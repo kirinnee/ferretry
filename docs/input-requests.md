@@ -179,8 +179,10 @@ the write:
   keeps it on the response, and every carrier calls it (`finalised`) as the last synchronous step before the bytes
   leave: the direct HTTP server and the relay tunnel (which the relay link and the direct carrier both use), so no
   await sits between the final check and the wire. The relay link also asks once more after the record is
-  queued and sealed, because those are awaits: an answer whose last word changed in the meantime is dropped unsent,
-  and its session ends so no sequence number is reused. Only the write to the socket itself remains, which is the
+  queued and sealed, because those are awaits: an answer, or a terminal stream frame (the bridge hands the
+  downstream a permit with every frame, true while its capture may still be shown), whose last word changed in the
+  meantime is dropped unsent, and its session ends so no sequence number is reused. The viewer reconnects and is
+  shown the quarantine notice. Only the write to the socket itself remains, which is the
   declared compare-and-enqueue gap.
 - **Every projection of what the daemon saw is covered.** While a pane is quarantined the prompt line, the
   program name and the argv in the owner's list, the agent's view and a restored request are replaced with a
@@ -310,7 +312,11 @@ the target's key (`sudo@kirin-box` → `SUDO_KIRIN_BOX`, "sudo on kirin-box"; a 
   the one commit point: before it, the entry is entirely the old one (old username, old password, the old
   ciphertext still sealed and still masked); after it, entirely the new one. Ciphertext nothing points at any
   more is swept after the commit and again at boot (`LoginDirectory.sweepUnreferenced`), and stays masked until
-  then. A boot with no committed index sweeps nothing.
+  then. The sweep runs only once the booting daemon holds the state home's lock (never while the daemon is
+  being assembled, nor for `--check` or `--print-config`), so a second invocation can never sweep a live
+  daemon's staged ciphertext. A boot with no committed index sweeps nothing, and neither does one whose index
+  names a value the sealed document does not hold: the store is reported as damaged and every value is kept,
+  and masked.
 - **A username and a password from one card are kept together** (`LoginDirectory.saveFields`, one change), so a
   login card never leaves an entry with half of what was typed. The one-field card saves the one field it has.
 
@@ -414,6 +420,11 @@ default**, revocable, and audited on every use. Until then every placement is a 
   program that renames itself `sudo` matches. The risk flag and the daemon-observed facts on the card are the
   defence, as for a typed value. A `ssh` destination is read from the command line and can be wrong; it then
   matches nothing.
+- **No migration from the first saved-login format.** An index written before versioned keys (an entry with
+  `password: true` and no `seals`) does not parse, so the store reads as damaged — it fails closed: nothing is
+  typed from it, nothing is swept, and every sealed value stays masked. No saved logins exist in a release yet,
+  so the premise is a fresh store; a daemon that has one must remove `login-entries.json` and
+  `login-secrets.json` and save the logins again.
 - **GAP: no QR import yet.** A 2FA seed is entered as text; reading it from an uploaded QR image is a
   follow-up.
 - **GAP: the ferret's hint and the target's key are not journalled**, so after a restart a request is offered

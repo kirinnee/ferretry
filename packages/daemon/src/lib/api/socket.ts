@@ -93,7 +93,12 @@ export function admitPendingSocketFrame(pending: number): SocketPendingDecision 
  */
 export interface SocketDownstream {
   /** A negative result means the peer has gone away even though nothing threw. */
-  send(frame: string | Uint8Array): number | undefined;
+  /**
+   * `permit` is the frame's last word: true while what it shows may still be shown. A transport with an
+   * await between this call and the wire (the relay queues and seals) asks it again just before the
+   * socket; one that writes synchronously has nothing to add and ignores it.
+   */
+  send(frame: string | Uint8Array, permit?: () => boolean): number | undefined;
   close(code: number, reason: string): void;
   bufferedBytes(): number;
 }

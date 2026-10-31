@@ -377,8 +377,11 @@ describe('McpServer — the tools', () => {
 
     // Assert — 20.0 KB measured with refs, page lifecycle and file tools, ~27.4 KB once pointer and keys land
     // (#F199): a runtime that defers MCP schemas (Claude) pays only the names; one that loads them all
-    // (Codex) pays this. 29.8 KB measured with the input bridge and saved logins; 30.8 KB once secure copy's three
-    // tools land (#F230, kept to about 1 KB). 32 KB is the ceiling; owner-gated groups are listed only while they are on.
+    // (Codex) pays this. The secure input bridge (terminal_request_input, input_wait and their fields) took the
+    // list to 30,519 bytes, past the old 30 KB ceiling, so the owner raised it to 32 KB (the saved-secrets hint
+    // and the secure copy need the room too). Descriptions stay tight: the 300-byte cap per tool still holds.
+    // Secure copy's three tools add about 1 KB (31,663 measured with browser_eval, #F230).
+    // Owner-gated groups are listed only while they are on.
     should(bytes).be.below(32_000);
     should(longest).be.belowOrEqual(300);
   });
