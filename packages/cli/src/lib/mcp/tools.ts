@@ -83,10 +83,9 @@ const INPUT_OPTIONS = {
   chain: { type: 'string', description: 'The card this login step follows, like A7.' },
   secretHint: {
     type: 'string',
-    description: 'A saved login you expect, e.g. SUDO_KIRIN_BOX; a hint.',
+    description: 'A saved login you expect, e.g. SUDO_KIRIN_BOX: a hint only, the owner still taps.',
   },
 };
-
 
 const object = (properties: Record<string, unknown>, required: readonly string[] = []) => ({
   type: 'object',
