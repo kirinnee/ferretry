@@ -72,6 +72,10 @@ export const LoopbackFirewallMarkerSchema = z.strictObject({
   entries: z.array(
     z.strictObject({ uid: z.number().int().min(0), ports: z.tuple([PortSchema, PortSchema, PortSchema]) }),
   ),
+  /** The last successful verify run (not apply), written by `--verify`; absent until one has run. */
+  verifiedAt: InstantSchema.optional(),
+  /** What that run found for each uid: rule listed and ports refuse (`ok`), a port let a probe in (`failed`), rule not listed (`missing`). */
+  perUser: z.record(z.string(), z.enum(['ok', 'failed', 'missing'])).optional(),
 });
 export type LoopbackFirewallMarker = z.infer<typeof LoopbackFirewallMarkerSchema>;
 

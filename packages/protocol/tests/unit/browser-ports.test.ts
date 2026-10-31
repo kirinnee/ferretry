@@ -37,6 +37,15 @@ const schemaCases: SchemaCase[] = [
     schema: LoopbackFirewallMarkerSchema,
     value: marker(20_000, [{ uid: 1001, ports: [20_004, 20_005, 20_006] }]),
   },
+  {
+    name: 'a verified marker',
+    schema: LoopbackFirewallMarkerSchema,
+    value: {
+      ...marker(20_000, [{ uid: 1001, ports: [20_004, 20_005, 20_006] }]),
+      verifiedAt: INSTANT,
+      perUser: { 1001: 'ok', 1002: 'failed', 1003: 'missing' },
+    },
+  },
 ];
 
 describe('the browser ports schemas', () => {
@@ -71,6 +80,16 @@ describe('the browser ports schemas', () => {
         name: 'a marker with a stray key',
         schema: LoopbackFirewallMarkerSchema,
         value: { ...marker(20_000), note: 'x' },
+      },
+      {
+        name: 'a marker with a perUser state it does not know',
+        schema: LoopbackFirewallMarkerSchema,
+        value: { ...marker(20_000), perUser: { 1001: 'unknown' } },
+      },
+      {
+        name: 'a marker with a verifiedAt that is not an instant',
+        schema: LoopbackFirewallMarkerSchema,
+        value: { ...marker(20_000), verifiedAt: 'yesterday' },
       },
       { name: 'a marker base below 1024', schema: LoopbackFirewallMarkerSchema, value: marker(1_023) },
       {
