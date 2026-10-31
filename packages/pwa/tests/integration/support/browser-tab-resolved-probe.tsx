@@ -90,35 +90,39 @@ for (const [name, view] of Object.entries(states)) {
   out[name] = { tab: shown.container.innerHTML, status: section.outerHTML };
   await shown.unmount();
 }
-// The credential form through the real controls: empty, stored, refused for being short, and a mistyped secret name.
+// The credential form through the real controls: nothing saved, what is saved, a short value, and a mistyped secret name.
 const SUMMARY = {
-  name: 'PROXY_PASSWORD',
   createdAt: '2026-10-31T01:00:00.000Z',
   updatedAt: '2026-10-31T01:00:00.000Z',
 };
-const formClient: FleetClient = {
+const formClientFor = (stored: readonly string[]): FleetClient => ({
   request: async <T,>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> => {
     if (path === BROWSER_STATE_PATH) return schema.parse({ state: 'stopped' });
     if (path === '/v1/secrets') {
       return schema.parse(
         init?.method === 'POST'
           ? { ...SUMMARY, name: JSON.parse(String(init.body)).name }
-          : { v: 1, health: 'ready', secrets: [], references: [] },
+          : { v: 1, health: 'ready', secrets: stored.map(name => ({ ...SUMMARY, name })), references: [] },
       );
     }
     throw new Error(`the picture asks nothing of ${path}`);
   },
-};
-const form = async (name: string, steps: (root: HTMLElement) => Promise<void>): Promise<void> => {
+});
+const form = async (
+  name: string,
+  saved: FleetMachineView,
+  stored: readonly string[],
+  steps: (root: HTMLElement) => Promise<void>,
+): Promise<void> => {
   const shown = await mount(
     <BrowserTab
       connection={connection}
       machineName="studio"
-      machine={{ ...machine, browserProxy: null }}
+      machine={saved}
       online
       checking={false}
       onRetry={() => undefined}
-      createClient={async () => formClient}
+      createClient={async () => formClientFor(stored)}
     />,
   );
   await settle();
@@ -133,26 +137,23 @@ const input = (root: HTMLElement, selector: string): HTMLInputElement =>
 const press = async (root: HTMLElement, selector: string): Promise<void> =>
   click(must(root.querySelector(selector), selector));
 const ADDRESS = 'socks5://proxy.example.test:1080';
-await form('form-empty', async root => {
+const NONE: FleetMachineView = { ...machine, browserProxy: null };
+await form('form-empty', NONE, [], async root => {
   await typeInto(input(root, '[data-browser-proxy-url]'), ADDRESS);
 });
-await form('form-stored', async root => {
-  await typeInto(input(root, '[data-browser-proxy-url]'), ADDRESS);
-  await typeInto(input(root, '[data-browser-proxy-credential-value="username"]'), 'amy.example');
-  await press(root, '[data-browser-proxy-credential-save="username"]');
-  await settle();
-  await typeInto(input(root, '[data-browser-proxy-credential-value="password"]'), 'correct-horse');
-  await press(root, '[data-browser-proxy-credential-save="password"]');
-  await settle();
+await form('form-stored', machine, ['PROXY_USER', 'PROXY_PASSWORD'], async root => {
+  must(root.querySelector('[data-browser-proxy-credential-stored="username"]'), 'the stored username');
   must(root.querySelector('[data-browser-proxy-credential-stored="password"]'), 'the stored password');
 });
-await form('form-short', async root => {
+await form('form-short', NONE, [], async root => {
   await typeInto(input(root, '[data-browser-proxy-url]'), ADDRESS);
   await typeInto(input(root, '[data-browser-proxy-credential-value="username"]'), 'amy');
-  await press(root, '[data-browser-proxy-credential-save="username"]');
+  await typeInto(input(root, '[data-browser-proxy-credential-value="password"]'), 'correct-horse');
+  await press(root, '[data-browser-proxy-test]');
+  await settle();
   must(root.querySelector('[data-browser-proxy-credential-problem="username"]'), 'the short-value error');
 });
-await form('invalid-form', async root => {
+await form('invalid-form', NONE, [], async root => {
   await typeInto(input(root, '[data-browser-proxy-url]'), ADDRESS);
   await press(root, '[data-browser-proxy-expert]');
   await typeInto(input(root, '[data-browser-proxy-username]'), 'amy.example');

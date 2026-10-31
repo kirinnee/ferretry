@@ -289,7 +289,7 @@ describe('BrowserTab › Browser proxy', () => {
           await typeInto(q('[data-browser-proxy-password]'), 'PROXY_PASSWORD');
         };
         await fill();
-        expect(q('[data-change-submit]')?.textContent).toBe('Save browser proxy');
+        expect(q('[data-change-submit]')?.textContent).toBe('Save and test');
         await click(q('[data-browser-proxy-undo]'), 'keep');
         expect(q('[data-change-submit]')).toBeNull();
         expect((q('[data-browser-proxy-url]') as HTMLInputElement).value).toBe('');
@@ -401,36 +401,111 @@ describe('BrowserTab › Test proxy', () => {
     });
   });
 
-  it('stores a typed password under PROXY_PASSWORD, empties the box, and shows Stored · Replace · Remove', async () => {
+  it('files what was typed when Test proxy is pressed, then tests that proxy, and then shows it as stored', async () => {
     await withTab(
       {
         machine: machineView({ browserProxy: null }),
         answers: {
           '/v1/secrets': (call: Recorded) =>
             call.method === 'POST'
-              ? { name: 'PROXY_PASSWORD', createdAt: '2026-10-31T01:00:00.000Z', updatedAt: '2026-10-31T01:00:00.000Z' }
+              ? {
+                  name: (call.body as { name: string }).name,
+                  createdAt: '2026-10-31T01:00:00.000Z',
+                  updatedAt: '2026-10-31T01:00:00.000Z',
+                }
               : { v: 1, health: 'ready', secrets: [], references: [] },
+          [BROWSER_PROXY_TEST_PATH]: reachable({ tested: 'unsaved' }),
         },
       },
       async ({ q, calls, container }) => {
+        await typeInto(q('[data-browser-proxy-url]'), 'socks5://proxy.example:1080');
+        await typeInto(q('[data-browser-proxy-credential-value="username"]'), 'amy-edge-login');
         await typeInto(q('[data-browser-proxy-credential-value="password"]'), 'hunter2!');
-        await click(q('[data-browser-proxy-credential-save="password"]'), 'save');
+        await click(button(q), 'test');
         await afterwards();
-        const put = calls.find(call => call.method === 'POST' && call.path === '/v1/secrets');
-        expect(put?.body).toEqual({ name: 'PROXY_PASSWORD', value: 'hunter2!' });
+        const puts = calls.filter(call => call.method === 'POST' && call.path === '/v1/secrets');
+        expect(puts.map(call => call.body)).toEqual([
+          { name: 'PROXY_USER', value: 'amy-edge-login' },
+          { name: 'PROXY_PASSWORD', value: 'hunter2!' },
+        ]);
+        expect(testCalls(calls)[0]?.body).toEqual({
+          proxy: {
+            url: 'socks5://proxy.example:1080',
+            bypass: [],
+            username: ref('PROXY_USER'),
+            password: ref('PROXY_PASSWORD'),
+          },
+        });
         expect(q('[data-browser-proxy-credential-value="password"]')).toBeNull();
-        expect(q('[data-browser-proxy-credential-stored="password"]')?.textContent).toBe('Stored');
-        expect(q('[data-browser-proxy-credential-replace="password"]')).not.toBeNull();
-        expect(q('[data-browser-proxy-credential-remove="password"]')).not.toBeNull();
-        expect(q('[data-browser-proxy-credential-problem="password"]')).toBeNull();
+        expect((q('[data-browser-proxy-credential-stored="password"]') as HTMLInputElement).value).not.toContain(
+          'hunter2',
+        );
         expect(container.innerHTML).not.toContain('hunter2!');
+        expect(container.innerHTML).not.toContain('amy-edge-login');
       },
     );
   });
 
-  it('Replace shows an empty box again, Cancel goes back, Remove forgets the name', async () => {
+  it('Save and test files what was typed, saves the setting, then tests the saved proxy', async () => {
+    await withTab(
+      {
+        machine: machineView({ browserProxy: null }),
+        answers: {
+          '/v1/secrets': (call: Recorded) =>
+            call.method === 'POST'
+              ? {
+                  name: (call.body as { name: string }).name,
+                  createdAt: '2026-10-31T01:00:00.000Z',
+                  updatedAt: '2026-10-31T01:00:00.000Z',
+                }
+              : { v: 1, health: 'ready', secrets: [], references: [] },
+          '/v1/fleet/proposals': STAGED,
+          [APPLY_PATH]: OUTCOME,
+          [BROWSER_PROXY_TEST_PATH]: reachable(),
+        },
+      },
+      async ({ q, calls, refreshed }) => {
+        await typeInto(q('[data-browser-proxy-url]'), 'socks5://proxy.example:1080');
+        await typeInto(q('[data-browser-proxy-credential-value="username"]'), 'amy-edge-login');
+        await typeInto(q('[data-browser-proxy-credential-value="password"]'), 'hunter2!');
+        expect(q('[data-change-submit]')?.textContent).toBe('Save and test');
+        await click(q('[data-change-submit]'), 'save and test');
+        await afterwards();
+        const order = calls.map(call => (call.method === 'POST' ? call.path : null)).filter(path => path !== null);
+        expect(order).toEqual([
+          '/v1/secrets',
+          '/v1/secrets',
+          '/v1/fleet/proposals',
+          APPLY_PATH,
+          BROWSER_PROXY_TEST_PATH,
+        ]);
+        const staged = JSON.stringify(calls.find(call => call.path === '/v1/fleet/proposals')?.body);
+        expect(staged).toContain(ref('PROXY_USER'));
+        expect(staged).not.toContain('hunter2!');
+        expect(testCalls(calls)[0]?.body).toEqual({});
+        expect(refreshed.count).toBe(1);
+        expect(q('[data-setup-note="browser-proxy-test"]')).not.toBeNull();
+      },
+    );
+  });
+
+  it('says what is set now, and that there is no proxy when none is', async () => {
     await withTab({ machine: withProxy() }, async ({ q }) => {
-      expect(q('[data-browser-proxy-credential-stored="username"]')).not.toBeNull();
+      const now = q('[data-browser-proxy-current]')?.textContent ?? '';
+      expect(now).toContain('http://proxy.example.test:8080');
+      expect(now).toContain('signs in with a stored username and password');
+      expect(now).toContain('skips 1 address');
+    });
+    await withTab({ machine: machineView({ browserProxy: null }) }, async ({ q }) => {
+      expect(q('[data-browser-proxy-current]')?.textContent).toContain('No proxy');
+    });
+  });
+
+  it('shows a stored credential as a masked box, never its value; Replace opens an empty box; Remove forgets it', async () => {
+    await withTab({ machine: withProxy() }, async ({ q }) => {
+      const stored = q('[data-browser-proxy-credential-stored="username"]') as HTMLInputElement | null;
+      expect(stored?.readOnly).toBe(true);
+      expect(stored?.value).toMatch(/^•+$/u);
       expect(q('[data-browser-proxy-credential-value="username"]')).toBeNull();
       await click(q('[data-browser-proxy-credential-replace="username"]'), 'replace');
       expect((q('[data-browser-proxy-credential-value="username"]') as HTMLInputElement).value).toBe('');
@@ -441,17 +516,19 @@ describe('BrowserTab › Test proxy', () => {
     });
   });
 
-  it('files a typed username under the expert name and says so plainly when the machine refuses', async () => {
+  it('files a typed username under the expert name, and when the machine refuses says so on that box and tests nothing', async () => {
     await withTab(
       {
         machine: machineView({ browserProxy: null }),
         answers: { '/v1/secrets': new FyHttpError('This machine’s secret store is locked.', 403, 'forbidden') },
       },
       async ({ q, calls }) => {
+        await typeInto(q('[data-browser-proxy-url]'), 'socks5://proxy.example:1080');
         await click(q('[data-browser-proxy-expert]'), 'expert');
         await typeInto(q('[data-browser-proxy-username]'), 'EDGE_USER');
         await typeInto(q('[data-browser-proxy-credential-value="username"]'), 'amy-edge-login');
-        await click(q('[data-browser-proxy-credential-save="username"]'), 'save');
+        await typeInto(q('[data-browser-proxy-credential-value="password"]'), 'hunter2!');
+        await click(button(q), 'test');
         await afterwards();
         expect(calls.find(call => call.method === 'POST')?.body).toEqual({
           name: 'EDGE_USER',
@@ -463,17 +540,22 @@ describe('BrowserTab › Test proxy', () => {
         expect((q('[data-browser-proxy-credential-value="username"]') as HTMLInputElement).value).toBe(
           'amy-edge-login',
         );
+        expect(testCalls(calls)).toHaveLength(0);
       },
     );
   });
 
   it('a value under 8 characters gets a one-line error on that field and is never sent', async () => {
     await withTab({ machine: machineView({ browserProxy: null }) }, async ({ q, calls }) => {
+      await typeInto(q('[data-browser-proxy-url]'), 'socks5://proxy.example:1080');
       await typeInto(q('[data-browser-proxy-credential-value="username"]'), 'amy');
+      await typeInto(q('[data-browser-proxy-credential-value="password"]'), 'hunter2!');
       expect(q('[data-browser-proxy-credential-problem="username"]')).toBeNull();
-      await click(q('[data-browser-proxy-credential-save="username"]'), 'save');
+      await click(button(q), 'test');
+      await afterwards();
       expect(q('[data-browser-proxy-credential-problem="username"]')?.textContent).toBe('Use at least 8 characters.');
       expect(calls.some(call => call.method === 'POST')).toBe(false);
+      expect(testCalls(calls)).toHaveLength(0);
     });
   });
 
@@ -759,7 +841,7 @@ describe('BrowserTab › Test proxy', () => {
         expect(shown).toContain('Missing secret');
         expect(shown).toContain('PROXY_PASSWORD is not stored');
         expect(shown).not.toContain('hunter2');
-        expect(q('[data-browser-proxy-credential-stored="password"]')?.textContent).toBe('Stored');
+        expect(q('[data-browser-proxy-credential-stored="password"]')).not.toBeNull();
         expect(container.querySelector('input[type="password"]')).toBeNull();
       },
     );

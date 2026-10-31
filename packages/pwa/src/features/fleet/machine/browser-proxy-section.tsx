@@ -1,4 +1,4 @@
-import type { BrowserProxySetting, FleetMachineView } from '@ferretry/protocol';
+import { type BrowserProxySetting, type FleetMachineView, MIN_SECRET_VALUE_LENGTH } from '@ferretry/protocol';
 import { useEffect, useId, useRef, useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import type { SetupAccess } from '../setup/setup-access.ts';
@@ -7,7 +7,7 @@ import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { listSecrets, putSecret } from '../../secrets/secrets-api.ts';
 import { testBrowserProxy } from './browser-proxy-api.ts';
 import { type BrowserProxyDraft, draftOf, isSecretName, nameTyped, settingOf } from './browser-proxy-draft.ts';
-import { BrowserProxyCredential, type StoreOutcome } from './browser-proxy-credential.tsx';
+import { BrowserProxyCredential } from './browser-proxy-credential.tsx';
 import { BrowserProxyTestBlock } from './browser-proxy-test-block.tsx';
 import type { ProxyTestShown } from './browser-proxy-test-result.tsx';
 import { machineSettings } from './machine-settings.ts';
@@ -43,6 +43,13 @@ export function BrowserProxySection({
   const [draft, setDraft] = useState<BrowserProxyDraft>(draftOf(saved));
   const [testing, setTesting] = useState(false);
   const [shown, setShown] = useState<ProxyTestShown | null>(null);
+  // What was typed into the write-only boxes and not yet filed in the secret store. In memory only; emptied the
+  // moment the machine has it.
+  const [pending, setPending] = useState({ username: '', password: '' });
+  const [problems, setProblems] = useState<{ username: string | null; password: string | null }>({
+    username: null,
+    password: null,
+  });
   const testRun = useRef(0);
   const [existing, setExisting] = useState<ReadonlySet<string> | null>(null);
   const [expert, setExpert] = useState(
@@ -76,81 +83,139 @@ export function BrowserProxySection({
   // A daemon that predates the setting cannot be asked for it.
   if (machine.browserProxy === undefined) return null;
 
-  const wanted = draft.url.trim() === '' ? ({ ok: true, setting: null } as const) : settingOf(draft);
-  const before = JSON.stringify(draftOf(saved));
-  const dirty = JSON.stringify(draft) !== before;
-  // What to test: nothing is sent for the saved proxy (`{}`); the edited setting is sent only when it differs.
-  const testBody: { readonly proxy?: BrowserProxySetting } | null =
-    draft.url.trim() === ''
-      ? saved === null
-        ? null
-        : {}
-      : wanted.ok && wanted.setting !== null
-        ? dirty
-          ? { proxy: wanted.setting }
-          : {}
-        : null;
+  const nameFor = (box: string, fallback: string): string => (isSecretName(nameTyped(box)) ? nameTyped(box) : fallback);
+  // The form as it will be once what was typed has been filed: a typed value is filed under the name already in
+  // the box, else under PROXY_USER / PROXY_PASSWORD.
+  const filed: BrowserProxyDraft = {
+    ...draft,
+    usernameSecret: pending.username === '' ? draft.usernameSecret : nameFor(draft.usernameSecret, DEFAULT_USER),
+    passwordSecret: pending.password === '' ? draft.passwordSecret : nameFor(draft.passwordSecret, DEFAULT_PASSWORD),
+  };
   const typed = draft.url.trim() !== '';
-  const test = (): void => {
-    if (typed && !wanted.ok) {
-      testRun.current += 1;
-      setTesting(false);
-      setShown({
-        kind: 'refused',
-        sentence: wanted.problem,
-      });
-      return;
-    }
-    if (testBody === null) return;
+  const wanted = typed ? settingOf(filed) : ({ ok: true, setting: null } as const);
+  const before = JSON.stringify(draftOf(saved));
+  const dirty = JSON.stringify(filed) !== before || pending.username !== '' || pending.password !== '';
+  // What to test: nothing is sent for the saved proxy (`{}`); the edited setting is sent only when it differs.
+  const testBody: { readonly proxy?: BrowserProxySetting } | null = !typed
+    ? saved === null
+      ? null
+      : {}
+    : wanted.ok && wanted.setting !== null
+      ? dirty
+        ? { proxy: wanted.setting }
+        : {}
+      : null;
+  const runTest = async (body: { readonly proxy?: BrowserProxySetting }): Promise<void> => {
     testRun.current += 1;
     const mine = testRun.current;
     setTesting(true);
     setShown(null);
-    void access
-      .act(client => testBrowserProxy(client, testBody.proxy))
-      .then(outcome => {
-        if (testRun.current !== mine) return;
-        setTesting(false);
-        setShown(
-          outcome.kind === 'done'
-            ? { kind: 'result', result: outcome.value }
-            : { kind: 'refused', sentence: outcome.sentence },
-        );
-      });
+    const outcome = await access.act(client => testBrowserProxy(client, body.proxy));
+    if (testRun.current !== mine) return;
+    setTesting(false);
+    setShown(
+      outcome.kind === 'done'
+        ? { kind: 'result', result: outcome.value }
+        : { kind: 'refused', sentence: outcome.sentence },
+    );
   };
-  const nameFor = (box: string, fallback: string): string => (isSecretName(nameTyped(box)) ? nameTyped(box) : fallback);
-  const store = async (name: string, value: string): Promise<StoreOutcome> => {
-    const outcome = await read(client => putSecret(client, name, value));
-    if (outcome.kind !== 'done') return { kind: 'refused', sentence: outcome.sentence };
-    setExisting(current => new Set([...(current ?? []), name]));
-    return { kind: 'stored', name };
+  const refuseTest = (sentence: string): void => {
+    testRun.current += 1;
+    setTesting(false);
+    setShown({ kind: 'refused', sentence });
   };
-  // Until the list has been read, only what was saved is taken to be there.
+  // Files what was typed in the secret store. False (with one short sentence on the box) when it cannot be.
+  const fileCredentials = async (): Promise<boolean> => {
+    const boxes = [
+      ['username', pending.username, filed.usernameSecret],
+      ['password', pending.password, filed.passwordSecret],
+    ] as const;
+    const short = boxes.filter(([, value]) => value !== '' && value.length < MIN_SECRET_VALUE_LENGTH);
+    if (short.length > 0) {
+      setProblems(current => ({
+        ...current,
+        ...Object.fromEntries(
+          short.map(([key]) => [key, `Use at least ${String(MIN_SECRET_VALUE_LENGTH)} characters.`]),
+        ),
+      }));
+      return false;
+    }
+    for (const [key, value, name] of boxes) {
+      if (value === '') continue;
+      const outcome = await read(client => putSecret(client, name, value));
+      if (outcome.kind !== 'done') {
+        setProblems(current => ({ ...current, [key]: outcome.sentence }));
+        return false;
+      }
+      setExisting(current => new Set([...(current ?? []), name]));
+      setPending(current => ({ ...current, [key]: '' }));
+      setDraft(current => ({ ...current, [`${key}Secret`]: name }));
+    }
+    return true;
+  };
+  const test = (): void => {
+    if (typed && !wanted.ok) {
+      refuseTest(wanted.problem);
+      return;
+    }
+    if (testBody === null) return;
+    void (async () => {
+      if (!(await fileCredentials())) return;
+      await runTest(testBody);
+    })();
+  };
+  // Is something filed under this box's name? Until the list has been read, only what was saved is taken to be.
   const isStored = (box: string, savedName: string): boolean => {
     const name = nameTyped(box);
     return isSecretName(name) && (existing === null ? name === savedName : existing.has(name));
   };
   const savedNames = draftOf(saved);
-  const apply = (browserProxy: NonNullable<typeof saved> | null): void => {
-    void changes.apply(machineSettings(machine, { browserProxy })).then(result => {
+  const typedInto = (key: 'username' | 'password', value: string): void => {
+    setPending(current => ({ ...current, [key]: value }));
+    setProblems(current => ({ ...current, [key]: null }));
+    changes.clear();
+    forgetTest();
+  };
+  const removeCredential = (key: 'username' | 'password'): void => {
+    setPending(current => ({ ...current, [key]: '' }));
+    edit({ [`${key}Secret`]: '' });
+  };
+  // Save files what was typed, saves the setting, and then tries the saved proxy: "set it, see it work".
+  const saveAndTest = (setting: BrowserProxySetting | null): void => {
+    void (async () => {
+      if (!(await fileCredentials())) return;
+      const result = await changes.apply(machineSettings(machine, { browserProxy: setting }));
       if (result.kind === 'refused') return;
       onSaved();
-    });
+      if (setting !== null) await runTest({});
+    })();
   };
 
   const testHint =
     !typed && saved === null
       ? 'Type a proxy address to test it.'
       : `Tries one request through the proxy from ${machineName}.`;
+  const now =
+    saved === null
+      ? 'No proxy: the browser goes direct.'
+      : [
+          saved.url,
+          saved.username === undefined ? 'no sign-in' : 'signs in with a stored username and password',
+          saved.bypass.length === 0
+            ? null
+            : `skips ${String(saved.bypass.length)} ${saved.bypass.length === 1 ? 'address' : 'addresses'}`,
+        ]
+          .filter(part => part !== null)
+          .join(' · ');
   // One half of a username/password pair is not yet a mistake: the other is still to be filled in.
-  const halfPair = (draft.usernameSecret === '') !== (draft.passwordSecret === '');
+  const halfPair = (filed.usernameSecret === '') !== (filed.passwordSecret === '');
   const testRefused = shown?.kind === 'refused';
 
   return (
     <SetupSection title="Browser proxy" name="browser-proxy">
-      <p className="m-0 text-meta leading-base text-muted">
-        Send the shared browser's traffic through a proxy. Leave the address empty to go direct. The window you sign in
-        through is not proxied.
+      <p className="m-0 min-w-0 break-words text-ui text-fg" data-browser-proxy-current="">
+        <span className="font-semibold">Now: </span>
+        {now}
       </p>
       <div className="flex min-w-0 flex-col gap-1">
         <label htmlFor={`${ids}-url`} className="text-ui font-semibold text-fg">
@@ -189,18 +254,18 @@ export function BrowserProxySection({
       <BrowserProxyCredential
         what="Username"
         stored={isStored(draft.usernameSecret, savedNames.usernameSecret)}
-        online={online}
-        store={value => store(nameFor(draft.usernameSecret, DEFAULT_USER), value)}
-        onStored={name => edit({ usernameSecret: name })}
-        onRemove={() => edit({ usernameSecret: '' })}
+        value={pending.username}
+        problem={problems.username}
+        onChange={value => typedInto('username', value)}
+        onRemove={() => removeCredential('username')}
       />
       <BrowserProxyCredential
         what="Password"
         stored={isStored(draft.passwordSecret, savedNames.passwordSecret)}
-        online={online}
-        store={value => store(nameFor(draft.passwordSecret, DEFAULT_PASSWORD), value)}
-        onStored={name => edit({ passwordSecret: name })}
-        onRemove={() => edit({ passwordSecret: '' })}
+        value={pending.password}
+        problem={problems.password}
+        onChange={value => typedInto('password', value)}
+        onRemove={() => removeCredential('password')}
       />
       <div className="flex min-w-0 flex-col gap-2">
         <button
@@ -269,14 +334,16 @@ export function BrowserProxySection({
           authority={changes.authority}
           busy={changes.busy}
           refusal={changes.refusal}
-          submitLabel={wanted.setting === null ? 'Turn the browser proxy off' : 'Save browser proxy'}
-          onSubmit={() => apply(wanted.setting)}
+          submitLabel={wanted.setting === null ? 'Turn the browser proxy off' : 'Save and test'}
+          onSubmit={() => saveAndTest(wanted.setting)}
         >
           <Button
             type="button"
             data-browser-proxy-undo=""
             onClick={() => {
               setDraft(draftOf(saved));
+              setPending({ username: '', password: '' });
+              setProblems({ username: null, password: null });
               forgetTest();
             }}
           >
