@@ -158,95 +158,92 @@ const open = async (
   return { tab, close: async () => await context.close() };
 };
 
-for (let round = 0; round < 15; round += 1)
-  describe('the open agenda item', () => {
-    for (const { name } of VIEWPORTS)
-      for (const scheme of ['light', 'dark'] as const)
-        it(`keeps its head and its answer row on screen while a long card scrolls (${name}, ${scheme})`, async () => {
-          const { tab, close } = await open('item', name, scheme, '&kind=choice');
-          try {
-            await tab.waitForSelector('.fy-item-view__body');
-            await tab.waitForSelector('[data-agenda-dock] [data-agenda-quick-replies], [data-agenda-dock] button');
-            await framesSettled(tab);
-            const scrollerSize = await tab.evaluate(() => {
-              const body = document.querySelector('.fy-item-view__body') as HTMLElement;
-              return { scroll: body.scrollHeight, client: body.clientHeight };
-            });
-            // The card really is long: the test would prove nothing on one that fits.
-            expect(scrollerSize.scroll).toBeGreaterThan(scrollerSize.client * 1.8);
+describe('the open agenda item', () => {
+  for (const { name } of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`keeps its head and its answer row on screen while a long card scrolls (${name}, ${scheme})`, async () => {
+        const { tab, close } = await open('item', name, scheme, '&kind=choice');
+        try {
+          await tab.waitForSelector('.fy-item-view__body');
+          await tab.waitForSelector('[data-agenda-dock] [data-agenda-quick-replies], [data-agenda-dock] button');
+          await framesSettled(tab);
+          const scrollerSize = await tab.evaluate(() => {
+            const body = document.querySelector('.fy-item-view__body') as HTMLElement;
+            return { scroll: body.scrollHeight, client: body.clientHeight };
+          });
+          // The card really is long: the test would prove nothing on one that fits.
+          expect(scrollerSize.scroll).toBeGreaterThan(scrollerSize.client * 1.8);
 
-            const check = async (label: string): Promise<void> => {
-              const { scroller, head, dock } = await edges(tab);
-              expect(head.height, `${label}: the head has a height`).toBeGreaterThan(20);
-              expect(Math.abs(head.top - scroller.top), `${label}: the head sits on the top edge`).toBeLessThanOrEqual(
-                1,
-              );
-              expect(dock.height, `${label}: the dock has a height`).toBeGreaterThan(20);
-              expect(
-                Math.abs(dock.bottom - scroller.bottom),
-                `${label}: the dock sits on the bottom edge`,
-              ).toBeLessThanOrEqual(1);
-              const options = await tab.evaluate(() => {
-                const dockElement = document.querySelector('[data-agenda-dock]') as HTMLElement;
-                const buttons = [...dockElement.querySelectorAll('button')];
-                const area = dockElement.getBoundingClientRect();
-                return buttons.map(button => {
-                  const rect = button.getBoundingClientRect();
-                  return rect.top >= area.top - 1 && rect.bottom <= area.bottom + 1 && rect.width > 0;
-                });
+          const check = async (label: string): Promise<void> => {
+            const { scroller, head, dock } = await edges(tab);
+            expect(head.height, `${label}: the head has a height`).toBeGreaterThan(20);
+            expect(Math.abs(head.top - scroller.top), `${label}: the head sits on the top edge`).toBeLessThanOrEqual(1);
+            expect(dock.height, `${label}: the dock has a height`).toBeGreaterThan(20);
+            expect(
+              Math.abs(dock.bottom - scroller.bottom),
+              `${label}: the dock sits on the bottom edge`,
+            ).toBeLessThanOrEqual(1);
+            const options = await tab.evaluate(() => {
+              const dockElement = document.querySelector('[data-agenda-dock]') as HTMLElement;
+              const buttons = [...dockElement.querySelectorAll('button')];
+              const area = dockElement.getBoundingClientRect();
+              return buttons.map(button => {
+                const rect = button.getBoundingClientRect();
+                return rect.top >= area.top - 1 && rect.bottom <= area.bottom + 1 && rect.width > 0;
               });
-              expect(options.length, `${label}: options are in the dock`).toBeGreaterThan(0);
-              expect(options.every(Boolean), `${label}: every option is inside the dock`).toBe(true);
-            };
-
-            await check('at the top');
-            await tab.evaluate(() => {
-              const body = document.querySelector('.fy-item-view__body') as HTMLElement;
-              body.scrollTop = (body.scrollHeight - body.clientHeight) / 2;
             });
-            await framesSettled(tab);
-            await check('mid-scroll');
-            if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${scheme}-card-scrolled.png`) });
+            expect(options.length, `${label}: options are in the dock`).toBeGreaterThan(0);
+            expect(options.every(Boolean), `${label}: every option is inside the dock`).toBe(true);
+          };
 
-            await tab.evaluate(() => {
-              const body = document.querySelector('.fy-item-view__body') as HTMLElement;
-              body.scrollTop = body.scrollHeight;
-            });
-            await framesSettled(tab);
-            await check('at the end');
-            // Nothing is left behind the dock: the last thing in the scroller ends above it.
-            const tail = await tab.evaluate(() => {
-              const column = document.querySelector('.fy-item-view__column') as HTMLElement;
-              const dock = document.querySelector('[data-agenda-dock]') as HTMLElement;
-              const last = [...column.children]
-                .filter(child => child !== dock && (child as HTMLElement).offsetHeight > 0)
-                .at(-1) as HTMLElement;
-              return { lastBottom: last.getBoundingClientRect().bottom, dockTop: dock.getBoundingClientRect().top };
-            });
-            expect(tail.lastBottom).toBeLessThanOrEqual(tail.dockTop + 1);
-          } finally {
-            await close();
-          }
-        });
+          await check('at the top');
+          await tab.evaluate(() => {
+            const body = document.querySelector('.fy-item-view__body') as HTMLElement;
+            body.scrollTop = (body.scrollHeight - body.clientHeight) / 2;
+          });
+          await framesSettled(tab);
+          await check('mid-scroll');
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${scheme}-card-scrolled.png`) });
 
-    it('leaves the bottom to the composer for a card that is answered in words', async () => {
-      const { tab, close } = await open('item', 'phone', 'light', '&kind=reply');
-      try {
-        await tab.waitForSelector('.fy-item-view__body');
-        await framesSettled(tab);
-        const dock = await tab.evaluate(() => {
-          const element = document.querySelector('[data-agenda-dock]') as HTMLElement | null;
-          return element === null ? 0 : element.getBoundingClientRect().height;
-        });
-        expect(dock).toBeLessThanOrEqual(12);
-        const { head, scroller } = await edges(tab);
-        expect(Math.abs(head.top - scroller.top)).toBeLessThanOrEqual(1);
-        if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, 'phone-light-reply-card.png') });
-      } finally {
-        await close();
-      }
-    });
+          await tab.evaluate(() => {
+            const body = document.querySelector('.fy-item-view__body') as HTMLElement;
+            body.scrollTop = body.scrollHeight;
+          });
+          await framesSettled(tab);
+          await check('at the end');
+          // Nothing is left behind the dock: the last thing in the scroller ends above it.
+          const tail = await tab.evaluate(() => {
+            const column = document.querySelector('.fy-item-view__column') as HTMLElement;
+            const dock = document.querySelector('[data-agenda-dock]') as HTMLElement;
+            const last = [...column.children]
+              .filter(child => child !== dock && (child as HTMLElement).offsetHeight > 0)
+              .at(-1) as HTMLElement;
+            return { lastBottom: last.getBoundingClientRect().bottom, dockTop: dock.getBoundingClientRect().top };
+          });
+          expect(tail.lastBottom).toBeLessThanOrEqual(tail.dockTop + 1);
+        } finally {
+          await close();
+        }
+      });
+
+  it('leaves the bottom to the composer for a card that is answered in words', async () => {
+    const { tab, close } = await open('item', 'phone', 'light', '&kind=reply');
+    try {
+      await tab.waitForSelector('.fy-item-view__body');
+      await framesSettled(tab);
+      const dock = await tab.evaluate(() => {
+        const element = document.querySelector('[data-agenda-dock]') as HTMLElement | null;
+        return element === null ? 0 : element.getBoundingClientRect().height;
+      });
+      expect(dock).toBeLessThanOrEqual(12);
+      const { head, scroller } = await edges(tab);
+      expect(Math.abs(head.top - scroller.top)).toBeLessThanOrEqual(1);
+      if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, 'phone-light-reply-card.png') });
+    } finally {
+      await close();
+    }
   });
+});
 
 describe('the chat at its tail', () => {
   for (const { name } of VIEWPORTS)
