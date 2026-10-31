@@ -9,7 +9,7 @@
  * ## One rule for the revision
  *
  * A catalog's `revision` goes up by exactly one on every change to what its manifest says — an item
- * added, a new version, a withdrawal, a rename, a new description — and never otherwise. `issuedAt` is
+ * added, a new version, a withdrawal, a rename, a new description, a new publisher name — and never otherwise. `issuedAt` is
  * the instant of that change. An export signs both, so two exports with nothing between them are the
  * same bytes (Ed25519 is deterministic), and a reader that saw revision 7 refuses a signed 6.
  */
@@ -61,6 +61,8 @@ const StoredCatalogSchema = z.strictObject({
   id: SharedCatalogIdSchema,
   name: CatalogLabelSchema,
   description: CatalogDescriptionSchema,
+  /** What the signed manifest calls this machine. Kept here so two exports of one revision are the same bytes. */
+  publisherName: CatalogLabelSchema,
   visibility: z.literal('members'),
   revision: z.number().int().min(1),
   issuedAt: InstantSchema,
@@ -142,6 +144,7 @@ export interface NewCatalog {
   readonly id: string;
   readonly name: string;
   readonly description: string;
+  readonly publisherName: string;
   readonly now: string;
 }
 
@@ -152,6 +155,7 @@ export function withCatalog(document: CatalogsDocument, created: NewCatalog): Ca
     id: created.id,
     name: created.name,
     description: created.description,
+    publisherName: created.publisherName,
     visibility: 'members',
     revision: 1,
     issuedAt: created.now,
@@ -169,9 +173,10 @@ export function withoutCatalog(document: CatalogsDocument, id: string): Catalogs
 export interface CatalogPatch {
   readonly name?: string | undefined;
   readonly description?: string | undefined;
+  readonly publisherName?: string | undefined;
 }
 
-/** A rename or a new description. Saying what it already is changes nothing, so the revision stays. */
+/** A rename, a new description or a new publisher name. Saying what it already is changes nothing, so the revision stays. */
 export function withCatalogPatch(
   document: CatalogsDocument,
   id: string,
@@ -181,10 +186,12 @@ export function withCatalogPatch(
   const catalog = findCatalog(document, id);
   const name = patch.name ?? catalog.name;
   const description = patch.description ?? catalog.description;
-  if (name === catalog.name && description === catalog.description) return document;
+  const publisherName = patch.publisherName ?? catalog.publisherName;
+  if (name === catalog.name && description === catalog.description && publisherName === catalog.publisherName)
+    return document;
   if (name !== catalog.name && document.catalogs.some(other => other.id !== id && other.name === name))
     throw new CatalogRefusal('name_taken', `You already have a catalog called ${name}.`);
-  return replaceCatalog(document, bumped({ ...catalog, name, description }, now));
+  return replaceCatalog(document, bumped({ ...catalog, name, description, publisherName }, now));
 }
 
 /** Whether a live item of this kind already has this name: the manifest would refuse two. */

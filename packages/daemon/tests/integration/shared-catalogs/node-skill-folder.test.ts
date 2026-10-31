@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -70,6 +70,21 @@ describe('the skill folder on disk', () => {
     should(await folder.read(manifest, '../x', 1_000)).deepEqual({ ok: false, reason: 'unreadable' });
   });
 
+  it('should list a file with a second hard link as one and never read it', async () => {
+    const { root, manifest } = await skill({ 'SKILL.md': 'abc' });
+    const outside = await skill({ 'secret.txt': 'keep out' });
+    await link(join(outside.root, 'secret.txt'), join(root, 'linked.txt'));
+    const folder = new NodeSkillFolder();
+
+    const listing = await folder.list(manifest, SKILL_WALK_LIMITS);
+    const read = await folder.read(manifest, 'linked.txt', 1_000);
+
+    const byPath = new Map(listing?.entries.map(entry => [entry.path, entry.type]));
+    should(byPath.get('linked.txt')).equal('hardlink');
+    should(byPath.get('SKILL.md')).equal('file');
+    should(read).deepEqual({ ok: false, reason: 'unreadable' });
+  });
+
   it('should read a file within the limit and say too_big beyond it', async () => {
     const { manifest } = await skill({ 'SKILL.md': 'abc', 'big.txt': 'x'.repeat(20) });
     const folder = new NodeSkillFolder();
@@ -101,6 +116,16 @@ describe('the skill folder on disk', () => {
 
     should(listing?.truncated).equal(true);
     should(listing?.entries).have.length(4);
+  });
+
+  it('should count folders toward the entry limit, so a tree of empty folders is cut short too', async () => {
+    const { root, manifest } = await skill({ 'SKILL.md': 'abc' });
+    for (let index = 0; index < 8; index += 1) await mkdir(join(root, `d${index}`));
+
+    const listing = await new NodeSkillFolder().list(manifest, { entries: 4, depth: 16 });
+
+    should(listing?.truncated).equal(true);
+    should(listing?.entries.length).be.belowOrEqual(4);
   });
 
   it('should answer undefined for a folder that is not there', async () => {

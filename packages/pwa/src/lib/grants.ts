@@ -182,7 +182,8 @@ export const REMOTE_ONE_WAY_NOTE =
 /**
  * What switching a capability off ALSO switches off, when that is the thing somebody came here to do.
  *
- * ONE ENTRY TODAY, AND IT IS NOT DECORATION. Somebody reaches for `pairing` off because a phone was
+ * ONE ENTRY TODAY, AND IT IS NOT DECORATION. A capability with no entry (`sharing` in phase 1) stops nothing
+ * beyond its own job, so its switch says nothing extra. Somebody reaches for `pairing` off because a phone was
  * stolen — and that same switch refuses `DELETE /v1/pair/devices/:deviceId`, because both carry
  * `pairing.use`. So the coarse switch disables the remedy the person is reaching for it to apply, and
  * the order that works has to be on the control rather than in `docs/grants.md`: a document is read
@@ -195,8 +196,6 @@ export const REMOTE_ONE_WAY_NOTE =
 const COARSE_SWITCH_ALSO_STOPS: Readonly<Partial<Record<DaemonCapability, string>>> = {
   pairing:
     'It also stops this device revoking a paired one, because both are the same permission — so if you are shutting out a lost or stolen device, revoke that device FIRST and switch this off afterwards.',
-  sharing:
-    'It also stops this device managing and exporting catalogs. It is turned back on at the machine, with the host command.',
 };
 
 /**

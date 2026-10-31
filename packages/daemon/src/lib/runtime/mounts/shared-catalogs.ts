@@ -26,7 +26,7 @@ import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import type { CapabilityDemand } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
-import { type ApiResponse, decodeParameter } from '../../api/http.ts';
+import { type ApiResponse, decodeParameter, queryValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { CatalogRefusal, type CatalogRefusalCode } from '../../shared-catalogs/refusal.ts';
@@ -68,6 +68,7 @@ const STATUS: Readonly<Record<CatalogRefusalCode, number>> = {
   signing_unavailable: 503,
   store_damaged: 500,
   export_failed: 500,
+  export_too_big: 413,
 };
 
 async function answer(work: () => Promise<unknown>, success = 200): Promise<ApiResponse> {
@@ -110,7 +111,8 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       minimum: 'operator',
       capability: SHARING_USE,
       noStore: true,
-      handle: async () => await answer(() => catalogs.list()),
+      handle: async context =>
+        await answer(() => catalogs.list({ sourceState: queryValue(context.request, 'sourceState') === '1' })),
     },
     {
       method: 'POST',

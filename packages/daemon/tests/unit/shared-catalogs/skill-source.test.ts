@@ -39,6 +39,45 @@ describe('readSkillFolder', () => {
     should(read.files.map(file => file.path)).deepEqual(['SKILL.md']);
   });
 
+  it('should list a hard-linked file as not carried, whatever it holds', async () => {
+    const tree = new MemoryTree();
+    tree.set(SKILL_PATH, { 'SKILL.md': SKILL_MD, 'linked.md': 'hardlink' });
+    const read = await readSkillFolder(tree, SKILL_PATH);
+    should(read.problems).deepEqual([
+      { subject: 'linked.md', reason: 'not carried: a hard link can be a file from outside the folder' },
+    ]);
+    should(read.files.map(file => file.path)).deepEqual(['SKILL.md']);
+  });
+
+  it('should not carry a file whose name says it holds a credential, at any depth, in any letter case', async () => {
+    const tree = new MemoryTree();
+    const names = [
+      '.env',
+      '.env.local',
+      'sub/.ENV.production',
+      '.netrc',
+      '.npmrc',
+      '.pypirc',
+      '.git-credentials',
+      'id_rsa',
+      'id_rsa.pub',
+      'id_ed25519',
+      'keys/server.pem',
+      'tls.KEY',
+    ];
+    tree.set(SKILL_PATH, {
+      'SKILL.md': SKILL_MD,
+      'env.md': 'about env',
+      'monkey.txt': 'keyword',
+      ...Object.fromEntries(names.map(name => [name, 'x'])),
+    });
+    const read = await readSkillFolder(tree, SKILL_PATH);
+    should(read.files.map(file => file.path)).deepEqual(['SKILL.md', 'env.md', 'monkey.txt']);
+    should(read.problems.map(problem => problem.subject).sort()).deepEqual([...names].sort());
+    for (const problem of read.problems)
+      should(problem.reason).match(/not carried: its name says it holds a credential/u);
+  });
+
   it('should list an oversize file and a file that fails to read, before reading the oversize one', async () => {
     const tree = new MemoryTree();
     tree.set(SKILL_PATH, { 'SKILL.md': SKILL_MD, 'huge.txt': big(300 * 1024) });

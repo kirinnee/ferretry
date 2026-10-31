@@ -20,8 +20,11 @@ const isInside = (root: string, candidate: string): boolean => {
  * The folder itself is resolved once (the fleet links a skill into a runtime home, so the inventory's path
  * may name a link to the folder). Everything INSIDE it is looked at with `lstat` and reported as it is: a
  * symbolic link is listed and left alone, never entered, so a skill cannot make the publisher read a file
- * outside its folder. A read opens with `O_NOFOLLOW` and checks the parent still resolves inside the
- * folder, because a folder can change between the listing and the read.
+ * outside its folder. A file with a second hard link is listed and never read: a hard link can be a file
+ * from anywhere on the disk, and it looks like an ordinary file in the folder. A read opens with
+ * `O_NOFOLLOW`, checks the parent still resolves inside the folder, and checks the opened file is a regular
+ * file with one link, because a folder can change between the listing and the read. One gap stays (a
+ * folder swapped for a link between the parent check and the open) and is declared in docs/catalogs.md.
  */
 export class NodeSkillFolder implements SkillTreePort {
   async list(manifestPath: string, limits: SkillWalkLimits): Promise<SkillTreeListing | undefined> {
@@ -33,6 +36,7 @@ export class NodeSkillFolder implements SkillTreePort {
     }
     const entries: SkillTreeEntry[] = [];
     let truncated = false;
+    let seen = 0;
     const pending: { readonly directory: string; readonly prefix: readonly string[] }[] = [
       { directory: root, prefix: [] },
     ];
@@ -47,10 +51,12 @@ export class NodeSkillFolder implements SkillTreePort {
         continue;
       }
       for (const name of names) {
-        if (entries.length >= limits.entries) {
+        // A folder counts as much as a file: a tree of empty folders is as long a walk as a tree of files.
+        if (seen >= limits.entries) {
           truncated = true;
           break;
         }
+        seen += 1;
         const segments = [...next.prefix, name];
         const path = segments.join('/');
         const full = join(next.directory, name);
@@ -65,7 +71,10 @@ export class NodeSkillFolder implements SkillTreePort {
         else if (stats.isDirectory()) {
           if (segments.length >= limits.depth) entries.push({ path, type: 'deep', size: 0 });
           else pending.push({ directory: full, prefix: segments });
-        } else if (stats.isFile()) entries.push({ path, type: 'file', size: stats.size });
+        } else if (stats.isFile())
+          entries.push(
+            stats.nlink > 1 ? { path, type: 'hardlink', size: 0 } : { path, type: 'file', size: stats.size },
+          );
         else entries.push({ path, type: 'other', size: 0 });
       }
     }
@@ -81,6 +90,8 @@ export class NodeSkillFolder implements SkillTreePort {
       if (parent !== root && !isInside(root, parent)) return { ok: false, reason: 'unreadable' };
       const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
       try {
+        const opened = await handle.stat();
+        if (!opened.isFile() || opened.nlink > 1) return { ok: false, reason: 'unreadable' };
         const buffer = new Uint8Array(maxBytes + 1);
         const { bytesRead } = await handle.read(buffer, 0, maxBytes + 1, 0);
         if (bytesRead > maxBytes) return { ok: false, reason: 'too_big' };

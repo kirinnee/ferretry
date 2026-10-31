@@ -8,6 +8,7 @@ import {
   renderExported,
   renderPreview,
   renderPublished,
+  renderSigning,
   renderWithdrawn,
 } from '../../../src/lib/catalog/render';
 import {
@@ -71,6 +72,12 @@ describe('rendering the catalog list', () => {
     should(renderCatalogList(catalogList([catalog({ items: [bare] })]))).containEql('skill pdf-tools (');
   });
 
+  it('should say nothing about the source when the daemon was not asked', () => {
+    const { sourceState: _unused, ...unchecked } = skillItem();
+    const text = renderCatalogList(catalogList([catalog({ items: [unchecked] })]));
+    should(text).not.containEql('source');
+  });
+
   it('should say a withdrawn item with no instant', () => {
     should(renderCatalogList(catalogList([catalog({ items: [skillItem({ sourceState: 'withdrawn' })] })]))).containEql(
       ' · withdrawn\n',
@@ -90,11 +97,21 @@ describe('rendering results', () => {
   });
 });
 
+describe('rendering what an export signs', () => {
+  it('should name the catalog, its publisher name, and one line per item', () => {
+    const text = renderSigning(catalog(), ['a v1 sha256:x', 'b v2 sha256:y']);
+    should(text).startWith(`This will sign Team tools (${CATALOG_ID}) at revision 3, published as laptop:`);
+    should(text).containEql('\n  a v1 sha256:x\n  b v2 sha256:y');
+    should(renderSigning(catalog(), [])).endWith('  no items');
+  });
+});
+
 describe('rendering a preview', () => {
   it('should show every entry in full, documents as indented blocks, then the digest', () => {
     const text = renderPreview(preview());
     should(text).containEql('skill pdf-tools · version 1 · 120 bytes');
     should(text).containEql('Summary: Split, merge and OCR PDFs');
+    should(text).containEql('Read from: /home/u/.claude/skills/pdf-tools/SKILL.md');
     should(text).containEql('  Skill file SKILL.md:\n    # pdf\n    line two\n\n    line four');
     should(text).containEql('  Starts: npx -y thing');
     should(text).endWith(`Digest: sha256:${'1'.repeat(64)}`);

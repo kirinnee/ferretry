@@ -63,6 +63,7 @@ export function catalog(overrides: Partial<OwnedCatalog> = {}): OwnedCatalog {
     id: CATALOG_ID,
     name: 'Team tools',
     description: '',
+    publisherName: 'laptop',
     visibility: 'members',
     revision: 3,
     issuedAt: AT,
@@ -82,6 +83,7 @@ export function preview(overrides: Partial<CatalogItemPreview> = {}): CatalogIte
     kind: 'skill',
     name: 'pdf-tools',
     summary: 'Split, merge and OCR PDFs',
+    location: '/home/u/.claude/skills/pdf-tools/SKILL.md',
     version: 1,
     digest: NEW_DIGEST,
     size: 120,
@@ -206,7 +208,7 @@ export class MemoryFiles implements ICatalogFileWriter {
 }
 
 export type GatewayCall =
-  | { call: 'list' }
+  | { call: 'list'; sourceState: boolean }
   | { call: 'create'; request: CreateCatalogRequest }
   | { call: 'update'; catalogId: string; request: UpdateCatalogRequest }
   | { call: 'remove'; catalogId: string }
@@ -219,6 +221,9 @@ export type GatewayCall =
 /** A gateway that records every call and answers from fixtures. */
 export class FakeGateway implements ICatalogGateway {
   readonly calls: GatewayCall[] = [];
+  /** What the "daemon" signs: the first catalog's live items, unless a test says it signed something else. */
+  signedDigest: string | undefined;
+
   constructor(
     private readonly state: { catalogs: readonly OwnedCatalog[]; preview: CatalogItemPreview } = {
       catalogs: [catalog()],
@@ -226,8 +231,8 @@ export class FakeGateway implements ICatalogGateway {
     },
   ) {}
 
-  list(): Promise<OwnedCatalogList> {
-    this.calls.push({ call: 'list' });
+  list(options: { readonly sourceState: boolean } = { sourceState: false }): Promise<OwnedCatalogList> {
+    this.calls.push({ call: 'list', sourceState: options.sourceState });
     return Promise.resolve(catalogList(this.state.catalogs));
   }
   create(request: CreateCatalogRequest): Promise<OwnedCatalog> {
@@ -264,6 +269,21 @@ export class FakeGateway implements ICatalogGateway {
   }
   export(catalogId: string, request: ExportCatalogRequest): Promise<SharedCatalogFile> {
     this.calls.push({ call: 'export', catalogId, request });
-    return Promise.resolve(catalogFile());
+    const file = catalogFile();
+    const live = (this.state.catalogs[0]?.items ?? []).filter(item => item.withdrawnAt === undefined);
+    const entry = file.signedManifest.manifest.items[0];
+    if (entry === undefined) throw new Error('fixture has no manifest entry');
+    const items = live.map(item => ({
+      ...entry,
+      itemId: item.itemId,
+      kind: item.kind,
+      name: item.name,
+      version: item.versions.at(-1)?.version ?? 1,
+      digest: this.signedDigest ?? item.versions.at(-1)?.digest ?? DIGEST,
+    }));
+    return Promise.resolve({
+      ...file,
+      signedManifest: { ...file.signedManifest, manifest: { ...file.signedManifest.manifest, items } },
+    });
   }
 }

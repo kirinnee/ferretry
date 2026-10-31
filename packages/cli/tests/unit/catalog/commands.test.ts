@@ -87,6 +87,7 @@ describe('catalog command surface', () => {
       '--out',
       '/tmp/x.json',
       '--force',
+      '--yes',
     ]);
     await parsed;
     should(gateway.calls.at(-1)).match({ call: 'export', request: { itemIds: [SKILL_ID, `itm_${'m'.repeat(22)}`] } });

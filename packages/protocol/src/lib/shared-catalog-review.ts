@@ -20,6 +20,7 @@ import { commandLine } from './fleet-clone-review.ts';
 import {
   CATALOG_SKILL_ENTRY_FILE,
   HIDDEN_CHARACTER_SOURCE,
+  holdsRawKey,
   type CatalogMcpSetup,
   type SharedCatalogItem,
 } from './shared-catalog.ts';
@@ -54,6 +55,8 @@ export const CATALOG_INSTALL_WARNING_CODES = [
   'runs-on-its-own',
   /** A carried file holds invisible or text-direction characters; the review shows each one marked. */
   'hidden-characters',
+  /** A skill file holds what looks like a raw key. It may be an example, but it is a credential if it is not. */
+  'possible-secret',
 ] as const;
 export const CatalogInstallWarningCodeSchema = z.enum(CATALOG_INSTALL_WARNING_CODES);
 export type CatalogInstallWarningCode = z.infer<typeof CatalogInstallWarningCodeSchema>;
@@ -518,6 +521,10 @@ const isScript = (file: { readonly path: string; readonly content: string }): bo
 const RUNS_ON_ITS_OWN =
   /(?:^|\/)(?:\.envrc|\.env|package\.json|Makefile|justfile|\.?mise\.toml|\.pre-commit-config\.yaml|\.mcp\.json|\.(?:vscode|idea|husky|claude|codex|agents|mise)\/.*)$/iu;
 
+/** Which carried files hold what the raw-key rule would refuse in an MCP setup. A guess, so a warning. */
+const filesWithPossibleSecret = (files: readonly { readonly path: string; readonly content: string }[]): string[] =>
+  files.filter(file => holdsRawKey(file.content)).map(file => file.path);
+
 const listed = (paths: readonly string[]): string => paths.join(', ');
 
 /** Which carried files hold an invisible or text-direction character, which the review shows marked. */
@@ -534,6 +541,7 @@ export function catalogItemWarnings(item: SharedCatalogItem): readonly CatalogIn
     const scripts = files.filter(isScript).map(file => file.path);
     const automatic = files.filter(file => RUNS_ON_ITS_OWN.test(file.path)).map(file => file.path);
     const hidden = filesWithHidden(files);
+    const secrets = filesWithPossibleSecret(files);
     return [
       ...(scripts.length === 0
         ? []
@@ -557,6 +565,14 @@ export function catalogItemWarnings(item: SharedCatalogItem): readonly CatalogIn
             {
               code: 'hidden-characters' as const,
               text: `${listed(hidden)} ${hidden.length === 1 ? 'holds' : 'hold'} invisible or text-direction characters, shown below as ⟨U+…⟩. They can make text read differently from what it says.`,
+            },
+          ]),
+      ...(secrets.length === 0
+        ? []
+        : [
+            {
+              code: 'possible-secret' as const,
+              text: `${listed(secrets)} ${secrets.length === 1 ? 'holds' : 'hold'} what looks like a key or token. It may only be an example, but if it is real, installing this skill puts that credential on your computer, and it was seen by everyone who had the file.`,
             },
           ]),
     ];

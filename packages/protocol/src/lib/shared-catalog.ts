@@ -314,7 +314,7 @@ const prefixedKey = (piece: string): boolean => RAW_KEY_PREFIXES.test(piece) && 
  * prefix anywhere in it, or a long unbroken value right after a word that announces one (`--token=…`,
  * `--api-key …`, `Bearer …`). A key with no known prefix under an innocent name is not found by anything.
  */
-const holdsRawKey = (value: string): boolean => {
+export const holdsRawKey = (value: string): boolean => {
   const parts = pieces(value);
   return parts.some(
     (part, index) => prefixedKey(part) || (index > 0 && announcesKey(parts[index - 1] ?? '') && part.length >= 16),

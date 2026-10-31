@@ -20,6 +20,7 @@ const block = (text: string, indent: string): string =>
 /** The sentence for a source that moved on, or is gone: what `ls` says so the owner knows to publish. */
 function sourceMark(item: OwnedCatalogItem): string {
   switch (item.sourceState) {
+    case undefined:
     case 'unchanged':
       return '';
     case 'changed':
@@ -73,6 +74,7 @@ export function renderPreview(preview: CatalogItemPreview): string {
   const lines: string[] = [
     `${preview.kind} ${preview.name} · version ${preview.version} · ${preview.size} bytes`,
     `Summary: ${preview.summary}`,
+    `Read from: ${preview.location}`,
     '',
     'What an installer would get:',
   ];
@@ -101,6 +103,14 @@ export function renderPublished(published: PublishedCatalogItem): string {
 
 export function renderWithdrawn(withdrawn: WithdrawnCatalogItem, name: string): string {
   return `Withdrew ${name} (${withdrawn.itemId}); catalog revision ${withdrawn.revision}.`;
+}
+
+/** What an export is about to sign: the catalog, its publisher name, and every live item by version and digest. */
+export function renderSigning(catalog: OwnedCatalog, lines: readonly string[]): string {
+  return [
+    `This will sign ${catalog.name} (${catalog.id}) at revision ${catalog.revision}, published as ${catalog.publisherName}:`,
+    ...(lines.length === 0 ? [`${INDENT}no items`] : lines.map(line => `${INDENT}${line}`)),
+  ].join('\n');
 }
 
 export function renderExported(catalogName: string, itemCount: number, path: string): string {

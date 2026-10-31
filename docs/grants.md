@@ -291,8 +291,11 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) ย
    (phase 2) revoking one will be `sharing.use`, and the remote turn-off warning will then need the
    "revoke FIRST" ordering [design/catalogs.md](design/catalogs.md) ยง3.6 describes.
 3. **So the way back on the control** is the same sentence every capability's remote turn-off carries:
-   the host command `fy daemon config set sharing --use`, with `sharing`'s own note in the switch
-   ("it also stops this device managing and exporting catalogs").
+   the host command `fy daemon config set sharing --use`. `sharing` has no "it also stops" note in the
+   switch: in phase 1 turning it off stops nothing beyond the catalog routes.
+4. **`terminal` is a superset of `sharing`.** A device that holds `terminal` can run `fy catalog export`
+   at the host, which is ungoverned, so switching `sharing` off does not keep catalogs from a device that
+   still holds `terminal`. The switch governs the daemon's own catalog routes, not what a shell can do.
 
 `sharing.configure` governs only whether a remote caller may re-grant `sharing`. Both axes are on by
 default; the operator password is the opt-in layer. That is the daemon-wide document and a device paired

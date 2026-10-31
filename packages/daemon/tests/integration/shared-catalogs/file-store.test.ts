@@ -45,6 +45,7 @@ describe('the catalogs document on disk', () => {
       id: CAT,
       name: 'Team',
       description: '',
+      publisherName: 'host',
       now: '2026-01-01T00:00:00.000Z',
     });
 

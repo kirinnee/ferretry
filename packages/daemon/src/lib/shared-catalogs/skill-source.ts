@@ -3,7 +3,8 @@
  *
  * NOTHING IS SKIPPED SILENTLY. Every entry the walk found is either carried or listed with the reason it
  * is not — a symbolic link (never followed: it could point out of the folder), a file that is not text, a
- * file over 256 KiB, a name the contract refuses (`.git`, a space, a non-ASCII letter), a path that would
+ * file over 256 KiB, a file with a second hard link (it can be a file from outside the folder), a
+ * credential file by its name (`.env`, `.npmrc`, a private key), a name the contract refuses (`.git`, a space, a non-ASCII letter), a path that would
  * be the same file as another on a Mac or on Windows, and what is left over once the 200-file or 2 MiB
  * bound is reached. The person reads that list in the preview, beside the files themselves.
  *
@@ -29,7 +30,7 @@ export interface SkillWalkLimits {
 
 export const SKILL_WALK_LIMITS: SkillWalkLimits = { entries: 1_000, depth: 16 };
 
-type SkillTreeEntryType = 'file' | 'symlink' | 'other' | 'deep';
+type SkillTreeEntryType = 'file' | 'symlink' | 'hardlink' | 'other' | 'deep';
 
 /** One thing found in the skill folder. `path` is relative, `/`-separated. A `deep` entry is a folder not entered. */
 export interface SkillTreeEntry {
@@ -76,6 +77,14 @@ function textOf(bytes: Uint8Array): string | undefined {
 
 const subject = (path: string): string => revealHidden(path).slice(0, 512) || '(unnamed)';
 
+/**
+ * Files whose NAME says they hold a credential. They are left out whatever they hold: a skill has no use
+ * for the owner's keys, and the freeze is the last place to stop one leaving the machine. A guess by name,
+ * so `possible-secret` still reads what IS carried.
+ */
+const CREDENTIAL_FILE =
+  /^(?:\.env(?:\..*)?|\.netrc|\.npmrc|\.pypirc|\.git-credentials|id_rsa.*|id_ed25519.*|.*\.pem|.*\.key)$/iu;
+
 /** Why the contract would refuse this path, or `null` when it would carry it. */
 function pathProblem(path: string): string | null {
   const parsed = CatalogSkillFileSchema.shape.path.safeParse(path);
@@ -103,6 +112,10 @@ export async function readSkillFolder(port: SkillTreePort, manifestPath: string)
       skip(entry.path, 'a symbolic link, which is never followed: it could point out of the folder');
       continue;
     }
+    if (entry.type === 'hardlink') {
+      skip(entry.path, 'not carried: a hard link can be a file from outside the folder');
+      continue;
+    }
     if (entry.type === 'other') {
       skip(entry.path, 'not a regular file (a socket, a device or a pipe)');
       continue;
@@ -114,6 +127,13 @@ export async function readSkillFolder(port: SkillTreePort, manifestPath: string)
     const refused = pathProblem(entry.path);
     if (refused !== null) {
       skip(entry.path, `its name is not one a catalog carries: ${refused}`);
+      continue;
+    }
+    if (CREDENTIAL_FILE.test(entry.path.split('/').pop() ?? '')) {
+      skip(
+        entry.path,
+        'not carried: its name says it holds a credential (a .env file, a package-manager login, a private key)',
+      );
       continue;
     }
     const lower = entry.path.toLowerCase();

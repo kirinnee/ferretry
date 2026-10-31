@@ -70,8 +70,11 @@ export function catalogExportPath(catalogId: string): string {
 export class ProtocolCatalogGateway implements ICatalogGateway {
   constructor(private readonly client: CatalogApiClient) {}
 
-  async list(): Promise<OwnedCatalogList> {
-    return await this.client.request(SHARED_CATALOGS_PATH, OwnedCatalogListSchema);
+  async list(options: { readonly sourceState: boolean } = { sourceState: false }): Promise<OwnedCatalogList> {
+    return await this.client.request(
+      options.sourceState ? `${SHARED_CATALOGS_PATH}?sourceState=1` : SHARED_CATALOGS_PATH,
+      OwnedCatalogListSchema,
+    );
   }
 
   async create(request: CreateCatalogRequest): Promise<OwnedCatalog> {

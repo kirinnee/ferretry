@@ -707,6 +707,22 @@ describe('auditedRoutes', () => {
     should(JSON.stringify(logged)).not.match(/secret name|files/u);
   });
 
+  it('should record a catalog change with no ids when the answer is not JSON', async () => {
+    // Arrange
+    const { journal, routes } = decorated({
+      'POST /v1/catalogs': async () => ({ status: 200, headers: new Map<string, string>(), body: 'plainly not json' }),
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(request({ method: 'POST', path: '/v1/catalogs', headers: ADMIN, loopback: true, body: '{}' }));
+
+    // Assert
+    const logged = records(journal);
+    should(logged.map(record => record.event)).deepEqual(['catalog.changed']);
+    should(logged[0]?.detail).not.have.property('catalogId');
+  });
+
   it('should audit answering a harness dialog as terminal input on the session, never with the choice', async () => {
     // Arrange
     const { journal, routes } = decorated({});

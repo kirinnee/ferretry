@@ -30,7 +30,8 @@ export interface ICatalogPrompt {
 
 /** The owner routes of the daemon (docs/catalogs.md § The publisher side). */
 export interface ICatalogGateway {
-  list(): Promise<OwnedCatalogList>;
+  /** With `sourceState`, the daemon also re-reads every source to say whether it changed. */
+  list(options?: { readonly sourceState: boolean }): Promise<OwnedCatalogList>;
   create(request: CreateCatalogRequest): Promise<OwnedCatalog>;
   update(catalogId: string, request: UpdateCatalogRequest): Promise<OwnedCatalog>;
   remove(catalogId: string): Promise<DeletedCatalog>;
@@ -48,7 +49,10 @@ export interface ICatalogGateway {
 /** Where an exported catalog file is written. */
 export interface ICatalogFileWriter {
   exists(path: string): Promise<boolean>;
-  /** Writes the whole file; with `overwrite` false it fails rather than replace one that is there. */
+  /**
+   * Writes the whole file; with `overwrite` false it fails rather than replace one that is there. Replacing goes through a
+   * temporary file beside it and a rename, and refuses a path that is a symbolic link.
+   */
   write(path: string, text: string, overwrite: boolean): Promise<void>;
 }
 

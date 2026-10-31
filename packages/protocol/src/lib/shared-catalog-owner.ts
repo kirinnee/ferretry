@@ -96,7 +96,8 @@ export const OwnedCatalogItemSchema = z.strictObject({
   summary: CatalogSummarySchema,
   harness: CatalogHarnessSchema.optional(),
   source: CatalogSourceReferenceSchema,
-  sourceState: CatalogSourceStateSchema,
+  /** Only when it was asked for (`?sourceState=1`): finding it re-reads the source, so a plain list does not. */
+  sourceState: CatalogSourceStateSchema.optional(),
   /** Why a source is `unavailable`, in words. */
   sourceNote: z.string().max(1_024).optional(),
   /** Set when the item was withdrawn. */
@@ -110,6 +111,8 @@ export const OwnedCatalogSchema = z.strictObject({
   id: SharedCatalogIdSchema,
   name: CatalogLabelSchema,
   description: CatalogDescriptionSchema,
+  /** What the signed manifest calls this machine: set when the catalog is made, changed with a new revision. */
+  publisherName: CatalogLabelSchema,
   visibility: CatalogVisibilitySchema,
   /** Goes up by one on every change to what a manifest says, and never otherwise. */
   revision: z.number().int().min(1),
@@ -137,16 +140,21 @@ export const CreateCatalogRequestSchema = z.strictObject({
 });
 export type CreateCatalogRequest = z.infer<typeof CreateCatalogRequestSchema>;
 
-/** `PATCH /v1/catalogs/:id`: rename it, describe it, or both. */
+/** `PATCH /v1/catalogs/:id`: rename it, describe it, or change the name this machine signs it under. */
 export const UpdateCatalogRequestSchema = z
   .strictObject({
     name: CatalogLabelSchema.optional(),
     description: CatalogDescriptionSchema.optional(),
+    publisherName: CatalogLabelSchema.optional(),
     visibility: CatalogVisibilitySchema.optional(),
   })
   .refine(
-    request => request.name !== undefined || request.description !== undefined || request.visibility !== undefined,
-    'name a change: a name, a description or a visibility',
+    request =>
+      request.name !== undefined ||
+      request.description !== undefined ||
+      request.publisherName !== undefined ||
+      request.visibility !== undefined,
+    'name a change: a name, a description, a publisher name or a visibility',
   );
 export type UpdateCatalogRequest = z.infer<typeof UpdateCatalogRequestSchema>;
 
@@ -176,6 +184,8 @@ export const CatalogItemPreviewSchema = z.strictObject({
   name: CatalogItemNameSchema,
   summary: CatalogSummarySchema,
   harness: CatalogHarnessSchema.optional(),
+  /** WHERE the source is, as resolved: the SKILL.md path, or the file or fleet record the MCP server comes from. */
+  location: z.string().min(1).max(2_048),
   /** The version this would be: 1 for a new item. */
   version: z.number().int().min(1),
   /** The version it would follow, when the frozen copy is the same as that one (nothing to publish). */

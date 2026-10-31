@@ -55,18 +55,21 @@ class MemoryBlobs implements CatalogBlobStore {
 
 /** A folder tree held in memory: `path` → text, a symlink marker, or raw bytes. */
 export class MemoryTree implements SkillTreePort {
-  readonly folders = new Map<string, Map<string, Uint8Array | 'symlink' | 'other' | 'deep'>>();
+  readonly folders = new Map<string, Map<string, Uint8Array | 'symlink' | 'other' | 'deep' | 'hardlink'>>();
   truncated = false;
 
-  set(manifestPath: string, files: Record<string, string | Uint8Array | 'symlink' | 'other' | 'deep'>): void {
+  set(
+    manifestPath: string,
+    files: Record<string, string | Uint8Array | 'symlink' | 'other' | 'deep' | 'hardlink'>,
+  ): void {
     this.folders.set(
       manifestPath,
       new Map(
         Object.entries(files).map(([path, value]) => [
           path,
-          typeof value === 'string' && !['symlink', 'other', 'deep'].includes(value)
+          typeof value === 'string' && !['symlink', 'other', 'deep', 'hardlink'].includes(value)
             ? new TextEncoder().encode(value)
-            : (value as Uint8Array | 'symlink' | 'other' | 'deep'),
+            : (value as Uint8Array | 'symlink' | 'other' | 'deep' | 'hardlink'),
         ]),
       ),
     );
@@ -109,6 +112,8 @@ export interface Rig {
   skills: { path: string; name: string }[];
   servers: McpSourceServer[];
   identity: DaemonIdentity | undefined;
+  /** The host name the identity source reports; a catalog keeps the one it was made under. */
+  readonly publisher: { name: string };
 }
 
 export async function rig(overrides: Partial<SharedCatalogDeps> = {}): Promise<Rig> {
@@ -125,10 +130,11 @@ export async function rig(overrides: Partial<SharedCatalogDeps> = {}): Promise<R
     skills: [{ path: SKILL_PATH, name: 'demo' }],
     servers: [stdio('files')],
     identity: await newIdentity(),
+    publisher: { name: 'studio' },
   } as Rig;
   const source: CatalogIdentitySource = {
     identity: async () => state.identity,
-    publisherName: () => 'studio',
+    publisherName: () => state.publisher.name,
   };
   const service = new SharedCatalogService({
     documents,

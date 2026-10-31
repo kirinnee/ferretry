@@ -14,6 +14,8 @@ const refusal = async (work: () => Promise<unknown>): Promise<CatalogRefusal> =>
   throw new Error('expected a refusal');
 };
 
+const ASKING = { sourceState: true };
+
 async function withSkill() {
   const r = await rig();
   const catalog = await r.service.create({ name: 'Team tools' });
@@ -134,15 +136,16 @@ describe('SharedCatalogService', () => {
 
   it('should list a source-changed flag per item and say when the source went away', async () => {
     const { r, catalog } = await withSkill();
-    should((await r.service.list()).catalogs[0]?.items[0]?.sourceState).equal('unchanged');
+    should((await r.service.list()).catalogs[0]?.items[0]).not.have.property('sourceState');
+    should((await r.service.list(ASKING)).catalogs[0]?.items[0]?.sourceState).equal('unchanged');
     r.tree.set(SKILL_PATH, { 'SKILL.md': SKILL_MD, 'a.txt': 'a' });
-    should((await r.service.list()).catalogs[0]?.items[0]?.sourceState).equal('changed');
+    should((await r.service.list(ASKING)).catalogs[0]?.items[0]?.sourceState).equal('changed');
     r.skills = [];
-    const gone = (await r.service.list()).catalogs[0]?.items[0];
+    const gone = (await r.service.list(ASKING)).catalogs[0]?.items[0];
     should(gone?.sourceState).equal('unavailable');
     should(gone?.sourceNote).match(/not a skill this machine lists/u);
     await r.service.withdraw(catalog.id, gone?.itemId ?? '');
-    should((await r.service.list()).catalogs[0]?.items[0]?.sourceState).equal('withdrawn');
+    should((await r.service.list(ASKING)).catalogs[0]?.items[0]?.sourceState).equal('withdrawn');
   });
 
   it('should refuse a withdrawn item a new version, and a second withdrawal', async () => {
@@ -260,6 +263,90 @@ describe('SharedCatalogService', () => {
     ).match(/now called renamed/u);
   });
 
+  it('should keep the publisher name it was created with, and sign it', async () => {
+    const { r, catalog } = await withSkill();
+    should(catalog.publisherName).equal('studio');
+    r.publisher.name = 'another-host';
+    should((await r.service.exportCatalog(catalog.id, {})).signedManifest.manifest.publisherName).equal('studio');
+    const before = (await r.service.list()).catalogs[0]?.revision;
+    const renamed = await r.service.update(catalog.id, { publisherName: 'Studio laptop' });
+    should(renamed.publisherName).equal('Studio laptop');
+    should(renamed.revision).equal((before ?? 0) + 1);
+    should((await r.service.exportCatalog(catalog.id, {})).signedManifest.manifest.publisherName).equal(
+      'Studio laptop',
+    );
+    should((await r.service.update(catalog.id, { publisherName: 'Studio laptop' })).revision).equal(renamed.revision);
+  });
+
+  it('should say where each source was read from, in the preview', async () => {
+    const r = await rig();
+    const catalog = await r.service.create({ name: 'Team' });
+    const skill = await r.service.previewItem(catalog.id, { source: { kind: 'skill', skill: 'demo' } });
+    should(skill.location).equal(SKILL_PATH);
+    const server = await r.service.previewItem(catalog.id, { source: { kind: 'mcp', mcp: 'files' } });
+    should(server.location).equal('files (user, /home/me/.claude.json)');
+  });
+
+  it('should refuse an export larger than a reader will open, and say to export fewer items', async () => {
+    const r = await rig({ exportMaxBytes: 300 });
+    const catalog = await r.service.create({ name: 'Team' });
+    const preview = await r.service.previewItem(catalog.id, { source: { kind: 'skill', skill: 'demo' } });
+    await r.service.addItem(catalog.id, { source: { kind: 'skill', skill: 'demo' }, digest: preview.digest });
+    const refused = await refusal(async () => await r.service.exportCatalog(catalog.id, {}));
+    should(refused.refusal).equal('export_too_big');
+    should(refused.message).match(/Export fewer items/u);
+  });
+
+  it('should refuse a file it cannot make, and one that does not verify', async () => {
+    const { r, catalog } = await withSkill();
+    const stored = r.documents.document;
+    const item = stored.catalogs[0]?.items[0];
+    if (stored.catalogs[0] === undefined || item === undefined) throw new Error('fixture');
+    const withHarness = { ...item, harness: 'claude' as const };
+    r.documents.document = { ...stored, catalogs: [{ ...stored.catalogs[0], items: [withHarness] }] };
+    const made = await refusal(async () => await r.service.exportCatalog(catalog.id, {}));
+    should(made.refusal).equal('export_failed');
+    should(made.message).match(/could not be made/u);
+
+    const sound = await rig({
+      crypto: Object.assign(Object.create(crypto) as typeof crypto, { verifyEd25519: async () => false }),
+    });
+    const other = await sound.service.create({ name: 'Team' });
+    const preview = await sound.service.previewItem(other.id, { source: { kind: 'skill', skill: 'demo' } });
+    await sound.service.addItem(other.id, { source: { kind: 'skill', skill: 'demo' }, digest: preview.digest });
+    const unverified = await refusal(async () => await sound.service.exportCatalog(other.id, {}));
+    should(unverified.refusal).equal('export_failed');
+    should(unverified.message).match(/did not verify/u);
+  });
+
+  it('should say an MCP setup went away on a new version, and let a real failure through a list', async () => {
+    const r = await rig();
+    const catalog = await r.service.create({ name: 'Team' });
+    const preview = await r.service.previewItem(catalog.id, { source: { kind: 'mcp', mcp: 'files' } });
+    const added = await r.service.addItem(catalog.id, {
+      source: { kind: 'mcp', mcp: 'files' },
+      digest: preview.digest,
+    });
+    r.servers = [];
+    should(
+      (await refusal(async () => await r.service.previewItem(catalog.id, { itemId: added.itemId }))).refusal,
+    ).equal('source_unknown');
+    const gone = (await r.service.list(ASKING)).catalogs[0]?.items[0];
+    should(gone?.sourceState).equal('unavailable');
+    r.skills = [];
+    const { r: other } = await withSkill();
+    other.tree.list = async () => {
+      throw new Error('the disk went away');
+    };
+    let thrown: unknown;
+    try {
+      await other.service.list(ASKING);
+    } catch (error) {
+      thrown = error;
+    }
+    should(String(thrown)).match(/the disk went away/u);
+  });
+
   it('should refuse to sign without an identity', async () => {
     const r = await rig();
     r.identity = undefined;
@@ -271,6 +358,10 @@ describe('SharedCatalogService', () => {
     const [digest] = [...r.blobs.blobs.keys()];
     const text = r.blobs.blobs.get(digest as string) as string;
     r.blobs.blobs.set(digest as string, text.replace('notes', 'NOTES'));
+    should((await refusal(async () => await r.service.exportCatalog(catalog.id, {}))).message).match(
+      /no longer matches its digest/u,
+    );
+    r.blobs.blobs.set(digest as string, text.replace('"content":"notes"', '"content":"\\ud800"'));
     should((await refusal(async () => await r.service.exportCatalog(catalog.id, {}))).message).match(
       /no longer matches its digest/u,
     );

@@ -40,10 +40,17 @@ function stubbed(failWith?: CatalogRefusalCode) {
   return { calls, dispatch };
 }
 
-const call = (method: string, path: string, body?: unknown, headers: Readonly<Record<string, string>> = human) =>
+const call = (
+  method: string,
+  path: string,
+  body?: unknown,
+  headers: Readonly<Record<string, string>> = human,
+  query: readonly (readonly [string, string])[] = [],
+) =>
   request({
     method,
     path,
+    query,
     headers: { ...headers, 'content-type': 'application/json' },
     body: body === undefined ? '' : JSON.stringify(body),
     loopback: true,
@@ -91,6 +98,18 @@ describe('the shared catalogs routes', () => {
     should(calls).have.length(9);
   });
 
+  it('should check the sources only when the list is asked with sourceState=1', async () => {
+    const { dispatch, calls } = stubbed();
+    await dispatch.dispatch(call('GET', '/v1/catalogs'));
+    await dispatch.dispatch(call('GET', '/v1/catalogs', undefined, human, [['sourceState', '1']]));
+    await dispatch.dispatch(call('GET', '/v1/catalogs', undefined, human, [['sourceState', '0']]));
+    should(calls).deepEqual([
+      'list [{"sourceState":false}]',
+      'list [{"sourceState":true}]',
+      'list [{"sourceState":false}]',
+    ]);
+  });
+
   it('should let a ferret list and preview, and refuse every other call with 403 forbidden', async () => {
     const { dispatch, calls } = stubbed();
     const ferret = agentIn('session-1');
@@ -106,6 +125,17 @@ describe('the shared catalogs routes', () => {
     );
     should(preview.status).equal(200);
     should(calls).have.length(2);
+  });
+
+  it('should let a failure that is not a refusal through', async () => {
+    const catalogs = {
+      list: async () => {
+        throw new Error('the store caught fire');
+      },
+    } as unknown as SharedCatalogSubsystem['catalogs'];
+    const dispatch = new ApiDispatcher(new ApiRouter(sharedCatalogRoutes({ catalogs })), CREDENTIALS, GRANTED);
+    const response = await dispatch.dispatch(call('GET', '/v1/catalogs'));
+    should(response.status).equal(500);
   });
 
   it('should answer 404 for an id that is not one, before touching the store', async () => {
@@ -141,6 +171,7 @@ describe('the shared catalogs routes', () => {
       signing_unavailable: 503,
       store_damaged: 500,
       export_failed: 500,
+      export_too_big: 413,
     };
     for (const [code, status] of Object.entries(expected)) {
       const { dispatch } = stubbed(code as CatalogRefusalCode);

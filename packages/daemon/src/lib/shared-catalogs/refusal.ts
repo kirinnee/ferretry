@@ -18,6 +18,7 @@ export const CATALOG_REFUSALS = [
   'signing_unavailable',
   'store_damaged',
   'export_failed',
+  'export_too_big',
 ] as const;
 export type CatalogRefusalCode = (typeof CATALOG_REFUSALS)[number];
 

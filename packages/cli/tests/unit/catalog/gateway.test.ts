@@ -62,6 +62,12 @@ describe('protocol catalog gateway', () => {
     should(actual.catalogs).have.length(1);
   });
 
+  it('should ask for the source check only when told to', async () => {
+    const calls: Call[] = [];
+    await new ProtocolCatalogGateway(fakeClient(catalogList(), calls)).list({ sourceState: true });
+    should(calls[0]?.path).equal('/v1/catalogs?sourceState=1');
+  });
+
   it('should POST a new catalog', async () => {
     const calls: Call[] = [];
     await new ProtocolCatalogGateway(fakeClient(catalog(), calls)).create({ name: 'Team tools' });

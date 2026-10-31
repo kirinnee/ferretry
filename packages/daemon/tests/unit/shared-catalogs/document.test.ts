@@ -49,7 +49,13 @@ const refusalOf = (work: () => unknown): string => {
   return 'none';
 };
 
-const one = withCatalog(EMPTY_CATALOGS_DOCUMENT, { id: catalogId(1), name: 'Team', description: '', now: T1 });
+const one = withCatalog(EMPTY_CATALOGS_DOCUMENT, {
+  id: catalogId(1),
+  name: 'Team',
+  description: '',
+  publisherName: 'host',
+  now: T1,
+});
 
 describe('the catalogs document', () => {
   it('should parse a round trip and name the first problem of a damaged one', () => {
@@ -109,10 +115,12 @@ describe('the revision rule', () => {
 
 describe('refusals', () => {
   it('should refuse a taken name, an unknown catalog and an unknown item', () => {
-    should(refusalOf(() => withCatalog(one, { id: catalogId(2), name: 'Team', description: '', now: T1 }))).equal(
-      'name_taken',
-    );
-    const two = withCatalog(one, { id: catalogId(2), name: 'Other', description: '', now: T1 });
+    should(
+      refusalOf(() =>
+        withCatalog(one, { id: catalogId(2), name: 'Team', description: '', publisherName: 'host', now: T1 }),
+      ),
+    ).equal('name_taken');
+    const two = withCatalog(one, { id: catalogId(2), name: 'Other', description: '', publisherName: 'host', now: T1 });
     should(refusalOf(() => withCatalogPatch(two, catalogId(2), { name: 'Team' }, T2))).equal('name_taken');
     should(refusalOf(() => findCatalog(one, catalogId(9)))).equal('catalog_unknown');
     should(refusalOf(() => withoutCatalog(one, catalogId(9)))).equal('catalog_unknown');

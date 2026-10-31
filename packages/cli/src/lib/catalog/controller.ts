@@ -9,6 +9,7 @@ import {
   renderExported,
   renderPreview,
   renderPublished,
+  renderSigning,
   renderWithdrawn,
 } from './render.ts';
 import { catalogFileSlug, resolveCatalog, resolveItem } from './resolve.ts';
@@ -32,7 +33,7 @@ export interface CatalogAddOptions extends CatalogConfirmedOptions {
   readonly summary?: string;
 }
 
-export interface CatalogExportOptions extends CatalogCommandOptions {
+export interface CatalogExportOptions extends CatalogConfirmedOptions {
   readonly item?: readonly string[];
   readonly out?: string;
   readonly force?: boolean;
@@ -60,7 +61,7 @@ export class CatalogController {
   ) {}
 
   async list(options: CatalogCommandOptions): Promise<void> {
-    const list = await this.gateway.list();
+    const list = await this.gateway.list({ sourceState: true });
     this.#report(list, options, () => renderCatalogList(list));
   }
 
@@ -138,6 +139,10 @@ export class CatalogController {
   /**
    * Writes the signed catalog file. It refuses to replace a file that is there unless `--force`, and says
    * so BEFORE asking the daemon to sign anything.
+   *
+   * The signature covers EVERY live item (`--item` only chooses which are carried in the file), so the list printed
+   * and asked about is every live item, and the signed file is checked against it before it is written: what a
+   * program on this machine put in the store since is the one thing the printout can show.
    */
   async export(catalog: string, options: CatalogExportOptions): Promise<void> {
     const found = await this.#catalog(catalog);
@@ -147,13 +152,26 @@ export class CatalogController {
       throw new Error(`${path} already exists — pass --force to replace it, or --out to write somewhere else`);
     }
     const itemIds = (options.item ?? []).map(wanted => resolveItem(found, wanted).itemId);
+    const shown = signedLines(found);
+    this.#showSigning(found, shown, options);
+    await this.#confirm(`Sign ${found.name} with the items listed above?`, options);
     const file = await this.gateway.export(found.id, itemIds.length === 0 ? {} : { itemIds });
+    const signed = file.signedManifest.manifest.items.map(entry => `${entry.name} v${entry.version} ${entry.digest}`);
+    if (signed.length !== shown.length || signed.some((line, index) => line !== shown[index]))
+      throw new Error('the daemon signed different items than the ones listed above — nothing was written');
     await this.files.write(path, `${JSON.stringify(file, null, 2)}\n`, overwrite);
     this.#report({ path, file }, options, () => renderExported(found.name, file.items.length, path));
   }
 
   async #catalog(wanted: string): Promise<OwnedCatalog> {
     return resolveCatalog((await this.gateway.list()).catalogs, wanted);
+  }
+
+  /** What the signature will cover. With `--json` it goes to stderr, like a preview. */
+  #showSigning(catalog: OwnedCatalog, lines: readonly string[], options: CatalogCommandOptions): void {
+    if (options.json === true)
+      this.out.diagnostic(JSON.stringify({ phase: 'sign', catalog: catalog.id, items: lines }));
+    else this.out.success(renderSigning(catalog, lines));
   }
 
   /** The preview in full. With `--json` it goes to stderr, so stdout stays one final payload. */
@@ -176,6 +194,16 @@ export class CatalogController {
   #report(payload: unknown, options: CatalogCommandOptions, human: () => string): void {
     this.out.success(options.json === true ? JSON.stringify(payload, null, 2) : human());
   }
+}
+
+/** One line per live item: what the manifest will say about it, in the order it will say it. */
+function signedLines(catalog: OwnedCatalog): readonly string[] {
+  return catalog.items
+    .filter(item => item.withdrawnAt === undefined)
+    .flatMap(item => {
+      const latest = item.versions.at(-1);
+      return latest === undefined ? [] : [`${item.name} v${latest.version} ${latest.digest}`];
+    });
 }
 
 /** Exactly one of `--skill` and `--mcp`, so a request never guesses what the person meant. */

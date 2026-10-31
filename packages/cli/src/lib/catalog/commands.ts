@@ -132,9 +132,17 @@ export function registerCatalogCommands(program: Command, controller: CatalogCon
     .command('export')
     .description('write the catalog as a signed file')
     .argument('<catalog>', 'the catalog id or name')
-    .option('--item <item>', 'only this item (repeat for more); every item otherwise', collect)
+    .option(
+      '--item <item>',
+      'carry only this item in the file (repeat for more). The signed list still names every live item, and the ask above shows them',
+      collect,
+    )
     .option('--out <file>', 'where to write it; <catalog-name>.catalog.json in this directory otherwise')
     .option('--force', 'replace the file if it is already there')
+    .option(
+      '-y, --yes',
+      'sign without asking; the list of what is signed is still printed. Required when not on a terminal',
+    )
     .option('--json', JSON_HELP)
     .action(async (name: string, _flags: unknown, command: Command) => {
       await controller.export(name, merged<CatalogExportOptions>(command));

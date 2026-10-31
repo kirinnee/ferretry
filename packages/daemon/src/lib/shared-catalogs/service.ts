@@ -37,6 +37,7 @@ import {
   CatalogItemNameSchema,
   CatalogLabelSchema,
   SHARED_CATALOG_FILE_FORMAT,
+  SHARED_CATALOG_FILE_MAX_BYTES,
   SHARED_CATALOG_MANIFEST_FORMAT,
   catalogCanonicalText,
 } from '@ferretry/protocol';
@@ -88,6 +89,8 @@ export interface SharedCatalogDeps {
   readonly crypto: RelayCrypto;
   /** Milliseconds since the epoch. */
   readonly now: () => number;
+  /** The most an exported file may hold. A reader refuses more, so the file is not made. Defaults to the contract's. */
+  readonly exportMaxBytes?: number;
 }
 
 /** A source read and frozen as far as a preview goes. */
@@ -100,6 +103,7 @@ interface Prepared {
   readonly summary: string;
   readonly ownSummary: boolean;
   readonly version: number;
+  readonly location: string;
   readonly problems: readonly CatalogSourceProblem[];
 }
 
@@ -132,11 +136,15 @@ export class SharedCatalogService {
 
   // ── Reads ──────────────────────────────────────────────────────────────────────────────────────
 
-  async list(): Promise<OwnedCatalogList> {
+  /**
+   * Every catalog. Whether each source has changed is worked out only when asked: it re-reads every live
+   * item's skill folder or MCP declaration, and the list is open to a ferret, which could ask in a loop.
+   */
+  async list(options: { readonly sourceState: boolean } = { sourceState: false }): Promise<OwnedCatalogList> {
     const identity = await this.#identity();
     const document = await this.deps.documents.read();
     const catalogs: OwnedCatalog[] = [];
-    for (const catalog of document.catalogs) catalogs.push(await this.#owned(catalog, identity));
+    for (const catalog of document.catalogs) catalogs.push(await this.#owned(catalog, identity, options.sourceState));
     return { publisher: identity.daemonId, catalogs };
   }
 
@@ -157,6 +165,7 @@ export class SharedCatalogService {
       name: prepared.name,
       summary: prepared.summary,
       ...(prepared.harness === undefined ? {} : { harness: prepared.harness }),
+      location: prepared.location,
       version: prepared.version,
       ...(latest !== undefined && latest.contentDigest === print.contentDigest
         ? { sameAsVersion: latest.version }
@@ -179,6 +188,7 @@ export class SharedCatalogService {
         id,
         name: request.name,
         description: request.description ?? '',
+        publisherName: publisherLabel(this.deps.identity.publisherName()),
         now: instant(this.deps.now()),
       });
       await this.deps.documents.write(next);
@@ -307,7 +317,7 @@ export class SharedCatalogService {
       format: SHARED_CATALOG_MANIFEST_FORMAT,
       version: 1,
       publisher: identity.daemonId,
-      publisherName: publisherLabel(this.deps.identity.publisherName()),
+      publisherName: catalog.publisherName,
       catalogId: catalog.id,
       name: catalog.name,
       description: catalog.description,
@@ -331,6 +341,12 @@ export class SharedCatalogService {
       throw new CatalogRefusal(
         'export_failed',
         `The catalog file could not be made: ${parsed.error.issues[0]?.message ?? 'it is malformed'}.`,
+      );
+    const limit = this.deps.exportMaxBytes ?? SHARED_CATALOG_FILE_MAX_BYTES;
+    if (new TextEncoder().encode(JSON.stringify(parsed.data)).length > limit)
+      throw new CatalogRefusal(
+        'export_too_big',
+        `This catalog file would be larger than ${Math.round(limit / 1024 / 1024)} MiB, which is more than a reader will open. Export fewer items.`,
       );
     const verified = await verifySharedCatalogFile(this.deps.crypto, parsed.data);
     if (!verified.ok)
@@ -377,12 +393,9 @@ export class SharedCatalogService {
     const parsed = SharedCatalogItemSchema.safeParse(document);
     if (!parsed.success) throw damaged('is not a catalog item');
     const canonical = catalogCanonicalText(parsed.data);
-    const bytes = canonical.ok ? new TextEncoder().encode(canonical.text) : undefined;
-    const hash = bytes === undefined ? undefined : await this.deps.crypto.sha256(bytes);
-    const digest =
-      hash === undefined
-        ? undefined
-        : `sha256:${Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('')}`;
+    if (!canonical.ok) throw damaged('no longer matches its digest');
+    const hash = await this.deps.crypto.sha256(new TextEncoder().encode(canonical.text));
+    const digest = `sha256:${Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('')}`;
     if (digest !== version.digest) throw damaged('no longer matches its digest');
     return parsed.data;
   }
@@ -477,6 +490,7 @@ export class SharedCatalogService {
       summary,
       ownSummary: own !== undefined || existing?.ownSummary === true,
       version: existing === undefined ? 1 : latestVersion(existing).version + 1,
+      location: read.location,
       problems: read.problems,
     };
   }
@@ -540,6 +554,7 @@ export class SharedCatalogService {
       if (typeof skill === 'string') throw new CatalogRefusal('source_refused', `${name} cannot be shared: ${skill}.`);
       return {
         reference,
+        location: reference.path,
         name,
         harness: undefined,
         body: { kind: 'skill', skill } as FrozenBody,
@@ -557,6 +572,7 @@ export class SharedCatalogService {
     if (!converted.ok) throw new CatalogRefusal('source_refused', converted.reason);
     return {
       reference,
+      location: describeMcpServer(server),
       name: server.name,
       harness: converted.harness,
       body: { kind: 'mcp', mcp: converted.setup } as FrozenBody,
@@ -584,9 +600,14 @@ export class SharedCatalogService {
     }
   }
 
-  async #ownedItem(identity: DaemonIdentity, catalog: StoredCatalog, item: StoredItem): Promise<OwnedCatalogItem> {
+  async #ownedItem(
+    identity: DaemonIdentity,
+    catalog: StoredCatalog,
+    item: StoredItem,
+    withState: boolean,
+  ): Promise<OwnedCatalogItem> {
     const latest = latestVersion(item);
-    const { state, note } = await this.#sourceState(identity, catalog, item);
+    const { state, note } = withState ? await this.#sourceState(identity, catalog, item) : {};
     return {
       itemId: item.itemId,
       kind: item.kind,
@@ -594,7 +615,7 @@ export class SharedCatalogService {
       summary: latest.summary,
       ...(item.harness === undefined ? {} : { harness: item.harness }),
       source: latest.source,
-      sourceState: state,
+      ...(state === undefined ? {} : { sourceState: state }),
       ...(note === undefined ? {} : { sourceNote: note }),
       ...(item.withdrawnAt === undefined ? {} : { withdrawnAt: item.withdrawnAt }),
       versions: item.versions.map(version => ({
@@ -606,13 +627,14 @@ export class SharedCatalogService {
     };
   }
 
-  async #owned(catalog: StoredCatalog, identity: DaemonIdentity): Promise<OwnedCatalog> {
+  async #owned(catalog: StoredCatalog, identity: DaemonIdentity, withState = false): Promise<OwnedCatalog> {
     const items: OwnedCatalogItem[] = [];
-    for (const item of catalog.items) items.push(await this.#ownedItem(identity, catalog, item));
+    for (const item of catalog.items) items.push(await this.#ownedItem(identity, catalog, item, withState));
     return {
       id: catalog.id,
       name: catalog.name,
       description: catalog.description,
+      publisherName: catalog.publisherName,
       visibility: catalog.visibility,
       revision: catalog.revision,
       issuedAt: catalog.issuedAt,
@@ -630,7 +652,7 @@ export class SharedCatalogService {
       itemVersion: latest.version,
       digest: latest.digest,
       revision: catalog.revision,
-      item: await this.#ownedItem(identity, catalog, stored),
+      item: await this.#ownedItem(identity, catalog, stored, true),
     };
   }
 }

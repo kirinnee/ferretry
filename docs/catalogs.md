@@ -182,6 +182,10 @@ what gets written can never disagree:
     `.mcp.json`, and anything in `.vscode`, `.idea`, `.husky`, `.mise`, `.claude`, `.codex` or
     `.agents`), in any letter case.
   - `hidden-characters`: which files hold the characters the review marks.
+  - `possible-secret`: which skill files hold what the MCP raw-key rule would refuse (a known provider
+    prefix, or a long value right after `token`, `key`, `password` and the like). A guess and a warning, not a
+    refusal: a skill may show an example key. The publisher's freeze also leaves out credential files by
+    name (see [What a freeze does](#what-a-freeze-does)).
   - Only the installer can know `first-publisher`, `older-version` and `edited-locally`, so it adds those
     itself.
 
@@ -211,9 +215,20 @@ fy catalog export "Team skills" --out team.catalog.json
   `--yes` skips the question, not the printing. `rm` and `withdraw` ask too.
 - `publish <catalog> <item>` freezes the source again as the item's **next version**. If the source
   has not changed it says "nothing to publish".
-- `export` writes `<catalog-name>.catalog.json` (or `--out`), refuses to overwrite without `--force`
-  (before asking the daemon to sign anything), takes `--item` once per item to export a subset, and
-  verifies the file with the installer's own check before it is handed over.
+- `export` writes `<catalog-name>.catalog.json` (or `--out`) and refuses to overwrite without `--force`
+  (before asking the daemon to sign anything). Before it signs, it **prints every live item with its
+  version and digest and asks `y/N`** (`--yes` skips the ask, not the printing), and after the daemon
+  answers it checks that what was signed is exactly what was printed, writing nothing if it is not. The
+  file is verified with the installer's own check before it is handed over. `--force` writes a temporary
+  file beside the destination and renames it over, and refuses a destination that is a symbolic link.
+- `export --item` chooses which items the **file carries**. The signed manifest still lists **every live
+  item** of the catalog, so a reader sees the whole catalog and which items it was not given. The ask
+  above shows every live item for the same reason.
+- `add` and `publish` also print **where the source was read from** (the `SKILL.md` path, or the file
+  or fleet component that declares the MCP server), so a name that means two things is never silently one.
+- `ls` re-reads every source to say whether it changed; the daemon does that only for
+  `GET /v1/catalogs?sourceState=1`, which `fy catalog ls` sends. A plain `GET /v1/catalogs` does not
+  touch any source.
 - Install is the other machine's side (`fy catalog install`, phase 1b).
 
 ### What a freeze does
@@ -224,7 +239,12 @@ fy catalog export "Team skills" --out team.catalog.json
 - **A skill** is read recursively. Symlinks are **not followed**, and nothing is left out silently:
   every file that does not go (binary, over 256 KiB, `.git`, deeper than 16 folders, a name the
   contract refuses, a case-clash, past 200 files or 2 MiB) is listed with its reason. The walk is bounded
-  before any contents are read.
+  before any contents are read, and **folders count toward the entry limit** as files do.
+- **Hard links are not carried** ("a hard link can be a file from outside the folder"): a file whose link
+  count is above one is listed as not carried.
+- **Credential files are not carried**, each listed with why: `.env`, `.env.*`, `.netrc`, `.npmrc`,
+  `.pypirc`, `.git-credentials`, and any `id_rsa*`, `id_ed25519*`, `*.pem` or `*.key` name. A file that
+  does go but looks like it holds a key draws the `possible-secret` warning in [the review](#the-review).
 - **An MCP setup from a fleet component** converts directly and keeps `${secret:NAME}` as a
   placeholder. An OAuth `clientSecret` is dropped, and the review says so.
 - **An MCP server from `.mcp.json`, `~/.claude.json` or a local config** is **refused** if an
@@ -242,33 +262,41 @@ add is refused (409 `changed_since_preview`). So the thing you read is the thing
 The digest is the content digest, with the item's identity (its id and version) set aside; the digest
 the signed manifest lists covers identity and is what an installer pins.
 
+The preview also says **where the source was read from** (`location`: the resolved `SKILL.md` path, or the file or fleet component that declares the MCP server). A name that matches more than one source is **refused (409 `source_ambiguous`) with every candidate listed**; the daemon never picks one.
+
 ### The revision rule
 
 A catalog's `revision` rises by **exactly 1** on every change the manifest can see (an item added, a
-new version, a withdrawal, a rename, a new description), and **never otherwise**. `issuedAt` is the
+new version, a withdrawal, a rename, a new description, a new publisher name), and **never otherwise**. `issuedAt` is the
 instant of that change, and a file's `exportedAt` is that same instant, so **two exports with nothing
 between them are byte-identical**. A reader that saw revision 7 refuses a signed 6.
+
+The publisher name the manifest carries is **stored with the catalog** when it is made (the machine's
+name then) and signed from the store at every export, so a change of host name does not change the bytes
+of a revision. `PATCH` may set it, which is a change like a rename. Restoring `catalogs.json` from a
+backup can **reuse revision numbers**: an installer that saw a newer revision of this catalog refuses
+the restored older one, and the fix is to publish something new so the revision passes theirs.
 
 ### Routes
 
 All are `sharing`/`use`, `noStore`, and the writes answer a ferret 403 `forbidden`.
 
-| Route                                          | Does                                                 | Ferret  |
-| ---------------------------------------------- | ---------------------------------------------------- | ------- |
-| `GET /v1/catalogs`                             | every catalog, its items, versions and `sourceState` | may     |
-| `POST /v1/catalogs`                            | make one (201)                                       | refused |
-| `PATCH /v1/catalogs/:id`                       | rename or describe                                   | refused |
-| `DELETE /v1/catalogs/:id`                      | delete it and its versions                           | refused |
-| `POST /v1/catalogs/:id/items/preview`          | freeze a source for review; writes nothing           | may     |
-| `POST /v1/catalogs/:id/items`                  | add the previewed source as a new item (201)         | refused |
-| `POST /v1/catalogs/:id/items/:itemId/versions` | publish the next version (201)                       | refused |
-| `DELETE /v1/catalogs/:id/items/:itemId`        | withdraw an item                                     | refused |
-| `POST /v1/catalogs/:id/export`                 | sign and return the catalog file                     | refused |
+| Route                                          | Does                                                                  | Ferret  |
+| ---------------------------------------------- | --------------------------------------------------------------------- | ------- |
+| `GET /v1/catalogs[?sourceState=1]`             | every catalog, its items and versions (`sourceState` only when asked) | may     |
+| `POST /v1/catalogs`                            | make one (201)                                                        | refused |
+| `PATCH /v1/catalogs/:id`                       | rename, describe or set the publisher name                            | refused |
+| `DELETE /v1/catalogs/:id`                      | delete it and its versions                                            | refused |
+| `POST /v1/catalogs/:id/items/preview`          | freeze a source for review; writes nothing                            | may     |
+| `POST /v1/catalogs/:id/items`                  | add the previewed source as a new item (201)                          | refused |
+| `POST /v1/catalogs/:id/items/:itemId/versions` | publish the next version (201)                                        | refused |
+| `DELETE /v1/catalogs/:id/items/:itemId`        | withdraw an item                                                      | refused |
+| `POST /v1/catalogs/:id/export`                 | sign and return the catalog file                                      | refused |
 
 Refusals keep their code: 404 `catalog_unknown` / `item_unknown` / `source_unknown`; 409 `item_withdrawn`,
 `name_taken`, `catalog_full`, `source_ambiguous`, `changed_since_preview`, `nothing_to_publish`; 400
-`public_unavailable`; 422 `source_refused`; 503 `signing_unavailable`; 500 `store_damaged` /
-`export_failed`.
+`public_unavailable`; 413 `export_too_big` (the file would be over 32 MiB: export fewer items); 422
+`source_refused`; 503 `signing_unavailable`; 500 `store_damaged` / `export_failed`.
 
 ### Why a ferret may only list
 
@@ -302,6 +330,19 @@ item ids). Both are **kept** events.
 - A catalog file is plain JSON that anyone can read. Signed is not secret: do not add what you would not
   hand over.
 - Skill content is shown in full but is only checked by the heuristics in [The review](#the-review).
+- **The ferret refusal is an honest-client guard, and the export's printout is the check.** "A ferret may
+  only list" reads who is asking from the session header `fy` sends from inside a ferret. A ferret holds
+  the same admin token and runs as the same user, so it can send raw HTTP without that header, or write
+  `state/catalogs/` itself. Either way a program running as the owner on the publisher can change what
+  the **next export signs**. `fy catalog export` therefore prints every item it will sign (name, version,
+  digest) and asks first, and refuses to write a file that differs from what it printed; read that list.
+  A per-session credential would close this and is not built (the same limit as
+  [secrets.md](secrets.md)).
+- **A folder swapped for a link during the read (declared as a gap).** The skill walk resolves the
+  folder, checks each parent, and opens each file with `O_NOFOLLOW`; after the open it checks the file is
+  a regular file with one link. What is not closed is the instant between the parent check and the open:
+  a folder replaced by a link in that instant is followed for that one read. The attacker must already be
+  the same user on the publisher, and the content is shown in the preview and bound by its digest.
 - `public` and members are not available; a file is the only way a catalog leaves.
 
 ## Declared gaps

@@ -233,6 +233,27 @@ describe('catalogItemWarnings', () => {
     );
     expect(two[0]?.text).toStartWith('SKILL.md, b.md hold invisible');
   });
+
+  it('names the files that hold what the MCP raw-key rule would refuse, as a warning and not a refusal', () => {
+    const one = catalogItemWarnings(
+      skill([
+        { path: 'SKILL.md', content: 'Set it up like this.' },
+        { path: 'notes.md', content: 'export KEY=sk-abcdefghijklmnopqrstuvwxyz' },
+      ]),
+    );
+    expect(one.map(warning => warning.code)).toEqual(['possible-secret']);
+    expect(one[0]?.text).toStartWith('notes.md holds what looks like a key or token');
+    const two = catalogItemWarnings(
+      skill([
+        { path: 'SKILL.md', content: 'curl --token abcdefghijklmnopqrstuvwxyz' },
+        { path: 'b.md', content: 'ghp_abcdefghijklmnopqrstuvwxyz' },
+      ]),
+    );
+    expect(two[0]?.text).toStartWith('SKILL.md, b.md hold what looks like');
+    expect(catalogItemWarnings(skill([{ path: 'SKILL.md', content: 'Use a token from the secret store.' }]))).toEqual(
+      [],
+    );
+  });
 });
 
 describe('catalogItemReview', () => {

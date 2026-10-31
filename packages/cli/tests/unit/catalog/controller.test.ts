@@ -6,6 +6,7 @@ import {
   CATALOG_ID,
   CWD,
   catalog,
+  DIGEST,
   FakeGateway,
   MemoryFiles,
   MCP_ID,
@@ -13,6 +14,7 @@ import {
   preview,
   SKILL_ID,
   ScriptedPrompt,
+  mcpItem,
   skillItem,
 } from './fixtures';
 
@@ -34,6 +36,7 @@ describe('fy catalog ls', () => {
     const human = build();
     await human.controller.list({});
     should(human.out.text).containEql('Team tools');
+    should(human.gateway.calls[0]).eql({ call: 'list', sourceState: true });
 
     const json = build();
     await json.controller.list({ json: true });
@@ -193,28 +196,103 @@ describe('fy catalog withdraw', () => {
 });
 
 describe('fy catalog export', () => {
-  it('should write <slug>.catalog.json in the working directory, without overwriting', async () => {
-    const { controller, gateway, files, out } = build();
+  it('should list what it will sign, ask, and write <slug>.catalog.json without overwriting', async () => {
+    const { controller, gateway, files, out, prompt } = build({ answers: ['y'] });
     await controller.export('Team tools', {});
     const path = `${CWD}/team-tools.catalog.json`;
     should(gateway.calls.at(-1)).eql({ call: 'export', catalogId: CATALOG_ID, request: {} });
+    should(out.lines[0]).containEql('This will sign Team tools');
+    should(out.lines[0]).containEql(`pdf-tools v1 ${DIGEST}`);
+    should(out.lines[0]).containEql('published as laptop');
+    should(prompt.asked[0]).startWith('Sign Team tools with the items listed above?');
     should(files.written.get(path)?.overwrite).equal(false);
     should(files.written.get(path)?.text.endsWith('}\n')).equal(true);
     should(JSON.parse(files.written.get(path)?.text ?? '').format).equal('ferretry-catalog-file');
-    should(out.text).equal(`Exported Team tools (1 item) to ${path}.`);
+    should(out.lines.at(-1)).equal(`Exported Team tools (1 item) to ${path}.`);
+  });
+
+  it('should write nothing when the answer is not yes, and not sign anything', async () => {
+    const { controller, gateway, files } = build({ answers: ['n'] });
+    await should(controller.export('Team tools', {})).rejectedWith(/cancelled/);
+    should(gateway.calls.some(call => call.call === 'export')).equal(false);
+    should(files.written.size).equal(0);
+  });
+
+  it('should still print what it signs with --yes, and with --json send that to stderr', async () => {
+    const human = build();
+    await human.controller.export('Team tools', { yes: true });
+    should(human.prompt.asked).have.length(0);
+    should(human.out.lines[0]).containEql('This will sign');
+
+    const json = build();
+    await json.controller.export('Team tools', { yes: true, json: true });
+    should(JSON.parse(json.out.diagnostics[0] ?? '{}')).containEql({ phase: 'sign' });
+    should(JSON.parse(json.out.lines[0] ?? '{}').path).containEql('team-tools.catalog.json');
+  });
+
+  it('should say there are no items when none is live, and need --yes off a terminal', async () => {
+    const empty = new FakeGateway({ catalogs: [catalog({ items: [] })], preview: preview() });
+    const { controller, out } = build({ gateway: empty });
+    await controller.export('Team tools', { yes: true });
+    should(out.lines[0]).containEql('no items');
+
+    const quiet = build({ interactive: false });
+    await should(quiet.controller.export('Team tools', {})).rejectedWith(/pass --yes/);
+  });
+
+  it('should list a withdrawn item as not signed', async () => {
+    const gateway = new FakeGateway({
+      catalogs: [catalog({ items: [skillItem(), mcpItem({ withdrawnAt: '2026-10-31T10:00:00.000Z' })] })],
+      preview: preview(),
+    });
+    const { controller, out } = build({ gateway });
+    await controller.export('Team tools', { yes: true });
+    should(out.lines[0]).not.containEql('github');
+  });
+
+  it('should write nothing when the daemon signed different items than the ones shown', async () => {
+    const gateway = new FakeGateway();
+    gateway.signedDigest = NEW_DIGEST;
+    const { controller, files } = build({ gateway });
+    await should(controller.export('Team tools', { yes: true })).rejectedWith(/signed different items/);
+    should(files.written.size).equal(0);
+  });
+
+  it('should write nothing when the daemon signed a different number of items', async () => {
+    const gateway = new FakeGateway();
+    const original = gateway.export.bind(gateway);
+    gateway.export = async (catalogId, request) => {
+      const file = await original(catalogId, request);
+      return {
+        ...file,
+        signedManifest: {
+          ...file.signedManifest,
+          manifest: { ...file.signedManifest.manifest, items: file.signedManifest.manifest.items.slice(0, 1) },
+        },
+      };
+    };
+    const { controller, files } = build({ gateway });
+    await should(controller.export('Team tools', { yes: true })).rejectedWith(/signed different items/);
+    should(files.written.size).equal(0);
   });
 
   it('should refuse to replace a file without --force, before asking the daemon to sign', async () => {
     const files = new MemoryFiles([`${CWD}/team-tools.catalog.json`]);
     const { controller, gateway } = build({ files });
-    await should(controller.export('Team tools', {})).rejectedWith(/already exists — pass --force/);
+    await should(controller.export('Team tools', { yes: true })).rejectedWith(/already exists — pass --force/);
     should(gateway.calls.some(call => call.call === 'export')).equal(false);
   });
 
   it('should replace it with --force, and write to --out relative to the working directory', async () => {
     const files = new MemoryFiles([`${CWD}/out/c.json`]);
     const { controller, gateway } = build({ files });
-    await controller.export('Team tools', { out: 'out/c.json', force: true, item: ['pdf-tools', MCP_ID], json: true });
+    await controller.export('Team tools', {
+      out: 'out/c.json',
+      force: true,
+      item: ['pdf-tools', MCP_ID],
+      json: true,
+      yes: true,
+    });
     should(gateway.calls.at(-1)).eql({
       call: 'export',
       catalogId: CATALOG_ID,
@@ -225,7 +303,9 @@ describe('fy catalog export', () => {
 
   it('should refuse an item the catalog does not have before signing anything', async () => {
     const { controller, gateway } = build();
-    await should(controller.export('Team tools', { item: ['ghost'] })).rejectedWith('no item in Team tools "ghost"');
+    await should(controller.export('Team tools', { item: ['ghost'], yes: true })).rejectedWith(
+      'no item in Team tools "ghost"',
+    );
     should(gateway.calls.some(call => call.call === 'export')).equal(false);
   });
 });
