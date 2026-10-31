@@ -6260,7 +6260,7 @@ function createInputRequestService(input: {
     new SttyTerminalModes(process.platform, runProgram),
     runProgram,
     // An echo-off code prompt stays a code only from a code program this account cannot replace (never the ps name).
-    ExecutableCodePrograms.forPlatform(process.platform, runProgram),
+    ExecutableCodePrograms.forPlatform(process.platform),
   );
   const pageTarget = new PageInputTarget(input.pages);
   // What a saved login's sign-in looked like, from the daemon's own looks at the target (docs/input-requests.md,

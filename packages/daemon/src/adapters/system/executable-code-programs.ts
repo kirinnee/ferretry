@@ -19,18 +19,15 @@ export class ExecutableCodePrograms implements CodeProgramPort {
     private readonly replaceable: (path: string) => Promise<boolean>,
   ) {}
 
-  /** The production wiring: `/proc/<pid>/exe` on Linux, `ps -o comm=` (the full path there) on macOS. */
-  static forPlatform(
-    platform: string,
-    run: (argv: readonly string[]) => Promise<string | undefined>,
-    account: number | undefined = process.getuid?.(),
-  ): ExecutableCodePrograms {
-    const executable = async (pid: number): Promise<string | undefined> => {
-      if (platform === 'linux') return await readlink(`/proc/${String(pid)}/exe`).catch(() => undefined);
-      if (platform === 'darwin')
-        return (await run(['ps', '-o', 'comm=', '-p', String(pid)]).catch(() => undefined))?.trim();
-      return undefined;
-    };
+  /**
+   * The production wiring: `/proc/<pid>/exe` on Linux, which the kernel keeps and a process cannot rewrite. Every other
+   * platform proves nothing, so an echo-off code prompt there is always a secret: on macOS `ps -o comm=` is not proven
+   * to be the kernel's executable path rather than a name the process chose (`exec -a`), and no other reading is
+   * wired. GAP: a macOS daemon never keeps an echo-off ssh code prompt a code.
+   */
+  static forPlatform(platform: string, account: number | undefined = process.getuid?.()): ExecutableCodePrograms {
+    const executable = async (pid: number): Promise<string | undefined> =>
+      platform === 'linux' ? await readlink(`/proc/${String(pid)}/exe`).catch(() => undefined) : undefined;
     return new ExecutableCodePrograms(executable, async path => await replaceableBy(account, path));
   }
 

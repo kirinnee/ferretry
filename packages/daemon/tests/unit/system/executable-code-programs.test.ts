@@ -14,6 +14,12 @@ const programs = (executable: string | undefined, replaceable: boolean) =>
   );
 
 describe('ExecutableCodePrograms', () => {
+  it('should prove nothing outside Linux: a name ps shows on macOS is not proven to be the executable', async () => {
+    // Act / Assert — a real pid of this very process, which on Linux would be readable.
+    should(await ExecutableCodePrograms.forPlatform('darwin').codeProgram(process.pid)).be.false();
+    should(await ExecutableCodePrograms.forPlatform('freebsd').codeProgram(process.pid)).be.false();
+  });
+
   it('should prove ssh from a store path this account cannot replace', async () => {
     // Act / Assert
     should(await programs('/nix/store/abc-openssh-10.0p2/bin/ssh', false).codeProgram(4242)).be.true();

@@ -151,8 +151,8 @@ one-time.
     passphrase, passwd, Passwort, Kennwort, contraseña, mot de passe, credential, secret, "pw:", PIN), whatever else
     the line says;
   - the terminal reads with typing hidden, unless its program asks for 2FA codes (ssh, scp, sftp, mosh, the aws,
-    gcloud, az and vault CLIs), proved from the file it RUNS (`/proc/<pid>/exe` on Linux, the path `ps` shows on
-    macOS) and only when no part of that file's path is owned by this account or open to anyone (the secure-copy
+    gcloud, az and vault CLIs), proved from the file it RUNS (`/proc/<pid>/exe`, Linux only: on macOS nothing proves the
+    program, so an echo-off code prompt there is always a secret) and only when no part of that file's path is owned by this account or open to anyone (the secure-copy
     rule: a name in `ps` can be rewritten and a shell copied to `~/bin/ssh`), and the prompt line the daemon read from the pane asks for a code (verification code,
     one-time, OTP, 2FA, authenticator, "code:") and says none of password, passphrase, PIN, token or secret; a
     shell's `read -s` is never a code;
