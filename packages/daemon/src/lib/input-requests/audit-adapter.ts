@@ -1,6 +1,6 @@
 import type { AuditActor, AuditDetail } from '@ferretry/protocol';
 import type { AuditSink } from '../audit/types.ts';
-import type { InputAudit, InputAuditEntry } from './ports.ts';
+import type { InputAudit, InputAuditEntry, InputSaveAuditEntry } from './ports.ts';
 
 /**
  * Writes an input request's audit record to the daemon's audit log: the event, who acted and names and
@@ -27,6 +27,20 @@ export class InputAuditAdapter implements InputAudit {
       outcome: entry.event === 'input.refused' ? 'refused' : 'succeeded',
       ...(entry.actor.kind === 'daemon' ? { cause: 'daemon' as const } : {}),
       detail,
+    });
+  }
+
+  /**
+   * "Save as" on a card is a change to the secret store, so it is KEPT exactly as `fy secret set` is: event
+   * `secrets.changed`, the entry's handle as the subject, and which field — never the value.
+   */
+  async saved(entry: InputSaveAuditEntry): Promise<void> {
+    await this.sink.record({
+      event: 'secrets.changed',
+      actor: entry.actor.kind === 'device' ? entry.actor : { kind: 'host' },
+      subject: entry.entry,
+      outcome: 'succeeded',
+      detail: { action: 'login-save', field: entry.field, requestId: entry.requestId, session: entry.sessionId },
     });
   }
 }

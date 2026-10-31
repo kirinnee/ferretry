@@ -1,7 +1,7 @@
 import { z } from 'zod';
+import { AgendaIdSchema } from './agenda.ts';
 import { InstantSchema } from './common.ts';
 import type { AgentConfigToolName } from './config-files.ts';
-import { AgendaIdSchema } from './agenda.ts';
 import {
   INPUT_MAX_EXPIRY_SECONDS,
   INPUT_PROMPT_MAX_LENGTH,
@@ -9,8 +9,8 @@ import {
   InputSensitivitySchema,
   InputSubmitModeSchema,
 } from './input-request.ts';
-import { SurfaceKeySchema, SurfaceKindSchema, SurfaceNameSchema } from './surface-names.ts';
 import { LoginEntryIdSchema } from './login-entries.ts';
+import { SurfaceKeySchema, SurfaceKindSchema, SurfaceNameSchema } from './surface-names.ts';
 
 export * from './surface-names.ts';
 

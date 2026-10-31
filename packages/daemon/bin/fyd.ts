@@ -147,9 +147,9 @@ import {
   NodeRawDeflate,
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
+import { StoreBoardAttachments } from '../src/adapters/board/board-attachments.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
 import { FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
-import { StoreBoardAttachments } from '../src/adapters/board/board-attachments.ts';
 import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
 import {
   JournalBoardChanges,
@@ -240,6 +240,7 @@ import {
   FileDaemonConfig,
   FileLaneSetStore,
   FileLegacyWireUseStore,
+  FileLoginIndexStore,
   FileModelCatalogCache,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
@@ -270,6 +271,7 @@ import {
   JournalGrantAudit,
   JscStackSampler,
   KeyedSerialExecutor,
+  LOGIN_SECRETS_DOCUMENT,
   LoadSafeWorker,
   ManifestAccountInventory,
   MCP_OAUTH_SECRETS_DOCUMENT,
@@ -716,6 +718,7 @@ import {
   codexModelProvider,
   combinedMcpOAuthServers,
   combinedReferences,
+  combinedValues,
   computerConversationRoots,
   configuredAt,
   connectorBaseEnvironment,
@@ -824,6 +827,7 @@ import {
   InputAgentNotifierAdapter,
   InputAuditAdapter,
   InputCardClosedObserver,
+  InputLoginAdapter,
   InputRequestService,
   InstructionRefresh,
   type InterruptedLaunchOutcome,
@@ -850,6 +854,8 @@ import {
   type LivenessSample,
   type LivenessTarget,
   LocalModelsService,
+  LoginDirectory,
+  LoginVault,
   type LogLevel,
   type LoopBlockedClockPort,
   type LoopWatchdogPort,
@@ -6037,6 +6043,8 @@ function createInputRequestService(input: {
   readonly values: EphemeralValues;
   readonly quarantine: QuarantineRegistry;
   readonly redact: (text: string) => Promise<string>;
+  /** Saved logins: what the card offers, what "Use" types and where "Save as" keeps a value. */
+  readonly logins: InputLoginAdapter;
 }): InputRequestService {
   const clock = { now: () => Date.now() };
   return new InputRequestService({
@@ -6113,6 +6121,8 @@ function createInputRequestService(input: {
     values: input.values,
     quarantine: input.quarantine,
     redact: input.redact,
+    logins: input.logins,
+    hostName: hostname(),
   });
 }
 
@@ -7115,6 +7125,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const outboundAuthorizer = new OutboundProviderAuthorizer(secretVault, new FetchEnhancementTransport());
   const speedupStopwatch = new PerformanceStopwatch();
   const secretDirectory = new SecretDirectory(secretDocuments, secretCipher, clock);
+  // SAVED LOGINS (docs/input-requests.md): an index with nothing secret in it, and the secret fields sealed
+  // under the vault's key in a document of their own, which `use` cannot spend and no reference can name.
+  // The directory is what a route is handed; the vault opens, and only the redactor and the input bridge
+  // hold one. See `lib/secrets/logins.ts`.
+  const loginIndex = new FileLoginIndexStore(paths, stateFiles);
+  const loginSealed = new FileSecretDocumentStore(paths, stateFiles, LOGIN_SECRETS_DOCUMENT);
+  const loginDirectory = new LoginDirectory(loginIndex, loginSealed, secretCipher, clock);
+  const loginVault = new LoginVault(loginIndex, loginSealed, secretCipher);
   // Copying secrets to another machine signs and checks offers with THIS daemon's identity — the key its
   // daemon id fingerprints — read per clone, so a daemon whose identity cannot be read refuses the copy
   // and serves everything else.
@@ -7127,6 +7145,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const secretCloneCrypto = new WebCryptoRelayCrypto();
   const secrets: SecretSubsystem = {
     directory: secretDirectory,
+    logins: loginDirectory,
     // TWO places name secrets now: the operator's own recipes, and the fleet accounts a profile
     // authenticates. Both are listed, so an account whose credential is missing from the store is a
     // line on a screen before it is a session that dies at start.
@@ -7163,7 +7182,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // The values the daemon has just typed for the owner are masked at the SAME boundary as a vault secret:
   // every read below that takes this redactor (screen, transcript, journal, processes) hides them too.
   const justTyped = new EphemeralValues({ now: () => Date.now() });
-  const secretRedactor = new EphemeralAwareRedactor(new SecretRedactor(secretVault), justTyped);
+  const secretRedactor = new EphemeralAwareRedactor(
+    new SecretRedactor(combinedValues(secretVault, loginVault)),
+    justTyped,
+  );
   // The terminals a secret was just typed into, kept from an agent and from a viewer for a window.
   const quarantined = new QuarantineRegistry({ now: () => Date.now() });
   // Held whole until the journal has been replayed: a restart must not open a terminal the last run closed.
@@ -9715,6 +9737,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         values: justTyped,
         quarantine: quarantined,
         redact: async text => await secretRedactor.redact(text),
+        // One of the two holders of the LoginVault (docs/secrets.md; the other is the redactor): the input bridge
+        // types a saved login into the target the owner tapped "Use" for, and answers only what happened.
+        logins: new InputLoginAdapter(loginDirectory, loginVault),
       });
       inputRequests = inputRequestService;
       const sweepInputRequests = asActivity(

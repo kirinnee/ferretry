@@ -833,6 +833,7 @@ describe('the mounted daemon surface', () => {
       3 + // a ferret's processes: the list, one process's output, and Stop
       3 + // the board's projects: the list, one project's lanes, and a propose, edit or confirm of them
       6 + // the owner's input requests: the two lists, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
+      4 + // saved logins: the list, put, rename and delete (docs/input-requests.md#saved-logins)
       2; // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
@@ -992,6 +993,11 @@ describe('the mounted daemon surface', () => {
       'POST /v1/secrets/imports',
       'POST /v1/secrets/imports/:importId',
       'POST /v1/secrets/exports/:importId',
+      // Saved logins: names, labels and flags out; values only ever in.
+      'GET /v1/secrets/logins',
+      'PUT /v1/secrets/logins/:id',
+      'POST /v1/secrets/logins/:id/rename',
+      'DELETE /v1/secrets/logins/:id',
       'GET /v1/sessions',
       'GET /v1/sessions/:sessionId',
       'GET /v1/projects',

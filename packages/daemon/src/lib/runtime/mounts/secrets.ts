@@ -1,5 +1,10 @@
 import {
+  type LoginEntryId,
+  LoginEntryIdSchema,
+  type LoginEntryList,
+  PutLoginEntryRequestSchema,
   PutSecretRequestSchema,
+  RenameLoginEntryRequestSchema,
   type SecretCloneRefusal,
   SecretExportRequestSchema,
   SecretExportResponseSchema,
@@ -23,6 +28,8 @@ import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
+  type LoginDirectory,
+  LoginEntryError,
   SecretCloneError,
   type SecretDirectory,
   type SecretExportService,
@@ -88,6 +95,13 @@ const CLONE_STATUS: Readonly<Record<SecretCloneRefusal, number>> = {
   bundle_invalid: 400,
 };
 
+const LOGIN_STATUS: Readonly<Record<LoginEntryError['refusal'], number>> = {
+  unknown_login: 404,
+  login_exists: 409,
+  label_required: 400,
+  no_such_field: 400,
+};
+
 /** Re-raises a domain failure as its HTTP answer, and anything else as itself so a genuine bug is
  *  still a 500 rather than being reported as the caller's fault. */
 function reraise(error: unknown): never {
@@ -96,7 +110,103 @@ function reraise(error: unknown): never {
   if (error instanceof SecretCloneError) throw new ApiError(CLONE_STATUS[error.refusal], error.message, error.refusal);
   if (error instanceof SecretUseError) throw new ApiError(USE_STATUS[error.refusal], error.message, error.refusal);
   if (error instanceof SecretStoreError) throw new ApiError(STORE_STATUS[error.failure], error.message, error.failure);
+  if (error instanceof LoginEntryError) throw new ApiError(LOGIN_STATUS[error.refusal], error.message, error.refusal);
   throw error;
+}
+
+/** The saved login's handle in the path. */
+function pathLoginId(context: RouteContext): LoginEntryId {
+  const parsed = LoginEntryIdSchema.safeParse(decodeParameter(context.params.get('id') ?? '') ?? '');
+  if (!parsed.success) throw new ApiError(400, 'the saved login name in the path is not usable', 'invalid_login_id');
+  return parsed.data;
+}
+
+/**
+ * SAVED LOGINS (docs/input-requests.md): labels, matches, usernames and WHICH secret fields exist. Like the
+ * secret routes, nothing here answers a value: the directory a route holds seals and never opens. A damaged
+ * store is part of the listing, never an empty one.
+ */
+async function listLogins(logins: LoginDirectory): Promise<ApiResponse> {
+  try {
+    return jsonResponse({ v: 1, health: 'ready', entries: await logins.list() } satisfies LoginEntryList);
+  } catch (error) {
+    if (!(error instanceof SecretStoreError)) throw error;
+    return jsonResponse({
+      v: 1,
+      health: 'damaged',
+      diagnosis: `the saved logins cannot be read: ${error.message}`,
+      entries: [],
+    } satisfies LoginEntryList);
+  }
+}
+
+async function putLogin(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
+  const id = pathLoginId(context);
+  const change = await parseBody(context.request, PutLoginEntryRequestSchema);
+  try {
+    return jsonResponse(await logins.put(id, change));
+  } catch (error) {
+    return reraise(error);
+  }
+}
+
+async function renameLogin(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
+  const id = pathLoginId(context);
+  const { to } = await parseBody(context.request, RenameLoginEntryRequestSchema);
+  try {
+    return jsonResponse(await logins.rename(id, to));
+  } catch (error) {
+    return reraise(error);
+  }
+}
+
+async function removeLogin(logins: LoginDirectory, context: RouteContext): Promise<ApiResponse> {
+  const id = pathLoginId(context);
+  try {
+    if (!(await logins.remove(id))) throw new ApiError(404, `there is no saved login ${id}`, 'unknown_login');
+    return jsonResponse({ id, removed: true });
+  } catch (error) {
+    return reraise(error);
+  }
+}
+
+/** The saved-login routes, when the daemon keeps them. */
+function loginRoutes(logins: LoginDirectory | undefined): readonly ApiRoute[] {
+  if (logins === undefined) return [];
+  return [
+    {
+      method: 'GET',
+      path: '/v1/secrets/logins',
+      minimum: 'operator',
+      capability: SECRETS_USE,
+      noStore: true,
+      handle: async () => await listLogins(logins),
+    },
+    {
+      method: 'PUT',
+      path: '/v1/secrets/logins/:id',
+      minimum: 'operator',
+      capability: SECRETS_CONFIGURE,
+      noStore: true,
+      handle: async context => await putLogin(logins, context),
+    },
+    {
+      method: 'POST',
+      path: '/v1/secrets/logins/:id/rename',
+      minimum: 'operator',
+      capability: SECRETS_CONFIGURE,
+      noStore: true,
+      handle: async context => await renameLogin(logins, context),
+    },
+    {
+      method: 'DELETE',
+      path: '/v1/secrets/logins/:id',
+      minimum: 'operator',
+      capability: SECRETS_CONFIGURE,
+      noStore: true,
+      handle: async context => await removeLogin(logins, context),
+    },
+  ];
 }
 
 /** The name in the path, decoded and validated as a name this store could ever have held. */
@@ -206,6 +316,8 @@ const SECRETS_CONFIGURE: CapabilityDemand = { capability: 'secrets', axis: 'conf
 export interface SecretSubsystem {
   /** Management only. It cannot open a secret, which is why a route may hold one. */
   readonly directory: SecretDirectory;
+  /** Saved logins: management only, like `directory`. It seals and never opens. */
+  readonly logins?: LoginDirectory;
   /** Where configuration names secrets, so an unresolvable reference is visible before it fails. */
   readonly references: SecretReferenceSource;
   /** Use-without-read. Holds the vault; returns only a child's scrubbed output. */
@@ -291,5 +403,6 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       noStore: true,
       handle: async context => await exportSecrets(subsystem.exports, context),
     },
+    ...loginRoutes(subsystem.logins),
   ];
 }

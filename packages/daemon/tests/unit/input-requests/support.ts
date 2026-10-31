@@ -54,7 +54,7 @@ export function inputRequestService(options: { readonly crash?: () => boolean } 
       quarantine: async () => undefined,
       quarantines: async () => [],
     },
-    audit: { record: async () => undefined },
+    audit: { record: async () => undefined, saved: async () => undefined },
     clock,
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },

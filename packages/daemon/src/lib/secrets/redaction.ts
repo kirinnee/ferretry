@@ -21,9 +21,31 @@
 
 import type { SecretName } from '@ferretry/protocol';
 import { redactJsonValue, redactSecretValues, secretCoverage, type TextRange } from './policy.ts';
-import type { SecretVault } from './vault.ts';
 
 export type { TextRange };
+
+/**
+ * Where the values to mask come from: the vault, the saved logins, or both. Each opens on every call, and a
+ * source that cannot open REJECTS, so the redactor fails closed rather than masking with half the values.
+ */
+export interface RedactionValueSource {
+  values(): Promise<ReadonlyMap<string, string>>;
+}
+
+/**
+ * Several stores as one source, for masking. Their names cannot collide (a saved login is keyed
+ * `login:<ID>:<field>`, a shape no vault name takes), and one that rejects rejects the whole open.
+ */
+export function combinedValues(...sources: readonly RedactionValueSource[]): RedactionValueSource {
+  return {
+    values: async () => {
+      const merged = new Map<string, string>();
+      for (const opened of await Promise.all(sources.map(async source => await source.values())))
+        for (const [name, value] of opened) merged.set(name, value);
+      return merged;
+    },
+  };
+}
 
 /**
  * The values of one vault open, as three pure functions.
@@ -68,7 +90,7 @@ export const NO_REDACTION: TextRedactor = {
 /** Masks every known value. See `policy.redactSecretValues` for exactly what that does and does not
  *  catch — in particular that a value an agent deliberately transformed is not recognisable. */
 export class SecretRedactor implements TextRedactor {
-  constructor(private readonly vault: SecretVault) {}
+  constructor(private readonly vault: RedactionValueSource) {}
 
   async redact(text: string): Promise<string> {
     return await this.batch(scrub => scrub.text(text));

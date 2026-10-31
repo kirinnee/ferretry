@@ -7,6 +7,9 @@ import type {
   InputQuarantineEvent,
   InputTarget,
   InputTargetFacts,
+  LoginEntryId,
+  LoginEntrySummary,
+  LoginFieldRole,
 } from '@ferretry/protocol';
 
 /**
@@ -97,8 +100,42 @@ export interface InputAuditEntry {
   readonly detail: InputAuditDetail;
 }
 
+/** A typed value kept in a saved login from a card: the KEPT record `fy secret set` writes, by name only. */
+export interface InputSaveAuditEntry {
+  readonly sessionId: string;
+  readonly requestId: string;
+  readonly actor: InputActor;
+  readonly entry: LoginEntryId;
+  readonly field: Exclude<LoginFieldRole, 'totp'>;
+}
+
 export interface InputAudit {
   record(entry: InputAuditEntry): Promise<void>;
+  /** The owner saved a typed value to a saved login: kept, like every change to the secret store. */
+  saved(entry: InputSaveAuditEntry): Promise<void>;
+}
+
+/**
+ * SAVED LOGINS, as the input service needs them. `fill` is the USE BOUNDARY: the value it answers is typed
+ * into the request's target and goes nowhere else — not into a request, an event, an audit entry, a result
+ * or an error. Every other method answers names, labels and flags.
+ */
+export interface InputLoginPort {
+  /** Every saved login, as a listing shows it. Rejects when the store cannot tell. */
+  entries(): Promise<readonly LoginEntrySummary[]>;
+  /** The value an entry's field types: the username, the password, or the 2FA code for `nowMs`. Rejects for a missing one. */
+  fill(id: LoginEntryId, role: LoginFieldRole, nowMs: number): Promise<string>;
+  /**
+   * Keeps a typed value in an entry: a new entry labelled `label` matching `match`, or the existing one
+   * (its label kept, `match` added to what it already matches).
+   */
+  save(
+    id: LoginEntryId,
+    label: string,
+    match: string | undefined,
+    field: Exclude<LoginFieldRole, 'totp'>,
+    value: string,
+  ): Promise<void>;
 }
 
 export interface InputClock {

@@ -2,7 +2,7 @@
 
 An agent stuck at a password, `sudo`, OTP or 2FA prompt raises an **input request** naming its own
 terminal (a browser field comes later). The **daemon**, not the agent, records what is actually
-there. The owner sees an agenda card, types the value or picks a saved secret, and presses Send. The
+there. The owner sees an agenda card, types the value or taps a [saved login](#saved-logins), and presses Send. The
 daemon re-checks the target and types the value **straight into it**, optionally pressing Enter.
 
 The wire contract is `packages/protocol/src/lib/input-request.ts`. This page says what it means and
@@ -29,7 +29,7 @@ limits.
 | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
 | Agent context, tool calls, harness transcript    | Not through the bridge: no agent tool takes or returns it. The terminal's own output: see below.      |
 | `agenda.json`, journal, audit log, push, ledgers | **Never.** The schemas have no field for it, and a test walks every schema to keep it that way.       |
-| Disk (the bridge's own files)                    | **Never**, unless the owner ticks "save as secret NAME": then only the encrypted vault.               |
+| Disk (the bridge's own files)                    | **Never**, unless the owner ticks "Save as": then only the sealed saved-login document.               |
 | The app                                          | Only the controlled field until Send. Cleared on send, on unmount and when the page is hidden.        |
 | The wire                                         | Only inside the end-to-end sealed carrier, **padded** to a 256-byte bucket (see below).               |
 | Daemon RAM while handling                        | From body parse to inject. No reference is kept after the handler returns.                            |
@@ -64,10 +64,12 @@ through the input tool; the generic add refuses it.
 - **`InputRequestSchema`**: the aggregate: ids, target, prompt, sensitivity, expiry, the facts and
   their digest while observed, the state and the outcome.
 - **`InputDeliverBodySchema`**: `deliveryId` (a UUID), `observedDigest`, **exactly one of** `padded`
-  or `secretName`, `submit`, and `saveAs` (a typed value only).
+  or `entry` (a saved login's handle), `submit`, and `save` (`{ entry, label }`, a typed value only).
 - **`InputAgentViewSchema`**: what the agent learns: state, whether Enter was pressed, `source`
-  (`typed` or `saved`) and a redacted screen. **Never** the value, its length or a saved secret's
+  (`typed` or `saved`) and a redacted screen. **Never** the value, its length or a saved login's
   name.
+- **`InputRequestSchema.saved`** (the owner's view only): the target's key, the saved logins the card may
+  offer and what "Save as" suggests. See [saved logins](#saved-logins).
 - **`InputEventSchema`** and **`InputAuditDetailSchema`**: names and flags only. The audit detail
   does not carry the prompt text.
 
@@ -253,6 +255,88 @@ and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Reda
   starts with no note), because a note is the one place a value could be pasted into the ledger by
   mistake.
 
+## Saved logins
+
+The bridge is also a small **password manager**. A saved login is a **labelled entry**: a label the owner
+reads ("GitHub (kirinnee)"), what it is for (`match`), and its fields. The wire is
+`packages/protocol/src/lib/login-entries.ts`; the store is `packages/daemon/src/lib/secrets/logins.ts`.
+
+| Field      | Kind               | Where it rests                                        | Who sees it                                              |
+| ---------- | ------------------ | ----------------------------------------------------- | -------------------------------------------------------- |
+| `label`    | plain              | the index, `login-entries.json` (`0600`)              | the owner's list and card                                |
+| `match`    | plain              | the index                                             | the owner's list and card                                |
+| `username` | **plain**          | the index                                             | the owner, and the ferret once it is typed (it is plain) |
+| `password` | **secret**         | sealed in `login-secrets.json`, under the vault's key | **nobody**: it is typed into a target and masked         |
+| `totp`     | **secret**, opt-in | sealed in `login-secrets.json`                        | **nobody**: the daemon makes the code and types it       |
+
+**Use, never read**, exactly as for every other secret ([secrets](secrets.md)). No route, command or API
+answers a password, a seed or a code. A listing shows the label, the match, the username and **which** secret
+fields exist. The sealed document is not the main vault: `fy secret use` cannot spend a saved login and
+`${secret:…}` cannot name one. Saved values are masked wherever the daemon scrubs text, as
+`[redacted:login:<ID>:password]`.
+
+### The first time: "Save as"
+
+The owner types the value on the card and ticks **Save as**. The daemon suggests a handle and a label from
+the target's key (`sudo@kirin-box` → `SUDO_KIRIN_BOX`, "sudo on kirin-box"; a web host `github.com` →
+`GITHUB_COM`); both are editable, and an existing entry can be chosen instead ("Save to … new or existing").
+
+- **The save is checked before anything is typed.** A one-time code is never saved (add the 2FA seed in
+  Settings instead), and a password shorter than `LOGIN_PASSWORD_MIN_LENGTH` (8, a masking limit, not a
+  strength rule) cannot be kept. Either refuses the Send with nothing typed and says to send it unsaved.
+- **The value is kept only once it is typed.** A `secret` is saved as the password, a `plain` value as the
+  username. Saving to an existing entry keeps its label and adds this target to what it matches.
+- **A failure to keep it never undoes the delivery.** The answer says so in a fixed sentence
+  (`saved: { ok: false }`); the owner can save it from Settings.
+- **It is recorded as a change to the secret store**: a KEPT `secrets.changed` record (`login-save`) with
+  the handle and the field, exactly as `fy secret set` is audited. Never the value.
+
+### The next time: one tap
+
+When a ferret raises a request, the daemon works out the target's **key** from what **it** observed:
+`program@host` for a terminal (the foreground program and this machine's short name, or the destination
+for `ssh`, `scp` and `sftp`), or the web host for a page. A saved login whose `match` contains that key
+**exactly** is **matched**, and the card offers it as the primary action, **"Use saved <label>"**, next to
+"Type a different one".
+
+- **The tap is the permission.** Nothing is typed until the owner taps. Every rule of a delivery applies
+  unchanged: owner only (twice), the `deliveryId`, the target re-observed and compared, the tmux guard, one
+  hex write, the quarantine, the risk flag. The value is opened **inside the daemon**, after every check that
+  can refuse without typing, and goes only into that write.
+- **A saved value never passes through the app.** The card sends the entry's handle; the daemon resolves it.
+- **Which field it fills** follows the request: the password for a `secret`, the 2FA code for a `private`
+  request, the username for a `plain` one. An entry that does not hold that field is not offered.
+- **A mismatch is never the primary.** A look-alike program, another host or another site is not matched;
+  every entry that holds the field stays **selectable by hand**, because the owner may know better.
+- **The ferret may hint** (`secretHint` / `secret_hint`): the card marks that entry as "the ferret suggested
+  this", but a hint never makes an entry matched, and the agent's answer is the same whether the entry exists.
+- **The agent learns `source: saved`** and nothing else: not the handle, not the label, not the value.
+
+### 2FA seeds (opt-in, per entry)
+
+An entry may keep a TOTP seed (RFC 6238; SHA-1, 6 digits and 30 seconds unless the setup page says otherwise).
+The daemon makes the current code when the owner taps Use on a `private` request and types it like any
+`private` value; the seed never leaves the use boundary. It is **off by default**, and adding one requires an
+explicit confirmation of this sentence (`LOGIN_TOTP_WARNING`), shown in the app and the CLI:
+
+> Keeping the password and the 2FA seed in the same place means one compromise of this machine's vault
+> defeats both factors.
+
+### Managing them
+
+Settings › Secrets › Saved logins and `fy secret entry ls|add|edit|rename|rm` list entries (never values),
+add and edit the label, match and username, replace a password, add or remove a 2FA seed, rename the handle and
+delete. Values are typed into a masked field or read from the TTY with echo off; never a flag.
+Routes: `GET /v1/secrets/logins`, `PUT /v1/secrets/logins/:id` (create or change; an omitted field is kept,
+`null` removes it), `POST /v1/secrets/logins/:id/rename`, `DELETE /v1/secrets/logins/:id`, all `secrets`
+capability (`use` to list, `configure` to change) and each change a kept `secrets.changed` record.
+
+### Later, and off by default: standing permission
+
+Placing a saved login **without a tap** is not built. A later phase may add it as an explicit owner opt-in,
+per entry and per target ("standing permission for `SUDO_KIRIN_BOX` on `sudo@kirin-box`"), **off by
+default**, revocable, and audited on every use. Until then every placement is a tap.
+
 ## Honest limits
 
 - **Not a sandbox.** An agent running as the owner's user that builds a capture program and talks the
@@ -298,8 +382,19 @@ and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Reda
 - **The value is briefly visible to `ps`.** Delivery is one `tmux send-keys -H` call, so the value's hex
   is in that process's arguments for the instant it runs. It is the same limit the terminal's own
   keystroke write has today.
-- **Saved secrets are refused for now.** A deliver body that names a vault secret instead of typing a
-  value answers 400 until P3.
+- **A saved login is as safe as the vault's key.** The sealed document sits beside the vault under the same
+  key file: it fails safe when one file is copied somewhere, and protects nothing against someone with this
+  user account ([secrets](secrets.md)). An agent that reads the admin token can deliver a saved login into a
+  capture program it built; the card, the risk flag and the exact match make that visible, not impossible.
+- **A 2FA seed beside its password is one factor.** That is why it is opt-in with the warning above.
+- **Matching is exact and by name.** `sudo@kirin-box` is the program's name and this machine's name; a
+  program that renames itself `sudo` matches. The risk flag and the daemon-observed facts on the card are the
+  defence, as for a typed value. A `ssh` destination is read from the command line and can be wrong; it then
+  matches nothing.
+- **GAP: no QR import yet.** A 2FA seed is entered as text; reading it from an uploaded QR image is a
+  follow-up.
+- **GAP: the ferret's hint and the target's key are not journalled**, so after a restart a request is offered
+  saved logins again from what is re-observed, without the hint.
 - **The relay carrier is not known where the owner is identified.** A paired device is recorded as
   `direct` in the audit record even when it came over the relay. GAP: `INPUT_MAX_REMOTE_DELIVERIES_PER_HOUR`
   is declared but not enforced yet, which waits on the carrier being known.
@@ -311,8 +406,8 @@ and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Reda
 | Phase | What                                                                                        | State       |
 | ----- | ------------------------------------------------------------------------------------------- | ----------- |
 | P0    | This contract and the schemas                                                               | done        |
-| P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input` | this change |
-| P2    | The app card                                                                                | later       |
-| P3    | Saved secrets (one tap) and "save as"                                                       | later       |
+| P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input` | done        |
+| P2    | The app card (one field with P3; several fields later)                                      | in part     |
+| P3    | Saved logins (one tap), "Save as", 2FA codes, `fy secret entry`, Settings › Saved logins    | this change |
 | P4    | Browser fields, and the agent-instruction extension for the browser                         | later       |
 | P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                          | later       |

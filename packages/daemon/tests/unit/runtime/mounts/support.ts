@@ -131,6 +131,9 @@ import { TerminalMountError, type TerminalSubsystem } from '../../../../src/lib/
 import type { WardenError, WardenSubsystem } from '../../../../src/lib/runtime/mounts/warden.ts';
 import {
   configuredReferences,
+  LoginDirectory,
+  type LoginIndexDocument,
+  type LoginIndexStore,
   type SecretChildOutcome,
   type SecretChildRunner,
   type SecretChildSpec,
@@ -1963,6 +1966,19 @@ export class MemorySecretDocuments implements SecretDocumentStore {
   }
 }
 
+/** The index held in memory: `undefined` until written, or a failure for a damaged one. */
+export class MemoryLoginIndex implements LoginIndexStore {
+  document: LoginIndexDocument | undefined;
+  constructor(private readonly failure?: SecretStoreError) {}
+  async read(): Promise<LoginIndexDocument | undefined> {
+    if (this.failure !== undefined) throw this.failure;
+    return this.document;
+  }
+  async write(document: LoginIndexDocument): Promise<void> {
+    this.document = document;
+  }
+}
+
 /** A child runner that never spawns anything, echoing back what it was given so a test can assert
  *  WHICH values reached the child's environment without a real program in the loop. */
 export class EchoSecretChildRunner implements SecretChildRunner {
@@ -1978,6 +1994,9 @@ export class EchoSecretChildRunner implements SecretChildRunner {
 
 export interface SecretWorld {
   readonly documents?: SecretDocumentStore;
+  /** The saved logins' index and sealed document; fresh memory ones when absent. */
+  readonly loginIndex?: LoginIndexStore;
+  readonly loginSealed?: SecretDocumentStore;
   readonly recipes?: Readonly<Record<string, string>>;
   readonly runner?: SecretChildRunner;
   /** This daemon's identity, for copying secrets; absent reads as an identity it cannot load. */
@@ -1999,6 +2018,12 @@ export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
   const crypto = new WebCryptoRelayCrypto();
   return {
     directory,
+    logins: new LoginDirectory(
+      world.loginIndex ?? new MemoryLoginIndex(),
+      world.loginSealed ?? new MemorySecretDocuments(),
+      cipher,
+      clock,
+    ),
     references: { references: async () => configuredReferences(recipes) },
     uses: new SecretUseService(new SecretVault(documents, cipher), world.runner ?? new EchoSecretChildRunner(), {
       read: async () => recipes,
