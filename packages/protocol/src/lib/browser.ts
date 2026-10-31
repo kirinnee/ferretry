@@ -7,6 +7,7 @@ import {
   BROWSER_MIN_HEIGHT,
   BROWSER_MIN_WIDTH,
   BROWSER_MAX_SNAPSHOT_DEPTH,
+  BrowserChallengeProviderSchema,
   BrowserCoordinateSchema,
   BrowserModifierSchema,
   BrowserMouseButtonSchema,
@@ -173,18 +174,9 @@ export const BrowserProxyStatusSchema = z.strictObject({
 });
 export type BrowserProxyStatus = z.infer<typeof BrowserProxyStatusSchema>;
 
-/** Who is asking the person on a page to prove they are human, as far as the page shows it. */
-export const BrowserChallengeProviderSchema = z.enum([
-  'cloudflare',
-  'recaptcha',
-  'hcaptcha',
-  'google',
-  'datadome',
-  'arkose',
-  'perimeterx',
-  'other',
-]);
-export type BrowserChallengeProvider = z.infer<typeof BrowserChallengeProviderSchema>;
+/** Who is asking the person on a page to prove they are human: kept beside the browser targets, which the input
+ *  request reads too, and named here with the rest of the browser's schemas. */
+export { type BrowserChallengeProvider, BrowserChallengeProviderSchema } from './browser-target.ts';
 
 /**
  * A page that appears to be showing a human check — a captcha or a "checking your browser" interstitial.

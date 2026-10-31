@@ -847,6 +847,7 @@ import {
   InputCardClosedObserver,
   InputLoginAdapter,
   InputRequestService,
+  InputTargetRouter,
   InstructionRefresh,
   type InterruptedLaunchOutcome,
   InterruptedLaunchReconciler,
@@ -6121,16 +6122,19 @@ function createInputRequestService(input: {
 }): InputRequestService {
   const clock = { now: () => Date.now() };
   return new InputRequestService({
-    target: new TmuxInputTarget(
-      input.tmux,
-      {
-        locate: async (sessionId, key) =>
-          (await input.terminals.list()).find(
-            record => record.ownerId === sessionId && (record.name === key || record.id === key),
-          ),
-      },
-      new SttyTerminalModes(process.platform, runProgram),
-      runProgram,
+    // A page cannot take a request yet: the router answers `unsupported` until a browser adapter is wired.
+    target: new InputTargetRouter(
+      new TmuxInputTarget(
+        input.tmux,
+        {
+          locate: async (sessionId, key) =>
+            (await input.terminals.list()).find(
+              record => record.ownerId === sessionId && (record.name === key || record.id === key),
+            ),
+        },
+        new SttyTerminalModes(process.platform, runProgram),
+        runProgram,
+      ),
     ),
     agenda: new InputAgendaAdapter(input.agenda),
     notifier: new InputAgentNotifierAdapter(

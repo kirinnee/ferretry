@@ -54,17 +54,22 @@ through the input tool; the generic add refuses it.
 
 ## The shapes
 
-- **`InputRaiseSchema`**: what the agent says: the target (`%terminal:<key>`), a prompt of at most
-  280 characters, a `sensitivity` and a `submit` mode. Nothing the daemon observes is accepted from
-  the agent.
+- **`InputRaiseSchema`**: what the agent says: the target (`%terminal:<key>` or `%browser:<key>`), a
+  prompt of at most 280 characters, a `submit` mode, and EITHER one `sensitivity` (one value) OR up to
+  four `fields` (see [cards of several fields](#cards-of-several-fields)). Nothing the daemon observes
+  is accepted from the agent.
 - **`InputTargetFactsSchema`**: what the daemon saw: for a terminal, the pane proof, the foreground
   program (pid, pgid, `comm`, argv), `echo` (`off`, `on` or `unknown`), the cursor row, the prompt
-  line with its digest, and `recognisedConsumer`. For a browser (a later phase): the page, origin,
-  frame origin, navigation, node, field attributes, box and visibility.
-- **`InputRequestSchema`**: the aggregate: ids, target, prompt, sensitivity, expiry, the facts and
-  their digest while observed, the state and the outcome.
-- **`InputDeliverBodySchema`**: `deliveryId` (a UUID), `observedDigest`, **exactly one of** `padded`
-  or `entry` (a saved login's handle), `submit`, and `save` (`{ entry, label }`, a typed value only).
+  line with its digest, and `recognisedConsumer`. For a page: the page, its origin and whether it is
+  secure, the document (`navigationId`), and per field the frame and its origin, the node, the field's
+  attributes, its box and whether it is visible; and `challenge` when the page shows a captcha.
+- **`InputRequestSchema`**: the aggregate: ids, target, prompt, `fields` (each with its own sensitivity
+  and risk), the strongest sensitivity, expiry, `chain` and `step`, the facts and their digest while
+  observed, the state and the outcome.
+- **`InputDeliverBodySchema`**: `deliveryId` (a UUID), `observedDigest`, the value(s), `submit`, and
+  `save` (`{ entry, label }`, typed values only). A one-field card sends **exactly one of** `padded`
+  or `entry` (a saved login's handle). A card of several sends `fields` (`[{ field, padded }]`, each
+  value padded on its own) and may add `entry` for the fields it did not type.
 - **`InputAgentViewSchema`**: what the agent learns: state, whether Enter was pressed, `source`
   (`typed` or `saved`) and a redacted screen. **Never** the value, its length or a saved login's
   name.
@@ -85,8 +90,38 @@ through the input tool; the generic add refuses it.
 ("this would press keys"). `plain` allows Tab. `inputValueProblem` is that rule.
 
 A `plain` value is typed the same way and is not held in the redaction window, so the agent's next read
-shows it as the terminal shows it. The card says it is visible to the ferret; nothing about it is
-hidden. Handing the value back in the agent's result arrives with the multi-field card (P2).
+shows it as the target shows it. The card says it is visible to the ferret; nothing about it is
+hidden. It is not handed back in the agent's result: the agent reads it off the screen like anything else.
+
+### Cards of several fields
+
+One card can ask for several values for **one surface**: a Google login is "Email" (`plain`, flagged red
+beside the field) and "Password" (`secret`) on one card, and the daemon types each into its own element.
+
+- **A page's fields each name their element** (`element`: a snapshot `ref` or a selector, the agent's
+  pointer). The daemon resolves every one and observes it: the frame, the node, the attributes, the box.
+  Each field gets its own risk flag; the card's header carries the worst.
+- **A terminal takes exactly one field.** A terminal shows one prompt at a time, so a value it asks for
+  next is a new card with `chain`. A terminal field may carry a `label` ("Passphrase").
+- **Every field is covered before anything is typed**: typed, or filled from ONE saved login by its role
+  (`plain` → the username, `secret` → the password, `private` → the 2FA code). Only a saved login that
+  holds every field's value is offered.
+- **"Save as" keeps a login card as ONE saved login**, in one change under the store-wide lock: the `plain`
+  field as the username and the `secret` one as the password (`savedRolesOf`). A one-time code is never
+  kept. A card with two usernames or two passwords cannot be kept as one login and does not offer it, and
+  every field it keeps must be typed (not filled from a saved login). The kept record is written once per
+  field kept.
+- **One write**: the target adapter gets the values in field order and types them under one binding
+  check, with Enter (submit) after the last. Each value that is not `plain` is masked before it is typed.
+- **A login on two pages is two cards**: the second names the first in `chain` and reads "Step 2 · after
+  !A7" (`request.step`). Submit is per card, so each step chooses its own. `chain` must name one of the
+  SAME session's input requests that this daemon holds; another session's card or an unknown one is refused.
+- **Only a password input is green.** `autocomplete="current-password"` or `"new-password"` says what a field
+  is for, not that it hides what is typed: a text input carrying it stays amber.
+- **With a saved login on offer, the card still lists every field** with its flag (the red "not secret" of a
+  `plain` field, the daemon's risk of the rest) above the one-tap button, so nothing is sent unseen.
+- A page's card does not survive a daemon restart: its elements are the agent's words and are not
+  journalled, so the card ends as interrupted and the agent raises it again.
 
 ## Who may do what
 
@@ -135,12 +170,14 @@ card draws what the **daemon** observed (`sudo` is reading it, typing is hidden)
 **agent** wrote small, and carries a **risk flag** with one fixed sentence that says what the risk is
 (`request.risk`: a level and a reason; the sentence never contains terminal text):
 
-| Level | When                                                                                                                      |
-| ----- | ------------------------------------------------------------------------------------------------------------------------- |
-| green | A `secret`, echo off, and a recognised program (`sudo`, `ssh`, `gpg` and so on).                                          |
-| amber | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.         |
-| amber | A `private` code (it echoes): "This code will show on screen while the terminal is hidden from the ferret for 2 minutes." |
-| red   | A `plain` value: "Not secret: the ferret can see this value."                                                             |
+| Level | When                                                                                                                                                                        |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| green | A `secret`, echo off, and a recognised program (`sudo`, `ssh`, `gpg` and so on).                                                                                            |
+| amber | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.                                                           |
+| amber | A `private` code (it echoes): "This code will show on screen while the terminal is hidden from the ferret for 2 minutes."                                                   |
+| amber | A page field: the page is not https, the field is in a frame from another site, a `secret` is going into a field that is not a password field, or the field cannot be seen. |
+| green | A page's `secret` going into a password field on a secure page.                                                                                                             |
+| red   | A `plain` value: "Not secret: the ferret can see this value."                                                                                                               |
 
 The flag is computed from what the daemon observed, when the request is raised and again when it is
 restored. Send is available at every level. The only refusals are a control character or line break in
@@ -439,7 +476,7 @@ default**, revocable, and audited on every use. Until then every placement is a 
 | ----- | ------------------------------------------------------------------------------------------- | ----------- |
 | P0    | This contract and the schemas                                                               | done        |
 | P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input` | done        |
-| P2    | The app card (one field with P3; several fields later)                                      | in part     |
-| P3    | Saved logins (one tap), "Save as", 2FA codes, `fy secret entry`, Settings › Saved logins    | this change |
+| P2    | The app card, cards of several fields, `chain` steps                                        | this change |
+| P3    | Saved logins (one tap), "Save as", 2FA codes, `fy secret entry`, Settings › Saved logins    | done        |
 | P4    | Browser fields, and the agent-instruction extension for the browser                         | later       |
 | P5    | Multi-step chains, consumer configuration, a per-daemon remote cap                          | later       |

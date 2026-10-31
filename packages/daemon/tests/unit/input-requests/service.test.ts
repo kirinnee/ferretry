@@ -160,9 +160,9 @@ function build(overrides: Partial<World> = {}) {
           ? { ok: false, reason: w.observeReason }
           : { ok: true, facts: w.facts, ...(w.names === undefined ? {} : { names: w.names }) };
       },
-      type: async (_session, _target, text, submit) => {
+      type: async (_session, _target, values, submit) => {
         w.order.push('write');
-        w.writes.push({ text, submit });
+        w.writes.push(...values.map(value => ({ text: value.text, submit })));
         await w.gate;
         if (w.typeThrows) throw new Error('tmux went away');
         return w.typeResult;
@@ -298,11 +298,9 @@ describe('InputRequestService.raise', () => {
     should(built.w.cards[1]?.chain).equal('A1');
   });
 
-  it('should refuse a browser target for now', async () => {
+  it('should refuse a page field that names no element', async () => {
     const { service } = build();
-    const error = await refused(
-      service.raise(SESSION, { ...RAISE, target: { kind: 'browser', key: 'app', selector: '#pw' } }),
-    );
+    const error = await refused(service.raise(SESSION, { ...RAISE, target: { kind: 'browser', key: 'app' } }));
 
     should(error.code).equal('bad_request');
   });
@@ -1030,7 +1028,8 @@ describe('review regressions: delivery is one recorded, serialised, never-repeat
     should(second.w.told.at(-1)?.message).containEql('partly or fully typed');
     should(second.w.closed.length).equal(1);
     should(promptless.w.closed.length).equal(1);
-    should(browser.w.closed.length).equal(0);
+    // A page can take a request now, so one interrupted mid-write ends like a terminal's.
+    should(browser.w.closed.length).equal(1);
     should(again.w.closed.length).equal(1);
   });
 

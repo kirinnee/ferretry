@@ -10,6 +10,7 @@ const cases: SchemaCase[] = [
   { name: 'modifier', schema: target.BrowserModifierSchema, value: 'ControlOrMeta' },
   { name: 'read mode', schema: target.BrowserReadModeSchema, value: 'snapshot' },
   { name: 'screenshot format', schema: target.BrowserScreenshotFormatSchema, value: 'jpeg' },
+  { name: 'challenge provider', schema: target.BrowserChallengeProviderSchema, value: 'cloudflare' },
 ];
 
 describe('browser targets', () => {

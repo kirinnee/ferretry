@@ -45,9 +45,12 @@ import {
 import { InstantSchema } from './common.ts';
 import type { AgentConfigToolName } from './config-files.ts';
 import {
+  INPUT_FIELD_LABEL_MAX_LENGTH,
   INPUT_MAX_EXPIRY_SECONDS,
+  INPUT_MAX_FIELDS,
   INPUT_PROMPT_MAX_LENGTH,
   InputAgentViewSchema,
+  InputFieldIdSchema,
   InputSensitivitySchema,
   InputSubmitModeSchema,
 } from './input-request.ts';
@@ -177,6 +180,28 @@ const SelectorSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_SELECTOR_CHAR
 /** The element a browser act names: a ref from a page snapshot (`e12`), or a selector. */
 const ElementTargetShape = { selector: SelectorSchema.optional(), ref: BrowserRefSchema.optional() };
 
+const InputFieldLabelSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(INPUT_FIELD_LABEL_MAX_LENGTH)
+  .regex(/^[^\p{Cc}\p{Cf}]*$/u, 'a label is one line');
+
+/**
+ * One field of a `browser.request_input` card: what it is called, how careful to be with it, and the element
+ * it goes into (a snapshot's ref or a selector). `plain` is a value the ferret may see (an e-mail); `secret`
+ * is a password.
+ */
+export const BrowserInputFieldSchema = z
+  .strictObject({
+    id: InputFieldIdSchema,
+    label: InputFieldLabelSchema.optional(),
+    sensitivity: InputSensitivitySchema,
+    ...ElementTargetShape,
+  })
+  .superRefine(refineBrowserTarget({ point: false, required: true }));
+export type BrowserInputField = z.infer<typeof BrowserInputFieldSchema>;
+
 /**
  * A file an upload names: a path inside the session's own folder (relative to it, or absolute under it), or
  * an attachment the owner put in this session's chat (`att_` and its sha-256).
@@ -248,6 +273,26 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     blocking: z.boolean().optional(),
     chain: AgendaIdSchema.optional(),
     /** The saved login the agent expects; a hint only, the daemon decides what matches. */
+    secretHint: LoginEntryIdSchema.optional(),
+    /** What the card calls the value ("Passphrase"); the daemon words one from the sensitivity when absent. */
+    label: InputFieldLabelSchema.optional(),
+  }),
+  z.strictObject({
+    tool: z.literal('browser.request_input'),
+    name: SurfaceKeySchema,
+    /** What the owner is told the values are for: shown as "the agent says", never as fact. */
+    prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
+    /** The values, in the order they are typed: each with its own sensitivity and its own element. */
+    fields: z
+      .array(BrowserInputFieldSchema)
+      .min(1)
+      .max(INPUT_MAX_FIELDS)
+      .refine(fields => new Set(fields.map(field => field.id)).size === fields.length, 'each field needs its own id'),
+    /** Press Enter in the last field after typing: offered to the owner by default. */
+    submit: InputSubmitModeSchema.optional(),
+    expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
+    blocking: z.boolean().optional(),
+    chain: AgendaIdSchema.optional(),
     secretHint: LoginEntryIdSchema.optional(),
   }),
   z.strictObject({
@@ -628,6 +673,7 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'browser.eval',
   'browser.close',
   'browser.ask_owner',
+  'browser.request_input',
 ];
 
 /** One surface as a list call shows it. An unnamed surface is still listed, by id. */

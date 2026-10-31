@@ -20,6 +20,7 @@ import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-value
 import type { InputAuditEntry, InputCaller } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
+import { InputTargetRouter } from '../../../src/lib/input-requests/target-router.ts';
 import { TmuxInputTarget } from '../../../src/lib/input-requests/terminal-target.ts';
 import { NO_REDACTION, SecretRedactor, type TextRedactor } from '../../../src/lib/secrets/redaction.ts';
 import type { SecretVault } from '../../../src/lib/secrets/vault.ts';
@@ -185,11 +186,13 @@ function composed(
   let card = 1;
   let id = 1;
   const service = new InputRequestService({
-    target: new TmuxInputTarget(
-      tmux,
-      { locate: async () => ({ tmuxSession: TMUX }) },
-      { echo: async () => 'off' },
-      async () => PS.replace('sudo sudo -v', `${pane.comm} ${pane.argv}`),
+    target: new InputTargetRouter(
+      new TmuxInputTarget(
+        tmux,
+        { locate: async () => ({ tmuxSession: TMUX }) },
+        { echo: async () => 'off' },
+        async () => PS.replace('sudo sudo -v', `${pane.comm} ${pane.argv}`),
+      ),
     ),
     agenda: {
       raise: async (_session, cardBody) => {
