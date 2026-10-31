@@ -34,6 +34,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'registers a working directory; governed by filesystem.configure and listed in the project table',
   'POST /v1/board/projects/:projectId/lanes':
     'proposes, edits or confirms a project board’s lanes; a board layout changes nobody’s access, and the lane set records who proposed and who confirmed it',
+  'POST /v1/search/related':
+    'a read: a POST only because a title and an ask do not fit a URL; it weighs them against the board and changes nothing',
   'POST /v1/worktrees':
     'creates a worktree inside a registered project; removal is the destructive half and is audited',
   'POST /v1/sessions/:sessionId/stop': 'drives an existing session; its journal records it',

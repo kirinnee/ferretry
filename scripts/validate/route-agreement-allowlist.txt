@@ -115,3 +115,5 @@ verb-unproven GET /v1/sessions/:sessionId/terminals # ANALYSIS: pwa web-terminal
 verb-unproven GET /v1/sessions/by-request/:requestId # ANALYSIS: fy-api-client.ts:481 trailing FY_RECOVERY_TIMEOUT_MS is indistinguishable from an init
 
 
+unreached GET /v1/search # TEMPORARY (&F303): the CLI (`fy search`, the related check) and the PWA finder dial it in the two PRs stacked on this one; remove this line in whichever lands second
+unreached POST /v1/search/related # TEMPORARY (&F303): `fy task create` / `fy agenda add` dial it in the CLI PR stacked on this one; remove this line there

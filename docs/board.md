@@ -524,16 +524,18 @@ Retired spellings print what replaced them and exit non-zero: `fy task list` is 
 The routes behind them, all needing the `fleet` capability at operator minimum for a caller off this host
 ([grants.md](grants.md)):
 
-| Route                                           | Does                                   |
-| ----------------------------------------------- | -------------------------------------- |
-| `GET /v1/board`                                 | the board view                         |
-| `POST /v1/board/tasks`                          | create a card                          |
-| `GET /v1/board/tasks?legacyRef=`                | find the card an imported task became  |
-| `GET, POST /v1/board/tasks/:taskId`             | read a card, or apply one action to it |
-| `POST /v1/board/skip`                           | record `fy task skip`                  |
-| `POST /v1/board/import`                         | run the import                         |
-| `GET /v1/board/projects`                        | list projects                          |
-| `GET, POST /v1/board/projects/:projectId/lanes` | read, propose or edit a lane set       |
+| Route                                           | Does                                                                        |
+| ----------------------------------------------- | --------------------------------------------------------------------------- |
+| `GET /v1/board`                                 | the board view                                                              |
+| `POST /v1/board/tasks`                          | create a card                                                               |
+| `GET /v1/board/tasks?legacyRef=`                | find the card an imported task became                                       |
+| `GET, POST /v1/board/tasks/:taskId`             | read a card, or apply one action to it                                      |
+| `POST /v1/board/skip`                           | record `fy task skip`                                                       |
+| `POST /v1/board/import`                         | run the import                                                              |
+| `GET /v1/board/projects`                        | list projects                                                               |
+| `GET, POST /v1/board/projects/:projectId/lanes` | read, propose or edit a lane set                                            |
+| `GET /v1/search`                                | find cards and agenda items by any words ([work-search.md](work-search.md)) |
+| `POST /v1/search/related`                       | the related check before filing                                             |
 
 A write that fails answers with one of these codes: `invalid`, `not-found`, `forbidden`, `reason-required`,
 `owner-gate`, `blocked-by`, `cycle`, `unknown-lane`, `no-lane-set`, `version-conflict`.

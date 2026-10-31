@@ -67,9 +67,20 @@ const clip = (text: string): string =>
  * The cards are read from disk once, on first use, and kept in memory: every write goes through this
  * store, so memory and disk agree. That copy is the board's query projection; it is rebuilt from the
  * files at every boot, so losing it loses nothing.
+ *
+ * **An edit made outside this daemon is noticed** ({@link noticeOutsideEdits}): the store remembers the
+ * identity of every card file as it last read or wrote it, and a change to the directory re-reads only the
+ * files whose identity moved — under that card's serial section, so it never races a write. A hand edit
+ * that no longer parses is quarantined exactly as it would be at boot, and a file removed by hand leaves
+ * the board as it would at the next boot.
  */
 export class FileBoardStore implements BoardStore {
   private loading: Promise<Loaded> | undefined;
+  /** Each card file's identity as this store last read or wrote it: what proves an outside edit. */
+  private readonly identities = new Map<BoardTaskId, string>();
+  /** A scan in flight, and whether another change arrived while it ran. */
+  private scanning: Promise<readonly BoardTaskId[]> | undefined;
+  private rescan = false;
   private readonly tasks: string;
   private readonly counters: string;
 
@@ -109,6 +120,9 @@ export class FileBoardStore implements BoardStore {
   async write<T>(id: BoardTaskId, decide: (current: BoardTask | undefined) => Promise<BoardWrite<T>>): Promise<T> {
     return await this.serial.run(`board:card:${id}`, async () => {
       const loaded = await this.load();
+      // A hand edit the watch has not reported yet is read first, so this write is decided on it and never
+      // silently overwrites it (one stat per write).
+      await this.catchUp(id, loaded);
       if (loaded.quarantined.has(id)) {
         throw new BoardUnavailableError(`card ${id} is quarantined; refusing to overwrite the damaged file`);
       }
@@ -117,10 +131,115 @@ export class FileBoardStore implements BoardStore {
       if (decision.task.id !== id)
         throw new BoardUnavailableError(`a write to ${id} tried to store ${decision.task.id}`);
       const task = BoardTaskSchema.parse(decision.task);
-      await this.files.writeTextAtomic(this.fileOf(id), `${JSON.stringify(task, null, 2)}\n`);
+      const written = `${JSON.stringify(task, null, 2)}\n`;
+      await this.files.writeTextAtomic(this.fileOf(id), written);
       loaded.cards.set(id, task);
+      await this.remember(id, written);
       return decision.result;
     });
+  }
+
+  /**
+   * Re-reads every card file changed since this store last read or wrote it, and drops a card whose file
+   * is gone; returns the ids it changed. Nothing before the first read (the first read is current), and
+   * nothing on a filesystem that cannot report identities. Calls that arrive during a scan coalesce into
+   * one more scan after it, so a burst of edits costs two directory walks, not one per edit.
+   */
+  async noticeOutsideEdits(): Promise<readonly BoardTaskId[]> {
+    if (this.scanning !== undefined) {
+      this.rescan = true;
+      return await this.scanning;
+    }
+    this.scanning = (async () => {
+      const changed = new Set<BoardTaskId>();
+      do {
+        this.rescan = false;
+        for (const id of await this.scan()) changed.add(id);
+      } while (this.rescan);
+      return [...changed];
+    })().finally(() => {
+      this.scanning = undefined;
+    });
+    return await this.scanning;
+  }
+
+  /**
+   * Hears the card directory through `subscribe` and notices each outside edit as it lands. Returns the
+   * unsubscribe. A scan that fails is reported and retried by the next change.
+   */
+  watch(subscribe: (directory: string, listener: () => void) => { close(): void }): () => void {
+    const subscription = subscribe(this.tasks, () => {
+      void this.noticeOutsideEdits().catch((error: unknown) =>
+        this.diagnostics.warn(
+          `the board could not re-read its card files: ${error instanceof Error ? error.message : String(error)}`,
+        ),
+      );
+    });
+    return () => subscription.close();
+  }
+
+  private async scan(): Promise<readonly BoardTaskId[]> {
+    const identity = this.files.identity?.bind(this.files);
+    if (this.loading === undefined || identity === undefined) return [];
+    const loaded = await this.load();
+    const entries = await this.files.listDirectory(this.tasks);
+    const onDisk = new Set<BoardTaskId>();
+    const changed: BoardTaskId[] = [];
+    for (const entry of entries) {
+      const id = CARD_FILE.exec(entry.name)?.[1];
+      if (id === undefined || entry.regularFile !== true) continue;
+      onDisk.add(id);
+      if ((await identity(this.fileOf(id))) === this.identities.get(id)) continue;
+      if (await this.reread(id, loaded)) changed.push(id);
+    }
+    for (const id of [...loaded.cards.keys(), ...loaded.quarantined.keys()]) {
+      if (onDisk.has(id)) continue;
+      await this.serial.run(`board:card:${id}`, async () => {
+        if ((await identity(this.fileOf(id))) !== undefined) return;
+        loaded.cards.delete(id);
+        loaded.quarantined.delete(id);
+        this.identities.delete(id);
+        changed.push(id);
+      });
+    }
+    return changed;
+  }
+
+  /** One card file read again after it changed under the store; whether the board's copy moved. */
+  private async reread(id: BoardTaskId, loaded: Loaded): Promise<boolean> {
+    // Asked again inside the section: a write of our own that raced the watch has remembered its file by now.
+    return await this.serial.run(`board:card:${id}`, async () => await this.catchUp(id, loaded));
+  }
+
+  /** Inside card `id`'s section: re-reads its file when it is not the one this store last read or wrote. */
+  private async catchUp(id: BoardTaskId, loaded: Loaded): Promise<boolean> {
+    if (this.files.identity === undefined) return false;
+    if ((await this.files.identity(this.fileOf(id))) === this.identities.get(id)) return false;
+    const before = loaded.cards.get(id);
+    const fresh = new Map<BoardTaskId, BoardTask>();
+    const problem = await this.parseCard(id, fresh);
+    const card = fresh.get(id);
+    if (card !== undefined) {
+      loaded.cards.set(id, card);
+      loaded.quarantined.delete(id);
+      return true;
+    }
+    if (problem === undefined) return false;
+    loaded.cards.delete(id);
+    loaded.quarantined.set(id, clip(problem));
+    this.diagnostics.warn(`board card ${id} is quarantined: ${problem}`);
+    return before !== undefined;
+  }
+
+  /**
+   * Records the identity of the file this store just wrote — read back with its bytes, so an edit that landed
+   * between the rename and this read is never taken for ours: it stays unremembered, and the next scan or
+   * write reads it.
+   */
+  private async remember(id: BoardTaskId, written: string): Promise<void> {
+    const read = await this.files.readTextIdentified?.(this.fileOf(id));
+    if (read !== undefined && read.text === written) this.identities.set(id, read.identity);
+    else this.identities.delete(id);
   }
 
   private fileOf(id: BoardTaskId): string {
@@ -154,8 +273,17 @@ export class FileBoardStore implements BoardStore {
 
   /** Reads one card into `cards`, or says why it cannot. */
   private async parseCard(id: BoardTaskId, cards: Map<BoardTaskId, BoardTask>): Promise<string | undefined> {
-    const text = await this.files.readText(this.fileOf(id));
-    if (text === undefined) return undefined;
+    const read =
+      this.files.readTextIdentified === undefined
+        ? await this.files
+            .readText(this.fileOf(id))
+            .then(text => (text === undefined ? undefined : { text, identity: undefined }))
+        : await this.files.readTextIdentified(this.fileOf(id));
+    if (read === undefined) return undefined;
+    // Remembered before parsing: a damaged file is not re-read until it changes again.
+    if (read.identity === undefined) this.identities.delete(id);
+    else this.identities.set(id, read.identity);
+    const text = read.text;
     try {
       const task = BoardTaskSchema.parse(JSON.parse(text));
       if (task.id !== id) return `the file is named ${id} but holds card ${task.id}`;
