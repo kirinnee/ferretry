@@ -74,14 +74,9 @@ describe('fy browser firewall', () => {
     should(lines).deepEqual(['no newline']);
   });
 
-  it('should join a firewall group another registration already made instead of adding a second', async () => {
+  it('should share one firewall group with the entry verb instead of adding a second', async () => {
     // Arrange
-    const { program, run, lines } = harness(p => {
-      p.commands
-        .find(command => command.name() === 'browser')
-        ?.command('firewall')
-        .command('entry');
-    });
+    const { program, run, lines } = harness();
 
     // Act
     await run('browser', 'firewall', 'unit');

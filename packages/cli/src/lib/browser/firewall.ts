@@ -15,6 +15,14 @@ export interface IFirewallOutput {
 
 const withoutFinalNewline = (text: string): string => (text.endsWith('\n') ? text.slice(0, -1) : text);
 
+/** The one `browser firewall` group, made by whichever registration reaches it first. */
+export function firewallGroup(browser: Command): Command {
+  return (
+    browser.commands.find(command => command.name() === 'firewall') ??
+    browser.command('firewall').description('the loopback firewall on a shared Linux host')
+  );
+}
+
 /**
  * `fy browser firewall script|unit|verify-unit|timer`: the loopback firewall's files, printed verbatim, so an
  * admin whose `fy` came from brew or nix (no repository checkout) can install them.
@@ -25,11 +33,7 @@ const withoutFinalNewline = (text: string): string => (text.endsWith('\n') ? tex
 export function registerFirewallCommands(program: Command, files: IFirewallFiles, output: IFirewallOutput): void {
   const browser = program.commands.find(command => command.name() === 'browser');
   if (browser === undefined) throw new Error('the browser command group must be registered before its firewall verbs');
-  const firewall =
-    browser.commands.find(command => command.name() === 'firewall') ??
-    browser
-      .command('firewall')
-      .description('the loopback firewall a host admin installs on a shared Linux host; run by root, not by a user');
+  const firewall = firewallGroup(browser);
 
   const verbs: readonly (readonly [string, keyof IFirewallFiles, string])[] = [
     ['script', 'script', 'the root script (install it as /usr/local/sbin/ferretry-loopback-firewall)'],

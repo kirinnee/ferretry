@@ -1,5 +1,6 @@
 import type { Command } from 'commander';
 import type { IBrowserRunner } from './controller.ts';
+import { firewallGroup } from './firewall.ts';
 import { optionalText, parseLoginMinutes, parseProxyTestFlags, parseViewport, requireText } from './parse.ts';
 import type { BrowserCommand } from './types.ts';
 
@@ -192,9 +193,7 @@ function registerProxyCommands(browser: Command, controller: IBrowserRunner): vo
  * the host admin for `/etc/ferretry/loopback-firewall.conf`.
  */
 function registerFirewallCommands(browser: Command, controller: IBrowserRunner): void {
-  const firewall = browser.command('firewall').description('the loopback firewall on a shared host; owner only');
-
-  firewall
+  firewallGroup(browser)
     .command('entry')
     .description('print the line to add to /etc/ferretry/loopback-firewall.conf for this user, from browserPorts')
     .action(async () => {
