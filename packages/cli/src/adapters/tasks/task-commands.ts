@@ -31,6 +31,9 @@ const acting = (command: Command): Command =>
 
 const ID_HELP = 'the task id: &F21 (or F21)';
 
+const HOW_TO_TEST_HELP =
+  'how the owner checks it before Done (markdown, a numbered list): where to go, what to do, what they should see';
+
 export function registerTaskCommands(program: Command, dependencies: TaskCommandDependencies): Command {
   const { board } = dependencies;
 
@@ -44,11 +47,13 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .option('--summary <line>', 'one line for the card face')
     .option('--ask <text>', "the human's words, verbatim")
     .option('--ask-source <link>', 'where those words came from')
-    .option('--premise <text>', 'why this work exists')
-    .option('--context <text>', 'what a newcomer needs to know')
+    .option('--premise <point>', 'why this work exists; repeat for bullet points', collect, [])
+    .option('--context <point>', 'what a newcomer needs to know; repeat for bullet points', collect, [])
     .option('--term <term=meaning>', 'a glossary entry (repeatable)', collect, [])
     .option('--brief <text>', 'the full description or plan')
     .option('--brief-file <path>', 'read the brief from a file instead')
+    .option('--how-to-test <md>', HOW_TO_TEST_HELP)
+    .option('--how-to-test-file <path>', 'read How to test from a file instead')
     .option('--workflow <workflow>', `one of ${choices(TaskWorkflowSchema.options)}`)
     .option('--depends-on <id>', 'a task this one waits on (repeatable)', collect, [])
     .option('--parent <id>', 'the task this one is part of')
@@ -64,7 +69,9 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     });
 
   acting(group.command('show'))
-    .description('one task in full: ask, premise, context, terms, brief, children, dependencies, links, asks, history')
+    .description(
+      'one task in full: ask, premise, context, terms, brief, How to test, children, dependencies, links, asks, history',
+    )
     .argument('<id>', ID_HELP)
     .action(async (id: string, options: SessionOptions) => {
       await board.show(id, options);
@@ -226,15 +233,17 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     });
 
   acting(group.command('edit'))
-    .description("change a card's title, summary, premise, context, glossary or brief")
+    .description("change a card's title, summary, premise, context, glossary, brief or How to test")
     .argument('<id>', ID_HELP)
     .option('--title <title>', TASK_TITLE_GUIDANCE)
     .option('--summary <line>', 'one line for the card face')
-    .option('--premise <text>', 'why this work exists')
-    .option('--context <text>', 'what a newcomer needs to know')
+    .option('--premise <point>', 'replace why this work exists; repeat for bullet points', collect, [])
+    .option('--context <point>', 'replace what a newcomer needs to know; repeat for bullet points', collect, [])
     .option('--term <term=meaning>', 'replace the glossary with these entries (repeatable)', collect, [])
     .option('--brief <text>', 'the full description or plan')
     .option('--brief-file <path>', 'read the brief from a file instead')
+    .option('--how-to-test <md>', HOW_TO_TEST_HELP)
+    .option('--how-to-test-file <path>', 'read How to test from a file instead')
     .action(async (id: string, options: TaskEditFlags) => {
       await board.edit(id, options);
     });

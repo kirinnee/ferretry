@@ -50,6 +50,8 @@ export const BOARD_TASK_SCHEMA_VERSION = 1 as const;
 export const MAX_BOARD_SUMMARY_LENGTH = 140;
 export const MAX_BOARD_PREMISE_LENGTH = 4 * 1024;
 export const MAX_BOARD_CONTEXT_LENGTH = 16 * 1024;
+/** The owner's test steps: a short checklist, sized like the context. */
+export const MAX_BOARD_HOW_TO_TEST_LENGTH = 16 * 1024;
 export const MAX_BOARD_BRIEF_LENGTH = 64 * 1024;
 export const MAX_BOARD_REASON_LENGTH = 2 * 1024;
 export const MAX_BOARD_NOTE_LENGTH = 2 * 1024;
@@ -274,7 +276,15 @@ export const BoardLinkFieldSchema = z.enum(['pr', 'branch', 'commit', 'doc']);
 export type BoardLinkField = z.infer<typeof BoardLinkFieldSchema>;
 
 /** The card fields an edit may change, each recorded as its own `field-edited` event. */
-export const BoardEditableFieldSchema = z.enum(['title', 'summary', 'premise', 'context', 'terms', 'brief']);
+export const BoardEditableFieldSchema = z.enum([
+  'title',
+  'summary',
+  'premise',
+  'context',
+  'terms',
+  'brief',
+  'howToTest',
+]);
 export type BoardEditableField = z.infer<typeof BoardEditableFieldSchema>;
 
 // ---------------------------------------------------------------------------------------------------
@@ -419,6 +429,11 @@ const BoardTaskShape = {
   terms: BoardTermsSchema,
   /** The full description or plan (markdown); a sub-ferret's brief for a card `fy new` made. */
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH),
+  /**
+   * How the owner checks the result before pressing Done (markdown, ideally a numbered list): where to go, what
+   * to do, what they should see. Empty until the ferret writes it; a card stored before it existed reads empty.
+   */
+  howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).default(''),
   /** The accountable ferret: the creator by default, the lead for a delegated card. */
   owner: SessionIdSchema,
   /** The ferret doing it now; `null` reads as the owner. */
@@ -683,6 +698,7 @@ export const BoardTaskCreateRequestSchema = z.strictObject({
   context: z.string().max(MAX_BOARD_CONTEXT_LENGTH).default(''),
   terms: BoardTermsSchema.default([]),
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH).default(''),
+  howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).default(''),
   workflow: TaskWorkflowSchema.default('quick'),
   /** The board; absent means the creating session's project. */
   projectId: BoardProjectIdSchema.optional(),
@@ -707,6 +723,7 @@ const editFields = {
   context: z.string().max(MAX_BOARD_CONTEXT_LENGTH).optional(),
   terms: BoardTermsSchema.optional(),
   brief: z.string().max(MAX_BOARD_BRIEF_LENGTH).optional(),
+  howToTest: z.string().max(MAX_BOARD_HOW_TO_TEST_LENGTH).optional(),
 };
 
 /**
