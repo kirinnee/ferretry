@@ -7,6 +7,7 @@ import {
   AgentToolResultSchema,
   isRepeatableAgentTool,
 } from '../../src/lib/agent-tools.ts';
+import { InputActorSchema, InputDeliverBodySchema, InputSourceSchema } from '../../src/lib/input-request.ts';
 import {
   COPY_COMMAND_MAX_ARGS,
   COPY_MAX_LIFETIME_SECONDS,
@@ -16,9 +17,16 @@ import {
   CopyMetaSchema,
   CopyNameSchema,
   CopyOriginSchema,
+  CopyPlanApproveSchema,
+  CopyPlanItemSchema,
+  CopyPlanSchema,
+  CopyRouteFromSchema,
+  CopyRouteToSchema,
   CopySourceSchema,
   copyHandle,
   copyMask,
+  PasteRuleCreateSchema,
+  PasteRuleSchema,
 } from '../../src/lib/secure-copy.ts';
 
 const AT = '2026-10-31T09:00:00.000Z';
@@ -187,5 +195,88 @@ describe('the secure copy schemas never hold a value', () => {
 
   it('should bound the masked stderr a command report carries', () => {
     should(CopyCommandReportSchema.safeParse({ outcome: 'exited', stderr: 'x'.repeat(2_049) }).success).be.false();
+  });
+});
+
+describe('pasting, rules and plans', () => {
+  it('should take a deliver body with exactly one of padded, entry or sealed, and save only a typed value', () => {
+    const base = { deliveryId: '7b0a5f1c-3a49-4a7e-9d69-2f2a7f6c2e11', observedDigest: 'c'.repeat(64), submit: true };
+
+    should(InputDeliverBodySchema.safeParse({ ...base, sealed: true }).success).be.true();
+    should(InputDeliverBodySchema.safeParse({ ...base, sealed: true, padded: '00005:hello' }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...base, sealed: true, entry: 'SUDO_BOX' }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...base, sealed: false }).success).be.false();
+    should(
+      InputDeliverBodySchema.safeParse({ ...base, sealed: true, save: { entry: 'SUDO_BOX', label: 'x' } }).success,
+    ).be.false();
+    should(InputDeliverBodySchema.safeParse(base).success).be.false();
+  });
+
+  it("should name a rule's ends by program, origin or exact secret name, and nothing looser", () => {
+    should(CopyRouteFromSchema.safeParse({ kind: 'command', program: '/usr/bin/gh' }).success).be.false();
+    should(
+      CopyRouteFromSchema.safeParse({ kind: 'browser', origin: 'https://github.com/settings/tokens' }).success,
+    ).be.false();
+    should(CopyRouteToSchema.safeParse({ kind: 'secret', name: 'vercel_token' }).success).be.false();
+    should(CopyRouteToSchema.safeParse({ kind: 'secret' }).success).be.false();
+    should(CopyRouteToSchema.safeParse({ kind: 'terminal', program: 'vercel' }).success).be.true();
+    should(
+      PasteRuleCreateSchema.safeParse({
+        from: { kind: 'command', program: 'gh' },
+        to: { kind: 'terminal', program: 'vercel' },
+        count: 0,
+      }).success,
+    ).be.false();
+  });
+
+  it('should hold a plan to its item cap and its words to one bounded line', () => {
+    const item = {
+      from: { kind: 'command', program: 'gh' },
+      to: { kind: 'terminal', program: 'vercel' },
+      why: 'token',
+    };
+
+    should(CopyPlanItemSchema.safeParse({ ...item, why: 'two\nlines' }).success).be.false();
+    should(CopyPlanItemSchema.safeParse({ ...item, why: 'x'.repeat(141) }).success).be.false();
+    should(
+      AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items: Array.from({ length: 11 }, () => item) })
+        .success,
+    ).be.false();
+    should(CopyPlanApproveSchema.safeParse({ items: [10] }).success).be.false();
+  });
+
+  it("should give a rule, a plan and an input request's source no field for a value", () => {
+    const VALUE_LIKE = /^(value|values|token|secret|text|content|data|raw|padded|stdout|digest)$/iu;
+    const names = (schema: z.ZodType): string[] => {
+      const found: string[] = [];
+      const walk = (node: unknown): void => {
+        if (node === null || typeof node !== 'object') return;
+        const properties = (node as { properties?: object }).properties;
+        if (properties !== undefined) found.push(...Object.keys(properties));
+        for (const child of Object.values(node as object)) walk(child);
+      };
+      walk(z.toJSONSchema(schema, { io: 'output', unrepresentable: 'any' }));
+      return found;
+    };
+
+    for (const schema of [PasteRuleSchema, CopyPlanSchema, InputSourceSchema, PasteRuleCreateSchema])
+      should(names(schema).filter(name => VALUE_LIKE.test(name))).eql([]);
+    should(InputActorSchema.safeParse({ kind: 'rule', ruleId: 'a'.repeat(32) }).success).be.true();
+    should(InputActorSchema.safeParse({ kind: 'rule', ruleId: 'x' }).success).be.false();
+  });
+});
+
+describe('a plan the agent asks for', () => {
+  it('should last at most a day, however long the agent asks', () => {
+    const items = [
+      { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'token' },
+    ];
+
+    should(
+      AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items, expiresInSeconds: 86_400 }).success,
+    ).be.true();
+    should(
+      AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items, expiresInSeconds: 86_401 }).success,
+    ).be.false();
   });
 });

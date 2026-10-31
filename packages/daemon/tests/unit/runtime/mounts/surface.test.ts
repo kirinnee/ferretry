@@ -16,6 +16,7 @@ import {
   type PairingSubsystem,
   type ScratchGcSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
+import { CopyPlanService, PasteRuleService } from '../../../../src/lib/secure-copy/index.ts';
 import { SecuritySettingsService } from '../../../../src/lib/security/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
@@ -698,6 +699,25 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     return { service: world.service, identities: world.identities };
   })(),
   inputRequests: inputRequestService().service,
+  secureCopy: (() => {
+    const rules = new PasteRuleService({
+      store: { read: async () => undefined, write: async () => undefined },
+      clock: { now: () => 0 },
+      ids: { ruleId: () => '0'.repeat(32) },
+      warn: () => undefined,
+    });
+    const plans = new CopyPlanService({
+      agenda: {
+        raise: async () => ({ ok: false, message: 'not exercised by the surface inventory' }),
+        close: async () => undefined,
+      },
+      rules,
+      tell: async () => undefined,
+      clock: { now: () => 0 },
+      ids: { planId: () => '0'.repeat(32) },
+    });
+    return { copies: { list: () => [] }, rules, plans };
+  })(),
   names: nameSubsystem(),
   learning: learningSubsystem(),
   recommend: recommendSubsystem(),
@@ -870,6 +890,7 @@ describe('the mounted daemon surface', () => {
       3 + // the board's projects: the list, one project's lanes, and a propose, edit or confirm of them
       6 + // the owner's input requests: the two lists, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
       4 + // saved logins: the list, put, rename and delete (docs/input-requests.md#saved-logins)
+      6 + // secure copy: a session's copies, the rules (list, add, remove), the paste plans and an answer to one (docs/secure-copy.md)
       2; // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
@@ -1143,6 +1164,13 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/input-quarantines',
       'POST /v1/sessions/:sessionId/input-quarantines/:key/end',
       'POST /v1/sessions/:sessionId/input-requests/:requestId/cancel',
+      // Secure copy: a session's copies by description, the owner's pre-approval rules and the ferrets' paste plans.
+      'GET /v1/sessions/:sessionId/copies',
+      'GET /v1/copy-rules',
+      'POST /v1/copy-rules',
+      'DELETE /v1/copy-rules/:ruleId',
+      'GET /v1/copy-plans',
+      'POST /v1/sessions/:sessionId/copy-plans/:planId/approve',
       'GET /v1/sessions/:sessionId/terminals',
       'POST /v1/sessions/:sessionId/terminals',
       'GET /v1/sessions/:sessionId/terminals/:terminalId',

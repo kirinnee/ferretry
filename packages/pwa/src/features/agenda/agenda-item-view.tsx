@@ -71,6 +71,8 @@ export interface AgendaItemViewProps {
   readonly settled?: ReactNode;
   /** The form an `input` item is answered with (`InputCardHost`): drawn in the card, in the answer row's place. */
   readonly inputForm?: ReactNode;
+  /** A ferret's paste plan (`CopyPlanHost`): drawn in the card, in the answer row's place. */
+  readonly planForm?: ReactNode;
 }
 
 /** Keys that are a field's or a button's own. */
@@ -104,6 +106,7 @@ export function AgendaItemView({
   quoteScope = null,
   settled,
   inputForm,
+  planForm,
   daemonId,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
@@ -219,6 +222,7 @@ export function AgendaItemView({
             {...(doneClose === undefined ? {} : { doneClose })}
             {...(settled === undefined ? {} : { settled })}
             {...(inputForm === undefined ? {} : { inputForm })}
+            {...(planForm === undefined ? {} : { planForm })}
           />
           <AgendaItemHistory events={history} ferret={ferret} now={now} renderProse={renderProse} />
         </div>

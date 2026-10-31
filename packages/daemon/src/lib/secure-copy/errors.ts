@@ -4,7 +4,14 @@
  */
 export class SecureCopyError extends Error {
   constructor(
-    readonly code: 'bad_request' | 'not_found' | 'conflict' | 'capacity' | 'unavailable' | 'upstream_failed',
+    readonly code:
+      | 'bad_request'
+      | 'not_found'
+      | 'conflict'
+      | 'forbidden'
+      | 'capacity'
+      | 'unavailable'
+      | 'upstream_failed',
     message: string,
   ) {
     super(message);

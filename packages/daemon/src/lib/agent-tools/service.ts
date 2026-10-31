@@ -59,7 +59,14 @@ import {
   surfaceReference,
   terminalInput,
 } from './policy.ts';
-import type { AgentCopyPort, AgentInputPort, AgentToolCaller, AgentToolClock, ResolvedSurface } from './types.ts';
+import type {
+  AgentCopyPort,
+  AgentInputPort,
+  AgentPlanPort,
+  AgentToolCaller,
+  AgentToolClock,
+  ResolvedSurface,
+} from './types.ts';
 
 /**
  * Why a tool call was not carried out, in words an agent can act on.
@@ -131,6 +138,8 @@ export interface AgentToolPorts {
   readonly quarantinedUntil?: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
   /** Secure copies (docs/secure-copy.md); absent where none are wired, which refuses the `secure.*` tools. */
   readonly copy?: AgentCopyPort;
+  /** A ferret's paste plans, for `secure.preapprove`; absent where none are wired. */
+  readonly plans?: AgentPlanPort;
 }
 
 /** The tools that change what a person would see, and so put up the driving marker. */
@@ -216,7 +225,13 @@ const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
  * reads — running a command is terminal control, reading a page is browser control.
  */
 const switchOf = (call: AgentToolCall): SurfaceKind | undefined =>
-  call.tool === 'secure.copy' ? (call.source.kind === 'command' ? 'terminal' : 'browser') : kindOf(call);
+  call.tool === 'secure.copy'
+    ? call.source.kind === 'command'
+      ? 'terminal'
+      : 'browser'
+    : call.tool === 'secure.paste'
+      ? 'terminal'
+      : kindOf(call);
 
 const plural = (count: number, word: string): string => `${String(count)} ${word}${count === 1 ? '' : 's'}`;
 
@@ -425,6 +440,44 @@ export class AgentToolService {
         const copy = this.copyPort().discard(sessionId, bareCopyName(call.handle));
         return { summary: `${copy.handle} is ${copy.state}: its value is gone from the daemon.`, copies: [copy] };
       }
+      case 'secure.paste': {
+        if (caller.kind !== 'agent')
+          throw new AgentToolError(
+            'bad_request',
+            'Only an agent pastes a secure copy; the owner allows it on the card.',
+          );
+        const surface = await this.resolve(sessionId, 'terminal', call.to.name);
+        facts.surface = surface;
+        await this.assertAgentMay(sessionId, surface);
+        const reference = surfaceReference('terminal', surface.name ?? surface.id);
+        const name = bareCopyName(call.handle);
+        const view = await this.inputPort(caller).raise(sessionId, {
+          target: { kind: 'terminal', key: surface.name ?? surface.id },
+          prompt: call.prompt,
+          sensitivity: 'secret',
+          submit: call.submit ?? 'offer-owner',
+          source: { kind: 'sealed', name },
+          ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
+        });
+        return {
+          summary:
+            view.state === 'delivered'
+              ? `Pasted ${copyHandle(name)} into ${reference} under a rule the owner approved in advance (!${view.id}). The terminal is unreadable for about two minutes.`
+              : `Asked the owner to allow pasting ${copyHandle(name)} into ${reference} (!${view.id}). Wait with input.wait; do not type there yourself.`,
+          input: view,
+        };
+      }
+      case 'secure.preapprove': {
+        if (caller.kind !== 'agent')
+          throw new AgentToolError('bad_request', 'Only an agent asks for pastes to be approved in advance.');
+        if (this.ports.plans === undefined)
+          throw new AgentToolError('unavailable', 'Secure copy is not available on this daemon.');
+        const plan = await this.ports.plans.propose(sessionId, call.items, call.expiresInSeconds);
+        return {
+          summary: `Asked the owner to approve ${plural(plan.items.length, 'paste')} in advance (!${plan.agendaItemId}). Until they answer, each paste asks them.`,
+          plan,
+        };
+      }
       case 'input.wait': {
         const input = this.inputPort(caller);
         const view = await input.agentView(sessionId, call.id, call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
@@ -464,7 +517,9 @@ export class AgentToolService {
           | 'input.wait'
           | 'secure.copy'
           | 'secure.list'
-          | 'secure.discard';
+          | 'secure.discard'
+          | 'secure.paste'
+          | 'secure.preapprove';
       }
     >,
     surface: ResolvedSurface,
@@ -1305,6 +1360,10 @@ function callFacts(call: AgentToolCall): AuditDetail {
       };
     case 'secure.discard':
       return { copy: copyHandle(bareCopyName(call.handle)) };
+    case 'secure.paste':
+      return { copy: copyHandle(bareCopyName(call.handle)) };
+    case 'secure.preapprove':
+      return { items: call.items.length };
     case 'browser.dialog':
       return {
         action: call.action,
@@ -1422,6 +1481,8 @@ function inputSummary(view: InputAgentView): string {
     case 'delivering':
       return `${card}: the owner's value is being typed now. Wait again with input.wait.`;
     case 'delivered':
+      if (view.source === 'sealed')
+        return `${card}: the secure copy was pasted${view.submitted === true ? ' and Enter pressed' : ''}. Read the terminal once its quarantine allows.`;
       return `${card}: the owner typed the value${view.submitted === true ? ' and pressed Enter' : ''}. Read the terminal to see what happened.`;
     case 'refused':
       return `${card} was refused${view.reason === undefined ? '' : ` (${view.reason})`}: the value was not typed. Look at the terminal, then raise a new request if it is still needed.`;

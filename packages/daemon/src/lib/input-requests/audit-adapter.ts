@@ -19,6 +19,7 @@ export class InputAuditAdapter implements InputAudit {
       ...Object.fromEntries(Object.entries(entry.detail).filter(([, value]) => value !== undefined)),
       ...(entry.requestId === undefined ? {} : { requestId: entry.requestId }),
       ...(entry.actor.kind === 'agent' ? { by: 'agent' } : {}),
+      ...(entry.actor.kind === 'rule' ? { by: 'rule', rule: entry.actor.ruleId } : {}),
     };
     await this.sink.record({
       event: entry.event,

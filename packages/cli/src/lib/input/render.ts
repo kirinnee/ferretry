@@ -52,6 +52,12 @@ export function renderInputFacts(request: InputRequest): string[] {
   if (request.risk !== undefined) lines.push(`risk ${request.risk.level}: ${showUntrusted(request.risk.reason)}`);
   const login = matchedLogin(request);
   if (login !== undefined) lines.push(`a saved login matches: ${login.text} (answer with --secret ${login.id})`);
+  if (request.source !== undefined) {
+    const from = request.source.from.origin ?? request.source.from.program ?? request.source.from.kind;
+    lines.push(
+      `pastes the secure copy sealed:${request.source.name}, captured from ${showUntrusted(from)}: nothing to type`,
+    );
+  }
   const observed = request.observed;
   if (observed?.kind === 'terminal') {
     lines.push(
@@ -83,6 +89,7 @@ const REASONS: Readonly<Record<InputReason, string>> = {
   agent_cancelled: 'the agent cancelled it',
   check_failures: 'too many checks failed',
   expired: 'it expired',
+  copy_gone: 'the secure copy it was to paste is gone',
 };
 
 /** The sentence for a closed reason. */

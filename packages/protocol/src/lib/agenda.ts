@@ -669,6 +669,13 @@ export const AgendaInputRefSchema = z.strictObject({ requestId: z.string().regex
 export type AgendaInputRef = z.infer<typeof AgendaInputRefSchema>;
 
 /**
+ * The paste plan a card presents (docs/secure-copy.md): a ferret's planned pastes, answered with the plan's own
+ * Allow and Decline, which only the owner's plan route carries. Only the daemon raises one.
+ */
+export const AgendaCopyPlanRefSchema = z.strictObject({ planId: z.string().regex(/^[0-9a-f]{32}$/u) });
+export type AgendaCopyPlanRef = z.infer<typeof AgendaCopyPlanRefSchema>;
+
+/**
  * What an `input` card may not be, and must be: it carries its request, and no ask, answers, steps or
  * confirmation of its own (the form answers it), and it is never a notice. Anything but an `input` card
  * carries no request.
@@ -760,6 +767,8 @@ const AgendaItemBaseShape = {
   offerClose: z.literal(true).optional(),
   /** The input request an `input` card presents; present exactly on that kind (`agendaInputProblems`). */
   input: AgendaInputRefSchema.optional(),
+  /** The paste plan a card presents: the plan's own form answers it, never the generic answer. */
+  copyPlan: AgendaCopyPlanRefSchema.optional(),
 };
 
 export const AgendaItemSchema = z
@@ -1165,7 +1174,7 @@ export const AgendaErrorCodeSchema = z.enum([
   'read-only',
   'full',
   'corrupt',
-  /** The generic answer was used on a `kind: 'input'` card: the input form answers it. */
+  /** The generic answer was used on a `kind: 'input'` card, or a paste plan's: its own form answers it. */
   'use_input_form',
 ]);
 export type AgendaErrorCode = z.infer<typeof AgendaErrorCodeSchema>;

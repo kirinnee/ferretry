@@ -380,7 +380,7 @@ describe('McpServer — the tools', () => {
     // (Codex) pays this. The secure input bridge (terminal_request_input, input_wait and their fields) took the
     // list to 30,519 bytes, past the old 30 KB ceiling, so the owner raised it to 32 KB (the saved-secrets hint
     // and the secure copy need the room too). Descriptions stay tight: the 300-byte cap per tool still holds.
-    // Secure copy's three tools add about 1 KB (31,663 measured with browser_eval, #F230).
+    // Secure copy's five tools add about 1.3 KB (31,998 measured with browser_eval and secure_paste, #F230).
     // Owner-gated groups are listed only while they are on.
     should(bytes).be.below(32_000);
     should(longest).be.belowOrEqual(300);

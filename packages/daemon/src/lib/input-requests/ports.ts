@@ -1,5 +1,8 @@
 import type {
   AgendaId,
+  CopyMeta,
+  CopyName,
+  CopyOrigin,
   InputActor,
   InputAuditDetail,
   InputAuditEvent,
@@ -203,3 +206,29 @@ export type InputCaller =
       readonly actor: InputActor;
       readonly carrier: 'loopback' | 'direct' | 'relay';
     };
+
+/**
+ * Secure copies (docs/secure-copy.md), as a paste needs them. `open` is the second place a value leaves this
+ * port set, beside {@link InputTargetPort.type}'s `text`: it is called once per write, after every check that
+ * can refuse without typing, and its answer goes only to `type`.
+ */
+export interface InputSealedPort {
+  /** What the daemon recorded about a live copy of this session, or nothing: never the value. */
+  describe(sessionId: string, name: CopyName): CopyMeta | undefined;
+  /** The live copy's value for the one write; nothing once it was discarded or expired. */
+  open(sessionId: string, name: CopyName): string | undefined;
+  /** A paste of it was typed. */
+  used(sessionId: string, name: CopyName): void;
+}
+
+/**
+ * The owner's pre-approval rules, as a paste asks them: the rule that allows this paste is RESERVED (its count
+ * taken) synchronously, so two pastes can never both spend a rule's last use. Matched on what the daemon saw.
+ */
+export interface InputPasteRules {
+  reserve(sessionId: string, from: CopyOrigin, facts: InputTargetFacts): string | undefined;
+  /** The paste a rule was reserved for was not typed: its use is given back. */
+  release(ruleId: string): void;
+  /** It was typed. */
+  spent(ruleId: string): void;
+}

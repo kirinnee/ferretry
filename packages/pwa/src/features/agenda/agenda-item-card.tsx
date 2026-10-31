@@ -51,6 +51,8 @@ export interface AgendaItemCardProps {
   readonly settled?: ReactNode;
   /** The form an `input` item is answered with (`InputCardHost`): drawn in the answer row's place. */
   readonly inputForm?: ReactNode;
+  /** A ferret's paste plan (`CopyPlanHost`): drawn in the answer row's place, its Allow and Decline are the answer. */
+  readonly planForm?: ReactNode;
 }
 
 /** The option a question's recommendation names, or '' when it names none. */
@@ -227,6 +229,7 @@ export function AgendaItemCard({
   doneClose,
   settled,
   inputForm,
+  planForm,
 }: AgendaItemCardProps) {
   const count = versionCount(current);
   // `null` follows the latest version, so an edit that lands while the card is open shows at once.
@@ -455,6 +458,10 @@ export function AgendaItemCard({
       ) : isInput ? (
         <div className="fy-card__input" data-agenda-input-form="">
           {inputForm}
+        </div>
+      ) : planForm !== undefined ? (
+        <div className="fy-card__input" data-agenda-plan-form="">
+          {planForm}
         </div>
       ) : (
         <AgendaQuickReplies

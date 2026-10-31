@@ -183,3 +183,152 @@ export type CopyCommandReport = z.infer<typeof CopyCommandReportSchema>;
 
 /** The marker a copy is masked with wherever the daemon scrubs text. */
 export const copyMask = (name: CopyName): string => `[sealed:${name}]`;
+
+// ── Pasting, and approving pastes in advance ───────────────────────────────────────────────────────────
+
+/** How long a pre-approval rule may live, how many pastes one may allow, and how many rules the daemon keeps. */
+export const COPY_RULE_MAX_LIFETIME_SECONDS = 30 * 24 * 3_600;
+export const COPY_RULE_MAX_COUNT = 100;
+export const COPY_MAX_RULES = 50;
+/** A plan card: at most this many planned pastes, each said in at most this many characters, waiting this long. */
+export const COPY_PLAN_MAX_ITEMS = 10;
+export const COPY_PLAN_WHY_MAX_CHARS = 140;
+export const COPY_PLAN_DEFAULT_LIFETIME_SECONDS = 7_200;
+/** The longest an agent may ask a plan's rules to last; a longer route is the owner's to add as a rule. */
+export const COPY_PLAN_MAX_LIFETIME_SECONDS = 86_400;
+
+/** A program as the daemon names it: a base name, no path. tmux reports at most 15 characters of it on Linux. */
+const ProgramSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9._+-]+$/u, 'a program base name, like vercel or gh');
+/** `scheme://host[:port]`, as the browser reports a page's origin. */
+const OriginSchema = z
+  .string()
+  .max(256)
+  .regex(/^https?:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?$/u, 'an origin, like https://github.com');
+const SecretStoreNameSchema = z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/u, 'a secret name, like VERCEL_TOKEN');
+
+/** Where a paste's value comes FROM, as a rule or a plan names it: a program, or a page's origin. */
+export const CopyRouteFromSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('command'), program: ProgramSchema }),
+  z.strictObject({ kind: z.literal('browser'), origin: OriginSchema }),
+  z.strictObject({ kind: z.literal('clipboard'), origin: OriginSchema }),
+]);
+export type CopyRouteFrom = z.infer<typeof CopyRouteFromSchema>;
+
+/**
+ * Where a paste GOES: the program reading a terminal, a page's origin, or a secret-store name. A rule for the
+ * secret store names the EXACT secret: no rule can write a secret it does not name (docs/secure-copy.md).
+ */
+export const CopyRouteToSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('terminal'), program: ProgramSchema }),
+  z.strictObject({ kind: z.literal('browser'), origin: OriginSchema }),
+  z.strictObject({ kind: z.literal('secret'), name: SecretStoreNameSchema }),
+]);
+export type CopyRouteTo = z.infer<typeof CopyRouteToSchema>;
+
+/** Who approved a rule: the owner at the machine, or a paired device. */
+const RuleOwnerSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('host') }),
+  z.strictObject({ kind: z.literal('device'), deviceId: boundedLine(128) }),
+]);
+
+const RuleIdSchema = z.string().regex(/^[0-9a-f]{32}$/u, 'a 128-bit hex id');
+export const CopyPlanIdSchema = z.string().regex(/^[0-9a-f]{32}$/u, 'a 128-bit hex id');
+
+/**
+ * A PRE-APPROVAL RULE: the owner allowed, in advance, pastes from this source to this destination. Matched on
+ * what the DAEMON observed (the copy's program or origin, the destination's program or origin), never on the
+ * agent's words. Each paste it allows is still raised, audited and shown in the log.
+ */
+export const PasteRuleSchema = z.strictObject({
+  id: RuleIdSchema,
+  from: CopyRouteFromSchema,
+  to: CopyRouteToSchema,
+  /** Only this session's pastes, or any session's. */
+  sessionId: boundedLine(128).optional(),
+  expiresAt: InstantSchema.optional(),
+  /** Pastes it still allows; absent means no count. */
+  remaining: z.number().int().min(0).max(COPY_RULE_MAX_COUNT).optional(),
+  used: NonNegativeIntegerSchema,
+  createdAt: InstantSchema,
+  createdBy: RuleOwnerSchema,
+  /** The plan card it came from, when the ferret asked first. */
+  plan: CopyPlanIdSchema.optional(),
+});
+export type PasteRule = z.infer<typeof PasteRuleSchema>;
+
+/** `POST /v1/copy-rules`: the owner approves a route in advance. */
+export const PasteRuleCreateSchema = z.strictObject({
+  from: CopyRouteFromSchema,
+  to: CopyRouteToSchema,
+  sessionId: boundedLine(128).optional(),
+  expiresInSeconds: z.number().int().min(60).max(COPY_RULE_MAX_LIFETIME_SECONDS).optional(),
+  count: z.number().int().min(1).max(COPY_RULE_MAX_COUNT).optional(),
+});
+export type PasteRuleCreate = z.infer<typeof PasteRuleCreateSchema>;
+
+/** `GET /v1/copy-rules`. */
+export const PasteRuleListSchema = z.strictObject({ rules: z.array(PasteRuleSchema).max(COPY_MAX_RULES) });
+export type PasteRuleList = z.infer<typeof PasteRuleListSchema>;
+
+/** One paste a ferret plans, said before it starts. `why` is the agent's own words, shown as such. */
+export const CopyPlanItemSchema = z.strictObject({
+  from: CopyRouteFromSchema,
+  to: CopyRouteToSchema,
+  why: z
+    .string()
+    .trim()
+    .min(1)
+    .max(COPY_PLAN_WHY_MAX_CHARS)
+    .regex(/^[^\p{Cc}\p{Cf}]*$/u),
+});
+export type CopyPlanItem = z.infer<typeof CopyPlanItemSchema>;
+
+export const CopyPlanStateSchema = z.enum(['pending', 'approved', 'declined', 'expired']);
+
+/**
+ * A FERRET'S PLAN of pastes, on one card: the owner ticks the ones it allows, and each becomes a rule for THIS
+ * session that allows one paste, until the plan's expiry. Nothing in it is a value.
+ */
+export const CopyPlanSchema = z.strictObject({
+  id: CopyPlanIdSchema,
+  sessionId: boundedLine(128),
+  agendaItemId: boundedLine(16),
+  items: z.array(CopyPlanItemSchema).min(1).max(COPY_PLAN_MAX_ITEMS),
+  state: CopyPlanStateSchema,
+  raisedAt: InstantSchema,
+  expiresAt: InstantSchema,
+  /** The items the owner allowed, by index. */
+  approved: z
+    .array(
+      z
+        .number()
+        .int()
+        .min(0)
+        .max(COPY_PLAN_MAX_ITEMS - 1),
+    )
+    .max(COPY_PLAN_MAX_ITEMS)
+    .optional(),
+});
+export type CopyPlan = z.infer<typeof CopyPlanSchema>;
+
+/** `GET /v1/copy-plans`: the plans still waiting. */
+export const CopyPlanListSchema = z.strictObject({ plans: z.array(CopyPlanSchema).max(100) });
+export type CopyPlanList = z.infer<typeof CopyPlanListSchema>;
+
+/** `POST /v1/sessions/:sessionId/copy-plans/:planId/approve`: which items, by index. An empty list declines. */
+export const CopyPlanApproveSchema = z.strictObject({
+  items: z
+    .array(
+      z
+        .number()
+        .int()
+        .min(0)
+        .max(COPY_PLAN_MAX_ITEMS - 1),
+    )
+    .max(COPY_PLAN_MAX_ITEMS),
+});
+export type CopyPlanApprove = z.infer<typeof CopyPlanApproveSchema>;

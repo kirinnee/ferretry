@@ -410,6 +410,19 @@ export const savedBody = (request: InputRequest, entry: string, submit: boolean,
         body: { deliveryId, observedDigest: request.observedDigest, entry, submit: enterFor(request, submit) },
       };
 
+/** What allowing a paste sends: no value, only that the owner allows the copy the REQUEST names (docs/secure-copy.md). */
+export const sealedBody = (request: InputRequest, submit: boolean, deliveryId: string): BuiltBody =>
+  request.observedDigest === undefined
+    ? { ok: false, problem: REOBSERVING }
+    : {
+        ok: true,
+        body: { deliveryId, observedDigest: request.observedDigest, sealed: true, submit: enterFor(request, submit) },
+      };
+
+/** "sealed:vercel_token": the handle a paste card pastes (where it came from is a row of its own). */
+export const pastedWords = (request: InputRequest): string | undefined =>
+  request.source === undefined ? undefined : `sealed:${request.source.name}`;
+
 type InputFailureKind = 'changed' | 'already' | 'gone' | 'refused' | 'step-up' | 'unknown';
 
 export interface InputFailure {

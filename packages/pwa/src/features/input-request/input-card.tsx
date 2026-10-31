@@ -42,11 +42,13 @@ import {
   observedWords,
   offersPressEnter,
   offerUsername,
+  pastedWords,
   plainFlagWords,
   saveDraftProblem,
   savedBody,
   savedButtonWords,
   savedOutcomeWords,
+  sealedBody,
   sendBlock,
   showsHeaderRisk,
   splitOffers,
@@ -57,6 +59,7 @@ import {
   typedReady,
   updatedEntry,
 } from '../../lib/input-card.ts';
+import { pasteRoute } from '../../lib/secure-copy.ts';
 
 export interface InputCardProps {
   readonly request: InputRequest;
@@ -240,7 +243,20 @@ export function InputCard({
         </p>
       )}
 
-      {settled === null ? (
+      {settled === null && request.source !== undefined ? (
+        <SealedPasteSection
+          blocked={blocked}
+          busy={cancelling}
+          cancel={cancelButton}
+          client={client}
+          onRefresh={onRefresh}
+          onSettled={text => {
+            setSettled(text);
+            onDone();
+          }}
+          request={request}
+        />
+      ) : settled === null ? (
         fields.length === 0 ? null : (
           <InputForm
             blocked={blocked}
@@ -274,6 +290,92 @@ export function InputCard({
         </div>
       )}
     </section>
+  );
+}
+
+interface PasteSectionProps {
+  readonly request: InputRequest;
+  readonly client: InputClient;
+  readonly blocked: string | undefined;
+  readonly busy: boolean;
+  readonly cancel: ReactNode;
+  readonly onSettled: (text: string) => void;
+  readonly onRefresh: (() => void) | undefined;
+}
+
+/**
+ * A PASTE (docs/secure-copy.md): the ferret asks to paste a secure copy it holds. There is no field: the owner
+ * allows it or cancels, and the daemon types the copy the request names. Its full card is a later phase.
+ */
+function SealedPasteSection({ request, client, blocked, busy, cancel, onSettled, onRefresh }: PasteSectionProps) {
+  const [sending, setSending] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  // A paste the daemon never answered keeps its id, so pressing Allow again cannot paste twice.
+  const pending = useRef<string | null>(null);
+  const off = blocked !== undefined || sending || busy;
+  const route = pasteRoute(request);
+
+  const allow = async (): Promise<void> => {
+    if (off) return;
+    pending.current ??= crypto.randomUUID();
+    const built = sealedBody(request, defaultSubmit(request), pending.current);
+    // Unreachable while re-observing (Allow is disabled then), and said in words if it ever is.
+    if (!built.ok) return void setFailure(built.problem);
+    setFailure(null);
+    setSending(true);
+    try {
+      await deliverInput(client, request, built.body);
+      pending.current = null;
+      onSettled(`Pasted into ${targetRef(request)}.`);
+    } catch (cause) {
+      const words = inputFailure(cause);
+      if (words.definitive) pending.current = null;
+      setFailure(words.text);
+      if (words.kind === 'changed') onRefresh?.();
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2" data-input-paste="">
+      <dl
+        className="m-0 grid min-w-0 grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-control border border-border-strong bg-surface-2 p-3 text-ui"
+        data-input-paste-route=""
+      >
+        <dt className="text-faint">Copy</dt>
+        <dd className="m-0 min-w-0 break-words mono text-fg">{pastedWords(request)}</dd>
+        <dt className="text-faint">From</dt>
+        <dd className="m-0 min-w-0 break-words text-fg" data-input-paste-from="">
+          {route?.from}
+        </dd>
+        <dt className="text-faint">Into</dt>
+        <dd className="m-0 min-w-0 break-words font-medium text-fg" data-input-paste-to="">
+          {route?.to}
+        </dd>
+      </dl>
+      <p className="m-0 text-meta text-faint">
+        You type nothing: Ferretry pastes the sealed value, which the ferret never sees.
+      </p>
+      {failure === null ? null : (
+        <p className="m-0 text-ui text-err" data-input-failure="" role="alert">
+          {failure}
+        </p>
+      )}
+      <div className="flex flex-wrap items-center justify-end gap-2" data-input-actions="">
+        {cancel}
+        <button
+          className="kt-btn min-h-[44px]"
+          data-input-allow=""
+          data-variant="primary"
+          disabled={off}
+          onClick={() => void allow()}
+          type="button"
+        >
+          {sending ? 'Pasting…' : 'Allow paste'}
+        </button>
+      </div>
+    </div>
   );
 }
 

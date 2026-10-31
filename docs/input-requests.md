@@ -70,6 +70,8 @@ through the input tool; the generic add refuses it.
   `save` (`{ entry, label }`, typed values only). A one-field card sends **exactly one of** `padded`
   or `entry` (a saved login's handle). A card of several sends `fields` (`[{ field, padded }]`, each
   value padded on its own) and may add `entry` for the fields it did not type.
+  A paste of a [secure copy](secure-copy.md) sends `sealed: true` and no value: the daemon pastes the copy the
+  request names.
 - **`InputAgentViewSchema`**: what the agent learns: state, whether Enter was pressed, `source`
   (`typed` or `saved`) and a redacted screen. **Never** the value, its length or a saved login's
   name.

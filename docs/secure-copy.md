@@ -93,21 +93,54 @@ Masking cannot take back what the agent already read. So a capture says, honestl
 
 The agent instruction teaches the rule that makes this work: **capture before you read**.
 
-## Pasting (SC2, SC3)
+## Pasting
 
-A paste names a handle and a destination: a browser field or a terminal prompt (an input-bridge target), or
-the secret store under a name. The daemon raises an **input request** whose source is the handle, so the
-card, the daemon-observed destination facts, `observedDigest`, the single guarded write, the quarantine and
-the audit are all the input bridge's own. The card names source and destination ("token from **gh** →
-**vercel.com** env value field") and carries a risk flag. The owner taps **Allow**; there is no value field.
+`secure.paste` names a handle and a terminal the agent opened. The daemon raises an **input request** whose
+value comes from the copy (`InputRaise.source`), so the card, the daemon-observed destination facts,
+`observedDigest`, the single guarded write, the quarantine and the audit are all the input bridge's own
+([input requests](input-requests.md)):
 
-- **Always approved by the owner by default.**
-- **Pre-approval**: the owner can approve a route in advance (source origin or program → destination
-  origin or program, with an optional expiry and count), from a card or from Settings. The agent can ask for
-  this up front with one card listing its planned copies. Routes are matched on what the **daemon**
-  observed, never on the agent's words. A pre-approved paste is still raised, audited and shown in the log.
-- **The secret store is never written by a rule** unless that rule names the exact secret NAME; otherwise
-  the owner approves the write, so no rule can overwrite an existing secret.
+- **A paste is always a `secret`**, whatever the agent said, and its card says what is pasted and where it
+  came from: "Allow pasting sealed:vercel (40 characters from gh) into the terminal. You type nothing."
+- **The owner allows it; there is nothing to type.** The deliver body is `{ sealed: true }`: it names no copy
+  and no value, and the daemon pastes the copy the REQUEST names. A typed value or a saved login on a paste
+  card is refused, and so is `sealed` on an ordinary card. `fy input answer !A7` allows it at the machine
+  (no prompt, so it also works from a pipe); the app's card shows **Allow paste** and no field.
+- **The copy is opened once, at the write**, after every check that can refuse without typing. A copy that
+  was discarded or expired since the card was raised ends the request as `copy_gone`, with nothing typed;
+  so does a paste still waiting when the daemon restarts, because a restart forgets every copy. A copy with
+  a line break or a control character is refused for a terminal ("this would press keys").
+- **Risk flag**: as for any terminal secret, and never green when the ferret had already seen the value
+  ("The ferret saw this value before it was sealed, so it is not protected; consider rotating it.").
+- **Audit**: `input.delivered` with `source: sealed` and the copy's name, never the value.
+
+### Approving in advance
+
+- **A rule** allows pastes from a source (`command:<program>`, `browser:<origin>`, `clipboard:<origin>`) to
+  a destination (`terminal:<program>`, `browser:<origin>`, `secret:<NAME>`), for one session or any, with an
+  optional expiry and count. Only the owner adds or removes one (`fy copy rules add|rm`, `POST|DELETE
+/v1/copy-rules`): the route refuses an agent before it reads a body and the service refuses again. Adding
+  one demands `terminal.configure`, so a remote device follows "ask again for each change"; each add, removal
+  and plan answer is kept in the security log as `security.changed`.
+- **Matching** runs on what the DAEMON observed: the program the copy was captured from, and the program
+  reading the terminal as tmux names it (`pane_current_command`, at most 15 characters on Linux). A match
+  pastes at once, still as one guarded write, with the card raised and closed so it shows in the log, and the
+  audit actor is the rule. A rule's use is taken synchronously, so two pastes can never both spend its last
+  use. A write that typed nothing gives the use back and leaves the card for the owner; a write that may have
+  typed (uncertain) spends it. A use is recorded in memory even when the rules file cannot be written.
+- **Only where typing is hidden.** Nobody sees the card of a pre-approved paste, so a rule pastes unasked only
+  into a terminal with echo off (or a page's password field). Anywhere the value would show on screen, the card
+  waits for the owner even under a matching rule.
+- **The secret store is never written by a rule** unless that rule names the exact secret NAME. Pasting into
+  the store is the next phase (SC2b); until then a `secret:` rule matches nothing.
+- **A plan**: `secure.preapprove` raises ONE card listing the pastes the agent plans, each with its route and
+  the agent's reason (shown as its words). The owner allows some or all with `fy copy plan approve <id> 1 3`
+  (none declines), or ticks them on the card, a permission card whose own Allow and Decline answer it (the
+  generic agenda answer is refused). Each allowed item becomes a rule for that session allowing one paste until
+  the plan's expiry, which the card states (two hours by default, a day at most: a longer route is the owner's to add as a
+  rule). Two answers arriving together make the rules once. Closing the card approves nothing. Plans live in RAM: a restart forgets them.
+- **The rules file** (`<state>/secure-copy/rules.json`) holds routes and counts, never a value. One that cannot
+  be read is NO rules: every paste then asks the owner.
 
 ## Honest limits
 
@@ -117,6 +150,14 @@ the audit are all the input bridge's own. The card names source and destination 
 - **Masking is best effort.** A value printed differently (cut, wrapped, encoded) is not recognised. A
   fragment of the value in a failed command's stderr is not masked.
 - **`clean` is not a proof.** The transcript check reads the file's end and matches the value whole.
+- **Owner-only is an honest-client rule.** Allowing a paste, adding a rule and answering a plan refuse a caller
+  that says it is a ferret, as every route under the admin token does ([input requests](input-requests.md)). A
+  ferret that clears its own session variables and reads the admin token is taken for the owner, and since
+  allowing a paste needs no value and no terminal, that is one command. It gains no more than the
+  [secrets](secrets.md) boundary already gives it; it is said here so nobody reads "owner only" as stronger.
+- **A rule trusts a program's name.** tmux reports the foreground command's name, so a program named `vercel`
+  that the agent wrote itself matches a `terminal:vercel` rule. Approve routes into programs you know the
+  ferret is running, and prefer a count or an expiry.
 - **Command arguments are the agent's own words.** They are not audited (only their count), but they are in
   the agent's transcript, so a secret belongs in a `${secret:NAME}` use, never in `argv`.
 - **Not zeroed, not locked.** Strings are immutable in the runtime; "let go of" means unreachable.
@@ -125,7 +166,8 @@ the audit are all the input bridge's own. The card names source and destination 
 
 | Phase | What                                                                                                 | State       |
 | ----- | ---------------------------------------------------------------------------------------------------- | ----------- |
-| SC1   | This contract, the in-memory store, command capture, masking, exposure check, `secure_*` agent tools | this change |
-| SC2   | Paste to a terminal prompt and to the secret store, pre-approval rules and the plan card, `fy copy`  | later       |
+| SC1   | This contract, the in-memory store, command capture, masking, exposure check, `secure_*` agent tools | done        |
+| SC2a  | Paste to a terminal prompt, pre-approval rules and the plan card, `fy copy`, Allow on the input card | this change |
+| SC2b  | Paste to the secret store, with the exact-NAME rule                                                  | later       |
 | SC3   | Page and clipboard capture, paste to a browser field, page-read and screenshot hiding                | later       |
 | SC4   | The app's paste and plan cards, Settings, and the agent instruction                                  | later       |

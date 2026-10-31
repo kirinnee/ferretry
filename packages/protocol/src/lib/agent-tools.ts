@@ -58,10 +58,14 @@ import { LoginEntryIdSchema } from './login-entries.ts';
 import {
   COPY_MAX_LIFETIME_SECONDS,
   COPY_MAX_LIVE_PER_SESSION,
+  COPY_PLAN_MAX_ITEMS,
+  COPY_PLAN_MAX_LIFETIME_SECONDS,
   CopyCommandReportSchema,
   CopyHandleSchema,
   CopyMetaSchema,
   CopyNameSchema,
+  CopyPlanItemSchema,
+  CopyPlanSchema,
   CopySourceSchema,
 } from './secure-copy.ts';
 import { SurfaceKeySchema, SurfaceKindSchema, SurfaceNameSchema } from './surface-names.ts';
@@ -622,6 +626,22 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
   }),
   z.strictObject({ tool: z.literal('secure.list') }),
   z.strictObject({ tool: z.literal('secure.discard'), handle: CopyHandleSchema }),
+  z.strictObject({
+    tool: z.literal('secure.paste'),
+    handle: CopyHandleSchema,
+    /** Where it goes: a terminal prompt the agent opened. The daemon observes what reads it. */
+    to: z.strictObject({ kind: z.literal('terminal'), name: SurfaceKeySchema }),
+    /** What the paste is for, shown to the owner as the agent's words. */
+    prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
+    submit: InputSubmitModeSchema.optional(),
+    expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
+  }),
+  z.strictObject({
+    tool: z.literal('secure.preapprove'),
+    /** The pastes the agent plans, before it starts: one card, the owner ticks what it allows. */
+    items: z.array(CopyPlanItemSchema).min(1).max(COPY_PLAN_MAX_ITEMS),
+    expiresInSeconds: z.number().int().min(300).max(COPY_PLAN_MAX_LIFETIME_SECONDS).optional(),
+  }),
 ]);
 export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 export type AgentToolName = AgentToolCall['tool'];
@@ -696,6 +716,8 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'secure.copy',
   'secure.list',
   'secure.discard',
+  'secure.paste',
+  'secure.preapprove',
 ];
 
 /** One surface as a list call shows it. An unnamed surface is still listed, by id. */
@@ -742,6 +764,8 @@ export const AgentToolResultSchema = z.strictObject({
     .optional(),
   /** `secure.copy` from a command: how it ended and its masked stderr, never its stdout. */
   command: CopyCommandReportSchema.optional(),
+  /** `secure.preapprove` only: the plan card raised for the owner. */
+  plan: CopyPlanSchema.optional(),
 });
 export type AgentToolResult = z.infer<typeof AgentToolResultSchema>;
 
