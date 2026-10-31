@@ -95,6 +95,13 @@ export interface ApiResponse {
   readonly status: number;
   readonly headers: ReadonlyMap<string, string>;
   readonly body: string;
+  /**
+   * The last word before the response leaves the dispatcher: a route whose body names something that can be
+   * sealed after the route built it (a terminal that a secret was just typed into) hands back a way to
+   * spell it again. The dispatcher calls it once, synchronously, after the route has finished, and sends
+   * what it returns.
+   */
+  readonly late?: () => ApiResponse;
 }
 
 /**

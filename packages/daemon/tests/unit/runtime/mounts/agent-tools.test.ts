@@ -333,6 +333,37 @@ describe('the agent tools routes — publication at the transport', () => {
     should(String(answered.body)).not.containEql(SCREEN);
   });
 
+  it.each([['an agent'], ['a person']])(
+    'should not spell a screen read for %s when a hold begins after the route last checked',
+    async (who: string) => {
+      let held = false;
+      const world = agentToolWorld({ quarantinedUntil: () => (held ? Date.now() + 60_000 : undefined) });
+      await world.service.call({ kind: 'agent', sessionId: 's1' }, { tool: 'terminal.open', name: 'dev' });
+      world.terminals.screens.set('000000000001', SCREEN);
+      const publish = world.service.publish.bind(world.service);
+      let publications = 0;
+      world.service.publish = result => {
+        publications += 1;
+        if (publications === 2) queueMicrotask(() => (held = true));
+        return publish(result);
+      };
+      const dispatch = new ApiDispatcher(
+        new ApiRouter(agentToolRoutes(world.service, world.identities)),
+        CREDENTIALS,
+        GRANTED,
+      );
+      const call = { tool: 'terminal.read', name: 'dev' } as const;
+
+      const answered = await dispatch.dispatch(
+        who === 'an agent' ? agentCall(call) : personCall('/v1/sessions/s1/surfaces/terminals/tools', call),
+      );
+
+      should(publications).equal(3);
+      should(answered.status).equal(409);
+      should(String(answered.body)).not.containEql(SCREEN);
+    },
+  );
+
   it('should not spell a screen read for a person when a hold begins after the service last checked', async () => {
     const dispatch = await racing();
 

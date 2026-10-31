@@ -220,6 +220,32 @@ describe('the owner request list — publication at the transport', () => {
     should(String(answered.body)).containEql('sudo wants your password');
   });
 
+  it('should mask the facts of a terminal a hold took after the route last sealed them', async () => {
+    const { service, quarantine } = inputRequestService({
+      facts: { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY }, promptLine: 'pane-prompt-CANARY' },
+      names: ['dev', '000000000001'],
+    });
+    await service.raise(SESSION, RAISE);
+    const until = service.quarantinedUntil.bind(service);
+    let checked = false;
+    service.quarantinedUntil = (...args: Parameters<typeof until>) => {
+      const end = until(...args);
+      if (!checked) {
+        checked = true;
+        queueMicrotask(() => void quarantine.begin(SESSION, ['dev', '000000000001'], 'late'));
+      }
+      return end;
+    };
+    const dispatch = new ApiDispatcher(new ApiRouter(inputRequestRoutes(service)), CREDENTIALS, GRANTED);
+
+    const answered = await dispatch.dispatch(request({ method: 'GET', path: '/v1/input-requests', headers: human }));
+
+    should(answered.status).equal(200);
+    should(answered.late).be.undefined();
+    should(String(answered.body)).not.containEql(CANARY);
+    should(String(answered.body)).not.containEql('pane-prompt-CANARY');
+  });
+
   it('should leave the facts of a terminal that is not quarantined as they are', async () => {
     const { service } = inputRequestService({ facts: { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY } } });
     await service.raise(SESSION, RAISE);

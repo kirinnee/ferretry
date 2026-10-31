@@ -478,6 +478,41 @@ describe('ApiDispatcher error handling', () => {
     should(jsonBody(response).code).equal('internal_error');
   });
 
+  it('should send what a route spells again as its last word, keeping the route cache policy', async () => {
+    const route: ApiRoute = {
+      method: 'GET',
+      path: '/late',
+      minimum: 'none',
+      noStore: true,
+      handle: async () => ({ ...jsonResponse({ shown: 'first' }), late: () => jsonResponse({ shown: 'last' }) }),
+    };
+
+    const response = await dispatcherFor(route).dispatch(request({ path: '/late' }));
+
+    should(jsonBody(response)).deepEqual({ shown: 'last' });
+    should(response.late).be.undefined();
+    should(response.headers.get('cache-control')).equal('no-store');
+  });
+
+  it('should answer a refusal raised by a route last word like any other', async () => {
+    const route: ApiRoute = {
+      method: 'GET',
+      path: '/late',
+      minimum: 'none',
+      handle: async () => ({
+        ...jsonResponse({ shown: 'first' }),
+        late: () => {
+          throw new ApiError(409, 'held', 'conflict');
+        },
+      }),
+    };
+
+    const response = await dispatcherFor(route).dispatch(request({ path: '/late' }));
+
+    should(response.status).equal(409);
+    should(response.body).not.containEql('first');
+  });
+
   it('should handle a thrown non-Error just as safely', async () => {
     // Arrange
     const dispatcher = dispatcherFor(failing('a bare string'));

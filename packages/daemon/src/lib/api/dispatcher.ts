@@ -488,7 +488,8 @@ export class ApiDispatcher {
 async function run(route: ApiRoute, context: RouteContext): Promise<ApiResponse> {
   let response: ApiResponse;
   try {
-    response = await route.handle(context);
+    const built = await route.handle(context);
+    response = built.late === undefined ? built : built.late();
   } catch (error) {
     response =
       error instanceof ApiError

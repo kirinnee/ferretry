@@ -136,13 +136,16 @@ function controllerOf(context: RouteContext): SurfaceController {
 const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
   call.tool === 'input.wait' ? undefined : call.tool.startsWith('terminal.') ? 'terminal' : 'browser';
 
-/** The last synchronous step before the body is spelled: a hold taken since the service answered still wins. */
+/** A hold taken since the service answered still wins, now and again as the dispatcher sends the body. */
 function published(service: AgentToolService, result: AgentToolResult): ApiResponse {
-  try {
-    return jsonResponse(service.publish(result));
-  } catch (error) {
-    return answered(error);
-  }
+  const spell = (): ApiResponse => {
+    try {
+      return jsonResponse(service.publish(result));
+    } catch (error) {
+      return answered(error);
+    }
+  };
+  return { ...spell(), late: spell };
 }
 
 async function agentCall(

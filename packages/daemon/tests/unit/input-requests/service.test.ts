@@ -1649,6 +1649,60 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
     should(JSON.stringify(delivered)).not.containEql('"consumer":"sudo"');
   });
 
+  describe('audit records while a terminal is held', () => {
+    const CANARY = 'pane-consumer-CANARY';
+    const facts = { ...FACTS, foreground: { ...FACTS.foreground, comm: CANARY } };
+
+    // R8-3
+    it('should keep the consumer out of the record of a refused check on a request whose terminal is held', async () => {
+      const live = await raised({ facts, names: NAMES });
+      await live.service.raise(SESSION, { ...RAISE, target: { kind: 'terminal', key: '000000000001' } });
+      const second = (await live.service.list(HOST)).find(request => request.id !== live.id);
+      await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
+      should(live.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
+
+      await live.service.deliver(SESSION, second?.id ?? '', bodyFor('not-the-digest'), HOST).catch(() => undefined);
+
+      const record = live.w.audits.filter(entry => entry.event === 'input.refused').at(-1);
+      should(record).not.be.undefined();
+      should(JSON.stringify(record)).not.containEql(CANARY);
+    });
+
+    // R8-3
+    it('should keep the consumer out of the record of a request raised on a terminal that is already held', async () => {
+      const live = await raised({ facts, names: NAMES });
+      await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
+
+      await live.service.raise(SESSION, RAISE);
+
+      const record = live.w.audits.filter(entry => entry.event === 'input.requested').at(-1);
+      should(JSON.stringify(record)).not.containEql(CANARY);
+    });
+
+    // R8-3
+    it('should keep the consumer out of the cancellation record when a hold begins while the cancellation is journalled', async () => {
+      const live = await raised({ facts, names: NAMES });
+      const journal = live.w.events;
+      const publish = (
+        live.service as unknown as { deps: { journal: { publish: (s: string, e: InputEvent) => Promise<void> } } }
+      ).deps.journal.publish;
+      (live.service as unknown as { deps: { journal: { publish: typeof publish } } }).deps.journal.publish = async (
+        session: string,
+        event: InputEvent,
+      ) => {
+        await publish(session, event);
+        if (event.state === 'cancelled') live.quarantine.begin(SESSION, NAMES, 'concurrent');
+      };
+
+      await live.service.cancel(SESSION, live.id, HOST);
+
+      should(journal.at(-1)?.state).equal('cancelled');
+      should(live.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
+      const record = live.w.audits.filter(entry => entry.event === 'input.cancelled').at(-1);
+      should(JSON.stringify(record)).not.containEql(CANARY);
+    });
+  });
+
   it('should hold a restored delivering request’s terminal for a fresh window, because the write may have landed', async () => {
     const live = await raised({ names: NAMES });
     live.w.gate = new Promise<void>(() => undefined);
@@ -1753,6 +1807,43 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
       should(live.service.quarantinedUntil(SESSION, ['dev'])).equal(live.w.now + WINDOW);
       should(live.service.quarantinedUntil(SESSION, ['000000000001'])).equal(live.w.now + WINDOW);
     });
+    // R8-1
+    it('should keep a live delivery pinned, under every alias, when its own session replay read was stalled and then reads the live hold', async () => {
+      let open: () => void = () => undefined;
+      const live = build({ names: NAMES });
+      live.w.quarantinesGate = {
+        session: SESSION,
+        gate: new Promise<void>(resolve => {
+          open = resolve;
+        }),
+      };
+      live.w.quarantineHistory = live.w.quarantineEvents;
+      live.quarantine.lock();
+      const restoring = live.service.restore();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      await live.service.raise(SESSION, RAISE);
+      const [request] = await live.service.list(HOST);
+      let finish: () => void = () => undefined;
+      live.w.gate = new Promise<void>(resolve => {
+        finish = resolve;
+      });
+      const delivering = live.service.deliver(SESSION, request?.id ?? '', bodyFor(request?.observedDigest ?? ''), HOST);
+      await new Promise(resolve => setTimeout(resolve, 0));
+      should(live.w.writes.length).equal(1);
+
+      open();
+      await restoring;
+
+      should(live.quarantine.unresolved(SESSION).length).equal(1);
+      should(live.w.quarantineEvents.at(-1)?.unresolved).equal(true);
+      live.w.now += WINDOW + 1;
+      should(live.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
+      should(live.service.quarantinedUntil(SESSION, ['000000000001'])).not.be.undefined();
+      finish();
+      await delivering;
+      should(live.service.quarantinedUntil(SESSION, ['dev'])).equal(live.w.now + WINDOW);
+    });
+
     // R6-1
     it('should keep a successful delivery held, under every name, when the settlement could not be recorded and the daemon restarts', async () => {
       const live = await raised({ names: NAMES, quarantineBudget: 1 });

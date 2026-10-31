@@ -93,9 +93,12 @@ function sealed(service: InputRequestService, request: InputRequest): InputReque
 async function list(service: InputRequestService, context: RouteContext, all: boolean): Promise<ApiResponse> {
   const caller = ownerOf(context);
   const requests = await service.list(caller, all ? undefined : sessionOf(context)).catch(answered);
-  // The last synchronous step before the body is spelled: a hold taken since the service answered still wins.
-  const body: InputRequestList = { requests: requests.map(request => sealed(service, request)) };
-  return jsonResponse(body);
+  // A hold taken since the service answered still wins, now and again as the dispatcher sends it.
+  const spell = (): ApiResponse => {
+    const body: InputRequestList = { requests: requests.map(request => sealed(service, request)) };
+    return jsonResponse(body);
+  };
+  return { ...spell(), late: spell };
 }
 
 export function inputRequestRoutes(service: InputRequestService): readonly ApiRoute[] {
