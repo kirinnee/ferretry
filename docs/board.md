@@ -335,6 +335,13 @@ that sends nothing back. Whichever ferret the reopen reaches gets a copy in its 
 fails, the line still lands with a sentence saying the files did not. A daemon reports
 `board.reopen.attachments.1` on `GET /v1/health` when it takes files; the app offers attaching only there.
 
+The upload rides the same carrier as every other call to that machine (the router's fetch), because a paired
+device holds no bearer value: the device key that opened the session is the credential, and a request sent over
+the raw network reaches the daemon as nobody and is refused `401 unauthorized`. The session attachment store
+keeps files by session id and does not require the session to be running, so a card whose ferret has stopped or
+finished still takes files; they wait in that session until the reopen carries them to whichever ferret it
+reaches. A `401 unauthorized` on an upload reads "pair it again from Settings", not the bare word.
+
 While a move is in flight, the pressed button shows a spinner and both answers are disabled; a refusal is
 shown next to them.
 

@@ -4,8 +4,8 @@ import { ChatProse } from '../../../src/components/chat-prose.tsx';
 import { AgendaBriefSections, PointForm } from '../../../src/features/agenda/agenda-brief.tsx';
 import { AgendaQuickReplies } from '../../../src/features/agenda/agenda-quick-replies.tsx';
 import { cardModel } from '../../../src/lib/agenda-card-model.ts';
-import { itemOptions } from '../../../src/lib/agenda-options.ts';
 import { swipeMap } from '../../../src/lib/agenda-inbox.ts';
+import { itemOptions } from '../../../src/lib/agenda-options.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { type Mounted, mount, must } from '../../support/dom.ts';
 
@@ -120,57 +120,60 @@ describe('the quick replies, lettered', () => {
         map={swipeMap(item)}
         model={cardModel(item)}
         onAct={() => {}}
-        onSkip={() => {}}
+        onDown={() => {}}
         options={itemOptions(item)}
         swipeable
       />,
     );
   };
   const buttons = (): HTMLButtonElement[] => [...root().querySelectorAll<HTMLButtonElement>('[data-agenda-option]')];
+  const said = (): string[] => buttons().map(button => button.querySelector('.fy-qr__label')?.textContent ?? '');
 
-  test('one row of letters by direction (← ↑ →), each named by its full label, the recommended one marked', async () => {
+  test('one row of letters in the list’s order (← ↑ →), each named by its full label, the recommended one marked', async () => {
     await draw(jaeda);
     expect(root().querySelectorAll('fieldset')).toHaveLength(1);
     expect(buttons().map(button => button.dataset.agendaAnswer)).toEqual(['left', 'up', 'right']);
-    expect(buttons().map(button => button.textContent)).toEqual(['B', 'A', 'C']);
+    expect(said()).toEqual(['A', 'B', 'C']);
     expect(buttons().map(button => button.dataset.agendaOption)).toEqual([
-      'Retry with backoff',
       'Lock the session row',
+      'Retry with backoff',
       'Do nothing at all',
     ]);
     expect(buttons().map(button => button.title)).toEqual([
-      'Retry with backoff',
       'Lock the session row',
+      'Retry with backoff',
       'Do nothing at all',
     ]);
-    expect(buttons()[1]?.getAttribute('aria-label')).toBe('Lock the session row, recommended, or swipe up');
-    expect(buttons()[1]?.hasAttribute('data-recommended')).toBe(true);
-    expect(buttons()[0]?.hasAttribute('data-recommended')).toBe(false);
+    expect(buttons()[0]?.getAttribute('aria-label')).toBe('Lock the session row, recommended, or swipe left');
+    expect(buttons()[0]?.hasAttribute('data-recommended')).toBe(true);
+    expect(buttons()[1]?.hasAttribute('data-recommended')).toBe(false);
   });
 
-  test('a row reads one way: short labels stay words, but one long label letters the whole row', async () => {
+  test('a row reads one way: one label that is not a single word letters the whole row', async () => {
     await draw(agendaItem('A60', { ask: choices('Looks good', 'Needs a different approach') } as Partial<AgendaItem>));
-    expect(buttons().map(button => button.textContent)).toEqual(['B', 'A']);
+    expect(said()).toEqual(['A', 'B']);
     await view?.unmount();
     await draw(agendaItem('A63', { ask: choices('Looks good', 'Skip') } as Partial<AgendaItem>));
-    expect(buttons().map(button => button.textContent)).toEqual(['Skip', 'Looks good']);
+    expect(said()).toEqual(['A', 'B']);
+    await draw(agendaItem('A64', { ask: choices('Ship', 'Skip') } as Partial<AgendaItem>));
+    expect(said()).toEqual(['Ship', 'Skip']);
   });
 
-  test('an old choice past the third option gets a second row, lettered like the first, and no menu', async () => {
+  test('an old choice past the third option keeps ONE row of three: the fourth is the card list’s', async () => {
     const many = agendaItem('A61', {
       ask: choices('Now and here', 'Later on today', 'Never ever again', 'Maybe some day'),
     });
     await draw(many);
-    expect(buttons().map(button => button.textContent)).toEqual(['B', 'A', 'C', 'D']);
-    const more = must(root().querySelector('[data-agenda-more-row]'), 'the second row');
-    expect(more.textContent).toBe('D');
-    expect(must(more.querySelector('button'), 'D').title).toBe('Maybe some day');
+    expect(said()).toEqual(['A', 'B', 'C']);
+    expect(root().querySelector('[data-agenda-more-row]')).toBeNull();
     expect(root().querySelector('[aria-haspopup="menu"]')).toBeNull();
   });
 
   test('answers that are not options of the ask stay in swipe order, whole labels', async () => {
     await draw(agendaItem('A62', { ask: { kind: 'permission' } } as Partial<AgendaItem>));
     expect(buttons().length).toBeGreaterThan(0);
-    expect(buttons().every(button => button.textContent === button.dataset.agendaOption)).toBe(true);
+    expect(
+      buttons().every(button => button.querySelector('.fy-qr__label')?.textContent === button.dataset.agendaOption),
+    ).toBe(true);
   });
 });

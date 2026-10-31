@@ -24,7 +24,7 @@ const machine: FleetMachineView = {
   setUp: true,
   agentPermissions: 'auto',
   defaultRuntime: 'claude-default',
-  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
   autoResume: true,
   lastAutoResume: {
     at: '2026-10-21T08:00:00.000Z',

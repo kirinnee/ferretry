@@ -5,6 +5,7 @@ export * from './digest.ts';
 export * from './discovery-pacing.ts';
 export * from './image-reader.ts';
 export * from './log-page.ts';
+export * from './log-search.ts';
 export * from './message-token.ts';
 export * from './provenance.ts';
 export * from './reader.ts';

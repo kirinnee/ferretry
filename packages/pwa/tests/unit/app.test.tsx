@@ -2404,7 +2404,7 @@ describe('AppShell', () => {
     }
   });
 
-  it('draws the ferret’s last messages as the History of the phone deck’s item, read through the machine the item came from', async () => {
+  it('draws only what was said about the phone deck’s item as its History, read through the machine the item came from', async () => {
     const restore = patchGlobal(window, 'innerWidth', 390);
     const { view } = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId], {
       sessions: ['shared'],
@@ -2412,7 +2412,8 @@ describe('AppShell', () => {
       sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
       attention: sessionId => agendaSnapshot(sessionId, [externalAgendaItem]),
       messages: () => [
-        { role: 'user', text: 'Can you rotate the key?' },
+        { role: 'assistant', text: 'Bumped the lockfile.' },
+        { role: 'user', text: '!A3 can you rotate the key?' },
         { role: 'assistant', text: 'Rotated; waiting on your approval.' },
       ],
     });
@@ -2427,7 +2428,9 @@ describe('AppShell', () => {
         node => node.textContent ?? '',
       ).join('\n');
       expect(shown).toContain('Rotated; waiting on your approval.');
-      expect(shown).not.toContain('Can you rotate the key?');
+      expect(shown).not.toContain('lockfile');
+      const owner = view.container.querySelector('[data-agenda-history] [data-history="owner"]')?.textContent ?? '';
+      expect(owner).toContain('can you rotate the key?');
     } finally {
       await view.unmount();
       restore();

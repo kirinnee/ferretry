@@ -23,8 +23,9 @@ import {
   browserTargetOf,
 } from '@ferretry/protocol';
 import { agentSpokenName } from '../../names/session-names.ts';
-import type { BrowserAutomation } from '../transport/automation-contracts.ts';
+import type { BrowserAutomation, BrowserPageActed } from '../transport/automation-contracts.ts';
 import type { BrowserUploadMode } from '../transport/page-acts.ts';
+import type { PageScript } from '../transport/page-script.ts';
 import type { WorkerStagedFile } from '../transport/worker-protocol.ts';
 import type { BrowserViewerHost, ViewerAttachment, ViewerTerminalSignal } from '../transport/viewer-contracts.ts';
 
@@ -123,6 +124,13 @@ export interface BrowserFileResult {
   readonly staged?: WorkerStagedFile;
 }
 
+/** An agent's own script on one page: the page's status, the page as it is now, and what the script returned. */
+export interface BrowserScriptResult {
+  readonly status: BrowserActionResult['status'];
+  readonly result: BrowserPageActed;
+  readonly text: string;
+}
+
 /** How a named page is opened. */
 export interface BrowserOpenOptions {
   readonly url?: string;
@@ -167,6 +175,16 @@ export interface BrowserSubsystem extends BrowserViewerHost {
   ): Promise<BrowserLifecycleOutcome>;
   /** Names a page of this session that has no name — a popup its page opened — and credits `openedBy` with it. */
   adoptPage(sessionId: string, key: string, name: string, openedBy?: SurfaceOpener): Promise<BrowserPageSummary>;
+  /**
+   * An agent's own script on this session's page (`browser.eval`), in an isolated world: the same
+   * queue, guard and rules as {@link actOnPage}. Whether the owner allows it is the caller's to check.
+   */
+  scriptOnPage(
+    sessionId: string,
+    key: string,
+    script: PageScript,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserScriptResult>;
   /** The file tools' acts on this session's page: the same queue, guard and rules as {@link actOnPage}. */
   filesOnPage(
     sessionId: string,
@@ -382,6 +400,24 @@ export class BrowserSessionService implements BrowserSubsystem {
       run.snapshot = pageOf(result);
       this.touch(run);
       return { status: this.project(run, sessionId), result, ...(staged === undefined ? {} : { staged }) };
+    });
+  }
+
+  async scriptOnPage(
+    sessionId: string,
+    key: string,
+    script: PageScript,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserScriptResult> {
+    await this.requireSession(sessionId);
+    const run = this.requireRunning();
+    const page = this.requirePage(run, sessionId, key);
+    return await this.exclusive(page.id, async () => {
+      await guard?.();
+      const { text, ...result } = await run.driver.evaluate(page.id, script);
+      run.snapshot = pageOf(result);
+      this.touch(run);
+      return { status: this.project(run, sessionId), result, text };
     });
   }
 

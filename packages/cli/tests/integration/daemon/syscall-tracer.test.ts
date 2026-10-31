@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import { writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import should from 'should';
 import { bunTracerHost, PlatformSyscallTracer, type TracerHost } from '../../../src/adapters/daemon/syscall-tracer.ts';
 
@@ -31,7 +31,7 @@ function host(overrides: Partial<TracerHost> = {}): TracerHost & { readonly ran:
       if (output >= 0) file = argv[output + 1] ?? '';
       return { code: 0, stdout: argv.includes('/usr/bin/fs_usage') ? FS_USAGE : '', stderr: '' };
     },
-    scratchFile: () => '/tmp/trace.txt',
+    scratchFile: async () => '/tmp/trace.txt',
     readText: async path => {
       should(path).equal(file);
       return STRACE;
@@ -116,6 +116,22 @@ describe('PlatformSyscallTracer', () => {
     should(actual.reason).match(expected);
   });
 
+  it('should say so, and run nothing, when it has nowhere private to write the trace', async () => {
+    // Arrange
+    const scripted = host({
+      scratchFile: async () => {
+        throw new Error('EACCES');
+      },
+    });
+
+    // Act
+    const actual = await new PlatformSyscallTracer(scripted).trace(1, 1);
+
+    // Assert
+    should(actual).deepEqual({ kind: 'unavailable', reason: 'there was nowhere private to write the trace' });
+    should(scripted.ran).deepEqual([]);
+  });
+
   it('should say a trace recorded nothing, with the tracer’s first words or its exit', async () => {
     // Arrange
     const quietStrace = host({
@@ -142,25 +158,75 @@ describe('PlatformSyscallTracer', () => {
 describe('bunTracerHost', () => {
   it('should run real processes: an interactive one, and a traced one stopped after its seconds', async () => {
     // Arrange
-    const subject = bunTracerHost();
-    const file = join(tmpdir(), `fy-tracer-${String(process.pid)}.txt`);
+    const state = await mkdtemp(join(tmpdir(), 'fy-tracer-state-'));
+    const subject = bunTracerHost(state);
+    const file = join(state, `fy-tracer-${String(process.pid)}.txt`);
     await writeFile(file, 'traced');
 
-    // Act
-    const interactive = await subject.interactive(['true']);
-    const traced = await subject.traceFor(['sh', '-c', 'echo started; sleep 30'], 1);
-    const text = await subject.readText(file);
-    await subject.remove(file);
-    const allowed = await subject.mayPtrace();
+    try {
+      // Act
+      const interactive = await subject.interactive(['true']);
+      const traced = await subject.traceFor(['sh', '-c', 'echo started; sleep 30'], 1);
+      const text = await subject.readText(file);
+      await rm(file, { force: true });
+      const allowed = await subject.mayPtrace();
 
-    // Assert
-    should(interactive).equal(0);
-    should(traced.stdout).equal('started\n');
-    should(text).equal('traced');
-    should(await Bun.file(file).exists()).be.false();
-    should(allowed).be.a.Boolean();
-    should(subject.which('sh')).not.be.null();
-    should(subject.scratchFile()).startWith(tmpdir());
-    should(subject.platform).equal(process.platform);
+      // Assert
+      should(interactive).equal(0);
+      should(traced.stdout).equal('started\n');
+      should(text).equal('traced');
+      should(allowed).be.a.Boolean();
+      should(subject.which('sh')).not.be.null();
+      should(subject.platform).equal(process.platform);
+    } finally {
+      await rm(state, { recursive: true, force: true });
+    }
   }, 10_000);
+
+  it('should write the trace into a fresh private directory under the state home, not the shared tmp', async () => {
+    // Arrange
+    const state = await mkdtemp(join(tmpdir(), 'fy-tracer-state-'));
+    const subject = bunTracerHost(state);
+
+    try {
+      // Act
+      const first = await subject.scratchFile();
+      const second = await subject.scratchFile();
+      const modes = await Promise.all(
+        [first, second]
+          .flatMap(file => [stat(dirname(file)), stat(file)])
+          .map(async pending => (await pending).mode & 0o777),
+      );
+
+      // Assert
+      for (const file of [first, second]) {
+        should(file.startsWith(`${state}/trace/fy-trace-`)).be.true();
+        should(file.startsWith(`${tmpdir()}/fy-trace-`)).be.false();
+      }
+      should(dirname(first)).not.equal(dirname(second));
+      // Directory 0700 so no other user can reach the file, and the file itself 0600 so a later
+      // loosening of the directory still does not expose it.
+      should(modes).deepEqual([0o700, 0o600, 0o700, 0o600]);
+    } finally {
+      await rm(state, { recursive: true, force: true });
+    }
+  });
+
+  it('should remove the whole private directory with the trace', async () => {
+    // Arrange
+    const state = await mkdtemp(join(tmpdir(), 'fy-tracer-state-'));
+    const subject = bunTracerHost(state);
+
+    try {
+      const file = await subject.scratchFile();
+
+      // Act
+      await subject.remove(file);
+
+      // Assert
+      should(await readdir(join(state, 'trace'))).deepEqual([]);
+    } finally {
+      await rm(state, { recursive: true, force: true });
+    }
+  });
 });

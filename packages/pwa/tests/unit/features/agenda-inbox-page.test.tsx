@@ -510,34 +510,37 @@ describe('AgendaInboxPage on a phone', () => {
     await mounted.unmount();
   });
 
-  it('puts the primary answer on ↑ and ↓ on skip, says so to a screen reader, and draws no hint line', async () => {
+  it('puts the second option on ↑ (the options list’s order) and Not needed on ↓, says so to a screen reader, and draws no hint line', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true, initialOpen: threeWay.key }));
     const said = mounted.container.querySelector('.fy-attn-deck__top [data-agenda-frame]')?.textContent ?? '';
-    expect(said).toContain('Arrow up: Rebase now.');
-    expect(said).toContain('Arrow down: skip.');
+    expect(said).toContain('Arrow up: Wait.');
+    expect(said).toContain('Arrow down: not needed.');
     expect(mounted.container.textContent).not.toContain('more after this one');
     await mounted.unmount();
   });
 
-  it('draws what the ferret said lately as the item’s History, read once for the open item', async () => {
+  it('draws only what was said ABOUT the item as its History, read once for the open item', async () => {
     const reads: string[] = [];
     const mounted = await mount(
       page(fakeInbox(), [twoWay], {
         phone: true,
         initialOpen: twoWay.key,
-        readRecent: async card => {
+        readConversation: async card => {
           reads.push(card.item.id);
-          return [{ text: 'Cut the release branch.' }, { text: 'Raised !A2 about shipping.' }];
+          return [
+            { id: 'a0', kind: 'assistant', text: 'Cut the release branch.', at: 1 },
+            { id: 'u1', kind: 'user', text: '!A2 is staging green?', at: 2 },
+            { id: 'a1', kind: 'assistant', text: 'Yes, all green.', at: 3 },
+          ];
         },
       }),
     );
     await flush();
     expect(reads).toEqual(['A2']);
-    expect(mounted.container.querySelector('[data-agenda-recent-toggle]')).toBeNull();
     const history = must(mounted.container.querySelector('[data-agenda-history]'), 'the History');
-    expect(history.textContent).toContain('Cut the release branch.');
-    expect(history.textContent).toContain('Raised !A2 about shipping.');
-    expect(history.querySelectorAll('[data-history="ferret"]')).toHaveLength(2);
+    expect(history.textContent).not.toContain('Cut the release branch.');
+    expect(history.querySelector('[data-history="owner"]')?.textContent).toContain('is staging green?');
+    expect(history.querySelector('[data-history="ferret"]')?.textContent).toContain('Yes, all green.');
     await mounted.unmount();
   });
 
@@ -567,7 +570,7 @@ describe('AgendaInboxPage on a phone', () => {
 
   it('draws no History when the ferret has written nothing, a failed read, or a host that cannot read', async () => {
     const quiet = await mount(
-      page(fakeInbox(), [twoWay], { phone: true, initialOpen: twoWay.key, readRecent: async () => [] }),
+      page(fakeInbox(), [twoWay], { phone: true, initialOpen: twoWay.key, readConversation: async () => [] }),
     );
     await flush();
     expect(quiet.container.querySelector('[data-agenda-history]')).toBeNull();
@@ -576,7 +579,7 @@ describe('AgendaInboxPage on a phone', () => {
       page(fakeInbox(), [twoWay], {
         phone: true,
         initialOpen: twoWay.key,
-        readRecent: async () => {
+        readConversation: async () => {
           throw new Error('offline');
         },
       }),

@@ -1,4 +1,5 @@
 import type {
+  QueueAuthor,
   SendCancelEffect,
   SendDisposition,
   SendEvidence,
@@ -117,6 +118,8 @@ export interface SendRecord {
   readonly from?: string | undefined;
   readonly fromName?: string | undefined;
   readonly senderKind?: SendSenderKind | undefined;
+  /** Who sent it, as data, when it did not come through the queue that records that. */
+  readonly by?: QueueAuthor | undefined;
   /** The sender is parked on a reply, so the receiver is told the exact command that unblocks them. */
   readonly replyExpected?: boolean | undefined;
   /** The file a file-backed payload was written to, so a failed transport does not lose the text. */

@@ -86,6 +86,25 @@ export type SendUnaccountedReason = z.infer<typeof SendUnaccountedReasonSchema>;
 export const SendSenderKindSchema = z.enum(['human', 'agent', 'daemon']);
 export type SendSenderKind = z.infer<typeof SendSenderKindSchema>;
 
+/**
+ * WHO A MESSAGE IS FROM, AS DATA. The owner (2026-10-30): "there should not be any append or prepend on any
+ * feature". Who sent a message and which feature it came from are never text in its body: the app reads
+ * them from here and shows a sender chip — "Ferretry · Board", a ferret's name, nothing for the owner.
+ */
+export const QueueAuthorSchema = z.strictObject({
+  kind: z.enum(['owner', 'ferret', 'ferretry']),
+  /** A ferret's name (its callsign), for a ferret's message. */
+  name: z.string().min(1).optional(),
+  /** The part of Ferretry that sent it: Board, Warden, Agenda, Monitor, Lessons, Instructions. */
+  feature: z.string().min(1).optional(),
+  /**
+   * What the message is about, by name, for a row that says so instead of showing the words: the always-on
+   * instruction sections an `Instructions` message restates ("Board", "Notify"…).
+   */
+  sections: z.array(z.string().min(1).max(64)).min(1).max(16).optional(),
+});
+export type QueueAuthor = z.infer<typeof QueueAuthorSchema>;
+
 /** How a `queued` fate was proven. */
 export const SendQueueProofSchema = z.enum(['transcript', 'pane']);
 export type SendQueueProof = z.infer<typeof SendQueueProofSchema>;
@@ -135,6 +154,8 @@ export const SendRecordSchema = z.object({
   fromName: z.string().optional(),
   /** Who asked for it. A person retries by hand; an agent's sends are retried by the daemon. */
   senderKind: SendSenderKindSchema.optional(),
+  /** Who sent it, as data, when the send never went through the queue that would have said so (see {@link QueueAuthorSchema}). */
+  by: QueueAuthorSchema.optional(),
   replyExpected: z.boolean().optional(),
   held: z.boolean().optional(),
   withdrawn: z.boolean().optional(),
@@ -1257,8 +1278,42 @@ export const InflightItemSchema = z.strictObject({
   detail: z.string().optional(),
   age: z.string().optional(),
   blocks: z.boolean(),
+  /**
+   * Set on a process the agent started from its own tool shell and left running — a background job of
+   * the agent's, which the agent can be asked to stop (`askToStopJobs`). Absent on everything else,
+   * and on every item from a daemon that predates it.
+   */
+  backgroundJob: z.literal(true).optional(),
+  /** The process id, carried on a background job so the agent can be told which one. */
+  pid: PositiveIntegerSchema.optional(),
 });
 export type InflightItem = z.infer<typeof InflightItemSchema>;
+
+/** The ask names nothing: the daemon looks again and asks about what it finds. */
+export const AskToStopJobsRequestSchema = z.strictObject({});
+export type AskToStopJobsRequest = z.infer<typeof AskToStopJobsRequestSchema>;
+
+/** One of the agent's background jobs a refused migration asked it to stop. */
+export const AgentJobSchema = z.strictObject({
+  pid: PositiveIntegerSchema,
+  /** The command line, trimmed to one line. */
+  command: z.string().min(1),
+  age: z.string().optional(),
+});
+export type AgentJob = z.infer<typeof AgentJobSchema>;
+
+/**
+ * `POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs`: the daemon looked again, found the agent's
+ * own background jobs that block a migration, and queued ONE message asking the agent to stop them
+ * (or say why not). It stops nothing itself. `alreadyAsked` means the same jobs were asked about before
+ * and that message is the one answered with, so a second press never asks twice.
+ */
+export const AskToStopJobsResultSchema = z.strictObject({
+  messageId: z.string().min(1),
+  jobs: z.array(AgentJobSchema).min(1),
+  alreadyAsked: z.boolean(),
+});
+export type AskToStopJobsResult = z.infer<typeof AskToStopJobsResultSchema>;
 
 /**
  * Why a Restart (a migration) was refused, as data. `restartsWithCli` counts the processes the

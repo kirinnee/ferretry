@@ -1839,6 +1839,7 @@ describe('deriveAccountChange: machine.settings', () => {
       browsers: true,
       files: false,
       ferretrySettings: false,
+      pageScripts: false,
     });
     should(edit.consequences).deepEqual(['Applies to an agent’s next action; nothing already running is interrupted.']);
   });
@@ -1864,7 +1865,7 @@ describe('deriveAccountChange: machine.settings', () => {
       kind: 'machine.settings',
       agentPermissions: 'auto',
       defaultRuntime: null,
-      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true },
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true, pageScripts: false },
     });
 
     // Assert
@@ -1875,7 +1876,9 @@ describe('deriveAccountChange: machine.settings', () => {
   it('should leave Ferretry settings as it is when a client that predates it leaves it out', () => {
     // Arrange — the owner turned it on; an older client sends only the three it knows.
     const model = modelOf({
-      machine: { agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true } },
+      machine: {
+        agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: true, pageScripts: false },
+      },
     });
 
     // Act
@@ -1896,6 +1899,7 @@ describe('deriveAccountChange: machine.settings', () => {
       browsers: true,
       files: true,
       ferretrySettings: true,
+      pageScripts: false,
     });
   });
 });

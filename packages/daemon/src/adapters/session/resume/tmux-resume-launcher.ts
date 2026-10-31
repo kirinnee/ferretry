@@ -3,6 +3,7 @@ import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
 import type { AccountLaunchRenewal } from '../../../lib/fleet/launch-renewal.ts';
 import { type SessionPaneFolders, sessionPaneEnvironment } from '../../../lib/session/lifecycle/policy.ts';
+import type { SessionCredentialRotator } from '../../../lib/session/lifecycle/types.ts';
 import {
   type PaneObservation,
   type ResumeLauncher,
@@ -112,6 +113,13 @@ export class TmuxResumeLauncher implements ResumeLauncher {
     private readonly files?: SessionPaneFolders,
     /** The CLI's binary name; see the launch path's identical parameter. */
     private readonly clientName?: string,
+    /**
+     * Re-issues the session's credential for the replacement pane, so the copy the replaced pane held
+     * dies with it. Asked by `relaunch` alone — never by the reads that merely address the pane — and
+     * BEFORE the spec is built, because the spec's environment is where the new plaintext is read
+     * from. Absent means the replacement inherits the credential the session already had.
+     */
+    private readonly credential?: SessionCredentialRotator,
   ) {}
 
   async observe(id: SessionId): Promise<PaneObservation> {
@@ -139,6 +147,9 @@ export class TmuxResumeLauncher implements ResumeLauncher {
    * first launch.
    */
   async relaunch(id: SessionId): Promise<SessionLaunchInstructions | undefined> {
+    // The replaced pane is already gone here — a revive kills it, or found it gone, before it
+    // relaunches — so no live agent loses the credential it is holding.
+    await this.credential?.rotate(id);
     const spec = await this.spec(id);
     const account =
       spec.agent === undefined ? {} : ((await this.accountEnvironment?.forWrapper(spec.agent, spec.cwd)) ?? {});

@@ -137,13 +137,16 @@ export type FleetMachineAuthority = z.infer<typeof FleetMachineAuthoritySchema>;
 /**
  * "What agents may control" (T, session-spec.html Settings): terminals, browsers and files, each on/off,
  * and Ferretry settings — whether an agent may edit this machine's configuration files with the
- * `config.*` tools (docs/config-files.md), off unless the owner turns it on.
+ * `config.*` tools (docs/config-files.md), off unless the owner turns it on; and Page scripts — whether
+ * an agent may run its own JavaScript in a page (`browser.eval`), off unless the owner turns it on.
+ * Absent from an older daemon, which has no Page scripts: read as off.
  */
 export const FleetAgentControlSchema = z.strictObject({
   terminals: z.boolean(),
   browsers: z.boolean(),
   files: z.boolean(),
   ferretrySettings: z.boolean(),
+  pageScripts: z.boolean().default(false),
 });
 export type FleetAgentControl = z.infer<typeof FleetAgentControlSchema>;
 
@@ -752,7 +755,10 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
      */
     defaultRuntime: NonEmptyStringSchema.nullable(),
     /** `ferretrySettings` may be left out by a client that predates it, and is then left as it is. */
-    agentControl: FleetAgentControlSchema.extend({ ferretrySettings: z.boolean().optional() }),
+    agentControl: FleetAgentControlSchema.extend({
+      ferretrySettings: z.boolean().optional(),
+      pageScripts: z.boolean().optional(),
+    }),
     /** Left out by a client that predates it, and then left as it is. */
     browserMode: BrowserModeSchema.optional(),
     /** Left out by a client that predates it, and then left as it is; `null` turns the proxy off. */

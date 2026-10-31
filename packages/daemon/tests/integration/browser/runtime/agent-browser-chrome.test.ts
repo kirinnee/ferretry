@@ -123,6 +123,11 @@ beforeAll(async () => {
           headers: { 'content-type': 'text/csv', 'content-disposition': 'attachment; filename="data.csv"' },
         });
       if (url.pathname === '/pointer') return new Response(POINTER_PAGE, { headers: { 'content-type': 'text/html' } });
+      if (url.pathname === '/script')
+        return new Response(
+          '<html><body><p id="o">hello</p><script>window.appSecret = "page-only"; JSON.stringify = () => "tampered";</script></body></html>',
+          { headers: { 'content-type': 'text/html' } },
+        );
       if (url.pathname === '/form')
         return new Response(
           '<html><body><label>Name <input id="n"></label>' +
@@ -176,6 +181,7 @@ beforeAll(async () => {
     }),
     audit: { record: async () => undefined },
     redactor: NO_REDACTION,
+    binaryName: 'fy',
     clock: { now: () => Date.now() },
     sleep: async milliseconds => await Bun.sleep(milliseconds),
   });
@@ -196,6 +202,43 @@ async function refOf(name: string, text: string): Promise<string> {
 }
 
 describe('the machine agent browser, in a real Chrome', () => {
+  it('should run a page script in a world of its own: the page’s DOM, none of its JavaScript', async () => {
+    // Arrange — the page sets a variable and patches JSON.stringify; neither may reach the script.
+    await tools.call(agent('s1'), { tool: 'browser.open', name: 'script', url: `${base}/script` });
+
+    // Act
+    const page = await tools.call(agent('s1'), {
+      tool: 'browser.eval',
+      name: 'script',
+      function: '() => ({ text: document.querySelector("#o").textContent, secret: typeof window.appSecret })',
+    });
+    const element = await tools.call(agent('s1'), {
+      tool: 'browser.eval',
+      name: 'script',
+      function: '(element) => element.textContent.toUpperCase()',
+      selector: '#o',
+    });
+    const marks = await tools.call(agent('s1'), {
+      tool: 'browser.eval',
+      name: 'script',
+      function: '() => document.querySelectorAll("[data-ferretry-script]").length',
+    });
+    const thrown = await tools
+      .call(agent('s1'), { tool: 'browser.eval', name: 'script', function: '() => { throw new Error("boom") }' })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    // Assert
+    should(page.output).equal('{"text":"hello","secret":"undefined"}');
+    should(element.output).equal('"HELLO"');
+    should(marks.output).equal('0');
+    should(thrown).be.instanceOf(AgentToolError);
+    should((thrown as AgentToolError).message).containEql('boom');
+    await tools.call(agent('s1'), { tool: 'browser.close', name: 'script' });
+  }, 60_000);
+
   it('should act on the refs a snapshot hands out, and refuse a ref the page no longer knows', async () => {
     // Arrange
     await tools.call(agent('s1'), { tool: 'browser.open', name: 'refs', url: `${base}/form` });

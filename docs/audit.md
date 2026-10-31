@@ -94,7 +94,7 @@ actor phrases (`this computer`, `a supervising agent`, …).
 | `device.key-rotated`   | `AuditedPairingService.rotateDeviceKey`, inside a step-up                                                                                     |
 | `device.expired`       | `AuditedPairingService.revokeDevice` with no actor — the daemon's own idle expiry                                                             |
 | `session.opened`       | `POST /v1/sessions` and a fork — an agent started, folded per device                                                                          |
-| `agent.prompted`       | `POST /v1/sessions/:sessionId/send` and `/answer` — folded per device per session                                                             |
+| `agent.prompted`       | `POST /v1/sessions/:sessionId/send`, `/answer` and `/migrate/ask-to-stop-jobs` — folded per device per session                                |
 | `fleet.configured`     | proposal create and apply, credential sign-in and its answer/cancel, tool install                                                             |
 | `terminal.opened`      | terminal create, and every stream attach (`detail.mode: 'attach'`)                                                                            |
 | `terminal.input`       | keystroke frames on a terminal stream, a Console write, and a Processes-tab Stop (`detail.mode: 'process-stop'`) — counted, never their bytes |

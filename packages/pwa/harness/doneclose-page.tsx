@@ -116,7 +116,6 @@ function Harness() {
           map={swipeMap(target)}
           model={cardModel(target)}
           onAct={() => undefined}
-          onSkip={() => undefined}
           options={itemOptions(target)}
           swipeable={false}
           {...(doneClose === undefined ? {} : { doneClose })}

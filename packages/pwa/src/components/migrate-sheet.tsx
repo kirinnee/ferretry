@@ -1,5 +1,15 @@
-import type { IFyApiClient, SessionView } from '@ferretry/protocol';
-import { AlertOctagon, AlertTriangle, ArrowRight, LoaderCircle, RefreshCw, ServerCog, ShieldAlert } from 'lucide-react';
+import type { AskToStopJobsResult, IFyApiClient, InflightItem, SessionView } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
+import {
+  AlertOctagon,
+  AlertTriangle,
+  ArrowRight,
+  LoaderCircle,
+  MessageSquare,
+  RefreshCw,
+  ServerCog,
+  ShieldAlert,
+} from 'lucide-react';
 import {
   type FormEvent,
   type ReactNode,
@@ -13,9 +23,10 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
-import { useDaemonClient } from '../lib/store.tsx';
 import { type DaemonConnection, sameDaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
+import { UPDATE_MACHINE_WHERE } from '../lib/machine-update-words.ts';
+import { useDaemonClient } from '../lib/store.tsx';
 import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import { BottomSheet } from '../shell/bottom-sheet.tsx';
 import { pickerIdBase } from '../shell/picker-model.ts';
@@ -24,6 +35,8 @@ import { statusMark, TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
 import { AccountName, DaemonAccountName, DaemonAccountPicker } from './daemon-pickers.tsx';
 import {
+  AGENT_JOBS_ASK_SINCE,
+  askNeedsDaemonUpdate,
   type MigrationFailure,
   type MigrationTarget,
   migrationContextDecision,
@@ -32,6 +45,7 @@ import {
   migrationModelSuggestions,
   migrationTarget,
   oneMillionVariant,
+  onlyAgentJobsBlock,
 } from './migrate-model.ts';
 
 export type MigrateSession = (
@@ -57,6 +71,32 @@ export const migrateSessionWithDaemon = async (
   return await client.migrate(scope.sessionId, input.agent, input.model, input.allowContextDowngrade, requestId);
 };
 
+export type AskToStopJobs = (connection: DaemonConnection, scope: DaemonSessionScope) => Promise<AskToStopJobsResult>;
+
+type AskClient = Pick<IFyApiClient, 'askToStopJobs'>;
+
+/** The production adapter for the refusal's one remedy: ask the agent, through the same paired client. */
+export const askToStopJobsWithDaemon = async (
+  connection: DaemonConnection,
+  scope: DaemonSessionScope,
+  createClient: (connection: DaemonConnection) => Promise<AskClient>,
+): Promise<AskToStopJobsResult> => {
+  if (connection.daemonId !== scope.daemonId) throw new Error('the ask must belong to the requested daemon');
+  const client = await createClient(connection);
+  return await client.askToStopJobs(scope.sessionId);
+};
+
+/** Where asking the agent to stop its background jobs has got to. */
+type JobsAsk =
+  | { readonly state: 'idle' }
+  | { readonly state: 'asking' }
+  | { readonly state: 'asked'; readonly result: AskToStopJobsResult }
+  /** The daemon looked again and none of the agent's jobs is in the way any more. */
+  | { readonly state: 'cleared' }
+  | { readonly state: 'failed'; readonly message: string };
+
+const JOBS_IDLE: JobsAsk = { state: 'idle' };
+
 /**
  * The stable identity of ONE logical migration.
  *
@@ -78,6 +118,8 @@ export interface MigrateSheetProps {
   readonly onClose: () => void;
   readonly onMigrated: (connection: DaemonConnection, scope: DaemonSessionScope, view: SessionView) => void;
   readonly migrateSession?: MigrateSession;
+  /** Asks the agent to stop its own background jobs; injected by tests, the paired client otherwise. */
+  readonly askToStopJobs?: AskToStopJobs;
   /**
    * This daemon's published account roster.
    *
@@ -202,6 +244,7 @@ export function MigrateSheet({
   onClose,
   onMigrated,
   migrateSession: injectedMigrate,
+  askToStopJobs: injectedAsk,
   accountPicker,
   usage,
 }: MigrateSheetProps) {
@@ -212,6 +255,8 @@ export function MigrateSheet({
     injectedMigrate ??
     ((target, sessionScope, input, requestId) =>
       migrateSessionWithDaemon(target, sessionScope, input, requestId, routedClient));
+  const askToStopJobs: AskToStopJobs =
+    injectedAsk ?? ((target, sessionScope) => askToStopJobsWithDaemon(target, sessionScope, routedClient));
   const { config, state } = view;
   const headingId = useId();
   const agentHelpId = useId();
@@ -236,6 +281,9 @@ export function MigrateSheet({
   const [phase, setPhase] = useState<MigrationPhase>('form');
   const [failure, setFailure] = useState<MigrationFailure | null>(null);
   const [downgradeAcknowledged, setDowngradeAcknowledged] = useState(false);
+  // Belongs to the refusal it answered: a retried safety check starts it over, and asking about the same
+  // jobs again is answered with the message already queued rather than a second one.
+  const [jobsAsk, setJobsAsk] = useState<JobsAsk>(JOBS_IDLE);
   const submitLock = useRef(false);
   const scopedIdentity = JSON.stringify([connection.daemonId, daemonSessionKey(scope), config.id]);
   const liveIdentity = useRef(scopedIdentity);
@@ -256,6 +304,7 @@ export function MigrateSheet({
     setFailure(null);
     setDowngradeAcknowledged(false);
     setChosenAccount(null);
+    setJobsAsk(JOBS_IDLE);
     submitLock.current = false;
     requestIdentity.current = null;
   }, [open, connection.daemonId, scope.daemonId, scope.sessionId, config.id]);
@@ -285,6 +334,20 @@ export function MigrateSheet({
   const terminal = TERMINAL_STATUSES.has(state.status);
   const busy = statusMark(view).klass === 'active';
   const quota = useCachedAccountUsage(usage, connection, open && canMutate && accountPicker !== undefined);
+
+  const askAgentToStopJobs = async (): Promise<void> => {
+    if (jobsAsk.state === 'asking') return;
+    const submittedIdentity = scopedIdentity;
+    setJobsAsk({ state: 'asking' });
+    try {
+      const result = await askToStopJobs(connection, scope);
+      if (liveIdentity.current === submittedIdentity) setJobsAsk({ state: 'asked', result });
+    } catch (error) {
+      if (liveIdentity.current !== submittedIdentity) return;
+      if (error instanceof FyHttpError && error.code === 'no_background_jobs') setJobsAsk({ state: 'cleared' });
+      else setJobsAsk({ state: 'failed', message: error instanceof Error ? error.message : String(error) });
+    }
+  };
 
   const editAgent = (next: string): void => {
     setAgent(next);
@@ -341,6 +404,7 @@ export function MigrateSheet({
     requestIdentity.current = identity;
     submitLock.current = true;
     setFailure(null);
+    setJobsAsk(JOBS_IDLE);
     setPhase('submitting');
     try {
       const migrated = await migrateSession(connection, scope, input, identity.id);
@@ -582,7 +646,9 @@ export function MigrateSheet({
         </form>
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-panel pb-5">
-          <div className="mx-auto grid w-full max-w-2xl gap-4 py-4">
+          {/* `minmax(0, 1fr)`, not the grid's `auto` track: an auto track grows to its longest unbroken line —
+              a daemon command, a job's argv — and on a phone that pushed the cards past the sheet's gutter. */}
+          <div className="mx-auto grid w-full max-w-2xl grid-cols-[minmax(0,1fr)] gap-4 py-4">
             {phase === 'refused' && failure ? (
               <section
                 aria-labelledby={`${headingId}-refused-heading`}
@@ -603,6 +669,15 @@ export function MigrateSheet({
                 >
                   {failure.message}
                 </pre>
+                {onlyAgentJobsBlock(failure.inflight) ? (
+                  <AgentJobsAsk
+                    ask={jobsAsk}
+                    jobs={failure.inflight?.items.filter(item => item.blocks) ?? []}
+                    onAsk={() => void askAgentToStopJobs()}
+                  />
+                ) : askNeedsDaemonUpdate(failure) ? (
+                  <AgentJobsNeedUpdate daemonVersion={failure.daemonVersion ?? ''} />
+                ) : null}
                 <p className="mt-3 text-ui font-semibold text-err">
                   There is no force control. A refused preflight cannot start a migration.
                 </p>
@@ -728,5 +803,95 @@ export function MigrateSheet({
         </div>
       )}
     </BottomSheet>
+  );
+}
+
+/**
+ * The refusal's one remedy when everything in the way is the agent's own: ask it. One queued message —
+ * from Ferretry · Migrate, the words naming each pid — and nothing is stopped by Ferretry. The person
+ * then runs the safety check again, which stays the only way a migration starts.
+ */
+function AgentJobsAsk({
+  ask,
+  jobs,
+  onAsk,
+}: {
+  readonly ask: JobsAsk;
+  readonly jobs: readonly InflightItem[];
+  readonly onAsk: () => void;
+}) {
+  const asked = ask.state === 'asked' ? ask.result : null;
+  return (
+    <div className="mt-3 rounded-control border border-border bg-surface p-3" data-agent-jobs-ask="">
+      <p className="m-0 text-ui font-semibold text-fg">
+        {jobs.length === 1 ? 'This is a job the agent started itself' : 'These are jobs the agent started itself'}
+      </p>
+      <p className="mt-1 text-ui leading-base text-muted">
+        The agent left {jobs.length === 1 ? 'it' : 'them'} running in the background from its own shell. Ferretry can
+        send it one message asking it to stop {jobs.length === 1 ? 'it' : 'them'}, or to say why not. Ferretry stops
+        nothing itself.
+      </p>
+      <ul className="mt-2 grid gap-1">
+        {jobs.map(job => (
+          <li className="flex min-w-0 items-baseline gap-sm text-meta" key={`${job.pid ?? ''}:${job.detail ?? ''}`}>
+            {job.pid === undefined ? null : <span className="mono shrink-0 text-muted">{`pid ${job.pid}`}</span>}
+            <span className="mono min-w-0 truncate text-fg">{job.detail ?? job.title}</span>
+          </li>
+        ))}
+      </ul>
+      {asked !== null || ask.state === 'cleared' ? null : (
+        <Button
+          className="!h-auto !whitespace-normal mt-3 min-h-[44px] w-full justify-center py-2 text-center sm:w-auto"
+          data-agent-jobs-ask-button=""
+          disabled={ask.state === 'asking'}
+          onClick={onAsk}
+          type="button"
+          variant="primary"
+        >
+          {ask.state === 'asking' ? (
+            <LoaderCircle aria-hidden="true" className="animate-spin" size={15} />
+          ) : (
+            <MessageSquare aria-hidden="true" size={15} />
+          )}
+          {ask.state === 'asking' ? 'Asking the agent…' : 'Ask the agent to stop its background jobs'}
+        </Button>
+      )}
+      {asked !== null ? (
+        <p className="mt-2 text-ui leading-base text-fg" role="status">
+          {asked.alreadyAsked
+            ? 'The agent was already asked about these jobs — that message is still the one in its queue.'
+            : 'Asked. The message is in the agent’s queue, and it reads it as soon as it is free.'}{' '}
+          Once it has stopped them, press <span className="font-semibold">Retry safety check</span>.
+        </p>
+      ) : ask.state === 'cleared' ? (
+        <p className="mt-2 text-ui leading-base text-fg" role="status">
+          None of them is running any more, so nothing was sent. Press{' '}
+          <span className="font-semibold">Retry safety check</span>.
+        </p>
+      ) : ask.state === 'failed' ? (
+        <p className="mt-2 break-words text-ui leading-base text-err" role="alert">
+          Couldn’t ask the agent: {ask.message}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The same refusal from a daemon too old to tell the agent's own jobs apart, or to ask about them. The app
+ * deploys before the machine updates, so this is the commonest way to meet the card without its button:
+ * it says what would bring the button, instead of leaving "no force control" as the only answer.
+ */
+function AgentJobsNeedUpdate({ daemonVersion }: { readonly daemonVersion: string }) {
+  return (
+    <div className="mt-3 rounded-control border border-border bg-surface p-3" data-agent-jobs-update="">
+      <p className="m-0 text-ui font-semibold text-fg">
+        Update this machine’s daemon to ask the agent to stop these jobs
+      </p>
+      <p className="mt-1 text-ui leading-base text-muted">
+        If the agent started them from its own shell, a newer daemon can send it one message asking it to stop them.
+        This machine runs {daemonVersion}; that needs {AGENT_JOBS_ASK_SINCE} or newer — {UPDATE_MACHINE_WHERE}.
+      </p>
+    </div>
   );
 }

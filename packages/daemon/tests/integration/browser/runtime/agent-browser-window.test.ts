@@ -54,7 +54,7 @@ describe.if(process.platform === 'linux')('the agent browser as a real window, i
       },
     });
     base = `http://127.0.0.1:${String(site.port)}`;
-    display = new XvfbDisplay({ executable: () => xvfb ?? undefined });
+    display = new XvfbDisplay({ authorityDirectory: join(root, 'x11'), executable: () => xvfb ?? undefined });
     browser = new BrowserSessionService(
       { get: async id => (id === 's1' ? {} : undefined) },
       new NodeSessionBrowserLauncher(
@@ -63,7 +63,9 @@ describe.if(process.platform === 'linux')('the agent browser as a real window, i
         node,
         { FY_CHROME_BIN: chrome, PATH: process.env.PATH, HOME: process.env.HOME },
         undefined,
-        { mode: async () => 'window', display, platform: 'linux' },
+        // Over the loopback PORT, named outright: the default, and the transport whose `navigator.webdriver`
+        // stays false. The DevTools pipe, which only an owner turns on, is agent-browser-pipe.test.ts.
+        { mode: async () => 'window', display, platform: 'linux', transport: async () => 'port' },
       ),
       () => Date.now(),
     );

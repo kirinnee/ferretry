@@ -3,6 +3,7 @@ import { queuedMessageInstruction, turnFileInstruction } from '@ferretry/protoco
 import should from 'should';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import {
+  sendRecordView,
   type ComposerClearOutcome,
   type ComposerSubmitOutcome,
   defaultSessionSendSettings,
@@ -865,6 +866,14 @@ describe('who a send is from', () => {
     should(human.ledger.only()).match({ senderKind: 'human', attachmentIds: ['att_1'], attempt: 1, attemptAt: NOW });
     should(agent.ledger.only()).match({ senderKind: 'agent', from: PEER, fromName: 'hadi' });
     should(daemon.ledger.only().senderKind).equal('daemon');
+  });
+
+  it('records the feature a direct daemon send names as its sender, and shows it on the wire', async () => {
+    const { service, ledger } = parts();
+    await service.send(request({ origin: 'daemon', by: { kind: 'ferretry', feature: 'Board' } }));
+
+    should(ledger.only()).match({ senderKind: 'daemon', by: { kind: 'ferretry', feature: 'Board' } });
+    should(sendRecordView(ledger.only())).match({ by: { kind: 'ferretry', feature: 'Board' } });
   });
 
   it('does not track a duplicate request, which found a send already being watched', async () => {

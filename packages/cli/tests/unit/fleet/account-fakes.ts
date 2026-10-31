@@ -47,7 +47,7 @@ export const machine = (overrides: Partial<FleetMachineView> = {}): FleetMachine
   setUp: true,
   agentPermissions: 'auto',
   defaultRuntime: 'claude-default',
-  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
   tools: [
     { harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/bin/claude' },
     { harness: 'codex', label: 'Codex', installed: false },

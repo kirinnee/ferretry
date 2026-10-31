@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -311,5 +311,66 @@ describe('spawning a CLI for real', () => {
     should(versions).deepEqual(['2.1.304 (Claude Code)', undefined, undefined, undefined]);
     // GNU echo prints its own banner and BSD echo prints the flag back; either way it is one line.
     should(real).be.a.String();
+  });
+
+  it('should run `--version` in a private, unguessable directory that is gone afterwards', async () => {
+    // Arrange
+    const root = await mkdtemp(join(tmpdir(), 'fy-version-root-'));
+    const seen: { cwd: string; home: string | undefined; mode: number }[] = [];
+    const spawn: CheckSpawn = async request => {
+      seen.push({ cwd: request.cwd, home: request.env.HOME, mode: (await stat(request.cwd)).mode & 0o777 });
+      return { exitCode: 0, output: '2.1.304\n' };
+    };
+
+    try {
+      // Act
+      await new CliHarnessVersion(spawn, root).version('/bin/cli');
+      await new CliHarnessVersion(spawn, root).version('/bin/cli');
+      const left = await readdir(root);
+
+      // Assert
+      should(seen).have.length(2);
+      for (const run of seen) {
+        // A directory the shared temporary folder's other users could not have planted `.claude` in.
+        should(run.cwd.startsWith(`${root}/`)).be.true();
+        should(run.cwd).not.equal(root);
+        should(run.home).equal(run.cwd);
+        should(run.mode).equal(0o700);
+      }
+      should(seen[0]?.cwd).not.equal(seen[1]?.cwd);
+      should(left).deepEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('should still remove its private directory when the CLI cannot start', async () => {
+    // Arrange
+    const root = await mkdtemp(join(tmpdir(), 'fy-version-root-'));
+    const throwing: CheckSpawn = async () => {
+      throw new Error('ENOENT');
+    };
+
+    try {
+      // Act
+      const actual = await new CliHarnessVersion(throwing, root).version('/bin/cli');
+
+      // Assert
+      should(actual).be.undefined();
+      should(await readdir(root)).deepEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('should read no version when no private directory can be made', async () => {
+    // Arrange
+    const spawn: CheckSpawn = async () => ({ exitCode: 0, output: '2.1.304\n' });
+
+    // Act
+    const actual = await new CliHarnessVersion(spawn, '/nonexistent/fy-no-such-root').version('/bin/cli');
+
+    // Assert
+    should(actual).be.undefined();
   });
 });

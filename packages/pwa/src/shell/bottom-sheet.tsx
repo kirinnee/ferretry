@@ -15,6 +15,7 @@ import {
   useState,
 } from 'react';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
+import { useScrimDismiss } from '../hooks/use-scrim-dismiss.ts';
 import { cn } from '../lib/class-names.ts';
 
 const SHEET_TRANSITION_MS = 200;
@@ -139,6 +140,7 @@ export function BottomSheet({
   }, []);
 
   const { onKeyDown } = useDialogFocus(open, panelRef, onClose);
+  const scrim = useScrimDismiss(onClose);
 
   const beginSwipe = (event: ReactPointerEvent<HTMLButtonElement>): void => {
     if (!open || event.button !== 0) return;
@@ -212,7 +214,7 @@ export function BottomSheet({
       <button
         type="button"
         aria-label={closeLabel}
-        onClick={onClose}
+        {...scrim}
         disabled={!open}
         tabIndex={open ? 0 : -1}
         className={cn(

@@ -54,6 +54,8 @@ export interface BrowserProfileStoreOptions {
 /** Node filesystem implementation of the daemon-global, private browser profile. */
 export class BrowserProfileStore implements BrowserProfilePort {
   readonly browserDirectory: string;
+  /** Where a private X display keeps the cookie file its clients must present. */
+  readonly displayDirectory: string;
   readonly profile: string;
   readonly leaseFile: string;
   private readonly daemonPid: number;
@@ -64,6 +66,7 @@ export class BrowserProfileStore implements BrowserProfilePort {
 
   constructor(daemonDirectory: string, options: BrowserProfileStoreOptions = {}) {
     this.browserDirectory = path.join(daemonDirectory, 'browser');
+    this.displayDirectory = path.join(this.browserDirectory, 'x11');
     this.profile = path.join(this.browserDirectory, 'profile');
     this.leaseFile = path.join(this.browserDirectory, leaseName);
     this.daemonPid = options.daemonPid ?? process.pid;

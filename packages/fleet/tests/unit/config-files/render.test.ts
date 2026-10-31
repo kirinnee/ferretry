@@ -389,7 +389,7 @@ describe('fleetFileEdits', () => {
   it('should write machine.yaml when the machine moves off its defaults, and name its path from the layout', () => {
     // Arrange
     const before = model();
-    const next = model({ machine: { agentControl: { ferretrySettings: true } } });
+    const next = model({ machine: { agentControl: { ferretrySettings: true, pageScripts: false } } });
 
     // Act
     const actual = fleetFileEdits(before, next, diskOf(before));
