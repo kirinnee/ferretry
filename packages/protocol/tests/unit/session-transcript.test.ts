@@ -215,6 +215,16 @@ describe('the session transcript read protocol', () => {
     should(parsed.messages.map(entry => entry.selectionBinding)).deepEqual(['binding-a', 'binding-b']);
   });
 
+  it('should carry the cursor before a page only when the daemon read backwards', () => {
+    // Assert — absent from a forward read and from an older daemon, null at the conversation start.
+    should(transcript.SessionTranscriptPageSchema.parse(page)).not.have.property('previousCursor');
+    should(
+      transcript.SessionTranscriptPageSchema.parse({ ...page, previousCursor: 'message-cursor-0' }).previousCursor,
+    ).equal('message-cursor-0');
+    should(transcript.SessionTranscriptPageSchema.parse({ ...page, previousCursor: null }).previousCursor).be.null();
+    should(transcript.SessionTranscriptPageSchema.safeParse({ ...page, previousCursor: '' }).success).be.false();
+  });
+
   it('should describe a page by its version, its session and an opaque nullable cursor', () => {
     // Act — the end of the conversation, and an empty page, are both ordinary answers.
     const last = transcript.SessionTranscriptPageSchema.parse({ ...page, nextCursor: null });

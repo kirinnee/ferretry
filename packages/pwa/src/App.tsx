@@ -238,7 +238,7 @@ import {
   supportsWebPush,
 } from './lib/push-enrolment.ts';
 import { frameQrDetector } from './lib/qr-frame-decoder.ts';
-import { readItemConversation } from './lib/item-conversation.ts';
+import { itemSince, readItemConversation } from './lib/item-conversation.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
@@ -2077,7 +2077,12 @@ function AgendaRoute({ connection }: DaemonPageProps) {
       readConversation={async card => {
         const target = inbox.connectionFor(card.daemonId);
         if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
-        return await readItemConversation(await store.clients.client(target), card.view.config.id, card.item.id);
+        return await readItemConversation(
+          await store.clients.client(target),
+          card.view.config.id,
+          card.item.id,
+          itemSince(card.item),
+        );
       }}
     />
   );

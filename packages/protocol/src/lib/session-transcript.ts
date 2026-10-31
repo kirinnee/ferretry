@@ -78,6 +78,12 @@ export const SessionTranscriptPageSchema = z.strictObject({
   messages: z.array(SessionTranscriptMessageSchema).readonly(),
   /** Opaque continuation token, or null at the end of the conversation as it currently reads. */
   nextCursor: z.string().min(1).nullable(),
+  /**
+   * Only on a backward read (`messagesTail`): the token to ask `through` for the page just older than this
+   * one, or null when this page begins the conversation. ABSENT on a forward read, and absent from a daemon
+   * that predates backward reads — which is how a caller tells that daemon apart.
+   */
+  previousCursor: z.string().min(1).nullable().optional(),
 });
 export type SessionTranscriptPage = z.infer<typeof SessionTranscriptPageSchema>;
 
@@ -153,4 +159,12 @@ export interface LogPageOptions {
   readonly limit?: number;
   /** The `file` token an earlier page carried. */
   readonly file?: string;
+}
+
+/** Which page `messagesTail` reads: the newest rows, or those ending at the row `through` names. */
+export interface MessagesTailOptions {
+  /** The `previousCursor` of the page already held; absent reads the tail. */
+  readonly through?: string;
+  readonly limit?: number;
+  readonly signal?: AbortSignal;
 }

@@ -582,6 +582,78 @@ describe('the session addressable-message route', () => {
     should(second.body).containEql('"byteOffset":20');
   });
 
+  it('should read from the tail with ?tail=1 and page back over the previousCursor it handed back', async () => {
+    // Arrange
+    const dispatch = fixture({ rows: [addressable(10), addressable(20), addressable(30)] });
+
+    // Act
+    const newest = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [
+        ['tail', '1'],
+        ['limit', '1'],
+      ],
+      headers: human,
+    });
+    const previous = jsonBody(newest).previousCursor;
+    should(previous).be.a.String();
+    const older = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [
+        ['through', String(previous)],
+        ['limit', '2'],
+      ],
+      headers: human,
+    });
+
+    // Assert — the token survives the query string verbatim, and the pages meet without a gap or an overlap.
+    should(newest.body).containEql('"byteOffset":30').and.not.containEql('"byteOffset":20');
+    should(older.status).equal(200);
+    should(older.body).containEql('"byteOffset":10').and.containEql('"byteOffset":20');
+    should(older.body).not.containEql('"byteOffset":30');
+    should(jsonBody(older)).have.property('previousCursor', null);
+  });
+
+  it('should leave previousCursor off a forward read', async () => {
+    // Arrange
+    const dispatch = fixture({ rows: [addressable(10)] });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/messages', headers: human });
+
+    // Assert
+    should(jsonBody(response)).not.have.property('previousCursor');
+  });
+
+  it('should refuse tail and through together, and either beside a cursor, as a bad request', async () => {
+    // Arrange
+    const dispatch = fixture({ rows: [addressable(10), addressable(20)] });
+    const first = await dispatch({ path: '/v1/sessions/s1/messages', query: [['limit', '1']], headers: human });
+    const token = String(jsonBody(first).nextCursor);
+
+    // Act
+    const both = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [
+        ['tail', '1'],
+        ['through', token],
+      ],
+      headers: human,
+    });
+    const beside = await dispatch({
+      path: '/v1/sessions/s1/messages',
+      query: [
+        ['tail', '1'],
+        ['cursor', token],
+      ],
+      headers: human,
+    });
+    const blank = await dispatch({ path: '/v1/sessions/s1/messages', query: [['through', '']], headers: human });
+
+    // Assert
+    should([both.status, beside.status, blank.status]).eql([400, 400, 400]);
+  });
+
   it('should answer 404 for a session the daemon does not hold', async () => {
     // Arrange
     const dispatch = fixture();

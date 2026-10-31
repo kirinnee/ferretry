@@ -143,6 +143,7 @@ import {
 import {
   type LogPageOptions,
   type LogSearchOptions,
+  type MessagesTailOptions,
   type SessionLogPage,
   SessionLogPageSchema,
   type SessionLogSearch,
@@ -1200,6 +1201,22 @@ export class FyApiClient implements IFyApiClient {
       `/v1/sessions/${sessionId}/messages${suffix}`,
       SessionTranscriptPageSchema,
       signal === undefined ? {} : { signal },
+    );
+  }
+
+  messagesTail(id: string, options: MessagesTailOptions = {}): Promise<SessionTranscriptPage> {
+    const sessionId = encodeURIComponent(NonEmptyValueSchema.parse(id));
+    const search = new URLSearchParams();
+    if (options.through === undefined) search.set('tail', '1');
+    else {
+      NonEmptyValueSchema.parse(options.through);
+      search.set('through', options.through);
+    }
+    if (options.limit !== undefined) search.set('limit', String(PositiveIntegerSchema.max(1_000).parse(options.limit)));
+    return this.request(
+      `/v1/sessions/${sessionId}/messages?${search.toString()}`,
+      SessionTranscriptPageSchema,
+      options.signal === undefined ? {} : { signal: options.signal },
     );
   }
 

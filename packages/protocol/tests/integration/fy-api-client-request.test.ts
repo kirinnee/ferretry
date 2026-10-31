@@ -45,6 +45,7 @@ describe('FyApiClient construction and generic requests', () => {
       'logSearch',
       'logs',
       'messages',
+      'messagesTail',
       'migrate',
       'openUrl',
       'projects',

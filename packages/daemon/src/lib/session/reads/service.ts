@@ -341,6 +341,14 @@ export const DEFAULT_MESSAGE_PAGE = 200;
 /** Largest addressable-row page one `messages` read will serve, matching the client's own ceiling. */
 export const MAX_MESSAGE_PAGE = 1_000;
 
+/**
+ * Which end a `messages` read counts from when it reads BACKWARD: the newest rows (`through` absent), or the
+ * newest rows ending at the row a cursor names, inclusive. A forward cursor and a backward one are the same token.
+ */
+export interface MessageBackwardRead {
+  readonly through?: string;
+}
+
 /** Transcript events a `logs` read returns when the caller names no limit. */
 export const DEFAULT_LOG_TAIL = 200;
 
@@ -816,6 +824,13 @@ export class OperatorReadService {
   /**
    * One page of the session's addressable conversation, strictly after an authenticated cursor.
    *
+   * BACKWARD. `backward` reads the page that ENDS at the newest row (`tail`), or at the row a cursor names
+   * (`through`, inclusive), and the answer carries `previousCursor`: the token over the row just before the
+   * page, which is also the cursor a forward read resumes after, so there is one token kind and one proof
+   * (`resumeAfter`). It is null at the start of the conversation. Rows stay oldest-first inside the page; a
+   * reader that wants an old item's thread asks for the tail and walks `previousCursor` back until it has
+   * what it came for, instead of paging the whole conversation forward to reach its end.
+   *
    * WHAT A PAGE PROMISES. Every row names a durable coordinate this daemon minted and carries opaque
    * evidence that the RAW message at that coordinate is still the one this read saw. That second half
    * is what a coordinate alone cannot give: a harness that rewrites a byte range leaves the point
@@ -841,11 +856,18 @@ export class OperatorReadService {
     sessionId: string,
     cursor: string | undefined,
     limit: number | undefined,
+    backward?: MessageBackwardRead,
   ): Promise<SessionTranscriptPage> {
     const size = boundedLimit(limit, DEFAULT_MESSAGE_PAGE, MAX_MESSAGE_PAGE, 'limit');
+    if (backward !== undefined && cursor !== undefined)
+      throw new OperatorReadError(
+        'invalid_query',
+        'cursor continues forward; it cannot be combined with tail or through',
+      );
     // The caller's own query is judged BEFORE a file is read: a cursor this daemon could not have
     // issued is a 400 about the request, never a statement about the session's transcript.
     const anchor = cursor === undefined ? undefined : cursorAnchor(cursor);
+    const through = backward?.through === undefined ? undefined : cursorAnchor(backward.through);
     const read = await this.messageSource.read(sessionId);
     if (read.kind === 'unresolved')
       throw new OperatorReadError(
@@ -880,22 +902,39 @@ export class OperatorReadService {
         'event_evidence_mismatch',
         `addressable conversation for ${sessionId} was read under context for ${read.context.sessionId}`,
       );
-    const start = anchor === undefined ? 0 : await this.resumeAfter(sessionId, read, anchor, cursor ?? '');
-    const served = read.rows.slice(start, start + size);
+    // The page is rows [start, end). Forward it begins after the cursor; backward it ENDS at the tail, or
+    // at the row the `through` cursor names (inclusive — the row a forward cursor would resume after).
+    const end =
+      backward === undefined
+        ? undefined
+        : through === undefined
+          ? read.rows.length
+          : await this.resumeAfter(sessionId, read, through, backward.through ?? '');
+    const start =
+      end !== undefined
+        ? Math.max(0, end - size)
+        : anchor === undefined
+          ? 0
+          : await this.resumeAfter(sessionId, read, anchor, cursor ?? '');
+    const served = read.rows.slice(start, end ?? start + size);
     // `nextCursor` is null EXACTLY at the current end, so a client that reaches it, waits and asks
     // again with the previous cursor is asking a question this daemon can answer.
     const last = start + served.length < read.rows.length ? served[served.length - 1] : undefined;
-    const [bound, nextCursor] = await Promise.all([
-      Promise.all(served.map(async row => await this.boundRow(read.context, row))),
-      last === undefined
+    const before = backward === undefined || start === 0 ? undefined : read.rows[start - 1];
+    const issue = async (row: PortableConversationRow | undefined): Promise<string | null> =>
+      row === undefined
         ? null
-        : issueSessionTranscriptMessageToken(
+        : await issueSessionTranscriptMessageToken(
             this.messageTokens,
             SESSION_TRANSCRIPT_MESSAGE_TOKEN_CURSOR_DOMAIN,
             read.context,
-            last.point,
-            last.rawPrefix,
-          ),
+            row.point,
+            row.rawPrefix,
+          );
+    const [bound, nextCursor, previousCursor] = await Promise.all([
+      Promise.all(served.map(async row => await this.boundRow(read.context, row))),
+      issue(last),
+      issue(before),
     ]);
     // The whole page under ONE vault open, and none for an empty page. Order and cardinality are the
     // caller's slice, and nothing here adds, drops or reorders a row.
@@ -907,7 +946,7 @@ export class OperatorReadService {
               servedRow(row, point, scrub.text(row.text), selectionBinding),
             ),
           );
-    return { v: 1, sessionId, messages, nextCursor };
+    return { v: 1, sessionId, messages, nextCursor, ...(backward === undefined ? {} : { previousCursor }) };
   }
 
   /**
