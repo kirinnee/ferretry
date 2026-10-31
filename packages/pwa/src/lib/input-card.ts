@@ -133,7 +133,7 @@ export const expiryWords = (expiresAt: string, now: number): string => {
 const ECHO_WORDS = { off: 'typing hidden', on: 'typing shows', unknown: 'echo unknown' } as const;
 
 /** What the daemon found for one field of a page, beside the label the card gives it. */
-export interface ObservedFieldWords {
+interface ObservedFieldWords {
   readonly key: string;
   readonly label: string;
   /** `password field`, `email field`, and `in a frame from <host>` when the field is not in the page's own frame. */
@@ -221,11 +221,18 @@ export const plainFlagWords = (field: InputCardField): string => field.risk?.rea
  */
 export const fieldRiskLine = (request: InputRequest, field: InputCardField): InputRisk | undefined => {
   if (field.sensitivity === 'plain' || field.risk === undefined) return undefined;
+  if (!showsHeaderRisk(request)) return field.risk;
   const header = request.risk;
   return header !== undefined && header.level === field.risk.level && header.reason === field.risk.reason
     ? undefined
     : field.risk;
 };
+
+/**
+ * Whether the card's own risk line is drawn above the fields. A card of several fields flags each field where it
+ * is instead, so the worst of them is not said twice (once on top and again beside the field it came from).
+ */
+export const showsHeaderRisk = (request: InputRequest): boolean => request.fields.length === 1;
 
 /** What is wrong with a typed value of this field, shown under it; nothing for an empty one. */
 export const fieldProblem = (field: InputCardField, value: string): string | undefined =>
@@ -301,7 +308,8 @@ export interface TypedSend {
 }
 
 export type BuiltBody =
-  { readonly ok: true; readonly body: InputDeliverBody } | { readonly ok: false; readonly problem: string };
+  | { readonly ok: true; readonly body: InputDeliverBody }
+  | { readonly ok: false; readonly problem: string };
 
 const enterFor = (request: InputRequest, submit: boolean): boolean => offersPressEnter(request) && submit;
 

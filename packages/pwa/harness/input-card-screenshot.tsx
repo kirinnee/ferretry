@@ -70,13 +70,22 @@ const page = (fields) => ({
   navigationId: 'nav-1',
   fields,
 });
+// The daemon's own sentences for a page (service.ts pageRiskOf), so the shots show what an owner reads.
+const CODE_RISK = {
+  level: 'amber',
+  reason: 'This code will show on the page; Ferretry hides the page from the ferret for 2 minutes.',
+};
 const google = fakeRequest({
   target: { kind: 'browser', key: 'app' },
   prompt: 'Sign in to Google',
   sensitivity: 'secret',
   fields: [
     field('plain', { id: 'email', label: 'Email' }),
-    field('secret', { id: 'password', label: 'Password' }),
+    field('secret', {
+      id: 'password',
+      label: 'Password',
+      risk: { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' },
+    }),
   ],
   risk: { level: 'red', reason: 'Not secret: the ferret can see this value.' },
   observed: page([
@@ -89,8 +98,8 @@ const chain = fakeRequest({
   target: { kind: 'browser', key: 'app' },
   prompt: 'Google wants the 2FA code',
   sensitivity: 'private',
-  fields: [field('private', { id: 'code', label: '2FA code', risk: { level: 'green', reason: 'The page is asking for a one-time code over https.' } })],
-  risk: { level: 'green', reason: 'The page is asking for a one-time code over https.' },
+  fields: [field('private', { id: 'code', label: '2FA code', risk: CODE_RISK })],
+  risk: CODE_RISK,
   chain: 'A7',
   step: 2,
   observed: page([browserField('code', { field: { tag: 'input', type: 'text', autocomplete: 'one-time-code' } })]),

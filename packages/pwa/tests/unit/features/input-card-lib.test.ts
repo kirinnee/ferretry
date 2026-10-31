@@ -21,6 +21,7 @@ import {
   savedBody,
   savedOutcomeWords,
   sendBlock,
+  showsHeaderRisk,
   splitOffers,
   targetRef,
   titleWords,
@@ -297,6 +298,15 @@ describe('a card of several fields', () => {
     expect(fieldRiskLine(same, must(fieldsOf(same)[0], 'the field'))).toBeUndefined();
     expect(fieldRiskLine(differs, must(fieldsOf(differs)[1], 'the field'))).toEqual(amber);
     expect(fieldRiskLine(differs, must(fieldsOf(differs)[0], 'the field'))).toBeUndefined();
+  });
+
+  it('flags each field of a larger card where it is, and never says the worst one twice on top', () => {
+    const amber = { level: 'amber', reason: 'This field may show what is typed.' } as const;
+    const card = login({ fields: [email, cardField('secret', { id: 'password', risk: amber })], risk: amber });
+
+    expect(showsHeaderRisk(card)).toBe(false);
+    expect(showsHeaderRisk(login({ fields: [password], risk: password.risk }))).toBe(true);
+    expect(fieldRiskLine(card, must(fieldsOf(card)[1], 'the field'))).toEqual(amber);
   });
 
   it('is ready to send only when every field is typed and fine', () => {

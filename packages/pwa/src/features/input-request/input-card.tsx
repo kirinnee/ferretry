@@ -47,6 +47,7 @@ import {
   savedButtonWords,
   savedOutcomeWords,
   sendBlock,
+  showsHeaderRisk,
   splitOffers,
   targetRef,
   titleWords,
@@ -228,7 +229,7 @@ export function InputCard({
         </p>
       )}
 
-      {request.risk === undefined || Risk === null ? null : (
+      {request.risk === undefined || Risk === null || !showsHeaderRisk(request) ? null : (
         <p
           className={`m-0 flex items-start gap-2 text-cell ${RISK_TONE[request.risk.level]}`}
           data-input-risk={request.risk.level}
