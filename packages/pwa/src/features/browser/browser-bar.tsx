@@ -111,7 +111,7 @@ export function BrowserBar({
     event.preventDefault();
     onNavigate();
   };
-  const stepClass = 'min-h-[44px] min-w-[36px] shrink-0 justify-center p-0 sm:min-w-[44px]';
+  const stepClass = 'min-h-[44px] min-w-[32px] shrink-0 justify-center p-0 sm:min-w-[44px]';
   const stepFor = (part: 'back' | 'forward' | 'reload') =>
     part === 'forward' ? `${stepClass} max-sm:hidden` : stepClass;
   const step = (part: 'back' | 'forward' | 'reload', control: BrowserBarStep) => (
@@ -149,12 +149,12 @@ export function BrowserBar({
         >
           <Globe2 size={14} aria-hidden="true" className="shrink-0 text-muted" />
           <span className="hidden min-w-0 truncate min-[420px]:inline">{name}</span>
-          <ChevronDown size={12} aria-hidden="true" className="shrink-0 text-muted" />
+          <ChevronDown size={12} aria-hidden="true" className="shrink-0 text-muted max-[419px]:hidden" />
         </button>
       )}
 
       <form onSubmit={submit} className="flex min-w-0 flex-1" data-browser-bar-part="address">
-        <label className="flex min-h-[40px] min-w-0 flex-1 items-center gap-1 rounded-control border border-strong bg-surface-2 px-2">
+        <label className="flex min-h-[40px] min-w-0 flex-1 items-center gap-1 rounded-control border border-strong bg-surface-2 px-1.5 sm:px-2">
           <span className="sr-only">URL or DuckDuckGo search</span>
           <Search size={13} aria-hidden="true" className="hidden shrink-0 text-muted sm:block" />
           <input
@@ -175,7 +175,7 @@ export function BrowserBar({
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
-            className="h-9 w-0 min-w-0 flex-1 truncate border-0 bg-transparent p-0 shadow-none outline-none font-mono text-meta text-fg placeholder:text-muted"
+            className="h-9 w-0 min-w-0 flex-1 truncate border-0 bg-transparent p-0 shadow-none outline-none font-mono text-meta text-fg max-sm:text-[11px] placeholder:text-muted"
           />
         </label>
         {/* Enter is Go: a visible button would take 44px from the address for a thing the keyboard does. */}
@@ -196,9 +196,9 @@ export function BrowserBar({
           data-browser-trigger="chip"
           data-attention={chip.attention ? '' : undefined}
           data-tone={chip.tone}
-          className="kt-badge inline-flex min-h-[32px] items-center gap-1 px-1.5 sm:max-w-[10rem]"
+          className="kt-badge inline-flex min-h-[32px] items-center gap-1 px-1.5 max-sm:tracking-normal sm:max-w-[10rem]"
         >
-          <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-current" />
+          <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-current max-sm:hidden" />
           <span className="min-w-0 truncate">{chip.label}</span>
         </button>
         {open === 'chip' && (
@@ -228,7 +228,7 @@ export function BrowserBar({
           aria-label="Browser controls"
           title={menuTitle}
           data-browser-trigger="menu"
-          className="min-h-[44px] min-w-[36px] justify-center p-0 sm:min-w-[44px]"
+          className="min-h-[44px] min-w-[32px] justify-center p-0 sm:min-w-[44px]"
         >
           <MoreVertical size={16} aria-hidden="true" />
         </Button>
