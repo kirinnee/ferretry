@@ -33,7 +33,7 @@ export interface TerminalStreamService {
 }
 
 export interface TerminalStreamDownstream {
-  send(bytes: Uint8Array): number | undefined;
+  send(bytes: Uint8Array, permit?: () => boolean): number | undefined;
   close(code: number, reason: string): void;
   /** Bytes the transport is still holding, when it can report them. A transport that cannot is
    *  treated as drained, which is the only assumption under which a stream keeps flowing at all. */
@@ -201,7 +201,11 @@ export class TerminalStreamBridge {
         if (this.closed) return;
       }
       const frame = plan.kind === 'delta' ? plan.frame : terminalFullRedraw(capture, TERMINAL_MAX_REDRAW_BYTES);
-      const sent = this.downstream.send(new TextEncoder().encode(frame));
+      const shown = capture;
+      const sent = this.downstream.send(
+        new TextEncoder().encode(frame),
+        this.service.publishable === undefined ? undefined : () => this.publishable(shown) === shown,
+      );
       const result = decideTerminalSend(sent);
       if (result.outcome === 'rejected') {
         this.finish(result.close.code, result.close.reason);
