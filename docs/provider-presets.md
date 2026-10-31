@@ -62,6 +62,11 @@ given to the runtime as `-c model_providers.<id>.…` launch flags, so Ferretry 
 other. A `{VARIABLE}` in its base URL is filled from the login's plain values at launch. The provider's
 `model` is the runtime's model only when the runtime's profile names none.
 
+The provider's `queryParams` (extra query parameters such as `api-version` on an older Azure endpoint) travel as
+`-c model_providers.<id>.query_params.<key>="<value>"` launch flags, which every local user can read in the process
+list: **never put a key or token in `queryParams`** — give it as a login variable and name that variable in
+`keyVariable`, so Codex sends it as a bearer token read from the environment, never from the command line.
+
 Field names avoid `secret`, `key` and `envKey` on purpose: the raw-secret detector reads a long value
 under a credential-shaped key as a pasted key, and `MOONSHOT_API_KEY` is a long value.
 
