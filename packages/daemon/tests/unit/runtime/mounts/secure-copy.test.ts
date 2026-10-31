@@ -164,6 +164,7 @@ describe('the secure copy routes, when a service fails unexpectedly', () => {
       { list: () => [] },
       {} as never,
       {
+        list: () => [],
         approve: async () => {
           throw new Error('the board fell over');
         },
