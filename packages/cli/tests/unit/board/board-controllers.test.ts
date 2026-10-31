@@ -522,6 +522,29 @@ describe('fy task create', () => {
     should(files.reads).eql([]);
   });
 
+  it('should read How to test from --how-to-test-file, or take --how-to-test, but never both', async () => {
+    // Arrange
+    const { controller, gateway, files } = harness(
+      new FakeGateway(),
+      undefined,
+      new FakeFiles({ '/test.md': '1. Open the Board\n2. See the steps\n' }),
+    );
+
+    // Act
+    await controller.create([], { ...base, howToTestFile: '/test.md' });
+    await controller.create([], { ...base, howToTest: ' 1. Inline ' });
+
+    // Assert
+    should(files.reads).eql(['/test.md']);
+    should(gateway.createCalls.map(call => call.request.howToTest)).eql([
+      '1. Open the Board\n2. See the steps',
+      '1. Inline',
+    ]);
+    should(await refusal(() => controller.create([], { ...base, howToTest: 'x', howToTestFile: '/test.md' }))).match(
+      /pass --how-to-test or --how-to-test-file, not both/u,
+    );
+  });
+
   it('should let a missing brief file fail as the reader reports it', async () => {
     // Arrange
     const { controller, gateway } = harness();
@@ -894,6 +917,21 @@ describe('the action verbs', () => {
       /pass --brief or --brief-file, not both/u,
     );
     should(await refusal(() => controller.edit('F1', {}))).match(/nothing to edit/u);
+  });
+
+  it('should edit How to test from --how-to-test or --how-to-test-file', async () => {
+    // Arrange
+    const { controller, gateway } = harness(new FakeGateway(), undefined, new FakeFiles({ '/test.md': '1. Open it' }));
+
+    // Act
+    await controller.edit('F1', { howToTestFile: '/test.md' });
+    await controller.edit('F1', { howToTest: '1. Inline' });
+
+    // Assert
+    should(sent(gateway)).eql([
+      { action: 'edit', howToTest: '1. Open it' },
+      { action: 'edit', howToTest: '1. Inline' },
+    ]);
   });
 
   it('should refile to another project, resolving the lane against that project’s own lanes', async () => {

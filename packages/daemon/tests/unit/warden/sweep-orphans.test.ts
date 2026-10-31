@@ -1,10 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { NUDGE_MESSAGES, TRIAGE_CRITERIA, type TriageDecision } from '../../../src/lib/speedups/jev.ts';
 import type { OrphanMemory, WardenBoardPort, WardenBoardRead, WardenFocusCard } from '../../../src/lib/warden/index.ts';
 import { lanes, PROJECT } from '../board/support.ts';
 import { boardOf, cardView, orphanView } from './board-fixtures.ts';
-import { enabled, harness, JEV_SKIP, journalTypes, NOW, session, triageable } from './sweep-harness.ts';
+import { enabled, harness, type JevScript, journalTypes, NOW, no, session, triageable } from './sweep-harness.ts';
 
 /**
  * The Warden reading the board, end to end through the real sweep (`board-design.md` §3.4): an orphaned card
@@ -224,15 +223,14 @@ describe('an orphaned card', () => {
 
 describe('a ferret the Warden starts again', () => {
   const card: WardenFocusCard = { task: cardView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
-  const jev = (verdict: TriageDecision['verdict'], confidence: number): TriageDecision => ({
-    ...JEV_SKIP,
-    verdict,
-    confidence,
-    reason: TRIAGE_CRITERIA[verdict],
-    ...(verdict === 'nudge'
-      ? { nudge: { id: 'stuck_command' as const, message: NUDGE_MESSAGES.stuck_command, confidence } }
-      : {}),
-  });
+  /**
+   * Jev's answers that walk the tree to the act: a ferret parked on its quota did not finish on purpose
+   * (resume); a running one, silent, waits on nothing real (restart).
+   */
+  const jev = (act: 'resume' | 'restart', confidence: number): JevScript =>
+    act === 'resume'
+      ? { answers: { finished_on_purpose: no(confidence) } }
+      : { answers: { waiting_on_real: no(confidence) } };
   const config = enabled({
     layers: { jev: true, llm: true },
     mayActAlone: { ...enabled().mayActAlone, resume: true, restart: true },

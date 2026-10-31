@@ -44,6 +44,27 @@ describe('auto-revive in the sweep', () => {
     should(subject.state().lastAnomalies?.map(anomaly => anomaly.sessionId) ?? []).not.containEql('s1');
   });
 
+  it('should count the revive by who decided it, show it in the status totals and watch whether it took', async () => {
+    // Arrange
+    const subject = harness({ config: enabled(), fleet: [died()], revive: service(async () => [gone]) });
+
+    // Act
+    await subject.service.run({ force: false });
+    const status = await subject.service.status();
+
+    // Assert
+    should(status.actionTotals?.find(entry => entry.action === 'revive' && entry.outcome === 'done')).containEql({
+      auto: 1,
+      jev: 0,
+      llm: 0,
+    });
+    should(subject.state().reviveWatch?.map(watch => [watch.sessionId, watch.actor])).deepEqual([['s1', 'auto']]);
+    should(status.reviveTotals).deepEqual({
+      progressed: { auto: 0, jev: 0, llm: 0 },
+      stalled: { auto: 0, jev: 0, llm: 0 },
+    });
+  });
+
   it('should revive nothing when no revive service is wired', async () => {
     // Arrange
     const subject = harness({ config: enabled(), fleet: [died()] });

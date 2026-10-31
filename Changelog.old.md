@@ -1,3 +1,39 @@
+## [4.160.1](https://github.com/kirinnee/ferretry/compare/v4.160.0...v4.160.1) (2026-10-31)
+
+### Performance
+
+* **session:** parse a session's unchanged documents once for the presence check ([#1144](https://github.com/kirinnee/ferretry/issues/1144)) ([4c91932](https://github.com/kirinnee/ferretry/commit/4c9193232e49ecb64dad69e424769cf55493b9ef))
+
+## [4.160.0](https://github.com/kirinnee/ferretry/compare/v4.159.0...v4.160.0) (2026-10-31)
+
+### Features
+
+* **board:** readable cards with How to test above Done ([#1135](https://github.com/kirinnee/ferretry/issues/1135)) ([7017a82](https://github.com/kirinnee/ferretry/commit/7017a82a916b6426760fb297a90a214aaee85822))
+* **cli:** ship the loopback firewall script and unit for shared hosts ([#1126](https://github.com/kirinnee/ferretry/issues/1126)) ([724ea35](https://github.com/kirinnee/ferretry/commit/724ea355e795d1cf93cf3a2b1b54578bebb03f60))
+* **warden:** revive and action stats by decider on the Warden page ([#1137](https://github.com/kirinnee/ferretry/issues/1137)) ([e4618bd](https://github.com/kirinnee/ferretry/commit/e4618bd221c4da4b1ede585289c132e55b9566a1))
+
+### Performance
+
+* **board:** derive one card from its neighbourhood, and memoize the roster ([#1143](https://github.com/kirinnee/ferretry/issues/1143)) ([d1990da](https://github.com/kirinnee/ferretry/commit/d1990da00af60e771ec7b948b0abe7b16607cbee))
+
+## [4.159.0](https://github.com/kirinnee/ferretry/compare/v4.158.1...v4.159.0) (2026-10-31)
+
+### Features
+
+* **fleet:** answer owner questions on the agenda too ([#1138](https://github.com/kirinnee/ferretry/issues/1138)) ([fa165f0](https://github.com/kirinnee/ferretry/commit/fa165f0ed8647cab9052bd5a23e3689428363900))
+
+### Performance
+
+* **agenda:** check a session exists without projecting its transcript ([#1136](https://github.com/kirinnee/ferretry/issues/1136)) ([92d721e](https://github.com/kirinnee/ferretry/commit/92d721e592ea7d0d6153d07f48f1b6754a8f149c))
+* **daemon:** keep the transcript parse worker warm for ten minutes idle ([#1131](https://github.com/kirinnee/ferretry/issues/1131)) ([b82555e](https://github.com/kirinnee/ferretry/commit/b82555e083048f2ad5a0810b8119bcb7c9fcb291))
+* **pwa:** read an Inbox item's thread from the transcript tail ([#1132](https://github.com/kirinnee/ferretry/issues/1132)) ([a7503e6](https://github.com/kirinnee/ferretry/commit/a7503e6e44659a532370ac521cbaca29b0928823))
+
+## [4.158.1](https://github.com/kirinnee/ferretry/compare/v4.158.0...v4.158.1) (2026-10-31)
+
+### Performance
+
+* **protocol:** share one frozen session list instead of deep-copying it per read ([#1129](https://github.com/kirinnee/ferretry/issues/1129)) ([5915434](https://github.com/kirinnee/ferretry/commit/5915434ae48de510f3bbcd2f59314c065c2859e9))
+
 ## [4.158.0](https://github.com/kirinnee/ferretry/compare/v4.157.0...v4.158.0) (2026-10-31)
 
 ### Features

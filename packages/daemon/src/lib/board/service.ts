@@ -46,7 +46,7 @@ import {
   triggerMove,
   withEvent,
 } from './card-actions.ts';
-import { deriveView, gatherDerivation } from './derive.ts';
+import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
@@ -715,7 +715,14 @@ export class BoardService {
     }
     const laneSets = await this.laneSetsOf(snapshot.cards.map(entry => entry.projectId));
     const index = new BoardIndex(snapshot.cards, this.ports.machineId() ?? '');
-    const derivation = await gatherDerivation(snapshot.cards, index, laneSets, this.ports);
+    // One card derives only what its view reads, never the whole board.
+    const derivation = await gatherDerivation(
+      neighbourhoodOf(card, index),
+      index,
+      laneSets,
+      this.ports,
+      snapshot.cards,
+    );
     return { task: deriveView(card, derivation), laneSet: laneSets.get(card.projectId) ?? null };
   }
 

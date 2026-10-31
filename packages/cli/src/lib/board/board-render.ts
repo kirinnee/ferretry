@@ -211,7 +211,8 @@ export function renderTermsTable(terms: BoardTaskView['terms']): string {
 
 /**
  * The whole card: its ask first (the owner's words, verbatim), then why it exists, what a newcomer needs,
- * the glossary, the brief, how it relates to other cards, and its history. Empty parts are left out.
+ * the glossary, the brief, how the owner tests it, how it relates to other cards, and its history. Empty parts
+ * are left out.
  */
 export function renderCard(
   card: BoardTaskView,
@@ -240,6 +241,7 @@ export function renderCard(
   if (card.context !== '') lines.push(...section('Context', card.context));
   if (card.terms.length > 0) lines.push(...section('Terms', renderTermsTable(card.terms)));
   if (card.brief !== '') lines.push(...section('Brief', card.brief));
+  if (card.howToTest !== '') lines.push(...section('How to test', card.howToTest));
 
   if (children.length > 0 || card.rollup.children > 0) {
     const roll = `${String(card.rollup.children)} children, ${String(card.rollup.active)} active`;

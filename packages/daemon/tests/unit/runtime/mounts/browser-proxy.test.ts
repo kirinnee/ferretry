@@ -18,7 +18,9 @@ const CREDENTIAL: Record<Kind, AuthenticatedCredential> = {
 };
 const ACTOR: Record<Kind, string> = { host: 'admin-cli', device: 'device:d1', agent: 'peer:s1' };
 
-function subsystem(probed: string[]) {
+type FirewallReading = () => Promise<{ state: 'stale'; detail: string } | undefined>;
+
+function subsystem(probed: string[], firewall?: FirewallReading) {
   return {
     tester: new BrowserProxyTester({
       saved: async () => ({ url: 'http://proxy.example:8080', bypass: [] }),
@@ -32,6 +34,7 @@ function subsystem(probed: string[]) {
       now: () => 0,
     }),
     state: () => ({ state: 'running' as const, startedAt: '2026-10-30T09:00:00.000Z' }),
+    ...(firewall === undefined ? {} : { firewall }),
   };
 }
 
@@ -42,8 +45,9 @@ async function drive(
   body: unknown,
   kind: Kind = 'host',
   fresh = false,
+  firewall?: FirewallReading,
 ) {
-  const found = new ApiRouter(browserProxyRoutes(subsystem(probed))).lookup(method, path);
+  const found = new ApiRouter(browserProxyRoutes(subsystem(probed, firewall))).lookup(method, path);
   if (found.kind !== 'matched') throw new Error(`no route ${method} ${path}`);
   let spent = 0;
   const governance: CallerGovernance = {
@@ -125,5 +129,22 @@ describe('the browser proxy test route', () => {
   it('answers the machine browser state', async () => {
     const answer = await drive([], 'GET', '/v1/browser/state', undefined);
     should(BrowserStateViewSchema.parse(answer.body)).containEql({ state: 'running' });
+    should(answer.body).not.have.property('firewall');
+  });
+
+  it('adds the loopback firewall reading to the browser state when the daemon has one', async () => {
+    const firewall = { state: 'stale' as const, detail: 'the loopback firewall is stale: ask the host admin' };
+    const answer = await drive([], 'GET', '/v1/browser/state', undefined, 'host', false, async () => firewall);
+    should(BrowserStateViewSchema.parse(answer.body).firewall).eql(firewall);
+  });
+
+  it('still answers the browser state when the firewall reading is absent or fails', async () => {
+    const absent = await drive([], 'GET', '/v1/browser/state', undefined, 'host', false, async () => undefined);
+    should(absent.body).not.have.property('firewall');
+    const failed = await drive([], 'GET', '/v1/browser/state', undefined, 'host', false, async () => {
+      throw new Error('unreadable');
+    });
+    should(failed.status).equal(200);
+    should(failed.body).not.have.property('firewall');
   });
 });

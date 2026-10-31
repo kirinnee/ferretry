@@ -3,6 +3,7 @@ import type { AgentToolService } from '../../agent-tools/service.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
 import type { CapabilityGuard } from '../../api/capability.ts';
+import type { ResponseCompressor } from '../../api/compression.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
@@ -153,6 +154,8 @@ export interface MountedSubsystems {
   readonly health: DaemonHealthSubsystem;
   /** Counts the requests that reach a route kept only for older clients. Absent where nothing counts. */
   readonly legacyWire?: LegacyWireUseRecorder;
+  /** Gzips a large `GET` answer for a caller that accepts it (`lib/api/compression.ts`). Absent where nothing compresses. */
+  readonly compressor?: ResponseCompressor;
   /** Host dependencies, diagnosed for this daemon's own machine. */
   readonly doctor: DoctorSubsystem;
   /**
@@ -726,6 +729,7 @@ export function createMountedDispatcher(base: DaemonApiDependencies, subsystems:
     undefined,
     subsystems.stepUp,
     subsystems.legacyWire,
+    subsystems.compressor,
   );
 }
 

@@ -13,6 +13,7 @@ import {
   type AgendaRef,
   type AgendaSnapshot,
   type BoardActor,
+  type BoardEditableField,
   type BoardTaskEvent,
   type BoardTaskView,
   formatTaskRef,
@@ -194,7 +195,7 @@ const describe = (event: BoardTaskEvent, context: HistoryContext): Pick<HistoryR
     case 'unblocked':
       return { text: 'unblocked', detail: event.reason, minor: false };
     case 'field-edited':
-      return { text: `edited the ${event.field}`, detail: null, minor: true };
+      return { text: `edited ${FIELD_WORDS[event.field]}`, detail: null, minor: true };
     case 'file-claimed':
       return { text: `claimed ${event.path}`, detail: null, minor: true };
     case 'file-released':
@@ -365,6 +366,70 @@ export const askSessions = (task: Pick<BoardTaskView, 'openAsks' | 'owner' | 'as
 
 /** A prose field the card actually has; an empty one earns no section. */
 export const written = (text: string): boolean => text.trim() !== '';
+
+/** How to test, as the owner reads it: an optional lead line ("On the Mac, v4.157:"), then the steps in order. */
+export interface TestSteps {
+  readonly lead: string | null;
+  readonly steps: readonly string[];
+}
+
+const LIST_ITEM = /^( {0,3}(?:\d{1,3}[.)]|[-*+])\s+)(.*)$/u;
+const FENCE = /^\s*(?:```|~~~)/u;
+
+interface StepLines {
+  /** How far the step's own text is indented: its continuation lines lose this much. */
+  readonly indent: number;
+  readonly lines: string[];
+}
+
+const dedent = (line: string, indent: number): string => {
+  const spaces = /^ */u.exec(line)?.[0].length ?? 0;
+  return line.slice(Math.min(spaces, indent));
+};
+
+/**
+ * How to test split into steps when it is written as a list (numbered or bulleted), each step keeping its own
+ * continuation lines (an indented code block, a second paragraph). Text before the list is its lead. `null` when
+ * it is not a list, or text follows the list: then it is drawn whole, as Markdown, rather than cut up wrongly.
+ */
+export const testSteps = (text: string): TestSteps | null => {
+  const lead: string[] = [];
+  const steps: StepLines[] = [];
+  let fence = false;
+  for (const line of text.trim().split('\n')) {
+    const current = steps.at(-1);
+    const item = fence ? null : LIST_ITEM.exec(line);
+    if (item !== null) {
+      steps.push({ indent: item[1]?.length ?? 0, lines: [item[2] ?? ''] });
+      continue;
+    }
+    if (current === undefined) {
+      lead.push(line);
+      continue;
+    }
+    const indented = (/^ */u.exec(line)?.[0].length ?? 0) >= Math.min(current.indent, 2);
+    if (!fence && line.trim() !== '' && !indented) return null;
+    current.lines.push(dedent(line, current.indent));
+    if (FENCE.test(line)) fence = !fence;
+  }
+  if (steps.length === 0) return null;
+  const leadText = lead.join('\n').trim();
+  return {
+    lead: leadText === '' ? null : leadText,
+    steps: steps.map(step => step.lines.join('\n').trim()),
+  };
+};
+
+/** What the history calls each field an edit changed. */
+const FIELD_WORDS: Readonly<Record<BoardEditableField, string>> = {
+  title: 'the title',
+  summary: 'the summary',
+  premise: 'the premise',
+  context: 'the context',
+  terms: 'the terms',
+  brief: 'the brief',
+  howToTest: 'How to test',
+};
 
 /** The card has a PR, a branch, a doc or a release to show. */
 export const hasLinks = (task: Pick<BoardTaskView, 'links' | 'shippedIn'>): boolean =>

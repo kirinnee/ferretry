@@ -76,6 +76,32 @@ describe('BoardCard', () => {
     expect(li.dataset.task).toBe('F412');
   });
 
+  it('draws the summary as one line under the title, and How to test as a marker', async () => {
+    const task = await cardOf({ summary: 'Cards say how to test them', howToTest: '1. Open it' });
+    view = await mount(
+      <ul>
+        <BoardCard card={task} category="verify" density="page" href="/x" names={names} now={NOW} showMachine={false} />
+      </ul>,
+    );
+    const root = view.container;
+    expect(root.querySelector('.fy-board-card__title')?.nextElementSibling?.className).toBe('fy-board-card__summary');
+    expect(root.querySelector('.fy-board-card__summary')?.textContent).toBe('Cards say how to test them');
+    expect(root.querySelector('[data-seg="test"]')?.textContent).toBe('How to test');
+  });
+
+  it('says quietly when a card to test has no test steps, and leaves the summary out of the side density', async () => {
+    const task = await cardOf({ summary: 'Cards say how to test them' });
+    view = await mount(
+      <ul>
+        <BoardCard card={task} category="verify" density="side" href="/x" names={names} now={NOW} showMachine={false} />
+      </ul>,
+    );
+    const root = view.container;
+    expect(root.querySelector('.fy-board-card__summary')).toBeNull();
+    expect(root.querySelector('[data-seg="test"]')?.textContent).toBe('no test steps');
+    expect(root.querySelector('[data-seg="test"]')?.getAttribute('data-tone')).toBe('quiet');
+  });
+
   it('keeps one short line in the side density, without the optional segments', async () => {
     const root = await draw({ density: 'side', showMachine: true });
     expect([...root.querySelectorAll('.fy-board-seg')].map(node => node.getAttribute('data-seg'))).toEqual([

@@ -27,6 +27,7 @@ import {
   prLine,
   type SessionAgenda,
   startBrief,
+  testSteps,
   verdictLanes,
   written,
 } from '../../src/lib/board-detail.ts';
@@ -272,6 +273,7 @@ describe('history', () => {
       minor: true,
     });
     expect(rowOf('field-edited', { field: 'title' })).toMatchObject({ text: 'edited the title', minor: true });
+    expect(rowOf('field-edited', { field: 'howToTest' })).toMatchObject({ text: 'edited How to test', minor: true });
     expect(rowOf('file-claimed', { path: 'a.ts' })).toMatchObject({ text: 'claimed a.ts', minor: true });
     expect(rowOf('file-released', { path: 'a.ts', reason: 'done' })).toMatchObject({
       text: 'released a.ts',
@@ -442,6 +444,40 @@ describe('written and hasLinks', () => {
     expect(hasLinks({ ...bare, shippedIn: { version: '1.0.0', tag: 'v1.0.0', at: '2026-08-01T09:50:00.000Z' } })).toBe(
       true,
     );
+  });
+});
+
+describe('testSteps', () => {
+  it('splits a numbered or bulleted list into steps, with the text before it as the lead', () => {
+    expect(testSteps('On the Mac, v4.157:\n\n1. Open **Board**\n2) Tap &F1\n3. See it')).toEqual({
+      lead: 'On the Mac, v4.157:',
+      steps: ['Open **Board**', 'Tap &F1', 'See it'],
+    });
+    expect(testSteps('- one\n* two\n+ three')).toEqual({ lead: null, steps: ['one', 'two', 'three'] });
+  });
+
+  it('keeps a step’s own lines with it: a second paragraph, an indented diagram', () => {
+    const fence = '`'.repeat(3);
+    const text = [
+      '1. Open it',
+      '',
+      '   then wait',
+      '2. Compare',
+      `   ${fence}mermaid`,
+      '   graph TB',
+      '     A-->B',
+      `   ${fence}`,
+    ].join('\n');
+    expect(testSteps(text)?.steps).toEqual([
+      'Open it\n\nthen wait',
+      `Compare\n${fence}mermaid\ngraph TB\n  A-->B\n${fence}`,
+    ]);
+  });
+
+  it('is null for text that is not a list, or that carries on after the list', () => {
+    expect(testSteps('Just open it and look.')).toBeNull();
+    expect(testSteps('')).toBeNull();
+    expect(testSteps('1. Open it\n2. Look\nThen you are done.')).toBeNull();
   });
 });
 

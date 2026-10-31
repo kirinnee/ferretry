@@ -1,10 +1,19 @@
 import type { WardenJevCheck } from '@ferretry/protocol';
-import type { TriageDecision, TriageSnapshot } from '../../../src/lib/speedups/jev.ts';
+import {
+  type JevJudgement,
+  type JevQuestionSet,
+  type JevYesNo,
+  NUDGE_MESSAGES,
+  type NudgeMessageId,
+  type TriageFailure,
+  type TriageSnapshot,
+} from '../../../src/lib/speedups/jev.ts';
 import {
   type AgendaBoardInput,
   defaultWardenConfig,
-  type WardenAnomalyKind,
+  type JevJudgementNode,
   type WardenAgendaWrite,
+  type WardenAnomalyKind,
   type WardenBoardPort,
   type WardenCardNotice,
   type WardenConfig,
@@ -12,6 +21,7 @@ import {
   type WardenEscalationRaise,
   type WardenEscalationVerdict,
   type WardenFleetSession,
+  type WardenReviveService,
   type WardenRuntimeState,
   type WardenSpawnFacts,
   type WardenSpawnProvenance,
@@ -20,7 +30,6 @@ import {
   WardenSweepService,
   type WardenSweepSettings,
   wardenEscalationSourceRef,
-  type WardenReviveService,
 } from '../../../src/lib/warden/index.ts';
 
 /**
@@ -29,17 +38,43 @@ import {
 
 export const NOW = Date.parse('2026-07-31T12:00:00.000Z');
 
-/** Jev, sure the ferret is healthy. */
-export const JEV_SKIP: TriageDecision = {
-  verdict: 'leave',
-  confidence: 0.96,
-  model: 'jev-latest',
-  inputTokens: 500,
-  latencyMs: 90,
-  costUsd: 0.001,
-};
-/** Jev, unsure: the flag is handed on. */
-export const JEV_INVESTIGATE: TriageDecision = { ...JEV_SKIP, verdict: 'unsure', confidence: 0.9 };
+/**
+ * How the fake Jev answers the decision tree's yes/no questions (`jev-tree.ts`): each question it is asked
+ * gets the answer named for its node, or `otherwise`. Only the questions the sweep actually asks are
+ * answered, so a test sees exactly what the facts left open.
+ */
+export interface JevScript {
+  readonly answers?: Partial<Record<JevJudgementNode, JevYesNo>>;
+  /** The answer to any question not named in `answers`. */
+  readonly otherwise?: JevYesNo;
+  /** The nudge message, when the sweep offers one to choose. */
+  readonly nudge?: { readonly id: NudgeMessageId; readonly confidence: number };
+  readonly costUsd?: number;
+  readonly failure?: TriageFailure;
+}
+
+export const yes = (confidence: number): JevYesNo => ({ answer: 'yes', confidence });
+export const no = (confidence: number): JevYesNo => ({ answer: 'no', confidence });
+
+/** Jev, sure the ferret is healthy: yes to every question — every path's yes ends in a leave. */
+export const JEV_SKIP: JevScript = { otherwise: yes(0.96), costUsd: 0.001 };
+/** Jev, not sure of anything: the flag is handed on, naming the first question. */
+export const JEV_INVESTIGATE: JevScript = { otherwise: yes(0.5), costUsd: 0.001 };
+
+/** The fake guard's reply to one question set. */
+function scriptedJudgement(script: JevScript, set: JevQuestionSet): JevJudgement {
+  const base = { model: 'jev-latest', inputTokens: 500, latencyMs: 90, costUsd: script.costUsd ?? 0.001 };
+  if (script.failure !== undefined) return { ...base, answers: {}, failure: script.failure };
+  const fallback = script.otherwise ?? yes(0.96);
+  const answers = Object.fromEntries(
+    set.questions.map(question => [question.id, script.answers?.[question.id as JevJudgementNode] ?? fallback]),
+  );
+  const nudge =
+    script.nudge !== undefined && (set.nudgeMessages ?? []).includes(script.nudge.id)
+      ? { id: script.nudge.id, message: NUDGE_MESSAGES[script.nudge.id], confidence: script.nudge.confidence }
+      : undefined;
+  return { ...base, answers, ...(nudge === undefined ? {} : { nudge }) };
+}
 export const at = (minutes: number): string => new Date(NOW + minutes * 60_000).toISOString();
 
 const settings = (overrides: Partial<WardenSweepSettings> = {}): WardenSweepSettings => ({
@@ -99,6 +134,8 @@ export interface Harness {
   readonly notices: { readonly sessionId: string; readonly notice: WardenCardNotice }[];
   /** Every snapshot the Jev guard was shown, after redaction. */
   readonly guarded: readonly TriageSnapshot[];
+  /** Every question set the Jev guard was asked, in order. */
+  readonly judged: readonly JevQuestionSet[];
   readonly guardSettings: readonly unknown[];
   /** Every Jev check the sweep wrote down, oldest first. */
   readonly jevChecks: readonly WardenJevCheck[];
@@ -146,8 +183,8 @@ export function harness(
     readonly noticeWrite?: WardenAgendaWrite;
     /** Force every raise to one outcome, for the paths a real store reaches rarely. */
     readonly raiseWrite?: WardenAgendaWrite;
-    /** The Jev guard's answer to each snapshot, in order; the last one repeats. */
-    readonly guard?: readonly (TriageDecision | Error)[];
+    /** The Jev guard's answer to each question set, in order; the last one repeats. */
+    readonly guard?: readonly (JevScript | Error)[];
     readonly evidence?: (
       sessionId: string,
     ) => Promise<{ readonly recentTurns: readonly string[]; readonly paneTail?: string }>;
@@ -181,6 +218,7 @@ export function harness(
   let spawnCall = 0;
   let capability = 0;
   const guarded: TriageSnapshot[] = [];
+  const judged: JevQuestionSet[] = [];
   const guardSettings: unknown[] = [];
   const jevChecks: WardenJevCheck[] = [];
   const remedies: { readonly action: string; readonly sessionId: string; readonly detail: string }[] = [];
@@ -194,13 +232,17 @@ export function harness(
     guard: settings => {
       guardSettings.push(settings);
       return {
-        decide: async snapshot => {
-          guarded.push(snapshot);
+        decide: async () => {
+          throw new Error('the sweep asks the decision tree, never one choice');
+        },
+        judge: async set => {
+          guarded.push(set.snapshot);
+          judged.push(set);
           const script = options.guard ?? [JEV_SKIP];
-          const next = script[Math.min(guardCall, script.length - 1)] as TriageDecision | Error;
+          const next = script[Math.min(guardCall, script.length - 1)] as JevScript | Error;
           guardCall += 1;
           if (next instanceof Error) throw next;
-          return next;
+          return scriptedJudgement(next, set);
         },
       };
     },
@@ -360,6 +402,7 @@ export function harness(
     resolved,
     notices,
     guarded,
+    judged,
     guardSettings,
     jevChecks,
     remedies,

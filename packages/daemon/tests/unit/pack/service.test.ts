@@ -806,7 +806,7 @@ describe("a sub-ferret's card", () => {
     should(delegated).match([['p1', { brief: 'fix the bug' }, true]]);
     should(delegations).deepEqual([reserved]);
     should(starts[0]?.prompt).containEql(
-      'Your card is &F413 on the Ferretry board, under &F412; move it as you work (`fy task …`).',
+      'Your card is &F413 on the Ferretry board, under &F412; the daemon moves it for you (`fy task note` adds progress).',
     );
     should(starts[0]).not.have.property('boardAccess');
     should(outcome.outcome === 'started' && outcome.card).deepEqual({
@@ -831,7 +831,7 @@ describe("a sub-ferret's card", () => {
 
     // Assert
     should(delegated[0]?.[2]).be.false();
-    should(starts[0]?.prompt).containEql("Your card is &F413 on the project's board; move it");
+    should(starts[0]?.prompt).containEql("Your card is &F413 on the project's board; the daemon moves it for you");
     should(outcome.outcome === 'started' && outcome.card).deepEqual({ id: 'F413', note: notes[0] });
   });
 

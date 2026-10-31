@@ -1531,6 +1531,13 @@ describe('deriveAccountChange: credential.remove with runtimes on the login', ()
   });
 });
 
+const PORTS_BASE = {
+  kind: 'machine.settings' as const,
+  agentPermissions: 'auto' as const,
+  defaultRuntime: null,
+  agentControl: { terminals: true, browsers: true, files: true },
+};
+
 describe('deriveAccountChange: machine.settings', () => {
   it('should apply to new sessions when none is running', () => {
     // Act
@@ -1653,6 +1660,70 @@ describe('deriveAccountChange: machine.settings', () => {
     should(same.summary).equal('Keep machine settings the same');
   });
 
+  it('should set the browser ports, saying they wait for the next browser or login-window start', () => {
+    // Act
+    const perUser = derive({ ...PORTS_BASE, browserPorts: 'per-user' });
+    const explicit = derive({ ...PORTS_BASE, browserPorts: { cdp: 9222, relay: 9223, vnc: 5901 } });
+
+    // Assert
+    should(perUser.summary).equal('Set the browser ports to per-user (derived from the user id)');
+    should(perUser.model.machine.browserPorts).equal('per-user');
+    should(explicit.summary).equal('Set the browser ports to cdp 9222, relay 9223, vnc 5901');
+    should(explicit.model.machine.browserPorts).eql({ cdp: 9222, relay: 9223, vnc: 5901 });
+    should(explicit.consequences).deepEqual([
+      'Applies the next time the browser or the login window starts; a browser already running keeps its ports until it stops.',
+    ]);
+  });
+
+  it('should set the firewall failure policy, and keep it when an older client leaves it out or repeats it', () => {
+    // Arrange
+    const model = modelOf({ machine: { browserFirewallFailure: 'refuse' } });
+
+    // Act
+    const refuse = derive({ ...PORTS_BASE, browserFirewallFailure: 'refuse' });
+    const warn = derive({ ...PORTS_BASE, browserFirewallFailure: 'warn' }, model);
+    const left = derive(PORTS_BASE, model);
+    const same = derive({ ...PORTS_BASE, browserFirewallFailure: 'refuse' }, model);
+
+    // Assert
+    should(refuse.summary).equal('Set the loopback firewall failure policy to refuse');
+    should(refuse.model.machine.browserFirewallFailure).equal('refuse');
+    should(refuse.consequences).deepEqual([
+      'Applies the next time the browser starts; a browser already running is not stopped.',
+    ]);
+    should(warn.model.machine.browserFirewallFailure).equal('warn');
+    should(left.model.machine.browserFirewallFailure).equal('refuse');
+    should(same.summary).equal('Keep machine settings the same');
+  });
+
+  it('should say random when the ports go back to random', () => {
+    // Arrange
+    const model = modelOf({ machine: { browserPorts: 'per-user' } });
+
+    // Act
+    const edit = derive({ ...PORTS_BASE, browserPorts: 'random' }, model);
+
+    // Assert
+    should(edit.summary).equal('Set the browser ports to random');
+    should(edit.model.machine.browserPorts).equal('random');
+  });
+
+  it('should keep the browser ports when an older client leaves them out or says the same again', () => {
+    // Arrange
+    const explicit = { cdp: 9222, relay: 9223, vnc: 5901 };
+    const model = modelOf({ machine: { browserPorts: explicit } });
+
+    // Act
+    const left = derive(PORTS_BASE, model);
+    const same = derive({ ...PORTS_BASE, browserPorts: { ...explicit } }, model);
+
+    // Assert
+    should(left.model.machine.browserPorts).eql(explicit);
+    should(left.summary).equal('Keep machine settings the same');
+    should(same.summary).equal('Keep machine settings the same');
+    should(same.consequences).deepEqual([]);
+  });
+
   it('should leave the browser mode as it is when an older client leaves it out', () => {
     // Arrange
     const model = modelOf({ machine: { browserMode: 'window' } });
@@ -1762,6 +1833,48 @@ describe('deriveAccountChange: machine.settings', () => {
     should(on.summary).equal('Set agenda mode for new ferrets on');
     should(untouched.summary).equal('Keep machine settings the same');
     should(untouched.model.machine.agendaMode).equal(false);
+  });
+
+  it('should switch the public usage feed on, saying who can then read it and that it takes hold at once', () => {
+    // Act
+    const edit = derive({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+      publicUsageFeed: true,
+    });
+
+    // Assert
+    should(edit.summary).equal('Set the public usage feed on');
+    should(edit.model.machine.publicUsageFeed).equal(true);
+    should(edit.consequences).deepEqual([
+      'Applies at once: any process on this host, and anything that reaches the daemon, can read quota percentages and account labels at /usage and /metrics without a credential.',
+    ]);
+  });
+
+  it('should switch the public usage feed back off, and leave it alone when an older client leaves it out', () => {
+    // Arrange
+    const model = modelOf({ machine: { publicUsageFeed: true } });
+    const base = {
+      kind: 'machine.settings' as const,
+      agentPermissions: 'auto' as const,
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    };
+
+    // Act
+    const off = derive({ ...base, publicUsageFeed: false }, model);
+    const untouched = derive(base, model);
+
+    // Assert
+    should(off.summary).equal('Set the public usage feed off');
+    should(off.model.machine.publicUsageFeed).equal(false);
+    should(off.consequences).deepEqual([
+      'Applies at once: /usage and /metrics answer as paths the daemon does not have.',
+    ]);
+    should(untouched.summary).equal('Keep machine settings the same');
+    should(untouched.model.machine.publicUsageFeed).equal(true);
   });
 
   it('should say nothing moved when every field matches the current machine settings', () => {

@@ -24,4 +24,8 @@ coveragePathIgnorePatterns = [
   "packages/*/*.config.ts",
   # The hosted app's release key, compiled into fyd as text (bunfig.int.toml says why it is listed).
   "packages/pwa/*.pub",
+  # THE HOST FIREWALL SCRIPT AND UNIT, text files `fy browser firewall script|unit` compiles in verbatim
+  # (docs/loopback-firewall.md). Bun records a text import as a covered "file", so a tier that loads the
+  # bundle would otherwise report `scripts/host/…` and fail on a PATH, not on a test.
+  "scripts/host/**",
 ]
