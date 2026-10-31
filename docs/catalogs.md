@@ -192,6 +192,11 @@ What exists on the machine that makes a catalog. Everything here needs the **`sh
 
 ### Making and exporting a catalog
 
+> **Upgrading.** A device paired before this release holds **Sharing OFF**: its record predates the
+> capability, and an old record never reads wider than it was written. At the machine, turn it on for one
+> device with `fy device grant <device> sharing --use`. The host's own `fy catalog` commands are not
+> governed by a device grant and work at once. See [grants.md](grants.md#changing-a-devices-grants).
+
 ```text
 fy catalog create "Team skills"                       # an empty catalog, revision 1
 fy catalog add "Team skills" --skill review-pr        # shows ALL of it, then asks y/N

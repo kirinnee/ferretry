@@ -36,9 +36,8 @@ export class NodeSkillFolder implements SkillTreePort {
     const pending: { readonly directory: string; readonly prefix: readonly string[] }[] = [
       { directory: root, prefix: [] },
     ];
-    while (pending.length > 0 && !truncated) {
-      const next = pending.shift();
-      if (next === undefined) break;
+    for (const next of pending) {
+      if (truncated) break;
       let names: string[];
       try {
         names = (await readdir(next.directory)).toSorted();

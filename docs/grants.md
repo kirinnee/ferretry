@@ -295,7 +295,9 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) �
    ("it also stops this device managing and exporting catalogs").
 
 `sharing.configure` governs only whether a remote caller may re-grant `sharing`. Both axes are on by
-default; the operator password is the opt-in layer.
+default; the operator password is the opt-in layer. That is the daemon-wide document and a device paired
+from this release on. A device paired **before** this release holds Sharing off until the owner turns it on
+(`fy device grant <device> sharing --use`), because its stored record never said anything about it.
 
 Each instance above cites a command. **Verify a cited command exists before adding one**, and verify it a
 second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` — that is `--replace`, so
@@ -524,6 +526,15 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
   field and reads as the default — `fleet.use` only — which is a narrowing and therefore safe. Every write
   carries the field. A record whose `grants` is malformed fails the document closed, as every other
   malformed field does.
+- **A record written before a capability existed reads that capability as OFF, and is written back.**
+  Adding a capability makes every stored `grants` one key short of the closed set, and refusing the document
+  would stop a daemon with a paired device from starting at all. So `StatePairingRepository.open` fills each
+  capability a record lacks with `{ use: false, configure: false }` (a narrowing, never a widening, whichever
+  capability it is) and writes the document back once, whole. The `upgrade-grants` unit test keeps a
+  committed `devices.json` exactly as v4.172.x wrote it (seven capabilities) and strips each capability this
+  build knows from a full record in turn, so a capability added without thought for old records fails there.
+  **Devices paired before `sharing` existed therefore start with Sharing OFF.** To turn it on for one, at
+  the machine: `fy device grant <device> sharing --use` (add `--configure` to let it re-grant Sharing).
 
 ### Changing a device's grants
 

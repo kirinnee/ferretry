@@ -1,5 +1,6 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -11,7 +12,10 @@ import { SKILL_WALK_LIMITS } from '../../../src/lib/shared-catalogs/skill-source
 const roots = new Set<string>();
 
 afterEach(async () => {
-  for (const root of roots) await rm(root, { recursive: true, force: true });
+  for (const root of roots) {
+    await chmod(join(root, 'locked'), 0o700).catch(() => undefined);
+    await rm(root, { recursive: true, force: true });
+  }
   roots.clear();
 });
 
@@ -103,5 +107,47 @@ describe('the skill folder on disk', () => {
     should(await new NodeSkillFolder().list('/nonexistent-ferretry/skill/SKILL.md', SKILL_WALK_LIMITS)).equal(
       undefined,
     );
+  });
+
+  it('should report a folder it cannot read as one thing it could not look at', async () => {
+    const { root, manifest } = await skill({ 'SKILL.md': 'abc' });
+    await mkdir(join(root, 'locked'));
+    await chmod(join(root, 'locked'), 0o000);
+
+    const listing = await new NodeSkillFolder().list(manifest, SKILL_WALK_LIMITS);
+
+    should(listing?.entries.find(entry => entry.path === 'locked')).deepEqual({
+      path: 'locked',
+      type: 'other',
+      size: 0,
+    });
+  });
+
+  it('should report an entry it can list but not look at as something it could not look at', async () => {
+    const { root, manifest } = await skill({ 'SKILL.md': 'abc', 'locked/inside.txt': 'x' });
+    await chmod(join(root, 'locked'), 0o444);
+
+    const listing = await new NodeSkillFolder().list(manifest, SKILL_WALK_LIMITS);
+
+    should(listing?.entries.find(entry => entry.path === 'locked/inside.txt')).deepEqual({
+      path: 'locked/inside.txt',
+      type: 'other',
+      size: 0,
+    });
+  });
+
+  it('should report a pipe as neither a file nor a folder', async () => {
+    const { root, manifest } = await skill({ 'SKILL.md': 'abc' });
+    execFileSync('mkfifo', [join(root, 'pipe')]);
+
+    const listing = await new NodeSkillFolder().list(manifest, SKILL_WALK_LIMITS);
+
+    should(listing?.entries.find(entry => entry.path === 'pipe')).deepEqual({ path: 'pipe', type: 'other', size: 0 });
+  });
+
+  it('should answer undefined when the place the manifest is said to be in is not a folder', async () => {
+    const { root } = await skill({ 'plain.txt': 'x' });
+
+    should(await new NodeSkillFolder().list(join(root, 'plain.txt', 'SKILL.md'), SKILL_WALK_LIMITS)).equal(undefined);
   });
 });

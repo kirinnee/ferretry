@@ -1,7 +1,13 @@
 import { afterAll, describe, it } from 'bun:test';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type DaemonId, LIMITED_DEVICE_GRANTS, FULL_DEVICE_GRANTS, PairingCodeSchema } from '@ferretry/protocol';
+import {
+  DAEMON_CAPABILITIES,
+  type DaemonId,
+  LIMITED_DEVICE_GRANTS,
+  FULL_DEVICE_GRANTS,
+  PairingCodeSchema,
+} from '@ferretry/protocol';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import { NodePairingCryptography, StatePairingRepository } from '../../../src/adapters/pairing/index.ts';
@@ -378,6 +384,29 @@ describe('StatePairingRepository device keys', () => {
 
     // Assert
     should(reopened.devices[0]?.grants).deepEqual(LIMITED_DEVICE_GRANTS);
+  });
+
+  it('should start on the devices.json of the release before the newest capability, on the real disk', async () => {
+    // The unit tier proves the rule; this proves it through the real file system and a real identity.
+    // Arrange
+    const { paths, files, repository } = await fixture('pairing-state-upgrade');
+    const state = await repository.open('workstation');
+    const old = (
+      await readFile(join(import.meta.dir, '../../fixtures/pairing/devices-v4.172.json'), 'utf8')
+    ).replaceAll('__DAEMON_ID__', state.daemonId);
+    await files.writeTextAtomic(join(paths.state, 'devices.json'), old);
+
+    // Act
+    const reopened = await new StatePairingRepository(paths, files).open('workstation');
+    const rewritten = JSON.parse(await readFile(join(paths.state, 'devices.json'), 'utf8')) as {
+      devices: { grants: Record<string, unknown> }[];
+    };
+
+    // Assert
+    should(reopened.devices.length).equal(2);
+    for (const device of reopened.devices) should(device.grants.sharing).deepEqual({ use: false, configure: false });
+    for (const device of rewritten.devices)
+      should(Object.keys(device.grants).sort()).deepEqual([...DAEMON_CAPABILITIES].sort());
   });
 
   it('should refuse a device grant document whose grants are malformed, rather than guess', async () => {

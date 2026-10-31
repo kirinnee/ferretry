@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import {
   type CapabilityGrants,
   CapabilityGrantsSchema,
+  DAEMON_CAPABILITIES,
   type DaemonId,
   LIMITED_DEVICE_GRANTS,
   DaemonIdSchema,
@@ -22,6 +23,27 @@ const IdentityDocumentSchema = z.strictObject({
   privateKeyPem: z.string().min(1),
 });
 
+/** What a stored record says about a capability it predates: off, a narrowing and so always safe. */
+const CAPABILITY_OFF = Object.freeze({ use: false, configure: false });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Whether a stored `grants` names every capability this release knows. A capability added after a record
+ * was written is missing from it, and the closed schema would refuse the whole document, which would
+ * stop the daemon from starting. Missing is filled with off instead (see `fillMissingCapabilities`) and the document is
+ * written back whole, so the next open finds nothing to fill.
+ */
+const namesEveryCapability = (grants: unknown): boolean =>
+  isRecord(grants) && DAEMON_CAPABILITIES.every(capability => capability in grants);
+
+/** Fills each capability a stored record predates with off. Anything else is left for the schema to judge. */
+function fillMissingCapabilities(grants: unknown): unknown {
+  if (!isRecord(grants)) return grants;
+  return { ...Object.fromEntries(DAEMON_CAPABILITIES.map(capability => [capability, CAPABILITY_OFF])), ...grants };
+}
+
 const DeviceRecordSchema = z.strictObject({
   id: PairedDeviceIdSchema,
   daemonId: DaemonIdSchema,
@@ -32,8 +54,9 @@ const DeviceRecordSchema = z.strictObject({
   pairedOver: z.enum(['direct', 'relay']).optional(),
   publicKey: DeviceKeySchema,
   // A record written before per-device grants reads as LIMITED (fleet.use only), a narrowing and
-  // therefore safe — so the document stays at schema 2. Every write carries the field.
-  grants: CapabilityGrantsSchema.default(LIMITED_DEVICE_GRANTS),
+  // therefore safe — so the document stays at schema 2. A record written before a CAPABILITY existed
+  // reads that capability as off, for the same reason. Every write carries the whole field.
+  grants: z.preprocess(fillMissingCapabilities, CapabilityGrantsSchema).default(LIMITED_DEVICE_GRANTS),
   /** When `publicKey` last replaced an earlier one. Absent until a first rotation. */
   keyRotatedAt: InstantSchema.optional(),
 });
@@ -124,6 +147,10 @@ export class StatePairingRepository implements PairingDeviceStore {
           throw new Error('device grants contain duplicate identities');
         }
         records = document.devices;
+        const stale = (raw as { devices: { grants?: unknown }[] }).devices.some(
+          device => !namesEveryCapability(device.grants),
+        );
+        if (stale) await this.files.writeTextAtomic(this.devicesPath, deviceDocument(daemonId, records));
       }
     }
 
