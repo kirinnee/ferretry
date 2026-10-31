@@ -13,6 +13,7 @@ import { SecureCopyError } from '../../secure-copy/errors.ts';
 import type { CopyPlanService } from '../../secure-copy/plans.ts';
 import type { PasteRuleCaller, PasteRuleService } from '../../secure-copy/rules.ts';
 import { ownerActorOf } from './input-requests.ts';
+import { refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
 
 /**
  * THE OWNER'S ROUTES FOR SECURE COPY (docs/secure-copy.md): the copies a session holds (descriptions only), the
@@ -95,7 +96,12 @@ export function secureCopyRoutes(
       handle: async context => {
         const caller = ruleOwner(context);
         const request = await parseBody(context.request, PasteRuleCreateSchema);
-        return jsonResponse(await rules.create(caller, request).catch(answered), 201);
+        const intoStore = request.to.kind === 'secret';
+        const refused = intoStore ? refusedSecretWrite(context, 'approve pastes into the secret store') : undefined;
+        if (refused !== undefined) return refused;
+        const rule = await rules.create(caller, request).catch(answered);
+        if (intoStore) spentSecretWrite(context);
+        return jsonResponse(rule, 201);
       },
     },
     {
@@ -130,11 +136,15 @@ export function secureCopyRoutes(
       handle: async context => {
         const caller = ruleOwner(context);
         const body = await parseBody(context.request, CopyPlanApproveSchema);
-        return jsonResponse(
-          await plans
-            .approve(caller, param(context, 'sessionId', SESSION), param(context, 'planId', ID), body.items)
-            .catch(answered),
-        );
+        const sessionId = param(context, 'sessionId', SESSION);
+        const planId = param(context, 'planId', ID);
+        const plan = plans.list(caller, sessionId).find(candidate => candidate.id === planId);
+        const intoStore = body.items.some(index => plan?.items[index]?.to.kind === 'secret');
+        const refused = intoStore ? refusedSecretWrite(context, 'approve pastes into the secret store') : undefined;
+        if (refused !== undefined) return refused;
+        const answer = await plans.approve(caller, sessionId, planId, body.items).catch(answered);
+        if (intoStore) spentSecretWrite(context);
+        return jsonResponse(answer);
       },
     },
   ];

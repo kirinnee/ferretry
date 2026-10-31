@@ -599,7 +599,8 @@ describe('a paste saved as a secret', () => {
 
     should(declined.told.at(-1)).match(/ended without saving sealed:vercel \(cancelled.*call secure_paste again/);
     should(cut.told.at(-1)).containEql('it may or may not hold it now');
-    should(cut.stores).eql([]);
+    should(cut.stores).match([{ name: 'VERCEL_TOKEN', uncertain: true }]);
+    should(declined.stores).eql([]);
   });
 
   it('should save at once under a rule naming that exact secret, and wait for the owner under any other name', async () => {
@@ -622,5 +623,46 @@ describe('a paste saved as a secret', () => {
     should([saved.state, waiting.state]).eql(['delivered', 'pending']);
     should([named.writes, other.writes]).eql([[TOKEN], []]);
     should(named.stores).match([{ actor: { kind: 'rule', ruleId: rule.id }, name: 'VERCEL_TOKEN' }]);
+  });
+});
+
+describe('what a rule never pastes unasked (the security review of SC2b)', () => {
+  const OWNER_RULER = { kind: 'owner', actor: { kind: 'host' } } as const;
+  const SECRET: InputTargetFacts = { kind: 'secret', name: 'VERCEL_TOKEN' as SecretName, exists: true };
+  const INTO_STORE: InputRaise = {
+    target: { kind: 'secret', key: 'VERCEL_TOKEN' as SecretName },
+    prompt: 'the minted Vercel token',
+    sensitivity: 'secret',
+    submit: 'agent',
+    source: { kind: 'sealed', name: 'vercel' },
+  };
+
+  it('should wait for the owner before replacing a secret, even under a rule naming it', async () => {
+    const w = await world({ facts: SECRET });
+    await w.rules.create(OWNER_RULER, {
+      from: { kind: 'command', program: 'vercel' },
+      to: { kind: 'secret', name: 'VERCEL_TOKEN' as SecretName },
+    });
+    await w.capture();
+
+    const view = await w.service.raise(SESSION, INTO_STORE);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+    should(w.rules.list(OWNER_RULER)).match([{ used: 0 }]);
+  });
+
+  it('should wait for the owner on a copy the ferret had already seen, whatever the rule says', async () => {
+    const w = await world({ transcript: 'found', facts: { ...VERCEL, echo: 'off' } });
+    await w.rules.create(OWNER_RULER, {
+      from: { kind: 'command', program: 'vercel' },
+      to: { kind: 'terminal', program: 'vercel' },
+    });
+    await w.capture();
+
+    const view = await w.service.raise(SESSION, PASTE);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
   });
 });

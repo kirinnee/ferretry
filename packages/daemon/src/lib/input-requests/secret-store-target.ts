@@ -1,10 +1,11 @@
 import type { InputTarget, InputTargetFacts, SecretName } from '@ferretry/protocol';
 import type { InputFieldValue, InputTargetPort, ObserveResult, TypeResult } from './ports.ts';
 
-/** The secret store as a paste needs it: which names it holds, and replacing one. Never a value back. */
+/** The secret store as a paste needs it: which names it holds, and storing one if it is still as seen. Never a value back. */
 export interface SecretStoreDirectory {
   list(): Promise<readonly { readonly name: string }[]>;
-  put(name: SecretName, value: string): Promise<unknown>;
+  /** Checked and written in the store's own turn, against every other writer; see `SecretDirectory.putIf`. */
+  putIf(name: SecretName, value: string, exists: boolean): Promise<'stored' | 'changed' | 'full' | 'unreadable'>;
 }
 
 /**
@@ -12,13 +13,11 @@ export interface SecretStoreDirectory {
  * secret NAME". What the daemon observes is whether NAME already holds a value, so the owner's card says whether
  * the paste adds a secret or replaces one. The one write puts the value in the vault, and only if that is still
  * true: a name that gained or lost a value since the card was drawn types nothing (`target_changed`), so a paste
- * the owner allowed as "new" can never overwrite a secret created meanwhile. Writes take turns, so two sessions
- * pasting into one new name cannot both find it empty: the second is refused.
+ * the owner allowed as "new" can never overwrite a secret created meanwhile. The check and the write are one
+ * turn of the store's own, shared with every other writer (the routes, an import, an MCP sign-in refresh), so
+ * nothing lands between them and two pastes into one new name cannot both find it empty.
  */
 export class SecretStoreTarget implements InputTargetPort {
-  /** The write in progress: each check-then-put waits for the one before it. */
-  private turn: Promise<unknown> = Promise.resolve();
-
   constructor(private readonly directory: SecretStoreDirectory) {}
 
   async observe(_sessionId: string, target: InputTarget): Promise<ObserveResult> {
@@ -39,21 +38,15 @@ export class SecretStoreTarget implements InputTargetPort {
     const [only, ...rest] = values;
     if (target.kind !== 'secret' || expected.kind !== 'secret' || only === undefined || rest.length > 0)
       return 'target_changed';
-    const write = this.turn.then(async () => await this.write(target.key, only.text, expected.exists));
-    this.turn = write;
-    return await write;
-  }
-
-  private async write(name: SecretName, value: string, expected: boolean): Promise<TypeResult> {
-    const exists = await this.holds(name);
-    if (exists === undefined) return 'target_gone';
-    if (exists !== expected) return 'target_changed';
+    let outcome: Awaited<ReturnType<SecretStoreDirectory['putIf']>>;
     try {
-      await this.directory.put(name, value);
-      return 'typed';
+      outcome = await this.directory.putIf(target.key, only.text, expected.exists);
     } catch {
+      // It failed while writing: the value may or may not be there.
       return 'uncertain';
     }
+    // A full or unreadable store refused before writing anything: nothing is there, so nothing is uncertain.
+    return outcome === 'stored' ? 'typed' : outcome === 'changed' ? 'target_changed' : 'target_gone';
   }
 
   /** Whether the store holds the name; nothing when the store cannot say (it is never read as "it does not"). */

@@ -126,10 +126,25 @@ without ever reading it. It is the same input request, with the store as the des
 - **The daemon observes the store, never a value**: the name and whether it exists. A new name is green; an
   existing one is amber ("This replaces the value the secret holds now; the old value is gone for good.").
   If the name appeared or went between the card and the write, the write is refused as `target_changed`
-  and nothing is stored.
-- **Nothing is shown**, so there is no quarantine, and a rule naming the exact NAME pastes unasked.
+  and nothing is stored. The check and the write are one turn of the store's own, which every writer shares
+  (the secrets routes, an import, an MCP sign-in refresh), so nothing lands between them and no write is lost.
+  A full or unreadable store refuses before writing, so nothing is uncertain and a rule's use is given back.
+- **It needs the secrets grant too.** Allowing a store paste, adding a `secret:` rule and approving a plan
+  item into the store are `terminal` routes, but they change the store, so a governed device also needs
+  `secrets.configure` (or its passkey confirmation), exactly as `POST /v1/secrets` does
+  ([grants](grants.md)). A device paired without it cannot overwrite a secret by allowing a paste instead.
+- **Nothing is shown**, so there is no quarantine, and a rule naming the exact NAME pastes unasked, but only
+  to ADD that secret: replacing a value the store holds now always waits for the owner.
 - **Audit**: `input.delivered` as for any paste, and `secrets.changed` with the name, `paste` or
-  `paste-replace`, the request and the rule if one allowed it; never the value.
+  `paste-replace`, the request and the rule if one allowed it; never the value. A write that was cut off is
+  kept as `paste-uncertain` (outcome `failed`), because the store may hold the copy now.
+- **GAP: a replaced value stops being masked.** The live redactor masks what the store holds, so after a paste
+  replaces a secret the OLD value (often still valid after minting a new token) is no longer masked in old
+  scrollback. Revoke the old credential when you replace it.
+- **GAP: this is consent, not a boundary against the agent.** Agents still hold the host token
+  ([secrets](secrets.md) GAP), so an agent can already run `fy secret set` with no card, and `fy secret ls`
+  already tells it which names exist. The exact-NAME rule decides what the owner is asked; it does not stop an
+  agent that bypasses `secure.paste`. Closing that is the per-session token work, separately.
 
 ### Approving in advance
 
@@ -148,6 +163,11 @@ without ever reading it. It is the same input request, with the store as the des
 - **Only where typing is hidden.** Nobody sees the card of a pre-approved paste, so a rule pastes unasked only
   into a terminal with echo off (or a page's password field). Anywhere the value would show on screen, the card
   waits for the owner even under a matching rule.
+- **Never a copy the ferret saw.** A copy whose value was already in the ferret's transcript is not protected,
+  so its paste always waits for the owner, whose card says so.
+- **A program run by its path never matches.** A rule names a bare program (`gh`), the one the daemon's PATH
+  finds. A copy captured from `./gh` or `/tmp/x/gh` keeps that path as its source, because it may be a file the
+  ferret made to print a value of its choosing, so no rule matches it and the owner is asked.
 - **The secret store is never written by a rule** unless that rule names the exact secret NAME: `secret:<NAME>`
   has no pattern and no wildcard, so a rule for `VERCEL_TOKEN` never writes `VERCEL_TOKEN_2`.
 - **A plan**: `secure.preapprove` raises ONE card listing the pastes the agent plans, each with its route and

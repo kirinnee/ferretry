@@ -1,20 +1,22 @@
 import { describe, it } from 'bun:test';
 import type { PasteRule } from '@ferretry/protocol';
 import should from 'should';
+import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { CopyPlanService, EphemeralValues, PasteRuleService, SecureCopyService } from '../../../../src/lib/index.ts';
 import { secureCopyRoutes } from '../../../../src/lib/runtime/mounts/secure-copy.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, GRANTED, human } from './support.ts';
+import { agentIn, CREDENTIALS, GRANTED, human, withoutSecretsConfigure } from './support.ts';
 
 /** The owner's secure-copy routes through the real router and authorization boundary, with the real services. */
 
 const SESSION = 'mvv6b4qw-49d0158d';
 const TOKEN = 'vcp_ROUTE-NEVER-RETURNS-77';
 const RULE = { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' } } as const;
+const INTO_STORE = { kind: 'secret', name: 'VERCEL_TOKEN' } as const;
 
-async function served() {
+async function served(guard: CapabilityGuard = GRANTED) {
   const clock = { now: () => Date.parse('2026-10-31T12:00:00.000Z') };
   const copies = new SecureCopyService({
     clock,
@@ -46,9 +48,12 @@ async function served() {
     clock,
     ids: { planId: () => 'b'.repeat(32) },
   });
-  const plan = await plans.propose(SESSION, [{ ...RULE, why: 'the deploy token' }]);
+  const plan = await plans.propose(SESSION, [
+    { ...RULE, why: 'the deploy token' },
+    { from: RULE.from, to: INTO_STORE, why: 'kept for the deploy script' },
+  ]);
   const routes = secureCopyRoutes({ list: sessionId => copies.list(sessionId) }, rules, plans);
-  const dispatch = new ApiDispatcher(new ApiRouter(routes), CREDENTIALS, GRANTED);
+  const dispatch = new ApiDispatcher(new ApiRouter(routes), CREDENTIALS, guard);
   return { dispatch, routes, stored, plan };
 }
 
@@ -171,5 +176,45 @@ describe('the secure copy routes, when a service fails unexpectedly', () => {
     );
 
     should(answer.status).equal(500);
+  });
+});
+
+describe('approving pastes into the secret store', () => {
+  it('should need the secrets grant to add a rule into the store, but not a rule into a terminal', async () => {
+    const { dispatch, stored } = await served(withoutSecretsConfigure('not-granted'));
+
+    const store = await dispatch.dispatch(post('/v1/copy-rules', { from: RULE.from, to: INTO_STORE }));
+    const terminal = await dispatch.dispatch(post('/v1/copy-rules', RULE));
+
+    should([store.status, terminal.status]).eql([403, 201]);
+    should(jsonBody(store).code).equal('grant_not_granted');
+    should(stored.rules?.map(rule => rule.to.kind)).eql(['terminal']);
+  });
+
+  it('should need the secrets grant to approve a plan item into the store, and not for the terminal item alone', async () => {
+    const refusing = await served(withoutSecretsConfigure('step-up-required'));
+    const terminalOnly = await served(withoutSecretsConfigure('not-granted'));
+
+    const both = await refusing.dispatch.dispatch(
+      post(`/v1/sessions/${SESSION}/copy-plans/${refusing.plan.id}/approve`, { items: [0, 1] }),
+    );
+    const first = await terminalOnly.dispatch.dispatch(
+      post(`/v1/sessions/${SESSION}/copy-plans/${terminalOnly.plan.id}/approve`, { items: [0] }),
+    );
+
+    should(both.status).equal(403);
+    should(jsonBody(both)).match({ code: 'grant_step_up_required', demand: { capability: 'secrets' } });
+    should(refusing.stored.rules ?? []).eql([]);
+    should(first.status).equal(200);
+    should(terminalOnly.stored.rules?.map(rule => rule.to.kind)).eql(['terminal']);
+  });
+
+  it('should add a rule into the store for a caller holding the grant', async () => {
+    const { dispatch, stored } = await served();
+
+    const response = await dispatch.dispatch(post('/v1/copy-rules', { from: RULE.from, to: INTO_STORE }));
+
+    should(response.status).equal(201);
+    should(stored.rules?.map(rule => rule.to)).eql([INTO_STORE]);
   });
 });

@@ -297,7 +297,7 @@ export class InputRequestService {
     facts: InputTargetFacts,
     submit: InputRaise['submit'],
   ): Promise<void> {
-    if (!hidesTyping(facts)) return;
+    if (!hidesTyping(facts) || !ruleMayPaste(copy, facts)) return;
     const ruleId = this.deps.rules?.reserve(held.request.sessionId, copy.from, facts);
     if (ruleId === undefined) return;
     const body: InputDeliverBody = {
@@ -480,6 +480,12 @@ export class InputRequestService {
     });
     held.deliveries.set(body.deliveryId, attempt);
     return await attempt;
+  }
+
+  /** Where a request's value goes, for a route that gates by destination: names only, never a value. */
+  targetOf(sessionId: string, requestId: string): InputRequest['target'] | undefined {
+    const held = this.held.get(requestId);
+    return held === undefined || held.request.sessionId !== sessionId ? undefined : held.request.target;
   }
 
   /** The owner declines. Owner only, before anything is read or changed. Only a pending request can be cancelled. */
@@ -814,9 +820,23 @@ export class InputRequestService {
         .type(request.sessionId, request.target, values, submitted, seen.facts)
         .catch((): TypeResult => 'uncertain');
       wrote?.(outcome);
+      const stored = async (uncertain: boolean): Promise<void> => {
+        if (seen.facts.kind !== 'secret') return;
+        await this.deps.audit
+          .stored({
+            sessionId: request.sessionId,
+            requestId: request.id,
+            actor: by,
+            name: seen.facts.name,
+            replaced: seen.facts.exists,
+            ...(uncertain ? { uncertain: true as const } : {}),
+          })
+          .catch(() => undefined);
+      };
       if (outcome === 'uncertain') {
         await this.settle(hold);
         hold = undefined;
+        await stored(true);
         await this.finish(held, 'refused', 'interrupted', undefined, {
           closeCard: true,
           tellAgent: true,
@@ -836,16 +856,7 @@ export class InputRequestService {
       await this.settle(hold);
       hold = undefined;
       if (pasted !== undefined) this.deps.sealed?.used(request.sessionId, pasted);
-      if (seen.facts.kind === 'secret')
-        await this.deps.audit
-          .stored({
-            sessionId: request.sessionId,
-            requestId: request.id,
-            actor: by,
-            name: seen.facts.name,
-            replaced: seen.facts.exists,
-          })
-          .catch(() => undefined);
+      await stored(false);
       const saved =
         body.save === undefined || kept === undefined ? undefined : await this.save(held, body.save, kept, by);
       await this.finish(held, 'delivered', undefined, by, {
@@ -1431,6 +1442,16 @@ const SEEN_FLAG = 'The ferret saw this value before it was sealed, so it is not 
 function pasteRisk(risk: InputRisk | undefined, copy: CopyMeta | undefined): InputRisk | undefined {
   if (copy?.exposure.transcript !== 'found') return risk;
   return { level: risk?.level === 'red' ? 'red' : 'amber', reason: SEEN_FLAG };
+}
+
+/**
+ * What a rule never does unasked, whatever it names: paste a copy the ferret had already seen (it is not
+ * protected, and the owner should be told), or replace a value the secret store holds now (the old one is gone
+ * for good). Both wait for the owner on the card, which says so.
+ */
+function ruleMayPaste(copy: CopyMeta, facts: InputTargetFacts): boolean {
+  if (copy.exposure.transcript === 'found') return false;
+  return facts.kind !== 'secret' || !facts.exists;
 }
 
 /** A target that does not show what is typed: a terminal with echo off, or a page whose fields are all password fields. */

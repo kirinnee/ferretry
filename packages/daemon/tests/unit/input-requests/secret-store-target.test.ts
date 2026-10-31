@@ -14,10 +14,10 @@ const INTO: InputTarget = { kind: 'secret', key: NAME };
 const NEW: InputTargetFacts = { kind: 'secret', name: NAME, exists: false };
 const TOKEN = 'vcp_STORE-NEVER-LEAKS-77a1';
 
-/** A store that records each put, holding the names it was seeded with. */
+/** A store that records each put, holding the names it was seeded with; its check-and-put is one step, as the vault's is. */
 function vault(
   names: readonly string[] = [],
-  options: { readonly unreadable?: boolean; readonly putFails?: boolean } = {},
+  options: { readonly unreadable?: boolean; readonly putFails?: boolean; readonly full?: boolean } = {},
 ) {
   const held = new Set(names);
   const puts: { name: string; value: string }[] = [];
@@ -26,10 +26,14 @@ function vault(
       if (options.unreadable === true) throw new Error('the vault is locked');
       return [...held].map(name => ({ name }));
     },
-    put: async (name, value) => {
-      if (options.putFails === true) throw new Error('disk full');
+    putIf: async (name, value, exists) => {
+      if (options.unreadable === true) return 'unreadable';
+      if (held.has(name) !== exists) return 'changed';
+      if (options.full === true && !exists) return 'full';
+      if (options.putFails === true) throw new Error('the disk went away mid-write');
       puts.push({ name, value });
       held.add(name);
+      return 'stored';
     },
   };
   return { directory, puts, held };
@@ -114,8 +118,12 @@ describe('the secret store as an input target', () => {
     should(store.puts).eql([]);
   });
 
-  it('should report a store it can no longer list as gone, and a put that threw as uncertain', async () => {
+  it('should report a full or unreadable store as gone, nothing written, and a put that threw mid-write as uncertain', async () => {
     const one = [{ field: 'value', text: TOKEN }];
+
+    should(await new SecretStoreTarget(vault([], { full: true }).directory).type(SESSION, INTO, one, false, NEW)).equal(
+      'target_gone',
+    );
 
     should(
       await new SecretStoreTarget(vault([], { unreadable: true }).directory).type(SESSION, INTO, one, false, NEW),

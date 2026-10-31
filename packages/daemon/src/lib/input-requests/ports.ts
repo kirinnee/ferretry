@@ -163,6 +163,8 @@ export interface InputStoreAuditEntry {
   readonly name: string;
   /** The name held a value before: the paste replaced it. */
   readonly replaced: boolean;
+  /** The write was cut off: the store may or may not hold the copy now. */
+  readonly uncertain?: true;
 }
 
 /**

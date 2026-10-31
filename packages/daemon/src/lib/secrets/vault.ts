@@ -59,6 +59,13 @@ function summaries(document: SecretVaultDocument): readonly SecretSummary[] {
  * opaque: there is nothing to show a person that they could sensibly amend.
  */
 export class SecretDirectory {
+  /**
+   * The change in progress. Every change reads the whole document and writes it back, so two at once would
+   * lose one: the second write would drop what the first added. Changes therefore take turns, over every
+   * writer this instance is handed to (the routes, a paste, an import, an MCP sign-in refresh).
+   */
+  private turn: Promise<unknown> = Promise.resolve();
+
   constructor(
     private readonly store: SecretDocumentStore,
     private readonly cipher: SecretCipherPort,
@@ -77,7 +84,32 @@ export class SecretDirectory {
    * Tuesday" is two different facts, and collapsing them loses the one an operator audits by.
    */
   async put(name: SecretName, value: string): Promise<SecretSummary> {
-    const document = await this.document();
+    return await this.inTurn(async () => await this.write(await this.document(), name, value));
+  }
+
+  /**
+   * Stores a value only if the name still holds one exactly when `exists` says, checked and written in one
+   * turn: what a paste the owner allowed as "new" (or as "replaces") needs, so it can never overwrite a value
+   * that arrived after the card was drawn. Says what it found without writing: `changed`, `full`, or
+   * `unreadable` when the store cannot be read. A failure while WRITING still raises, because then the value
+   * may or may not be there.
+   */
+  async putIf(name: SecretName, value: string, exists: boolean): Promise<'stored' | 'changed' | 'full' | 'unreadable'> {
+    return await this.inTurn(async () => {
+      let document: SecretVaultDocument;
+      try {
+        document = await this.document();
+      } catch {
+        return 'unreadable';
+      }
+      if ((document.entries[name] !== undefined) !== exists) return 'changed';
+      if (!exists && Object.keys(document.entries).length >= MAX_SECRETS_PER_DAEMON) return 'full';
+      await this.write(document, name, value);
+      return 'stored';
+    });
+  }
+
+  private async write(document: SecretVaultDocument, name: SecretName, value: string): Promise<SecretSummary> {
     const existing = document.entries[name];
     if (existing === undefined && Object.keys(document.entries).length >= MAX_SECRETS_PER_DAEMON)
       throw new SecretStoreError('full', `this daemon already holds ${MAX_SECRETS_PER_DAEMON} secrets`);
@@ -93,11 +125,20 @@ export class SecretDirectory {
 
   /** Removes a secret. Answers whether there was one, so a caller can report an honest 404. */
   async remove(name: SecretName): Promise<boolean> {
-    const document = await this.document();
-    if (document.entries[name] === undefined) return false;
-    const { [name]: _removed, ...rest } = document.entries;
-    await this.store.write({ ...document, entries: rest });
-    return true;
+    return await this.inTurn(async () => {
+      const document = await this.document();
+      if (document.entries[name] === undefined) return false;
+      const { [name]: _removed, ...rest } = document.entries;
+      await this.store.write({ ...document, entries: rest });
+      return true;
+    });
+  }
+
+  /** Runs one change after the one before it settles, whether that one succeeded or not. */
+  private async inTurn<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.turn.then(work, work);
+    this.turn = run.catch(() => undefined);
+    return await run;
   }
 
   private async document(): Promise<SecretVaultDocument> {
