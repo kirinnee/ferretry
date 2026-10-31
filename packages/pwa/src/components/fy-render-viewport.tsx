@@ -88,6 +88,10 @@ interface Measure {
   readonly screen: number;
 }
 
+/** The strip above the drawing that the controls own: the viewport's top padding, which is not room for the picture. */
+const stripOf = (element: HTMLElement | null): number =>
+  element instanceof Element ? Number.parseFloat(getComputedStyle(element).paddingTop) || 0 : 0;
+
 /** The box's room, read from its element and the window; re-read on every resize of either. */
 function useMeasure(ref: { readonly current: HTMLDivElement | null }, fullscreen: boolean): Measure | null {
   const [measure, setMeasure] = useState<Measure | null>(null);
@@ -96,7 +100,7 @@ function useMeasure(ref: { readonly current: HTMLDivElement | null }, fullscreen
     const element = ref.current;
     const read = (): void => {
       const next: Measure = {
-        height: Math.round(element?.clientHeight ?? 0),
+        height: Math.round((element?.clientHeight ?? 0) - stripOf(element)),
         screen: typeof window === 'undefined' ? 0 : window.innerHeight,
         width: Math.round(element?.clientWidth ?? 0),
       };

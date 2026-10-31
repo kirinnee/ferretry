@@ -42,6 +42,7 @@
   position: relative;
   min-width: 0;
   max-width: 100%;
+  padding-top: calc(max(26px, var(--target-floor)) + 8px);
 }
 
 .fy-render-pan {
@@ -92,14 +93,15 @@
   }
 }
 
-/* ZOOM / RESET: the same quiet cluster as the corner tools, bottom right, revealed the same ways — hover, focus
-   within, a long press — and always while the picture is zoomed, and always where there is no hover to find them
-   with. */
+/* ZOOM / RESET: the same quiet cluster as the corner tools, in the strip the viewport reserves ABOVE the drawing
+   (its padding-top, as tall as the tools), top left, level with the tools at top right — so no control ever sits on
+   the picture. Revealed the same ways — hover, focus within, a long press — and always while the picture is
+   zoomed, and always where there is no hover to find them with. */
 .fy-render-zoom {
   position: absolute;
   z-index: 1;
-  right: 4px;
-  bottom: 4px;
+  top: 4px;
+  left: 4px;
   display: flex;
   gap: 2px;
   padding: 2px;
