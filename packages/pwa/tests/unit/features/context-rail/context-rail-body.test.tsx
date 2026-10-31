@@ -28,6 +28,9 @@ import {
   skillFileLoader,
 } from '../../../../src/features/context-rail/context-rail-ports.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { type AppStore, StoreProvider } from '../../../../src/lib/store.tsx';
+import { fakeClient } from '../../../support/catalog-client.ts';
+import { installRecord, ownedCatalog } from '../../../support/catalog-views.ts';
 import { interact, type Mounted, must } from '../../../support/dom.ts';
 import { click, mountSettled, settle, text, type } from '../fleet/components/view-support.tsx';
 import {
@@ -582,5 +585,66 @@ describe('Context › MCP and Skills against a daemon older than the app', () =>
     expect(root.querySelector('[data-context-failed]')).toBeNull();
     expect(text(root, '[data-context-mcp-problem]')).toContain('/Users/me/Documents/pe/.mcp.json cannot be read');
     expect(rows(root, 'data-context-mcp').length).toBeGreaterThan(0);
+  });
+});
+
+describe('ContextRailBody — catalogs', () => {
+  const fake = () =>
+    fakeClient({
+      'GET /v1/catalog-installs': () => ({
+        installs: [installRecord('skill', 'floop'), installRecord('mcp', 'github')],
+      }),
+      'GET /v1/catalogs': () => ({ catalogs: [ownedCatalog()] }),
+    });
+  const store = {
+    projects: { subscribe: () => () => undefined, slice: () => 1, projects: () => [] },
+  } as unknown as AppStore;
+
+  it('shows where a skill came from, offers Add to catalog and Install from a file on the Skills tab', async () => {
+    const client = fake();
+    const { root } = await body({ tab: 'skills', catalogs: { connection: STUDIO, createClient: client.factory } });
+    const floop = must(
+      root.querySelector('[data-context-skill-scope] [data-catalog-row-tools="floop"]'),
+      'floop tools',
+    );
+    expect(floop.querySelector('[data-catalog-installed-from]')?.textContent).toContain('From');
+    expect(root.querySelectorAll('[data-catalog-add-to]')).toHaveLength(4);
+    expect(root.querySelectorAll('[data-catalog-installed-from]')).toHaveLength(1);
+    await click(root, '[data-catalog-row-tools="babysit-pr"] [data-catalog-add-to]');
+    expect(root.querySelector('[data-catalog-sheet="add"]')).not.toBeNull();
+    expect(client.calls.some(call => call.path === '/v1/catalogs')).toBe(true);
+  });
+
+  it('does the same on the MCP tab, matching a server by name', async () => {
+    const client = fake();
+    const { root } = await body({ tab: 'mcp', catalogs: { connection: STUDIO, createClient: client.factory } });
+    expect(root.querySelector('[data-context-mcp="github"] [data-catalog-installed-from]')).not.toBeNull();
+    expect(root.querySelector('[data-context-mcp="linear"] [data-catalog-installed-from]')).toBeNull();
+    expect(root.querySelectorAll('[data-catalog-add-to]')).toHaveLength(6);
+    await mounted?.render(
+      <StoreProvider store={store}>
+        <ContextRailBody
+          sessionId="session-a"
+          machineName="studio-mac"
+          loadMcp={async () => MCP}
+          loadSkills={async () => SKILLS}
+          loadDocs={async () => DOCS}
+          onInsertSkill={() => undefined}
+          onOpenFile={() => undefined}
+          now={() => NOW}
+          tab="mcp"
+          catalogs={{ connection: STUDIO, createClient: client.factory }}
+        />
+      </StoreProvider>,
+    );
+    await settle();
+    await click(root, '[data-catalog-install-from-file]');
+    expect(root.ownerDocument.querySelector('[data-catalog-sheet="install"]')).not.toBeNull();
+  });
+
+  it('shows no catalog tools at all when the host names no machine', async () => {
+    const { root } = await body({ tab: 'skills' });
+    expect(root.querySelector('[data-catalog-row-tools]')).toBeNull();
+    expect(root.querySelector('[data-catalog-install-from-file]')).toBeNull();
   });
 });

@@ -2898,9 +2898,9 @@ try {
             // The fixture is only evidence about the real frame if it carries the panels the composition
             // root supplies: every app panel but Model pricing, Speed-ups and Learning, which it has never mounted.
             const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-            if (daemonPanels !== 14)
+            if (daemonPanels !== 15)
               fail(
-                `settings fixture listed ${daemonPanels} connection and security panels instead of the 14 it mounts`,
+                `settings fixture listed ${daemonPanels} connection and security panels instead of the 15 it mounts`,
               );
             await wardenFrame.scrollIntoViewIfNeeded();
             // Ten rows with a sentence each is the longest list in Settings; if one row widens a phone, it is here.

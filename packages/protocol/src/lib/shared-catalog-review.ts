@@ -19,11 +19,14 @@ import { z } from 'zod';
 import { commandLine } from './fleet-clone-review.ts';
 import {
   CATALOG_SKILL_ENTRY_FILE,
-  HIDDEN_CHARACTER_SOURCE,
+  hiddenCharacters,
   holdsRawKey,
+  revealHidden,
   type CatalogMcpSetup,
   type SharedCatalogItem,
 } from './shared-catalog.ts';
+
+export { revealHidden };
 
 /** One thing an item brings, in words. */
 export const CatalogReviewEntrySchema = z.strictObject({
@@ -68,29 +71,6 @@ export const CatalogInstallWarningSchema = z.strictObject({
 export type CatalogInstallWarning = z.infer<typeof CatalogInstallWarningSchema>;
 
 // ── Every file and every command ─────────────────────────────────────────────────────────────────
-
-/**
- * Invisible and text-direction characters, and controls other than a tab, a line break and a carriage
- * return that ends a line — a fresh global matcher each time, since `lastIndex` is state.
- */
-const hiddenCharacters = (): RegExp =>
-  // A carriage return is fine before a line feed (a Windows line ending) and hidden anywhere else: in a
-  // terminal `rm -rf ~ #\recho hi` shows as `echo hi`.
-  new RegExp(
-    String.raw`(?:[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F${HIDDEN_CHARACTER_SOURCE}]|\r(?!\n))`,
-    'gu',
-  );
-
-/**
- * A file's text with each hidden character written as `⟨U+202E⟩`, so the review shows what the file
- * holds rather than what it makes the screen look like (Trojan Source). The install writes the bytes as
- * published; only what a person reads is marked.
- */
-export const revealHidden = (text: string): string =>
-  text.replace(
-    hiddenCharacters(),
-    character => `⟨U+${(character.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}⟩`,
-  );
 
 /** `SKILL.md` first, then every other file by path, each in full. Paths are unique (the schema says so). */
 const skillEntries = (files: readonly { readonly path: string; readonly content: string }[]): CatalogReviewEntry[] =>

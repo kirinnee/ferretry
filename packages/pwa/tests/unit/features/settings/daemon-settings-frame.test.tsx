@@ -80,6 +80,7 @@ describe('daemon settings panel rail', () => {
     expect(rows.map(row => String(row.props['data-daemon-panel']))).toEqual([
       'warden',
       'secrets',
+      'catalogs',
       'devices',
       'grants',
       'security',
@@ -103,7 +104,7 @@ describe('daemon settings panel rail', () => {
     });
 
     // ALL of them, so the label column has one left edge.
-    expect(glyphs).toHaveLength(14);
+    expect(glyphs).toHaveLength(15);
     // NONE of them the fallback, so every panel was named deliberately rather than caught by the net.
     expect(glyphs.filter(glyph => glyph.includes(FALLBACK_GLYPH))).toEqual([]);
     // ONE EACH, so two panels cannot claim the same landmark and stop being distinguishable.
@@ -230,11 +231,38 @@ describe('daemon settings panel list', () => {
     }
   });
 
+  it('hands the catalogs panel the frame’s own client factory, so nothing real is read', async () => {
+    const asked: string[] = [];
+    const view = await mount(
+      <DaemonSettingsFrame
+        connection={alpha}
+        name="Alpha"
+        additionalTabs={PRODUCTION_ADDITIONAL_TABS}
+        readWardenStatus={unavailable}
+        createWardenClient={unavailable}
+        createCatalogClient={async connection => {
+          asked.push(connection.daemonId);
+          return { request: async () => ({ catalogs: [] }) as never };
+        }}
+        onOpenPanel={() => undefined}
+        panel="catalogs"
+      />,
+    );
+    try {
+      await interact(async () => {
+        await Promise.resolve();
+      });
+      expect(asked).toContain('alpha');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('lands on the list for a panel that does not exist, never on a blank frame', async () => {
     const view = await mount(frame({ panel: 'retired-panel' }));
     try {
       expect(view.container.querySelector('[data-daemon-panel-open]')).toBeNull();
-      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(14);
+      expect(view.container.querySelectorAll('[data-daemon-panel]')).toHaveLength(15);
     } finally {
       await view.unmount();
     }
@@ -242,6 +270,7 @@ describe('daemon settings panel list', () => {
 
   it.each([
     ['secrets', '[aria-label="Loading secrets"], [aria-label="Secrets unavailable"]'],
+    ['catalogs', '[data-catalogs-surface]'],
     ['devices', '[data-daemon-panel-open="devices"] *'],
     ['grants', '[aria-label="Loading capability grants"], [aria-label="Capability grants unavailable"]'],
     ['security', '[data-daemon-panel-open="security"] *'],

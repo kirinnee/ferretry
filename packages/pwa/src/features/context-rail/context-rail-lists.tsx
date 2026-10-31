@@ -10,6 +10,12 @@
 import type { SessionSkillsInventory, SkillEntry, SkillFile } from '@ferretry/protocol';
 import { useCallback, useId, useState } from 'react';
 import { Markdown } from '../../components/markdown.tsx';
+import {
+  CatalogRowTools,
+  type CatalogRowsHost,
+  InstallFromFileButton,
+  useCatalogInstalls,
+} from '../catalogs/catalog-row-tools.tsx';
 import { cn } from '../../lib/class-names.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
@@ -59,6 +65,8 @@ export interface ContextSkillsPanelProps extends ListPanelProps<SessionSkillsInv
   readonly loadSkillFile?: SkillFileLoader;
   /** The machine's own name, for a failure said in words. */
   readonly machineName: string;
+  /** Lets rows offer "Add to catalog…", say where an installed skill came from, and install from a file. */
+  readonly catalogs?: CatalogRowsHost;
 }
 
 export function ContextSkillsPanel({
@@ -71,8 +79,10 @@ export function ContextSkillsPanel({
   onInsertSkill,
   loadSkillFile,
   machineName,
+  catalogs,
 }: ContextSkillsPanelProps) {
   const [opened, setOpened] = useState<SkillEntry | null>(null);
+  const installed = useCatalogInstalls(catalogs);
   const { load, reload } = read;
   if (load.kind === 'failed')
     return (
@@ -106,10 +116,13 @@ export function ContextSkillsPanel({
         onChipChange={onChipChange}
         {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })}
       />
-      <p className="m-0 text-2xs text-faint">
-        {skillHarnessLabel(harness)}
-        {load.value.truncated ? ' · the list was cut short' : ''}
-      </p>
+      <div className="flex min-w-0 items-center justify-between gap-sm">
+        <p className="m-0 text-2xs text-faint">
+          {skillHarnessLabel(harness)}
+          {load.value.truncated ? ' · the list was cut short' : ''}
+        </p>
+        {catalogs === undefined ? null : <InstallFromFileButton host={catalogs} />}
+      </div>
       {visible.length === 0 ? (
         <ContextNote>{contextEmptyCopy('skills', total, query, chipLabel)}</ContextNote>
       ) : (
@@ -120,45 +133,58 @@ export function ContextSkillsPanel({
             return (
               <li
                 key={skill.path}
-                className={cn('flex min-w-0 items-start gap-xs', override !== undefined && 'opacity-70')}
+                className={cn('flex min-w-0 flex-col', override !== undefined && 'opacity-70')}
                 data-context-skill-scope={skill.scope}
               >
-                <button
-                  type="button"
-                  className={ROW}
-                  aria-label={`Use ${invocation} in chat`}
-                  onClick={() => onInsertSkill(invocation)}
-                  data-context-skill={skill.name}
-                >
-                  <span className="flex max-w-full min-w-0 flex-wrap items-center gap-x-xs gap-y-0.5">
-                    <span className="min-w-0 truncate font-mono text-cell text-fg">{invocation}</span>
-                    <span
-                      className="fy-info-chip"
-                      data-tone={skill.scope === 'project' ? 'accent' : 'muted'}
-                      title={SKILL_SCOPE_TITLE[skill.scope]}
-                    >
-                      {SKILL_SCOPE_LABEL[skill.scope]}
-                    </span>
-                  </span>
-                  <span className="line-clamp-2 text-meta text-muted">{skill.description}</span>
-                  {override === undefined ? null : (
-                    <span className="text-meta text-faint" data-context-skill-override="">
-                      {override}
-                    </span>
-                  )}
-                </button>
-                {loadSkillFile === undefined ? null : (
-                  <Button
+                <div className="flex min-w-0 items-start gap-xs">
+                  <button
                     type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="mt-xs shrink-0"
-                    aria-label={`Open ${skill.name}’s SKILL.md`}
-                    onClick={() => setOpened(skill)}
-                    data-context-skill-open={skill.name}
+                    className={ROW}
+                    aria-label={`Use ${invocation} in chat`}
+                    onClick={() => onInsertSkill(invocation)}
+                    data-context-skill={skill.name}
                   >
-                    Open
-                  </Button>
+                    <span className="flex max-w-full min-w-0 flex-wrap items-center gap-x-xs gap-y-0.5">
+                      <span className="min-w-0 truncate font-mono text-cell text-fg">{invocation}</span>
+                      <span
+                        className="fy-info-chip"
+                        data-tone={skill.scope === 'project' ? 'accent' : 'muted'}
+                        title={SKILL_SCOPE_TITLE[skill.scope]}
+                      >
+                        {SKILL_SCOPE_LABEL[skill.scope]}
+                      </span>
+                    </span>
+                    <span className="line-clamp-2 text-meta text-muted">{skill.description}</span>
+                    {override === undefined ? null : (
+                      <span className="text-meta text-faint" data-context-skill-override="">
+                        {override}
+                      </span>
+                    )}
+                  </button>
+                  {loadSkillFile === undefined ? null : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="mt-xs shrink-0"
+                      aria-label={`Open ${skill.name}’s SKILL.md`}
+                      onClick={() => setOpened(skill)}
+                      data-context-skill-open={skill.name}
+                    >
+                      Open
+                    </Button>
+                  )}
+                </div>
+                {catalogs === undefined ? null : (
+                  <div className="px-xs pb-xs">
+                    <CatalogRowTools
+                      host={catalogs}
+                      kind="skill"
+                      name={skill.name}
+                      source={{ kind: 'skill', skill: skill.path }}
+                      read={installed}
+                    />
+                  </div>
                 )}
               </li>
             );

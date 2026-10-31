@@ -88,9 +88,9 @@ nothing publishes one yet.
 **Labels** (a catalog's name, the publisher's name, a summary) refuse controls, line breaks and every
 invisible or text-direction character: the bidirectional overrides and marks, zero-width spaces and
 joiners, the soft hyphen, the line and paragraph separators, the Hangul fillers, variation selectors, tag
-characters and the byte-order mark (`HIDDEN_CHARACTER_SOURCE`). A description may also hold line breaks
+characters and the byte-order mark (`HIDDEN_CHARACTER_SOURCE`). **Any Unicode format character (`\p{Cf}`) is refused** the same way in names, summaries, arguments and values, and marked in file bodies, so a file that parsed under an older build can be refused now. A description may also hold line breaks
 and tabs. **Look-alike letters are not refused** (a Cyrillic `А` in "Аnthropic"): names in every
-language are allowed, so a reader always shows **its own label** for a publisher and the start of its
+language are allowed, so a reader always shows **its own label** for a publisher and the first 20 characters of its
 fingerprint beside the publisher's own name.
 
 ## Signed manifests
@@ -457,8 +457,8 @@ What this does **not** protect against, said plainly (more in design §4.8):
 
 ## What is built
 
-| Phase                                                                                                        | State                                                                                                                                            |
-| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.**                                                                                                                                       |
-| **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | **1a built:** the publisher side (`fy catalog`, the owner routes, the `sharing` capability). **1b built:** the installer side. Next: 1c screens. |
-| 2–7. Members, the offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones   | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                                                             |
+| Phase                                                                                                        | State                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.**                                                                                                                                                                                                                                                                                                                   |
+| **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | **Built**: the publisher side (`fy catalog`, the owner routes, the `sharing` capability), the installer side (`fy catalog install`, the install routes, a passkey per install), and the app screens (Add to catalog, Settings › Sharing › Catalogs, Install from a file). The next phase is 2 (members, live), once decided. |
+| 2–7. Members, the offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones   | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                                                                                                                                                                                                                                         |
