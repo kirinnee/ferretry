@@ -95,6 +95,7 @@ import {
   type TranscriptProvenance,
   type WardenGuardConfig,
 } from '@ferretry/protocol';
+import { sweepPairingRedirects } from '@ferretry/protocol/pairing-redirect-sweep';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 // One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
 // verifies the claim. Two implementations that agree about a primitive and disagree about an encoding
@@ -1365,6 +1366,11 @@ export interface DaemonWorld {
     readonly stackSampler?: () => Promise<StackSamplerPort | undefined>;
     /** The disk's pressure, kept fresh while the daemon runs, so a stall can say it was the disk. */
     readonly ioPressure?: IoPressureSourcePort;
+    /**
+     * Removes the pairing redirect pages a killed `fy pair --open` left in the state home, returning how many.
+     * A world field so a test can boot without touching a real directory; absent means nothing is swept.
+     */
+    readonly sweepPairingRedirects?: (stateHome: string) => Promise<number>;
   };
   readonly config: DaemonConfigStore;
   /** What this invocation said on the command line, overriding the document for this run only. */
@@ -8203,6 +8209,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       stackSampler: async () =>
         stackSamplerEnabled(process.env[STACK_SAMPLER_VARIABLE]) ? await JscStackSampler.start() : undefined,
       ioPressure,
+      sweepPairingRedirects: stateHome => sweepPairingRedirects(stateHome, Date.now()),
     },
     // An operator's own document when they named one, and the state home's otherwise. The confined
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
@@ -11767,6 +11774,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     return opened.storage.close();
   });
   world.notices.step('state home opened', opened.paths.home);
+  // A page left by a `fy pair --open` that was killed holds a dead code; the daemon owns the home now, so it clears it.
+  await world.boot.sweepPairingRedirects?.(opened.paths.home);
 
   progress.enter('loading configuration');
   const peeked = await world.config.peek();

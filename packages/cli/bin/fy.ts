@@ -12,6 +12,7 @@ import {
   type SessionView,
 } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
+import { sweepPairingRedirects } from '@ferretry/protocol/pairing-redirect-sweep';
 import chalk from 'chalk';
 import { Command } from 'commander';
 import type { z } from 'zod';
@@ -771,6 +772,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
 
 /** `fy pair`, and the QR `fy setup` offers at a terminal: one construction, so the two cannot differ. */
 function buildPairController(world: CliWorld, client: SharedDaemonClient): PairController {
+  const stateHome = resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME);
   return new PairController({
     gateway: new ProtocolPairingGateway(client),
     screen: new PlainScreen(),
@@ -779,7 +781,8 @@ function buildPairController(world: CliWorld, client: SharedDaemonClient): PairC
     clock: new SystemMillisecondClock(),
     qr: new QrCodeTerminal(),
     terminal: new ProcessTerminalSize(),
-    browser: desktopBrowserOpener(resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME)),
+    browser: desktopBrowserOpener(stateHome),
+    redirectSweeper: { sweep: async () => void (await sweepPairingRedirects(stateHome, Date.now())) },
     binaryName: BINARY_NAME,
   });
 }

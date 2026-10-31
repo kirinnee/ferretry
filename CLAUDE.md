@@ -234,7 +234,7 @@ daemon keeps only the public half, and the grant ends on revocation or after its
 device bearer value at all** — each session's own transcript is signed by the device key, so nothing on the
 wire replays — and the design and its threat model are [docs/design/zero-trust.md](docs/design/zero-trust.md).
 A **pairing code is a live credential**, so its QR is generated locally and never by an image service, never announced to a screen
-reader, never persisted, and never screenshotted for real (committed captures use a fixed fake code).
+reader, never persisted — except a ≤10 s owner-only (`0600`, in a `0700` directory) redirect file for `fy pair --open`, swept if a crash leaves it — and never screenshotted for real (committed captures use a fixed fake code).
 Minting is governed by the `pairing` capability rather than by an admin-token minimum, because a browser is
 always a paired device and could otherwise never add a second one.
 
