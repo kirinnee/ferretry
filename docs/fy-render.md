@@ -353,8 +353,11 @@ window, 800px)`, never up inline, so it is wholly visible at rest and the page n
   shown on touch, on hover or focus otherwise), plus the existing **Fullscreen**. Focused, `+`/`=` zoom in,
   `-` zooms out, `0` resets, arrows pan. Drag pans, two fingers pinch, a double tap zooms and the next one returns,
   `Ctrl`/`Cmd` + wheel (and a trackpad pinch) zooms about the cursor. Transitions respect `prefers-reduced-motion`.
-- **Plain scroll is never trapped.** A plain wheel inline is the page's, and `touch-action` is derived from the
-  axes the picture can actually move on, so a wholly visible diagram leaves touch scrolling to the transcript.
+- **Plain scroll is never trapped.** A plain wheel inline is always the page's, and the box sets no
+  `overscroll-behavior` (`contain` on its `overflow: hidden` box stopped wheel and touch scrolls from chaining on to
+  the transcript). Inline and not zoomed in, a vertical finger drag is the page's even when the resting picture is
+  taller than its box (`touch-action: pan-y`, or `pan-x pan-y`); a wide picture still pans sideways. Zoomed in, a
+  finger pans the picture, and whatever the picture cannot take because it is at its edge scrolls the transcript.
   Fullscreen has no page behind it, so a plain wheel pans there.
 - **How it zooms.** The `<img>` is resized (so the SVG re-rasterises crisp at any scale) and only its offset is a
   transform. No new element type enters the tree: the sink is still an `<img>`, with no `innerHTML`, iframe, object,

@@ -1409,3 +1409,171 @@ describe('fy-render component evidence — diagrams fit, zoom and pan', () => {
     }
   }
 });
+
+describe('fy-render component evidence — a diagram never traps the scroll', () => {
+  const pan = (page: Page) => page.locator('.fy-render-pan').first();
+
+  /**
+   * The app never scrolls its window (`html` and `body` are `overflow: hidden`): the transcript is a scrolling
+   * element of its own. This scene does the same, with the block in a tall scroller and the diagram in the middle
+   * of the window, so "the page scrolls" is measured on the element that really scrolls.
+   */
+  const placeInLongPage = async (page: Page): Promise<void> => {
+    await page.evaluate(() => {
+      const scroller = document.createElement('div');
+      scroller.id = 'scene-scroller';
+      scroller.style.cssText = 'position:fixed;inset:0;overflow-y:auto;';
+      const root = document.getElementById('root') as HTMLElement;
+      root.style.cssText = 'padding:1400px 0 3000px';
+      root.before(scroller);
+      scroller.append(root);
+      const box = (document.querySelector('.fy-render-pan') as HTMLElement).getBoundingClientRect();
+      scroller.scrollTop = box.top - (window.innerHeight - box.height) / 2;
+    });
+    await page.waitForFunction(() => (document.getElementById('scene-scroller')?.scrollTop ?? 0) > 100);
+  };
+
+  const scrollY = async (page: Page): Promise<number> =>
+    await page.evaluate(() => document.getElementById('scene-scroller')?.scrollTop ?? 0);
+  const view = async (page: Page) =>
+    await page.evaluate(() => {
+      const box = document.querySelector('.fy-render-pan') as HTMLElement;
+      const shown = (
+        document.querySelector('img[data-fy-render-diagram="true"]') as HTMLImageElement
+      ).getBoundingClientRect();
+      return { left: shown.left, scale: Number(box.getAttribute('data-fy-render-scale')), top: shown.top };
+    });
+
+  /** A real touch drag through the browser's input pipeline, so `touch-action` decides who scrolls. */
+  const touchDrag = async (
+    page: Page,
+    from: { readonly x: number; readonly y: number },
+    by: { readonly x: number; readonly y: number },
+  ): Promise<void> => {
+    const cdp = await page.context().newCDPSession(page);
+    const steps = 12;
+    await cdp.send('Input.dispatchTouchEvent', { touchPoints: [{ x: from.x, y: from.y }], type: 'touchStart' });
+    for (let step = 1; step <= steps; step += 1) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        touchPoints: [{ x: from.x + (by.x * step) / steps, y: from.y + (by.y * step) / steps }],
+        type: 'touchMove',
+      });
+      await page.waitForTimeout(16);
+    }
+    await cdp.send('Input.dispatchTouchEvent', { touchPoints: [], type: 'touchEnd' });
+    await page.waitForTimeout(400);
+    await cdp.detach();
+  };
+
+  const centreOf = async (page: Page): Promise<{ x: number; y: number }> => {
+    const at = await pan(page).boundingBox();
+    if (at === null) throw new Error('the pan box has no layout');
+    return { x: at.x + at.width / 2, y: at.y + at.height / 2 };
+  };
+
+  for (const which of ['mermaid-tall', 'mermaid-wide'] as const) {
+    test(`should scroll the page with a wheel over a diagram at rest: ${which}, at 1440x900`, async () => {
+      // Arrange
+      const scene = await openScene(which, VIEWPORTS[1]);
+      const { page, shot } = scene;
+      try {
+        await waitForMermaidDiagram(page);
+        await placeInLongPage(page);
+        const before = await scrollY(page);
+        const restView = await view(page);
+        const at = await centreOf(page);
+
+        // Act — a mouse wheel and a trackpad-sized wheel, both with the pointer over the picture.
+        await page.mouse.move(at.x, at.y);
+        await page.mouse.wheel(0, 300);
+        await page.waitForTimeout(400);
+        await page.mouse.wheel(0, 40);
+        await page.waitForTimeout(400);
+
+        // Assert — the page moved by the whole wheel, and the picture did not.
+        should(await scrollY(page)).be.above(before + 300);
+        should((await view(page)).scale).be.approximately(restView.scale, 0.001);
+        await shot(`${which}-wheel-scrolled-past`);
+      } finally {
+        await scene.close();
+      }
+    }, 180_000);
+
+    test(`should scroll the page with a touch drag over a diagram at rest: ${which}, at 390x844`, async () => {
+      // Arrange
+      const scene = await openScene(which, VIEWPORTS[0]);
+      const { page, shot } = scene;
+      try {
+        await waitForMermaidDiagram(page);
+        await placeInLongPage(page);
+        const before = await scrollY(page);
+        const restView = await view(page);
+        const at = await centreOf(page);
+
+        // Act — one finger, dragged up, starting on the picture.
+        await touchDrag(page, { x: at.x, y: at.y + 60 }, { x: 0, y: -240 });
+
+        // Assert — the page scrolled with the finger and the picture stayed where it was.
+        should(await scrollY(page)).be.above(before + 150);
+        const after = await view(page);
+        should(after.scale).be.approximately(restView.scale, 0.001);
+        should(after.left).be.approximately(restView.left, 1);
+        await shot(`${which}-touch-scrolled-past`);
+      } finally {
+        await scene.close();
+      }
+    }, 180_000);
+  }
+
+  test('should pan a zoomed-in picture with a touch drag instead of scrolling, at 390x844', async () => {
+    // Arrange
+    const scene = await openScene('mermaid-tall', VIEWPORTS[0]);
+    const { page } = scene;
+    try {
+      await waitForMermaidDiagram(page);
+      await placeInLongPage(page);
+      for (let step = 0; step < 4; step += 1) await page.getByRole('button', { name: 'Zoom in' }).first().click();
+      await page.waitForFunction(
+        () => document.getAnimations().filter(each => each.playState === 'running').length === 0,
+      );
+      const before = await scrollY(page);
+      const zoomed = await view(page);
+      const at = await centreOf(page);
+
+      // Act — drag up and left by a short way, well inside the picture's reach.
+      await touchDrag(page, at, { x: -40, y: -40 });
+
+      // Assert — the picture moved, the page stayed put.
+      const after = await view(page);
+      should(after.left).be.below(zoomed.left - 20);
+      should(after.top).be.below(zoomed.top - 20);
+      should(await scrollY(page)).be.approximately(before, 1);
+    } finally {
+      await scene.close();
+    }
+  }, 180_000);
+
+  test('should hand a zoomed-in touch drag on to the page once the picture reaches its edge, at 390x844', async () => {
+    // Arrange
+    const scene = await openScene('mermaid-tall', VIEWPORTS[0]);
+    const { page } = scene;
+    try {
+      await waitForMermaidDiagram(page);
+      await placeInLongPage(page);
+      for (let step = 0; step < 4; step += 1) await page.getByRole('button', { name: 'Zoom in' }).first().click();
+      await page.waitForFunction(
+        () => document.getAnimations().filter(each => each.playState === 'running').length === 0,
+      );
+      const at = await centreOf(page);
+      const before = await scrollY(page);
+
+      // Act — drag up far more than the picture can move: it runs out of picture and the rest is the page's.
+      for (let round = 0; round < 6; round += 1) await touchDrag(page, { x: at.x, y: at.y + 120 }, { x: 0, y: -240 });
+
+      // Assert
+      should(await scrollY(page)).be.above(before + 100);
+    } finally {
+      await scene.close();
+    }
+  }, 180_000);
+});

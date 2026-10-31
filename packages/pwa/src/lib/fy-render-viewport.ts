@@ -48,6 +48,9 @@ const INLINE_HEIGHT_CAP_PX = 800;
 /** A button press, a `+` key and a double tap each change the scale by this factor. */
 export const ZOOM_STEP = 1.25;
 
+/** A picture drawn beyond this multiple of its resting scale counts as zoomed in. */
+const ZOOMED_IN_BEYOND = 1.05;
+
 /** A double tap zooms to this multiple of the resting scale. */
 export const DOUBLE_TAP_ZOOM = 2.5;
 
@@ -216,7 +219,7 @@ export function panBy(view: View, plan: ViewportPlan, natural: Size, dx: number,
  * A double tap: from anywhere near rest it zooms in on the spot, and from a zoomed view it goes back to rest.
  */
 export function toggleZoom(view: View, plan: ViewportPlan, natural: Size, focal: Point): View {
-  if (!isAtRest(view, plan, natural) && view.scale > plan.rest * 1.05) return restView(plan, natural);
+  if (!isAtRest(view, plan, natural) && view.scale > plan.rest * ZOOMED_IN_BEYOND) return restView(plan, natural);
   return zoomTo(view, plan, natural, plan.rest * DOUBLE_TAP_ZOOM, focal);
 }
 
@@ -230,10 +233,16 @@ export function wheelFactor(deltaY: number): number {
  *
  * Whatever the picture can be panned along is ours; whatever it cannot is left to the transcript's scroll, so a
  * diagram that is wholly visible never traps a thumb that only wanted to scroll the page.
+ *
+ * INLINE AND NOT ZOOMED IN, a vertical drag is ALWAYS the page's, even when the resting picture is taller than its
+ * box (a legible-floor diagram): the transcript must stay scrollable under a thumb that lands on a diagram. A reader
+ * who wants to move around a picture zooms it first. Zoomed in, or in fullscreen (no page behind it), the picture
+ * takes the axes it can move along.
  */
-export function touchActionFor(view: View, plan: ViewportPlan, natural: Size): string {
+export function touchActionFor(view: View, plan: ViewportPlan, natural: Size, fullscreen = false): string {
   const overX = natural.width * view.scale > plan.box.width + 0.5;
   const overY = natural.height * view.scale > plan.box.height + 0.5;
+  if (!fullscreen && view.scale <= plan.rest * ZOOMED_IN_BEYOND) return overX ? 'pan-y' : 'pan-x pan-y';
   if (overX && overY) return 'none';
   if (overX) return 'pan-y';
   if (overY) return 'pan-x';

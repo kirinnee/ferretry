@@ -221,6 +221,50 @@ describe('FyRenderViewport', () => {
     should(img.style.transform).equal(before);
   });
 
+  describe('a drag the picture cannot take', () => {
+    const scrollable = (root: HTMLElement): void => {
+      root.style.overflowY = 'auto';
+      Object.defineProperty(root, 'scrollHeight', { configurable: true, value: 2_000 });
+      Object.defineProperty(root, 'clientHeight', { configurable: true, value: 400 });
+      root.scrollTop = 300;
+    };
+    const drag = async (root: HTMLElement, pointerType: string, id: number): Promise<void> => {
+      const at = (type: string, y: number): PointerEvent =>
+        new PointerEvent(type, { bubbles: true, clientX: 100, clientY: y, pointerId: id, pointerType });
+      await interact(() => pan(root).dispatchEvent(at('pointerdown', 200)));
+      await interact(() => pan(root).dispatchEvent(at('pointermove', 150)));
+      await interact(() => pan(root).dispatchEvent(at('pointerup', 150)));
+    };
+
+    test('should scroll the page by what a finger drags past the picture’s edge', async () => {
+      // Arrange — wholly visible, so the picture can take none of it.
+      const root = await show();
+      scrollable(root);
+
+      // Act — a finger dragged 50px up.
+      await drag(root, 'touch', 40);
+
+      // Assert — the page moved down by those 50px.
+      should(root.scrollTop).equal(350);
+    });
+
+    test('should never scroll the page from a mouse drag, nor from fullscreen', async () => {
+      // Arrange
+      const root = await show();
+      scrollable(root);
+      const full = await show({ fullscreen: true });
+      scrollable(full);
+
+      // Act
+      await drag(root, 'mouse', 41);
+      await drag(full, 'touch', 42);
+
+      // Assert
+      should(root.scrollTop).equal(300);
+      should(full.scrollTop).equal(300);
+    });
+  });
+
   test('should rest a picture with unreadable text at the legible scale and pan it', async () => {
     // Act — 0.9 is far above the fit for a 460px ceiling.
     const root = await show({ legibleScale: 0.9 });
