@@ -18,6 +18,7 @@ const IO_PRESSURE_REFRESH_MS = 5_000;
  */
 export class ProcIoPressure implements IoPressurePort {
   #reading: IoPressure | undefined;
+  #generation = 0;
 
   constructor(
     private readonly path: string = PROC_IO_PRESSURE_PATH,
@@ -29,13 +30,19 @@ export class ProcIoPressure implements IoPressurePort {
     return this.#reading;
   }
 
-  /** Reads the file once and caches what it says, or clears the cache when it says nothing. */
+  /**
+   * Reads the file once and caches what it says, or clears the cache when it says nothing. A read that
+   * was in flight when the timer was stopped lands on a stale generation and changes nothing.
+   */
   async refresh(): Promise<void> {
+    const generation = this.#generation;
+    let reading: IoPressure | undefined;
     try {
-      this.#reading = parseIoPressure(await this.readText(this.path));
+      reading = parseIoPressure(await this.readText(this.path));
     } catch {
-      this.#reading = undefined;
+      reading = undefined;
     }
+    if (generation === this.#generation) this.#reading = reading;
   }
 
   /** Reads now and then every period, without keeping the process alive; returns what stops it. */
@@ -43,6 +50,9 @@ export class ProcIoPressure implements IoPressurePort {
     void this.refresh();
     const timer = setInterval(() => void this.refresh(), this.intervalMs);
     timer.unref();
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      this.#generation += 1;
+    };
   }
 }
