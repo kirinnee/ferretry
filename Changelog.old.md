@@ -1,3 +1,9 @@
+## [4.168.0](https://github.com/kirinnee/ferretry/compare/v4.167.0...v4.168.0) (2026-10-31)
+
+### Features
+
+* **secure-copy:** paste a secure copy into the secret store (SC2b) ([#1161](https://github.com/kirinnee/ferretry/issues/1161)) ([4a6c07a](https://github.com/kirinnee/ferretry/commit/4a6c07a1e2e1a68726e87653e6de12fd80b2bba7)), closes [#F230](https://github.com/kirinnee/ferretry/issues/F230)
+
 ## [4.167.0](https://github.com/kirinnee/ferretry/compare/v4.166.0...v4.167.0) (2026-10-31)
 
 ### Features
