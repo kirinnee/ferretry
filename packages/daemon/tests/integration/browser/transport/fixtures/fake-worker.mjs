@@ -181,6 +181,19 @@ function inputReply(id, method, params) {
           ? { observation: { ok: true, facts: { kind: 'browser' } } }
           : { observation: { ok: true, facts } },
     );
+  // A re-find answers like a look, and also says when several fields could be the one (#B100).
+  else if (method === 'inputRefind')
+    reply(
+      id,
+      true,
+      page === 'missing'
+        ? { observation: { ok: false, missing: 'password' } }
+        : page === 'ambiguous'
+          ? { observation: { ok: false, ambiguous: 'password' } }
+          : page === 'garbled'
+            ? { observation: { ok: true, facts: { kind: 'browser' } } }
+            : { observation: { ok: true, facts: { ...facts, fields: [{ ...facts.fields[0], backendNodeId: 9 }] } } },
+    );
   else if (method === 'inputShot')
     reply(
       id,

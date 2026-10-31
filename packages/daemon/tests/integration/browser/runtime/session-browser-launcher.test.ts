@@ -207,6 +207,10 @@ describe('NodeSessionBrowserLauncher', () => {
         calls.push(`observe:${pageId}:${fields.length}`);
         return { ok: false, missing: 'password' };
       },
+      inputRefind: async (pageId: string, _expected: unknown, fields: readonly unknown[]) => {
+        calls.push(`refind:${pageId}:${fields.length}`);
+        return { ok: false, ambiguous: 'password' };
+      },
       inputShot: async (pageId: string) => {
         calls.push(`shot:${pageId}`);
         return { pngBase64: 'iVBORw0KGgo=', clip: { x: 0, y: 0, w: 1, h: 1 } };
@@ -229,13 +233,21 @@ describe('NodeSessionBrowserLauncher', () => {
 
     should(await browser.inputDocument('p1')).eql({ navigationId: 'loader-1' });
     should(await browser.inputObserve('p1', [])).eql({ ok: false, missing: 'password' });
+    should(await browser.inputRefind('p1', facts, [])).eql({ ok: false, ambiguous: 'password' });
     should((await browser.inputShot('p1', facts)).clip).eql({ x: 0, y: 0, w: 1, h: 1 });
     should(await browser.inputType('p1', facts, [{ field: 'password', text: 'x' }], true)).equal('typed');
     should(await browser.copyRead('p1', { kind: 'ref', ref: 'e1' }, 'attribute', 'title')).eql({
       ok: false,
       reason: 'empty',
     });
-    should(calls).eql(['document:p1', 'observe:p1:0', 'shot:p1', 'type:p1:1:true', 'copy:p1:attribute:title']);
+    should(calls).eql([
+      'document:p1',
+      'observe:p1:0',
+      'refind:p1:0',
+      'shot:p1',
+      'type:p1:1:true',
+      'copy:p1:attribute:title',
+    ]);
     await browser.close();
   });
 
