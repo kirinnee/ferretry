@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { WardenActorCounts, WardenDayStats, WardenStatusView } from '@ferretry/protocol';
 import {
   actorSplit,
+  combinedTodayTotals,
   hasHistory,
   layerLines,
   spendTotals,
@@ -556,5 +557,45 @@ describe('spend at a glance', () => {
     // Assert
     expect(jev?.summary).toContain('$0.03 of $0.50 today');
     expect(jev?.clause).toBe('~$0.0042 per check');
+  });
+});
+
+describe('combinedTodayTotals', () => {
+  const ec2 = withHistory([
+    day('2026-07-31', { flags: 7, moved: { auto: 3, jev: 4, llm: 0 }, cleared: { auto: 0, jev: 2, llm: 0 } }),
+  ]);
+  const mbp = withHistory([
+    day('2026-07-31', {
+      flags: 2,
+      moved: { auto: 1, jev: 0, llm: 0 },
+      cleared: { auto: 0, jev: 1, llm: 0 },
+      asked: { auto: 0, jev: 1, llm: 0 },
+    }),
+  ]);
+  const value = (totals: ReturnType<typeof combinedTodayTotals>, key: string) =>
+    totals.tiles.find(entry => entry.key === key)?.value;
+
+  it('adds each tile across the daemons that were read', () => {
+    const totals = combinedTodayTotals([ec2, mbp], NOW);
+    expect(totals.tiles.map(entry => [entry.key, entry.value])).toEqual([
+      ['flagged', 9],
+      ['moved', 8],
+      ['cleared', 3],
+      ['stopped', 0],
+      ['asked', 1],
+    ]);
+    expect(totals).toMatchObject({ counted: 2, of: 2 });
+  });
+
+  it('leaves out a daemon that has not been read and says how many were counted', () => {
+    const totals = combinedTodayTotals([ec2, undefined], NOW);
+    expect(value(totals, 'flagged')).toBe(7);
+    expect(totals).toMatchObject({ counted: 1, of: 2 });
+  });
+
+  it('never turns an unknown into a zero', () => {
+    const totals = combinedTodayTotals([undefined, withHistory([day('2026-07-30', { flags: 5 })])], NOW);
+    expect(value(totals, 'flagged')).toBeNull();
+    expect(totals.counted).toBe(0);
   });
 });

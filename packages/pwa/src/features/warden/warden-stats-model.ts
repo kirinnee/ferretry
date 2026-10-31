@@ -19,9 +19,9 @@
  */
 
 import {
+  type WardenAction,
   type WardenActor,
   type WardenActorCounts,
-  type WardenAction,
   type WardenDayStats,
   type WardenOutcome,
   type WardenStatusView,
@@ -406,4 +406,33 @@ export const wholeNumberTicks = (max: number): readonly number[] => {
   const step = top <= 4 ? 1 : top <= 10 ? 2 : Math.ceil(top / 5 / 5) * 5;
   const last = Math.ceil(top / step) * step;
   return Array.from({ length: last / step + 1 }, (_, index) => index * step);
+};
+
+// ── Across daemons ──────────────────────────────────────────────────────────────────────────────
+
+export interface CombinedTotals {
+  /** Today's five tiles, each summed over the daemons that could say; `null` when none could. */
+  readonly tiles: readonly { readonly key: StatTileKey; readonly label: string; readonly value: number | null }[];
+  /** How many of the daemons had a record for today to add. */
+  readonly counted: number;
+  readonly of: number;
+}
+
+/** Today's tiles added across daemons. A daemon with no record is left out, never counted as zero. */
+export const combinedTodayTotals = (
+  statuses: readonly (WardenStatusView | undefined)[],
+  now: number,
+): CombinedTotals => {
+  const known = statuses.flatMap(status => {
+    const tiles = status === undefined ? [] : wardenStats(status, 'today', now).tiles;
+    return tiles.some(tile => tile.value !== null) ? [tiles] : [];
+  });
+  return {
+    tiles: TILE_ORDER.map(key => {
+      const values = known.flatMap(tiles => tiles.find(tile => tile.key === key)?.value ?? []);
+      return { key, label: TILE_LABEL[key], value: values.length === 0 ? null : values.reduce((a, b) => a + b, 0) };
+    }),
+    counted: known.length,
+    of: statuses.length,
+  };
 };

@@ -147,6 +147,11 @@ export interface DeviceControls {
    */
   readonly machineOrder: readonly string[];
   /**
+   * The one daemon the Warden page is narrowed to on THIS device. null = All paired daemons (the default).
+   * A preference, reconciled against who is paired now, so it may name a daemon that has been unpaired.
+   */
+  readonly wardenDaemon: string | null;
+  /**
    * Which keys open the composer's reference menu: the `@` ladder, the direct
    * symbols, or both (`SuggestionKeys`).
    *
@@ -201,6 +206,7 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   sessionsList: 'all',
   sessionsMode: null,
   machineOrder: Object.freeze([]),
+  wardenDaemon: null,
   suggestionKeys: DEFAULT_SUGGESTION_KEYS,
   skillSuggestions: true,
   composerVimMode: false,
@@ -306,6 +312,8 @@ const readDeviceControls = (value: unknown): DeviceControls => {
         ? fields.sessionsMode
         : null,
     machineOrder: readMachineOrder(fields.machineOrder),
+    wardenDaemon:
+      typeof fields.wardenDaemon === 'string' && fields.wardenDaemon.trim() !== '' ? fields.wardenDaemon : null,
     // The two switches this choice replaced (`mentionSuggestions`, `directReferenceSuggestions`) may
     // still sit in a stored record; they are left unread rather than translated, because the new
     // default is a deliberate change of offer and an old "all on" is not a choice of keys.
