@@ -184,6 +184,71 @@ what gets written can never disagree:
   - Only the installer can know `first-publisher`, `older-version` and `edited-locally`, so it adds those
     itself.
 
+## Installing from a file
+
+Installing is two steps and every route has exactly one capability. A project write is governed by
+`filesystem` and a runtime write by `fleet`, so each scope has its own preview and its own apply
+(`packages/daemon/src/lib/runtime/mounts/catalog-installs.ts`):
+
+| Route                                            | Capability             | What it does                                                              |
+| ------------------------------------------------ | ---------------------- | ------------------------------------------------------------------------- |
+| `POST /v1/catalog-installs/project/preview`      | `filesystem.use`       | verifies everything, answers the review and a `previewId`; writes nothing |
+| `POST /v1/catalog-installs/project`              | `filesystem.configure` | applies exactly that preview into a project folder                        |
+| `POST /v1/catalog-installs/runtime/preview`      | `fleet.use`            | the same, for a runtime and profile                                       |
+| `POST /v1/catalog-installs/runtime`              | `fleet.configure`      | applies it as one fleet change                                            |
+| `GET /v1/catalog-installs`                       | `fleet.use`            | what is installed, and where                                              |
+| `DELETE /v1/catalog-installs/project/:installId` | `filesystem.configure` | removes exactly what that install wrote                                   |
+| `DELETE /v1/catalog-installs/runtime/:installId` | `fleet.configure`      | the same, for a runtime install                                           |
+
+- **The preview** runs the checks above in that order. Each refusal has its own code and a plain
+  sentence (`CATALOG_INSTALL_REFUSALS`); the first one to fail is the one reported. The body is refused
+  past 16 MiB before it is parsed. The answer is the full review, the publisher (with `firstSeen`),
+  where it would land in words, and every placeholder with `held`: whether B holds a secret of that
+  name. `replaces` is set only when B's own record shows the same publisher, catalog and item at the same
+  target; another publisher's item of the same name is never replaced.
+- **Previews live in memory** only, a few at a time, for 600 seconds. A preview is bound to the item's
+  digest and the target, and an apply consumes it.
+- **The apply** takes `{previewId, secretBindings}`. The bindings name **exactly** the preview's
+  placeholders. Each maps to one of B's own secrets (it must exist) or to `null` (unbound). Nothing is
+  bound silently, so a mismatch is `catalog_bindings_invalid`. A `null` for a name B does hold a
+  secret for is refused too: say which one you mean. A project server gets `${NAME}` in `.mcp.json`
+  (the variable must be set in the ferret's environment, and the apply says so); a runtime server gets
+  `${secret:NAME}`. No secret value crosses any route.
+- **It writes only through existing paths**: the project `.mcp.json` compare-and-swap, a project skill
+  folder (a new port that never follows a symbolic link and refuses one on the path), and for a runtime
+  the fleet catalogue (`catalog.install`: the component, its skill files and the profile entry are one
+  change). Anything already at the destination that B's install record did not write is
+  `catalog_install_conflict`. An update replaces an install only when every file it wrote still has the
+  hash B recorded; a file edited by hand is a conflict that says so. Keeping your edits is phase 3.
+- **A passkey for every install.** An apply from a governed caller needs a fresh step-up for the act
+  `catalog-install` (`403 grant_step_up_required` otherwise), and it is spent on success. An update asks
+  too. **Removing never asks.** A loopback caller is ungoverned: the CLI asks y/N instead.
+- **A ferret may preview and list, but never install or remove**: it is refused with `403 forbidden`
+  , because an install is code that will run.
+- **What "pinned" means.** The first install from a catalog records the publisher's fingerprint, and
+  later installs of that catalog from any other fingerprint are `catalog_publisher_changed`. B also
+  records the highest manifest revision it has installed from, and an older revision is
+  `catalog_revision_older`. The pin, the revision and the install are recorded **only when an apply
+  succeeds**, never by a preview. Nothing updates itself: a newer version is a new preview and a new yes.
+- **Storage.** `<FY_HOME>/state/catalog-installs.json`, mode `0600`, written by temp file and rename,
+  with a `schemaVersion` and checked on read. It holds each install with the SHA-256 of every file it
+  wrote, the publishers, the pin per catalog and the highest revision seen. A damaged file stops every
+  install route with `500 catalog_installs_unreadable` instead of starting afresh.
+
+### The command line
+
+```
+fy catalog install <file> [--item <name>]
+    ( --project <root> --harness claude|codex | --runtime <r> --profile <p> )
+    [--bind PLACEHOLDER=MY_SECRET]... [--unbound PLACEHOLDER]... [--older] [--yes]
+fy catalog installs
+fy catalog uninstall <installId> [--yes]
+```
+
+`install` checks the file's size before reading it, previews, prints the **whole** review (every file,
+command and warning), asks for each placeholder you did not name (or fails when it cannot ask), asks
+y/N unless `--yes`, then applies. When the daemon wants a passkey it says so and changes nothing.
+
 ## Declared gaps
 
 What this does **not** protect against, said plainly (more in design §4.8):
@@ -201,13 +266,19 @@ What this does **not** protect against, said plainly (more in design §4.8):
   under a name that does not sound secret, passes.
 - **Look-alike names.** A publisher may name itself with letters that look like another's. The reader's
   own label and the fingerprint are what tell two publishers apart.
+- **Files left behind.** If B's state file cannot be written after the files were, they stay on disk
+  with no record, and the next install there is a `catalog_install_conflict`. Nothing is deleted
+  that B has no hash for.
+- **A folder swapped for a link mid-install.** The write refuses a link on the path when it checks and
+  again for each file, but a folder swapped for a link in the instant between the two is not caught.
+- **Refused previews are not in the audit log.** Only applies and removes are.
 - **Signed means attributable (G9).** Anyone holding a signed manifest can prove the publisher
   published it. A catalog file's `exportedAt` is not signed: it only says when the file was written.
 
 ## What is built
 
-| Phase                                                                                                        | State                                                                                                     |
-| ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.** No routes and no screens yet.                                                                  |
-| **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | Next: the publisher side (`fy catalog`, the `sharing` capability), then the installer side, then the app. |
-| 2–7. Members, the offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones   | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                      |
+| Phase                                                                                                        | State                                                                                       |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
+| **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.** No routes and no screens yet.                                                    |
+| **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | The installer side is built (routes, `fy catalog install`, storage). Next: the app screens. |
+| 2–7. Members, the offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones   | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                        |

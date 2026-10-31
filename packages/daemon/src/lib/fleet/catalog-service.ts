@@ -362,6 +362,8 @@ const errorMessage = (error: unknown): string =>
 
 /** The change as a view repeats it: a component's text is reported by size, never echoed back. */
 function stagedChange(change: FleetAccountChange): FleetAccountChange {
+  if (change.kind === 'catalog.install')
+    return { ...change, files: change.files.map(file => ({ path: file.path, content: '' })) };
   if (change.kind !== 'component.put' || change.content === undefined) return change;
   const { content: _reportedBySize, ...rest } = change;
   return rest;

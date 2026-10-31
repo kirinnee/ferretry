@@ -54,6 +54,7 @@ import type {
   FleetCatalogFormat,
   FleetComponentCatalog,
   FleetComponentContent,
+  FleetComponentView,
   FleetComponentDetail,
   FleetCredentialStatusWord,
   FleetEnvEntry,
@@ -432,6 +433,9 @@ export function componentCatalog(model: AccountModel, facts: CatalogFacts): Flee
             ...(checkPath === undefined ? {} : { checkPath }),
             ...(typeof component.clonedFrom === 'string' ? { clonedFrom: component.clonedFrom } : {}),
             ...(typeof component.clonedFromDaemon === 'string' ? { clonedFromDaemon: component.clonedFromDaemon } : {}),
+            ...(component.installedFrom === undefined
+              ? {}
+              : { installedFrom: component.installedFrom as FleetComponentView['installedFrom'] }),
           };
         }),
     })),

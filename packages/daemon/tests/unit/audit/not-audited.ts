@@ -49,6 +49,10 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'a read with a body: previews a .mcp.json change and writes nothing; the add is audited',
   'POST /v1/sessions/:sessionId/mcp/login/preview':
     'a read with a body: previews a login MCP add and writes nothing; the add is audited',
+  'POST /v1/catalog-installs/project/preview':
+    'a read with a body: verifies a signed catalog item and shows the review; writes nothing and pins nothing; the apply is audited',
+  'POST /v1/catalog-installs/runtime/preview':
+    'a read with a body: verifies a signed catalog item and shows the review; writes nothing and pins nothing; the apply is audited',
   'POST /v1/sessions/:sessionId/interrupt': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/attachments': 'a file handed to an agent; the transcript is that history',
   'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock': 'opens an attachment to its own session only',

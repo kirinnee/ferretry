@@ -39,6 +39,7 @@ import {
   type SettingsObject,
   scopeFits,
   serializeSettings,
+  skillSourceReference,
   slugName,
 } from '@ferretry/fleet';
 import type {
@@ -410,6 +411,8 @@ function applyAccountChange(
       return putComponent(model, draft, change, facts, files, consequences);
     case 'component.remove':
       return removeComponent(model, draft, change, consequences);
+    case 'catalog.install':
+      return installCatalogItem(model, draft, change, facts, files, consequences);
     case 'credential.add': {
       assertFreeRuntimeName(change.id, id => model.credentials[id] !== undefined, 'login', facts.machineName);
       assertLabelFree(model, change.id, change.harness, change.label);
@@ -1024,6 +1027,60 @@ function putComponent(
     if (consequence !== undefined) consequences.push(consequence);
   }
   return existing === undefined ? `Add ${word} ${change.name}` : `Change ${word} ${change.name}`;
+}
+
+/**
+ * An MCP server or a skill a catalog published, put into the setup and into ONE profile. It is a
+ * component put with three differences: the component records where it came from (`installedFrom`,
+ * which the installer verified), a skill's files are written under the skills store in the same
+ * apply, and the profile gains the layer. A component already there is replaced only when it is the
+ * very item this publisher's catalog installed before — never because the names match.
+ */
+function installCatalogItem(
+  model: AccountModel,
+  draft: Draft,
+  change: Extract<AccountPlanChange, { kind: 'catalog.install' }>,
+  facts: AccountChangeFacts,
+  files: AccountComponentFile[],
+  consequences: string[],
+): string {
+  const kind = change.component.kind === 'skills' ? 'skills' : 'mcp';
+  const word = KIND_WORDS[kind];
+  const origin = change.installedFrom;
+  const existing = model.components[kind][change.name] as Record<string, unknown> | undefined;
+  const earlier = existing?.installedFrom as { publisher?: string; catalogId?: string; itemId?: string } | undefined;
+  if (existing !== undefined && !change.replace) {
+    refuse(`${change.name} is already a ${word} on ${facts.machineName}, and no install of this item put it there`);
+  }
+  if (
+    existing !== undefined &&
+    (earlier?.publisher !== origin.publisher ||
+      earlier.catalogId !== origin.catalogId ||
+      earlier.itemId !== origin.itemId)
+  ) {
+    refuse(`${change.name} is a ${word} on ${facts.machineName} that this item did not install`);
+  }
+  if (existing === undefined && change.replace) refuse(`no ${word} ${change.name} exists to replace`);
+  const profile = model.profiles[change.profile];
+  if (profile === undefined) return refuse(`no profile ${change.profile} exists on this machine`);
+  if (change.component.kind === 'skills' && change.component.items.join('/') !== change.name)
+    refuse('a skill installed from a catalog is the one folder that carries its name');
+  const built = componentOf(change.name, change.component, undefined, existing, undefined);
+  draft.components[kind][change.name] = { ...built.component, installedFrom: origin };
+  if (kind === 'skills') {
+    const folder = skillSourceReference(change.name);
+    for (const file of change.files) files.push({ file: `${folder}/${file.path}`, content: file.content });
+  }
+  const reference = `${kind}/${change.name}` as const;
+  const layers = (draft.profiles[change.profile] as { layers: string[] }).layers;
+  if (!layers.includes(reference)) layers.push(reference);
+  const consequence = existing === undefined ? undefined : editConsequence(componentUsage(model, reference));
+  if (consequence !== undefined) consequences.push(consequence);
+  consequences.push(
+    `It becomes a layer of profile ${change.profile}, so every runtime on that profile gets it the next time it starts.`,
+  );
+  const verb = existing === undefined ? 'Install' : 'Replace';
+  return `${verb} ${word} ${change.name} from ${origin.publisherName}`;
 }
 
 function removeComponent(

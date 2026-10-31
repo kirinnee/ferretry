@@ -2,6 +2,22 @@ import { z } from 'zod';
 import { type AnalyticsResponse, AnalyticsResponseSchema } from '../lib/analytics.ts';
 import { type ProjectList, ProjectListSchema, type SessionSkills, SessionSkillsSchema } from '../lib/catalog.ts';
 import {
+  CatalogInstalledSchema,
+  CatalogInstallListSchema,
+  type CatalogInstallPreview,
+  CatalogInstallPreviewRequestSchema,
+  CatalogInstallPreviewSchema,
+  CatalogInstallRemovedSchema,
+  CatalogInstallRequestSchema,
+  type CatalogInstalled,
+  type CatalogInstallList,
+  type CatalogInstallPreviewRequest,
+  type CatalogInstallRemoved,
+  type CatalogInstallRequest,
+  type CatalogInstallScope,
+  CatalogInstallIdSchema,
+} from '../lib/catalog-install.ts';
+import {
   FY_REQUEST_ID_HEADER,
   FY_VERSION_HEADER,
   type FyClientOptions,
@@ -699,6 +715,35 @@ export class FyApiClient implements IFyApiClient {
       CgroupConfigViewSchema,
       jsonRequest('PATCH', CgroupConfigPatchSchema, patch),
     );
+  }
+
+  // Each scope dials its own literal path: the route-agreement pass can only hold a path it can read.
+  previewCatalogInstall(
+    scope: CatalogInstallScope,
+    request: CatalogInstallPreviewRequest,
+  ): Promise<CatalogInstallPreview> {
+    const init = jsonRequest('POST', CatalogInstallPreviewRequestSchema, request);
+    return scope === 'project'
+      ? this.request('/v1/catalog-installs/project/preview', CatalogInstallPreviewSchema, init)
+      : this.request('/v1/catalog-installs/runtime/preview', CatalogInstallPreviewSchema, init);
+  }
+
+  applyCatalogInstall(scope: CatalogInstallScope, request: CatalogInstallRequest): Promise<CatalogInstalled> {
+    const init = jsonRequest('POST', CatalogInstallRequestSchema, request);
+    return scope === 'project'
+      ? this.request('/v1/catalog-installs/project', CatalogInstalledSchema, init)
+      : this.request('/v1/catalog-installs/runtime', CatalogInstalledSchema, init);
+  }
+
+  catalogInstalls(): Promise<CatalogInstallList> {
+    return this.request('/v1/catalog-installs', CatalogInstallListSchema);
+  }
+
+  removeCatalogInstall(scope: CatalogInstallScope, installId: string): Promise<CatalogInstallRemoved> {
+    const id = encodeURIComponent(CatalogInstallIdSchema.parse(installId));
+    return scope === 'project'
+      ? this.request(`/v1/catalog-installs/project/${id}`, CatalogInstallRemovedSchema, { method: 'DELETE' })
+      : this.request(`/v1/catalog-installs/runtime/${id}`, CatalogInstallRemovedSchema, { method: 'DELETE' });
   }
 
   daemonUpdate(): Promise<DaemonUpdateView> {

@@ -21,6 +21,7 @@ import {
   type RuntimeIds,
 } from '@ferretry/fleet';
 import {
+  type FleetAccountChange,
   FleetAccountChangeOutcomeSchema,
   FleetAccountChangeViewSchema,
   FleetComponentCatalogSchema,
@@ -637,6 +638,98 @@ describe('applying a change', () => {
       apply: { outcome: 'rolled-back', failedOperation: 'write /a', reason: 'disk full' },
     });
     should(error.message).match(/not what this change was composed against/u);
+  });
+});
+
+describe('installing from a catalog', () => {
+  const ORIGIN = {
+    publisher: `fy_daemon_${'A'.repeat(43)}`,
+    publisherName: 'kirin-box',
+    catalogId: `cat_${'c'.repeat(22)}`,
+    catalogName: "Kirin's catalog",
+    itemId: `itm_${'s'.repeat(22)}`,
+    kind: 'skill',
+    name: 'pdf-tools',
+    version: 1,
+    digest: `sha256:${'a'.repeat(64)}`,
+  } as const;
+  const SKILL_INSTALL: Extract<FleetAccountChange, { kind: 'catalog.install' }> = {
+    kind: 'catalog.install',
+    name: 'pdf-tools',
+    component: { kind: 'skills', items: ['pdf-tools'] },
+    files: [
+      { path: 'SKILL.md', content: '---\nname: pdf-tools\n---\n' },
+      { path: 'scripts/split.sh', content: 'echo split\n' },
+    ],
+    profile: 'default',
+    installedFrom: ORIGIN,
+    replace: false,
+  };
+
+  it('should stage a skill install, naming every file but never echoing its text back', async () => {
+    // Arrange
+    const { service } = world();
+
+    // Act
+    const view = FleetAccountChangeViewSchema.parse(await service.propose(SKILL_INSTALL));
+
+    // Assert
+    should(view.change).deepEqual({
+      ...SKILL_INSTALL,
+      files: [
+        { path: 'SKILL.md', content: '' },
+        { path: 'scripts/split.sh', content: '' },
+      ],
+    });
+    if (view.preview.kind !== 'apply') throw new Error('expected an apply preview');
+    const paths = view.preview.documents.map(document => document.path);
+    should(paths).containEql('/state/fleet/assets/skills/pdf-tools/SKILL.md');
+    should(paths).containEql('/state/fleet/assets/skills/pdf-tools/scripts/split.sh');
+  });
+
+  it('should apply the install with the skill files in the documents the provisioner writes', async () => {
+    // Arrange
+    const { service, applied } = world();
+    const staged = await service.propose(SKILL_INSTALL);
+
+    // Act
+    const outcome = FleetAccountChangeOutcomeSchema.parse(await service.apply(staged.id, governance));
+
+    // Assert — the files were kept from the derivation, not blanked with the view.
+    should(outcome.outcome).equal('applied');
+    should(applied).have.length(1);
+    const written = new Map(applied[0]?.documents.map(document => [document.path, document.content]));
+    should(written.get('/state/fleet/assets/skills/pdf-tools/SKILL.md')).equal('---\nname: pdf-tools\n---\n');
+    should(written.get('/state/fleet/assets/skills/pdf-tools/scripts/split.sh')).equal('echo split\n');
+  });
+
+  it('should report a skill install the provisioner rolled back as the outcome it was', async () => {
+    // Arrange
+    const { service, state } = world();
+    state.apply = async () => {
+      throw new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: 'write /a', reason: 'disk full' });
+    };
+    const staged = await service.propose(SKILL_INSTALL);
+
+    // Act
+    const outcome = await service.apply(staged.id, governance);
+
+    // Assert
+    should(outcome).deepEqual({
+      outcome: 'applied',
+      apply: { outcome: 'rolled-back', failedOperation: 'write /a', reason: 'disk full' },
+    });
+  });
+
+  it('should refuse an install of a name the setup already holds from elsewhere', async () => {
+    // Arrange
+    const { service } = world();
+
+    // Act & Assert — `mine` is a skills component this machine wrote itself.
+    await refusal(
+      service.propose({ ...SKILL_INSTALL, name: 'mine', component: { kind: 'skills', items: ['mine'] } }),
+      'fleet_change_refused',
+    );
   });
 });
 

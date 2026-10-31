@@ -1734,6 +1734,32 @@ describe('componentCatalog content', () => {
     should(componentNamed(actual, 'mcp/own')).not.have.property('clonedFrom');
   });
 
+  it('should say where an installed component came from, as the install verified it', () => {
+    // Arrange
+    const installedFrom = {
+      publisher: `fy_daemon_${'A'.repeat(43)}`,
+      publisherName: 'kirin-box',
+      catalogId: `cat_${'c'.repeat(22)}`,
+      catalogName: "Kirin's catalog",
+      itemId: `itm_${'m'.repeat(22)}`,
+      kind: 'mcp',
+      name: 'acme',
+      version: 3,
+      digest: `sha256:${'a'.repeat(64)}`,
+    } as const;
+    const model = parseAccountModel({
+      version: 2,
+      components: { mcp: { acme: { command: 'npx', installedFrom }, own: { command: 'npx' } } },
+    });
+
+    // Act
+    const actual = componentCatalog(model, factsOf());
+
+    // Assert
+    should(componentNamed(actual, 'mcp/acme').installedFrom).deepEqual(installedFrom);
+    should(componentNamed(actual, 'mcp/own')).not.have.property('installedFrom');
+  });
+
   it('should name the first path under somebody else’s home, and none under this machine’s', () => {
     // Act
     const actual = componentCatalog(contentModel(), contentFacts());

@@ -681,6 +681,16 @@ command says so at the moment somebody might be tempted to do that instead.
   seven section); a device paired before B5 reads as the default, `fleet.use` only, so it lost that access
   on upgrade and must be widened deliberately.
 
+## Installing from a catalog file
+
+Catalog installs use the same split as the session MCP add below: `filesystem` governs a write into a
+project folder and `fleet` governs a runtime write, each with a preview (`use`) and an apply
+(`configure`). The seven routes are listed in [catalogs.md](catalogs.md#installing-from-a-file). An
+apply from a governed caller demands a fresh step-up for the act `catalog-install`
+(`STEP_UP_ACTS.catalogInstall`), spent on success, for every install and every update. Removing needs
+only the capability. A ferret may preview and list but is refused an install or a remove, whatever its
+grants say.
+
 ## Adding an MCP server for one ferret
 
 Actions › Add MCP server… writes in one of two places, and each is governed by the capability that

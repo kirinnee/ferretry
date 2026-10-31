@@ -286,6 +286,25 @@ const CLONE_ORIGIN_SHAPE = {
 };
 
 /**
+ * Set by a catalog install (docs/catalogs.md): where an MCP server or a skills component came from, as
+ * this machine VERIFIED it — the publisher's signature and the item's digest, checked here, never taken
+ * from the caller. Display and provenance only; nothing is matched against it but the next install of the
+ * same item. Editing the component by hand drops it, because the component is no longer what was published.
+ */
+export const InstalledFromSchema = z.strictObject({
+  publisher: NonEmptyString,
+  publisherName: NonEmptyString,
+  catalogId: NonEmptyString,
+  catalogName: NonEmptyString,
+  itemId: NonEmptyString,
+  kind: z.enum(['skill', 'mcp']),
+  name: NonEmptyString,
+  version: z.number().int().min(1),
+  digest: z.string().regex(/^sha256:[0-9a-f]{64}$/u),
+});
+export type InstalledFrom = z.infer<typeof InstalledFromSchema>;
+
+/**
  * One CLI's half of an environment login with halves (`./halves.ts`): the variables that CLI is given
  * beyond the login's shared `env`, and — Codex only — the model provider it is pointed at.
  */
@@ -484,6 +503,7 @@ export const McpComponentSchema = z
     oauth: McpOAuthClientSchema.optional(),
     harness: HarnessKindSchema.optional(),
     ...CLONE_ORIGIN_SHAPE,
+    installedFrom: InstalledFromSchema.optional(),
   })
   .check(ctx => {
     const server = ctx.value;
@@ -538,6 +558,7 @@ export const SkillsComponentSchema = z
     items: z.array(SafeNameSchema).min(1),
     harness: HarnessKindSchema.optional(),
     ...CLONE_ORIGIN_SHAPE,
+    installedFrom: InstalledFromSchema.optional(),
   })
   .check(ctx => {
     const seen = new Set<string>();

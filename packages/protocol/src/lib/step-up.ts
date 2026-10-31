@@ -223,7 +223,15 @@ export const StepUpDemandSchema = z.strictObject({
    * wants a passkey proved for it alone ({@link STEP_UP_ACTS}). Absent for every other step-up.
    */
   act: z
-    .enum(['add-device', 'widen-device', 'enable-agent-control', 'loosen-config', 'clone-secrets', 'loosen-security'])
+    .enum([
+      'add-device',
+      'widen-device',
+      'enable-agent-control',
+      'loosen-config',
+      'clone-secrets',
+      'loosen-security',
+      'catalog-install',
+    ])
     .optional(),
 });
 export type StepUpDemand = z.infer<typeof StepUpDemandSchema>;
@@ -264,6 +272,12 @@ export const STEP_UP_ACTS = {
    * (owner decision 2026-10-21).
    */
   loosenSecurity: 'loosen-security',
+  /**
+   * Installing, or updating, an item from a catalog someone else published (docs/catalogs.md). A skill is
+   * instructions a ferret follows and an MCP setup is a program this machine runs, so every install
+   * wants a passkey proved for it alone — even inside an unlock (owner decision Q7). Removing one never asks.
+   */
+  catalogInstall: 'catalog-install',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**

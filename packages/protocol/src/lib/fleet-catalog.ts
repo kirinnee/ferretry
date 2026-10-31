@@ -32,6 +32,7 @@
  * Every object is strict, so a field the daemon grew without adding it here fails the response.
  */
 import { z } from 'zod';
+import { CatalogProvenanceSchema } from './catalog-install.ts';
 import { AutoResumeSummarySchema } from './auto-resume.ts';
 import { BrowserModeSchema, BrowserProxySettingSchema } from './browser.ts';
 import { BrowserPortsSettingSchema } from './browser-ports.ts';
@@ -51,6 +52,7 @@ import {
 } from './fleet-credentials.ts';
 import { GrantRefusalSchema } from './grants.ts';
 import { LocalModelsSchema } from './models.ts';
+import { CATALOG_SKILL_FILE_MAX_BYTES, CATALOG_SKILL_MAX_FILES } from './shared-catalog.ts';
 
 const HarnessKindSchema = z.enum(['claude', 'codex']);
 
@@ -310,6 +312,8 @@ export const FleetComponentViewSchema = z.strictObject({
   clonedFrom: NonEmptyStringSchema.optional(),
   /** That machine's daemon id as the copying browser reported it, so a surface can name it by its own label. */
   clonedFromDaemon: NonEmptyStringSchema.optional(),
+  /** Set by a catalog install: what this machine verified about where it came from (docs/catalogs.md). */
+  installedFrom: CatalogProvenanceSchema.optional(),
 });
 export type FleetComponentView = z.infer<typeof FleetComponentViewSchema>;
 
@@ -679,6 +683,27 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     /** The component's file text, for the kinds that have one. */
     content: z.string().max(MAX_COMPONENT_CONTENT_BYTES).optional(),
     create: z.boolean(),
+  }),
+  /**
+   * Put an MCP server or a skill that a catalog published into this machine's setup, and add it to one
+   * profile — in ONE reviewed change, so the provisioner's rollback boundary covers the component, the
+   * skill's files and the profile together. `installedFrom` is what the installer VERIFIED; a skill's
+   * `files` are relative to its own folder and land under the skills store (docs/catalogs.md).
+   * `replace` means "the component of this name is the one this publisher's item installed before".
+   */
+  z.strictObject({
+    kind: z.literal('catalog.install'),
+    name: FleetComponentNameSchema,
+    component: FleetComponentInputSchema.refine(
+      component => component.kind === 'mcp' || component.kind === 'skills',
+      'only an MCP server or a skill is installed from a catalog',
+    ),
+    files: z
+      .array(z.strictObject({ path: NonEmptyStringSchema, content: z.string().max(CATALOG_SKILL_FILE_MAX_BYTES) }))
+      .max(CATALOG_SKILL_MAX_FILES),
+    profile: FleetComponentNameSchema,
+    installedFrom: CatalogProvenanceSchema,
+    replace: z.boolean(),
   }),
   z.strictObject({
     kind: z.literal('component.remove'),
