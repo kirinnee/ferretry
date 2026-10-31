@@ -295,7 +295,7 @@ function peerOver(
       ...wire.frames.flatMap(frame => {
         if (frame.kind !== FRAME_KINDS.control) return [];
         const decoded = decodeControlMessage(frame.payload);
-        return decoded?.t === 'closed' ? [decoded.code] : [];
+        return decoded?.t === 'closed' && frame.sessionId.text === sessionId.text ? [decoded.code] : [];
       }),
     ],
     until,
@@ -494,7 +494,7 @@ async function ask(peer: Peer, id: number, method: string, path: string, body?: 
     return answer !== undefined;
   });
   const res = answer as { status: number; body: string };
-  return { status: res.status, body: JSON.parse(res.body) as { error?: { code?: string } } & Record<string, unknown> };
+  return { status: res.status, body: JSON.parse(res.body) as { code?: string } & Record<string, unknown> };
 }
 
 /** Joins with a fresh code and answers who the publisher made. */
@@ -616,7 +616,7 @@ for (const build of [directCarrier, relayCarrier]) {
       // Assert — before the unlock, what a member reads is locked, even its own name
       const me = await ask(peer, 1, 'GET', '/v1/shared/me');
       should(me.status).equal(403);
-      should(me.body.error?.code).equal('member_locked');
+      should(me.body.code).equal('member_locked');
 
       // Assert — the passkey ceremony opens inside the key's window
       const options = await ask(peer, 2, 'POST', '/v1/shared/passkeys/options', { origin: APP_ORIGIN });
@@ -626,7 +626,7 @@ for (const build of [directCarrier, relayCarrier]) {
       // Assert — an unlock without a passkey is refused, and a route of the device table is simply not there
       const unlock = await ask(peer, 3, 'POST', '/v1/shared/unlock/options', { origin: APP_ORIGIN });
       should(unlock.status).equal(404);
-      should(unlock.body.error?.code).equal('member_no_passkey');
+      should(unlock.body.code).equal('member_no_passkey');
       const device = await ask(peer, 4, 'GET', '/v1/sessions');
       should(device.status).equal(404);
       should(rig.deviceRequests).have.length(0);
@@ -648,7 +648,7 @@ for (const build of [directCarrier, relayCarrier]) {
 
       // Assert
       should(options.status).equal(403);
-      should(options.body.error?.code).equal('member_registration_closed');
+      should(options.body.code).equal('member_registration_closed');
     });
 
     it('should end an unknown key and a bad proof with the same 4403', async () => {
