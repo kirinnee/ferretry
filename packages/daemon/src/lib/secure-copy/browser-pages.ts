@@ -4,12 +4,16 @@ import type { CopyPageGuard, CopyPagePort, CopyPageQueue, CopyPageRead } from '.
 
 /** The agent browser as it runs one page's work in that page's own queue (`BrowserSubsystem.copyOnPage`). */
 export interface CopyPageHost {
-  copyOnPage<T>(
-    sessionId: string,
-    key: string,
-    work: (copy: BrowserCopyPort, pageId: string) => Promise<T>,
-    guard?: CopyPageGuard,
-  ): Promise<T>;
+  copyOnPage<T>(sessionId: string, key: string, job: CopyPageJob<T>): Promise<T>;
+}
+
+/**
+ * One copy's work in a page's queue: the guard run first, then the read. ONE object on purpose: a host that hands
+ * it on whole cannot drop the guard, where a forgotten trailing argument would compile and skip the check.
+ */
+export interface CopyPageJob<T> {
+  readonly work: (copy: BrowserCopyPort, pageId: string) => Promise<T>;
+  readonly guard?: CopyPageGuard;
 }
 
 /**
@@ -27,17 +31,15 @@ export class BrowserCopyPages implements CopyPagePort {
     attribute: string | undefined,
     queue: CopyPageQueue,
   ): Promise<CopyPageRead> {
-    return await this.host.copyOnPage(
-      sessionId,
-      key,
-      async (copy, pageId) => {
+    return await this.host.copyOnPage(sessionId, key, {
+      work: async (copy, pageId) => {
         const read = await copy.copyRead(pageId, target, part, attribute);
         if (!read.ok) return read;
         const found = { ...read, pageId };
         queue.seal(found);
         return found;
       },
-      queue.guard,
-    );
+      ...(queue.guard === undefined ? {} : { guard: queue.guard }),
+    });
   }
 }

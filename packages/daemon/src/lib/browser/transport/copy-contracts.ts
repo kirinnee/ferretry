@@ -25,6 +25,8 @@ export type BrowserCopyRead =
       readonly frameOrigin: string;
       /** The document the value was read from: it changes with every navigation. */
       readonly navigationId: string;
+      /** The element is editable (a contenteditable one, or inside one): its text is whatever was typed there. */
+      readonly editable?: true;
     }
   | { readonly ok: false; readonly reason: 'missing' | 'empty' | 'changed' };
 

@@ -521,8 +521,9 @@ export class AgentToolService {
         if (caller.kind === 'agent') await this.assertAgentMay(sessionId, surface);
         if (surface.surface === 'browser') await this.guardPage(caller, call.tool, surface);
         const result = await this.act(caller, call, surface, facts);
-        // A hold that began while the page was being read wins: what the read saw may hold the value.
-        if (surface.surface === 'browser') await this.assertPageReadable(caller, call.tool, surface);
+        // A hold that began while the page was being read wins: what the read saw may hold the value. A copy's hold
+        // cannot begin mid-act (a copy seals inside the page's queue), so it is checked before the act, not here.
+        if (surface.surface === 'browser') await this.assertPageReadable(caller, call.tool, surface, undefined, false);
         await this.drove(caller, call, surface);
         return result;
       }
@@ -1133,9 +1134,11 @@ export class AgentToolService {
     tool: string,
     surface: ResolvedSurface,
     document?: () => Promise<string | undefined>,
+    /** Whether a copy's hold is checked too: before an act and inside its queue, not after it. */
+    copies = true,
   ): Promise<void> {
     if (!PAGE_PICTURES.has(tool) && !PAGE_TEXT.has(tool)) return;
-    if (PAGE_PICTURES.has(tool)) await this.assertNotCopiedFrom(caller, surface, document);
+    if (copies && PAGE_PICTURES.has(tool)) await this.assertNotCopiedFrom(caller, surface, document);
     const input = this.ports.input;
     const held = input?.pageHeld?.(caller.sessionId, [surface.name, surface.id]);
     if (input === undefined || held === undefined) return;

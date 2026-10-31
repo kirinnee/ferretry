@@ -92,6 +92,7 @@ function parseCopyRead(raw: unknown): BrowserCopyRead {
       origin: read.origin,
       frameOrigin: read.frameOrigin,
       navigationId: read.navigationId,
+      ...(read.editable === true ? { editable: true as const } : {}),
     };
   throw new BrowserTransportError(
     'upstream_failed',

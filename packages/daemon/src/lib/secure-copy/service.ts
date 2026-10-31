@@ -96,15 +96,19 @@ const spellings = (value: string): readonly string[] =>
 /**
  * Every spelling a reader may meet a value in, for MASKING (the transcript is searched for the value's own
  * spellings only): as read and trimmed; with its white space collapsed to single spaces, as a page snapshot lays
- * text out; each of its lines, collapsed the same way, when long enough to mask safely (a list of recovery codes,
- * a key's lines); and each of those as a JSON or YAML string escapes it.
+ * text out; each of its lines, collapsed the same way, when long enough to be a value rather than a word on a
+ * button ("Done", "Copy"), which masked would leave the agent unable to find it; and each of those as a JSON or
+ * YAML string escapes it.
  */
+/** The shortest line of a multi-line value masked on its own: a recovery code or a key's line, not a button's word. */
+const MASKED_LINE_MIN_CHARS = 8;
+
 const maskSpellings = (value: string): readonly string[] => {
   const collapse = (text: string): string => text.replace(/\s+/gu, ' ').trim();
   const lines = value
     .split(/\r\n|\r|\n/u)
     .map(collapse)
-    .filter(line => [...line].length >= COPY_VALUE_MIN_CHARS);
+    .filter(line => [...line].length >= MASKED_LINE_MIN_CHARS);
   const plain = [...new Set([...spellings(value), collapse(value), ...lines])];
   return [...new Set([...plain, ...plain.map(each => JSON.stringify(each).slice(1, -1))])].filter(each => each !== '');
 };
@@ -342,8 +346,9 @@ export class SecureCopyService implements InputSealedPort {
         kind: 'browser',
         origin: read.frameOrigin,
         surface: source.key,
-        // A field's value is whatever was typed into it, by the agent too: no rule ever matches it.
-        ...(source.read === 'value' ? { editable: true as const } : {}),
+        // A field's value, or the text of an element anyone may edit, is whatever was typed into it, by the agent
+        // too: no rule ever matches it.
+        ...(source.read === 'value' || read.editable === true ? { editable: true as const } : {}),
       },
       page: { names: [source.key, read.pageId], navigationId: read.navigationId },
     };

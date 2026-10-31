@@ -901,19 +901,17 @@ describe('the machine agent browser — a page’s lifecycle', () => {
     const other = await service.openPage('s2', 'app');
 
     // Act
-    const read = await service.copyOnPage('s1', 'app', async (copy, pageId) =>
-      copy.copyRead(pageId, { kind: 'ref', ref: 'e1' }, 'text'),
-    );
-    const refused = await failure(service.copyOnPage('s1', other.id, async () => 'reached'));
+    const read = await service.copyOnPage('s1', 'app', {
+      work: async (copy, pageId) => copy.copyRead(pageId, { kind: 'ref', ref: 'e1' }, 'text'),
+    });
+    const refused = await failure(service.copyOnPage('s1', other.id, { work: async () => 'reached' }));
     const guarded = await failure(
-      service.copyOnPage(
-        's1',
-        'app',
-        async () => 'reached',
-        async page => {
+      service.copyOnPage('s1', 'app', {
+        work: async () => 'reached',
+        guard: async page => {
           if ((await page.document()) !== undefined) throw new BrowserSessionError('conflict', 'held');
         },
-      ),
+      }),
     );
 
     // Assert

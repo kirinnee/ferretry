@@ -10093,9 +10093,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         masking: justTyped,
         redact: async text => await secretRedactor.redact(text),
         pages: new BrowserCopyPages({
-          copyOnPage: async (sessionId, key, work) => {
+          copyOnPage: async (sessionId, key, job) => {
             if (pageHost === undefined) throw new Error('the agent browser is not running yet');
-            return await pageHost.copyOnPage(sessionId, key, work);
+            return await pageHost.copyOnPage(sessionId, key, job);
           },
         }),
         pageHolds: copyPageRecords,

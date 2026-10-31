@@ -370,8 +370,10 @@ export class BrowserSessionService implements BrowserSubsystem {
   async copyOnPage<T>(
     sessionId: string,
     key: string,
-    work: (copy: BrowserCopyPort, pageId: string) => Promise<T>,
-    guard?: BrowserActGuard,
+    {
+      work,
+      guard,
+    }: { readonly work: (copy: BrowserCopyPort, pageId: string) => Promise<T>; readonly guard?: BrowserActGuard },
   ): Promise<T> {
     await this.requireSession(sessionId);
     const run = this.requireRunning();

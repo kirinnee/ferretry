@@ -145,12 +145,23 @@ describe('copying a page element', () => {
     should(masking.scrub(SESSION, 'yaml: "RECOVERY \\"cccc\\" 3333"')).equal('yaml: "[sealed:gh]"');
   });
 
-  it("should mark a field's value as editable, so no rule matches what the agent could have typed", async () => {
-    const { service } = world();
+  it("should not mask a short line of a copied container on its own, so the page's buttons stay findable", async () => {
+    const { service, masking } = world({ ...READ, value: `${TOKEN}\nDone\nCopy it` });
 
-    const { copy } = await service.capture(SESSION, fromPage({ read: 'value' }));
+    await service.capture(SESSION, fromPage());
 
-    should(copy.from.editable).be.true();
+    should(masking.scrub(SESSION, 'button "Done", button "Copy it"')).equal('button "Done", button "Copy it"');
+    should(masking.scrub(SESSION, `token ${TOKEN}`)).equal('token [sealed:gh]');
+  });
+
+  it("should mark a field's value, or an editable element's text, as editable: no rule matches what the agent typed", async () => {
+    const field = world();
+    const editable = world({ ...READ, editable: true });
+
+    const value = await field.service.capture(SESSION, fromPage({ read: 'value' }));
+    const text = await editable.service.capture(SESSION, fromPage());
+
+    should([value.copy.from.editable, text.copy.from.editable]).eql([true, true]);
   });
 
   it('should name a selector, a part and an attribute as the agent did, and the frame a value really came from', async () => {
@@ -295,7 +306,7 @@ describe('BrowserCopyPages', () => {
     const answer: BrowserCopyRead = { ...READ };
     const guard = async () => void calls.push('guard');
     const pages = new BrowserCopyPages({
-      copyOnPage: async (sessionId, key, work, queueGuard) => {
+      copyOnPage: async (sessionId, key, { work, guard: queueGuard }) => {
         calls.push(`queue:${sessionId}:${key}`);
         await queueGuard?.({ document: async () => 'loader-1' });
         return await work(

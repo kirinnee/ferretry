@@ -55,28 +55,40 @@ export async function readCopyElement(
     const frame = await handle.ownerFrame();
     if (frame === null) return { ok: false, reason: 'missing' };
     const frameOrigin = originOfUrl(frame.url());
-    const value = await handle.evaluate(readPart, {
+    const found = await handle.evaluate(readPart, {
       part,
       attribute: attribute ?? '',
       limit: COPY_VALUE_MAX_BYTES + 1,
     });
+    const value = found?.text;
     if (typeof value !== 'string' || value === '') return { ok: false, reason: 'empty' };
     if ((await document()).navigationId !== navigationId) return { ok: false, reason: 'changed' };
-    return { ok: true, value, origin, frameOrigin, navigationId };
+    return {
+      ok: true,
+      value,
+      origin,
+      frameOrigin,
+      navigationId,
+      ...(found?.editable === true ? { editable: true } : {}),
+    };
   } finally {
     await handle.dispose().catch(() => undefined);
   }
 }
 
-/** Runs IN the page: the part asked for, as text, cut at `limit` characters; nothing when there is none. */
+/**
+ * Runs IN the page: the part asked for, as text, cut at `limit` characters, and whether the element is one anyone
+ * may type into (`isContentEditable` covers an element inside an editable one); nothing when there is no text.
+ */
 function readPart(
   element: unknown,
   { part, attribute, limit }: { readonly part: CopyElementPart; readonly attribute: string; readonly limit: number },
-): string | null {
+): { readonly text: string; readonly editable: boolean } | null {
   const node = element as {
     innerText?: string;
     textContent?: string | null;
     value?: unknown;
+    isContentEditable?: boolean;
     getAttribute?: (name: string) => string | null;
   };
   const text =
@@ -87,5 +99,5 @@ function readPart(
           ? node.value
           : null
         : (node.innerText ?? node.textContent ?? null);
-  return text === null ? null : text.slice(0, limit);
+  return text === null ? null : { text: text.slice(0, limit), editable: node.isContentEditable === true };
 }

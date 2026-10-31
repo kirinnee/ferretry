@@ -12,6 +12,7 @@ const TOKEN = 'ghp_PAGE-COPY-NEVER-LOGGED-91c2';
 
 /** An element as the page would answer a read of it. */
 interface FakeElement {
+  readonly isContentEditable?: boolean;
   readonly innerText?: string;
   readonly textContent?: string | null;
   readonly value?: unknown;
@@ -141,6 +142,18 @@ describe('reading a page element for a secure copy', () => {
     );
 
     should(reads).eql(cases.map(() => ({ ok: false, reason: 'empty' })));
+  });
+
+  it('should say an element anyone may type into is editable, and an ordinary one is not', async () => {
+    const editable = page({ element: { innerText: TOKEN, isContentEditable: true } });
+    const plain = page({ element: { innerText: TOKEN, isContentEditable: false } });
+
+    const reads = [
+      await readCopyElement(editable.subject, DOCUMENT, REF, 'text'),
+      await readCopyElement(plain.subject, DOCUMENT, REF, 'text'),
+    ];
+
+    should(reads.map(read => read.ok && read.editable)).eql([true, undefined]);
   });
 
   it('should answer changed, and no value, when the page moved to another document while it was read', async () => {

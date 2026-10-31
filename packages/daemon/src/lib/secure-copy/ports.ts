@@ -46,6 +46,8 @@ export type CopyPageRead =
       readonly origin: string;
       readonly frameOrigin: string;
       readonly navigationId: string;
+      /** The element (or one it sits in) is editable: its text is whatever was typed there. */
+      readonly editable?: true;
     }
   | { readonly ok: false; readonly reason: 'missing' | 'empty' | 'changed' };
 
