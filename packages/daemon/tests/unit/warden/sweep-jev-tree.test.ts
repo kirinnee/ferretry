@@ -158,7 +158,7 @@ describe('a question Jev was not sure of', () => {
     const subject = harness({
       config: layers(true),
       fleet: [stuck()],
-      guard: [{ answers: { waiting_on_real: no(0.7) } }],
+      guard: [{ answers: { waiting_on_real: no(0.6) } }],
     });
 
     // Act
@@ -172,7 +172,7 @@ describe('a question Jev was not sure of', () => {
       path: [
         { node: 'running', answer: 'yes' },
         { node: 'output_changed', answer: 'no' },
-        { node: 'waiting_on_real', answer: 'no', confidence: 0.7 },
+        { node: 'waiting_on_real', answer: 'no', confidence: 0.6 },
         { node: 'dialog_on_screen', answer: 'no' },
       ],
     });

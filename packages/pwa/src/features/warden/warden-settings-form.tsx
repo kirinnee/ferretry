@@ -99,6 +99,9 @@ const JEV_ACTS: readonly { readonly id: WardenJevAct; readonly label: string }[]
   { id: 'stop', label: 'Stop a ferret' },
 ];
 
+/** Both Jev bars move in 5% steps across their ranges. */
+const THRESHOLD_STEP = 0.05;
+
 /** What the slider says for a bar: the percent, or “Never” at the top, where Jev never does the act alone. */
 export const jevActBarLabel = (bar: number): string => (bar >= 1 ? 'Never' : `${Math.round(bar * 100)}%`);
 
@@ -458,13 +461,13 @@ export function WardenSettingsForm({
                   type="range"
                   min={WARDEN_GUARD_THRESHOLD_RANGE.min}
                   max={WARDEN_GUARD_THRESHOLD_RANGE.max}
-                  step={0.01}
+                  step={THRESHOLD_STEP}
                   aria-valuetext={`${Math.round(value.guard.threshold * 100)}%`}
                   className="min-h-[44px] min-w-0 flex-1 accent-[var(--accent)]"
                   value={value.guard.threshold}
                   onChange={event => set({ guard: { ...value.guard, threshold: Number(event.target.value) } })}
                 />
-                <output className="mono w-12 text-right text-ui">{value.guard.threshold.toFixed(2)}</output>
+                <output className="mono w-14 text-right text-ui">{jevActBarLabel(value.guard.threshold)}</output>
               </span>
               <span className="text-meta font-normal leading-base text-muted">
                 Lower: more cleared and cheaper. Higher: more passed on and safer.
@@ -494,7 +497,7 @@ export function WardenSettingsForm({
                         type="range"
                         min={WARDEN_JEV_ACT_THRESHOLD_RANGE.min}
                         max={WARDEN_JEV_ACT_THRESHOLD_RANGE.max}
-                        step={0.01}
+                        step={THRESHOLD_STEP}
                         disabled={!allowed}
                         aria-valuetext={bar >= 1 ? 'Never alone' : `${jevActBarLabel(bar)} sure`}
                         className="min-h-[44px] min-w-0 flex-1 accent-[var(--accent)]"

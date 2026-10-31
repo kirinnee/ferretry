@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { DEFAULT_WARDEN_CONFIG, DEFAULT_WARDEN_JEV_ACTS, type WardenMayActAlone } from '@ferretry/protocol';
+import { DEFAULT_WARDEN_CONFIG, type WardenMayActAlone } from '@ferretry/protocol';
 import should from 'should';
 import {
   NUDGE_MESSAGES,
@@ -36,9 +36,10 @@ import {
 const NOW = Date.parse('2026-10-29T12:00:00.000Z');
 const MINUTE = 60_000;
 
+/** The bars are pinned, not read from the defaults: these rows test the table, not what ships. */
 const POLICY: JevResponderPolicy = {
-  leaveThreshold: DEFAULT_WARDEN_CONFIG.guard.threshold,
-  acts: DEFAULT_WARDEN_JEV_ACTS,
+  leaveThreshold: 0.85,
+  acts: { nudge: 0.9, resume: 0.93, restart: 0.95, stop: 0.98 },
   mayActAlone: DEFAULT_WARDEN_CONFIG.mayActAlone,
   offered: ['nudge', 'resume', 'restart', 'failover', 'stop'],
 };

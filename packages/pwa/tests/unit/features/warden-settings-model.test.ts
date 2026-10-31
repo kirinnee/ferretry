@@ -153,7 +153,7 @@ describe('wardenSummary', () => {
 
     // Assert
     expect(summary).toBe(
-      'Every 2 min the rules flag anomalies. Jev clears a flag it is at least 85% sure is healthy; anything else, including when it is unsure, goes to a read-only investigation on claude-default (low effort, 1 at a time). A cleared flag is left alone for 15 min, twice as long each time it is cleared again, up to 4 h. Caps: $0.50/day for Jev and $2.00/day for investigations. When an investigation’s verdict says so, it may nudge, resume or revive, restart a dead or frozen process and fail over to the next login on its own; stopping always asks you first.',
+      'Every 2 min the rules flag anomalies. Jev clears a flag it is at least 70% sure is healthy; anything else, including when it is unsure, goes to a read-only investigation on claude-default (low effort, 1 at a time). A cleared flag is left alone for 15 min, twice as long each time it is cleared again, up to 4 h. Caps: $0.50/day for Jev and $2.00/day for investigations. When an investigation’s verdict says so, it may nudge, resume or revive, restart a dead or frozen process and fail over to the next login on its own; stopping always asks you first.',
     );
   });
 
@@ -163,7 +163,7 @@ describe('wardenSummary', () => {
 
     // Assert
     expect(summary).toBe(
-      'Every 2 min the rules flag anomalies. Jev clears a flag it is at least 85% sure is healthy; every other flag is shown to you, and no investigation runs. A cleared flag is left alone for 15 min, twice as long each time it is cleared again, up to 4 h. Cap: $0.50/day for Jev.',
+      'Every 2 min the rules flag anomalies. Jev clears a flag it is at least 70% sure is healthy; every other flag is shown to you, and no investigation runs. A cleared flag is left alone for 15 min, twice as long each time it is cleared again, up to 4 h. Cap: $0.50/day for Jev.',
     );
     expect(wardenSummary(jevOnly(), false)).toContain(
       'Needs a Jev key: until one is added, every flag is shown to you.',

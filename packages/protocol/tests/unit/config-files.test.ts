@@ -281,7 +281,7 @@ describe('warden.yaml', () => {
     ['an unknown triage', { triage: 'ai' }],
     ['an unknown layer', { layers: { rules: true } }],
     ['an unknown key inside caps', { caps: { usd: 1 } }],
-    ['a threshold below the floor', { guard: { threshold: 0.5 } }],
+    ['a threshold below the floor', { guard: { threshold: 0.29 } }],
   ])('should refuse %s', (_label, input) => {
     // Act
     const actual = config.WardenFileSchema.safeParse(input);

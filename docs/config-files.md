@@ -193,7 +193,7 @@ request asks which of that leaf's messages fits ("a command you started has run 
 output…"); no message, no nudge. The daily and hourly Jev caps and the provider back-off apply as before.
 
 **Acting.** An act is carried out only when **every** Jev answer on the path is at least as sure as the bar
-of the leaf it reaches — the act's own `jevActs` bar, or `guard.threshold` (0.70–0.95, 0.85) for a leave
+of the leaf it reaches — the act's own `jevActs` bar, or `guard.threshold` (0.30–0.95, default 0.70) for a leave
 — and the rest of the gates still hold: only the acts that fit the flag are offered (a stuck or frozen
 ferret may be nudged, restarted or stopped, one whose quota came back resumed; a question waiting for you,
 a finished ferret or a fault of the daemon is never acted on), an act must be allowed alone, and Jev acts
@@ -239,8 +239,8 @@ an explicit NEEDS_HUMAN verdict wrote a durable item (`warden:<kind>`); the firs
 resolves any still open, with a note, and tells you as a notification instead. Insights › Warden links to the
 Inbox's Warden notifications; nothing else lists them.
 
-**How sure Jev must be to act alone** is `jevActs`, one bar per act, from 0.80 to 1 — riskier acts higher by
-default: `nudge` 0.90, `resume` 0.93, `restart` 0.95, `stop` 0.98. **`1` means Jev never does that act
+**How sure Jev must be to act alone** is `jevActs`, one bar per act, from 0.30 to 1, default 0.70 for
+`nudge`, `resume` and `restart` and 0.80 for `stop`, a notch higher because it is the most disruptive. **`1` means Jev never does that act
 alone.** A bar is only half the permission: the matching `mayActAlone` must be on too, and `stop` is off by
 default, so out of the box a confident stop is a recommendation, not an act. Lowering a bar lets Jev act on
 less certainty, so an edit that lowers one is held until you confirm it, like any loosening.
@@ -462,8 +462,8 @@ extra sweep a minute.
 # yaml-language-server: $schema=.schema/warden.json
 enabled: true
 layers: { jev: true, llm: true }
-guard: { threshold: 0.85 }
-jevActs: { nudge: 0.9, resume: 0.93, restart: 0.95, stop: 0.98 }
+guard: { threshold: 0.7 }
+jevActs: { nudge: 0.7, resume: 0.7, restart: 0.7, stop: 0.8 }
 caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2 }
 mayActAlone: { stop: false }
 investigation: { effort: low }

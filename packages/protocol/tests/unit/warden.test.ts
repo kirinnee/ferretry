@@ -294,7 +294,7 @@ describe('warden schemas', () => {
       {
         name: 'threshold too low',
         schema: warden.WardenGuardConfigSchema,
-        value: { ...wardenConfig.guard, threshold: 0.6 },
+        value: { ...wardenConfig.guard, threshold: 0.29 },
       },
       {
         name: 'threshold too high',
@@ -392,7 +392,7 @@ describe('mergeWardenConfig', () => {
 
   it('should refuse a merge that produces settings the loader would refuse', () => {
     // Arrange
-    const patch = { guard: { threshold: 0.5 } };
+    const patch = { guard: { threshold: 0.29 } };
 
     // Act
     const act = () => warden.mergeWardenConfig(DEFAULT_WARDEN_CONFIG, patch);
@@ -543,25 +543,35 @@ describe('settings from before Jev could act', () => {
     should(partial).deepEqual({ guard: { threshold: 0.9 } });
   });
 
-  it('should ask more of riskier acts by default, and never less than the leave bar', () => {
+  it('should default every bar to the leave bar, with a stop a notch higher', () => {
     // Arrange
     const acts = DEFAULT_WARDEN_CONFIG.jevActs;
 
     // Assert
-    should(acts.nudge).be.above(DEFAULT_WARDEN_CONFIG.guard.threshold);
-    should(acts.resume).be.above(acts.nudge);
-    should(acts.restart).be.above(acts.resume);
+    should(DEFAULT_WARDEN_CONFIG.guard.threshold).equal(0.7);
+    should(acts).deepEqual({ nudge: 0.7, resume: 0.7, restart: 0.7, stop: 0.8 });
     should(acts.stop).be.above(acts.restart);
+  });
+
+  it('should let the leave bar go down to 30% and no lower', () => {
+    // Act
+    const at = warden.WardenGuardConfigSchema.safeParse({ ...wardenConfig.guard, threshold: 0.3 });
+    const under = warden.WardenGuardConfigSchema.safeParse({ ...wardenConfig.guard, threshold: 0.29 });
+
+    // Assert
+    should(at.success).be.true();
+    should(under.success).be.false();
   });
 
   it('should refuse a bar under the floor and a patch naming an act Jev cannot do alone', () => {
     // Act
-    const low = warden.WardenJevActsSchema.safeParse({ ...warden.DEFAULT_WARDEN_JEV_ACTS, nudge: 0.79 });
+    const low = warden.WardenJevActsSchema.safeParse({ ...warden.DEFAULT_WARDEN_JEV_ACTS, nudge: 0.29 });
     const failover = warden.WardenConfigPatchSchema.safeParse({ jevActs: { failover: 0.9 } });
     const merged = warden.mergeWardenConfig(DEFAULT_WARDEN_CONFIG, { jevActs: { stop: 1 } });
 
     // Assert
     should(low.success).be.false();
+    should(warden.WardenJevActsSchema.safeParse({ ...warden.DEFAULT_WARDEN_JEV_ACTS, nudge: 0.3 }).success).be.true();
     should(failover.success).be.false();
     should(merged.jevActs).deepEqual({ ...warden.DEFAULT_WARDEN_JEV_ACTS, stop: 1 });
   });
