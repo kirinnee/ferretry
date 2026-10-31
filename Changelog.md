@@ -1,3 +1,9 @@
+## [4.178.0](https://github.com/kirinnee/ferretry/compare/v4.177.2...v4.178.0) (2026-10-31)
+
+### Features
+
+* **pwa:** add to catalog, catalogs settings and install from a catalog file (phase 1c) ([#1176](https://github.com/kirinnee/ferretry/issues/1176)) ([9c82097](https://github.com/kirinnee/ferretry/commit/9c82097a2f632d2f30d5e9cc0b4fff73ff247ab6))
+
 ## [4.177.2](https://github.com/kirinnee/ferretry/compare/v4.177.1...v4.177.2) (2026-10-31)
 
 ### Fixes
