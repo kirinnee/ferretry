@@ -806,16 +806,26 @@ pre,
     border-left-width: var(--divider-width);
   }
   [data-md-table-view='table'] thead th {
+    border-top-width: var(--divider-width);
+  }
+  /* The header row sticks ONLY in the full-screen sheet, whose box is the one that scrolls down. Inline, the
+     box above is a horizontal scroller as tall as the table, so a sticky header has nothing to stick to — and
+     its z-index used to leak out and paint over a card's own sticky head (&B109). */
+  .md-table-pan[data-md-table-view='table'] thead th {
     position: sticky;
     top: 0;
     z-index: 2;
-    border-top-width: var(--divider-width);
   }
   [data-md-table-view='table'] tr > :first-child {
     position: sticky;
     left: 0;
     z-index: 1;
     background: var(--surface);
+  }
+  /* The sticky column's z-index is the table's own business: it may never reach a sticky head the table's
+     container carries (an agenda card's, a board card's). */
+  [data-md-table-view='table'] .md-table-scroll {
+    isolation: isolate;
   }
   /* The zebra stripe is translucent; a sticky column has to be opaque or the cells it covers show through. */
   [data-md-table-view='table'] tbody tr:nth-child(even) > :first-child {
@@ -825,6 +835,18 @@ pre,
     z-index: 3;
     background: var(--surface-2);
   }
+}
+/* A table that scrolls sideways says so: the edge with more beyond it fades out. `data-md-table-more` is set by
+   `MarkdownTable` from the box's own scroll position. The fade is a mask, so it takes the pane's ground in every
+   theme instead of painting a colour of its own. */
+.md-table-scroll[data-md-table-more='end'] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.md-table-scroll[data-md-table-more='start'] {
+  mask-image: linear-gradient(to left, #000 calc(100% - 28px), transparent);
+}
+.md-table-scroll[data-md-table-more='both'] {
+  mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
 /* The full-screen sheet pans in both directions inside itself. */
 .md-table-pan {

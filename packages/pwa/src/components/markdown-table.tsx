@@ -15,7 +15,7 @@
  */
 
 import { Maximize2 } from 'lucide-react';
-import { type ComponentProps, useId, useState, useSyncExternalStore } from 'react';
+import { type ComponentProps, type RefObject, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { TableViewPreferenceStore } from '../lib/table-view-preference.ts';
 import { BottomSheet } from '../shell/bottom-sheet.tsx';
@@ -27,10 +27,42 @@ export interface MarkdownTableProps extends ComponentProps<'table'> {
   readonly store?: TableViewPreferenceStore;
 }
 
+type MoreBeyond = 'none' | 'start' | 'end' | 'both';
+
+/**
+ * Which edges of a horizontally scrolling box have more beyond them, kept in step with its scroll position and
+ * its size. The box fades that edge (`.md-table-scroll[data-md-table-more]` in styles/index.css), so a table cut
+ * at the card's edge reads as "scroll for more" and not as a clipped value.
+ */
+function useMoreBeyond(box: RefObject<HTMLDivElement | null>): MoreBeyond {
+  const [more, setMore] = useState<MoreBeyond>('none');
+  useEffect(() => {
+    const element = box.current;
+    if (element === null) return undefined;
+    const measure = (): void => {
+      const before = element.scrollLeft > 1;
+      const after = element.scrollLeft + element.clientWidth < element.scrollWidth - 1;
+      setMore(before && after ? 'both' : before ? 'start' : after ? 'end' : 'none');
+    };
+    measure();
+    element.addEventListener('scroll', measure, { passive: true });
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
+    observer?.observe(element);
+    if (element.firstElementChild !== null) observer?.observe(element.firstElementChild);
+    return () => {
+      element.removeEventListener('scroll', measure);
+      observer?.disconnect();
+    };
+  }, [box]);
+  return more;
+}
+
 export function MarkdownTable({ store = defaultStore, ...table }: MarkdownTableProps) {
   const view = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
   const [full, setFull] = useState(false);
   const sheetId = useId();
+  const box = useRef<HTMLDivElement | null>(null);
+  const more = useMoreBeyond(box);
   return (
     <div className="md-table" data-md-table-view={view}>
       <fieldset aria-label="Table view" className="md-table-tools">
@@ -54,7 +86,7 @@ export function MarkdownTable({ store = defaultStore, ...table }: MarkdownTableP
           </button>
         ) : null}
       </fieldset>
-      <div className="md-table-scroll scroll-thin">
+      <div className="md-table-scroll scroll-thin" data-md-table-more={more} ref={box}>
         <table {...table} />
       </div>
       {/* At the document root: a fixed sheet inside the transcript's scroller would be placed against

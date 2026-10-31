@@ -200,6 +200,7 @@
         "tests/integration/fixtures/chat-rerender-scene.tsx",
         "tests/integration/fixtures/chat-history-scene.tsx",
         "tests/integration/fixtures/agenda-sticky-scene.tsx",
+        "tests/integration/fixtures/agenda-table-scene.tsx",
         "tests/integration/fixtures/jump-latest-scene.tsx",
         "tests/integration/fixtures/browser-pane-jumpy-scene.tsx",
         "tests/integration/fixtures/ledger-actions-scene.tsx",
