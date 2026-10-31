@@ -1,6 +1,7 @@
 import {
   AGENT_TOOL_DEFAULT_READ_LINES,
   AGENT_TOOL_DEFAULT_WAIT_MS,
+  type AgendaId,
   type AgentSurface,
   type AgentToolCall,
   type AgentToolResult,
@@ -53,6 +54,13 @@ export class AgentToolError extends Error {
     super(message);
     this.name = 'AgentToolError';
   }
+}
+
+/** What a result that carries pane-derived text was read from. */
+interface PaneBinding {
+  readonly caller: AgentToolCaller;
+  readonly surface: ResolvedSurface;
+  readonly reference: string;
 }
 
 /** How often a wait looks again. */
@@ -120,8 +128,11 @@ const openedByAgent = (openedBy: SurfaceOpener | undefined, sessionId: string): 
 export class AgentToolService {
   constructor(private readonly ports: AgentToolPorts) {}
 
+  /** The pane each pane-derived result was read from, so the transport can ask once more at the last moment. */
+  private readonly bindings = new WeakMap<AgentToolResult, PaneBinding>();
+
   async call(caller: AgentToolCaller, call: AgentToolCall): Promise<AgentToolResult> {
-    const facts: { surface?: ResolvedSurface } = {};
+    const facts: { surface?: ResolvedSurface; pane?: ResolvedSurface } = {};
     let result: AgentToolResult;
     try {
       const kind = kindOf(call);
@@ -135,15 +146,31 @@ export class AgentToolService {
       await this.record(caller, call, facts.surface, failed ? 'failed' : 'refused');
       throw refusal ?? error;
     }
-    // The last step before anything leaves the daemon: a hold that began during the capture, the redaction
-    // or the audit record above is honoured here, synchronously, at the point of publication.
-    if (result.output !== undefined && facts.surface !== undefined)
-      this.assertReadable(
-        caller,
-        facts.surface,
-        surfaceReference(facts.surface.surface, facts.surface.name ?? facts.surface.id),
-      );
-    return result;
+    const pane = facts.pane ?? facts.surface;
+    if (pane === undefined || (result.output === undefined && result.input?.observed === undefined)) return result;
+    this.bindings.set(result, {
+      caller,
+      surface: pane,
+      reference: surfaceReference(pane.surface, pane.name ?? pane.id),
+    });
+    return this.publish(result);
+  }
+
+  /**
+   * The last step before anything leaves the daemon: a hold that began during the capture, the redaction or the
+   * audit record is honoured here, synchronously. Screen text is refused; the foreground facts of a nested input
+   * view are dropped. A transport calls it again right before it serialises, so a hold taken after the service
+   * answered still wins; a result that read no pane passes through.
+   */
+  publish(result: AgentToolResult): AgentToolResult {
+    const bound = this.bindings.get(result);
+    if (bound === undefined) return result;
+    if (result.output !== undefined) this.assertReadable(bound.caller, bound.surface, bound.reference);
+    if (result.input?.observed === undefined) return result;
+    if (this.ports.quarantinedUntil?.(bound.caller.sessionId, [bound.surface.name, bound.surface.id]) === undefined)
+      return result;
+    const { observed: _hidden, ...input } = result.input;
+    return { ...result, input };
   }
 
   /**
@@ -200,7 +227,7 @@ export class AgentToolService {
   private async dispatch(
     caller: AgentToolCaller,
     call: AgentToolCall,
-    facts: { surface?: ResolvedSurface },
+    facts: { surface?: ResolvedSurface; pane?: ResolvedSurface },
   ): Promise<AgentToolResult> {
     const { sessionId } = caller;
     switch (call.tool) {
@@ -247,7 +274,11 @@ export class AgentToolService {
       case 'input.wait': {
         const input = this.inputPort(caller);
         const view = await input.agentView(sessionId, call.id, call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
-        return { summary: inputSummary(view), input: view };
+        if (view.observed === undefined) return { summary: inputSummary(view), input: view };
+        facts.pane = await this.paneOf(input, sessionId, call.id);
+        if (facts.pane !== undefined) return { summary: inputSummary(view), input: view };
+        const { observed: _unbound, ...unbound } = view;
+        return { summary: inputSummary(view), input: unbound };
       }
       default: {
         const surface = await this.resolve(
@@ -464,6 +495,21 @@ export class AgentToolService {
     const text = await this.ports.terminals.text(caller.sessionId, surface.id, lines);
     this.assertReadable(caller, surface, reference);
     return this.scrubbed(caller.sessionId, text);
+  }
+
+  /** The terminal a pending request is on: the one it is pending on, among the session's own. */
+  private async paneOf(input: AgentInputPort, sessionId: string, id: AgendaId): Promise<ResolvedSurface | undefined> {
+    const { terminals } = await this.ports.terminals.list(sessionId);
+    for (const terminal of terminals) {
+      const names = [terminal.name, terminal.id];
+      if (names.some(key => key !== undefined && input.pendingOn(sessionId, { kind: 'terminal', key }) === id))
+        return {
+          surface: 'terminal',
+          id: terminal.id,
+          ...(terminal.name === undefined ? {} : { name: terminal.name }),
+        };
+    }
+    return undefined;
   }
 
   /** Runs `work` as one turn in the session when input requests are wired; just runs it where they are not. */

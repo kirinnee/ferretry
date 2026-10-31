@@ -80,6 +80,9 @@ describe('the one publication gate, at the real bridge', () => {
 
   it('should not send a delta read before a hold began (delta)', async () => {
     const h = harness();
+    // The viewer's size matches the pane's, so the next frame is a delta rather than a complete redraw.
+    h.bridge.fromClient(JSON.stringify({ type: 'resize', cols: 100, rows: 5 }));
+    await turn();
     await h.bridge.open();
     h.state.screen = SECRET;
     h.state.holdAfterRead = true;

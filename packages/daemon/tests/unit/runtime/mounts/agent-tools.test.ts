@@ -298,3 +298,49 @@ describe('take over and hand back', () => {
     should(missing.status).equal(404);
   });
 });
+
+describe('the agent tools routes — publication at the transport', () => {
+  const SCREEN = 'pane-screen-CANARY';
+
+  /** A world whose terminal is quarantined one microtask after the service's last check, with its audit suspended. */
+  const racing = async () => {
+    let held = false;
+    let afterAudit = false;
+    let queued = false;
+    const world = agentToolWorld({
+      quarantinedUntil: () => {
+        if (afterAudit && !queued) {
+          queued = true;
+          queueMicrotask(() => (held = true));
+        }
+        return held ? Date.now() + 60_000 : undefined;
+      },
+    });
+    await world.service.call({ kind: 'agent', sessionId: 's1' }, { tool: 'terminal.open', name: 'dev' });
+    world.terminals.screens.set('000000000001', SCREEN);
+    world.audit.during = async () => {
+      afterAudit = true;
+    };
+    return new ApiDispatcher(new ApiRouter(agentToolRoutes(world.service, world.identities)), CREDENTIALS, GRANTED);
+  };
+
+  it('should not spell a screen read for an agent when a hold begins after the service last checked', async () => {
+    const dispatch = await racing();
+
+    const answered = await dispatch.dispatch(agentCall({ tool: 'terminal.read', name: 'dev' }));
+
+    should(answered.status).equal(409);
+    should(String(answered.body)).not.containEql(SCREEN);
+  });
+
+  it('should not spell a screen read for a person when a hold begins after the service last checked', async () => {
+    const dispatch = await racing();
+
+    const answered = await dispatch.dispatch(
+      personCall('/v1/sessions/s1/surfaces/terminals/tools', { tool: 'terminal.read', name: 'dev' }),
+    );
+
+    should(answered.status).equal(409);
+    should(String(answered.body)).not.containEql(SCREEN);
+  });
+});

@@ -1,18 +1,19 @@
 import {
   type AgentToolCall,
   AgentToolCallSchema,
+  type AgentToolResult,
   type SurfaceController,
   SurfaceControlRequestSchema,
   type SurfaceKind,
 } from '@ferretry/protocol';
+import { AgentToolError, type AgentToolService } from '../../agent-tools/service.ts';
+import type { AgentIdentityResolver, AgentToolCaller } from '../../agent-tools/types.ts';
 import { isHumanAdminActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { AgentToolError, type AgentToolService } from '../../agent-tools/service.ts';
-import type { AgentIdentityResolver, AgentToolCaller } from '../../agent-tools/types.ts';
 import { auditActorOf } from '../../audit/policy.ts';
 import { decideTerminalOpener } from '../../terminal/ownership.ts';
 
@@ -135,6 +136,15 @@ function controllerOf(context: RouteContext): SurfaceController {
 const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
   call.tool === 'input.wait' ? undefined : call.tool.startsWith('terminal.') ? 'terminal' : 'browser';
 
+/** The last synchronous step before the body is spelled: a hold taken since the service answered still wins. */
+function published(service: AgentToolService, result: AgentToolResult): ApiResponse {
+  try {
+    return jsonResponse(service.publish(result));
+  } catch (error) {
+    return answered(error);
+  }
+}
+
 async function agentCall(
   service: AgentToolService,
   identities: AgentIdentityResolver,
@@ -145,7 +155,7 @@ async function agentCall(
     await service.refusedCaller('not a tool call');
     throw error;
   });
-  return jsonResponse(await service.call(caller, call).catch(answered));
+  return published(service, await service.call(caller, call).catch(answered));
 }
 
 async function personCall(service: AgentToolService, kind: SurfaceKind, context: RouteContext): Promise<ApiResponse> {
@@ -153,7 +163,7 @@ async function personCall(service: AgentToolService, kind: SurfaceKind, context:
   const call = await parseBody(context.request, AgentToolCallSchema);
   if (kindOf(call) !== kind)
     throw new ApiError(400, `this route takes ${kind} tools; ${call.tool} is not one`, 'bad_request');
-  return jsonResponse(await service.call(caller, call).catch(answered));
+  return published(service, await service.call(caller, call).catch(answered));
 }
 
 async function control(service: AgentToolService, kind: SurfaceKind, context: RouteContext): Promise<ApiResponse> {
