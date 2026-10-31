@@ -32,7 +32,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: all work is a card (&F412); agenda items are !A48. New ask, first: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>` (repeatable; fy new/start make one). Before To test: `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`. Move: `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy agenda add --task <id>` (owner), `fy task depend` (card), `fy task block` (else). `fy task drop --reason`, `fy task focus <id>`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs/releases move cards; only the owner closes.
+Board: all work is a card (&F412); agenda items are !A48. New ask, first: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>` (fy new/start make one). Before To test: `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`. Lane by the work (`fy board lanes show`): plan → plan lane (owner OKs leaving), build → active: `fy task move <id> <lane> --reason "<why>"`. Blocked is no lane: `fy agenda add --task <id>` (owner), `fy task depend` (card), `fy task block` (else). `fy task drop --reason`, `fy task focus <id>`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. Starts, PRs, merges, releases, `fy signal done` self-move; owner closes.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -56,8 +56,8 @@ session identity — in `BoardService` (`create`, `act`) and on the lane route �
 | `fy send` its lead (and peers the lead names)             | editing a project's lanes (`PATCH` of the lane list: `403 sub-ferret`)                            |
 
 The refusal is `forbidden` and names the way out, e.g. `Sub-ferrets don't move cards; tell your lead: fy send <lead-callsign> "…"`.
-The daemon still makes the sub-ferret's card when `fy new` starts it (that is the lead's act), and a PR or release
-still moves it. A directory that cannot place a caller refuses nothing: the limit narrows a ferret known to be a
+The daemon still makes the sub-ferret's card when `fy new` starts it (that is the lead's act), enters its working lane
+for it when the session starts (`work.started`, below), and a PR or release still moves it. A directory that cannot place a caller refuses nothing: the limit narrows a ferret known to be a
 sub-ferret, it never locks one out it cannot find.
 
 A sub-ferret's system prompt drops the Board rules above and the Notify rule and the Agenda mode section, and
@@ -66,7 +66,7 @@ carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` laun
 
 ```text
 Sub-ferret: you were started by a lead ferret. Report to it with `fy send <lead-callsign> "<message>"`; you cannot raise agenda items, notify the owner or move cards.
-Link your PR to your card: `fy task link <id> --pr <url>` (or `--branch`); add progress with `fy task note`. Your final report says how the owner tests it.
+Link your PR to your card: `fy task link <id> --pr <url>` (or `--branch`); add progress with `fy task note`. Your card moves itself: start, PR, merge, `fy signal done`. Your final report says how the owner tests it.
 ```
 
 Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen — go to its **lead** instead
@@ -211,6 +211,17 @@ hand-made set.
 else the first review or verify lane ahead: a review lane where one comes first (today's behaviour on a board that
 has one), else the verify lane where the owner tries it. It never moves a card into a closed lane, because only the
 owner closes. A card with a PR is left where it is; its PR moves it.
+
+**A session starting on a card fires `work.started`.** `SessionCards` does it, for a card it just made (`fy new`,
+`fy start`) and for one handed over by `fy new --card`, so a sub-ferret, who may not move cards, still lands in the
+lane its workflow works in (In progress / Doing; Plan for `design-first`). A card already past that lane stays
+where it is, and a failed move only warns: the session still starts. A card the lead makes with `fy task create`
+has no session yet, so it stays in Todo until the lead passes `--lane` or moves it.
+
+**Which lane, by what the work is.** `fy task move --help` and `fy board lanes show` give the rule by lane category,
+and `lanes show` adds a "use when" per lane (`laneUse`, single-sourced in `@ferretry/protocol`): planning or designing
+in the lane the owner gates (the owner approves leaving it), building in the active lane, a PR, a merge, a release and
+`fy signal done` move a card by themselves, and blocked is not a lane (`fy task block`, `depend`).
 
 A card's **workflow** (`quick`, `design-first`, `research-first`, `investigate`) selects its variant of the lane
 set and cannot change after creation. In the PR templates only `design-first` and `research-first` work walks

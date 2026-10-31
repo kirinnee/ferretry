@@ -657,9 +657,7 @@ describe('hypermedia teaching', () => {
     should(teaching).containEql('Do not overdo it');
     // The owner's three asks: reach for it when teaching, keep it inline, and tell it interactively.
     should(teaching).startWith('Hypermedia: when you teach, explain, compare or walk through');
-    should(teaching).containEql(
-      'never publish an artifact, page, gist or link to explain something unless the owner asks',
-    );
+    should(teaching).containEql('never publish an artifact, page, gist or link to explain, unless asked');
     should(teaching).containEql('step-through Next buttons');
     should(teaching).containEql('prefers-reduced-motion');
     // The theme is the reader's: a ferret never paints a chart or a diagram.
@@ -827,11 +825,15 @@ describe('BOARD_INSTRUCTION', () => {
     should(text).containEql(
       '`zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`',
     );
-    should(text).containEql('(repeatable; zz new/start make one)');
+    should(text).containEql('(zz new/start make one)');
     should(text).containEql(
       'Before To test: `zz task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`',
     );
     should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
+    should(text).containEql(
+      'Lane by the work (`zz board lanes show`): plan → plan lane (owner OKs leaving), build → active:',
+    );
+    should(text).containEql('Blocked is no lane:');
     should(text).containEql('`zz agenda add --task <id>` (owner)');
     should(text).containEql('`zz task depend` (card)');
     should(text).containEql('`zz task block` (else)');
@@ -839,7 +841,7 @@ describe('BOARD_INSTRUCTION', () => {
     should(text).containEql('`zz task focus <id>`');
     should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');
     should(text).containEql("Owner's bug:");
-    should(text).containEql('PRs/releases move cards; only the owner closes.');
+    should(text).containEql('Starts, PRs, merges, releases, `zz signal done` self-move; owner closes.');
     should(text).not.containEql('`fy ');
   });
 
@@ -847,7 +849,7 @@ describe('BOARD_INSTRUCTION', () => {
     // Assert
     should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n${BOARD_INSTRUCTION('fy')}`);
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
-    should(BOARD_INSTRUCTION('fy').length).be.below(660);
+    should(BOARD_INSTRUCTION('fy').length).be.below(760);
   });
 });
 
@@ -1039,6 +1041,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     should(text).containEql('`zz task link <id> --pr <url>` (or `--branch`)');
     should(text).containEql('`zz task note`');
     should(text).containEql('Your final report says how the owner tests it.');
+    should(text).containEql('Your card moves itself: start, PR, merge, `zz signal done`.');
     should(text).not.containEql('agenda add');
     should(text).not.containEql('task move');
   });

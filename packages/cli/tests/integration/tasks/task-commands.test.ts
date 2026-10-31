@@ -210,6 +210,35 @@ describe('fy task skip', () => {
   });
 });
 
+describe('fy task move --help', () => {
+  it('should teach which lane fits which work, by category, after the options', async () => {
+    // Arrange
+    const gateway = new FakeBoardGateway();
+    const board = new BoardController({
+      gateway,
+      output: new CapturedOutput(),
+      files: new StubFiles(),
+      binary: 'fy',
+      environmentSessionId: 'session-7',
+    });
+    const written: string[] = [];
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({ writeOut: text => written.push(text), writeErr: () => {} });
+    registerTaskCommands(program, { board });
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'task', 'move', '--help']).catch(() => undefined);
+
+    // Assert
+    const help = written.join('');
+    should(help).containEql('--reason <why>');
+    should(help.indexOf('Pick the lane by what the work is')).be.above(help.indexOf('--reason <why>'));
+    should(help).containEql('`fy board lanes show` lists this project\'s lanes with "use when"');
+    should(help).containEql('  active  ');
+    should(help).containEql('Blocked is not a lane');
+  });
+});
+
 describe('every remaining task verb', () => {
   const verbs: readonly (readonly [string, readonly string[], string])[] = [
     ['focus', ['focus', 'F412'], 'focus'],

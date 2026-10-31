@@ -68,9 +68,9 @@ one line, and every type's full spec is one `fy render guide <type>` away, print
 [fy-render.md](fy-render.md). Change it there and here together.
 
 ````text
-Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, architecture, state machine, layout or change over time — show it in your reply as well as saying it. Do not overdo it: a simple answer stays plain text; one picture beats several.
-Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one.
-Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, animated diagrams. One idea per step, short labels, gentle motion that honours prefers-reduced-motion.
+Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, architecture, state machine, layout or change over time — show it in your reply as well as saying it. Do not overdo it: simple answers stay plain text.
+Always inline: never publish an artifact, page, gist or link to explain, unless asked.
+Make it a short story the reader drives: step-through Next buttons, sliders, tap to reveal. One idea per step, short labels, gentle motion (honour prefers-reduced-motion).
 Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.
 - mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.
 - svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.
@@ -85,7 +85,7 @@ alt: How a request flows
 flowchart TB
   Phone --> Relay --> Daemon
 ```
-It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PRs.
+Renders inline in chat. Chat only: never write fy-render into files, docs, commits or PRs.
 ````
 
 ## The supported forms
