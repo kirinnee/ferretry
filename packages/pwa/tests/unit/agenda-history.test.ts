@@ -57,19 +57,107 @@ describe('the history of one agenda item', () => {
     expect(itemHistory(item(), [peer])).toEqual([]);
   });
 
-  test('keeps the ferret’s FINAL text of the turn that answers the owner, even when it does not cite the item', () => {
+  test('keeps only the paragraph of a multi-topic reply that cites the item', () => {
+    const reply = [
+      'Ferret piper finished the relay probe; the PR is up.',
+      '',
+      'Ferret kylene is still on the lockfile bump.',
+      '',
+      'On !A47: pause does not kill a running turn, it finishes first.',
+      '',
+      'Nothing else is waiting on you.',
+    ].join('\n');
+    const events = itemHistory(item(), [
+      entry('u1', 'user', '!A47 does pause kill a running turn?', 1),
+      entry('a1', 'assistant', reply, 2),
+    ]);
+    expect(said(events)).toEqual([
+      'owner: does pause kill a running turn?',
+      'ferret: On !A47: pause does not kill a running turn, it finishes first.',
+    ]);
+  });
+
+  test('shows nothing for a reply that never cites the item, even right after an owner row about it', () => {
     const events = itemHistory(item(), [
       entry('u1', 'user', '!A47 does pause kill a running turn?', 1),
       entry('a1', 'assistant', 'Let me check the runner.', 2),
       entry('t1', 'tool', 'Read(runner.ts) → 140 lines', 3),
-      entry('a2', 'assistant', 'No. A running turn finishes.', 4),
-      entry('u2', 'user', 'unrelated: bump the lockfile?', 5),
-      entry('a3', 'assistant', 'Bumped the lockfile.', 6),
+      entry('a2', 'assistant', 'No. A running turn finishes. Also the lockfile is bumped.', 4),
     ]);
-    expect(said(events)).toEqual(['owner: does pause kill a running turn?', 'ferret: No. A running turn finishes.']);
+    expect(said(events)).toEqual(['owner: does pause kill a running turn?']);
   });
 
-  test('keeps the ferret’s text that cites the item anywhere, and nothing else it said', () => {
+  test('keeps only the list items that cite the item, not their siblings', () => {
+    const reply = [
+      '- piper: relay probe done',
+      '- !A47 — answered, pause waits for the turn',
+      '- kylene: lockfile',
+    ].join('\n');
+    expect(said(itemHistory(item(), [entry('a1', 'assistant', reply, 1)]))).toEqual([
+      'ferret: - !A47 — answered, pause waits for the turn',
+    ]);
+  });
+
+  test('keeps everything under a heading that cites the item, up to the next heading', () => {
+    const reply = [
+      '## Relay probe',
+      'Piper is done.',
+      '## !A47 pause behaviour',
+      'A running turn finishes first.',
+      '',
+      '- then the queue pauses',
+      '### Detail',
+      'Nothing is killed.',
+      '## Lockfile',
+      'Bumped.',
+    ].join('\n');
+    expect(said(itemHistory(item(), [entry('a1', 'assistant', reply, 1)]))).toEqual([
+      [
+        'ferret: ## !A47 pause behaviour',
+        'A running turn finishes first.',
+        '- then the queue pauses',
+        '### Detail',
+        'Nothing is killed.',
+      ].join('\n\n'),
+    ]);
+  });
+
+  test('keeps a Q/A recap pair that cites the item, and one whose Q restates the owner’s question', () => {
+    const reply = [
+      'Done with the relay probe.',
+      '',
+      'Q: Does the lockfile need a bump?',
+      'A: Yes, bumped.',
+      '',
+      'Q: !A47 ship the relay fix?',
+      'A: Yes, on staging first.',
+      '',
+      'Q: Does pause kill a running turn',
+      'A: No. A running turn finishes.',
+    ].join('\n');
+    const events = itemHistory(item(), [
+      entry('u1', 'user', '!A47 does pause kill a running turn?', 1),
+      entry('a1', 'assistant', reply, 2),
+    ]);
+    expect(said(events)).toEqual([
+      'owner: does pause kill a running turn?',
+      [
+        'ferret: Q: !A47 ship the relay fix?\n\nA: Yes, on staging first.',
+        'Q: Does pause kill a running turn\n\nA: No. A running turn finishes.',
+      ].join('\n\n'),
+    ]);
+  });
+
+  test('does not keep a recap pair whose Q is only about something else', () => {
+    const reply = 'Q: Does the lockfile need a bump?\nA: Yes, bumped.';
+    const events = itemHistory(item(), [
+      entry('u1', 'user', '!A47 does pause kill a running turn?', 1),
+      entry('a1', 'assistant', reply, 2),
+    ]);
+    expect(said(events)).toEqual(['owner: does pause kill a running turn?']);
+  });
+
+  test('keeps the cited part of a reply whole-turn-agnostic, cut long, and nothing from other rows', () => {
     const long = `Re !A47: ${'x'.repeat(HISTORY_FERRET_CHARS + 50)}`;
     const events = itemHistory(item(), [
       entry('a0', 'assistant', 'Building the settings page.', 0),
@@ -85,13 +173,38 @@ describe('the history of one agenda item', () => {
     expect(second?.kind === 'ferret' ? second.text.endsWith('…') : false).toBe(true);
   });
 
-  test('does not keep the narration of an answering turn once the ferret cites the item in it', () => {
-    const events = itemHistory(item(), [
-      entry('u1', 'user', '!A47 why?', 1),
-      entry('a1', 'assistant', 'Checking.', 2),
-      entry('a2', 'assistant', 'Updated !A47 with the reason.', 3),
+  test('says what each edit changed in plain words, from the item’s own revisions', () => {
+    const revisions = [
+      {
+        at: '2026-08-01T10:00:00.000Z',
+        by: 'agent',
+        changed: ['premise', 'stillOpen', 'title'],
+        previous: {
+          premise: '- The relay is slow\n- Nobody knows why',
+          stillOpen: '- Who owns it',
+          title: 'Old title',
+        },
+      },
+      { at: '2026-08-01T11:00:00.000Z', by: 'agent', changed: ['decided'], previous: {} },
+    ] as unknown as AgendaItem['revisions'];
+    const events = itemHistory(
+      item({
+        revisions,
+        premise: '- The relay is slow\n- A cache is the cause',
+        stillOpen: '- Who owns it',
+        title: 'New title',
+        decided: '- Ship it',
+      } as Partial<AgendaItem>),
+      [],
+    );
+    const summaries = events.map(event => (event.kind === 'revision' ? event.summary : []));
+    expect(summaries[0]).toEqual([
+      'Premise: added “A cache is the cause”',
+      'Premise: removed “Nobody knows why”',
+      'Still open: reordered',
+      'Title: now “New title”',
     ]);
-    expect(said(events)).toEqual(['owner: why?', 'ferret: Updated !A47 with the reason.']);
+    expect(summaries[1]).toEqual(['Decided so far: added “Ship it”']);
   });
 
   test('interleaves versions and chat by time, stably, and lets a row with no clock inherit the last', () => {

@@ -29,7 +29,7 @@ describe('the History under an open agenda card', () => {
     const root = await draw([
       { kind: 'ferret', key: 'r', at: AT, text: 'What should happen at the hard limit?' },
       { kind: 'owner', key: 'o', at: AT + 180_000, text: 'does pause kill a running turn?' },
-      { kind: 'revision', key: 'v', at: AT + 200_000, version: 2 },
+      { kind: 'revision', key: 'v', at: AT + 200_000, version: 2, summary: [] },
       { kind: 'ferret', key: 'f', at: AT + 240_000, text: 'No. A running turn finishes.' },
     ]);
     const rows = [...root.querySelectorAll('[data-agenda-history] li')];
