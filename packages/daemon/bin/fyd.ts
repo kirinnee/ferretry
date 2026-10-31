@@ -297,6 +297,7 @@ import {
   JscStackSampler,
   KeyedSerialExecutor,
   LOGIN_SECRETS_DOCUMENT,
+  SECRETS_DOCUMENT,
   LoadSafeWorker,
   ManifestAccountInventory,
   MCP_OAUTH_SECRETS_DOCUMENT,
@@ -599,6 +600,11 @@ import {
   SessionCards,
   type SessionLivenessSource,
 } from '../src/lib/board/index.ts';
+import { isAgendaSessionId } from '../src/lib/agenda/index.ts';
+import { WorkSearchService } from '../src/lib/work-search/index.ts';
+
+/** How long after boot the work search builds its index: after the boot's own reads, before anyone searches. */
+const WORK_SEARCH_WARM_DELAY_MS = 5_000;
 import { GitHubWatcher, UnfiledRefiler } from '../src/lib/board-github/index.ts';
 import { BoardImporter, LaneSetImportProjects, type TaskAssigneeCandidate } from '../src/lib/board-import/index.ts';
 import { type MeteredFile, SpendMeter } from '../src/lib/budget/meter.ts';
@@ -9940,6 +9946,40 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         undefined,
         agendaFilesMigrated,
       );
+      // ONE search over every card and agenda item (docs/work-search.md): the finder, `fy search` and the related
+      // check. It reads the board store's in-memory cards and the agenda ledgers through their own caches, indexes
+      // only scrubbed text, and rebuilds whenever the secret or login vault file changes (its epoch).
+      const workSearch = new WorkSearchService({
+        cards: {
+          cards: async () => (await boardWorld.store.read()).cards,
+          laneSet: async projectId => await laneSets.laneSet(projectId),
+        },
+        agenda: {
+          sessions: async () =>
+            (await stateFiles.listDirectory(paths.sessions))
+              .filter(entry => entry.directory && isAgendaSessionId(entry.name))
+              .map(entry => entry.name),
+          ledger: async sessionId => await agendaBoards.read(sessionId),
+        },
+        redaction: {
+          batch: async work => await secretRedactor.batch(scrub => work(text => scrub.text(text))),
+          epoch: async () =>
+            (
+              await Promise.all(
+                [SECRETS_DOCUMENT, LOGIN_SECRETS_DOCUMENT].map(
+                  async name => (await stateFiles.identity?.(join(paths.state, name))) ?? '-',
+                ),
+              )
+            ).join('|'),
+        },
+        now: () => Date.parse(clock.now()),
+        warn: message => process.stderr.write(`${message}\n`),
+      });
+      // A card file edited by hand reaches the board (and so the search) as soon as its directory says so; the hub
+      // closes the watch at shutdown. The index is built a few seconds after boot, off the boot path, so the
+      // first search rarely waits for it.
+      boardWorld.store.watch((directory, listener) => fileEvents.subscribeDirectory(directory, () => listener()));
+      setTimeout(() => workSearch.warm(), WORK_SEARCH_WARM_DELAY_MS).unref();
       // Released and To test are one lane now: every stored set that still has both is folded into one at boot,
       // its cards moved with it, and the owner is asked nothing. A `quick` set from before To test gains it the same
       // way. Then the Unfiled cards that belong on a project's board are refiled there (`UnfiledRefiler`), so a
@@ -10101,6 +10141,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new AgendaChangeFanout([
           // The session list's unread signal, kept true to the board.
           agendaProjection,
+          // The work search re-reads this session's ledger before its next answer.
+          { changed: async sessionId => await workSearch.changed(sessionId) },
           // The owner's Accept on a lane proposal confirms those lanes; any other answer is ignored.
           new LaneProposalAcceptance(laneSets),
           // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
@@ -11844,6 +11886,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
         },
         boardGitHub,
+        workSearch: {
+          search: async query => await workSearch.search(query),
+          related: async request => await workSearch.related(request),
+        },
         analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
         analyticsIngest: analyticsIngestion,

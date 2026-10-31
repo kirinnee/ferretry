@@ -125,3 +125,5 @@ unreached POST /v1/shared/passkeys/options # served by the member route table; i
 unreached POST /v1/shared/redeem # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
 unreached POST /v1/shared/unlock # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
 unreached POST /v1/shared/unlock/options # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
+unreached GET /v1/search # TEMPORARY (&F303): the CLI (`fy search`, the related check) and the PWA finder dial it in the two PRs stacked on this one; remove this line in whichever lands second
+unreached POST /v1/search/related # TEMPORARY (&F303): `fy task create` / `fy agenda add` dial it in the CLI PR stacked on this one; remove this line there

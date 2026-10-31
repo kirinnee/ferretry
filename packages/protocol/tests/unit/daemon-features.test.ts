@@ -43,6 +43,11 @@ describe('daemon features', () => {
     should(daemonFeatureList()).containEql('login.budget.1');
   });
 
+  it('should name the work search, so the app and the CLI use it only on a machine that serves it', () => {
+    should(DAEMON_FEATURES.workSearch).equal('work.search.1');
+    should(daemonFeatureList()).containEql('work.search.1');
+  });
+
   it('should offer a feature only when the daemon listed it', () => {
     // Arrange
     const listed = { features: [DAEMON_FEATURES.packIdea4000] };
