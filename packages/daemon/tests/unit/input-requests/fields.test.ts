@@ -450,6 +450,10 @@ describe('a card of several fields', () => {
         { ...PAGE, fields: [pageField('email'), pageField('password', { visible: false })] },
         'Ferretry could not see this field on the page, so the value may land somewhere unexpected.',
       ],
+      [
+        { ...PAGE, fields: [pageField('email'), pageField('password', { covered: true })] },
+        'Something on the page covers this field, or it is off screen, so you cannot see where the value goes.',
+      ],
     ];
     for (const [facts, reason] of cases) {
       const { request } = await raisedLogin({ facts });

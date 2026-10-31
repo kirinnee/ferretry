@@ -170,7 +170,10 @@ const ECHO_WORDS = { off: 'typing hidden', on: 'typing shows', unknown: 'echo un
 interface ObservedFieldWords {
   readonly key: string;
   readonly label: string;
-  /** `password field`, `email field`, and `in a frame from <host>` when the field is not in the page's own frame. */
+  /**
+   * `password field`, `email field`, `in a frame from <host>` when the field is not in the page's own frame, and
+   * `covered or off screen` when something else is on top of it.
+   */
   readonly words: string;
 }
 
@@ -203,7 +206,7 @@ const schemeWords = (origin: string, secure: boolean): string => {
 const fieldWords = (field: InputBrowserFieldFacts, pageOrigin: string): string => {
   const kind = field.field.type === 'password' ? 'password' : (field.field.type ?? field.field.tag);
   const frame = field.frameOrigin === pageOrigin ? '' : ` in a frame from ${hostOf(field.frameOrigin)}`;
-  return `${kind} field${frame}`;
+  return `${kind} field${frame}${field.covered === true ? ', covered or off screen' : ''}`;
 };
 
 /** What the daemon saw, in words: drawn large, because the agent's own sentence is not evidence. */

@@ -22,11 +22,10 @@ import { type ActablePage, BROWSER_PROBE_TIMEOUT_MS, browserElementOf } from './
  * DevTools session these calls touch, so each rule is tested with fakes and no browser.
  *
  * THE BROWSER DECIDES, THE PAGE IS NOT ASKED. The agent's pointer (a ref or a selector) only says where to
- * look. The node, its frame, its attributes, its box and the document come from DevTools; the only thing the
- * page's own script is made to do is carry a one-time marker attribute on the element, so DevTools can look the
- * element up. The marker is a lookup aid and never evidence: the node it leads to is proved to be the element
- * the handle holds (same box, and the node on top at its centre) before any fact is taken, and it is always
- * taken off.
+ * look: Playwright resolves it in its own isolated world and holds the element. The element's IDENTITY is the
+ * node Playwright's own DevTools session names for that handle ({@link InputHandle.describe}); the node, its
+ * frame, its attributes, its box and the document all come from DevTools for that one node. The page's own
+ * script is never asked anything about which element it is.
  *
  * NOTHING THE PAGE CONTROLS RUNS BETWEEN THE LAST PROOF AND THE INSERT. The write selects and checks focus
  * through an isolated world of the field's frame, whose prototypes the page cannot reach, and `Input.insertText`
@@ -48,13 +47,15 @@ export interface InputFrame {
   url(): string;
 }
 
-/** The element a locator resolved, held while the marker is on it. */
+/** The element a locator resolved, held while it is looked at. */
 export interface InputHandle {
   ownerFrame(): Promise<InputFrame | null>;
-  /** Sets {@link INPUT_MARKER} on the element to `token`; the one thing the page's own script is made to carry. */
-  mark(token: string): Promise<void>;
-  /** Takes {@link INPUT_MARKER} off the element. */
-  unmark(): Promise<void>;
+  /**
+   * The node this handle holds, as the DevTools session that holds it describes it (`DOM.describeNode` on the
+   * handle's own remote object): its `backendNodeId`, name and attributes. This is the element's identity; no
+   * page script runs to answer it.
+   */
+  describe(): Promise<unknown>;
   boundingBox(): Promise<{
     readonly x: number;
     readonly y: number;
@@ -122,15 +123,11 @@ export interface InputSubject {
   readonly sessions: InputFrameSessions;
 }
 
-/** The attribute that marks the one element being looked at, so DevTools can find it again. */
-export const INPUT_MARKER = 'data-fy-input';
 /** The world the write runs its few scripts in: created by DevTools per frame, so the page's overrides are not in it. */
 const ISOLATED_WORLD = 'ferretry-input';
 /** Selects what a field holds with the browser's own `select`, not whatever `select` the page put on the element. */
 const SELECT_CONTENTS =
   'function () { const p = this instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; if (typeof p.select === "function") p.select.call(this); }';
-/** How far the handle's box and the node's box may differ and still be the same element, in CSS pixels. */
-const BOX_TOLERANCE_PX = 1;
 /**
  * The element that has focus, looked for through the documents it can sit in: a field in a same-origin
  * iframe or an open shadow root is not `document.activeElement` itself, its host is. A frame the page may
@@ -281,26 +278,32 @@ async function sessionOwning(
   }
 }
 
-/** The node carrying the marker, or a refusal when it is not exactly one. The caller still has to prove it is the element. */
-async function findMarked(session: InputCdpSession, token: string): Promise<Record<string, unknown>> {
-  await ask(session, 'DOM.getDocument', { depth: 0 });
-  const search = await ask(session, 'DOM.performSearch', {
-    query: `[${INPUT_MARKER}="${token}"]`,
-    includeUserAgentShadowDOM: true,
-  });
-  const searchId = search.searchId;
-  if (typeof searchId !== 'string') throw new Error(REFUSALS.unidentified);
-  try {
-    const count = search.resultCount;
-    if (count !== 1) throw new Error(REFUSALS.unidentified);
-    const results = await ask(session, 'DOM.getSearchResults', { searchId, fromIndex: 0, toIndex: 1 });
-    const nodeIds = Array.isArray(results.nodeIds) ? (results.nodeIds as readonly unknown[]) : [];
-    const nodeId = nodeIds[0];
-    if (nodeIds.length !== 1 || typeof nodeId !== 'number' || nodeId <= 0) throw new Error(REFUSALS.unidentified);
-    return objectOf((await ask(session, 'DOM.describeNode', { nodeId })).node);
-  } finally {
-    await session.send('DOM.discardSearchResults', { searchId }).catch(() => undefined);
-  }
+/**
+ * The node a Playwright element handle holds, as Playwright's own DevTools session describes it. Playwright
+ * resolves a ref or a selector in its own isolated world and adopts the element by its backend node, so the
+ * remote object it holds IS the element; asking that session to describe the object needs no page script.
+ *
+ * This reaches past Playwright's public API (the in-process connection's `toImpl`, the page delegate's
+ * `_sessionForHandle`, the handle's `_objectId`), pinned with the Playwright version the worker ships. Any
+ * part that is not there is a refusal: a field whose identity cannot be proved is never observed.
+ */
+export async function playwrightNodeOf(handle: unknown): Promise<unknown> {
+  const client = handle as { readonly _connection?: { toImpl?: (object: unknown) => unknown } } | null;
+  const server = client?._connection?.toImpl?.(handle) as
+    | {
+        readonly _objectId?: unknown;
+        readonly _page?: {
+          readonly delegate?: {
+            _sessionForHandle?: (object: unknown) => { readonly _client?: { send?: unknown } } | undefined;
+          };
+        };
+      }
+    | undefined;
+  const objectId = server?._objectId;
+  const session = server?._page?.delegate?._sessionForHandle?.(server)?._client;
+  if (typeof objectId !== 'string' || typeof session?.send !== 'function') throw new Error(REFUSALS.unidentified);
+  const send = session.send as (method: string, params: Readonly<Record<string, unknown>>) => Promise<unknown>;
+  return objectOf(objectOf(await send.call(session, 'DOM.describeNode', { objectId })).node);
 }
 
 interface Box {
@@ -328,47 +331,28 @@ async function measuredBox(session: InputCdpSession, backendNodeId: number): Pro
   return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
 }
 
-const nearly = (left: number, right: number): boolean => Math.abs(left - right) <= BOX_TOLERANCE_PX;
-
 /**
- * Proves the node DevTools found is the element the handle holds, and answers the box every fact about the
- * field is drawn from. The node's own box must match the handle's — in size, and in place too unless the
- * field is in a frame of its own, whose coordinates are frame-local and so only agree in size — and the node
- * on top at the centre of that box must be this node. A node with no box agrees only with a handle that has
- * none. Anything else is a refusal: the marker led somewhere else, or something sits over the field.
+ * Whether the node is the one on top at the centre of its own box, measured and hit-tested by DevTools in the
+ * node's own session (frame-local for a frame of its own). A field that is covered, or off screen, is not:
+ * that is a fact for the owner's card (amber), never a reason to refuse — the identity is proved already.
  */
-async function provenBox(
-  session: InputCdpSession,
-  backendNodeId: number,
-  claimed: { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null,
-  samePlace: boolean,
-): Promise<Box> {
-  const proven = await measuredBox(session, backendNodeId);
-  if (proven === undefined || claimed === null) {
-    if (proven === undefined && claimed === null) return { x: 0, y: 0, w: 0, h: 0 };
-    throw new Error(REFUSALS.unidentified);
-  }
-  if (!nearly(proven.w, claimed.width) || !nearly(proven.h, claimed.height)) throw new Error(REFUSALS.unidentified);
-  if (samePlace && (!nearly(proven.x, claimed.x) || !nearly(proven.y, claimed.y)))
-    throw new Error(REFUSALS.unidentified);
-  if (proven.w > 0 && proven.h > 0) {
-    // The node's UA internals answer as the field itself, so ask for the field and not for its inner editor.
-    const top = await ask(session, 'DOM.getNodeForLocation', {
-      x: Math.floor(proven.x + proven.w / 2),
-      y: Math.floor(proven.y + proven.h / 2),
-      includeUserAgentShadowDOM: false,
-      ignorePointerEventsNone: true,
-    }).catch(() => ({}) as Record<string, unknown>);
-    if (top.backendNodeId !== backendNodeId) throw new Error(REFUSALS.unidentified);
-  }
-  return samePlace ? proven : { x: claimed.x, y: claimed.y, w: proven.w, h: proven.h };
+async function onTop(session: InputCdpSession, backendNodeId: number): Promise<boolean> {
+  const box = await measuredBox(session, backendNodeId);
+  if (box === undefined || box.w <= 0 || box.h <= 0) return false;
+  // The node's UA internals answer as the field itself, so ask for the field and not for its inner editor.
+  const top = await ask(session, 'DOM.getNodeForLocation', {
+    x: Math.floor(box.x + box.w / 2),
+    y: Math.floor(box.y + box.h / 2),
+    includeUserAgentShadowDOM: false,
+    ignorePointerEventsNone: true,
+  }).catch(() => ({}) as Record<string, unknown>);
+  return top.backendNodeId === backendNodeId;
 }
 
 /** Looks at one field: its frame, node, attributes and box. `undefined` when the element is not on the page. */
 async function observeField(
   subject: InputSubject,
   pointer: BrowserInputFieldPointer,
-  token: string,
 ): Promise<InputBrowserFieldFacts | undefined> {
   let handle: InputHandle | null;
   try {
@@ -382,22 +366,39 @@ async function observeField(
     return undefined;
   }
   if (handle === null) return undefined;
-  let marked = false;
   try {
     const frame = await handle.ownerFrame();
     if (frame === null) throw new Error(REFUSALS.frameless);
-    marked = true;
-    await handle.mark(token);
-    const { session, owned } = await sessionOwning(subject, frame);
-    const node = await findMarked(session, token);
-    const backendNodeId = node.backendNodeId;
+    // The identity: the node Playwright holds, described by the session that holds it.
+    const held = objectOf(
+      await handle.describe().catch(() => {
+        throw new Error(REFUSALS.unidentified);
+      }),
+    );
+    const backendNodeId = held.backendNodeId;
     if (typeof backendNodeId !== 'number' || !Number.isSafeInteger(backendNodeId) || backendNodeId <= 0)
       throw new Error(REFUSALS.unidentified);
+    const { session, owned } = await sessionOwning(subject, frame);
+    // The same node, as the session the write will use names it: the same name and attributes, or a refusal.
+    const node = objectOf(
+      (
+        await ask(session, 'DOM.describeNode', { backendNodeId }).catch(() => {
+          throw new Error(REFUSALS.unidentified);
+        })
+      ).node,
+    );
+    if (node.backendNodeId !== backendNodeId || !sameNode(node, held)) throw new Error(REFUSALS.unidentified);
     const info = objectOf(objectOf(await ask(session, 'Target.getTargetInfo')).targetInfo);
     const frameId = typeof info.targetId === 'string' ? oneLine(info.targetId, FRAME_ID_LIMIT) : '';
     if (frameId === '') throw new Error(REFUSALS.unidentified);
-    const box = await provenBox(session, backendNodeId, await handle.boundingBox().catch(() => null), !owned);
+    // Playwright measures the element it holds, in the page's viewport whichever frame it is in.
+    const measured = await handle.boundingBox().catch(() => null);
+    const box =
+      measured === null
+        ? { x: 0, y: 0, w: 0, h: 0 }
+        : { x: measured.x, y: measured.y, w: measured.width, h: measured.height };
     const visible = (await handle.isVisible().catch(() => false)) && box.w > 0 && box.h > 0;
+    const covered = !(await onTop(session, backendNodeId));
     subject.sessions.remember(frameId, session, owned);
     return {
       fieldId: pointer.id,
@@ -407,11 +408,18 @@ async function observeField(
       field: inputFieldAttributes(node),
       box,
       visible,
+      ...(covered ? { covered: true } : {}),
     };
   } finally {
-    if (marked) await handle.unmark().catch(() => undefined);
     await handle.dispose().catch(() => undefined);
   }
+}
+
+/** Two descriptions of one node agree: the same element name and the same attributes. */
+function sameNode(left: Record<string, unknown>, right: Record<string, unknown>): boolean {
+  return (
+    left.nodeName === right.nodeName && JSON.stringify(left.attributes ?? []) === JSON.stringify(right.attributes ?? [])
+  );
 }
 
 /**
@@ -425,8 +433,7 @@ export async function observeInputFields(
   const { page } = subject;
   const observed: InputBrowserFieldFacts[] = [];
   for (const pointer of fields) {
-    const token = crypto.randomUUID().replaceAll('-', '');
-    const found = await observeField(subject, pointer, token);
+    const found = await observeField(subject, pointer);
     if (found === undefined) return { ok: false, missing: pointer.id };
     observed.push(found);
   }

@@ -261,6 +261,8 @@ export const InputBrowserFieldFactsSchema = z.strictObject({
     h: z.number().finite().nonnegative(),
   }),
   visible: z.boolean(),
+  /** Something else is on top at the field's centre, or it is off screen: the card flags it, nothing refuses it. */
+  covered: z.literal(true).optional(),
 });
 export type InputBrowserFieldFacts = z.infer<typeof InputBrowserFieldFactsSchema>;
 

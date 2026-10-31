@@ -324,10 +324,15 @@ What is different is how the daemon looks and types, and what it holds back afte
   (`GET /v1/sessions/:sid/input-requests/:id/shot`, owner only; `request.pictured` says there is one). The
   card draws each field's box on it from the browser's facts. It is let go when the request ends.
 
-- **The marker is only a lookup aid.** The node it leads to must be the element the agent's pointer resolved to:
-  the same box (the browser's own measurement), and the node on top at its centre. Every fact on the card (node,
-  attributes, box) comes from that proven node. A field that is covered, or not on screen, is refused: scroll
-  it into view and raise again.
+- **The field's identity is the node Playwright holds.** Playwright resolves the agent's ref or selector in its
+  own isolated world and holds the element; the node is the one Playwright's own DevTools session names for that
+  handle (`DOM.describeNode` on its remote object), and the session the write uses must describe the same node.
+  Every fact on the card (node, attributes, box) comes from that node; no page script is asked which element it
+  is. This reaches past Playwright's public API (pinned with the version the worker ships): a missing part refuses
+  the field, it never guesses.
+- **Covered or off screen is a flag, not a refusal.** The node on top at the field's centre (hit-tested by
+  DevTools) that is not the field, or a field off screen, marks it `covered`; the card says "covered or off screen"
+  and flags it amber, and the owner decides.
 
 ### Typing: one write into exactly the nodes the card showed
 
