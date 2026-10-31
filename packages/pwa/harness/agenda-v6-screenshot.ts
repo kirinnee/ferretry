@@ -143,6 +143,9 @@ const checkLayout = async (page: Page, label: string): Promise<void> => {
       Math.round(node.getBoundingClientRect().top),
     );
     const view = document.querySelector('[data-agenda-view]');
+    const pictures = [
+      ...(card?.querySelectorAll('.fy-render-image:not([data-fy-render-sized="true"]), .fy-render-chart') ?? []),
+    ].map(node => Math.round(node.getBoundingClientRect().width));
     const folds = card?.querySelectorAll('details, summary').length ?? 0;
     const hiddenSections = [...(card?.querySelectorAll('.fy-card__section-body') ?? [])].filter(
       node => node.getBoundingClientRect().height === 0,
@@ -180,6 +183,7 @@ const checkLayout = async (page: Page, label: string): Promise<void> => {
       whyNow: /why now/iu.test(view?.textContent ?? ''),
       bars,
       folds,
+      pictures,
       hiddenSections,
       chips,
     };
@@ -202,6 +206,10 @@ const checkLayout = async (page: Page, label: string): Promise<void> => {
   }
   if (found.premise !== null && found.context !== null)
     check(found.premise.background !== found.context.background, `${label}: premise and context share one tint`);
+  check(
+    found.pictures.every(width => width <= 481),
+    `${label}: a picture or chart is drawn wider than 480px (${found.pictures.join(',')})`,
+  );
   check(found.folds === 0, `${label}: ${found.folds} folding element(s) in the card`);
   check(found.hiddenSections === 0, `${label}: ${found.hiddenSections} section(s) drawn with no body`);
   check(found.chips.length <= 3, `${label}: the answer row holds ${found.chips.length} buttons`);
