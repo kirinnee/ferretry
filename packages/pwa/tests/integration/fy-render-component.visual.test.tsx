@@ -583,16 +583,20 @@ describe('fy-render component evidence — layout and focus', () => {
 
         // Assert — 44px on a coarse pointer, small on a fine one, and inside the stage.
         const stage = await page.locator('.fy-render-stage').boundingBox();
-        const buttons = page.locator('.fy-render-tool');
-        should(await buttons.count()).equal(2);
+        const toolbar = page.locator('.fy-render-tools .fy-render-tool');
+        const zoom = page.locator('.fy-render-zoom .fy-render-tool');
+        should(await toolbar.count()).equal(2);
+        should(await zoom.count()).equal(3);
         const boxes = [];
-        for (let index = 0; index < 2; index += 1) {
-          const box = await buttons.nth(index).boundingBox();
-          boxes.push(box);
-          if (coarse) should(box?.height ?? 0).be.aboveOrEqual(44);
-          else should(box?.height ?? 0).be.below(44);
-          should((box?.x ?? 0) + (box?.width ?? 0)).be.belowOrEqual((stage?.x ?? 0) + (stage?.width ?? 0) + 1);
-          should(box?.y ?? 0).be.aboveOrEqual(stage?.y ?? 0);
+        for (const buttons of [toolbar, zoom]) {
+          for (let index = 0; index < (await buttons.count()); index += 1) {
+            const box = await buttons.nth(index).boundingBox();
+            boxes.push(box);
+            if (coarse) should(box?.height ?? 0).be.aboveOrEqual(44);
+            else should(box?.height ?? 0).be.below(44);
+            should((box?.x ?? 0) + (box?.width ?? 0)).be.belowOrEqual((stage?.x ?? 0) + (stage?.width ?? 0) + 1);
+            should(box?.y ?? 0).be.aboveOrEqual(stage?.y ?? 0);
+          }
         }
         await shot('layout-01-tools', { boxes, coarse, overflow: await overflow(page), stage });
         should(await overflow(page)).equal(0);

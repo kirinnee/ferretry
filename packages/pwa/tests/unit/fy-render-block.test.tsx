@@ -9,6 +9,7 @@ import { FyRenderHtmlFrame, type FyRenderHtmlPaint } from '../../src/components/
 import { FyRenderMap } from '../../src/components/fy-render-map.tsx';
 import { FyRenderMedia } from '../../src/components/fy-render-media.tsx';
 import { FyRenderSandbox, type FyRenderSandboxFailure } from '../../src/components/fy-render-sandbox.tsx';
+import { FyRenderViewport } from '../../src/components/fy-render-viewport.tsx';
 import {
   FY_RENDER_LIMITS,
   type FyRenderWorkspaceReader,
@@ -333,6 +334,26 @@ describe('FyRenderBlock execution surface', () => {
     should(String(image.props.src).startsWith('data:image/svg+xml,')).be.true();
     should(image.props.alt).equal('A flow');
     should(image.props['data-fy-render-diagram']).equal('true');
+  });
+
+  test('should show a compiled diagram that declares no viewBox as a plain image', () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={mermaidBlock()} />);
+
+    // Act
+    run(() =>
+      compile(
+        tree,
+        'dark',
+        '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="10" height="10"/></svg>',
+      ),
+    );
+
+    // Assert
+    const image = tree.root.findByType('img');
+    should(image.props['data-fy-render-diagram']).equal('true');
+    should(image.props.className).equal('fy-render-image');
+    should(count(tree, FyRenderViewport)).equal(0);
   });
 });
 

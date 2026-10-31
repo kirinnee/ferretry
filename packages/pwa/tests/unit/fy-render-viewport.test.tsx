@@ -216,6 +216,100 @@ describe('FyRenderViewport', () => {
     should(pan(root).dataset.fyRenderPannable).equal('true');
   });
 
+  test('should pan the picture with a plain wheel in fullscreen, where no page sits behind it', async () => {
+    // Arrange
+    const root = await show({ fullscreen: true });
+    for (let step = 0; step < 4; step += 1) await interact(() => button(root, 'Zoom in').click());
+    const img = must(root.querySelector('img'), 'the image');
+    const before = img.style.transform;
+    const wheel = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaX: 20, deltaY: 60 });
+
+    // Act
+    await interact(() => pan(root).dispatchEvent(wheel));
+
+    // Assert
+    should(wheel.defaultPrevented).be.true();
+    should(img.style.transform).not.equal(before);
+  });
+
+  test('should pinch to zoom with two pointers, then carry on panning with the one left', async () => {
+    // Arrange
+    const root = await show();
+    const rest = scale(root);
+    const at = (type: string, id: number, x: number, y: number): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, clientX: x, clientY: y, pointerId: id });
+
+    // Act — two fingers down, one moves apart.
+    await interact(() => pan(root).dispatchEvent(at('pointerdown', 10, 100, 100)));
+    await interact(() => pan(root).dispatchEvent(at('pointerdown', 11, 140, 100)));
+    await interact(() => pan(root).dispatchEvent(at('pointermove', 11, 240, 100)));
+
+    // Assert
+    should(scale(root)).be.above(rest);
+    should(pan(root).dataset.fyRenderDragging).equal('true');
+
+    // Act — one lifts; the other pans.
+    await interact(() => pan(root).dispatchEvent(at('pointerup', 10, 100, 100)));
+    await interact(() => pan(root).dispatchEvent(at('pointermove', 11, 200, 160)));
+    await interact(() => pan(root).dispatchEvent(at('pointerup', 11, 200, 160)));
+    should(pan(root).dataset.fyRenderDragging).equal('false');
+  });
+
+  test('should ignore a pinch whose fingers start on the same spot', async () => {
+    // Arrange
+    const root = await show();
+    const rest = scale(root);
+    const at = (type: string, id: number, x: number): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, clientX: x, clientY: 90, pointerId: id });
+
+    // Act
+    await interact(() => pan(root).dispatchEvent(at('pointerdown', 20, 90)));
+    await interact(() => pan(root).dispatchEvent(at('pointerdown', 21, 90)));
+    await interact(() => pan(root).dispatchEvent(at('pointermove', 21, 150)));
+
+    // Assert
+    should(scale(root)).equal(rest);
+  });
+
+  test('should keep working when the pointer cannot be captured or released', async () => {
+    // Arrange
+    const root = await show();
+    const box = pan(root);
+    box.setPointerCapture = () => {
+      throw new Error('gone');
+    };
+    box.releasePointerCapture = () => {
+      throw new Error('gone');
+    };
+    const at = (type: string): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, clientX: 50, clientY: 50, pointerId: 30 });
+
+    // Act / Assert
+    await interact(() => box.dispatchEvent(at('pointerdown')));
+    await interact(() => box.dispatchEvent(at('pointerup')));
+    should(box.dataset.fyRenderDragging).equal('false');
+  });
+
+  test('should pan with the arrow keys only along an axis the picture overflows', async () => {
+    // Arrange
+    const root = await show();
+    const img = must(root.querySelector('img'), 'the image');
+    const wholly = img.style.transform;
+
+    // Act — nothing to pan while the whole picture shows.
+    for (const key of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'])
+      await interact(() => pressKey(pan(root), key));
+    should(img.style.transform).equal(wholly);
+
+    // Act — zoomed, every arrow moves it.
+    for (let step = 0; step < 4; step += 1) await interact(() => button(root, 'Zoom in').click());
+    for (const key of ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp']) {
+      const before = img.style.transform;
+      await interact(() => pressKey(pan(root), key));
+      should(img.style.transform).not.equal(before);
+    }
+  });
+
   test('should mark a fullscreen viewport', async () => {
     // Act
     const root = await show({ fullscreen: true });
