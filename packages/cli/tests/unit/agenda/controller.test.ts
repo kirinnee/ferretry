@@ -157,7 +157,7 @@ describe('agenda controller add', () => {
       title: 'Deploy approval',
       answers: [
         { direction: 'left', does: 'reject', label: 'Deny' },
-        { direction: 'right', does: 'approve', label: 'Allow' },
+        { direction: 'right', does: 'approve', label: 'Approve' },
       ],
     });
   });

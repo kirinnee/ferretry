@@ -7,8 +7,8 @@
  * plain "why it matters" line. Then the options as buttons (three at most; the recommended one tagged, its
  * reason said once in a line under them) and a quiet second row: Skip, "Details ›" (only when the item has
  * more to read, which opens `AgendaDetail` in the host's side panel or full view) and a ⋯ menu holding
- * "Not needed…", which dismisses. A text-only ask has no options and says to reply in the message box.
- * An item with several questions keeps one picker per question and a single "Send answers".
+ * "Not needed…", which dismisses. A card answered in words — an open question, several questions, a mix — has no
+ * options: it lists what it asks and says to reply in the message box.
  *
  * It is the one card every place draws — the Attention inbox's deck, where it also swipes, and the pinned
  * card over the ferret's conversation — so an answer reads, and is sent, the same in both. It holds no
@@ -22,17 +22,11 @@
 
 import type { AgendaItem, AgendaRevisableField } from '@ferretry/protocol';
 import { ArrowRight } from 'lucide-react';
-import { type ReactNode, useId, useState } from 'react';
+import { type ReactNode, useId } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import { answerAction, CLEAR_ACTION, kindWord, optionAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
-import {
-  DISMISS_ACTION,
-  historyLine,
-  type InboxAction,
-  questionAnswersAction,
-  updatedSinceAsked,
-} from '../../lib/agenda-inbox.ts';
+import { DISMISS_ACTION, historyLine, type InboxAction, updatedSinceAsked } from '../../lib/agenda-inbox.ts';
 import { decidedSummary, type RevisionHighlight, revisionHighlight } from '../../lib/agenda-revisions.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { AgendaActions } from './agenda-actions.tsx';
@@ -40,6 +34,7 @@ import { agendaAge, agendaKindMeta } from './agenda-board.tsx';
 import { AgendaBriefSections, cardLede } from './agenda-brief.tsx';
 import { AgendaDelivery } from './agenda-delivery.tsx';
 import { agendaHasDetail } from './agenda-detail.tsx';
+import { WantedAnswers, wantedAnswers } from './agenda-need.tsx';
 import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { AgendaBody } from './agenda-steps.tsx';
 import { AgendaDecidedSummary, AgendaUpdated } from './agenda-updated.tsx';
@@ -126,40 +121,20 @@ export function AgendaCard({
   planForm,
 }: AgendaCardProps) {
   const titleId = useId();
-  const [picks, setPicks] = useState<readonly string[]>([]);
   const kind = agendaKindMeta(item);
   const KindIcon = kind.icon;
   const model = cardModel(item);
-  const { answers, extras, perQuestion, heading, showAsk, asking, recommendation, recommended } = model;
+  const { answers, extras, heading, showAsk, asking, recommended } = model;
+  // Several questions are answered in one reply: listed, numbered, with no picker.
+  const listsAnswers = model.shape === 'answers' && (item.questions?.length ?? 0) > 1;
   const history = historyLine(item.history);
   const updated = updatedSinceAsked(item);
-  const questions = item.questions ?? [];
-  const sendable =
-    perQuestion && picks.some(pick => pick.trim() !== '') ? questionAnswersAction(questions, picks) : null;
   const lede = cardLede(item, model.why);
   const highlight = revisionHighlight(item);
   const give = (action: InboxAction): void => {
     if (busy) return;
     onAct(action);
   };
-  const sendAnswers = (): void => {
-    if (sendable === null || busy) return;
-    onAct(sendable);
-    setPicks([]);
-  };
-
-  const picker = perQuestion
-    ? {
-        answers: picks,
-        disabled: busy,
-        onAnswer: (index: number, text: string) =>
-          setPicks(current => {
-            const next = questions.map((_, at) => current[at] ?? '');
-            next[index] = text;
-            return next;
-          }),
-      }
-    : undefined;
 
   return (
     <article
@@ -227,7 +202,7 @@ export function AgendaCard({
           </p>
         )}
         {model.notice && item.body?.trim() ? <AgendaBody renderProse={renderProse} text={item.body} /> : null}
-        {showAsk || picker !== undefined ? (
+        {showAsk ? (
           <AgendaBriefSections
             askShown
             {...(showAsk && asking ? { askLabel: null } : {})}
@@ -235,10 +210,11 @@ export function AgendaCard({
             item={item}
             part="card"
             renderProse={renderProse}
-            {...(perQuestion && recommendation !== undefined ? { recommendation } : {})}
             {...(showAsk ? { ask: item.subject } : {})}
-            {...(picker === undefined ? {} : { picker })}
           />
+        ) : null}
+        {listsAnswers ? (
+          <WantedAnswers answers={wantedAnswers(item.questions ?? [], false)} renderProse={renderProse} />
         ) : null}
         {history === null ? null : (
           <p className="fy-attn-card__history m-0 text-meta text-faint" data-agenda-history="">
@@ -283,7 +259,6 @@ export function AgendaCard({
           {...(item.waitingOn === 'ferret' && !model.notice
             ? { waiting: `With ${origin?.ferret ?? 'the ferret'} — it will update this.` }
             : {})}
-          {...(perQuestion ? { sendAnswers: { ready: sendable !== null, onSend: sendAnswers } } : {})}
         />
       )}
       {origin === undefined || pinned ? null : (

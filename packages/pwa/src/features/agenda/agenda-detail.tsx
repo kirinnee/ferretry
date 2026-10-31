@@ -30,7 +30,7 @@ export interface AgendaDetailProps {
    * The full view draws the item's questions and its recommendation in the same ordered sections; what it needs
    * from the host is only what the host owns: the picks, the ask when it is longer than the heading's preview.
    */
-  readonly brief?: Pick<AgendaBriefProps, 'ask' | 'askLabel' | 'askShown' | 'picker' | 'recommendation'>;
+  readonly brief?: Pick<AgendaBriefProps, 'ask' | 'askLabel' | 'askShown' | 'recommendation'>;
 }
 
 const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;

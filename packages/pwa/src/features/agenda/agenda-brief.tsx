@@ -14,8 +14,8 @@
  * recommendation is NOT a section there: the answer bar tags the recommended option and says why under the
  * buttons. The BOARD's is collapsible: native `<details>`, closed except the first question.
  *
- * An item with SEVERAL questions and an open-question ask is answered one answer per question: each
- * question gets its own picker here, and the answers leave together (`composeQuestionAnswers`).
+ * An item with SEVERAL questions is answered in ONE reply, its answers numbered: the questions are listed, never given
+ * option buttons (docs/agenda.md, "What I need from you").
  */
 
 import type {
@@ -29,13 +29,7 @@ import { agendaCardKind, recommendedAgendaOption } from '@ferretry/protocol';
 import { Check, ChevronRight, ExternalLink } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
-import {
-  itemOptions,
-  type LetteredOption,
-  letteredOptions,
-  needsOptionsSection,
-  shortLabel,
-} from '../../lib/agenda-options.ts';
+import { itemOptions, type LetteredOption, letteredOptions, needsOptionsSection } from '../../lib/agenda-options.ts';
 import { bulletPoints, type RevisionHighlight } from '../../lib/agenda-revisions.ts';
 
 type AgendaProse = (text: string) => ReactNode;
@@ -120,13 +114,6 @@ export const cardLede = (item: Pick<AgendaItem, 'context'>, why: string | null):
   const left = rest.join('\n\n').trim();
   return { line: first.trim(), context: left === '' ? null : left };
 };
-
-/** The picks a several-question item collects before "Send answers". */
-export interface QuestionAnswers {
-  readonly answers: readonly string[];
-  readonly onAnswer: (index: number, answer: string) => void;
-  readonly disabled: boolean;
-}
 
 /** The word the badge on a recommended option says; a badge, so the pick never rests on colour alone. */
 const RECOMMENDED_WORD = 'Recommended';
@@ -251,70 +238,6 @@ function OptionsList({
   );
 }
 
-/** One short button of a question's row: its letter (or a label of one or two words); the full label names it. */
-function PickButton({
-  option,
-  pressed,
-  disabled,
-  onPick,
-}: {
-  readonly option: LetteredOption;
-  readonly pressed: boolean;
-  readonly disabled: boolean;
-  readonly onPick: () => void;
-}) {
-  return (
-    <button
-      aria-label={option.recommended ? `${option.label}, recommended` : option.label}
-      aria-pressed={pressed}
-      className="kt-attn-option fy-attn-q__option"
-      data-agenda-pick={option.label}
-      data-recommended={option.recommended || undefined}
-      disabled={disabled}
-      onClick={onPick}
-      title={option.label}
-      type="button"
-    >
-      {option.recommended ? <Check aria-hidden="true" size={12} /> : null}
-      <span className="fy-attn-q__option-text">{shortLabel(option.label, option.letter)}</span>
-    </button>
-  );
-}
-
-function QuestionPicker({
-  question,
-  index,
-  picker,
-  details,
-  renderProse,
-}: {
-  readonly question: AgendaQuestion;
-  readonly index: number;
-  readonly picker: QuestionAnswers;
-  readonly details: AgendaItem['optionDetails'];
-  readonly renderProse: AgendaProse;
-}) {
-  if (question.options === undefined) return null;
-  const answer = picker.answers[index] ?? '';
-  const options = letteredOptions(question.options, details, question.recommended?.trim());
-  return (
-    <div className="fy-attn-q__picker">
-      <fieldset aria-label={`Options for question ${index + 1}`} className="fy-attn-q__options">
-        {options.map(option => (
-          <PickButton
-            disabled={picker.disabled}
-            key={option.label}
-            onPick={() => picker.onAnswer(index, answer === option.label ? '' : option.label)}
-            option={option}
-            pressed={answer === option.label}
-          />
-        ))}
-      </fieldset>
-      {needsOptionsSection(options) ? <OptionsList options={options} renderProse={renderProse} /> : null}
-    </div>
-  );
-}
-
 /** The line under a question: why the pick, or the pick itself when it has no button to be tagged on. */
 function QuestionReason({
   question,
@@ -344,25 +267,21 @@ function QuestionReason({
   );
 }
 
-export function Question({
+function Question({
   question,
   index,
   numbered,
-  picker,
   showWhy,
   showAsk = true,
-  details,
   renderProse,
 }: {
   readonly question: AgendaQuestion;
   readonly index: number;
   readonly numbered: boolean;
-  readonly picker: QuestionAnswers | undefined;
   /** Show the recommendation's reason here; the option buttons live elsewhere for a single question. */
   readonly showWhy: boolean;
   /** False where the question's text is already drawn (a folded row's summary): it is said once. */
   readonly showAsk?: boolean;
-  readonly details: AgendaItem['optionDetails'];
   readonly renderProse: AgendaProse;
 }) {
   return (
@@ -373,9 +292,6 @@ export function Question({
           <div className="min-w-0">{renderProse(question.question)}</div>
         </div>
       ) : null}
-      {picker === undefined ? null : (
-        <QuestionPicker details={details} index={index} picker={picker} question={question} renderProse={renderProse} />
-      )}
       <QuestionReason question={question} renderProse={renderProse} showWhy={showWhy} />
     </>
   );
@@ -444,8 +360,6 @@ function Situation({
 export interface AgendaBriefProps {
   readonly item: AgendaItem;
   readonly renderProse: AgendaProse;
-  /** Present only when the item is answered one answer per question. */
-  readonly picker?: QuestionAnswers;
   /**
    * Sections fold behind a `<summary>` (the board). `false` draws every section open under a bold heading
    * (the card). Default: collapsible.
@@ -455,7 +369,7 @@ export interface AgendaBriefProps {
   readonly expanded?: boolean;
   /**
    * The card already draws the ask: a LONE question would only say it again in other words, so its section
-   * is left out. Several questions, or one answered here (a picker), still draw.
+   * is left out. Several questions still draw.
    */
   readonly askShown?: boolean;
   /** The ask itself, drawn first — when it is not already the card's heading. */
@@ -476,7 +390,7 @@ export interface AgendaBriefProps {
   readonly detail?: ReactNode;
   /**
    * Which half to draw. `card`: only what the minimal card needs (the ask when it is not the heading, the
-   * per-question pickers, a recommendation handed in). `detail`: everything else — what the item knows beyond
+   * recommendation handed in). `detail`: everything else — what the item knows beyond
    * its question. Default `all`: the board's folded brief.
    */
   readonly part?: 'all' | 'card' | 'detail';
@@ -488,7 +402,6 @@ export interface AgendaBriefProps {
 export function AgendaBriefSections({
   item,
   renderProse,
-  picker,
   collapsible = true,
   expanded = false,
   askShown = false,
@@ -512,8 +425,7 @@ export function AgendaBriefSections({
     fields.some(field => highlight?.fields.has(field) === true);
   const all = item.questions ?? [];
   const several = all.length > 1;
-  const questions =
-    asDetail || (askShown && !several && picker === undefined) || (asCard && picker === undefined) ? [] : all;
+  const questions = asDetail || (askShown && !several) || asCard ? [] : all;
   const pick = recommendedAgendaOption(item);
   const lettered = asCard || several ? [] : letteredOptions(itemOptions(item), item.optionDetails, pick);
   const options = needsOptionsSection(lettered) ? lettered : [];
@@ -558,15 +470,7 @@ export function AgendaBriefSections({
             {questions.map((question, index) =>
               !fold || index === 0 || !several ? (
                 <li className="fy-attn-q__item" data-agenda-question={index} key={question.question}>
-                  <Question
-                    details={item.optionDetails}
-                    index={index}
-                    numbered={several}
-                    picker={picker}
-                    question={question}
-                    renderProse={renderProse}
-                    showWhy={picker !== undefined || !several}
-                  />
+                  <Question index={index} numbered={several} question={question} renderProse={renderProse} showWhy />
                 </li>
               ) : (
                 <li className="fy-attn-q__item" data-agenda-question={index} key={question.question}>
@@ -574,20 +478,15 @@ export function AgendaBriefSections({
                     <summary className="fy-attn-sec__title">
                       <ChevronRight aria-hidden="true" className="fy-attn-sec__chevron" size={14} />
                       {`${index + 1}. ${question.question}`}
-                      {(picker?.answers[index] ?? '') === '' ? null : (
-                        <Check aria-label="answered" className="fy-attn-q__done" size={12} />
-                      )}
                     </summary>
                     <div className="fy-attn-sec__body">
                       <Question
-                        details={item.optionDetails}
                         index={index}
                         numbered={false}
-                        picker={picker}
                         question={question}
                         renderProse={renderProse}
                         showAsk={false}
-                        showWhy={picker !== undefined}
+                        showWhy={false}
                       />
                     </div>
                   </details>

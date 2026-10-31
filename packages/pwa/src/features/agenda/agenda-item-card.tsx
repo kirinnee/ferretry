@@ -3,9 +3,10 @@
  *
  *   top bar    the item's type, "↓ Not needed" (the ↓ swipe) and the version picker ("v2 of 2 · 3m ago")
  *   situation  PREMISE and CONTEXT — the two fields every item carries — as two tinted blocks, each label above its points
- *   question   the one thing asked, said plainly
- *   options    each option's one-word name (or its letter) and what it means, the recommended one said in words
- *   sections   only what the item carries, each open, none folding: why the recommendation, steps, reasoning or more detail
+ *   need       "WHAT I NEED FROM YOU" (`agenda-need.tsx`): exactly the ask, by the card's shape — the question and each
+ *              option with what it means; the steps to tick; the numbered answers a reply gives; what an approval
+ *              does; what to review — and the one plain instruction ("Pick one option.")
+ *   sections   only what the item carries, each open, none folding: why the recommendation, reasoning or more detail
  *              (Markdown with fy-render), decided, still open, impact, links, terms
  *   answers    ONE row of at most three — ← ↑ → — or the item's own form (an input request), or why it cannot be
  *              answered here (parked or resolved)
@@ -15,18 +16,19 @@
  * bars, no hint lines, no menus.
  */
 
-import type { AgendaItem, AgendaTerm } from '@ferretry/protocol';
+import type { AgendaCardAnswer, AgendaItem, AgendaTerm } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { optionAction } from '../../lib/agenda-answers.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
-import { DISMISS_ACTION, type InboxAction, questionAnswersAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
-import { AgendaLinkRow, PointForm, Question } from './agenda-brief.tsx';
+import { AgendaLinkRow, PointForm } from './agenda-brief.tsx';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
 import { AgendaDelivery } from './agenda-delivery.tsx';
+import { AgendaNeed, WantedAnswers, wantedAnswers } from './agenda-need.tsx';
 import { AgendaQuickReplies } from './agenda-quick-replies.tsx';
 import { AgendaBody, AgendaSteps } from './agenda-steps.tsx';
 import { markTerms, TermLayer } from './agenda-terms.tsx';
@@ -53,13 +55,12 @@ export interface AgendaItemCardProps {
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the answer row's place, its Allow and Decline are the answer. */
   readonly planForm?: ReactNode;
+  /**
+   * A review's Request changes: the host sends the composer's words as the change asked for, or puts the owner in
+   * the composer when it is empty. Absent: the card says to type the changes there instead.
+   */
+  readonly onRequestChanges?: ((answer: AgendaCardAnswer) => void) | undefined;
 }
-
-/** The option a question's recommendation names, or '' when it names none. */
-const recommendedPick = (question: NonNullable<AgendaItem['questions']>[number]): string => {
-  const pick = question.recommended?.trim() ?? '';
-  return question.options?.some(option => option.label === pick) === true ? pick : '';
-};
 
 /** The detail without its premise: the daemon also writes a confirmed change into it for older apps. */
 const forConfirmation = (item: AgendaItem): AgendaItem => {
@@ -169,6 +170,24 @@ function OptionsList({
   );
 }
 
+function LinksList({
+  links,
+  renderProse,
+}: {
+  readonly links: NonNullable<AgendaItem['links']>;
+  readonly renderProse: Prose;
+}) {
+  return (
+    <ul className="fy-card__links">
+      {links.map(link => (
+        <li key={`${link.label ?? ''}\u0000${link.target}`}>
+          <AgendaLinkRow link={link} renderProse={renderProse} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function TermsList({ terms, renderProse }: { readonly terms: readonly AgendaTerm[]; readonly renderProse: Prose }) {
   return (
     <dl className="fy-card__terms" data-agenda-terms="">
@@ -230,13 +249,13 @@ export function AgendaItemCard({
   settled,
   inputForm,
   planForm,
+  onRequestChanges,
 }: AgendaItemCardProps) {
   const count = versionCount(current);
   // `null` follows the latest version, so an edit that lands while the card is open shows at once.
   const [picked, setPicked] = useState<number | null>(null);
   const shown = Math.min(picked ?? count, count);
   const setShown = (version: number): void => setPicked(version >= count ? null : version);
-  const [picks, setPicks] = useState<readonly string[]>([]);
   const latest = shown >= count;
   const item = latest ? current : itemAtVersion(current, shown);
   const read = forConfirmation(item);
@@ -257,8 +276,11 @@ export function AgendaItemCard({
   };
   const pull = useDownSwipe(dismiss, swipeable && canDismiss);
 
-  // One question (or a choice ask): its options are listed with what each means, and answered on the row.
-  const options = model.perQuestion ? [] : itemOptions(item);
+  // A choice (one question): its options are listed with what each means, and answered on the row. Any other shape
+  // offers none, whatever options an item raised before the rule still carries.
+  const shape = model.shape;
+  const choosing = shape === 'choice' || shape === 'yesno';
+  const options = choosing ? itemOptions(item) : [];
   const lettered = cardLettered(options);
   const onRow = new Set(model.answers.map(answer => answer.label.trim().toLowerCase()));
   const listed: readonly ListedOption[] = letteredOptions(options, item.optionDetails, model.recommended).map(
@@ -280,30 +302,19 @@ export function AgendaItemCard({
   const showList = listed.some(option => option.meaning !== null || option.pickHere);
 
   const questions = item.questions ?? [];
-  const asked = questions.flatMap((entry, index) => (entry.options === undefined ? [] : [{ entry, index }]));
-  const agreed = questions.map(recommendedPick);
-  const sendable =
-    model.perQuestion && asked.length > 0 && asked.every(({ index }) => (picks[index] ?? '').trim() !== '')
-      ? questionAnswersAction(questions, picks)
-      : null;
-  const picker = model.perQuestion
-    ? {
-        answers: picks,
-        disabled: busy || !answerable,
-        onAnswer: (index: number, text: string) =>
-          setPicks(now => {
-            const next = questions.map((_, at) => now[at] ?? '');
-            next[index] = text;
-            return next;
-          }),
-      }
-    : undefined;
-
   const recommendation = model.recommendation;
   const recommendedOption = listed.find(option => option.recommended);
   const kind = meta.kind;
   const body = item.body?.trim() ? item.body : null;
   const steps = item.steps ?? [];
+  // What the segment already says is not said again below it: an approval's effect, a review's links, a to-do's steps.
+  const effectInNeed = shape === 'approval' && item.impact !== undefined;
+  const linksInNeed = shape === 'review' && item.links !== undefined;
+  const stepsInNeed = shape === 'todo';
+  const requestChanges =
+    answerable && onRequestChanges !== undefined && model.requestChanges !== undefined
+      ? { answer: model.requestChanges, onTap: () => onRequestChanges(model.requestChanges as AgendaCardAnswer) }
+      : undefined;
 
   return (
     <article
@@ -340,42 +351,51 @@ export function AgendaItemCard({
       {latest ? <AgendaConfigChange item={item} /> : null}
       <TermLayer renderProse={renderProse} terms={terms}>
         <Situation context={context} premise={premise} renderProse={renderProse} />
-        {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
-        {question === null ? null : (
-          <div className="fy-card__question" data-agenda-question-line="">
-            {renderProse(mark(question))}
-          </div>
-        )}
-        {showList ? (
-          <OptionsList
-            busy={busy}
-            onPick={label => {
-              const option = options.find(entry => entry.label === label);
-              if (option !== undefined && !busy) onAct(optionAction(option, ''));
-            }}
-            options={listed}
-            renderProse={renderProse}
-          />
-        ) : null}
-        {questions.length > 1 ? (
-          <ol className="fy-card__questions" data-agenda-questions="">
-            {questions.map((entry, index) => (
-              <li data-agenda-question={index} key={entry.question}>
-                <Question
-                  details={item.optionDetails}
-                  index={index}
-                  numbered
-                  picker={picker}
-                  question={entry}
-                  renderProse={renderProse}
-                  showWhy
-                />
-              </li>
-            ))}
-          </ol>
-        ) : null}
+        <AgendaNeed shape={shape} {...(answerable ? {} : { lead: '' })}>
+          {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
+          {question === null || shape === 'answers' ? null : (
+            <div className="fy-card__question" data-agenda-question-line="">
+              {renderProse(mark(question))}
+            </div>
+          )}
+          {choosing && showList ? (
+            <OptionsList
+              busy={busy}
+              onPick={label => {
+                const option = options.find(entry => entry.label === label);
+                if (option !== undefined && !busy) onAct(optionAction(option, ''));
+              }}
+              options={listed}
+              renderProse={renderProse}
+            />
+          ) : null}
+          {effectInNeed && item.impact !== undefined ? (
+            <div className="fy-card__need-part" data-agenda-need-effect="">
+              <h5 className="fy-card__label">What it does</h5>
+              <PointForm renderProse={renderProse} text={mark(item.impact)} />
+            </div>
+          ) : null}
+          {linksInNeed && item.links !== undefined ? (
+            <div className="fy-card__need-part" data-agenda-need-review="">
+              <h5 className="fy-card__label">What to review</h5>
+              <LinksList links={item.links} renderProse={renderProse} />
+            </div>
+          ) : null}
+          {shape === 'answers' ? (
+            <WantedAnswers answers={wantedAnswers(questions, steps.length > 0)} renderProse={renderProse} />
+          ) : null}
+          {stepsInNeed && steps.length > 0 ? (
+            <AgendaSteps
+              disabled={busy || !answerable}
+              done={item.stepsDone ?? []}
+              renderProse={renderProse}
+              steps={steps}
+              {...(onProgress === undefined || !answerable ? {} : { onProgress })}
+            />
+          ) : null}
+        </AgendaNeed>
       </TermLayer>
-      {recommendation === undefined || model.perQuestion || recommendation.why === undefined ? null : (
+      {recommendation === undefined || recommendation.why === undefined ? null : (
         <Section name="recommendation" title={`Why I recommend ${recommendedOption?.name ?? recommendation.decision}`}>
           {recommendedOption === undefined ? (
             <p className="fy-card__decision">
@@ -385,7 +405,7 @@ export function AgendaItemCard({
           <PointForm renderProse={renderProse} text={recommendation.why} />
         </Section>
       )}
-      {steps.length === 0 ? null : (
+      {steps.length === 0 || stepsInNeed ? null : (
         <Section name="steps" title="Steps">
           <AgendaSteps
             disabled={busy || !answerable}
@@ -414,9 +434,11 @@ export function AgendaItemCard({
           <PointForm renderProse={renderProse} text={read.stillOpen} />
         </Section>
       ) : null}
-      {item.impact === undefined && item.urgency === undefined ? null : (
+      {(item.impact === undefined || effectInNeed) && item.urgency === undefined ? null : (
         <Section name="impact" title={kind === 'permission' ? 'What it allows' : 'Impact'}>
-          {item.impact === undefined ? null : <PointForm renderProse={renderProse} text={item.impact} />}
+          {item.impact === undefined || effectInNeed ? null : (
+            <PointForm renderProse={renderProse} text={item.impact} />
+          )}
           {item.urgency === undefined ? null : (
             <p className="fy-card__decision">
               <strong>Urgency:</strong> {item.urgency}
@@ -424,15 +446,9 @@ export function AgendaItemCard({
           )}
         </Section>
       )}
-      {item.links === undefined ? null : (
+      {item.links === undefined || linksInNeed ? null : (
         <Section name="links" title="Links">
-          <ul className="fy-card__links">
-            {item.links.map(link => (
-              <li key={`${link.label ?? ''}\u0000${link.target}`}>
-                <AgendaLinkRow link={link} renderProse={renderProse} />
-              </li>
-            ))}
-          </ul>
+          <LinksList links={item.links} renderProse={renderProse} />
         </Section>
       )}
       {terms.length === 0 ? null : (
@@ -475,20 +491,7 @@ export function AgendaItemCard({
           {...(canDismiss ? { onDown: dismiss } : {})}
           {...(doneClose === undefined ? {} : { doneClose })}
           {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
-          {...(model.perQuestion && asked.length > 0
-            ? {
-                sending: {
-                  ready: sendable !== null,
-                  canUseRecommended: asked.every(({ index }) => agreed[index] !== ''),
-                  onSend: () => {
-                    if (sendable === null || busy) return;
-                    onAct(sendable);
-                    setPicks([]);
-                  },
-                  onUseRecommended: () => setPicks(agreed),
-                },
-              }
-            : {})}
+          {...(requestChanges === undefined ? {} : { requestChanges })}
         />
       )}
     </article>

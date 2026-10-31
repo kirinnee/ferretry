@@ -40,9 +40,10 @@ const sections = (root: ParentNode): string[] =>
   [...root.querySelectorAll('[data-agenda-section]')].map(node => node.getAttribute('data-agenda-section') ?? '');
 
 describe('AgendaCard sections', () => {
-  test('a rich item draws only what it needs to be answered: the per-question pickers and a recommendation', async () => {
+  test('a rich item draws only what it needs to be answered: its several questions, numbered, and no sections', async () => {
     view = await mount(<AgendaCard item={rich} onAct={() => {}} />);
-    expect(sections(view.container)).toEqual(['questions', 'recommendation']);
+    expect(sections(view.container)).toEqual([]);
+    expect(view.container.querySelectorAll('[data-agenda-wanted-answer]')).toHaveLength(2);
     expect(view.container.querySelectorAll('details[data-agenda-section]')).toHaveLength(0);
     expect(view.container.textContent).not.toContain('Urgency:');
   });
@@ -75,7 +76,7 @@ describe('AgendaCard sections', () => {
     expect(view.container.querySelector('[data-agenda-recommended]')).toBeNull();
   });
 
-  test('the header names the ferret and machine, the title stands above the scroll, the per-question recommendation is a section', async () => {
+  test('the header names the ferret and machine, the title stands above the scroll, the recommendation is a line', async () => {
     view = await mount(
       <AgendaCard
         item={rich}
@@ -88,11 +89,6 @@ describe('AgendaCard sections', () => {
     expect(view.container.querySelector('[data-agenda-title]')?.textContent).toBeTruthy();
     expect(view.container.querySelector('[data-agenda-recommendation]')?.textContent).toContain('Use SQLite');
     expect(view.container.querySelector('[data-agenda-scroll] [data-agenda-title]')).toBeNull();
-    expect(
-      view.container.querySelector(
-        '[data-agenda-scroll] [data-agenda-section="recommendation"] [data-agenda-recommendation]',
-      ),
-    ).not.toBeNull();
   });
 });
 
@@ -113,44 +109,18 @@ describe('AgendaCard recommended option', () => {
   });
 });
 
-describe('AgendaCard per-question answers', () => {
-  test('collects one picked answer per question and sends them as one open-question reply', async () => {
+describe('AgendaCard several questions', () => {
+  test('are answered in one reply: no pickers, no option buttons and no Send answers', async () => {
     const sent: InboxAction[] = [];
     view = await mount(<AgendaCard item={rich} onAct={action => sent.push(action)} />);
-    const send = (): HTMLButtonElement =>
-      must(view?.container.querySelector<HTMLButtonElement>('[data-agenda-send-answers]'), 'Send answers');
-    expect(send().disabled).toBe(true);
-    // The default view offers a single "Send answers", not the per-item options.
-    expect(view.container.querySelector('[data-agenda-option]')).toBeNull();
-
-    await interact(() =>
-      must(view?.container.querySelector<HTMLButtonElement>('[data-agenda-pick="SQLite"]'), 'SQLite').click(),
-    );
-    expect(view.container.querySelector('[data-agenda-pick="SQLite"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(send().disabled).toBe(false);
-
-    await interact(() =>
-      must(view?.container.querySelector<HTMLButtonElement>('[data-agenda-pick="Now"]'), 'Now').click(),
+    expect(
+      view.container.querySelector('[data-agenda-send-answers], [data-agenda-pick], [data-agenda-option]'),
+    ).toBeNull();
+    expect(view.container.querySelector('[data-agenda-composer-hint]')?.textContent).toBe(
+      'Reply with your answers below, numbered.',
     );
     expect(view.container.querySelector('input[type="text"], textarea')).toBeNull();
-    await interact(() => send().click());
-    expect(sent).toEqual([
-      {
-        kind: 'respond',
-        label: 'Reply',
-        response: {
-          kind: 'open-question',
-          answer: '1. Which engine?\n→ SQLite\n\n2. Migrate when?\n→ Now',
-        },
-      },
-    ]);
-  });
-
-  test('several questions behind a non-open-question ask keep today’s controls', async () => {
-    const odd = { ...rich, ask: choices('Go', 'Stop') };
-    view = await mount(<AgendaCard item={odd} onAct={() => {}} />);
-    expect(view.container.querySelector('[data-agenda-send-answers]')).toBeNull();
-    expect(view.container.querySelectorAll('[data-agenda-option]')).toHaveLength(2);
+    expect(sent).toEqual([]);
   });
 });
 

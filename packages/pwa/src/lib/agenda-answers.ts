@@ -35,8 +35,8 @@ import {
   agendaCardAnswers,
   agendaCardKind,
   agendaInDiscussion,
-  DEFAULT_ANSWER_LABELS,
-  GOT_IT_LABEL,
+  agendaShape,
+  isDefaultAnswerLabel,
   unswipedChoices,
 } from '@ferretry/protocol';
 
@@ -68,12 +68,8 @@ export type SwipeDirection = AnswerDirection;
 const withNote = (note: string | undefined): { readonly note?: string } => (note === undefined ? {} : { note });
 
 /** Whether the ferret worded this answer itself, rather than leaving its effect's default word. */
-export const hasCustomLabel = (answer: Pick<AgendaCardAnswer, 'does' | 'label'>): boolean => {
-  if (answer.does === 'choose') return false;
-  const label = answer.label.trim().toLowerCase();
-  const defaults = [DEFAULT_ANSWER_LABELS[answer.does], answer.does === 'done' ? GOT_IT_LABEL : undefined];
-  return !defaults.some(word => word?.toLowerCase() === label);
-};
+export const hasCustomLabel = (answer: Pick<AgendaCardAnswer, 'does' | 'label'>): boolean =>
+  answer.does !== 'choose' && !isDefaultAnswerLabel(answer.does, answer.label);
 
 /** The note an answer carries: its own wording when that is not the default, then the reply. */
 export const answerNote = (answer: Pick<AgendaCardAnswer, 'does' | 'label'>, reply: string): string | undefined => {
@@ -223,8 +219,10 @@ export const kindWord = (item: Pick<AnswerSource, 'kind' | 'ask'> & { readonly n
   item.notice === true ? 'Notification' : KIND_WORDS[agendaCardKind(item)];
 
 /**
- * Whether the card is a text-only ask: it has no answers to give, so the owner answers in the
- * message box below. A reply card the ferret gave answers to is an ordinary card.
+ * Whether the card is answered in words alone: an open question, several questions, or a question mixed with steps
+ * (`agendaShape` reply or answers). It has no buttons; the owner answers in the message box below.
  */
-export const isTextOnlyAsk = (item: AnswerSource): boolean =>
-  item.ask?.kind === 'open-question' && cardAnswers(item).length === 0;
+export const isTextOnlyAsk = (item: AnswerSource & { readonly notice?: true | undefined }): boolean => {
+  const shape = agendaShape(item);
+  return shape === 'reply' || shape === 'answers';
+};

@@ -16,16 +16,14 @@
 
 import {
   AGENDA_LINK_PARAMETER,
-  LEGACY_ATTENTION_LINK_PARAMETER,
   type AgendaBrief,
   type AgendaId,
   AgendaIdSchema,
   type AgendaItem,
-  type AgendaQuestion,
   type AgendaSnapshot,
   agendaInDiscussion,
   agendaTurn,
-  MAX_AGENDA_DETAIL_LENGTH,
+  LEGACY_ATTENTION_LINK_PARAMETER,
   type ResolvedAgendaItem,
   type SessionAgendaSummary,
   type SessionView,
@@ -395,60 +393,6 @@ export const hasAgendaBrief = (item: AgendaBrief): boolean =>
 export const visibleWhy = (item: Pick<AgendaItem, 'subject' | 'why'>): string | null => {
   const why = item.why.trim();
   return why === '' || why === item.subject.trim() ? null : why;
-};
-
-/** The item asks several things, so it is answered one answer per question. */
-export const hasSeveralQuestions = (item: AgendaBrief): boolean => (item.questions?.length ?? 0) > 1;
-
-/** Several questions AND the open-question ask that takes their answers as one reply. */
-export const answersPerQuestion = (item: AgendaBrief & Pick<AgendaItem, 'ask'>): boolean =>
-  hasSeveralQuestions(item) && item.ask?.kind === 'open-question';
-
-const NO_ANSWER = '(no answer)';
-const MIN_QUESTION_CHARACTERS = 24;
-
-const clip = (text: string, limit: number): string =>
-  text.length <= limit ? text : `${text.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
-
-/**
- * One open-question reply from per-question answers: `1. <question>\n→ <answer>`, blank line between,
- * `→ (no answer)` for an unanswered one. It must fit `MAX_AGENDA_DETAIL_LENGTH`: questions are cut
- * to make room, answers never are — and `null` (refuse) when the answers alone do not fit.
- */
-export const composeQuestionAnswers = (
-  questions: readonly Pick<AgendaQuestion, 'question'>[],
-  answers: readonly (string | undefined)[],
-): string | null => {
-  const answerOf = (index: number): string => {
-    const answer = answers[index]?.trim() ?? '';
-    return answer === '' ? NO_ANSWER : answer;
-  };
-  const build = (limit: number): string =>
-    questions
-      .map(
-        (entry, index) =>
-          `${index + 1}. ${clip(entry.question.trim().replace(/\s+/gu, ' '), limit)}\n→ ${answerOf(index)}`,
-      )
-      .join('\n\n');
-  let limit = Number.POSITIVE_INFINITY;
-  let text = build(limit);
-  if (text.length > MAX_AGENDA_DETAIL_LENGTH) {
-    limit = Math.max(...questions.map(entry => entry.question.length));
-    while (text.length > MAX_AGENDA_DETAIL_LENGTH && limit > MIN_QUESTION_CHARACTERS) {
-      limit = Math.max(MIN_QUESTION_CHARACTERS, Math.floor(limit * 0.8));
-      text = build(limit);
-    }
-  }
-  return text.length > MAX_AGENDA_DETAIL_LENGTH || answers.every(answer => (answer?.trim() ?? '') === '') ? null : text;
-};
-
-/** The one reply a several-question item sends, as an action — or `null` when it cannot be sent. */
-export const questionAnswersAction = (
-  questions: readonly Pick<AgendaQuestion, 'question'>[],
-  answers: readonly (string | undefined)[],
-): InboxAction | null => {
-  const answer = composeQuestionAnswers(questions, answers);
-  return answer === null ? null : { kind: 'respond', label: 'Reply', response: { kind: 'open-question', answer } };
 };
 
 export type SwipeMap = Readonly<Partial<Record<SwipeDirection, InboxAction>>>;

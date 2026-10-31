@@ -65,7 +65,7 @@
  * Pure and total: the machine setting, the launch folder and what the installed Claude accepts are
  * all parameters, read at launch by the caller, so a change applies to new sessions only (F5).
  */
-import type { LaunchInstructionSectionId, SessionLaunchInstructions } from '@ferretry/protocol';
+import { AGENDA_SHAPE_LINE, type LaunchInstructionSectionId, type SessionLaunchInstructions } from '@ferretry/protocol';
 import type { HarnessKind } from '../manifest.ts';
 import { deepMergeSettings, type SettingsObject } from '../settings.ts';
 import {
@@ -445,9 +445,9 @@ export const AGENDA_ENV = 'FY_AGENDA';
 /** The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. */
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
-    `Agenda mode: ONLY for what the owner alone can give: info, a decision or action. Never track work ("please test/verify"): the board covers it (Done/Not good); after a Not good, open one only if you need input. Owner's question: ALSO answer as a \`--kind info\` item. One item per ask: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\` (required). Title ≤40, ask ≤120. Read cold: no "as above", ticket/PR numbers, paths, acronyms (\`--term "X=meaning"\`).`,
-    `Items stand ALONE: Markdown, \`--decided\` = settled, \`--still-open\` = left; \`--body\`: hypermedia. \`--kind todo|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option "Label: why"\`; \`--recommend <label> --recommend-why <line>\`. To-do: \`--step "<md>"\`.`,
-    `\`--blocking\`: stuck; \`--will-block\`: blocks later; \`--by <time>\`.`,
+    `Agenda mode: ONLY for what the owner alone can give: info, a decision or action. Never track work ("please test/verify"): the board covers it (Done/Not good); after a Not good, open one only if you need input. Owner's question: ALSO answer as a \`-k info\` item. One item per ask: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<background>" "<the ask>"\` (required). Title ≤40, ask ≤120. Read cold: no "as above", ticket/PR numbers, paths, acronyms (\`--term "X=meaning"\`).`,
+    `ALONE: Markdown; \`--decided\`=settled, \`--still-open\`=left, \`--body\`=hypermedia. ${AGENDA_SHAPE_LINE}`,
+    `\`--blocking\`=stuck, \`--will-block\`=later, \`--by <time>\`.`,
     `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat, parking it: reopen with \`${fy} agenda edit <id>\` refreshing summary/premise/context, else done it. KEEP CURRENT this turn: \`edit\` if changed, \`done\` if settled; \`ls\` = open.`,
   ].join('\n');
 

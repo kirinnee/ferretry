@@ -23,9 +23,11 @@ import {
   type AgendaUndelivered,
   agendaBriefOf,
   agendaBriefRequiredProblems,
+  agendaEditShapeProblems,
   agendaNoticeProblems,
   agendaOfferCloseProblems,
   agendaOptionDetailProblems,
+  agendaShapeProblems,
   agendaWakeAt,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_HISTORY,
@@ -582,6 +584,10 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   // A ferret's new item carries its premise and context; the daemon's and the Warden's raises write their own.
   const briefProblems = actor.kind === 'agent' ? agendaBriefRequiredProblems(request) : [];
   if (briefProblems.length > 0) return failure('invalid', `a new agenda item needs both: ${briefProblems.join('; ')}`);
+  // ONE ANSWER SHAPE PER KIND (docs/agenda.md, "What I need from you"): a ferret's raise that mixes shapes is
+  // refused with the shape to write instead. The daemon's own raises carry their own fixed shapes.
+  const shapeProblems = actor.kind === 'agent' ? agendaShapeProblems(request) : [];
+  if (shapeProblems.length > 0) return failure('invalid', shapeProblems.join('; '));
   if (request.ask === undefined && request.kind !== 'info' && request.notice !== true && actor.kind !== 'daemon') {
     return failure(
       'invalid',
@@ -1071,6 +1077,9 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
     ...(patch.optionDetails === undefined ? {} : { optionDetails: patch.optionDetails }),
   })[0];
   if (optionDetailProblem !== undefined) return failure('invalid', optionDetailProblem);
+  // Steps belong to a to-do alone: an edit never gives them to a card of another shape.
+  const shapeProblem = command.actor.kind === 'agent' ? agendaEditShapeProblems(target.item, patch)[0] : undefined;
+  if (shapeProblem !== undefined) return failure('invalid', shapeProblem);
   const changed = EDITABLE_FIELDS.filter(
     field =>
       clears.some(cleared => cleared === field) ||

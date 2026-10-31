@@ -292,6 +292,60 @@
   margin: 0;
 }
 
+/* "What I need from you": exactly the ask, in one framed block under the situation — the question, the options or
+   steps or numbered answers, and the plain instruction last. A neutral surface with a strong edge, so it reads apart
+   from the two tinted situation blocks above it in both themes. */
+.fy-card__need {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: var(--stroke, 1px) solid var(--border-strong, var(--border));
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.fy-card__need-title {
+  color: var(--fg);
+}
+.fy-card__need-part {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.fy-card__need-lead {
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+}
+.fy-card__wanted {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+.fy-card__wanted > li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+}
+.fy-card__wanted-n {
+  min-width: 1.4em;
+  font-weight: var(--weight-strong);
+  font-variant-numeric: tabular-nums;
+}
+.fy-card__wanted-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fy-card__wanted-choices {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
 .fy-card__question {
   font-size: var(--text-lg);
   font-weight: var(--weight-strong);

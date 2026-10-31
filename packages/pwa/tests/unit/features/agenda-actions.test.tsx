@@ -17,23 +17,19 @@ const props = (overrides: Partial<AgendaActionsProps>): AgendaActionsProps => ({
 });
 
 describe('AgendaActions in flight', () => {
-  it('spins and locks the Send answers button while the answers are going, and sends once idle', async () => {
-    let sends = 0;
-    const sendAnswers = { ready: true, onSend: () => (sends += 1) };
-
-    const idle = await mount(<AgendaActions {...props({ sendAnswers })} />);
-    const send = must(idle.container.querySelector<HTMLButtonElement>('[data-agenda-send-answers]'), 'Send answers');
-    expect(send.querySelector('svg.animate-spin')).toBeNull();
-    await interact(() => send.click());
-    expect(sends).toBe(1);
+  it('says Got it on a notice, the one action it has, and locks it while it is going', async () => {
+    let cleared = 0;
+    const idle = await mount(<AgendaActions {...props({ clear: () => (cleared += 1) })} />);
+    const gotIt = must(idle.container.querySelector<HTMLButtonElement>('[data-agenda-clear]'), 'Got it');
+    expect(gotIt.textContent).toBe('Got it');
+    await interact(() => gotIt.click());
+    expect(cleared).toBe(1);
     await idle.unmount();
 
-    const busy = await mount(<AgendaActions {...props({ sendAnswers, busy: true })} />);
-    const locked = must(busy.container.querySelector<HTMLButtonElement>('[data-agenda-send-answers]'), 'Send answers');
+    const busy = await mount(<AgendaActions {...props({ clear: () => (cleared += 1), busy: true })} />);
+    const locked = must(busy.container.querySelector<HTMLButtonElement>('[data-agenda-clear]'), 'Got it');
     expect(locked.disabled).toBe(true);
-    expect(locked.querySelector('svg.animate-spin')).not.toBeNull();
-    await interact(() => locked.click());
-    expect(sends).toBe(1);
+    expect(busy.container.querySelector('[data-agenda-send-answers]')).toBeNull();
     await busy.unmount();
   });
 

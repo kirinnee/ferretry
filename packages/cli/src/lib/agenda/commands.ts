@@ -1,3 +1,4 @@
+import { agendaShapeHelp } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import type { NotifyOptions } from '../notify/commands.ts';
 import { ASK_KIND_NAMES } from './ask.ts';
@@ -72,18 +73,23 @@ JSON body (title and ask are required; questions and options may be plain string
    "steps": ["Open **Settings** and choose Logins", "Run \`fy login work\` and paste the code it prints"],
    "body": "Anything longer than a list, as Markdown"}`;
 
-const ASK_KINDS = `--kind says what the human DOES, and the answers the card swipes with (left · up · right):
-  todo         do something: ← Need more info · → Done      (--up "Skip" adds ↑ Skip)
-  yesno        a yes-or-no question: ← No · → Yes            (it brings its own options)
-  permission   approve or reject: ← Deny · → Allow          (--up "Always allow" adds ↑, which approves)
-  choice       pick one of 2 or 3 --option labels; the --recommend option (else the first) is →
-  review       say the answer is good, or ask for a clarification: ← Needs changes · → Looks good
-  info         nothing to decide, only to read: → Got it  (also where the answer to the owner's question goes)
-  reply        write a full answer (the default); no swipes
-(task, open, multiple-choice and answer-review are still accepted as older names.) More than 3 options is
-refused: split the item, or use --kind reply. --up-why "<line>" describes the --up answer.
-Without --kind, steps with no question are a todo, --option makes a choice (exactly Yes and No, a yesno),
-one --question with options is a choice, and several questions are answered in words.`;
+/**
+ * `fy agenda add --help`'s kinds: the protocol's one table of answer shapes (`agendaShapeHelp`), an example each,
+ * then the answers each kind swipes with.
+ */
+const askKinds = (fy: string): string => `${agendaShapeHelp(fy)}
+
+The answers a card gives, as buttons and swipes (left · up · right):
+  choice       the options, in order (2 or 3; more is refused: split the item); the --recommend option is tagged
+  yesno        ← No · → Yes                 (it brings its own options)
+  permission   ← Deny · → Approve           (--up "Always allow" adds ↑, which approves)
+  review       ← Request changes · → Approve (Request changes takes the owner's words from the reply box)
+  todo         → Mark as done               (--up "Skip" adds ↑ Skip)
+  info         → Got it                     (also where the answer to the owner's question goes)
+  reply        none: the reply box is the answer (the default)
+(task, open, multiple-choice and answer-review are still accepted as older names.) --up-why "<line>" describes
+the --up answer. Without --kind: steps alone are a todo, --option makes a choice (exactly Yes and No, a yesno),
+one --question with options is a choice, and plain questions — one or several — are a reply.`;
 
 const DISMISS_POLICY = `Agents may dismiss only agenda items they raised themselves.
 A human may dismiss any agenda item. Every dismissal remains in the resolution audit.`;
@@ -221,7 +227,7 @@ function mountVerbs(
         "a config file with a change held for the owner (fy config status): the owner's Allow applies it; the card's answers are Allow, Deny, Discard change",
       )
       .option('--json-file <path>', 'read these fields as JSON from a file, or - for stdin')
-      .addHelpText('after', `\n${ASK_KINDS}`),
+      .addHelpText('after', `\n${askKinds(root.parent?.name() ?? 'fy')}`),
   ).action(async (words: string[], _flags: unknown, command: Command) => {
     await controller.add(words, merged<AgendaAddOptions>(command));
   });

@@ -13,6 +13,7 @@
  *                         A84 note, A85 reply
  *   &v6=1                 adds the v6 card items: A90 (the spend-limit decision with terms, two versions and a
  *                         conversation), A91 a to-do with steps, A92 a lettered choice of four, A93 an input request
+ *   ?shapes=1             only one item of each answer shape (A101 choice … A108 info), for `agenda-shapes-screenshot.ts`
  *
  * Every component is the REAL one (`useAgenda` through `AgendaChatHarness`); only the data is
  * invented and the answers go nowhere.
@@ -693,6 +694,97 @@ const A93 = item('A93', 6, {
   input: { requestId: '0123456789abcdef0123456789abcdef' },
 } as Partial<AgendaItem>);
 const V6_ITEMS = [A90, A91, A92, A93] as const;
+
+// SHAPES: one item of each answer shape, each with its "What I need from you" segment (`agenda-shapes-screenshot.ts`).
+const SHAPE_BRIEF = {
+  raisedByName: 'lizzette',
+  premise: '- The deploy pipeline is ready\n- One thing waits on you',
+  context: '- Nothing ships until it is answered\n- The rest is built and tested',
+} as const;
+const SHAPES_ITEMS = [
+  item('A101', 50, {
+    ...SHAPE_BRIEF,
+    title: 'Deploy region',
+    subject: 'Which region should the deploy use?',
+    kind: 'choice',
+    ask: {
+      kind: 'multiple-choice',
+      options: [
+        { label: 'EU', description: 'Data stays in Europe; 20 ms slower for US users' },
+        { label: 'US', description: 'Cheapest, and fastest for most users' },
+        { label: 'Both', description: 'Twice the cost; each user gets the nearest' },
+      ],
+    },
+    questions: [
+      {
+        question: 'Which region should the deploy use?',
+        options: [{ label: 'EU' }, { label: 'US' }, { label: 'Both' }],
+        recommended: 'EU',
+      },
+    ],
+    recommendation: { decision: 'EU', why: 'Your users are mostly in Europe' },
+  }),
+  item('A102', 45, {
+    ...SHAPE_BRIEF,
+    title: 'Restart tonight',
+    subject: 'Restart the build box tonight at 22:00?',
+    kind: 'yesno',
+    ask: { kind: 'multiple-choice', options: [{ label: 'Yes' }, { label: 'No' }] },
+  }),
+  item('A103', 40, {
+    ...SHAPE_BRIEF,
+    title: 'Delete old backups',
+    subject: 'Delete the backups older than 90 days?',
+    kind: 'permission',
+    ask: { kind: 'permission' },
+    impact: '- Frees 40 GB on the studio disk\n- Those backups cannot be restored after',
+  }),
+  item('A104', 35, {
+    ...SHAPE_BRIEF,
+    title: 'New sign-in page',
+    subject: 'Is the new sign-in page right?',
+    kind: 'review',
+    ask: { kind: 'answer-review' },
+    links: [{ label: 'Preview of the sign-in page', target: 'https://example.com/preview' }],
+    body: 'The page now asks for the email first, then the password.',
+  }),
+  item('A105', 30, {
+    ...SHAPE_BRIEF,
+    title: 'Welcome email',
+    subject: 'What should the welcome email say?',
+    kind: 'reply',
+    ask: { kind: 'open-question' },
+  }),
+  item('A106', 25, {
+    ...SHAPE_BRIEF,
+    title: 'Three answers for the deploy',
+    subject: 'Three things to settle before the deploy',
+    kind: 'reply',
+    ask: { kind: 'open-question' },
+    questions: [
+      { question: 'Which region should it go to?' },
+      { question: 'Is it OK to restart the build box?' },
+      { question: 'What is your work email, for the alerts?' },
+    ],
+  }),
+  item('A107', 20, {
+    ...SHAPE_BRIEF,
+    title: 'Sign in to the work account',
+    subject: 'Sign in to the work account so the deploy can run.',
+    kind: 'task',
+    ask: { kind: 'task' },
+    steps: ['Open **Settings › Logins**', 'Press **Sign in** beside *work*', 'Paste the code the page shows'],
+    stepsDone: [0],
+    answers: [{ direction: 'right', does: 'done', label: 'Mark as done' }],
+  }),
+  item('A108', 15, {
+    ...SHAPE_BRIEF,
+    title: 'Nightly build fixed',
+    subject: 'The nightly build is fixed and green again.',
+    kind: 'info',
+  }),
+] as const;
+
 const V6_ENTRIES = [
   ferretSays('w0', 70, 'Building the spend-limit settings page now.'),
   ferretSays(
@@ -747,6 +839,7 @@ const v4 = params.get('v4') === '1';
 const parked = params.get('parked') === '1';
 const v5 = params.get('v5') === '1';
 const v6 = params.get('v6') === '1';
+const shapes = params.get('shapes') === '1';
 
 const items = [
   ...AGENDA,
@@ -778,7 +871,9 @@ const board: AgendaSnapshot =
         ? snapshot([], { delivery: { sending: ['A1' as AgendaId] } }, [SENT])
         : view === 'one'
           ? snapshot([A3])
-          : snapshot(items);
+          : shapes
+            ? snapshot([...SHAPES_ITEMS])
+            : snapshot(items);
 
 const live =
   params.get('live') === '1' ? (

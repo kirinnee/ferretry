@@ -36,7 +36,7 @@ describe('a plain notification on the card', () => {
 describe('cardModel', () => {
   it('gives a notice nothing to answer', () => {
     const model = cardModel(notice);
-    expect(model).toMatchObject({ notice: true, answers: [], extras: [], perQuestion: false, textOnly: false });
+    expect(model).toMatchObject({ notice: true, shape: 'info', answers: [], extras: [], textOnly: false });
     expect(model.recommended).toBeUndefined();
   });
 

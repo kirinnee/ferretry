@@ -10,12 +10,14 @@
  * On touch the row swipes (← ↑ →) exactly as the Inbox deck does (`swipeIntent`), and ↓ is `onDown` — Not needed.
  * An item linked to a card the owner may close also draws "Done · closes &F12" in the → slot when it is free; with
  * all three taken it is the one button under the row, tap only — a swipe never closes a card.
- * An item answered one answer per question draws its chips beside each question; this row then holds the one
- * compact "Send answers" (and "All recommended" when every question has a pick to agree with).
+ * A card answered in words (an open question, several questions, a mix) draws NO buttons here: the composer is the
+ * answer. A review's "Request changes" is a button, never a swipe: it takes the composer's words, or puts the owner
+ * in the composer when it is empty. A notice's one button is Got it.
  */
 
 import type { AgendaAskOption, AgendaCardAnswer } from '@ferretry/protocol';
-import { Check, LoaderCircle, Send } from 'lucide-react';
+import { GOT_IT_LABEL } from '@ferretry/protocol';
+import { Check } from 'lucide-react';
 import { type PointerEvent, useRef } from 'react';
 import { type AnswerDirection, answerAction, CLEAR_ACTION } from '../../lib/agenda-answers.ts';
 import type { CardModel } from '../../lib/agenda-card-model.ts';
@@ -37,14 +39,10 @@ const ARROW: Readonly<Record<AnswerDirection, string>> = { left: '←', up: '↑
 const sameLabel = (a: string, b: string | undefined): boolean =>
   b !== undefined && a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** What an item answered one answer per question lets the row do. */
-export interface QuestionSending {
-  /** Every question that has options has a pick. */
-  readonly ready: boolean;
-  /** Every such question has a recommendation that names one of its options. */
-  readonly canUseRecommended: boolean;
-  readonly onSend: () => void;
-  readonly onUseRecommended: () => void;
+/** A review's Request changes: drawn in its own direction's slot, tapped only. */
+export interface RequestChanges {
+  readonly answer: AgendaCardAnswer;
+  readonly onTap: () => void;
 }
 
 export interface AgendaQuickRepliesProps {
@@ -59,7 +57,8 @@ export interface AgendaQuickRepliesProps {
   readonly waitingOn?: string;
   /** The primary pointer is touch: chips swipe and say their direction. */
   readonly swipeable: boolean;
-  readonly sending?: QuestionSending;
+  /** A review's Request changes, when the host can take the owner to the composer. */
+  readonly requestChanges?: RequestChanges;
   /** "Done · closes &F12": absent when the item offers no card to close. */
   readonly doneClose?: DoneCloseView;
   /** One answer; the host adds the composer's text as its note. */
@@ -119,59 +118,41 @@ function Chip({ label, letter, lettered, recommended, busy, arrow, swipeable, pr
   );
 }
 
-function QuestionChips({ sending, busy }: { readonly sending: QuestionSending; readonly busy: boolean }) {
-  return (
-    <>
-      {sending.canUseRecommended ? (
-        <button
-          className="kt-btn fy-qr__chip"
-          data-agenda-use-recommended=""
-          disabled={busy}
-          onClick={sending.onUseRecommended}
-          type="button"
-        >
-          <Check aria-hidden="true" size={13} />
-          All recommended
-        </button>
-      ) : null}
-      <button
-        className="kt-btn fy-qr__chip"
-        data-agenda-send-answers=""
-        data-variant="primary"
-        disabled={busy || !sending.ready}
-        onClick={sending.onSend}
-        type="button"
-      >
-        {busy ? (
-          <LoaderCircle size={13} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-        ) : (
-          <Send size={13} aria-hidden="true" />
-        )}
-        Send answers
-      </button>
-    </>
-  );
-}
-
 /** One button of the row: an answer the card gives, in the slot of its swipe direction. */
 interface Reply {
   readonly label: string;
   readonly letter: string | undefined;
   readonly answer: AgendaCardAnswer;
+  /** Tapped only, with its own handling (Request changes); absent: the answer is sent as it is. */
+  readonly onTap?: () => void;
 }
 
 /** Where a direction sits in the row, read left to right: ← ↑ →. */
 const ROW_ORDER: Readonly<Record<string, number>> = { left: 0, up: 1, right: 2 };
 
 /** The row's buttons, in ← ↑ → order: the card's answers (three at most), each with its letter among the item's options. */
-const repliesOf = (model: CardModel, options: readonly AgendaAskOption[]): readonly Reply[] =>
-  model.answers
-    .map(answer => ({ label: answer.label, letter: letterOf(options, answer.label), answer }))
-    .toSorted((a, b) => (ROW_ORDER[a.answer.direction] ?? 3) - (ROW_ORDER[b.answer.direction] ?? 3));
+const repliesOf = (
+  model: CardModel,
+  options: readonly AgendaAskOption[],
+  requestChanges: RequestChanges | undefined,
+): readonly Reply[] =>
+  [
+    ...model.answers.map(answer => ({ label: answer.label, letter: letterOf(options, answer.label), answer })),
+    ...(requestChanges === undefined
+      ? []
+      : [
+          {
+            label: requestChanges.answer.label,
+            letter: undefined,
+            answer: requestChanges.answer,
+            onTap: requestChanges.onTap,
+          },
+        ]),
+  ].toSorted((a, b) => (ROW_ORDER[a.answer.direction] ?? 3) - (ROW_ORDER[b.answer.direction] ?? 3));
 
-/** Whether the row has anything to draw: chips, a clear, a send, a waiting line or an error. */
-const hasReplies = (model: CardModel, sending: QuestionSending | undefined): boolean =>
-  model.notice || sending !== undefined || model.answers.length > 0;
+/** Whether the row has anything to draw: chips, a Got it, a waiting line or an error. */
+const hasReplies = (model: CardModel, requestChanges: RequestChanges | undefined): boolean =>
+  model.notice || requestChanges !== undefined || model.answers.length > 0;
 
 export function AgendaQuickReplies({
   model,
@@ -181,7 +162,7 @@ export function AgendaQuickReplies({
   error,
   waitingOn,
   swipeable,
-  sending,
+  requestChanges,
   doneClose,
   onAct,
   onDown,
@@ -234,13 +215,14 @@ export function AgendaQuickReplies({
   };
 
   const recommended = model.recommended;
-  const replies = repliesOf(model, options);
-  const slotted = replies.length > 0 && sending === undefined && !model.notice;
+  const replies = repliesOf(model, options, requestChanges);
+  const slotted = replies.length > 0 && !model.notice;
   // The row reads the way the options list does: one label that is not a single short word letters every option.
   const lettered = cardLettered(options);
   // "Done · closes &F12" takes the → slot when the card gave fewer than three answers; with three it sits under them.
-  const closeInRow = doneClose !== undefined && replies.length < 3 && sending === undefined;
-  if (!hasReplies(model, sending) && doneClose === undefined && error === null && waitingOn === undefined) return null;
+  const closeInRow = doneClose !== undefined && replies.length < 3;
+  if (!hasReplies(model, requestChanges) && doneClose === undefined && error === null && waitingOn === undefined)
+    return null;
   return (
     <div
       className="fy-qr"
@@ -285,7 +267,7 @@ export function AgendaQuickReplies({
             type="button"
           >
             <Check aria-hidden="true" size={13} />
-            Clear
+            {GOT_IT_LABEL}
           </button>
         ) : null}
         {replies.map(reply => (
@@ -298,10 +280,10 @@ export function AgendaQuickReplies({
             lettered={lettered}
             recommended={recommended}
             swipeable={swipeable}
+            {...(reply.onTap === undefined ? {} : { onTap: reply.onTap })}
           />
         ))}
         {closeInRow ? <DoneCloseChip disabled={busy} view={doneClose} /> : null}
-        {sending === undefined ? null : <QuestionChips busy={busy} sending={sending} />}
       </fieldset>
       {doneClose === undefined || closeInRow ? null : (
         <div className="fy-qr__under" data-agenda-more-row="">
@@ -320,6 +302,7 @@ function AnswerChip({
   lettered,
   recommended,
   swipeable,
+  onTap,
 }: {
   readonly answer: AgendaCardAnswer;
   readonly busy: boolean;
@@ -328,15 +311,21 @@ function AnswerChip({
   readonly lettered: boolean;
   readonly recommended: string | undefined;
   readonly swipeable: boolean;
+  /** A button with its own handling: tapped only, so it says no swipe direction. */
+  readonly onTap?: (() => void) | undefined;
 }) {
   return (
     <Chip
-      arrow={answer.direction}
+      arrow={onTap === undefined ? answer.direction : undefined}
       busy={busy}
       label={answer.label}
       letter={letter}
       lettered={lettered}
       onTap={() => {
+        if (onTap !== undefined) {
+          if (!busy) onTap();
+          return;
+        }
         const action = answerAction(answer, '');
         if (action !== null) give(action);
       }}

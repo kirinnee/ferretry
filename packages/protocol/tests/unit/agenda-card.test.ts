@@ -7,13 +7,13 @@ import {
   agendaAnswerProblems,
 } from '../../src/lib/agenda.ts';
 import {
-  answerInDirection,
-  askForKind,
   agendaCanDiscuss,
   agendaCardAnswers,
   agendaCardKind,
   agendaInDiscussion,
   agendaTitle,
+  answerInDirection,
+  askForKind,
   clipAtWord,
   DISCUSS_LABEL,
   defaultAgendaAnswers,
@@ -79,10 +79,10 @@ describe('attention card', () => {
   });
 
   describe('default answers', () => {
-    it('puts Done right and Need more info left on a task, with an optional up', () => {
-      should(layout(defaultAgendaAnswers('task', { kind: 'task' }))).eql(['left:Need more info', 'right:Done']);
+    it('puts one Mark as done right on a task, with an optional up', () => {
+      should(layout(defaultAgendaAnswers('task', { kind: 'task' }))).eql(['right:Mark as done']);
       const withSkip = defaultAgendaAnswers('task', { kind: 'task' }, undefined, { label: 'Skip' });
-      should(layout(withSkip)).eql(['left:Need more info', 'up:Skip', 'right:Done']);
+      should(layout(withSkip)).eql(['up:Skip', 'right:Mark as done']);
       should(answerInDirection(withSkip, 'up')?.does).equal('dismiss');
     });
 
@@ -92,11 +92,11 @@ describe('attention card', () => {
       should(answers.every(each => each.does === 'choose')).be.true();
     });
 
-    it('puts Deny left and Allow right on a permission, with an optional Always allow up', () => {
+    it('puts Deny left and Approve right on a permission, with an optional Always allow up', () => {
       const answers = defaultAgendaAnswers('permission', { kind: 'permission' }, undefined, {
         label: 'Always allow',
       });
-      should(layout(answers)).eql(['left:Deny', 'up:Always allow', 'right:Allow']);
+      should(layout(answers)).eql(['left:Deny', 'up:Always allow', 'right:Approve']);
       should(answers.map(each => each.does)).eql(['reject', 'approve', 'approve']);
     });
 
@@ -112,10 +112,10 @@ describe('attention card', () => {
       should(answerInDirection(defaultAgendaAnswers('choice', choice('A', 'B')), 'up')?.label).equal('A');
     });
 
-    it('puts Needs changes left and Looks good right on a review', () => {
+    it('puts Request changes left and Approve right on a review', () => {
       should(layout(defaultAgendaAnswers('review', { kind: 'answer-review' }))).eql([
-        'left:Needs changes',
-        'right:Looks good',
+        'left:Request changes',
+        'right:Approve',
       ]);
     });
 

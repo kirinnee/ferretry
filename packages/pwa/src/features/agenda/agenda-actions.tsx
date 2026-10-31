@@ -9,12 +9,12 @@
  *  3. A quiet second row: Skip — move on, unanswered (only where the host can) · "Details ›" (only where the
  *     item has more to read) · a ⋯ menu holding "Not needed…", which dismisses.
  *
- * An item answered one answer per question swaps the answers for a single "Send answers" button. Nothing
+ * Several questions are answered in one reply, so they get no buttons here: the line says to reply. Nothing
  * here sends anything: every answer leaves through the callbacks.
  */
 
-import type { AgendaAskOption, AgendaCardAnswer } from '@ferretry/protocol';
-import { ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, Ellipsis, LoaderCircle, Send, X } from 'lucide-react';
+import { type AgendaAskOption, type AgendaCardAnswer, GOT_IT_LABEL } from '@ferretry/protocol';
+import { ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, Ellipsis, LoaderCircle, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import type { AnswerDirection } from '../../lib/agenda-answers.ts';
 
@@ -226,7 +226,7 @@ export interface AgendaActionsProps {
   readonly dismissInMenu: boolean;
   /** Dismisses as not needed; the host attaches the message box's text as the reason. */
   readonly onDismiss: () => void;
-  /** A plain notification: the one action is "Clear". */
+  /** A plain notification: the one action is "Got it". */
   readonly clear?: () => void;
   /** Quiet extras in the second row (the full card's "Add to reply"), between `secondaryLead` and the ⋯ menu. */
   readonly secondaryExtra?: ReactNode;
@@ -234,8 +234,6 @@ export interface AgendaActionsProps {
   readonly secondaryLead?: ReactNode;
   /** The end of the second row, after the ⋯ menu (the full card's ✕). */
   readonly secondaryTail?: ReactNode;
-  /** Several questions: one "Send answers" button replaces the answers. */
-  readonly sendAnswers?: { readonly ready: boolean; readonly onSend: () => void };
 }
 
 export function AgendaActions({
@@ -258,7 +256,6 @@ export function AgendaActions({
   secondaryExtra,
   secondaryLead,
   secondaryTail,
-  sendAnswers,
 }: AgendaActionsProps) {
   const hintId = useId();
   const menu = dismissInMenu ? <ActionMenu busy={busy} onDismiss={onDismiss} /> : null;
@@ -284,34 +281,6 @@ export function AgendaActions({
       </p>
     );
 
-  if (sendAnswers !== undefined) {
-    return (
-      <div className="fy-attn-actions" data-agenda-actions="">
-        <div className="fy-attn-actions__row">
-          <button
-            className="kt-btn fy-attn-actions__send-answers"
-            data-agenda-send-answers=""
-            data-variant="primary"
-            disabled={busy || !sendAnswers.ready}
-            onClick={sendAnswers.onSend}
-            type="button"
-          >
-            {busy ? (
-              <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-            ) : (
-              <Send size={14} aria-hidden="true" />
-            )}
-            Send answers
-          </button>
-          {hosted ? null : skip}
-          {hosted ? null : details}
-          {hosted ? null : menu}
-        </div>
-        {hosted ? secondary : null}
-      </div>
-    );
-  }
-
   const hasAnswerButtons = answers.length > 0 || extraOptions.length > 0;
   return (
     <div className="fy-attn-actions" data-agenda-actions="">
@@ -327,7 +296,7 @@ export function AgendaActions({
             type="button"
           >
             <Check aria-hidden="true" size={14} />
-            Clear
+            {GOT_IT_LABEL}
           </button>
         </div>
       )}

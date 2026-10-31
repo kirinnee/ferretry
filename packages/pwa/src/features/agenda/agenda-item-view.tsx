@@ -16,11 +16,12 @@
  * keeps its own keys). Everything typed goes through the composer: this view has no text field of its own.
  */
 
-import type { AgendaItem } from '@ferretry/protocol';
+import type { AgendaCardAnswer, AgendaItem } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef } from 'react';
 import { useQuoteMenu } from '../../components/quote-menu.tsx';
 import { useDoneClose } from '../../hooks/use-done-close.ts';
+import { answerAction } from '../../lib/agenda-answers.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
@@ -28,6 +29,7 @@ import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inb
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { composerQuoteTarget } from '../../lib/quote.ts';
 import { agendaHeading } from './agenda-delivery.tsx';
 import { AgendaItemCard } from './agenda-item-card.tsx';
 import { AgendaItemHistory } from './agenda-item-history.tsx';
@@ -118,6 +120,17 @@ export function AgendaItemView({
   const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));
   const answerable = settled === undefined && !(inputForm !== undefined && item.kind === 'input');
   const canDismiss = answerable && model.dismissInMenu && !model.notice;
+  // Request changes IS the owner's words: sent with what the composer holds, or the owner is put in the composer first.
+  const requestChanges = (answer: AgendaCardAnswer): void => {
+    const composer = quoteScope === null ? null : composerQuoteTarget(quoteScope);
+    const words = composer?.draft().trim() ?? '';
+    if (words === '') {
+      composer?.replaceDraft(composer.draft());
+      return;
+    }
+    const action = answerAction(answer, words);
+    if (action !== null) onAct(action);
+  };
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus the dialog again whenever another item opens
   useEffect(() => {
@@ -223,6 +236,7 @@ export function AgendaItemView({
             {...(settled === undefined ? {} : { settled })}
             {...(inputForm === undefined ? {} : { inputForm })}
             {...(planForm === undefined ? {} : { planForm })}
+            {...(quoteScope === null ? {} : { onRequestChanges: requestChanges })}
           />
           <AgendaItemHistory events={history} ferret={ferret} now={now} renderProse={renderProse} />
         </div>

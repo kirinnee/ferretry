@@ -1,4 +1,5 @@
 import {
+  AGENDA_SHAPE_ERRORS,
   type AgendaAsk,
   AgendaAskSchema,
   type AgendaKind,
@@ -74,7 +75,7 @@ export function parseAsk(flags: AskFlags): CardAsk {
     throw new Error('--kind yesno brings its own Yes and No: drop --option (or use --kind choice for other options)');
   }
   if (kind !== 'choice') {
-    if (options.length > 0) throw new Error(`--option only makes sense with --kind choice, not ${kind}`);
+    if (options.length > 0) throw new Error(AGENDA_SHAPE_ERRORS.optionsOnlyChoice);
     return { kind, ask: askForKind(kind) };
   }
 

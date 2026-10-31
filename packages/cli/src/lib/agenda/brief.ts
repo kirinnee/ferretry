@@ -1,4 +1,5 @@
 import {
+  AGENDA_SHAPE_ERRORS,
   type AgendaActionRequest,
   AgendaActionRequestSchema,
   type AgendaAsk,
@@ -8,6 +9,8 @@ import {
   type AgendaOptionDetail,
   type AgendaQuestion,
   type AgendaTerm,
+  agendaEditShapeProblems,
+  agendaShapeProblems,
   defaultAgendaAnswers,
   MAX_AGENDA_CARD_ANSWERS,
   MAX_AGENDA_SUBJECT_LENGTH,
@@ -225,6 +228,9 @@ export function composeAddRequest(
     ...(willBlock === undefined ? {} : { willBlock }),
     ...(neededBy === undefined ? {} : { neededBy }),
   };
+  // ONE ANSWER SHAPE PER KIND: the daemon refuses a mix with the same words, so it is said here first.
+  const shape = confirms === undefined ? agendaShapeProblems(request) : [];
+  if (shape.length > 0) throw new Error(shape.join('; '));
   const parsed = AgendaActionRequestSchema.safeParse(
     confirms === undefined ? request : confirmationRequest(request, confirms),
   );
@@ -355,12 +361,14 @@ function askFor(
 ): CardAsk {
   const lone = questions?.length === 1 ? questions[0] : undefined;
   const named = parseKind(kind);
-  if (named === 'task' && questions !== undefined) {
-    throw new Error('a todo asks nothing to answer: drop --question, or drop --todo (or --kind todo)');
+  if (named === 'task' && questions !== undefined) throw new Error(AGENDA_SHAPE_ERRORS.todoAsksNothing);
+  if (named === 'info' && questions !== undefined) throw new Error(AGENDA_SHAPE_ERRORS.infoAsksNothing);
+  // Several questions are answered in one reply, as a numbered list: never options, never another kind.
+  const several = (questions?.length ?? 0) > 1;
+  if (several && (options !== undefined || questions?.some(each => each.options !== undefined) === true)) {
+    throw new Error(AGENDA_SHAPE_ERRORS.severalQuestions);
   }
-  if (named === 'info' && questions !== undefined) {
-    throw new Error('an info card asks nothing to answer: drop --question, or use --kind reply');
-  }
+  if (several && named !== undefined && named !== 'reply') throw new Error(AGENDA_SHAPE_ERRORS.severalQuestions);
   if (named === 'yesno' && lone?.options !== undefined) {
     throw new Error('--kind yesno brings its own Yes and No: drop the question options (or use --kind choice)');
   }
@@ -371,9 +379,6 @@ function askFor(
     return parseAsk({ kind: 'task' });
   }
   if (named !== undefined || options !== undefined) {
-    if (questions !== undefined && questions.length > 1 && options !== undefined) {
-      throw new Error('--option belongs to a single question; give each of several questions its own options');
-    }
     // `--kind choice` over a lone question that brought its own options chooses between those.
     const choices = options ?? (named === 'choice' ? lone?.options?.map(each => each.label) : undefined);
     return parseAsk({
@@ -569,6 +574,8 @@ export function composeEditRequest(
   const terms = flags.term !== undefined && flags.term.length > 0 ? flags.term.map(termFrom) : undefined;
   const links = flags.link !== undefined && flags.link.length > 0 ? flags.link.map(link) : undefined;
   const steps = stepsFrom(flags.step);
+  const stepProblem = current === undefined ? undefined : agendaEditShapeProblems(current, { steps })[0];
+  if (stepProblem !== undefined) throw new Error(stepProblem);
   const body = text(flags.body);
   const willBlock = text(flags.willBlock);
   const neededBy = text(flags.neededBy);

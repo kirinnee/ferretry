@@ -173,7 +173,7 @@ The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,050 characters, 
 test) opens with the rule that the agenda is only for what the owner alone can give — information, a decision or an
 action — and never tracks or checks work (no "please test/verify" items: the board's Done / Not good covers that,
 and after a Not good the ferret opens an item only if it needs something from the owner; [agenda.md](agenda.md)), adds that a question the owner asks is also answered there, as one `--kind info` item (the owner reads the agenda, not every reply; [agenda.md](agenda.md)), names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
-`--context`, which every new item requires ([agenda.md](agenda.md#rules-the-writing-keeps)) — what `--blocking`,
+`--context`, which every new item requires ([agenda.md](agenda.md#rules-the-writing-keeps)) — one line mapping each kind to its answer shape (`AGENDA_SHAPE_LINE`; [agenda.md](agenda.md#what-i-need-from-you)), what `--blocking`,
 `--will-block` and `--by` mean, and that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat that
 parks the item as replied (bring it back with `fy agenda edit` refreshing the whole card — `--summary`, `--premise` and `--context` — else `done` it —
 [agenda.md](agenda.md#parked-items)).

@@ -4,9 +4,11 @@
  * for an item answered in the message box. Pure; the surfaces only draw it.
  */
 
-import type { AgendaAskOption, AgendaCardAnswer, AgendaItem } from '@ferretry/protocol';
+import type { AgendaAskOption, AgendaCardAnswer, AgendaItem, AgendaShape } from '@ferretry/protocol';
 import {
+  AGENDA_SHAPE_LEADS,
   agendaCardKind,
+  agendaShape,
   agendaTitle,
   hasOwnTitle,
   recommendedAgendaOption,
@@ -14,7 +16,7 @@ import {
   unswipedChoices,
 } from '@ferretry/protocol';
 import { cardAnswers, isTextOnlyAsk, needsReplyText } from './agenda-answers.ts';
-import { answersPerQuestion, visibleWhy } from './agenda-inbox.ts';
+import { visibleWhy } from './agenda-inbox.ts';
 
 /** The longest ask that is still drawn as the card's heading. */
 const QUESTION_HEADING_MAX = 160;
@@ -22,12 +24,14 @@ const QUESTION_HEADING_MAX = 160;
 export interface CardModel {
   /** A plain notification: no answers, no turn; the owner reads it and clears it. */
   readonly notice: boolean;
+  /** What the card needs from the owner, and so how its "What I need from you" segment reads (`agendaShape`). */
+  readonly shape: AgendaShape;
   /** The card's answers as buttons (left · up · right), without one that needs the owner's words. */
   readonly answers: readonly AgendaCardAnswer[];
   /** An old choice's options past the third: plain buttons, never a swipe. */
   readonly extras: readonly AgendaAskOption[];
-  /** One answer per question, sent together. */
-  readonly perQuestion: boolean;
+  /** A review's Request changes: its words are the message box's, so it is a button that takes them, never a swipe. */
+  readonly requestChanges: AgendaCardAnswer | undefined;
   /** A review that wants changes written: the words are the message box's. */
   readonly asksForWords: boolean;
   readonly textOnly: boolean;
@@ -53,8 +57,9 @@ export const cardModel = (item: AgendaItem): CardModel => {
   const allAnswers = notice ? [] : cardAnswers(item);
   const answers = allAnswers.filter(answer => !needsReplyText(answer));
   const asksForWords = answers.length < allAnswers.length;
+  const requestChanges = allAnswers.find(needsReplyText);
   const extras = notice ? [] : unswipedChoices(item);
-  const perQuestion = !notice && answersPerQuestion(item);
+  const shape = agendaShape(item);
   const textOnly = !notice && isTextOnlyAsk(item);
   // An item from before titles is headed by its whole ask, said once: a title cut from the ask would only
   // repeat its first words above it. (A push still cuts one, to fit a lock screen: `agendaTitle`.)
@@ -80,9 +85,10 @@ export const cardModel = (item: AgendaItem): CardModel => {
         : `Recommended: ${recommendation.decision}${recommendation.why === undefined ? '' : ` — ${recommendation.why}`}`;
   return {
     notice,
+    shape,
     answers,
     extras,
-    perQuestion,
+    requestChanges,
     asksForWords,
     textOnly,
     heading: asksInHeading ? subject : title,
@@ -93,12 +99,10 @@ export const cardModel = (item: AgendaItem): CardModel => {
     recommended,
     recommendationLine,
     dismissInMenu: !answers.some(answer => answer.does === 'dismiss'),
-    composerHint: perQuestion
-      ? undefined
-      : textOnly
-        ? 'Reply in the message box below.'
-        : asksForWords
-          ? 'To ask for changes, reply in the message box below.'
-          : undefined,
+    composerHint: textOnly
+      ? AGENDA_SHAPE_LEADS[shape]
+      : asksForWords
+        ? 'To request changes, type them in the message box below.'
+        : undefined,
   };
 };

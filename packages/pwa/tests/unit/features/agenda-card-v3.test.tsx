@@ -64,7 +64,7 @@ describe('the minimal card', () => {
   it('a text-only ask offers no options and says to reply in the message box', async () => {
     const view = await mountCard({ kind: 'open-question' }, () => undefined);
     expect(view.container.querySelector('[data-agenda-option]')).toBeNull();
-    expect(pick(view, '[data-agenda-composer-hint]', 'the hint').textContent).toContain('message box');
+    expect(pick(view, '[data-agenda-composer-hint]', 'the hint').textContent).toBe('Type your answer below.');
     await view.unmount();
   });
 });

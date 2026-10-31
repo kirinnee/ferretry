@@ -184,10 +184,29 @@ describe('attention listing', () => {
     );
 
     // Assert
-    should(permission).containEql('answers: ← Deny · → Allow');
-    should(review).containEql('answers: ← Needs changes · → Looks good');
+    should(permission).containEql('answers: ← Deny · → Approve');
+    should(review).containEql('answers: ← Request changes · → Approve');
     should(open).containEql('answer: write a full answer');
     should(choice).containEql('answers: ← ship it · → hold');
+  });
+
+  it('should say several questions want one reply, each answer numbered, and offer them no answers', () => {
+    // Act
+    const several = renderAgendaList(
+      snapshot([
+        humanItem('A1', 'x', {
+          ask: { kind: 'open-question' },
+          questions: [
+            { question: 'Which region?', options: [{ label: 'EU' }, { label: 'US' }] },
+            { question: 'OK to restart?' },
+          ],
+        }),
+      ]),
+    );
+
+    // Assert
+    should(several).containEql('answer: one reply, each answer numbered');
+    should(several).not.containEql('answers: ←');
   });
 
   it('should omit the answer hint for an item with no ask', () => {
@@ -463,7 +482,7 @@ describe('attention to-do items', () => {
     );
 
     // Assert
-    should(plain).containEql('answers: ← Need more info · → Done');
+    should(plain).containEql('answers: → Mark as done');
     should(plain).not.containEql("ferret's turn");
     should(waiting).containEql("ferret's turn: more information asked 2026-07-31T09:10:00.000Z");
   });
@@ -593,7 +612,7 @@ describe('attention cards', () => {
     // Assert
     should(row(actual, 1)).equal('  !A1  [question]  approve the deploy');
     should(actual).not.containEql('ask: approve the deploy');
-    should(row(actual, 2)).equal('      answers: ← Deny · → Allow');
+    should(row(actual, 2)).equal('      answers: ← Deny · → Approve');
   });
 
   it('should name an old item’s options past the third so none is hidden', () => {

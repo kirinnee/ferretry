@@ -516,149 +516,159 @@ describe('the answer row', () => {
   });
 });
 
-describe('several questions', () => {
+describe('What I need from you', () => {
+  const need = (): HTMLElement => one('[data-agenda-need]');
+  const lead = (): string => one('[data-agenda-need-lead]').textContent ?? '';
+  const chips = (): string[] =>
+    [...root().querySelectorAll('[data-agenda-quick-replies] .fy-qr__chip')].map(each => each.textContent ?? '');
   const several = agendaItem('A5', {
     title: 'Plan the launch',
-    recommendation: { decision: 'Ship Monday', why: 'The team is in.' },
+    subject: 'Three things to settle for the launch',
     ask: { kind: 'open-question' },
+    kind: 'reply',
     questions: [
       {
         question: 'Which day should it ship?',
         options: [{ label: 'Monday' }, { label: 'Friday' }],
         recommended: 'Monday',
       },
-      { question: 'Who should announce it?', options: [{ label: 'Zoe' }, { label: 'Kit' }] },
+      { question: 'OK to restart the build box?' },
+      { question: 'Your work email?' },
     ],
   } as Partial<AgendaItem>);
-  const pick = (label: string) =>
-    interact(() => must(root().querySelector<HTMLButtonElement>(`[data-agenda-pick="${label}"]`), label).click());
-  const send = () => one<HTMLButtonElement>('[data-agenda-send-answers]');
 
-  test('collect a pick for each, then send them as ONE answer', async () => {
-    const spy = await draw(several);
-    expect(send().disabled).toBe(true);
-    await pick('Friday');
-    expect(send().disabled).toBe(true);
-    await pick('Kit');
-    expect(send().disabled).toBe(false);
-    await interact(() => send().click());
-    expect(spy.acted).toHaveLength(1);
-    expect(send().disabled).toBe(true);
+  test('sits directly under the premise and context, before every optional section', async () => {
+    await draw(richItem);
+    const card = one('.fy-card');
+    const order = [...card.querySelectorAll('[data-agenda-situation], [data-agenda-need], [data-agenda-section]')]
+      .map(
+        each =>
+          each.getAttribute('data-agenda-section') ?? (each.hasAttribute('data-agenda-need') ? 'need' : 'situation'),
+      )
+      .filter(name => name !== 'premise' && name !== 'context');
+    expect(order.slice(0, 2)).toEqual(['situation', 'need']);
+    expect(need().querySelector('h4')?.textContent).toBe('What I need from you');
   });
 
-  test('picking the same answer again clears it', async () => {
-    await draw(several);
-    await pick('Friday');
-    await pick('Friday');
-    expect(send().disabled).toBe(true);
-  });
-
-  test('send nothing while busy', async () => {
-    const spy = await draw(several);
-    await pick('Friday');
-    await view?.render(
-      <AgendaItemView
-        busy
-        error={null}
-        ferret="Zoe"
-        history={[]}
-        item={several}
-        onAct={action => spy.acted.push(action)}
-        onClose={() => undefined}
-        position={{ index: 0, total: 1 }}
-        renderProse={text => text}
-        swipeable={false}
-      />,
+  test('a choice: the options and what each means inside it, the options as the buttons, "Pick one option."', async () => {
+    await draw(
+      agendaItem('A47', {
+        ...richItem,
+        ask: {
+          kind: 'multiple-choice',
+          options: [
+            { label: 'SQLite', description: 'One file, no server' },
+            { label: 'Postgres', description: 'Another service to run' },
+          ],
+        },
+      } as Partial<AgendaItem>),
     );
-    await interact(() => send().click());
+    expect(need().getAttribute('data-agenda-need')).toBe('choice');
+    expect(need().querySelector('[data-agenda-options]')?.textContent).toContain('One file, no server');
+    expect(lead()).toBe('Pick one option.');
+    expect(chips()).toEqual(['←SQLite', '→Postgres']);
+  });
+
+  test('several questions: a numbered list of each answer wanted, no buttons, no swipes, "Reply with your answers below"', async () => {
+    const spy = await draw(several);
+    expect(need().getAttribute('data-agenda-need')).toBe('answers');
+    const wanted = [...need().querySelectorAll('[data-agenda-wanted-answer]')].map(each => each.textContent ?? '');
+    expect(wanted).toHaveLength(3);
+    expect(wanted[0]).toContain('1.');
+    expect(wanted[0]).toContain('Which day should it ship?');
+    // An option a question was raised with before the rule is said in words, never a button.
+    expect(wanted[0]).toContain('Monday / Friday');
+    expect(wanted[0]).toContain('Suggested: Monday');
+    expect(wanted[2]).toContain('Your work email?');
+    expect(lead()).toBe('Reply with your answers below, numbered.');
+    expect(root().querySelector('[data-agenda-pick], [data-agenda-send-answers], [data-agenda-option]')).toBeNull();
+    expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
+    await pressKey(one('.fy-item-view'), 'ArrowRight');
+    await pressKey(one('.fy-item-view'), 'ArrowLeft');
     expect(spy.acted).toEqual([]);
   });
-});
 
-describe('several questions, drawn once each', () => {
-  const asked = agendaItem('A5', {
-    title: 'Plan the launch',
-    ask: { kind: 'open-question' },
-    questions: [
-      {
-        question: 'Which day should it ship?',
-        options: [{ label: 'Monday' }, { label: 'Friday' }],
-        recommended: 'Monday',
-        why: 'The team is in.',
-      },
-      {
-        question: 'Who should announce it?',
-        options: [{ label: 'Zoe' }, { label: 'Kit' }],
-        recommended: 'Zoe',
-      },
-    ],
-  } as Partial<AgendaItem>);
-  const count = (text: string, part: string): number => text.split(part).length - 1;
-
-  test('each question and its reason appear once, with no boilerplate about the message box', async () => {
-    await draw(asked);
-    const text = one('.fy-item-view__body').textContent ?? '';
-    expect(count(text, 'Which day should it ship?')).toBe(1);
-    expect(count(text, 'Who should announce it?')).toBe(1);
-    expect(count(text, 'The team is in.')).toBe(1);
-    expect(text).not.toContain('message box');
-    expect(root().querySelector('[data-agenda-composer-hint]')).toBeNull();
-  });
-
-  test('tags "Recommended" on the matching option of each question, and offers "All recommended"', async () => {
-    const spy = await draw(asked);
-    const monday = one('[data-agenda-pick="Monday"]');
-    expect(monday.getAttribute('aria-label')).toBe('Monday, recommended');
-    expect(one('[data-agenda-pick="Friday"]').getAttribute('aria-label')).toBe('Friday');
-    await interact(() => one<HTMLButtonElement>('[data-agenda-use-recommended]').click());
-    expect(one('[data-agenda-pick="Monday"]').getAttribute('aria-pressed')).toBe('true');
-    expect(one('[data-agenda-pick="Zoe"]').getAttribute('aria-pressed')).toBe('true');
-    await interact(() => one<HTMLButtonElement>('[data-agenda-send-answers]').click());
-    expect(spy.acted).toHaveLength(1);
-    expect(spy.acted[0]).toMatchObject({ kind: 'respond' });
-  });
-
-  test('offers no "All recommended" when a question has no recommendation', async () => {
+  test('an open question: the question alone, no buttons, "Type your answer below."', async () => {
     await draw(
       agendaItem('A6', {
+        kind: 'reply',
         ask: { kind: 'open-question' },
-        questions: [
-          { question: 'Which day?', options: [{ label: 'Monday' }], recommended: 'Monday' },
-          { question: 'Who?', options: [{ label: 'Zoe' }] },
-        ],
+        subject: 'What should the welcome email say?',
+        answers: [{ direction: 'right', does: 'done', label: 'Done' }],
       } as Partial<AgendaItem>),
     );
-    expect(root().querySelector('[data-agenda-use-recommended]')).toBeNull();
-    expect(one<HTMLButtonElement>('[data-agenda-send-answers]').disabled).toBe(true);
-  });
-
-  test('has no "Send answers" for questions that have no options: they are answered in the composer', async () => {
-    await draw(
-      agendaItem('A7', {
-        ask: { kind: 'open-question' },
-        questions: [{ question: 'Which day?' }, { question: 'Who?' }],
-      } as Partial<AgendaItem>),
-    );
-    expect(root().querySelector('[data-agenda-send-answers]')).toBeNull();
+    expect(need().getAttribute('data-agenda-need')).toBe('reply');
+    expect(lead()).toBe('Type your answer below.');
     expect(root().querySelector('[data-agenda-quick-replies]')).toBeNull();
-    const text = one('.fy-item-view__body').textContent ?? '';
-    expect(count(text, 'Which day?')).toBe(1);
-    expect(count(text, 'Who?')).toBe(1);
   });
-});
 
-describe('several questions without a recommendation', () => {
-  test('still draw their pickers', async () => {
-    await draw(
-      agendaItem('A6', {
-        ask: { kind: 'open-question' },
-        questions: [
-          { question: 'Which day should it ship?', options: [{ label: 'Monday' }] },
-          { question: 'Who should announce it?', options: [{ label: 'Zoe' }] },
+  test('a to-do: its steps numbered and ticked inside it, then one Mark as done', async () => {
+    const spy = await draw(
+      agendaItem('A4', {
+        kind: 'task',
+        ask: { kind: 'task' },
+        steps: ['Open it', 'Rotate it'],
+        answers: [
+          { direction: 'left', does: 'needs-info', label: 'Need more info' },
+          { direction: 'right', does: 'done', label: 'Mark as done' },
         ],
       } as Partial<AgendaItem>),
     );
-    expect(root().querySelectorAll('[data-agenda-pick]')).toHaveLength(2);
+    expect(need().getAttribute('data-agenda-need')).toBe('todo');
+    expect(need().querySelectorAll('[data-agenda-tick]')).toHaveLength(2);
+    expect(root().querySelector('[data-agenda-section="steps"]')).toBeNull();
+    expect(lead()).toBe('Do these steps, then tap Mark as done.');
+    expect(chips()).toEqual(['→Mark as done']);
+    await interact(() => one<HTMLInputElement>('[data-agenda-tick="0"]').click());
+    expect(spy.progress).toEqual([[0, true]]);
+  });
+
+  test('an info card: the message and one Got it', async () => {
+    await draw(agendaItem('A8', { kind: 'info', subject: 'The nightly build is fixed' } as Partial<AgendaItem>));
+    expect(need().getAttribute('data-agenda-need')).toBe('info');
+    expect(lead()).toContain('Got it');
+    expect(chips()).toEqual(['→Got it']);
+  });
+
+  test('a permission: what it does inside it, and Approve or Deny', async () => {
+    await draw(
+      agendaItem('A9', {
+        kind: 'permission',
+        ask: { kind: 'permission' },
+        subject: 'Delete the old backups?',
+        impact: 'Frees 40 GB; they cannot be restored',
+      } as Partial<AgendaItem>),
+    );
+    expect(need().getAttribute('data-agenda-need')).toBe('approval');
+    expect(one('[data-agenda-need-effect]').textContent).toContain('Frees 40 GB');
+    expect(root().querySelector('[data-agenda-section="impact"]')).toBeNull();
+    expect(lead()).toBe('Approve or deny.');
+    expect(chips()).toEqual(['←Deny', '→Approve']);
+  });
+
+  test('a review: what to review inside it, Approve, and Request changes that puts the owner in the composer', async () => {
+    const asked: string[] = [];
+    await draw(
+      agendaItem('A10', {
+        kind: 'review',
+        ask: { kind: 'answer-review' },
+        subject: 'Is the new sign-in page right?',
+        links: [{ label: 'Preview', target: 'https://example.test/preview' }],
+      } as Partial<AgendaItem>),
+    );
+    expect(need().getAttribute('data-agenda-need')).toBe('review');
+    expect(one<HTMLAnchorElement>('[data-agenda-need-review] a').href).toBe('https://example.test/preview');
+    expect(root().querySelector('[data-agenda-section="links"]')).toBeNull();
+    expect(lead()).toBe('Review it, then approve or request changes.');
+    // With no composer to put the owner in, Request changes is not a button: the line says to type them.
+    expect(chips()).toEqual(['→Approve']);
+    expect(asked).toEqual([]);
+  });
+
+  test('says no instruction on an item that cannot be answered here', async () => {
+    await draw(richItem, { settled: <p>Answered.</p> });
+    expect(root().querySelector('[data-agenda-need]')).not.toBeNull();
+    expect(root().querySelector('[data-agenda-need-lead]')).toBeNull();
   });
 });
 

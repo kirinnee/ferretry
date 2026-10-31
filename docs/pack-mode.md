@@ -70,7 +70,7 @@ and the longest routing prompt:
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
 | Board (`fy task`, cards)                 | 640        | 160      | every agent runtime         |
-| Agenda (`fy agenda`, with steps)         | 1,044      | 261      | `FY_AGENDA=1`               |
+| Agenda (`fy agenda`, with answer shapes) | 1,046      | 262      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,503      | 376      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -82,7 +82,7 @@ The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settin
 7.9 KB (the Tools section grew by 351 to teach the login rule and `terminal_request_input`: do the login or website step yourself, ask the owner only for the one secret value, then by 6 more, its wording tightened, to teach `browser_request_input` and to never create a passkey; the old always-on Agenda section became the short Notify rule, and its words moved into the Agenda section, which only a ferret in agenda mode carries — [notifications.md](notifications.md#agenda-mode); Hypermedia grew by 335 to teach `chart`) and the Pack section itself under 1,050 characters. The always-on Board
 section (749, with the card-writing rule, How to test and the lane-by-category rule) was paid for, not added on top: the tools are named by prefix (`terminal_*`, `browser_*`), map, media
 and chart's full spec moved behind `fy render guide <type>`, and the lessons rule was compressed. The measured total
-is 7,246 without the Tools growth above (the Board rule teaches How to test and which lane by the kind of work, in tightened words, the lane rule paid for by tightening Hypermedia; the Agenda section carries the required `--premise` and `--context`, the self-contained, full-Markdown, hypermedia rule, the reply-parks-the-item rule — bring it back by editing the whole card, `--summary`, `--premise` and `--context` — and the rule that an owner's question is also answered as a `--kind info` item, paid for in its own words), and the test keeps at least 150 characters of headroom under the 7.9 KB cap. The routing line grew from a 150-character
+is 7,246 without the Tools growth above (the Board rule teaches How to test and which lane by the kind of work, in tightened words, the lane rule paid for by tightening Hypermedia; the Agenda section carries the required `--premise` and `--context`, the self-contained, full-Markdown, hypermedia rule, the reply-parks-the-item rule — bring it back by editing the whole card, `--summary`, `--premise` and `--context` — and the rule that an owner's question is also answered as a `--kind info` item, paid for in its own words; its one kind → answer-shape line, `AGENDA_SHAPE_LINE` from `@ferretry/protocol`, replaced the old per-kind flag hints and was paid for by tightening the section's own wording, leaving 6 characters under the cap), and the test keeps at least 150 characters of headroom under the 7.9 KB cap. The routing line grew from a 150-character
 summary to the whole prompt when the use-case guide became one routing prompt, so the agent decides with
 exactly what Jev is told.
 
