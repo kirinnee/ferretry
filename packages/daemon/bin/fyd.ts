@@ -11411,7 +11411,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               if (ref === null || (ref.machineId !== undefined && ref.machineId !== attachmentDaemonId))
                 return undefined;
               const found = await boardWorld.board.task(ref.id).catch(() => undefined);
-              return found === undefined ? undefined : { task: found.task, laneSet: found.laneSet };
+              if (found === undefined) return undefined;
+              const lead = await new StorageSubFerretDirectory(storage).leadOf(sessionId).catch(() => undefined);
+              return { task: found.task, laneSet: found.laneSet, ...(lead === undefined ? {} : { subFerret: true }) };
             },
           },
           activities,

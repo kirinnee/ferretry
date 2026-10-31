@@ -388,7 +388,7 @@ describe('a session started with a brief', () => {
       // Arrange
       const { subject, ports, focus } = build({
         cards: [
-          card({ id: 'F9', owner: 'lead', title: 'Something else', parent: { id: 'F1' } }),
+          card({ id: 'F9', owner: 'lead', title: 'Something else', parent: { id: 'F1' }, workflow: 'design-first' }),
           card({ id: 'F1', owner: 'lead' }),
         ],
       });
