@@ -91,19 +91,41 @@ const joinMembers = change => ({
   ...change,
 });
 
+const WITHDRAWN_INSTALLED_ID = 'itm_' + 'w'.repeat(22);
+const WITHDRAWN_OTHER_ID = 'itm_' + 'x'.repeat(22);
+const withdrawnBrowse = {
+  ...fixture.browse,
+  catalogs: fixture.browse.catalogs.map(block =>
+    block.manifest === undefined
+      ? block
+      : {
+          ...block,
+          manifest: {
+            ...block.manifest,
+            withdrawn: [WITHDRAWN_INSTALLED_ID, WITHDRAWN_OTHER_ID].map(itemId => ({ itemId, at: THEN })),
+          },
+        },
+  ),
+};
+
 const sharedMembers = {
   list: async () => [FIRST, SECOND],
+  tryAgain: async () => ({ kind: 'refused' }),
   browse: async sub =>
     ok(
       sub.daemonId === FIRST.daemonId
-        ? fixture.browse
+        ? withdrawnBrowse
         : {
             ...fixture.browse,
             catalogs: [{ catalogId: 'cat_' + 'r'.repeat(22), name: 'Reading list', revision: 1, problem: NOT_SHOWN_SENTENCE }],
           },
     ),
   openItem: async (_sub, _view, entry) =>
-    ok({ item: [fixture.skill, fixture.mcp].find(item => item.itemId === entry.itemId), opened: fixture.opened }),
+    ok({
+      item: [fixture.skill, fixture.mcp].find(item => item.itemId === entry.itemId),
+      opened: fixture.opened,
+      entry,
+    }),
   unlock: async () => await never,
   leave: async () => await never,
   forget: async () => undefined,
@@ -117,6 +139,14 @@ const skillEntry = fixture.entries.find(entry => entry.kind === 'skill');
 const installClient = {
   request: async (path, schema, init) => {
     const method = init?.method ?? 'GET';
+    if (method === 'GET' && path === '/v1/catalog-installs') {
+      const record = installRecord('skill', 'pdf-merge');
+      return schema.parse({
+        installs: [
+          { ...record, provenance: { ...record.provenance, publisher: fixture.identity.daemonId, itemId: WITHDRAWN_INSTALLED_ID } },
+        ],
+      });
+    }
     if (method === 'GET' && path === '/v1/fleet/runtimes') return { runtimes: [{ id: 'box', profile: 'default' }] };
     if (method === 'GET' && path === '/v1/secrets') return schema.parse({ v: 1, health: 'ready', secrets: [], references: [] });
     if (method === 'POST' && path.endsWith('/preview'))
@@ -168,6 +198,7 @@ else if (view === 'access-refused')
       joinMembers({
         begin: async () => ({ kind: 'known', seed: SEED, subscription: FIRST }),
         redeem: async () => ({ kind: 'refused' }),
+        tryAgain: async () => ({ kind: 'refused' }),
       }),
     ),
   );
@@ -297,6 +328,7 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await page.locator('[data-shared-item]').first().waitFor({ state: 'visible' });
   if ((await page.locator('[data-shared-publisher]').count()) !== 2)
     fail('Shared with me does not show two publishers');
+  await page.locator('[data-shared-withdrawn-installed]').first().waitFor({ state: 'visible' });
   await shot(page, 'list', theme, vp, PAGE);
 
   await page.locator('[data-shared-item]').first().click();
@@ -315,6 +347,9 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await page.locator('[data-known-redeem]').click();
   await page.locator('[data-access-refused]').waitFor({ state: 'visible' });
   await shot(page, 'access-refused', theme, vp, PAGE);
+  await page.locator('[data-refused-try-again]').click();
+  await page.getByText('It refused again.').first().waitFor({ state: 'visible' });
+  await shot(page, 'access-refused-again', theme, vp, PAGE);
 };
 
 try {
