@@ -22,6 +22,7 @@ import { InstantSchema } from './common.ts';
 import { DaemonIdSchema } from './pairing.ts';
 import { SecretNameSchema } from './secrets.ts';
 import {
+  CATALOG_MCP_MAX_ENV,
   CatalogDigestSchema,
   CatalogItemKindSchema,
   CatalogItemNameSchema,
@@ -37,6 +38,12 @@ export const CATALOG_INSTALLS_PATH = '/v1/catalog-installs' as const;
 
 /** How long a preview may be applied. Long enough to read every file; short enough to be the same decision. */
 export const CATALOG_INSTALL_PREVIEW_TTL_SECONDS = 600;
+
+/** Placeholder → the installer's own secret, or `null` for unbound. At most one per variable an item can set. */
+export const CatalogSecretBindingsSchema = z
+  .record(SecretNameSchema, SecretNameSchema.nullable())
+  .refine(bindings => Object.keys(bindings).length <= CATALOG_MCP_MAX_ENV, `at most ${CATALOG_MCP_MAX_ENV} secrets`);
+export type CatalogSecretBindings = z.infer<typeof CatalogSecretBindingsSchema>;
 
 /** `cip_` and 22 base64url characters: one preview, 128 random bits. */
 export const CatalogInstallPreviewIdSchema = z.string().regex(/^cip_[A-Za-z0-9_-]{22}$/u, 'invalid install preview id');
@@ -111,7 +118,7 @@ export const CatalogInstallPreviewSchema = z.strictObject({
   /** Where it would write, in words: a folder, `.mcp.json`, or a runtime and profile. */
   destination: z.string().min(1),
   review: z.array(CatalogReviewEntrySchema),
-  secrets: z.array(CatalogInstallSecretSchema),
+  secrets: z.array(CatalogInstallSecretSchema).max(CATALOG_MCP_MAX_ENV),
   warnings: z.array(CatalogInstallWarningSchema),
   /** The install this would replace at the same target, when there is one. */
   replaces: z.strictObject({ installId: CatalogInstallIdSchema, version: z.number().int().min(1) }).optional(),
@@ -126,7 +133,7 @@ export type CatalogInstallPreview = z.infer<typeof CatalogInstallPreviewSchema>;
  */
 export const CatalogInstallRequestSchema = z.strictObject({
   previewId: CatalogInstallPreviewIdSchema,
-  secretBindings: z.record(SecretNameSchema, SecretNameSchema.nullable()),
+  secretBindings: CatalogSecretBindingsSchema,
 });
 export type CatalogInstallRequest = z.infer<typeof CatalogInstallRequestSchema>;
 
@@ -138,7 +145,7 @@ export const CatalogInstallSchema = z.strictObject({
   target: CatalogInstallTargetSchema,
   destination: z.string().min(1),
   /** Placeholder → the installer's own secret it was bound to, or `null` when left unbound. */
-  secretBindings: z.record(SecretNameSchema, SecretNameSchema.nullable()),
+  secretBindings: CatalogSecretBindingsSchema,
 });
 export type CatalogInstall = z.infer<typeof CatalogInstallSchema>;
 

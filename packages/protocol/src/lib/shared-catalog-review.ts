@@ -17,7 +17,12 @@
  */
 import { z } from 'zod';
 import { commandLine } from './fleet-clone-review.ts';
-import { CATALOG_SKILL_ENTRY_FILE, type CatalogMcpSetup, type SharedCatalogItem } from './shared-catalog.ts';
+import {
+  CATALOG_SKILL_ENTRY_FILE,
+  HIDDEN_CHARACTER_SOURCE,
+  type CatalogMcpSetup,
+  type SharedCatalogItem,
+} from './shared-catalog.ts';
 
 /** One thing an item brings, in words. */
 export const CatalogReviewEntrySchema = z.strictObject({
@@ -43,6 +48,12 @@ export const CATALOG_INSTALL_WARNING_CODES = [
   'edited-locally',
   /** The first install from this publisher: its fingerprint is pinned from now on. */
   'first-publisher',
+  /** It fetches packages from a registry other than the public one, which can serve anything for a version. */
+  'package-registry',
+  /** A skill carries files a tool runs or obeys on its own when it opens the folder. */
+  'runs-on-its-own',
+  /** A carried file holds invisible or text-direction characters; the review shows each one marked. */
+  'hidden-characters',
 ] as const;
 export const CatalogInstallWarningCodeSchema = z.enum(CATALOG_INSTALL_WARNING_CODES);
 export type CatalogInstallWarningCode = z.infer<typeof CatalogInstallWarningCodeSchema>;
@@ -55,6 +66,24 @@ export type CatalogInstallWarning = z.infer<typeof CatalogInstallWarningSchema>;
 
 // ── Every file and every command ─────────────────────────────────────────────────────────────────
 
+/**
+ * Invisible and text-direction characters, and controls other than a tab, a line break and a carriage
+ * return — a fresh global matcher each time, since `lastIndex` is state.
+ */
+const hiddenCharacters = (): RegExp =>
+  new RegExp(String.raw`[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F${HIDDEN_CHARACTER_SOURCE}]`, 'gu');
+
+/**
+ * A file's text with each hidden character written as `⟨U+202E⟩`, so the review shows what the file
+ * holds rather than what it makes the screen look like (Trojan Source). The install writes the bytes as
+ * published; only what a person reads is marked.
+ */
+export const revealHidden = (text: string): string =>
+  text.replace(
+    hiddenCharacters(),
+    character => `⟨U+${(character.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}⟩`,
+  );
+
 /** `SKILL.md` first, then every other file by path, each in full. Paths are unique (the schema says so). */
 const skillEntries = (files: readonly { readonly path: string; readonly content: string }[]): CatalogReviewEntry[] =>
   [
@@ -62,7 +91,7 @@ const skillEntries = (files: readonly { readonly path: string; readonly content:
     ...files
       .filter(file => file.path !== CATALOG_SKILL_ENTRY_FILE)
       .toSorted((left, right) => (left.path < right.path ? -1 : 1)),
-  ].map(file => ({ label: `Skill file ${file.path}`, text: file.content, document: true }));
+  ].map(file => ({ label: `Skill file ${file.path}`, text: revealHidden(file.content), document: true }));
 
 const mcpEntries = (setup: CatalogMcpSetup): CatalogReviewEntry[] => {
   if (setup.transport === 'url') {
@@ -102,7 +131,7 @@ export function catalogItemReview(item: SharedCatalogItem): readonly CatalogRevi
   }
 }
 
-// ── Unpinned packages ────────────────────────────────────────────────────────────────────────────
+// ── Packages fetched at launch ───────────────────────────────────────────────────────────────────
 
 /** What fetches a package at launch, and the package it would fetch. */
 export interface UnpinnedPackage {
@@ -116,156 +145,311 @@ export interface UnpinnedPackage {
 const programName = (command: string): string =>
   (command.split(/[/\\]/u).at(-1) ?? command).replace(/\.(?:exe|cmd|bat)$/iu, '').toLowerCase();
 
-/** An exact npm version: `1.2.3`, `1.2.3-beta.1`, `1.2.3+build`. A range or a tag is not. */
+/** An exact version: `1.2.3`, `v1.2.3`, `1.2.3-beta.1`, `1.2.3+build`. A range or a tag is not. */
 const EXACT_SEMVER = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u;
 
-/** `@scope/name@1.2.3` or `name@1.2.3` → the version part, or `undefined` when none is written. */
-const npmVersion = (spec: string): string | undefined => {
+/** `name@1.2.3` or `@scope/name@1.2.3` → its two halves; the version is `undefined` when none is written. */
+const splitAt = (spec: string): { readonly name: string; readonly version: string | undefined } => {
   const at = spec.indexOf('@', spec.startsWith('@') ? 1 : 0);
-  return at === -1 ? undefined : spec.slice(at + 1);
+  return at === -1 ? { name: spec, version: undefined } : { name: spec.slice(0, at), version: spec.slice(at + 1) };
 };
 
-const npmName = (spec: string): string => {
-  const at = spec.indexOf('@', spec.startsWith('@') ? 1 : 0);
-  return at === -1 ? spec : spec.slice(0, at);
-};
+const LOCAL_PATH = /^(?:\.{0,2}\/|file:)/u;
 
 /**
- * A spec a package manager resolves to a FIXED thing: an exact version, a local path, or a git commit.
- * A tag (`latest`, `next`), a range (`^1`, `~1.2`, `1.x`, `>=1`) or nothing at all resolves to whatever
- * is newest when the ferret starts.
+ * An npm spec that resolves to a FIXED thing: an exact version, a local path, or a git commit. A tag
+ * (`latest`, `next`), a range (`^1`, `~1.2`, `1.x`, `>=1`) or nothing at all resolves to whatever is
+ * newest when the ferret starts.
  */
 const npmPinned = (spec: string): boolean => {
-  if (/^(?:\.{0,2}\/|file:)/u.test(spec)) return true;
+  if (LOCAL_PATH.test(spec)) return true;
   if (/^(?:git\+|github:|https?:)/u.test(spec)) return /#[0-9a-f]{40}$/u.test(spec);
-  const version = npmVersion(spec);
+  const { version } = splitAt(spec);
   return version !== undefined && EXACT_SEMVER.test(version);
 };
 
 /** Python: `name==1.2.3` (pip, uvx, pipx) or `name@1.2.3` (uvx). `>=`, `~=` and no version are not pinned. */
 const pythonPinned = (spec: string): boolean => {
-  if (/^(?:\.{0,2}\/|file:)/u.test(spec)) return true;
+  if (LOCAL_PATH.test(spec)) return true;
   if (/^git\+/u.test(spec)) return /@[0-9a-f]{40}$/u.test(spec);
   const exact = /^[A-Za-z0-9._-]+(?:\[[^\]]*\])?(?:==|@)(.+)$/u.exec(spec);
-  return exact !== null && /^[0-9][0-9A-Za-z.+!-]*$/u.test(exact[1] ?? '') && exact[1] !== 'latest';
+  return exact !== null && /^[0-9][0-9A-Za-z.+!-]*$/u.test(exact[1] ?? '');
 };
 
 const pythonName = (spec: string): string => spec.split(/==|@|>=|<=|~=|!=|>|<|\[/u)[0] ?? spec;
 
-/** A container image is fixed only by digest. A missing tag or `latest` moves; any other tag can be re-pushed. */
-const imageMoves = (image: string): boolean => {
-  if (image.includes('@sha256:')) return false;
-  const lastSegment = image.split('/').at(-1) ?? image;
-  const colon = lastSegment.lastIndexOf(':');
-  return colon === -1 || lastSegment.slice(colon + 1) === 'latest';
-};
-
-/** The first argument that is not a flag, skipping a flag's own value for flags known to take one. */
-const firstOperand = (
-  args: readonly string[],
-  valued: ReadonlySet<string>,
-): { index: number; value: string } | undefined => {
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index] ?? '';
-    if (arg === '--') return index + 1 < args.length ? { index: index + 1, value: args[index + 1] ?? '' } : undefined;
-    if (arg.startsWith('-')) {
-      if (!arg.includes('=') && valued.has(arg)) index += 1;
-      continue;
-    }
-    return { index, value: arg };
-  }
-  return undefined;
-};
-
-/** The value of `--flag value` or `--flag=value`, for any of `flags`. */
-const flagValue = (args: readonly string[], flags: readonly string[]): string | undefined => {
+/** Every value of `--flag value` or `--flag=value`, for any of `flags`. */
+const flagValues = (args: readonly string[], flags: readonly string[]): readonly string[] => {
+  const values: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index] ?? '';
     for (const flag of flags) {
-      if (arg === flag) return args[index + 1];
-      if (arg.startsWith(`${flag}=`)) return arg.slice(flag.length + 1);
+      if (arg === flag && index + 1 < args.length) values.push(args[index + 1] ?? '');
+      else if (arg.startsWith(`${flag}=`)) values.push(arg.slice(flag.length + 1));
     }
   }
-  return undefined;
+  return values;
 };
 
-const NPX_VALUED = new Set(['-p', '--package', '-c', '--call', '--registry', '--cache', '--userconfig']);
-const UVX_VALUED = new Set(['--from', '--with', '-w', '--python', '-p', '--index', '--index-url', '--extra-index-url']);
+/** The arguments after the leading flags, skipping each flag's own value for flags known to take one. */
+const operands = (args: readonly string[], valued: ReadonlySet<string>): readonly string[] => {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? '';
+    if (arg === '--') return args.slice(index + 1);
+    if (!arg.startsWith('-')) return args.slice(index);
+    if (!arg.includes('=') && valued.has(arg)) index += 1;
+  }
+  return [];
+};
+
+const NPX_VALUED = new Set([
+  '-p',
+  '--package',
+  '-c',
+  '--call',
+  '--registry',
+  '--cache',
+  '--userconfig',
+  '--prefix',
+  '-w',
+  '--workspace',
+]);
+const UV_VALUED = new Set([
+  '--from',
+  '--with',
+  '-w',
+  '--with-requirements',
+  '--with-editable',
+  '--python',
+  '-p',
+  '--index',
+  '--index-url',
+  '--default-index',
+  '--extra-index-url',
+  '--find-links',
+  '-f',
+  '--index-strategy',
+  '--cache-dir',
+  '--directory',
+  '--project',
+  '--spec',
+  '--config-file',
+]);
 const DOCKER_VALUED = new Set([
+  '-a',
+  '--attach',
+  '--add-host',
+  '--cap-add',
+  '--cap-drop',
+  '--cgroupns',
+  '--cidfile',
+  '--cpu-shares',
+  '-c',
+  '--cpus',
+  '--cpuset-cpus',
+  '--device',
+  '--dns',
   '-e',
   '--env',
-  '-v',
-  '--volume',
-  '-p',
-  '--publish',
-  '--name',
-  '-w',
-  '--workdir',
-  '-u',
-  '--user',
-  '--network',
   '--env-file',
   '--entrypoint',
-  '--mount',
-  '--platform',
+  '--expose',
+  '--gpus',
+  '--group-add',
+  '-h',
+  '--hostname',
+  '--health-cmd',
+  '--ip',
+  '--ipc',
   '-l',
   '--label',
-  '--add-host',
-  '--cpus',
+  '--label-file',
+  '--link',
+  '--log-driver',
+  '--log-opt',
+  '--mac-address',
   '-m',
   '--memory',
+  '--memory-swap',
+  '--mount',
+  '--name',
+  '--network',
+  '--network-alias',
+  '-p',
+  '--publish',
+  '--pid',
+  '--platform',
+  '--pull',
+  '--restart',
+  '--runtime',
+  '--security-opt',
+  '--shm-size',
+  '--stop-signal',
+  '--stop-timeout',
+  '--tmpfs',
+  '-u',
+  '--user',
+  '--ulimit',
+  '--userns',
+  '--uts',
+  '-v',
+  '--volume',
+  '--volumes-from',
+  '-w',
+  '--workdir',
 ]);
+const DENO_VALUED = new Set(['-c', '--config', '--lock', '--import-map', '--cert', '--location', '--seed']);
 
-const npmLike = (launcher: string, args: readonly string[]): UnpinnedPackage | null => {
-  const packaged = flagValue(args, ['-p', '--package']);
-  const spec = packaged ?? firstOperand(args, NPX_VALUED)?.value;
-  if (spec === undefined || npmPinned(spec)) return null;
-  return { launcher, target: npmName(spec) };
+/** Shells and wrappers whose `-c`/`/c` string is itself a command line to read. */
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'cmd', 'powershell', 'pwsh']);
+const SHELL_COMMAND_FLAGS = ['-c', '/c', '/C', '-Command', '-command'];
+
+/** The simple commands in a shell string: split on `&&`, `||`, `;` and `|`, then on spaces, quotes dropped. */
+const shellCommands = (line: string): readonly (readonly string[])[] =>
+  line
+    .split(/&&|\|\||[;|]/u)
+    .map(part =>
+      part
+        .trim()
+        .split(/\s+/u)
+        .map(word => word.replace(/^["']|["']$/gu, ''))
+        .filter(word => word !== ''),
+    )
+    .filter(words => words.length > 0);
+
+/** A registry or index other than the public one: it can serve any bytes for any version. */
+const REGISTRY_FLAGS = ['--registry', '--index-url', '--extra-index-url', '--index', '--default-index', '--find-links'];
+const REGISTRY_ENV =
+  /^(?:NPM_CONFIG_REGISTRY|NPM_CONFIG_USERCONFIG|BUN_CONFIG_REGISTRY|YARN_REGISTRY|YARN_NPM_REGISTRY_SERVER|UV_INDEX|UV_INDEX_URL|UV_DEFAULT_INDEX|UV_EXTRA_INDEX_URL|UV_FIND_LINKS|PIP_INDEX_URL|PIP_EXTRA_INDEX_URL|PIP_FIND_LINKS|GOPROXY|GOFLAGS)$/u;
+
+/** How deep a shell string inside a shell string is read. Past it, the line is still shown in full. */
+const MAX_WRAPPER_DEPTH = 3;
+
+const npmLike = (launcher: string, args: readonly string[], depth: number): UnpinnedPackage[] => {
+  const calls = flagValues(args, ['-c', '--call']).flatMap(line =>
+    shellCommands(line).flatMap(([program = '', ...rest]) => launched(program, rest, depth + 1)),
+  );
+  const packages = flagValues(args, ['-p', '--package']);
+  const specs = packages.length > 0 ? packages : operands(args, NPX_VALUED).slice(0, 1);
+  return [...specs.filter(spec => !npmPinned(spec)).map(spec => ({ launcher, target: splitAt(spec).name })), ...calls];
 };
 
-const pythonLike = (launcher: string, args: readonly string[]): UnpinnedPackage | null => {
-  const from = flagValue(args, ['--from', '--spec']);
-  const spec = from ?? firstOperand(args, UVX_VALUED)?.value;
-  if (spec === undefined || pythonPinned(spec)) return null;
-  return { launcher, target: pythonName(spec) };
+const pythonLike = (launcher: string, args: readonly string[], main: boolean): UnpinnedPackage[] => {
+  const from = flagValues(args, ['--from', '--spec']);
+  const mainSpecs = main ? (from.length > 0 ? from : operands(args, UV_VALUED).slice(0, 1)) : [];
+  return [...mainSpecs, ...flagValues(args, ['--with', '-w'])]
+    .filter(spec => !pythonPinned(spec))
+    .map(spec => ({ launcher, target: pythonName(spec) }));
 };
 
-/**
- * Whether this command line downloads what it runs at every launch without naming a fixed version
- * (gap G6, owner decision Q15: warned, not refused). Recognises npx, bunx, `npm exec`, `pnpm dlx`/`pnpx`,
- * `yarn dlx`, uvx, `uv tool run`, `pipx run`, and `docker`/`podman run`. Anything else is a program
- * already on the machine, which the review shows by its command line.
- */
-export function unpinnedPackage(command: string, args: readonly string[]): UnpinnedPackage | null {
+/** The subcommand after any leading flags, and what follows it. */
+const subcommand = (args: readonly string[]): { readonly name: string; readonly rest: readonly string[] } => {
+  const index = args.findIndex(arg => !arg.startsWith('-'));
+  return index === -1 ? { name: '', rest: [] } : { name: args[index] ?? '', rest: args.slice(index + 1) };
+};
+
+/** A container image is fixed only by its digest: a missing tag or `latest` moves, and any tag can be re-pushed. */
+const containerRun = (program: string, args: readonly string[]): UnpinnedPackage[] => {
+  const run = args[0] === 'run' ? args.slice(1) : args[0] === 'container' && args[1] === 'run' ? args.slice(2) : null;
+  if (run === null) return [];
+  const image = operands(run, DOCKER_VALUED)[0];
+  return image === undefined || image.includes('@sha256:') ? [] : [{ launcher: `${program} run`, target: image }];
+};
+
+/** Every package this command line fetches at launch without a fixed version. */
+function launched(command: string, args: readonly string[], depth: number): UnpinnedPackage[] {
+  if (depth > MAX_WRAPPER_DEPTH) return [];
   const program = programName(command);
+  const { name, rest } = subcommand(args);
+  if (SHELLS.has(program)) {
+    return flagValues(args, SHELL_COMMAND_FLAGS).flatMap(line =>
+      shellCommands(line).flatMap(([inner = '', ...innerArgs]) => launched(inner, innerArgs, depth + 1)),
+    );
+  }
   switch (program) {
+    case 'env': {
+      // `env [-i] NAME=value … program args`
+      const at = args.findIndex(arg => !arg.startsWith('-') && !arg.includes('='));
+      return at === -1 ? [] : launched(args[at] ?? '', args.slice(at + 1), depth + 1);
+    }
     case 'npx':
     case 'bunx':
     case 'pnpx':
-      return npmLike(program, args);
+      return npmLike(program, args, depth);
     case 'npm':
-      return args[0] === 'exec' || args[0] === 'x' ? npmLike(`npm ${args[0]}`, args.slice(1)) : null;
+      return name === 'exec' || name === 'x' ? npmLike(`npm ${name}`, rest, depth) : [];
     case 'pnpm':
     case 'yarn':
+      return name === 'dlx' ? npmLike(`${program} dlx`, rest, depth) : [];
     case 'bun':
-      return args[0] === 'dlx' || (program === 'bun' && args[0] === 'x')
-        ? npmLike(`${program} ${args[0]}`, args.slice(1))
-        : null;
+      return name === 'x' ? npmLike('bun x', rest, depth) : [];
     case 'uvx':
-      return pythonLike('uvx', args);
+      return pythonLike('uvx', args, true);
     case 'uv':
-      return args[0] === 'tool' && args[1] === 'run' ? pythonLike('uv tool run', args.slice(2)) : null;
+      if (name === 'tool' && rest[0] === 'run') return pythonLike('uv tool run', rest.slice(1), true);
+      return name === 'run' ? pythonLike('uv run', rest, false) : [];
     case 'pipx':
-      return args[0] === 'run' ? pythonLike('pipx run', args.slice(1)) : null;
+      return name === 'run' ? pythonLike('pipx run', rest, true) : [];
     case 'docker':
-    case 'podman': {
-      if (args[0] !== 'run') return null;
-      const image = firstOperand(args.slice(1), DOCKER_VALUED)?.value;
-      return image !== undefined && imageMoves(image) ? { launcher: `${program} run`, target: image } : null;
+    case 'podman':
+      return containerRun(program, args);
+    case 'go': {
+      const spec = name === 'run' ? operands(rest, new Set())[0] : undefined;
+      if (spec === undefined || !spec.includes('@')) return [];
+      const { name: module, version } = splitAt(spec);
+      return version !== undefined && EXACT_SEMVER.test(version) ? [] : [{ launcher: 'go run', target: module }];
+    }
+    case 'deno': {
+      const spec = name === 'run' ? operands(rest, DENO_VALUED)[0] : undefined;
+      if (spec === undefined) return [];
+      if (/^https?:/u.test(spec)) return [{ launcher: 'deno run', target: spec }];
+      const registry = /^(?:npm|jsr):(.+)$/u.exec(spec)?.[1];
+      return registry === undefined || npmPinned(registry)
+        ? []
+        : [{ launcher: 'deno run', target: splitAt(registry).name }];
+    }
+    case 'nix': {
+      const ref = name === 'run' || name === 'shell' ? operands(rest, new Set())[0] : undefined;
+      return ref === undefined || LOCAL_PATH.test(ref) || /(?:rev=|\/)[0-9a-f]{40}/u.test(ref)
+        ? []
+        : [{ launcher: `nix ${name}`, target: ref }];
     }
     default:
-      return null;
+      return [];
   }
+}
+
+/**
+ * Every package this command line downloads at launch without naming a fixed version (gap G6, owner
+ * decision Q15: warned, not refused). Recognises npx, bunx, `npm exec`, `pnpm dlx`/`pnpx`, `yarn dlx`,
+ * `bun x`, uvx, `uv tool run`, `uv run --with`, `pipx run`, `docker`/`podman run`, `go run`, `deno run`
+ * and `nix run`/`nix shell`, inside `sh -c`, `cmd /c`, `env` and `npx -c` too. Anything else is a program
+ * already on the machine, which the review shows by its command line.
+ *
+ * Even an exact version is only the top of the tree: its own dependencies resolve fresh at each install.
+ */
+export function unpinnedPackages(command: string, args: readonly string[]): readonly UnpinnedPackage[] {
+  return launched(command, args, 0);
+}
+
+/**
+ * Where this command line fetches packages from, when it is not the public registry: a `--registry` or
+ * `--index-url` flag anywhere, or a variable that sets one. An exact version means nothing there — that
+ * registry serves whatever bytes it likes for it.
+ */
+export function packageRegistries(
+  command: string,
+  args: readonly string[],
+  env: Readonly<Record<string, string>>,
+): readonly string[] {
+  const words = [command, ...args, ...args.flatMap(arg => shellCommands(arg).flat())];
+  return [
+    ...flagValues(words, REGISTRY_FLAGS),
+    ...Object.keys(env)
+      .toSorted()
+      .filter(name => REGISTRY_ENV.test(name))
+      .map(name => `${name}=${env[name] ?? ''}`),
+  ].filter((value, index, all) => all.indexOf(value) === index);
 }
 
 // ── Warnings ─────────────────────────────────────────────────────────────────────────────────────
@@ -275,21 +459,52 @@ const SCRIPT_EXTENSION = /\.(?:sh|bash|zsh|fish|py|js|mjs|cjs|ts|rb|pl|php|ps1|b
 const isScript = (file: { readonly path: string; readonly content: string }): boolean =>
   SCRIPT_EXTENSION.test(file.path) || file.content.startsWith('#!');
 
+/** Files a tool runs or obeys on its own when it opens the folder: a direnv file, editor tasks, package scripts. */
+const RUNS_ON_ITS_OWN =
+  /(?:^|\/)(?:\.envrc|\.env|package\.json|Makefile|\.pre-commit-config\.yaml|\.mcp\.json|\.(?:vscode|idea|husky|claude|codex|agents)\/.*)$/u;
+
+const listed = (paths: readonly string[]): string => paths.join(', ');
+
+/** Which carried files hold an invisible or text-direction character, which the review shows marked. */
+const filesWithHidden = (files: readonly { readonly path: string; readonly content: string }[]): string[] =>
+  files.filter(file => hiddenCharacters().test(file.content)).map(file => file.path);
+
 /**
  * What a person must read before installing this item, from the item alone. The installer adds the
  * warnings only it can know (`first-publisher`, `older-version`, `edited-locally`).
  */
 export function catalogItemWarnings(item: SharedCatalogItem): readonly CatalogInstallWarning[] {
   if (item.kind === 'skill') {
-    const scripts = item.skill.files.filter(isScript).map(file => file.path);
-    return scripts.length === 0
-      ? []
-      : [
-          {
-            code: 'carries-scripts',
-            text: `This skill carries ${scripts.length === 1 ? 'a script' : `${scripts.length} scripts`} a ferret may run: ${scripts.join(', ')}. Read ${scripts.length === 1 ? 'it' : 'them'} before installing.`,
-          },
-        ];
+    const files = item.skill.files;
+    const scripts = files.filter(isScript).map(file => file.path);
+    const automatic = files.filter(file => RUNS_ON_ITS_OWN.test(file.path)).map(file => file.path);
+    const hidden = filesWithHidden(files);
+    return [
+      ...(scripts.length === 0
+        ? []
+        : [
+            {
+              code: 'carries-scripts' as const,
+              text: `This skill carries ${scripts.length === 1 ? 'a script' : `${scripts.length} scripts`} a ferret may run: ${listed(scripts)}. Read ${scripts.length === 1 ? 'it' : 'them'} before installing.`,
+            },
+          ]),
+      ...(automatic.length === 0
+        ? []
+        : [
+            {
+              code: 'runs-on-its-own' as const,
+              text: `Some tools run or obey these files on their own when they open the folder: ${listed(automatic)}. Read them before installing.`,
+            },
+          ]),
+      ...(hidden.length === 0
+        ? []
+        : [
+            {
+              code: 'hidden-characters' as const,
+              text: `${listed(hidden)} ${hidden.length === 1 ? 'holds' : 'hold'} invisible or text-direction characters, shown below as ⟨U+…⟩. They can make text read differently from what it says.`,
+            },
+          ]),
+    ];
   }
   if (item.kind !== 'mcp') return [];
   const setup = item.mcp;
@@ -301,13 +516,17 @@ export function catalogItemWarnings(item: SharedCatalogItem): readonly CatalogIn
       },
     ];
   }
-  const unpinned = unpinnedPackage(setup.command, setup.args);
-  return unpinned === null
-    ? []
-    : [
-        {
-          code: 'unpinned-package',
-          text: `${unpinned.launcher} ${unpinned.target} has no fixed version. It runs whatever is newest each time a ferret starts, so it can change without an update.`,
-        },
-      ];
+  const unpinned = unpinnedPackages(setup.command, setup.args).map(
+    (found): CatalogInstallWarning => ({
+      code: 'unpinned-package',
+      text: `${found.launcher} ${found.target} has no fixed version. It runs whatever is newest each time a ferret starts, so it can change without an update.`,
+    }),
+  );
+  const registries = packageRegistries(setup.command, setup.args, setup.env).map(
+    (registry): CatalogInstallWarning => ({
+      code: 'package-registry',
+      text: `It fetches packages from ${registry}, not the public registry. That registry can serve different files for the same version, so this item can change without an update.`,
+    }),
+  );
+  return [...unpinned, ...registries];
 }

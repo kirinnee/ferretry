@@ -247,3 +247,29 @@ describe('documents with no one canonical spelling', () => {
     });
   });
 });
+
+describe('what the security review found (PR #1166)', () => {
+  it('should not sign a manifest its own schema refuses, so it never signs what every reader rejects', async () => {
+    const identity = await newDaemonIdentity();
+    const manifest = await publish(identity.daemonId, skill(identity.daemonId));
+    const extra = { ...manifest, note: 'not in the schema' } as unknown as SharedCatalogManifest;
+    should(await signCatalogManifest(relayCrypto, identity, extra)).match({ ok: false, refusal: 'manifest_invalid' });
+  });
+
+  it('should refuse an item whose harness is not the one its manifest line lists', async () => {
+    const { signedManifest, item } = await signed();
+    should(await verifyCatalogItem(relayCrypto, signedManifest.manifest, { ...item, harness: 'codex' })).match({
+      ok: false,
+      refusal: 'item_mismatch',
+    });
+  });
+
+  it('should name nothing from an unverified manifest when the signature fails', async () => {
+    const { signedManifest } = await signed();
+    const result = await verifySignedCatalogManifest(relayCrypto, {
+      ...signedManifest,
+      manifest: { ...signedManifest.manifest, publisherName: 'Anthropic' },
+    });
+    should(result).match({ ok: false, reason: 'This catalog was not signed by the machine it names.' });
+  });
+});

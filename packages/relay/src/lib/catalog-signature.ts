@@ -23,6 +23,7 @@ import {
   type SharedCatalogFile,
   type SharedCatalogItem,
   type SharedCatalogManifest,
+  SharedCatalogManifestSchema,
   type SharedCatalogManifestEntry,
   type SignedCatalogManifest,
 } from '@ferretry/protocol';
@@ -34,7 +35,7 @@ import { publicKeyMatchesDaemonId } from './identity.ts';
 export { CATALOG_MANIFEST_SIGNATURE_LABEL };
 
 /** Why a catalog did not verify. Each is a different sentence for the person. */
-export type CatalogVerificationRefusal = 'signature_invalid' | 'item_mismatch' | 'not_canonical';
+export type CatalogVerificationRefusal = 'signature_invalid' | 'item_mismatch' | 'not_canonical' | 'manifest_invalid';
 
 export type CatalogVerification<T> =
   | { readonly ok: true; readonly value: T }
@@ -77,6 +78,14 @@ export async function signCatalogManifest(
   identity: DaemonIdentity,
   manifest: SharedCatalogManifest,
 ): Promise<CatalogVerification<SignedCatalogManifest>> {
+  // Parsed here, so a typed object carrying anything the schema refuses is never signed: every reader
+  // would refuse it, and the publisher would have signed something it cannot show anyone.
+  const parsed = SharedCatalogManifestSchema.safeParse(manifest);
+  if (!parsed.success)
+    return refuse(
+      'manifest_invalid',
+      `This catalog cannot be signed: ${parsed.error.issues[0]?.message ?? 'it is malformed'}.`,
+    );
   if (manifest.publisher !== identity.daemonId)
     return refuse('signature_invalid', 'A machine signs only catalogs it publishes itself.');
   const signed = await manifestSignedBytes(crypto, manifest);
@@ -96,7 +105,8 @@ export async function verifySignedCatalogManifest(
 ): Promise<CatalogVerification<SharedCatalogManifest>> {
   const spki = fromBase64UrlFixed(signed.spki, ED25519_SPKI_BYTES);
   const sig = fromBase64UrlFixed(signed.sig, ED25519_SIGNATURE_BYTES);
-  const notSigned = `This catalog was not signed by the machine it names (${signed.manifest.publisherName}).`;
+  // No name from the manifest in this sentence: nothing in it is trusted until the signature holds.
+  const notSigned = 'This catalog was not signed by the machine it names.';
   if (spki === null || sig === null) return refuse('signature_invalid', notSigned);
   if (!(await publicKeyMatchesDaemonId(crypto, spki, signed.manifest.publisher)))
     return refuse('signature_invalid', notSigned);
@@ -125,7 +135,8 @@ export async function verifyCatalogItem(
     entry.version !== item.itemVersion ||
     entry.kind !== item.kind ||
     entry.name !== item.name ||
-    entry.summary !== item.summary
+    entry.summary !== item.summary ||
+    entry.harness !== item.harness
   )
     return refuse('item_mismatch', mismatch);
   const measured = await catalogItemDigest(crypto, item);

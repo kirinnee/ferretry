@@ -59,7 +59,8 @@ const write = (value: unknown, depth: number, where: string): string => {
       return writeString(value, where);
     case 'object': {
       if (Array.isArray(value)) {
-        return `[${value
+        // `Array.from`, not `map`: a hole in a sparse array reads as `undefined` and is refused, not skipped.
+        return `[${Array.from(value as readonly unknown[])
           .map((element: unknown, index) => {
             if (element === undefined)
               throw new NotCanonical(`${where}[${index}] is undefined, which JSON cannot hold`);

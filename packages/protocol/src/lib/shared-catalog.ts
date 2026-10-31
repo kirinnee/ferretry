@@ -36,7 +36,13 @@ import { isCanonicalAssetPath } from './fleet-clone-review.ts';
 import { InstantSchema } from './common.ts';
 import { DaemonIdSchema } from './pairing.ts';
 import { SECRET_REFERENCE_SOURCE } from './secrets.ts';
-import { mcpServerRefusal, SessionMcpEnvNameSchema, SessionMcpNameSchema } from './session-mcp.ts';
+import {
+  mcpServerRefusal,
+  RAW_KEY_PREFIXES,
+  SECRET_SOUNDING_NAME,
+  SessionMcpEnvNameSchema,
+  SessionMcpNameSchema,
+} from './session-mcp.ts';
 
 // ── Formats and bounds ───────────────────────────────────────────────────────────────────────────
 
@@ -78,30 +84,41 @@ const utf8Length = (text: string): number => new TextEncoder().encode(text).leng
 // ── Words a person reads ─────────────────────────────────────────────────────────────────────────
 
 /**
- * Characters that change how text LOOKS without being seen: C0 and C1 controls, and the bidirectional
- * overrides and isolates. A catalog's name is the publisher's own text and is shown beside the
- * installer's own label for that publisher; an override could make "Anthropic" out of other letters, or
- * hide the end of a name. Refused in every label, and in a description everything but a line break.
+ * Characters that change how text LOOKS without being seen (Trojan Source, CVE-2021-42574): the
+ * bidirectional overrides, isolates and marks; zero-width spaces, joiners and the word joiner; the soft
+ * hyphen; the line and paragraph separators; the Hangul fillers; variation selectors; tag characters;
+ * the byte-order mark; and the interlinear annotation marks. Written as escapes, so this source never
+ * holds one itself.
+ *
+ * A catalog's name is the publisher's own text, shown beside the installer's own label for that
+ * publisher. One of these could make "Anthropic" out of other letters, hide the end of a name, or make
+ * two different file names look the same in the review \u2014 and the review is the control.
  */
-// Written as escapes in a string, so the source never holds an invisible character itself.
-const DIRECTION_MARKS = String.raw`\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069`;
-const INVISIBLE_IN_LABEL = new RegExp(String.raw`[\u0000-\u001F\u007F-\u009F${DIRECTION_MARKS}]`, 'u');
-const INVISIBLE_IN_TEXT = new RegExp(String.raw`[\u0000-\u0009\u000B-\u001F\u007F-\u009F${DIRECTION_MARKS}]`, 'u');
+export const HIDDEN_CHARACTER_SOURCE = String.raw`\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0\uFFF9-\uFFFB\u{E0000}-\u{E007F}\u{E0100}-\u{E01EF}`;
+/** C0 and C1 controls, except tab and line feed. */
+const CONTROLS = String.raw`\u0000-\u0008\u000B-\u001F\u007F-\u009F`;
 
-const words = (max: number, invisible: RegExp) =>
+/** Anything hidden, any control, a tab or a line break: for one-line text a person reads as a name. */
+const HIDDEN_IN_LINE = new RegExp(String.raw`[${CONTROLS}\u0009\u000A${HIDDEN_CHARACTER_SOURCE}]`, 'u');
+/** Anything hidden or any control, but tabs and line breaks are fine: for longer text. */
+const HIDDEN_IN_TEXT = new RegExp(String.raw`[${CONTROLS}${HIDDEN_CHARACTER_SOURCE}]`, 'u');
+
+const NO_HIDDEN = 'no control, invisible or text-direction characters';
+
+const words = (max: number, hidden: RegExp) =>
   z
     .string()
     .min(1)
     .max(max)
     .refine(text => text.trim() === text, 'no spaces at the start or the end')
-    .refine(text => !invisible.test(text), 'no control or text-direction characters');
+    .refine(text => !hidden.test(text), NO_HIDDEN);
 
 /** A catalog's or a publisher's name, as its publisher wrote it. */
-export const CatalogLabelSchema = words(80, INVISIBLE_IN_LABEL);
+export const CatalogLabelSchema = words(80, HIDDEN_IN_LINE);
 /** One line about an item. */
-export const CatalogSummarySchema = words(280, INVISIBLE_IN_LABEL);
+export const CatalogSummarySchema = words(280, HIDDEN_IN_LINE);
 /** A catalog's description: may hold line breaks. Empty is allowed. */
-export const CatalogDescriptionSchema = z.union([z.literal(''), words(2_000, INVISIBLE_IN_TEXT)]);
+export const CatalogDescriptionSchema = z.union([z.literal(''), words(2_000, HIDDEN_IN_TEXT)]);
 
 // ── Identifiers ──────────────────────────────────────────────────────────────────────────────────
 
@@ -145,20 +162,51 @@ export const CatalogSignatureSchema = base64UrlOf(64);
 
 // ── Items ────────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * One folder or file name inside a skill: ASCII letters, digits, `.`, `_` and `-`, at most 255.
+ *
+ * An allowlist rather than a list of refusals, because every name outside it is a way for two paths to
+ * look alike in the review or land on one file: case folding beyond ASCII (`σ`/`ς`), Unicode
+ * normalisation (`é` two ways), invisible characters, and Windows's own rules (a trailing `.` or space,
+ * `name::$DATA`). A project install lands in a repository a teammate on Windows may check out, so its
+ * reserved device names are refused too.
+ */
+const SKILL_SEGMENT = /^[A-Za-z0-9._-]{1,255}$/u;
+const WINDOWS_DEVICE = /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/iu;
+
+/** Why one path segment cannot be carried, or `null` when it can. */
+const segmentProblem = (segment: string): string | null => {
+  if (!SKILL_SEGMENT.test(segment))
+    return `${JSON.stringify(segment)} uses a character other than A-Z, a-z, 0-9, ., _ and -`;
+  if (segment.endsWith('.')) return `${segment} ends with a dot`;
+  if (WINDOWS_DEVICE.test(segment)) return `${segment} is a device name on Windows`;
+  // A carried `.git` folder is a repository inside the skill: its config can name programs (`fsmonitor`)
+  // that any `git` run in that folder starts, with nothing in the review that looks like a script.
+  if (segment.toLowerCase() === '.git') return 'a skill cannot carry a .git folder';
+  return null;
+};
+
 /** One file of a skill, relative to the skill's own folder, carried as text. */
 export const CatalogSkillFileSchema = z.strictObject({
   path: z
     .string()
     .max(CATALOG_SKILL_PATH_MAX_LENGTH)
     .refine(isCanonicalAssetPath, 'a plain relative path inside the skill: no leading /, ~ or $, no . or .., no \\')
-    .refine(path => !INVISIBLE_IN_LABEL.test(path), 'no control or text-direction characters in a path')
-    .refine(path => path.split('/').length <= CATALOG_SKILL_PATH_MAX_DEPTH, 'nested too deep'),
+    .refine(path => path.split('/').length <= CATALOG_SKILL_PATH_MAX_DEPTH, 'nested too deep')
+    .check(ctx => {
+      for (const segment of ctx.value.split('/')) {
+        const problem = segmentProblem(segment);
+        if (problem === null) continue;
+        ctx.issues.push({ code: 'custom', message: problem, input: ctx.value });
+        return;
+      }
+    }),
   content: z.string().refine(content => utf8Length(content) <= CATALOG_SKILL_FILE_MAX_BYTES, 'larger than 256 KiB'),
 });
 export type CatalogSkillFile = z.infer<typeof CatalogSkillFileSchema>;
 
-/** How two paths could land on ONE file: a case-insensitive or normalising file system (macOS). */
-const collisionKey = (path: string): string => path.normalize('NFC').toLowerCase();
+/** How two paths could land on ONE file on a case-insensitive file system. Paths are ASCII, so this is all. */
+const collisionKey = (path: string): string => path.toLowerCase();
 
 /**
  * A skill: a folder with `SKILL.md` at its root and up to 200 text files. Every path is written one way,
@@ -182,7 +230,7 @@ export const CatalogSkillSchema = z
         issue(
           earlier === file.path
             ? `${file.path} is carried twice`
-            : `${earlier} and ${file.path} would be one file on a Mac, so neither is carried`,
+            : `${earlier} and ${file.path} would be one file on a Mac or on Windows, so neither is carried`,
         );
         return;
       }
@@ -213,34 +261,58 @@ const HTTP_URL = /^https?:\/\/[^\s/?#@]+(?:[/?#][^\s]*)?$/u;
 
 // biome-ignore lint/suspicious/noTemplateCurlyInString: the reference grammar, written out for a person to read
 const NO_SUBSTITUTION = 'a secret travels only as a whole environment value, ${secret:NAME}; nothing else may hold ${';
+// biome-ignore lint/suspicious/noTemplateCurlyInString: the reference grammar, written out for a person to read
+const RAW_KEY = 'this looks like a raw key: name a secret as a whole environment value, ${secret:NAME}, instead';
+
+/** The pieces of a value a key could hide in: words, and each side of `=`, `&`, `?`, `/`, `:` and quotes. */
+const pieces = (value: string): readonly string[] => value.split(/[\s=&?#/:,;"'`]+/u).filter(piece => piece !== '');
+
+/**
+ * A HEURISTIC, not a guarantee: whether a value carries what looks like a raw key — a known provider
+ * prefix anywhere in it, or a long unbroken value right after a secret-sounding name (`--token=…`,
+ * `?api_key=…`). A key with no known prefix under an innocent name is not found by anything.
+ */
+/** A word that says the next one is a credential: a secret-sounding name, or an HTTP auth scheme. */
+const announcesKey = (word: string): boolean =>
+  SECRET_SOUNDING_NAME.test(word.toUpperCase()) || /^(?:bearer|basic)$/iu.test(word);
+
+const holdsRawKey = (value: string): boolean => {
+  const parts = pieces(value);
+  return parts.some(
+    (part, index) =>
+      (RAW_KEY_PREFIXES.test(part) && part.length >= 20) ||
+      (index > 0 && announcesKey(parts[index - 1] ?? '') && part.length >= 16),
+  );
+};
+
+/** One line a person reads as a command, an address or an id. */
+const plainLine = (max: number) =>
+  z
+    .string()
+    .min(1)
+    .max(max)
+    .refine(text => !HIDDEN_IN_LINE.test(text), NO_HIDDEN)
+    .refine(text => !substitutes(text), NO_SUBSTITUTION)
+    .refine(text => !holdsRawKey(text), RAW_KEY);
+
+/** An argument or a value: tabs and line breaks are fine (the review quotes them), nothing hidden is. */
+const plainText = z
+  .string()
+  .max(4_096)
+  .refine(text => !HIDDEN_IN_TEXT.test(text), NO_HIDDEN);
 
 /** A program the installer's runtimes start, with its arguments and environment. */
 const CatalogMcpCommandSchema = z.strictObject({
   transport: z.literal('command'),
-  command: z
-    .string()
-    .min(1)
-    .max(1_024)
-    .refine(text => !substitutes(text), NO_SUBSTITUTION),
-  args: z
-    .array(
-      z
-        .string()
-        .max(4_096)
-        .refine(text => !substitutes(text), NO_SUBSTITUTION),
-    )
-    .max(CATALOG_MCP_MAX_ARGS),
+  command: plainLine(1_024),
+  args: z.array(plainText.refine(text => !substitutes(text), NO_SUBSTITUTION)).max(CATALOG_MCP_MAX_ARGS),
   /** Each value is a literal with no `${` in it, or exactly `${secret:NAME}` — a placeholder the installer fills. */
   env: z
     .record(
       SessionMcpEnvNameSchema,
-      z
-        .string()
-        .max(4_096)
-        .refine(value => !substitutes(value) || WHOLE_SECRET_PLACEHOLDER.test(value), NO_SUBSTITUTION),
+      plainText.refine(value => !substitutes(value) || WHOLE_SECRET_PLACEHOLDER.test(value), NO_SUBSTITUTION),
     )
     .refine(env => Object.keys(env).length <= CATALOG_MCP_MAX_ENV, `at most ${CATALOG_MCP_MAX_ENV} variables`),
-  harness: CatalogHarnessSchema.optional(),
 });
 
 /** A server the installer's runtimes reach at an address. */
@@ -248,45 +320,49 @@ const CatalogMcpUrlSchema = z.strictObject({
   transport: z.literal('url'),
   // A plain pattern rather than `z.url()`, which accepts `javascript:` and `data:`. No user name or
   // password in the address: that is a credential in plain text.
-  url: z
-    .string()
-    .max(2_048)
-    .regex(HTTP_URL, 'an http:// or https:// address, with no user name or password in it')
-    .refine(text => !substitutes(text), NO_SUBSTITUTION),
+  url: plainLine(2_048).regex(HTTP_URL, 'an http:// or https:// address, with no user name or password in it'),
   /** The installer signs in to it from their own machine (docs/mcp-oauth.md). A token never travels. */
   auth: z.literal('oauth').optional(),
   /** A client registered by hand with the provider. Its client SECRET has no field: it never travels. */
   oauth: z
     .strictObject({
-      clientId: z.string().min(1).max(512),
+      clientId: plainLine(512),
       callbackPort: z.number().int().min(1024).max(65_535).optional(),
     })
     .optional(),
-  harness: CatalogHarnessSchema.optional(),
 });
 
 /**
  * One MCP server definition, as McpComponentSchema's fields, minus everything that would carry a
- * credential. Refused when it looks like it holds a raw key, by the rule the MCP forms run.
+ * credential. Refused when it looks like it holds a raw key: by the rule the MCP forms run, and by
+ * {@link holdsRawKey} on every argument and value. Both are heuristics; the guarantee is only that no
+ * FIELD exists for a secret value, and that `${` reaches nothing but a placeholder the installer fills.
  */
 export const CatalogMcpSetupSchema = z
   .discriminatedUnion('transport', [CatalogMcpCommandSchema, CatalogMcpUrlSchema])
   .check(ctx => {
     const setup = ctx.value;
+    const issue = (message: string, path: (string | number)[]): void => {
+      ctx.issues.push({ code: 'custom', message, input: setup, path });
+    };
     if (setup.transport === 'url') {
-      if (setup.oauth !== undefined && setup.auth !== 'oauth')
-        ctx.issues.push({ code: 'custom', message: '"oauth" needs "auth": "oauth"', input: setup, path: ['oauth'] });
+      if (setup.oauth !== undefined && setup.auth !== 'oauth') issue('"oauth" needs "auth": "oauth"', ['oauth']);
       if (setup.auth === 'oauth' && !setup.url.startsWith('https://'))
-        ctx.issues.push({
-          code: 'custom',
-          message: 'a server signed in to is reached over https://',
-          input: setup,
-          path: ['url'],
-        });
+        issue('a server signed in to is reached over https://', ['url']);
       return;
     }
     const refusal = mcpServerRefusal('login', setup);
-    if (refusal !== null) ctx.issues.push({ code: 'custom', message: refusal, input: setup, path: [] });
+    if (refusal !== null) return issue(refusal, []);
+    const args = setup.args.findIndex(
+      (arg, index) => holdsRawKey(arg) || holdsRawKey(`${setup.args[index - 1] ?? ''} ${arg}`),
+    );
+    if (args !== -1) return issue(RAW_KEY, ['args', args]);
+    // A placeholder is a NAME, never a key, however long or secret-sounding it is.
+    const name = Object.keys(setup.env).find(key => {
+      const value = setup.env[key] ?? '';
+      return !WHOLE_SECRET_PLACEHOLDER.test(value) && holdsRawKey(`${key} ${value}`);
+    });
+    if (name !== undefined) issue(`${name}: ${RAW_KEY}`, ['env', name]);
   });
 export type CatalogMcpSetup = z.infer<typeof CatalogMcpSetupSchema>;
 
@@ -308,6 +384,8 @@ const ItemHeadShape = {
   itemVersion: z.number().int().min(1),
   name: CatalogItemNameSchema,
   summary: CatalogSummarySchema,
+  /** Which harness it is written for. Absent means either. Its manifest line must say the same. */
+  harness: CatalogHarnessSchema.optional(),
 };
 
 /**
@@ -424,7 +502,10 @@ export const SharedCatalogFileSchema = z
           ? 'belongs to another catalog'
           : entry === undefined
             ? 'is not listed in the signed manifest'
-            : entry.version !== item.itemVersion || entry.kind !== item.kind || entry.name !== item.name
+            : entry.version !== item.itemVersion ||
+                entry.kind !== item.kind ||
+                entry.name !== item.name ||
+                entry.harness !== item.harness
               ? 'is not the version the signed manifest lists'
               : undefined;
       carried.add(item.itemId);
@@ -448,7 +529,8 @@ export type SharedCatalogFileReading =
  * nothing about who made it — the signature and digests are checked by `verifySharedCatalogFile`.
  */
 export function readSharedCatalogFile(text: string): SharedCatalogFileReading {
-  if (utf8Length(text) > SHARED_CATALOG_FILE_MAX_BYTES)
+  // UTF-8 never takes fewer bytes than UTF-16 code units, so the cheap length refuses first, then the exact one.
+  if (text.length > SHARED_CATALOG_FILE_MAX_BYTES || utf8Length(text) > SHARED_CATALOG_FILE_MAX_BYTES)
     return { ok: false, reason: 'This catalog file is larger than 32 MiB, so it was not read.' };
   let document: unknown;
   try {

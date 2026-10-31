@@ -371,3 +371,119 @@ describe('no schema has a field for a secret value, a code or a private key', ()
     expect(offenders).toEqual([]);
   });
 });
+
+describe('what the security review found (PR #1166)', () => {
+  /** By code point, so this source holds no invisible character itself. */
+  const at = (...points: number[]) => String.fromCodePoint(...points);
+
+  it('refuses every invisible character in a label, not only the direction overrides', () => {
+    for (const hidden of [
+      0x200b, 0x200c, 0x200d, 0x2060, 0xfeff, 0x00ad, 0x2028, 0x2029, 0xe0041, 0x3164, 0x115f, 0xfe0f, 0x034f,
+    ]) {
+      expect([hidden.toString(16), CatalogLabelSchema.safeParse(`An${at(hidden)}thropic`).success]).toEqual([
+        hidden.toString(16),
+        false,
+      ]);
+    }
+    expect(CatalogLabelSchema.safeParse('a\nb').success).toBe(false);
+    expect(CatalogLabelSchema.safeParse('Kirin’s skills · kirin-box').success).toBe(true);
+  });
+
+  it('allows only plain ASCII names in a skill, and refuses .git, Windows device names and a trailing dot', () => {
+    const md = { path: 'SKILL.md', content: '#' };
+    for (const path of [
+      '.git/config',
+      'sub/.GIT/hooks/pre-commit',
+      `SKILL${at(0x200b)}.md`,
+      'a b.md',
+      'notes.',
+      'CON',
+      'con.txt',
+      'lpt1/x',
+      'SKILL.md::$DATA',
+      'aσ.md',
+      'x'.repeat(256),
+    ]) {
+      expect([path, CatalogSkillSchema.safeParse({ files: [md, { path, content: '' }] }).success]).toEqual([
+        path,
+        false,
+      ]);
+    }
+    // Two names one case-insensitive file system treats as one.
+    expect(
+      CatalogSkillSchema.safeParse({ files: [md, { path: 'A.md', content: '' }, { path: 'a.md', content: '' }] })
+        .success,
+    ).toBe(false);
+    for (const path of ['.gitignore', 'scripts/run.sh', 'a_b-c.d.md', 'console.md', 'x'.repeat(255)]) {
+      expect([path, CatalogSkillSchema.safeParse({ files: [md, { path, content: '' }] }).success]).toEqual([
+        path,
+        true,
+      ]);
+    }
+  });
+
+  it('refuses hidden characters in a command, an argument, a value, an address and a client id', () => {
+    const rlo = at(0x202e);
+    for (const setup of [
+      { ...COMMAND, command: `np${rlo}x` },
+      { ...COMMAND, args: [`a${rlo}b`] },
+      { ...COMMAND, env: { LOG_LEVEL: `in${at(0x200b)}fo` } },
+      { transport: 'url', url: `https://evil.example/${rlo}google.com` },
+      { transport: 'url', url: 'https://\u0000x' },
+      { transport: 'url', url: 'https://x.example', auth: 'oauth', oauth: { clientId: `a${rlo}` } },
+    ]) {
+      expect(CatalogMcpSetupSchema.safeParse(setup).success).toBe(false);
+    }
+    // A line break in an argument is shown quoted by the review, so it may travel.
+    expect(CatalogMcpSetupSchema.safeParse({ ...COMMAND, args: ['line one\nline two'] }).success).toBe(true);
+  });
+
+  it('refuses a key hidden inside a value, an argument or an address — a heuristic, said as one', () => {
+    for (const setup of [
+      { transport: 'url', url: 'https://x.example/?token=sk-abcdefghijklmnopqrstuvwxyz' },
+      { transport: 'url', url: 'https://x.example/mcp?api_key=abcdef0123456789abcdef' },
+      { ...COMMAND, args: ['--token=ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'] },
+      { ...COMMAND, args: ['--api-key', 'abcdef0123456789abcdef'] },
+      { ...COMMAND, env: { API_KEY: 'Bearer sk-abcdefghijklmnopqrstuvwxyz' } },
+      { ...COMMAND, env: { HEADERS: 'Authorization: Bearer abcdef0123456789abcdef' } },
+    ]) {
+      expect([JSON.stringify(setup), CatalogMcpSetupSchema.safeParse(setup).success]).toEqual([
+        JSON.stringify(setup),
+        false,
+      ]);
+    }
+    // Ordinary flags and values pass: the heuristic needs a key-like prefix, or a long value after a secret-sounding word.
+    for (const args of [
+      ['--read-only', '--title', 'a long title for this server'],
+      ['--token-file', '/run/token'],
+    ]) {
+      expect(CatalogMcpSetupSchema.safeParse({ ...COMMAND, args }).success).toBe(true);
+    }
+  });
+
+  it('binds the harness an item says it is for to its manifest line', () => {
+    const claude = { ...skillItem(), harness: 'claude' };
+    expect(SharedCatalogFileSchema.safeParse(file([claude])).success).toBe(false);
+    const listed = manifest({ items: [{ ...entry(SKILL_ID, 'skill', 'pdf-tools', 2), harness: 'claude' }] });
+    expect(
+      SharedCatalogFileSchema.safeParse({
+        ...file([claude]),
+        signedManifest: { manifest: listed, spki: SPKI, sig: SIG },
+      }).success,
+    ).toBe(true);
+  });
+
+  it('refuses a file larger than its bound by its length alone, before measuring its bytes', () => {
+    const read = readSharedCatalogFile('x'.repeat(SHARED_CATALOG_FILE_MAX_BYTES + 1));
+    expect(read.ok ? '' : read.reason).toContain('larger than 32 MiB');
+  });
+});
+
+describe('a placeholder is a name, not a key', () => {
+  it('accepts a long, secret-sounding placeholder name', () => {
+    expect(
+      CatalogMcpSetupSchema.safeParse({ ...COMMAND, env: { GITHUB_TOKEN: '${secret:GITHUB_TOKEN_READONLY_FOR_CI}' } })
+        .success,
+    ).toBe(true);
+  });
+});
