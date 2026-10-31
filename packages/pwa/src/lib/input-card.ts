@@ -11,6 +11,7 @@
  */
 
 import {
+  INPUT_ERROR_CODES,
   type InputBrowserFieldFacts,
   type InputDeliverBody,
   type InputDeliverResult,
@@ -492,15 +493,45 @@ interface HttpFailure {
   readonly message?: unknown;
 }
 
-/** A failed Send as a sentence, and what kind it is: each needs a different next step from the owner. */
-export const inputFailure = (error: unknown): InputFailure => {
+/** What the card calls the surface a value goes into, in the sentences a failed Send is told in. */
+const SURFACE_WORDS: Readonly<Record<InputRequest['target']['kind'], string>> = {
+  browser: 'page',
+  terminal: 'terminal',
+  secret: 'secret store',
+};
+
+/**
+ * The words for a card the daemon REDREW: the target changed under it but is still the same field or prompt, so the
+ * daemon looked again, took a new picture and asks the owner to check it. Nothing was typed and nothing counted.
+ */
+const reboundWords = (kind: InputRequest['target']['kind'] | undefined): string =>
+  kind === 'terminal'
+    ? 'The terminal redrew its prompt. Check it and send again.'
+    : kind === 'browser' || kind === undefined
+      ? 'The page changed. Check the picture and send again.'
+      : 'The secret store changed. Check the card and send again.';
+
+/**
+ * A failed Send as a sentence, and what kind it is: each needs a different next step from the owner. `kind` is the
+ * card's target, so a sentence names the page or the terminal it is about.
+ */
+export const inputFailure = (error: unknown, kind?: InputRequest['target']['kind']): InputFailure => {
   const failure = (error !== null && typeof error === 'object' ? error : {}) as HttpFailure;
   const message = typeof failure.message === 'string' && failure.message !== '' ? failure.message : undefined;
-  if (failure.status === 409 && failure.code === 'target_changed')
+  const surface = kind === undefined ? 'target' : SURFACE_WORDS[kind];
+  if (failure.status === 409 && failure.code === INPUT_ERROR_CODES.targetRebound)
+    return { kind: 'changed', definitive: true, text: reboundWords(kind) };
+  if (failure.status === 409 && failure.code === INPUT_ERROR_CODES.targetChanged)
     return {
       kind: 'changed',
       definitive: true,
-      text: 'The target changed since this card was drawn, so nothing was typed. Ferretry is looking at it again.',
+      text: `The ${surface} is no longer what this card showed, so nothing was typed. Check the card before you send again.`,
+    };
+  if (failure.status === 410 && failure.code === INPUT_ERROR_CODES.targetUnsettled)
+    return {
+      kind: 'gone',
+      definitive: true,
+      text: `The ${surface} kept changing, so nothing was typed and this request ended. Ask the ferret to request again.`,
     };
   if (failure.status === 409 && failure.code === 'already_delivered')
     return { kind: 'already', definitive: true, text: 'This was already sent.' };

@@ -115,8 +115,9 @@ describe('the input request routes', () => {
     const stale = await dispatch.dispatch(post(path(requestId, 'deliver'), deliverBody('f'.repeat(64))));
     const missing = await dispatch.dispatch(post(path('f'.repeat(32), 'deliver'), deliverBody(digest)));
 
+    // A card older than the request: answered so the client reads it again, and nothing is counted.
     should(stale.status).equal(409);
-    should(jsonBody(stale).code).equal('target_changed');
+    should(jsonBody(stale).code).equal('target_rebound');
     should(missing.status).equal(404);
     should(writes).eql([]);
   });

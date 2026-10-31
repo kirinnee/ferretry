@@ -235,6 +235,38 @@ describe('inputFailure', () => {
     expect(inputFailure({ status: 400, message: 'a value with a line break' }).text).toBe('a value with a line break');
   });
 
+  it('asks the owner to check a redrawn card and send again, naming the page or the terminal (#B100)', () => {
+    const page = inputFailure({ status: 409, code: INPUT_ERROR_CODES.targetRebound }, 'browser');
+    const terminal = inputFailure({ status: 409, code: INPUT_ERROR_CODES.targetRebound }, 'terminal');
+
+    expect(page).toEqual({
+      kind: 'changed',
+      definitive: true,
+      text: 'The page changed. Check the picture and send again.',
+    });
+    expect(terminal.text).toBe('The terminal redrew its prompt. Check it and send again.');
+    expect(inputFailure({ status: 409, code: INPUT_ERROR_CODES.targetRebound }, 'secret').text).toBe(
+      'The secret store changed. Check the card and send again.',
+    );
+    expect(inputFailure({ status: 409, code: INPUT_ERROR_CODES.targetRebound }).text).toBe(
+      'The page changed. Check the picture and send again.',
+    );
+  });
+
+  it('says in plain words why a request that kept changing ended, never "check failures" (#B100)', () => {
+    const ended = inputFailure({ status: 410, code: INPUT_ERROR_CODES.targetUnsettled }, 'browser');
+    const changed = inputFailure({ status: 409, code: INPUT_ERROR_CODES.targetChanged }, 'browser');
+
+    expect(ended.kind).toBe('gone');
+    expect(ended.text).toBe(
+      'The page kept changing, so nothing was typed and this request ended. Ask the ferret to request again.',
+    );
+    expect(ended.text).not.toContain('check failures');
+    expect(changed.text).toBe(
+      'The page is no longer what this card showed, so nothing was typed. Check the card before you send again.',
+    );
+  });
+
   it('keeps the delivery id after an unanswered send, so a second press cannot type twice', () => {
     const lost = inputFailure(new TypeError('network down'));
     expect(lost.definitive).toBe(false);

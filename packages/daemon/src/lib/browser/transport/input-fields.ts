@@ -11,7 +11,7 @@ import {
   type BrowserInputShot,
   type BrowserInputValue,
 } from './input-contracts.ts';
-import { type ActablePage, BROWSER_PROBE_TIMEOUT_MS, browserElementOf } from './page-acts.ts';
+import { type ActablePage, BROWSER_PROBE_TIMEOUT_MS, browserElementOf, browserSelectorOf } from './page-acts.ts';
 
 /**
  * WHAT THE BROWSER WORKER DOES FOR THE INPUT BRIDGE (docs/input-requests.md, "Pages"): look at the fields an
@@ -81,6 +81,8 @@ export interface InputHandle {
 /** The slice of a locator the input calls use: which element, and a hold on it. */
 export interface InputLocator {
   first(): InputLocator;
+  /** The element at this index of the ones it matches; a re-find looks at each candidate in turn. */
+  nth(index: number): InputLocator;
   count(): Promise<number>;
   elementHandle(options: { readonly timeout: number }): Promise<InputHandle | null>;
 }
@@ -391,13 +393,31 @@ async function observeField(
   subject: InputSubject,
   pointer: BrowserInputFieldPointer,
 ): Promise<InputBrowserFieldFacts | undefined> {
-  let handle: InputHandle | null;
+  let element: InputLocator;
   try {
-    const element = (await browserElementOf(
+    element = (await browserElementOf(
       subject.page as unknown as ActablePage,
       pointer.target as BrowserElementTarget,
     )) as unknown as InputLocator;
     if ((await element.count().catch(() => 0)) === 0) return undefined;
+  } catch {
+    return undefined;
+  }
+  return await observeLocated(subject, pointer.id, element);
+}
+
+/**
+ * Looks at the one element a locator holds, as the card's field `fieldId`: the node Playwright holds, described by
+ * the session that holds it, then its frame, attributes and box. `undefined` when it holds none; a throw when the
+ * element's identity cannot be proved.
+ */
+async function observeLocated(
+  subject: InputSubject,
+  fieldId: string,
+  element: InputLocator,
+): Promise<InputBrowserFieldFacts | undefined> {
+  let handle: InputHandle | null;
+  try {
     handle = await element.elementHandle({ timeout: BROWSER_PROBE_TIMEOUT_MS });
   } catch {
     return undefined;
@@ -438,7 +458,7 @@ async function observeField(
     const covered = !(await onTop(session, backendNodeId));
     subject.sessions.remember(frameId, session, owned);
     return {
-      fieldId: pointer.id,
+      fieldId,
       frameOrigin: originOfUrl(frame.url()),
       frameId,
       backendNodeId,
@@ -467,29 +487,148 @@ export async function observeInputFields(
   subject: InputSubject,
   fields: readonly BrowserInputFieldPointer[],
 ): Promise<BrowserInputObservation> {
-  const { page } = subject;
   const observed: InputBrowserFieldFacts[] = [];
   for (const pointer of fields) {
     const found = await observeField(subject, pointer);
     if (found === undefined) return { ok: false, missing: pointer.id };
     observed.push(found);
   }
+  return { ok: true, facts: await pageFactsOf(subject, observed) };
+}
+
+/** The page's own facts around fields that were looked at: its origin, whether it is secure, its document, a challenge. */
+async function pageFactsOf(
+  subject: InputSubject,
+  observed: readonly InputBrowserFieldFacts[],
+): Promise<BrowserInputFacts> {
+  const { page } = subject;
   const url = page.url();
   const challenge = recogniseBrowserChallenge({
     url,
     title: await titleOf(page),
     frameUrls: page.frames().map(frame => frame.url()),
   });
-  const facts = {
+  return {
     kind: 'browser',
     pageId: subject.pageId,
     origin: originOfUrl(url),
     secure: isSecureUrl(url),
     navigationId: await navigationIdOf(await subject.cdp.page()),
-    fields: observed,
+    fields: [...observed],
     ...(challenge === undefined ? {} : { challenge }),
   } satisfies BrowserInputFacts;
-  return { ok: true, facts };
+}
+
+/** The most elements a re-find looks at for one field: more than this many look-alikes is never one field. */
+export const INPUT_REFIND_MAX_CANDIDATES = 8;
+
+/**
+ * A CSS string value, quoted, with a backslash and a quote escaped so the value cannot end the selector. The
+ * attributes it quotes went through {@link inputFieldAttributes}, which leaves no control character in them.
+ */
+const cssString = (value: string): string => `"${value.replace(/[\\"]/gu, match => `\\${match}`)}"`;
+
+/**
+ * A selector for elements with a field's tag and the attributes the card recorded. A value cut at its limit is
+ * matched by its start, since the element's own value is longer; {@link inputFieldAttributes} cuts the candidate
+ * the same way, so the exact comparison after it still decides.
+ */
+export function inputFieldSelector(field: FieldAttributes): string {
+  const tag = /^[a-z][a-z0-9-]*$/u.test(field.tag) ? field.tag : '*';
+  const parts = (Object.keys(FIELD_LIMITS) as (keyof typeof FIELD_LIMITS)[]).map(name => {
+    const value = field[name];
+    if (value === undefined) return '';
+    return `[${name}${value.length >= FIELD_LIMITS[name] ? '^=' : '='}${cssString(value)}]`;
+  });
+  // Named as CSS, so no part of a value is read as another selector engine.
+  return `css=${tag}${parts.join('')}`;
+}
+
+/** A candidate is the field the card showed: the same frame origin, tag and attributes, and the owner can see it. */
+const isSameField = (want: InputBrowserFieldFacts, got: InputBrowserFieldFacts): boolean =>
+  got.visible && got.frameOrigin === want.frameOrigin && sameAttributes(got.field, want.field);
+
+/** The same node: a field fact names one node by its target and backend node id. */
+const sameNodeAs = (left: InputBrowserFieldFacts, right: InputBrowserFieldFacts): boolean =>
+  left.frameId === right.frameId && left.backendNodeId === right.backendNodeId;
+
+/**
+ * Every visible element of the page that is the field the card showed, found by its tag and attributes. Strict
+ * against the page itself: more than {@link INPUT_REFIND_MAX_CANDIDATES} elements, one whose identity cannot be
+ * proved or that went away while it was looked at, or one node met twice, makes the whole search `ambiguous`,
+ * so a page that mutates while it is searched never narrows the field down to one.
+ */
+async function lookAlikes(
+  subject: InputSubject,
+  want: InputBrowserFieldFacts,
+): Promise<InputBrowserFieldFacts[] | 'ambiguous'> {
+  const alike = subject.page.locator(inputFieldSelector(want.field));
+  const count = await alike.count().catch(() => 0);
+  if (count > INPUT_REFIND_MAX_CANDIDATES) return 'ambiguous';
+  const matches: InputBrowserFieldFacts[] = [];
+  const seen: InputBrowserFieldFacts[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const found = await observeLocated(subject, want.fieldId, alike.nth(index)).catch(() => undefined);
+    if (found === undefined || seen.some(other => sameNodeAs(other, found))) return 'ambiguous';
+    seen.push(found);
+    if (isSameField(want, found)) matches.push(found);
+  }
+  return matches;
+}
+
+/**
+ * One field of a re-find, in order: the node the owner approved, when it is still there and still that field; the
+ * agent's pointer, when it names exactly one element that is that field; the page's ONE look-alike. A search the page
+ * disturbed is `ambiguous` before the pointer is asked: nothing narrows a page that changes under the search.
+ */
+async function refindField(
+  subject: InputSubject,
+  want: InputBrowserFieldFacts,
+  pointer: BrowserInputFieldPointer | undefined,
+): Promise<InputBrowserFieldFacts | 'missing' | 'ambiguous'> {
+  const matches = await lookAlikes(subject, want);
+  if (matches === 'ambiguous') return 'ambiguous';
+  const approved = matches.find(found => sameNodeAs(found, want));
+  if (approved !== undefined) return approved;
+  if (pointer !== undefined) {
+    const named = subject.page.locator(browserSelectorOf(pointer.target as BrowserElementTarget));
+    if ((await named.count().catch(() => 0)) === 1) {
+      const found = await observeLocated(subject, want.fieldId, named.first()).catch(() => undefined);
+      if (found !== undefined && isSameField(want, found)) return found;
+    }
+  }
+  const [only, ...more] = matches;
+  if (only === undefined) return 'missing';
+  return more.length > 0 ? 'ambiguous' : only;
+}
+
+/**
+ * THE FIELDS A CARD SHOWED, FOUND AGAIN after the page changed under it: a re-render replaced the node (a new
+ * backend node id, so the agent's ref is stale), a countdown moved the box, or a reload made a new document.
+ *
+ * Each field is the node the owner approved when it is still there, else the agent's pointer when it names exactly
+ * one element that is still that field, else the ONE visible element of the page's main frame (or an open shadow
+ * root) with the same tag and attributes. Every candidate is
+ * looked at exactly as {@link observeInputFields} looks — the node Playwright holds, described by the session that
+ * holds it — so the identity is proved the same way. None is `missing`; several, or two fields landing on one
+ * node, is `ambiguous`; nothing is chosen then. It never types: the card is redrawn and the owner sends again.
+ */
+export async function refindInputFields(
+  subject: InputSubject,
+  expected: BrowserInputFacts,
+  fields: readonly BrowserInputFieldPointer[],
+): Promise<BrowserInputObservation> {
+  const found: InputBrowserFieldFacts[] = [];
+  for (const want of expected.fields) {
+    const pointer = fields.find(each => each.id === want.fieldId);
+    const field = await refindField(subject, want, pointer);
+    if (field === 'missing') return { ok: false, missing: want.fieldId };
+    if (field === 'ambiguous') return { ok: false, ambiguous: want.fieldId };
+    if (found.some(other => other.frameId === field.frameId && other.backendNodeId === field.backendNodeId))
+      return { ok: false, ambiguous: want.fieldId };
+    found.push(field);
+  }
+  return { ok: true, facts: await pageFactsOf(subject, found) };
 }
 
 /** Whether the node a field fact names is still the same node: it answers, with the same tag and attributes. */

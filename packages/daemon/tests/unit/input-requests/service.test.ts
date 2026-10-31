@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   type AgendaId,
+  INPUT_MAX_REBINDS,
   type InputDeliverBody,
   type InputEvent,
   type InputQuarantineEvent,
@@ -58,6 +59,8 @@ interface World {
   history: InputEvent[];
   writes: { text: string; submit: boolean }[];
   observes: number;
+  /** Times the target was looked for again after it changed under the card. */
+  refinds: number;
   cards: InputCard[];
   closed: { id: AgendaId; note: string }[];
   told: { id: AgendaId; message: string }[];
@@ -115,6 +118,7 @@ function build(overrides: Partial<World> = {}) {
     history: [],
     writes: [],
     observes: 0,
+    refinds: 0,
     cards: [],
     closed: [],
     told: [],
@@ -156,6 +160,13 @@ function build(overrides: Partial<World> = {}) {
       observe: async (): Promise<ObserveResult> => {
         w.observes += 1;
         await w.observeGate;
+        return w.facts === undefined
+          ? { ok: false, reason: w.observeReason }
+          : { ok: true, facts: w.facts, ...(w.names === undefined ? {} : { names: w.names }) };
+      },
+      // As the router does for a terminal: finding it again is looking again.
+      refind: async (): Promise<ObserveResult> => {
+        w.refinds += 1;
         return w.facts === undefined
           ? { ok: false, reason: w.observeReason }
           : { ok: true, facts: w.facts, ...(w.names === undefined ? {} : { names: w.names }) };
@@ -252,6 +263,9 @@ async function raised(over: Partial<World> = {}, raise: InputRaise = RAISE) {
   if (request === undefined) throw new Error('no request');
   return { ...built, view, request, id: request.id, digest: request.observedDigest ?? '' };
 }
+
+/** Another program now holds the terminal: a genuinely different target, which a Send must refuse and count. */
+const ANOTHER_PROGRAM: InputTargetFacts = { ...FACTS, foreground: { ...FACTS.foreground, pid: 5100, comm: 'bash' } };
 
 const refused = async (promise: Promise<unknown>): Promise<InputRequestError> => {
   try {
@@ -456,7 +470,7 @@ describe('InputRequestService.deliver', () => {
   });
 
   it('should type once when a FAILED attempt is still recording its refusal while two later Sends race', async () => {
-    // Arrange — the first attempt is refused (a digest the card did not show) and its audit is suspended. If
+    // Arrange — the first attempt is refused (another program held the terminal) and its audit is suspended. If
     // the lock covered only the write, the two correct Sends behind it would both pass their guards and type.
     const { w, service, id, digest } = await raised();
     let record: () => void = () => undefined;
@@ -465,8 +479,10 @@ describe('InputRequestService.deliver', () => {
     });
 
     // Act
-    const failing = service.deliver(SESSION, id, bodyFor('c'.repeat(64)), HOST);
+    w.facts = ANOTHER_PROGRAM;
+    const failing = service.deliver(SESSION, id, bodyFor(digest), HOST);
     await new Promise(resolve => setTimeout(resolve, 0));
+    w.facts = FACTS;
     const results = Promise.allSettled([
       service.deliver(SESSION, id, bodyFor(digest), HOST),
       service.deliver(SESSION, id, bodyFor(digest), DEVICE),
@@ -486,13 +502,17 @@ describe('InputRequestService.deliver', () => {
     }
   });
 
-  it('should refuse a digest the card did not show: target_changed, zero writes', async () => {
-    const { w, service, id } = await raised();
-    const error = await refused(service.deliver(SESSION, id, bodyFor('c'.repeat(64)), HOST));
+  it('should refuse a card older than the request without counting it: target_rebound, zero writes', async () => {
+    const { w, service, id, digest } = await raised();
+    for (let n = 0; n < 5; n += 1) {
+      const error = await refused(service.deliver(SESSION, id, bodyFor('c'.repeat(64)), HOST));
+      should(error.code).equal('conflict');
+      should(error.reason).equal('target_rebound');
+    }
 
-    should(error.code).equal('conflict');
-    should(error.reason).equal('target_changed');
     should(w.writes.length).equal(0);
+    should(w.audits.filter(entry => entry.event === 'input.refused')).eql([]);
+    should((await service.deliver(SESSION, id, bodyFor(digest), HOST)).state).equal('delivered');
   });
 
   const mutations: readonly [string, (facts: InputTargetFacts & { kind: 'terminal' }) => InputTargetFacts][] = [
@@ -501,7 +521,6 @@ describe('InputRequestService.deliver', () => {
     ['foreground', f => ({ ...f, foreground: { ...f.foreground, pid: 9999 } })],
     ['program', f => ({ ...f, foreground: { ...f.foreground, comm: 'bash' } })],
     ['echo', f => ({ ...f, echo: 'on' })],
-    ['cursor row', f => ({ ...f, cursorRow: 7 })],
     ['prompt line', f => ({ ...f, promptLineDigest: 'f'.repeat(64) })],
   ];
   for (const [name, mutate] of mutations) {
@@ -525,30 +544,49 @@ describe('InputRequestService.deliver', () => {
     should(w.writes.length).equal(0);
   });
 
-  it('should refuse when the pane vanishes between the check and the write', async () => {
+  it('should refuse when the pane vanishes between the check and the write and is not there again', async () => {
     const { w, service, id, digest } = await raised();
     w.typeResult = 'target_gone';
-    const error = await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
+    let write: () => void = () => undefined;
+    w.gate = new Promise<void>(resolve => {
+      write = resolve;
+    });
+    const sending = refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    should(w.writes.length).equal(1);
+    w.facts = undefined;
+    write();
+    const error = await sending;
 
     should(error.reason).equal('target_changed');
+    should(w.refinds).equal(1);
     should((await service.list(HOST)).length).equal(1);
   });
 
-  it('should end the request after three failed checks', async () => {
+  it('should end the request after three failed checks, saying why in plain words', async () => {
     const { w, service, id, digest } = await raised();
-    for (let n = 0; n < 3; n += 1) await refused(service.deliver(SESSION, id, bodyFor('d'.repeat(64)), HOST));
+    w.facts = ANOTHER_PROGRAM;
+    const errors: InputRequestError[] = [];
+    for (let n = 0; n < 3; n += 1) errors.push(await refused(service.deliver(SESSION, id, bodyFor(digest), HOST)));
     const after = await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
 
+    // Another target, three times: it never says "kept changing", which would invite a fresh request on it.
+    should(errors.map(error => error.reason)).eql(['target_changed', 'target_changed', 'target_changed']);
     should(after.code).equal('gone');
     should(w.events.at(-1)?.type).equal('surface.input_refused');
     should(w.audits.at(-1)?.detail.reason).equal('check_failures');
-    should(w.told.at(-1)?.message).containEql('check failures');
+    should(w.closed.at(-1)?.note).equal(
+      'The terminal is no longer what you approved, so nothing was typed. Look at it before the ferret asks again.',
+    );
+    should(w.told.at(-1)?.message).containEql('(refused: the terminal is no longer what the owner approved)');
+    should(w.told.at(-1)?.message).not.containEql('check failures');
     should(w.writes.length).equal(0);
   });
 
   it('should record each failed check without ending the request', async () => {
-    const { w, service, id } = await raised();
-    await refused(service.deliver(SESSION, id, bodyFor('d'.repeat(64)), HOST));
+    const { w, service, id, digest } = await raised();
+    w.facts = ANOTHER_PROGRAM;
+    await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
 
     should(w.audits.at(-1)?.event).equal('input.refused');
     should(w.audits.at(-1)?.detail.reason).equal('target_changed');
@@ -943,10 +981,11 @@ describe('R7: the agent is never sent to chat for a value', () => {
     });
 
     it(`should point a refused ${sensitivity} request to a fresh request, not chat`, async () => {
-      const { w, service, id } = await raised({}, raise);
-      for (let n = 0; n < 4; n += 1) await refused(service.deliver(SESSION, id, bodyFor('d'.repeat(64)), HOST));
+      const { w, service, id, digest } = await raised({}, raise);
+      w.facts = ANOTHER_PROGRAM;
+      for (let n = 0; n < 4; n += 1) await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
 
-      should(w.told.at(-1)?.message).containEql('check failures');
+      should(w.told.at(-1)?.message).containEql('no longer what the owner approved');
       guided(w.told.at(-1)?.message);
     });
   }
@@ -1040,7 +1079,8 @@ describe('review regressions: delivery is one recorded, serialised, never-repeat
     const restored = build({ history: [...w.events] });
     await restored.service.restore();
 
-    should(error.reason).equal('target_changed');
+    // Looked at again it is the same prompt: the card is redrawn, and the owner sends again.
+    should(error.reason).equal('target_rebound');
     should(w.events.at(-1)?.type).equal('surface.input_requested');
     should((await service.list(HOST)).length).equal(1);
     should((await restored.service.list(HOST)).length).equal(1);
@@ -1684,11 +1724,22 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
       await live.service.deliver(SESSION, live.id, bodyFor(live.digest), HOST);
       should(live.service.quarantinedUntil(SESSION, ['dev'])).not.be.undefined();
 
-      await live.service.deliver(SESSION, second?.id ?? '', bodyFor('not-the-digest'), HOST).catch(() => undefined);
+      // A redraw first (the prompt a row lower), then a refused check (echo came on): neither record names it.
+      live.w.facts = { ...facts, cursorRow: 5 };
+      await live.service
+        .deliver(SESSION, second?.id ?? '', bodyFor(second?.observedDigest ?? ''), HOST)
+        .catch(() => undefined);
+      const redrawn = (await live.service.list(HOST)).find(request => request.id === second?.id);
+      live.w.facts = { ...facts, echo: 'on' };
+      await live.service
+        .deliver(SESSION, second?.id ?? '', bodyFor(redrawn?.observedDigest ?? ''), HOST)
+        .catch(() => undefined);
 
       const record = live.w.audits.filter(entry => entry.event === 'input.refused').at(-1);
+      const rebound = live.w.audits.filter(entry => entry.event === 'input.rebound').at(-1);
       should(record).not.be.undefined();
-      should(JSON.stringify(record)).not.containEql(CANARY);
+      should(rebound).not.be.undefined();
+      should(JSON.stringify([record, rebound])).not.containEql(CANARY);
     });
 
     // R8-3
@@ -2035,5 +2086,103 @@ describe('the pane quarantine: a terminal a secret was typed into is kept from a
     await service.sweep();
 
     should(quarantine.sessions()).eql([]);
+  });
+});
+
+describe('when the terminal changes under the card (#B100)', () => {
+  /** The same sudo prompt, redrawn: the program printed it again a row lower (a resize, a retry, a clear). */
+  const REDRAWN: InputTargetFacts = { ...FACTS, cursorRow: 4 };
+
+  it('should redraw the card for the same prompt redrawn a row lower, count nothing, and type once into it', async () => {
+    const { w, service, id, digest } = await raised();
+    w.facts = REDRAWN;
+
+    const error = await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
+    const [card] = await service.list(HOST);
+    const done = await service.deliver(SESSION, id, bodyFor(card?.observedDigest ?? ''), HOST);
+
+    should(error.code).equal('conflict');
+    should(error.reason).equal('target_rebound');
+    should(error.message).containEql('same prompt');
+    should(card?.state).equal('pending');
+    should(card?.observedDigest).equal(digestFacts(REDRAWN));
+    should(card?.observedDigest).not.equal(digest);
+    should(card?.observed).eql(REDRAWN);
+    should(w.audits.map(entry => entry.event)).eql(['input.requested', 'input.rebound', 'input.delivered']);
+    should(done.state).equal('delivered');
+    should(w.writes).eql([{ text: VALUE, submit: true }]);
+  });
+
+  it('should never count a redraw as a failed check, however many come before the Send that lands', async () => {
+    const { w, service, id } = await raised();
+    let digest = '';
+    for (let row = 2; row < 2 + INPUT_MAX_REBINDS; row += 1) {
+      w.facts = { ...FACTS, cursorRow: row };
+      const [card] = await service.list(HOST);
+      const error = await refused(service.deliver(SESSION, id, bodyFor(card?.observedDigest ?? ''), HOST));
+      should(error.reason).equal('target_rebound');
+      digest = (await service.list(HOST))[0]?.observedDigest ?? '';
+    }
+
+    should(w.audits.filter(entry => entry.event === 'input.refused')).eql([]);
+    should((await service.deliver(SESSION, id, bodyFor(digest), HOST)).state).equal('delivered');
+  });
+
+  it('should end, in plain words, a terminal that keeps redrawing faster than the owner can answer', async () => {
+    const { w, service, id } = await raised();
+    const reasons: (string | undefined)[] = [];
+    for (let row = 2; row < 3 + INPUT_MAX_REBINDS; row += 1) {
+      w.facts = { ...FACTS, cursorRow: row };
+      const [card] = await service.list(HOST);
+      reasons.push((await refused(service.deliver(SESSION, id, bodyFor(card?.observedDigest ?? ''), HOST))).reason);
+    }
+
+    should(reasons).eql([...Array.from({ length: INPUT_MAX_REBINDS }, () => 'target_rebound'), 'target_unsettled']);
+    should(await service.list(HOST)).eql([]);
+    should(w.closed.at(-1)?.note).equal(
+      'The terminal kept changing, so nothing was typed. Ask the ferret to request again.',
+    );
+    should(w.writes).eql([]);
+  });
+
+  const different: readonly [string, InputTargetFacts][] = [
+    ['another program', ANOTHER_PROGRAM],
+    [
+      'the same program run again',
+      { ...FACTS, cursorRow: 4, foreground: { ...FACTS.foreground, pid: 5200, pgid: 5200 } },
+    ],
+    ['another prompt', { ...FACTS, cursorRow: 4, promptLine: 'Password:', promptLineDigest: 'b'.repeat(64) }],
+    ['echo on', { ...FACTS, cursorRow: 4, echo: 'on' }],
+    ['another pane', { ...FACTS, cursorRow: 4, paneProof: { ...FACTS.paneProof, paneId: '%9' } }],
+  ];
+  for (const [name, facts] of different) {
+    it(`should refuse and count it when the terminal now shows ${name}, typing nothing`, async () => {
+      const { w, service, id, digest } = await raised();
+      w.facts = facts;
+      const error = await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
+
+      should(error.reason).equal('target_changed');
+      should(w.audits.at(-1)?.event).equal('input.refused');
+      should((await service.list(HOST))[0]?.observedDigest).equal(digest);
+      should(w.writes).eql([]);
+    });
+  }
+
+  it('should redraw the card, not type again, when the guarded write refused because the prompt moved', async () => {
+    const { w, service, id, digest } = await raised({ typeResult: 'target_changed' });
+    let write: () => void = () => undefined;
+    w.gate = new Promise<void>(resolve => {
+      write = resolve;
+    });
+    const sending = refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    w.facts = REDRAWN;
+    write();
+    const error = await sending;
+
+    should(error.reason).equal('target_rebound');
+    should(w.writes.length).equal(1);
+    should((await service.list(HOST))[0]?.observedDigest).equal(digestFacts(REDRAWN));
+    should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
   });
 });

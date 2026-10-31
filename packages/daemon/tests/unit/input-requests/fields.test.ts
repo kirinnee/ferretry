@@ -87,7 +87,12 @@ function build(options: { facts?: InputTargetFacts; entries?: LoginEntrySummary[
   const fills: { id: string; role: LoginFieldRole }[] = [];
   const saves: { entry: string; label: string; match: string | undefined; fields: object }[] = [];
   const kept: string[] = [];
-  let facts: InputTargetFacts = options.facts ?? PAGE;
+  let facts: InputTargetFacts | undefined = options.facts ?? PAGE;
+  /** What looking for the fields again finds; the page as it is now when unset. */
+  let refound: ObserveResult | undefined;
+  const refinds: InputTargetFacts[] = [];
+  const shots: InputTargetFacts[] = [];
+  const typedInto: InputTargetFacts[] = [];
   let card = 1;
   let id = 1;
   const clock = { now: () => Date.parse('2026-10-31T12:00:00.000Z') };
@@ -103,10 +108,35 @@ function build(options: { facts?: InputTargetFacts; entries?: LoginEntrySummary[
   const page = {
     observe: async (_session: string, _target: InputTarget, fields: readonly InputTargetField[]) => {
       observed.push(fields);
-      return { ok: true, facts, names: ['page-1'] } as ObserveResult;
+      return (
+        facts === undefined ? { ok: false, reason: 'target_gone' } : { ok: true, facts, names: ['page-1'] }
+      ) as ObserveResult;
     },
-    type: async (_session: string, target: InputTarget, typed: readonly InputFieldValue[], submit: boolean) => {
+    refind: async (
+      _session: string,
+      _target: InputTarget,
+      _fields: readonly InputTargetField[],
+      expected: InputTargetFacts,
+    ) => {
+      refinds.push(expected);
+      return (refound ??
+        (facts === undefined
+          ? { ok: false, reason: 'target_gone' }
+          : { ok: true, facts, names: ['page-1'] })) as ObserveResult;
+    },
+    shoot: async (_session: string, _target: InputTarget, seen: InputTargetFacts) => {
+      shots.push(seen);
+      return { pngBase64: `c2hvdA${shots.length}`, clip: { x: 0, y: 0, w: 400, h: 200 } };
+    },
+    type: async (
+      _session: string,
+      target: InputTarget,
+      typed: readonly InputFieldValue[],
+      submit: boolean,
+      expected: InputTargetFacts,
+    ) => {
       writes.push({ target, values: typed, submit });
+      typedInto.push(expected);
       return 'typed' as const;
     },
   };
@@ -159,8 +189,14 @@ function build(options: { facts?: InputTargetFacts; entries?: LoginEntrySummary[
     saves,
     kept,
     values,
-    setFacts: (next: InputTargetFacts) => {
+    refinds,
+    shots,
+    typedInto,
+    setFacts: (next: InputTargetFacts | undefined) => {
       facts = next;
+    },
+    setRefound: (next: ObserveResult | undefined) => {
+      refound = next;
     },
   };
 }
@@ -179,6 +215,15 @@ const send = (digest: string, over: Partial<InputDeliverBody> = {}): InputDelive
   submit: true,
   ...over,
 });
+
+/** A Send of the login card's two typed values. */
+const both = (digest: string): InputDeliverBody =>
+  send(digest, {
+    fields: [
+      { field: 'email', padded: padInputValue(EMAIL) },
+      { field: 'password', padded: padInputValue(PASSWORD) },
+    ],
+  });
 
 const refused = async (promise: Promise<unknown>): Promise<InputRequestError> => {
   try {
@@ -474,23 +519,14 @@ describe('a card of several fields', () => {
     should(view.note).containEql('never try to solve it');
   });
 
-  it('should refuse a Send when a field’s element changed since the card was drawn, typing nothing', async () => {
+  it('should refuse a Send when a field became another kind of field since the card was drawn, typing nothing', async () => {
     const { service, request, writes, setFacts } = await raisedLogin();
-    setFacts({ ...PAGE, fields: [pageField('email'), pageField('password', { backendNodeId: 99 })] });
+    setFacts({
+      ...PAGE,
+      fields: [pageField('email'), pageField('password', { field: { tag: 'input', type: 'text' } })],
+    });
 
-    const error = await refused(
-      service.deliver(
-        SESSION,
-        request.id,
-        send(request.observedDigest ?? '', {
-          fields: [
-            { field: 'email', padded: padInputValue(EMAIL) },
-            { field: 'password', padded: padInputValue(PASSWORD) },
-          ],
-        }),
-        HOST,
-      ),
-    );
+    const error = await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
 
     should(error.message).equal('what is on the page is no longer what the card showed; nothing was typed');
     should(writes).eql([]);
@@ -540,6 +576,39 @@ describe('InputTargetRouter', () => {
       reason: 'unsupported',
     });
     should(await router.type(SESSION, { kind: 'browser', key: 'app' }, [], false, PAGE)).equal('target_gone');
+    should(await router.refind(SESSION, { kind: 'browser', key: 'app' }, [{ id: 'value' }], PAGE)).eql({
+      ok: false,
+      reason: 'unsupported',
+    });
+  });
+
+  it("should send a page's re-find to the browser, and look at a terminal again (#B100)", async () => {
+    const asked: InputTargetFacts[] = [];
+    const page = {
+      observe: async () => ({ ok: false, reason: 'target_gone' }) as ObserveResult,
+      type: async () => 'typed' as const,
+    };
+    const finder = {
+      ...page,
+      refind: async (_s: string, _t: InputTarget, _f: readonly InputTargetField[], expected: InputTargetFacts) => {
+        asked.push(expected);
+        return { ok: true, facts: PAGE } as ObserveResult;
+      },
+    };
+    const app = { kind: 'browser', key: 'app' } as const;
+
+    should(await new InputTargetRouter(terminal, page).refind(SESSION, app, [{ id: 'value' }], PAGE)).eql({
+      ok: false,
+      reason: 'unsupported',
+    });
+    should(await new InputTargetRouter(terminal, finder).refind(SESSION, app, [{ id: 'value' }], PAGE)).eql({
+      ok: true,
+      facts: PAGE,
+    });
+    should(asked).eql([PAGE]);
+    should(
+      await new InputTargetRouter(terminal).refind(SESSION, { kind: 'terminal', key: 'dev' }, [{ id: 'value' }], FACTS),
+    ).eql({ ok: true, facts: FACTS });
   });
 
   it('should type exactly one value into a terminal and refuse any other count with nothing typed', async () => {
@@ -736,6 +805,147 @@ describe('Save as on a login card', () => {
 
     should(error.message).containEql('cannot be kept as one saved login');
     should(request.saved?.saves).be.undefined();
+    should(writes).eql([]);
+  });
+});
+
+describe('when the page changes under the card (#B100)', () => {
+  /** The password input re-rendered as a new node (React replaced it; the agent's ref is stale now). */
+  const RERENDERED: PageFacts = {
+    ...PAGE,
+    fields: [pageField('email'), pageField('password', { backendNodeId: 99, box: { x: 10, y: 64, w: 300, h: 40 } })],
+  };
+
+  it('should redraw the card for a field re-rendered as a new node, then type into the new node', async () => {
+    const { service, request, writes, setFacts, shots, typedInto, told } = await raisedLogin();
+    setFacts(RERENDERED);
+
+    const error = await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
+    const [card] = await service.list(HOST);
+    const picture = service.shot(HOST, SESSION, request.id);
+    const done = await service.deliver(SESSION, request.id, both(card?.observedDigest ?? ''), HOST);
+
+    should(error.code).equal('conflict');
+    should(error.reason).equal('target_rebound');
+    should(error.message).equal(
+      'the page changed since the card was drawn, but it is the same field: Ferretry looked again and redrew the card; check it and send again. Nothing was typed',
+    );
+    should(card?.observed).eql(RERENDERED);
+    should(card?.pictured).equal(true);
+    should(card?.risk?.level).equal('red');
+    should(shots.map(seen => (seen.kind === 'browser' ? seen.fields[1]?.backendNodeId : 0))).eql([12, 99]);
+    should(picture.pngBase64).equal('c2hvdA2');
+    should(done.state).equal('delivered');
+    should(writes.length).equal(1);
+    should(typedInto.map(seen => (seen.kind === 'browser' ? seen.fields[1]?.backendNodeId : 0))).eql([99]);
+    should(told.at(-1)).containEql('was answered and typed');
+  });
+
+  it("should flag a card redrawn onto a new document amber, above the field's own flag", async () => {
+    const { service, request, setFacts } = await raisedLogin();
+    setFacts({ ...RERENDERED, navigationId: 'loader-2' });
+
+    const error = await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
+    const [card] = await service.list(HOST);
+
+    should(error.reason).equal('target_rebound');
+    should(card?.fields.map(field => field.risk?.level)).eql(['red', 'amber']);
+    should(card?.fields[1]?.risk?.reason).equal(
+      'The page loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the one you meant.',
+    );
+    should(request.fields[1]?.risk?.level).equal('green');
+  });
+
+  it('should find a field whose ref went stale by looking for it again, and redraw the card', async () => {
+    const { service, request, setFacts, setRefound, refinds } = await raisedLogin();
+    setFacts(undefined);
+    setRefound({ ok: true, facts: RERENDERED, names: ['page-1'] });
+
+    const error = await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
+
+    should(error.reason).equal('target_rebound');
+    should(refinds).eql([PAGE]);
+    should((await service.list(HOST))[0]?.observed).eql(RERENDERED);
+  });
+
+  it('should type, without redrawing, when the field found again is exactly the one the card showed', async () => {
+    const { service, request, writes, setFacts, setRefound } = await raisedLogin();
+    setFacts(undefined);
+    setRefound({ ok: true, facts: PAGE, names: ['page-1'] });
+
+    const done = await service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST);
+
+    should(done.state).equal('delivered');
+    should(writes.length).equal(1);
+  });
+
+  const different: readonly [string, ObserveResult][] = [
+    ['a page on another origin', { ok: true, facts: { ...RERENDERED, origin: 'https://evil.example' } }],
+    [
+      'the field in a frame from another site',
+      {
+        ok: true,
+        facts: {
+          ...RERENDERED,
+          fields: [
+            pageField('email'),
+            pageField('password', { backendNodeId: 99, frameOrigin: 'https://evil.example' }),
+          ],
+        },
+      },
+    ],
+    [
+      'a password field that became a text field',
+      {
+        ok: true,
+        facts: {
+          ...PAGE,
+          fields: [
+            pageField('email'),
+            pageField('password', { backendNodeId: 99, field: { tag: 'input', type: 'text' } }),
+          ],
+        },
+      },
+    ],
+    [
+      'the field hidden',
+      {
+        ok: true,
+        facts: { ...PAGE, fields: [pageField('email'), pageField('password', { backendNodeId: 99, visible: false })] },
+      },
+    ],
+    ['an http page', { ok: true, facts: { ...RERENDERED, secure: false } }],
+    ['another page', { ok: true, facts: { ...RERENDERED, pageId: 'page-2' } }],
+    ['no such field, or several look-alikes', { ok: false, reason: 'target_gone' }],
+  ];
+  for (const [name, found] of different) {
+    it(`should refuse and count it when looking again finds ${name}`, async () => {
+      const { service, request, writes, setFacts, setRefound } = await raisedLogin();
+      setFacts(undefined);
+      setRefound(found);
+
+      const error = await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
+      const [card] = await service.list(HOST);
+
+      should(error.reason).equal('target_changed');
+      should(card?.observedDigest).equal(request.observedDigest);
+      should(card?.observed).eql(PAGE);
+      should(writes).eql([]);
+    });
+  }
+
+  it('should look again on a navigation to another origin and end the card after three, never typing', async () => {
+    const { service, request, writes, setFacts, closed } = await raisedLogin();
+    setFacts({ ...RERENDERED, origin: 'https://evil.example', navigationId: 'loader-9' });
+    const reasons: (string | undefined)[] = [];
+    for (let n = 0; n < 3; n += 1)
+      reasons.push(
+        (await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST))).reason,
+      );
+
+    should(reasons).eql(['target_changed', 'target_changed', 'target_changed']);
+    should(await service.list(HOST)).eql([]);
+    should(closed.length).equal(1);
     should(writes).eql([]);
   });
 });

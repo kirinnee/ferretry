@@ -34,6 +34,20 @@ export class InputTargetRouter implements InputTargetPort {
     return fields.length === 1 ? await this.terminal.observe(sessionId, target) : { ok: false, reason: 'unsupported' };
   }
 
+  async refind(
+    sessionId: string,
+    target: InputTarget,
+    fields: readonly InputTargetField[],
+    expected: InputTargetFacts,
+  ): Promise<ObserveResult> {
+    if (target.kind === 'browser')
+      return this.browser?.refind === undefined
+        ? { ok: false, reason: 'unsupported' }
+        : await this.browser.refind(sessionId, target, fields, expected);
+    // A terminal is one pane and the secret store one name: finding them again is looking again.
+    return await this.observe(sessionId, target, fields);
+  }
+
   async type(
     sessionId: string,
     target: InputTarget,

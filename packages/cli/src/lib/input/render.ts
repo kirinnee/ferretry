@@ -94,7 +94,7 @@ const REASONS: Readonly<Record<InputReason, string>> = {
   interrupted: 'the daemon was interrupted',
   owner_declined: 'declined',
   agent_cancelled: 'the agent cancelled it',
-  check_failures: 'too many checks failed',
+  check_failures: 'the target kept changing, so nothing was typed; ask the ferret to request again',
   expired: 'it expired',
   copy_gone: 'the secure copy it was to paste is gone',
 };

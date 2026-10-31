@@ -641,6 +641,9 @@ describe('browser worker client — the input bridge', () => {
     const document = await client.inputDocument('p1');
     if (!seen.ok) throw new Error('the page should have been seen');
     const shot = await client.inputShot('p1', seen.facts);
+    const refound = await client.inputRefind('p1', seen.facts, pointer);
+    const refoundMissing = await client.inputRefind('missing', seen.facts, pointer);
+    const refoundAmbiguous = await client.inputRefind('ambiguous', seen.facts, pointer);
     const typed = await client.inputType('p1', seen.facts, [{ field: 'password', text: 'x' }], true);
     const changed = await client.inputType('p1', seen.facts, [{ field: 'password', text: 'x' }], false);
 
@@ -648,6 +651,9 @@ describe('browser worker client — the input bridge', () => {
     should(seen.facts.fields[0]?.backendNodeId).equal(7);
     should(missing).deepEqual({ ok: false, missing: 'password' });
     should(document).deepEqual({ navigationId: 'loader-1' });
+    should(refound.ok && refound.facts.fields[0]?.backendNodeId).equal(9);
+    should(refoundMissing).deepEqual({ ok: false, missing: 'password' });
+    should(refoundAmbiguous).deepEqual({ ok: false, ambiguous: 'password' });
     should(shot).deepEqual({ pngBase64: 'iVBORw0KGgo=', clip: { x: 0, y: 0, w: 10, h: 10 } });
     should(typed).equal('typed');
     should(changed).equal('target_changed');
@@ -668,12 +674,13 @@ describe('browser worker client — the input bridge', () => {
     // Act
     const observed = await rejection(client.inputObserve('garbled', []));
     const pictured = await rejection(client.inputShot('garbled', facts));
+    const refound = await rejection(client.inputRefind('garbled', facts, []));
     const documented = await rejection(client.inputDocument('garbled'));
     const garbled = await client.inputType('garbled', facts, [{ field: 'password', text: 'x' }], true);
     const refused = await client.inputType('refuses', facts, [{ field: 'password', text: 'x' }], true);
 
     // Assert
-    for (const failure of [observed, pictured, documented]) should(failure.code).equal('upstream_failed');
+    for (const failure of [observed, pictured, documented, refound]) should(failure.code).equal('upstream_failed');
     should(garbled).equal('uncertain');
     should(refused).equal('uncertain');
   });

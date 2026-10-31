@@ -71,6 +71,7 @@ export const AUDIT_EVENTS = [
   'input.requested',
   'input.delivered',
   'input.refused',
+  'input.rebound',
   'input.expired',
   'input.cancelled',
   'input.quarantine_ended',

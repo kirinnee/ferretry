@@ -110,6 +110,10 @@ class Tabs {
       this.calls.push(`inputObserve:${pageId}`);
       return { ok: false, missing: 'value' };
     },
+    inputRefind: async pageId => {
+      this.calls.push(`inputRefind:${pageId}`);
+      return { ok: false, missing: 'value' };
+    },
     inputShot: async pageId => {
       this.calls.push(`inputShot:${pageId}`);
       return { pngBase64: 'AAAA', clip: { x: 0, y: 0, w: 1, h: 1 } };

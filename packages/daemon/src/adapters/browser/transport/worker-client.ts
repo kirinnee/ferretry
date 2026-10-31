@@ -55,6 +55,8 @@ function parseObservation(raw: unknown): BrowserInputObservation {
   const observation = (raw as { observation?: unknown } | null)?.observation as Record<string, unknown> | undefined;
   if (observation?.ok === false && typeof observation.missing === 'string')
     return { ok: false, missing: observation.missing.slice(0, 64) };
+  if (observation?.ok === false && typeof observation.ambiguous === 'string')
+    return { ok: false, ambiguous: observation.ambiguous.slice(0, 64) };
   const facts = InputTargetFactsSchema.safeParse(observation?.facts);
   if (observation?.ok === true && facts.success && facts.data.kind === 'browser')
     return { ok: true, facts: facts.data };
@@ -458,6 +460,14 @@ export class BrowserWorkerClient implements BrowserAutomation {
 
   async inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation> {
     return parseObservation(await this.request(BROWSER_INPUT_WORKER_METHODS.observe, { pageId, fields }));
+  }
+
+  async inputRefind(
+    pageId: string,
+    expected: BrowserInputFacts,
+    fields: readonly BrowserInputFieldPointer[],
+  ): Promise<BrowserInputObservation> {
+    return parseObservation(await this.request(BROWSER_INPUT_WORKER_METHODS.refind, { pageId, expected, fields }));
   }
 
   async inputShot(pageId: string, facts: BrowserInputFacts): Promise<BrowserInputShot> {

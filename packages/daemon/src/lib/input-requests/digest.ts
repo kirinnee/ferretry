@@ -24,7 +24,12 @@ function sorted(value: unknown): unknown {
 
 /** Keyed sha-256 (lowercase hex) of the facts with every object's keys sorted: any changed fact changes the digest. */
 export function digestFacts(facts: InputTargetFacts): string {
-  return keyed(JSON.stringify(sorted(facts)));
+  return digestValue(facts);
+}
+
+/** Keyed sha-256 (lowercase hex) of any JSON value with every object's keys sorted. */
+export function digestValue(value: unknown): string {
+  return keyed(JSON.stringify(sorted(value)));
 }
 
 /** Keyed sha-256 (lowercase hex) of one line of text. */

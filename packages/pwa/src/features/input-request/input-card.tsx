@@ -122,7 +122,7 @@ export function InputCard({
       setSettled('Cancelled. Nothing was typed.');
       onDone();
     } catch (cause) {
-      setProblem(inputFailure(cause).text);
+      setProblem(inputFailure(cause, request.target.kind).text);
     } finally {
       setCancelling(false);
     }
@@ -332,7 +332,7 @@ function SealedPasteSection({ request, client, blocked, busy, cancel, onSettled,
       pending.current = null;
       onSettled(`Pasted into ${targetRef(request)}.`);
     } catch (cause) {
-      const words = inputFailure(cause);
+      const words = inputFailure(cause, request.target.kind);
       if (words.definitive) pending.current = null;
       setFailure(words.text);
       if (words.kind === 'changed') onRefresh?.();
@@ -657,7 +657,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
       const kept = savedOutcomeWords(result, label);
       onSettled(`Sent to ${targetRef(request)}.${kept === undefined ? '' : ` ${kept}`}`);
     } catch (cause) {
-      const words = inputFailure(cause);
+      const words = inputFailure(cause, request.target.kind);
       if (words.definitive) pending.current = null;
       setFailure(words.text);
       if (words.kind === 'changed') onRefresh?.();

@@ -144,6 +144,7 @@ class FakeBrowser {
     copyRead: async () => ({ ok: false, reason: 'missing' }),
     inputDocument: async () => ({ navigationId: 'loader-1' }),
     inputObserve: async () => ({ ok: false, missing: 'value' }),
+    inputRefind: async () => ({ ok: false, missing: 'value' }),
     inputShot: async () => {
       throw new Error('no field shots in this journey');
     },

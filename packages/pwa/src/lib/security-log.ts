@@ -55,6 +55,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'input.requested': 'A ferret asked for a value to be typed',
   'input.delivered': 'A value was typed into a terminal or page for a ferret',
   'input.refused': 'A value for a ferret was not typed',
+  'input.rebound': 'A page or terminal changed under a request for a value, and the request was redrawn',
   'input.expired': 'A request for a value ran out of time',
   'input.cancelled': 'A request for a value was cancelled',
   'input.quarantine_ended': 'A terminal that a ferret was kept out of was opened up again',
