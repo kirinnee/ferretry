@@ -56,6 +56,13 @@ export interface ApiRequest {
    */
   readonly device?: SessionDevice;
   /**
+   * The shared-catalog member a SESSION proved, set by the one tunnel constructor that builds a member
+   * request (`tunnelMemberRequest`) and by nothing else. It is never set beside `device`, and the main
+   * route table refuses a request that carries it before anything else is looked at: a member reaches
+   * the member route table or nothing.
+   */
+  readonly member?: SessionMember;
+  /**
    * The transcript hash of the session that carried this request, set beside `device` by the same one
    * constructor. What a device-key rotation's proof is signed over (`docs/design/zero-trust.md` B6);
    * a hash, public to both ends of the session, and never a secret.
@@ -90,6 +97,15 @@ export interface SessionDevice {
   readonly appSession: string;
 }
 
+/** Who opened a member session: the key that signed it, and the running copy of the app it came from. */
+export interface SessionMember {
+  readonly memberId: string;
+  readonly keyId: string;
+  readonly appSession: string;
+  /** The session that carries it, which a route may ask to have spared while it removes its own key. */
+  readonly sessionId: string;
+}
+
 export interface ApiResponse {
   readonly status: number;
   readonly headers: ReadonlyMap<string, string>;
@@ -108,6 +124,11 @@ export interface ApiResponse {
    * what the route said; the transport that sends this adds `Content-Encoding: gzip`.
    */
   readonly gzip?: Uint8Array;
+  /**
+   * Set by a member route that is the last thing its session does (leaving): the answer is sealed first,
+   * then the session concludes with `4440`, so the app can tell "I left" from "I was refused".
+   */
+  readonly endsSession?: true;
 }
 
 /**

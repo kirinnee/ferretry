@@ -38,6 +38,8 @@ import {
   DeviceProofSchema,
   fromBase64Url,
   MAX_PLAINTEXT_BYTES,
+  MemberAuthRecordSchema,
+  MemberJoinRecordSchema,
   type RelayCloseCode,
   SESSION_PROTOCOL_ID,
   toBase64Url,
@@ -53,6 +55,7 @@ import {
   headersFrom,
   queryFrom,
   type SessionDevice,
+  type SessionMember,
 } from '../api/http.ts';
 
 /** The widest request identifier a client may name an answer with. */
@@ -201,10 +204,10 @@ const DeviceClaim = {
 const BodyPartSchema = z.string().max(MAX_PLAINTEXT_BYTES);
 
 /**
- * THE RECORD AT SEQUENCE 1 IS A STRICT UNION OF THREE, and the union is the enforcement.
+ * THE RECORD AT SEQUENCE 1 IS A STRICT UNION OF FIVE, and the union is the enforcement.
  *
- * Each credential record commits its session to one job — requests, one stream, or one pairing
- * attempt — and no mode can reach another's states. "A stream session should not send requests" is a
+ * Each credential record commits its session to one job — a device's requests, one stream, one pairing
+ * attempt, one join by a shared-catalog member, or a member's requests — and no mode can reach another's states. "A stream session should not send requests" is a
  * rule something has to check and somebody has to remember; a session whose accepted messages have no
  * request in them is a rule nothing can break.
  */
@@ -230,6 +233,10 @@ export const RelayTunnelClientMessageSchema = z.union([
       deviceKey: z.string().min(1).max(128),
       proof: z.string().min(1).max(128),
     }),
+    // A join and a member session are the other two jobs a credential record can commit to. Their shapes
+    // are the relay package's, so the browser and this daemon cannot disagree about them.
+    MemberJoinRecordSchema,
+    MemberAuthRecordSchema,
     z.strictObject({
       t: z.literal('req'),
       id: RequestIdSchema,
@@ -270,9 +277,16 @@ export type RelayTunnelRequest = Extract<RelayTunnelClientMessage, { t: 'req' }>
 export type RelayTunnelRequestPart = Extract<RelayTunnelClientMessage, { t: 'req-more' }>;
 export type RelayTunnelStream = Extract<RelayTunnelClientMessage, { t: 'stream' }>;
 export type RelayTunnelPair = Extract<RelayTunnelClientMessage, { t: 'pair' }>;
+export type RelayTunnelJoin = Extract<RelayTunnelClientMessage, { t: 'join' }>;
+export type RelayTunnelMember = Extract<RelayTunnelClientMessage, { t: 'member' }>;
 export type RelayTunnelData = Extract<RelayTunnelClientMessage, { t: 'data' }>;
 
 export type RelayTunnelDaemonMessage =
+  /**
+   * A member join's outcome, already padded to its fixed size (`padJoinOutcome`), sealed as the plaintext it is.
+   * Carried as text rather than a shape so nobody can send an unpadded one by building the object.
+   */
+  | { readonly t: 'join-outcome'; readonly text: string }
   /**
    * The device's proof verified. `accessExpiresAt` is when this session's lease ends unless renewed;
    * `rotateBy` is when the device's key is due for replacement (`docs/design/zero-trust.md` B6).
@@ -357,6 +371,7 @@ export type RelayTunnelDaemonMessage =
     };
 
 export function encodeTunnelMessage(message: RelayTunnelDaemonMessage): Uint8Array {
+  if (message.t === 'join-outcome') return utf8Bytes(message.text);
   return utf8Bytes(JSON.stringify(message));
 }
 
@@ -551,4 +566,36 @@ export function tunnelResponseMessages(id: number, answer: ApiResponse): readonl
     const more = index < parts.length - 1 ? ({ more: true } as const) : {};
     return index === 0 ? { ...whole, body, ...more } : { t: 'res-more', id, body, ...more };
   });
+}
+
+/**
+ * Turn a member session's request into the value the MEMBER route table is written against.
+ *
+ * The one constructor that sets `member`, as `tunnelApiRequest` is the one that sets `device`. A member is
+ * NEVER host-local: whatever the socket's address, `loopback` and `privilegedLoopback` are false, so nothing
+ * the daemon grants somebody at the machine can be reached from a shared catalog's page.
+ */
+export function tunnelMemberRequest(
+  source: TunnelRequestSource,
+  member: SessionMember,
+  sessionId: string,
+  arrival?: SessionArrival,
+  transcriptHash?: Uint8Array,
+): ApiRequest {
+  const body = source.body ?? '';
+  return {
+    method: source.method,
+    path: source.path,
+    query: queryFrom(source.query ?? []),
+    headers: headersFrom({ ...source.headers }),
+    clientAddress: arrival?.clientAddress ?? relayRateLimitIdentity(sessionId),
+    loopback: false,
+    privilegedLoopback: false,
+    member,
+    ...(transcriptHash === undefined ? {} : { transcriptHash }),
+    text: async limitBytes => {
+      if (limitBytes !== undefined && utf8Bytes(body).byteLength > limitBytes) throw new BodyTooLargeError(limitBytes);
+      return body;
+    },
+  };
 }

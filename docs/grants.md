@@ -290,8 +290,8 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) �
    through `pairing`, and the host's own `fy catalog` commands are ungoverned. Members (phase 2b-1) are
    `sharing.use` too: minting a share needs a fresh `share-catalog` passkey from a governed caller, and a
    ferret may list shares and members but never mint, end or revoke. The remote turn-off warning will need
-   the "revoke FIRST" ordering [design/catalogs.md](design/catalogs.md) §3.6 describes once members can
-   hold live sessions (2b-2).
+   the "revoke FIRST" ordering [design/catalogs.md](design/catalogs.md) §3.6 describes now that members
+   can hold live sessions (built in 2b-2; revoking a member closes them).
 3. **So the way back on the control** is the same sentence every capability's remote turn-off carries:
    the host command `fy daemon config set sharing --use`. `sharing` has no "it also stops" note in the
    switch: in phase 1 turning it off stops nothing beyond the catalog routes.

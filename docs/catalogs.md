@@ -414,9 +414,9 @@ as JSON on stderr, so a script never skips the review a person would have read.
 
 ## Members (phase 2)
 
-**Status: the contract (2a) is written; 2b-1 serves the publisher's half of it.** The relay's `join` and
-`member` records, the member route table, member passkeys and closing a revoked member's live sessions are
-2b-2; the app is 2c. The wire is `packages/protocol/src/lib/catalog-member.ts` and
+**Status: the contract (2a) is written; 2b-1 and 2b-2 serve the publisher's half of it.** The relay's `join`
+and `member` records, the member route table, member passkeys and closing a revoked member's live sessions
+are built in 2b-2; the app is 2c and the end-to-end test is 2d. The wire is `packages/protocol/src/lib/catalog-member.ts` and
 `packages/relay/src/lib/member-session.ts`; the session records are
 [relay-protocol.md](relay-protocol.md) §14 "Member sessions", which also fixes the exact order of a join's
 checks.
@@ -478,7 +478,8 @@ never see each other (Q14) and never share onward (Q16).
 **Bounds.** 128 members and 512 member keys per publisher, 200 keys per member (so one leaked multi-use
 code fills its own member, never the publisher), 64 live shares, 64 catalogs per share, 60 successful joins
 and redeems an hour per share, 10 failed joins a minute per peer on the direct carrier. A full publisher refuses a
-join and leaves the code live. A member key unused for 90 days is removed; the member stays.
+join and leaves the code live. A member key unused for 90 days is removed; the member stays. Until the sweep reaches it, such a key is already
+refused (`4403`) and opening a session never refreshes it: one predicate decides both.
 
 ### Built in 2b-1: shares and members on the publisher
 
@@ -515,12 +516,52 @@ SHA-256 of a code is stored.
   governed caller, claimed atomically. The code and link appear ONLY in the mint's answer. Minting is refused
   (`share_link_unavailable`, 503) when the daemon has no address another person could open, so no code is
   spent on a link that only works on this machine.
-- **Revoke writes first** and is idempotent. Closing a removed member's live sessions is a no-op port until 2b-2.
+- **Revoke writes first** and is idempotent. Closing a removed member's live sessions is built in 2b-2 (below).
   Deleting a catalog also removes it from every member and share.
 - **CLI.** `fy catalog share <catalog...> (--member <name> | --to <person>) --expires 15m|1h|3h|8h|1d
 [--multi [--cap N]]` prints the link once with a locally drawn QR; `fy catalog shares`, `fy catalog unshare`,
   `fy member ls|rename|revoke|forget-key|take`. `--json` prints one payload; the code is in the mint's only. `--to` warns what the link opens BEFORE it
   makes one and asks y/N; `--yes` skips the question and is required off a terminal.
+
+### Built in 2b-2: join and member sessions on the publisher
+
+The browser reaches the publisher on the same carriers a device does; the relay's sequence-1 union
+now has `join` and `member` ([relay-protocol.md](relay-protocol.md) §14 "Member sessions").
+
+- **Join** (`catalog-members/join.ts`) is a record, never a request. The order is contract: the per-peer
+  budget of FAILED joins (10 a minute, direct carrier only), the stateless checks (code, member key, box key,
+  client name, the proof over this session's transcript), then the 2b-1 admission, then AWAIT the write of
+  the burn, then `commit`, then the sealed `joined`. A reservation is committed or released in a `finally`.
+  Every refusal is the same refusal, and both outcomes are padded to `MEMBER_JOIN_OUTCOME_BYTES`. One
+  attempt per session, then `4440`.
+- **A member session** proves the filed key. An unknown, revoked or idle key, or a bad proof, is the one
+  `4403`. Accepted, it answers `authenticated` and serves requests from the **member route table**
+  only.
+- **The member route table** (`/v1/shared/*`, `catalog-members/shared-routes.ts`) is a separate table
+  the main router never contains. A member principal meets no minimum of the main table, the main
+  dispatcher refuses it `403` before routing, and a test sweeps every route of the main table to prove
+  it (and that no device credential reaches `/v1/shared/*`). Nine routes: passkey options and register,
+  unlock options and unlock, then `GET /v1/shared/me`, a catalog's manifest (`ETag` is the revision,
+  `304` on a match), an item, `POST /v1/shared/redeem` and `DELETE /v1/shared/me/keys/self`.
+  Every request re-checks the member's current grants, so a revoke applies to the very next request.
+- **Member passkeys** (`catalog-members/passkeys.ts`): before the first unlock a key may register ONE
+  passkey, and only in its own ten-minute window; after an unlock it may add more. One assertion unlocks a
+  browser for `catalogs.memberUnlockDays` (default 30, range 1–90; read at start, set in the daemon's
+  config file), kept in `state/catalogs/member-unlocks.json` so a restart does not ask everyone again.
+  Member passkeys live in `state/catalogs/member-passkeys.json`, apart from the devices' file. A not-unlocked
+  member reaches only unlock and, in the window, passkey registration.
+- **Redeem** awaits the write of the burn before it answers anything — a Q5 refusal and a redeem that
+  adds nothing included — and commits or releases its reservation in a `finally`.
+- **Revoke closes sessions.** Removing a browser, revoking a member or deleting a catalog ends the
+  member's live sessions with `4403`, after the write. A browser that **leaves** (`DELETE /v1/shared/me/keys/self`)
+  gets its `200` first and then `4440` (concluded), never `4403`, so it can tell "I left" from "I was refused";
+  the key's other sessions end with `4403`. The idle and passkey-less sweep that 2b-1 built runs in the
+  daemon and now has sessions to close.
+- **Audit** ([audit.md](audit.md)): `catalog.member.joined`, `catalog.member.passkey-added` (both kept),
+  `catalog.member.unlocked` and `catalog.member.join-refused` (general; at most one a minute per carrier, with a `count`). Never the code, a key or a proof.
+- **Not in 2b-2:** the app (2c) and the end-to-end test with a real browser (2d). Known limit: after a
+  revoke the member's rows in `member-passkeys.json` are not removed when the member is (the closer is not told
+  key ids), which is harmless because every request re-checks the key.
 
 ## Declared gaps
 
@@ -567,9 +608,9 @@ What this does **not** protect against, said plainly (more in design §4.8):
 
 ## What is built
 
-| Phase                                                                                                        | State                                                                                                                                                                                                                                                                                                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.**                                                                                                                                                                                                                                                                                                                                                                                                      |
-| **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | **Built**: the publisher side (`fy catalog`, the owner routes, the `sharing` capability), the installer side (`fy catalog install`, the install routes, a passkey per install), and the app screens (Add to catalog, Settings › Sharing › Catalogs, Install from a file). The next phase is 2 (members, live), once decided.                                                                                    |
-| **2. Members, live**: shares and codes, joining, member passkeys, the member route table, revoke             | **2a contract written** ([Members](#members-phase-2), relay-protocol §14 "Member sessions"). **2b-1 built**: shares, members, the owner routes and `fy catalog share` / `fy member` ([Built in 2b-1](#built-in-2b-1-shares-and-members-on-the-publisher)). Next: 2b-2 (relay `join`/`member` records, the member route table, member passkeys, closing sessions on revoke), 2c the app, 2d the end-to-end test. |
-| 3–7. The offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones            | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                                                                                                                                                                                                                                                                                                                            |
+| Phase                                                                                                        | State                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.**                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | **Built**: the publisher side (`fy catalog`, the owner routes, the `sharing` capability), the installer side (`fy catalog install`, the install routes, a passkey per install), and the app screens (Add to catalog, Settings › Sharing › Catalogs, Install from a file). The next phase is 2 (members, live), once decided.                                                                                                                                                                         |
+| **2. Members, live**: shares and codes, joining, member passkeys, the member route table, revoke             | **2a contract written** ([Members](#members-phase-2), relay-protocol §14 "Member sessions"). **2b-1 built**: shares, members, the owner routes and `fy catalog share` / `fy member` ([Built in 2b-1](#built-in-2b-1-shares-and-members-on-the-publisher)). **2b-2 built**: relay `join`/`member` records, the member route table, member passkeys, closing sessions on revoke ([Built in 2b-2](#built-in-2b-2-join-and-member-sessions-on-the-publisher)). Next: 2c the app, 2d the end-to-end test. |
+| 3–7. The offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones            | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                                                                                                                                                                                                                                                                                                                                                                                                                 |

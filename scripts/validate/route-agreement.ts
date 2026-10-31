@@ -104,6 +104,7 @@ const SERVER_PACKAGE = 'packages/daemon';
 const SERVER_ROUTE_DIRECTORIES = [
   'packages/daemon/src/lib/api/routes',
   'packages/daemon/src/lib/runtime/mounts',
+  'packages/daemon/src/lib/catalog-members',
 ] as const;
 
 /** Independently compiled callers whose disappearance would make a green scan suspicious. */

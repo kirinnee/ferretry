@@ -22,9 +22,12 @@ export class MemberSweepTimer {
     private readonly report: (error: unknown) => void,
   ) {}
 
+  /** One sweep now, before the first interval: a browser time already ended must not wait an hour to be removed. */
   start(intervalMs: number): () => void {
-    return this.clock.repeat(() => {
+    const run = (): void => {
       this.sweep().catch(this.report);
-    }, intervalMs);
+    };
+    run();
+    return this.clock.repeat(run, intervalMs);
   }
 }

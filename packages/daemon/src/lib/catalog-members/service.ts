@@ -22,8 +22,7 @@
  *
  * ## The order of a revoke
  *
- * `members.json` is written FIRST, then `shares.json`, then live sessions are closed (a no-op until phase
- * 2b-2 registers them): what the person can reach must stop before anything else is tidied.
+ * `members.json` is written FIRST, then `shares.json`, then live sessions are closed (`LiveMemberSessions`): what the person can reach must stop before anything else is tidied.
  */
 import {
   CATALOG_MAX_LIVE_SHARES,
@@ -77,7 +76,7 @@ import type {
 } from './ports.ts';
 import { pruneShares } from './prune.ts';
 import { CatalogMemberRefusal } from './refusal.ts';
-import { sweepMembers, type RemovedKey } from './sweep.ts';
+import { keyExpired, sweepMembers, type RemovedKey } from './sweep.ts';
 import { listedShares, memberView, shareView } from './views.ts';
 
 export interface CatalogMemberDeps {
@@ -132,6 +131,24 @@ export interface RemovedMemberCatalog {
   readonly memberId: string;
   readonly catalogId: string;
 }
+
+/** A browser as a member session reads it: the key to verify, and the grants to check on every request. */
+export interface MemberAccess {
+  readonly memberId: string;
+  readonly keyId: string;
+  readonly label: string;
+  readonly memberKey: string;
+  readonly clientName: string;
+  readonly catalogIds: readonly string[];
+  readonly passkeyCount: number;
+  readonly passkeyWindowEndsAt?: string;
+}
+
+/** How stale `lastSeenAt` may be before a session writes it again: the idle expiry counts in days. */
+const LAST_SEEN_GRANULARITY_MS = 10 * 60 * 1_000;
+
+/** The most passkeys one browser files; the document's own bound. */
+const MEMBER_PASSKEYS_MAX = 16;
 
 interface State {
   readonly members: MembersDocument;
@@ -576,6 +593,7 @@ export class CatalogMemberService {
         this.#withoutCatalog(before, catalogId, share => share.memberId === memberId),
         before,
       );
+      await this.deps.sessions.closeMember(memberId);
       return { memberId, catalogId };
     });
   }
@@ -598,11 +616,68 @@ export class CatalogMemberService {
             : member,
         ),
       };
-      const changed = members.members.some((member, index) => member !== state.members.members[index]);
-      if (changed) await this.#applyMembers(members, state.members);
+      const affected = state.members.members.filter(member => member.catalogIds.includes(catalogId));
+      if (affected.length > 0) await this.#applyMembers(members, state.members);
       const before = this.#loaded().shares;
       const shares = this.#withoutCatalog(before, catalogId, () => true);
       if (shares !== before) await this.#applyShares(shares, before);
+      // After the writes, like a removal: a session that was reading the catalog stops with it.
+      for (const member of affected) await this.deps.sessions.closeMember(member.memberId);
+    });
+  }
+
+  // ── The member's own session (phase 2b-2) ──────────────────────────────────────────────────────────
+
+  /** One browser as it stands NOW, or `undefined` when its key, its member or the store is gone, or time ended the key. */
+  async access(keyId: string): Promise<MemberAccess | undefined> {
+    await this.ready();
+    const now = this.deps.now();
+    for (const member of this.#loaded().members.members) {
+      const key = member.keys.find(entry => entry.keyId === keyId);
+      if (key !== undefined && keyExpired(key, now)) return undefined;
+      if (key !== undefined)
+        return {
+          memberId: member.memberId,
+          keyId,
+          label: member.label,
+          memberKey: key.memberKey,
+          clientName: key.clientName,
+          catalogIds: member.catalogIds,
+          passkeyCount: key.passkeyCount,
+          ...(key.passkeyWindowEndsAt === undefined ? {} : { passkeyWindowEndsAt: key.passkeyWindowEndsAt }),
+        };
+    }
+    return undefined;
+  }
+
+  /** Files that a browser was just seen, at most once a {@link LAST_SEEN_GRANULARITY_MS}; idle expiry counts in days. */
+  async touchKey(keyId: string): Promise<void> {
+    await this.ready();
+    await this.#serially(async () => {
+      const state = this.#loaded();
+      const now = this.deps.now();
+      const found = this.#find(state.members, keyId);
+      if (found === undefined || keyExpired(found.key, now)) return;
+      const seen = found.key.lastSeenAt === undefined ? undefined : Date.parse(found.key.lastSeenAt);
+      if (seen !== undefined && now - seen < LAST_SEEN_GRANULARITY_MS) return;
+      await this.#applyMembers(
+        this.#withKey(state.members, found, { ...found.key, lastSeenAt: instant(now) }),
+        state.members,
+      );
+    });
+  }
+
+  /** A passkey was filed for this browser: it can do more than register now. Answers the new count. */
+  async passkeyAdded(keyId: string): Promise<number> {
+    await this.ready();
+    return await this.#serially(async () => {
+      const state = this.#loaded();
+      const found = this.#find(state.members, keyId);
+      if (found === undefined)
+        throw new CatalogMemberRefusal('member_key_unknown', 'That browser is no longer registered.');
+      const passkeyCount = Math.min(found.key.passkeyCount + 1, MEMBER_PASSKEYS_MAX);
+      await this.#applyMembers(this.#withKey(state.members, found, { ...found.key, passkeyCount }), state.members);
+      return passkeyCount;
     });
   }
 
@@ -638,6 +713,21 @@ export class CatalogMemberService {
     const member = state.members.members.find(entry => entry.memberId === memberId);
     if (member === undefined) throw new CatalogMemberRefusal('member_unknown', 'There is no such member.');
     return member;
+  }
+
+  #find(document: MembersDocument, keyId: string): { member: StoredMember; key: StoredMemberKey } | undefined {
+    for (const member of document.members) {
+      const key = member.keys.find(entry => entry.keyId === keyId);
+      if (key !== undefined) return { member, key };
+    }
+    return undefined;
+  }
+
+  #withKey(document: MembersDocument, found: { member: StoredMember }, key: StoredMemberKey): MembersDocument {
+    return this.#membersWith(document, {
+      ...found.member,
+      keys: found.member.keys.map(entry => (entry.keyId === key.keyId ? key : entry)),
+    });
   }
 
   #membersWith(document: MembersDocument, next: StoredMember): MembersDocument {

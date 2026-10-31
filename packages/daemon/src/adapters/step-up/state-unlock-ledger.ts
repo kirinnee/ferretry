@@ -16,11 +16,18 @@ import type { FileSystemPort, FoundationPaths, UnlockLedgerPort } from '../../li
 
 const UNLOCK_LEDGER_MODE = 0o600;
 
-const DocumentSchema = z.strictObject({
-  schemaVersion: z.literal(1),
-  daemonId: z.string().min(1).max(200),
-  unlocks: z.array(z.strictObject({ deviceId: PairedDeviceIdSchema, unlockedAt: InstantSchema })).max(10_000),
-});
+const documentSchema = (owner: z.ZodType<string>) =>
+  z.strictObject({
+    schemaVersion: z.literal(1),
+    daemonId: z.string().min(1).max(200),
+    unlocks: z.array(z.strictObject({ deviceId: owner, unlockedAt: InstantSchema })).max(10_000),
+  });
+
+/** Where a ledger lives and whose unlocks it keeps. The default is the paired devices'. */
+export interface UnlockLedgerPlacement {
+  readonly path: string;
+  readonly owner: z.ZodType<string>;
+}
 
 /** The unlock ledger could not be read as unlocks. */
 class UnlockLedgerDamaged extends Error {
@@ -32,13 +39,16 @@ class UnlockLedgerDamaged extends Error {
 
 export class StateUnlockLedger implements UnlockLedgerPort {
   private readonly path: string;
+  private readonly schema: ReturnType<typeof documentSchema>;
 
   constructor(
     paths: FoundationPaths,
     private readonly files: Pick<FileSystemPort, 'readText' | 'writeTextAtomic' | 'setMode'>,
     private readonly daemonId: string,
+    placement: UnlockLedgerPlacement = { path: join(paths.state, 'unlocks.json'), owner: PairedDeviceIdSchema },
   ) {
-    this.path = join(paths.state, 'unlocks.json');
+    this.path = placement.path;
+    this.schema = documentSchema(placement.owner);
   }
 
   async read(): Promise<ReadonlyMap<string, number>> {
@@ -50,7 +60,7 @@ export class StateUnlockLedger implements UnlockLedgerPort {
     } catch {
       throw new UnlockLedgerDamaged('the unlock ledger is not valid JSON');
     }
-    const document = DocumentSchema.safeParse(parsed);
+    const document = this.schema.safeParse(parsed);
     if (!document.success) throw new UnlockLedgerDamaged('the unlock ledger does not describe unlocks');
     if (document.data.daemonId !== this.daemonId) return new Map();
     return new Map(document.data.unlocks.map(entry => [entry.deviceId, Date.parse(entry.unlockedAt)]));
@@ -62,7 +72,7 @@ export class StateUnlockLedger implements UnlockLedgerPort {
       daemonId: this.daemonId,
       unlocks: [...unlocks].map(([deviceId, at]) => ({ deviceId, unlockedAt: new Date(at).toISOString() })),
     };
-    await this.files.writeTextAtomic(this.path, `${JSON.stringify(DocumentSchema.parse(document))}\n`);
+    await this.files.writeTextAtomic(this.path, `${JSON.stringify(this.schema.parse(document))}\n`);
     await this.files.setMode(this.path, UNLOCK_LEDGER_MODE);
   }
 }

@@ -21,20 +21,25 @@ const PASSKEY_MODE = 0o600;
 
 const Base64Url = z.string().regex(/^[A-Za-z0-9_-]+$/u);
 
-const RecordSchema = z.strictObject({
-  credentialId: Base64Url.max(1_366),
-  deviceId: PairedDeviceIdSchema,
-  algorithm: z.union([z.literal(-7), z.literal(-8), z.literal(-257)]),
-  publicKeySpki: Base64Url.max(2_048),
-  signCount: z.number().int().min(0).max(0xffff_ffff),
-  origin: AppOriginSchema,
-  createdAt: InstantSchema,
-});
+/** Whose passkeys these are (a paired device, or a member's browser) and the schemas that follow. */
+const documentSchemas = (owner: z.ZodType<string>) => {
+  const record = z.strictObject({
+    credentialId: Base64Url.max(1_366),
+    deviceId: owner,
+    algorithm: z.union([z.literal(-7), z.literal(-8), z.literal(-257)]),
+    publicKeySpki: Base64Url.max(2_048),
+    signCount: z.number().int().min(0).max(0xffff_ffff),
+    origin: AppOriginSchema,
+    createdAt: InstantSchema,
+  });
+  return { record, document: z.strictObject({ schemaVersion: z.literal(1), passkeys: z.array(record) }) };
+};
 
-const DocumentSchema = z.strictObject({
-  schemaVersion: z.literal(1),
-  passkeys: z.array(RecordSchema),
-});
+/** Where a store lives and whose keys it holds. The default is the paired devices'. */
+export interface PasskeyStorePlacement {
+  readonly path: string;
+  readonly owner: z.ZodType<string>;
+}
 
 /** The passkey document could not be read as passkeys. A state to report, never an empty list. */
 export class PasskeyStoreDamaged extends Error {
@@ -46,13 +51,16 @@ export class PasskeyStoreDamaged extends Error {
 
 export class StatePasskeyStore implements PasskeyStore {
   private readonly path: string;
+  private readonly schemas: ReturnType<typeof documentSchemas>;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(
     paths: FoundationPaths,
     private readonly files: Pick<FileSystemPort, 'readText' | 'writeTextAtomic' | 'setMode'>,
+    placement: PasskeyStorePlacement = { path: join(paths.state, 'passkeys.json'), owner: PairedDeviceIdSchema },
   ) {
-    this.path = join(paths.state, 'passkeys.json');
+    this.path = placement.path;
+    this.schemas = documentSchemas(placement.owner);
   }
 
   async list(deviceId: string): Promise<readonly StoredPasskey[]> {
@@ -74,7 +82,7 @@ export class StatePasskeyStore implements PasskeyStore {
         throw new PasskeyStoreDamaged('that credential already belongs to another device');
       return [
         ...current.filter(existing => existing.credentialId !== passkey.credentialId),
-        RecordSchema.parse(passkey),
+        this.schemas.record.parse(passkey),
       ];
     });
   }
@@ -120,7 +128,7 @@ export class StatePasskeyStore implements PasskeyStore {
     } catch {
       throw new PasskeyStoreDamaged('the passkey document is not valid JSON');
     }
-    const document = DocumentSchema.safeParse(parsed);
+    const document = this.schemas.document.safeParse(parsed);
     if (!document.success) throw new PasskeyStoreDamaged('the passkey document does not describe passkeys');
     if (new Set(document.data.passkeys.map(passkey => passkey.credentialId)).size !== document.data.passkeys.length)
       throw new PasskeyStoreDamaged('the passkey document holds one credential twice');

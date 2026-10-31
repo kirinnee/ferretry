@@ -21,4 +21,19 @@ export { shareLinkTarget } from './link-target.ts';
 export { CATALOG_MEMBER_REFUSALS, CatalogMemberRefusal } from './refusal.ts';
 export type { CatalogMemberRefusalCode } from './refusal.ts';
 export { CatalogMemberService } from './service.ts';
-export type { CatalogMemberDeps, Durable, JoinedMember, NewMemberKey, RedeemedBy } from './service.ts';
+export type { CatalogMemberDeps, Durable, JoinedMember, MemberAccess, NewMemberKey, RedeemedBy } from './service.ts';
+export { LiveMemberSessions } from './sessions.ts';
+export { MemberGateway } from './gateway.ts';
+export type { MemberGatewayDeps } from './gateway.ts';
+export { FailedJoinBudget, MemberJoinGate } from './join.ts';
+export type { MemberJoinDeps, MemberJoinPublisher } from './join.ts';
+export { MEMBER_PASSKEY_REFUSALS, MemberPasskeyService } from './passkeys.ts';
+export type { MemberPasskeyCaller, MemberPasskeyDeps, MemberPasskeyOutcome, MemberPasskeyRefusal } from './passkeys.ts';
+export { MemberDispatcher, sharedRoutes } from './shared-routes.ts';
+export type {
+  SharedCatalogReader,
+  SharedPublisher,
+  SharedRoute,
+  SharedRouteContext,
+  SharedRouteDeps,
+} from './shared-routes.ts';

@@ -86,6 +86,9 @@ export interface FoundationPaths {
    */
   readonly catalogMembers: string;
   readonly catalogShares: string;
+  /** The passkeys and unlocks of members' browsers, by member KEY id: public keys and instants, never a secret. */
+  readonly catalogMemberPasskeys: string;
+  readonly catalogMemberUnlocks: string;
 }
 export interface SessionPaths {
   readonly directory: string;
@@ -140,6 +143,8 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     catalogBlobs: join(state, 'catalogs', 'blobs'),
     catalogMembers: join(state, 'catalogs', 'members.json'),
     catalogShares: join(state, 'catalogs', 'shares.json'),
+    catalogMemberPasskeys: join(state, 'catalogs', 'member-passkeys.json'),
+    catalogMemberUnlocks: join(state, 'catalogs', 'member-unlocks.json'),
   };
 }
 

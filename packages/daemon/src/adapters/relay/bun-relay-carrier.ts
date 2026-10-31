@@ -42,6 +42,7 @@ import {
   RELAY_CLOSE_CODES,
 } from '@ferretry/relay';
 import type { DeviceConnectionTracker } from '../../lib/pairing/index.ts';
+import type { RelayMemberSessions } from '../../lib/relay/member-port.ts';
 import type {
   AccessLeasePolicy,
   RelayApiDispatch,
@@ -91,6 +92,8 @@ export interface BunRelayCarrierDependencies {
   readonly sockets: RelayStreamDispatch;
   readonly devices: RelayDeviceDirectory;
   readonly pairing: RelayPairingRedeemer;
+  /** The member side, for sessions a share link's browser opens through the relay. */
+  readonly members?: RelayMemberSessions;
   /** Where each relayed session's device is registered, so unpairing it ends the session. */
   readonly connections: DeviceConnectionTracker;
   readonly socketFactory?: RelayWebSocketFactory;
@@ -267,6 +270,7 @@ export class BunRelayCarrier {
       sockets: this.deps.sockets,
       devices: this.deps.devices,
       pairing: this.deps.pairing,
+      ...(this.deps.members === undefined ? {} : { members: this.deps.members }),
       connections: this.deps.connections,
       scheduler: this.#scheduler,
       clock: { now: () => this.#now() },

@@ -114,3 +114,14 @@ verb-unproven GET /v1/sessions/:sessionId/fs/diff # ANALYSIS: cli filesystem/gat
 verb-unproven GET /v1/sessions/:sessionId/terminals # ANALYSIS: pwa web-terminals.ts:81 trailing `fetcher` argument is indistinguishable from an init
 verb-unproven GET /v1/sessions/by-request/:requestId # ANALYSIS: fy-api-client.ts:481 trailing FY_RECOVERY_TIMEOUT_MS is indistinguishable from an init
 
+
+# The member route table (/v1/shared/*, catalog-members/shared-routes.ts) is served since 2b-2; the only caller is the member app, built in 2c.
+unreached DELETE /v1/shared/me/keys/self # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
+unreached GET /v1/shared/catalogs/:catalogId/items/:itemId/:version # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
+unreached GET /v1/shared/catalogs/:catalogId/manifest # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
+unreached GET /v1/shared/me # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
+unreached POST /v1/shared/passkeys # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
+unreached POST /v1/shared/passkeys/options # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
+unreached POST /v1/shared/redeem # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
+unreached POST /v1/shared/unlock # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
+unreached POST /v1/shared/unlock/options # served by the member route table; its browser client is the 2c app (catalogs.md phase table)

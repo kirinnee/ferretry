@@ -229,6 +229,28 @@ describe('ApiDispatcher authorization', () => {
     should(unwired.status).equal(401);
   });
 
+  it('should refuse a shared-catalog member on every route of this table, a public one and an admin token included', async () => {
+    // A member session is served by the member route table alone. The main table refuses it before the
+    // public shortcut, before authentication and before the route's own scope is read.
+    const MEMBER = { memberId: 'mbr_x', keyId: 'mk_x', appSession: 'app-one', sessionId: 'relay-1' } as const;
+    const dispatcher = dispatcherFor(
+      echo('/healthz', 'none'),
+      echo('/v1/sessions', 'operator'),
+      echo('/v1/admin', 'admin-token'),
+    );
+
+    for (const path of ['/healthz', '/v1/sessions', '/v1/admin', '/v1/nowhere']) {
+      for (const carried of [{}, { loopback: true, privilegedLoopback: true }]) {
+        const refused = await dispatcher.dispatch({ ...request({ path, ...carried }), member: MEMBER });
+
+        should(refused.status).equal(403);
+        should(jsonBody(refused).code).equal('forbidden');
+      }
+    }
+    // The device path is untouched: the same route answers a device that is not a member.
+    should((await dispatcher.dispatch(request({ path: '/v1/sessions', device: DEVICE }))).status).equal(200);
+  });
+
   it('should let a paired device use operator routes but never an admin-token route', async () => {
     const dispatcher = dispatcherFor(echo('/v1/sessions', 'operator'), echo('/v1/pair/code', 'admin-token', 'POST'));
 

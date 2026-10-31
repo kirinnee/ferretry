@@ -16,6 +16,7 @@ import {
   storedKey,
   storedMember,
   storedShare,
+  DAY,
   T0,
 } from './support.ts';
 
@@ -334,7 +335,7 @@ describe('CatalogMemberService.removeCatalog', () => {
 
     // Assert
     should(removed).eql({ memberId: memberId(7), catalogId: catalogId(1) });
-    should(r.log).eql(['members.write', 'shares.write']);
+    should(r.log).eql(['members.write', 'shares.write', `closeMember:${memberId(7)}`]);
     should(memberOf(r.members.document, 7).catalogIds).eql([catalogId(2)]);
     should(shareOf(r.shares.document, 1).catalogIds).eql([catalogId(3)]);
     should(shareOf(r.shares.document, 1).state).equal('live');
@@ -391,6 +392,7 @@ describe('CatalogMemberService.removeCatalog', () => {
 
     // Assert
     should(error.message).equal('members disk full');
+    should(r.log.some(entry => entry.startsWith('closeMember'))).be.false();
     should((await r.service.listMembers()).members[0]?.catalogIds).eql([catalogId(1), catalogId(2)]);
     should(r.shares.writes).equal(0);
   });
@@ -406,6 +408,7 @@ describe('CatalogMemberService.removeCatalog', () => {
 
     // Assert
     should(error.message).equal('shares disk full');
+    should(r.log.some(entry => entry.startsWith('closeMember'))).be.false();
     should((await r.service.listShares()).shares[0]?.catalogIds).eql([catalogId(1)]);
   });
 });
@@ -431,8 +434,8 @@ describe('CatalogMemberService.forgetCatalog', () => {
     // Act
     await r.service.forgetCatalog(catalogId(1));
 
-    // Assert
-    should(r.log).eql(['members.write', 'shares.write']);
+    // Assert — and the two members who were reading it stop, after both writes
+    should(r.log).eql(['members.write', 'shares.write', `closeMember:${memberId(7)}`, `closeMember:${memberId(8)}`]);
     should(memberOf(r.members.document, 7).catalogIds).eql([catalogId(2)]);
     should(memberOf(r.members.document, 8).catalogIds).eql([]);
     should(memberOf(r.members.document, 9).catalogIds).eql([catalogId(2)]);
@@ -464,7 +467,7 @@ describe('CatalogMemberService.forgetCatalog', () => {
     await r.service.forgetCatalog(catalogId(1));
 
     // Assert
-    should(r.log).eql(['members.write']);
+    should(r.log).eql(['members.write', `closeMember:${memberId(7)}`]);
   });
 
   it('should write only the shares file when no member holds the catalog', async () => {
@@ -490,6 +493,7 @@ describe('CatalogMemberService.forgetCatalog', () => {
     // Assert
     should(error.message).equal('members disk full');
     should(r.shares.writes).equal(0);
+    should(r.log.some(entry => entry.startsWith('closeMember'))).be.false();
     should((await r.service.listMembers()).members[0]?.catalogIds).eql([catalogId(1), catalogId(2)]);
   });
 
@@ -504,5 +508,199 @@ describe('CatalogMemberService.forgetCatalog', () => {
     // Assert
     should(error.message).equal('shares disk full');
     should((await r.service.listShares()).shares[0]).containEql({ catalogIds: [catalogId(1)], state: 'live' });
+  });
+});
+
+describe('CatalogMemberService.access', () => {
+  it('should answer the browser as it stands now, window included when it has one', async () => {
+    // Arrange
+    const key = storedKey(71, { passkeyCount: 0, passkeyWindowEndsAt: new Date(T0 + 1000).toISOString() });
+    const r = await rig({ members: membersDoc(storedMember(7, { catalogIds: [catalogId(2)], keys: [key] })) });
+
+    // Act
+    const access = await r.service.access(keyId(71));
+
+    // Assert
+    should(access).eql({
+      memberId: memberId(7),
+      keyId: keyId(71),
+      label: 'Member 7',
+      memberKey: key.memberKey,
+      clientName: 'Browser 71',
+      catalogIds: [catalogId(2)],
+      passkeyCount: 0,
+      passkeyWindowEndsAt: key.passkeyWindowEndsAt,
+    });
+  });
+
+  it('should leave the window out when the browser has none', async () => {
+    // Arrange
+    const r = await rig({ members: membersDoc(seven()) });
+
+    // Act
+    const access = await r.service.access(keyId(72));
+
+    // Assert
+    should(access).not.be.undefined();
+    should(access).not.have.property('passkeyWindowEndsAt');
+  });
+
+  it('should answer nothing for a browser nobody filed', async () => {
+    // Arrange
+    const r = await rig({ members: membersDoc(seven()) });
+
+    // Act
+    const access = await r.service.access(keyId(99));
+
+    // Assert
+    should(access).be.undefined();
+  });
+});
+
+describe('CatalogMemberService: a key that time has ended', () => {
+  const EXPIRED = (r: Awaited<ReturnType<typeof rig>>) => memberOf(r.members.document, 7).keys[0];
+
+  it('should answer nothing for a key idle past 90 days, even before the sweep has removed it', async () => {
+    // Arrange — the probed case: last used at T0, asked at T0 + 91 days
+    const r = await rig({ members: membersDoc(seven()) });
+    r.clock.now = T0 + 91 * DAY;
+
+    // Act
+    const access = await r.service.access(keyId(71));
+
+    // Assert
+    should(access).be.undefined();
+    should(EXPIRED(r)?.keyId).equal(keyId(71));
+  });
+
+  it('should never refresh an idle-expired key, so opening a session cannot revive it', async () => {
+    // Arrange
+    const r = await rig({ members: membersDoc(seven()) });
+    r.clock.now = T0 + 91 * DAY;
+
+    // Act
+    await r.service.touchKey(keyId(71));
+
+    // Assert
+    should(EXPIRED(r)?.lastSeenAt).be.undefined();
+    should(r.members.writes).equal(0);
+  });
+
+  it('should still answer a key one moment short of 90 days', async () => {
+    // Arrange
+    const r = await rig({ members: membersDoc(seven()) });
+    r.clock.now = T0 + 90 * DAY - 1;
+
+    // Act
+    const access = await r.service.access(keyId(71));
+
+    // Assert
+    should(access?.keyId).equal(keyId(71));
+  });
+
+  it('should answer nothing for a key with no passkey once its window has closed', async () => {
+    // Arrange
+    const key = storedKey(71, { passkeyCount: 0, passkeyWindowEndsAt: new Date(T0 + 1000).toISOString() });
+    const r = await rig({ members: membersDoc(storedMember(7, { keys: [key] })) });
+    r.clock.now = T0 + 1000;
+
+    // Act
+    const access = await r.service.access(keyId(71));
+    await r.service.touchKey(keyId(71));
+
+    // Assert
+    should(access).be.undefined();
+    should(r.members.writes).equal(0);
+  });
+});
+
+describe('CatalogMemberService.touchKey', () => {
+  const seen = (r: Awaited<ReturnType<typeof rig>>) => memberOf(r.members.document, 7).keys[0]?.lastSeenAt;
+
+  it('should file when a browser was seen, and not again inside ten minutes', async () => {
+    // Arrange
+    const r = await rig({ members: membersDoc(seven()) });
+
+    // Act
+    await r.service.touchKey(keyId(71));
+    r.clock.now = T0 + 10 * 60_000 - 1;
+    await r.service.touchKey(keyId(71));
+
+    // Assert
+    should(seen(r)).equal(new Date(T0).toISOString());
+    should(r.members.writes).equal(1);
+  });
+
+  it('should file it again once ten minutes have passed', async () => {
+    // Arrange
+    const r = await rig({ members: membersDoc(seven()) });
+    await r.service.touchKey(keyId(71));
+
+    // Act
+    r.clock.now = T0 + 10 * 60_000;
+    await r.service.touchKey(keyId(71));
+
+    // Assert
+    should(seen(r)).equal(new Date(T0 + 10 * 60_000).toISOString());
+    should(r.members.writes).equal(2);
+  });
+
+  it('should write nothing for a browser nobody filed', async () => {
+    // Arrange
+    const r = await rig({ members: membersDoc(seven()) });
+
+    // Act
+    await r.service.touchKey(keyId(99));
+
+    // Assert
+    should(r.members.writes).equal(0);
+  });
+});
+
+describe('CatalogMemberService.passkeyAdded', () => {
+  it('should count the passkey and file it', async () => {
+    // Arrange
+    const r = await rig({ members: membersDoc(storedMember(7, { keys: [storedKey(71, { passkeyCount: 0 })] })) });
+
+    // Act
+    const count = await r.service.passkeyAdded(keyId(71));
+
+    // Assert
+    should(count).equal(1);
+    should(memberOf(r.members.document, 7).keys[0]?.passkeyCount).equal(1);
+  });
+
+  it('should stop counting at sixteen', async () => {
+    // Arrange
+    const r = await rig({ members: membersDoc(storedMember(7, { keys: [storedKey(71, { passkeyCount: 16 })] })) });
+
+    // Act
+    const count = await r.service.passkeyAdded(keyId(71));
+
+    // Assert
+    should(count).equal(16);
+  });
+
+  it('should refuse a browser nobody filed, and write nothing', async () => {
+    // Arrange
+    const r = await rig({ members: membersDoc(seven()) });
+
+    // Act
+    const error = await refusal(() => r.service.passkeyAdded(keyId(99)));
+
+    // Assert
+    should(error.refusal).equal('member_key_unknown');
+    should(r.members.writes).equal(0);
+  });
+
+  it('should take two passkeys filed at once one after the other', async () => {
+    // Arrange
+    const r = await rig({ members: membersDoc(storedMember(7, { keys: [storedKey(71, { passkeyCount: 0 })] })) });
+
+    // Act
+    const counts = await Promise.all([r.service.passkeyAdded(keyId(71)), r.service.passkeyAdded(keyId(71))]);
+
+    // Assert
+    should(counts).eql([1, 2]);
   });
 });
