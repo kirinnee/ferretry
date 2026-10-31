@@ -127,7 +127,7 @@ export interface ReviveSuccess {
   readonly stalled: number;
   /** `80%`, or `—`. */
   readonly percent: string;
-  /** `8 of 10 revives did real work within 10 minutes`. */
+  /** `8 of 10 got moving within 10 minutes`. */
   readonly sentence: string;
   /** Per decider, non-zero: `Auto 6 of 7`. */
   readonly byActor: readonly string[];
@@ -192,8 +192,8 @@ const reviveSuccess = (history: readonly WardenDayStats[]): ReviveSuccess => {
     percent: rate === null ? '—' : `${Math.round(rate * 100)}%`,
     sentence:
       settled === 0
-        ? `No revive has been settled yet: each gets ${WARDEN_REVIVE_PROGRESS_MINUTES} minutes to do real work.`
-        : `${progressed} of ${plural(settled, 'revive')} did real work within ${WARDEN_REVIVE_PROGRESS_MINUTES} minutes`,
+        ? `No revive has been settled yet: each gets ${WARDEN_REVIVE_PROGRESS_MINUTES} minutes to get moving.`
+        : `${progressed} of ${settled} got moving within ${WARDEN_REVIVE_PROGRESS_MINUTES} minutes`,
     byActor: STACK.flatMap(actor => {
       const done = total.progressed[actor];
       const all = done + total.stalled[actor];

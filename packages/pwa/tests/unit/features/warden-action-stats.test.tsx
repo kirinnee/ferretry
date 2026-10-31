@@ -44,8 +44,8 @@ describe('WardenActionStats', () => {
       // Assert
       expect(text).toContain('Auto 2');
       expect(text).toContain('Jev 1');
-      expect(text).toContain('Revives that took67%');
-      expect(text).toContain('2 of 3 revives did real work within 10 minutes');
+      expect(text).toContain('Revives that worked:67%');
+      expect(text).toContain('2 of 3 got moving within 10 minutes');
     } finally {
       await view.unmount();
     }

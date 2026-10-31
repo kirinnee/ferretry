@@ -98,7 +98,7 @@ describe('wardenActionStats success rate', () => {
     // Assert
     expect(success.rate).toBeCloseTo(5 / 8);
     expect(success.percent).toBe('63%');
-    expect(success.sentence).toBe('5 of 8 revives did real work within 10 minutes');
+    expect(success.sentence).toBe('5 of 8 got moving within 10 minutes');
     expect(success.byActor).toEqual(['Auto 3 of 4', 'Jev 1 of 2', 'LLM 1 of 2']);
   });
 

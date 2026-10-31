@@ -43,7 +43,7 @@ function SuccessLine({ success }: { readonly success: ReviveSuccess }) {
   return (
     <div className="flex min-w-0 flex-col gap-xs" data-revive-success={success.percent}>
       <p className="m-0 flex flex-wrap items-baseline gap-x-sm text-cell leading-base">
-        <b className="font-semibold text-fg">Revives that took</b>
+        <b className="font-semibold text-fg">Revives that worked:</b>
         <span
           className="text-fg [font-variant-numeric:tabular-nums]"
           role="img"
@@ -77,13 +77,13 @@ export function WardenActionStats({ status, now }: { readonly status: WardenStat
       </div>
       <SuccessLine success={stats.success} />
       <div className="flex min-w-0 flex-col gap-xs">
-        <div aria-label="Action shown" role="toolbar" className="flex flex-wrap gap-xs">
+        <div aria-label="Action shown" role="toolbar" className="scroll-thin flex flex-nowrap gap-xs overflow-x-auto">
           {chart.filters.map(option => (
             <button
               key={option.key}
               type="button"
               aria-pressed={filter === option.key}
-              className="kt-tab !px-sm !min-h-8 !min-w-0 sm:!min-h-0"
+              className="kt-tab !px-sm !min-h-8 !min-w-0 shrink-0 whitespace-nowrap sm:!min-h-0"
               onClick={() => setFilter(option.key)}
             >
               {option.label}
