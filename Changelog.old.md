@@ -1,3 +1,9 @@
+## [4.166.0](https://github.com/kirinnee/ferretry/compare/v4.165.0...v4.166.0) (2026-10-31)
+
+### Features
+
+* **secure-copy:** seal what a command prints, paste by handle later (SC1) ([#1139](https://github.com/kirinnee/ferretry/issues/1139)) ([2ec8e4e](https://github.com/kirinnee/ferretry/commit/2ec8e4e0a5119987f03ff75b27165914d0d59f77))
+
 ## [4.165.0](https://github.com/kirinnee/ferretry/compare/v4.164.0...v4.165.0) (2026-10-31)
 
 ### Features

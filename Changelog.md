@@ -1,3 +1,9 @@
+## [4.167.0](https://github.com/kirinnee/ferretry/compare/v4.166.0...v4.167.0) (2026-10-31)
+
+### Features
+
+* **secure-copy:** paste a sealed copy into a terminal, approved by the owner or in advance (SC2a) ([#1159](https://github.com/kirinnee/ferretry/issues/1159)) ([e75a77a](https://github.com/kirinnee/ferretry/commit/e75a77abfe1a318fe70a0028d54eca8b9cc83265))
+
 ## [4.166.0](https://github.com/kirinnee/ferretry/compare/v4.165.0...v4.166.0) (2026-10-31)
 
 ### Features
