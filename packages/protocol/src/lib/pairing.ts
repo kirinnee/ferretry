@@ -136,47 +136,65 @@ export function pairingLinkUrl(appUrl: string, seed: PairingLinkSeed): string {
   return url.toString();
 }
 
-/** One decoded `name=value` piece, or the reason the whole fragment is unreadable. */
-function fragmentField(piece: string): { readonly name: string; readonly value: string } {
-  const separator = piece.indexOf('=');
-  if (separator <= 0) throw new Error('pairing link field is not name=value');
-  const name = piece.slice(0, separator);
+/**
+ * The `name=value` fields of a `v1` link fragment, decoded, or the reason the whole fragment is unreadable.
+ *
+ * ONE READER FOR EVERY LINK THAT CARRIES A CREDENTIAL IN ITS FRAGMENT — a pairing link and a share link
+ * (`catalog-member.ts`) — so the two cannot come to hold different opinions about one string. Its rules: the
+ * version must be `v1`; a field is `name=value`, percent-decoded; a REPEATED name is refused, because two
+ * values for one name is a real ambiguity; an unrecognised name is kept for the caller to ignore. `link`
+ * names the link in each sentence ("pairing link", "share link").
+ */
+export function readLinkFragmentFields(fragment: string, link: string): ReadonlyMap<string, string> {
+  const pieces = (fragment.startsWith('#') ? fragment.slice(1) : fragment).split(';');
+  if (pieces.shift() !== 'v1') throw new Error(`${link} version is not recognised`);
+  const fields = new Map<string, string>();
+  for (const piece of pieces) {
+    const separator = piece.indexOf('=');
+    if (separator <= 0) throw new Error(`${link} field is not name=value`);
+    const name = piece.slice(0, separator);
+    if (fields.has(name)) throw new Error(`${link} repeats ${name}`);
+    try {
+      fields.set(name, decodeURIComponent(piece.slice(separator + 1)));
+    } catch {
+      throw new Error(`${link} field ${name} is not decodable`);
+    }
+  }
+  return fields;
+}
+
+/**
+ * Whether a link's daemon address is one this app may dial: a parseable `http:` or `https:` URL. Any other
+ * scheme (`javascript:`, `file:`, `ws:`) is refused, because the address came from whoever made the link.
+ */
+export function isDialableLinkAddress(address: string): boolean {
   try {
-    return { name, value: decodeURIComponent(piece.slice(separator + 1)) };
+    const protocol = new URL(address).protocol;
+    return protocol === 'http:' || protocol === 'https:';
   } catch {
-    throw new Error(`pairing link field ${name} is not decodable`);
+    return false;
   }
 }
 
 /**
  * Reads a fragment back into a seed, or throws the reason it cannot be one.
  *
- * The tolerance rules in the codec comment above are implemented here and nowhere else, so the
- * daemon that writes a link and the browser that reads one cannot come to hold different opinions
- * about the same string. An unrecognised field name — `relay=` included — is IGNORED rather than
- * honoured: the writer emits none, and a reader that dialled one would be trusting an address the
- * daemon never authored.
+ * The tolerance rules in the codec comment above are implemented by {@link readLinkFragmentFields}, so the
+ * daemon that writes a link and the browser that reads one cannot come to hold different opinions about
+ * the same string. An unrecognised field name — `relay=` included — is IGNORED rather than honoured: the
+ * writer emits none, and a reader that dialled one would be trusting an address the daemon never authored.
+ * One name is refused rather than ignored: `share`, which only a catalog share link carries, so a link
+ * holding both a pairing code and a share code is read by neither reader.
  */
 export function parsePairingFragment(fragment: string): PairingLinkSeed {
-  const pieces = (fragment.startsWith('#') ? fragment.slice(1) : fragment).split(';');
-  const version = pieces.shift();
-  if (version !== 'v1') throw new Error('pairing link version is not recognised');
-  const fields = new Map<string, string>();
-  for (const piece of pieces) {
-    const { name, value } = fragmentField(piece);
-    if (fields.has(name)) throw new Error(`pairing link repeats ${name}`);
-    fields.set(name, value);
-  }
+  const fields = readLinkFragmentFields(fragment, 'pairing link');
+  if (fields.has('share')) throw new Error('this is a share link, not a pairing link');
   const daemonUrl = fields.get('url');
   const code = fields.get('code');
   const fingerprint = fields.get('fp');
   if (daemonUrl === undefined || code === undefined || fingerprint === undefined)
     throw new Error('pairing link must include url, code, and fp');
-  try {
-    new URL(daemonUrl);
-  } catch {
-    throw new Error('pairing link daemon address is not a URL');
-  }
+  if (!isDialableLinkAddress(daemonUrl)) throw new Error('pairing link daemon address is not an http or https URL');
   const parsedCode = PairingCodeSchema.safeParse(code);
   if (!parsedCode.success) throw new Error('pairing link carries an invalid code');
   const parsedDaemonId = DaemonIdSchema.safeParse(fingerprint);

@@ -72,6 +72,7 @@ export const StepUpActSchema = z.enum([
   'clone-secrets',
   'loosen-security',
   'catalog-install',
+  'share-catalog',
 ]);
 export type StepUpAct = z.infer<typeof StepUpActSchema>;
 
@@ -288,6 +289,11 @@ export const STEP_UP_ACTS = {
    * wants a passkey proved for it alone — even inside an unlock (owner decision Q7). Removing one never asks.
    */
   catalogInstall: 'catalog-install',
+  /**
+   * Minting a share code for a catalog (docs/catalogs.md § Members): the next browser to redeem it can read
+   * what the catalog holds, so every code wants a passkey proved for it alone, like a pairing code.
+   */
+  shareCatalog: 'share-catalog',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**

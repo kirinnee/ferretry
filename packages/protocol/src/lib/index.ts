@@ -33,6 +33,7 @@ export * from './carriers.ts';
 export * from './canonical-json.ts';
 export * from './catalog.ts';
 export * from './catalog-install.ts';
+export * from './catalog-member.ts';
 export * from './client.ts';
 export * from './common.ts';
 export * from './config-changes.ts';

@@ -113,6 +113,7 @@ const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = 
   'clone-secrets': 'copy secrets to another machine',
   'loosen-security': 'make this machine ask for your passkey less often',
   'catalog-install': 'install something from a shared catalog',
+  'share-catalog': 'share a catalog with someone',
 };
 
 /**
