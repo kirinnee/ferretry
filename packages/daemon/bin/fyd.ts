@@ -510,6 +510,7 @@ import {
   LOOP_PARSE_PACING,
   NodeTranscriptFileRuntime,
   NodeTranscriptImageFiles,
+  NodeTranscriptRecordScanner,
   NodeTranscriptSource,
   TranscriptParseWorker,
   WorkerConversationDescriber,
@@ -964,6 +965,7 @@ import {
   readDoctorReport,
   readHarnessPreflight,
   readTranscriptPage,
+  searchTranscriptRecords,
   refuseExhaustedCandidates,
   refuseHeldStateHome,
   refuseOccupiedAddress,
@@ -1063,6 +1065,7 @@ import {
   SessionStopPending,
   type SessionTranscriptMessageTokenCodec,
   type SessionTranscriptPages,
+  type SessionTranscriptSearch,
   SessionTranscriptReader,
   SessionTranscriptResolver,
   type SessionTranscriptTail,
@@ -7744,37 +7747,86 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * The file is named to the caller by a token — a digest of its path and its device and inode — so a
    * page can be refused once the session's transcript is another file, and the path never leaves.
    */
-  const createSessionTranscriptPages = (storage: DaemonStorage): SessionTranscriptPages => {
+  /**
+   * Which file a session's transcript is, the source that reads its harness, and the token that names the
+   * file to a caller — a digest of its path and its device and inode, so a page or a search hit can be
+   * refused once the transcript is another file, and the path never leaves.
+   */
+  const createTranscriptLocation = (storage: DaemonStorage) => {
     const resolver = createTranscriptFileResolver(storage);
+    return async (
+      sessionId: string,
+    ): Promise<
+      | { readonly kind: 'unresolved' }
+      | { readonly kind: 'unreadable' }
+      | {
+          readonly kind: 'found';
+          readonly file: string;
+          readonly source: TranscriptSource;
+          readonly token: string;
+          readonly size: number;
+        }
+    > => {
+      const file = await resolver.file(sessionId).catch(() => undefined);
+      if (file === undefined) return { kind: 'unresolved' };
+      const id = tryParseSessionId(sessionId);
+      if (id === undefined) return { kind: 'unresolved' };
+      const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+      if (!config.success) return { kind: 'unresolved' };
+      const source = transcriptSources.find(
+        candidate => candidate.harness === (config.data.harness === 'codex' ? 'codex' : 'claude'),
+      );
+      const info = await stat(file).catch(() => undefined);
+      if (source === undefined || info === undefined) return { kind: 'unreadable' };
+      const token = createHash('sha256')
+        .update(`${file}\u0000${String(info.dev)}:${String(info.ino)}`)
+        .digest('base64url')
+        .slice(0, 22);
+      return { kind: 'found', file, source, token, size: info.size };
+    };
+  };
+  const createSessionTranscriptPages = (storage: DaemonStorage): SessionTranscriptPages => {
+    const located = createTranscriptLocation(storage);
     const tails = createSessionTranscriptTail(storage);
     return {
       page: async (sessionId, query) => {
-        const file = await resolver.file(sessionId).catch(() => undefined);
-        if (file === undefined) return { kind: 'unresolved' };
-        const id = tryParseSessionId(sessionId);
-        if (id === undefined) return { kind: 'unresolved' };
-        const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
-        if (!config.success) return { kind: 'unresolved' };
-        const source = transcriptSources.find(
-          candidate => candidate.harness === (config.data.harness === 'codex' ? 'codex' : 'claude'),
-        );
-        const info = await stat(file).catch(() => undefined);
-        if (source === undefined || info === undefined) return { kind: 'unreadable' };
-        const token = createHash('sha256')
-          .update(`${file}\u0000${String(info.dev)}:${String(info.ino)}`)
-          .digest('base64url')
-          .slice(0, 22);
+        const where = await located(sessionId);
+        if (where.kind !== 'found') return where;
         if (query.before === undefined) {
           const tail = await tails.tail(sessionId, query.limit);
           if (tail.kind !== 'read') return tail;
-          const page = tailPage(tail.events, query.limit, info.size);
-          if (page !== undefined) return { kind: 'read', ...page, file: token };
+          const page = tailPage(tail.events, query.limit, where.size);
+          if (page !== undefined) return { kind: 'read', ...page, file: where.token };
         }
-        const before = Math.min(query.before ?? info.size, info.size);
+        const before = Math.min(query.before ?? where.size, where.size);
         const range = { from: query.from ?? 0, before, limit: query.limit };
-        const page = await readTranscriptPage(source, file, sessionId, range).catch(() => undefined);
+        const page = await readTranscriptPage(where.source, where.file, sessionId, range).catch(() => undefined);
         if (page === undefined) return { kind: 'unreadable' };
-        return { kind: 'read', ...page, file: token };
+        return { kind: 'read', ...page, file: where.token };
+      },
+    };
+  };
+  /**
+   * The whole of a session's transcript searched, newest first, through the same file and source as its
+   * pages and under the same file token, so a hit is only ever looked for in the pages it came from.
+   */
+  const transcriptRecordScanner = new NodeTranscriptRecordScanner();
+  const createSessionTranscriptSearch = (storage: DaemonStorage): SessionTranscriptSearch => {
+    const located = createTranscriptLocation(storage);
+    return {
+      search: async (sessionId, query) => {
+        const where = await located(sessionId);
+        if (where.kind !== 'found') return where;
+        const result = await searchTranscriptRecords(
+          where.source,
+          transcriptRecordScanner,
+          where.file,
+          sessionId,
+          query,
+          query.limit,
+        ).catch(() => undefined);
+        if (result === undefined) return { kind: 'unreadable' };
+        return { kind: 'read', ...result, file: where.token };
       },
     };
   };
@@ -10440,6 +10492,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // remembered to. See `lib/secrets/redaction.ts` for the boundary this draws.
         secretRedactor,
         createSessionTranscriptPages(storage),
+        createSessionTranscriptSearch(storage),
       );
       // Lessons: the review board, passive suggestions, Apply and the explicit scan. A new ferret's
       // passive default is recorded through it, and a running one is re-instructed with a queued send.

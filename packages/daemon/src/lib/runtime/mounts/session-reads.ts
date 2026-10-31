@@ -203,6 +203,38 @@ async function logPage(
 }
 
 /**
+ * Every place in the session's whole transcript that says `?q` — the chat's search.
+ *
+ * `?who` is `all` (the default), `me` or `agent`; `?tools=1` searches tool calls, their results and
+ * thinking too. Not conditional: a search is asked once per query, and its answer is a moment's.
+ */
+async function logSearch(
+  reads: OperatorReadService,
+  sessions: SessionDirectorySubsystem,
+  context: RouteContext,
+): Promise<ApiResponse> {
+  const id = sessionId(context);
+  await requireSession(sessions, id);
+  const who = queryValue(context.request, 'who');
+  const tools = queryValue(context.request, 'tools');
+  if (tools !== undefined && tools !== '0' && tools !== '1')
+    throw new ApiError(400, 'query parameter "tools" must be 0 or 1', 'invalid_query');
+  const limit = numberQuery(context, 'limit');
+  try {
+    return jsonResponse(
+      await reads.logSearch(id, {
+        q: queryValue(context.request, 'q') ?? '',
+        tools: tools === '1',
+        ...(who === undefined || who === '' ? {} : { who }),
+        ...(limit === undefined ? {} : { limit }),
+      }),
+    );
+  } catch (error) {
+    return refuse(error);
+  }
+}
+
+/**
  * One page of the session's addressable conversation.
  *
  * `?cursor` is passed through RAW and unnormalized, which is the one place this mount deliberately
@@ -276,8 +308,9 @@ async function transcriptImage(
 }
 
 /**
- * The `operator` minimum on all six: a pane capture is the agent's whole screen, a transcript is
- * everything it has said (a log page is the same transcript, read further back), an addressable page
+ * The `operator` minimum on all seven: a pane capture is the agent's whole screen, a transcript is
+ * everything it has said (a log page is the same transcript read further back, and a search reads all
+ * of it), an addressable page
  * is that transcript row by row, and the journal carries the session's configuration in its lifecycle
  * events. None of it is warden-readable until a unit decides deliberately that it should be.
  *
@@ -324,6 +357,13 @@ export function sessionReadRoutes(
       minimum: 'operator',
       noStore: true,
       handle: async context => await logPage(reads, sessions, context),
+    },
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/log-search',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => await logSearch(reads, sessions, context),
     },
     {
       method: 'GET',
