@@ -1,3 +1,9 @@
+## [4.163.0](https://github.com/kirinnee/ferretry/compare/v4.162.0...v4.163.0) (2026-10-31)
+
+### Features
+
+* **daemon:** secure input bridge for terminal secrets (P1) ([#1013](https://github.com/kirinnee/ferretry/issues/1013)) ([d39a164](https://github.com/kirinnee/ferretry/commit/d39a16472bb3315175b6ac5efffbf7cdd40300d1))
+
 ## [4.162.0](https://github.com/kirinnee/ferretry/compare/v4.161.0...v4.162.0) (2026-10-31)
 
 ### Features
