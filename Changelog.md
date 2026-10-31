@@ -1,3 +1,13 @@
+## [4.154.0](https://github.com/kirinnee/ferretry/compare/v4.153.0...v4.154.0) (2026-10-31)
+
+### Features
+
+* **chat:** search within a conversation — the whole transcript, jump to a hit ([#1107](https://github.com/kirinnee/ferretry/issues/1107)) ([12f41a1](https://github.com/kirinnee/ferretry/commit/12f41a1f282cc6ca254b8a27367163431c039d58))
+
+### Fixes
+
+* **pwa:** keep Test proxy pressable and explain the secret-name boxes ([#1106](https://github.com/kirinnee/ferretry/issues/1106)) ([d60dfe8](https://github.com/kirinnee/ferretry/commit/d60dfe8beb1e2782d46b438fcfbb4e53218972fb))
+
 ## [4.153.0](https://github.com/kirinnee/ferretry/compare/v4.152.0...v4.153.0) (2026-10-31)
 
 ### Features

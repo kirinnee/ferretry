@@ -1,3 +1,15 @@
+## [4.153.0](https://github.com/kirinnee/ferretry/compare/v4.152.0...v4.153.0) (2026-10-31)
+
+### Features
+
+* **migrate:** ask the agent to stop its own background jobs on a refused migration ([#1103](https://github.com/kirinnee/ferretry/issues/1103)) ([e0dd62b](https://github.com/kirinnee/ferretry/commit/e0dd62bdf3396f19de38508185a69d1f1474fab9))
+
+### Fixes
+
+* **chat:** scroll a long conversation back to its first message ([#1099](https://github.com/kirinnee/ferretry/issues/1099)) ([6de3ba2](https://github.com/kirinnee/ferretry/commit/6de3ba2115d43e82f7a009d2c8be71337015b7b6))
+* **pwa:** key the visual fixture cache on every build input ([#1104](https://github.com/kirinnee/ferretry/issues/1104)) ([59f8c69](https://github.com/kirinnee/ferretry/commit/59f8c691bc732a39de4e6d0cef8f32bc7c212e66))
+* **pwa:** show the board's nudges as a Board system row, not an owner bubble ([#1102](https://github.com/kirinnee/ferretry/issues/1102)) ([b35e6ea](https://github.com/kirinnee/ferretry/commit/b35e6eaef8d302908a9e58cd7bd324477b918802))
+
 ## [4.152.0](https://github.com/kirinnee/ferretry/compare/v4.151.0...v4.152.0) (2026-10-31)
 
 ### Features
