@@ -441,6 +441,8 @@ interface ShellOptions {
   readonly transcriptGate?: () => Promise<void>;
   /** Send-ledger rows the ledger read answers with; without it the ledger read fails, as before. */
   readonly sends?: readonly unknown[];
+  /** A daemon older than `log-page`: the page read answers `unknown_route`, and only `logs` reads. */
+  readonly noLogPage?: true;
 }
 
 interface HealthRead {
@@ -623,6 +625,18 @@ const appStore = async (
           return typeof options.transcript === 'function'
             ? options.transcript(connection.daemonId, sessionId)
             : (options.transcript ?? '');
+        },
+        // The chat reads its tail as a page (`log-page`): the same transcript, beginning at the file's start.
+        logPage: async (sessionId: string) => {
+          if (options.noLogPage === true)
+            throw Object.assign(new Error('no route'), { status: 404, code: 'unknown_route' });
+          transcriptReads.push(`${connection.daemonId}:${sessionId}`);
+          await options.transcriptGate?.();
+          const log =
+            typeof options.transcript === 'function'
+              ? options.transcript(connection.daemonId, sessionId)
+              : (options.transcript ?? '');
+          return { v: 1 as const, sessionId, log, start: 0, file: 'transcript' };
         },
         // A conversation's durable rows, in one page — what the Attention page's "Last messages" fold reads.
         messages: async (sessionId: string) => ({
@@ -4989,6 +5003,23 @@ describe('the navigation cache', () => {
       expect(store.sessionCache.peekTranscript(scope)?.log).toBe('assistant/message: Fresh from the daemon.');
     } finally {
       valve.open();
+      await view.unmount();
+    }
+  });
+
+  it('reads the transcript through logs from a daemon that has no page route', async () => {
+    // Act
+    const { view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
+      transcript: 'assistant/message: From an older daemon.',
+      noLogPage: true,
+    });
+    try {
+      await settle();
+
+      // Assert
+      expect(transcriptText(view.container)).toContain('From an older daemon.');
+      expect(view.container.querySelector('[data-history="unavailable"]')).not.toBeNull();
+    } finally {
       await view.unmount();
     }
   });

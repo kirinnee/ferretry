@@ -1,3 +1,14 @@
+## [4.152.0](https://github.com/kirinnee/ferretry/compare/v4.151.0...v4.152.0) (2026-10-31)
+
+### Features
+
+* **browser:** add pointer and keys tools for agents ([#1083](https://github.com/kirinnee/ferretry/issues/1083)) ([a6957fe](https://github.com/kirinnee/ferretry/commit/a6957fe9349c01fcd190ecbf6fa39f3ad488042d)), closes [#1086](https://github.com/kirinnee/ferretry/issues/1086) [#1087](https://github.com/kirinnee/ferretry/issues/1087)
+
+### Fixes
+
+* **fleet:** teach ferrets the agenda is not a task tracker ([#1100](https://github.com/kirinnee/ferretry/issues/1100)) ([f80bc77](https://github.com/kirinnee/ferretry/commit/f80bc775309d5e77faed1a0f08191426fa7426b0))
+* **pwa:** close the agenda when the board is expanded over the chat ([#1101](https://github.com/kirinnee/ferretry/issues/1101)) ([8942a91](https://github.com/kirinnee/ferretry/commit/8942a912b98ffeb5a3239e903f91040b906c7194))
+
 ## [4.151.0](https://github.com/kirinnee/ferretry/compare/v4.150.0...v4.151.0) (2026-10-31)
 
 ### Features

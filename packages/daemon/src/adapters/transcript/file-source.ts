@@ -517,6 +517,8 @@ async function reconcileFollow(
   observer: TranscriptInputObserver,
   clock: TranscriptClock,
   limits: ResolvedTranscriptReadLimits,
+  /** A window's `end`: no byte at or past it is read (see `TranscriptWindowOptions.end`). */
+  end?: number,
 ): Promise<FollowReconcileResult> {
   let info: TranscriptFileInfo | undefined;
   try {
@@ -692,9 +694,15 @@ async function reconcileFollow(
       };
   if (reset) observer.reset();
 
+  // A step stops at the window's end as it stops at the end of the file: what is past it is not owed.
+  const step = Math.min(limits.maxReadBytes, DEFAULT_MAX_STEP_BYTES);
+  const room = end === undefined ? step : Math.min(step, Math.max(0, end - base.byteOffset));
   let read: BoundedTranscriptRead;
   try {
-    read = await runtime.readFrom(file, base.byteOffset, Math.min(limits.maxReadBytes, DEFAULT_MAX_STEP_BYTES));
+    read =
+      room === 0 ? { bytes: new Uint8Array(), truncated: false } : await runtime.readFrom(file, base.byteOffset, room);
+    if (end !== undefined && read.truncated && base.byteOffset + read.bytes.byteLength >= end)
+      read = { bytes: read.bytes, truncated: false };
   } catch (error) {
     if (errorCode(error) === 'ENOENT') return missingResult(parser, file, state, observer);
     const next = { ...base, availability: 'error' as const };
@@ -940,6 +948,7 @@ class NodeTranscriptWindow implements TranscriptWindow {
       this.observer,
       this.clock,
       this.limits,
+      this.options.end,
     );
     this.state = reconciled.state;
     const owed = this.owed;
@@ -963,7 +972,9 @@ class NodeTranscriptWindow implements TranscriptWindow {
     const start = this.options.start;
     const since = start.at === 'since' ? Date.parse(start.instant) : NaN;
     const tail = start.at === 'tail' && Number.isFinite(start.bytes) ? Math.max(0, Math.floor(start.bytes)) : NaN;
-    if (!Number.isFinite(since) && !Number.isFinite(tail)) {
+    const offset =
+      start.at === 'offset' && Number.isFinite(start.byteOffset) ? Math.max(0, Math.floor(start.byteOffset)) : NaN;
+    if (!Number.isFinite(since) && !Number.isFinite(tail) && !Number.isFinite(offset)) {
       this.state = unpositionedState({ initialized: false, availability: 'unknown' });
       return undefined;
     }
@@ -989,14 +1000,20 @@ class NodeTranscriptWindow implements TranscriptWindow {
     let seek: { readonly byteOffset: number; readonly capped: boolean };
     let anchor: Uint8Array;
     try {
-      seek = Number.isFinite(tail)
-        ? {
-            // One byte early, so a window that lands exactly on a boundary keeps the record starting there.
-            byteOffset:
-              info.size <= tail ? 0 : await boundaryFrom(this.runtime, this.file, info.size - tail - 1, info.size),
-            capped: false,
-          }
-        : await seekSince(this.runtime, this.file, info.size, since, this.limits.maxWindowBytes);
+      // One byte early, so a window that lands exactly on a boundary keeps the record starting there.
+      const from = Number.isFinite(offset) ? offset : info.size - tail;
+      seek =
+        Number.isFinite(tail) || Number.isFinite(offset)
+          ? {
+              byteOffset:
+                from <= 0
+                  ? 0
+                  : from >= info.size
+                    ? info.size
+                    : await boundaryFrom(this.runtime, this.file, from - 1, info.size),
+              capped: false,
+            }
+          : await seekSince(this.runtime, this.file, info.size, since, this.limits.maxWindowBytes);
       anchor = await readAnchor(this.runtime, this.file, seek.byteOffset);
     } catch {
       return failed('transcript window could not be placed');

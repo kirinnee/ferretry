@@ -137,7 +137,13 @@ import {
   type RestartStatus,
   RestartStatusSchema,
 } from '../lib/session-restart.ts';
-import { type SessionTranscriptPage, SessionTranscriptPageSchema } from '../lib/session-transcript.ts';
+import {
+  type LogPageOptions,
+  type SessionLogPage,
+  SessionLogPageSchema,
+  type SessionTranscriptPage,
+  SessionTranscriptPageSchema,
+} from '../lib/session-transcript.ts';
 import {
   type MachineSkillsInventory,
   MachineSkillsInventorySchema,
@@ -1101,6 +1107,36 @@ export class FyApiClient implements IFyApiClient {
     if (etag === null) this.#validatedLogs.forget(path);
     else this.#validatedLogs.remember(path, { etag, body });
     return body;
+  }
+
+  /**
+   * One page of the chat's transcript: the tail, or the page `before` a byte. Conditional like `logs`,
+   * so a polled tail that has not moved is a `304` and the page held from the last read.
+   */
+  async logPage(id: string, options: LogPageOptions = {}): Promise<SessionLogPage> {
+    const search = new URLSearchParams();
+    if (options.before !== undefined) search.set('before', String(NonNegativeIntegerSchema.parse(options.before)));
+    if (options.from !== undefined) search.set('from', String(NonNegativeIntegerSchema.parse(options.from)));
+    if (options.limit !== undefined) search.set('limit', String(PositiveIntegerSchema.max(2_000).parse(options.limit)));
+    if (options.file !== undefined) search.set('file', NonEmptyValueSchema.parse(options.file));
+    const suffix = search.size === 0 ? '' : `?${search.toString()}`;
+    const path = `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/log-page${suffix}`;
+    const held = this.#validatedLogs.recall(path);
+    const response = await this.#exchange(
+      path,
+      { method: 'GET', headers: held === undefined ? {} : { 'if-none-match': held.etag } },
+      FY_REQUEST_TIMEOUT_MS,
+      held !== undefined,
+    );
+    if (held !== undefined && response.status === 304) {
+      this.#validatedLogs.remember(path, held);
+      return SessionLogPageSchema.parse(JSON.parse(held.body));
+    }
+    const page = SessionLogPageSchema.parse(await responsePayload(response));
+    const etag = response.headers.get('etag');
+    if (etag === null) this.#validatedLogs.forget(path);
+    else this.#validatedLogs.remember(path, { etag, body: JSON.stringify(page) });
+    return page;
   }
 
   handoff(id: string, name: string): Promise<SessionHandoff> {

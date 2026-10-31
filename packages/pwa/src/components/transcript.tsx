@@ -15,6 +15,7 @@ import type { SendCancel, SendRetry, SendSubmit } from './ledger-message.tsx';
 import { LiveActivityLine } from './live-activity.tsx';
 import { useQuoteMenu } from './quote-menu.tsx';
 import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
+import { type TranscriptHistoryControl, TranscriptHistoryRow, wantsOlder } from './transcript-history-row.tsx';
 import { TranscriptRow } from './transcript-row.tsx';
 
 export interface TranscriptProps {
@@ -53,6 +54,8 @@ export interface TranscriptProps {
   readonly pinSignal?: number;
   /** Where this session's reading position is kept, so coming back finds it (`useStickToBottom`). */
   readonly readingPosition?: ChatScrollSlot;
+  /** Older messages above the first one shown, loaded as the reader nears the top. Absent: none offered. */
+  readonly history?: TranscriptHistoryControl;
 }
 /**
  * An assistant row labelled with the agent's name — "Hadi" rather than "Assistant", the harness, or the
@@ -108,6 +111,7 @@ export function Transcript({
   liveInRow = false,
   pinSignal = 0,
   readingPosition,
+  history,
 }: TranscriptProps) {
   const hold = useTranscriptHold();
   const shown = useHeldStill({ entries, busy, activity, activityFallback, turnStartedAt, live }, hold);
@@ -160,6 +164,23 @@ export function Transcript({
     prevFirstId.current = firstId;
   }, [firstId, ids.length]);
 
+  // ---- OLDER HISTORY: read the page before the first row as the reader nears the top ----------------
+  // Asked on every scroll and again after every change to the rows or the status, so a page that added
+  // nothing to see — a run of tool calls, a stretch of bookkeeping — is followed by the next one at once,
+  // and a transcript too short to scroll keeps loading until it fills the screen or reaches the start.
+  const historyStatus = history?.status ?? 'unavailable';
+  const loadOlder = history?.loadOlder;
+  const askOlder = useCallback(() => {
+    const element = viewportRef.current;
+    if (element !== null && loadOlder !== undefined && wantsOlder(historyStatus, element.scrollTop)) loadOlder();
+  }, [historyStatus, loadOlder, viewportRef]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the row count is the trigger
+  useEffect(askOlder, [askOlder, ids.length]);
+  const onTranscriptScroll = useCallback(() => {
+    onScroll();
+    askOlder();
+  }, [askOlder, onScroll]);
+
   const quote = useQuoteMenu(
     viewportRef,
     useMemo(() => ({ daemonId: toDaemonId(daemonId), sessionId }), [daemonId, sessionId]),
@@ -173,12 +194,13 @@ export function Transcript({
            not take that away, so this scroller declines it by name. */
         {...{ [PULL_TO_PALETTE_IGNORE_ATTR]: '' }}
         {...quote.handlers}
-        onScroll={onScroll}
+        onScroll={onTranscriptScroll}
         ref={viewportRef}
         role="log"
         aria-live="polite"
       >
         <div className="fy-transcript-content" ref={contentRef}>
+          {history === undefined ? null : <TranscriptHistoryRow control={history} />}
           {items.map((item, index) => (
             <Fragment key={item.entry.id}>
               {compaction?.phase === 'done' && stripAt === index ? <CompactionStrip compaction={compaction} /> : null}

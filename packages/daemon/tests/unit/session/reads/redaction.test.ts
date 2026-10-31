@@ -94,6 +94,9 @@ const service = (redactor: OperatorReadRedactor, paneText = `screen ${SECRET}`):
     CODEC,
     { read: async () => ({ kind: 'read', text: `final frame ${SECRET}` }) },
     redactor,
+    {
+      page: async () => ({ kind: 'read', events: [message(`an older ${SECRET}`)], start: 0, file: 'file-token' }),
+    },
   );
 
 describe('operator reads are scrubbed', () => {
@@ -103,6 +106,14 @@ describe('operator reads are scrubbed', () => {
 
     // Assert
     should(screen).equal('screen [redacted:TOKEN]');
+  });
+
+  it('should mask a value in a page of older history', async () => {
+    // Act
+    const page = await service(masking()).logPage('s1', { before: 900 });
+
+    // Assert
+    should(page.log).equal('[09:08:07] assistant/message: an older [redacted:TOKEN]');
   });
 
   it('should mask a value in the stored final frame', async () => {

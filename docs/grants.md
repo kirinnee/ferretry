@@ -653,6 +653,11 @@ command says so at the moment somebody might be tempted to do that instead.
   never address arbitrary bytes of the file, and a handle outside that transcript is a 4xx with a
   code. The image is served as `private, max-age=31536000, immutable` with a strong etag, so a
   browser keeps it per device.
+- **The log page route (`GET /v1/sessions/:id/log-page`) reads the same transcript as `/logs`, at the
+  same `operator` minimum, and widens nothing.** It is the chat's tail and every page of history older
+  than it, rendered and scrubbed exactly as `/logs` is, so whoever may read the tail may scroll back
+  through the rest. Its `start` is a byte offset into the transcript and its `file` an opaque digest of
+  the file's path and identity — positions, never content, and never the path itself.
 - ~~Web Push enrolment is governed by `pairing`.~~ **Closed by B5.** A device enrolling **itself** — reading
   the key, enrolling, listing and un-enrolling its own enrolments — needs no capability and no step-up,
   because it grants nothing: it lets this daemon reach the device that asked, and only it. A default
