@@ -22,6 +22,7 @@ import type {
   PackQuota,
   PackRefusal,
 } from '@ferretry/protocol';
+import { usdWords } from '@ferretry/fleet';
 import { modelVocabulary, namedModels } from '@ferretry/protocol';
 import type { PaneLimit } from '../usage/pane-limit.ts';
 import { QUOTA_RANK, quotaOf } from './quota.ts';
@@ -82,6 +83,13 @@ export function runtimeRefusal(
       `${tool.label} is not installed on this machine, so ${name} cannot start.`,
       `Install ${tool.label}, or pick another runtime.`,
     );
+  const budget = overBudget(facts.credentials.find(candidate => candidate.id === runtime.credential.id));
+  if (budget !== undefined)
+    return refusal(
+      'over_budget',
+      `${name}'s login (${runtime.credential.id}) ${budget}`,
+      'Pick another model; this one is back when the budget resets.',
+    );
   const unlaunchable = facts.unlaunchable[runtime.wrapper];
   if (unlaunchable !== undefined)
     return refusal('cli_missing', `${name} cannot be launched: ${unlaunchable}`, 'Pick another runtime.');
@@ -118,6 +126,25 @@ export function runtimeRefusal(
   if (model !== undefined && !offers(runtime, model))
     return refusal('model_unavailable', `${name} does not offer ${model}.`, '`recommend` lists the runtimes that do.');
   return undefined;
+}
+
+/**
+ * "spent $41.20 of its $40.00 daily trigger on this machine; back at 2026-10-31T07:00:00.000Z" — or
+ * `undefined` when the login's budget holds nothing. The worse period speaks; a tie goes to the longer.
+ */
+export function overBudget(credential: FleetCredentialView | undefined): string | undefined {
+  const budget = credential?.budget;
+  if (budget === undefined || budget.level === 'ok') return undefined;
+  const periods = (['weekly', 'daily'] as const).flatMap(period => {
+    const view = budget[period];
+    return view === undefined || view.level === 'ok' ? [] : [{ period, view }];
+  });
+  const speaking = periods.find(entry => entry.view.level === budget.level) ?? periods[0];
+  if (speaking === undefined) return undefined;
+  const { period, view } = speaking;
+  const hard = view.level === 'over_hard';
+  const limit = (hard ? view.hard : view.trigger) ?? 0;
+  return `spent ${usdWords(view.spentUsd)} of its ${usdWords(limit)} ${period} ${hard ? 'hard limit' : 'trigger'} on this machine; back at ${view.resetsAt}`;
 }
 
 /** Whether a runtime offers a model, from its catalog when its login reads one, else its model set. */

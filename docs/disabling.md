@@ -1,7 +1,8 @@
 # Switching a login or a runtime off
 
 A login that has hit its provider's spend limit, or a runtime you want to rest, can be **switched off
-without being deleted**. Nothing new starts on it; nothing already running is touched; one command
+without being deleted**. (To have a login switch itself off at a dollar amount, give it a budget instead:
+[budgets.md](budgets.md). A budget holds a login through the same mechanism described below.) Nothing new starts on it; nothing already running is touched; one command
 (or one tap) switches it back on.
 
 ## The switch

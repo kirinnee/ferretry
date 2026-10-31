@@ -74,7 +74,7 @@ import {
   credentialLaunchEnvironment,
   resolveCredentialStore,
 } from './credentials.ts';
-import { binaryNameOf, runtimeDisable } from './disabled-runtime.ts';
+import { type BudgetHolds, binaryNameOf, runtimeDisable } from './disabled-runtime.ts';
 import { applyFixedLayer, type FixedLayer, fixedLayerFor } from './fixed-layer.ts';
 import { assignRuntimeIds, type RuntimeIds, runtimeIdsPath, serializeRuntimeIds } from './ids.ts';
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from './layering.ts';
@@ -147,6 +147,11 @@ export interface MaterialiseInput {
   readonly acceptsAutoPermissionMode: boolean;
   /** The model ids each credential can use (E23), by credential id. Absent means all of them. */
   readonly availableModels?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * The logins their spend budget holds now, by credential id (docs/budgets.md): every runtime on one is
+   * published unavailable with the budget's sentence, exactly as a `disabled` login is. Absent: none.
+   */
+  readonly budgetHolds?: BudgetHolds;
   /**
    * The model catalogs and presets in effect (docs/model-catalog.md). A runtime whose login names a
    * catalog offers its models and gets its tier pins; absent, every runtime offers its profile's model set.
@@ -310,7 +315,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     homeOwners.set(home, name);
     const wrapper = joinPath(layout.binDirectory, name);
     const reasons: string[] = [];
-    reasons.push(...(runtimeDisable(model, name, now, binary)?.clauses ?? []));
+    reasons.push(...(runtimeDisable(model, name, now, binary, input.budgetHolds)?.clauses ?? []));
 
     const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths, harness);
     if ('unavailable' in store)

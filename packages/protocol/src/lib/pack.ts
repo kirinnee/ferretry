@@ -263,6 +263,7 @@ export type PackCleanUpStatus = z.infer<typeof PackCleanUpStatusSchema>;
  * - `not_logged_in`: its login needs signing in, or a secret it names is not set.
  * - `out_of_quota`: its login's quota is used up.
  * - `disabled`: the runtime or its login is switched off (`disabled:` in its file) until someone enables it.
+ * - `over_budget`: its login has spent its daily or weekly trigger on this machine; it is back at the reset.
  * - `probe_failed`: the "reply OK" check did not answer OK in time.
  * - `no_candidate`: no model a runtime here offers can run now.
  * - `jev_unavailable` / `jev_cap_reached`: Jev decides, and could not.
@@ -281,6 +282,7 @@ export const PACK_REFUSAL_CODES = [
   'not_logged_in',
   'out_of_quota',
   'disabled',
+  'over_budget',
   'probe_failed',
   'no_candidate',
   'jev_unavailable',

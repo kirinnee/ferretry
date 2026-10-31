@@ -103,7 +103,7 @@ function emptyTotals(): UsageTotals {
  * a gross input and subtracts the cached parts back out, so each harness is converted to gross
  * exactly once, here.
  */
-function grossInput(harness: TranscriptHarness, input: number, cachedRead: number, cacheWrite: number): number {
+export function grossInput(harness: TranscriptHarness, input: number, cachedRead: number, cacheWrite: number): number {
   return harness === 'claude' ? input + cachedRead + cacheWrite : input;
 }
 
@@ -115,7 +115,7 @@ function grossInput(harness: TranscriptHarness, input: number, cachedRead: numbe
  * write itself, so a figure this daemon cannot place is refused rather than assigned to whichever
  * side makes the arithmetic close.
  */
-function cacheWriteIsPlaceable(harness: TranscriptHarness, cacheWrite: number): boolean {
+export function cacheWriteIsPlaceable(harness: TranscriptHarness, cacheWrite: number): boolean {
   return harness === 'claude' || cacheWrite === 0;
 }
 
@@ -132,7 +132,7 @@ function cacheWriteIsPlaceable(harness: TranscriptHarness, cacheWrite: number): 
  * Codex's billing semantics by default, silently, on the strength of not being Anthropic's — and the
  * first anyone would learn of it is a bill. A harness earns this by being listed.
  */
-function reasoningIsBilledApart(harness: TranscriptHarness): boolean {
+export function reasoningIsBilledApart(harness: TranscriptHarness): boolean {
   return harness === 'codex';
 }
 
@@ -162,11 +162,11 @@ function lastUsagePerMessage(events: readonly TranscriptEvent[]): ReadonlyMap<st
  * request's per-request figures still attached; summing it charged that request twice (+1.4% input on
  * a real rollout against Codex's own total). A running total that did not move is no new request.
  */
-function repeatsTheLastTotal(total: number | undefined, previous: number | undefined): boolean {
+export function repeatsTheLastTotal(total: number | undefined, previous: number | undefined): boolean {
   return total !== undefined && total === previous;
 }
 
-function isCountable(value: number | undefined): value is number {
+export function isCountable(value: number | undefined): value is number {
   return value !== undefined && Number.isSafeInteger(value) && value >= 0;
 }
 

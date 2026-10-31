@@ -197,7 +197,34 @@ const ENVIRONMENT_CASES: readonly SchemaCase[] = [
   },
 ];
 
+const budgetPeriod = {
+  trigger: 40,
+  hard: 60,
+  spentUsd: 41.2,
+  level: 'over_trigger',
+  startsAt: INSTANT,
+  resetsAt: LATER_INSTANT,
+} as const;
+
+const budget = {
+  timeZone: 'America/Los_Angeles',
+  timeZoneSet: true,
+  daily: budgetPeriod,
+  weekly: { hard: 200, spentUsd: 41.2, level: 'ok', startsAt: INSTANT, resetsAt: LATER_INSTANT },
+  level: 'over_trigger',
+  unpriced: 0,
+  measured: true,
+} as const;
+
 const cases: readonly SchemaCase[] = [
+  { name: 'FleetBudgetLevelSchema', schema: credentials.FleetBudgetLevelSchema, value: 'over_hard' },
+  { name: 'FleetBudgetPeriodViewSchema', schema: credentials.FleetBudgetPeriodViewSchema, value: budgetPeriod },
+  { name: 'FleetCredentialBudgetSchema', schema: credentials.FleetCredentialBudgetSchema, value: budget },
+  {
+    name: 'FleetCredentialViewSchema with a budget',
+    schema: credentials.FleetCredentialViewSchema,
+    value: { ...view, budget },
+  },
   { name: 'FleetCredentialIdSchema', schema: credentials.FleetCredentialIdSchema, value: 'claude-work' },
   { name: 'FleetCredentialStatusWordSchema', schema: credentials.FleetCredentialStatusWordSchema, value: 'checking' },
   {

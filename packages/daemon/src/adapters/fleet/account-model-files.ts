@@ -167,7 +167,7 @@ export interface FileFleetCatalogOptions {
   /** What a person types to run this binary: the wrapper's history claim and statusLine run it. */
   readonly clientName: string;
   /** The configuration files: read for the model in effect, and told about every file a change writes. */
-  readonly config: Pick<ConfigFilesService, 'inEffect' | 'load' | 'acknowledge'>;
+  readonly config: Pick<ConfigFilesService, 'inEffect' | 'load' | 'acknowledge' | 'acknowledgeRemoval'>;
   /** `<FY_HOME>/config`. */
   readonly configDirectory: string;
 }
@@ -184,7 +184,7 @@ export interface FileFleetCatalogOptions {
  */
 function acknowledgingProvisioner(
   inner: FleetCatalogServiceDeps['provisioner'],
-  config: Pick<ConfigFilesService, 'acknowledge' | 'load'>,
+  config: Pick<ConfigFilesService, 'acknowledge' | 'acknowledgeRemoval' | 'load'>,
   configDirectory: string,
 ): FleetCatalogServiceDeps['provisioner'] {
   return {
@@ -192,7 +192,9 @@ function acknowledgingProvisioner(
     apply: async (plan, documents = []) => {
       const configFiles = documents.filter(document => !relative(configDirectory, document.path).startsWith('..'));
       for (const document of configFiles) {
-        if (document.remove !== true) config.acknowledge(relative(configDirectory, document.path), document.content);
+        const path = relative(configDirectory, document.path);
+        if (document.remove === true) config.acknowledgeRemoval(path);
+        else config.acknowledge(path, document.content);
       }
       try {
         return await inner.apply(plan, documents);

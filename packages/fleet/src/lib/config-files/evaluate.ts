@@ -41,7 +41,14 @@ import type { AccountModel } from '../account/schema.ts';
 import type { ModelCatalog, ModelCatalogFile } from '../models/schema.ts';
 import { type ProviderPreset, type ProviderPresetFile, presetFromFile } from '../presets/schema.ts';
 import { type CheckedConfigFile, checkConfigFile, schemaIssues } from './check.ts';
-import { configLoosening, SINGLETON_DEFAULTS, type SingletonKind } from './kinds.ts';
+import {
+  type ConfigValues,
+  configLoosening,
+  loginLoosening,
+  runtimeLoosening,
+  SINGLETON_DEFAULTS,
+  type SingletonKind,
+} from './kinds.ts';
 import { assembleAccountModel, type FleetFileValue, isFleetFile, modelIssueSite } from './model.ts';
 
 /** One file found in the directory, by its path relative to it. */
@@ -139,6 +146,33 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
   /** Fleet paths whose entry in `next` changed this round, to undo if the fleet does not assemble. */
   const fleetChanges = new Set<string>();
 
+  /** The logins with a budget in effect before this round: what a runtime may not leave unconfirmed. */
+  const budgeted = new Set(
+    Object.entries(input.accepted).flatMap(([path, accepted]) => {
+      const candidate = acceptedCandidate(path, accepted);
+      if (candidate === undefined || candidate.checked.address.kind !== 'login') return [];
+      const login = candidate.checked.value as ConfigValues['login'];
+      return login.budget === undefined ? [] : [candidate.checked.address.name];
+    }),
+  );
+  /** The budget edits a file makes, against what was in effect: `after` absent is the file deleted. */
+  const budgetLoosening = (address: ConfigFileAddress, before: Candidate | undefined, after: Candidate | undefined) => {
+    if (address.kind === 'login')
+      return loginLoosening(
+        address.name,
+        before?.checked.value as ConfigValues['login'] | undefined,
+        after?.checked.value as ConfigValues['login'] | undefined,
+      );
+    if (address.kind === 'runtime')
+      return runtimeLoosening(
+        address.name,
+        before?.checked.value as ConfigValues['runtime'] | undefined,
+        after?.checked.value as ConfigValues['runtime'] | undefined,
+        login => budgeted.has(login),
+      );
+    return [];
+  };
+
   const unreadable = input.unreadable ?? [];
   const onDisk = new Set([...input.files.map(file => file.path), ...unreadable]);
   for (const path of unreadable) {
@@ -188,6 +222,14 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
         continue;
       }
     }
+    if (etag !== previous?.etag) {
+      const changes = budgetLoosening(address, previous, candidate);
+      if (changes.length > 0) {
+        pending.push({ path: file.path, etag, changes: [...changes] });
+        keepPrevious('pending');
+        continue;
+      }
+    }
     states.set(file.path, { address, state: 'ok' });
     effective.set(file.path, candidate);
     next[file.path] = { etag, text: file.text };
@@ -213,6 +255,15 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
         next[path] = accepted;
         continue;
       }
+    }
+    // A budgeted login deleted, or a runtime deleted off one, is a budget removed: held like any removal.
+    const changes = budgetLoosening(address, previous, undefined);
+    if (changes.length > 0) {
+      pending.push({ path, etag: ABSENT_CONFIG_ETAG, changes: [...changes] });
+      states.set(path, { address, state: 'pending' });
+      effective.set(path, previous);
+      next[path] = accepted;
+      continue;
     }
     if (isFleetFile(address)) fleetChanges.add(path);
   }

@@ -69,6 +69,7 @@ import {
   type FleetCredentialUsageWindow,
   type FleetCredentialView,
   FleetCredentialViewSchema,
+  type FleetCredentialBudget,
   type FleetDisabled,
   type FleetProviderPresetCatalog,
   type ProviderQuotaReading,
@@ -451,6 +452,8 @@ export interface FleetCredentialsServiceDeps {
    * listing logins never asks a provider anything; whoever is watching asks the reader first.
    */
   readonly providerQuota?: { peek(id: string): ProviderQuotaReading | undefined };
+  /** A login's spend budget and where it stands (docs/budgets.md), from the last check. Absent: none shown. */
+  readonly budget?: { view(id: string): FleetCredentialBudget | undefined };
   /**
    * How long one list answers every caller that asks for the same view of the same catalogue. Absent, a
    * list is shared only by the callers that ask while it is being made.
@@ -740,6 +743,7 @@ export class FleetCredentialsService {
       ...(entry.credential.label === undefined ? {} : { label: entry.credential.label }),
       needsLabel: needsLabel(entry, email, emails, entries),
       ...disabledField(entry.credential.disabled, this.deps.listCache?.now() ?? 0),
+      ...budgetField(entry.credential.budget === undefined ? undefined : this.deps.budget?.view(entry.id)),
       ...(entry.credential.clonedFrom === undefined ? {} : { clonedFrom: entry.credential.clonedFrom }),
       ...(entry.credential.clonedFromDaemon === undefined
         ? {}
@@ -769,6 +773,10 @@ export class FleetCredentialsService {
     });
   }
 }
+
+/** The login's `budget` field, when it has a budget the last check stood it against. */
+const budgetField = (budget: FleetCredentialBudget | undefined): { readonly budget?: FleetCredentialBudget } =>
+  budget === undefined ? {} : { budget };
 
 /** The login's `disabled` field when its block is in effect at `now`, else nothing. */
 function disabledField(block: Disabled | undefined, now: number): { readonly disabled?: FleetDisabled } {

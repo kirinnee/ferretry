@@ -594,6 +594,15 @@ export const SessionConfigSchema = z.object({
       at: InstantSchema,
     })
     .optional(),
+  /**
+   * EVERY move this session made, oldest first — `migration` is only the last. What a spend budget books a
+   * request against (docs/budgets.md): the login the session ran on when the request was made. Absent on a
+   * session that predates it, where `migration` is all the history there is.
+   */
+  migrations: z
+    .array(z.object({ from: z.string().min(1), to: z.string().min(1), at: InstantSchema }))
+    .max(1_000)
+    .optional(),
   /** Target-only lineage back to the transfer decision that created this fresh session. */
   transferredFrom: SessionTransferEdgeSchema.optional(),
   /** Where the conversation came from, when a cross-harness migration converted it. */
