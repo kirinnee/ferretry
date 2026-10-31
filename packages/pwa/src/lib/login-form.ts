@@ -27,11 +27,6 @@ import {
   TotpSeedSchema,
 } from '@ferretry/protocol';
 
-export const MATCH_HELP =
-  'What it is for: program@host (sudo@kirin-box) or a web host (github.com). Separate several with commas.';
-
-export const DOMAINS_HELP = 'Web hosts you sign in on, like app.vercel.com. Commas between.';
-
 /** `sudo@kirin-box, github.com` → the list; blanks dropped, lowercase. */
 export const parseMatch = (text: string): readonly string[] =>
   text

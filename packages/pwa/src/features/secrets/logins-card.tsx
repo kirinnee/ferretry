@@ -24,12 +24,10 @@ import { normalizeHandle } from '../../lib/input-card.ts';
 import {
   addTotpBody,
   canAddLogin,
-  DOMAINS_HELP,
   domainsWords,
   editLoginBody,
   fieldWords,
   handleFromLabel,
-  MATCH_HELP,
   METHOD_OPTIONS,
   matchText,
   methodWords,
@@ -59,15 +57,7 @@ export interface LoginsCardProps {
 
 const INPUT = 'kt-input min-h-[44px] w-full rounded-control border border-border bg-surface-2 px-2 text-fg';
 
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  readonly label: string;
-  readonly hint?: string;
-  readonly children: (id: string) => ReactNode;
-}) {
+function Field({ label, children }: { readonly label: string; readonly children: (id: string) => ReactNode }) {
   const id = useId();
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-1">
@@ -75,7 +65,6 @@ function Field({
         {label}
       </label>
       {children(id)}
-      {hint !== undefined && <p className="m-0 text-meta leading-base text-faint">{hint}</p>}
     </div>
   );
 }
@@ -153,7 +142,7 @@ function SignInFields({
           )}
         </Field>
       )}
-      <Field label="Login domain(s)" hint={DOMAINS_HELP}>
+      <Field label="Login domain(s)">
         {fieldId => (
           <input
             id={fieldId}
@@ -237,7 +226,7 @@ function AddLoginForm({
             />
           )}
         </Field>
-        <Field label="Handle" hint="The name the CLI and cards use.">
+        <Field label="Handle">
           {fieldId => (
             <input
               id={fieldId}
@@ -256,13 +245,13 @@ function AddLoginForm({
           )}
         </Field>
       </div>
-      <Field label="Used for" hint={MATCH_HELP}>
+      <Field label="Used for">
         {fieldId => (
           <input
             id={fieldId}
             className={`${INPUT} mono`}
             value={match}
-            placeholder="github.com"
+            placeholder="sudo@kirin-box, github.com"
             autoComplete="off"
             autoCapitalize="off"
             spellCheck={false}
@@ -273,7 +262,7 @@ function AddLoginForm({
       </Field>
       <SignInFields draft={signIn} choices={viaChoices(entries, undefined)} kind="new" onChange={setSignIn} />
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-        <Field label="Username (optional)" hint="Not secret: the ferret can see it.">
+        <Field label="Username (optional)">
           {fieldId => (
             <input
               id={fieldId}
@@ -287,7 +276,7 @@ function AddLoginForm({
             />
           )}
         </Field>
-        <Field label="Password" hint="Write-only. It is never shown again.">
+        <Field label="Password">
           {fieldId => (
             <input
               id={fieldId}
@@ -488,7 +477,7 @@ function LoginRow({
               />
             )}
           </Field>
-          <Field label="Used for" hint={MATCH_HELP}>
+          <Field label="Used for">
             {fieldId => (
               <input
                 id={fieldId}
@@ -497,13 +486,14 @@ function LoginRow({
                 autoComplete="off"
                 autoCapitalize="off"
                 spellCheck={false}
+                placeholder="sudo@kirin-box, github.com"
                 data-login-edit-match=""
                 onChange={event => setMatch(event.target.value)}
               />
             )}
           </Field>
           <SignInFields draft={signIn} choices={viaChoices(entries, entry.id)} kind="edit" onChange={setSignIn} />
-          <Field label="Username" hint="Empty removes it.">
+          <Field label="Username">
             {fieldId => (
               <input
                 id={fieldId}
@@ -551,7 +541,7 @@ function LoginRow({
               run(onPut(entry.id, replacePasswordBody(password)));
           }}
         >
-          <Field label="New password" hint="Write-only. The old one is replaced, never shown.">
+          <Field label="New password">
             {fieldId => (
               <input
                 id={fieldId}
@@ -611,7 +601,7 @@ function LoginRow({
             />
             <span>I understand, keep the 2FA seed with this password.</span>
           </label>
-          <Field label="2FA seed" hint="The base32 setup key an authenticator shows. Write-only.">
+          <Field label="2FA seed">
             {fieldId => (
               <input
                 id={fieldId}
@@ -622,6 +612,7 @@ function LoginRow({
                 autoCapitalize="off"
                 autoCorrect="off"
                 spellCheck={false}
+                placeholder="Base32 setup key"
                 data-login-totp-seed=""
                 onChange={event => setSeed(event.target.value)}
               />
@@ -654,7 +645,7 @@ function LoginRow({
               run(onRename(entry.id, renameTarget));
           }}
         >
-          <Field label="Handle" hint="Values follow the rename; nothing is re-typed.">
+          <Field label="Handle">
             {fieldId => (
               <input
                 id={fieldId}
@@ -730,10 +721,7 @@ export function LoginsCard({ list, busy = null, error = null, onPut, onRename, o
         </h2>
         <span className="rounded-control bg-surface-2 px-2 py-0.5 text-meta font-medium text-faint">write-only</span>
       </div>
-      <p className="m-0 text-cell leading-base text-muted">
-        Passwords an input card can type for you with one tap. A password is sealed on this machine and never shown
-        again; the ferret never holds it.
-      </p>
+      <p className="m-0 text-cell leading-base text-muted">Passwords are write-only; ferrets never see them.</p>
 
       {list.health === 'damaged' ? (
         <div
