@@ -219,7 +219,9 @@ fy catalog export "Team skills" --out team.catalog.json
   (before asking the daemon to sign anything). Before it signs, it **prints every live item with its
   version and digest and asks `y/N`** (`--yes` skips the ask, not the printing), and after the daemon
   answers it checks that what was signed is exactly what was printed, writing nothing if it is not. The
-  file is verified with the installer's own check before it is handed over. `--force` writes a temporary
+  file is verified with the installer's own check before it is handed over. The file is **compact JSON on one
+  line**, because the 32 MiB cap is measured on those bytes and the file is for machines; the review above is what a
+  person reads. `--force` writes a temporary
   file beside the destination and renames it over, and refuses a destination that is a symbolic link.
 - `export --item` chooses which items the **file carries**. The signed manifest still lists **every live
   item** of the catalog, so a reader sees the whole catalog and which items it was not given. The ask

@@ -207,6 +207,7 @@ describe('fy catalog export', () => {
     should(prompt.asked[0]).startWith('Sign Team tools with the items listed above?');
     should(files.written.get(path)?.overwrite).equal(false);
     should(files.written.get(path)?.text.endsWith('}\n')).equal(true);
+    should(files.written.get(path)?.text.trimEnd().includes('\n')).equal(false);
     should(JSON.parse(files.written.get(path)?.text ?? '').format).equal('ferretry-catalog-file');
     should(out.lines.at(-1)).equal(`Exported Team tools (1 item) to ${path}.`);
   });

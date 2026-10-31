@@ -145,6 +145,25 @@ export const CapabilityGrantsSchema = z.strictObject(
 export type CapabilityGrants = z.infer<typeof CapabilityGrantsSchema>;
 
 /**
+ * How a CLIENT reads grants off the wire from a daemon on another version (`version-skew.ts`).
+ *
+ * A capability this build knows and the answer omits (an older daemon) reads as OFF, a narrowing, so
+ * a hosted app newer than its daemon still opens the device screen and never shows access that was not
+ * granted. A key this build does not know (a newer daemon) is dropped, so a capability added later
+ * cannot break a client that has not heard of it. The result is the closed `CapabilityGrantsSchema`.
+ */
+export const ReadCapabilityGrantsSchema = z.preprocess(raw => {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
+  const given = raw as Record<string, unknown>;
+  return Object.fromEntries(
+    DAEMON_CAPABILITIES.map(capability => [
+      capability,
+      capability in given ? given[capability] : { use: false, configure: false },
+    ]),
+  );
+}, CapabilityGrantsSchema);
+
+/**
  * What a device paired with a LIMITED code (`fy pair --limited`) is given: `fleet.use`, and nothing else.
  *
  * The opt-in narrowing (`docs/design/zero-trust.md` B5): a phone that can read the fleet and chat with

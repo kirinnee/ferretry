@@ -3,7 +3,7 @@ import { isLoopbackHost, isWildcardHost } from './address.ts';
 import { ADVERTISEMENT_REFUSALS, type AdvertisementRefusal } from './advertisement.ts';
 import { PublishedCarriersSchema, SocketEndpointSchema } from './carriers.ts';
 import { InstantSchema } from './common.ts';
-import { CapabilityGrantsSchema, DAEMON_CAPABILITIES, type DaemonCapability } from './grants.ts';
+import { DAEMON_CAPABILITIES, type DaemonCapability, ReadCapabilityGrantsSchema } from './grants.ts';
 
 /** Pairing codes are deliberately short-lived and have a small online-attempt budget. */
 export const PAIRING_CODE_TTL_SECONDS = 120 as const;
@@ -534,7 +534,7 @@ export const PairedDeviceSchema = z.strictObject({
    * (`docs/grants.md`, "Per-device grants"). A newly paired device holds `FULL_DEVICE_GRANTS`, behind the
    * unlock, unless its code was minted `--limited`. The owner's admin token at the machine is ungoverned.
    */
-  grants: CapabilityGrantsSchema,
+  grants: ReadCapabilityGrantsSchema,
 });
 export type PairedDevice = z.infer<typeof PairedDeviceSchema>;
 
@@ -574,7 +574,7 @@ export const PairedDevicesViewSchema = z.strictObject({
    * so `true` here means "allowed after confirming", never "allowed without". Turning an axis OFF is
    * not listed: it needs only a step-up, on any device, including the caller's own.
    */
-  mayWiden: CapabilityGrantsSchema,
+  mayWiden: ReadCapabilityGrantsSchema,
 });
 export type PairedDevicesView = z.infer<typeof PairedDevicesViewSchema>;
 

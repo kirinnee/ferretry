@@ -509,6 +509,13 @@ gets both at once ([design/zero-trust.md](design/zero-trust.md) B5):
 effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.grants[capability][axis]
 ```
 
+**Two versions of the app and the daemon agree on the capability list by narrowing.** A client (the app, `fy`)
+reading `devices[].grants` or `mayWiden` from a daemon on another version reads a capability the answer omits
+(an older daemon) as **off**, and drops a key it has never heard of (a newer daemon, with a later capability),
+through one shared parse, `ReadCapabilityGrantsSchema`. The device screen therefore keeps working in both
+directions, and never shows access that was not granted. The daemon itself stays closed on what it enforces
+from. This is the version-skew rule in `packages/protocol/src/lib/version-skew.ts`.
+
 - **A newly paired device holds every capability** (`FULL_DEVICE_GRANTS`, owner decision 2026-10-14), behind
   the unlock: it can do nothing until it unlocks, and then anything the daemon-wide document allows.
 - **A `fy pair --limited` code** gives the device that redeems it `fleet.use` only (`LIMITED_DEVICE_GRANTS`):

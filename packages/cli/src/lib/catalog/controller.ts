@@ -159,7 +159,7 @@ export class CatalogController {
     const signed = file.signedManifest.manifest.items.map(entry => `${entry.name} v${entry.version} ${entry.digest}`);
     if (signed.length !== shown.length || signed.some((line, index) => line !== shown[index]))
       throw new Error('the daemon signed different items than the ones listed above — nothing was written');
-    await this.files.write(path, `${JSON.stringify(file, null, 2)}\n`, overwrite);
+    await this.files.write(path, `${JSON.stringify(file)}\n`, overwrite);
     this.#report({ path, file }, options, () => renderExported(found.name, file.items.length, path));
   }
 

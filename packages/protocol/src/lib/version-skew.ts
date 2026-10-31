@@ -29,6 +29,10 @@
  * key absent, which is what a schema default is for, and the default has to mean what the older
  * daemon actually offers rather than what the newer one would have said.
  *
+ * A CAPABILITY added to the grants is the one place this is handled in the schema: a client reads grants through
+ * `ReadCapabilityGrantsSchema`, which reads an omitted capability as off and drops an unknown one, so neither
+ * direction breaks the device screen (`docs/grants.md`, Per-device grants).
+ *
  * The window in which "same release" is achievable is the window in which the paired-device population
  * is small. That is a fact about calendars rather than code, and it is why a field like this lands
  * early or does not land at all.
