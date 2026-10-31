@@ -40,6 +40,13 @@ export const offeredCards = (
 export const doneCloseLabel = (refs: readonly TaskRef[]): string =>
   `Done · closes ${refs.map(formatTaskRef).join(', ')}`;
 
+/**
+ * The same words where the row is narrow (a phone): "Close &F12", or "Close 3 cards". The row stays ONE line with
+ * "Not needed" in it (the owner's compact action area); the full words stay the button's name and its title.
+ */
+export const doneCloseShortLabel = (refs: readonly TaskRef[]): string =>
+  refs.length === 1 && refs[0] !== undefined ? `Close ${formatTaskRef(refs[0])}` : `Close ${refs.length} cards`;
+
 /** The card as the board read it: what a Done needs. */
 export interface CardForClose {
   readonly laneId: string;

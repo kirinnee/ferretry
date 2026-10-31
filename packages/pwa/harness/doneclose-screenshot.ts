@@ -134,7 +134,12 @@ const placement = (page: Page) =>
       inRow: row?.contains(chip) === true,
       answers: row === null ? 0 : row.querySelectorAll('[data-agenda-answer]').length,
       below: row === null ? true : chip.getBoundingClientRect().top >= row.getBoundingClientRect().bottom - 1,
-      label: chip.textContent?.trim() ?? '',
+      label: chip.getAttribute('aria-label') ?? '',
+      shown: chip.innerText.trim(),
+      // ONE line: every control in the row, "Not needed" too, shares the row's top (the owner's compact rule).
+      oneLine:
+        row === null ||
+        new Set([...row.children].map(kid => Math.round((kid as HTMLElement).getBoundingClientRect().top))).size === 1,
       disabled: (chip as HTMLButtonElement).disabled,
       outside: [...document.querySelectorAll<HTMLElement>('.fy-qr__row > *')]
         .filter(kid => {
@@ -157,6 +162,9 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   check(rowAt?.inRow === true, `row ${at}: the button is not in the one row`);
   check(rowAt?.outside.length === 0, `row ${at}: off the screen: ${rowAt?.outside.join(' | ')}`);
   check((rowAt?.answers ?? 9) <= 3, `row ${at}: the row holds ${rowAt?.answers} answers`);
+  check(rowAt?.oneLine === true, `row ${at}: the row wraps — "Not needed" is not on the answers' line`);
+  const words = form === 'phone' ? 'Close &F12' : 'Done · closes &F12';
+  check(rowAt?.shown === words, `row ${at}: the button shows "${rowAt?.shown}", wanted "${words}"`);
   await shot(row, 'row', form, theme);
   await row.locator(BUTTON).click();
   await row.locator('[data-resolved]').waitFor({ state: 'visible' });
@@ -175,11 +183,13 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await shot(full, 'row-three-answers', form, theme);
   await full.close();
 
-  // A to-do with no answer of its own: the button is the row.
+  // A to-do (Need more info · Done, in words): the row keeps one line with "Not needed", the button goes under it.
   const alone = await open(context, theme, 'alone', `alone ${at}`);
   const aloneAt = await placement(alone);
   check(aloneAt !== null, `alone ${at}: the button is missing`);
   check(aloneAt?.outside.length === 0, `alone ${at}: off the screen: ${aloneAt?.outside.join(' | ')}`);
+  check(aloneAt?.oneLine === true, `alone ${at}: the row wraps — "Not needed" is not on the answers' line`);
+  check(aloneAt !== null && !aloneAt.inRow && aloneAt.below, `alone ${at}: the button is not under the worded answers`);
   await shot(alone, 'row-alone', form, theme);
   await alone.close();
 

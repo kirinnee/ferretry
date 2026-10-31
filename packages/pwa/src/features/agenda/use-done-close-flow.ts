@@ -8,7 +8,12 @@
 
 import type { TaskRef } from '@ferretry/protocol';
 import { useEffect, useRef, useState } from 'react';
-import { type DoneCloseCard, type DoneCloseSource, doneCloseLabel } from '../../lib/agenda-done-close.ts';
+import {
+  type DoneCloseCard,
+  type DoneCloseSource,
+  doneCloseLabel,
+  doneCloseShortLabel,
+} from '../../lib/agenda-done-close.ts';
 
 interface DoneCloseConfirmView {
   readonly cards: readonly DoneCloseCard[];
@@ -20,6 +25,8 @@ interface DoneCloseConfirmView {
 
 export interface DoneCloseView {
   readonly label: string;
+  /** The words a narrow row shows (`doneCloseShortLabel`). */
+  readonly shortLabel: string;
   /** The close is in flight. */
   readonly busy: boolean;
   /** Why the last close did not go through; the item is still open. */
@@ -47,6 +54,7 @@ export const useDoneCloseFlow = (
   if (source === undefined) return undefined;
   const { cards } = source;
   const label = doneCloseLabel(cards.map(card => card.ref));
+  const shortLabel = doneCloseShortLabel(cards.map(card => card.ref));
 
   const run = async (refs: readonly TaskRef[]): Promise<void> => {
     setPhase('closing');
@@ -71,6 +79,7 @@ export const useDoneCloseFlow = (
 
   return {
     label,
+    shortLabel,
     busy: phase === 'closing',
     error,
     onTap,

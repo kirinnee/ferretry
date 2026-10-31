@@ -100,7 +100,10 @@ const errorLine = (): string | undefined =>
 describe('Done · closes on an agenda item: when it is offered', () => {
   test('draws the button in the one row, saying which card it closes', async () => {
     await drawItem(closing(), world());
-    expect(theChip().textContent).toBe('Done · closes &F1');
+    // Its name is the full words; it carries them and the short ones a narrow row shows instead ("Close &F1").
+    expect(theChip().getAttribute('aria-label')).toBe('Done · closes &F1');
+    expect(theChip().querySelector('.fy-qr__close-long')?.textContent).toBe('Done · closes &F1');
+    expect(theChip().querySelector('.fy-qr__close-short')?.textContent).toBe('Close &F1');
     expect(theChip().closest('[data-more-row], [data-agenda-more-row]')).toBeNull();
     expect(theChip().closest('fieldset')?.getAttribute('aria-label')).toBe('Quick replies');
     expect(theChip().hasAttribute('data-agenda-answer')).toBe(false);
@@ -366,11 +369,22 @@ describe('where Done · closes sits among the answers', () => {
     view = await mount(<Slot />);
   };
 
-  test('takes the → slot while the card gave fewer than three answers', async () => {
-    await place(agendaItem('A1', { ask: choices('Yes', 'No') } as Partial<AgendaItem>));
+  test('takes the → slot beside two lettered answers, or beside one answer', async () => {
+    await place(
+      agendaItem('A1', { ask: choices('Use the seeded test account', 'Make a new one') } as Partial<AgendaItem>),
+    );
     expect(theChip().closest('fieldset')?.getAttribute('aria-label')).toBe('Quick replies');
     expect(root().querySelectorAll('[data-agenda-answer]').length).toBe(2);
     expect(theChip().hasAttribute('data-agenda-answer')).toBe(false);
+    await view?.unmount();
+    await place(agendaItem('A3', { ask: choices('Ship it') } as Partial<AgendaItem>));
+    expect(theChip().closest('fieldset')?.getAttribute('aria-label')).toBe('Quick replies');
+  });
+
+  test('goes under two answers in words: the row keeps one line with "Not needed" on a phone', async () => {
+    await place(agendaItem('A4', { ask: choices('Yes', 'No') } as Partial<AgendaItem>));
+    expect(root().querySelectorAll('[data-agenda-answer]').length).toBe(2);
+    expect(theChip().closest('fieldset')?.getAttribute('aria-label')).not.toBe('Quick replies');
   });
 
   test('goes in the extra row when all three swipe slots are taken', async () => {

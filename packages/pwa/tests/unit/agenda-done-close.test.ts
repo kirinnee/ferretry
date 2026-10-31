@@ -5,6 +5,7 @@ import {
   closePlan,
   type DoneCloseResult,
   doneCloseLabel,
+  doneCloseShortLabel,
   offeredCards,
 } from '../../src/lib/agenda-done-close.ts';
 import { laneSetFor } from './board-support.ts';
@@ -37,6 +38,9 @@ describe('the button’s words', () => {
   it('names every card it closes', () => {
     expect(doneCloseLabel([F12])).toBe('Done · closes &F12');
     expect(doneCloseLabel([F12, { id: 'F13' }])).toBe('Done · closes &F12, &F13');
+    // A narrow row's words: the one card, or how many.
+    expect(doneCloseShortLabel([F12])).toBe('Close &F12');
+    expect(doneCloseShortLabel([F12, { id: 'F13' }, { id: 'F14' }])).toBe('Close 3 cards');
   });
 });
 

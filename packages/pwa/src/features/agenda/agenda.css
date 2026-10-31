@@ -356,13 +356,21 @@
   border: 0;
   padding: 0;
 }
-/* "Done · closes &F12" is a long label that never shrinks: when the row cannot hold it beside the answers, it wraps
-   onto a line of its own instead of pushing "Not needed" off the screen. */
+/* "Done · closes &F12" keeps the row ONE line with "Not needed" in it (the owner's compact action area): where the
+   row is narrow, the button says the short words ("Close &F12"); its name and title keep the full ones. */
 .fy-qr__row[data-wraps] {
-  flex-wrap: wrap;
+  container-type: inline-size;
 }
-.fy-qr__row[data-wraps] .fy-qr__dismiss {
-  margin-inline-start: auto;
+.fy-qr__close-short {
+  display: none;
+}
+@container (max-width: 560px) {
+  .fy-qr__close-long {
+    display: none;
+  }
+  .fy-qr__close-short {
+    display: inline;
+  }
 }
 /* The options past the swiped three: as many rows as they need, each filling the width; tap only. */
 .fy-qr__more {

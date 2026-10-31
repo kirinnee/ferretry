@@ -236,8 +236,11 @@ export function AgendaQuickReplies({
   const slotted = replies.length > 0 && sending === undefined && !model.notice;
   // Every row reads one way: one long label letters the swipe row AND the rows under it.
   const lettered = rowLettered([...replies, ...extras]);
-  // The → slot is free when the card gave fewer than three answers and the row is not the per-question one.
-  const closeInRow = doneClose !== undefined && replies.length < 3 && sending === undefined;
+  // The → slot is free when the card gave fewer than three answers and the row is not the per-question one — and the
+  // row still fits ONE line with "Not needed" in it: beside two answers in words ("Need more info", "Done") it does
+  // not on a phone, so it takes the full-width row under them, as options past three do.
+  const closeInRow =
+    doneClose !== undefined && replies.length < 3 && sending === undefined && (replies.length < 2 || lettered);
   if (!hasReplies(model, sending) && doneClose === undefined && error === null && waitingOn === undefined) return null;
   return (
     <div

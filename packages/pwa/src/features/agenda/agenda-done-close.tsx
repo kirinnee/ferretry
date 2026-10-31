@@ -11,6 +11,7 @@ import type { DoneCloseView } from './use-done-close-flow.ts';
 export function DoneCloseChip({ view, disabled }: { readonly view: DoneCloseView; readonly disabled: boolean }) {
   return (
     <button
+      aria-label={view.label}
       className="kt-btn fy-qr__chip"
       data-agenda-done-close=""
       disabled={disabled || view.busy}
@@ -23,7 +24,12 @@ export function DoneCloseChip({ view, disabled }: { readonly view: DoneCloseView
       ) : (
         <Check aria-hidden="true" size={13} />
       )}
-      <span className="fy-qr__label">{view.label}</span>
+      <span aria-hidden="true" className="fy-qr__label fy-qr__close-long">
+        {view.label}
+      </span>
+      <span aria-hidden="true" className="fy-qr__label fy-qr__close-short">
+        {view.shortLabel}
+      </span>
     </button>
   );
 }
