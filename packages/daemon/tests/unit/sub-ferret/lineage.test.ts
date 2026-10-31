@@ -56,7 +56,7 @@ describe('a lead over its sub-ferret agenda', () => {
   const verbs: readonly [string, (s: AgendaService, session: string, by: string) => Promise<AgendaMutation>][] = [
     ['edit', (s, session, by) => s.edit(session, id, { subject: 'Another' }, agent(by))],
     ['surface', (s, session, by) => s.surface(session, id, agent(by))],
-    ['resolve', (s, session, by) => s.resolve(session, id, agent(by))],
+    ['resolve', (s, session, by) => s.resolve(session, id, agent(by), 'No longer needed')],
     ['dismiss', (s, session, by) => s.dismiss(session, id, agent(by))],
   ];
 
@@ -110,7 +110,7 @@ describe('a lead over its sub-ferret agenda', () => {
 
   it('should let a sub-ferret that leads a deeper session act on that session', async () => {
     // Act
-    const result = await (await seeded()).resolve('grandchild', id, agent('child'));
+    const result = await (await seeded()).resolve('grandchild', id, agent('child'), 'No longer needed');
 
     // Assert
     should(result.ok).be.true();
@@ -121,10 +121,27 @@ describe('a lead over its sub-ferret agenda', () => {
     const service = await seeded();
 
     // Act
-    const result = await service.resolve('child', id, agent('lead'));
+    const result = await service.resolve('child', id, agent('lead'), 'No longer needed');
 
     // Assert
     should(result).containDeep({ ok: true, addressed: { resolvedBySession: 'lead', raisedBySession: 'child' } });
+  });
+
+  it("should record a lead's close of an unanswered question as a withdrawal with its reason", async () => {
+    // Act
+    const result = await (await seeded()).resolve('child', id, agent('lead'), 'No longer needed');
+
+    // Assert
+    should(result).containDeep({ ok: true, addressed: { resolutionNote: 'No longer needed' } });
+    should((result as { addressed?: { response?: unknown } }).addressed?.response).be.undefined();
+  });
+
+  it('should refuse a lead closing its sub-ferret’s unanswered question without a reason', async () => {
+    // Act
+    const result = await (await seeded()).resolve('child', id, agent('lead'));
+
+    // Assert
+    should(result).containDeep({ ok: false, error: { code: 'invalid' } });
   });
 
   it('should be refused every verb the lineage does not cover', async () => {
