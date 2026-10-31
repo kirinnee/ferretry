@@ -65,6 +65,8 @@ export type SharingRepairOutcome =
       readonly deviceIds: readonly string[];
       /** Sharing turned on, but the journal record failed: said at boot, so the owner knows. */
       readonly unrecorded: readonly string[];
+      /** The write itself failed: nothing changed for these, and later devices were still tried. */
+      readonly failed: readonly string[];
     }
   | {
       readonly kind: 'skipped';
@@ -106,20 +108,28 @@ const decided = (entries: readonly GrantAuditEntry[]): ReadonlySet<string> => {
  */
 export async function repairSharingFromPairing(deps: SharingRepairDeps): Promise<SharingRepairOutcome> {
   const candidates = (await deps.devices.devices()).filter(device => isOldFullDevice(device.grants));
-  if (candidates.length === 0) return { kind: 'repaired', deviceIds: [], unrecorded: [] };
+  if (candidates.length === 0) return { kind: 'repaired', deviceIds: [], unrecorded: [], failed: [] };
   const daemonWide = deps.daemonWide();
   if (daemonWide === undefined) return { kind: 'skipped', reason: 'grants-undetermined' };
-  if (!fullyOn(daemonWide.pairing)) return { kind: 'repaired', deviceIds: [], unrecorded: [] };
+  if (!fullyOn(daemonWide.pairing)) return { kind: 'repaired', deviceIds: [], unrecorded: [], failed: [] };
   const journal = await deps.journal.readAll(SHARING_REPAIR_JOURNAL_MAX_BYTES);
   if (journal.kind === 'too-large') return { kind: 'skipped', reason: 'journal-too-large' };
   if (journal.unreadable > 0) return { kind: 'skipped', reason: 'journal-unreadable' };
   const skip = decided(journal.entries);
   const repaired: string[] = [];
   const unrecorded: string[] = [];
+  const failed: string[] = [];
   for (const device of candidates) {
     if (skip.has(device.id)) continue;
     const next: CapabilityGrants = { ...device.grants, sharing: { use: true, configure: true } };
-    if (!(await deps.devices.setDeviceGrants(device.id, next))) continue;
+    let written: boolean;
+    try {
+      written = await deps.devices.setDeviceGrants(device.id, next);
+    } catch {
+      failed.push(device.id);
+      continue;
+    }
+    if (!written) continue;
     try {
       // After the write, as every grant change is: a record never claims a change that did not land.
       await deps.audit.record({
@@ -132,5 +142,5 @@ export async function repairSharingFromPairing(deps: SharingRepairDeps): Promise
       unrecorded.push(device.id);
     }
   }
-  return { kind: 'repaired', deviceIds: repaired, unrecorded };
+  return { kind: 'repaired', deviceIds: repaired, unrecorded, failed };
 }

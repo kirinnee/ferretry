@@ -78,7 +78,7 @@ describe('Sharing for a device that held everything before Sharing existed', () 
 
     const outcome = await repairSharingFromPairing(deps);
 
-    should(outcome).deepEqual({ kind: 'repaired', deviceIds: [PHONE], unrecorded: [] });
+    should(outcome).deepEqual({ kind: 'repaired', deviceIds: [PHONE], unrecorded: [], failed: [] });
     should(stored.get(PHONE)?.sharing).deepEqual(ON);
     should(recorded).deepEqual([
       {
@@ -99,7 +99,12 @@ describe('Sharing for a device that held everything before Sharing existed', () 
       },
     });
 
-    should(await repairSharingFromPairing(deps)).deepEqual({ kind: 'repaired', deviceIds: [], unrecorded: [] });
+    should(await repairSharingFromPairing(deps)).deepEqual({
+      kind: 'repaired',
+      deviceIds: [],
+      unrecorded: [],
+      failed: [],
+    });
     should(stored.get(LAPTOP)?.sharing).deepEqual(OFF);
     should(stored.get(TABLET)?.sharing).deepEqual(OFF);
     // No candidate, so neither the daemon-wide answer nor the journal is read: an ordinary boot costs nothing.
@@ -112,6 +117,7 @@ describe('Sharing for a device that held everything before Sharing existed', () 
       kind: 'repaired',
       deviceIds: [],
       unrecorded: [],
+      failed: [],
     });
     should(pairingOff.stored.get(PHONE)?.sharing).deepEqual(OFF);
 
@@ -135,7 +141,12 @@ describe('Sharing for a device that held everything before Sharing existed', () 
       journal,
     });
 
-    should(await repairSharingFromPairing(deps)).deepEqual({ kind: 'repaired', deviceIds: [LAPTOP], unrecorded: [] });
+    should(await repairSharingFromPairing(deps)).deepEqual({
+      kind: 'repaired',
+      deviceIds: [LAPTOP],
+      unrecorded: [],
+      failed: [],
+    });
     should(stored.get(PHONE)?.sharing).deepEqual(OFF);
     should(stored.get(TABLET)?.sharing).deepEqual(OFF);
     should(stored.get(LAPTOP)?.sharing).deepEqual(ON);
@@ -148,7 +159,12 @@ describe('Sharing for a device that held everything before Sharing existed', () 
     // The owner then turns the phone's Sharing off by hand; the next boot reads both records.
     const second = rig({ journal: journalOf(...first.recorded) });
 
-    should(await repairSharingFromPairing(second.deps)).deepEqual({ kind: 'repaired', deviceIds: [], unrecorded: [] });
+    should(await repairSharingFromPairing(second.deps)).deepEqual({
+      kind: 'repaired',
+      deviceIds: [],
+      unrecorded: [],
+      failed: [],
+    });
     should(second.stored.get(PHONE)?.sharing).deepEqual(OFF);
   });
 
@@ -171,11 +187,40 @@ describe('Sharing for a device that held everything before Sharing existed', () 
       kind: 'repaired',
       deviceIds: [],
       unrecorded: [PHONE],
+      failed: [],
     });
 
     const { deps, recorded } = rig();
     const gone = { ...deps, devices: { ...deps.devices, setDeviceGrants: async () => false } };
-    should(await repairSharingFromPairing(gone)).deepEqual({ kind: 'repaired', deviceIds: [], unrecorded: [] });
+    should(await repairSharingFromPairing(gone)).deepEqual({
+      kind: 'repaired',
+      deviceIds: [],
+      unrecorded: [],
+      failed: [],
+    });
     should(recorded).deepEqual([]);
+  });
+
+  it('reports a device whose write threw, and still repairs the others', async () => {
+    const { deps, stored } = rig({ devices: { [PHONE]: oldFull(), [LAPTOP]: oldFull() } });
+    const flaky = {
+      ...deps,
+      devices: {
+        ...deps.devices,
+        setDeviceGrants: async (id: string, grants: CapabilityGrants) => {
+          if (id === PHONE) throw new Error('disk full');
+          return await deps.devices.setDeviceGrants(id, grants);
+        },
+      },
+    };
+
+    should(await repairSharingFromPairing(flaky)).deepEqual({
+      kind: 'repaired',
+      deviceIds: [LAPTOP],
+      unrecorded: [],
+      failed: [PHONE],
+    });
+    should(stored.get(PHONE)?.sharing).deepEqual(OFF);
+    should(stored.get(LAPTOP)?.sharing).deepEqual(ON);
   });
 });
