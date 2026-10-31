@@ -209,9 +209,10 @@ export const InputRaiseSchema = z
     /**
      * The saved login the ferret expects to be used. A HINT only: the daemon decides what matches the target,
      * a hint never makes an entry the one-tap choice, and the answer is the same whether such an entry exists.
-     * An account handle, or a sign-in (`si_…`) where the daemon keeps them (`accounts.signins.1`): a daemon
-     * without that feature refuses a `si_` hint, so a client sends one only where the daemon reports it. A
-     * sign-in hint can only choose among the sign-ins the daemon itself matched (accounts.ts `chosenSignIn`).
+     * An account handle, or a sign-in (`si_…`). A daemon from before sign-ins refuses a `si_` hint, and one that
+     * does not yet keep them (no `accounts.signins.1`) names no sign-in, so the hint orders nothing: a client sends
+     * one only where the daemon reports the feature. Either way a hint can only choose among the sign-ins the daemon
+     * itself matched (accounts.ts `chosenSignIn`).
      */
     secretHint: z.union([LoginEntryIdSchema, SignInIdSchema]).optional(),
     /**
@@ -570,11 +571,6 @@ export const InputDeliverBodySchema = z
       .optional(),
     /** A saved login, by its handle: the daemon types the fields the request needs from it. */
     entry: LoginEntryIdSchema.optional(),
-    /**
-     * Which of `entry`'s sign-ins the owner tapped (`accounts.signins.1`): it must belong to that account, and the
-     * daemon files what it observes under it. Absent (an older app): the account's sign-in matched here, if any.
-     */
-    signIn: SignInIdSchema.optional(),
     /** Allow a paste: the daemon types the secure copy the request names (`request.source`), never one the body names. */
     sealed: z.literal(true).optional(),
     /** Press Enter / submit after typing. */
@@ -607,9 +603,6 @@ export const InputDeliverBodySchema = z
         code: 'custom',
         message: 'send a value: padded, fields, a saved entry, or sealed for a paste',
       });
-    }
-    if (body.signIn !== undefined && body.entry === undefined) {
-      context.addIssue({ code: 'custom', path: ['signIn'], message: 'a sign-in is sent with its account (entry)' });
     }
     if (body.fields !== undefined) {
       const problem = fieldsProblem(body.fields.map(typed => ({ id: typed.field })));

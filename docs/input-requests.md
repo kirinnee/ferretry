@@ -771,7 +771,8 @@ the ferret's `secretHint` (a handle or a `si_…`), then the session's project d
 its folder default, then the site default (`config/account-defaults.yaml`, R1-4), then the only matched one.
 Two or more matched and nothing chose one: **no one-tap primary**, the owner picks ("Pick one: 2 accounts sign
 in here"). A hint or a default naming an account with no matched sign-in is ignored. None of them types
-anything: **the tap is still the permission.**
+anything: **the tap is still the permission.** A line that would choose two matched sign-ins at once chooses
+neither, so the answer never depends on list order.
 
 `account_hint` will answer one line per sign-in, with the sign-in id to propose against. It never says which
 secret fields an account holds, nor its 2FA parameters, seal names, auto-apply or proposals.

@@ -387,16 +387,13 @@ describe('delivering', () => {
     ).be.false();
   });
 
-  it('should take the sign-in the owner tapped only with its account', () => {
+  it('should refuse a sign-in in a deliver until the daemon checks that it belongs to the account', () => {
     // Arrange
     const tapped = { deliveryId: DELIVERY, observedDigest: DIGEST, entry: 'GITHUB_KIRINNEE', submit: true };
 
-    // Act / Assert — an older app sends the account alone, which still parses
+    // Act / Assert — accepted and ignored, a sign-in of ANOTHER account would ride along unchecked; so it is refused
     should(InputDeliverBodySchema.safeParse(tapped).success).be.true();
-    should(InputDeliverBodySchema.safeParse({ ...tapped, signIn: 'si_0123456789abcdef' }).success).be.true();
-    // A sign-in without its account.
-    should(InputDeliverBodySchema.safeParse({ ...body, signIn: 'si_0123456789abcdef' }).success).be.false();
-    should(InputDeliverBodySchema.safeParse({ ...tapped, signIn: 'GITHUB_KIRINNEE' }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...tapped, signIn: 'si_0123456789abcdef' }).success).be.false();
   });
 
   it('should refuse a delivery id that is not a UUID and a body with a plain value field', () => {

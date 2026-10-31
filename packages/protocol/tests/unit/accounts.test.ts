@@ -97,6 +97,9 @@ describe('a place and the keys it is matched on (invariant 9)', () => {
     expect(PlaceSchema.safeParse(terminal('Sudo', 'kirin-box')).success).toBe(false);
     expect(PlaceSchema.safeParse({ kind: 'site', domains: ['a.example'], match: [], extra: 1 }).success).toBe(false);
     expect(PlaceSchema.safeParse(terminal('scp', 'kirin-box', 'files.example.com')).success).toBe(true);
+    // ssh, scp and sftp name where they go: without it, this machine's name would be read as the destination (L2).
+    for (const tool of ['ssh', 'scp', 'sftp'])
+      expect(PlaceSchema.safeParse(terminal(tool, 'kirin-box')).success).toBe(false);
   });
 });
 
@@ -115,7 +118,11 @@ const signIn = (n: number, place: Place, extra: object = {}) => ({
   updatedAt: AT,
   ...extra,
 });
-const index = (accounts: Record<string, object>, signIns: Record<string, object>) => ({ v: 2, accounts, signIns });
+const index = (accounts: Record<string, object | undefined>, signIns: Record<string, object>) => ({
+  v: 2,
+  accounts,
+  signIns,
+});
 
 describe('the version 2 index and the store’s rules', () => {
   const GOOD = index(
@@ -190,6 +197,38 @@ describe('the version 2 index and the store’s rules', () => {
       },
     );
     expect(AccountIndexDocumentSchema.safeParse(document).success).toBe(false);
+  });
+
+  it('should refuse a seal that is not the account’s own, for its own field, or that two accounts share (L6)', () => {
+    const own = (n: number, field: string) => `${KEY(n)}_${field}_00000001`;
+    const totp = { algorithm: 'SHA1', digits: 6, period: 30 };
+    for (const accounts of [
+      { A: account(1, { seals: { password: own(2, 'PASSWORD') } }), B: account(2) },
+      { A: account(1, { seals: { password: own(1, 'TOTP') } }) },
+      { A: account(1, { seals: { totp: own(1, 'PASSWORD') }, totp }) },
+      { A: account(1, { seals: { totp: own(1, 'TOTP') } }) },
+      { A: account(1, { totp }) },
+    ])
+      expect(AccountIndexDocumentSchema.safeParse(index(accounts, {})).success).toBe(false);
+    expect(
+      AccountIndexDocumentSchema.safeParse(
+        index({ A: account(1, { seals: { password: own(1, 'PASSWORD'), totp: own(1, 'TOTP') }, totp }) }, {}),
+      ).success,
+    ).toBe(true);
+  });
+
+  it('should refuse a stored recipe a recipe may not be (L6)', () => {
+    for (const recipe of ['steps <<<recipe inside', 'zero\u200bwidth'])
+      expect(
+        AccountIndexDocumentSchema.safeParse(
+          index({ A: account(1) }, { [SI(1)]: signIn(1, site(['a.example']), { recipe }) }),
+        ).success,
+      ).toBe(false);
+    expect(
+      AccountIndexDocumentSchema.safeParse(
+        index({ A: account(1) }, { [SI(1)]: signIn(1, site(['a.example']), { recipe: 'Open a.example.' }) }),
+      ).success,
+    ).toBe(true);
   });
 
   it('should refuse more accounts, or more sign-ins in all, than the store keeps', () => {
@@ -315,6 +354,38 @@ describe('which sign-in a card offers first (invariants 10 and 11)', () => {
       signIn: SI(2),
       why: 'site',
     });
+  });
+
+  it('should choose nothing when two lines name two matched sign-ins, whatever order they were listed in (L1)', () => {
+    // Arrange — both sign in on accounts.google.com; one is for vercel.com, the other for netlify.com
+    const forVercel = candidate(1, 'GOOGLE_A', site(['accounts.google.com'], ['vercel.com']));
+    const forNetlify = candidate(2, 'GOOGLE_B', site(['accounts.google.com'], ['netlify.com']));
+    const defaults = { sites: { 'vercel.com': 'GOOGLE_A', 'netlify.com': 'GOOGLE_B' } };
+
+    // Act / Assert
+    expect(chosenSignIn('accounts.google.com', [forVercel, forNetlify], { defaults })).toBeUndefined();
+    expect(chosenSignIn('accounts.google.com', [forNetlify, forVercel], { defaults })).toBeUndefined();
+    // A line on the key itself still decides.
+    expect(
+      chosenSignIn('accounts.google.com', [forNetlify, forVercel], {
+        defaults: { sites: { ...defaults.sites, 'accounts.google.com': 'GOOGLE_B' } },
+      }),
+    ).toEqual({ signIn: SI(2), why: 'site' });
+  });
+
+  it('should choose nothing for a handle that two matched sign-ins share (a damaged list), never the first', () => {
+    const twice = [CLICKUP_A, { ...CLICKUP_A, id: SI(9) }];
+    expect(chosenSignIn(KEY_HERE, twice, { hint: 'CLICKUP_A' })).toBeUndefined();
+    expect(chosenSignIn(KEY_HERE, twice, { defaults: { sites: { [KEY_HERE]: 'CLICKUP_A' } } })).toBeUndefined();
+  });
+
+  it('should use no folder line or folder with a . or .. segment', () => {
+    const defaults = {
+      folders: { '/work/../home/kirin': { [KEY_HERE]: 'CLICKUP_A' }, '/srv': { [KEY_HERE]: 'CLICKUP_B' } },
+    };
+    expect(chosenSignIn(KEY_HERE, ALL, { defaults, folder: '/home/kirin/x' })).toBeUndefined();
+    expect(chosenSignIn(KEY_HERE, ALL, { defaults, folder: '/srv/./app' })).toBeUndefined();
+    expect(chosenSignIn(KEY_HERE, ALL, { defaults, folder: '/srv/app' })).toEqual({ signIn: SI(2), why: 'folder' });
   });
 
   it('should use the longest folder line for an Unfiled session, on a path boundary, and not for a project one', () => {
@@ -481,11 +552,10 @@ describe('what a ferret may learn about signing in (account.hint)', () => {
 
   it('should say why a sign-in would be first for the calling session, from the same function the card uses', () => {
     // Arrange
-    const signIns = LIST.signIns.map(entry => ({ id: entry.id, account: entry.account, place: entry.place }));
-    const choice = chosenSignIn('vercel.com', signIns, { defaults: { sites: { 'vercel.com': 'VERCEL_WORK' } } });
+    const context = { defaults: { sites: { 'vercel.com': 'VERCEL_WORK' } } };
 
     // Act
-    const hints = accountHintsFor('vercel.com', LIST, choice);
+    const hints = accountHintsFor('vercel.com', LIST, context);
 
     // Assert
     expect(hints.find(hint => hint.signIn === SI(3))?.default).toEqual({ by: 'site' });
@@ -495,10 +565,40 @@ describe('what a ferret may learn about signing in (account.hint)', () => {
     );
   });
 
-  it('should never turn a ferret’s pick into a hint default', () => {
-    const signIns = LIST.signIns.map(entry => ({ id: entry.id, account: entry.account, place: entry.place }));
-    const choice = chosenSignIn('vercel.com', signIns, { hint: 'VERCEL_WORK' });
-    expect(accountHintsFor('vercel.com', LIST, choice).every(hint => hint.default === undefined)).toBe(true);
+  // Two accounts sign in on shared.example; only ONE of them holds a password.
+  const SHARED: AccountList = AccountListSchema.parse({
+    v: 1,
+    health: 'ready',
+    accounts: [
+      summary('HAS_PASSWORD', 'Has a password', [SI(1)]),
+      summary('NO_PASSWORD', 'No password', [SI(2)], { password: false, totp: false }),
+    ],
+    signIns: [
+      signInSummary(1, 'HAS_PASSWORD', site(['shared.example'])),
+      signInSummary(2, 'NO_PASSWORD', site(['shared.example'])),
+    ],
+  });
+
+  it('should never turn a ferret’s pick into a hint default, even if a caller passes one', () => {
+    const context = { hint: 'HAS_PASSWORD' } as Parameters<typeof accountHintsFor>[2];
+    expect(accountHintsFor('shared.example', SHARED, context).every(hint => hint.default === undefined)).toBe(true);
+  });
+
+  it('should decide the default over every sign-in, so "only" never says which accounts hold a password (L4)', () => {
+    // Arrange — the card narrows to the accounts that can fill a password, which leaves one: "only"
+    const fills = SHARED.signIns.filter(
+      entry => SHARED.accounts.find(account => account.id === entry.account)?.fields.password,
+    );
+    const card = chosenSignIn('shared.example', fills);
+
+    // Act
+    const hints = accountHintsFor('shared.example', SHARED);
+
+    // Assert — the hint does not narrow, so two match and neither is the default
+    expect(card).toEqual({ signIn: SI(1), why: 'only' });
+    expect(hints).toHaveLength(2);
+    expect(hints.every(hint => hint.default === undefined)).toBe(true);
+    expect(accountHintSummary('shared.example', hints)).not.toContain('Only account here');
   });
 
   it('should fence the recipe and name the method, the provider and the sign-in to propose against', () => {
@@ -583,6 +683,8 @@ describe('config/account-defaults.yaml', () => {
       { sites: { 'App.ClickUp.com': 'CLICKUP_A' } },
       { sites: { 'app.clickup.com': 'clickup_a' } },
       { folders: { 'Workspace/scratch': { 'github.com': 'GITHUB' } } },
+      { folders: { '~/Workspace/../secrets': { 'github.com': 'GITHUB' } } },
+      { folders: { '/srv/./app': { 'github.com': 'GITHUB' } } },
       { projects: { ' ferretry': { 'github.com': 'GITHUB' } } },
     ])
       expect(AccountDefaultsFileSchema.safeParse(file).success).toBe(false);

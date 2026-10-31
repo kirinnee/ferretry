@@ -112,6 +112,12 @@ export const TerminalPlaceSchema = z
     path: ['dest'],
     message: 'only ssh, scp and sftp have a destination',
   })
+  // Without one, `host` would be read as the destination: this machine's password one tap away on an ssh to another
+  // machine that happens to share its name.
+  .refine(place => place.dest !== undefined || !isRemoteTool(place.tool), {
+    path: ['dest'],
+    message: 'ssh, scp and sftp name their destination',
+  })
   .refine(place => LoginMatchSchema.safeParse(terminalKey(place)).success, {
     message: 'the program and host are too long to be a terminal key',
   });
@@ -231,11 +237,34 @@ export function accountIndexProblems(document: {
     problems.push({ path: ['signIns'], message: `at most ${String(MAX_SIGN_INS)} sign-ins` });
 
   const handleOfKey = new Map<string, string>();
+  const sealOwner = new Map<string, string>();
   for (const [handle, account] of accounts) {
     const other = handleOfKey.get(account.key);
     if (other !== undefined)
       problems.push({ path: ['accounts', handle, 'key'], message: `${handle} and ${other} share one key` });
     else handleOfKey.set(account.key, handle);
+    for (const [slot, field] of [
+      ['password', 'PASSWORD'],
+      ['totp', 'TOTP'],
+    ] as const) {
+      const seal = account.seals[slot];
+      if (seal === undefined) continue;
+      // A seal is the account's own, for its own field: a hand-edit cannot point one account at another's secret.
+      if (!seal.startsWith(`${account.key}_${field}_`))
+        problems.push({
+          path: ['accounts', handle, 'seals', slot],
+          message: `${handle}'s ${slot} is not its own seal`,
+        });
+      const holder = sealOwner.get(seal);
+      if (holder !== undefined)
+        problems.push({ path: ['accounts', handle, 'seals', slot], message: `${handle} and ${holder} share one seal` });
+      else sealOwner.set(seal, handle);
+    }
+    if ((account.seals.totp === undefined) !== (account.totp === undefined))
+      problems.push({
+        path: ['accounts', handle, 'totp'],
+        message: `${handle} keeps 2FA parameters exactly when it keeps a 2FA seed`,
+      });
   }
 
   const perAccount = new Map<string, number>();
@@ -247,6 +276,9 @@ export function accountIndexProblems(document: {
       continue;
     }
     if (signIn.place.kind === 'site') sites.add(signIn.account);
+    // A recipe at rest keeps the rules a recipe is written under (no hidden characters, no fence markers).
+    if (signIn.recipe !== undefined && !LoginRecipeSchema.safeParse(signIn.recipe).success)
+      problems.push({ path: ['signIns', id, 'recipe'], message: `${id}'s recipe is not one a recipe may be` });
     const count = (perAccount.get(signIn.account) ?? 0) + 1;
     perAccount.set(signIn.account, count);
     if (count === MAX_SIGN_INS_PER_ACCOUNT + 1)
@@ -418,7 +450,8 @@ export const AccountDefaultsFileSchema = z.strictObject({
         .string()
         .min(1)
         .max(1_024)
-        .regex(/^(?:~|~\/[^\p{Cc}]*|\/[^\p{Cc}]*)$/u, 'an absolute path or ~/…'),
+        .regex(/^(?:~|~\/[^\p{Cc}]*|\/[^\p{Cc}]*)$/u, 'an absolute path or ~/…')
+        .refine(line => !hasDotSegment(line), 'a folder path has no . or .. segment'),
       DefaultsMapSchema,
     )
     .optional(),
@@ -466,7 +499,14 @@ export function matchedSignIns<T extends SignInCandidate>(
 const lineOf = (map: Readonly<Record<string, string>> | undefined, key: string): string | undefined =>
   map !== undefined && Object.hasOwn(map, key) ? map[key] : undefined;
 
-/** The matched sign-in a defaults map names: the target key's line first, then a line for a site's `match` host. */
+/** The one candidate of several, or `undefined` when there is none or more than one: never "the first". */
+const onlyOne = <T>(found: readonly T[]): T | undefined => (found.length === 1 ? found[0] : undefined);
+
+/**
+ * The matched sign-in a defaults map names: the target key's line first, then a line for a site's `match` host. Each
+ * chooses only when EXACTLY ONE matched sign-in qualifies (two lines naming two matched accounts choose neither), so
+ * the answer never depends on the order the caller listed the sign-ins in.
+ */
 function pickedBy(
   map: Readonly<Record<string, string>> | undefined,
   key: string,
@@ -474,19 +514,25 @@ function pickedBy(
 ): SignInCandidate | undefined {
   if (map === undefined) return undefined;
   const account = lineOf(map, key);
-  const direct = account === undefined ? undefined : matched.find(candidate => candidate.account === account);
+  const direct =
+    account === undefined ? undefined : onlyOne(matched.filter(candidate => candidate.account === account));
   if (direct !== undefined) return direct;
-  return matched.find(
-    candidate =>
-      candidate.place.kind === 'site' && candidate.place.match.some(host => lineOf(map, host) === candidate.account),
+  return onlyOne(
+    matched.filter(
+      candidate =>
+        candidate.place.kind === 'site' && candidate.place.match.some(host => lineOf(map, host) === candidate.account),
+    ),
   );
 }
+
+/** Whether a path has a `.` or `..` segment: it would name a folder other than the one it spells. */
+const hasDotSegment = (path: string): boolean => path.split('/').some(segment => segment === '.' || segment === '..');
 
 /** A folder line as a path to compare: `~` expanded, no trailing slash (but the root). `undefined`: it cannot be. */
 function folderPath(line: string, home: string | undefined): string | undefined {
   const expanded =
     line === '~' || line.startsWith('~/') ? (home === undefined ? undefined : home + line.slice(1)) : line;
-  if (expanded === undefined || !expanded.startsWith('/')) return undefined;
+  if (expanded === undefined || !expanded.startsWith('/') || hasDotSegment(expanded)) return undefined;
   return expanded.replaceAll(/\/{2,}/gu, '/').replace(/(?<=.)\/$/u, '');
 }
 
@@ -525,7 +571,7 @@ export function chosenSignIn(
   const named =
     hint === undefined
       ? undefined
-      : matched.find(candidate => (namesSignIn(hint) ? candidate.id === hint : candidate.account === hint));
+      : onlyOne(matched.filter(candidate => (namesSignIn(hint) ? candidate.id === hint : candidate.account === hint)));
   if (named !== undefined) return { signIn: named.id, why: 'ferret' };
   const defaults = context.defaults;
   const project = context.project;
@@ -646,14 +692,19 @@ function hintOf(
 /**
  * The sign-ins for a site: those that name it EXACTLY (a login domain, what a site is for, or a terminal key), then
  * the provider ones they lead to — the via account's site sign-ins and every sign-in of an account a recipe names as
- * `[[ID]]`. Each is listed once, a site one before a provider one. `choice` is the calling session's
- * {@link chosenSignIn} for this site, asked with no ferret hint.
+ * `[[ID]]`. Each is listed once, a site one before a provider one.
+ *
+ * `context` is the calling session's (its project, folder and the defaults file; a ferret hint is never read). The
+ * `default` is {@link chosenSignIn} over EVERY sign-in, not only those whose account holds a field: a card's
+ * choice is narrowed to the accounts that can fill it, and that narrowing would tell a ferret, through "only", which
+ * accounts have no password.
  */
 export function accountHintsFor(
   site: PlaceKey,
   list: Pick<AccountList, 'accounts' | 'signIns'>,
-  choice?: SignInChoice,
+  context: Omit<SignInChoiceContext, 'hint'> = {},
 ): readonly AccountHint[] {
+  const choice = chosenSignIn(site, list.signIns, { ...context, hint: undefined });
   const accounts = new Map(list.accounts.map(account => [account.id, account]));
   const forSite = list.signIns.filter(signIn => placeHosts(signIn.place).includes(site));
   const listed = new Set(forSite.map(signIn => signIn.id));
