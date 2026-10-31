@@ -10,6 +10,7 @@ import {
   InputSubmitModeSchema,
 } from './input-request.ts';
 import { SurfaceKeySchema, SurfaceKindSchema, SurfaceNameSchema } from './surface-names.ts';
+import { LoginEntryIdSchema } from './login-entries.ts';
 
 export * from './surface-names.ts';
 
@@ -166,6 +167,8 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
     blocking: z.boolean().optional(),
     chain: AgendaIdSchema.optional(),
+    /** The saved login the agent expects; a hint only, the daemon decides what matches. */
+    secretHint: LoginEntryIdSchema.optional(),
   }),
   z.strictObject({
     tool: z.literal('input.wait'),
