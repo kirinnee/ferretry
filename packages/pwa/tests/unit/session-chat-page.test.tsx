@@ -2945,6 +2945,109 @@ describe('SessionChatPage', () => {
         run(() => page.unmount());
       }
     });
+
+    describe('with the board expanded over the chat (#B86)', () => {
+      // THE RULE: the board and the agenda never share the chat column. Expanding the board closes the agenda's
+      // drawer and item; showing an item collapses the board. Whichever was asked for last is the one on screen.
+      const boardStore = new DaemonBoardStore(
+        fakePort({
+          board: async () =>
+            boardAnswer([boardCard('F18', { owner: 'shared' })], { projectId: PROJECT, laneSet: laneSetFor() }),
+        }),
+        fakeEnvironment(),
+      );
+      const boardAndAgenda = (expanded: boolean, setExpanded: (next: boolean) => void, extra = {}) =>
+        agendaPage({
+          board: boardStore,
+          formFactor: 'desktop',
+          session: sessionView('shared', {
+            config: { focusTask: { id: 'F18' } },
+            state: { attention: { agendaMode: true } as never },
+          }),
+          tasksView: { expanded, agents: false, setAgents: () => undefined, setExpanded },
+          ...extra,
+        });
+      const boardFull = (root: ReactTestInstance) => root.findAllByProps({ 'data-board-full': '' });
+
+      // Re-renders inside the SAME provider and stores the first render used: a different tree shape remounts the page.
+      const daemon = fakeDaemon().factory;
+      const layouts = new WorkspaceLayoutStore(NO_STORAGE);
+      const rails = new WorkspaceRailPreferenceStore(NO_STORAGE);
+      const tree = (element: ReactElement<ComponentProps<typeof SessionChatPage>>) => (
+        <DaemonClientProvider client={daemon}>
+          {withSessionSearch(
+            cloneElement(element, { workspaceLayouts: layouts, workspaceRails: rails, formFactor: 'desktop' }),
+          )}
+        </DaemonClientProvider>
+      );
+      const mount = (element: ReactElement<ComponentProps<typeof SessionChatPage>>) => {
+        const page = render(tree(element));
+        return {
+          page,
+          rerender: (next: ReactElement<ComponentProps<typeof SessionChatPage>>) => run(() => page.update(tree(next))),
+        };
+      };
+
+      test('expanding the board closes an open item, so nothing of the agenda is left over it', async () => {
+        const { page, rerender } = mount(boardAndAgenda(false, () => undefined, { agendaTarget: 'A3' }));
+        try {
+          await flush();
+          expect(page.root.findAllByType(AgendaItemView)).toHaveLength(1);
+          rerender(boardAndAgenda(true, () => undefined, { agendaTarget: 'A3' }));
+          await flush();
+          expect(boardFull(page.root)).toHaveLength(1);
+          expect(page.root.findAllByType(AgendaItemView)).toHaveLength(0);
+        } finally {
+          run(() => page.unmount());
+        }
+      });
+
+      test('expanding the board closes the open drawer and its scrim', async () => {
+        const { page, rerender } = mount(boardAndAgenda(false, () => undefined));
+        try {
+          await flush();
+          press(page.root);
+          expect(drawers(page.root)).toHaveLength(1);
+          rerender(boardAndAgenda(true, () => undefined));
+          await flush();
+          expect(boardFull(page.root)).toHaveLength(1);
+          expect(drawers(page.root)).toHaveLength(0);
+          expect(page.root.findAll(node => node.props?.['data-agenda-scrim'] !== undefined)).toHaveLength(0);
+        } finally {
+          run(() => page.unmount());
+        }
+      });
+
+      test('showing an item while the board is expanded collapses the board, so the item is not hidden behind it', async () => {
+        const expansions: boolean[] = [];
+        const setExpanded = (next: boolean) => void expansions.push(next);
+        const { page, rerender } = mount(boardAndAgenda(true, setExpanded));
+        try {
+          await flush();
+          expect(boardFull(page.root)).toHaveLength(1);
+          rerender(boardAndAgenda(true, setExpanded, { agendaTarget: 'A3', agendaTargetKey: 'entry-1' }));
+          await flush();
+          expect(expansions).toEqual([false]);
+        } finally {
+          run(() => page.unmount());
+        }
+      });
+
+      test('the item the board gave way to is open once the board has collapsed', async () => {
+        const { page, rerender } = mount(boardAndAgenda(true, () => undefined));
+        try {
+          await flush();
+          rerender(boardAndAgenda(true, () => undefined, { agendaTarget: 'A3', agendaTargetKey: 'entry-1' }));
+          await flush();
+          rerender(boardAndAgenda(false, () => undefined, { agendaTarget: 'A3', agendaTargetKey: 'entry-1' }));
+          await flush();
+          expect(boardFull(page.root)).toHaveLength(0);
+          expect(page.root.findAllByType(AgendaItemView)).toHaveLength(1);
+        } finally {
+          run(() => page.unmount());
+        }
+      });
+    });
   });
 });
 

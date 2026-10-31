@@ -54,6 +54,7 @@
         "harness/lane-editor-screenshot.ts",
         "harness/lane-editor-page.tsx",
         "harness/board-chat-screenshot.ts",
+        "harness/board-agenda-screenshot.ts",
         "harness/board-scope-screenshot.ts",
         "harness/phone-chat-screenshot.ts",
         "harness/phone-chat-page.tsx",
