@@ -32,7 +32,14 @@ const APP = { kind: 'browser', key: 'app' } as const;
 const FIELDS = [{ id: 'password', element: { kind: 'ref', ref: 'e3' } }] as const;
 
 /** The browser host and its page, faked: what it was asked and what it answers. */
-function host(options: { pageId?: string; refuse?: boolean; observation?: BrowserInputObservation } = {}) {
+function host(
+  options: {
+    pageId?: string;
+    refuse?: boolean;
+    observation?: BrowserInputObservation;
+    refound?: BrowserInputObservation;
+  } = {},
+) {
   const calls: string[] = [];
   let outcome: BrowserInputOutcome | Error = 'typed';
   const port: BrowserInputFieldsPort = {
@@ -43,6 +50,12 @@ function host(options: { pageId?: string; refuse?: boolean; observation?: Browse
     inputObserve: async (pageId, fields) => {
       calls.push(`observe:${pageId}:${fields.map(field => `${field.id}=${JSON.stringify(field.target)}`).join(',')}`);
       return options.observation ?? { ok: true, facts: FACTS_PAGE };
+    },
+    inputRefind: async (pageId, expected, fields) => {
+      calls.push(
+        `refind:${pageId}:${expected.navigationId}:${fields.map(field => `${field.id}=${JSON.stringify(field.target)}`).join(',')}`,
+      );
+      return options.refound ?? { ok: true, facts: FACTS_PAGE };
     },
     inputShot: async pageId => {
       calls.push(`shot:${pageId}`);
@@ -128,6 +141,41 @@ describe('PageInputTarget', () => {
       'uncertain',
     );
     should(await gone.target.type('s1', APP, [], false, FACTS as InputTargetFacts)).equal('target_gone');
+  });
+
+  it("should look for the card's fields again on the same page, by the agent's pointers and the card's facts (#B100)", async () => {
+    const moved = { ...FACTS_PAGE, navigationId: 'loader-3' };
+    const { target, calls } = host({ refound: { ok: true, facts: moved } });
+
+    should(await target.refind('s1', APP, FIELDS, FACTS_PAGE)).eql({ ok: true, facts: moved, names: ['page-1'] });
+    should(calls).eql(['page:s1:app', 'refind:page-1:loader-1:password={"kind":"ref","ref":"e3"}']);
+  });
+
+  it('should call a re-find gone for another page, a field not found or not one, and a page that is not there', async () => {
+    const elsewhere = host({ pageId: 'page-2' });
+    const missing = host({ refound: { ok: false, missing: 'password' } });
+    const ambiguous = host({ refound: { ok: false, ambiguous: 'password' } });
+    const wrongPage = host({ refound: { ok: true, facts: { ...FACTS_PAGE, pageId: 'page-9' } } });
+    const gone = { ok: false, reason: 'target_gone' };
+
+    should(await elsewhere.target.refind('s1', APP, FIELDS, FACTS_PAGE)).eql(gone);
+    should(elsewhere.calls).eql(['page:s1:app']);
+    should(await missing.target.refind('s1', APP, FIELDS, FACTS_PAGE)).eql(gone);
+    should(await ambiguous.target.refind('s1', APP, FIELDS, FACTS_PAGE)).eql(gone);
+    should(await wrongPage.target.refind('s1', APP, FIELDS, FACTS_PAGE)).eql(gone);
+    should(await host({ refuse: true }).target.refind('s1', APP, FIELDS, FACTS_PAGE)).eql(gone);
+  });
+
+  it("should re-find no terminal, no facts that are not a page's and no field without an element", async () => {
+    const { target, calls } = host();
+
+    should(await target.refind('s1', { kind: 'terminal', key: 'dev' }, FIELDS, FACTS_PAGE)).eql({
+      ok: false,
+      reason: 'unsupported',
+    });
+    should(await target.refind('s1', APP, FIELDS, FACTS as InputTargetFacts)).eql({ ok: false, reason: 'unsupported' });
+    should(await target.refind('s1', APP, [{ id: 'password' }], FACTS_PAGE)).eql({ ok: false, reason: 'unsupported' });
+    should(calls).eql([]);
   });
 
   it('should picture the fields and tell the page’s document, and answer nothing when it cannot', async () => {

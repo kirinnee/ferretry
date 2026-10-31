@@ -64,6 +64,19 @@ export interface InputTargetPort {
    */
   observe(sessionId: string, target: InputTarget, fields: readonly InputTargetField[]): Promise<ObserveResult>;
   /**
+   * The target the card showed (`expected`), found AGAIN after it changed under the card: a page whose field was
+   * re-rendered as a new node, a terminal that redrew its prompt. A page looks for the same field (the agent's
+   * pointer, else the one visible look-alike); a terminal is simply looked at again. It never types, and whether
+   * what it found may take the card's place is the service's decision (`input-requests/rebind.ts`). Absent: a
+   * changed target is only ever a failed check.
+   */
+  refind?(
+    sessionId: string,
+    target: InputTarget,
+    fields: readonly InputTargetField[],
+    expected: InputTargetFacts,
+  ): Promise<ObserveResult>;
+  /**
    * The values, each into its own field in order, with Enter after the last when `submit`. `expected` is what
    * the card showed: an adapter that finds anything about the target different (the pane, the foreground
    * program, echo, the prompt, the page's document, a field's element) writes nothing and answers

@@ -8,6 +8,10 @@ import type { BrowserElementTarget, InputTargetFacts } from '@ferretry/protocol'
  * - {@link BrowserInputFieldsPort.inputObserve}: what the fields the agent pointed at really are — the page's
  *   origin and document, and per field the frame, the node, the attributes, the box. The browser decides all
  *   of it; the agent's pointer (a ref or a selector) only says where to look.
+ * - {@link BrowserInputFieldsPort.inputRefind}: the fields a card showed, found AGAIN after the page changed under it
+ *   (a re-render replaced the node, a reload made a new document): the agent's pointer first, else the one visible
+ *   field of the page with the same tag and attributes in a frame of the same origin. It is looked at exactly as
+ *   `inputObserve` looks, so its identity is the node Playwright holds; it never types.
  * - {@link BrowserInputFieldsPort.inputShot}: a picture of the part of the page the fields are in, for the
  *   owner's card, taken BEFORE anything is typed.
  * - {@link BrowserInputFieldsPort.inputType}: the one write. It checks the page against `expected` first (the
@@ -38,7 +42,9 @@ export type BrowserInputFacts = Extract<InputTargetFacts, { readonly kind: 'brow
  */
 export type BrowserInputObservation =
   | { readonly ok: true; readonly facts: BrowserInputFacts }
-  | { readonly ok: false; readonly missing: string };
+  | { readonly ok: false; readonly missing: string }
+  /** A re-find only: more than one field on the page could be this one, so none is chosen. */
+  | { readonly ok: false; readonly ambiguous: string };
 
 /** One value for one field, by the card's field id. */
 export interface BrowserInputValue {
@@ -68,6 +74,16 @@ export interface BrowserInputFieldsPort {
   /** The page's current document, cheaply: no field is looked at. */
   inputDocument(pageId: string): Promise<BrowserInputDocument>;
   inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation>;
+  /**
+   * The fields `expected` describes, found again in the page as it is now. Each field: the agent's pointer when it
+   * names exactly one element that is still that field (same frame origin, tag and attributes, visible); else the
+   * one visible element of the page with that tag and those attributes. None is `missing`, several is `ambiguous`.
+   */
+  inputRefind(
+    pageId: string,
+    expected: BrowserInputFacts,
+    fields: readonly BrowserInputFieldPointer[],
+  ): Promise<BrowserInputObservation>;
   inputShot(pageId: string, facts: BrowserInputFacts): Promise<BrowserInputShot>;
   inputType(
     pageId: string,
@@ -85,12 +101,14 @@ export const BROWSER_INPUT_SHOT_MARGIN = 48;
 /**
  * The worker's JSON-line methods behind the port, one per call: `inputDocument` `{ pageId }` answers
  * `{ document: { navigationId } }` (the main frame's loaderId); `inputObserve` `{ pageId, fields }` answers
- * `{ observation }`; `inputShot` `{ pageId, facts }` answers `{ shot }`; `inputType` `{ pageId, expected, values,
- * submit }` answers `{ outcome }`. Each answer is parsed by the daemon before it is believed.
+ * `{ observation }`; `inputRefind` `{ pageId, expected, fields }` answers `{ observation }`; `inputShot`
+ * `{ pageId, facts }` answers `{ shot }`; `inputType` `{ pageId, expected, values, submit }` answers `{ outcome }`.
+ * Each answer is parsed by the daemon before it is believed.
  */
 export const BROWSER_INPUT_WORKER_METHODS = {
   document: 'inputDocument',
   observe: 'inputObserve',
+  refind: 'inputRefind',
   shot: 'inputShot',
   type: 'inputType',
 } as const;

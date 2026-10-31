@@ -38,6 +38,12 @@ export const INPUT_MAX_PENDING_PER_SESSION = 3;
 export const INPUT_MAX_RAISES_PER_HOUR = 20;
 /** Per request: deliveries that fail a check (the target changed, echo came on) before the request is refused. */
 export const INPUT_MAX_CHECK_FAILURES = 3;
+/**
+ * Per request: times the daemon may find the SAME target again after it changed under the card (a page that
+ * re-rendered its field, a terminal that redrew its prompt) and redraw the card instead of counting a failure.
+ * Past it the target is changing faster than the owner can answer, and the request ends.
+ */
+export const INPUT_MAX_REBINDS = 5;
 /** Per daemon: deliveries an hour from carriers that are not this machine. */
 export const INPUT_MAX_REMOTE_DELIVERIES_PER_HOUR = 30;
 /** The longest value, in UTF-8 bytes, before padding. */
@@ -603,6 +609,17 @@ export const INPUT_ERROR_CODES = {
   useInputForm: 'use_input_form',
   /** 409: the target is no longer the one the card showed. */
   targetChanged: 'target_changed',
+  /**
+   * 409: the target changed under the card but is still the same field or prompt: the daemon looked again and
+   * redrew the card (a new picture, digest and risk). Nothing was typed and nothing was counted; read the request
+   * again and send.
+   */
+  targetRebound: 'target_rebound',
+  /**
+   * 410: the target kept changing (the last failed check, or one redraw too many), so the request ended with
+   * nothing typed. The owner asks the ferret to request again.
+   */
+  targetUnsettled: 'target_unsettled',
   /** 409: the request is delivering or delivered under another `deliveryId`. */
   alreadyDelivered: 'already_delivered',
   /** 410: the request expired or was cancelled. */
@@ -697,6 +714,8 @@ export const INPUT_AUDIT_EVENTS = [
   'input.requested',
   'input.delivered',
   'input.refused',
+  /** The target changed under the card and the daemon found the same field or prompt again: the card was redrawn. */
+  'input.rebound',
   'input.expired',
   'input.cancelled',
   'input.quarantine_ended',

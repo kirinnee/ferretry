@@ -713,6 +713,7 @@ describe('a paste into a field on a page', () => {
     const port: BrowserInputFieldsPort = {
       inputDocument: async () => ({ navigationId: 'loader-1' }),
       inputObserve: async () => ({ ok: true, facts }),
+      inputRefind: async () => ({ ok: true, facts }),
       inputShot: async () => ({ pngBase64: 'AAAA', clip: { x: 0, y: 0, w: 10, h: 10 } }),
       inputType: async (_pageId, _expected, values) => {
         typed.push(...values);

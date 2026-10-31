@@ -60,6 +60,7 @@ import {
   type InputLocator,
   type InputSubject,
   observeInputFields,
+  refindInputFields,
   playwrightNodeOf,
   shootInputFields,
   typeInputFields,
@@ -484,6 +485,7 @@ function inputHandleOf(handle: ElementHandle): InputHandle {
 function inputLocatorOf(locator: Locator): InputLocator {
   return {
     first: () => inputLocatorOf(locator.first()),
+    nth: index => inputLocatorOf(locator.nth(index)),
     count: async () => await locator.count(),
     elementHandle: async options => {
       const handle = await locator.elementHandle(options);
@@ -898,6 +900,14 @@ async function act(request: Request): Promise<Record<string, unknown>> {
     case 'inputObserve':
       return {
         observation: await observeInputFields(inputSubject(targetPage(params.pageId)), inputPointers(params.fields)),
+      };
+    case 'inputRefind':
+      return {
+        observation: await refindInputFields(
+          inputSubject(targetPage(params.pageId)),
+          browserFactsParam(params.expected),
+          inputPointers(params.fields),
+        ),
       };
     case 'inputShot': {
       const page = targetPage(params.pageId);

@@ -148,8 +148,9 @@ beside the field) and "Password" (`secret`) on one card, and the daemon types ea
   not dead". The foreground facts shown on the card come from `ps` and are digested; tmux can only be
   asked about its own command name, so that name is what the guard compares. Any mismatch types nothing and answers 409 `target_changed`;
   a refused or failed command is _uncertain_. A foreground program whose name tmux cannot compare
-  safely is refused. Three failed checks end the request. **What tmux cannot bind** is in the honest
-  limits below.
+  safely is refused. Three failed checks end the request; a change that is still the same target redraws
+  the card instead of counting ([When the target changes](#when-the-target-changes)). **What tmux cannot
+  bind** is in the honest limits below.
 - **One write, never repeated.** A terminal delivery is **one** hex `send-keys -H` carrying the
   value and, when the owner wants Enter pressed, the `\r` in the same command (on by default for a
   terminal secret, off for a browser). If that command fails or throws, the outcome is _uncertain_: the
@@ -164,6 +165,48 @@ beside the field) and "Password" (`secret`) on one card, and the daemon types ea
   request closed. A close the daemon itself caused is ignored by the card-closed observer.
 - **Limits**: 3 pending requests and 20 raises an hour per session; 30 remote deliveries an hour per
   daemon.
+
+## When the target changes
+
+The card binds to everything the daemon saw, so ANY change refuses the write: a page's field node, its box,
+whether something covers it, the document; a terminal's cursor row. Most changes are not a different target.
+A 2FA page re-renders its code input as a new node (React replaces it, and the agent's ref goes stale), a
+countdown moves the box, a toast covers it for a moment, a reload makes a new document; a terminal redraws the
+same password prompt a row lower. Before this rule the request kept the digest it was raised with, so after
+one such change every Send failed the same way and the third ended the request as `check_failures`.
+
+Now a Send whose look does not match **looks again** (`InputTargetPort.refind`). A page looks for the same
+field: the agent's pointer when it names exactly one element that is still that field, else the **one** visible
+element of the page with the same tag and attributes in a frame of the same origin, looked at exactly as the
+first look (the node Playwright holds, described by the session that holds it). A terminal is looked at again.
+What it finds is then compared on its **binding**, the part of the facts that names the target itself
+(`lib/input-requests/rebind.ts`):
+
+| Target     | Must be the same                                                                                                   | May change                                          |
+| ---------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
+| a page     | the page, its origin and https, every field's frame origin, tag, `type`, `name`, `id`, `autocomplete`, `inputmode` | the node, frame id, box, cover, document, challenge |
+| a terminal | the pane, the program (pid, group, name, argv), echo, the prompt line, whether it asks for secrets                 | the cursor row                                      |
+| a secret   | its name                                                                                                           | whether it already holds a value                    |
+
+- **The same target, exactly as shown**: it is typed into (a stale ref that finds the same node, say).
+- **The same target, something else changed**: the card is **redrawn** — a new picture taken before anything
+  is typed, a new digest, the risk worked out again — the request stays pending, nothing is typed and **nothing
+  is counted**. Send answers 409 `target_rebound` and the card says "The page changed. Check the picture and
+  send again." (a terminal: "The terminal redrew its prompt."). The owner always approves the target the value
+  goes into: a re-bind never types. It is audited as `input.rebound`.
+- **Anything else** is a failed check, counted as before: another origin or page, an http page, a field in
+  another site's frame, a password field that became a text field, a hidden field, no such field, **several
+  look-alikes** (none is chosen), another program or prompt, echo turned on.
+
+A card older than the request (the owner's client still holds the digest from before a redraw) is answered
+`target_rebound` and not counted: nothing is wrong with the target. A target that is redrawn more than
+`INPUT_MAX_REBINDS` (5) times, or fails three checks, ends the request with `check_failures` and Send answers
+410 `target_unsettled`. The owner reads why in plain words: "The page kept changing, so nothing was typed. Ask
+the ferret to request again."
+
+The guarded write is unchanged: `inputType` still writes only to the exact nodes the (redrawn) card showed and
+refuses anything different, and a write refused at the last moment redraws the card but is never retried within
+that Send.
 
 ## The risk is flagged, never a reason to refuse
 

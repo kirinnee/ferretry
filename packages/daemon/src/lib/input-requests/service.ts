@@ -8,6 +8,7 @@ import {
   INPUT_JOURNAL_EVENT_TYPES,
   INPUT_MAX_CHECK_FAILURES,
   INPUT_MAX_PENDING_PER_SESSION,
+  INPUT_MAX_REBINDS,
   INPUT_MAX_RAISES_PER_HOUR,
   INPUT_PROMPT_MAX_LENGTH,
   INPUT_QUARANTINE_EVENT_TYPES,
@@ -62,9 +63,11 @@ import type {
   InputTargetField,
   InputTargetPort,
   InputTimers,
+  ObserveResult,
   TypeResult,
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
+import { bindingOf, mayRebind } from './rebind.ts';
 import { savedForFields, targetMatchKey } from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
 
@@ -126,6 +129,10 @@ interface Held {
   /** Every name the terminal was seen under (its key and its id), so a quarantine on any of them seals it. */
   names: readonly string[];
   checkFailures: number;
+  /** Times the target changed under the card and was found again, so the card was redrawn instead of failing. */
+  rebinds: number;
+  /** Which target the card is for (`rebind.ts`): a sighting with this binding may redraw the card. Absent: none may. */
+  binding?: string;
   /** The target's key for saved logins (`sudo@kirin-box`), from what the DAEMON saw; never from the agent. */
   matchKey?: string;
   /** The saved login the ferret said it expects: shown to the owner as a hint, never made the one-tap choice. */
@@ -293,6 +300,8 @@ export class InputRequestService {
       request,
       names: [target.key, ...(seen.names ?? [])],
       checkFailures: 0,
+      rebinds: 0,
+      binding: bindingOf(seen.facts),
       ...(matchKey === undefined ? {} : { matchKey }),
       ...(raise.secretHint === undefined ? {} : { hint: raise.secretHint }),
       deliveries: new Map(),
@@ -726,7 +735,14 @@ export class InputRequestService {
       expiresAt: event.expiresAt,
       state: 'pending',
     };
-    const held: Held = { request, names: [target.key], checkFailures: 0, deliveries: new Map(), waiters: new Set() };
+    const held: Held = {
+      request,
+      names: [target.key],
+      checkFailures: 0,
+      rebinds: 0,
+      deliveries: new Map(),
+      waiters: new Set(),
+    };
     this.held.set(request.id, held);
     // A paste's copy lived in the memory of the daemon that stopped: it is gone, so the paste is too.
     if (event.sealed !== undefined) {
@@ -745,6 +761,7 @@ export class InputRequestService {
       return;
     }
     held.names = [target.key, ...(seen.names ?? [])];
+    held.binding = bindingOf(seen.facts);
     const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
     if (matchKey !== undefined) held.matchKey = matchKey;
     const fields = withRisk(request.fields, seen.facts);
@@ -778,6 +795,7 @@ export class InputRequestService {
       request,
       names: [request.target.key],
       checkFailures: 0,
+      rebinds: 0,
       deliveries: new Map(),
       waiters: new Set(),
     };
@@ -829,10 +847,6 @@ export class InputRequestService {
     wrote?: (typed: TypeResult) => void,
   ): Promise<InputDeliverResult> {
     const { request } = held;
-    const fail = async (code: InputReason, error: InputRequestError): Promise<never> => {
-      await this.checkFailed(held, code);
-      throw error;
-    };
     held.request = { ...request, state: 'delivering' };
     let hold: QuarantineHold | undefined;
     try {
@@ -848,12 +862,13 @@ export class InputRequestService {
       if (body.entry !== undefined && this.deps.logins === undefined)
         throw new InputRequestError('bad_request', 'this daemon keeps no saved logins; type the value instead');
       const kept = body.save === undefined ? undefined : this.guardSave(request, typed);
-      const changed = (): InputRequestError => targetChanged(request.target.kind);
-      if (body.observedDigest !== request.observedDigest) return await fail('target_changed', changed());
+      // The owner's card is older than the request (it was redrawn since): nothing is wrong with the target, so
+      // nothing is counted; the card reads the request again and the owner checks it before sending.
+      if (body.observedDigest !== request.observedDigest) throw targetRebound(request.target.kind);
       const submitted = body.submit && request.submit !== 'agent';
-      const seen = await this.deps.target.observe(request.sessionId, request.target, request.fields.map(pointerOf));
-      if (!seen.ok) return await fail('target_gone', changed());
-      if (digestFacts(seen.facts) !== request.observedDigest) return await fail('target_changed', changed());
+      const looked = await this.deps.target.observe(request.sessionId, request.target, request.fields.map(pointerOf));
+      const seen =
+        looked.ok && digestFacts(looked.facts) === request.observedDigest ? looked : await this.lookAgain(held, looked);
       // A secure copy is opened HERE, like a saved value: after every check that can refuse without typing, and only to be typed.
       if (pasted !== undefined)
         typed.set((request.fields[0] as InputRequestField).id, await this.openCopy(held, pasted));
@@ -915,7 +930,10 @@ export class InputRequestService {
         await this.letGo(hold);
         hold = undefined;
         await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
-        return await fail(outcome, changed());
+        // Nothing was typed: the target changed between the last look and the write. The same target found
+        // again redraws the card; it is never typed into within this Send.
+        const gone: ObserveResult = { ok: false, reason: 'target_gone' };
+        return await this.redrawOrRefuse(held, await this.refound(held, gone), outcome);
       }
       await this.settle(hold);
       hold = undefined;
@@ -1109,14 +1127,101 @@ export class InputRequestService {
     });
   }
 
-  /** A check failed: nothing was typed. Three failures end the request; fewer leave it pending. */
-  private async checkFailed(held: Held, reason: InputReason): Promise<void> {
+  /**
+   * The look before the write found the target not as the card showed it (`looked`). It is looked for AGAIN
+   * ({@link refound}); found exactly as the card showed it (a stale ref that still finds the same node), those facts
+   * are typed into. Anything else is {@link redrawOrRefuse}d.
+   */
+  private async lookAgain(held: Held, looked: ObserveResult): Promise<Extract<ObserveResult, { readonly ok: true }>> {
+    const again = await this.refound(held, looked);
+    if (again.ok && digestFacts(again.facts) === held.request.observedDigest) return again;
+    return await this.redrawOrRefuse(held, again, looked.ok ? 'target_changed' : 'target_gone');
+  }
+
+  /**
+   * The target the card is for, looked for again (`InputTargetPort.refind`): a page looks for the same field, a
+   * terminal is looked at again. A sighting that is already the same target needs no second look.
+   */
+  private async refound(held: Held, looked: ObserveResult): Promise<ObserveResult> {
+    const { request, binding } = held;
+    if (binding !== undefined && looked.ok && mayRebind(binding, looked.facts)) return looked;
+    if (request.observed === undefined || this.deps.target.refind === undefined) return looked;
+    return await this.deps.target.refind(
+      request.sessionId,
+      request.target,
+      request.fields.map(pointerOf),
+      request.observed,
+    );
+  }
+
+  /**
+   * What a target that is not as the card showed comes to. Nothing is typed either way:
+   *
+   * - the SAME target (`rebind.ts`) with something else changed: the card is redrawn — a new picture, digest and
+   *   risk — nothing is counted, and the owner is asked to check it and send again;
+   * - anything else (another origin, no such field, several look-alikes, a password field that became a text field,
+   *   another program): a failed check, counted.
+   *
+   * A target that keeps changing ends the request once it was redrawn {@link INPUT_MAX_REBINDS} times.
+   */
+  private async redrawOrRefuse(held: Held, again: ObserveResult, code: InputReason): Promise<never> {
+    const { request, binding } = held;
+    if (binding === undefined || !again.ok || !mayRebind(binding, again.facts)) {
+      throw (await this.checkFailed(held, code))
+        ? targetUnsettled(request.target.kind)
+        : targetChanged(request.target.kind);
+    }
+    if (held.rebinds >= INPUT_MAX_REBINDS) {
+      await this.finish(held, 'refused', 'check_failures', undefined, { closeCard: true, tellAgent: true });
+      throw targetUnsettled(request.target.kind);
+    }
+    await this.rebind(held, again);
+    throw targetRebound(request.target.kind);
+  }
+
+  /**
+   * The card is redrawn from what was seen now: the same target, so the fields' risk, the picture and the digest are
+   * taken again and the request waits for the owner. Nothing is typed and nothing is counted; it is audited.
+   */
+  private async rebind(held: Held, seen: Extract<ObserveResult, { readonly ok: true }>): Promise<void> {
+    const { request } = held;
+    held.rebinds += 1;
+    held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
+    const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
+    if (matchKey !== undefined) held.matchKey = matchKey;
+    const fields = withRisk(request.fields, seen.facts);
+    // The new picture is taken before the owner is asked again, exactly as at raise.
+    const shot =
+      seen.facts.kind === 'browser'
+        ? await this.deps.target.shoot?.(request.sessionId, request.target, seen.facts).catch(() => undefined)
+        : undefined;
+    if (shot === undefined) delete held.shot;
+    else held.shot = shot;
+    const copy =
+      request.source === undefined ? undefined : this.deps.sealed?.describe(request.sessionId, request.source.name);
+    const { pictured: _pictured, ...rest } = request;
+    held.request = {
+      ...rest,
+      state: 'pending',
+      fields,
+      observed: await this.project(request.sessionId, seen.facts, held.names),
+      risk: pasteRisk(worstRisk(fields.map(field => field.risk)), copy),
+      observedDigest: digestFacts(seen.facts),
+      ...(shot === undefined ? {} : { pictured: true as const }),
+    };
+    await this.record(held.request, 'input.rebound', { kind: 'daemon' }, this.auditOf(held.request));
+  }
+
+  /** A check failed: nothing was typed. Three failures end the request (and answer true); fewer leave it pending. */
+  private async checkFailed(held: Held, reason: InputReason): Promise<boolean> {
     held.checkFailures += 1;
     held.request = { ...held.request, state: 'pending' };
-    if (held.checkFailures >= INPUT_MAX_CHECK_FAILURES)
+    if (held.checkFailures >= INPUT_MAX_CHECK_FAILURES) {
       await this.finish(held, 'refused', 'check_failures', undefined, { closeCard: true, tellAgent: true });
-    else
-      await this.record(held.request, 'input.refused', { kind: 'daemon' }, { ...this.auditOf(held.request), reason });
+      return true;
+    }
+    await this.record(held.request, 'input.refused', { kind: 'daemon' }, { ...this.auditOf(held.request), reason });
+    return false;
   }
 
   private async finish(
@@ -1185,7 +1290,8 @@ export class InputRequestService {
           }
         : {}),
     });
-    if (options.closeCard) await this.deps.agenda.close(request.sessionId, request.agendaItemId, noteOf(state, reason));
+    if (options.closeCard)
+      await this.deps.agenda.close(request.sessionId, request.agendaItemId, noteOf(state, reason, request.target.kind));
     if (options.tellAgent)
       await this.deps.notifier.tell(
         request.sessionId,
@@ -1303,6 +1409,24 @@ function targetChanged(kind: InputTarget['kind']): InputRequestError {
     'conflict',
     `what is on the ${surfaceWord(kind)} is no longer what the card showed; nothing was typed`,
     INPUT_ERROR_CODES.targetChanged,
+  );
+}
+
+/** The target changed under the card but is the same target: the card was redrawn and nothing was counted. */
+function targetRebound(kind: InputTarget['kind']): InputRequestError {
+  return new InputRequestError(
+    'conflict',
+    `the ${surfaceWord(kind)} changed since the card was drawn, but it is the same ${kind === 'terminal' ? 'prompt' : 'field'}: Ferretry looked again and redrew the card; check it and send again. Nothing was typed`,
+    INPUT_ERROR_CODES.targetRebound,
+  );
+}
+
+/** The last failed check ended the request: the owner is told why in plain words, and what to do. */
+function targetUnsettled(kind: InputTarget['kind']): InputRequestError {
+  return new InputRequestError(
+    'gone',
+    `the ${surfaceWord(kind)} kept changing, so nothing was typed and this request ended; ask the ferret to request again`,
+    INPUT_ERROR_CODES.targetUnsettled,
   );
 }
 
@@ -1551,8 +1675,15 @@ function maskedFacts(facts: InputTargetFacts): InputTargetFacts {
   };
 }
 
-function noteOf(state: string, reason: InputReason | undefined): string {
+function noteOf(state: string, reason: InputReason | undefined, kind: InputTarget['kind']): string {
+  if (reason === 'check_failures')
+    return `The ${surfaceWord(kind)} kept changing, so nothing was typed. Ask the ferret to request again.`;
   return reason === undefined ? `Input request ${state}.` : `Input request ${state}: ${reason.replaceAll('_', ' ')}.`;
+}
+
+/** Why a request ended, in the words the ferret is told: never a bare wire code. */
+function reasonWords(reason: InputReason, kind: InputTarget['kind']): string {
+  return reason === 'check_failures' ? `the ${surfaceWord(kind)} kept changing` : reason.replaceAll('_', ' ');
 }
 
 function tellOf(request: InputRequest, state: string, reason: InputReason | undefined, uncertain: boolean): string {
@@ -1566,7 +1697,7 @@ function tellOf(request: InputRequest, state: string, reason: InputReason | unde
     return `${request.agendaItemId}: ${copyHandle(request.source.name)} was pasted into %${kind}:${key}. Read the ${surface} to continue once its quarantine allows.`;
   if (state === 'delivered')
     return `${request.agendaItemId} was answered and typed into %${kind}:${key}. Read the ${surface} to continue.`;
-  return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reason.replaceAll('_', ' ')}`}). If you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
+  return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reasonWords(reason, kind)}`}). If you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
 }
 
 /** What the agent is told about a paste into the secret store: it never reads the store, so it is told whether the name now holds the copy. */
@@ -1582,5 +1713,5 @@ function storeTellOf(
     return `${request.agendaItemId} was interrupted while ${handle} was being saved as the secret ${key}; it may or may not hold it now. Ask the owner to check the secret in Settings before you use \${secret:${key}}.`;
   if (state === 'delivered')
     return `${request.agendaItemId}: ${handle} was saved as the secret ${key}. Use it as \${secret:${key}}; you can never read it.`;
-  return `${request.agendaItemId} ended without saving ${handle} (${state}${reason === undefined ? '' : `: ${reason.replaceAll('_', ' ')}`}). If you still need it saved, call secure_paste again or ask the owner.`;
+  return `${request.agendaItemId} ended without saving ${handle} (${state}${reason === undefined ? '' : `: ${reasonWords(reason, request.target.kind)}`}). If you still need it saved, call secure_paste again or ask the owner.`;
 }

@@ -13,12 +13,15 @@ import {
   type InputLocator,
   type InputablePage,
   type InputSubject,
+  INPUT_REFIND_MAX_CANDIDATES,
   inputFieldAttributes,
+  inputFieldSelector,
   isSecureUrl,
   observeInputFields,
   originOfUrl,
   PLAYWRIGHT_REACHED_VERSION,
   playwrightNodeOf,
+  refindInputFields,
   shootInputFields,
   typeInputFields,
 } from '../../../../src/lib/index.ts';
@@ -36,6 +39,8 @@ interface FakeElement {
   /** The target that session says it is, when it is not the one this element's frame runs in. */
   heldTarget?: unknown;
   box: { x: number; y: number; width: number; height: number } | null;
+  /** Playwright cannot take a hold on it (the element went away mid-call). */
+  handleFails?: true;
   /** What Playwright measures for the element it holds, when it is not the box DevTools measures. */
   claimedBox?: { x: number; y: number; width: number; height: number } | null;
   visible: boolean;
@@ -264,17 +269,78 @@ class FakeWorld {
     return element;
   }
 
+  /**
+   * The page re-renders an element: a NEW node with the same tag and attributes takes its place, and the old one is
+   * gone from the document. A ref to it goes stale (Playwright drops a ref whose element is not connected); a
+   * selector now finds the new node.
+   */
+  rerender(old: FakeElement, backendNodeId: number, change: Partial<FakeElement> = {}): FakeElement {
+    const element: FakeElement = { ...old, backendNodeId, ...change };
+    this.elements.splice(this.elements.indexOf(old), 1, element);
+    for (const [pointer, at] of [...this.pointers]) {
+      if (at !== old) continue;
+      if (pointer.startsWith('aria-ref=')) {
+        this.pointers.delete(pointer);
+        this.refs.delete(pointer.slice('aria-ref='.length));
+      } else this.pointers.set(pointer, element);
+    }
+    return element;
+  }
+
+  /** A field that is on the page and that no pointer names: a look-alike only a search can find. */
+  extra(backendNodeId: number, attributes: string[], change: Partial<FakeElement> = {}): FakeElement {
+    const element: FakeElement = {
+      backendNodeId,
+      nodeName: 'INPUT',
+      attributes,
+      frame: this.main,
+      box: { x: 10, y: 20 + 40 * this.elements.length, width: 100, height: 24 },
+      visible: true,
+      ...change,
+    };
+    this.elements.push(element);
+    return element;
+  }
+
+  /** The main frame's elements a `css=tag[attr="value"]…` selector matches, in document order (open shadow roots too). */
+  private matching(selector: string): FakeElement[] {
+    const css = selector.slice('css='.length);
+    const tag = /^([a-z*][a-z0-9-]*)/u.exec(css)?.[1] ?? '';
+    const parts = [...css.slice(tag.length).matchAll(/\[([a-z]+)(\^?=)"((?:[^"\\]|\\.)*)"\]/gu)].map(match => ({
+      name: match[1] as string,
+      prefix: match[2] === '^=',
+      value: (match[3] as string).replace(/\\(.)/gu, '$1'),
+    }));
+    return this.elements.filter(element => {
+      if (element.frame !== this.main) return false;
+      if (tag !== '*' && element.nodeName.toLowerCase() !== tag) return false;
+      return parts.every(part => {
+        const at = element.attributes.findIndex((name, index) => index % 2 === 0 && name === part.name);
+        const value = at < 0 ? undefined : element.attributes[at + 1];
+        return value !== undefined && (part.prefix ? value.startsWith(part.value) : value === part.value);
+      });
+    });
+  }
+
   get page(): InputablePage {
-    const locatorOf = (selector: string): InputLocator => ({
-      first: () => locatorOf(selector),
+    const resolve = (selector: string): FakeElement[] => {
+      if (selector.startsWith('css=')) return this.matching(selector);
+      const element = this.pointers.get(selector);
+      return element === undefined ? [] : [element];
+    };
+    const locatorOf = (selector: string, index?: number): InputLocator => ({
+      first: () => locatorOf(selector, index ?? 0),
+      nth: at => locatorOf(selector, at),
       count: async () => {
         const ref = /^aria-ref=(.+)$/u.exec(selector)?.[1];
         if (ref !== undefined) return this.refs.has(ref) ? 1 : 0;
-        return this.pointers.has(selector) ? 1 : 0;
+        const found = resolve(selector);
+        return index === undefined ? found.length : found[index] === undefined ? 0 : 1;
       },
       elementHandle: async () => {
-        const element = this.pointers.get(selector);
+        const element = resolve(selector)[index ?? 0];
         if (element === undefined) return null;
+        if (element.handleFails === true) throw new Error('Element is not attached to the DOM');
         const handle: InputHandle = {
           ownerFrame: async () => element.frame,
           describe: async () => {
@@ -346,7 +412,7 @@ function loginWorld(): { world: FakeWorld; user: FakeElement; password: FakeElem
 
 async function observed(world: FakeWorld, ids: readonly string[]): Promise<BrowserInputFacts> {
   const result = await observeInputFields(world.subject, ids.map(target));
-  if (!result.ok) throw new Error(`missing ${result.missing}`);
+  if (!result.ok) throw new Error(`not observed: ${JSON.stringify(result)}`);
   return result.facts;
 }
 
@@ -1321,5 +1387,179 @@ describe('review regressions: the write is bound to the target that holds the ha
       () => should.fail(undefined, undefined, 'it should reject'),
       () => undefined,
     );
+  });
+});
+
+describe('refindInputFields (#B100)', () => {
+  /** A 2FA page: one code input, pointed at by a ref from the agent's snapshot. */
+  function codeWorld() {
+    const world = new FakeWorld();
+    const code = world.element('aria-ref=e7', 21, [
+      'type',
+      'text',
+      'name',
+      'otp',
+      'autocomplete',
+      'one-time-code',
+      'inputmode',
+      'numeric',
+    ]);
+    return { world, code };
+  }
+  const pointer = { id: 'code', target: { kind: 'ref' as const, ref: 'e7' } };
+  const look = async (world: FakeWorld) => {
+    const result = await observeInputFields(world.subject, [pointer]);
+    if (!result.ok) throw new Error('not observed');
+    return result.facts;
+  };
+
+  it('should show WHICH part of the facts a re-render changes: the node only', async () => {
+    const { world, code } = codeWorld();
+    const before = await look(world);
+    // The agent reads the page again: its fresh snapshot names the new node e7.
+    world.pointers.set('aria-ref=e7', world.rerender(code, 77));
+    world.refs.add('e7');
+    const after = await look(world);
+
+    should(after.fields[0]?.backendNodeId).equal(77);
+    should({ ...after, fields: [{ ...after.fields[0], backendNodeId: 21 }] }).eql(before);
+  });
+
+  it("should answer missing for the agent's stale ref, then find the re-rendered field and type into the new node", async () => {
+    const { world, code } = codeWorld();
+    const before = await look(world);
+    world.rerender(code, 77);
+
+    const stale = await observeInputFields(world.subject, [pointer]);
+    const again = await refindInputFields(world.subject, before, [pointer]);
+    if (!again.ok) throw new Error('not refound');
+    const outcome = await typeInputFields(world.subject, again.facts, [{ field: 'code', text: '123456' }], true);
+
+    should(stale).eql({ ok: false, missing: 'code' });
+    should(again.facts.fields[0]?.backendNodeId).equal(77);
+    should(again.facts.fields[0]?.field).eql(before.fields[0]?.field);
+    should(outcome).equal('typed');
+    should(world.session('page-target').typed).eql([{ backendNodeId: 77, text: '123456' }]);
+    // The identity came from the handle Playwright holds, exactly as a first look proves it.
+    should(world.described.at(-1)).equal(77);
+  });
+
+  it('should still refuse to type into the old node: the write after a re-render is target_changed', async () => {
+    const { world, code } = codeWorld();
+    const before = await look(world);
+    world.rerender(code, 77);
+
+    should(await typeInputFields(world.subject, before, [{ field: 'code', text: '123456' }], true)).equal(
+      'target_changed',
+    );
+    should(insertions(world)).equal(0);
+  });
+
+  it("should use the agent's pointer when it still names exactly that field", async () => {
+    const world = new FakeWorld();
+    world.element('#otp', 21, ['type', 'text', 'name', 'otp']);
+    world.extra(30, ['type', 'text', 'name', 'otp']);
+    const selector = { id: 'code', target: { kind: 'selector' as const, selector: '#otp' } };
+    const first = await observeInputFields(world.subject, [selector]);
+    if (!first.ok) throw new Error('not observed');
+
+    const again = await refindInputFields(world.subject, first.facts, [selector]);
+
+    should(again.ok && again.facts.fields[0]?.backendNodeId).equal(21);
+  });
+
+  it('should pass over a look-alike Playwright cannot take a hold on', async () => {
+    const { world, code } = codeWorld();
+    const before = await look(world);
+    world.rerender(code, 77);
+    world.extra(78, [...code.attributes], { handleFails: true });
+
+    const again = await refindInputFields(world.subject, before, [pointer]);
+
+    should(again.ok && again.facts.fields[0]?.backendNodeId).equal(77);
+  });
+
+  it('should refuse two visible look-alikes as ambiguous, choosing neither', async () => {
+    const { world, code } = codeWorld();
+    const before = await look(world);
+    world.rerender(code, 77);
+    world.extra(78, [...code.attributes]);
+
+    should(await refindInputFields(world.subject, before, [pointer])).eql({ ok: false, ambiguous: 'code' });
+  });
+
+  it('should pass over a hidden look-alike and a look-alike in another frame', async () => {
+    const { world, code } = codeWorld();
+    const before = await look(world);
+    world.rerender(code, 77);
+    world.extra(78, [...code.attributes], { visible: false });
+    const other = new FakeFrame('https://evil.example/frame', 'evil-target', true);
+    world.element('#elsewhere', 79, [...code.attributes], other);
+
+    const again = await refindInputFields(world.subject, before, [pointer]);
+
+    should(again.ok && again.facts.fields[0]?.backendNodeId).equal(77);
+  });
+
+  it('should refuse more look-alikes than it will look at', async () => {
+    const { world, code } = codeWorld();
+    const before = await look(world);
+    world.rerender(code, 77, { visible: false });
+    for (let n = 0; n < INPUT_REFIND_MAX_CANDIDATES; n += 1)
+      world.extra(100 + n, [...code.attributes], { visible: false });
+
+    should(await refindInputFields(world.subject, before, [pointer])).eql({ ok: false, ambiguous: 'code' });
+  });
+
+  const changed: readonly [string, Partial<FakeElement>][] = [
+    ['a password field that became a text field', {}],
+    ['a field that is now hidden', { visible: false }],
+  ];
+  for (const [name, change] of changed) {
+    it(`should answer missing for ${name}`, async () => {
+      const world = new FakeWorld();
+      const password = world.element('aria-ref=e9', 31, ['type', 'password', 'name', 'pw']);
+      const ref = { id: 'pw', target: { kind: 'ref' as const, ref: 'e9' } };
+      const first = await observeInputFields(world.subject, [ref]);
+      if (!first.ok) throw new Error('not observed');
+      world.rerender(password, 32, {
+        ...change,
+        attributes: name.startsWith('a password') ? ['type', 'text', 'name', 'pw'] : password.attributes,
+      });
+
+      should(await refindInputFields(world.subject, first.facts, [ref])).eql({ ok: false, missing: 'pw' });
+    });
+  }
+
+  it('should refuse two fields of the card that land on one node', async () => {
+    const world = new FakeWorld();
+    world.element('#a', 41, ['type', 'text']);
+    const pointers = [
+      { id: 'one', target: { kind: 'selector' as const, selector: '#a' } },
+      { id: 'two', target: { kind: 'selector' as const, selector: '#a' } },
+    ];
+    const first = await observeInputFields(world.subject, pointers);
+    if (!first.ok) throw new Error('not observed');
+
+    should(await refindInputFields(world.subject, first.facts, pointers)).eql({ ok: false, ambiguous: 'two' });
+  });
+
+  it("should describe the page as it is now: a reload's new document is in the facts", async () => {
+    const { world, code } = codeWorld();
+    const before = await look(world);
+    world.rerender(code, 77);
+    world.loaderId = 'loader-2';
+
+    const again = await refindInputFields(world.subject, before, [pointer]);
+
+    should(again.ok && again.facts.navigationId).equal('loader-2');
+  });
+
+  it('should build a CSS selector a value cannot break out of, matching a cut value by its start', () => {
+    should(inputFieldSelector({ tag: 'input', type: 'text', name: 'a"] , *[x="' })).equal(
+      'css=input[type="text"][name="a\\"] , *[x=\\""]',
+    );
+    should(inputFieldSelector({ tag: 'input', name: 'n'.repeat(128) })).equal(`css=input[name^="${'n'.repeat(128)}"]`);
+    should(inputFieldSelector({ tag: 'unknown tag' })).equal('css=*');
   });
 });

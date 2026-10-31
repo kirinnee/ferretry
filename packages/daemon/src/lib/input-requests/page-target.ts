@@ -43,6 +43,34 @@ export class PageInputTarget implements InputTargetPort {
     }
   }
 
+  /**
+   * The fields the card showed, found again in the page as it is now (`inputRefind`), in the page's own queue. A
+   * page that is now another page, or a field that is not there or not one, is `target_gone`.
+   */
+  async refind(
+    sessionId: string,
+    target: InputTarget,
+    fields: readonly InputTargetField[],
+    expected: InputTargetFacts,
+  ): Promise<ObserveResult> {
+    if (target.kind !== 'browser' || expected.kind !== 'browser') return { ok: false, reason: 'unsupported' };
+    const pointers: { id: string; target: BrowserElementTarget }[] = [];
+    for (const field of fields) {
+      if (field.element === undefined) return { ok: false, reason: 'unsupported' };
+      pointers.push({ id: field.id, target: field.element });
+    }
+    try {
+      return await this.host.inputOnPage(sessionId, target.key, async (port, pageId) => {
+        if (pageId !== expected.pageId) return { ok: false, reason: 'target_gone' };
+        const seen = await port.inputRefind(pageId, expected, pointers);
+        if (!seen.ok || seen.facts.pageId !== pageId) return { ok: false, reason: 'target_gone' };
+        return { ok: true, facts: seen.facts, names: [pageId] };
+      });
+    } catch {
+      return { ok: false, reason: 'target_gone' };
+    }
+  }
+
   async type(
     sessionId: string,
     target: InputTarget,
