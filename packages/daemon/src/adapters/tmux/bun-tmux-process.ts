@@ -1,5 +1,6 @@
 import { isAbsolute } from 'node:path';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../lib/tmux/contracts.ts';
+import { carriesPayload, scriptArguments, scriptLine } from '../../lib/tmux/script.ts';
 
 /** Bun-backed tmux process adapter. An absolute private socket is mandatory for fleet safety. */
 export class BunTmuxProcess implements TmuxCommandPort {
@@ -14,6 +15,10 @@ export class BunTmuxProcess implements TmuxCommandPort {
   async execute(arguments_: readonly string[], stdin?: string): Promise<TmuxCommandResult> {
     if (arguments_.length === 0 || arguments_[0]?.startsWith('-'))
       throw new Error('tmux command must begin with a command name, not a server option');
+    // A pane's environment and the keys typed into it are payloads, not addresses: they go to tmux as a
+    // script on stdin so no process listing on the host ever shows them (`lib/tmux/script.ts`).
+    if (stdin === undefined && carriesPayload(arguments_))
+      return await this.execute(scriptArguments(arguments_), scriptLine(arguments_));
     // `-u` makes tmux print UTF-8 whatever this process's locale says. Without it a daemon started
     // with no UTF-8 locale — which is every daemon a service manager or `fy daemon start` launches
     // unless told otherwise — gets every tab and non-ASCII byte in a format's output back as `_`, so

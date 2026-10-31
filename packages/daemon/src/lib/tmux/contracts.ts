@@ -12,9 +12,10 @@ export interface TmuxCommandPort {
   /**
    * Run one tmux command.
    *
-   * `stdin` exists for `load-buffer -`, the only command here that carries a payload rather than a
-   * target: a turn brief is longer than any argv limit and would be world-readable through `/proc`
-   * if it were passed as an argument.
+   * `stdin` exists for `load-buffer -`: a turn brief is longer than any argv limit and would be
+   * world-readable through `/proc` if it were passed as an argument. A command whose ARGUMENTS carry a
+   * payload — a pane's environment, typed keys — is moved onto stdin by the adapter itself
+   * (`script.ts`), so callers keep passing ordinary argv.
    */
   execute(arguments_: readonly string[], stdin?: string): Promise<TmuxCommandResult>;
 }
@@ -63,7 +64,9 @@ export interface TmuxLaunch {
    * It exists because a per-session secret has nowhere else to travel: argv is world-readable
    * through `/proc`, and the agent wrappers this daemon launches read their board capability from
    * `FY_SESSION_BOARD_CAPABILITY`. Every entry becomes one `-e NAME=VALUE` on `new-session`, so a
-   * value never reaches a shell for word-splitting or expansion.
+   * value never reaches a shell for word-splitting or expansion — and because `-e` is itself an
+   * argument, the command adapter sends a `new-session` that has one as a script on stdin
+   * (`script.ts`), so the values are in no process's argv either, the tmux server's included.
    */
   readonly env?: Readonly<Record<string, string>>;
 }
