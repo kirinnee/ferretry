@@ -291,6 +291,43 @@ describe('the session send ledger routes', () => {
     should(unusable.status).equal(400);
   });
 
+  it('should serve the ledger a page at a time, and refuse a page it cannot name', async () => {
+    // Arrange
+    const sessions = new FakeSessionSend();
+    sessions.ledger = ['send-1', 'send-2', 'send-3'].map((sendId, n) => ({
+      ...record,
+      sendId,
+      fate: 'delivered' as const,
+      acceptedAt: `2026-08-01T12:0${String(n)}:00.000Z`,
+    }));
+    const subject = dispatcher(sessions);
+    const get = async (query: Record<string, string>) =>
+      await subject.dispatch(
+        request({ method: 'GET', path: '/v1/sessions/s1/sends', headers: human, query: Object.entries(query) }),
+      );
+
+    // Act
+    const first = SendListResponseSchema.parse(JSON.parse((await get({ limit: '2' })).body));
+    const older = SendListResponseSchema.parse(
+      JSON.parse((await get({ limit: '2', before: first.nextCursor ?? '' })).body),
+    );
+    const refused = await Promise.all(
+      (
+        [{ limit: '0' }, { limit: '1001' }, { limit: 'two' }, { since: 'x' }, { before: 'nope' }] as Record<
+          string,
+          string
+        >[]
+      ).map(get),
+    );
+
+    // Assert
+    should(first.sends.map(each => each.sendId)).eql(['send-3', 'send-2']);
+    should(first.nextCursor).equal('send-2');
+    should(older.sends.map(each => each.sendId)).eql(['send-1']);
+    should(older.nextCursor).be.null();
+    should(refused.map(each => each.status)).eql([400, 400, 400, 400, 400]);
+  });
+
   it("should serve the session's durable queue, and refuse a session that is not there", async () => {
     // Arrange
     const sessions = new FakeSessionSend();

@@ -24,6 +24,7 @@ import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { DEFAULT_SEND_PAGE, MAX_SEND_PAGE, type SendPageQuery, sendPage } from '../../session/send/page.ts';
 
 /**
  * Talking to a session that is already running: `POST /v1/sessions/:sessionId/send` and
@@ -282,6 +283,30 @@ function pathMessageId(context: RouteContext): string {
   return decoded;
 }
 
+/** The page a sends read asks for: `limit` (1 to {@link MAX_SEND_PAGE}) and `before`, the cursor a previous page named. */
+function sendPageQuery(context: RouteContext): SendPageQuery {
+  const { query } = context.request;
+  for (const [name] of query) {
+    if (name !== 'limit' && name !== 'before')
+      throw new ApiError(400, `unknown sends parameter ${name}`, 'unknown_parameter');
+  }
+  const raw = query.get('limit')?.[0];
+  const limit = raw === undefined ? DEFAULT_SEND_PAGE : Number(raw);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_SEND_PAGE)
+    throw new ApiError(400, `a sends limit must be a whole number from 1 to ${MAX_SEND_PAGE}`, 'invalid_limit');
+  const before = query.get('before')?.[0];
+  if (before === '') throw new ApiError(400, 'a sends cursor must not be empty', 'invalid_cursor');
+  return before === undefined ? { limit } : { limit, before };
+}
+
+/** One page of a session's sends, or the refusal of a cursor that names none of them. */
+async function sendsPage(subsystem: SessionSendSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const query = sendPageQuery(context);
+  const page = sendPage(await subsystem.sends(pathSessionId(context)).catch(refuse), query);
+  if (page === undefined) throw new ApiError(400, `no send ${query.before ?? ''} to page from`, 'invalid_cursor');
+  return jsonResponse(page);
+}
+
 /**
  * `operator` minimum on the three ledger routes, for the reason the send itself carries it: a send
  * row is the message text, and a retry types it into a live terminal again.
@@ -295,7 +320,8 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       path: '/v1/sessions/:sessionId/sends',
       minimum: 'operator',
       noStore: true,
-      handle: async context => jsonResponse({ sends: await subsystem.sends(pathSessionId(context)).catch(refuse) }),
+      // A page, not the whole ledger (`session/send/page.ts`): the newest sends and every open one.
+      handle: async context => await sendsPage(subsystem, context),
     },
     // The durable queue every message will go through. Read-only until delivery moves onto it, and the
     // same words as the ledger rows above, so the same minimum.
