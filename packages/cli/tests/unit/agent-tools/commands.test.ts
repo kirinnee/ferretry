@@ -5,6 +5,7 @@ import { registerBrowserCommands } from '../../../src/lib/browser/command';
 import {
   registerBrowserPageCommands,
   registerTerminalCommands,
+  targetArgument,
   wholeNumber,
 } from '../../../src/lib/agent-tools/commands';
 import type { AgentToolsCommand } from '../../../src/lib/agent-tools/controller';
@@ -145,6 +146,64 @@ describe('fy browser page', () => {
       { kind: 'call', call: { tool: 'browser.ask_owner', name: 'bank', message: 'Solve the captcha.' } },
       { kind: 'call', call: { tool: 'browser.ask_owner', name: 'bank' } },
     ]);
+  });
+
+  it('should take a ref, a point or a selector wherever a page act names its target', async () => {
+    // Arrange
+    const { calls, run } = harness();
+
+    // Act
+    await run('browser', 'page', 'click', 'app', 'e12', '--double');
+    await run('browser', 'page', 'click', 'app', '120,340', '--right');
+    await run('browser', 'page', 'type', 'app', 'f1e3', 'hi', '--submit', '--slowly');
+    await run('browser', 'page', 'read', 'app', '--snapshot');
+    await run('browser', 'page', 'read', 'app', '--find', 'Sign in', '--selector', 'e3');
+    await run('browser', 'page', 'navigate', 'app', 'back');
+    await run('browser', 'page', 'screenshot', 'app', 'shot.jpg', '--jpeg', '--full-page');
+    await run('browser', 'page', 'screenshot', 'app', 'button.png', '--of', 'e4');
+
+    // Assert
+    should(calls).deepEqual([
+      { kind: 'call', call: { tool: 'browser.click', name: 'app', ref: 'e12', double: true } },
+      { kind: 'call', call: { tool: 'browser.click', name: 'app', x: 120, y: 340, button: 'right' } },
+      {
+        kind: 'call',
+        call: { tool: 'browser.type', name: 'app', ref: 'f1e3', text: 'hi', submit: true, slowly: true },
+      },
+      { kind: 'call', call: { tool: 'browser.read', name: 'app', mode: 'snapshot' } },
+      { kind: 'call', call: { tool: 'browser.read', name: 'app', mode: 'snapshot', find: 'Sign in', ref: 'e3' } },
+      { kind: 'call', call: { tool: 'browser.navigate', name: 'app', history: 'back' } },
+      {
+        kind: 'call',
+        call: { tool: 'browser.screenshot', name: 'app', fullPage: true, format: 'jpeg' },
+        screenshotTo: 'shot.jpg',
+      },
+      { kind: 'call', call: { tool: 'browser.screenshot', name: 'app', ref: 'e4' }, screenshotTo: 'button.png' },
+    ]);
+  });
+
+  it('should refuse a point where only an element will do, before calling anything', async () => {
+    // Arrange
+    const { calls, run } = harness();
+
+    // Act
+    const failure = await run('browser', 'page', 'type', 'app', '1,2', 'hi').then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should((failure as Error).message).containEql('not a point');
+    should(calls).deepEqual([]);
+  });
+
+  it('should tell a ref and a point from a selector by their shape alone', () => {
+    should(targetArgument('e12')).deepEqual({ ref: 'e12' });
+    should(targetArgument('f2e7')).deepEqual({ ref: 'f2e7' });
+    should(targetArgument('10.5,20')).deepEqual({ x: 10.5, y: 20 });
+    should(targetArgument('button.e12')).deepEqual({ selector: 'button.e12' });
+    should(targetArgument('#e12')).deepEqual({ selector: '#e12' });
+    should(targetArgument('text=Sign in')).deepEqual({ selector: 'text=Sign in' });
   });
 
   it('should read --session from the verb, the page group or the browser group', async () => {

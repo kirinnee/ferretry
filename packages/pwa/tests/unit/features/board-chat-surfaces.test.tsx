@@ -34,6 +34,7 @@ const chatOf = async (
     sessionId: SELF,
     focus,
     relatives: new Set([KID]),
+    agents: false,
   });
   const chip = chatChip(
     focus ?? undefined,
@@ -42,7 +43,14 @@ const chatOf = async (
     status,
   );
   const refreshed: boolean[] = [];
-  const chat: BoardChat = { chip, cards, status, refresh: () => void refreshed.push(true) };
+  const chat: BoardChat = {
+    chip,
+    cards,
+    status,
+    refresh: () => void refreshed.push(true),
+    agents: false,
+    splitsAgents: false,
+  };
   return { chat, refreshed };
 };
 
@@ -61,6 +69,7 @@ describe('BoardSideTab', () => {
         callsigns={new Map()}
         chat={chat}
         now={NOW}
+        onAgents={() => undefined}
         onOpenCard={card => extra.onOpenCard?.(card.task.id)}
         onView={next => extra.onView?.(next)}
         scope={scope}
@@ -153,6 +162,7 @@ describe('BoardSideTab', () => {
         sessionId: SELF,
         focus: null,
         relatives: new Set(),
+        agents: false,
       }),
     };
     const root = await draw(none);
@@ -205,6 +215,7 @@ describe('BoardSideTab', () => {
           sessionId: SELF,
           focus: null,
           relatives: new Set(),
+          agents: false,
         }),
       };
       return { chat: none, refreshed };

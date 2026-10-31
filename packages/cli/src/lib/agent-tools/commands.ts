@@ -1,4 +1,4 @@
-import { AGENT_TOOL_DEFAULT_WAIT_MS } from '@ferretry/protocol';
+import { AGENT_TOOL_DEFAULT_WAIT_MS, BROWSER_REF_PATTERN } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import { AgentToolsCommandError } from './client.ts';
 import type { AgentToolsCommand, IAgentToolsRunner } from './controller.ts';
@@ -18,6 +18,32 @@ export function wholeNumber(value: string, option: string): number {
     throw new AgentToolsCommandError(`${option} must be a whole number, not "${value}"`);
   return parsed;
 }
+
+/** A point on the command line: `x,y` in viewport CSS pixels. */
+const POINT = /^(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)$/u;
+
+/**
+ * What a page act points at, from one command-line word: a ref from `read --snapshot` (`e12`), a point
+ * (`120,340`, where the act takes one), or else a selector.
+ */
+export function targetArgument(
+  word: string,
+): { readonly ref: string } | { readonly x: number; readonly y: number } | { readonly selector: string } {
+  const value = word.trim();
+  if (BROWSER_REF_PATTERN.test(value)) return { ref: value };
+  const point = POINT.exec(value);
+  if (point !== null) return { x: Number(point[1]), y: Number(point[2]) };
+  return { selector: word };
+}
+
+/** The same, for an act that takes only an element. */
+function elementArgument(word: string): { readonly ref: string } | { readonly selector: string } {
+  const target = targetArgument(word);
+  if ('x' in target) throw new AgentToolsCommandError(`this act takes a ref or a selector, not a point ("${word}")`);
+  return target;
+}
+
+const HISTORY_STEPS: ReadonlySet<string> = new Set(['back', 'forward', 'reload']);
 
 /** Text given as several words on the command line, as one string; absent when none was given. */
 const joined = (words: readonly string[]): string | undefined => (words.length === 0 ? undefined : words.join(' '));
@@ -187,50 +213,116 @@ export function registerBrowserPageCommands(program: Command, runner: IAgentTool
       },
     );
 
-  verb('navigate', 'load a URL in a page')
+  verb('navigate', 'load a URL in a page, or go back, forward or reload')
     .argument('<name>', 'the page’s name or id')
-    .argument('<url>', 'an http or https URL')
+    .argument('<url>', 'an http or https URL, or back, forward or reload')
     .action(async (name: string, url: string, options: SessionOption) => {
-      await call({ tool: 'browser.navigate', name, url }, options);
+      await call(
+        HISTORY_STEPS.has(url)
+          ? { tool: 'browser.navigate', name, history: url as 'back' | 'forward' | 'reload' }
+          : { tool: 'browser.navigate', name, url },
+        options,
+      );
     });
 
-  verb('click', 'click a selector in a page')
+  verb('click', 'click an element in a page, or a point in it')
     .argument('<name>', 'the page’s name or id')
-    .argument('<selector>', 'what to click; shell-quote a selector containing spaces')
-    .action(async (name: string, selector: string, options: SessionOption) => {
-      await call({ tool: 'browser.click', name, selector }, options);
-    });
-
-  verb('type', 'fill a selector in a page; the text is never logged')
-    .argument('<name>', 'the page’s name or id')
-    .argument('<selector>', 'what to fill')
-    .argument('[text...]', 'text to type; use -- before text that starts with a dash')
-    .action(async (name: string, selector: string, text: string[], options: SessionOption) => {
-      await call({ tool: 'browser.type', name, selector, text: text.join(' ') }, options);
-    });
-
-  verb('read', 'print a page’s visible text, or its accessibility tree')
-    .argument('<name>', 'the page’s name or id')
-    .option('--a11y', 'the accessibility tree instead of the text')
-    .option('--selector <selector>', 'read only this part of the page')
-    .action(async (name: string, options: SessionOption & { a11y?: boolean; selector?: string }) => {
+    .argument('<target>', 'a ref from read --snapshot (e12), a point (120,340), or a selector; shell-quote spaces')
+    .option('--double', 'a double click')
+    .option('--right', 'the right button')
+    .action(async (name: string, target: string, options: SessionOption & { double?: boolean; right?: boolean }) => {
       await call(
         {
-          tool: 'browser.read',
+          tool: 'browser.click',
           name,
-          ...(options.a11y === true ? { mode: 'a11y' } : {}),
-          ...(options.selector === undefined ? {} : { selector: options.selector }),
+          ...targetArgument(target),
+          ...(options.double === true ? { double: true } : {}),
+          ...(options.right === true ? { button: 'right' } : {}),
         },
         options,
       );
     });
 
+  verb('type', 'fill a field in a page; the text is never logged')
+    .argument('<name>', 'the page’s name or id')
+    .argument('<target>', 'a ref from read --snapshot (e12), or a selector')
+    .argument('[text...]', 'text to type; use -- before text that starts with a dash')
+    .option('--submit', 'press Enter after the text')
+    .option('--slowly', 'type key by key, for a field that reacts to each keystroke')
+    .action(
+      async (
+        name: string,
+        target: string,
+        text: string[],
+        options: SessionOption & { submit?: boolean; slowly?: boolean },
+      ) => {
+        await call(
+          {
+            tool: 'browser.type',
+            name,
+            ...elementArgument(target),
+            text: text.join(' '),
+            ...(options.submit === true ? { submit: true } : {}),
+            ...(options.slowly === true ? { slowly: true } : {}),
+          },
+          options,
+        );
+      },
+    );
+
+  verb('read', 'print a page’s visible text, its accessibility tree, or a snapshot with refs')
+    .argument('<name>', 'the page’s name or id')
+    .option('--a11y', 'the accessibility tree instead of the text')
+    .option('--snapshot', 'the accessibility tree with a ref per element, which click and type accept')
+    .option('--find <text>', 'with --snapshot: only the lines containing this text')
+    .option('--selector <target>', 'read only this part of the page: a ref or a selector')
+    .action(
+      async (
+        name: string,
+        options: SessionOption & { a11y?: boolean; snapshot?: boolean; find?: string; selector?: string },
+      ) => {
+        await call(
+          {
+            tool: 'browser.read',
+            name,
+            ...(options.snapshot === true || options.find !== undefined
+              ? { mode: 'snapshot' }
+              : options.a11y === true
+                ? { mode: 'a11y' }
+                : {}),
+            ...(options.find === undefined ? {} : { find: options.find }),
+            ...(options.selector === undefined ? {} : elementArgument(options.selector)),
+          },
+          options,
+        );
+      },
+    );
+
   verb('screenshot', 'save a screenshot of a page')
     .argument('<name>', 'the page’s name or id')
-    .argument('<file>', 'where to write the PNG')
-    .action(async (name: string, file: string, options: SessionOption) => {
-      await call({ tool: 'browser.screenshot', name }, options, { screenshotTo: file });
-    });
+    .argument('<file>', 'where to write the image')
+    .option('--full-page', 'the whole page, not only what is in view')
+    .option('--jpeg', 'a JPEG instead of a PNG')
+    .option('--of <target>', 'one element only: a ref or a selector')
+    .action(
+      async (
+        name: string,
+        file: string,
+        options: SessionOption & { fullPage?: boolean; jpeg?: boolean; of?: string },
+      ) => {
+        await call(
+          {
+            tool: 'browser.screenshot',
+            name,
+            ...(options.of === undefined ? {} : elementArgument(options.of)),
+            ...(options.fullPage === true ? { fullPage: true } : {}),
+            ...(options.jpeg === true ? { format: 'jpeg' } : {}),
+          },
+          options,
+          { screenshotTo: file },
+        );
+      },
+    );
 
   verb('close', 'close a page')
     .argument('<name>', 'the page’s name or id')

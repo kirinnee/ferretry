@@ -1,8 +1,8 @@
 /**
  * `fy signal done` ON THE BOARD (`board-design.md` §3.1 item 5), as pure rules: the done message becomes a
  * note on the ferret's focus card, and a card still in an `active` lane with no PR moves on to where its
- * work is checked — never into a `closed` lane, because only the owner closes. A card with a PR is left
- * where it is: the GitHub watcher owns its lane.
+ * work is checked (a review lane, else the verify lane the owner tries it in) — never into a `closed` lane,
+ * because only the owner closes. A card with a PR is left where it is: the GitHub watcher owns its lane.
  */
 import {
   type BoardActor,
@@ -39,10 +39,11 @@ export const doneReason = (message: string | undefined): string => {
 };
 
 /**
- * Where a done card goes: the lane its variant enters on `signal.done` when that lies ahead, else the first
- * `review` or `verify` lane after its own, else the variant's next lane. `null` when it stays — it is not in
- * an `active` lane, it has a PR, it is dropped, or the lane it would reach is `closed` (a `quick` board
- * closes on `signal.done`, and only the owner closes here).
+ * Where a done card goes: the lane its variant enters on `signal.done` when that lies ahead and is not
+ * `closed`, else the first `review` or `verify` lane after its own (a review lane before the verify lane is
+ * where the work is checked first; with none, the verify lane, where the owner tries it), else the variant's
+ * next lane. `null` when it stays — it is not in an `active` lane, it has a PR, it is dropped, or the only
+ * lane it could reach is `closed`, because only the owner closes.
  */
 export const doneLane = (card: BoardTask, laneSet: LaneSet): Lane | null => {
   if (card.dropped !== null || card.links.prs.length > 0) return null;
@@ -51,12 +52,12 @@ export const doneLane = (card: BoardTask, laneSet: LaneSet): Lane | null => {
   const lanes = variantLanes(laneSet, card.workflow);
   if (!lanes.ok) return null;
   const from = laneSet.lanes.findIndex(lane => lane.id === card.laneId);
-  const later = lanes.value.filter(lane => laneSet.lanes.indexOf(lane) > from);
+  const later = lanes.value.filter(lane => laneSet.lanes.indexOf(lane) > from && lane.category !== 'closed');
   const target =
     later.find(lane => lane.enterOn?.includes('signal.done') === true) ??
     later.find(lane => lane.category === 'review' || lane.category === 'verify') ??
     later[0];
-  return target === undefined || target.category === 'closed' ? null : target;
+  return target ?? null;
 };
 
 /** A done move, or why the card stays where it is. */

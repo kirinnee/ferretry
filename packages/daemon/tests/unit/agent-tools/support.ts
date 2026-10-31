@@ -13,8 +13,10 @@ import {
   BrowserSessionError,
   type BrowserSubsystem,
   type RecordedSurfaceEvent,
+  type Scrub,
   SurfaceControl,
   type SurfaceEventSink,
+  type TextRedactor,
 } from '../../../src/lib/index.ts';
 import { FakeTerminals } from '../runtime/mounts/support.ts';
 
@@ -51,6 +53,32 @@ export class RecordingEvents implements SurfaceEventSink {
   }
 }
 
+/**
+ * The vault, as redaction sees it: the values a case put in it, each masked as `[redacted:NAME]`. A
+ * locked vault refuses every scrub, as a real one that cannot be opened does.
+ */
+class FakeRedactor implements Pick<TextRedactor, 'batch'> {
+  readonly values = new Map<string, string>();
+  locked = false;
+  batches = 0;
+  async batch<T>(work: (scrub: Scrub) => T): Promise<T> {
+    if (this.locked) throw new Error('the vault is locked');
+    this.batches += 1;
+    const mask = (text: string): string =>
+      [...this.values].reduce((masked, [value, name]) => masked.split(value).join(`[redacted:${name}]`), text);
+    return work({ text: mask, data: value => value, cover: () => [] });
+  }
+}
+
+/** A snapshot as Playwright's `ai` mode writes one: a ref beside every element. */
+export const SNAPSHOT = [
+  '- banner [ref=e1]:',
+  '  - link "Home" [ref=e2]',
+  '- main [ref=e3]:',
+  '  - button "Sign in" [ref=e4]',
+  '  - textbox "Email" [ref=e5]',
+].join('\n');
+
 /** The machine's switches, settable per case. */
 class Switches implements AgentControlPolicy {
   readonly off = new Set<AgentControlKind>();
@@ -86,6 +114,12 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
   readonly pages = new Map<string, FakePage[]>();
   readonly active = new Map<string, string>();
   readonly acts: string[] = [];
+  /** Every action, exactly as the agent-tools service built it. */
+  readonly actions: BrowserPageAction[] = [];
+  /** What the next read answers, when a case wants something other than the defaults. */
+  readText: string | undefined;
+  /** Where every act reports the page to be, when a case wants an address other than the page's own. */
+  actedUrl: string | undefined;
   failure: unknown;
   private minted = 0;
 
@@ -141,11 +175,37 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
     const page = this.page(sessionId, key);
     this.active.set(sessionId, page.id);
     this.acts.push(`${sessionId}:${page.id}:${action.action}`);
+    this.actions.push(action);
     const status = (await this.status(sessionId)) as Extract<BrowserStatus, { readonly state: 'running' }>;
-    const snapshot = { ...this.snapshot(sessionId), actedPageId: page.id };
-    if (action.action === 'read')
-      return { status, result: { ...snapshot, text: action.mode === 'a11y' ? '- button "Sign in"' : 'Welcome back' } };
-    if (action.action === 'screenshot') return { status, result: { ...snapshot, screenshotBase64: 'iVBORw0KGgo=' } };
+    const snapshot = {
+      ...this.snapshot(sessionId),
+      ...(this.actedUrl === undefined ? {} : { url: this.actedUrl }),
+      actedPageId: page.id,
+    };
+    if (action.action === 'read') {
+      const text =
+        this.readText ??
+        (action.mode === 'snapshot'
+          ? action.find === undefined
+            ? SNAPSHOT
+            : SNAPSHOT.split('\n')
+                .filter(line => line.toLowerCase().includes(action.find?.toLowerCase() ?? ''))
+                .map(line => line.trim())
+                .join('\n')
+          : action.mode === 'a11y'
+            ? '- button "Sign in"'
+            : 'Welcome back');
+      return { status, result: { ...snapshot, text } };
+    }
+    if (action.action === 'screenshot')
+      return {
+        status,
+        result: {
+          ...snapshot,
+          screenshotBase64: action.format === 'jpeg' ? '/9j/4AAQ' : 'iVBORw0KGgo=',
+          ...(action.format === 'jpeg' ? { screenshotFormat: 'jpeg' as const } : {}),
+        },
+      };
     return { status, result: snapshot };
   }
 
@@ -204,12 +264,14 @@ export function agentToolWorld(extra: Pick<AgentToolPorts, 'input' | 'scrub' | '
   const slept: number[] = [];
   const control = new SurfaceControl(events, clock);
   const onSleep: (() => void | Promise<void>)[] = [];
+  const redactor = new FakeRedactor();
   const service = new AgentToolService({
     terminals,
     browser,
     control,
     policy,
     audit,
+    redactor,
     clock,
     ...extra,
     sleep: async milliseconds => {
@@ -218,7 +280,7 @@ export function agentToolWorld(extra: Pick<AgentToolPorts, 'input' | 'scrub' | '
       await onSleep.shift()?.();
     },
   });
-  return { terminals, browser, audit, events, clock, policy, slept, onSleep, control, service, identities };
+  return { terminals, browser, audit, events, clock, policy, slept, onSleep, control, redactor, service, identities };
 }
 
 export const agent = { kind: 'agent', sessionId: 's1', name: 'Hadi' } as const;

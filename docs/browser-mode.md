@@ -2,7 +2,7 @@
 
 The machine's one agent browser — the Chrome the browser pane streams and the agents' browser tools
 drive — runs in one of two modes, set per machine in `machine.yaml` (`browserMode`) or in the app under
-Settings › a machine › **Browser mode**:
+Settings › a machine › **Browser** › **Browser mode**:
 
 | Mode                     | What runs                                                                                                                              | For                                                     |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |

@@ -70,12 +70,20 @@ describe('laneForStatus', () => {
     should(lane).equal('verify');
   });
 
-  it('should fall to the closed lane when a live task has no shipped or verify lane', () => {
+  it('should put a live quick task in To test, the lane a release enters there', () => {
     // Act
     const lane = laneOf('quick', 'live');
 
     // Assert
-    should(lane).equal('closed');
+    should(lane).equal('to-test');
+  });
+
+  it('should fall to the closed lane when a live task has no shipped or verify lane', () => {
+    // Act
+    const lane = laneOf('pr', 'live');
+
+    // Assert
+    should(lane).equal('merged');
   });
 
   it('should keep a built task with a PR in the last active lane when there is no review lane', () => {
@@ -99,7 +107,7 @@ describe('laneForStatus', () => {
 
   it('should fall to the backlog lane when there is no active lane', () => {
     // Arrange
-    const [todo, , closed] = LANE_TEMPLATES.quick.lanes;
+    const [todo, , , closed] = LANE_TEMPLATES.quick.lanes;
     const bare: LaneSet = { ...lanes(undefined, 'quick'), lanes: [todo!, closed!], variants: {} };
 
     // Act

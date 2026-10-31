@@ -14,6 +14,7 @@ import {
   expandProjectRoots,
   ProjectAdoption,
   type RepositoryLocation,
+  SessionBoardResolver,
   type SessionProjectFacts,
 } from '../../../src/lib/board-projects/index.ts';
 import { FERRETRY_ID, project } from './support.ts';
@@ -270,5 +271,60 @@ describe('adopting a ferret’s repository', () => {
     should(adopted).equal(null);
     should(registry.requests).be.empty();
     should(stamps).be.empty();
+  });
+});
+
+describe('re-resolving the board of an Unfiled card’s ferret (SessionBoardResolver over ProjectAdoption)', () => {
+  const resolverOver = (sessions: Readonly<Record<string, SessionProjectFacts>>) => {
+    const world = harness(sessions);
+    const resolver = new SessionBoardResolver(
+      { read: async id => sessions[id] ?? null },
+      { projectForStart: async () => UNFILED_PROJECT_ID },
+      world.adoption,
+    );
+    return { ...world, resolver };
+  };
+
+  it('should register a repository inside a project root, as a ferret’s first card would', async () => {
+    // Arrange
+    const { resolver, registry, stamps } = resolverOver({ old: { cwd: '/home/owner/Workspace/notes-fix' } });
+
+    // Act
+    const board = await resolver.boardOf('old');
+
+    // Assert
+    should(board).equal(registry.projects[0]?.id);
+    should(registry.requests).eql([{ kind: 'confirmed-discovery', path: '/home/owner/Workspace/notes' }]);
+    should(stamps).eql([{ sessionId: 'old', projectId: board }]);
+  });
+
+  it.each([
+    { name: 'the home folder', cwd: HOME },
+    { name: 'a temp folder', cwd: '/tmp/try' },
+    { name: 'a repository outside every project root', cwd: '/srv/elsewhere' },
+    { name: 'a folder that is not a git repository', cwd: '/home/owner/Workspace/loose' },
+  ])('should never register $name, so its card stays Unfiled', async ({ cwd }) => {
+    // Arrange
+    const { resolver, registry } = resolverOver({ old: { cwd } });
+
+    // Act / Assert
+    should(await resolver.boardOf('old')).be.null();
+    should(registry.requests).be.empty();
+  });
+
+  it('should make one project when two of its ferrets are re-resolved at once', async () => {
+    // Arrange
+    const { resolver, registry, proposals } = resolverOver({
+      left: { cwd: '/home/owner/Workspace/notes' },
+      right: { cwd: '/home/owner/Workspace/notes-fix' },
+    });
+
+    // Act
+    const [left, right] = await Promise.all([resolver.boardOf('left'), resolver.boardOf('right')]);
+
+    // Assert
+    should(left).equal(right);
+    should(registry.projects).have.length(1);
+    should(proposals).have.length(1);
   });
 });

@@ -94,6 +94,8 @@ import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspa
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import type { AgendaReplies } from '../../hooks/use-agenda-replies.ts';
 import { useChatCard } from '../../hooks/use-chat-card.ts';
+import { useStateChatTasks } from '../../hooks/use-chat-tasks-url.ts';
+import type { ChatTasksView } from '../board-chat-url.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { conversationFromTranscript } from '../../hooks/use-dictation.ts';
 import { useFinePointer } from '../../hooks/use-fine-pointer.ts';
@@ -197,6 +199,12 @@ export interface SessionChatPageProps {
   readonly catchingUp?: boolean;
   /** Where this session's reading position is kept, so Back and a reload return to it. */
   readonly readingPosition?: ChatScrollSlot;
+  /**
+   * The Tasks tab's place: expanded over the chat or in the panel, and whether agent tasks show. The app
+   * keeps both in the address (`?tasks=full`, `?agents=1`) so Back collapses the board; absent, the page
+   * keeps them in its own state.
+   */
+  readonly tasksView?: ChatTasksView;
   /**
    * This machine's connection health, from the shell. While it is `reconnecting` the page says nothing
    * about the outage itself — the shell's connection notice says it once — and keeps what it last showed.
@@ -427,6 +435,7 @@ export function SessionChatPage({
   updating = false,
   catchingUp = false,
   readingPosition,
+  tasksView,
   connectionState,
   chatWidth = 'readable',
   composerEnterKey,
@@ -477,13 +486,16 @@ export function SessionChatPage({
   const workspace = useSessionWorkspace(workspaceLayouts, scope);
   const info = useInfoPlacement(initialInfo);
   const machineName = contextDependencies?.machineName ?? connection.daemonName ?? connection.daemonId;
+  const ownTasksView = useStateChatTasks();
+  const tasks = tasksView ?? ownTasksView;
   const cardChat = useChatCard({
     store: board,
     connection,
     machineName,
     session,
     sessions: daemonSessions,
-    reading: session.config.focusTask !== undefined || (info.open && info.tab === 'tasks'),
+    reading: session.config.focusTask !== undefined || (info.open && info.tab === 'tasks') || tasks.expanded,
+    agents: tasks.agents,
   });
   const [actionForm, setActionForm] = useState<string | null>(null);
   // Who drives which terminal and page, and the session's pages: both through the daemon client, so a
@@ -1291,11 +1303,14 @@ export function SessionChatPage({
       },
     };
   }, [contextDependencies, connection, scope, referenceFetch, openFile, routedClient]);
+  const tasksFull = tasks.expanded && cardChat !== null && board !== undefined;
+  // The board takes the whole chat column on a desktop: the side panel steps out of the way.
+  const panelCovered = tasksFull && formFactor === 'desktop';
   const infoSlot: SessionInfoSlot | undefined =
     infoPorts === undefined
       ? undefined
       : {
-          open: info.open,
+          open: info.open && !panelCovered,
           onClose: info.close,
           sheetSize: info.sheetSize,
           render: (presentation, titleId) => (
@@ -1333,6 +1348,12 @@ export function SessionChatPage({
                           chat={cardChat}
                           machine={{ connection, name: machineName }}
                           now={Date.now()}
+                          onAgents={tasks.setAgents}
+                          onExpand={() => {
+                            // The phone's sheet gives way to the board; Collapse brings it back (below).
+                            if (presentation === 'sheet') info.close();
+                            tasks.setExpanded(true);
+                          }}
                           phone={formFactor === 'phone'}
                           scope={scope}
                           store={board}
@@ -1386,7 +1407,7 @@ export function SessionChatPage({
       <SessionTopBar
         actions={lifecycleActions}
         compact={compact}
-        infoOpen={info.open}
+        infoOpen={info.open && !panelCovered}
         menu={actionsMenu}
         session={session}
         themeToggle={<ThemeToggle iconOnly touch={compact} />}
@@ -1400,7 +1421,16 @@ export function SessionChatPage({
           </>
         }
         turn={turn}
-        {...(infoSlot === undefined ? {} : { onToggleInfo: info.toggle })}
+        {...(infoSlot === undefined
+          ? {}
+          : {
+              onToggleInfo: panelCovered
+                ? () => {
+                    tasks.setExpanded(false);
+                    info.show('tasks');
+                  }
+                : info.toggle,
+            })}
         {...(onOpenSessions === undefined ? {} : { onOpenSessions })}
       />
       {/* NOT a live region. App.tsx owns the single announcement for a refresh
@@ -1571,6 +1601,39 @@ export function SessionChatPage({
     </div>
   );
 
+  // The ferret's board laid over the chat column — under the header, so the app and the page's own chrome stay.
+  // The conversation stays mounted beneath it (its scroll, its draft) but inert: nothing in it can be tabbed
+  // to or read out while the board covers it. The wrapper is the same element whether or not the board is up,
+  // so expanding never remounts the chat.
+  const chatWithTasks = (
+    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col" data-chat-tasks-full={tasksFull ? '' : undefined}>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col" inert={tasksFull}>
+        {chat}
+      </div>
+      {tasksFull ? (
+        <section aria-label="Tasks" className="fy-board-full" data-board-full="">
+          <ChatTasks
+            callsigns={callsigns}
+            chat={cardChat}
+            expanded
+            machine={{ connection, name: machineName }}
+            now={Date.now()}
+            onAgents={tasks.setAgents}
+            onExpand={() => {
+              tasks.setExpanded(false);
+              if (formFactor !== 'desktop') info.show('tasks');
+            }}
+            phone={formFactor === 'phone'}
+            scope={scope}
+            store={board}
+            {...(boardTasks === undefined ? {} : boardTasks)}
+            {...(onNavigate === undefined ? {} : { onNavigate })}
+          />
+        </section>
+      ) : null}
+    </div>
+  );
+
   return (
     // Every Markdown reader inside the conversation — transcript prose, notices, file previews in the
     // workspace and whatever a later item renders here — reads references through this one surface.
@@ -1596,7 +1659,7 @@ export function SessionChatPage({
                 // The in-app browser host around the chat: under Settings › Appearance › "Open links in" ›
                 // Ferretry side panel, a tapped link opens BESIDE the conversation on a desktop, and as a
                 // sheet over it on a tablet or phone, where two columns would leave the chat unreadable.
-                chat={<InAppBrowserWorkspace compact={formFactor !== 'desktop'}>{chat}</InAppBrowserWorkspace>}
+                chat={<InAppBrowserWorkspace compact={formFactor !== 'desktop'}>{chatWithTasks}</InAppBrowserWorkspace>}
                 connection={connection}
                 driving={driving}
                 formFactor={formFactor}

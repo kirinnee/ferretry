@@ -6,13 +6,15 @@
  * (portalled to the body, so the Info panel's own scrolling and stacking cannot clip it), and the move flow
  * behind Done ✓, Not good and the ⋯ menu, which is the Board's own (`useBoardAnswers`): a move back opens the same
  * composer, the pressed answer spins and the card's others wait, and a refusal is said on the card.
+ * Drawn small in the Info panel, or at page density when `expanded` (the chat page lays that over the chat);
+ * either way it is this one host, so a move, the drawer and the reason box behave the same in both.
  * Nothing here navigates: a card link inside the drawer reopens the drawer on that card.
  */
 
 import { type ReactElement, useCallback, useMemo, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { type BoardMachine, useBoardActions, useBoardProjects } from '../../hooks/use-board.ts';
-import type { BoardChat } from '../../lib/board-chat.ts';
+import type { BoardChat, ChatKanbanLane } from '../../lib/board-chat.ts';
 import { chatSiblings } from '../../lib/board-chat.ts';
 import { boardDone, doneLaneOf, isReleaseLane, notGoodLaneOf } from '../../lib/board-done.ts';
 import { moveChoices } from '../../lib/board-move.ts';
@@ -23,8 +25,8 @@ import type { BoardCardOf, BoardCardPlace } from '../../lib/board-view.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonBoardCardPath, daemonBoardPath } from '../../lib/pages/routes.ts';
-import type { BoardCardMoves } from './board-card.tsx';
 import { useBoardAnswers } from './board-answers.tsx';
+import type { BoardCardMoves } from './board-card.tsx';
 import { BoardSideTab } from './board-side-tab.tsx';
 import type { BoardDoneControl } from './board-views.tsx';
 import { type BoardAgenda, BoardDetail, type BoardDetailPorts } from './detail/board-detail.tsx';
@@ -43,6 +45,12 @@ export interface ChatTasksProps {
   readonly now: number;
   /** Where a link inside the drawer that is not a card of this ferret goes. */
   readonly onNavigate?: (to: string) => void;
+  /** "Show agent tasks" on or off (`chat.agents` is its current value). */
+  readonly onAgents: (agents: boolean) => void;
+  /** The tab fills the chat, at page density; the button then collapses it. */
+  readonly expanded?: boolean;
+  /** Expands the tab to the chat, or collapses it back; absent: the tab has no such button. */
+  readonly onExpand?: () => void;
 }
 
 const refuseAgenda = (): Promise<never> => Promise.reject(new Error('this host has no agenda'));
@@ -71,6 +79,9 @@ export function ChatTasks({
   phone,
   now,
   onNavigate,
+  onAgents,
+  expanded = false,
+  onExpand,
 }: ChatTasksProps): ReactElement {
   const view = useSyncExternalStore(subscribeView, readView, readView);
   const names = useMemo(() => ferretNamer(callsigns), [callsigns]);
@@ -78,6 +89,7 @@ export function ChatTasks({
   const actions = useBoardActions(store, agenda ?? NO_AGENDA, connections);
   const [openId, setOpenId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<BoardCardOf | null>(null);
   const { requestMove, answerFor, composer } = useBoardAnswers({
     actions,
     ports,
@@ -99,11 +111,20 @@ export function ChatTasks({
         onMove: (target, laneId, answer) => requestMove(target, group, laneId, answer),
         closeLaneId: closed ? null : doneLaneOf(group.laneSet),
         reworkLaneId: closed ? null : notGoodLaneOf(group.laneSet),
-        onDragStart: () => undefined,
-        onDragEnd: () => undefined,
+        onDragStart: setDragging,
+        onDragEnd: () => setDragging(null),
       };
     },
     [requestMove],
+  );
+
+  const dropOn = useCallback(
+    (card: BoardCardOf, lane: ChatKanbanLane): void => {
+      setDragging(null);
+      const place = chat.cards.places.get(card.key);
+      if (place !== undefined && lane.laneId !== null) requestMove(card, place.group, lane.laneId);
+    },
+    [chat.cards.places, requestMove],
   );
 
   const doneFor = useCallback(
@@ -177,9 +198,14 @@ export function ChatTasks({
         callsigns={callsigns}
         chat={chat}
         answerFor={answerFor}
+        density={expanded ? 'page' : 'side'}
         doneFor={doneFor}
+        dragging={dragging}
         movesFor={movesFor}
         now={now}
+        onAgents={onAgents}
+        onDropCard={dropOn}
+        onExpand={onExpand}
         onOpenCard={openCard}
         onView={next => boardSideView.set(next)}
         scope={scope}

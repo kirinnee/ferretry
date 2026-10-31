@@ -381,6 +381,66 @@ function Question({
   );
 }
 
+/**
+ * THE TOP OF AN OPEN BODY: what is going on (the premise) and why now (the context), ONE tinted block in a soft
+ * surface of the theme's accent — a cold reader starts here. It is drawn instead of the two plain sections the
+ * folded layouts keep, never beside them.
+ */
+function Situation({
+  premise,
+  context,
+  highlight,
+  renderProse,
+}: {
+  readonly premise: string | null;
+  readonly context: string | null;
+  readonly highlight: RevisionHighlight | undefined;
+  readonly renderProse: AgendaProse;
+}) {
+  const changed = (...fields: readonly RevisionField[]): boolean =>
+    fields.some(field => highlight?.fields.has(field) === true);
+  return (
+    <section aria-label="Situation" className="fy-attn-situation" data-agenda-situation="">
+      {premise === null ? null : (
+        <div
+          className="fy-attn-situation__part"
+          data-agenda-changed={changed('premise') ? 'changed' : undefined}
+          data-agenda-section="premise"
+        >
+          <h4 className="fy-attn-situation__heading">
+            What’s going on
+            {changed('premise') ? <NewMarker word="changed" /> : null}
+          </h4>
+          <PointForm
+            className="fy-attn-prose"
+            fresh={highlight?.points.premise}
+            renderProse={renderProse}
+            text={premise}
+          />
+        </div>
+      )}
+      {context === null ? null : (
+        <div
+          className="fy-attn-situation__part"
+          data-agenda-changed={changed('context', 'why') ? 'changed' : undefined}
+          data-agenda-section="context"
+        >
+          <h4 className="fy-attn-situation__heading">
+            {SUGGESTED_PICKS.test(context) ? 'Suggested answers' : 'Why now'}
+            {changed('context', 'why') ? <NewMarker word="changed" /> : null}
+          </h4>
+          <PointForm
+            className="fy-attn-prose"
+            fresh={highlight?.points.context}
+            renderProse={renderProse}
+            text={context}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
+
 export interface AgendaBriefProps {
   readonly item: AgendaItem;
   readonly renderProse: AgendaProse;
@@ -466,6 +526,24 @@ export function AgendaBriefSections({
     recommendation !== undefined &&
     options.some(option => option.label.trim().toLowerCase() === recommendation.decision.trim().toLowerCase());
   const heading = askLabel === undefined ? askHeading(item, several) : askLabel;
+  // Open and not the card: the premise and the context are ONE block on top, and the type orders what follows.
+  const situated = !fold && !asCard && (premise !== null || context !== null);
+  const kind = agendaCardKind(item);
+  const typed = !fold && !asCard;
+  const stepsBlock =
+    asCard || steps === undefined ? null : (
+      <Section fold={fold} name="steps" open={open} title="Steps">
+        {steps}
+      </Section>
+    );
+  const detailBlock =
+    asCard || detail === undefined ? null : (
+      <Section fold={fold} name="more" open={open} title={typed && kind === 'review' ? 'Reasoning' : 'More detail'}>
+        {detail}
+      </Section>
+    );
+  // A to-do leads with its steps, a review with its reasoning: what the reader acts on comes before the background.
+  const early = typed && kind === 'task' ? stepsBlock : typed && kind === 'review' ? detailBlock : null;
   // The open layout asks first: what is being asked is the item, what is going on is its background.
   const questionsBlock =
     asDetail || ((ask === undefined || heading === null) && questions.length === 0) ? null : (
@@ -527,8 +605,12 @@ export function AgendaBriefSections({
           {renderProse(ask)}
         </div>
       )}
+      {situated ? (
+        <Situation context={context} highlight={highlight} premise={premise} renderProse={renderProse} />
+      ) : null}
       {fold ? null : questionsBlock}
-      {premise === null ? null : (
+      {early}
+      {premise === null || situated ? null : (
         <Section changed={changedWhole('premise')} fold={fold} name="premise" open={open} title="What's going on">
           <PointForm
             className="fy-attn-prose"
@@ -538,7 +620,7 @@ export function AgendaBriefSections({
           />
         </Section>
       )}
-      {context === null ? null : (
+      {context === null || situated ? null : (
         <Section
           changed={changedWhole('context', 'why')}
           fold={fold}
@@ -605,7 +687,12 @@ export function AgendaBriefSections({
         </Section>
       )}
       {asCard || (item.impact === undefined && item.urgency === undefined) ? null : (
-        <Section fold={fold} name="impact" open={open} title="Impact">
+        <Section
+          fold={fold}
+          name="impact"
+          open={open}
+          title={typed && kind === 'permission' ? 'What it allows' : 'Impact'}
+        >
           {item.impact === undefined ? null : (
             <PointForm className="fy-attn-prose" renderProse={renderProse} text={item.impact} />
           )}
@@ -636,16 +723,8 @@ export function AgendaBriefSections({
           </table>
         </Section>
       )}
-      {asCard || steps === undefined ? null : (
-        <Section fold={fold} name="steps" open={open} title="Steps">
-          {steps}
-        </Section>
-      )}
-      {asCard || detail === undefined ? null : (
-        <Section fold={fold} name="more" open={open} title="More detail">
-          {detail}
-        </Section>
-      )}
+      {early === stepsBlock ? null : stepsBlock}
+      {early === detailBlock ? null : detailBlock}
       {asCard || item.links === undefined ? null : (
         <Section fold={fold} name="links" open={open} title={fold ? `Links (${item.links.length})` : 'Links'}>
           <ul className="fy-attn-links">

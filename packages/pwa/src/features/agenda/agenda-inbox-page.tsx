@@ -26,7 +26,7 @@
  *   `/inbox?from=warden` — a "From Warden" chip that keeps only what the Warden raised, with a way to clear it.
  *
  * The page renders off the shell's `AgendaInbox` alone, so it render-tests with a fake one; reading a
- * ferret's last messages are the host's (`readRecent`).
+ * ferret's last messages (the lead-up in an open item's History) are the host's (`readRecent`).
  */
 
 import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, Search, SkipForward, X, Zap } from 'lucide-react';
@@ -37,7 +37,7 @@ import { Spinner } from '../../components/spinner.tsx';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { CLEAR_ACTION, kindWord } from '../../lib/agenda-answers.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
-import { itemHistory } from '../../lib/agenda-history.ts';
+import { itemHistory, recentEntries } from '../../lib/agenda-history.ts';
 import {
   actionSentence,
   agendaConversationPath,
@@ -87,7 +87,6 @@ import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
-import { AgendaRecentMessages } from './agenda-recent-messages.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
@@ -126,7 +125,6 @@ interface CardHostProps {
   readonly now: number | undefined;
   readonly readRecent?: ((card: InboxCard) => Promise<readonly RecentMessage[]>) | undefined;
   readonly readConversation?: ((card: InboxCard) => Promise<readonly TranscriptEntry[]>) | undefined;
-  readonly recentOpen?: boolean | undefined;
 }
 
 /**
@@ -244,7 +242,7 @@ interface OpenItemPlace {
 
 /** The open item: who and what, then the SAME full view the chat shows, answering into the undo window. */
 function OpenItem({
-  host: { inbox, onNavigate, now, readConversation },
+  host: { inbox, onNavigate, now, readConversation, readRecent },
   card,
   act,
   skip,
@@ -257,7 +255,11 @@ function OpenItem({
   readonly place: OpenItemPlace;
 }) {
   const entries = useItemConversation(card, readConversation);
-  const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
+  const lead = useItemConversation(
+    card,
+    readRecent === undefined ? undefined : async open => recentEntries(await readRecent(open)),
+  );
+  const history = useMemo(() => itemHistory(card.item, entries, lead), [card.item, entries, lead]);
   return (
     <div className="fy-inbox-open" data-inbox-open={card.key} key={card.key}>
       <InboxWhoLine card={card} onNavigate={onNavigate} />
@@ -680,14 +682,12 @@ export interface AgendaInboxPageProps {
   readonly clock?: () => number;
   /** Under the header: the shell's "notifications are off for <machine>" banner, which draws nothing when none is. */
   readonly banner?: ReactNode;
-  /** Reads the last few things the card's ferret said. Absent: the card has no "Last messages" fold. */
+  /** Reads the last few things the card's ferret said, for the open item's History. Absent: only what names the item. */
   readonly readRecent?: (card: InboxCard) => Promise<readonly RecentMessage[]>;
   /** Reads what was said about the card's item in its conversation, for the open item's History. Absent: revisions only. */
   readonly readConversation?: (card: InboxCard) => Promise<readonly TranscriptEntry[]>;
   /** Forces the phone deck's reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
-  /** Starts the deck card's "Last messages" fold open (a harness). */
-  readonly recentOpen?: boolean;
   /** On a phone, the item whose deck card starts open (a harness); the list otherwise. */
   readonly initialOpen?: string;
   /** Only what this source raised (`/inbox?from=warden`); everything otherwise. */
@@ -960,7 +960,6 @@ export function AgendaInboxPage({
   readRecent,
   readConversation,
   reducedMotion,
-  recentOpen,
   initialOpen,
   from = null,
   onClearFrom,
@@ -1058,7 +1057,7 @@ export function AgendaInboxPage({
     filter === 'open'
       ? inbox.reading && !empty
       : inbox.resolvedReading && (filter === 'resolved' ? inbox.resolved.length : inbox.parked.length) > 0;
-  const host: CardHostProps = { inbox, onNavigate, now, readRecent, readConversation, recentOpen };
+  const host: CardHostProps = { inbox, onNavigate, now, readRecent, readConversation };
   const atEnd = deckPlace === QUEUE_END;
   const openAt = (key: string): void => {
     setDeckAt(key);
@@ -1226,16 +1225,6 @@ export function AgendaInboxPage({
               }}
             />
             <div className="fy-inbox-deck-foot" data-inbox-deck-foot="">
-              {deck[0] === undefined || readRecent === undefined ? null : (
-                // What led up to it, a fold away, beside where the reply is written.
-                <AgendaRecentMessages
-                  ferret={inboxWho(deck[0]).ferret}
-                  initiallyOpen={recentOpen ?? false}
-                  key={deck[0].key}
-                  read={() => readRecent(deck[0] as InboxCard)}
-                  {...(now === undefined ? {} : { now })}
-                />
-              )}
               {deck[0] === undefined || renderComposer === undefined ? null : (
                 // biome-ignore lint/a11y/noStaticElementInteractions: the keydown only routes an unclaimed Esc in the composer back to the Inbox list
                 <div

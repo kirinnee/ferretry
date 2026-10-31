@@ -57,6 +57,18 @@ export function clipOutput(text: string, limit: number = AGENT_TOOL_MAX_OUTPUT_C
   return text.length <= limit ? text : text.slice(text.length - limit);
 }
 
+/**
+ * Keeps the START of a page's accessibility tree or snapshot, inside the wire bound, on a line boundary.
+ * A tree is read top-down — its first lines are the page's landmarks and headings — so the tail a
+ * terminal keeps would hand back the footer.
+ */
+export function clipReading(text: string, limit: number = AGENT_TOOL_MAX_OUTPUT_CHARS): string {
+  if (text.length <= limit) return text;
+  const head = text.slice(0, limit);
+  const lastLine = head.lastIndexOf('\n');
+  return lastLine > 0 ? head.slice(0, lastLine) : head;
+}
+
 /** A surface as a person writes it: `%terminal:dev`. */
 export function surfaceReference(surface: SurfaceKind, key: string): string {
   return `%${surface}:${key}`;

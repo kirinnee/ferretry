@@ -45,6 +45,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'warden.configured': 'The supervisor was reconfigured',
   'warden.ran': 'The supervisor was run',
   'browser.opened': 'A browser was opened',
+  'browser.proxy-tested': 'The browser proxy was tested',
   'worktree.removed': 'A worktree was removed',
   'agent.prompted': 'An agent was given a message',
   'agent.tool': 'An agent drove a terminal or browser',

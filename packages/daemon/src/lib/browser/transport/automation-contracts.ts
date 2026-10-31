@@ -1,11 +1,20 @@
 import type {
+  BrowserElementTarget,
   BrowserInputEvent,
   BrowserProxyStatus,
   BrowserPageActionSnapshot,
   BrowserPageSnapshot,
   BrowserScreencastFrame,
+  BrowserScreenshotFormat,
+  BrowserTarget,
   BrowserViewport,
 } from '@ferretry/protocol';
+import type {
+  BrowserClickOptions,
+  BrowserReadOptions,
+  BrowserScreenshotOptions,
+  BrowserTypeOptions,
+} from './page-acts.ts';
 
 /**
  * The machine's agent browser, seen from the daemon. One implementation drives a real browser worker;
@@ -22,15 +31,28 @@ export interface BrowserAutomation {
   /** Where this browser sends its traffic, when the owner chose a proxy: the address, never a credential. */
   readonly proxy?: BrowserProxyStatus;
   navigate(pageId: string, url: string): Promise<BrowserPageActionSnapshot>;
-  click(pageId: string, selector: string): Promise<BrowserPageActionSnapshot>;
-  type(pageId: string, selector: string, text: string): Promise<BrowserPageActionSnapshot>;
-  /** `mode: 'a11y'` answers the accessibility tree (YAML) instead of the visible text. */
-  read(
+  /** Clicks an element (a ref or a selector) or a point in the viewport. */
+  click(pageId: string, target: BrowserTarget, options?: BrowserClickOptions): Promise<BrowserPageActionSnapshot>;
+  type(
     pageId: string,
-    selector?: string,
-    mode?: 'text' | 'a11y',
-  ): Promise<BrowserPageActionSnapshot & { readonly text: string }>;
-  screenshot(pageId: string): Promise<BrowserPageActionSnapshot & { readonly screenshotBase64: string }>;
+    target: BrowserElementTarget,
+    text: string,
+    options?: BrowserTypeOptions,
+  ): Promise<BrowserPageActionSnapshot>;
+  /**
+   * The visible text (the default), the accessibility tree (`a11y`, YAML), or a `snapshot`: that tree
+   * with a ref beside every element — of the page, or of one element of it.
+   */
+  read(pageId: string, options?: BrowserReadOptions): Promise<BrowserPageActionSnapshot & { readonly text: string }>;
+  screenshot(
+    pageId: string,
+    options?: BrowserScreenshotOptions,
+  ): Promise<
+    BrowserPageActionSnapshot & {
+      readonly screenshotBase64: string;
+      readonly screenshotFormat?: BrowserScreenshotFormat;
+    }
+  >;
   back(pageId: string): Promise<BrowserPageActionSnapshot>;
   forward(pageId: string): Promise<BrowserPageActionSnapshot>;
   reload(pageId: string): Promise<BrowserPageActionSnapshot>;

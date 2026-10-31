@@ -1,4 +1,7 @@
-import { BrowserCommandError, type BrowserCommand, type BrowserRequest } from './types.ts';
+import { BROWSER_PROXY_TEST_PATH } from '@ferretry/protocol';
+import { type BrowserCommand, BrowserCommandError, type BrowserRequest } from './types.ts';
+
+export { BROWSER_PROXY_TEST_PATH };
 
 export const BROWSER_LOGIN_PATH = '/v1/browser/login';
 
@@ -14,6 +17,13 @@ export const sessionBrowserPath = (sessionId: string): string =>
  */
 export function browserRequest(command: BrowserCommand, selfSessionId?: string): BrowserRequest {
   if (command.command === 'login') return loginRequest(command);
+  if (command.command === 'proxy') {
+    return {
+      method: 'POST',
+      path: BROWSER_PROXY_TEST_PATH,
+      body: command.proxy === undefined ? {} : { proxy: command.proxy },
+    };
+  }
 
   const sessionId = command.session?.trim() || selfSessionId?.trim();
   if (!sessionId) {

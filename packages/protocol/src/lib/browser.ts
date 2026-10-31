@@ -1,5 +1,18 @@
 import { z } from 'zod';
 import { SurfaceNameSchema } from './agent-tools.ts';
+import {
+  BROWSER_MAX_FIND_CHARS,
+  BROWSER_MAX_SNAPSHOT_DEPTH,
+  BrowserCoordinateSchema,
+  BrowserModifierSchema,
+  BrowserMouseButtonSchema,
+  BrowserReadModeSchema,
+  BrowserRefSchema,
+  BrowserScreenshotFormatSchema,
+  refineBrowserRead,
+  refineBrowserScreenshot,
+  refineBrowserTarget,
+} from './browser-target.ts';
 import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
 import { SECRET_REFERENCE_SOURCE } from './secrets.ts';
 import { SurfaceOpenerSchema } from './surface.ts';
@@ -352,24 +365,65 @@ export const BrowserStatusSchema = z.union([
 ]);
 export type BrowserStatus = z.infer<typeof BrowserStatusSchema>;
 
+/** The element an act names: a ref from a snapshot, or a selector. */
+const BrowserTargetShape = {
+  selector: z.string().min(1).max(BROWSER_MAX_SELECTOR_LENGTH).optional(),
+  ref: BrowserRefSchema.optional(),
+};
+
 export const BrowserActionSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('start') }),
   z.strictObject({ action: z.literal('open'), url: z.url().optional() }),
   z.strictObject({ action: z.literal('stop') }),
   z.strictObject({ action: z.literal('navigate'), url: z.url() }),
-  z.strictObject({ action: z.literal('click'), selector: z.string().min(1).max(BROWSER_MAX_SELECTOR_LENGTH) }),
-  z.strictObject({
-    action: z.literal('type'),
-    selector: z.string().min(1).max(BROWSER_MAX_SELECTOR_LENGTH),
-    text: z.string().max(BROWSER_MAX_TEXT_LENGTH),
-  }),
-  z.strictObject({
-    action: z.literal('read'),
-    selector: z.string().min(1).max(BROWSER_MAX_SELECTOR_LENGTH).optional(),
-    /** `text` (the default) is the visible text; `a11y` is the accessibility tree as YAML. */
-    mode: z.enum(['text', 'a11y']).optional(),
-  }),
-  z.strictObject({ action: z.literal('screenshot') }),
+  z
+    .strictObject({
+      action: z.literal('click'),
+      ...BrowserTargetShape,
+      x: BrowserCoordinateSchema.optional(),
+      y: BrowserCoordinateSchema.optional(),
+      button: BrowserMouseButtonSchema.optional(),
+      double: z.literal(true).optional(),
+      modifiers: z.array(BrowserModifierSchema).max(5).optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: true, required: true })),
+  z
+    .strictObject({
+      action: z.literal('type'),
+      ...BrowserTargetShape,
+      text: z.string().max(BROWSER_MAX_TEXT_LENGTH),
+      /** Press Enter after the text. */
+      submit: z.literal(true).optional(),
+      /** One key at a time, for a field that reacts to each keystroke, instead of filling it at once. */
+      slowly: z.literal(true).optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: true })),
+  z
+    .strictObject({
+      action: z.literal('read'),
+      ...BrowserTargetShape,
+      /**
+       * `text` (the default) is the visible text; `a11y` is the accessibility tree as YAML; `snapshot` is
+       * that tree with a ref beside every element, which every act accepts.
+       */
+      mode: BrowserReadModeSchema.optional(),
+      /** `snapshot` only: just the lines that contain this text, each with its ref. */
+      find: z.string().trim().min(1).max(BROWSER_MAX_FIND_CHARS).optional(),
+      depth: z.number().int().min(1).max(BROWSER_MAX_SNAPSHOT_DEPTH).optional(),
+      /** `snapshot` only: each element's box in the viewport, for a later act by point. */
+      boxes: z.literal(true).optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: false }))
+    .superRefine(refineBrowserRead),
+  z
+    .strictObject({
+      action: z.literal('screenshot'),
+      ...BrowserTargetShape,
+      fullPage: z.literal(true).optional(),
+      format: BrowserScreenshotFormatSchema.optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: false }))
+    .superRefine(refineBrowserScreenshot),
   z.strictObject({ action: z.literal('back') }),
   z.strictObject({ action: z.literal('forward') }),
   z.strictObject({ action: z.literal('reload') }),
@@ -397,7 +451,11 @@ export const BrowserActionResultSchema = z.union([
   }),
   z.strictObject({
     status: RunningBrowserStatusSchema,
-    result: BrowserResultPageSchema.safeExtend({ screenshotBase64: z.string().min(1) }),
+    result: BrowserResultPageSchema.safeExtend({
+      screenshotBase64: z.string().min(1),
+      /** Absent from an older worker, whose screenshots are always PNG. */
+      screenshotFormat: BrowserScreenshotFormatSchema.optional(),
+    }),
   }),
   z.strictObject({ status: RunningBrowserStatusSchema, result: BrowserResultPageSchema }),
   z.strictObject({ status: BrowserStatusSchema }),

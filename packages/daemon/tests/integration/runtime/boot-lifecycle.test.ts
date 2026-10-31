@@ -2953,6 +2953,7 @@ describe('daemon boot lifecycle', () => {
     const reviver = new RecordingResumeLauncher();
     const inventory = new StubProcessInventory();
     let release = (): void => {};
+    let daemonStorage: Parameters<DaemonWorld['createResumeLauncher']>[0] | undefined;
     const world = {
       ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
@@ -2960,7 +2961,10 @@ describe('daemon boot lifecycle', () => {
         });
       })),
       sessionLauncher: launcher,
-      createResumeLauncher: () => reviver,
+      createResumeLauncher: (storage: Parameters<DaemonWorld['createResumeLauncher']>[0]) => {
+        daemonStorage = storage;
+        return reviver;
+      },
       // The REAL gate over doubled host probes: everything it decides is production's.
       migratePreflight: new MigrationPreflight(inventory, { visible: async () => undefined }),
     };
@@ -2995,6 +2999,19 @@ describe('daemon boot lifecycle', () => {
       });
     const storedConfig = async (): Promise<Record<string, unknown>> =>
       JSON.parse(await readFile(configFile, 'utf8')) as Record<string, unknown>;
+    // The documents this case seeds are written through the DAEMON'S OWN storage, under the session lock
+    // every daemon writer takes. A plain `writeFile` raced them: once a move relaunches the session, its
+    // observer records the turn the carried transcript shows by reading `state.json`, transforming it and
+    // writing it back under that lock — and a seeded `rate_limited` landing between its read and its write
+    // was overwritten with the `running` the move left behind. The next move then met a session claiming
+    // work nothing in its pane showed, and the gate refused it: one move short of four.
+    const patch = async (document: 'config' | 'state', fields: Record<string, unknown>): Promise<void> => {
+      const storage = daemonStorage;
+      if (storage === undefined) throw new Error('the daemon never built its resume launcher');
+      const merge = (current: unknown): unknown => ({ ...(current as Record<string, unknown>), ...fields });
+      if (document === 'config') await storage.updateConfig(parseSessionId(id), merge);
+      else await storage.updateState(parseSessionId(id), merge);
+    };
 
     // Act
     // The pane is alive and at a prompt throughout: a migration must replace it anyway.
@@ -3029,12 +3046,7 @@ describe('daemon boot lifecycle', () => {
     // The account runs out of quota. Nothing mounted produces this status — the quota reader that
     // would is not mounted — so the state document is seeded directly, which is the whole reason a
     // migration exists: an operator moves a rate-limited session onto an account with headroom.
-    const stateFile = join(home, 'state', 'sessions', id, 'state.json');
-    await writeFile(
-      stateFile,
-      JSON.stringify({ ...(JSON.parse(await readFile(stateFile, 'utf8')) as object), status: 'rate_limited' }),
-      { mode: 0o600 },
-    );
+    await patch('state', { status: 'rate_limited' });
     // The target serves a 200k window and this session was started on a 1M model.
     const downgrade = await migrate({ agent: TARGET_WRAPPER }, 'req-migrate-ask-2');
     const afterDowngrade = await storedConfig();
@@ -3070,26 +3082,17 @@ describe('daemon boot lifecycle', () => {
       })}\n`,
       { mode: 0o600 },
     );
-    await writeFile(
-      configFile,
-      JSON.stringify({
-        ...(await storedConfig()),
-        transcript: {
-          v: 1,
-          home: harnessHome,
-          harnessSessionId: 'seeded-harness-session',
-          identity: 'minted',
-          file: transcriptFile,
-          resolvedAt: '2026-07-31T22:00:00.000Z',
-        },
-      }),
-      { mode: 0o600 },
-    );
-    await writeFile(
-      stateFile,
-      JSON.stringify({ ...(JSON.parse(await readFile(stateFile, 'utf8')) as object), openTools: ['tool-open-1'] }),
-      { mode: 0o600 },
-    );
+    await patch('config', {
+      transcript: {
+        v: 1,
+        home: harnessHome,
+        harnessSessionId: 'seeded-harness-session',
+        identity: 'minted',
+        file: transcriptFile,
+        resolvedAt: '2026-07-31T22:00:00.000Z',
+      },
+    });
+    await patch('state', { openTools: ['tool-open-1'] });
     const moved = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true }, 'req-migrate-ask-4');
     const movedRaw: unknown = await moved.json();
     // Same reason: a refused migration must fail with the refusal it answered, not with a schema
@@ -3107,15 +3110,7 @@ describe('daemon boot lifecycle', () => {
     // The replacement runs out of quota too. Seeded the same way and for the same reason: a migrated
     // session comes back `running`, and an agent mid-turn is not one this gate interrupts. The open
     // tool goes with it: the pane was REPLACED, so the previous harness's tool ids are stale.
-    await writeFile(
-      stateFile,
-      JSON.stringify({
-        ...(JSON.parse(await readFile(stateFile, 'utf8')) as object),
-        status: 'rate_limited',
-        openTools: [],
-      }),
-      { mode: 0o600 },
-    );
+    await patch('state', { status: 'rate_limited', openTools: [] });
     // Straight back again, which is the case that used to destroy work: the turn a revive hands over
     // is recorded on the STATE document, and reading the configuration's frozen copy first made every
     // second relaunch write `turn-002.md` a second time — over an assignment the agent may not have
@@ -3128,11 +3123,7 @@ describe('daemon boot lifecycle', () => {
     // RESTART ANYWAY. The session is back on its original account and rate-limited again, and a
     // process the gate cannot classify is in the pane. Without the flag the refusal says so as data;
     // with it, a person who confirmed gets the move — journalled, and marked FORCED in the report.
-    await writeFile(
-      stateFile,
-      JSON.stringify({ ...(JSON.parse(await readFile(stateFile, 'utf8')) as object), status: 'rate_limited' }),
-      { mode: 0o600 },
-    );
+    await patch('state', { status: 'rate_limited' });
     inventory.observation = {
       kind: 'observed',
       processes: [
@@ -3159,15 +3150,7 @@ describe('daemon boot lifecycle', () => {
     // harness reports a million-token window — the shape a stale or incomplete catalog produces. Restart asks
     // for no new model on the same account, so it relaunches into the window it already has instead of being
     // refused as a downgrade it cannot accept.
-    await writeFile(
-      stateFile,
-      JSON.stringify({
-        ...(JSON.parse(await readFile(stateFile, 'utf8')) as object),
-        status: 'rate_limited',
-        contextWindow: 1_000_000,
-      }),
-      { mode: 0o600 },
-    );
+    await patch('state', { status: 'rate_limited', contextWindow: 1_000_000 });
     inventory.observation = { kind: 'observed', processes: [] };
     const restartInPlace = await migrate({ agent: TARGET_WRAPPER }, 'req-restart-in-place');
     const restartInPlaceRaw: unknown = await restartInPlace.json();

@@ -13,7 +13,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 
 import { BrowserChallengeBanner } from '../../../src/features/browser/browser-challenge-banner.tsx';
-import { BrowserModeSection } from '../../../src/features/fleet/machine/settings-tab.tsx';
+import { BrowserModeSection } from '../../../src/features/fleet/machine/browser-mode-section.tsx';
 import type { SetupAccess } from '../../../src/features/fleet/setup/setup-access.ts';
 import { appStylesheet } from '../support/app-stylesheet.ts';
 import { sharedChromium } from '../support/chromium.ts';

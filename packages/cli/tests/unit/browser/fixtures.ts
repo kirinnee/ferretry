@@ -1,6 +1,8 @@
 import {
   type BrowserActionResult,
   BrowserActionResultSchema,
+  type BrowserProxyTestResult,
+  BrowserProxyTestResultSchema,
   type BrowserStatus,
   BrowserStatusSchema,
 } from '@ferretry/protocol';
@@ -52,3 +54,22 @@ export const actionResult = (overrides: Record<string, unknown> = {}): BrowserAc
 
 export const statusOnlyResult = (): BrowserActionResult =>
   BrowserActionResultSchema.parse({ status: { ...BASE, state: 'stopped', pages: [] } });
+
+export const proxyTestResult = (overrides: Record<string, unknown> = {}): BrowserProxyTestResult =>
+  BrowserProxyTestResultSchema.parse({
+    reachable: true,
+    tested: 'saved',
+    roundTripMs: 312,
+    egressIp: '203.0.113.7',
+    message: 'The proxy answered and the test endpoint saw its address.',
+    ...overrides,
+  });
+
+export const failedProxyTest = (overrides: Record<string, unknown> = {}): BrowserProxyTestResult =>
+  BrowserProxyTestResultSchema.parse({
+    reachable: false,
+    tested: 'saved',
+    errorClass: 'connect',
+    message: 'Nothing accepted a connection at the proxy address.',
+    ...overrides,
+  });

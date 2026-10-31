@@ -1857,8 +1857,8 @@ body {
   outline: var(--focus-width) solid var(--focus-color);
   outline-offset: calc(-1 * var(--focus-width));
 }
-/* A STRIP OF ICONED TABS FITS A PHONE (`kt-utabs--stack`). Side by side, the machine's five tabs are ~600px
-   in a 362px strip: Components and Machine sat past the edge behind a fade. Below `sm` each tab stacks its
+/* A STRIP OF ICONED TABS FITS A PHONE (`kt-utabs--stack`). Side by side, the machine's six tabs are ~700px
+   in a 362px strip: Components, Browser and Machine sat past the edge behind a fade. Below `sm` each tab stacks its
    icon over a smaller label and the tabs share the row, the way the bottom tab bar does. They grow but never
    shrink, so a family whose type still does not fit falls back to the scrolling strip and its fades. */
 @media (max-width: 639px) {

@@ -263,7 +263,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 98, desktop: 95 };
+const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 99, desktop: 96 };
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`), per
@@ -279,7 +279,7 @@ const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobil
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 64, desktop: 64 };
+const MACHINES_GEOMETRY_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 65, desktop: 65 };
 
 /**
  * HOW MANY TERMINAL GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertTerminalGeometry`): one per
@@ -1574,7 +1574,7 @@ const assertMachinesGeometry = async (page: Page, where: string): Promise<void> 
           );
       const rowBox = row.getBoundingClientRect();
       const buttons = [...row.querySelectorAll('[data-machine-tab]')];
-      if (buttons.length !== 5) found.push(`the tab row has ${buttons.length} tabs instead of 5`);
+      if (buttons.length !== 6) found.push(`the tab row has ${buttons.length} tabs instead of 6`);
       const current = buttons.filter(button => button.getAttribute('aria-current') === 'page');
       if (current.length !== 1) found.push(`${current.length} tabs are marked current instead of one`);
       const cells = buttons.map(button => button.getBoundingClientRect());
@@ -3091,8 +3091,8 @@ try {
             await page.screenshot({ path: removalTarget });
             process.stdout.write(`📸 Settings removal disclosure ${viewport.name} -> ${removalTarget}\n`);
 
-            // MACHINES (account model, O1): the section, each of its five tabs, and the Machines list the
-            // switcher opens. The tab row is five equal columns, which is the
+            // MACHINES (account model, O1): the section, each of its six tabs, and the Machines list the
+            // switcher opens. The tab row is six equal columns, which is the
             // shape most likely to widen a 390px phone once a label is longer than its cell. A tab is waited
             // for by its PANEL, so a tab that a unit has filled is walked exactly like an empty frame.
             //
@@ -3104,9 +3104,26 @@ try {
             const machinesSurface = await openMachine('harness-daemon');
             await machinesSurface.locator('[data-machine-tab-panel="runtimes"]').waitFor({ state: 'visible' });
             await assertMachinesGeometry(page, `the Machines runtimes tab at ${viewport.name}`);
-            for (const tab of ['credentials', 'profiles', 'components', 'machine'] as const) {
+            for (const tab of ['credentials', 'profiles', 'components', 'browser', 'machine'] as const) {
               await machinesSurface.locator(`[data-machine-tab="${tab}"]`).click();
               await machinesSurface.locator(`[data-machine-tab-panel="${tab}"]`).waitFor({ state: 'visible' });
+              if (tab === 'browser') {
+                // THE STATUS LINE MUST LOAD, not stay on "Checking the browser…": the harness daemon answers
+                // `GET /v1/browser/state`, so a resolved line is proof the tab read it.
+                const state = machinesSurface.locator('[data-browser-state]');
+                await state.and(page.locator('[data-browser-state="running"]')).waitFor({ state: 'visible' });
+                const said = (await state.textContent()) ?? '';
+                if (!said.startsWith('Running · via proxy http://proxy.example.test:8080'))
+                  throw new Error(`the Browser status line did not resolve: "${said}"`);
+                await machinesSurface.locator('[data-browser-proxy-test]').click();
+                await machinesSurface.locator('[data-setup-note="browser-proxy-test"]').waitFor({ state: 'visible' });
+                const browserTarget = join(outDir, `settings-machines-browser-${viewport.name}.png`);
+                await assertNoSidewaysScroll(page, `the Machines browser tab at ${viewport.name}`);
+                await assertMachinesGeometry(page, `the Machines browser tab at ${viewport.name}`);
+                await settledShot(browserTarget);
+                process.stdout.write(`📸 Settings Machines Browser ${viewport.name} -> ${browserTarget}\n`);
+                continue;
+              }
               await assertNoSidewaysScroll(page, `the Machines ${tab} tab at ${viewport.name}`);
               await assertMachinesGeometry(page, `the Machines ${tab} tab at ${viewport.name}`);
             }
