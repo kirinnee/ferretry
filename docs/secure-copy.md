@@ -183,10 +183,15 @@ without ever reading it. It is the same input request, with the store as the des
 - **The card names the file that printed it.** The child runner finds the program once, on the command's own
   PATH, runs that very file, and the copy records its path (`from.path`), so the card, `fy input answer` and
   `fy copy ls` show WHICH `gh` printed the value: `/usr/bin/gh`, or one in `~/.local/bin` the ferret could
-  have written. A program given by a path is found from the folder's real location, so a symlinked folder cannot
-  point `../x` at another file. A rule matches the bare name only for a program the daemon found AND that this
-  account cannot change: if the file or its folder is writable (`~/.local/bin`, `~/.bun/bin`, the session's own
-  folder), the copy is `replaceable` and every paste of it asks the owner, whose card shows the path.
+  have written. A program given by a path is walked on the disk itself, every `..` and symlink as the kernel takes
+  them, so neither a symlinked folder nor a link inside the path can point it at another file. A rule matches the
+  bare name only for a program the daemon found AND that this account cannot change. It is `replaceable` (and every
+  paste of it asks the owner, whose card shows the path) when any part of its path, or of the real file behind it,
+  up to `/`, is OWNED by the account the daemon and every ferret run as, or is a folder anyone may write without the
+  sticky bit. Ownership, not permission bits: an owner can `chmod` its way back in. So a rule auto-pastes only from
+  system programs (`/usr/bin/gh`); anything under `$HOME`, a `~/.nix-profile` link included, always asks.
+  A rule names a program, not what it runs: `gh` (its aliases and extensions), `env`, `node` or `op run` can run
+  anything, and a rule for one matches whatever arguments the ferret gives it.
 - **The secret store is never written by a rule** unless that rule names the exact secret NAME: `secret:<NAME>`
   has no pattern and no wildcard, so a rule for `VERCEL_TOKEN` never writes `VERCEL_TOKEN_2`.
 - **A plan**: `secure.preapprove` raises ONE card listing the pastes the agent plans, each with its route and

@@ -350,7 +350,8 @@ function SealedPasteSection({ request, client, blocked, busy, cancel, onSettled,
         <dd className="m-0 min-w-0 break-words mono text-fg">{pastedWords(request)}</dd>
         <dt className="text-faint">From</dt>
         <dd className="m-0 min-w-0 break-words text-fg" data-input-paste-from="">
-          {route?.from}
+          {/* A path from the ferret's own files: isolated, so a right-to-left folder name cannot reorder it. */}
+          <bdi dir="ltr">{route?.from}</bdi>
         </dd>
         <dt className="text-faint">Into</dt>
         <dd className="m-0 min-w-0 break-words font-medium text-fg" data-input-paste-to="">

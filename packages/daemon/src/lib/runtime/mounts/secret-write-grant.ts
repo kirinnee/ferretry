@@ -21,15 +21,10 @@ export function refusedSecretWrite(context: RouteContext, act: string): ApiRespo
 /**
  * A value typed or pasted into a PAGE is allowed on the input-request route, which is a `terminal` one, so it also
  * needs `browser.use`, exactly as the card's own field picture does: a device denied the browser must not put a
- * value into a page by allowing a card instead.
+ * value into a page by allowing a card instead, nor by approving page pastes in advance (a rule or a plan item).
  */
-export function refusedPageInput(context: RouteContext): ApiResponse | undefined {
-  return refusedExtra(
-    context,
-    { capability: 'browser', axis: 'use' },
-    'allow a value into a page',
-    'that needs the browser permission',
-  );
+export function refusedPageInput(context: RouteContext, act = 'allow a value into a page'): ApiResponse | undefined {
+  return refusedExtra(context, { capability: 'browser', axis: 'use' }, act, 'that needs the browser permission');
 }
 
 /** One more demand behind a route that already passed its own: the refusal, or `undefined` when allowed. */

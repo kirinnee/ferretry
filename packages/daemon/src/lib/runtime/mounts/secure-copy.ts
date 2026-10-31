@@ -13,7 +13,7 @@ import { SecureCopyError } from '../../secure-copy/errors.ts';
 import type { CopyPlanService } from '../../secure-copy/plans.ts';
 import type { PasteRuleCaller, PasteRuleService } from '../../secure-copy/rules.ts';
 import { ownerActorOf } from './input-requests.ts';
-import { refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
+import { refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
 
 /**
  * THE OWNER'S ROUTES FOR SECURE COPY (docs/secure-copy.md): the copies a session holds (descriptions only), the
@@ -97,7 +97,11 @@ export function secureCopyRoutes(
         const caller = ruleOwner(context);
         const request = await parseBody(context.request, PasteRuleCreateSchema);
         const intoStore = request.to.kind === 'secret';
-        const refused = intoStore ? refusedSecretWrite(context, 'approve pastes into the secret store') : undefined;
+        const refused = intoStore
+          ? refusedSecretWrite(context, 'approve pastes into the secret store')
+          : request.to.kind === 'browser'
+            ? refusedPageInput(context, 'approve pastes into a page')
+            : undefined;
         if (refused !== undefined) return refused;
         const rule = await rules.create(caller, request).catch(answered);
         if (intoStore) spentSecretWrite(context);
@@ -139,8 +143,11 @@ export function secureCopyRoutes(
         const sessionId = param(context, 'sessionId', SESSION);
         const planId = param(context, 'planId', ID);
         const plan = plans.list(caller, sessionId).find(candidate => candidate.id === planId);
-        const intoStore = body.items.some(index => plan?.items[index]?.to.kind === 'secret');
-        const refused = intoStore ? refusedSecretWrite(context, 'approve pastes into the secret store') : undefined;
+        const into = (kind: string) => body.items.some(index => plan?.items[index]?.to.kind === kind);
+        const intoStore = into('secret');
+        const refused =
+          (intoStore ? refusedSecretWrite(context, 'approve pastes into the secret store') : undefined) ??
+          (into('browser') ? refusedPageInput(context, 'approve pastes into a page') : undefined);
         if (refused !== undefined) return refused;
         const answer = await plans.approve(caller, sessionId, planId, body.items).catch(answered);
         if (intoStore) spentSecretWrite(context);

@@ -7,7 +7,7 @@ import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { CopyPlanService, EphemeralValues, PasteRuleService, SecureCopyService } from '../../../../src/lib/index.ts';
 import { secureCopyRoutes } from '../../../../src/lib/runtime/mounts/secure-copy.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, GRANTED, human, withoutSecretsConfigure } from './support.ts';
+import { agentIn, CREDENTIALS, GRANTED, human, withoutGrant, withoutSecretsConfigure } from './support.ts';
 
 /** The owner's secure-copy routes through the real router and authorization boundary, with the real services. */
 
@@ -15,6 +15,7 @@ const SESSION = 'mvv6b4qw-49d0158d';
 const TOKEN = 'vcp_ROUTE-NEVER-RETURNS-77';
 const RULE = { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' } } as const;
 const INTO_STORE = { kind: 'secret', name: 'VERCEL_TOKEN' } as const;
+const INTO_PAGE = { kind: 'browser', origin: 'https://vercel.com' } as const;
 
 async function served(guard: CapabilityGuard = GRANTED) {
   const clock = { now: () => Date.parse('2026-10-31T12:00:00.000Z') };
@@ -51,6 +52,7 @@ async function served(guard: CapabilityGuard = GRANTED) {
   const plan = await plans.propose(SESSION, [
     { ...RULE, why: 'the deploy token' },
     { from: RULE.from, to: INTO_STORE, why: 'kept for the deploy script' },
+    { from: RULE.from, to: INTO_PAGE, why: 'the env page' },
   ]);
   const routes = secureCopyRoutes({ list: sessionId => copies.list(sessionId) }, rules, plans);
   const dispatch = new ApiDispatcher(new ApiRouter(routes), CREDENTIALS, guard);
@@ -217,5 +219,36 @@ describe('approving pastes into the secret store', () => {
 
     should(response.status).equal(201);
     should(stored.rules?.map(rule => rule.to)).eql([INTO_STORE]);
+  });
+});
+
+describe('approving pastes into a page', () => {
+  const NO_BROWSER = withoutGrant({ capability: 'browser', axis: 'use' });
+
+  it('should need the browser grant to add a rule into a page, as allowing one would', async () => {
+    const { dispatch, stored } = await served(NO_BROWSER);
+
+    const page = await dispatch.dispatch(post('/v1/copy-rules', { from: RULE.from, to: INTO_PAGE }));
+    const terminal = await dispatch.dispatch(post('/v1/copy-rules', RULE));
+
+    should([page.status, terminal.status]).eql([403, 201]);
+    should(String(jsonBody(page).error)).containEql('needs the browser permission');
+    should(stored.rules?.map(rule => rule.to.kind)).eql(['terminal']);
+  });
+
+  it('should need the browser grant to approve a plan item into a page, and not for the others', async () => {
+    const refused = await served(NO_BROWSER);
+    const others = await served(NO_BROWSER);
+
+    const page = await refused.dispatch.dispatch(
+      post(`/v1/sessions/${SESSION}/copy-plans/${refused.plan.id}/approve`, { items: [0, 2] }),
+    );
+    const rest = await others.dispatch.dispatch(
+      post(`/v1/sessions/${SESSION}/copy-plans/${others.plan.id}/approve`, { items: [0, 1] }),
+    );
+
+    should([page.status, rest.status]).eql([403, 200]);
+    should(refused.stored.rules ?? []).eql([]);
+    should(others.stored.rules?.map(rule => rule.to.kind)).eql(['terminal', 'secret']);
   });
 });

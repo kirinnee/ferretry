@@ -1,6 +1,5 @@
-import { constants } from 'node:fs';
-import { access, realpath } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
+import { dirname, isAbsolute } from 'node:path';
 import type { SecretChildOutcome, SecretChildRunner, SecretChildSpec } from '../../lib/index.ts';
 
 /**
@@ -82,7 +81,11 @@ async function readCapped(
  * logic rather than only observable through a spawn.
  */
 export class BunSecretChildRunner implements SecretChildRunner {
-  constructor(private readonly inherited: () => Readonly<Record<string, string | undefined>> = () => process.env) {}
+  constructor(
+    private readonly inherited: () => Readonly<Record<string, string | undefined>> = () => process.env,
+    /** The account this daemon, and every ferret, runs as: what it owns, a ferret could change. */
+    private readonly account: () => number | undefined = () => process.getuid?.(),
+  ) {}
 
   async run(spec: SecretChildSpec): Promise<SecretChildOutcome> {
     const [program, ...rest] = spec.command;
@@ -96,16 +99,17 @@ export class BunSecretChildRunner implements SecretChildRunner {
 
     const env = { ...environment, ...spec.env };
     // Found once, on the child's own PATH, and that very file is what runs: what the outcome names as the
-    // program is what was spawned, never a second lookup that could find something else. A path is taken from
-    // the folder's REAL location, as the kernel would walk `..` from it, so a symlinked folder cannot point it
-    // at another file. A lookup that fails (no such folder, a name too long) is a spawn failure like any other.
+    // program is what was spawned, never a second lookup that could find something else. A path is walked on the
+    // disk itself, every `..` and symlink as the kernel takes them, so neither a symlinked folder nor a link inside
+    // the path can point it at another file. A lookup that fails (no such file, a name too long) is a spawn
+    // failure like any other.
     let file: string | null;
     let replaceable: boolean;
     try {
       file = program.includes('/')
-        ? resolve(await realpath(spec.cwd), program)
+        ? await realpath(isAbsolute(program) ? program : `${await realpath(spec.cwd)}/${program}`)
         : Bun.which(program, { PATH: env.PATH ?? '', cwd: spec.cwd });
-      replaceable = file !== null && (await writable(file));
+      replaceable = file !== null && (await replaceableBy(this.account(), file));
     } catch {
       return { outcome: 'spawn_failed', stdout: '', stderr: '', truncated: false };
     }
@@ -161,14 +165,26 @@ export class BunSecretChildRunner implements SecretChildRunner {
 }
 
 /**
- * Whether this account could change the program, or put another in its place: the file itself, or the folder
- * holding it, is writable. A ferret runs as this same account, so such a program is one it could have replaced.
+ * Whether this account could change the program or put another in its place. OWNERSHIP, not today's permission
+ * bits: an owner can `chmod` its way back in. A ferret runs as this same account, so the program counts as
+ * replaceable when any part of the path as found, or of the real file behind it, up to `/`, is owned by this
+ * account (a link it could repoint, a folder it could fill), or is a folder anyone may write without the sticky
+ * bit. A part that cannot be looked at counts as replaceable.
  */
-async function writable(file: string): Promise<boolean> {
-  const can = async (path: string): Promise<boolean> =>
-    await access(path, constants.W_OK).then(
-      () => true,
-      () => false,
-    );
-  return (await can(file)) || (await can(dirname(file)));
+async function replaceableBy(account: number | undefined, file: string): Promise<boolean> {
+  const real = await realpath(file).catch(() => file);
+  for (const path of new Set([file, real])) if (await anyPartReplaceable(account, path)) return true;
+  return false;
+}
+
+async function anyPartReplaceable(account: number | undefined, path: string): Promise<boolean> {
+  for (let part = path; ; part = dirname(part)) {
+    const status = await lstat(part).catch(() => undefined);
+    if (status === undefined) return true;
+    if (account !== undefined && status.uid === account) return true;
+    const openToOthers = (status.mode & 0o022) !== 0 && (status.mode & 0o1000) === 0;
+    // A symlink's own mode is always open and means nothing; what it names is checked on the real path.
+    if (openToOthers && !status.isSymbolicLink()) return true;
+    if (part === dirname(part)) return false;
+  }
 }

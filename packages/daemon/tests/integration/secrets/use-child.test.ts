@@ -298,6 +298,60 @@ describe('the child runner, finding the program it runs', () => {
     should(system.replaceable).be.undefined();
   });
 
+  it('should still call a program this account owns replaceable after it took away its own write bits', async () => {
+    // Arrange — an owner can chmod its way back in, so 555 proves nothing.
+    const { folder, bin } = await folderWithProgram('runner-chmod');
+    await chmod(join(bin, 'hello'), 0o555);
+    await chmod(bin, 0o555);
+    const runner = new BunSecretChildRunner(() => ({ PATH: bin }));
+
+    // Act
+    const result = await runner.run(spec(['hello'], folder)).finally(async () => await chmod(bin, 0o755));
+
+    // Assert
+    should(result).match({ outcome: 'exited', replaceable: true });
+  });
+
+  it("should judge by who OWNS the path, so another account's program in a sticky or closed folder is not replaceable", async () => {
+    // Arrange — the same file, as seen by an account that owns nothing on the way to it.
+    const { folder, bin } = await folderWithProgram('runner-other-account');
+    // Closed to others whatever this machine's umask is: a group-writable folder is replaceable, rightly.
+    await chmod(bin, 0o755);
+    const runner = new BunSecretChildRunner(
+      () => ({ PATH: bin }),
+      () => -1,
+    );
+
+    // Act
+    const result = await runner.run(spec(['hello'], folder));
+
+    // Assert
+    should(result.outcome).equal('exited');
+    should(result.replaceable).be.undefined();
+  });
+
+  it('should follow a link inside the program path on the disk itself, as the kernel does', async () => {
+    // Arrange — x/link/../tools/hello is real/tools/hello, never x/tools/hello.
+    const folder = await tempDirectory('runner-inner-link');
+    await mkdir(join(folder, 'real', 'sub'), { recursive: true });
+    await mkdir(join(folder, 'real', 'tools'));
+    await writeFile(join(folder, 'real', 'tools', 'hello'), '#!/bin/sh\necho inner\n');
+    await chmod(join(folder, 'real', 'tools', 'hello'), 0o755);
+    await mkdir(join(folder, 'x'));
+    await symlink(join(folder, 'real', 'sub'), join(folder, 'x', 'link'));
+    const runner = new BunSecretChildRunner(() => ({ PATH: '/nonexistent' }));
+
+    // Act
+    const result = await runner.run(spec(['x/link/../tools/hello'], folder));
+
+    // Assert
+    should(result).match({
+      outcome: 'exited',
+      stdout: 'inner\n',
+      program: join(await realpath(folder), 'real', 'tools', 'hello'),
+    });
+  });
+
   it('should report a name too long to look up as a spawn failure, not throw', async () => {
     // Arrange
     const { folder } = await folderWithProgram('runner-long');
