@@ -69,8 +69,18 @@ A budget can also be taken away without touching `budget:`, so these are held as
   week of spend and its running ferrets out of the budget's reach.
 
 The owner's own reviewed changes (`fy login rm`, `fy runtime rm`, a runtime's login changed in the app) are
-acknowledged as they are applied and are not asked about again. So an agent can always lower a budget, and
-cannot raise one, remove one, move a runtime off one or move its days without the owner confirming it.
+acknowledged as they are applied and are not asked about again.
+
+**What this holds against, honestly.** An edit to the files — by hand, by `fy config write`, by `fy login
+budget` or by the `config.*` tools — that loosens a budget waits for the owner, so a confused or
+prompt-injected agent editing configuration cannot raise, remove or sidestep one. It is the same
+**honest-client limit** as the secret store's ([secrets.md](secrets.md#what-this-does-not-protect-against)):
+every ferret runs as the owner's user with this host's admin token, and the daemon tells a ferret from the
+owner's shell only by what `fy` sends. So an agent can still run the owner's own reviewed changes — `fy login
+rm` on loopback, which is acknowledged like the owner's — or send raw HTTP that looks like the owner, or edit
+the accepted record on disk. A budget is a guard against accidents and runaway spend, not against an agent set
+on removing it. The real fix is per-agent credentials (&F259), which would let the daemon refuse a ferret the
+owner's changes outright.
 
 ## What is counted
 
