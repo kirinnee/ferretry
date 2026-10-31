@@ -31,8 +31,7 @@ const collect = (value: string, previous: readonly string[] | undefined): readon
  * own file) is added without touching the others.
  */
 export function registerCatalogCommands(program: Command, controller: CatalogController): void {
-  const catalog = program
-    .command('catalog')
+  const catalog = (program.commands.find(command => command.name() === 'catalog') ?? program.command('catalog'))
     .alias('catalogs')
     .description('publish skills and MCP setups as a catalog, and export it as a signed file')
     .option('--json', JSON_HELP)
