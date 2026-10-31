@@ -32,7 +32,8 @@ Everything an agent ever learns about a copy is `CopyMeta`:
 
 A command copy also reports how the command ended (`exited` with its code, `timeout`, `spawn_failed`) and its
 **stderr**, with the would-be value masked, then put through the vault redactor, and cut to 2,048
-characters. A vault that cannot be opened withholds stderr. **Stdout is never returned.** No schema here has
+characters. A vault that cannot be opened withholds stderr. Stderr that holds any piece of the value (six characters or more
+in a row, or all of a shorter one) is withheld whole, because masking only recognises the whole value. **Stdout is never returned.** No schema here has
 a field for the value; a protocol test walks every schema to keep it that way.
 
 ## Capturing
@@ -44,7 +45,9 @@ a field for the value; a protocol test walks every schema to keep it that way.
 | `clipboard` | Reads the agent browser's clipboard for that page's origin, after the agent pressed the page's own Copy button. Never this computer's system clipboard.                                                                                                                                                     | SC3   |
 
 A capture is refused, and nothing is held, when the command fails, times out, prints nothing, or prints
-more than 16 KiB. Capturing needs no approval: the agent could run the command or read the page itself.
+more than 16 KiB. Capturing needs no approval: the agent could run the command or read the page itself. The
+tools are an AGENT's: a person's terminal and browser tool routes refuse every `secure.*` call, so a device granted only
+the browser can never reach a command through them.
 Capturing **instead** keeps the value out of its context. It does need the "What agents may control"
 switch for what it reads: `terminal` for a command, `browser` for a page.
 

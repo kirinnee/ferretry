@@ -2,8 +2,8 @@ import { describe, it } from 'bun:test';
 import { AGENT_TOOL_MAX_TEXT_CHARS, AgentToolResultSchema, SurfaceControlViewSchema } from '@ferretry/protocol';
 import should from 'should';
 import type { CapabilityDemand, CapabilityGuard, GrantDecision } from '../../../../src/lib/api/capability.ts';
-import type { ApiResponse } from '../../../../src/lib/api/http.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
+import type { ApiResponse } from '../../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { AGENT_SESSION_CAPABILITY_HEADER, agentToolRoutes } from '../../../../src/lib/runtime/mounts/agent-tools.ts';
 import { terminalRoutes } from '../../../../src/lib/runtime/mounts/terminals.ts';
@@ -455,5 +455,30 @@ describe('the agent tools routes — publication at the transport', () => {
 
     should(answered.status).equal(409);
     should(String(answered.body)).not.containEql(SCREEN);
+  });
+});
+
+describe('a person’s tool routes and secure copy', () => {
+  it('should refuse every secure tool on both person routes, so no grant reaches a command through them', async () => {
+    // Arrange
+    const { world, dispatch } = served();
+    const copy = { tool: 'secure.copy', name: 'token', source: { kind: 'command', argv: ['id'] } };
+
+    // Act
+    const answers = await Promise.all([
+      dispatch.dispatch(deviceCall('/v1/sessions/s1/surfaces/browser/tools', copy)),
+      dispatch.dispatch(personCall('/v1/sessions/s1/surfaces/terminals/tools', copy)),
+      dispatch.dispatch(personCall('/v1/sessions/s1/surfaces/browser/tools', { tool: 'secure.list' })),
+      dispatch.dispatch(
+        personCall('/v1/sessions/s1/surfaces/terminals/tools', { tool: 'secure.discard', handle: 'token' }),
+      ),
+    ]);
+
+    // Assert
+    should(answers.map(answer => answer.status)).deepEqual([400, 400, 400, 400]);
+    should(jsonBody(answers[0] as ApiResponse).error).equal(
+      "secure.copy is an agent's tool, not one a person's surface route takes",
+    );
+    should(world.audit.entries).deepEqual([]);
   });
 });

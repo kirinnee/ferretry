@@ -333,3 +333,53 @@ describe('SecureCopyService lifetime', () => {
     should(service.list('s1').map(copy => copy.handle)).eql(['sealed:b', 'sealed:a']);
   });
 });
+
+describe('SecureCopyService under the security review', () => {
+  it('should let only one of two captures under one name run, and count a running one against the live cap', async () => {
+    const { service, runner } = world();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const slow = runner.run.bind(runner);
+    runner.run = async spec => {
+      await gate;
+      return await slow(spec);
+    };
+
+    const first = service.capture('s1', command());
+    const second = await refusal(service.capture('s1', command()));
+    for (let index = 1; index < COPY_MAX_LIVE_PER_SESSION; index += 1)
+      void service.capture('s1', { ...command(), name: `t${String(index)}` });
+    const over = await refusal(service.capture('s1', { ...command(), name: 'one-too-many' }));
+    release();
+    await first;
+
+    should(second.code).equal('conflict');
+    should(over.code).equal('capacity');
+    should(runner.specs.length).equal(COPY_MAX_LIVE_PER_SESSION);
+  });
+
+  it('should withhold stderr that holds a piece of the value, not just mask the whole of it', async () => {
+    const { service, runner } = world();
+    runner.outcome = { ...runner.outcome, exitCode: 1, stderr: `error: bad prefix ${TOKEN.slice(0, 9)}… try again` };
+
+    const error = await refusal(service.capture('s1', command()));
+
+    should(error.message).equal(
+      'The command exited with 1; nothing was copied. It said on stderr: [withheld: it held part of sealed:token]',
+    );
+    should(error.message).not.containEql(TOKEN.slice(0, 9));
+  });
+});
+
+describe('SecureCopyService and a short value', () => {
+  it('should mask a short value whole in stderr, and keep stderr that holds none of it', async () => {
+    const { service, runner } = world();
+    runner.outcome = { outcome: 'exited', exitCode: 0, stdout: 'ab12', stderr: 'printed ab12 once', truncated: false };
+
+    const { command: report } = await service.capture('s1', command());
+
+    should(report?.stderr).equal('printed [sealed:token] once');
+  });
+});
