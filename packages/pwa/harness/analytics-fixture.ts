@@ -91,7 +91,7 @@ const MODELS = [
   { model: 'claude-sonnet-5-5', harness: 'claude', rates: [3, 15, 0.3, 3.75] },
   { model: 'claude-haiku-5-5', harness: 'claude', rates: [1, 5, 0.1, 1.25] },
   { model: 'gpt-5.6-sol', harness: 'codex', rates: [1.25, 10, 0.125, 0] },
-  { model: 'gpt-6-astra', harness: 'codex', rates: null },
+  { model: 'acme-unpriced-1', harness: 'codex', rates: null },
 ] as const;
 
 /** A small deterministic generator, so every capture draws the same fleet. */
@@ -257,7 +257,7 @@ export const ANALYTICS_FIXTURE_ROWS: readonly AnalyticsRawSession[] = (() => {
         ? 'transcript_unresolved'
         : row.model === 'claude-sonnet-5-5' && at % 17 === 0
           ? 'transcript_unreadable'
-          : row.model === 'gpt-6-astra'
+          : row.model === 'acme-unpriced-1'
             ? 'unknown_pricing_model'
             : null;
     const cost = gap === null ? row.equivalentApiCostUsdMicros : null;
