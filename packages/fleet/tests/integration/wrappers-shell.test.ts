@@ -461,6 +461,10 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       'Never put a secret in chat',
       'terminal_ask_owner',
       'browser_ask_owner',
+      'browser_request_input',
+      'one field per input',
+      'Use plain for a username',
+      'create passkeys',
     ])
       should(AGENT_TOOLS_INSTRUCTION).containEql(phrase);
   });
