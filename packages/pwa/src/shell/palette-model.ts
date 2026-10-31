@@ -27,7 +27,7 @@ import type { DaemonId } from '../lib/daemon-connection.ts';
 // same folder name the group header shows it under.
 import { baseName } from '../lib/fleet-grouping.ts';
 import { daemonBoardCardPath, daemonSettingsPath } from '../lib/pages/routes.ts';
-import { workHitDescription, workHitKey } from '../lib/work-search.ts';
+import { workHitDescription, workHitKey, workProjectLabel } from '../lib/work-search.ts';
 import {
   type AppBarDestinationLike,
   type DestinationPaletteEntry,
@@ -267,6 +267,7 @@ export const paletteWorkRows = (
   filter: PaletteWorkFilter,
   daemon: DaemonId,
   sessions: readonly PaletteSession[],
+  projectNames?: ReadonlyMap<string, string>,
 ): { readonly cards: readonly PaletteWork[]; readonly agenda: readonly PaletteWork[] } => {
   const cards: PaletteWork[] = [];
   const agenda: PaletteWork[] = [];
@@ -282,7 +283,12 @@ export const paletteWorkRows = (
       description: workHitDescription(hit),
     };
     if (hit.kind === 'task') {
-      cards.push({ ...common, kindLabel: 'Card', context: hit.projectId, href: daemonBoardCardPath(daemon, hit.id) });
+      cards.push({
+        ...common,
+        kindLabel: 'Card',
+        context: workProjectLabel(hit.projectId, projectNames),
+        href: daemonBoardCardPath(daemon, hit.id),
+      });
     } else {
       agenda.push({
         ...common,
@@ -360,7 +366,11 @@ export interface PaletteInput {
   /** Injected so ranking is deterministic under test. */
   readonly now?: number;
   /** The daemon's work-search hits for this query; absent on a machine that cannot search. */
-  readonly work?: { readonly hits: readonly WorkHit[]; readonly filter: PaletteWorkFilter };
+  readonly work?: {
+    readonly hits: readonly WorkHit[];
+    readonly filter: PaletteWorkFilter;
+    readonly projectNames?: ReadonlyMap<string, string>;
+  };
 }
 
 export interface PaletteResults {
@@ -405,7 +415,7 @@ export const paletteResults = (input: PaletteInput): PaletteResults => {
   const { cards, agenda } =
     input.work === undefined || !input.query.trim()
       ? { cards: [], agenda: [] }
-      : paletteWorkRows(input.work.hits, input.work.filter, input.daemon, input.sessions);
+      : paletteWorkRows(input.work.hits, input.work.filter, input.daemon, input.sessions, input.work.projectNames);
 
   const results: PaletteResult[] = [
     ...destinations.map(entry => ({ kind: 'destination' as const, entry })),

@@ -5,12 +5,14 @@ import type { WorkSearchPort, WorkSearchRequest } from '../../src/lib/work-searc
 import { CommandPalette, type CommandPaletteProps } from '../../src/shell/command-palette.tsx';
 import { interact, type Mounted, mount, pressKey } from '../support/dom.ts';
 
+const RELAY_PROJECT = '6f1c2f0e-3a4b-4c55-9d1e-0a7b8c9d1e2f';
+
 const alpha = daemonId('alpha');
 
 const card = (id: string, patch: Partial<Extract<WorkHit, { kind: 'task' }>> = {}): WorkHit => ({
   kind: 'task',
   id,
-  projectId: 'ferretry',
+  projectId: RELAY_PROJECT,
   sessionId: 's1',
   title: `Card ${id}`,
   state: 'open',
@@ -135,6 +137,31 @@ describe('the finder over the daemon work search', () => {
     expect(rows.some(row => row.includes('Pick a relay region') && row.includes('which relay should we pick'))).toBe(
       true,
     );
+  });
+
+  it("names a card's project under it, says Unfiled for the unfiled board, and never shows an id", async () => {
+    const stranger = '11111111-2222-4333-8444-555555555555';
+    const { port } = fakePort([
+      card('F10', { title: 'Harden the relay', projectId: RELAY_PROJECT }),
+      card('F11', { title: 'Loose relay idea', projectId: 'unfiled' }),
+      card('F12', { title: 'Orphan relay card', projectId: stranger }),
+    ]);
+    await open({ workSearch: port, workProjectNames: new Map([[RELAY_PROJECT, 'Relay']]) });
+    await type('relay');
+    await settle();
+
+    const rows = optionText();
+    const named = rows.find(row => row.includes('Harden the relay'));
+    const unfiled = rows.find(row => row.includes('Loose relay idea'));
+    const unknown = rows.find(row => row.includes('Orphan relay card'));
+    expect(named).toContain('Relay');
+    expect(unfiled).toContain('Unfiled');
+    expect(unknown).toBeDefined();
+    for (const row of rows) {
+      expect(row).not.toContain(RELAY_PROJECT);
+      expect(row).not.toContain(stranger);
+      expect(row).not.toContain('unfiled');
+    }
   });
 
   it('opens a card on the board and an agenda item in its session', async () => {

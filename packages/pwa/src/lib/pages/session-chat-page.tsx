@@ -115,6 +115,7 @@ import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import type { DaemonAgendaClient } from '../agenda-client.ts';
 import type { AgendaLoadStatus } from '../agenda-store.ts';
 import { sessionAgendaSummary } from '../agenda-wire.ts';
+import { useWorkProjectNames } from '../../hooks/use-work-project-names.ts';
 import { useAgendaWire, useWorkSearchOffered } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
@@ -568,6 +569,7 @@ export function SessionChatPage({
   // The carrier router: the `@file` proof and the skills read both reach a relay-only daemon.
   const referenceFetch = useDaemonFetch();
   const workSearchOffered = useWorkSearchOffered(connection.daemonId);
+  const workProjectNames = useWorkProjectNames(connection, workSearchOffered === true);
   const workSearch = useMemo(
     () => workSearchPortFor(workSearchOffered, connection, referenceFetch),
     [workSearchOffered, connection, referenceFetch],
@@ -1674,7 +1676,9 @@ export function SessionChatPage({
               {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
               {...(composerCatalogs.attention === undefined ? {} : { autocompleteAgenda: composerCatalogs.attention })}
               {...(composerCatalogs.tasks === undefined ? {} : { autocompleteTasks: composerCatalogs.tasks })}
-              {...(workSearch === undefined ? {} : { autocompleteWorkSearch: workSearch })}
+              {...(workSearch === undefined
+                ? {}
+                : { autocompleteWorkSearch: workSearch, autocompleteProjectNames: workProjectNames })}
               {...(composerCatalogs.skills?.skills === undefined
                 ? {}
                 : { autocompleteSkills: composerCatalogs.skills })}

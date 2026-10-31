@@ -87,6 +87,18 @@ export const isWorkSearchWords = (text: string): boolean => {
   return trimmed.length >= WORK_SEARCH_MIN_LENGTH && !/^[a-z]?\d*$/i.test(trimmed);
 };
 
+/** A project id to its name, for the projects a machine listed. */
+export const workProjectNames = (
+  projects: readonly { readonly id: string; readonly name: string }[],
+): ReadonlyMap<string, string> => new Map(projects.map(project => [project.id, project.name] as const));
+
+/**
+ * The name a card's project goes by, or `''` to show nothing: a project id is a UUID no reader can use, so an
+ * id with no known name is left out rather than shown.
+ */
+export const workProjectLabel = (projectId: string, names: ReadonlyMap<string, string> | undefined): string =>
+  projectId === 'unfiled' ? 'Unfiled' : (names?.get(projectId) ?? '');
+
 /** The key an agenda hit is known by: its id is per session. */
 export const workHitKey = (hit: WorkHit): string =>
   hit.kind === 'agenda' ? `agenda:${hit.sessionId}:${hit.id}` : `task:${hit.id}`;

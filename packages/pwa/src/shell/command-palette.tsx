@@ -157,6 +157,8 @@ export interface CommandPaletteProps {
    * chips, exactly as before the search existed.
    */
   readonly workSearch?: WorkSearchPort;
+  /** Project id to name, so a card hit names its project instead of showing its id. */
+  readonly workProjectNames?: ReadonlyMap<string, string>;
 }
 
 /** How many hits one search asks for; a kind alone shows them all, both kinds share the first rows of each. */
@@ -176,6 +178,7 @@ export function CommandPalette({
   destinations = APP_BAR_DESTINATIONS,
   touchAffected = false,
   workSearch,
+  workProjectNames,
 }: CommandPaletteProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -211,8 +214,15 @@ export function CommandPalette({
       : null;
   const workRead = useWorkSearch(workSearch, daemon, workRequest);
   const work = useMemo(
-    () => (workSearch === undefined ? undefined : { hits: workRead.hits, filter: workFilter }),
-    [workSearch, workRead.hits, workFilter],
+    () =>
+      workSearch === undefined
+        ? undefined
+        : {
+            hits: workRead.hits,
+            filter: workFilter,
+            ...(workProjectNames === undefined ? {} : { projectNames: workProjectNames }),
+          },
+    [workSearch, workRead.hits, workFilter, workProjectNames],
   );
   const groups = useMemo(
     () => paletteResults({ query, daemon, sessions, destinations, commands, settings: matchedSettings, work }),

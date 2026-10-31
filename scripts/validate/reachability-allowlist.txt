@@ -275,6 +275,7 @@ packages/pwa/src/hooks/use-fine-pointer.ts # used by SessionChatPage via App.tsx
 packages/pwa/src/hooks/use-chat-tasks-url.ts # the Tasks tab expand/agents view kept in the chat address, used by App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-warden-daemon-scope.ts # the Warden page daemon filter choice kept per device, used by WardenRoute in App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/hooks/use-warden-statuses.ts # the combined Warden totals' reads, used by warden-totals-surface.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/hooks/use-work-project-names.ts # the project names a work-search card hit shows, used by App.tsx and SessionChatPage ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-chat-url.ts # the Tasks tab address grammar (tasks=full, agents=1), used by use-chat-tasks-url.ts ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/chat-search.ts # search within a conversation: used by components/chat-search.tsx ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
 

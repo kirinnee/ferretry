@@ -4,10 +4,12 @@ import { useWorkSearch, type WorkSearchAsk, type WorkSearchRead } from '../../sr
 import type { WorkSearchPort } from '../../src/lib/work-search.ts';
 import { interact, type Mounted, mount } from '../support/dom.ts';
 
+const RELAY_PROJECT = '6f1c2f0e-3a4b-4c55-9d1e-0a7b8c9d1e2f';
+
 const hit = (id: string): WorkHit => ({
   kind: 'task',
   id,
-  projectId: 'ferretry',
+  projectId: RELAY_PROJECT,
   sessionId: null,
   title: `Card ${id}`,
   state: 'open',

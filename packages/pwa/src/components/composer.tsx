@@ -153,6 +153,8 @@ export interface ComposerProps {
   readonly autocompleteTasks?: readonly ComposerReferenceTask[];
   /** The daemon's work search; absent on a machine that cannot search, which keeps both menus local-only. */
   readonly autocompleteWorkSearch?: WorkSearchPort;
+  /** Project id to name for the cards that search finds. */
+  readonly autocompleteProjectNames?: ReadonlyMap<string, string>;
   /** The session's already-read skills catalog, shared with reference proof. */
   readonly autocompleteSkills?: ComposerSkillsCatalog;
   /**
@@ -385,6 +387,7 @@ export function Composer({
   autocompleteAgenda,
   autocompleteTasks,
   autocompleteWorkSearch,
+  autocompleteProjectNames,
   autocompleteSkills,
   autocompleteReady,
   autocompleteFetcher,
@@ -494,6 +497,7 @@ export function Composer({
     skills: autocompleteSkills,
     ready: autocompleteReady,
     workSearch: autocompleteWorkSearch,
+    projectNames: autocompleteProjectNames,
   });
   hostRef.current = {
     sessions: autocompleteSessions,
@@ -502,6 +506,7 @@ export function Composer({
     skills: autocompleteSkills,
     ready: autocompleteReady,
     workSearch: autocompleteWorkSearch,
+    projectNames: autocompleteProjectNames,
   };
   /**
    * THE COMMIT HANDSHAKE, owned by `useComposerHostWarmup`.
@@ -534,6 +539,7 @@ export function Composer({
               getTasks: () => hostRef.current.tasks ?? EMPTY_TASKS,
               getIncludeAgentTasks: () => includeAgentTasksRef.current,
               getWorkSearch: () => hostRef.current.workSearch,
+              getProjectNames: () => hostRef.current.projectNames,
               waitForAgendaItems: hostWarmup,
               waitForTasks: hostWarmup,
               waitForSkills: hostWarmup,

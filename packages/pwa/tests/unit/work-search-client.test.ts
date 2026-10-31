@@ -6,8 +6,12 @@ import {
   fetchWorkSearch,
   isWorkSearchWords,
   workHitDescription,
+  workProjectLabel,
+  workProjectNames,
   workSearchPortFor,
 } from '../../src/lib/work-search.ts';
+
+const RELAY_PROJECT = '6f1c2f0e-3a4b-4c55-9d1e-0a7b8c9d1e2f';
 
 const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 
@@ -17,7 +21,7 @@ const json = (body: unknown, status = 200): Response =>
 const hit = (match: WorkHit['match']): WorkHit => ({
   kind: 'task',
   id: 'F1',
-  projectId: 'ferretry',
+  projectId: RELAY_PROJECT,
   sessionId: null,
   title: 'Relay handshake',
   state: 'open',
@@ -77,5 +81,27 @@ describe('the line a hit matched', () => {
     expect(workHitDescription(hit({ field: 'title', line: 'Relay handshake' }))).toBe('');
     expect(workHitDescription(hit({ field: 'id', line: 'F1' }))).toBe('');
     expect(workHitDescription(hit({ field: 'note', line: '   ' }))).toBe('');
+  });
+});
+
+describe('the project a card lives in', () => {
+  const names = workProjectNames([
+    { id: RELAY_PROJECT, name: 'Relay' },
+    { id: 'unfiled', name: 'Unfiled' },
+  ]);
+
+  it("is named by the board's project, never by its id", () => {
+    expect(workProjectLabel(RELAY_PROJECT, names)).toBe('Relay');
+  });
+
+  it('says Unfiled for the unfiled board even before any names have loaded', () => {
+    expect(workProjectLabel('unfiled', undefined)).toBe('Unfiled');
+    expect(workProjectLabel('unfiled', new Map())).toBe('Unfiled');
+  });
+
+  it('says nothing for a project it has no name for', () => {
+    const stranger = '11111111-2222-4333-8444-555555555555';
+    expect(workProjectLabel(stranger, names)).toBe('');
+    expect(workProjectLabel(RELAY_PROJECT, undefined)).toBe('');
   });
 });

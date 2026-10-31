@@ -38,11 +38,14 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 
 const daemon = daemonConnection({ daemonId: 'harness', baseUrl: 'https://harness.invalid', deviceId: 'd' });
 const at = '2026-10-30T09:40:00.000Z';
+const RELAY_PROJECT = '6f1c2f0e-3a4b-4c55-9d1e-0a7b8c9d1e2f';
+const PILOT_PROJECT = 'b2d9a7c4-58e1-4f36-8a0b-31c4d5e6f708';
+const projectNames = new Map([[RELAY_PROJECT, 'Relay'], [PILOT_PROJECT, 'Hosted pilot']]);
 const hits = [
-  { kind: 'task', id: 'F412', projectId: 'ferretry', sessionId: 's1', title: 'Harden the relay handshake', state: 'open', standing: 'Doing', updatedAt: at, match: { field: 'brief', line: 'the relay handshake drops when the phone sleeps' }, score: 9 },
-  { kind: 'task', id: 'F377', projectId: 'ferretry', sessionId: 's2', title: 'Pick a relay region', state: 'open', standing: 'To do', updatedAt: at, match: { field: 'note', line: 'frankfurt or virginia for the hosted relay' }, score: 7 },
-  { kind: 'task', id: 'F301', projectId: 'ferretry', sessionId: 's2', title: 'Relay directory advertisement', state: 'closed', standing: 'Shipped', updatedAt: at, match: { field: 'resolution', line: 'shipped the relay directory behind a flag' }, score: 5 },
-  { kind: 'task', id: 'F290', projectId: 'ferretry', sessionId: null, title: 'Self-host the relay on a spare box', state: 'dropped', standing: 'Dropped', updatedAt: at, match: { field: 'body', line: 'dropped: the hosted relay covers this' }, score: 3 },
+  { kind: 'task', id: 'F412', projectId: RELAY_PROJECT, sessionId: 's1', title: 'Harden the relay handshake', state: 'open', standing: 'Doing', updatedAt: at, match: { field: 'brief', line: 'the relay handshake drops when the phone sleeps' }, score: 9 },
+  { kind: 'task', id: 'F377', projectId: RELAY_PROJECT, sessionId: 's2', title: 'Pick a relay region', state: 'open', standing: 'To do', updatedAt: at, match: { field: 'note', line: 'frankfurt or virginia for the hosted relay' }, score: 7 },
+  { kind: 'task', id: 'F301', projectId: PILOT_PROJECT, sessionId: 's2', title: 'Relay directory advertisement', state: 'closed', standing: 'Shipped', updatedAt: at, match: { field: 'summary', line: 'shipped the relay directory behind a flag' }, score: 5 },
+  { kind: 'task', id: 'F290', projectId: 'unfiled', sessionId: null, title: 'Self-host the relay on a spare box', state: 'dropped', standing: 'Dropped', updatedAt: at, match: { field: 'ask', line: 'self-host the hosted relay on a spare box' }, score: 3 },
   { kind: 'agenda', id: 'A3', sessionId: 's1', title: 'Which relay region should we pick?', state: 'open', standing: 'open', updatedAt: at, match: { field: 'body', line: 'frankfurt is closer to most owners than virginia' }, score: 8 },
   { kind: 'agenda', id: 'A8', sessionId: 's1', title: 'Hosted or self-hosted relay for the pilot?', state: 'open', standing: 'snoozed', updatedAt: at, match: { field: 'body', line: 'the pilot owners asked for a relay they run themselves' }, score: 6 },
   { kind: 'agenda', id: 'A7', sessionId: 's2', title: 'Ship the relay behind a flag?', state: 'closed', standing: 'addressed', updatedAt: at, match: { field: 'resolution', line: 'yes, flagged until the daemon side lands' }, score: 4 },
@@ -50,7 +53,7 @@ const hits = [
 const port = {
   search: async (request) => {
     const found = hits.filter(hit => (request.kind === undefined || hit.kind === request.kind) && (request.open !== true || hit.state === 'open'));
-    return { hits: found, total: found.length, indexed: hits.length };
+    return { hits: found, total: found.length, indexed: { tasks: 4, agenda: 3 } };
   },
 };
 const params = new URLSearchParams(location.search);
@@ -65,6 +68,7 @@ createRoot(root).render(
         autocompleteFetcher={async () => Response.json({}, { status: 500 })}
         autocompleteAgenda={[{ id: 'A3', subject: 'Which relay region should we pick?', source: 'question' }]}
         autocompleteWorkSearch={port}
+        autocompleteProjectNames={projectNames}
         compact={params.get('compact') === '1'}
         daemon={daemon}
         sessionId="s1"
@@ -72,7 +76,7 @@ createRoot(root).render(
       />
     </div>
   ) : (
-    <CommandPalette open focusSignal={0} onClose={() => {}} daemon={daemon.daemonId} sessions={[]} destinations={[]} onNavigate={() => {}} workSearch={port} />
+    <CommandPalette open focusSignal={0} onClose={() => {}} daemon={daemon.daemonId} sessions={[]} destinations={[]} onNavigate={() => {}} workSearch={port} workProjectNames={projectNames} />
   ),
 );
 `;
@@ -124,6 +128,7 @@ type Scene = {
   readonly scene: 'palette' | 'picker';
   readonly draft: string;
   readonly chip?: string;
+  readonly kind?: 'attention' | 'task';
 };
 
 const SCENES: readonly Scene[] = [
@@ -131,7 +136,8 @@ const SCENES: readonly Scene[] = [
   { name: 'palette-cards', scene: 'palette', draft: 'relay', chip: 'Cards' },
   { name: 'palette-agenda', scene: 'palette', draft: 'relay', chip: 'Agenda' },
   { name: 'palette-open', scene: 'palette', draft: 'relay', chip: 'Open' },
-  { name: 'picker-agenda', scene: 'picker', draft: '@@@relay' },
+  { name: 'picker-agenda', scene: 'picker', draft: '@@@relay', kind: 'attention' },
+  { name: 'picker-cards', scene: 'picker', draft: '@@@@relay', kind: 'task' },
 ];
 
 const shotsDir = process.env.WORK_SEARCH_SHOTS ?? '/tmp/claude-1000/shots/work-search';
@@ -170,7 +176,10 @@ try {
             await field.waitFor({ state: 'visible' });
             await field.click();
             await page.keyboard.type(scene.draft);
-            await page.locator('[data-kind=attention]').nth(1).waitFor({ state: 'visible' });
+            await page
+              .locator(`[data-kind=${scene.kind ?? 'attention'}]`)
+              .nth(1)
+              .waitFor({ state: 'visible' });
           }
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${scene.name} at ${viewport.name}/${scheme} scrolls sideways by ${overflow}px`);

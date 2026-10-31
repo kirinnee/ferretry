@@ -26,7 +26,12 @@ import { browserFetch, type DaemonFetch, DaemonResponseError } from '../lib/runt
 import { sessionStatusLabel } from '../lib/session-screens.ts';
 import { describeSurfaceOwnership, type SessionSurface, sessionSurfaces } from '../lib/surface-references.ts';
 import { listSessionTerminals } from '../lib/web-terminals.ts';
-import { isWorkSearchWords, WORK_SEARCH_DEBOUNCE_MS, type WorkSearchPort } from '../lib/work-search.ts';
+import {
+  isWorkSearchWords,
+  WORK_SEARCH_DEBOUNCE_MS,
+  type WorkSearchPort,
+  workProjectLabel,
+} from '../lib/work-search.ts';
 import { rankSessions, recentSessions, type SessionEntry } from '../shell/palette-ranking.ts';
 import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 import {
@@ -139,6 +144,8 @@ export interface ComposerReferenceProviderOptions extends ComposerProviderScopeO
    * open on an id prefix (the reference grammar's own token shape), so they never carry words and never ask.
    */
   readonly getWorkSearch?: () => WorkSearchPort | undefined;
+  /** Project id to name for the cards the search finds; a card whose project is unnamed shows no project. */
+  readonly getProjectNames?: () => ReadonlyMap<string, string> | undefined;
 }
 
 /** Injected so a test can drive the surfaces family without a live daemon; the
@@ -762,6 +769,8 @@ const WORK_PICKER_LIMIT = 20;
 
 const noWorkSearch = (): WorkSearchPort | undefined => undefined;
 
+const noProjectNames = (): ReadonlyMap<string, string> | undefined => undefined;
+
 const sleepUnlessAborted = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     if (signal.aborted) {
@@ -783,13 +792,14 @@ const sleepUnlessAborted = (ms: number, signal: AbortSignal): Promise<void> =>
 const taskHitCandidate = (
   scope: DaemonSessionScope,
   hit: Extract<WorkHit, { kind: 'task' }>,
+  projectNames: ReadonlyMap<string, string> | undefined,
 ): ComposerAutocompleteCandidate => {
   const reference = formatReference({ kind: 'task', id: hit.id });
   return {
     id: scopedId('task', scope, hit.id),
     kind: 'task',
     label: reference,
-    detail: [hit.title, hit.projectId].join(' · '),
+    detail: [hit.title, workProjectLabel(hit.projectId, projectNames)].filter(part => part !== '').join(' · '),
     group: 'Tasks',
     badge: hit.standing,
     rankPriority: -1,
@@ -835,6 +845,7 @@ const withWorkHits = async (
   kind: WorkKind,
   scope: DaemonSessionScope,
   port: WorkSearchPort | undefined,
+  projectNames: ReadonlyMap<string, string> | undefined,
 ): Promise<ComposerProviderResult> => {
   if (port === undefined || !isWorkSearchWords(context.query)) return base;
   await sleepUnlessAborted(WORK_SEARCH_DEBOUNCE_MS, context.signal);
@@ -851,7 +862,7 @@ const withWorkHits = async (
   const found = hits.flatMap(hit => {
     if (hit.kind !== kind) return [];
     if (hit.kind === 'agenda') return hit.sessionId === scope.sessionId ? [agendaHitCandidate(scope, hit)] : [];
-    return [taskHitCandidate(scope, hit)];
+    return [taskHitCandidate(scope, hit, projectNames)];
   });
   const fresh = found.filter(candidate => !known.has(candidate.id));
   return fresh.length === 0 ? base : { ...base, candidates: [...base.candidates, ...fresh] };
@@ -1036,6 +1047,7 @@ export function createReferencesProvider({
   waitForTasks,
   getIncludeAgentTasks = neverAgentTasks,
   getWorkSearch = noWorkSearch,
+  getProjectNames = noProjectNames,
 }: ComposerReferenceProviderOptions): ComposerAutocompleteProvider {
   assertProviderScope(daemon, scope);
   const files = createFilesProvider({ daemon, scope, fetcher });
@@ -1076,6 +1088,7 @@ export function createReferencesProvider({
         getTasks(scope),
         getIncludeAgentTasks(),
         getWorkSearch(),
+        getProjectNames(),
         agentReferenceIdentityKey(scope.daemonId, sessions),
       ]);
     },
@@ -1094,7 +1107,14 @@ export function createReferencesProvider({
       if (tier === 1) return await files.candidates(context);
       const local = await warmed(tierWarmup(tier), context.signal, () => tierResult(tier, context.query));
       if (tier !== 3 && tier !== 4) return local;
-      return await withWorkHits(local, context, tier === 3 ? 'agenda' : 'task', scope, getWorkSearch());
+      return await withWorkHits(
+        local,
+        context,
+        tier === 3 ? 'agenda' : 'task',
+        scope,
+        getWorkSearch(),
+        getProjectNames(),
+      );
     },
   };
 }

@@ -179,6 +179,7 @@ import { useTheme } from './hooks/use-theme.ts';
 import { useToTestCards } from './hooks/use-to-test-cards.ts';
 import { useWardenDaemonScope } from './hooks/use-warden-daemon-scope.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
+import { useWorkProjectNames } from './hooks/use-work-project-names.ts';
 import { agendaClearPort } from './lib/agenda-clear-agents.ts';
 import { agendaTargetFromSearch } from './lib/agenda-inbox.ts';
 import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
@@ -2673,6 +2674,7 @@ export function AppShell() {
     () => (connection === undefined ? undefined : workSearchPortFor(finderOffered, connection, finderFetch)),
     [finderOffered, connection, finderFetch],
   );
+  const finderProjectNames = useWorkProjectNames(connection, palette.open && finderWorkSearch !== undefined);
   const openPalette = useCallback(
     () => setPalette(current => ({ open: true, focusSignal: current.focusSignal + 1 })),
     [],
@@ -2956,7 +2958,9 @@ export function AppShell() {
                     focusSignal={palette.focusSignal}
                     onClose={closePalette}
                     daemon={connection.daemonId}
-                    {...(finderWorkSearch === undefined ? {} : { workSearch: finderWorkSearch })}
+                    {...(finderWorkSearch === undefined
+                      ? {}
+                      : { workSearch: finderWorkSearch, workProjectNames: finderProjectNames })}
                     sessions={paletteSearch.sessions}
                     sessionsNote={paletteSearch.note}
                     onNavigate={navigate}
