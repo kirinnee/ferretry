@@ -238,7 +238,7 @@
   inset: -8px -2px;
   content: '';
 }
-:is(.fy-card__dismiss, .fy-card__version, .fy-card__option-pick, .fy-card__fold-title):focus-visible {
+:is(.fy-card__dismiss, .fy-card__version, .fy-card__option-pick):focus-visible {
   outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
   outline-offset: 2px;
 }
@@ -352,32 +352,16 @@
   list-style: none;
 }
 
-/* The sections the ferret added: each folds, with + / − on the right. */
-.fy-card__fold {
+/* The sections the ferret added: each always open, its label above its body. */
+.fy-card__section {
   border-top: var(--stroke, 1px) solid var(--border);
   padding-top: 9px;
 }
-.fy-card__fold-title {
-  display: flex;
-  justify-content: space-between;
-  cursor: pointer;
-  list-style: none;
-}
-.fy-card__fold-title::-webkit-details-marker {
-  display: none;
-}
-.fy-card__fold-title::after {
-  color: var(--muted);
-  content: '+';
-}
-.fy-card__fold[open] > .fy-card__fold-title::after {
-  content: '−';
-}
-.fy-card__fold-body {
+.fy-card__section-body {
   margin-top: 6px;
   min-width: 0;
 }
-.fy-card__fold-body .fy-attn-points {
+.fy-card__section-body .fy-attn-points {
   padding-left: 18px;
 }
 .fy-card__terms {

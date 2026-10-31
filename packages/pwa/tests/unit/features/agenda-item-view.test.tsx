@@ -202,9 +202,8 @@ describe('the question and its options', () => {
 
   test('says why it recommends the option in a section of its own, open', async () => {
     await draw(spend);
-    const why = one<HTMLDetailsElement>('details[data-agenda-section="recommendation"]');
-    expect(why.open).toBe(true);
-    expect(why.querySelector('summary')?.textContent).toBe('Why I recommend Pause');
+    const why = one('[data-agenda-section="recommendation"]');
+    expect(why.querySelector('h4')?.textContent).toBe('Why I recommend Pause');
     expect(why.textContent).toContain('It can never overspend.');
   });
 
@@ -344,12 +343,12 @@ describe('the version picker', () => {
 });
 
 describe('the sections the ferret added', () => {
-  test('draws only what the item carries: an item with premise and context alone has no folds', async () => {
+  test('draws only what the item carries: an item with premise and context alone has no sections', async () => {
     await draw(agendaItem('A3', { ask: choices('Yes', 'No'), premise: '- a', context: '- b' } as Partial<AgendaItem>));
-    expect(root().querySelectorAll('.fy-card__fold')).toHaveLength(0);
+    expect(root().querySelectorAll('.fy-card__section')).toHaveLength(0);
   });
 
-  test('folds what else the item carries — decided, still open, impact, links — each under its own name', async () => {
+  test('draws what else the item carries, open — decided, still open, impact, links — each under its own name', async () => {
     await draw(
       agendaItem('A7', {
         ask: { kind: 'permission' },
@@ -361,7 +360,7 @@ describe('the sections the ferret added', () => {
         recommendation: { decision: 'Allow it for a week', why: 'It is reversible.' },
       } as Partial<AgendaItem>),
     );
-    const titles = [...root().querySelectorAll('.fy-card__fold > summary')].map(summary => summary.textContent);
+    const titles = [...root().querySelectorAll('.fy-card__section > h4')].map(title => title.textContent);
     expect(titles).toEqual([
       'Why I recommend Allow it for a week',
       'Decided so far',
@@ -369,34 +368,30 @@ describe('the sections the ferret added', () => {
       'What it allows',
       'Links',
     ]);
-    expect(one('details[data-agenda-section="impact"]').textContent).toContain('Urgency: before Friday');
-    expect(one('details[data-agenda-section="recommendation"] .fy-card__decision').textContent).toBe(
-      'Allow it for a week',
-    );
-    expect(one<HTMLAnchorElement>('details[data-agenda-section="links"] a').href).toBe('https://example.test/pr/1');
+    expect(one('[data-agenda-section="impact"]').textContent).toContain('Urgency: before Friday');
+    expect(one('[data-agenda-section="recommendation"] .fy-card__decision').textContent).toBe('Allow it for a week');
+    expect(one<HTMLAnchorElement>('[data-agenda-section="links"] a').href).toBe('https://example.test/pr/1');
   });
 
-  test('leads a to-do with its steps, open and tickable', async () => {
+  test('leads a to-do with its steps, tickable', async () => {
     const spy = await draw(
       agendaItem('A4', { kind: 'task', ask: { kind: 'task' }, steps: ['Open it', 'Rotate it'] } as Partial<AgendaItem>),
     );
-    const steps = one<HTMLDetailsElement>('details[data-agenda-section="steps"]');
-    expect(steps.open).toBe(true);
+    expect(root().querySelector('details')).toBeNull();
     await interact(() => one<HTMLInputElement>('[data-agenda-tick="1"]').click());
     expect(spy.progress).toEqual([[1, true]]);
   });
 
-  test('draws a review’s body as its Reasoning, open, and any other body as More detail, folded', async () => {
+  test('draws a review’s body as its Reasoning and any other body as More detail, both open', async () => {
     await draw(
       agendaItem('A5', { kind: 'review', ask: { kind: 'answer-review' }, body: 'Because.' } as Partial<AgendaItem>),
     );
-    const reasoning = one<HTMLDetailsElement>('details[data-agenda-section="reasoning"]');
-    expect([reasoning.open, reasoning.querySelector('summary')?.textContent]).toEqual([true, 'Reasoning']);
+    expect(one('[data-agenda-section="reasoning"] h4').textContent).toBe('Reasoning');
     await view?.unmount();
     view = null;
     await draw(agendaItem('A6', { ask: choices('Yes', 'No'), body: 'More.' } as Partial<AgendaItem>));
-    const more = one<HTMLDetailsElement>('details[data-agenda-section="more"]');
-    expect([more.open, more.querySelector('summary')?.textContent]).toEqual([false, 'More detail']);
+    expect(one('[data-agenda-section="more"] h4').textContent).toBe('More detail');
+    expect(root().querySelector('details')).toBeNull();
   });
 });
 
@@ -414,9 +409,9 @@ describe('terms', () => {
     expect(root().querySelector('[data-agenda-term-tip]')).toBeNull();
   });
 
-  test('are listed in a folding Terms section', async () => {
+  test('are listed in an open Terms section', async () => {
     await draw(richItem);
-    const terms = one('details[data-agenda-section="terms"]');
+    const terms = one('[data-agenda-section="terms"]');
     expect([...terms.querySelectorAll('dt')].map(term => term.textContent)).toEqual(['WAL', 'ACID']);
   });
 });
