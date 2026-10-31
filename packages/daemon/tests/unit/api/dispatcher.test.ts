@@ -309,8 +309,8 @@ describe('ApiDispatcher authorization', () => {
     should(hostAdmin.status).equal(200);
   });
 
-  it('should honour a query token only for a loopback peer', async () => {
-    // A token in a URL is logged by every proxy on the path.
+  it('should honour no query token, even for a loopback peer', async () => {
+    // A token in a URL is logged by every proxy on the path and lands in argv and shell history.
     // Arrange
     const dispatcher = dispatcherFor(echo('/v1/events', 'operator'));
 
@@ -323,7 +323,7 @@ describe('ApiDispatcher authorization', () => {
     );
 
     // Assert
-    should(local.status).equal(200);
+    should(local.status).equal(401);
     should(remote.status).equal(401);
   });
 });

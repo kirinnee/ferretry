@@ -41,6 +41,7 @@ import {
 } from '../../../src/lib/session/events/index.ts';
 import type { StoredSessionEvent } from '../../../src/lib/session/reads/index.ts';
 import { daemonVersion } from '../../../src/lib/version.ts';
+import { bearerSocket } from '../../support/bearer-socket.ts';
 import { waitFor } from '../support/wait-for.ts';
 
 /**
@@ -729,7 +730,7 @@ function connect(url: string): {
   untilFrames(count: number): Promise<void>;
   untilClosed(): Promise<void>;
 } {
-  const socket = new WebSocket(url);
+  const socket = bearerSocket(url, CREDENTIALS.admin);
   socket.binaryType = 'arraybuffer';
   const frames: string[] = [];
   const closes: Array<readonly [number, string]> = [];
@@ -843,10 +844,35 @@ describe('BunApiServer over a live socket', () => {
     return handle;
   }
 
-  /** The socket URL, carrying the token the way a browser must: a `WebSocket` cannot set headers. */
+  /** The socket URL. It carries no credential: `connect` presents the token as a header. */
   function streamUrl(handle: ApiServerHandle): string {
-    return `${handle.url.replace('http://', 'ws://')}/v1/stream?token=${CREDENTIALS.admin}`;
+    return `${handle.url.replace('http://', 'ws://')}/v1/stream`;
   }
+
+  it('should refuse a token in the URL even from a loopback peer', async () => {
+    // A token in a URL reaches argv, shell history and every proxy's access log, so the daemon reads
+    // none from there: the same upgrade that the header authenticates is a 401 with only a query.
+    // Arrange
+    const handle = await listen(recordingSocket({ record: recorded() }));
+    const upgradeHeaders = {
+      upgrade: 'websocket',
+      connection: 'upgrade',
+      'sec-websocket-version': '13',
+      'sec-websocket-key': 'AAAAAAAAAAAAAAAAAAAAAA==',
+    };
+
+    // Act
+    const queried = await fetch(`${streamUrl(handle).replace('ws://', 'http://')}?token=${CREDENTIALS.admin}`, {
+      headers: upgradeHeaders,
+    });
+    const bearer = await fetch(streamUrl(handle).replace('ws://', 'http://'), {
+      headers: { ...upgradeHeaders, authorization: `Bearer ${CREDENTIALS.admin}` },
+    });
+
+    // Assert
+    should(queried.status).equal(401);
+    should(bearer.status).equal(101);
+  });
 
   it('should carry the handler‘s bytes out and the client‘s frames in', async () => {
     // Arrange
@@ -861,7 +887,7 @@ describe('BunApiServer over a live socket', () => {
     viewer.send(Uint8Array.of(13, 10));
     await waitFor(() => record.frames.length >= 2, 'both frames at the stream handler');
 
-    // Assert: the loopback query-parameter token authenticated it, and both frame kinds arrived
+    // Assert: the bearer header authenticated it, and both frame kinds arrived
     // intact and in order.
     should(record.opened).equal(1);
     should(viewer.frames).deepEqual(['hello']);
@@ -1073,7 +1099,7 @@ describe('BunApiServer over a live socket', () => {
     // that runs `closeSockets` and then `stop` would hang the daemon forever.
     // Arrange
     const handle = await new BunApiServer().listen(surfaceOf([], [recordingSocket()]), BIND);
-    const viewer = connect(`${handle.url.replace('http://', 'ws://')}/v1/stream?token=${CREDENTIALS.admin}`);
+    const viewer = connect(streamUrl(handle));
     await viewer.opened;
     await viewer.untilFrames(1);
 
@@ -1097,7 +1123,7 @@ describe('toApiRequest', () => {
   });
 
   it('should treat a remote or unknown peer as not loopback', () => {
-    // An unknown peer must never be trusted with the query-parameter token path.
+    // An unknown peer must never be taken for a loopback one.
     // Arrange
     const source = new Request('http://127.0.0.1/healthz');
 

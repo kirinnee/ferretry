@@ -277,10 +277,10 @@ describe('the hosted tunnel carrier, with every production adapter', () => {
     should(preflight.headers.get('access-control-allow-origin')).be.null();
   });
 
-  it('should refuse a query-string token on the tunnel listener that a loopback listener honours', async () => {
+  it('should honour a query-string token on neither a loopback listener nor the tunnel listener', async () => {
     // A route that wants a credential, served once on an ordinary loopback listener and once with the
-    // tunnel's rule. The same `?token=` that authenticates from loopback must not authenticate here:
-    // a token in a URL is honoured only from a loopback ARRIVAL, and nothing on this listener is one.
+    // tunnel's rule. A token in a URL reaches argv and every access log, so no listener reads one: the
+    // same `?token=` is refused on both.
     // Arrange
     const arrivals: ApiRequest[] = [];
     const surface = tunnelListenerSurface({
@@ -310,9 +310,9 @@ describe('the hosted tunnel carrier, with every production adapter', () => {
     const fromTunnel = await upgrade(`ws://127.0.0.1:${String(tunnel.port)}${path}`);
 
     // Assert
-    should(fromLoopback).equal('open');
+    should(fromLoopback).equal(401);
     should(fromTunnel).equal(401);
-    should(arrivals.map(arrival => arrival.loopback)).deepEqual([true]);
+    should(arrivals).deepEqual([]);
   });
 
   it('should withdraw the tunnel while cloudflared is down, and keep restarting it', async () => {

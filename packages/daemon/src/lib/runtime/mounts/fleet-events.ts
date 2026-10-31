@@ -28,7 +28,7 @@ function isConfigTopic(context: RouteContext): boolean {
   if (topic === undefined) return false;
   if (topic !== CONFIG_CHANGE_TOPIC) throw new ApiError(400, `unknown event-stream topic "${topic}"`, 'invalid_query');
   for (const name of context.request.query.keys()) {
-    if (name !== 'topic' && name !== 'token' && name !== 'ticket')
+    if (name !== 'topic' && name !== 'ticket')
       throw new ApiError(400, `the configuration stream takes no "${name}" parameter`, 'invalid_query');
   }
   return true;
@@ -53,16 +53,14 @@ function fleetTail(raw: string): number {
 
 async function scope(context: RouteContext, sessions: SessionDirectorySubsystem): Promise<FleetEventStreamScope> {
   for (const name of context.request.query.keys()) {
-    // `token` and `ticket` are both consumed by the upgrade's authentication before the route is
-    // reached — the first from a loopback peer, the second from a browser that cannot send a header
-    // at all. Rejecting either here would refuse the only credential such a caller can present.
+    // `ticket` is tolerated as a leftover. A `token` is not: no credential is read from a URL, so one
+    // here is an unknown parameter like any other.
     if (
       name !== 'after' &&
       name !== 'sessionId' &&
       name !== 'live' &&
       name !== 'transcript' &&
       name !== 'tail' &&
-      name !== 'token' &&
       name !== 'ticket'
     )
       throw new ApiError(400, `unknown event-stream query parameter "${name}"`, 'invalid_query');
