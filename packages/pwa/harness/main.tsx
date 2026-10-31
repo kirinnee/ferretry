@@ -9,8 +9,8 @@
  */
 
 import type {
-  AnalyticsResponse,
   AgendaSnapshot,
+  AnalyticsResponse,
   BoardTaskView,
   BrowserStatus,
   CapabilityGrant,
@@ -26,7 +26,7 @@ import type {
   GrantRefusal,
   GrantsView,
   HarnessUpdateStartRequest,
-  HarnessUpdateView,
+  HarnessUpdateView,LoginEntryList,
   PairedDevicesView,
   PairingCodeMintResponse,
   PasskeysView,
@@ -47,20 +47,6 @@ import {
   SESSION_FILE_INDEX_VERSION,
   secretReference,
 } from '@ferretry/protocol';
-import {
-  boardAnswer,
-  card as boardCard,
-  fakeEnvironment as fakeBoardEnvironment,
-  fakePort as fakeBoardPort,
-  COUNTS as BOARD_COUNTS,
-  laneSetFor,
-  PROJECT as BOARD_PROJECT,
-} from '../tests/unit/board-support.ts';
-import { BoardPage } from '../src/features/board/board-page.tsx';
-import { DaemonAgendaStore } from '../src/lib/agenda-store.ts';
-import { DaemonBoardStore } from '../src/lib/board-store.ts';
-import { daemonBoardPort } from '../src/lib/board-client.ts';
-import { AgendaChatHarness } from './agenda-chat.tsx';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { type ConnectionChoice, chooseConnection } from '@ferretry/relay';
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -111,6 +97,7 @@ import { SessionsPage } from '../src/components/sessions-page.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
 import { ThinkingIndicator } from '../src/components/thinking-indicator.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
+import { AgendaBoard } from '../src/features/agenda/agenda-board.tsx';
 import type { AnalyticsRequest } from '../src/features/analytics/analytics-custom-query.tsx';
 import { AnalyticsMetricChart } from '../src/features/analytics/analytics-metric-chart.tsx';
 import {
@@ -129,7 +116,7 @@ import {
   type SessionAnalyticsRequest,
   SessionAnalyticsSurface,
 } from '../src/features/analytics/session-analytics-surface.tsx';
-import { AgendaBoard } from '../src/features/agenda/agenda-board.tsx';
+import { BoardPage } from '../src/features/board/board-page.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { InAppBrowserSurface } from '../src/features/browser/in-app-browser.tsx';
 import type { BrowserDestination } from '../src/features/browser/in-app-browser-model.ts';
@@ -222,8 +209,11 @@ import type { RemoteBrowserScheduler, RemoteBrowserTransport } from '../src/hook
 import type { WardenStatusReader } from '../src/hooks/use-warden-status.ts';
 import type { PickerAccount, PickerAccountHealth } from '../src/lib/account-picker-catalog.ts';
 import { type DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../src/lib/account-picker-store.ts';
-import { DaemonHttpTransport, daemonApiClient } from '../src/lib/api-client.ts';
 import { DaemonAgendaClient } from '../src/lib/agenda-client.ts';
+import { DaemonAgendaStore } from '../src/lib/agenda-store.ts';
+import { DaemonHttpTransport, daemonApiClient } from '../src/lib/api-client.ts';
+import { daemonBoardPort } from '../src/lib/board-client.ts';
+import { DaemonBoardStore } from '../src/lib/board-store.ts';
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
 import { type ChatWidthPreference, type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection } from '../src/lib/daemon-connection.ts';
@@ -300,7 +290,17 @@ import {
 import { SidePaneTabs } from '../src/shell/side-pane-tabs.tsx';
 import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
+import {
+  COUNTS as BOARD_COUNTS,
+  PROJECT as BOARD_PROJECT,
+  boardAnswer,
+  card as boardCard,
+  fakeEnvironment as fakeBoardEnvironment,
+  fakePort as fakeBoardPort,
+  laneSetFor,
+} from '../tests/unit/board-support.ts';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
+import { AgendaChatHarness } from './agenda-chat.tsx';
 import {
   ANALYTICS_FIXTURE_MACHINES,
   ANALYTICS_FIXTURE_NOW,
@@ -1810,6 +1810,31 @@ const HARNESS_DOCTOR: DoctorReport = {
  * no route that returns one, so there is nothing for a harness to invent. What a review is looking
  * at is a name, an instant, a mask, and a configured reference that does not resolve.
  */
+const SAVED_LOGINS_READY: LoginEntryList = {
+  v: 1,
+  health: 'ready',
+  entries: [
+    {
+      id: 'GITHUB_KIRINNEE',
+      label: 'GitHub (kirinnee)',
+      match: ['github.com'],
+      username: 'kirinnee',
+      fields: { password: true, totp: false },
+      createdAt: '2026-10-30T09:00:00.000Z',
+      updatedAt: '2026-10-30T09:00:00.000Z',
+    },
+    {
+      id: 'SUDO_KIRIN_BOX',
+      label: 'sudo on kirin-box',
+      match: ['sudo@kirin-box'],
+      fields: { password: true, totp: true },
+      totp: { algorithm: 'SHA1', digits: 6, period: 30 },
+      createdAt: '2026-10-30T09:00:00.000Z',
+      updatedAt: '2026-10-30T09:00:00.000Z',
+    },
+  ],
+};
+
 const SECRETS_READY: SecretList = {
   v: SECRET_SCHEMA_VERSION,
   health: 'ready',
@@ -2017,10 +2042,13 @@ const HARNESS_UNLOCK_GATE = new StepUpGate({
 });
 if (window.location.search === '?unlock-prompt') void HARNESS_UNLOCK_GATE.require(daemon);
 
-/** The secret store's client: answers the one list the panel reads, and no write. */
+/** The secret store's client: answers the two lists the panel reads (secrets and saved logins), and no write. */
 const HARNESS_SECRET_CLIENT: SecretClientFactory = async connection => {
   if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
-  return { request: (async () => SECRETS_READY) as SecretClient['request'] };
+  return {
+    request: (async (path: string) =>
+      path === '/v1/secrets/logins' ? SAVED_LOGINS_READY : SECRETS_READY) as SecretClient['request'],
+  };
 };
 
 const HARNESS_PASSKEY_CLIENT: PasskeyClientFactory = async connection => {
@@ -2876,6 +2904,8 @@ const HARNESS_SEARCH_SESSION_IDS: readonly string[] = ['harness-session', HARNES
 
 const HARNESS_DAEMON_READS: Readonly<Record<string, unknown>> = {
   '/v1/secrets': SECRETS_READY,
+  // Saved logins: one GitHub login with a username, and sudo on this machine with a 2FA seed; never a value.
+  '/v1/secrets/logins': SAVED_LOGINS_READY,
   // The session workspace's "This folder" rail: one open signal and one answered, and its skills.
   '/v1/sessions/harness-workspace/attention': {
     v: 1,
