@@ -116,7 +116,15 @@ function fixture(
       push,
       serial: new KeyedSerialExecutor(),
       clock: { now: options.now ?? (() => AT) },
-      ...(options.warnings === undefined ? {} : { diagnostics: { warn: message => options.warnings?.push(message) } }),
+      ...(options.warnings === undefined
+        ? {}
+        : {
+            diagnostics: {
+              failed: (key: string, reason: string) => options.warnings?.push(`failed ${key}: ${reason}`),
+              made: (key: string, result: PushDeliveryResult) =>
+                options.warnings?.push(`made ${key}: ${result.delivered}/${result.failed}`),
+            },
+          }),
       ...(options.subjectOf === undefined ? {} : { subjectOf: options.subjectOf }),
     }),
   };
@@ -310,7 +318,7 @@ describe('NotificationService containment', () => {
     should(outcomeFailure.push.calls).equal(1);
   });
 
-  it('should say, through its diagnostics, a push it could not make or deliver', async () => {
+  it('should tell its diagnostics each push it made and each it could not make or deliver', async () => {
     // Arrange
     const unreadableWarnings: string[] = [];
     const unreadable = fixture({ warnings: unreadableWarnings });
@@ -320,14 +328,20 @@ describe('NotificationService containment', () => {
     undelivered.push.notifyHook = async () => {
       throw new Error('push failed');
     };
+    const madeWarnings: string[] = [];
+    const made = fixture({ warnings: madeWarnings });
 
     // Act
     await unreadable.service.stopped(SESSION, AT, snapshot);
     await undelivered.service.stopped(SESSION, AT, snapshot);
+    await made.service.stopped(SESSION, AT, snapshot);
+    await made.service.stopped(SESSION, AT, snapshot);
 
     // Assert
-    should(unreadableWarnings).eql([`push agenda:${SESSION}:stopped:${AT} was not made — ledger cannot be read`]);
-    should(undeliveredWarnings).eql([`push agenda:${SESSION}:stopped:${AT} was not delivered — push failed`]);
+    const key = `agenda:${SESSION}:stopped:${AT}`;
+    should(unreadableWarnings).eql([`failed ${key}: ledger cannot be read`]);
+    should(undeliveredWarnings).eql([`failed ${key}: push failed`]);
+    should(madeWarnings).eql([`made ${key}: 2/0`]);
   });
 
   it('should stay total when its diagnostics throw', async () => {
@@ -341,7 +355,10 @@ describe('NotificationService containment', () => {
       serial: new KeyedSerialExecutor(),
       clock: { now: () => AT },
       diagnostics: {
-        warn: () => {
+        failed: () => {
+          throw new Error('stderr closed');
+        },
+        made: () => {
           throw new Error('stderr closed');
         },
       },
@@ -349,6 +366,10 @@ describe('NotificationService containment', () => {
 
     // Act / Assert
     await should(service.stopped(SESSION, AT, snapshot)).be.fulfilled();
+    world.ledger.failFind = false;
+    await should(service.stopped(SESSION, AT, snapshot)).be.fulfilled();
+    should(world.push.calls).equal(1);
+    should(world.ledger.records.map(record => record.phase)).eql(['requested', 'outcome']);
   });
 });
 

@@ -63,7 +63,13 @@ async function fixture(label: string) {
   const home = await tempDirectory(label);
   const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
   const files = new StateFileSystem(paths);
-  return { paths, files, ledger: new FileNotificationDeliveryLedger(paths, files) };
+  const warnings: string[] = [];
+  return {
+    paths,
+    files,
+    warnings,
+    ledger: new FileNotificationDeliveryLedger(paths, files, { warn: message => warnings.push(message) }),
+  };
 }
 
 async function writeLines(
@@ -254,26 +260,86 @@ describe('FileNotificationDeliveryLedger', () => {
     should(await world.ledger.find('direct:req-1')).be.undefined();
   });
 
-  it('should fail closed for every complete malformed or phase-inconsistent ledger', async () => {
+  it('should skip and count every malformed or out-of-phase line, and still read every other', async () => {
     // Arrange
     const validRequest = requested() as Record<string, unknown>;
     const validOutcome = outcome() as Record<string, unknown>;
-    const cases: readonly (readonly (string | Record<string, unknown>)[])[] = [
-      ['not json', validRequest],
-      [validRequest, 'not json'],
-      [validRequest, validRequest],
-      [validRequest, validOutcome, validOutcome],
-      [validOutcome],
-      [{ ...validRequest, v: 2 }],
-      [{ ...validRequest, phase: 'settled' }],
+    const cases: readonly {
+      readonly lines: readonly (string | Record<string, unknown>)[];
+      readonly delivered: boolean;
+      readonly reason: string;
+    }[] = [
+      { lines: ['not json', validRequest], delivered: false, reason: 'line 1, malformed JSON' },
+      { lines: [validRequest, 'not json'], delivered: false, reason: 'line 2, malformed JSON' },
+      { lines: [validRequest, validRequest], delivered: false, reason: 'line 2, a second request' },
+      { lines: [validRequest, validOutcome, validOutcome], delivered: true, reason: 'line 3, a second outcome' },
+      { lines: [validOutcome, validRequest], delivered: false, reason: 'line 1, an outcome before its request' },
+      { lines: [{ ...validRequest, v: 2 }, validRequest], delivered: false, reason: 'line 1, not a phase record' },
+      { lines: [{ ...validRequest, phase: 'settled' }, validRequest], delivered: false, reason: 'line 1, not a phase' },
     ];
 
     // Act + Assert
-    for (const [index, lines] of cases.entries()) {
+    for (const [index, { lines, delivered, reason }] of cases.entries()) {
       const world = await fixture(`notification-ledger-corrupt-${index}`);
       await writeLines(world, lines);
-      await should(world.ledger.find('direct:req-1')).be.rejected();
+      const found = await world.ledger.find('direct:req-1');
+      should(found?.requested).containDeep({ key: 'direct:req-1', phase: 'requested' });
+      should(found?.outcome !== undefined).equal(delivered);
+      should(world.warnings).have.length(1);
+      should(world.warnings[0]).containEql('1 unreadable line skipped').and.containEql(reason);
     }
+  });
+
+  it('should say the skipped count only when it changes, and say when the ledger reads cleanly again', async () => {
+    // Arrange
+    const world = await fixture('notification-ledger-skip-told');
+    await writeLines(world, ['not json', requested()]);
+
+    // Act
+    await world.ledger.find('direct:req-1');
+    await world.ledger.find('direct:req-1');
+    await Bun.write(world.ledger.path, `not json\nnot json either\n${JSON.stringify(requested())}\n`);
+    await world.ledger.find('direct:req-1');
+    await writeLines(world, [requested()]);
+    await world.ledger.find('direct:req-1');
+
+    // Assert
+    should(world.warnings).have.length(3);
+    should(world.warnings[0]).containEql('1 unreadable line skipped (first: line 1, malformed JSON)');
+    should(world.warnings[1]).containEql('2 unreadable lines skipped');
+    should(world.warnings[2]).containEql('reads cleanly again');
+  });
+
+  it('should inspect a ledger: the lines it skips and its newest outcome', async () => {
+    // Arrange
+    const world = await fixture('notification-ledger-inspect');
+    const empty = await world.ledger.inspect();
+    await writeLines(world, ['not json', requested(), outcome(), requested('direct:req-2')]);
+
+    // Act
+    const health = await world.ledger.inspect();
+
+    // Assert
+    should(empty).eql({ readable: true, skipped: 0 });
+    should(health).containDeep({ readable: true, skipped: 1, latestOutcome: { key: 'direct:req-1', delivered: 1 } });
+  });
+
+  it('should inspect a ledger it cannot read as unreadable, with the reason', async () => {
+    // Arrange
+    const world = await fixture('notification-ledger-inspect-unreadable');
+    const ledger = new FileNotificationDeliveryLedger(world.paths, {
+      readText: async () => {
+        throw new Error('permission denied');
+      },
+      appendLineDurable: async (path, line) => await world.files.appendLineDurable(path, line),
+    });
+
+    // Act
+    const health = await ledger.inspect();
+
+    // Assert
+    should(health).eql({ readable: false, reason: 'permission denied' });
+    await should(ledger.find('direct:req-1')).be.rejectedWith('permission denied');
   });
 
   it('should accept other valid keys and independently merge interleaved phases', async () => {
