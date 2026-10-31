@@ -4,6 +4,7 @@ import {
   boardReplyMessage,
   conversationTurn,
   discussMessage,
+  isQuietAcknowledgement,
   needsInfoMessage,
   sessionAgendaSummary,
 } from './conversation.ts';
@@ -99,7 +100,7 @@ export class SessionAgendaProjection implements AgendaChangeObserver {
  * Tells a ferret the owner's answer to an item IT raised, as an ordinary message naming the item.
  *
  * Every closing the owner makes on the board of an agent-raised item is told — an answer, a done or a
- * dismiss (`boardReplyMessage`) — and so is a request for more information or to discuss it, which leave
+ * dismiss (`boardReplyMessage`), except a bare "Got it" on an info item (`isQuietAcknowledgement`) — and so is a request for more information or to discuss it, which leave
  * the item open. Nothing else is: an answer given in the conversation already reached
  * the ferret in the owner's words, the ferret's own `done` needs no echo, and the warden's or a
  * source's reconciliation is not an answer. Each goes to the ferret's outbox (`AgendaReplyBatcher`), which
@@ -131,6 +132,7 @@ export class AgendaReplyDelivery implements AgendaChangeObserver {
     }
     if (change.via !== 'board' || change.actor.kind !== 'human' || addressed === undefined) return;
     if (addressed.raisedBy !== 'agent' || addressed.raisedBySession !== sessionId) return;
+    if (isQuietAcknowledgement(addressed)) return;
     await this.replies.add(sessionId, addressed.id, boardReplyMessage(addressed));
   }
 }

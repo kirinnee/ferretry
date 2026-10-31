@@ -8,6 +8,7 @@ import {
   agendaDismissedMessage,
   agendaDoneMessage,
   agendaNeedsInfoMessage,
+  agendaCardKind,
   agendaChatReply,
   agendaTitle,
   referencedAgendaIds,
@@ -65,9 +66,24 @@ export function responseWords(response: AgendaResponse): string {
 }
 
 /**
+ * Whether the owner's closing of an item is only "Got it": an `info` item marked done with no words. Nothing
+ * was decided and nothing was said, so telling the ferret would pay for a turn to read an acknowledgement; the
+ * item is simply resolved on its board, which the ferret reads next time it lists it. Anything the owner
+ * wrote, a dismissal, or any other kind of item is still told.
+ */
+export function isQuietAcknowledgement(item: ResolvedAgendaItem): boolean {
+  return (
+    agendaCardKind(item) === 'info' &&
+    item.disposition === 'done' &&
+    item.response === undefined &&
+    (item.resolutionNote?.trim() ?? '') === ''
+  );
+}
+
+/**
  * The message a ferret receives when the owner closed one of ITS items on the board.
  *
- * EVERY CLOSING IS TOLD, the bare ones included. A ferret that asked and is told nothing waits on an
+ * EVERY CLOSING IS TOLD, the bare ones included (but for a bare "Got it" on an info item, `isQuietAcknowledgement`). A ferret that asked and is told nothing waits on an
  * item the owner has already settled: the board resolved, the panel cleared, and the ferret's own chat
  * never said so (the live defect this replaced kept a bare done or dismiss silent, to spare a finished
  * ferret one turn). An answer carries the owner's words; a done or a dismiss says which it was, with

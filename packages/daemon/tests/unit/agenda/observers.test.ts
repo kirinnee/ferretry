@@ -266,6 +266,87 @@ describe('Agenda board observers', () => {
     ]);
   });
 
+  describe('an info item the owner closes', () => {
+    const INFO = {
+      source: 'agent-raised' as const,
+      sourceRef: null,
+      subject: 'Deploy finished',
+      why: 'The release went out.',
+      howToResolve: 'Read it.',
+      kind: 'info' as const,
+    };
+
+    async function raised(): Promise<{ agenda: AgendaService; changes: RecordingChanges }> {
+      const changes = new RecordingChanges();
+      const agenda = service(new MemoryRepository(), changes);
+      should((await agenda.raise(SESSION, INFO, AGENT)).ok).be.true();
+      return { agenda, changes };
+    }
+
+    async function told(changes: RecordingChanges): Promise<RecordingMessenger> {
+      const messenger = new RecordingMessenger();
+      const delivery = new AgendaReplyDelivery(messenger, 'fy');
+      for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
+      return messenger;
+    }
+
+    it('should resolve a bare Got it quietly: on the board, told to no one', async () => {
+      // Arrange
+      const { agenda, changes } = await raised();
+
+      // Act
+      const done = await agenda.resolve(SESSION, 'A1', HUMAN);
+      const messenger = await told(changes);
+
+      // Assert
+      should(done.ok).be.true();
+      const listed = await agenda.list(SESSION);
+      should(listed.ok ? listed.value.resolved.map(each => each.id) : []).deepEqual(['A1']);
+      should(messenger.sent).deepEqual([]);
+    });
+
+    it('should still tell the ferret words the owner typed with it', async () => {
+      // Arrange
+      const { agenda, changes } = await raised();
+
+      // Act
+      await agenda.resolve(SESSION, 'A1', HUMAN, 'thanks, but rerun the smoke test');
+      const messenger = await told(changes);
+
+      // Assert
+      should(messenger.sent.map(each => each.id)).deepEqual(['A1']);
+      should(messenger.sent[0]?.message).containEql('thanks, but rerun the smoke test');
+    });
+
+    it('should still tell the ferret a dismissal', async () => {
+      // Arrange
+      const { agenda, changes } = await raised();
+
+      // Act
+      await agenda.dismiss(SESSION, 'A1', HUMAN);
+      const messenger = await told(changes);
+
+      // Assert
+      should(messenger.sent.map(each => each.id)).deepEqual(['A1']);
+    });
+  });
+
+  it('should still tell a ferret a bare done on any other kind of item', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const agenda = service(new MemoryRepository(), changes);
+    await agenda.raise(SESSION, { ...ASK, kind: 'task', ask: { kind: 'task' } }, AGENT);
+    const messenger = new RecordingMessenger();
+    const delivery = new AgendaReplyDelivery(messenger, 'fy');
+
+    // Act
+    await agenda.resolve(SESSION, 'A1', HUMAN);
+    for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
+
+    // Assert
+    should(messenger.sent.map(each => each.id)).deepEqual(['A1']);
+  });
+
   it('should not tell a ferret about an item another session or the daemon raised', async () => {
     // Arrange
     const messenger = new RecordingMessenger();
