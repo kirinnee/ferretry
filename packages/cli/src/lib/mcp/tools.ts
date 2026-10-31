@@ -841,13 +841,12 @@ export const MCP_SEARCH_TOOLS: readonly (McpToolDefinition & { readonly searchTo
   {
     name: 'search_work',
     searchTool: true,
-    description:
-      'Search cards and all agenda items by words or an id (F303, A3). Search first; update or link a match, not a duplicate.',
+    description: 'Find cards and agenda items by words or id (F303, A3) before filing a duplicate.',
     inputSchema: object(
       {
         query: { type: 'string', minLength: 1, maxLength: 200 },
         kind: { type: 'string', enum: ['task', 'agenda'] },
-        open: { type: 'boolean', description: 'Only open work.' },
+        open: { type: 'boolean' },
       },
       ['query'],
     ),

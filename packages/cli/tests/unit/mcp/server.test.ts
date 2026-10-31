@@ -399,6 +399,7 @@ describe('McpServer — the tools', () => {
     // browser_wait_for, the ask_owner pair and the file tools' repeated words (31,974).
     // account_propose (a ferret proposes a saved login's recipe) fit by trimming the words NAME, REF and ASK_OWNER
     // repeat in every tool that takes them (31,577).
+    // search_work (cards and agenda by words) fit in its own words (31,981).
     // Owner-gated groups are listed only while they are on.
     should(bytes).be.below(32_000);
     should(longest).be.belowOrEqual(300);
