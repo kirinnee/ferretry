@@ -7,10 +7,12 @@ import { BROWSER_MAX_HEIGHT, BROWSER_MAX_WIDTH, type BrowserViewport } from '@fe
 import {
   BrowserControlError,
   generateXCookie,
+  listenerHeldRefusal,
   selectChromeExecutable,
   xauthorityEntry,
   xvfbLaunchArguments,
 } from '../../../lib/browser/control/index.ts';
+import { type ListenerProverPort, ProcListenerProver } from './listener-prover.ts';
 import type { BrowserLoginChild, BrowserLoginRuntime } from './login-window.ts';
 
 /**
@@ -388,9 +390,11 @@ export interface BrowserLoginRuntimeOptions extends BrowserLoginTiming {
   readonly spawn?: BrowserLoginSpawner;
   readonly run?: BrowserLoginProgramReader;
   readonly exists?: (candidate: string) => boolean;
-  /** Whether anything is accepting TCP on loopback at this port. */
+  /** Whether anything is accepting TCP on loopback at this port — asked only where the listener cannot be proven. */
   readonly probePort?: (port: number) => Promise<boolean>;
   readonly freePort?: () => Promise<number>;
+  /** Proves the VNC port is held by the x11vnc this window started. Defaults to this host's `/proc`. */
+  readonly listenerProver?: ListenerProverPort;
 }
 
 /**
@@ -416,6 +420,7 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
   private readonly exists: (candidate: string) => boolean;
   private readonly probePort: (port: number) => Promise<boolean>;
   private readonly freePortOf: () => Promise<number>;
+  private readonly prover: ListenerProverPort;
 
   constructor(private readonly options: BrowserLoginRuntimeOptions) {
     this.platform = options.platform ?? process.platform;
@@ -448,6 +453,7 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
       });
     this.probePort = options.probePort ?? (port => loopbackAccepts(port));
     this.freePortOf = options.freePort ?? (() => loopbackFreePort());
+    this.prover = options.listenerProver ?? new ProcListenerProver();
   }
 
   async display(): Promise<string> {
@@ -539,11 +545,25 @@ export class NodeBrowserLoginRuntime implements BrowserLoginRuntime {
     });
   }
 
+  /**
+   * Waits until the VNC port is held by THIS window's x11vnc, proven from the kernel's socket table and the
+   * supervisor's process tree (`lib/browser/control/listener-proof.ts`) — before the window announces the port,
+   * password and ssh line to anybody. Nothing in Ferretry ever connects to it: a person's VNC client does, over
+   * `ssh -L`, so a program that took the port between `freePort` and x11vnc's bind would otherwise be the screen
+   * that person is shown and types their password into. A listener that is not x11vnc's refuses at once, naming
+   * the port. Only a host that cannot prove (macOS) falls back to asking whether anything accepts there.
+   */
   async waitForVnc(port: number, child: BrowserLoginChild): Promise<void> {
     await awaitReady({
       what: 'the VNC server',
       child,
-      ready: async () => await this.probePort(port),
+      ready: async () => {
+        const proof = await this.prover.prove(port, child.pid);
+        if (proof.kind === 'foreign') {
+          throw new BrowserControlError('launch_failed', listenerHeldRefusal(port, proof.uid));
+        }
+        return proof.kind === 'unknown' ? await this.probePort(port) : proof.kind === 'proven';
+      },
       timing: this.timing,
     });
   }

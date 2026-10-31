@@ -6,6 +6,7 @@ import should from 'should';
 import {
   type BrowserDisplayPort,
   type BrowserLoginChild,
+  type ListenerProverPort,
   NodeBrowserLoginRuntime,
   type XvfbChild,
   XvfbDisplay,
@@ -23,7 +24,8 @@ import { BrowserControlError } from '../../../../src/lib/index.ts';
  *
  * The two readiness probes that CANNOT be faked by a script are exercised against the real thing at a
  * loopback address the test owns: a free port is taken by binding one, and "is the VNC server up" is
- * answered by a listener this test opened and closed.
+ * answered by a listener this test opened and closed — proven, from this host's `/proc`, to be held by
+ * the process the runtime was told started it.
  */
 
 const roots: string[] = [];
@@ -442,6 +444,12 @@ function fakeDisplay(): BrowserDisplayPort & { closed: number } {
   return port;
 }
 
+/** A host with no `/proc` to prove a listener from (macOS): the runtime falls back to a connection probe. */
+const UNPROVABLE: ListenerProverPort = {
+  prove: async () => ({ kind: 'unknown' }),
+  holder: async () => undefined,
+};
+
 describe('NodeBrowserLoginRuntime', () => {
   it('should describe this host from its own environment by default', async () => {
     // Arrange
@@ -702,14 +710,61 @@ describe('NodeBrowserLoginRuntime', () => {
     );
   });
 
-  it('should wait for the VNC server by connecting to the loopback port it claims', async () => {
-    // The one probe that cannot be faked by a script, so it runs against a real listener the test owns.
+  it.if(process.platform === 'linux')(
+    'should wait until the kernel shows the VNC port is held by the process it started',
+    async () => {
+      // The proof that cannot be faked by a script, so it runs against a real listener on this host's `/proc`:
+      // the test's own process holds the socket, so it stands in as the "x11vnc" the window started.
+      // Arrange
+      const root = await workspace();
+      const subject = new NodeBrowserLoginRuntime({
+        display: fakeDisplay(),
+        secretsDirectory: root,
+        pollIntervalMs: 1,
+      });
+      const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => undefined } });
+      const vnc = { ...fakeChild(running()), pid: process.pid };
+
+      try {
+        // Act + Assert
+        await subject.waitForVnc(server.port, vnc);
+      } finally {
+        server.stop(true);
+      }
+    },
+  );
+
+  it.if(process.platform === 'linux')(
+    'should refuse, before the window announces anything, a VNC port another program holds',
+    async () => {
+      // Arrange: the port was taken before x11vnc (pid 4242, which holds nothing) could bind it.
+      const root = await workspace();
+      const subject = new NodeBrowserLoginRuntime({
+        display: fakeDisplay(),
+        secretsDirectory: root,
+        pollIntervalMs: 1,
+      });
+      const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => undefined } });
+
+      try {
+        // Act + Assert
+        await should(subject.waitForVnc(server.port, fakeChild(running()))).be.rejectedWith(
+          `port ${String(server.port)} is held by another program (uid ${String(process.getuid?.())}), not this browser — someone may be squatting it; pick another port base or free it`,
+        );
+      } finally {
+        server.stop(true);
+      }
+    },
+  );
+
+  it('should fall back to connecting to the port on a host whose listeners cannot be proven', async () => {
     // Arrange
     const root = await workspace();
     const subject = new NodeBrowserLoginRuntime({
       display: fakeDisplay(),
       secretsDirectory: root,
       pollIntervalMs: 1,
+      listenerProver: UNPROVABLE,
     });
     const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => undefined } });
 
@@ -727,6 +782,7 @@ describe('NodeBrowserLoginRuntime', () => {
     const subject = new NodeBrowserLoginRuntime({
       display: fakeDisplay(),
       secretsDirectory: root,
+      listenerProver: UNPROVABLE,
       readinessTimeoutMs: 3,
       pollIntervalMs: 1,
       now: tickingClock(2),
