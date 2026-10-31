@@ -851,7 +851,7 @@ describe('when the page changes under the card (#B100)', () => {
     should(error.reason).equal('target_rebound');
     should(card?.fields.map(field => field.risk?.level)).eql(['red', 'amber']);
     should(card?.fields[1]?.risk?.reason).equal(
-      'The page loaded a new document since you were asked, so check its address and the picture before you send.',
+      'The page loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the one you meant.',
     );
     should(request.fields[1]?.risk?.level).equal('green');
   });

@@ -177,11 +177,11 @@ one such change every Send failed the same way and the third ended the request a
 
 Now a Send whose look does not match **looks again** (`InputTargetPort.refind`). A page looks for the same
 field: the node the owner approved when it is still there, else the agent's pointer when it names exactly one
-element that is still that field, else the **one** visible element of the page's main frame (or an open shadow
-root) with the same tag and attributes. Every candidate is looked at exactly as the first look (the node Playwright
-holds, described by the session that holds it); one that cannot be proved, or a page that changes while it is
-searched, makes the search ambiguous. A field inside a frame is found again only through the pointer. A terminal
-is looked at again.
+element that is still that field (it decides between several look-alikes), else the **one** visible element of the
+page's main frame (or an open shadow root) with the same tag and attributes. Every candidate is looked at exactly as
+the first look (the node Playwright holds, described by the session that holds it); one that cannot be proved, more
+than eight, or a page that changes while it is searched makes the search ambiguous, and then not even the pointer
+decides. A field inside a frame is found again only through the pointer. A terminal is looked at again.
 What it finds is then compared on its **binding**, the part of the facts that names the target itself
 (`lib/input-requests/rebind.ts`):
 
@@ -198,7 +198,9 @@ What it finds is then compared on its **binding**, the part of the facts that na
   send again." (a terminal: "The terminal redrew its prompt."). The owner always approves the target the value
   goes into: a re-bind never types. It is audited as `input.rebound`. A page card redrawn onto ANOTHER document
   than the one it was raised on (a reload, or a navigation within the same origin) is flagged amber: "The page
-  loaded a new document since you were asked, so check its address and the picture before you send."
+  loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the
+  one you meant." The card shows the origin, not the address. A field whose own flag is red (a plain value) keeps
+  red; the other fields of the card carry the amber.
 - **Anything else** is a failed check, counted as before: another origin or page, an http page, a field in
   another site's frame, a password field that became a text field, a hidden field, no such field, **several
   look-alikes** (none is chosen), another program or prompt, echo turned on.

@@ -578,7 +578,8 @@ async function lookAlikes(
 
 /**
  * One field of a re-find, in order: the node the owner approved, when it is still there and still that field; the
- * agent's pointer, when it names exactly one element that is that field; the page's ONE look-alike.
+ * agent's pointer, when it names exactly one element that is that field; the page's ONE look-alike. A search the page
+ * disturbed is `ambiguous` before the pointer is asked: nothing narrows a page that changes under the search.
  */
 async function refindField(
   subject: InputSubject,
@@ -586,7 +587,8 @@ async function refindField(
   pointer: BrowserInputFieldPointer | undefined,
 ): Promise<InputBrowserFieldFacts | 'missing' | 'ambiguous'> {
   const matches = await lookAlikes(subject, want);
-  const approved = matches === 'ambiguous' ? undefined : matches.find(found => sameNodeAs(found, want));
+  if (matches === 'ambiguous') return 'ambiguous';
+  const approved = matches.find(found => sameNodeAs(found, want));
   if (approved !== undefined) return approved;
   if (pointer !== undefined) {
     const named = subject.page.locator(browserSelectorOf(pointer.target as BrowserElementTarget));
@@ -595,7 +597,6 @@ async function refindField(
       if (found !== undefined && isSameField(want, found)) return found;
     }
   }
-  if (matches === 'ambiguous') return 'ambiguous';
   const [only, ...more] = matches;
   if (only === undefined) return 'missing';
   return more.length > 0 ? 'ambiguous' : only;

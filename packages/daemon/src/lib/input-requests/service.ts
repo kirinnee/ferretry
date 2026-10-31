@@ -1546,10 +1546,14 @@ function typedValues(request: InputRequest, body: InputDeliverBody): Map<string,
 }
 
 const PLAIN_FLAG = 'Not secret: the ferret can see this value.';
-/** A page card redrawn onto a new document: the field looks the same, but the page may not be the one you were asked on. */
+/**
+ * A page card redrawn onto a new document: the field looks the same, but the page may not be the one you were asked
+ * on. The card shows the origin and the picture, not the address, so that is what the owner is sent to check.
+ */
 const NEW_DOCUMENT_FLAG: InputRisk = {
   level: 'amber',
-  reason: 'The page loaded a new document since you were asked, so check its address and the picture before you send.',
+  reason:
+    'The page loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the one you meant.',
 };
 const PRIVATE_FLAG = 'This code will show on screen while the terminal is hidden from the ferret for 2 minutes.';
 

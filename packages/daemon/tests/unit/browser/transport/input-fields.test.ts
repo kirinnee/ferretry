@@ -1477,6 +1477,18 @@ describe('refindInputFields (#B100)', () => {
     should(await refindInputFields(world.subject, before, [pointer])).eql({ ok: false, ambiguous: 'code' });
   });
 
+  it('should not let the pointer decide a search the page disturbed', async () => {
+    const world = new FakeWorld();
+    const code = world.element('#otp', 21, ['type', 'text', 'name', 'otp']);
+    const selector = { id: 'code', target: { kind: 'selector' as const, selector: '#otp' } };
+    const first = await observeInputFields(world.subject, [selector]);
+    if (!first.ok) throw new Error('not observed');
+    world.rerender(code, 77);
+    world.extra(78, ['type', 'text', 'name', 'otp'], { handleFails: true });
+
+    should(await refindInputFields(world.subject, first.facts, [selector])).eql({ ok: false, ambiguous: 'code' });
+  });
+
   it('should keep the node the owner approved while it is still there, whatever the pointer now names', async () => {
     const world = new FakeWorld();
     world.element('#otp', 21, ['type', 'text', 'name', 'otp']);
