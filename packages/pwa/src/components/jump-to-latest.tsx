@@ -4,9 +4,9 @@ import { jumpToLatestLabel } from '../lib/transcript-follow.ts';
 /**
  * The "↓ jump to latest" pill a detached reader gets back to the tail with.
  *
- * It sits in a gradient strip rather than bare over the text, so neither it nor what is behind it is
- * hard to read. The strip is absolutely placed in its host's own box (which must be `position:
- * relative`), so in the chat it floats above the composer and never over it.
+ * It gets a row of its own under the scroller, in its host's flex column (the scroller must be a `flex: 1`
+ * sibling above it), so it takes its height from the scroller while it shows and can never cover what the
+ * reader is looking at. In the chat that column ends at the composer, so the pill floats above it, not over it.
  */
 export function JumpToLatest({ count = 0, onJump }: { readonly count?: number; readonly onJump: () => void }) {
   return (
