@@ -72,8 +72,11 @@ export interface SessionBrowserModeOptions {
   readonly listenerProver?: ListenerProverPort;
   /** Which loopback ports `browserPorts` asks for, read at every launch like the mode; absent means random. */
   readonly ports?: () => Promise<ResolvedBrowserPorts>;
-  /** Told at each start that binds fixed ports, so a missing firewall is said out loud. Never blocks a start. */
-  readonly warnFirewall?: () => Promise<void>;
+  /**
+   * Asked at each start that binds fixed ports: the sentence that declines it (the owner chose `refuse` and this
+   * account's firewall check failed), or `undefined` to go ahead. An unreadable answer never blocks a start.
+   */
+  readonly checkFirewall?: () => Promise<string | undefined>;
   readonly platform?: NodeJS.Platform;
   /** The daemon-owned directory the worker stages downloads and PDFs in (the file tools read them from here). */
   readonly stageDirectory?: string;
@@ -108,7 +111,10 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     const ports = await this.modes.ports?.();
     if (ports?.kind === 'refused') throw new BrowserControlError('launch_failed', ports.reason);
     const fixed = ports?.kind === 'fixed' ? ports.ports : undefined;
-    if (fixed !== undefined) await this.modes.warnFirewall?.().catch(() => undefined);
+    if (fixed !== undefined) {
+      const refusal = await this.modes.checkFirewall?.().catch(() => undefined);
+      if (refusal !== undefined) throw new BrowserControlError('launch_failed', refusal);
+    }
     const proxy = await this.modes.proxy?.();
     const version = await chromeVersion(executable);
     const display = mode === 'window' && platform === 'linux' ? await this.privateDisplay() : undefined;

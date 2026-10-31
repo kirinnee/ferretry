@@ -1,4 +1,4 @@
-import type { BrowserStateView } from '@ferretry/protocol';
+import type { BrowserStateView, LoopbackFirewallState } from '@ferretry/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '../../../shell/primitives.tsx';
 import type { SetupAccess } from '../setup/setup-access.ts';
@@ -21,6 +21,15 @@ export const browserStateSentence = (view: BrowserStateView, savedProxy: boolean
     case 'stopped':
       return `Stopped · the next start goes ${savedProxy ? 'via the saved proxy' : 'direct'}.`;
   }
+};
+
+/** The heading of the firewall note, by what the daemon read; `applied` shows no note. */
+const FIREWALL_TITLES: Record<LoopbackFirewallState['state'], string> = {
+  applied: 'The loopback firewall is applied',
+  missing: 'Other users on this host can reach this browser’s ports',
+  stale: 'Other users on this host can reach this browser’s ports',
+  failed: 'The loopback firewall let another user reach this browser’s ports',
+  unverified: 'The loopback firewall has not been checked recently',
 };
 
 type Reading =
@@ -79,7 +88,7 @@ export function BrowserStateLine({
       reading.kind === 'shown' &&
       reading.view.firewall !== undefined &&
       reading.view.firewall.state !== 'applied' ? (
-        <SetupNote tone="warn" name="browser-firewall" title="Other users on this host can reach this browser’s ports">
+        <SetupNote tone="warn" name="browser-firewall" title={FIREWALL_TITLES[reading.view.firewall.state]}>
           <p className="m-0 min-w-0 break-words">{reading.view.firewall.detail}</p>
         </SetupNote>
       ) : null}

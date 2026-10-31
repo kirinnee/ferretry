@@ -52,6 +52,7 @@ describe('setUpFerretrySkill', () => {
 
     // Assert
     should(actual).containEql('`browserPorts`');
+    should(actual).containEql('`browserFirewallFailure`');
     should(actual).containEql('`per-user`');
     should(actual).containEql('loopback firewall');
   });

@@ -414,6 +414,7 @@ describe('machineView', () => {
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       browserMode: 'headless',
       browserPorts: 'random',
+      browserFirewallFailure: 'warn',
       browserProxy: null,
       autoResume: true,
       agendaMode: true,
@@ -427,6 +428,17 @@ describe('machineView', () => {
       authority: OPEN,
     });
     FleetMachineViewSchema.parse(actual);
+  });
+
+  it('should carry the firewall failure policy, warn unless the machine says refuse', () => {
+    // Act
+    const warn = machineView(modelOf({}), factsOf({}), OPEN);
+    const refuse = machineView(modelOf({ machine: { browserFirewallFailure: 'refuse' } }), factsOf({}), OPEN);
+
+    // Assert
+    should(warn.browserFirewallFailure).equal('warn');
+    should(refuse.browserFirewallFailure).equal('refuse');
+    FleetMachineViewSchema.parse(refuse);
   });
 
   it('should carry the machine browser ports setting, random unless the machine says otherwise', () => {

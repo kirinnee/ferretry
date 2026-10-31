@@ -1675,6 +1675,27 @@ describe('deriveAccountChange: machine.settings', () => {
     ]);
   });
 
+  it('should set the firewall failure policy, and keep it when an older client leaves it out or repeats it', () => {
+    // Arrange
+    const model = modelOf({ machine: { browserFirewallFailure: 'refuse' } });
+
+    // Act
+    const refuse = derive({ ...PORTS_BASE, browserFirewallFailure: 'refuse' });
+    const warn = derive({ ...PORTS_BASE, browserFirewallFailure: 'warn' }, model);
+    const left = derive(PORTS_BASE, model);
+    const same = derive({ ...PORTS_BASE, browserFirewallFailure: 'refuse' }, model);
+
+    // Assert
+    should(refuse.summary).equal('Set the loopback firewall failure policy to refuse');
+    should(refuse.model.machine.browserFirewallFailure).equal('refuse');
+    should(refuse.consequences).deepEqual([
+      'Applies the next time the browser starts; a browser already running is not stopped.',
+    ]);
+    should(warn.model.machine.browserFirewallFailure).equal('warn');
+    should(left.model.machine.browserFirewallFailure).equal('refuse');
+    should(same.summary).equal('Keep machine settings the same');
+  });
+
   it('should say random when the ports go back to random', () => {
     // Arrange
     const model = modelOf({ machine: { browserPorts: 'per-user' } });

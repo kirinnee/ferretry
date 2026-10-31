@@ -67,7 +67,11 @@ const FORM_SCENES = ['form-empty', 'form-stored', 'form-short', 'invalid-form'] 
 const invalidForm = (): string => wrap(FORM_SCENES.map(scene => resolved[scene]?.status ?? '').join(''));
 
 const firewallGallery = (): string =>
-  wrap(['firewall-missing', 'firewall-stale'].map(scene => resolved[scene]?.status ?? '').join(''));
+  wrap(
+    ['firewall-missing', 'firewall-stale', 'firewall-failed', 'firewall-unverified']
+      .map(scene => resolved[scene]?.status ?? '')
+      .join(''),
+  );
 
 const statusGallery = (): string => wrap(STATUS_SCENES.map(scene => resolved[scene.key]?.status ?? '').join(''));
 
@@ -227,7 +231,7 @@ describe('Browser tab visual contract', () => {
                 should(said).eql(STATUS_SCENES.map(status => status.words));
               }
               if (scene.name === 'browser-firewall') {
-                should(await page.locator('[data-setup-note="browser-firewall"]').count()).equal(2);
+                should(await page.locator('[data-setup-note="browser-firewall"]').count()).equal(4);
               }
               if (scene.name === 'browser-tab') {
                 should(await page.locator('[data-browser-state]').first().textContent()).equal(STATUS_SCENES[0].words);

@@ -24,6 +24,7 @@
  */
 import {
   BrowserModeSchema,
+  BrowserFirewallFailureSchema,
   BrowserPortsSettingSchema,
   BrowserProxySettingSchema,
   CONFIG_COMPONENT_KINDS,
@@ -198,6 +199,12 @@ export const MACHINE_SHAPE = {
    * agent may do.
    */
   browserPorts: BrowserPortsSettingSchema.default('random'),
+  /**
+   * "When the loopback firewall check fails" (docs/browser-mode.md#loopback-ports): `warn` (the default) says so;
+   * `refuse` also declines to START the browser on a fixed port while this account's own check shows `failed`.
+   * A browser already running is left alone. Not a loosening: it can only make a start stricter.
+   */
+  browserFirewallFailure: BrowserFirewallFailureSchema.default('warn'),
   /**
    * "Auto-resume after restart": when the daemon boots and finds ferrets that were running when the host
    * went down, it resumes them with their conversation intact. On by default; sessions the owner stopped

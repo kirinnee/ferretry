@@ -28,6 +28,7 @@ describe('configJsonSchema', () => {
       'agentPermissions',
       'attentionNudge',
       'autoResume',
+      'browserFirewallFailure',
       'browserMode',
       'browserPorts',
       'browserProxy',

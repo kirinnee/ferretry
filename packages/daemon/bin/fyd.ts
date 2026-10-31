@@ -968,6 +968,9 @@ import {
   type RunOverrides,
   readDaemonRelayIdentity,
   readDoctorReport,
+  firewallRefusal,
+  LOOPBACK_FIREWALL_CHECK_MS,
+  LoopbackFirewallWatch,
   readLoopbackFirewall,
   readHarnessPreflight,
   readTranscriptPage,
@@ -7297,7 +7300,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       async () => (await declaredAccountModel())?.machine.browserPorts ?? 'random',
       process.getuid?.() ?? 0,
       new FileLoopbackMarkerReader(),
+      () => Date.now(),
     );
+  /** Each change of that reading is said once (a daemon notice), at a browser start and on the five-minute tick. */
+  const loopbackFirewallWatch = new LoopbackFirewallWatch(loopbackFirewall, message => bootNotices.state(message));
   /**
    * The same model as the last configuration load has it, without touching the directory: for the
    * readers that run on a timer — the credential catalogue, the usage feed and its cadence, auto-resume —
@@ -8657,10 +8663,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // configuration launches headless rather than not at all.
         mode: async () => (await declaredAccountModel())?.machine.browserMode ?? 'headless',
         ports: browserPorts,
-        warnFirewall: async () => {
-          const firewall = await loopbackFirewall();
-          if (firewall !== undefined && firewall.state !== 'applied') bootNotices.state(firewall.detail);
-        },
+        checkFirewall: async () =>
+          firewallRefusal(
+            await loopbackFirewallWatch.check(),
+            (await declaredAccountModel())?.machine.browserFirewallFailure ?? 'warn',
+          ),
         // Read at every launch too, but a proxy the owner asked for is never dropped quietly: a secret the vault
         // does not hold refuses the launch (resolveBrowserProxy) rather than sending traffic around the proxy.
         proxy: async () => {
@@ -9832,6 +9839,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         asActivity(activities, 'board sweep', async () => await boardSweep.tick()),
         BOARD_SWEEP_INTERVAL_MS,
       ).unref();
+      // The loopback firewall is re-read every five minutes, not only at a browser start, so a rule that was
+      // flushed or a check that stopped running is said out loud. Reads nothing while browserPorts is random.
+      const checkLoopbackFirewall = asActivity(
+        activities,
+        'loopback firewall check',
+        async () => await loopbackFirewallWatch.check(),
+      );
+      setInterval(checkLoopbackFirewall, LOOPBACK_FIREWALL_CHECK_MS).unref();
+      setTimeout(checkLoopbackFirewall, 30_000).unref();
       // Agenda mode: the switch (the session document and its launch variable, written together like Pack's and
       // hypermedia's) and the one-time migration that turns it on for every ferret that already had open items —
       // they ARE its agenda.

@@ -358,7 +358,9 @@ describe('doctor tmux release row', () => {
 });
 
 describe('doctor loopback firewall row', () => {
-  const withFirewall = (loopbackFirewall: { state: 'applied' | 'missing' | 'stale'; detail: string } | undefined) =>
+  const withFirewall = (
+    loopbackFirewall: { state: 'applied' | 'missing' | 'stale' | 'unverified' | 'failed'; detail: string } | undefined,
+  ) =>
     readDoctorReport({
       platform: 'linux',
       harnesses,
@@ -383,7 +385,9 @@ describe('doctor loopback firewall row', () => {
 
     // Assert
     should(row(result)).containEql({ requirement: 'capability', status: 'missing', impact: remedy });
-    should(row(result)?.summary).match(/no usable marker at \/run\/ferretry\/loopback-firewall\.json/u);
+    should(row(result)?.summary).match(
+      /no firewall rule for this account in the marker at \/run\/ferretry\/loopback-firewall\.json/u,
+    );
     should(result.ready).be.true();
   });
 
@@ -391,5 +395,16 @@ describe('doctor loopback firewall row', () => {
     should(row(withFirewall({ state: 'stale', detail: remedy }))?.summary).equal(
       'the marker does not list this account’s ports',
     );
+  });
+
+  it('should say the check reached this account’s ports when it failed, and that the check is not running when unverified', () => {
+    // Act + Assert
+    should(row(withFirewall({ state: 'failed', detail: remedy }))).containEql({
+      status: 'missing',
+      summary: 'the last check reached this account’s ports from another user',
+    });
+    const unverified = withFirewall({ state: 'unverified', detail: remedy });
+    should(row(unverified)?.summary).equal('the 5-minute firewall check is not running');
+    should(unverified.ready).be.true();
   });
 });

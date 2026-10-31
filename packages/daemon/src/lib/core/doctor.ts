@@ -126,11 +126,13 @@ function loopbackFirewall(state: LoopbackFirewallState | undefined): readonly Do
     return [
       present(name, 'capability', 'applied', 'Other users on this host cannot reach this account’s browser ports.'),
     ];
-  const summary =
-    state.state === 'missing'
-      ? `no usable marker at ${LOOPBACK_FIREWALL_MARKER_PATH}`
-      : 'the marker does not list this account’s ports';
-  return [missing(name, 'capability', summary, state.detail)];
+  const summaries: Record<Exclude<LoopbackFirewallState['state'], 'applied'>, string> = {
+    failed: 'the last check reached this account’s ports from another user',
+    missing: `no firewall rule for this account in the marker at ${LOOPBACK_FIREWALL_MARKER_PATH}`,
+    stale: 'the marker does not list this account’s ports',
+    unverified: 'the 5-minute firewall check is not running',
+  };
+  return [missing(name, 'capability', summaries[state.state], state.detail)];
 }
 
 const TMUX_CRASH =

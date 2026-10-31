@@ -524,11 +524,11 @@ describe('NodeSessionBrowserLauncher', () => {
       should(absent.started).match(/--remote-debugging-port=\d+\n/u);
     });
 
-    it('should tell the firewall warning about a start on fixed ports, and survive it failing', async () => {
+    it('should ask the firewall check before a start on fixed ports, and go ahead when it cannot answer', async () => {
       const cdp = await spare();
-      let told = 0;
+      let asked = 0;
       const fixed = async () => ({ kind: 'fixed' as const, ports: { cdp, relay: cdp + 1, vnc: cdp + 2 } });
-      const started = async (warnFirewall: () => Promise<void>) => {
+      const started = async (checkFirewall: () => Promise<string | undefined>) => {
         const chrome = await fakeChrome();
         const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
         roots.push(root);
@@ -539,21 +539,48 @@ describe('NodeSessionBrowserLauncher', () => {
           process.execPath,
           environment(chrome),
           async () => worker as never,
-          { ...PORT, ports: fixed, warnFirewall },
+          { ...PORT, ports: fixed, checkFirewall },
         );
         opened.push(await launcher.launch({ width: 800, height: 600 }));
       };
       await started(async () => {
-        told += 1;
+        asked += 1;
+        return undefined;
       });
-      should(told).equal(1);
+      should(asked).equal(1);
       await started(async () => {
         throw new Error('the marker is unreadable');
       });
     });
 
-    it('should not tell the firewall warning about a start on random ports', async () => {
-      let told = 0;
+    it('should refuse a start on fixed ports with the sentence the firewall check gives, before taking the profile', async () => {
+      const cdp = await spare();
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+      roots.push(root);
+      const launcher = new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        INJECTED_WORKER,
+        process.execPath,
+        environment(await fakeChrome()),
+        async () => {
+          throw new Error('no worker should start');
+        },
+        {
+          ...PORT,
+          ports: async () => ({ kind: 'fixed', ports: { cdp, relay: cdp + 1, vnc: cdp + 2 } }),
+          checkFirewall: async () => 'the browser was not started because the loopback firewall failed its check',
+        },
+      );
+      const refused = await launcher.launch({ width: 800, height: 600 }).catch((error: unknown) => error);
+      should(refused).instanceOf(BrowserControlError);
+      should((refused as Error).message).equal(
+        'the browser was not started because the loopback firewall failed its check',
+      );
+      should(await new BrowserProfileStore(root).acquire({ sessionId: 'after' })).have.property('sessionId', 'after');
+    });
+
+    it('should not ask the firewall check about a start on random ports', async () => {
+      let asked = 0;
       const chrome = await fakeChrome();
       const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
       roots.push(root);
@@ -567,13 +594,14 @@ describe('NodeSessionBrowserLauncher', () => {
         {
           ...PORT,
           ports: async () => ({ kind: 'random' }),
-          warnFirewall: async () => {
-            told += 1;
+          checkFirewall: async () => {
+            asked += 1;
+            return 'refused';
           },
         },
       );
       opened.push(await launcher.launch({ width: 800, height: 600 }));
-      should(told).equal(0);
+      should(asked).equal(0);
     });
 
     it('should refuse the launch with the reason, rather than quietly falling back to a random port', async () => {
