@@ -55,19 +55,24 @@ import {
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
 import { useLayoutMode } from '../hooks/use-layout-mode.ts';
+import { useWorkSearch } from '../hooks/use-work-search.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
+import { WORK_SEARCH_MIN_LENGTH, type WorkSearchPort } from '../lib/work-search.ts';
 import { APP_BAR_DESTINATIONS } from './app-bar.tsx';
 import { MachineChip } from './machine-chip.tsx';
 import type { AppBarDestinationLike, DestinationPaletteEntry } from './palette-destinations.ts';
 import {
   clampActiveIndex,
+  DEFAULT_PALETTE_WORK_FILTER,
   nextActiveIndex,
   PALETTE_IDS,
   type PaletteCommand,
   type PaletteResult,
   type PaletteSession,
   type PaletteSettingsEntry,
+  type PaletteWork,
+  type PaletteWorkFilter,
   paletteCountLabel,
   paletteFocusPolicy,
   paletteGroupHeading,
@@ -76,6 +81,7 @@ import {
   paletteSettingHref,
 } from './palette-model.ts';
 import { paletteShortcutLabel } from './palette-shortcut.ts';
+import { Badge } from './primitives.tsx';
 import { StatusMark } from './status-mark.tsx';
 
 /**
@@ -145,7 +151,16 @@ export interface CommandPaletteProps {
    * on-screen keyboard over the results they opened the palette to read.
    */
   readonly touchAffected?: boolean;
+  /**
+   * The daemon's work search, bound to this daemon. Supplied only for a machine that offers it
+   * (`DAEMON_FEATURES.workSearch`): without it the palette has no Cards or Agenda groups and no filter
+   * chips, exactly as before the search existed.
+   */
+  readonly workSearch?: WorkSearchPort;
 }
+
+/** How many hits one search asks for; a kind alone shows them all, both kinds share the first rows of each. */
+const WORK_SEARCH_LIMIT = 20;
 
 export function CommandPalette({
   open,
@@ -160,12 +175,14 @@ export function CommandPalette({
   settings = NO_SETTINGS,
   destinations = APP_BAR_DESTINATIONS,
   touchAffected = false,
+  workSearch,
 }: CommandPaletteProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   const [announcement, setAnnouncement] = useState('');
+  const [workFilter, setWorkFilter] = useState<PaletteWorkFilter>(DEFAULT_PALETTE_WORK_FILTER);
   const layout = useLayoutMode();
 
   // Modality is latched for one opening so a convertible changing pointer mode
@@ -182,9 +199,24 @@ export function CommandPalette({
   });
 
   const matchedSettings = useMemo(() => settings(daemon, query), [daemon, query, settings]);
+  const trimmedQuery = query.trim();
+  const workRequest =
+    open && workSearch !== undefined && trimmedQuery.length >= WORK_SEARCH_MIN_LENGTH
+      ? {
+          q: trimmedQuery,
+          ...(workFilter.kind === 'all' ? {} : { kind: workFilter.kind }),
+          open: workFilter.open,
+          limit: WORK_SEARCH_LIMIT,
+        }
+      : null;
+  const workRead = useWorkSearch(workSearch, daemon, workRequest);
+  const work = useMemo(
+    () => (workSearch === undefined ? undefined : { hits: workRead.hits, filter: workFilter }),
+    [workSearch, workRead.hits, workFilter],
+  );
   const groups = useMemo(
-    () => paletteResults({ query, daemon, sessions, destinations, commands, settings: matchedSettings }),
-    [query, daemon, sessions, destinations, commands, matchedSettings],
+    () => paletteResults({ query, daemon, sessions, destinations, commands, settings: matchedSettings, work }),
+    [query, daemon, sessions, destinations, commands, matchedSettings, work],
   );
   const activeIndex = clampActiveIndex(active, groups.results.length);
   const activeEntry = activeIndex >= 0 ? groups.results[activeIndex] : undefined;
@@ -217,6 +249,7 @@ export function CommandPalette({
     setQuery('');
     setActive(0);
     setAnnouncement('');
+    setWorkFilter(DEFAULT_PALETTE_WORK_FILTER);
   }, [open]);
 
   // Keep the active row in the scroller. `block: 'nearest'` scrolls the palette's
@@ -241,6 +274,10 @@ export function CommandPalette({
         return;
       }
       if (result.kind === 'destination') {
+        onNavigate(result.entry.href);
+        return;
+      }
+      if (result.kind === 'card' || result.kind === 'agenda') {
         onNavigate(result.entry.href);
         return;
       }
@@ -323,7 +360,11 @@ export function CommandPalette({
             aria-controls={PALETTE_IDS.listbox}
             aria-activedescendant={activeEntry ? paletteResultId(activeEntry) : undefined}
             aria-autocomplete="list"
-            aria-label="Search app destinations, commands, settings, and sessions"
+            aria-label={
+              workSearch === undefined
+                ? 'Search app destinations, commands, settings, and sessions'
+                : 'Search app destinations, commands, settings, sessions, cards, and agenda'
+            }
             autoComplete="off"
             spellCheck={false}
             value={query}
@@ -333,13 +374,21 @@ export function CommandPalette({
               setActive(0);
             }}
             onKeyDown={onInputKeyDown}
-            placeholder="Search places, settings, sessions…"
+            placeholder={
+              workSearch === undefined
+                ? 'Search places, settings, sessions…'
+                : 'Search places, sessions, cards, agenda…'
+            }
             // Not `.kt-input`: the panel already draws the edge, and a second
             // bordered control inside it reads as a box in a box. Type size and
             // colour still come from tokens.
             className="min-w-0 flex-1 border-0 bg-transparent p-0 font-ui text-ui text-fg outline-none placeholder:text-faint"
           />
         </div>
+
+        {workSearch !== undefined && searching ? (
+          <WorkFilters filter={workFilter} onChange={setWorkFilter} pending={workRead.pending} />
+        ) : null}
 
         {/* The palette's OWN scroller. The page below still owns exactly one;
             this is an overlay and never nests inside it. */}
@@ -419,6 +468,46 @@ export function CommandPalette({
                 })}
               </fieldset>
             )}
+            {groups.cards.length > 0 && (
+              <fieldset className="m-0 min-w-0 border-0 p-0" aria-labelledby={PALETTE_IDS.cardsHeading}>
+                <div id={PALETTE_IDS.cardsHeading} className="kt-label px-cell-x pb-xs pt-xs">
+                  {paletteGroupHeading('cards', searching)}
+                </div>
+                {groups.cards.map((entry, index) => {
+                  const resultIndex = groups.offsets.cards + index;
+                  return (
+                    <WorkOption
+                      key={entry.key}
+                      entry={entry}
+                      result={{ kind: 'card', entry }}
+                      selected={resultIndex === activeIndex}
+                      onActivate={() => run({ kind: 'card', entry })}
+                      onHover={() => setActive(resultIndex)}
+                    />
+                  );
+                })}
+              </fieldset>
+            )}
+            {groups.agenda.length > 0 && (
+              <fieldset className="m-0 min-w-0 border-0 p-0" aria-labelledby={PALETTE_IDS.agendaHeading}>
+                <div id={PALETTE_IDS.agendaHeading} className="kt-label px-cell-x pb-xs pt-xs">
+                  {paletteGroupHeading('agenda', searching)}
+                </div>
+                {groups.agenda.map((entry, index) => {
+                  const resultIndex = groups.offsets.agenda + index;
+                  return (
+                    <WorkOption
+                      key={entry.key}
+                      entry={entry}
+                      result={{ kind: 'agenda', entry }}
+                      selected={resultIndex === activeIndex}
+                      onActivate={() => run({ kind: 'agenda', entry })}
+                      onHover={() => setActive(resultIndex)}
+                    />
+                  );
+                })}
+              </fieldset>
+            )}
             {sessionsNote === null ? null : (
               <p className="m-0 px-cell-x py-row-y text-meta text-muted" data-palette-sessions-note="" role="note">
                 {sessionsNote}
@@ -430,7 +519,12 @@ export function CommandPalette({
               yet." here, but the shell destinations are offered unconditionally,
               so a resting palette is never empty — that copy was unreachable
               there and would be dead code here. */}
-          {searching && groups.results.length === 0 && (
+          {searching && groups.results.length === 0 && workRead.pending && workSearch !== undefined && (
+            <p className="m-0 px-cell-x py-row-y text-cell text-muted" data-palette-work-pending="">
+              Searching cards and agenda…
+            </p>
+          )}
+          {searching && groups.results.length === 0 && !(workRead.pending && workSearch !== undefined) && (
             <p className="m-0 px-cell-x py-row-y text-cell text-muted">
               Nothing matches <span className="mono text-fg-soft">{trimmed}</span>. Try a page (analytics, warden,
               learning, settings), a setting, a teammate callsign, a task, a project folder, or the start of a session
@@ -630,6 +724,116 @@ function SessionOption({
           {entry.label && <span className="min-w-0 truncate">· {entry.label}</span>}
           <span className="mono ml-auto shrink-0 text-faint">{entry.shortId}</span>
         </span>
+      </span>
+    </PaletteOption>
+  );
+}
+
+const WORK_KIND_FILTERS: readonly { readonly id: PaletteWorkFilter['kind']; readonly label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'task', label: 'Cards' },
+  { id: 'agenda', label: 'Agenda' },
+];
+
+const WORK_STATE_FILTERS: readonly { readonly open: boolean; readonly label: string }[] = [
+  { open: false, label: 'Everything' },
+  { open: true, label: 'Open' },
+];
+
+/**
+ * Narrows what the daemon's search shows: which kind, and whether closed work is among it. Buttons that
+ * keep the query box focused — pointer-down does not take focus — so a reader can type, chip, and keep typing.
+ */
+function WorkFilters({
+  filter,
+  onChange,
+  pending,
+}: {
+  readonly filter: PaletteWorkFilter;
+  readonly onChange: (next: PaletteWorkFilter) => void;
+  readonly pending: boolean;
+}) {
+  return (
+    <fieldset
+      id={PALETTE_IDS.filters}
+      aria-label="Narrow cards and agenda"
+      aria-busy={pending}
+      className="m-0 flex min-w-0 shrink-0 flex-wrap items-center gap-x-md gap-y-xs border-x-0 border-t-0 border-b border-border-soft px-panel py-xs"
+    >
+      <span className="flex items-center gap-xs">
+        {WORK_KIND_FILTERS.map(option => (
+          <button
+            key={option.id}
+            type="button"
+            className="kt-tab"
+            aria-pressed={filter.kind === option.id}
+            onPointerDown={event => event.preventDefault()}
+            onClick={() => onChange({ ...filter, kind: option.id })}
+          >
+            {option.label}
+          </button>
+        ))}
+      </span>
+      <span className="flex items-center gap-xs">
+        {WORK_STATE_FILTERS.map(option => (
+          <button
+            key={option.label}
+            type="button"
+            className="kt-tab"
+            aria-pressed={filter.open === option.open}
+            onPointerDown={event => event.preventDefault()}
+            onClick={() => onChange({ ...filter, open: option.open })}
+          >
+            {option.label}
+          </button>
+        ))}
+      </span>
+    </fieldset>
+  );
+}
+
+/**
+ * One card or agenda item the daemon found. A closed, dropped or addressed one is muted but not hidden — it
+ * is the answer to "did we already do this?" — and its state chip says so in words, never by tone alone.
+ */
+function WorkOption({
+  entry,
+  result,
+  selected,
+  onActivate,
+  onHover,
+}: {
+  readonly entry: PaletteWork;
+  readonly result: Extract<PaletteResult, { readonly kind: 'card' | 'agenda' }>;
+  readonly selected: boolean;
+  readonly onActivate: () => void;
+  readonly onHover: () => void;
+}) {
+  return (
+    <PaletteOption
+      id={paletteResultId(result)}
+      selected={selected}
+      onActivate={onActivate}
+      onHover={onHover}
+      className="kt-navrow cursor-pointer items-start"
+    >
+      <span
+        className={`flex min-w-0 flex-1 flex-col gap-0.5 ${entry.muted ? 'opacity-70' : ''}`}
+        data-work-kind={result.kind}
+        data-work-muted={entry.muted ? 'true' : undefined}
+      >
+        <span className="flex min-w-0 items-baseline gap-sm">
+          <Badge tone="accent" className="shrink-0">
+            {entry.kindLabel}
+          </Badge>
+          <span className="mono shrink-0 text-meta text-faint">{entry.hit.id}</span>
+          <span className="min-w-0 flex-1 truncate font-semibold text-fg">{entry.title}</span>
+          <Badge tone={entry.muted ? 'pend' : 'ok'} className="shrink-0">
+            {entry.stateLabel}
+          </Badge>
+        </span>
+        {entry.description === '' ? null : <span className="truncate text-meta text-fg-soft">{entry.description}</span>}
+        {entry.context === '' ? null : <span className="truncate text-meta text-muted">{entry.context}</span>}
       </span>
     </PaletteOption>
   );

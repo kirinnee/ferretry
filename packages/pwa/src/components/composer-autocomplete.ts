@@ -206,6 +206,11 @@ export interface ComposerAutocompleteCandidate {
   readonly rankPriority?: number;
   /** Compact state/action word shown at the row's trailing edge. */
   readonly badge?: string;
+  /**
+   * The daemon already matched this row against what was typed (its work search reads text no row carries),
+   * so the fuzzy filter keeps it. It ranks after rows the fuzzy filter matched itself.
+   */
+  readonly prematched?: boolean;
   /** Complete replacement for the active token, including its sigil. */
   readonly replacement: string;
   /** Final selections close with a separating space; directories stay open. */
@@ -548,7 +553,7 @@ function candidateScore(candidate: ComposerAutocompleteCandidate, query: string)
   if (!query) return 1;
   const label = fieldScore(candidate.label, query);
   const supporting = Math.max(fieldScore(candidate.detail ?? '', query), fieldScore(candidate.keywords ?? '', query));
-  if (!label && !supporting) return 0;
+  if (!label && !supporting) return candidate.prematched === true ? 1 : 0;
   // Names dominate descriptions, while a supporting hit still admits a skill
   // whose human description contains the term the reader remembers.
   return label * 3 + supporting;

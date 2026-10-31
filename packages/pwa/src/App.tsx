@@ -269,6 +269,8 @@ import type { SpeechAssets } from './lib/stt/on-device-voices.ts';
 import { createSurfaceEventHub } from './lib/surface-control.ts';
 import type { TranscriptHistoryStatus } from './lib/transcript-history.ts';
 import { tunnelNote } from './lib/tunnel-service.ts';
+import { useDaemonHealth } from './lib/use-daemon-health.ts';
+import { workSearchPortFor } from './lib/work-search.ts';
 import {
   AppBar,
   AppTabBar,
@@ -2389,6 +2391,13 @@ export function AppShell() {
   // The machine on screen tells this browser when its configuration moves, so no screen showing it
   // needs a reload to see a change made anywhere else. See `useConfigChangeFeed`.
   useConfigChangeFeed(store, connection);
+  // The finder searches card and agenda words only on a machine that says it can.
+  const finderFetch = useDaemonFetch();
+  const finderHealth = useDaemonHealth(connection);
+  const finderWorkSearch = useMemo(
+    () => (connection === undefined ? undefined : workSearchPortFor(finderHealth, connection, finderFetch)),
+    [finderHealth, connection, finderFetch],
+  );
   // A notification tap routes here in the app instead of the worker reloading the window.
   useNotificationOpen(notificationOpenSource(), window.location.origin, navigate);
   /*
@@ -2948,6 +2957,7 @@ export function AppShell() {
                     focusSignal={palette.focusSignal}
                     onClose={closePalette}
                     daemon={connection.daemonId}
+                    {...(finderWorkSearch === undefined ? {} : { workSearch: finderWorkSearch })}
                     sessions={paletteSearch.sessions}
                     sessionsNote={paletteSearch.note}
                     onNavigate={navigate}
