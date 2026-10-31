@@ -349,6 +349,82 @@ describe('the file send ledger', () => {
     // Assert
     should([...all.keys()]).deepEqual(['send-1']);
   });
+
+  it('should read only what was appended since its last read, the last line for a send still winning', async () => {
+    // Arrange
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(() => home, clock);
+    await subject.accept(ID, record());
+    should((await subject.all(ID)).get('send-1')?.fate).equal('accepted');
+
+    // Act — another writer appends a settlement and a new send behind the reader's back.
+    const file = join(home, 'channel', 'sends.jsonl');
+    await appendFile(
+      file,
+      `${JSON.stringify(record({ fate: 'delivered' }))}\n${JSON.stringify(record({ sendId: 'send-2' }))}\n`,
+    );
+    const all = await subject.all(ID);
+
+    // Assert
+    should(all.get('send-1')?.fate).equal('delivered');
+    should([...all.keys()]).deepEqual(['send-1', 'send-2']);
+  });
+
+  it('should read the whole file again once it was replaced, shortened or rewritten in place', async () => {
+    // Arrange
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(() => home, clock);
+    await subject.accept(ID, record());
+    await subject.accept(ID, record({ sendId: 'send-2' }));
+    await subject.all(ID);
+    const file = join(home, 'channel', 'sends.jsonl');
+
+    // Act — a person rewrites it shorter, then in place at the same size.
+    await writeFile(file, `${JSON.stringify(record({ sendId: 'send-3' }))}\n`);
+    const shortened = await subject.all(ID);
+    const sameSize = `${JSON.stringify(record({ sendId: 'send-4' }))}\n`;
+    await new Promise(resolve => setTimeout(resolve, 5));
+    await writeFile(file, sameSize);
+    const rewritten = await subject.all(ID);
+
+    // Assert
+    should([...shortened.keys()]).deepEqual(['send-3']);
+    should([...rewritten.keys()]).deepEqual(['send-4']);
+  });
+
+  it('should answer a complete last line that has no newline yet, and still read the line its newline completes', async () => {
+    // Arrange
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(() => home, clock);
+    await subject.accept(ID, record());
+    const file = join(home, 'channel', 'sends.jsonl');
+    await appendFile(file, JSON.stringify(record({ sendId: 'send-2' })));
+
+    // Act
+    const before = await subject.all(ID);
+    await appendFile(file, `\n${JSON.stringify(record({ sendId: 'send-3' }))}\n`);
+    const after = await subject.all(ID);
+
+    // Assert
+    should([...before.keys()]).deepEqual(['send-1', 'send-2']);
+    should([...after.keys()]).deepEqual(['send-1', 'send-2', 'send-3']);
+  });
+
+  it('should hand out frozen records and a map of its own, so no reader changes what another reads', async () => {
+    // Arrange
+    const home = await directory('ferretry-send-ledger-');
+    const subject = new FileSendLedger(() => home, clock);
+    await subject.accept(ID, record());
+
+    // Act
+    const first = await subject.all(ID);
+    first.delete('send-1');
+    const second = await subject.all(ID);
+
+    // Assert
+    should(second.has('send-1')).be.true();
+    should(Object.isFrozen(second.get('send-1'))).be.true();
+  });
 });
 
 describe('the file send channel', () => {
