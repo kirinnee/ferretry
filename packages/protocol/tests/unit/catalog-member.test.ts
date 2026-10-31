@@ -258,3 +258,83 @@ describe('no member schema has a field for a code, a key or a proof — except t
     expect(offenders).toEqual([]);
   });
 });
+
+describe('the owner’s member management answers', () => {
+  it('takes a rename of a one-line label, and nothing else', () => {
+    const { CatalogMemberRenameRequestSchema } = member;
+    expect(CatalogMemberRenameRequestSchema.safeParse({ label: 'Samuel' }).success).toBe(true);
+    expect(CatalogMemberRenameRequestSchema.safeParse({ label: 'x'.repeat(80) }).success).toBe(true);
+    for (const bad of [
+      {},
+      { label: '' },
+      { label: ' Samuel' },
+      { label: 'Samuel ' },
+      { label: 'x'.repeat(81) },
+      { label: 'two\nlines' },
+      { label: 7 },
+      { label: 'Samuel', memberId: MEMBER },
+    ]) {
+      expect(CatalogMemberRenameRequestSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it('says what a revoke removed, within the bounds the store holds', () => {
+    const { CatalogMemberRevokedSchema, CATALOG_MAX_KEYS_PER_MEMBER, CATALOG_SHARES_LISTED_MAX } = member;
+    const revoked = { memberId: MEMBER, keysRemoved: 2, sharesEnded: 1 };
+    expect(CatalogMemberRevokedSchema.parse(revoked)).toEqual(revoked);
+    expect(CatalogMemberRevokedSchema.safeParse({ ...revoked, keysRemoved: 0, sharesEnded: 0 }).success).toBe(true);
+    expect(
+      CatalogMemberRevokedSchema.safeParse({
+        ...revoked,
+        keysRemoved: CATALOG_MAX_KEYS_PER_MEMBER,
+        sharesEnded: CATALOG_SHARES_LISTED_MAX,
+      }).success,
+    ).toBe(true);
+    for (const bad of [
+      { ...revoked, keysRemoved: -1 },
+      { ...revoked, keysRemoved: CATALOG_MAX_KEYS_PER_MEMBER + 1 },
+      { ...revoked, sharesEnded: -1 },
+      { ...revoked, sharesEnded: CATALOG_SHARES_LISTED_MAX + 1 },
+      { ...revoked, keysRemoved: 1.5 },
+      { ...revoked, memberId: KEY },
+      { memberId: MEMBER, keysRemoved: 1 },
+      { ...revoked, label: 'Sam' },
+    ]) {
+      expect(CatalogMemberRevokedSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it('names the one browser a remove took away', () => {
+    const { CatalogMemberKeyRemovedSchema } = member;
+    const removed = { memberId: MEMBER, keyId: KEY };
+    expect(CatalogMemberKeyRemovedSchema.parse(removed)).toEqual(removed);
+    for (const bad of [
+      {},
+      { memberId: MEMBER },
+      { keyId: KEY },
+      { memberId: KEY, keyId: KEY },
+      { memberId: MEMBER, keyId: MEMBER },
+      { memberId: MEMBER, keyId: `mk_${'k'.repeat(21)}` },
+      { ...removed, remaining: 0 },
+    ]) {
+      expect(CatalogMemberKeyRemovedSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it('names the one catalog a remove took away', () => {
+    const { CatalogMemberCatalogRemovedSchema } = member;
+    const removed = { memberId: MEMBER, catalogId: CATALOG };
+    expect(CatalogMemberCatalogRemovedSchema.parse(removed)).toEqual(removed);
+    for (const bad of [
+      {},
+      { memberId: MEMBER },
+      { catalogId: CATALOG },
+      { memberId: CATALOG, catalogId: CATALOG },
+      { memberId: MEMBER, catalogId: MEMBER },
+      { memberId: MEMBER, catalogId: `cat_${'c'.repeat(21)}` },
+      { ...removed, name: 'Team tools' },
+    ]) {
+      expect(CatalogMemberCatalogRemovedSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+});

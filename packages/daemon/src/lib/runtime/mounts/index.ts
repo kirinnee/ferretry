@@ -87,6 +87,7 @@ import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
+import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
 import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catalogs.ts';
 import { type CopyListing, secureCopyRoutes } from './secure-copy.ts';
 import { securityRoutes } from './security.ts';
@@ -433,6 +434,7 @@ export interface MountedSubsystems {
   readonly secrets: SecretSubsystem;
   /** The catalogs this machine publishes: signed files of skills and MCP setups for another machine to install. */
   readonly sharedCatalogs: SharedCatalogSubsystem;
+  readonly catalogMembers: CatalogMemberSubsystem;
   /** Fleet supervision: the deterministic anomaly sweep, the wardens it spawns to judge a suspect
    *  session, and the operator configuration that decides whether it may spend a session at all. The
    *  subsystem owns the sweep TIMER as well as the routes — a supervision loop with no route would be
@@ -579,6 +581,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // it is not addressed by a session, and no session owns one.
         ...secretRoutes(subsystems.secrets),
         ...sharedCatalogRoutes(subsystems.sharedCatalogs),
+        ...catalogMemberRoutes(subsystems.catalogMembers),
         // The session read comes first among the subsystems: `/v1/sessions` is a fixed literal, and the
         // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
         // deeper per-session routes that follow.

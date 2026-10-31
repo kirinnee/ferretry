@@ -43,9 +43,35 @@ describe('audit schemas', () => {
 
     // Act / Assert
     for (const event of future) should(audit.AuditEventSchema.parse(event)).equal(event);
-    should(audit.AUDIT_EVENTS).have.length(38);
+    should(audit.AUDIT_EVENTS).have.length(44);
     should(audit.AuditEventSchema.parse('security.changed')).equal('security.changed');
     should(audit.AuditEventSchema.parse('device.key-rotated')).equal('device.key-rotated');
+  });
+
+  it('should declare the six sharing events, and keep each of them past rotation', () => {
+    // Arrange
+    const sharing = [
+      'catalog.share.minted',
+      'catalog.share.ended',
+      'catalog.share.cross-member',
+      'catalog.member.revoked',
+      'catalog.member.key-removed',
+      'catalog.member.catalog-removed',
+    ] as const;
+
+    // Act / Assert
+    for (const event of sharing) {
+      should(audit.AuditEventSchema.parse(event)).equal(event);
+      should(audit.AUDIT_EVENTS).containEql(event);
+      should(audit.AUDIT_KEPT_EVENTS).containEql(event);
+    }
+  });
+
+  it('should only keep events the log can hold, each once', () => {
+    // Arrange / Act / Assert
+    for (const event of audit.AUDIT_KEPT_EVENTS) should(audit.AUDIT_EVENTS).containEql(event);
+    should(new Set(audit.AUDIT_KEPT_EVENTS).size).equal(audit.AUDIT_KEPT_EVENTS.length);
+    should(new Set(audit.AUDIT_EVENTS).size).equal(audit.AUDIT_EVENTS.length);
   });
 
   it('should reserve every fixed actor phrase, whatever its case or spacing', () => {

@@ -79,6 +79,13 @@ export interface FoundationPaths {
   readonly catalogs: string;
   readonly catalogsDocument: string;
   readonly catalogBlobs: string;
+  /**
+   * The people this machine shares catalogs with and the codes that let them in (docs/catalogs.md § Members).
+   * STATE: a damaged file is an error, never an empty list. `catalogShares` holds the SHA-256 of each code and
+   * never a code.
+   */
+  readonly catalogMembers: string;
+  readonly catalogShares: string;
 }
 export interface SessionPaths {
   readonly directory: string;
@@ -131,6 +138,8 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     catalogs: join(state, 'catalogs'),
     catalogsDocument: join(state, 'catalogs', 'catalogs.json'),
     catalogBlobs: join(state, 'catalogs', 'blobs'),
+    catalogMembers: join(state, 'catalogs', 'members.json'),
+    catalogShares: join(state, 'catalogs', 'shares.json'),
   };
 }
 

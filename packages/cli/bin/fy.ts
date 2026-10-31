@@ -241,6 +241,9 @@ import { assertSemver } from '../src/lib/version';
 import { registerCatalogCommands } from '../src/lib/catalog/commands';
 import { CatalogController } from '../src/lib/catalog/controller';
 import { ProtocolCatalogGateway } from '../src/lib/catalog/gateway';
+import { registerShareCommands } from '../src/lib/catalog-share/commands';
+import { ShareController } from '../src/lib/catalog-share/controller';
+import { ProtocolSharingGateway } from '../src/lib/catalog-share/gateway';
 import { FileCatalogWriter } from '../src/adapters/catalog/export-file';
 import { registerWorktreeCommands } from '../src/lib/worktrees/commands';
 import { WorktreeController } from '../src/lib/worktrees/controller';
@@ -1126,6 +1129,21 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         world.interactive,
         world.cwd,
       ),
+    ),
+  ({ program, world, client }) =>
+    registerShareCommands(
+      program,
+      new ShareController({
+        sharing: new ProtocolSharingGateway(client),
+        catalogs: new ProtocolCatalogGateway(client),
+        out: world.io,
+        screen: new PlainScreen(),
+        qr: new QrCodeTerminal(),
+        terminal: new ProcessTerminalSize(),
+        prompt: world.prompt,
+        interactive: world.interactive,
+        binaryName: BINARY_NAME,
+      }),
     ),
   ({ program, world, client }) =>
     registerWorktreeCommands(

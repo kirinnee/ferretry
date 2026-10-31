@@ -234,6 +234,32 @@ export const CatalogMemberListSchema = z.strictObject({
 });
 export type CatalogMemberList = z.infer<typeof CatalogMemberListSchema>;
 
+/** `PATCH /v1/catalog-members/:memberId`: the owner's name for a person. */
+export const CatalogMemberRenameRequestSchema = z.strictObject({ label: CatalogMemberLabelSchema });
+export type CatalogMemberRenameRequest = z.infer<typeof CatalogMemberRenameRequestSchema>;
+
+/** `DELETE /v1/catalog-members/:memberId`: a person removed, with their browsers, and the shares that named them ended. */
+export const CatalogMemberRevokedSchema = z.strictObject({
+  memberId: CatalogMemberIdSchema,
+  keysRemoved: z.number().int().min(0).max(CATALOG_MAX_KEYS_PER_MEMBER),
+  sharesEnded: z.number().int().min(0).max(CATALOG_SHARES_LISTED_MAX),
+});
+export type CatalogMemberRevoked = z.infer<typeof CatalogMemberRevokedSchema>;
+
+/** `DELETE /v1/catalog-members/:memberId/keys/:keyId`: one browser of a person removed. */
+export const CatalogMemberKeyRemovedSchema = z.strictObject({
+  memberId: CatalogMemberIdSchema,
+  keyId: CatalogMemberKeyIdSchema,
+});
+export type CatalogMemberKeyRemoved = z.infer<typeof CatalogMemberKeyRemovedSchema>;
+
+/** `DELETE /v1/catalog-members/:memberId/catalogs/:catalogId`: one catalog taken away from a person. */
+export const CatalogMemberCatalogRemovedSchema = z.strictObject({
+  memberId: CatalogMemberIdSchema,
+  catalogId: SharedCatalogIdSchema,
+});
+export type CatalogMemberCatalogRemoved = z.infer<typeof CatalogMemberCatalogRemovedSchema>;
+
 // ── The joining browser ──────────────────────────────────────────────────────────────────────────
 
 /**

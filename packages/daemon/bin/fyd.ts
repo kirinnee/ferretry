@@ -265,6 +265,11 @@ import {
   FileRoutingCatalog,
   FileCatalogBlobStore,
   FileCatalogDocumentStore,
+  FileCatalogMembersStore,
+  FileCatalogSharesStore,
+  MemberSweepTimer,
+  NodeShareCodeHasher,
+  systemSweepClock,
   NodeSkillFolder,
   FileScratchCollector,
   FileSecretDocumentStore,
@@ -1062,6 +1067,8 @@ import {
   type CatalogIdentitySource,
   type McpSourceServer,
   SharedCatalogService,
+  CatalogMemberService,
+  shareLinkTarget,
   publisherLabel,
   type SecretCloneIdentitySource,
   SecretDirectory,
@@ -3970,6 +3977,8 @@ interface SessionPackHooks {
 /** A session status after which no process runs until the session is launched again. */
 /** How often the deadline sweep looks for an item whose `neededBy` came near with nothing else touching its board. */
 const AGENDA_DEADLINE_SWEEP_MS = 5 * 60_000;
+/** How often the member sweep looks for browsers whose passkey window closed or that sat idle. */
+const MEMBER_SWEEP_INTERVAL_MS = 60_000;
 
 const HYPERMEDIA_NOT_RUNNING: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
 
@@ -7140,6 +7149,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // this composition root so the attachment store can key state by daemon
   // without widening the public pairing route interface.
   let attachmentDaemonId: string | undefined;
+  // What a share link points at: read from the same advertisement pairing mints from, kept here for the same
+  // reason as the id above. Unset until pairing opens, which no request can precede.
+  let shareAdvertisement: Advertisement | undefined;
   // The name pairing gave this machine, stamped on analytics rows as the `machine` label.
   let analyticsMachineName: string | undefined;
   const clock = new SystemClock();
@@ -8806,6 +8818,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const repository = new StatePairingRepository(paths, stateFiles, cryptography);
       const state = await repository.open(hostname());
       attachmentDaemonId = state.daemonId;
+      shareAdvertisement = config.advertisement;
       analyticsMachineName = state.daemonName;
       const credentials = new PairingDeviceRegistry(state.daemonId, state.devices);
       // Read BEFORE pairing is built: the idle period and the step-up window are both asked of it.
@@ -11387,7 +11400,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // A message held while this session could not take input is delivered now that it is back.
         sends,
       );
-      const mounted: Omit<MountedSubsystems, 'sessionMcp' | 'catalogInstalls' | 'mcpInventory' | 'sharedCatalogs'> = {
+      const mounted: Omit<
+        MountedSubsystems,
+        'sessionMcp' | 'catalogInstalls' | 'mcpInventory' | 'sharedCatalogs' | 'catalogMembers'
+      > = {
         pack: {
           service: packService,
           routing: { cleanUp, file: guideFile },
@@ -12256,7 +12272,30 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         publisherName: () => publisherLabel(hostname()),
       };
+      const catalogMembers = new CatalogMemberService({
+        members: new FileCatalogMembersStore(paths, stateFiles),
+        shares: new FileCatalogSharesStore(paths, stateFiles),
+        hasher: new NodeShareCodeHasher(),
+        crypto: new WebCryptoRelayCrypto(),
+        catalogs: {
+          knownIds: async () => new Set((await sharedCatalogs.list()).catalogs.map(catalog => catalog.id)),
+        },
+        links: {
+          target: () => shareLinkTarget(shareAdvertisement, attachmentDaemonId, HOSTED_APP_ORIGIN),
+        },
+        // Phase 2b-2 registers the member route table's live connections here; until then nothing is open.
+        sessions: { closeMember: async () => undefined, closeKey: async () => undefined },
+        audit: auditLog,
+        now: () => millisecondClock.now(),
+      });
+      new MemberSweepTimer(
+        systemSweepClock,
+        async () => await catalogMembers.sweep(),
+        (error: unknown) =>
+          process.stderr.write(`member sweep failed: ${error instanceof Error ? error.message : String(error)}\n`),
+      ).start(MEMBER_SWEEP_INTERVAL_MS);
       const sharedCatalogs = new SharedCatalogService({
+        membership: catalogMembers,
         documents: new FileCatalogDocumentStore(paths, stateFiles),
         blobs: new FileCatalogBlobStore(paths, stateFiles),
         skillTree: new NodeSkillFolder(),
@@ -12317,6 +12356,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         mcpInventory,
         sharedCatalogs: { catalogs: sharedCatalogs },
+        catalogMembers: { members: catalogMembers },
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),

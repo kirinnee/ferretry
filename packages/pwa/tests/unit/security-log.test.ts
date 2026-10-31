@@ -38,6 +38,16 @@ describe('security log words', () => {
     expect(AUDIT_EVENT_WORDS['device.paired']).toBe('A device was paired');
     expect(AUDIT_EVENT_WORDS['step-up.failed']).toBe('Passkey confirmation failed');
     expect(AUDIT_EVENT_WORDS['step-up.succeeded']).toBe('Passkey confirmation passed');
+    expect(AUDIT_EVENT_WORDS['catalog.share.minted']).toBe('A catalog share code was made');
+    expect(AUDIT_EVENT_WORDS['catalog.share.ended']).toBe('A catalog share code was ended');
+    expect(AUDIT_EVENT_WORDS['catalog.member.revoked']).toBe('A person who reads shared catalogs was removed');
+    expect(AUDIT_EVENT_WORDS['catalog.member.key-removed']).toBe(
+      'One browser of a person who reads shared catalogs was removed',
+    );
+    expect(AUDIT_EVENT_WORDS['catalog.member.catalog-removed']).toBe('A shared catalog was taken away from a person');
+    expect(AUDIT_EVENT_WORDS['catalog.share.cross-member']).toBe(
+      "A share code made for one person was used by another person's browser",
+    );
     expect(Object.values(AUDIT_EVENT_WORDS).join(' ')).not.toContain('Password confirmation');
   });
 

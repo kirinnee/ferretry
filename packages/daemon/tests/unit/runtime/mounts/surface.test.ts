@@ -1,3 +1,4 @@
+import type { CatalogMemberSubsystem } from '../../../../src/lib/runtime/mounts/catalog-members.ts';
 import type { SharedCatalogSubsystem } from '../../../../src/lib/runtime/mounts/shared-catalogs.ts';
 import { describe, it } from 'bun:test';
 import { ANALYTICS_PRICING_RATE_APPLICABILITY } from '@ferretry/protocol';
@@ -774,6 +775,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   systemOpen: { open: async () => ({ opened: true, host: 'example.com' }) },
   secrets: secretSubsystem(),
   sharedCatalogs: { catalogs: {} as SharedCatalogSubsystem['catalogs'] },
+  catalogMembers: { members: {} as CatalogMemberSubsystem['members'] },
   warden: new FakeWarden(),
   transcriptImages: new MemoryTranscript([]).reader(),
   sessionReads: new OperatorReadService(
@@ -912,7 +914,8 @@ describe('the mounted daemon surface', () => {
       6 + // secure copy: a session's copies, the rules (list, add, remove), the paste plans and an answer to one (docs/secure-copy.md)
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
       7 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
-      9; // the catalogs this machine publishes: list, make, change, delete, preview, add, publish, withdraw and export (docs/catalogs.md)
+      9 + // the catalogs this machine publishes: list, make, change, delete, preview, add, publish, withdraw and export (docs/catalogs.md)
+      8; // the people a catalog is shared with: mint, list and end a share; list, rename, revoke a member, remove a browser or a catalog (docs/catalogs.md)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -1088,6 +1091,14 @@ describe('the mounted daemon surface', () => {
       'POST /v1/catalogs/:id/items/:itemId/versions',
       'DELETE /v1/catalogs/:id/items/:itemId',
       'POST /v1/catalogs/:id/export',
+      'POST /v1/catalog-shares',
+      'GET /v1/catalog-shares',
+      'DELETE /v1/catalog-shares/:shareId',
+      'GET /v1/catalog-members',
+      'PATCH /v1/catalog-members/:memberId',
+      'DELETE /v1/catalog-members/:memberId',
+      'DELETE /v1/catalog-members/:memberId/keys/:keyId',
+      'DELETE /v1/catalog-members/:memberId/catalogs/:catalogId',
       'GET /v1/sessions',
       'GET /v1/sessions/:sessionId',
       'GET /v1/projects',
