@@ -49,9 +49,10 @@ import {
   type ConfigFilesClient,
   configErrorCode,
   configInvalidBody,
-  confirmConfigChange,
+  confirmHeld,
   readConfigFile,
   readConfigStatus,
+  reasonOf,
   writeConfigFile,
 } from './config-files-api.ts';
 
@@ -85,11 +86,6 @@ export const CONFIG_HEADLINE = 'These settings live in files on this machine';
 export const CONFIG_SECRET_COMMAND = 'fy secret set NAME';
 // biome-ignore lint/suspicious/noTemplateCurlyInString: the reference grammar, written out for a person to type
 export const CONFIG_SECRET_REFERENCE = '${secret:NAME}';
-
-const reasonOf = (cause: unknown): string => {
-  const message = cause instanceof Error ? cause.message.trim() : '';
-  return message === '' ? 'This machine did not answer.' : message;
-};
 
 const plural = (count: number, one: string, many = `${one}s`): string => `${String(count)} ${count === 1 ? one : many}`;
 
@@ -147,23 +143,6 @@ type ConfirmState =
   | { readonly status: 'failed'; readonly sentence: string };
 
 const IDLE: ConfirmState = { status: 'idle' };
-
-const STALE_CONFIRM =
-  'That edit is no longer the one waiting — the file changed since. Review it again before confirming.';
-
-/** Confirm one held edit and say what happened, never throwing. `null` is "confirmed". */
-async function confirmHeld(
-  createClient: ConfigFilesClientFactory,
-  connection: DaemonConnection,
-  pending: Pick<ConfigPending, 'path' | 'etag'>,
-): Promise<string | null> {
-  try {
-    const result = await confirmConfigChange(await createClient(connection), pending.path, pending.etag);
-    return result.confirmed ? null : STALE_CONFIRM;
-  } catch (cause) {
-    return reasonOf(cause);
-  }
-}
 
 function ConfirmButton({
   state,

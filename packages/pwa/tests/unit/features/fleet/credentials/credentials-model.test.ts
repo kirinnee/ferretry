@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'bun:test';
-import type { FleetCredentialList } from '@ferretry/protocol';
+import type { FleetBudgetPeriodView, FleetCredentialBudget, FleetCredentialList } from '@ferretry/protocol';
 import {
+  budgetChip,
+  budgetDraft,
+  budgetDraftChanged,
+  budgetDraftProblem,
+  budgetMeterRows,
+  budgetOfDraft,
+  budgetResetWords,
+  budgetScopeNote,
+  budgetZoneWords,
   credentialEmail,
   credentialExplanation,
   credentialGroups,
@@ -18,6 +27,7 @@ import {
   labelsError,
   nextCredentialId,
   otherHarness,
+  parseBudgetAmount,
   plural,
   sameEmailLogin,
   scopeOfHarnesses,
@@ -28,6 +38,7 @@ import {
   type UsageBar,
   usageBars,
   usageBarText,
+  usdWords,
 } from '../../../../../src/features/fleet/credentials/credentials-model.ts';
 import { CREDENTIALS, credential, NOW, withStatus } from '../account-support.ts';
 
@@ -303,5 +314,202 @@ describe('nextCredentialId', () => {
       ),
     ).toBe('claude-4');
     expect(nextCredentialId(CREDENTIALS, 'codex')).toBe('codex-2');
+  });
+});
+
+// ── Budgets (docs/budgets.md) ─────────────────────────────────────────────────────────────────────
+
+/** America/New_York, EDT: local midnight is 04:00Z, so the reset words are pinned by these instants. */
+const period = (overrides: Partial<FleetBudgetPeriodView> = {}): FleetBudgetPeriodView => ({
+  trigger: 40,
+  hard: 60,
+  spentUsd: 12.4,
+  level: 'ok',
+  startsAt: '2026-10-13T04:00:00.000Z',
+  resetsAt: '2026-10-14T04:00:00.000Z',
+  ...overrides,
+});
+
+const budget = (overrides: Partial<FleetCredentialBudget> = {}): FleetCredentialBudget => ({
+  timeZone: 'America/New_York',
+  timeZoneSet: true,
+  daily: period({ trigger: 40, hard: 60 }),
+  weekly: period({ trigger: 200, hard: 300, spentUsd: 150.01, resetsAt: '2026-10-19T04:00:00.000Z' }),
+  level: 'ok',
+  unpriced: 0,
+  measured: true,
+  ...overrides,
+});
+
+describe('budget words', () => {
+  it('says dollars as a bill reads', () => {
+    expect(usdWords(12.4)).toBe('$12.40');
+    expect(usdWords(0)).toBe('$0.00');
+    expect(usdWords(40)).toBe('$40.00');
+  });
+
+  it('says a reset time in the zone the budget is counted in, never the reader’s', () => {
+    expect(budgetResetWords('2026-10-14T04:00:00.000Z', 'America/New_York')).toBe('resets Wed');
+    expect(budgetResetWords('2026-10-19T04:00:00.000Z', 'America/New_York')).toBe('resets Mon');
+    expect(budgetResetWords('2026-10-17T00:00:00.000Z', 'UTC')).toBe('resets Sat');
+    expect(budgetResetWords('2026-10-14T09:30:00.000Z', 'UTC')).toBe('resets Wed 09:30');
+  });
+});
+
+describe('budget meter rows', () => {
+  it('draws one row per period on a bar a fifth past the higher limit, so both marks sit inside it', () => {
+    expect(budgetMeterRows(budget())).toEqual([
+      {
+        label: '$/day',
+        words: '$12.40 of $40.00 · resets Wed',
+        fillPercent: 17,
+        triggerPercent: 56,
+        hardPercent: 83,
+        level: 'ok',
+      },
+      {
+        label: '$/week',
+        words: '$150.01 of $200.00 · resets Mon',
+        fillPercent: 42,
+        triggerPercent: 56,
+        hardPercent: 83,
+        level: 'ok',
+      },
+    ]);
+  });
+
+  it('scales a period with no trigger by its hard limit and says so', () => {
+    const rows = budgetMeterRows(budget({ daily: period({ trigger: undefined, hard: 50, spentUsd: 12.5 }) }));
+    expect(rows[0]?.words).toBe('$12.50 of $50.00 hard · resets Wed');
+    expect(rows[0]?.fillPercent).toBe(21);
+    expect(rows[0]?.triggerPercent).toBeNull();
+    expect(rows[0]?.hardPercent).toBe(83);
+  });
+
+  it('clamps the fill at the bar’s end and leaves the tick off a period with no hard limit', () => {
+    const rows = budgetMeterRows(budget({ daily: period({ trigger: 10, hard: undefined, spentUsd: 99 }) }));
+    expect(rows[0]?.fillPercent).toBe(100);
+    expect(rows[0]?.triggerPercent).toBe(83);
+    expect(rows[0]?.hardPercent).toBeNull();
+  });
+
+  it('leaves out a period the budget does not have and carries each period’s level', () => {
+    expect(budgetMeterRows(budget({ weekly: undefined, daily: period({ level: 'over_trigger' }) }))).toEqual([
+      expect.objectContaining({ label: '$/day', level: 'over_trigger' }),
+    ]);
+    expect(budgetMeterRows(budget({ daily: undefined }))[0]?.label).toBe('$/week');
+  });
+});
+
+describe('budget chip', () => {
+  it('says what each hold stops, by level', () => {
+    expect(budgetChip(undefined)).toBeNull();
+    expect(budgetChip(budget())).toBeNull();
+    expect(budgetChip(budget({ level: 'over_trigger' }))).toEqual({
+      label: 'Over budget — not routing',
+      tone: 'warn',
+    });
+    expect(budgetChip(budget({ level: 'over_hard' }))).toEqual({
+      label: 'Hard limit — ferrets stopped',
+      tone: 'err',
+    });
+  });
+});
+
+describe('budget scope note', () => {
+  it('says the spend is this machine’s only', () => {
+    expect(budgetScopeNote(budget(), 'studio-mac')).toBe('Spent on studio-mac only');
+  });
+
+  it('counts unpriced requests and an unmeasured meter, never as $0', () => {
+    expect(budgetScopeNote(budget({ unpriced: 1, measured: false }), 'studio-mac')).toBe(
+      'Spent on studio-mac only · 1 request without a price · Counting…',
+    );
+    expect(budgetScopeNote(budget({ unpriced: 3 }), 'studio-mac')).toBe(
+      'Spent on studio-mac only · 3 requests without a price',
+    );
+    expect(budgetScopeNote(budget({ measured: false }), 'studio-mac')).toBe('Spent on studio-mac only · Counting…');
+  });
+
+  it('says the amount may be low when a transcript could not be read back to the start of the period', () => {
+    expect(budgetScopeNote(budget({ partial: true }), 'studio-mac')).toBe(
+      'Spent on studio-mac only · may be low: a transcript is too large to read in full',
+    );
+  });
+});
+
+describe('budget zone words', () => {
+  it('says where a budget’s zone comes from, and what saving writes', () => {
+    expect(budgetZoneWords(budget(), 'Asia/Singapore')).toBe(
+      'Days reset at midnight, weeks on Monday, in America/New_York (written in machine.yaml).',
+    );
+    expect(budgetZoneWords(budget({ timeZoneSet: false }), 'Asia/Singapore')).toBe(
+      'Days reset at midnight, weeks on Monday, in America/New_York — this machine’s own zone. Saving here writes yours (Asia/Singapore).',
+    );
+    expect(budgetZoneWords(undefined, 'Asia/Singapore')).toBe(
+      'Days reset at midnight, weeks on Monday — counted in your zone (Asia/Singapore) once you save; it is written to machine.yaml.',
+    );
+  });
+});
+
+describe('budget drafts', () => {
+  it('fills the editor from the budget the daemon last reported', () => {
+    expect(budgetDraft(budget())).toEqual({
+      dailyTrigger: '40',
+      dailyHard: '60',
+      weeklyTrigger: '200',
+      weeklyHard: '300',
+    });
+    expect(budgetDraft(undefined)).toEqual({ dailyTrigger: '', dailyHard: '', weeklyTrigger: '', weeklyHard: '' });
+    expect(budgetDraft(budget({ daily: period({ trigger: 40, hard: undefined }) })).dailyHard).toBe('');
+  });
+
+  it('parses a field as dollars above 0, taking a $ and blanks', () => {
+    expect(parseBudgetAmount('')).toBeUndefined();
+    expect(parseBudgetAmount('   ')).toBeUndefined();
+    expect(parseBudgetAmount('40')).toBe(40);
+    expect(parseBudgetAmount(' $12.50 ')).toBe(12.5);
+    expect(Number.isNaN(parseBudgetAmount('0'))).toBe(true);
+    expect(Number.isNaN(parseBudgetAmount('-3'))).toBe(true);
+    expect(Number.isNaN(parseBudgetAmount('lots'))).toBe(true);
+  });
+
+  it('names why a draft cannot be saved', () => {
+    expect(budgetDraftProblem(budgetDraft(budget()))).toBeNull();
+    expect(budgetDraftProblem({ dailyTrigger: '40', dailyHard: '', weeklyTrigger: 'lots', weeklyHard: '' })).toBe(
+      'Give every limit as dollars above 0, like 40 or 12.50.',
+    );
+    expect(budgetDraftProblem({ dailyTrigger: '40', dailyHard: '30', weeklyTrigger: '', weeklyHard: '' })).toBe(
+      'The daily hard limit must not be below its trigger.',
+    );
+    expect(budgetDraftProblem({ dailyTrigger: '', dailyHard: '', weeklyTrigger: '100', weeklyHard: '90' })).toBe(
+      'The weekly hard limit must not be below its trigger.',
+    );
+    expect(budgetDraftProblem({ dailyTrigger: '40', dailyHard: '40', weeklyTrigger: '', weeklyHard: '' })).toBeNull();
+    expect(budgetDraftProblem(budgetDraft(undefined))).toBeNull();
+  });
+
+  it('writes a draft as the login’s budget key, dropping empty periods and removals', () => {
+    expect(budgetOfDraft({ dailyTrigger: '40', dailyHard: '', weeklyTrigger: '', weeklyHard: '' })).toEqual({
+      daily: { trigger: 40 },
+    });
+    expect(budgetOfDraft({ dailyTrigger: '40', dailyHard: '60', weeklyTrigger: '200', weeklyHard: '300' })).toEqual({
+      daily: { trigger: 40, hard: 60 },
+      weekly: { trigger: 200, hard: 300 },
+    });
+    expect(budgetOfDraft(budgetDraft(undefined))).toBeUndefined();
+    expect(budgetOfDraft({ dailyTrigger: '', dailyHard: '', weeklyTrigger: '200', weeklyHard: '' })).toEqual({
+      weekly: { trigger: 200 },
+    });
+  });
+
+  it('knows whether a draft differs from the budget in effect, not from its text', () => {
+    const view = budget();
+    expect(budgetDraftChanged(budgetDraft(view), view)).toBe(false);
+    expect(budgetDraftChanged({ ...budgetDraft(view), dailyTrigger: '40.00' }, view)).toBe(false);
+    expect(budgetDraftChanged({ ...budgetDraft(view), dailyTrigger: '30' }, view)).toBe(true);
+    expect(budgetDraftChanged(budgetDraft(undefined), undefined)).toBe(false);
+    expect(budgetDraftChanged(budgetDraft(undefined), view)).toBe(true);
+    expect(budgetDraftChanged(budgetDraft(view), undefined)).toBe(true);
   });
 });
