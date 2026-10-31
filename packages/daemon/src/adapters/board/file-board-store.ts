@@ -204,6 +204,8 @@ export class FileBoardStore implements BoardStore {
   /** One card file read again after it changed under the store; whether the board's copy moved. */
   private async reread(id: BoardTaskId, loaded: Loaded): Promise<boolean> {
     return await this.serial.run(`board:card:${id}`, async () => {
+      // Asked again inside the section: a write of our own that raced the watch has remembered its file by now.
+      if ((await this.files.identity?.(this.fileOf(id))) === this.identities.get(id)) return false;
       const before = loaded.cards.get(id);
       const fresh = new Map<BoardTaskId, BoardTask>();
       const problem = await this.parseCard(id, fresh);
