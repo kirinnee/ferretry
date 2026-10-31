@@ -20,12 +20,14 @@ const settle = async (): Promise<void> => {
 
 type Cards = ReturnType<typeof useProjectCards>;
 
-const observe = async (projectId: string | null) => {
+const observe = async (projectId: string | null, failure?: Error, gate?: Promise<void>) => {
   const queries: BoardServerQuery[] = [];
   const store = new DaemonBoardStore(
     fakePort({
       board: async (_connection, query) => {
         queries.push(query);
+        if (gate !== undefined) await gate;
+        if (failure !== undefined) throw failure;
         return boardAnswer(
           [
             originCard('F1', 'human', null, { owner: SESSION }),
@@ -45,8 +47,9 @@ const observe = async (projectId: string | null) => {
     return null;
   };
   const view = render(<Probe />);
-  await settle();
+  if (gate === undefined) await settle();
   return {
+    settle,
     queries,
     latest: () => {
       if (latest === undefined) throw new Error('probe never rendered');
@@ -99,5 +102,47 @@ describe('useProjectCards', () => {
     } finally {
       probe.unmount();
     }
+  });
+
+  test('says the project could not be read when the board refuses, and has nothing to wait for', async () => {
+    const probe = await observe(PROJECT, new Error('board is down'));
+    try {
+      expect(probe.latest().state).toBe('unavailable');
+      expect(probe.latest().error).toContain('board is down');
+      expect(probe.latest().cards).toEqual([]);
+      expect(probe.latest().wait()).toBeUndefined();
+    } finally {
+      probe.unmount();
+    }
+  });
+
+  test('hands out one wait while the read is running and settles it when the cards arrive', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const probe = await observe(PROJECT, undefined, gate);
+    try {
+      await probe.settle();
+      const first = probe.latest().wait();
+      expect(first).toBeInstanceOf(Promise);
+      expect(probe.latest().wait()).toBe(first);
+      release();
+      await probe.settle();
+      await first;
+      expect(probe.latest().state).toBe('ready');
+      expect(probe.latest().wait()).toBeUndefined();
+    } finally {
+      probe.unmount();
+    }
+  });
+
+  test('settles a wait that is still open when the reader leaves', async () => {
+    const probe = await observe(PROJECT, undefined, new Promise<void>(() => undefined));
+    await probe.settle();
+    const pending = probe.latest().wait();
+    expect(pending).toBeInstanceOf(Promise);
+    probe.unmount();
+    await pending;
   });
 });
