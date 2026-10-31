@@ -2087,7 +2087,7 @@ function createSessionDirectorySubsystem(
   paths: FoundationPaths,
   storage: DaemonStorage,
   project?: (id: SessionId, config: SessionConfig) => Promise<void>,
-): SessionDirectorySubsystem {
+): ReturnType<typeof createSessionDirectory> {
   return createSessionDirectory({
     sessions: () => storage.listSessions(),
     find: id => storage.findSession(id),
@@ -9850,12 +9850,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const agenda = new AgendaService(
         agendaBoards,
         clock,
-        {
-          // A missing agenda.json is an empty board only for a session the
-          // registry can prove exists. Session document damage propagates
-          // rather than being flattened into "no attention".
-          has: async id => (await sessions.get(id)) !== undefined,
-        },
+        // A missing agenda.json is an empty board only for a session the
+        // registry can prove exists. Session document damage propagates
+        // rather than being flattened into "no attention". Never projected:
+        // a board read asks this for every ferret on the board.
+        sessions,
         agendaBuzz,
         new AgendaChangeFanout([
           // The session list's unread signal, kept true to the board.
