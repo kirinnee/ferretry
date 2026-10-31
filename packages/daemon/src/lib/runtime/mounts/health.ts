@@ -36,7 +36,7 @@ import type { DaemonHealthReport } from '../../session/health/report.ts';
  *
  * What it therefore publishes to any peer that can reach the bound address: the daemon's version and
  * process id, the size and state of the fleet, and its self-check ledger. That is the same class of
- * operational fact the already-public `/usage` and `/metrics` feeds carry, and it is why the route
+ * operational fact the opt-in `/usage` and `/metrics` feeds carry when the owner turns them on, and it is why the route
  * exposes counts rather than session ids. `bootstrapErrorMessages` is the one field that could quote
  * a path inside the state home; the composition root reports no bootstrap errors today, and the unit
  * that starts recording real ones owns the decision about how much of them a public feed may carry.

@@ -231,6 +231,15 @@ export const MACHINE_SHAPE = {
    * loosening either way: it changes what a ferret is told, never what it may do or spend. Read at every start.
    */
   agendaMode: z.boolean().default(true),
+  /**
+   * "Public usage feed" (docs/multi-user-host.md): whether the daemon also answers `GET /usage` and `GET /metrics`
+   * to a caller with no credential. Off by default, and while it is off both paths answer exactly as a path the
+   * daemon does not have, so another user on the host cannot read quota percentages and account labels or even
+   * learn the feeds exist; `GET /v1/usage` stays behind a token either way. Turn it on only for an external
+   * reader that holds no daemon token (a Prometheus scrape, a script on this host). A loosening: switching it on
+   * is held for the owner. Read at every request, from the configuration in effect.
+   */
+  publicUsageFeed: z.boolean().default(false),
 };
 
 export const MachineSchema = z.strictObject(MACHINE_SHAPE).prefault({});

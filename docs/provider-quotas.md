@@ -33,7 +33,7 @@ Only when somebody is watching, and never inference:
   while a quota chip or Info › Usage is showing), the Warden's sweep and quota failover. Each asks the
   reader first; the reader reads every environment login whose last attempt is **60 s** old or more, and
   concurrent watchers share one read.
-- **Not watchers**: the daemon's unattended usage refresh timer, `GET /usage` and `GET /metrics` (both
+- **Not watchers**: the daemon's unattended usage refresh timer, `GET /usage` and `GET /metrics` (both opt-in, `publicUsageFeed`;
   scraped on someone else's timer). They read the cached readings and ask no provider anything
   (`WatchedUsageFeed.unattended`).
 - There is **no idle timer**. A daemon nobody looks at reads no quota.

@@ -53,6 +53,7 @@ describe('SINGLETON_DEFAULTS', () => {
       browserFirewallFailure: 'warn',
       autoResume: true,
       agendaMode: true,
+      publicUsageFeed: false,
       attentionNudge: true,
       conversations: { listComputer: true },
     });
@@ -248,6 +249,22 @@ describe('configLoosening: machine', () => {
     // Assert — an agent's own script can read what a page holds, so only the owner may turn it on.
     should(SINGLETON_DEFAULTS.machine.machine.agentControl.pageScripts).be.false();
     should(goingOn).deepEqual(['agents may now control page scripts']);
+    should(goingOff).deepEqual([]);
+  });
+
+  it('should hold the public usage feed going on from the default, and apply it going off at once', () => {
+    // Arrange
+    const on = machineWith({ publicUsageFeed: true });
+
+    // Act
+    const goingOn = configLoosening('machine', SINGLETON_DEFAULTS.machine, on);
+    const goingOff = configLoosening('machine', on, SINGLETON_DEFAULTS.machine);
+
+    // Assert — it lets any local process read quota percentages and account labels, so only the owner may turn it on.
+    should(SINGLETON_DEFAULTS.machine.machine.publicUsageFeed).be.false();
+    should(goingOn).deepEqual([
+      'any process on this host can now read quota percentages and account labels without a credential',
+    ]);
     should(goingOff).deepEqual([]);
   });
 

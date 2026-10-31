@@ -1835,6 +1835,48 @@ describe('deriveAccountChange: machine.settings', () => {
     should(untouched.model.machine.agendaMode).equal(false);
   });
 
+  it('should switch the public usage feed on, saying who can then read it and that it takes hold at once', () => {
+    // Act
+    const edit = derive({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+      publicUsageFeed: true,
+    });
+
+    // Assert
+    should(edit.summary).equal('Set the public usage feed on');
+    should(edit.model.machine.publicUsageFeed).equal(true);
+    should(edit.consequences).deepEqual([
+      'Applies at once: any process on this host, and anything that reaches the daemon, can read quota percentages and account labels at /usage and /metrics without a credential.',
+    ]);
+  });
+
+  it('should switch the public usage feed back off, and leave it alone when an older client leaves it out', () => {
+    // Arrange
+    const model = modelOf({ machine: { publicUsageFeed: true } });
+    const base = {
+      kind: 'machine.settings' as const,
+      agentPermissions: 'auto' as const,
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    };
+
+    // Act
+    const off = derive({ ...base, publicUsageFeed: false }, model);
+    const untouched = derive(base, model);
+
+    // Assert
+    should(off.summary).equal('Set the public usage feed off');
+    should(off.model.machine.publicUsageFeed).equal(false);
+    should(off.consequences).deepEqual([
+      'Applies at once: /usage and /metrics answer as paths the daemon does not have.',
+    ]);
+    should(untouched.summary).equal('Keep machine settings the same');
+    should(untouched.model.machine.publicUsageFeed).equal(true);
+  });
+
   it('should say nothing moved when every field matches the current machine settings', () => {
     // Act
     const edit = derive({

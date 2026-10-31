@@ -123,6 +123,16 @@ export interface RoutePattern {
   readonly method: string;
   /** A pattern of literal segments, `:name` captures and a trailing `*name` catch-all. */
   readonly path: string;
+  /**
+   * Whether the router may match this route AT ALL, asked at every lookup. Absent means always.
+   *
+   * A route that answers `false` is not refused or hidden by a handler — it is not in the table for that
+   * request, so the caller gets exactly what a path this daemon never had gets: `401` when anonymous, `404`
+   * when authenticated, `405` never. A handler that answered 404 itself would be told apart from an
+   * unrouted path by an anonymous caller, who is refused before any unrouted path is named. Synchronous on
+   * purpose: it is read on the request path, from state already in memory, and cannot fail open on a throw.
+   */
+  readonly available?: () => boolean;
 }
 
 /** A route whose reachability is decided by the token class that authenticated the request. Shared

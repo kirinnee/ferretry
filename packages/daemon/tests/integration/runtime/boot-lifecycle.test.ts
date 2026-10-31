@@ -927,7 +927,7 @@ describe('daemon boot lifecycle', () => {
     await cleanupTempDirectories();
   });
 
-  it('should serve health and usage over the configured address, then release everything', async () => {
+  it('should serve health over the configured address, answer the public usage pair as absent paths, then release everything', async () => {
     // Arrange
     const home = await tempDirectory('fyd-boot');
     const cleanups: Array<() => void | Promise<void>> = [];
@@ -943,7 +943,10 @@ describe('daemon boot lifecycle', () => {
     const port = await recordedPort(home);
     // The server is listening once /healthz answers.
     const health = await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
+    // The public pair is opt-in and this machine.yaml never set it, so the boot serves neither.
     const usage = await fetch(`http://127.0.0.1:${port}/usage`);
+    const metrics = await fetch(`http://127.0.0.1:${port}/metrics`);
+    const unrouted = await fetch(`http://127.0.0.1:${port}/not-a-route`);
     const unauthorized = await fetch(`http://127.0.0.1:${port}/v1/usage`);
     // A mounted subsystem, reached with the token the boot minted. The session does not exist, so a
     // MOUNTED pin board answers `not-found`; an unmounted one would answer `unknown_route`.
@@ -960,14 +963,53 @@ describe('daemon boot lifecycle', () => {
     should(code).equal(0);
     should(health.status).equal(200);
     should((await health.json()) as { status: string }).have.property('status', 'ok');
-    should(usage.status).equal(200);
-    should((await usage.json()) as { ready: boolean }).have.property('ready', false);
+    should([usage.status, metrics.status, unrouted.status]).deepEqual([401, 401, 401]);
     should(unauthorized.status).equal(401);
     should(pins.status).equal(404);
     should((await pins.json()) as { code: string }).have.property('code', 'not-found');
     should(afterStop).be.undefined();
     // The API tokens were minted into the home, which only a boot that reached the server does.
     should(await readdir(home)).containEql('api-token');
+  });
+
+  it('should serve /usage and /metrics to anyone once the owner has the public usage feed on', async () => {
+    // Arrange: the owner's accepted record already holds the switch, as it does once they confirmed it.
+    const home = await tempDirectory('fyd-boot-public-usage');
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    const machineYaml = 'publicUsageFeed: true\n';
+    await writeFile(join(home, 'config', 'machine.yaml'), machineYaml, { mode: 0o600 });
+    await mkdir(join(home, 'state'), { recursive: true });
+    await writeFile(
+      join(home, 'state', 'config-accepted.json'),
+      JSON.stringify({
+        'machine.yaml': { etag: createHash('sha256').update(machineYaml, 'utf8').digest('hex'), text: machineYaml },
+      }),
+      { mode: 0o600 },
+    );
+
+    // Act
+    const exit = start(world, cleanups);
+    const port = await recordedPort(home);
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
+    const usage = await fetch(`http://127.0.0.1:${port}/usage`);
+    const metrics = await fetch(`http://127.0.0.1:${port}/metrics`);
+    const unauthorized = await fetch(`http://127.0.0.1:${port}/v1/usage`);
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    should(usage.status).equal(200);
+    should((await usage.json()) as { ready: boolean }).have.property('ready', false);
+    should(metrics.status).equal(200);
+    should(unauthorized.status).equal(401);
   });
 
   it('should resolve Codex provenance before one message read and issue against the persisted context', async () => {

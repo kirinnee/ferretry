@@ -51,6 +51,7 @@ describe('AccountModelSchema', () => {
       browserFirewallFailure: 'warn',
       autoResume: true,
       agendaMode: true,
+      publicUsageFeed: false,
       attentionNudge: true,
       conversations: { listComputer: true },
     });
