@@ -29,7 +29,6 @@ import {
   arrivedOnHost,
   arrivedPrivileged,
   headerValue,
-  queryValue,
   type RouteParameters,
 } from './http.ts';
 import { compressed, type ResponseCompressor } from './compression.ts';
@@ -49,9 +48,6 @@ import type { ApiRouter } from './router.ts';
 export const SESSION_ID_HEADER = 'x-ferretry-session-id';
 /** Client self-identification (`cli`), which is what tells `admin-cli` from `admin-ui`. */
 export const CLIENT_HEADER = 'x-ferretry-client';
-/** Query parameter carrying a token for WebSocket upgrades, which cannot set headers. Honoured for
- *  loopback peers only. */
-export const TOKEN_QUERY_PARAMETER = 'token';
 /**
  * The per-assignment capability a warden presents to exercise a remedy.
  *
@@ -82,8 +78,8 @@ export type RouteAuthorization<TRoute extends ScopedRoute> =
  * It is shared by BOTH route tables rather than repeated per transport. That is what makes
  * "authentication happens on the upgrade" true by construction: a socket cannot be reached over
  * credentials the request/response surface would have refused, warden scope is enforced the same
- * way on both, and the loopback query-parameter token — the only credential a browser `WebSocket`
- * can carry — is honoured on identical terms.
+ * way on both, and the `Authorization: Bearer` header — the only place a token is read from — is
+ * honoured on identical terms.
  *
  * The order matters and differs from the source in one way worth naming. Unknown-route and
  * wrong-verb answers are produced only AFTER authentication succeeds, so an unauthenticated caller
@@ -157,12 +153,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       ? credentials.devices?.has(device.deviceId) === true
         ? { kind: 'authenticated', tokenClass: 'device', deviceId: device.deviceId }
         : { kind: 'anonymous' }
-      : authenticate(credentials, {
-          bearer,
-          // A token in a URL is logged by every proxy in the path, so it is accepted only from a peer
-          // that could already read the token file it came from.
-          query: request.loopback ? queryValue(request, TOKEN_QUERY_PARAMETER) : undefined,
-        });
+      : authenticate(credentials, { bearer });
   // THERE ARE NO SOCKET TICKETS ANY MORE. They existed so a browser — which cannot put a header on a
   // WebSocket — could authenticate an upgrade with a short-lived bearer value bought over HTTP. A
   // browser now opens every stream inside a session its device key opened, so no URL ever carries a

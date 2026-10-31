@@ -182,7 +182,7 @@ link instead`). Then only one person on the box can be mid-sign-in at a time, an
 ## Where this was decided
 
 The audit behind this page (card &I28) and its fixes: the CLI's port-owner check, X display
-authentication, the pairing link kept out of argv, private temporary paths, tmux payloads on stdin, a
+authentication, the pairing link kept out of argv, no token read from a URL (only `Authorization: Bearer`), private temporary paths, tmux payloads on stdin, a
 fresh session credential per launch, a selectable pipe transport for the agent browser (off by default),
 fixed per-user browser ports with a listener-ownership proof, and the root loopback firewall with its
 five-minute verify timer (owner's choice, agenda !A111).

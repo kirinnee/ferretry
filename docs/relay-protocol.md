@@ -1716,7 +1716,7 @@ Afterwards, any number of requests:
   a request cannot promote itself past the grant it arrived under. (A client strips the header before
   it builds the record.)
 - A relayed request is **never a loopback peer**. Everything a daemon grants a loopback caller — a
-  token in a query parameter, a `privilegedOnly` route — is unreachable through a relay by construction,
+  `privilegedOnly` route — is unreachable through a relay by construction,
   not by a check somebody has to remember. A **direct** session's requests carry the arrival the
   listener classified at the upgrade (§4) — so a browser on the host is host-local exactly when it
   would have been over plain HTTP — and nothing inside a record can change it.
