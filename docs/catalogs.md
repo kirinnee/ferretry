@@ -8,7 +8,8 @@ from itself, whatever carried it: a file, a browser, an offline copy.
 This page is the **contract**: what is built, the bytes both ends agree on, and the checks an installer
 runs. The full approved design, with the people, sharing codes, offline library and artifacts still to
 come, is [design/catalogs.md](design/catalogs.md). Where they differ, this page wins for what exists.
-Which parts are live is the [phase table](#what-is-built) at the end.
+Which parts are live is the [phase table](#what-is-built) at the end. The machine that makes a catalog is
+[the publisher side](#the-publisher-side).
 
 The wire contract is `packages/protocol/src/lib/shared-catalog.ts` (items, manifests, files),
 `shared-catalog-review.ts` (the review and its warnings), `catalog-install.ts` (the installer's routes)
@@ -181,8 +182,150 @@ what gets written can never disagree:
     `.mcp.json`, and anything in `.vscode`, `.idea`, `.husky`, `.mise`, `.claude`, `.codex` or
     `.agents`), in any letter case.
   - `hidden-characters`: which files hold the characters the review marks.
+  - `possible-secret`: which skill files hold what the MCP raw-key rule would refuse (a known provider
+    prefix, or a long value right after `token`, `key`, `password` and the like). A guess and a warning, not a
+    refusal: a skill may show an example key. The publisher's freeze also leaves out credential files by
+    name (see [What a freeze does](#what-a-freeze-does)).
   - Only the installer can know `first-publisher`, `older-version` and `edited-locally`, so it adds those
     itself.
+
+## The publisher side
+
+What exists on the machine that makes a catalog. Everything here needs the **`sharing`** capability
+(`use`), and every write is the owner's: a ferret may read, never publish.
+
+### Making and exporting a catalog
+
+> **Upgrading.** A device paired before this release holds **Sharing OFF**: its record predates the
+> capability, and an old record never reads wider than it was written. At the machine, turn it on for one
+> device with `fy device grant <device> sharing --use`. The host's own `fy catalog` commands are not
+> governed by a device grant and work at once. See [grants.md](grants.md#changing-a-devices-grants).
+
+```text
+fy catalog create "Team skills"                       # an empty catalog, revision 1
+fy catalog add "Team skills" --skill review-pr        # shows ALL of it, then asks y/N
+fy catalog add "Team skills" --mcp docs --summary "Search our docs"
+fy catalog export "Team skills" --out team.catalog.json
+```
+
+- `ls`, `create`, `rename`, `describe`, `rm` manage catalogs. `add`, `publish`, `withdraw` manage items.
+- `add --skill <path|name>` / `add --mcp <id|name>` freezes a **copy** of the source. A name that matches
+  several sources is never guessed: the command lists them and stops.
+- `add` and `publish` print the full review and the warnings the installer will see, then ask `y/N`.
+  `--yes` skips the question, not the printing. `rm` and `withdraw` ask too.
+- `publish <catalog> <item>` freezes the source again as the item's **next version**. If the source
+  has not changed it says "nothing to publish".
+- `export` writes `<catalog-name>.catalog.json` (or `--out`) and refuses to overwrite without `--force`
+  (before asking the daemon to sign anything). Before it signs, it **prints every live item with its
+  version and digest and asks `y/N`** (`--yes` skips the ask, not the printing), and after the daemon
+  answers it checks that what was signed is exactly what was printed, writing nothing if it is not. The
+  file is verified with the installer's own check before it is handed over. The file is **compact JSON on one
+  line**, because the 32 MiB cap is measured on those bytes and the file is for machines; the review above is what a
+  person reads. `--force` writes a temporary
+  file beside the destination and renames it over, and refuses a destination that is a symbolic link.
+- `export --item` chooses which items the **file carries**. The signed manifest still lists **every live
+  item** of the catalog, so a reader sees the whole catalog and which items it was not given. The ask
+  above shows every live item for the same reason.
+- `add` and `publish` also print **where the source was read from** (the `SKILL.md` path, or the file
+  or fleet component that declares the MCP server), so a name that means two things is never silently one.
+- `ls` re-reads every source to say whether it changed; the daemon does that only for
+  `GET /v1/catalogs?sourceState=1`, which `fy catalog ls` sends. A plain `GET /v1/catalogs` does not
+  touch any source.
+- Install is the other machine's side (`fy catalog install`, phase 1b).
+
+### What a freeze does
+
+- **A freeze is a copy.** Editing the skill afterwards changes nothing already published. The list shows a
+  `sourceState`: `unchanged`, `changed` (publish to ship it), `unavailable` (the source is gone) or
+  `withdrawn`.
+- **A skill** is read recursively. Symlinks are **not followed**, and nothing is left out silently:
+  every file that does not go (binary, over 256 KiB, `.git`, deeper than 16 folders, a name the
+  contract refuses, a case-clash, past 200 files or 2 MiB) is listed with its reason. The walk is bounded
+  before any contents are read, and **folders count toward the entry limit** as files do.
+- **Hard links are not carried** ("a hard link can be a file from outside the folder"): a file whose link
+  count is above one is listed as not carried.
+- **Credential files are not carried**, each listed with why: `.env`, `.env.*`, `.netrc`, `.npmrc`,
+  `.pypirc`, `.git-credentials`, and any `id_rsa*`, `id_ed25519*`, `*.pem` or `*.key` name. A file that
+  does go but looks like it holds a key draws the `possible-secret` warning in [the review](#the-review).
+- **An MCP setup from a fleet component** converts directly and keeps `${secret:NAME}` as a
+  placeholder. An OAuth `clientSecret` is dropped, and the review says so.
+- **An MCP server from `.mcp.json`, `~/.claude.json` or a local config** is **refused** if an
+  environment value uses `${VAR}` or looks like a raw key. The answer is the contract's sentence plus the
+  fix: put the key in the secret store and add the server as a fleet component with `${secret:NAME}`.
+  Headers and a bearer variable are never carried, and are listed as not carried.
+- **Ferretry's own tools server** is not shareable: every install already starts it.
+- Visibility is always `members`. A request for `public` is refused (400, `public_unavailable`).
+
+### One preview, one add
+
+`POST /items/preview` freezes the source and answers the review and a **digest** of the content.
+`POST /items` sends that digest back with the source; if the source hashes differently by then, the
+add is refused (409 `changed_since_preview`). So the thing you read is the thing that is published.
+The digest is the content digest, with the item's identity (its id and version) set aside; the digest
+the signed manifest lists covers identity and is what an installer pins.
+
+The preview also says **where the source was read from** (`location`: the resolved `SKILL.md` path, or the file or fleet component that declares the MCP server). A name that matches more than one source is **refused (409 `source_ambiguous`) with every candidate listed**; the daemon never picks one.
+
+### The revision rule
+
+A catalog's `revision` rises by **exactly 1** on every change the manifest can see (an item added, a
+new version, a withdrawal, a rename, a new description, a new publisher name), and **never otherwise**. `issuedAt` is the
+instant of that change, and a file's `exportedAt` is that same instant, so **two exports with nothing
+between them are byte-identical**. A reader that saw revision 7 refuses a signed 6.
+
+The publisher name the manifest carries is **stored with the catalog** when it is made (the machine's
+name then) and signed from the store at every export, so a change of host name does not change the bytes
+of a revision. `PATCH` may set it, which is a change like a rename. Restoring `catalogs.json` from a
+backup can **reuse revision numbers**: an installer that saw a newer revision of this catalog refuses
+the restored older one, and the fix is to publish something new so the revision passes theirs.
+
+### Routes
+
+All are `sharing`/`use`, `noStore`, and the writes answer a ferret 403 `forbidden`.
+
+| Route                                          | Does                                                                  | Ferret  |
+| ---------------------------------------------- | --------------------------------------------------------------------- | ------- |
+| `GET /v1/catalogs[?sourceState=1]`             | every catalog, its items and versions (`sourceState` only when asked) | may     |
+| `POST /v1/catalogs`                            | make one (201)                                                        | refused |
+| `PATCH /v1/catalogs/:id`                       | rename, describe or set the publisher name                            | refused |
+| `DELETE /v1/catalogs/:id`                      | delete it and its versions                                            | refused |
+| `POST /v1/catalogs/:id/items/preview`          | freeze a source for review; writes nothing                            | may     |
+| `POST /v1/catalogs/:id/items`                  | add the previewed source as a new item (201)                          | refused |
+| `POST /v1/catalogs/:id/items/:itemId/versions` | publish the next version (201)                                        | refused |
+| `DELETE /v1/catalogs/:id/items/:itemId`        | withdraw an item                                                      | refused |
+| `POST /v1/catalogs/:id/export`                 | sign and return the catalog file                                      | refused |
+
+Refusals keep their code: 404 `catalog_unknown` / `item_unknown` / `source_unknown`; 409 `item_withdrawn`,
+`name_taken`, `catalog_full`, `source_ambiguous`, `changed_since_preview`, `nothing_to_publish`; 400
+`public_unavailable`; 413 `export_too_big` (the file would be over 32 MiB: export fewer items); 422
+`source_refused`; 503 `signing_unavailable`; 500 `store_damaged` / `export_failed`.
+
+### Why a ferret may only list
+
+A ferret holds the admin token, but a catalog hands skills and MCP setups to other machines. A
+prompt-injected agent that could publish would be one that could hand a skill, or the address of a
+server, to whoever the owner next sends the file to. So the daemon refuses a ferret (an agent caller)
+every route above except the two reads. Governed remote callers also need a passkey step-up for
+`sharing.use` ([grants.md](grants.md#capability-eight-was-added-sharing)).
+
+### Storage
+
+Under `<FY_HOME>/state/catalogs/`, directory `0700`, files `0600`, written atomically:
+
+- `catalogs.json`: the catalogs, their items and a line per version (digest, size, when, source). It
+  carries a `schemaVersion` and is parsed with zod on every read. A damaged file is a clear
+  `store_damaged` error; it is never silently reset.
+- `blobs/<sha256-hex>.json`: one frozen item version each, **content-addressed and never rewritten**.
+  The blob is written before the document that lists it, and a blob is checked against its digest when
+  read.
+
+Mutations are serialised, so two requests never interleave a read-modify-write.
+
+### Audit
+
+Ids only, never what an item holds ([audit.md](audit.md)): `catalog.changed` (create, update, delete,
+publish, withdraw, with item id, version, digest and revision) and `catalog.exported` (revision and
+item ids). Both are **kept** events.
 
 ## Installing from a file
 
@@ -283,16 +426,33 @@ What this does **not** protect against, said plainly (more in design §4.8):
 - **Files left behind.** If B's state file cannot be written after the files were, they stay on disk
   with no record, and the next install there is a `catalog_install_conflict`. Nothing is deleted
   that B has no hash for.
-- **A folder swapped for a link mid-install.** The write refuses a link on the path when it checks and
+- **A folder swapped for a link mid-install** (the installer side). The write refuses a link on the path when it checks and
   again for each file, but a folder swapped for a link in the instant between the two is not caught.
 - **Refused previews are not in the audit log.** Only applies and removes are.
 - **Signed means attributable (G9).** Anyone holding a signed manifest can prove the publisher
   published it. A catalog file's `exportedAt` is not signed: it only says when the file was written.
+- A catalog file is plain JSON that anyone can read. Signed is not secret: do not add what you would not
+  hand over.
+- Skill content is shown in full but is only checked by the heuristics in [The review](#the-review).
+- **The ferret refusal is an honest-client guard, and the export's printout is the check.** "A ferret may
+  only list" reads who is asking from the session header `fy` sends from inside a ferret. A ferret holds
+  the same admin token and runs as the same user, so it can send raw HTTP without that header, or write
+  `state/catalogs/` itself. Either way a program running as the owner on the publisher can change what
+  the **next export signs**. `fy catalog export` therefore prints every item it will sign (name, version,
+  digest) and asks first, and refuses to write a file that differs from what it printed; read that list.
+  A per-session credential would close this and is not built (the same limit as
+  [secrets.md](secrets.md)).
+- **A folder swapped for a link during the publisher’s read (declared as a gap).** The skill walk resolves the
+  folder, checks each parent, and opens each file with `O_NOFOLLOW`; after the open it checks the file is
+  a regular file with one link. What is not closed is the instant between the parent check and the open:
+  a folder replaced by a link in that instant is followed for that one read. The attacker must already be
+  the same user on the publisher, and the content is shown in the preview and bound by its digest.
+- `public` and members are not available; a file is the only way a catalog leaves.
 
 ## What is built
 
-| Phase                                                                                                        | State                                                                                       |
-| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
-| **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.** No routes and no screens yet.                                                    |
-| **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | The installer side is built (routes, `fy catalog install`, storage). Next: the app screens. |
-| 2–7. Members, the offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones   | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                        |
+| Phase                                                                                                        | State                                                                                                                                            |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **0. The contract**: items, manifests, files, canonical JSON, signing and checking, the review, the warnings | **Built.**                                                                                                                                       |
+| **1. Signed catalog files**: make catalogs, export a file, install it on another machine with the review     | **1a built:** the publisher side (`fy catalog`, the owner routes, the `sharing` capability). **1b built:** the installer side. Next: 1c screens. |
+| 2–7. Members, the offline library, public catalogs, revoke clean-up, hosted artifacts, passkey-locked ones   | Designed ([design/catalogs.md](design/catalogs.md) §6), not started.                                                                             |

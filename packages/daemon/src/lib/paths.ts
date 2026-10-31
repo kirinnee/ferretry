@@ -71,6 +71,14 @@ export interface FoundationPaths {
   readonly grantAudit: string;
   /** Who changed this machine's security settings, and every device key replaced (B6). */
   readonly securityAudit: string;
+  /**
+   * The catalogs this machine PUBLISHES: the document that lists them and the frozen item versions
+   * beside it (docs/catalogs.md § The publisher side). STATE, never config: nobody hand-edits a
+   * revision, and a damaged document is an error rather than an empty list.
+   */
+  readonly catalogs: string;
+  readonly catalogsDocument: string;
+  readonly catalogBlobs: string;
 }
 export interface SessionPaths {
   readonly directory: string;
@@ -120,6 +128,9 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     retiredOperatorPassword: join(state, 'operator-password.json'),
     grantAudit: join(state, 'grant-audit.jsonl'),
     securityAudit: join(state, 'security-audit.jsonl'),
+    catalogs: join(state, 'catalogs'),
+    catalogsDocument: join(state, 'catalogs', 'catalogs.json'),
+    catalogBlobs: join(state, 'catalogs', 'blobs'),
   };
 }
 

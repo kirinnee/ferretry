@@ -106,6 +106,10 @@ describe('foundation paths', () => {
       // The security settings journal, beside the grant one and for the same reason: one daemon's
       // record of who changed which setting can never be read as another's.
       securityAudit: '/tmp/fy-home/state/security-audit.jsonl',
+      // What this machine publishes: the catalogs document and the frozen item versions beside it.
+      catalogs: '/tmp/fy-home/state/catalogs',
+      catalogsDocument: '/tmp/fy-home/state/catalogs/catalogs.json',
+      catalogBlobs: '/tmp/fy-home/state/catalogs/blobs',
     });
     should(requiredLayoutDirectories(actual)).deepEqual([
       '/tmp/fy-home',

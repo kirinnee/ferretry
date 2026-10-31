@@ -82,17 +82,18 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 `mayTrustDirectLoopback`) is now about the **place**, never the owner: it admits only `privilegedOnly` routes
 — a local terminal attach — through `arrivedPrivileged`, and grants nothing.
 
-## Seven capabilities, two axes
+## Eight capabilities, two axes
 
-| capability   | what it covers                                                                                                        |
-| ------------ | --------------------------------------------------------------------------------------------------------------------- |
-| `fleet`      | the machine, its credentials, components, profiles and runtimes, and the proposals that change them                   |
-| `terminal`   | opening, writing to and streaming session terminals, and typing into a session's own pane (Console)                   |
-| `browser`    | the human login window and per-session browser control                                                                |
-| `filesystem` | reading session working trees, registering projects, and the browser file tools (upload / download / pdf) on the host |
-| `warden`     | supervision status, sweeps and the warden configuration                                                               |
-| `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments                                |
-| `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets                      |
+| capability   | what it covers                                                                                                                                  |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fleet`      | the machine, its credentials, components, profiles and runtimes, and the proposals that change them                                             |
+| `terminal`   | opening, writing to and streaming session terminals, and typing into a session's own pane (Console)                                             |
+| `browser`    | the human login window and per-session browser control                                                                                          |
+| `filesystem` | reading session working trees, registering projects, and the browser file tools (upload / download / pdf) on the host                           |
+| `warden`     | supervision status, sweeps and the warden configuration                                                                                         |
+| `pairing`    | pairing codes, the paired devices and their grants, and other devices' push enrolments                                                          |
+| `secrets`    | running a command with a stored secret in its environment, listing, setting and deleting secrets                                                |
+| `sharing`    | making catalogs of skills and MCP setups, freezing items into them, and exporting a signed file ([catalogs.md](catalogs.md#the-publisher-side)) |
 
 **Leaving a ferret alone is `warden.configure`.** `POST /v1/warden/leave` keeps the Warden off one flagged
 or cleared ferret for an hour, four, or until its status changes ([config-files.md](config-files.md#the-warden)).
@@ -173,7 +174,7 @@ closed would make a fresh remote session useless until somebody walked to the ma
 **The primary security layer is locality.** A remote caller can never turn a capability on. The passkey
 **unlock** is the **second layer**: a governed caller does nothing until its device unlocks the machine,
 and the unlock then stands in for the step-up over every `configure` and the `use` of `terminal`,
-`browser`, `pairing` and `secrets` — except minting a code, widening a device, sealing secrets for
+`browser`, `pairing`, `secrets` and `sharing` — except minting a code, widening a device, sealing secrets for
 another machine ([secrets.md](secrets.md#copying-secrets-to-another-machine)), or turning "what agents
 may control" back ON (terminals/browsers/files) from a remote device, which always want a passkey for
 that act ([design/zero-trust.md](design/zero-trust.md) B1). Turning one of those three OFF never asks
@@ -274,6 +275,33 @@ The questions above, answered for it ([design/zero-trust.md](design/zero-trust.m
    carries: the host command `fy daemon config set secrets --use`. There is no ordering to follow, so
    nothing like `pairing`'s "revoke FIRST" note is needed.
 
+### Capability eight was added: `sharing`
+
+The questions above, answered for it ([design/catalogs.md](design/catalogs.md) §3.6):
+
+1. **What does somebody reach for this switch to STOP?** A paired device making a catalog, freezing
+   skills and MCP setups into it, and exporting a file this machine has signed. The export is the
+   daemon identity vouching for what is in it, and it is handed to people outside the device list, so
+   it is the one act here that cannot be recalled. `sharing.use` therefore needs a step-up from a
+   governed caller. A ferret that holds the admin token is refused every write regardless of the grant
+   (it may list); that is not a grant, it is the route.
+2. **Does switching it off also stop the thing that undoes it?** Not yet. With catalogs as files there is
+   nothing a remote device has to undo: what was exported stays exported, a leaked device is revoked
+   through `pairing`, and the host's own `fy catalog` commands are ungoverned. When members arrive
+   (phase 2) revoking one will be `sharing.use`, and the remote turn-off warning will then need the
+   "revoke FIRST" ordering [design/catalogs.md](design/catalogs.md) §3.6 describes.
+3. **So the way back on the control** is the same sentence every capability's remote turn-off carries:
+   the host command `fy daemon config set sharing --use`. `sharing` has no "it also stops" note in the
+   switch: in phase 1 turning it off stops nothing beyond the catalog routes.
+4. **`terminal` is a superset of `sharing`.** A device that holds `terminal` can run `fy catalog export`
+   at the host, which is ungoverned, so switching `sharing` off does not keep catalogs from a device that
+   still holds `terminal`. The switch governs the daemon's own catalog routes, not what a shell can do.
+
+`sharing.configure` governs only whether a remote caller may re-grant `sharing`. Both axes are on by
+default; the operator password is the opt-in layer. That is the daemon-wide document and a device paired
+from this release on. A device paired **before** this release holds Sharing off until the owner turns it on
+(`fy device grant <device> sharing --use`), because its stored record never said anything about it.
+
 Each instance above cites a command. **Verify a cited command exists before adding one**, and verify it a
 second way: `rg -n --fixed-strings "fy daemon adopt"`. Not `rg -r` — that is `--replace`, so
 `rg -rn "adopt" src` prints every hit with `adopt` rewritten to `n`, which reads as "the command is not
@@ -336,9 +364,10 @@ When a per-act step-up is asked for, its window is the `stepUpWindowMinutes` sec
 **What needs one** — which an unlock satisfies by default. A **governed** caller needs a current step-up for:
 
 - **every `configure` demand**, on every capability; and
-- **`use` of `terminal`, `browser`, `pairing` and `secrets`** — session terminals are arbitrary code on the
+- **`use` of `terminal`, `browser`, `pairing`, `secrets` and `sharing`** — session terminals are arbitrary code on the
   host, the browser capability drives a browser the operator is signed into, pairing hands out credentials,
-  and using a secret runs a command with it in that command's environment.
+  using a secret runs a command with it in that command's environment, and an export makes this machine
+  sign material for people who are not its devices.
 
 Every other `use` — reading the fleet, the filesystem view, supervision status — is ordinary operation and
 needs nothing beyond the grant. The rule is one predicate, `demandNeedsStepUp`, read by the same place that
@@ -486,6 +515,13 @@ gets both at once ([design/zero-trust.md](design/zero-trust.md) B5):
 effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.grants[capability][axis]
 ```
 
+**Two versions of the app and the daemon agree on the capability list by narrowing.** A client (the app, `fy`)
+reading `devices[].grants` or `mayWiden` from a daemon on another version reads a capability the answer omits
+(an older daemon) as **off**, and drops a key it has never heard of (a newer daemon, with a later capability),
+through one shared parse, `ReadCapabilityGrantsSchema`. The device screen therefore keeps working in both
+directions, and never shows access that was not granted. The daemon itself stays closed on what it enforces
+from. This is the version-skew rule in `packages/protocol/src/lib/version-skew.ts`.
+
 - **A newly paired device holds every capability** (`FULL_DEVICE_GRANTS`, owner decision 2026-10-14), behind
   the unlock: it can do nothing until it unlocks, and then anything the daemon-wide document allows.
 - **A `fy pair --limited` code** gives the device that redeems it `fleet.use` only (`LIMITED_DEVICE_GRANTS`):
@@ -506,6 +542,15 @@ effective(device, capability, axis) = daemonWide[capability][axis] ∧ device.gr
   field and reads as the default — `fleet.use` only — which is a narrowing and therefore safe. Every write
   carries the field. A record whose `grants` is malformed fails the document closed, as every other
   malformed field does.
+- **A record written before a capability existed reads that capability as OFF, and is written back.**
+  Adding a capability makes every stored `grants` one key short of the closed set, and refusing the document
+  would stop a daemon with a paired device from starting at all. So `StatePairingRepository.open` fills each
+  capability a record lacks with `{ use: false, configure: false }` (a narrowing, never a widening, whichever
+  capability it is) and writes the document back once, whole. The `upgrade-grants` unit test keeps a
+  committed `devices.json` exactly as v4.172.x wrote it (seven capabilities) and strips each capability this
+  build knows from a full record in turn, so a capability added without thought for old records fails there.
+  **Devices paired before `sharing` existed therefore start with Sharing OFF.** To turn it on for one, at
+  the machine: `fy device grant <device> sharing --use` (add `--configure` to let it re-grant Sharing).
 
 ### Changing a device's grants
 

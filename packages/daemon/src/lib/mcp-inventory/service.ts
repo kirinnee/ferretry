@@ -219,6 +219,11 @@ export class McpInventoryService {
     return { servers: servers.map(server => toWire(server, connections)), problems };
   }
 
+  /** Every declaration on this machine with what a conversion needs (the catalogs publisher reads it). */
+  async servers(): Promise<readonly ResolvedMcpServer[]> {
+    return (await this.#machine())[0];
+  }
+
   /** `GET /v1/sessions/:id/mcp/servers`: exactly what one ferret sees. */
   async session(sessionId: string): Promise<McpInventory> {
     const [servers, connections, problems] = await this.#session(sessionId);

@@ -211,6 +211,7 @@ const CAPABILITY_GRANT_FIELDS = {
   warden: grantSchemaFor('warden'),
   pairing: grantSchemaFor('pairing'),
   secrets: grantSchemaFor('secrets'),
+  sharing: grantSchemaFor('sharing'),
 } as const satisfies CapabilityGrantFields;
 
 export const CapabilityGrantsDocumentSchema = z.strictObject(CAPABILITY_GRANT_FIELDS).prefault({});

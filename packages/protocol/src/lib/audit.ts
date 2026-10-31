@@ -54,6 +54,8 @@ export const AUDIT_EVENTS = [
   'grants.changed',
   'secrets.used',
   'secrets.changed',
+  'catalog.changed',
+  'catalog.exported',
   'security.changed',
   'device.key-rotated',
   'pairing.code-revoked',
@@ -99,6 +101,8 @@ export const AUDIT_KEPT_EVENTS: readonly AuditEvent[] = [
   'passkey.registered',
   'grants.changed',
   'secrets.changed',
+  'catalog.changed',
+  'catalog.exported',
   'security.changed',
   'warden.configured',
 ];

@@ -36,6 +36,7 @@ describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compil
       'learning',
       'stt',
       'worktree',
+      'catalog',
       'fleet',
       'fs',
       'migrate',
@@ -134,6 +135,26 @@ describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compil
     // Assert
     should(actual.code).not.equal(0);
     should(actual.err).containEql('needs the text to clean up');
+  });
+
+  it('documents every catalog verb in its help', async () => {
+    // Act
+    const actual = await cli(['catalog', '--help']);
+
+    // Assert
+    should(actual.code).equal(0);
+    for (const verb of ['ls', 'create', 'rename', 'describe', 'rm', 'add', 'publish', 'withdraw', 'export']) {
+      should(actual.out).containEql(verb);
+    }
+  });
+
+  it('asks for a source before touching a catalog', async () => {
+    // Act
+    const actual = await cli(['catalog', 'add', 'Team tools', '--skill', 'a', '--mcp', 'b']);
+
+    // Assert — decided before any daemon call, so it holds offline
+    should(actual.code).not.equal(0);
+    should(actual.err).containEql('only one of --skill, --mcp');
   });
 
   it('offers no blanket force on a worktree removal', async () => {

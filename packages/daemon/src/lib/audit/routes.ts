@@ -52,6 +52,12 @@ export interface AuditedRouteRule {
    * Only scalars that are not text are taken, so nothing typed by a person can come along.
    */
   readonly responseSettings?: readonly string[];
+  /**
+   * Named facts out of a successful JSON response, copied into `detail` under the key given: a path of field
+   * names, with `*` for every element of an array. Only an identifier-shaped string (an id, a digest) or a
+   * finite number is taken, so nothing a person typed can come along.
+   */
+  readonly responseFields?: Readonly<Record<string, readonly string[]>>;
 }
 
 export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
@@ -387,6 +393,55 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     responseNames: 'imported',
     detail: { action: 'clone-import' },
   },
+  // Catalogs this machine publishes (docs/catalogs.md): ids, names and digests only — never what an item holds.
+  // The brief the person read is the item; the log keeps WHICH item and WHICH version left, and where it went.
+  {
+    method: 'POST',
+    path: '/v1/catalogs',
+    event: 'catalog.changed',
+    detail: { action: 'create' },
+    responseFields: { catalogId: ['id'], revision: ['revision'] },
+  },
+  {
+    method: 'PATCH',
+    path: '/v1/catalogs/:id',
+    event: 'catalog.changed',
+    subject: 'id',
+    detail: { action: 'update' },
+    responseFields: { revision: ['revision'] },
+  },
+  { method: 'DELETE', path: '/v1/catalogs/:id', event: 'catalog.changed', subject: 'id', detail: { action: 'delete' } },
+  {
+    method: 'POST',
+    path: '/v1/catalogs/:id/items',
+    event: 'catalog.changed',
+    subject: 'id',
+    detail: { action: 'publish' },
+    responseFields: { itemId: ['itemId'], itemVersion: ['itemVersion'], digest: ['digest'], revision: ['revision'] },
+  },
+  {
+    method: 'POST',
+    path: '/v1/catalogs/:id/items/:itemId/versions',
+    event: 'catalog.changed',
+    subject: 'id',
+    detail: { action: 'publish' },
+    responseFields: { itemId: ['itemId'], itemVersion: ['itemVersion'], digest: ['digest'], revision: ['revision'] },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/catalogs/:id/items/:itemId',
+    event: 'catalog.changed',
+    subject: 'id',
+    detail: { action: 'withdraw' },
+    responseFields: { itemId: ['itemId'], revision: ['revision'] },
+  },
+  {
+    method: 'POST',
+    path: '/v1/catalogs/:id/export',
+    event: 'catalog.exported',
+    subject: 'id',
+    responseFields: { revision: ['signedManifest', 'manifest', 'revision'], itemIds: ['items', '*', 'itemId'] },
+  },
   { method: 'POST', path: '/v1/worktrees/remove', event: 'worktree.removed' },
   { method: 'POST', path: '/v1/browser/login', event: 'browser.opened', detail: { action: 'sign-in-window' } },
   // A proxy test makes this machine dial a proxy with the stored credentials, so it is kept by name: only whether
@@ -590,9 +645,14 @@ async function record(
     outcome === 'succeeded' && rule.responseSettings !== undefined
       ? settingsIn(answer.body, rule.responseSettings)
       : undefined;
+  const fields =
+    outcome === 'succeeded' && rule.responseFields !== undefined
+      ? fieldsIn(answer.body, rule.responseFields)
+      : undefined;
   const detail: AuditDetail = {
     ...rule.detail,
     ...settings,
+    ...fields,
     ...(answer.subjectName === undefined ? {} : { deviceName: answer.subjectName }),
     ...(names === undefined ? {} : { [(rule.responseNames ?? 'names').split('.').at(-1) as string]: names }),
     ...(rule.refusalCode === true && outcome !== 'succeeded' && answer.code !== undefined ? { code: answer.code } : {}),
@@ -649,6 +709,38 @@ function settingsIn(body: string | undefined, path: readonly string[]): AuditDet
           (typeof field === 'boolean' || (typeof field === 'number' && Number.isFinite(field))),
       ),
     ) as AuditDetail;
+  } catch {
+    return undefined;
+  }
+}
+
+/** What `responseFields` may copy: an id, a digest, a revision — never free text. */
+const IDENTIFIER = /^[A-Za-z0-9_:.-]{1,160}$/u;
+
+function valuesAt(value: unknown, path: readonly string[]): readonly unknown[] {
+  const [head, ...rest] = path;
+  if (head === undefined) return [value];
+  if (head === '*') return Array.isArray(value) ? value.flatMap(entry => valuesAt(entry, rest)) : [];
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
+  return valuesAt((value as Record<string, unknown>)[head], rest);
+}
+
+/** The facts a rule names out of a JSON body: one value, or several joined, under the key it chose. */
+function fieldsIn(
+  body: string | undefined,
+  fields: Readonly<Record<string, readonly string[]>>,
+): AuditDetail | undefined {
+  try {
+    const parsed: unknown = JSON.parse(body ?? '');
+    const detail: Record<string, string | number> = {};
+    for (const [key, path] of Object.entries(fields)) {
+      const found = valuesAt(parsed, path);
+      const texts = found.filter((entry): entry is string => typeof entry === 'string' && IDENTIFIER.test(entry));
+      const numbers = found.filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry));
+      if (numbers.length === 1 && found.length === 1) detail[key] = numbers[0] as number;
+      else if (texts.length > 0 && texts.length === found.length) detail[key] = joinedWithin(texts, AUDIT_TEXT_MAX);
+    }
+    return Object.keys(detail).length === 0 ? undefined : detail;
   } catch {
     return undefined;
   }

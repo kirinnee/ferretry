@@ -530,13 +530,14 @@ describe('GrantsSurface', () => {
 });
 
 describe('GrantsCard per-device grants', () => {
-  it('shows the secret store beside the other six, as a card of its own', () => {
+  it('shows the secret store and catalog sharing beside the other six, as cards of their own', () => {
     // Arrange, Act
     const renderer = render(<GrantsCard connection={connection()} view={view()} onChange={() => {}} />);
 
     // Assert
-    expect(marked(renderer, 'data-grant-capability')).toHaveLength(7);
-    expect(marked(renderer, 'data-grant-capability').at(-1)?.props['data-grant-capability']).toBe('secrets');
+    expect(marked(renderer, 'data-grant-capability')).toHaveLength(8);
+    expect(marked(renderer, 'data-grant-capability').at(-2)?.props['data-grant-capability']).toBe('secrets');
+    expect(marked(renderer, 'data-grant-capability').at(-1)?.props['data-grant-capability']).toBe('sharing');
     expect(text(renderer)).toContain('Secrets');
     expect(axisSwitch(renderer, 'secrets.use')).toBeDefined();
   });

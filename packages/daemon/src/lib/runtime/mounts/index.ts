@@ -87,6 +87,7 @@ import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
+import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catalogs.ts';
 import { type CopyListing, secureCopyRoutes } from './secure-copy.ts';
 import { securityRoutes } from './security.ts';
 import { type SessionAddressBook, sessionAddressedRoutes, sessionAddressedSockets } from './session-addressing.ts';
@@ -430,6 +431,8 @@ export interface MountedSubsystems {
    *  output comes back. NOTHING here can project a value — see `mounts/secrets.ts` for why that is a
    *  property of the types rather than a rule, and for the boundary it does and does not draw. */
   readonly secrets: SecretSubsystem;
+  /** The catalogs this machine publishes: signed files of skills and MCP setups for another machine to install. */
+  readonly sharedCatalogs: SharedCatalogSubsystem;
   /** Fleet supervision: the deterministic anomaly sweep, the wardens it spawns to judge a suspect
    *  session, and the operator configuration that decides whether it may spend a session at all. The
    *  subsystem owns the sweep TIMER as well as the routes — a supervision loop with no route would be
@@ -575,6 +578,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // surfaces above rather than among the per-session ones because a secret belongs to the MACHINE:
         // it is not addressed by a session, and no session owns one.
         ...secretRoutes(subsystems.secrets),
+        ...sharedCatalogRoutes(subsystems.sharedCatalogs),
         // The session read comes first among the subsystems: `/v1/sessions` is a fixed literal, and the
         // id pattern beneath it matches one segment, so neither can be shadowed by — or shadow — the
         // deeper per-session routes that follow.

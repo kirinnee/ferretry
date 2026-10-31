@@ -263,6 +263,9 @@ import {
   FileQuotaFailoverStateStore,
   FileRestartQueue,
   FileRoutingCatalog,
+  FileCatalogBlobStore,
+  FileCatalogDocumentStore,
+  NodeSkillFolder,
   FileScratchCollector,
   FileSecretDocumentStore,
   FileSecretKey,
@@ -1051,6 +1054,10 @@ import {
   SESSION_ROSTER_MAX_AGE_MS,
   SESSION_STATUS_TALLY_MAX_AGE_MS,
   SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+  type CatalogIdentitySource,
+  type McpSourceServer,
+  SharedCatalogService,
+  publisherLabel,
   type SecretCloneIdentitySource,
   SecretDirectory,
   SecretExportService,
@@ -11333,7 +11340,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // A message held while this session could not take input is delivered now that it is back.
         sends,
       );
-      const mounted: Omit<MountedSubsystems, 'sessionMcp' | 'catalogInstalls' | 'mcpInventory'> = {
+      const mounted: Omit<MountedSubsystems, 'sessionMcp' | 'catalogInstalls' | 'mcpInventory' | 'sharedCatalogs'> = {
         pack: {
           service: packService,
           routing: { cleanUp, file: guideFile },
@@ -12145,6 +12152,95 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           changed: () => deviceConnections.recheckAll(),
         }),
       };
+      const mcpInventory = (() => {
+        mcpFolderSources.known = mcpInventoryFolders(mounted.catalogs, mounted.worktrees);
+        mcpFolderSources.ferrets = async () => (await mounted.sessions.list()).map(view => view.config.cwd);
+        const inventory = new McpInventoryService({
+          accounts: mcpAccounts,
+          components: async () =>
+            (await mounted.fleetCatalog.components()).kinds
+              .filter(group => group.kind === 'mcp')
+              .flatMap(group => group.components)
+              .map(component => ({
+                name: component.name,
+                runtimes: component.usedBy.runtimes,
+                ...(component.detail.kind === 'mcp' && component.detail.auth === 'oauth'
+                  ? { auth: 'oauth' as const }
+                  : {}),
+              })),
+          folders: mcpFolders,
+          connections: async () => await mcpOAuth.connections(),
+          documents: mcpDocuments,
+          sessions: mounted.sessions,
+        });
+        return {
+          inventory,
+          check: new McpCheckService({
+            inventory,
+            probe: new TransportMcpProbe(),
+            launchEnvironment: async runtime => {
+              const account = (await mcpAccounts()).find(candidate => candidate.runtime === runtime);
+              return account === undefined ? {} : await accountLaunchEnvironment.forWrapper(account.wrapper);
+            },
+            baseEnvironment: () => mcpCheckBaseEnvironment(process.env),
+            bearer: async (subject, url) => {
+              const names = mcpOAuthSecretNames(subject, url);
+              await mcpOAuth.refreshForLaunch([names.access]);
+              return (await secretVault.values()).get(names.access);
+            },
+            redactor: secretRedactor,
+            now: () => millisecondClock.now(),
+          }),
+        };
+      })();
+
+      const sharedCatalogIdentity: CatalogIdentitySource = {
+        identity: async () => {
+          const read = await readDaemonRelayIdentity(
+            stateFiles,
+            paths.daemonIdentity,
+            new WebCryptoRelayIdentityKeys(),
+          );
+          return read.ok ? read.identity : undefined;
+        },
+        publisherName: () => publisherLabel(hostname()),
+      };
+      const sharedCatalogs = new SharedCatalogService({
+        documents: new FileCatalogDocumentStore(paths, stateFiles),
+        blobs: new FileCatalogBlobStore(paths, stateFiles),
+        skillTree: new NodeSkillFolder(),
+        skills: {
+          list: async () => {
+            const inventory = await mounted.catalogs.skillsInventory();
+            const entries = [
+              ...inventory.homes.flatMap(home => home.skills),
+              ...inventory.projects.flatMap(project => project.skills),
+            ];
+            return [...new Map(entries.map(entry => [entry.path, { path: entry.path, name: entry.name }])).values()];
+          },
+        },
+        mcp: {
+          servers: async (): Promise<readonly McpSourceServer[]> => {
+            const model = (await fleetCatalogDeps.document()).model;
+            return (await mcpInventory.inventory.servers()).map(server => {
+              const name = server.declaration?.name ?? '';
+              const component = server.scope === 'component' ? model.components.mcp[name] : undefined;
+              return {
+                id: server.id,
+                name,
+                scope: server.scope,
+                harness: server.harness,
+                source: server.source,
+                declaration: server.declaration,
+                component,
+              };
+            });
+          },
+        },
+        identity: sharedCatalogIdentity,
+        crypto: new WebCryptoRelayCrypto(),
+        now: () => millisecondClock.now(),
+      });
       return {
         ...mounted,
         // Built after the rest because it reads three of them: the session directory, and the project
@@ -12168,47 +12264,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           now: () => millisecondClock.now(),
           mint: prefix => `${prefix}_${randomBytes(16).toString('base64url')}`,
         }),
-        mcpInventory: (() => {
-          mcpFolderSources.known = mcpInventoryFolders(mounted.catalogs, mounted.worktrees);
-          mcpFolderSources.ferrets = async () => (await mounted.sessions.list()).map(view => view.config.cwd);
-          const inventory = new McpInventoryService({
-            accounts: mcpAccounts,
-            components: async () =>
-              (await mounted.fleetCatalog.components()).kinds
-                .filter(group => group.kind === 'mcp')
-                .flatMap(group => group.components)
-                .map(component => ({
-                  name: component.name,
-                  runtimes: component.usedBy.runtimes,
-                  ...(component.detail.kind === 'mcp' && component.detail.auth === 'oauth'
-                    ? { auth: 'oauth' as const }
-                    : {}),
-                })),
-            folders: mcpFolders,
-            connections: async () => await mcpOAuth.connections(),
-            documents: mcpDocuments,
-            sessions: mounted.sessions,
-          });
-          return {
-            inventory,
-            check: new McpCheckService({
-              inventory,
-              probe: new TransportMcpProbe(),
-              launchEnvironment: async runtime => {
-                const account = (await mcpAccounts()).find(candidate => candidate.runtime === runtime);
-                return account === undefined ? {} : await accountLaunchEnvironment.forWrapper(account.wrapper);
-              },
-              baseEnvironment: () => mcpCheckBaseEnvironment(process.env),
-              bearer: async (subject, url) => {
-                const names = mcpOAuthSecretNames(subject, url);
-                await mcpOAuth.refreshForLaunch([names.access]);
-                return (await secretVault.values()).get(names.access);
-              },
-              redactor: secretRedactor,
-              now: () => millisecondClock.now(),
-            }),
-          };
-        })(),
+        mcpInventory,
+        sharedCatalogs: { catalogs: sharedCatalogs },
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),

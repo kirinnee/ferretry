@@ -650,6 +650,79 @@ describe('auditedRoutes', () => {
     ]);
   });
 
+  it('should record catalog changes by id, version and digest, and never what an item holds', async () => {
+    // Arrange
+    const CAT = `cat_${'A'.repeat(22)}`;
+    const ITEM = `itm_${'B'.repeat(22)}`;
+    const DIGEST = `sha256:${'c'.repeat(64)}`;
+    const answers: Record<string, unknown> = {
+      'POST /v1/catalogs': { id: CAT, revision: 1, name: 'secret name text with spaces' },
+      'POST /v1/catalogs/:id/items': {
+        itemId: ITEM,
+        itemVersion: 1,
+        digest: DIGEST,
+        revision: 2,
+        item: { files: 'x' },
+      },
+      'DELETE /v1/catalogs/:id/items/:itemId': { itemId: ITEM, revision: 3 },
+      'POST /v1/catalogs/:id/export': {
+        signedManifest: { manifest: { revision: 3 } },
+        items: [{ itemId: ITEM }, { itemId: `itm_${'D'.repeat(22)}` }],
+      },
+    };
+    const handlers = Object.fromEntries(
+      Object.entries(answers).map(([key, body]) => [key, async () => jsonResponse(body)] as const),
+    );
+    const { journal, routes } = decorated(handlers);
+    const api = await dispatcher(routes);
+
+    // Act
+    for (const [method, path] of [
+      ['POST', '/v1/catalogs'],
+      ['POST', `/v1/catalogs/${CAT}/items`],
+      ['DELETE', `/v1/catalogs/${CAT}/items/${ITEM}`],
+      ['POST', `/v1/catalogs/${CAT}/export`],
+    ] as const)
+      await api.dispatch(request({ method, path, headers: ADMIN, loopback: true, body: '{}' }));
+
+    // Assert
+    const logged = records(journal);
+    should(logged.map(record => record.event)).deepEqual([
+      'catalog.changed',
+      'catalog.changed',
+      'catalog.changed',
+      'catalog.exported',
+    ]);
+    should(logged[0]?.detail).containEql({ action: 'create', catalogId: CAT, revision: 1 });
+    should(logged[1]?.detail).containEql({
+      action: 'publish',
+      itemId: ITEM,
+      itemVersion: 1,
+      digest: DIGEST,
+      revision: 2,
+    });
+    should(logged[2]?.detail).containEql({ action: 'withdraw', itemId: ITEM, revision: 3 });
+    should(logged[3]?.subject).equal(CAT);
+    should(logged[3]?.detail).containEql({ revision: 3, itemIds: `${ITEM},itm_${'D'.repeat(22)}` });
+    should(JSON.stringify(logged)).not.match(/secret name|files/u);
+  });
+
+  it('should record a catalog change with no ids when the answer is not JSON', async () => {
+    // Arrange
+    const { journal, routes } = decorated({
+      'POST /v1/catalogs': async () => ({ status: 200, headers: new Map<string, string>(), body: 'plainly not json' }),
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(request({ method: 'POST', path: '/v1/catalogs', headers: ADMIN, loopback: true, body: '{}' }));
+
+    // Assert
+    const logged = records(journal);
+    should(logged.map(record => record.event)).deepEqual(['catalog.changed']);
+    should(logged[0]?.detail).not.have.property('catalogId');
+  });
+
   it('should audit answering a harness dialog as terminal input on the session, never with the choice', async () => {
     // Arrange
     const { journal, routes } = decorated({});

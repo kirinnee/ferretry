@@ -16,7 +16,7 @@ import type { EnforcedGrants } from './types.ts';
  * PERMISSIVE, and chosen rather than shrugged at. The governing principle is *control as much as
  * possible from the UI, with a security layer for the cautious* — so a person should be able to do
  * everything from a browser until they decide otherwise, and the restriction is something they turn
- * on rather than a wall they start behind. Both axes are therefore enabled for all seven capabilities,
+ * on rather than a wall they start behind. Both axes are therefore enabled for all eight capabilities,
  * `pairing` included — see `docs/grants.md` for why the one that hands out credentials needs no
  * exception: a caller who is not on this host can switch it off and can never switch it back on.
  *
@@ -43,6 +43,7 @@ export const DEFAULT_CAPABILITY_GRANTS: CapabilityGrants = {
   warden: { use: true, configure: true },
   pairing: { use: true, configure: true },
   secrets: { use: true, configure: true },
+  sharing: { use: true, configure: true },
 };
 
 /**
@@ -78,9 +79,10 @@ export function isGovernedCaller(arrival: CallerArrival): boolean {
 /**
  * The demands that need a passkey step-up from a governed caller even when the axis is granted.
  *
- * Every `configure`, and the `use` of the three capabilities whose ordinary use already reaches past
- * the daemon: `terminal` is arbitrary code on the host, `browser` drives a browser the operator is
- * signed into, and `pairing` hands out credentials for the machine. Every other `use` — watching
+ * Every `configure`, and the `use` of the capabilities whose ordinary use already reaches past the
+ * daemon: `terminal` is arbitrary code on the host, `browser` drives a browser the operator is signed
+ * into, `pairing` hands out credentials for the machine, and `sharing` publishes its material to people
+ * who are not its devices. Every other `use` — watching
  * sessions, reading the fleet, the filesystem view, the warden — is ordinary operation and needs
  * nothing beyond the grant.
  */
@@ -92,8 +94,17 @@ export function demandNeedsStepUp(demand: CapabilityDemand): boolean {
 /**
  * `secrets.use` is here because it RUNS A COMMAND — the value goes into a child's environment — so it is
  * code execution on the host exactly as a terminal is (`docs/design/zero-trust.md` B1).
+ *
+ * `sharing.use` is here because it makes this machine VOUCH for something: an export is signed with the
+ * daemon identity and handed to people outside it (`docs/grants.md`, capability eight).
  */
-const STEP_UP_USE_CAPABILITIES: ReadonlySet<DaemonCapability> = new Set(['terminal', 'browser', 'pairing', 'secrets']);
+const STEP_UP_USE_CAPABILITIES: ReadonlySet<DaemonCapability> = new Set([
+  'terminal',
+  'browser',
+  'pairing',
+  'secrets',
+  'sharing',
+]);
 
 /** Everything the per-request decision reads, gathered so none of it comes from a global. */
 export interface GrantEvaluation {
@@ -161,6 +172,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   warden: 'fleet supervision',
   pairing: 'device pairing',
   secrets: 'the secret store',
+  sharing: 'catalog sharing',
 };
 
 /** The capability as an operator reads it, for a report row or a refusal. */

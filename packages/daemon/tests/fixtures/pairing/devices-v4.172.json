@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 2,
+  "daemonId": "__DAEMON_ID__",
+  "devices": [
+    {
+      "id": "fy_device_id_aaaaaaaaaaaaaaaaaaaaaa",
+      "daemonId": "__DAEMON_ID__",
+      "name": "Owner phone",
+      "platform": "browser",
+      "createdAt": "2026-10-02T09:00:00.000Z",
+      "lastSeenAt": "2026-10-20T18:30:00.000Z",
+      "pairedOver": "relay",
+      "publicKey": "MCowBQYDK2VwAyEABQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU",
+      "grants": {
+        "fleet": { "use": true, "configure": true },
+        "terminal": { "use": true, "configure": true },
+        "browser": { "use": true, "configure": true },
+        "filesystem": { "use": true, "configure": true },
+        "warden": { "use": true, "configure": true },
+        "pairing": { "use": true, "configure": true },
+        "secrets": { "use": true, "configure": true }
+      }
+    },
+    {
+      "id": "fy_device_id_bbbbbbbbbbbbbbbbbbbbbb",
+      "daemonId": "__DAEMON_ID__",
+      "name": "Reading tablet",
+      "platform": "browser",
+      "createdAt": "2026-10-05T10:00:00.000Z",
+      "lastSeenAt": "2026-10-19T08:00:00.000Z",
+      "pairedOver": "direct",
+      "publicKey": "MCowBQYDK2VwAyEABQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU",
+      "grants": {
+        "fleet": { "use": true, "configure": false },
+        "terminal": { "use": false, "configure": false },
+        "browser": { "use": false, "configure": false },
+        "filesystem": { "use": false, "configure": false },
+        "warden": { "use": false, "configure": false },
+        "pairing": { "use": false, "configure": false },
+        "secrets": { "use": false, "configure": false }
+      }
+    }
+  ]
+}

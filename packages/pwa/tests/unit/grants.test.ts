@@ -216,6 +216,8 @@ describe('grant vocabulary', () => {
     expect(remoteRevokeWarning('terminal', 'fyd')).toContain('fyd daemon config set terminal --use');
     expect(remoteRevokeWarning('terminal')).not.toContain('revoke that device FIRST');
     expect(remoteRevokeWarning('pairing')).toContain('revoke that device FIRST');
+    expect(remoteRevokeWarning('sharing')).toContain('fy daemon config set sharing --use');
+    expect(remoteRevokeWarning('sharing')).not.toContain('also stops');
     expect(grantOnlyAtMachine('fleet')).toContain('fy daemon config set fleet --use');
     expect(grantOnlyAtMachine('fleet')).not.toMatch(/password|unlock/iu);
     expect(grantOnlyAtMachine('fleet', 'fyd')).toContain('fyd daemon config set fleet --use');

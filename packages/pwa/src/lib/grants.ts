@@ -45,7 +45,7 @@ import {
  * secret to type: it is a touch on this device, it lasts a short while, and it never widens.
  */
 export const STEP_UP_NOTE =
-  'Changing how a capability behaves, or opening a terminal, the browser, a pairing code or a stored secret, asks you to confirm with your passkey on this device. It covers this open copy of the app for a short while and never turns anything on that was switched off.';
+  'Changing how a capability behaves, or opening a terminal, the browser, a pairing code, a stored secret or sharing a catalog, asks you to confirm with your passkey on this device. It covers this open copy of the app for a short while and never turns anything on that was switched off.';
 
 /**
  * The capability as an operator reads it, so a refusal names a thing rather than a key.
@@ -63,6 +63,7 @@ const CAPABILITY_NOUNS: Readonly<Record<DaemonCapability, string>> = {
   warden: 'fleet supervision',
   pairing: 'device pairing',
   secrets: 'the secret store',
+  sharing: 'catalog sharing',
 };
 
 export const capabilityNoun = (capability: DaemonCapability): string => CAPABILITY_NOUNS[capability];
@@ -76,6 +77,7 @@ const CAPABILITY_LABELS: Readonly<Record<DaemonCapability, string>> = {
   warden: 'Fleet supervision',
   pairing: 'Device pairing',
   secrets: 'Secrets',
+  sharing: 'Sharing',
 };
 
 export const capabilityLabel = (capability: DaemonCapability): string => CAPABILITY_LABELS[capability];
@@ -95,6 +97,7 @@ const USE_ACTS: Readonly<Record<DaemonCapability, string>> = {
   warden: 'use fleet supervision',
   pairing: 'add or manage a paired device',
   secrets: 'run a command with a stored secret',
+  sharing: 'manage or export a shared catalog',
 };
 
 /**
@@ -144,6 +147,8 @@ const CAPABILITY_REACH: Readonly<Record<DaemonCapability, string>> = {
     'Minting pairing codes that let another device reach this machine. A device that can mint credentials for more devices turns one stolen phone into standing access, so switching this off is the one decision a browser can never undo.',
   secrets:
     'Runs a command with a stored secret in its environment — code on this machine; and sets or deletes stored secrets.',
+  sharing:
+    'Making catalogs of this machine’s skills and MCP setups and exporting them as signed files, which makes this machine vouch for what they hold. Sharing with named people comes in a later update.',
 };
 
 export const capabilityReach = (capability: DaemonCapability): string => CAPABILITY_REACH[capability];
@@ -178,7 +183,8 @@ export const REMOTE_ONE_WAY_NOTE =
 /**
  * What switching a capability off ALSO switches off, when that is the thing somebody came here to do.
  *
- * ONE ENTRY TODAY, AND IT IS NOT DECORATION. Somebody reaches for `pairing` off because a phone was
+ * ONE ENTRY TODAY, AND IT IS NOT DECORATION. A capability with no entry (`sharing` in phase 1) stops nothing
+ * beyond its own job, so its switch says nothing extra. Somebody reaches for `pairing` off because a phone was
  * stolen — and that same switch refuses `DELETE /v1/pair/devices/:deviceId`, because both carry
  * `pairing.use`. So the coarse switch disables the remedy the person is reaching for it to apply, and
  * the order that works has to be on the control rather than in `docs/grants.md`: a document is read
@@ -258,7 +264,7 @@ const POSTURE_COPY = {
     badge: 'Governed',
     headline: 'The operator’s limits apply to this browser, even when it runs on the machine itself.',
     detail:
-      'Every capability below is open only because the operator allowed it, and changing one, or opening a terminal, the browser, a pairing code or a stored secret, asks you to confirm with your passkey.',
+      'Every capability below is open only because the operator allowed it, and changing one, or opening a terminal, the browser, a pairing code, a stored secret or sharing a catalog, asks you to confirm with your passkey.',
     tone: 'disclosure',
   },
   unknown: {
@@ -333,6 +339,9 @@ const CAPABILITY_WEIGHTS: Readonly<Record<DaemonCapability, AccessWeight>> = {
   // Running a command is code execution on the host, with credentials in its environment: the same tier
   // as a terminal, whatever the secret store holds.
   secrets: 'broad',
+  // Publishes this machine's own skills and MCP setups to people outside it, signed as this machine. What it
+  // hands over is material the owner chose, not control of the host, so it weighs less than pairing.
+  sharing: 'moderate',
 };
 
 export const capabilityWeight = (capability: DaemonCapability): AccessWeight => CAPABILITY_WEIGHTS[capability];

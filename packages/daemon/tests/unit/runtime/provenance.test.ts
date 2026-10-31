@@ -227,8 +227,8 @@ describe('the grant posture a `--check` reports', () => {
     // list and present in the configure list, so `not.match(/terminal/)` would fail on a correct
     // sentence and `match(/terminal/)` would pass on a broken one.
     const lists = /may use (.*), and change settings for (.*)$/u.exec(partial.split('\n')[0] ?? '');
-    should(lists?.[1]).equal('fleet, browser, filesystem, warden, pairing, secrets');
-    should(lists?.[2]).equal('fleet, terminal, browser, filesystem, pairing, secrets');
+    should(lists?.[1]).equal('fleet, browser, filesystem, warden, pairing, secrets, sharing');
+    should(lists?.[2]).equal('fleet, terminal, browser, filesystem, pairing, secrets, sharing');
     should(all).match(/may use everything, and change settings for everything/u);
   });
 

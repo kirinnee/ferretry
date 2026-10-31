@@ -16,6 +16,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/fleet/profiles/preview': 'a read with a body: previews a draft and writes nothing',
   'POST /v1/sessions/:sessionId/conversion-preview':
     'a read with a body: previews a cross-harness conversion and writes nothing; the migrate it precedes is audited',
+  'POST /v1/catalogs/:id/items/preview':
+    'a read with a body: previews what a publish would carry and writes nothing; the add it precedes is audited',
   'POST /v1/passkeys/options': 'mints a one-time challenge; the registration that spends it is audited',
   'POST /v1/step-up/options': 'mints a one-time challenge; the step-up that spends it is audited',
   'POST /v1/unlock/options': 'mints a one-time challenge; the unlock that spends it is audited',

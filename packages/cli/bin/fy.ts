@@ -238,6 +238,10 @@ import { DAEMON_RELEASE_KEYS } from '../src/lib/update/release-keys';
 import { DaemonUpdateStatusReader } from '../src/lib/update/status';
 import { DaemonUpdater } from '../src/lib/update/updater';
 import { assertSemver } from '../src/lib/version';
+import { registerCatalogCommands } from '../src/lib/catalog/commands';
+import { CatalogController } from '../src/lib/catalog/controller';
+import { ProtocolCatalogGateway } from '../src/lib/catalog/gateway';
+import { FileCatalogWriter } from '../src/adapters/catalog/export-file';
 import { registerWorktreeCommands } from '../src/lib/worktrees/commands';
 import { WorktreeController } from '../src/lib/worktrees/controller';
 import { ProtocolWorktreeGateway } from '../src/lib/worktrees/gateway';
@@ -1107,6 +1111,18 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   // prompt's per-type lines point at. No daemon — the text ships in the binary.
   ({ program, world }) =>
     registerRenderCommands(program, new RenderController(world.io, BINARY_NAME, RENDER_GUIDE_SECTION)),
+  ({ program, world, client }) =>
+    registerCatalogCommands(
+      program,
+      new CatalogController(
+        new ProtocolCatalogGateway(client),
+        world.io,
+        world.prompt,
+        new FileCatalogWriter(),
+        world.interactive,
+        world.cwd,
+      ),
+    ),
   ({ program, world, client }) =>
     registerWorktreeCommands(
       program,
