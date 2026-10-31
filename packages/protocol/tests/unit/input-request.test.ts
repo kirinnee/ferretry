@@ -149,11 +149,12 @@ describe('an input request', () => {
     should(InputRequestSchema.safeParse({ ...REQUEST, note: 'hi' }).success).be.false();
   });
 
-  it('should name the saved secret of an outcome by NAME only', () => {
-    const outcome = { at: AT, by: { kind: 'host' }, submitted: true, source: 'saved', secretName: 'SUDO_KIRIN_BOX' };
+  it('should name the saved login of an outcome by its handle only', () => {
+    const outcome = { at: AT, by: { kind: 'host' }, submitted: true, source: 'saved', entry: 'SUDO_KIRIN_BOX' };
 
     should(InputOutcomeSchema.safeParse(outcome).success).be.true();
-    should(InputOutcomeSchema.safeParse({ ...outcome, secretName: 'hunter2 with spaces' }).success).be.false();
+    should(InputOutcomeSchema.safeParse({ ...outcome, entry: 'hunter2 with spaces' }).success).be.false();
+    should(InputOutcomeSchema.safeParse({ ...outcome, secretName: 'SUDO_KIRIN_BOX' }).success).be.false();
   });
 
   it('should tell the agent where it stands without a value, a length or a saved secret name', () => {
@@ -161,6 +162,8 @@ describe('an input request', () => {
 
     should(InputAgentViewSchema.safeParse(view).success).be.true();
     should(InputAgentViewSchema.safeParse({ ...view, secretName: 'SUDO_KIRIN_BOX' }).success).be.false();
+    should(InputAgentViewSchema.safeParse({ ...view, entry: 'SUDO_KIRIN_BOX' }).success).be.false();
+    should(InputAgentViewSchema.safeParse({ ...view, saved: { offers: [] } }).success).be.false();
     should(InputAgentViewSchema.safeParse({ ...view, length: 8 }).success).be.false();
   });
 });
@@ -200,31 +203,33 @@ describe('the events and the audit detail', () => {
 describe('delivering', () => {
   const body = { deliveryId: DELIVERY, observedDigest: DIGEST, padded: padInputValue('hunter2-UNIQUE'), submit: true };
 
-  it('should carry the padded value or a saved secret NAME, exactly one', () => {
+  it('should carry the padded value or a saved login handle, exactly one', () => {
     should(InputDeliverBodySchema.safeParse(body).success).be.true();
     should(
       InputDeliverBodySchema.safeParse({
         deliveryId: DELIVERY,
         observedDigest: DIGEST,
-        secretName: 'SUDO_X',
+        entry: 'SUDO_X',
         submit: false,
       }).success,
     ).be.true();
-    should(InputDeliverBodySchema.safeParse({ ...body, secretName: 'SUDO_X' }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...body, entry: 'SUDO_X' }).success).be.false();
     should(
       InputDeliverBodySchema.safeParse({ deliveryId: DELIVERY, observedDigest: DIGEST, submit: true }).success,
     ).be.false();
   });
 
   it('should allow saving only a typed value', () => {
-    should(InputDeliverBodySchema.safeParse({ ...body, saveAs: 'SUDO_KIRIN_BOX' }).success).be.true();
+    should(InputDeliverBodySchema.safeParse({ ...body, save: { entry: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' } }).success).be.true();
+    should(InputDeliverBodySchema.safeParse({ ...body, save: { entry: 'sudo', label: 'x' } }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...body, save: { entry: 'SUDO', label: 'a\nb' } }).success).be.false();
     should(
       InputDeliverBodySchema.safeParse({
         deliveryId: DELIVERY,
         observedDigest: DIGEST,
-        secretName: 'SUDO_X',
+        entry: 'SUDO_X',
         submit: true,
-        saveAs: 'SUDO_Y',
+        save: { entry: 'SUDO_Y', label: 'y' },
       }).success,
     ).be.false();
   });

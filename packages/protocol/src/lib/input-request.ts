@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { AgendaIdSchema } from './agenda.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
-import { SecretNameSchema } from './secrets.ts';
+import { InputSavedSchema, LOGIN_LABEL_MAX_LENGTH, LoginEntryIdSchema } from './login-entries.ts';
 import { SurfaceKeySchema, SurfaceKindSchema } from './surface-names.ts';
 
 /**
@@ -93,6 +93,11 @@ export const InputRaiseSchema = z.strictObject({
   blocking: z.boolean().optional(),
   /** A follow-up in a multi-step login: the card it follows. */
   chain: AgendaIdSchema.optional(),
+  /**
+   * The saved login the ferret expects to be used. A HINT only: the daemon decides what matches the target,
+   * a hint never makes an entry the one-tap choice, and the answer is the same whether such an entry exists.
+   */
+  secretHint: LoginEntryIdSchema.optional(),
 });
 export type InputRaise = z.infer<typeof InputRaiseSchema>;
 
@@ -208,10 +213,10 @@ export const InputOutcomeSchema = z.strictObject({
   at: InstantSchema,
   by: InputActorSchema,
   submitted: z.boolean(),
-  /** Typed by the owner, or a saved secret chosen by name. */
+  /** Typed by the owner, or a saved login chosen by the owner. */
   source: z.enum(['typed', 'saved']),
-  /** The NAME of the saved secret used; the owner's card shows it, the agent never sees it for a `secret`. */
-  secretName: SecretNameSchema.optional(),
+  /** The saved login used; the owner's card shows it, the agent never sees it. */
+  entry: LoginEntryIdSchema.optional(),
   reason: InputReasonSchema.optional(),
 });
 export type InputOutcome = z.infer<typeof InputOutcomeSchema>;
@@ -250,6 +255,8 @@ export const InputRequestSchema = z.strictObject({
   risk: InputRiskSchema.optional(),
   /** A digest of the facts the card showed; deliver refuses `target_changed` when it no longer matches. */
   observedDigest: Digest.optional(),
+  /** Saved logins: what the card may offer and what "Save as" suggests. The owner's view only. */
+  saved: InputSavedSchema.optional(),
   state: InputRequestStateSchema,
   outcome: InputOutcomeSchema.optional(),
 });
@@ -281,7 +288,8 @@ export type InputAgentView = z.infer<typeof InputAgentViewSchema>;
 /**
  * `POST /v1/sessions/:sid/input-requests/:id/deliver`. The one schema with a value, carried only inside
  * the sealed carrier. `padded` is {@link padInputValue}'s output, so the relay's size view reveals a
- * bucket, not a length. Exactly one of `padded` or `secretName`.
+ * bucket, not a length. Exactly one of `padded` or `entry`: a saved login is named, and the DAEMON
+ * resolves its value inside the use boundary, so a saved value never passes through the app.
  */
 export const InputDeliverBodySchema = z
   .strictObject({
@@ -292,18 +300,27 @@ export const InputDeliverBodySchema = z
       .min(1)
       .max(INPUT_VALUE_MAX_BYTES + 2 * INPUT_PAD_BUCKET_BYTES)
       .optional(),
-    secretName: SecretNameSchema.optional(),
+    /** A saved login, by its handle: the daemon types the field the request needs from it. */
+    entry: LoginEntryIdSchema.optional(),
     /** Press Enter / submit after typing. */
     submit: z.boolean(),
-    /** Save a typed value to the secret store under this name (only for a typed `secret`). */
-    saveAs: SecretNameSchema.optional(),
+    /**
+     * Keep the typed value in a saved login: a new entry with this label, or the existing one with this
+     * handle (its label then stays). Saved only once it has been typed; a one-time code is never saved.
+     */
+    save: z
+      .strictObject({
+        entry: LoginEntryIdSchema,
+        label: z.string().trim().min(1).max(LOGIN_LABEL_MAX_LENGTH).regex(/^[^\p{Cc}\p{Cf}]*$/u),
+      })
+      .optional(),
   })
   .superRefine((body, context) => {
-    if ((body.padded === undefined) === (body.secretName === undefined)) {
-      context.addIssue({ code: 'custom', message: 'send exactly one of padded or secretName' });
+    if ((body.padded === undefined) === (body.entry === undefined)) {
+      context.addIssue({ code: 'custom', message: 'send exactly one of padded or entry' });
     }
-    if (body.saveAs !== undefined && body.padded === undefined) {
-      context.addIssue({ code: 'custom', message: 'saveAs saves a typed value', path: ['saveAs'] });
+    if (body.save !== undefined && body.padded === undefined) {
+      context.addIssue({ code: 'custom', message: 'save keeps a typed value', path: ['save'] });
     }
   });
 export type InputDeliverBody = z.infer<typeof InputDeliverBodySchema>;
@@ -315,6 +332,13 @@ export const InputDeliverResultSchema = z.strictObject({
   state: InputRequestStateSchema,
   submitted: z.boolean(),
   reason: InputReasonSchema.optional(),
+  /**
+   * What came of "Save as", when it was asked for. The value was typed either way: a save that failed
+   * says why (`problem`, a fixed sentence) and the owner can save it from Settings instead.
+   */
+  saved: z
+    .strictObject({ entry: LoginEntryIdSchema, ok: z.boolean(), problem: z.string().max(240).optional() })
+    .optional(),
 });
 export type InputDeliverResult = z.infer<typeof InputDeliverResultSchema>;
 
@@ -444,7 +468,10 @@ export const InputAuditDetailSchema = z.strictObject({
   surface: SurfaceKeySchema.optional(),
   recognised: z.boolean().optional(),
   source: z.enum(['typed', 'saved']).optional(),
-  secretName: SecretNameSchema.optional(),
+  /** The saved login typed from, or saved to: a handle, never what it holds. */
+  entry: LoginEntryIdSchema.optional(),
+  /** The typed value was kept in `entry`. */
+  saved: z.boolean().optional(),
   submitted: z.boolean().optional(),
   carrier: z.enum(['loopback', 'direct', 'relay']).optional(),
   reason: InputReasonSchema.optional(),
