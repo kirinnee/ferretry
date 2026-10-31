@@ -1,6 +1,7 @@
 import { describe, test } from 'bun:test';
 import should from 'should';
 import {
+  flowsDown,
   isNarrowColumn,
   MERMAID_NARROW_COLUMN_PX,
   verticalizeMermaid,
@@ -118,5 +119,22 @@ describe('isNarrowColumn', () => {
     should(isNarrowColumn(MERMAID_NARROW_COLUMN_PX)).be.false();
     should(isNarrowColumn(860)).be.false();
     should(isNarrowColumn(0)).be.false();
+  });
+});
+
+describe('flowsDown', () => {
+  test('should be true for a flowchart that runs top-down, spelled any way', () => {
+    for (const head of ['flowchart TD', 'flowchart TB', 'graph TD', 'graph TB', 'flowchart', 'graph;', 'FLOWCHART td'])
+      should(flowsDown(`${head}\n  A --> B`)).be.true();
+  });
+
+  test('should read past front matter, comments and directives to the header', () => {
+    should(flowsDown('---\ntitle: T\n---\n%% note\nflowchart TD\n  A --> B')).be.true();
+    should(flowsDown('---\ntitle: T\n---\nflowchart LR\n  A --> B')).be.false();
+  });
+
+  test('should be false for a sideways, bottom-up or non-flowchart diagram', () => {
+    for (const head of ['flowchart LR', 'flowchart RL', 'flowchart BT', 'sequenceDiagram', 'gantt', ''])
+      should(flowsDown(`${head}\n  A --> B`)).be.false();
   });
 });

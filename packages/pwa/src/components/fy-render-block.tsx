@@ -70,7 +70,7 @@ import {
   isFyRenderMediaBlock,
   type FyRenderBlock as ParsedBlock,
 } from '../lib/fy-render.ts';
-import { isNarrowColumn, verticalizeMermaid } from '../lib/fy-render-mermaid-layout.ts';
+import { flowsDown, isNarrowColumn, verticalizeMermaid } from '../lib/fy-render-mermaid-layout.ts';
 import { mermaidThemeVariables, paletteKey, type ResolvedTheme } from '../lib/fy-render-palette.ts';
 import { MERMAID_LEGIBLE_SCALE, svgNaturalSize, viewBoxSize } from '../lib/fy-render-viewport.ts';
 import { FyRenderChart, type FyRenderChartModules } from './fy-render-chart.tsx';
@@ -694,6 +694,7 @@ export function FyRenderBlock({
             fullscreen={fullscreen}
             key={`diagram:${generation.current}`}
             kind="Diagram"
+            anchor={flowsDown(diagramSource) ? 'centre' : 'start'}
             legibleScale={MERMAID_LEGIBLE_SCALE}
             natural={natural}
             onError={onDecodeFailure(generation.current)}

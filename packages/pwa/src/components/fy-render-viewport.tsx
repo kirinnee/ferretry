@@ -26,6 +26,7 @@
 
 import { Scan, ZoomIn, ZoomOut } from 'lucide-react';
 import {
+  type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
   type SyntheticEvent,
@@ -40,13 +41,16 @@ import {
 import {
   boxCentre,
   clampView,
+  type Edges,
   inlineMaxHeight,
   isAtRest,
   KEY_PAN_PX,
+  moreBeyond,
   type Point,
   panBy,
   pinchOf,
   planViewport,
+  type RestAnchor,
   restView,
   type Size,
   toggleZoom,
@@ -59,6 +63,21 @@ import {
   zoomTo,
 } from '../lib/fy-render-viewport.ts';
 
+const NO_EDGES: Edges = { bottom: false, left: false, right: false, top: false };
+
+/** The edges with more picture beyond them, as words, for the shots and the tests. */
+const moreOf = (edges: Edges): string =>
+  (['left', 'right', 'top', 'bottom'] as const).filter(side => edges[side]).join(' ');
+
+/** Each edge's fade, 1 where there is more to drag to and 0 where the picture ends: read by `.fy-render-plane`. */
+const fadeStyle = (edges: Edges): CSSProperties =>
+  ({
+    '--fy-fade-b': edges.bottom ? 1 : 0,
+    '--fy-fade-l': edges.left ? 1 : 0,
+    '--fy-fade-r': edges.right ? 1 : 0,
+    '--fy-fade-t': edges.top ? 1 : 0,
+  }) as CSSProperties;
+
 /** A press that moves less than this is a tap, not the start of a pan. */
 const TAP_SLOP_PX = 6;
 /** Two taps this close in time and space are a double tap. */
@@ -66,6 +85,8 @@ const DOUBLE_TAP_MS = 320;
 const DOUBLE_TAP_DISTANCE_PX = 32;
 
 export interface FyRenderViewportProps {
+  /** Where an overflowing picture starts across the box: its left edge (default) or its middle. */
+  readonly anchor?: RestAnchor;
   /** The picture's URL: a `data:image/svg+xml` the caller built. */
   readonly src: string;
   readonly alt: string;
@@ -135,6 +156,7 @@ type Gesture =
     };
 
 export function FyRenderViewport({
+  anchor = 'start',
   src,
   alt,
   natural,
@@ -153,13 +175,14 @@ export function FyRenderViewport({
     if (measure === null) return null;
     const room: Size = { height: measure.height, width: measure.width };
     return planViewport({
+      anchor,
       columnWidth: measure.width,
       legibleScale,
       natural,
       maxHeight: inlineMaxHeight(measure.screen),
       ...(fullscreen && room.width > 0 && room.height > 0 ? { fullscreenBox: room } : {}),
     });
-  }, [measure, natural, legibleScale, fullscreen]);
+  }, [anchor, measure, natural, legibleScale, fullscreen]);
 
   /** `null` is "at rest": the view follows the plan as the column or the screen changes. Any gesture pins it. */
   const [moved, setMoved] = useState<View | null>(null);
@@ -366,6 +389,8 @@ export function FyRenderViewport({
     view !== null &&
     (natural.width * view.scale > plan.box.width + 0.5 || natural.height * view.scale > plan.box.height + 0.5);
 
+  const edges: Edges = plan === null || view === null ? NO_EDGES : moreBeyond(view, plan, natural);
+
   return (
     <div
       className="fy-render-viewport"
@@ -383,6 +408,7 @@ export function FyRenderViewport({
             aria-label={`${kind}: ${alt}`}
             className="fy-render-pan"
             data-fy-render-dragging={dragging ? 'true' : 'false'}
+            data-fy-render-more={moreOf(edges)}
             data-fy-render-fit={plan.rest > plan.fit + 0.001 ? 'legible' : 'whole'}
             data-fy-render-pannable={overflowing ? 'true' : 'false'}
             data-fy-render-scale={view.scale.toFixed(3)}
@@ -400,20 +426,22 @@ export function FyRenderViewport({
             // biome-ignore lint/a11y/noNoninteractiveTabindex: a pannable box must be a tab stop so a keyboard can pan and zoom it
             tabIndex={0}
           >
-            <img
-              alt={alt}
-              className="fy-render-image"
-              data-fy-render-diagram={diagram ? 'true' : undefined}
-              data-fy-render-sized="true"
-              draggable={false}
-              onError={onError}
-              src={src}
-              style={{
-                height: `${natural.height * view.scale}px`,
-                transform: `translate(${view.x}px, ${view.y}px)`,
-                width: `${natural.width * view.scale}px`,
-              }}
-            />
+            <div className="fy-render-plane" style={fadeStyle(edges)}>
+              <img
+                alt={alt}
+                className="fy-render-image"
+                data-fy-render-diagram={diagram ? 'true' : undefined}
+                data-fy-render-sized="true"
+                draggable={false}
+                onError={onError}
+                src={src}
+                style={{
+                  height: `${natural.height * view.scale}px`,
+                  transform: `translate(${view.x}px, ${view.y}px)`,
+                  width: `${natural.width * view.scale}px`,
+                }}
+              />
+            </div>
           </div>
           <span className="sr-only" id={hintId}>
             Drag to pan. Pinch, or hold Control and scroll, to zoom. Plus and minus zoom, zero resets, arrow keys pan.

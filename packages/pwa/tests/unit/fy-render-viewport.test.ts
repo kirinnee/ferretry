@@ -7,6 +7,7 @@ import {
   fitScale,
   inlineMaxHeight,
   isAtRest,
+  moreBeyond,
   MERMAID_LEGIBLE_SCALE,
   panBy,
   pinchOf,
@@ -159,6 +160,64 @@ describe('planViewport — legibility', () => {
     // Assert
     should(view.x).equal(0);
     should(view.y).equal(0);
+  });
+});
+
+describe('planViewport — a tree that is wider than its column', () => {
+  const natural = { height: 600, width: 2_000 };
+
+  test('should start centred on the root when asked, and still at the top', () => {
+    // Arrange
+    const p = plan(natural, { anchor: 'centre' });
+
+    // Act
+    const view = restView(p, natural);
+
+    // Assert — half of the overflow is hidden to each side.
+    should(p.anchor).equal('centre');
+    should(view.x).equal(-(natural.width * view.scale - p.box.width) / 2);
+    should(view.y).equal(0);
+  });
+
+  test('should size the box to the scaled picture, with no empty area below it', () => {
+    // Act
+    const p = plan(natural, { anchor: 'centre' });
+
+    // Assert
+    should(p.box.height).equal(Math.round(natural.height * p.rest));
+  });
+
+  test('should name the sides that have more picture beyond them', () => {
+    // Arrange
+    const p = plan(natural, { anchor: 'centre' });
+    const view = restView(p, natural);
+
+    // Act
+    const edges = moreBeyond(view, p, natural);
+
+    // Assert
+    should(edges).eql({ bottom: false, left: true, right: true, top: false });
+  });
+
+  test('should name no side for a picture that fits, and only the far side at the start', () => {
+    // Arrange
+    const small = { height: 100, width: 100 };
+    const fits = plan(small);
+    const p = plan(natural);
+
+    // Assert
+    should(moreBeyond(restView(fits, small), fits, small)).eql({
+      bottom: false,
+      left: false,
+      right: false,
+      top: false,
+    });
+    should(moreBeyond(restView(p, natural), p, natural)).eql({
+      bottom: false,
+      left: false,
+      right: true,
+      top: false,
+    });
   });
 });
 

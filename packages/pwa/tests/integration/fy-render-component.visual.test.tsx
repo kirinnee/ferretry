@@ -1276,6 +1276,11 @@ describe('fy-render component evidence — diagrams fit, zoom and pan', () => {
           shown.right <= box.right + 1 &&
           shown.bottom <= box.bottom + 1,
         left: shown.left,
+        boxCentre: box.left + box.width / 2,
+        boxTop: box.top,
+        centre: shown.left + shown.width / 2,
+        fadeMask: getComputedStyle(document.querySelector('.fy-render-plane') as HTMLElement).maskImage,
+        more: (document.querySelector('.fy-render-pan') as HTMLElement).getAttribute('data-fy-render-more'),
         scale: Number((document.querySelector('.fy-render-pan') as HTMLElement).getAttribute('data-fy-render-scale')),
         top: shown.top,
         windowHeight: window.innerHeight,
@@ -1308,6 +1313,14 @@ describe('fy-render component evidence — diagrams fit, zoom and pan', () => {
             should(await overflow(page)).equal(0);
             should(rest.box.height).be.belowOrEqual(rest.windowHeight * 0.6 + 1);
             if (rest.fit === 'whole') should(rest.inside).be.true();
+            if (which === 'mermaid-wide' && rest.fit !== 'whole') {
+              // A tree wider than the column starts on its root (top-middle), is as tall as its scaled picture,
+              // and fades the sides that have more to drag to.
+              should(Math.abs(rest.centre - rest.boxCentre)).be.belowOrEqual(2);
+              should(rest.top).be.approximately(rest.boxTop, 1);
+              should(rest.more).equal('left right');
+              should(rest.fadeMask).not.equal('none');
+            }
             await pan(page).hover();
             should(await controlsOverPicture(page)).equal(0);
             await shot(`${which}-1-rest-${theme}`, { rest });

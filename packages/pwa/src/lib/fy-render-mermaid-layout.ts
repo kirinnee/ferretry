@@ -41,6 +41,14 @@ function headerLineIndex(lines: readonly string[]): number {
   return at < lines.length ? at : -1;
 }
 
+const TOP_DOWN = /^\s*(?:graph|flowchart)(?:\s+(?:TD|TB))?\s*(?:;|$)/iu;
+
+/** Whether the diagram is a flowchart that flows downward, so its root sits at the top-middle. */
+export function flowsDown(source: string): boolean {
+  const at = headerLineIndex(source.split('\n'));
+  return at >= 0 && TOP_DOWN.test(source.split('\n')[at] ?? '');
+}
+
 /**
  * Rewrites a `flowchart`/`graph` declared `LR` or `RL` to `TB` or `BT`. ONLY the direction token on the
  * diagram's own header line is touched: a node label that spells `flowchart LR`, a subgraph's local

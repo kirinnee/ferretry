@@ -61,7 +61,12 @@ const FULLSCREEN_MAX_REST_SCALE = 2;
 /** How far a key press pans, in px. */
 export const KEY_PAN_PX = 48;
 
+/** Where a picture that overflows the box starts: its left edge, or its horizontal middle (a tree's root). */
+export type RestAnchor = 'start' | 'centre';
+
 export interface ViewportPlan {
+  /** Where an overflowing picture starts across the box. It always starts at the top. */
+  readonly anchor: RestAnchor;
   /** The box the picture is shown in, in px. */
   readonly box: Size;
   /** The scale at which the whole picture is visible. */
@@ -77,6 +82,8 @@ export interface ViewportPlan {
 
 export interface PlanInput {
   readonly natural: Size;
+  /** Where an overflowing picture starts across the box (default: its left edge). */
+  readonly anchor?: RestAnchor;
   /** The column the box lives in, in px. A column that could not be measured (0) is treated as wide enough. */
   readonly columnWidth: number;
   /** The tallest the box may be inline, in px (usually {@link inlineMaxHeight}). Ignored when `fullscreen`. */
@@ -121,6 +128,7 @@ export function planViewport(input: PlanInput): ViewportPlan {
   const ceiling = Math.max(rest, Math.min(MAX_SCALE, MAX_DISPLAY_PX / natural.width, MAX_DISPLAY_PX / natural.height));
   const max = Math.max(ceiling, rest * ZOOM_STEP);
   return {
+    anchor: input.anchor ?? 'start',
     box,
     fit,
     max,
@@ -147,11 +155,29 @@ export function clampView(view: View, plan: ViewportPlan, natural: Size): View {
 }
 
 /**
- * The view at rest: the picture centred when it fits, otherwise at its top-left corner — the start of a flowchart
- * is where a reader begins.
+ * The view at rest: the picture centred when it fits, otherwise at its top — the start of a flowchart is where a
+ * reader begins — and at its left edge, or its horizontal middle for a top-down tree whose root sits there.
  */
 export function restView(plan: ViewportPlan, natural: Size): View {
-  return clampView({ scale: plan.rest, x: 0, y: 0 }, plan, natural);
+  const x = plan.anchor === 'centre' ? (plan.box.width - natural.width * plan.rest) / 2 : 0;
+  return clampView({ scale: plan.rest, x, y: 0 }, plan, natural);
+}
+
+/** Which edges of the box have more picture beyond them, so the reader can be shown that it drags. */
+export interface Edges {
+  readonly left: boolean;
+  readonly right: boolean;
+  readonly top: boolean;
+  readonly bottom: boolean;
+}
+
+export function moreBeyond(view: View, plan: ViewportPlan, natural: Size): Edges {
+  return {
+    bottom: view.y + natural.height * view.scale > plan.box.height + 0.5,
+    left: view.x < -0.5,
+    right: view.x + natural.width * view.scale > plan.box.width + 0.5,
+    top: view.y < -0.5,
+  };
 }
 
 /** Whether a view is the one at rest (within rounding), so Reset has nothing to do. */

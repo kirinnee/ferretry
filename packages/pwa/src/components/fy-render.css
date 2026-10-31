@@ -70,7 +70,48 @@
 
 /* Drawn at the size the script computed, so neither the column's measure nor the height ceiling of a plain
    picture applies. Offset by transform only: the image is RESIZED to zoom, so the vector is re-rasterised sharp. */
-.fy-render-pan > .fy-render-image {
+/* THE PLANE the picture moves on: clipped to the box, and faded at each edge that has more picture beyond it, so a
+   reader can see it drags. A mask on the plane rather than the box, so the focus ring is never faded. */
+.fy-render-plane {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+  -webkit-mask-image:
+    linear-gradient(
+      to right,
+      transparent 0,
+      #000 calc(var(--fy-fade-l, 0) * 28px),
+      #000 calc(100% - var(--fy-fade-r, 0) * 28px),
+      transparent 100%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 calc(var(--fy-fade-t, 0) * 28px),
+      #000 calc(100% - var(--fy-fade-b, 0) * 28px),
+      transparent 100%
+    );
+  mask-image:
+    linear-gradient(
+      to right,
+      transparent 0,
+      #000 calc(var(--fy-fade-l, 0) * 28px),
+      #000 calc(100% - var(--fy-fade-r, 0) * 28px),
+      transparent 100%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 0,
+      #000 calc(var(--fy-fade-t, 0) * 28px),
+      #000 calc(100% - var(--fy-fade-b, 0) * 28px),
+      transparent 100%
+    );
+}
+
+.fy-render-pan .fy-render-image {
   position: absolute;
   top: 0;
   left: 0;
@@ -80,7 +121,7 @@
 }
 
 /* A button or key zoom eases; a drag or a pinch never does, and reduced motion removes it. */
-.fy-render-pan[data-fy-render-dragging='false'] > .fy-render-image {
+.fy-render-pan[data-fy-render-dragging='false'] .fy-render-image {
   transition:
     width 140ms ease,
     height 140ms ease,
@@ -88,7 +129,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .fy-render-pan[data-fy-render-dragging='false'] > .fy-render-image {
+  .fy-render-pan[data-fy-render-dragging='false'] .fy-render-image {
     transition: none;
   }
 }
@@ -483,7 +524,7 @@
 }
 
 /* The plane-filling rule above caps a plain picture at the box; a viewport's picture is sized by script. */
-.fy-render[data-fy-render-fullscreen='true'] .fy-render-pan > .fy-render-image {
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-pan .fy-render-image {
   max-width: none;
   max-height: none;
 }

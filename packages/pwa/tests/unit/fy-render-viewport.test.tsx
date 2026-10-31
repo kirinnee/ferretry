@@ -11,15 +11,18 @@ afterEach(async () => {
   for (const each of mounted.splice(0)) await each.unmount();
 });
 
-const show = async (over: { fullscreen?: boolean; legibleScale?: number } = {}): Promise<HTMLElement> => {
+const show = async (
+  over: { anchor?: 'centre' | 'start'; fullscreen?: boolean; legibleScale?: number; natural?: typeof NATURAL } = {},
+): Promise<HTMLElement> => {
   const view = await mount(
     <FyRenderViewport
       alt="Order flow"
+      anchor={over.anchor}
       diagram
       fullscreen={over.fullscreen ?? false}
       kind="Diagram"
       legibleScale={over.legibleScale ?? 0}
-      natural={NATURAL}
+      natural={over.natural ?? NATURAL}
       onError={() => undefined}
       src={SRC}
     />,
@@ -33,6 +36,18 @@ const pan = (root: HTMLElement): HTMLElement =>
 const button = (root: HTMLElement, label: string): HTMLButtonElement =>
   must(root.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`), `the ${label} button`);
 const scale = (root: HTMLElement): number => Number(pan(root).dataset.fyRenderScale);
+
+/** happy-dom lays nothing out: give every element a phone-sized column for the length of `run`. */
+const onPhone = async (run: () => Promise<void>): Promise<void> => {
+  const was = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 358 });
+  try {
+    await run();
+  } finally {
+    if (was) Object.defineProperty(HTMLElement.prototype, 'clientWidth', was);
+    else Reflect.deleteProperty(HTMLElement.prototype, 'clientWidth');
+  }
+};
 
 describe('FyRenderViewport', () => {
   test('should rest at the fit, whole, with the zoom out and reset disabled', async () => {
@@ -308,6 +323,36 @@ describe('FyRenderViewport', () => {
       await interact(() => pressKey(pan(root), key));
       should(img.style.transform).not.equal(before);
     }
+  });
+
+  test('should fade the sides of a wide tree that has more beyond them, starting on its root', async () => {
+    // Arrange — 2000 wide at a legible floor: wider than any column, so it pans.
+    const wide = { height: 600, width: 2_000 };
+
+    await onPhone(async () => {
+      // Act
+      const root = await show({ anchor: 'centre', legibleScale: 10 / 16, natural: wide });
+
+      // Assert
+      const plane = must(root.querySelector<HTMLElement>('.fy-render-plane'), 'the plane');
+      should(pan(root).dataset.fyRenderMore).equal('left right');
+      should(plane.style.getPropertyValue('--fy-fade-l')).equal('1');
+      should(plane.style.getPropertyValue('--fy-fade-r')).equal('1');
+      should(plane.style.getPropertyValue('--fy-fade-t')).equal('0');
+      should(plane.style.getPropertyValue('--fy-fade-b')).equal('0');
+    });
+  });
+
+  test('should fade only the far side when it starts at the left edge, and none for a whole picture', async () => {
+    await onPhone(async () => {
+      // Act
+      const start = await show({ legibleScale: 10 / 16, natural: { height: 600, width: 2_000 } });
+      const whole = await show();
+
+      // Assert
+      should(pan(start).dataset.fyRenderMore).equal('right');
+      should(pan(whole).dataset.fyRenderMore).equal('');
+    });
   });
 
   test('should mark a fullscreen viewport', async () => {
