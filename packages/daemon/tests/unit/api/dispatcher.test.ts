@@ -1989,6 +1989,28 @@ describe('a ferret session credential at the boundary', () => {
     should(refusals).deepEqual([{ reason: 'session_mismatch', sessionId: 's-1', route: 'GET /v1/sessions' }]);
   });
 
+  it('should answer a relabel the same way when the audit write fails', async () => {
+    // An audit write never decides an outcome: a log that cannot be written must not turn a refusal into
+    // a 500, or into anything a caller could tell apart.
+    // Arrange
+    const sessions: SessionCredentialDirectory = {
+      resolve: async capability => (capability === S1 ? { sessionId: 's-1' } : undefined),
+      refused: async () => await Promise.reject(new Error('the audit log is full')),
+    };
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter([unreachable('/v1/sessions', 'operator')]),
+      { ...credentials, sessions },
+      NO_GOVERNED_ROUTES_GUARD,
+    );
+
+    // Act
+    const response = await dispatcher.dispatch(asSession('/v1/sessions', S1, { [SESSION_ID_HEADER]: 's-2' }));
+
+    // Assert
+    should(response.status).equal(401);
+    should(jsonBody(response).code).equal('session_mismatch');
+  });
+
   it('should not let a warden capability or a client header make a session credential anything else', async () => {
     // Arrange
     const { dispatcher } = served(unreachable('/v1/sessions', 'authenticated'));

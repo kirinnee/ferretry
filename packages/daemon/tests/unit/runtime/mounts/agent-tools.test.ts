@@ -5,7 +5,11 @@ import type { CapabilityDemand, CapabilityGuard, GrantDecision } from '../../../
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import type { ApiResponse } from '../../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { AGENT_SESSION_CAPABILITY_HEADER, agentToolRoutes } from '../../../../src/lib/runtime/mounts/agent-tools.ts';
+import {
+  AGENT_SESSION_CAPABILITY_HEADER,
+  agentToolRoutes,
+  sessionCredentialDirectory,
+} from '../../../../src/lib/runtime/mounts/agent-tools.ts';
 import { terminalRoutes } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import { agentToolWorld, PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { jsonBody, request } from '../../api/support.ts';
@@ -596,5 +600,50 @@ describe('a person’s tool routes and secure copy', () => {
       "secure.copy is an agent's tool, not one a person's surface route takes",
     );
     should(world.audit.entries).deepEqual([]);
+  });
+});
+
+describe('the session credential directory the boundary is wired with', () => {
+  it("should answer with the agent tools' own resolver, naming only the session", async () => {
+    // Arrange
+    const { world } = served();
+    const directory = sessionCredentialDirectory(world.identities, world.audit);
+
+    // Act
+    const known = await directory.resolve(PREFIXED_S1);
+    const unknown = await directory.resolve(`fys_${'n'.repeat(43)}`);
+
+    // Assert — the session id and nothing else of the identity, such as its spoken name.
+    should(known).deepEqual({ sessionId: 's1' });
+    should(unknown).be.undefined();
+  });
+
+  it('should audit a refusal under the session the credential named, within the one-line bound', async () => {
+    // Arrange
+    const { world } = served();
+    const directory = sessionCredentialDirectory(world.identities, world.audit);
+    const long = `GET /v1/${'x'.repeat(400)}`;
+
+    // Act
+    await directory.refused?.({ reason: 'session_mismatch', sessionId: 's1', route: 'GET /v1/sessions' });
+    await directory.refused?.({ reason: 'session_mismatch', sessionId: 's2', route: long });
+
+    // Assert
+    should(world.audit.entries).deepEqual([
+      {
+        event: 'session.credential-refused',
+        actor: { kind: 'host' },
+        subject: 's1',
+        outcome: 'refused',
+        detail: { by: 'agent', reason: 'session_mismatch', route: 'GET /v1/sessions' },
+      },
+      {
+        event: 'session.credential-refused',
+        actor: { kind: 'host' },
+        subject: 's2',
+        outcome: 'refused',
+        detail: { by: 'agent', reason: 'session_mismatch', route: long.slice(0, 160) },
+      },
+    ]);
   });
 });
