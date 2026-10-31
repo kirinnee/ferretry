@@ -39,7 +39,7 @@ browser draws, not what an agent may do with it, so it applies at once.
   in a Real window stays signed in, for you and for your agents, until you sign out.
 
 Both modes keep Chrome's loopback debugging port, because that is what the view streams through and the
-agent tools drive. **Neither mode passes an automation switch** — no `--enable-automation`, and no
+agent tools drive. (A DevTools pipe transport, `--remote-debugging-pipe`, also exists; it is not on by default.) **Neither mode passes an automation switch** — no `--enable-automation`, and no
 `--disable-blink-features=AutomationControlled` either: Ferretry does not announce automation and does
 not hide it. In a Real window `navigator.webdriver` is `false` because nothing about the browser is
 automated until an agent acts on a page.

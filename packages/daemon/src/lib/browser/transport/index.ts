@@ -1,4 +1,5 @@
 export * from './automation-contracts.ts';
+export * from './cdp-pipe.ts';
 export * from './challenge.ts';
 export * from './contracts.ts';
 export * from './download-stage.ts';
