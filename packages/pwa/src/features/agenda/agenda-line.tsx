@@ -1,7 +1,7 @@
 /**
  * THE AGENDA'S PARTS IN A FERRET'S CHAT, all siblings of the composer so its own box never moves:
  *
- * - the ONE ROW above it: what is running ("Pondering… 11s") on its left, and on its right what is on its way
+ * - the ONE ROW above it: the chat's "Jump to latest" pill on its far left while the reader is away from the tail, what is running ("Pondering… 11s") on its left, and on its right what is on its way
  *   ("Sending…") and the agenda PILL — "● Agenda · 5 need you · 2 with Johnnie ▴", "Agenda · 7" when the row is
  *   narrow. The row never wraps, and has no left half when nothing is running;
  * - the DRAWER the pill opens: a raised sheet above the chat, over a scrim, with its own header and scroll, one
@@ -34,9 +34,21 @@ export interface AgendaLineProps {
   readonly repliesSlot?: ReactNode;
   /** What is running, drawn on the row's left ("Pondering… 11s"). Absent: nothing runs and the pill stands alone. */
   readonly live?: ReactNode;
+  /** Receives the slot at the row's left that the chat's Jump-to-latest pill is drawn in (null when the row goes). */
+  readonly jumpSlot?: (slot: HTMLElement | null) => void;
 }
 
-export function AgendaLine({ ferret, counts, open, controls, onToggle, sending, repliesSlot, live }: AgendaLineProps) {
+export function AgendaLine({
+  ferret,
+  counts,
+  open,
+  controls,
+  onToggle,
+  sending,
+  repliesSlot,
+  live,
+  jumpSlot,
+}: AgendaLineProps) {
   const hasStatus = repliesSlot !== undefined || sending.count > 0;
   if (counts === undefined && !hasStatus) return null;
   const segments = counts === undefined ? [] : agendaSegments(counts, ferret);
@@ -72,6 +84,7 @@ export function AgendaLine({ ferret, counts, open, controls, onToggle, sending, 
       data-shared={live ? '' : undefined}
       {...(counts === undefined ? {} : { 'data-agenda-line': '' })}
     >
+      {jumpSlot === undefined ? null : <div className="fy-agenda-line__jump" data-agenda-jump-slot="" ref={jumpSlot} />}
       <AgendaLineLive live={live} />
       <AgendaLineStatus repliesSlot={repliesSlot} sending={sending} />
       {counts === undefined ? null : (

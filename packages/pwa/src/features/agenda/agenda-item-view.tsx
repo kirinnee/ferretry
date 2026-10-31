@@ -11,6 +11,11 @@
  *            whatever sections the ferret added, the version picker, and the ONE answer row
  *   history  the conversation about the item, newest at the bottom, just above the composer
  *
+ * THE HEAD STICKS to the top of the scroller, and a one-row answer (choice, approval, to-do, notice, review) is drawn in
+ * a DOCK that sticks to its bottom, so the title, the pager and the buttons are in reach however long the card runs. A
+ * card answered in words (reply, mixed, form) has no dock: the composer is its answer. The scroller keeps room for both
+ * (`scroll-padding`), so a focused field never lands behind one.
+ *
  * The body is the ONE scroller (`overscroll-behavior: contain`). ✕ and Esc go back to the chat; ‹ › page through the
  * items without answering; ← ↑ → answer on a keyboard and ↓ is Not needed, exactly as the swipes (a field or a button
  * keeps its own keys). Everything typed goes through the composer: this view has no text field of its own.
@@ -18,7 +23,7 @@
 
 import type { AgendaCardAnswer, AgendaItem } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, useEffect, useRef } from 'react';
+import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { useQuoteMenu } from '../../components/quote-menu.tsx';
 import { useDoneClose } from '../../hooks/use-done-close.ts';
 import { answerAction } from '../../lib/agenda-answers.ts';
@@ -88,6 +93,28 @@ const KEY_DIRECTION: Readonly<Record<string, 'left' | 'up' | 'right'>> = {
   ArrowRight: 'right',
 };
 
+/** Keeps the scroller's scroll padding at the height of the sticky head and dock, so nothing scrolled to hides behind them. */
+function useScrollPadding(
+  body: { readonly current: HTMLElement | null },
+  head: { readonly current: HTMLElement | null },
+  dock: HTMLElement | null,
+): void {
+  useEffect(() => {
+    const scroller = body.current;
+    const bar = head.current;
+    if (scroller === null || bar === null || typeof ResizeObserver === 'undefined') return undefined;
+    const apply = (): void => {
+      scroller.style.scrollPaddingTop = `${bar.offsetHeight}px`;
+      scroller.style.scrollPaddingBottom = `${dock?.offsetHeight ?? 0}px`;
+    };
+    apply();
+    const watch = new ResizeObserver(apply);
+    watch.observe(bar);
+    if (dock !== null) watch.observe(dock);
+    return () => watch.disconnect();
+  }, [body, head, dock]);
+}
+
 export function AgendaItemView({
   item,
   ferret,
@@ -112,6 +139,10 @@ export function AgendaItemView({
   daemonId,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
+  const body = useRef<HTMLDivElement | null>(null);
+  const top = useRef<HTMLElement | null>(null);
+  const [dock, setDock] = useState<HTMLDivElement | null>(null);
+  useScrollPadding(body, top, dock);
   const quote = useQuoteMenu(root, quoteScope);
   const model = cardModel(item);
   const map = swipeMap(item);
@@ -170,9 +201,9 @@ export function AgendaItemView({
       role="dialog"
       tabIndex={-1}
     >
-      <div className="fy-item-view__body" data-agenda-body="">
+      <div className="fy-item-view__body" data-agenda-body="" ref={body}>
         <div className="fy-item-view__column">
-          <header className="fy-item-view__head" data-agenda-top="">
+          <header className="fy-item-view__head" data-agenda-top="" ref={top}>
             <div className="fy-item-view__pager">
               {status === null ? null : (
                 <span className="fy-item-view__status" title={status.label}>
@@ -231,6 +262,7 @@ export function AgendaItemView({
             onAct={onAct}
             renderProse={renderProse}
             swipeable={swipeable}
+            answerDock={dock}
             {...(onProgress === undefined ? {} : { onProgress })}
             {...(doneClose === undefined ? {} : { doneClose })}
             {...(settled === undefined ? {} : { settled })}
@@ -239,6 +271,7 @@ export function AgendaItemView({
             {...(quoteScope === null ? {} : { onRequestChanges: requestChanges })}
           />
           <AgendaItemHistory events={history} ferret={ferret} now={now} renderProse={renderProse} />
+          <div className="fy-item-view__dock" data-agenda-dock="" ref={setDock} />
         </div>
       </div>
       {quote.menu}

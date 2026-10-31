@@ -20,6 +20,22 @@
   color: var(--muted);
   font-size: var(--text-sm);
 }
+/* THE JUMP-TO-LATEST SLOT: the chat's pill is drawn here (`JumpToLatest` with a host), on the row's far left, so the
+   transcript needs no row of its own under the messages. It takes no width while the pill is away, and the row's
+   height is its own (`min-height`, taller than the pill), so the pill coming and going never resizes the scroller. */
+.fy-agenda-line__jump {
+  display: flex;
+  min-width: 0;
+  flex: none;
+  align-items: center;
+  margin-inline-end: auto;
+}
+.fy-agenda-line__jump:empty {
+  display: none;
+}
+.fy-agenda-line__jump .fy-jump-latest {
+  padding-block: 6px;
+}
 /* What is running: the row's left half, giving way before the pill does. */
 .fy-agenda-line__live {
   display: flex;
