@@ -108,6 +108,7 @@ export * from './stt-cleanup.ts';
 export * from './stt-cleanup-context.ts';
 export * from './stt-cleanup-debug.ts';
 export * from './stt-cleanup-guard.ts';
+
 export * from './surface.ts';
 export * from './system-callsigns.ts';
 export * from './task-title.ts';
@@ -120,4 +121,5 @@ export * from './turn-handoff.ts';
 export * from './version-skew.ts';
 export * from './warden.ts';
 export * from './webrtc.ts';
+export * from './work-search.ts';
 export * from './worktrees.ts';
