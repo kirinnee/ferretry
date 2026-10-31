@@ -23,6 +23,8 @@ import {
   PLAYWRIGHT_REACHED_VERSION,
   playwrightNodeOf,
   refindInputFields,
+  PROBE_SECOND_LOOK_MS,
+  probeInputFields,
   readInputText,
   shootInputFields,
   typeInputFields,
@@ -76,6 +78,8 @@ class FakeSession implements InputCdpSession {
   readonly calls: { readonly method: string; readonly params: Record<string, unknown> }[] = [];
   readonly typed: { readonly backendNodeId: number | undefined; readonly text: string }[] = [];
   readonly keys: string[] = [];
+  /** What each field holds, as typing and Backspace leave it. */
+  readonly values = new Map<number, string>();
   focused: number | undefined;
   detached = false;
   /** Where focus really lands when asked for a node: another node, to play a page that moves focus. */
@@ -190,6 +194,13 @@ class FakeSession implements InputCdpSession {
       }
       case 'Runtime.callFunctionOn': {
         const objectId = String(params.objectId);
+        if (String(params.functionDeclaration).includes('view.top')) return { result: { value: !this.world.framed } };
+        if (String(params.functionDeclaration).includes('getOwnPropertyDescriptor')) {
+          if (!this.world.unclearable) this.values.set(Number(objectId.split('-').at(-1)), '');
+          return { result: {} };
+        }
+        if (String(params.functionDeclaration).includes('this.value'))
+          return { result: { value: this.values.get(Number(objectId.split('-').at(-1))) ?? '' } };
         if (!this.isolatedObjects.has(objectId)) {
           this.pageWorld.push('Runtime.callFunctionOn');
           if (this.pageSelectMovesFocusTo !== undefined) this.focused = this.pageSelectMovesFocusTo;
@@ -198,9 +209,13 @@ class FakeSession implements InputCdpSession {
       }
       case 'Input.insertText':
         this.typed.push({ backendNodeId: this.focused, text: String(params.text) });
+        if (this.focused !== undefined) this.values.set(this.focused, String(params.text));
+        this.world.onInput?.();
         return {};
       case 'Input.dispatchKeyEvent':
         this.keys.push(`${String(params.type)}:${String(params.key)}`);
+        if (params.type === 'keyDown' && params.key === 'Backspace' && this.focused !== undefined && !this.world.sticky)
+          this.values.set(this.focused, '');
         return {};
       case 'Page.getLayoutMetrics':
         return { cssVisualViewport: this.world.viewport };
@@ -237,6 +252,21 @@ class FakeWorld {
   frames: FakeFrame[] = [this.main];
   pageUrl = PAGE_URL;
   bodyText = 'Welcome back';
+  /** The page shows what its fields hold in its text (a page that echoes). */
+  reflects = false;
+  /** Backspace does not empty a field. */
+  sticky = false;
+  /** The probed field sits in a frame, not the main document. */
+  framed = false;
+  /** Not even the native value setter empties it. */
+  unclearable = false;
+  /** WebSockets the page holds open, and how many it ever opened. */
+  sockets = 0;
+  socketsEver = 0;
+  /** Runs on every insert: a page that fires a request or navigates as you type. */
+  onInput: (() => void) | undefined;
+  readonly listeners = new Set<() => void>();
+  listening = true;
   aria = '- textbox "Email": kirin@example.test';
   markup: unknown = '<html><body><input title="hello"></body></html>';
   title = 'Sign in';
@@ -340,7 +370,10 @@ class FakeWorld {
     const locatorOf = (selector: string, index?: number): InputLocator => ({
       first: () => locatorOf(selector, index ?? 0),
       nth: at => locatorOf(selector, at),
-      innerText: async () => (selector === 'body' ? this.bodyText : ''),
+      innerText: async () =>
+        selector === 'body'
+          ? [this.bodyText, ...(this.reflects ? this.session('page-target').values.values() : [])].join(' ')
+          : '',
       ariaSnapshot: async () => (selector === 'body' ? this.aria : ''),
       count: async () => {
         const ref = /^aria-ref=(.+)$/u.exec(selector)?.[1];
@@ -382,6 +415,14 @@ class FakeWorld {
       title: async () => this.title,
       mainFrame: () => this.main,
       frames: () => this.frames,
+      ...(this.listening
+        ? {
+            on: (_event: 'request', listener: () => void) => this.listeners.add(listener),
+            off: (_event: 'request', listener: () => void) => this.listeners.delete(listener),
+            openSockets: () => this.sockets,
+            socketsOpened: () => this.socketsEver,
+          }
+        : {}),
     };
   }
 
@@ -1659,5 +1700,132 @@ describe('refindInputFields (#B100)', () => {
     );
     should(inputFieldSelector({ tag: 'input', name: 'n'.repeat(128) })).equal(`css=input[name^="${'n'.repeat(128)}"]`);
     should(inputFieldSelector({ tag: 'unknown tag' })).equal('css=*');
+  });
+});
+
+describe('probeInputFields', () => {
+  const DUMMY = '~a1';
+  const waited: number[] = [];
+  const wait = async (ms: number): Promise<void> => void waited.push(ms);
+
+  async function ready(): Promise<{ world: FakeWorld; facts: BrowserInputFacts }> {
+    const { world } = loginWorld();
+    const facts = await observed(world, ['#user', '#pw']);
+    return { world, facts };
+  }
+  const probe = async (world: FakeWorld, facts: BrowserInputFacts, fields: readonly string[] = ['#pw']) =>
+    await probeInputFields(world.subject, facts, fields, DUMMY, wait);
+
+  it('types the throwaway value, looks twice, finds it nowhere, empties the field, and answers hidden', async () => {
+    const { world, facts } = await ready();
+    waited.length = 0;
+    should(await probe(world, facts)).equal('hidden');
+    const session = world.session('page-target');
+    should(session.typed).eql([{ backendNodeId: 12, text: DUMMY }]);
+    should(session.values.get(12)).equal('');
+    should(session.keys).eql(['keyDown:Backspace', 'keyUp:Backspace']);
+    should(waited).eql([PROBE_SECOND_LOOK_MS]);
+    should(world.listeners.size).equal(0);
+  });
+
+  it('answers shown when the page shows what was typed, at the first look', async () => {
+    const { world, facts } = await ready();
+    world.reflects = true;
+    waited.length = 0;
+    should(await probe(world, facts)).equal('shown');
+    should(waited).eql([]);
+    should(world.session('page-target').values.get(12)).equal('');
+  });
+
+  it('answers shown when the page shows it only on the second look', async () => {
+    const { world, facts } = await ready();
+    const later = async (): Promise<void> => {
+      world.reflects = true;
+    };
+    should(await probeInputFields(world.subject, facts, ['#pw'], DUMMY, later)).equal('shown');
+  });
+
+  it('aborts when the page fires a request while it runs, and still empties the field', async () => {
+    const { world, facts } = await ready();
+    world.onInput = () => {
+      for (const listener of world.listeners) listener();
+    };
+    should(await probe(world, facts)).equal('aborted');
+    should(world.session('page-target').values.get(12)).equal('');
+  });
+
+  it('aborts when the page opens a socket while it runs, even one it closes again', async () => {
+    const { world, facts } = await ready();
+    world.onInput = () => {
+      world.socketsEver += 1;
+    };
+    should(await probe(world, facts)).equal('aborted');
+    should(world.session('page-target').values.get(12)).equal('');
+  });
+
+  it('aborts when the page shows another document while it runs', async () => {
+    const { world, facts } = await ready();
+    world.onInput = () => {
+      world.loaderId = 'loader-2';
+    };
+    should(await probe(world, facts)).equal('aborted');
+  });
+
+  it('empties a field Backspace would not with the native setter, and aborts one nothing empties', async () => {
+    const sticky = await ready();
+    sticky.world.sticky = true;
+    should(await probe(sticky.world, sticky.facts)).equal('hidden');
+    should(sticky.world.session('page-target').values.get(12)).equal('');
+    const stuck = await ready();
+    stuck.world.sticky = true;
+    stuck.world.unclearable = true;
+    should(await probe(stuck.world, stuck.facts)).equal('aborted');
+  });
+
+  it('never types into a field that already holds something, or where a socket is open', async () => {
+    const full = await ready();
+    full.world.session('page-target').values.set(12, 'already there');
+    should(await probe(full.world, full.facts)).equal('aborted');
+    should(full.world.session('page-target').values.get(12)).equal('already there');
+    const socket = await ready();
+    socket.world.sockets = 1;
+    should(await probe(socket.world, socket.facts)).equal('aborted');
+    for (const world of [full.world, socket.world]) should(world.session('page-target').typed).eql([]);
+  });
+
+  it('aborts, typing nothing, for two fields, an unknown field, a closed page, or a browser that cannot tell', async () => {
+    const worlds: FakeWorld[] = [];
+    const two = await ready();
+    worlds.push(two.world);
+    should(await probe(two.world, two.facts, ['#user', '#pw'])).equal('aborted');
+    const none = await ready();
+    worlds.push(none.world);
+    should(await probe(none.world, none.facts, [])).equal('aborted');
+    const unknown = await ready();
+    worlds.push(unknown.world);
+    should(await probe(unknown.world, unknown.facts, ['#nope'])).equal('aborted');
+    const closed = await ready();
+    worlds.push(closed.world);
+    closed.world.closed = true;
+    should(await probe(closed.world, closed.facts)).equal('aborted');
+    const quiet = await ready();
+    worlds.push(quiet.world);
+    quiet.world.listening = false;
+    should(await probe(quiet.world, quiet.facts)).equal('aborted');
+    for (const world of worlds) should(world.session('page-target').typed).eql([]);
+  });
+
+  it('aborts for a field outside the main frame', async () => {
+    const { world, facts } = await ready();
+    world.framed = true;
+    should(await probe(world, facts)).equal('aborted');
+    should(world.session('page-target').typed).eql([]);
+  });
+
+  it('aborts when the page cannot be read whole, after emptying what it typed', async () => {
+    const { world, facts } = await ready();
+    world.markup = undefined;
+    should(await probe(world, facts)).equal('aborted');
+    should(world.session('page-target').values.get(12)).equal('');
   });
 });

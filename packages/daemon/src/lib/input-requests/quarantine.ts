@@ -29,6 +29,8 @@ export const EVERY_TERMINAL = '*';
 interface Entry {
   readonly id: string;
   readonly names: readonly string[];
+  /** How long this hold runs once settled: the full window, or the short lock a proven-hidden target earned. */
+  readonly window: number;
   /** A settled hold ends here; an in-flight one is open until it is settled or released. */
   until: number | 'in-flight';
 }
@@ -52,19 +54,23 @@ export class QuarantineRegistry {
     private readonly window = INPUT_QUARANTINE_SECONDS * 1000,
   ) {}
 
-  /** Hold the terminal known by `names` for a delivery that is about to happen. It cannot expire until settled or released. */
-  begin(sessionId: string, names: readonly string[], owner: string): QuarantineHold {
+  /**
+   * Hold the terminal known by `names` for a delivery that is about to happen. It cannot expire until settled or
+   * released, and while in flight it reads as the FULL window whatever `window` says. `window` (at most the full
+   * window) is how long it runs once settled.
+   */
+  begin(sessionId: string, names: readonly string[], owner: string, window = this.window): QuarantineHold {
     const hold: QuarantineHold = { id: this.mint(owner), sessionId, names: [...new Set(names)] };
     this.held.set(sessionId, [
       ...(this.held.get(sessionId) ?? []),
-      { id: hold.id, names: hold.names, until: 'in-flight' },
+      { id: hold.id, names: hold.names, window: Math.min(Math.max(window, 0), this.window), until: 'in-flight' },
     ]);
     return hold;
   }
 
-  /** The write is done: the hold now runs for a full window from this moment. Returns its end time. */
+  /** The write is done: the hold now runs for its window from this moment. Returns its end time. */
   settle(hold: QuarantineHold): number {
-    const until = this.clock.now() + this.window;
+    const until = this.clock.now() + (this.entry(hold)?.window ?? this.window);
     const entry = this.entry(hold);
     if (entry === undefined) this.add(hold.sessionId, hold.names, until);
     else entry.until = until;
@@ -94,7 +100,10 @@ export class QuarantineRegistry {
     if ((until !== 'in-flight' && until <= this.clock.now()) || names.length === 0) return undefined;
     if (this.minted.has(id) || this.entryById(sessionId, id) !== undefined) return undefined;
     const hold: QuarantineHold = { id, sessionId, names: [...new Set(names)] };
-    this.held.set(sessionId, [...(this.held.get(sessionId) ?? []), { id, names: hold.names, until }]);
+    this.held.set(sessionId, [
+      ...(this.held.get(sessionId) ?? []),
+      { id, names: hold.names, window: this.window, until },
+    ]);
     return hold;
   }
 
@@ -194,7 +203,7 @@ export class QuarantineRegistry {
   private add(sessionId: string, names: readonly string[], until: number): void {
     this.held.set(sessionId, [
       ...(this.held.get(sessionId) ?? []),
-      { id: this.mint('hold'), names: [...new Set(names)], until },
+      { id: this.mint('hold'), names: [...new Set(names)], window: this.window, until },
     ]);
   }
 

@@ -33,6 +33,49 @@ export const INPUT_MAX_REDACTION_SECONDS = 3_600;
  * refused and the owner's viewer shows a cover instead of the screen. The owner can end it sooner.
  */
 export const INPUT_QUARANTINE_SECONDS = 120;
+/**
+ * THE SHORT LOCK (docs/input-requests.md, "How long the lock lasts"): a target PROVEN not to show what is typed is
+ * kept from the ferret this long after the write instead of {@link INPUT_QUARANTINE_SECONDS}. Masking still runs
+ * its whole redaction window either way.
+ */
+export const INPUT_SHORT_LOCK_SECONDS = 10;
+
+/**
+ * Why a card's lock is as long as it is. Only the first three are short, and each is something the DAEMON saw:
+ *
+ * - `hidden-terminal`: a local password prompt: echo off in line mode, sudo/su/doas/passwd running setuid root.
+ * - `proven-field`: a password field on a secure page whose identity Ferretry has seen, on an earlier sign-in, hide
+ *   the value after submit and move on (a saved login's observed facts).
+ * - `probed-field`: one password field on a secure page into which Ferretry typed a throwaway value, did not find it in
+ *   the page's text, and cleared it again, with no request or socket it could see and no navigation meanwhile.
+ * - `code`: a one-time code shows as it is typed.
+ * - `not-proven`: nothing proved that this target hides what is typed.
+ */
+export const INPUT_LOCK_REASONS = ['hidden-terminal', 'proven-field', 'probed-field', 'code', 'not-proven'] as const;
+export const InputLockReasonSchema = z.enum(INPUT_LOCK_REASONS);
+export type InputLockReason = z.infer<typeof InputLockReasonSchema>;
+
+export const InputLockSchema = z.strictObject({
+  seconds: z.number().int().min(1).max(INPUT_QUARANTINE_SECONDS),
+  reason: InputLockReasonSchema,
+});
+export type InputLock = z.infer<typeof InputLockSchema>;
+
+/** What the card says about each reason: one fixed sentence, never page or terminal text. */
+export const INPUT_LOCK_WORDS: Readonly<Record<InputLockReason, string>> = {
+  'hidden-terminal': 'A local password prompt (sudo, su, doas or passwd) with typing hidden.',
+  'proven-field': 'A password field Ferretry has seen hide the value and move on after signing in.',
+  'probed-field': "A password field: a test value Ferretry typed did not show in the page's text.",
+  code: 'A one-time code shows on screen as it is typed.',
+  'not-proven': 'Ferretry has not proven that this target hides what is typed.',
+};
+
+/** "Hidden from the ferret for 10 s" or "for 2 minutes". */
+export function lockWords(lock: InputLock): string {
+  return lock.seconds >= 60
+    ? `${String(Math.round(lock.seconds / 60))} minute${lock.seconds >= 90 ? 's' : ''}`
+    : `${String(lock.seconds)} s`;
+}
 /** Per session: requests open at once, and raises an hour. Past either, the raise is refused with a sentence. */
 export const INPUT_MAX_PENDING_PER_SESSION = 3;
 export const INPUT_MAX_RAISES_PER_HOUR = 20;
@@ -263,6 +306,13 @@ const TerminalFactsSchema = z.strictObject({
   promptLineDigest: Digest,
   /** The program is one that asks for a secret (sudo, ssh, gpg, …); the shell itself or an interpreter is not. */
   recognisedConsumer: z.boolean(),
+  /**
+   * The TTY is in canonical (line) mode, as a password prompt reads it. A program in raw or readline mode turns echo
+   * off and draws every character itself (ssh to a remote shell, psql), so echo off alone proves nothing.
+   */
+  canonical: z.boolean().optional(),
+  /** The foreground program runs setuid root (effective uid 0, real uid not): not a script or binary a ferret placed. */
+  trustedProgram: z.literal(true).optional(),
 });
 
 const BrowserFieldSchema = z.strictObject({
@@ -449,6 +499,8 @@ export const InputRequestSchema = z.strictObject({
   pictured: z.literal(true).optional(),
   /** Saved logins: what the card may offer and what "Save as" suggests. The owner's view only. */
   saved: InputSavedSchema.optional(),
+  /** How long the target is kept from the ferret after the write, and why: the card shows it. */
+  lock: InputLockSchema.optional(),
   state: InputRequestStateSchema,
   outcome: InputOutcomeSchema.optional(),
 });
@@ -471,6 +523,8 @@ export const InputAgentViewSchema = z.strictObject({
     .optional(),
   submitted: z.boolean().optional(),
   source: z.enum(['typed', 'saved', 'sealed']).optional(),
+  /** How many seconds the surface is unreadable after the write. */
+  lockSeconds: z.number().int().min(1).max(INPUT_QUARANTINE_SECONDS).optional(),
   reason: InputReasonSchema.optional(),
   screen: z.string().max(65_536).optional(),
   note: z.string().max(400).optional(),

@@ -1,5 +1,6 @@
 import type { AgendaId, InputEvent, InputRaise, InputShot, InputTargetFacts } from '@ferretry/protocol';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
+import type { InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
 
@@ -27,14 +28,20 @@ export const RAISE: InputRaise = {
 export function inputRequestService(
   options: {
     readonly crash?: () => boolean;
-    /** What the terminal shows; the default is a sudo prompt. */
-    readonly facts?: InputTargetFacts;
+    /** What the terminal shows; the default is a sudo prompt. A function is asked at every look. */
+    readonly facts?: InputTargetFacts | (() => InputTargetFacts);
     /** Every other way the terminal is known besides its key. */
     readonly names?: readonly string[];
     /** The one live session; the default is {@link SESSION}. */
     readonly session?: string;
     /** The picture a page target answers with; none by default. */
     readonly shot?: InputShot;
+    /** The dummy probe a page target answers with (lock.ts); absent: the target cannot probe. */
+    readonly probe?: (fieldIds: readonly string[]) => Promise<'hidden' | 'shown' | 'aborted'>;
+    /** Saved logins, for the facts the lock may read; none by default. */
+    readonly logins?: InputLoginPort;
+    /** Whether the ferret steered a page (the login observer); absent: no observer, so every page counts as steered. */
+    readonly steered?: (since: number) => boolean;
   } = {},
 ) {
   const live = options.session ?? SESSION;
@@ -51,11 +58,17 @@ export function inputRequestService(
         if (options.crash?.() === true) throw new Error('the terminal subsystem fell over');
         return {
           ok: true,
-          facts: options.facts ?? FACTS,
+          facts: typeof options.facts === 'function' ? options.facts() : (options.facts ?? FACTS),
           ...(options.names === undefined ? {} : { names: options.names }),
         };
       },
       ...(options.shot === undefined ? {} : { shoot: async () => options.shot }),
+      ...(options.probe === undefined
+        ? {}
+        : {
+            probe: async (_session, _target, _facts, fieldIds) =>
+              await (options.probe as NonNullable<typeof options.probe>)(fieldIds),
+          }),
       type: async (_session, _target, values) => {
         writes.push(...values.map(value => value.text));
         return 'typed';
@@ -81,6 +94,16 @@ export function inputRequestService(
     values,
     quarantine,
     redact: async text => values.scrubAll(text),
+    ...(options.logins === undefined ? {} : { logins: options.logins }),
+    ...(options.steered === undefined
+      ? {}
+      : {
+          observer: {
+            delivered: async () => undefined,
+            tainted: (_session: string, _kind: string, since: number) =>
+              (options.steered as NonNullable<typeof options.steered>)(since),
+          },
+        }),
   });
   return { service, writes, events, quarantine };
 }

@@ -219,6 +219,14 @@ describe('NodeSessionBrowserLauncher', () => {
         calls.push(`type:${pageId}:${values.length}:${submit}`);
         return 'typed';
       },
+      inputText: async (pageId: string) => {
+        calls.push(`text:${pageId}`);
+        return 'Welcome back';
+      },
+      inputProbe: async (pageId: string, _expected: unknown, fieldIds: readonly string[], dummy: string) => {
+        calls.push(`probe:${pageId}:${fieldIds.join(',')}:${dummy}`);
+        return 'hidden';
+      },
     };
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
@@ -240,6 +248,8 @@ describe('NodeSessionBrowserLauncher', () => {
       ok: false,
       reason: 'empty',
     });
+    should(await browser.inputText?.('p1')).equal('Welcome back');
+    should(await browser.inputProbe?.('p1', facts, ['password'], '~abcde')).equal('hidden');
     should(calls).eql([
       'document:p1',
       'observe:p1:0',
@@ -247,6 +257,8 @@ describe('NodeSessionBrowserLauncher', () => {
       'shot:p1',
       'type:p1:1:true',
       'copy:p1:attribute:title',
+      'text:p1',
+      'probe:p1:password:~abcde',
     ]);
     await browser.close();
   });

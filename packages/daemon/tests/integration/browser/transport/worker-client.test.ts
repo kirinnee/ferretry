@@ -642,6 +642,11 @@ describe('browser worker client — the input bridge', () => {
     const hostless = await client.inputDocument('hostless');
     const text = await client.inputText('p1');
     if (!seen.ok) throw new Error('the page should have been seen');
+    const probed = await client.inputProbe('p1', seen.facts, ['password'], '~abcde');
+    const echoes = await client.inputProbe('echoes', seen.facts, ['password'], '~abcde');
+    const odd = await client.inputProbe('garbled', seen.facts, ['password'], '~abcde');
+    const refused = await client.inputProbe('refuses', seen.facts, ['password'], '~abcde');
+    if (!seen.ok) throw new Error('the page should have been seen');
     const shot = await client.inputShot('p1', seen.facts);
     const refound = await client.inputRefind('p1', seen.facts, pointer);
     const refoundMissing = await client.inputRefind('missing', seen.facts, pointer);
@@ -658,6 +663,7 @@ describe('browser worker client — the input bridge', () => {
     should(refound.ok && refound.facts.fields[0]?.backendNodeId).equal(9);
     should(refoundMissing).deepEqual({ ok: false, missing: 'password' });
     should(refoundAmbiguous).deepEqual({ ok: false, ambiguous: 'password' });
+    should([probed, echoes, odd, refused]).deepEqual(['hidden', 'shown', 'aborted', 'aborted']);
     should(shot).deepEqual({ pngBase64: 'iVBORw0KGgo=', clip: { x: 0, y: 0, w: 10, h: 10 } });
     should(typed).equal('typed');
     should(changed).equal('target_changed');

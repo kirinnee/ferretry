@@ -179,6 +179,8 @@ function inputReply(id, method, params) {
           ? { document: { navigationId: 'loader-1' } }
           : { document: { navigationId: 'loader-1', host: 'accounts.example.test' } },
     );
+  else if (method === 'inputProbe')
+    reply(id, true, { outcome: page === 'garbled' ? 'typed' : page === 'echoes' ? 'shown' : 'hidden' });
   else if (method === 'inputText') reply(id, true, page === 'garbled' ? { text: 5 } : { text: 'Welcome back' });
   else if (method === 'inputObserve')
     reply(

@@ -7,7 +7,8 @@ import type {
   BrowserInputObservation,
   BrowserInputOutcome,
 } from '../../../src/lib/browser/transport/input-contracts.ts';
-import { type PageInputHost, PageInputTarget } from '../../../src/lib/input-requests/page-target.ts';
+import { type PageInputHost, PageInputTarget, throwawayValue } from '../../../src/lib/input-requests/page-target.ts';
+import { InputTargetRouter } from '../../../src/lib/input-requests/target-router.ts';
 import { FACTS } from './support.ts';
 
 const FACTS_PAGE: BrowserInputFacts = {
@@ -49,6 +50,10 @@ function host(
       return options.hostless === true
         ? { navigationId: 'loader-2' }
         : { navigationId: 'loader-2', host: 'accounts.example.test' };
+    },
+    inputProbe: async (pageId, _expected, fieldIds, dummy) => {
+      calls.push(`probe:${pageId}:${fieldIds.join(',')}:${dummy}`);
+      return 'hidden';
     },
     inputText: async pageId => {
       calls.push(`text:${pageId}`);
@@ -222,5 +227,42 @@ describe('PageInputTarget pins its looks to the page typed into', () => {
     should(await target.where('s1', 'app', ['app', 'page-1'])).be.undefined();
     should(await target.text('s1', 'app', ['app', 'page-1'])).be.undefined();
     should(calls).deepEqual(['page:s1:app', 'page:s1:app']);
+  });
+});
+
+describe('the dummy probe through a page target', () => {
+  it('should probe the page the card was drawn from, in its queue, with a fresh throwaway value', async () => {
+    const { target, calls } = host();
+    should(await target.probe('s1', APP, FACTS_PAGE, ['password'])).equal('hidden');
+    should(calls[0]).equal('page:s1:app');
+    should(calls[1]).match(/^probe:page-1:password:~[a-z0-9]{2}$/u);
+  });
+
+  it('should abort for another page, a terminal, a refused page, or a browser that cannot probe', async () => {
+    should(await host({ pageId: 'page-9' }).target.probe('s1', APP, FACTS_PAGE, ['password'])).equal('aborted');
+    should(await host().target.probe('s1', { kind: 'terminal', key: 'dev' }, FACTS_PAGE, ['password'])).equal(
+      'aborted',
+    );
+    should(await host({ refuse: true }).target.probe('s1', APP, FACTS_PAGE, ['password'])).equal('aborted');
+  });
+
+  it('should make a throwaway value of a tilde and two letters or digits, different each time', () => {
+    const made = new Set(Array.from({ length: 20 }, () => throwawayValue()));
+    for (const value of made) should(value).match(/^~[a-z0-9]{2}$/u);
+    should(made.size).be.above(1);
+  });
+});
+
+describe('the router and the dummy probe', () => {
+  it('should send a page probe to the page adapter, and never probe a terminal or the secret store', async () => {
+    const page = host();
+    const terminal = {
+      observe: async () => ({ ok: false as const, reason: 'unsupported' as const }),
+      type: async () => 'target_gone' as const,
+    };
+    const router = new InputTargetRouter(terminal, page.target);
+    should(await router.probe('s1', APP, FACTS_PAGE, ['password'])).equal('hidden');
+    should(await router.probe('s1', { kind: 'terminal', key: 'dev' }, FACTS_PAGE, ['password'])).equal('aborted');
+    should(await new InputTargetRouter(terminal).probe('s1', APP, FACTS_PAGE, ['password'])).equal('aborted');
   });
 });

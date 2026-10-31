@@ -240,3 +240,20 @@ describe('QuarantineRegistry', () => {
     should(quarantine.until(SESSION, ['dev'])).be.undefined();
   });
 });
+
+describe('a hold with its own lock window', () => {
+  it('should run the short window once settled, and the full window while in flight', () => {
+    const { clock, quarantine } = registry();
+    const hold = quarantine.begin(SESSION, ['dev'], 'req', 10_000);
+    should(quarantine.until(SESSION, ['dev'])).equal(1_120_000);
+    should(quarantine.settle(hold)).equal(1_010_000);
+    clock.ms = 1_010_000;
+    should(quarantine.until(SESSION, ['dev'])).be.undefined();
+  });
+
+  it('should never run longer than the full window, nor below nothing', () => {
+    const { quarantine } = registry();
+    should(quarantine.settle(quarantine.begin(SESSION, ['a'], 'req', 999_999))).equal(1_120_000);
+    should(quarantine.settle(quarantine.begin(SESSION, ['b'], 'req', -5))).equal(1_000_000);
+  });
+});

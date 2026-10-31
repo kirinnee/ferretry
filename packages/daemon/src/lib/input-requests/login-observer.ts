@@ -169,6 +169,17 @@ export class LoginObserver {
     if (script) this.scripted.add(sessionId);
   }
 
+  /**
+   * Whether the ferret could have steered a surface of `kind`: for a page, it ran a page script in this session; or
+   * it acted on that kind of surface at or after `since` (an unreadable `since` counts as acted).
+   */
+  tainted(sessionId: string, kind: SurfaceKind, since: number): boolean {
+    if (kind === 'browser' && this.scripted.has(sessionId)) return true;
+    if (Number.isNaN(since)) return true;
+    const last = this.drove.get(`${sessionId}\u0000${kind}`);
+    return last !== undefined && last >= since;
+  }
+
   /** The sessions it remembers anything about. */
   sessions(): readonly string[] {
     return [

@@ -40,6 +40,7 @@ import {
   type ElementHandle,
   type Locator,
   type Page,
+  type WebSocket,
 } from 'playwright-core';
 import {
   CDP_PIPE_ENDPOINT,
@@ -53,6 +54,7 @@ import { DownloadStage } from '../src/lib/browser/transport/download-stage.ts';
 import type { BrowserInputFacts, BrowserInputValue } from '../src/lib/browser/transport/input-contracts.ts';
 import {
   describeInputDocument,
+  probeInputFields,
   readInputText,
   type InputablePage,
   type InputCdpSession,
@@ -316,6 +318,14 @@ function watch(page: Page, key: string): void {
 function registerPage(page: Page): void {
   if (pageIds.has(page)) return;
   const key = pageId(page);
+  // The WebSockets the page holds open: the dummy probe will not type where a socket may carry each keystroke.
+  const sockets = new Set<WebSocket>();
+  openSockets.set(page, sockets);
+  page.on('websocket', socket => {
+    sockets.add(socket);
+    socketsOpened.set(page, (socketsOpened.get(page) ?? 0) + 1);
+    socket.on('close', () => sockets.delete(socket));
+  });
   watch(page, key);
   setPageState(page, 'ready');
   void page
@@ -496,6 +506,11 @@ function inputLocatorOf(locator: Locator): InputLocator {
 }
 
 /** The page as the input bridge sees it: Playwright for the element, DevTools for the node. */
+/** Each page's open WebSockets (`registerPage`). */
+const openSockets = new WeakMap<Page, Set<WebSocket>>();
+/** How many WebSockets each page has ever opened. */
+const socketsOpened = new WeakMap<Page, number>();
+
 function inputSubject(page: Page): InputSubject {
   const key = pageId(page);
   let sessions = inputSessions.get(key);
@@ -512,6 +527,10 @@ function inputSubject(page: Page): InputSubject {
       title: async () => await safeTitle(page),
       mainFrame: () => page.mainFrame(),
       frames: () => page.frames(),
+      on: (event: 'request', listener: () => void) => page.on(event, listener),
+      off: (event: 'request', listener: () => void) => page.off(event, listener),
+      openSockets: () => openSockets.get(page)?.size ?? 0,
+      socketsOpened: () => socketsOpened.get(page) ?? 0,
     } as unknown as InputablePage,
     cdp: {
       page: async () => (await pageSession(page)) as unknown as InputCdpSession,
@@ -568,6 +587,22 @@ async function inputType(params: Readonly<Record<string, unknown>>): Promise<Rec
     return { outcome: await typeInputFields(inputSubject(page), expected, values, params.submit === true) };
   } catch {
     return { outcome: 'uncertain' };
+  }
+}
+
+/** The dummy probe: anything malformed or failing is `aborted`, which only ever makes the lock longer. */
+async function inputProbe(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  try {
+    const page = targetPage(params.pageId);
+    const expected = browserFactsParam(params.expected);
+    if (!Array.isArray(params.fieldIds) || !params.fieldIds.every(id => typeof id === 'string'))
+      return { outcome: 'aborted' };
+    if (typeof params.dummy !== 'string' || params.dummy === '') return { outcome: 'aborted' };
+    return {
+      outcome: await probeInputFields(inputSubject(page), expected, params.fieldIds as string[], params.dummy),
+    };
+  } catch {
+    return { outcome: 'aborted' };
   }
 }
 
@@ -923,6 +958,8 @@ async function act(request: Request): Promise<Record<string, unknown>> {
     }
     case 'inputType':
       return await inputType(params);
+    case 'inputProbe':
+      return await inputProbe(params);
     case 'pointer': {
       const page = targetPage(params.pageId);
       const outcome = await performPointerAct(page as unknown as PointerPage, pointerActParam(params.act));

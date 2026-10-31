@@ -34,6 +34,7 @@ import {
   type InputTarget,
   type InputTargetFacts,
   loginDomainsOf,
+  type LoginObserved,
   inputRaiseFields,
   inputValueProblem,
   LOGIN_PASSWORD_MIN_LENGTH,
@@ -69,6 +70,7 @@ import type {
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
 import { bindingOf, mayRebind } from './rebind.ts';
+import { lockFor, longerLock, probeable } from './lock.ts';
 import type { LoginObserver } from './login-observer.ts';
 import { savedForFields, targetMatchKey } from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
@@ -148,6 +150,8 @@ interface Held {
   shot?: InputShot;
   /** The document a page's values were typed into: once the page has left it, its quarantine lets text reads by. */
   navigation?: string;
+  /** The daemon's dummy probe at raise found its throwaway value in no read of the page (lock.ts). */
+  probed?: boolean;
 }
 
 /**
@@ -186,7 +190,7 @@ export interface InputRequestServiceDependencies {
    * Told about every value typed into a terminal or a page, once it landed: the facts a saved login keeps
    * (docs/input-requests.md, "Login recipes") come only from here. Absent: no facts are kept.
    */
-  readonly observer?: Pick<LoginObserver, 'delivered'>;
+  readonly observer?: Pick<LoginObserver, 'delivered' | 'tainted'>;
 }
 
 const instant = (ms: number): string => new Date(ms).toISOString();
@@ -267,6 +271,30 @@ export class InputRequestService {
       seen.facts.kind === 'browser'
         ? await this.deps.target.shoot?.(sessionId, target, seen.facts).catch(() => undefined)
         : undefined;
+    // How long the target is kept from the ferret after the write (lock.ts): only what the daemon saw decides it.
+    // The dummy probe runs after the picture, so the picture shows the page as it was.
+    const observedFacts = sensitivity === 'plain' || target.kind === 'secret' ? [] : await this.observedFacts();
+    // At the raise only a page script the ferret ever ran counts: acts before the card are the ferret's own business.
+    const context = {
+      observed: observedFacts,
+      submitted: raise.submit !== 'agent',
+      steered: this.tainted(sessionId, Number.POSITIVE_INFINITY),
+    };
+    const probed =
+      sensitivity !== 'plain' && probeable(seen.facts, fields, context)
+        ? (await this.deps.target
+            .probe?.(
+              sessionId,
+              target,
+              seen.facts,
+              fields.filter(f => f.sensitivity === 'secret').map(f => f.id),
+            )
+            .catch(() => 'aborted' as const)) === 'hidden'
+        : false;
+    const lock =
+      sensitivity === 'plain' || target.kind === 'secret'
+        ? undefined
+        : lockFor(seen.facts, fields, { ...context, probed });
     const step = raise.chain === undefined ? undefined : this.stepAfter(sessionId, raise.chain);
     const card = await this.deps.agenda.raise(sessionId, {
       requestId,
@@ -296,6 +324,7 @@ export class InputRequestService {
       risk: pasteRisk(worstRisk(fields.map(field => field.risk)), copy),
       observedDigest: digestFacts(seen.facts),
       ...(shot === undefined ? {} : { pictured: true as const }),
+      ...(lock === undefined ? {} : { lock }),
       state: 'pending',
     };
     try {
@@ -317,6 +346,7 @@ export class InputRequestService {
       deliveries: new Map(),
       waiters: new Set(),
       ...(shot === undefined ? {} : { shot }),
+      ...(probed ? { probed: true } : {}),
     };
     this.held.set(requestId, held);
     this.noteRaise(sessionId, now);
@@ -891,9 +921,20 @@ export class InputRequestService {
       }
       held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
       if (seen.facts.kind === 'browser') held.navigation = seen.facts.navigationId;
-      // The secret store is no surface anybody reads, so there is nothing to hold from view.
-      if (request.sensitivity !== 'plain' && request.target.kind !== 'secret')
-        hold = await this.holdFor(request, held.names);
+      // The secret store is no surface anybody reads, so there is nothing to hold from view. The lock is looked at
+      // again from the facts just seen, and the longer of that and the card's is kept: a card never shortens.
+      if (request.sensitivity !== 'plain' && request.target.kind !== 'secret') {
+        // At the write, any act of the ferret on a page since the card was raised voids a page's proof as well.
+        const now = lockFor(seen.facts, request.fields, {
+          observed: await this.observedFacts(),
+          probed: held.probed === true,
+          submitted,
+          steered: this.tainted(request.sessionId, Date.parse(request.raisedAt)),
+        });
+        const lock = request.lock === undefined ? now : longerLock(request.lock, now);
+        held.request = { ...held.request, lock };
+        hold = await this.holdFor(request, held.names, lock.seconds * 1000);
+      }
       try {
         await this.journal(request, 'delivering', undefined, undefined, body.deliveryId);
       } catch {
@@ -1064,6 +1105,20 @@ export class InputRequestService {
     }
   }
 
+  /**
+   * Whether the ferret could have steered a page: it ran a page script in this session, or drove a page since `since`.
+   * With no observer wired nothing is known, so every page counts as steered (the lock stays long).
+   */
+  private tainted(sessionId: string, since: number): boolean {
+    return this.deps.observer?.tainted(sessionId, 'browser', since) ?? true;
+  }
+
+  /** Every saved login's observed facts, for the lock; none when the store cannot be read (the lock stays long). */
+  private async observedFacts(): Promise<readonly LoginObserved[]> {
+    const entries = await this.deps.logins?.entries().catch(() => []);
+    return (entries ?? []).flatMap(entry => entry.observed ?? []);
+  }
+
   /** The value a saved login types for one field. Refuses with the entry's name, never its value. */
   /**
    * The value of the copy a paste names, opened only to be typed. A copy that ended since the card was raised ends
@@ -1142,10 +1197,14 @@ export class InputRequestService {
    * hold belongs to this attempt alone and cannot expire while the write is in flight; a pre-write end time
    * of two windows covers the write landing late, and {@link settle} replaces it with the exact one.
    */
-  private async holdFor(request: InputRequest, seenNames: readonly string[] | undefined): Promise<QuarantineHold> {
+  private async holdFor(
+    request: InputRequest,
+    seenNames: readonly string[] | undefined,
+    window = QUARANTINE_MS,
+  ): Promise<QuarantineHold> {
     const surfaceNames = [...new Set([request.target.key, ...(seenNames ?? [])])].slice(0, 4);
     const names = request.target.kind === 'browser' ? surfaceNames.map(pageName) : surfaceNames;
-    const hold = this.deps.quarantine.begin(request.sessionId, names, request.id);
+    const hold = this.deps.quarantine.begin(request.sessionId, names, request.id, window);
     try {
       await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.started, this.deps.clock.now() + QUARANTINE_MS, true);
     } catch {
@@ -1271,9 +1330,21 @@ export class InputRequestService {
     else held.shot = shot;
     const copy =
       request.source === undefined ? undefined : this.deps.sealed?.describe(request.sessionId, request.source.name);
+    // A dummy probe was about the node the card first showed: a redrawn card earns its lock again without it.
+    held.probed = false;
+    const lock =
+      request.lock === undefined
+        ? undefined
+        : lockFor(seen.facts, request.fields, {
+            observed: await this.observedFacts(),
+            probed: false,
+            submitted: request.submit !== 'agent',
+            steered: this.tainted(request.sessionId, Date.parse(request.raisedAt)),
+          });
     const { pictured: _pictured, ...rest } = request;
     held.request = {
       ...rest,
+      ...(lock === undefined ? {} : { lock }),
       state: 'pending',
       fields,
       observed: await this.project(request.sessionId, seen.facts, held.names),
@@ -1408,6 +1479,7 @@ export class InputRequestService {
       ...(request.outcome === undefined
         ? {}
         : { submitted: request.outcome.submitted, source: request.outcome.source }),
+      ...(request.lock === undefined ? {} : { lockSeconds: request.lock.seconds }),
       ...(pending && page?.challenge !== undefined
         ? {
             note: `The page is showing a captcha: hand it to the owner with browser_ask_owner ("complete the captcha") and wait; never try to solve it. ${request.agendaItemId} waits for the owner too.`,

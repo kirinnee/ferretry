@@ -14,6 +14,12 @@ export interface PageInputHost {
   ): Promise<T>;
 }
 
+/** A throwaway value for the dummy probe: a tilde and two random letters or digits, shorter than any code or PIN field. */
+export function throwawayValue(): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyz0123456789';
+  return `~${[...crypto.getRandomValues(new Uint8Array(2))].map(byte => alphabet[byte % alphabet.length]).join('')}`;
+}
+
 /**
  * A PAGE AS AN INPUT TARGET (docs/input-requests.md, "Pages"): the browser observes the fields the agent pointed
  * at, and the one write goes to exactly the nodes the card showed.
@@ -23,7 +29,10 @@ export interface PageInputHost {
  * changed under the same name) is `target_changed`. Only the write can be `uncertain`, and only once it began.
  */
 export class PageInputTarget implements InputTargetPort {
-  constructor(private readonly host: PageInputHost) {}
+  constructor(
+    private readonly host: PageInputHost,
+    private readonly dummy: () => string = throwawayValue,
+  ) {}
 
   async observe(sessionId: string, target: InputTarget, fields: readonly InputTargetField[]): Promise<ObserveResult> {
     if (target.kind !== 'browser') return { ok: false, reason: 'unsupported' };
@@ -131,6 +140,28 @@ export class PageInputTarget implements InputTargetPort {
       );
     } catch {
       return undefined;
+    }
+  }
+
+  /**
+   * The dummy probe, inside the page's own queue so no act of the agent lands in it. The throwaway value is made here:
+   * three characters (shorter than any code or PIN, and than any password a site accepts), random, never kept.
+   */
+  async probe(
+    sessionId: string,
+    target: InputTarget,
+    facts: InputTargetFacts,
+    fieldIds: readonly string[],
+  ): Promise<'hidden' | 'shown' | 'aborted'> {
+    if (target.kind !== 'browser' || facts.kind !== 'browser') return 'aborted';
+    try {
+      return await this.host.inputOnPage(sessionId, target.key, async (port, pageId) =>
+        pageId === facts.pageId && port.inputProbe !== undefined
+          ? await port.inputProbe(pageId, facts, fieldIds, this.dummy())
+          : ('aborted' as const),
+      );
+    } catch {
+      return 'aborted';
     }
   }
 

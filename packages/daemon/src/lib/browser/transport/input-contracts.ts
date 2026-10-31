@@ -85,6 +85,13 @@ export interface BrowserInputFieldsPort {
    * returns it.
    */
   inputText?(pageId: string): Promise<string>;
+  /** The dummy probe (`probeInputFields`): `hidden`, `shown` or `aborted`. The throwaway value is no secret. */
+  inputProbe?(
+    pageId: string,
+    expected: BrowserInputFacts,
+    fieldIds: readonly string[],
+    dummy: string,
+  ): Promise<'hidden' | 'shown' | 'aborted'>;
   inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation>;
   /**
    * The fields `expected` describes, found again in the page as it is now. Each field: the node the card showed, if
@@ -125,4 +132,5 @@ export const BROWSER_INPUT_WORKER_METHODS = {
   shot: 'inputShot',
   type: 'inputType',
   text: 'inputText',
+  probe: 'inputProbe',
 } as const;

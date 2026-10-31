@@ -178,6 +178,8 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     if (captured.code !== 0) return { ok: false, reason: 'target_gone' };
     const promptLine = plain(captured.stdout.split('\n')[0] ?? '');
     const echo = await this.modes.echo(first.tty);
+    const canonical = await this.modes.canonical?.(first.tty);
+    const trusted = (await this.modes.trusted?.(foreground.pid)) === true;
     const last = await this.describe(pane);
     if (
       last === undefined ||
@@ -200,6 +202,8 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
       promptLine,
       promptLineDigest: digestLine(promptLine),
       recognisedConsumer: recognisedConsumer(foreground.comm),
+      ...(canonical === undefined ? {} : { canonical }),
+      ...(trusted ? { trustedProgram: true as const } : {}),
     };
     return {
       ok: true,

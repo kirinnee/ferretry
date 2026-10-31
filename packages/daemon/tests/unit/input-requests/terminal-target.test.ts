@@ -42,6 +42,9 @@ interface World {
   queued: (readonly string[])[];
   /** Runs after tmux's condition held and the bytes were enqueued, before any program reads them. */
   afterEnqueue: ((w: World) => void) | undefined;
+  /** What the line-mode and trusted-program reads answer; absent: the modes cannot tell. */
+  canonical?: boolean;
+  trusted?: boolean;
 }
 
 const world = (): World => ({
@@ -100,7 +103,11 @@ function target(w: World): TmuxInputTarget {
   const terminals: TerminalLocator = {
     locate: async () => (w.located ? { tmuxSession: SESSION, id: 't-dev' } : undefined),
   };
-  const modes: TerminalModes = { echo: async () => w.echo };
+  const modes: TerminalModes = {
+    echo: async () => w.echo,
+    ...(w.canonical === undefined ? {} : { canonical: async () => w.canonical }),
+    ...(w.trusted === undefined ? {} : { trusted: async () => w.trusted as boolean }),
+  };
   return new TmuxInputTarget(tmux, terminals, modes, async argv => {
     w.ran.push(argv);
     return w.ps;
@@ -518,5 +525,28 @@ describe('the screen look is pinned to the terminal typed into', () => {
     const w = world();
     should(await target(w).screen('s1', 'dev', ['dev', 't-old'])).be.undefined();
     should(w.calls.some(call => call[0] === 'capture-pane')).be.false();
+  });
+});
+
+describe('the facts the adaptive lock reads from a terminal', () => {
+  it('should say the terminal is in line mode and the program is trusted, when the modes can tell', async () => {
+    const w = world();
+    w.canonical = true;
+    w.trusted = true;
+    const facts = await observed(w);
+    should(facts.canonical).be.true();
+    should(facts.trustedProgram).be.true();
+  });
+
+  it('should leave out what it cannot tell, and never claim a program it does not trust', async () => {
+    const quiet = await observed(world());
+    should(quiet).not.have.property('canonical');
+    should(quiet).not.have.property('trustedProgram');
+    const w = world();
+    w.canonical = false;
+    w.trusted = false;
+    const facts = await observed(w);
+    should(facts.canonical).be.false();
+    should(facts).not.have.property('trustedProgram');
   });
 });

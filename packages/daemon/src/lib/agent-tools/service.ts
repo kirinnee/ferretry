@@ -562,7 +562,7 @@ export class AgentToolService {
         return {
           summary:
             view.state === 'delivered'
-              ? `Pasted ${copyHandle(name)} into ${reference} under a rule the owner approved in advance (!${view.id}). The terminal is unreadable for about two minutes.`
+              ? `Pasted ${copyHandle(name)} into ${reference} under a rule the owner approved in advance (!${view.id}). The terminal is unreadable for ${view.lockSeconds === undefined ? 'about two minutes' : `${String(view.lockSeconds)} seconds`}.`
               : `Asked the owner to allow pasting ${copyHandle(name)} into ${reference} (!${view.id}). Wait with input.wait; do not type there yourself.`,
           input: view,
         };

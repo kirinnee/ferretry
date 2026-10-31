@@ -55,7 +55,7 @@ function harness(
     /** A daemon that keeps no saved logins at all. */
     none?: true;
     /** Where landed deliveries are told, for a saved login's facts. */
-    observer?: (directory: LoginDirectory) => Pick<LoginObserver, 'delivered'>;
+    observer?: (directory: LoginDirectory) => Pick<LoginObserver, 'delivered' | 'tainted'>;
   } = {},
 ) {
   const writes: string[] = [];
@@ -549,7 +549,9 @@ describe('the refusals around saved logins, each with nothing typed', () => {
 describe('what the daemon saw is kept on the saved login', () => {
   it('should hand a one-tap delivery to the observer with the login, its hosts and the value for its own look', async () => {
     const told: LoginDelivery[] = [];
-    const h = harness({ observer: () => ({ delivered: async delivery => void told.push(delivery) }) });
+    const h = harness({
+      observer: () => ({ delivered: async delivery => void told.push(delivery), tainted: () => false }),
+    });
     await h.directory.put(
       'SUDO_KIRIN_BOX',
       PutLoginEntryRequestSchema.parse({ label: 'sudo', match: ['sudo@kirin-box'], password: PASSWORD }),
@@ -600,7 +602,9 @@ describe('what the daemon saw is kept on the saved login', () => {
 
   it('should tell the observer about a typed value no login holds, so a code can follow a password', async () => {
     const told: LoginDelivery[] = [];
-    const h = harness({ observer: () => ({ delivered: async delivery => void told.push(delivery) }) });
+    const h = harness({
+      observer: () => ({ delivered: async delivery => void told.push(delivery), tainted: () => false }),
+    });
     const { request } = await raised(h);
     await h.service.deliver(SESSION, request.id, typed(request.observedDigest as string, PASSWORD), HOST);
     await Bun.sleep(0);
@@ -611,7 +615,9 @@ describe('what the daemon saw is kept on the saved login', () => {
 
 describe('a login observer that fails', () => {
   it('should never fail or hold up the delivery', async () => {
-    const h = harness({ observer: () => ({ delivered: async () => await Promise.reject(new Error('store gone')) }) });
+    const h = harness({
+      observer: () => ({ delivered: async () => await Promise.reject(new Error('store gone')), tainted: () => false }),
+    });
     const { request } = await raised(h);
     const result = await h.service.deliver(
       SESSION,
