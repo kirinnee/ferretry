@@ -15,27 +15,54 @@
  * An INCOGNITO page gets its own browser context (its own cookies and storage, shared with nothing),
  * closed with the page.
  */
+import { mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import {
   BROWSER_MODIFIERS,
   type BrowserInputEvent,
   type BrowserModifier,
   type BrowserMouseButton,
+  BrowserPageLifecycleRequestSchema,
   type BrowserTarget,
 } from '@ferretry/protocol';
 import { type Browser, type BrowserContext, type CDPSession, chromium, type Page } from 'playwright-core';
 import { recogniseBrowserChallenge } from '../src/lib/browser/transport/challenge.ts';
+import { DownloadStage } from '../src/lib/browser/transport/download-stage.ts';
 import {
   browserElementParam,
   browserTargetParam,
   clickOn,
+  printPdf,
   readPage,
   shootPage,
   typeInto,
+  uploadFiles,
 } from '../src/lib/browser/transport/page-acts.ts';
+import {
+  ConsoleLog,
+  NetworkLog,
+  PageDialogs,
+  PageEmulation,
+  runLifecycleRequest,
+  type WaitablePage,
+} from '../src/lib/browser/transport/page-lifecycle.ts';
+import { performPointerAct, type PointerPage, pointerActParam } from '../src/lib/browser/transport/pointer-acts.ts';
 import { type PointerPosition, pointerAfter, pointerSequence } from '../src/lib/browser/transport/pointer.ts';
 
 const endpoint = process.argv[2];
+/** Where downloads and PDFs are staged for the daemon; without it the worker stages nothing. */
+const stageDirectory = process.argv[3];
+const downloads = new DownloadStage({
+  directory: stageDirectory,
+  disk: {
+    mkdirp: async directory => void (await mkdir(directory, { recursive: true, mode: 0o700 })),
+    size: async file => (await stat(file)).size,
+    remove: async file => await rm(file, { force: true }),
+    write: async (file, bytes) => await writeFile(file, bytes, { mode: 0o600 }),
+  },
+  now: () => Date.now(),
+  sleep: async milliseconds => await new Promise(resolve => setTimeout(resolve, milliseconds)),
+});
 const MAX_PAGES = 200;
 const DEFAULT_VIEWPORT = { width: 1280, height: 800 } as const;
 const MAX_ERROR_CHARS = 200;
@@ -68,6 +95,16 @@ const pointers = new Map<string, PointerPosition>();
 const screencasts = new Map<string, CDPSession>();
 const heldFrames = new Map<number, HeldFrame>();
 let global: Promise<unknown> = Promise.resolve();
+/** What each page is holding, logging and emulating — all of it forgotten with the page. */
+const dialogs = new PageDialogs();
+const consoles = new Map<string, ConsoleLog>();
+const networks = new Map<string, NetworkLog>();
+const emulations = new Map<string, PageEmulation>();
+/** The last title a page answered with: `page.title()` hangs while a dialog is open. */
+const titles = new WeakMap<Page, string>();
+const TITLE_WAIT_MS = 750;
+/** The acts that can be stuck behind a dialog the page opened. */
+const DIALOG_RACED = new Set(['navigate', 'click', 'type', 'read', 'screenshot', 'back', 'forward', 'reload']);
 
 function send(record: unknown): void {
   process.stdout.write(`${JSON.stringify(record)}\n`);
@@ -114,9 +151,67 @@ function setPageState(page: Page, state: PageState['state'], error?: unknown): v
   pageStates.set(page, { state, ...(error === undefined ? {} : { error: safeError(error) }) });
 }
 
+function logOf<T>(logs: Map<string, T>, key: string, make: () => T): T {
+  let log = logs.get(key);
+  if (log === undefined) {
+    log = make();
+    logs.set(key, log);
+  }
+  return log;
+}
+
+/** Listeners that only ever record: a failure in one must not become a failure of the page. */
+function watch(page: Page, key: string): void {
+  const guarded =
+    <A extends unknown[]>(handler: (...args: A) => void) =>
+    (...args: A): void => {
+      try {
+        handler(...args);
+      } catch {}
+    };
+  page.on(
+    'dialog',
+    guarded(dialog => dialogs.hold(key, dialog)),
+  );
+  page.on(
+    'console',
+    guarded(message =>
+      logOf(consoles, key, () => new ConsoleLog()).add(message.type(), message.text(), message.location()),
+    ),
+  );
+  page.on(
+    'pageerror',
+    guarded(error => logOf(consoles, key, () => new ConsoleLog()).add('error', error.message)),
+  );
+  page.on(
+    'request',
+    guarded(request => logOf(networks, key, () => new NetworkLog()).started(request)),
+  );
+  page.on(
+    'response',
+    guarded(response => logOf(networks, key, () => new NetworkLog()).responded(response.request(), response)),
+  );
+  page.on(
+    'requestfinished',
+    guarded(
+      request =>
+        void logOf(networks, key, () => new NetworkLog())
+          .finished(request)
+          .catch(() => undefined),
+    ),
+  );
+  page.on(
+    'requestfailed',
+    guarded(request =>
+      logOf(networks, key, () => new NetworkLog()).failed(request, request.failure()?.errorText ?? 'request failed'),
+    ),
+  );
+}
+
 function registerPage(page: Page): void {
   if (pageIds.has(page)) return;
-  pageId(page);
+  const key = pageId(page);
+  watch(page, key);
   setPageState(page, 'ready');
   void page
     .opener()
@@ -124,6 +219,7 @@ function registerPage(page: Page): void {
       if (opener) openers.set(page, pageId(opener));
     })
     .catch(() => undefined);
+  page.on('download', download => downloads.accept(pageId(page), download));
   page.on('request', request => {
     try {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) setPageState(page, 'loading');
@@ -147,6 +243,10 @@ function registerPage(page: Page): void {
     const id = pageId(page);
     viewports.delete(id);
     pointers.delete(id);
+    dialogs.drop(id);
+    consoles.delete(id);
+    networks.delete(id);
+    emulations.delete(id);
     const cast = screencasts.get(id);
     screencasts.delete(id);
     if (cast) void cast.detach().catch(() => undefined);
@@ -187,11 +287,30 @@ function safeUrl(page: Page): string {
   }
 }
 
-async function safeTitle(page: Page): Promise<string> {
+/** Gives up on slow work after `ms` rather than hang a status behind a page that cannot answer. */
+async function within<T>(ms: number, work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    return (await page.title()).slice(0, MAX_TITLE_CHARS);
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('the page did not answer in time')), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function safeTitle(page: Page): Promise<string> {
+  const known = titles.get(page) ?? '';
+  if (dialogs.pending(pageId(page)) !== undefined) return known;
+  try {
+    const title = (await within(TITLE_WAIT_MS, page.title())).slice(0, MAX_TITLE_CHARS);
+    titles.set(page, title);
+    return title;
   } catch {
-    return '';
+    return known;
   }
 }
 
@@ -203,6 +322,17 @@ async function pageSession(page: Page): Promise<CDPSession> {
     sessions.set(page, session);
   }
   return await session;
+}
+
+/** The page's CDP session, as the acts that need DevTools directly see it. */
+async function cdpOf(
+  page: Page,
+): Promise<{ send(method: string, params: Readonly<Record<string, unknown>>): Promise<unknown> }> {
+  const session = await pageSession(page);
+  return {
+    send: async (method, params) =>
+      await (session as { send(m: string, p: unknown): Promise<unknown> }).send(method, params),
+  };
 }
 
 async function targetId(page: Page): Promise<string> {
@@ -243,7 +373,7 @@ async function snapshot(focus: Page, extra: Readonly<Record<string, unknown>> = 
   let canGoForward = false;
   if (!focus.isClosed()) {
     try {
-      const history = (await (await pageSession(focus)).send('Page.getNavigationHistory')) as {
+      const history = (await within(TITLE_WAIT_MS, (await pageSession(focus)).send('Page.getNavigationHistory'))) as {
         currentIndex?: number;
         entries?: unknown[];
       };
@@ -279,7 +409,75 @@ async function snapshot(focus: Page, extra: Readonly<Record<string, unknown>> = 
 }
 
 async function acted(page: Page, extra: Readonly<Record<string, unknown>> = {}): Promise<Record<string, unknown>> {
-  return { ...(await snapshot(page, extra)), actedPageId: pageId(page) };
+  const dialog = dialogs.pending(pageId(page));
+  const started = await downloads.notices(pageId(page));
+  return {
+    ...(await snapshot(page, extra)),
+    actedPageId: pageId(page),
+    ...(dialog === undefined ? {} : { dialog }),
+    ...(started.length === 0 ? {} : { downloads: started }),
+  };
+}
+
+/**
+ * An act that a dialog can strand: a click that opens an `alert` does not return until the alert is
+ * answered, and nor does the next `page.title()`. So the act races the dialog; when the dialog wins the
+ * act's own outcome is dropped and the result reports the dialog instead, leaving the page's queue free
+ * for the `browser.dialog` that answers it.
+ */
+async function racing(request: Request): Promise<Record<string, unknown>> {
+  const page = targetPage(request.params.pageId);
+  const key = pageId(page);
+  if (dialogs.pending(key) === undefined) {
+    const work = act(request);
+    work.catch(() => undefined);
+    const opened = dialogs.opened(key);
+    try {
+      const outcome = await Promise.race([work.then(value => ({ value })), opened.promise.then(() => undefined)]);
+      if (outcome !== undefined) return outcome.value;
+    } finally {
+      opened.cancel();
+    }
+  }
+  const pending = dialogs.pending(key);
+  if (request.method === 'screenshot')
+    throw new Error(
+      `a ${pending?.type ?? 'browser'} dialog is open on this page; answer it with browser.dialog before taking a screenshot`,
+    );
+  return await acted(page, request.method === 'read' ? { text: '' } : {});
+}
+
+/** One lifecycle request: a dialog answer, a bounded wait, a log read or an emulation. */
+async function lifecycle(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  const page = targetPage(params.pageId);
+  const parsed = BrowserPageLifecycleRequestSchema.safeParse(params.request);
+  if (!parsed.success) throw new Error(`invalid lifecycle request: ${parsed.error.issues[0]?.message ?? 'unknown'}`);
+  const key = pageId(page);
+  const reply = await runLifecycleRequest(
+    {
+      pageKey: key,
+      page: page as unknown as WaitablePage,
+      dialogs,
+      messages: logOf(consoles, key, () => new ConsoleLog()),
+      network: logOf(networks, key, () => new NetworkLog()),
+      emulation: logOf(emulations, key, () => new PageEmulation()),
+      targets: {
+        session: await pageSession(page),
+        setViewport: async viewport => await resizeTo(page, viewport),
+        url: () => safeUrl(page),
+        grantPermissions: async (permissions, origin) =>
+          await page.context().grantPermissions([...permissions], { origin }),
+        clearPermissions: async () => await page.context().clearPermissions(),
+      },
+    },
+    parsed.data,
+  );
+  return { ...(await acted(page)), lifecycle: reply };
+}
+
+async function resizeTo(page: Page, viewport: Viewport): Promise<void> {
+  if (screencasts.has(pageId(page))) await startScreencast(page, viewport);
+  else await applyViewport(page, viewport);
 }
 
 /** Opens a page in its own background window — in the shared profile, or in a new incognito context. */
@@ -421,7 +619,21 @@ function keyOf(request: Request): string {
   return typeof id === 'string' && request.method !== 'dispatchInput' && request.method !== 'ackFrame' ? id : '';
 }
 
+/** Requests that must not wait behind the page's other work, because that work may be what they unstick. */
+function unqueued(request: Request): boolean {
+  if (request.method === 'dispatchInput' || request.method === 'ackFrame') return true;
+  if (request.method !== 'lifecycle') return false;
+  const op = (request.params.request as { op?: unknown } | undefined)?.op;
+  return op === 'dialog' || op === 'console' || op === 'network';
+}
+
 async function run(request: Request): Promise<Record<string, unknown>> {
+  if (request.method === 'lifecycle') return await lifecycle(request.params);
+  if (DIALOG_RACED.has(request.method)) return await racing(request);
+  return await act(request);
+}
+
+async function act(request: Request): Promise<Record<string, unknown>> {
   const params = request.params;
   switch (request.method) {
     case 'navigate': {
@@ -443,17 +655,24 @@ async function run(request: Request): Promise<Record<string, unknown>> {
         ...(params.double === true ? { double: true } : {}),
         ...(Array.isArray(params.modifiers) ? { modifiers: params.modifiers.filter(isModifier) } : {}),
       });
+      // A click that starts a download hears of it a moment later; the act should be able to say so.
+      await downloads.awaitStart(pageId(page), 250);
       return await acted(page);
     }
     case 'type': {
       const page = targetPage(params.pageId);
       const target = browserElementParam(legacyTarget(params));
       if (target === undefined) throw new Error('target is required');
-      await typeInto(page, target, typeof params.text === 'string' ? params.text : '', {
+      const typed = await typeInto(page, target, typeof params.text === 'string' ? params.text : '', {
         ...(params.submit === true ? { submit: true } : {}),
         ...(params.slowly === true ? { slowly: true } : {}),
       });
-      return await acted(page);
+      return await acted(page, typed.passwordField ? { passwordField: true } : {});
+    }
+    case 'pointer': {
+      const page = targetPage(params.pageId);
+      const outcome = await performPointerAct(page as unknown as PointerPage, pointerActParam(params.act));
+      return await acted(page, outcome.passwordField ? { passwordField: true } : {});
     }
     case 'read': {
       const page = targetPage(params.pageId);
@@ -483,6 +702,30 @@ async function run(request: Request): Promise<Record<string, unknown>> {
         screenshotBase64: shot.base64.slice(0, MAX_SCREENSHOT_CHARS),
         screenshotFormat: shot.format,
       });
+    }
+    case 'upload': {
+      const page = targetPage(params.pageId);
+      const target = browserElementParam(params.target);
+      if (target === undefined) throw new Error('target is required');
+      const paths = Array.isArray(params.paths)
+        ? params.paths.filter((item): item is string => typeof item === 'string')
+        : [];
+      await uploadFiles(page, await cdpOf(page), target, paths, params.mode === 'drop' ? 'drop' : 'input');
+      return await acted(page);
+    }
+    case 'download': {
+      const page = targetPage(params.pageId);
+      const staged = await downloads.claim(
+        pageId(page),
+        typeof params.downloadId === 'string' ? params.downloadId : undefined,
+      );
+      return await acted(page, { staged });
+    }
+    case 'pdf': {
+      const page = targetPage(params.pageId);
+      const base64 = await printPdf(await cdpOf(page));
+      const staged = await downloads.stagePdf(pageId(page), base64, await safeTitle(page));
+      return await acted(page, { staged });
     }
     case 'back': {
       const page = targetPage(params.pageId);
@@ -519,8 +762,7 @@ async function run(request: Request): Promise<Record<string, unknown>> {
     case 'resize': {
       const page = targetPage(params.pageId);
       const viewport = { width: dimension(params.width, 'width'), height: dimension(params.height, 'height') };
-      if (screencasts.has(pageId(page))) await startScreencast(page, viewport);
-      else await applyViewport(page, viewport);
+      await resizeTo(page, viewport);
       return await acted(page);
     }
     case 'startScreencast':
@@ -626,8 +868,9 @@ export async function startBrowserWorker(): Promise<void> {
       send({ id: undefined, ok: false, error: safeError(error) });
       return;
     }
-    // Input and frame acknowledgements never wait: a person typing must not queue behind a page load.
-    if (request.method === 'dispatchInput' || request.method === 'ackFrame') void answer(request);
+    // Input, frame acknowledgements and the dialog and log reads never wait: a person typing must not
+    // queue behind a page load, nor a dialog answer behind the click that is stuck on that dialog.
+    if (unqueued(request)) void answer(request);
     else void queued(keyOf(request), async () => await answer(request));
   });
   process.stdin.on('end', () => {

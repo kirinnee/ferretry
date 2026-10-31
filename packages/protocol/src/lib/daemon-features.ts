@@ -59,6 +59,12 @@ export const DAEMON_FEATURES = {
    * without this name refuses the field: the app offers the composer's attach only where the machine reports it.
    */
   boardReopenAttachments: 'board.reopen.attachments.1',
+  /**
+   * An agenda add may carry `offerClose`, and an item may come back with it: the app then offers "Done · closes
+   * &F12" beside the answers. A daemon without this name refuses the add, so the app and the CLI send it only
+   * where the machine reports it.
+   */
+  agendaOfferClose: 'agenda.offer-close.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

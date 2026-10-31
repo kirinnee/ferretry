@@ -175,9 +175,15 @@ the write:
   audit record and wait tail, and before it is returned, matched against a predicate, sent as a stream
   frame (full, delta, re-attach and the second capture of a redraw) or remembered as the last frame sent.
   A screen read before the quarantine began is discarded if the quarantine began before it was published.
+  The routes that carry such a body also hand back a way to spell it again (`ApiResponse.late`). The dispatcher
+  keeps it on the response, and every carrier calls it (`finalised`) as the last synchronous step before the bytes
+  leave: the direct HTTP server and the relay tunnel (which the relay link and the direct carrier both use), so no
+  await sits between the final check and the wire. Only the write to the socket itself remains, which is the
+  declared compare-and-enqueue gap.
 - **Every projection of what the daemon saw is covered.** While a pane is quarantined the prompt line, the
   program name and the argv in the card, the owner's list, the agent's view, the audit record and a
-  restored request are replaced with a notice, not just masked.
+  restored request are replaced with a notice, not just masked. The audit record reads the hold at the moment it is
+  written, not when the request was seen, so a hold taken while the move was being journalled still hides it.
 - **A viewer gets a notice instead of the pane**, unless that viewer chose "Show anyway". That choice
   is per connection (`?reveal=1` on the viewer socket), owner-gated, and audited as
   `input.quarantine_revealed`.

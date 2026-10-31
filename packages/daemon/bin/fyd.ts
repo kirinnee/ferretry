@@ -275,6 +275,7 @@ import {
   LoadSafeWorker,
   ManifestAccountInventory,
   MCP_OAUTH_SECRETS_DOCUMENT,
+  NodeAgentFilesystem,
   NodeBrowserLoginRuntime,
   NodeCatalog,
   NodeConversationFiles,
@@ -557,6 +558,7 @@ import {
 } from '../src/lib/analytics/pricing-service.ts';
 import {
   AgendaCardLinks,
+  AgendaToTestLanes,
   BOARD_SWEEP_INTERVAL_MS,
   BoardService,
   BoardSweep,
@@ -639,6 +641,7 @@ import {
   AgendaTurnNudge,
   AgendaWaker,
   type AgentInputPort,
+  AgentFiles,
   AgentSendFailureNotifier,
   AgentToolService,
   ANALYTICS_BACKSTOP_MS,
@@ -978,6 +981,7 @@ import {
   readDaemonRelayIdentity,
   readDoctorReport,
   readHarnessPreflight,
+  readTranscriptPage,
   refuseExhaustedCandidates,
   refuseHeldStateHome,
   refuseOccupiedAddress,
@@ -1076,6 +1080,7 @@ import {
   SessionStatusTally,
   SessionStopPending,
   type SessionTranscriptMessageTokenCodec,
+  type SessionTranscriptPages,
   SessionTranscriptReader,
   SessionTranscriptResolver,
   type SessionTranscriptTail,
@@ -1142,6 +1147,7 @@ import {
   type TunnelServicePort,
   type TunnelSwitchPort,
   TurnChanges,
+  tailPage,
   tailTranscriptEvents,
   temporaryFilePath,
   transcriptKey,
@@ -5989,6 +5995,7 @@ function createAgentToolsSubsystem(input: {
   readonly input: AgentInputPort;
   readonly scrub: (sessionId: string, text: string) => string;
   readonly quarantinedUntil: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
+  readonly files: AgentFiles;
   /** The vault redactor every operator read is scrubbed by; a page's text goes through it too. */
   readonly redactor: Pick<SecretRedactor, 'batch'>;
 }): MountedSubsystems['agentTools'] {
@@ -6019,6 +6026,7 @@ function createAgentToolsSubsystem(input: {
       browser: input.browser,
       control,
       policy: input.policy,
+      files: input.files,
       audit: input.audit,
       input: input.input,
       scrub: input.scrub,
@@ -7864,6 +7872,47 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     };
   };
   /**
+   * Pages of a session's transcript for the chat: the tail through the same remembered tails as
+   * `logs`, and each older page through a window that ends where the newer one began.
+   *
+   * The file is named to the caller by a token — a digest of its path and its device and inode — so a
+   * page can be refused once the session's transcript is another file, and the path never leaves.
+   */
+  const createSessionTranscriptPages = (storage: DaemonStorage): SessionTranscriptPages => {
+    const resolver = createTranscriptFileResolver(storage);
+    const tails = createSessionTranscriptTail(storage);
+    return {
+      page: async (sessionId, query) => {
+        const file = await resolver.file(sessionId).catch(() => undefined);
+        if (file === undefined) return { kind: 'unresolved' };
+        const id = tryParseSessionId(sessionId);
+        if (id === undefined) return { kind: 'unresolved' };
+        const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+        if (!config.success) return { kind: 'unresolved' };
+        const source = transcriptSources.find(
+          candidate => candidate.harness === (config.data.harness === 'codex' ? 'codex' : 'claude'),
+        );
+        const info = await stat(file).catch(() => undefined);
+        if (source === undefined || info === undefined) return { kind: 'unreadable' };
+        const token = createHash('sha256')
+          .update(`${file}\u0000${String(info.dev)}:${String(info.ino)}`)
+          .digest('base64url')
+          .slice(0, 22);
+        if (query.before === undefined) {
+          const tail = await tails.tail(sessionId, query.limit);
+          if (tail.kind !== 'read') return tail;
+          const page = tailPage(tail.events, query.limit, info.size);
+          if (page !== undefined) return { kind: 'read', ...page, file: token };
+        }
+        const before = Math.min(query.before ?? info.size, info.size);
+        const range = { from: query.from ?? 0, before, limit: query.limit };
+        const page = await readTranscriptPage(source, file, sessionId, range).catch(() => undefined);
+        if (page === undefined) return { kind: 'unreadable' };
+        return { kind: 'read', ...page, file: token };
+      },
+    };
+  };
+  /**
    * One image of a session's transcript, found from the handle its log carried.
    *
    * It resolves the file and the harness exactly as the tail does, and parses ONLY the one record the
@@ -8637,6 +8686,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return setting === undefined ? undefined : resolveBrowserProxy(setting, await secretVault.values());
         },
         display: agentBrowserDisplay,
+        // Where the worker keeps a page's downloads until the agent saves them (or fifteen minutes pass).
+        stageDirectory: join(paths.temporary, 'browser-stage'),
       },
     ),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
@@ -9256,6 +9307,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // The Unfiled board's cards that belong on a project's board are refiled there: by a linked PR's repository,
       // else by the folder the card's ferret works in (registering its repository by `ProjectAdoption`'s rules).
       // ONE instance, so the watcher's tick and the boot run never overlap.
+      const boardLaneProposer = new InferredLaneProposer(laneSets, new GitProjectFacts());
       const unfiledRefiler = new UnfiledRefiler({
         board: boardWorld.board,
         sessions: new SessionBoardResolver(
@@ -9268,6 +9320,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           ),
           boardWorld.adoption,
         ),
+        // A target with no lanes gets the ones its folder suggests first, as the card's ferret: one agenda choice.
+        lanes: {
+          laneSet: async projectId => await laneSets.laneSet(projectId),
+          propose: async (projectId, sessionId) => await boardLaneProposer.propose(projectId, sessionId),
+        },
         projects: { projects: async () => await catalogs.projects() },
         copies: boardCopies,
         clock: { now: () => clock.now() },
@@ -9734,6 +9791,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // the CLI's, a harness question's and a Warden escalation's alike.
         new StorageSessionFocus(storage),
         new StorageSubFerretDirectory(storage),
+        // A to-do or review on a card waiting to be tried offers the owner to close it with the answer.
+        new AgendaToTestLanes(
+          async id => {
+            const found = await boardWorld.board.task(id);
+            return { task: found.task, laneSet: found.laneSet };
+          },
+          () => attachmentDaemonId,
+        ),
       );
       // Off unless `attention.resurfaceAfterMinutes` is set: asks left in discussion that long surface themselves.
       if (agendaConfig.resurfaceAfterMinutes !== undefined) {
@@ -10461,7 +10526,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         releaseSession: browserService.releaseSession.bind(browserService),
         openPage: browserService.openPage.bind(browserService),
         actOnPage: browserService.actOnPage.bind(browserService),
+        filesOnPage: browserService.filesOnPage.bind(browserService),
         closePage: browserService.closePage.bind(browserService),
+        lifecycleOnPage: browserService.lifecycleOnPage.bind(browserService),
+        adoptPage: browserService.adoptPage.bind(browserService),
         closeAll: browserService.closeAll.bind(browserService),
         stream: async (sessionId, downstream) => {
           let viewer: BrowserViewerStream | undefined;
@@ -10527,6 +10595,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // a child ever printed one, so all three are scrubbed here rather than at whichever caller
         // remembered to. See `lib/secrets/redaction.ts` for the boundary this draws.
         secretRedactor,
+        createSessionTranscriptPages(storage),
       );
       // Lessons: the review board, passive suggestions, Apply and the explicit scan. A new ferret's
       // passive default is recorded through it, and a running one is re-instructed with a queued send.
@@ -11260,6 +11329,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           input: inputRequestService,
           scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
           quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
+          files: new AgentFiles({
+            fs: new NodeAgentFilesystem(),
+            folderOf: async sessionId => {
+              const id = tryParseSessionId(sessionId);
+              if (id === undefined || storage.findSession(id) === undefined) return undefined;
+              const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+              return config.success ? config.data.cwd : undefined;
+            },
+            readAttachment: async (sessionId, attachmentId) => {
+              const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
+              return { filename: attachment.filename, bytes };
+            },
+            uploadDirectory: join(paths.temporary, 'browser-upload'),
+            token: () => crypto.randomUUID().replaceAll('-', ''),
+          }),
           redactor: secretRedactor,
         }),
         configFiles: createConfigFilesSubsystem({

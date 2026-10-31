@@ -33,6 +33,7 @@
  *   - a machine's push worker takes a new release only when the app asks for one — loading the app
  *     never re-checks it — which is why the app's reconcile asks at every start.
  */
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -113,6 +114,16 @@ afterAll(async () => {
   if (workDirectory !== '') await rm(workDirectory, { recursive: true, force: true });
 });
 
+/** Runs a case, then closes whatever profiles it left open. */
+const runClosing = async (run: () => Promise<void>): Promise<void> => {
+  const opened = caseContexts.getStore() ?? [];
+  try {
+    await run();
+  } finally {
+    await Promise.allSettled(opened.map(async context => await context.close()));
+  }
+};
+
 const pause = (milliseconds: number) => new Promise(resolveTick => setTimeout(resolveTick, milliseconds));
 
 /** What the scene shows: where the window is, and the route the app renders there. */
@@ -153,11 +164,74 @@ const settledOn = async (page: Page, path: string, timeout = 60_000): Promise<Sh
 };
 
 /**
+ * TWO PROFILES AT ONCE, never more: the runner has two vCPUs. Every case below is its own browser profile
+ * (cookie jar, workers, notifications), so running two side by side proves what running them in turn did.
+ * A profile holds its lane from boot until its context closes.
+ */
+const LANES = 2;
+let lanesInUse = 0;
+const waitingForLane: (() => void)[] = [];
+const takeLane = async (): Promise<() => void> => {
+  if (lanesInUse >= LANES) await new Promise<void>(resolveLane => waitingForLane.push(resolveLane));
+  else lanesInUse += 1;
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const next = waitingForLane.shift();
+    if (next === undefined) lanesInUse -= 1;
+    else next();
+  };
+};
+
+/** The contexts the running case opened, so a case that fails still gives its lane back. */
+const caseContexts = new AsyncLocalStorage<{ close(): Promise<void> }[]>();
+
+interface Case {
+  readonly name: string;
+  readonly run: () => Promise<void>;
+}
+const cases: Case[] = [];
+const outcomes = new Map<string, PromiseSettledResult<void>>();
+
+/**
+ * A case of the suite: it runs in the lanes ahead of the tests, and its own test reports its outcome under its
+ * own name, in the order written.
+ */
+const lane = (name: string, run: () => Promise<void>): void => {
+  cases.push({ name, run });
+  test(name, () => {
+    const outcome = outcomes.get(name);
+    if (outcome === undefined) throw new Error('the case never ran');
+    if (outcome.status === 'rejected') throw outcome.reason;
+  });
+};
+
+/**
  * One browser profile with the app's worker installed at `/` and each machine's push worker at its own
  * scope — exactly the registrations `containerPushEnrolment` makes — and DevTools watching them.
  */
 const profile = async () => {
+  const release = await takeLane();
+  try {
+    return await bootProfile(release);
+  } catch (error) {
+    release();
+    throw error;
+  }
+};
+
+const bootProfile = async (release: () => void) => {
   const context = await browser.newContext();
+  const closeContext = context.close.bind(context);
+  context.close = async (...closing) => {
+    try {
+      await closeContext(...closing);
+    } finally {
+      release();
+    }
+  };
+  caseContexts.getStore()?.push(context);
   await context.grantPermissions(['notifications'], { origin: origin() });
   const setup = await context.newPage();
   await setup.goto(`${origin()}/`);
@@ -382,7 +456,17 @@ const ASK = {
 const BETA_ASK = '/d/beta/session/mvb9x0-c0ffee01?attention=A3';
 
 describe('a notification tap opens its conversation on the machine that sent it', () => {
-  test('with the app closed, the worker opens Beta’s conversation at the item', async () => {
+  beforeAll(async () => {
+    const results = await Promise.allSettled(
+      cases.map(async ({ run }) => await caseContexts.run([], async () => await runClosing(run))),
+    );
+    cases.forEach(({ name }, index) => {
+      const result = results[index];
+      if (result !== undefined) outcomes.set(name, result);
+    });
+  }, 240_000);
+
+  lane('with the app closed, the worker opens Beta’s conversation at the item', async () => {
     const browserProfile = await profile();
     await push(browserProfile, 'beta', ASK);
     // Every window of the app is gone; only the browser's notification is left.
@@ -403,9 +487,9 @@ describe('a notification tap opens its conversation on the machine that sent it'
       attention: 'A3',
     });
     await browserProfile.context.close();
-  }, 120_000);
+  });
 
-  test('with the app on Alpha’s conversation, routes that window to Beta’s — no second window, no reload', async () => {
+  lane('with the app on Alpha’s conversation, routes that window to Beta’s — no second window, no reload', async () => {
     const browserProfile = await profile();
     const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001');
     await retire(browserProfile);
@@ -423,9 +507,9 @@ describe('a notification tap opens its conversation on the machine that sent it'
     // Routed in the app: the same document, not a reload.
     expect(await app.evaluate(() => (globalThis as unknown as { __sameDocument?: boolean }).__sameDocument)).toBe(true);
     await browserProfile.context.close();
-  }, 120_000);
+  });
 
-  test('with the app on Sessions, opens Beta’s conversation', async () => {
+  lane('with the app on Sessions, opens Beta’s conversation', async () => {
     const browserProfile = await profile();
     const app = await appAt(browserProfile, '/d/alpha');
     await retire(browserProfile);
@@ -437,9 +521,9 @@ describe('a notification tap opens its conversation on the machine that sent it'
     expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
     expect((await tapped()).opened).toEqual([]);
     await browserProfile.context.close();
-  }, 120_000);
+  });
 
-  test('with the app on the same conversation at another item, moves to the tapped item', async () => {
+  lane('with the app on the same conversation at another item, moves to the tapped item', async () => {
     const browserProfile = await profile();
     const app = await appAt(browserProfile, '/d/beta/session/mvb9x0-c0ffee01?attention=A1');
     const before = await shown(app);
@@ -454,9 +538,9 @@ describe('a notification tap opens its conversation on the machine that sent it'
     expect(landed.route?.entry).not.toBe(before.route?.entry);
     expect((await tapped()).opened).toEqual([]);
     await browserProfile.context.close();
-  }, 120_000);
+  });
 
-  test('with the landing page and the app both open, routes the app window and leaves the landing page', async () => {
+  lane('with the landing page and the app both open, routes the app window and leaves the landing page', async () => {
     const browserProfile = await profile();
     const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001');
     await retire(browserProfile);
@@ -473,9 +557,9 @@ describe('a notification tap opens its conversation on the machine that sent it'
     expect(await landing.evaluate(() => location.pathname)).toBe('/');
     expect((await tapped()).opened).toEqual([]);
     await browserProfile.context.close();
-  }, 120_000);
+  });
 
-  test('each machine’s notification opens its own machine’s conversation, never the other’s', async () => {
+  lane('each machine’s notification opens its own machine’s conversation, never the other’s', async () => {
     const browserProfile = await profile();
     const app = await appAt(browserProfile, '/d/alpha');
     await retire(browserProfile);
@@ -491,7 +575,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     expect(onAlpha.route).toMatchObject({ kind: 'session', daemonId: 'alpha', attention: 'A2' });
     expect(onBeta.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
     await browserProfile.context.close();
-  }, 120_000);
+  });
 
   /**
    * A DAEMON THAT NAMES NO PAGE. Before #768 every push carried `url: '/'`, an ask included, and
@@ -521,32 +605,35 @@ describe('a notification tap opens its conversation on the machine that sent it'
     },
   ] as const;
   // Three independent profiles, so the cases run side by side instead of paying each boot in turn.
-  test('a daemon that names no page still opens the conversation the push is about, or that machine’s sessions', async () => {
-    const outcomes = await Promise.allSettled(
-      UNNAMED_PAGES.map(async ({ name, payload, expected }) => {
-        const browserProfile = await profile();
-        try {
-          const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001');
-          await retire(browserProfile);
-          await push(browserProfile, 'beta', payload);
+  lane(
+    'a daemon that names no page still opens the conversation the push is about, or that machine’s sessions',
+    async () => {
+      const outcomes = await Promise.allSettled(
+        UNNAMED_PAGES.map(async ({ name, payload, expected }) => {
+          const browserProfile = await profile();
+          try {
+            const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001');
+            await retire(browserProfile);
+            await push(browserProfile, 'beta', payload);
 
-          await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
-          const landed = await settledOn(app, expected);
+            await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
+            const landed = await settledOn(app, expected);
 
-          expect(landed.path).toBe(expected);
-          expect(landed.route?.daemonId).toBe('beta');
-        } catch (error) {
-          if (error instanceof Error) error.message = `[${name} → ${expected}] ${error.message}`;
-          throw error;
-        } finally {
-          await browserProfile.context.close();
-        }
-      }),
-    );
-    for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
-  }, 120_000);
+            expect(landed.path).toBe(expected);
+            expect(landed.route?.daemonId).toBe('beta');
+          } catch (error) {
+            if (error instanceof Error) error.message = `[${name} → ${expected}] ${error.message}`;
+            throw error;
+          } finally {
+            await browserProfile.context.close();
+          }
+        }),
+      );
+      for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
+    },
+  );
 
-  test('a window still starting when the tap lands is routed once the app is up, without a second window', async () => {
+  lane('a window still starting when the tap lands is routed once the app is up, without a second window', async () => {
     const browserProfile = await profile();
     // The store is still loading — the router is not mounted — for as long as the test holds it.
     const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001', { held: true });
@@ -562,9 +649,9 @@ describe('a notification tap opens its conversation on the machine that sent it'
 
     expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
     await browserProfile.context.close();
-  }, 120_000);
+  });
 
-  test('a window that never answers (an app too old for the message) still ends on the conversation', async () => {
+  lane('a window that never answers (an app too old for the message) still ends on the conversation', async () => {
     const browserProfile = await profile();
     const stale = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001', { wired: false });
     await retire(browserProfile);
@@ -578,28 +665,31 @@ describe('a notification tap opens its conversation on the machine that sent it'
     expect(await stale.evaluate(() => location.pathname)).toBe('/d/alpha/session/mva1-aaaa0001');
     expect((await tapped()).opened).toEqual([`${origin()}${BETA_ASK}`]);
     await browserProfile.context.close();
-  }, 120_000);
+  });
 
-  test('a notification the page showed (needs input, failed) opens its conversation through the app’s worker', async () => {
-    const browserProfile = await profile();
-    const app = await appAt(browserProfile, '/d/alpha');
-    await retire(browserProfile);
-    // The page watcher shows through the app-wide registration, with the app's own path
-    // (`notification-ledger.ts` → `notify.ts`).
-    await app.evaluate(async () => {
-      const registration = await navigator.serviceWorker.getRegistration();
-      await registration?.showNotification('Needs input', {
-        tag: 'session-needs',
-        data: { url: '/d/beta/session/mvb9x0-c0ffee01', sessionId: 'mvb9x0-c0ffee01', eventKey: 'k', count: 1 },
+  lane(
+    'a notification the page showed (needs input, failed) opens its conversation through the app’s worker',
+    async () => {
+      const browserProfile = await profile();
+      const app = await appAt(browserProfile, '/d/alpha');
+      await retire(browserProfile);
+      // The page watcher shows through the app-wide registration, with the app's own path
+      // (`notification-ledger.ts` → `notify.ts`).
+      await app.evaluate(async () => {
+        const registration = await navigator.serviceWorker.getRegistration();
+        await registration?.showNotification('Needs input', {
+          tag: 'session-needs',
+          data: { url: '/d/beta/session/mvb9x0-c0ffee01', sessionId: 'mvb9x0-c0ffee01', eventKey: 'k', count: 1 },
+        });
       });
-    });
 
-    await tap(browserProfile, '/', '/sw.verified.js');
-    const landed = await settledOn(app, '/d/beta/session/mvb9x0-c0ffee01');
+      await tap(browserProfile, '/', '/sw.verified.js');
+      const landed = await settledOn(app, '/d/beta/session/mvb9x0-c0ffee01');
 
-    expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', sessionId: 'mvb9x0-c0ffee01' });
-    await browserProfile.context.close();
-  }, 120_000);
+      expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', sessionId: 'mvb9x0-c0ffee01' });
+      await browserProfile.context.close();
+    },
+  );
 
   /**
    * WHY A FIX TO THE WORKER NEVER REACHED A PHONE THAT WAS ALREADY ENROLLED. A browser re-checks a

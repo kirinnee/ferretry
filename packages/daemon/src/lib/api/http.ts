@@ -95,6 +95,23 @@ export interface ApiResponse {
   readonly status: number;
   readonly headers: ReadonlyMap<string, string>;
   readonly body: string;
+  /**
+   * The last word before the response leaves the dispatcher: a route whose body names something that can be
+   * sealed after the route built it (a terminal that a secret was just typed into) hands back a way to
+   * spell it again. It never throws and is cheap to call again. The dispatcher calls it after the
+   * route has finished and keeps it on the response; each carrier calls it again, synchronously, as the very
+   * last step before the bytes leave (`finalised`), and sends what it returns.
+   */
+  readonly late?: () => ApiResponse;
+}
+
+/**
+ * The response as it may leave NOW. A route whose body names something that can be sealed after the route
+ * built it carries a last word (`ApiResponse.late`); every carrier calls this as its final synchronous step
+ * before it turns the response into bytes, so no await sits between the last check and the wire.
+ */
+export function finalised(response: ApiResponse): ApiResponse {
+  return response.late === undefined ? response : response.late();
 }
 
 /**

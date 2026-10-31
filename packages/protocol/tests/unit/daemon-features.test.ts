@@ -60,6 +60,8 @@ describe('daemon features', () => {
     should(list).containEql('agenda.clear-agents.1');
     // The app offers files on "Not good" only where this name is listed (an older daemon refuses the field).
     should(list).containEql('board.reopen.attachments.1');
+    // The app draws "Done · closes &F12" only where this name is listed (an older daemon refuses `offerClose`).
+    should(list).containEql('agenda.offer-close.1');
   });
 
   it('should keep the older idea limit below the raised one the feature unlocks', () => {

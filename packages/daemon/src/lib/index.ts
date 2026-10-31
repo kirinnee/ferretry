@@ -1,6 +1,7 @@
 /** Stable role exposed by this workspace package. */
 export const packageRole = 'daemon' as const;
 
+export * from './agent-files/index.ts';
 export * from './agent-tools/index.ts';
 export * from './analytics/ingest.ts';
 export * from './analytics/ingestion.ts';

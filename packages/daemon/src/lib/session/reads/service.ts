@@ -38,6 +38,7 @@
 import type {
   ConversationMessagePoint,
   FyEvent,
+  SessionLogPage,
   SessionTranscriptMessage,
   SessionTranscriptPage,
 } from '@ferretry/protocol';
@@ -115,7 +116,13 @@ export type OperatorReadFailure =
    * missing. Malformed cursor syntax is a different answer, `invalid_query`, because that one is the
    * caller's own mistake rather than a statement about this session's transcript.
    */
-  | 'message_cursor_stale';
+  | 'message_cursor_stale'
+  /**
+   * A page of older history was asked for against a transcript file other than the one the caller's
+   * earlier pages came from — the session was re-bound, or its file replaced. Byte offsets name places
+   * in ONE file, so the caller starts again from the tail rather than stitching two files together.
+   */
+  | 'log_cursor_stale';
 
 export class OperatorReadError extends Error {
   constructor(
@@ -191,6 +198,42 @@ export type TranscriptTailResult =
 export interface SessionTranscriptTail {
   tail(sessionId: string, limit: number): Promise<TranscriptTailResult>;
 }
+
+/** Which page of a transcript a `logPage` read is for: the tail when `before` is absent. */
+export interface TranscriptPageQuery {
+  /** The byte the page ends before — the `start` of the page the caller already holds. */
+  readonly before?: number;
+  /** The lowest byte the page may begin at; only meaningful with `before`. */
+  readonly from?: number;
+  readonly limit: number;
+}
+
+/**
+ * A page read that reports resolution separately from content, as {@link TranscriptTailResult} does.
+ *
+ * `file` names the transcript file the page was read from — an opaque token, never its path — so a
+ * caller can tell that a later page would come from a different file. `start` is the record boundary
+ * the page begins at (see `readTranscriptPage`).
+ */
+export type TranscriptPageResult =
+  | { readonly kind: 'unresolved' }
+  | { readonly kind: 'unreadable' }
+  | {
+      readonly kind: 'read';
+      readonly events: readonly TranscriptEvent[];
+      readonly start: number;
+      readonly file: string;
+    };
+
+/** Pages of one session's transcript, newest first, each ending where the last began. */
+export interface SessionTranscriptPages {
+  page(sessionId: string, query: TranscriptPageQuery): Promise<TranscriptPageResult>;
+}
+
+/** The stand-in for a daemon that wired no pages: an honest refusal, never an empty page. */
+const NO_PAGES: SessionTranscriptPages = {
+  page: async () => ({ kind: 'unreadable' }),
+};
 
 /**
  * ONE completed read of one session's addressable conversation.
@@ -464,6 +507,7 @@ export class OperatorReadService {
     private readonly messageTokens: SessionTranscriptMessageTokenCodec,
     private readonly lastSnapshot: LastSnapshotReader = { read: async () => ({ kind: 'absent' }) },
     private readonly redactor: OperatorReadRedactor = UNREDACTED,
+    private readonly pages: SessionTranscriptPages = NO_PAGES,
   ) {}
 
   /**
@@ -574,6 +618,57 @@ export class OperatorReadService {
       partialFirstRecord:
         turnEvents.length > tail || (start === 0 ? result.events.length >= tail : cutsRecord(result.events, start)),
     });
+  }
+
+  /**
+   * One page of the session's transcript as the chat renders it: the tail, or the page before a byte.
+   *
+   * The same text as `logs` — one event per line, scrubbed, image markers intact — plus where the page
+   * begins and which file it came from, so the reader can ask for the page before this one and lay the
+   * two end to end. A page never begins inside a record, so its images are numbered from the first.
+   *
+   * `file`, when given, is the token an earlier page carried. A page of a different file is refused
+   * (`log_cursor_stale`): its offsets name places in a conversation the caller has never seen.
+   */
+  async logPage(
+    sessionId: string,
+    query: { readonly before?: number; readonly from?: number; readonly limit?: number; readonly file?: string },
+  ): Promise<SessionLogPage> {
+    const limit = boundedLimit(query.limit, DEFAULT_LOG_TAIL, MAX_LOG_TAIL, 'limit');
+    const offset = (value: number | undefined, name: string): number | undefined => {
+      if (value === undefined) return undefined;
+      if (!Number.isSafeInteger(value) || value < 0)
+        throw new OperatorReadError('invalid_query', `${name} must be a non-negative integer`);
+      return value;
+    };
+    const before = offset(query.before, 'before');
+    const from = offset(query.from, 'from');
+    if (from !== undefined && before === undefined)
+      throw new OperatorReadError('invalid_query', 'from is only meaningful with before');
+    if (from !== undefined && before !== undefined && from > before)
+      throw new OperatorReadError('invalid_query', 'from must not be past before');
+    const result = await this.pages.page(sessionId, {
+      limit,
+      ...(before === undefined ? {} : { before }),
+      ...(from === undefined ? {} : { from }),
+    });
+    if (result.kind === 'unresolved')
+      throw new OperatorReadError(
+        'no_transcript',
+        `session ${sessionId} has no transcript this daemon can prove is its own`,
+      );
+    if (result.kind === 'unreadable')
+      throw new OperatorReadError(
+        'transcript_unreadable',
+        `session ${sessionId} has a proved transcript, but this daemon could not read it`,
+      );
+    if (query.file !== undefined && query.file !== result.file)
+      throw new OperatorReadError(
+        'log_cursor_stale',
+        `session ${sessionId}'s transcript is no longer the file those pages came from`,
+      );
+    const log = await this.renderRedacted(result.events, { partialFirstRecord: false });
+    return { v: 1, sessionId, log, start: result.start, file: result.file };
   }
 
   /**

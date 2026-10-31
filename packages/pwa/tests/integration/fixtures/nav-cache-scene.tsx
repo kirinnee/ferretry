@@ -196,6 +196,12 @@ const store = await createAppStore({
         await held('logs');
         return transcript(id, renamed);
       },
+      // The chat reads its tail as a page (`log-page`): the same transcript and the same hold, from the file's start.
+      logPage: async (id: string) => {
+        hooks.reads.push(`logs:${id}`);
+        await held('logs');
+        return { v: 1, sessionId: id, log: transcript(id, renamed), start: 0, file: 'transcript' };
+      },
       configChanges: never,
       stream: async (_sessionId: unknown, _after: unknown, _onEvent: unknown, signal?: AbortSignal): Promise<void> =>
         await never(undefined, signal),

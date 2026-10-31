@@ -82,6 +82,20 @@ describe('AgentToolsController', () => {
     should(world.said).deepEqual(['Still waiting.', 'Met.']);
   });
 
+  it('should wait for a page, exiting 1 on a timeout and 0 on a match', async () => {
+    const world = harness([
+      { summary: 'Not yet.', matched: false },
+      { summary: 'There.', matched: true },
+    ]);
+    const timedOut = await world.run({ kind: 'browser-wait', call: { name: 'app', text: 'Hi' }, totalMs: 1_000 });
+    const found = await world.run({ kind: 'browser-wait', call: { name: 'app', text: 'Hi' }, totalMs: 1_000 });
+    const none = await world.run({ kind: 'browser-wait', call: { name: 'app' }, totalMs: 1_000 });
+    const tooLong = await world.run({ kind: 'browser-wait', call: { name: 'app', text: 'Hi' }, totalMs: 120_001 });
+
+    should([timedOut, found, none, tooLong]).deepEqual([1, 0, 1, 1]);
+    should(world.sent).have.length(2);
+  });
+
   it('should refuse a wait budget outside its bounds', async () => {
     const world = harness();
     should(await world.run({ kind: 'wait', wait: { name: 'dev', exit: true, totalMs: 120_001 } })).equal(1);
@@ -136,6 +150,19 @@ describe('rendering', () => {
       '2 browser pages: %browser:app, %browser:page-2.\n  app  App  http://localhost:5173/\n  page-2  \ntail',
     );
     should(renderToolResult({ summary: 'Read.', output: '' })).equal('Read.');
+  });
+
+  it('should show a popup’s opener and a page that is not the agent’s', () => {
+    const result: AgentToolResult = {
+      summary: '2 pages.',
+      surfaces: [
+        { id: 'page-2', title: 'Pay', url: 'https://pay.test/', openerId: 'page-1', available: true },
+        { id: 'page-3', title: 'Ad', openerId: 'page-9', available: false },
+      ],
+    };
+    should(renderToolResult(result)).equal(
+      '2 pages.\n  page-2  Pay  https://pay.test/  (popup of page-1)\n  page-3  Ad  (popup of page-9)  [not yours]',
+    );
   });
 
   it('should say who drives what and who holds what', () => {

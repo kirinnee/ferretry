@@ -1,3 +1,4 @@
+export * from './agent-files/index.ts';
 export * from './agent-tools/index.ts';
 export * from './api/index.ts';
 export * from './attachments/index.ts';

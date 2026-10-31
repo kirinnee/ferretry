@@ -4,6 +4,13 @@ The agenda is what the owner has to decide or do, and what each item blocks. It 
 as the name of the feature (`fy attention …` still works, deprecated). A plain notification with
 nothing to decide is a **notice**, not an agenda item (see [Notices](#notices)).
 
+**The agenda is not a task tracker.** It exists to get information, a decision or an action only the owner can
+give. A ferret never raises an item to track or check its own work: no "please test X", "please verify Y" or "try it
+after the release". That is the board's job: a finished card reaches its "To test" lane and the owner presses
+**Done** or **Not good** ([board.md](board.md)). After the owner marks a result **Not good**, the ferret
+opens an agenda item only if it needs something from them to fix it. The ferret's instruction says so
+(`AGENDA_INSTRUCTION`, [notifications.md](notifications.md#agenda-mode)).
+
 The daemon owns the model: the state machine is `packages/daemon/src/lib/agenda/state-machine.ts`,
 the wire contract is `packages/protocol/src/lib/agenda.ts`. This page says what they mean.
 
@@ -35,6 +42,32 @@ field, so the item is raised without it and the CLI says so. For one release a b
 is not a card reference) still means a to-do; `--todo` is its name now. The kind is named `--kind todo` for the same
 reason — "task" means a board card — and `--kind task` is still read as its older spelling. The wire value stays
 `task`, so a released daemon keeps accepting the add.
+
+### Done · closes &F12
+
+An item tied to a card can offer the owner one extra answer, **Done · closes &F12**: one tap resolves the item
+AND closes the card, through the same shared Done the board uses (the Closed lane, the card's history, and the
+plain message to its ferret — nothing here is a second path).
+
+- **Opt in**: `fy agenda add --task F12 --offer-close` (the flag `offerClose` on the item). It is **on by default**
+  for a to-do (`--kind todo`) or a review on a card that is in the board's to-test lane when the item is raised —
+  the lane `release.published` enters ("Released · to test"), the one notion the board's lane facts already use. A
+  notice never offers it, and an add that names no card (and the session has no focus card) is refused the flag.
+- **Where it sits**: one more answer in the one A/B/C row, in the → slot while the card gave fewer than three
+  answers and in the full-width row otherwise. It is tap only: no swipe and no arrow reaches it, so a swipe
+  can never close a card.
+- **Order**: the card is closed first; only when that succeeded is the item resolved. A card the board refuses to
+  close, or one that cannot be read, leaves the item open with "Not closed: …" under the row. The button is off
+  while the card is closing, so a second tap closes nothing twice. The close is immediate: the Inbox's Undo window
+  holds the item's resolution, not the card's.
+- **Several cards**: the app lists them with a checkbox each, all ticked, and asks to confirm; cards close in
+  turn and a failure names the card and which earlier ones already closed. (An item carries one `task` today, so
+  the wire yields one card; the list is ready for the day it carries more.)
+- **Owner only**: the tap is the owner's in the app, and the board's own gate already refuses a ferret moving a
+  card into the Closed lane (`ownerGate`, standing `owner-human`).
+- **The app ships first**: a daemon reports `agenda.offer-close.1` on `GET /v1/health`. The app offers the button
+  only for a machine that lists it AND an item with a linked card of that machine that asked for it. The CLI sends
+  `offerClose` only to a daemon that lists it; to an older one it raises the item without and says so.
 
 ## Turns
 
@@ -228,17 +261,18 @@ cryptographic one — the same boundary `fy config confirm` has.
 
 `fy agenda add | edit | step | show | ls | history | surface | snooze | unsnooze | done | dismiss | needs-info | discuss | send-now`
 
-| Verb                    | Does                                                                         |
-| ----------------------- | ---------------------------------------------------------------------------- |
-| `add`                   | Raise an item (the owner's turn). `--title` and the ask are required.        |
-| `edit <id>`             | Reword; on the ferret's turn, or a replied item, hands it to the owner.      |
-| `surface <id>`          | Hand it back to the owner, or bring back a replied one, unchanged (silent).  |
-| `snooze <id>`           | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh. |
-| `unsnooze <id>`         | The owner's: bring a snoozed or replied item back to the list now.           |
-| `done <id>`             | Resolve, optionally answering its ask (`--choice`, `--yes`, `--other`…)      |
-| `dismiss <id>`          | Close without answering; agents only their own.                              |
-| `ls` / `show`           | Open items with turn and blocking fields / one item in full.                 |
-| `needs-info`, `discuss` | The owner's side, kept for old clients. They make it the ferret's turn.      |
+| Verb                    | Does                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------- |
+| `add`                   | Raise an item (the owner's turn). `--title` and the ask are required.           |
+| `add --offer-close`     | With `--task`: the owner may close the card with the same tap that resolves it. |
+| `edit <id>`             | Reword; on the ferret's turn, or a replied item, hands it to the owner.         |
+| `surface <id>`          | Hand it back to the owner, or bring back a replied one, unchanged (silent).     |
+| `snooze <id>`           | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.    |
+| `unsnooze <id>`         | The owner's: bring a snoozed or replied item back to the list now.              |
+| `done <id>`             | Resolve, optionally answering its ask (`--choice`, `--yes`, `--other`…)         |
+| `dismiss <id>`          | Close without answering; agents only their own.                                 |
+| `ls` / `show`           | Open items with turn and blocking fields / one item in full.                    |
+| `needs-info`, `discuss` | The owner's side, kept for old clients. They make it the ferret's turn.         |
 
 `edit` and `surface` take `--now` when it is urgent: it wakes an item the owner snoozed, once an hour per item.
 

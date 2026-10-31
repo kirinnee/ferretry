@@ -157,6 +157,11 @@ const browserCases: SchemaCase[] = [
   { name: 'page summary', schema: browser.BrowserPageSummarySchema, value: homePage },
   { name: 'page snapshot', schema: browser.BrowserPageSnapshotSchema, value: readySnapshot },
   { name: 'page action snapshot', schema: browser.BrowserPageActionSnapshotSchema, value: actionSnapshot },
+  {
+    name: 'download notice',
+    schema: browser.BrowserDownloadNoticeSchema,
+    value: { id: 'dl-3', name: 'report.csv', size: 2048, state: 'ready' },
+  },
   { name: 'agent page', schema: browser.BrowserAgentPageSchema, value: agentPage },
   { name: 'capacity', schema: browser.BrowserCapacitySchema, value: capacity },
   { name: 'proxy setting', schema: browser.BrowserProxySettingSchema, value: proxySetting },
@@ -416,6 +421,31 @@ describe('browser schemas', () => {
 
     // Act + Assert
     assertRejects(cases);
+  });
+
+  it('should carry the downloads an act started, and refuse a notice that could carry a path or too many', () => {
+    // Arrange
+    const notice = { id: 'dl-1', name: 'a.csv', state: 'downloading' } as const;
+
+    // Act
+    const parsed = browser.BrowserPageActionSnapshotSchema.parse({ ...actionSnapshot, downloads: [notice] });
+    const plain = browser.BrowserPageActionSnapshotSchema.parse(actionSnapshot);
+
+    // Assert
+    should(parsed.downloads).deepEqual([notice]);
+    should(plain.downloads).be.undefined();
+    assertRejects([
+      { name: 'path in the id', schema: browser.BrowserDownloadNoticeSchema, value: { ...notice, id: '../x' } },
+      { name: 'unknown state', schema: browser.BrowserDownloadNoticeSchema, value: { ...notice, state: 'saved' } },
+      { name: 'extra key', schema: browser.BrowserDownloadNoticeSchema, value: { ...notice, path: '/tmp/a' } },
+      { name: 'negative size', schema: browser.BrowserDownloadNoticeSchema, value: { ...notice, size: -1 } },
+      { name: 'empty name', schema: browser.BrowserDownloadNoticeSchema, value: { ...notice, name: '' } },
+      {
+        name: 'too many notices',
+        schema: browser.BrowserPageActionSnapshotSchema,
+        value: { ...actionSnapshot, downloads: Array.from({ length: 21 }, () => notice) },
+      },
+    ]);
   });
 
   it('should reject page snapshots whose active page, state, and error disagree', () => {

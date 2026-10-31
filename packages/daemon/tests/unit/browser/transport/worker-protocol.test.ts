@@ -10,7 +10,11 @@ import {
   boundedScreenshot,
   coarseWorkerError,
   encodeWorkerRequest,
+  normalizeLifecycleReply,
   normalizeWorkerActionSnapshot,
+  normalizeWorkerDialog,
+  normalizeWorkerDownloads,
+  normalizeWorkerStaged,
   normalizeWorkerSnapshot,
   parseWorkerLine,
 } from '../../../../src/lib/index.ts';
@@ -184,6 +188,18 @@ describe('browser worker snapshots', () => {
     // Assert
     should(accepted.ok).be.true();
     should(accepted.ok && accepted.value.actedPageId).equal('p1');
+  });
+
+  it('should carry the password-field flag only when the worker says exactly true', () => {
+    // Act
+    const flagged = normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1', passwordField: true });
+    const stringy = normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1', passwordField: 'true' });
+    const absent = normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1' });
+
+    // Assert
+    should(flagged.ok && flagged.value.passwordField).equal(true);
+    should(stringy.ok && 'passwordField' in stringy.value).be.false();
+    should(absent.ok && 'passwordField' in absent.value).be.false();
   });
 
   it('should refuse a snapshot with no usable or no matching active page', () => {
@@ -383,5 +399,110 @@ describe('browser transport errors', () => {
     should(error.code).equal('launch_failed');
     should(error.status).equal(503);
     should(error.message).equal('browser worker did not become ready');
+  });
+});
+
+describe('lifecycle replies from a worker', () => {
+  it('should read a dialog the wire knows, bounded, and ignore one it does not', () => {
+    // Act
+    const known = normalizeWorkerDialog({ dialog: { type: 'prompt', message: 'x'.repeat(5_000) } });
+    const unknown = normalizeWorkerDialog({ dialog: { type: 'modal', message: 'hi' } });
+    const absent = normalizeWorkerDialog({});
+
+    // Assert
+    should(known?.type).equal('prompt');
+    should(known?.message.length).equal(1_024);
+    should(unknown).be.undefined();
+    should(absent).be.undefined();
+  });
+
+  it('should read the text, whether a wait matched, and which dialog was answered', () => {
+    // Act
+    const reply = normalizeLifecycleReply({
+      lifecycle: { text: 'accepted the confirm dialog: ok', matched: true, dialogType: 'confirm' },
+    });
+    const bare = normalizeLifecycleReply({ lifecycle: { text: 'hi', matched: 'yes', dialogType: 'modal' } });
+    const empty = normalizeLifecycleReply({});
+
+    // Assert
+    should(reply).deepEqual({ text: 'accepted the confirm dialog: ok', matched: true, dialogType: 'confirm' });
+    should(bare).deepEqual({ text: 'hi' });
+    should(empty).deepEqual({ text: '' });
+  });
+
+  it('should bound a lifecycle text so a page cannot grow the daemon without limit', () => {
+    // Act
+    const reply = normalizeLifecycleReply({ lifecycle: { text: 'q'.repeat(5_000_000) } });
+
+    // Assert
+    should(reply.text.length).be.below(5_000_000);
+  });
+});
+
+describe('worker downloads and staged files', () => {
+  it('should keep the notices that satisfy the wire schema and drop the rest', () => {
+    // Arrange
+    const reply = [
+      { id: 'dl-1', name: 'a.csv', state: 'ready', size: 12 },
+      { id: 'dl-2', name: 'b.zip', state: 'downloading' },
+      { id: '../etc', name: 'evil', state: 'ready' },
+      { id: 'dl-3', name: 'c', state: 'saved' },
+      { id: 'dl-4', name: '', state: 'failed', size: -1 },
+      'junk',
+    ];
+
+    // Act
+    const notices = normalizeWorkerDownloads(reply);
+
+    // Assert
+    should(notices).deepEqual([
+      { id: 'dl-1', name: 'a.csv', state: 'ready', size: 12 },
+      { id: 'dl-2', name: 'b.zip', state: 'downloading' },
+      { id: 'dl-4', name: 'download', state: 'failed' },
+    ]);
+  });
+
+  it('should read nothing from a reply with no list, and at most the notice cap from a long one', () => {
+    should(normalizeWorkerDownloads(undefined)).deepEqual([]);
+    should(normalizeWorkerDownloads({ id: 'dl-1' })).deepEqual([]);
+    should(
+      normalizeWorkerDownloads(
+        Array.from({ length: 60 }, (_, index) => ({ id: `dl-${String(index)}`, name: 'x', state: 'ready' })),
+      ).length,
+    ).equal(20);
+  });
+
+  it('should carry downloads on an act snapshot only when there are some', () => {
+    const withDownloads = normalizeWorkerActionSnapshot({
+      ...snapshotReply(),
+      actedPageId: 'p1',
+      downloads: [{ id: 'dl-1', name: 'a.csv', state: 'ready', size: 1 }],
+    });
+    const without = normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1', downloads: [] });
+
+    should(withDownloads.ok && withDownloads.value.downloads).deepEqual([
+      { id: 'dl-1', name: 'a.csv', state: 'ready', size: 1 },
+    ]);
+    should(without.ok && without.value.downloads).be.undefined();
+  });
+
+  it('should read a staged file only with a path and a whole-number size', () => {
+    should(normalizeWorkerStaged({ staged: { path: '/stage/dl-1-a.csv', name: 'a.csv', size: 5 } })).deepEqual({
+      path: '/stage/dl-1-a.csv',
+      name: 'a.csv',
+      size: 5,
+    });
+    should(normalizeWorkerStaged({ staged: { path: '/stage/x', size: 0 } })?.name).equal('download');
+    for (const staged of [
+      undefined,
+      {},
+      { path: '', size: 1 },
+      { path: '/x'.repeat(3000), size: 1 },
+      { path: '/x', size: -1 },
+      { path: '/x', size: 1.5 },
+      { path: '/x', size: '5' },
+      { path: 5, size: 1 },
+    ])
+      should(normalizeWorkerStaged({ staged })).be.undefined();
   });
 });

@@ -112,6 +112,44 @@ describe('BunApiServer', () => {
     should(body.after).deepEqual(['7']);
   });
 
+  it('should send what a route last spells, after the last await between the route and the wire', async () => {
+    // Arrange — the seal lands after the dispatcher has answered, the way a hold begins between a route's
+    // last check and the bytes leaving.
+    let sealed = false;
+    const route: ApiRoute = {
+      method: 'GET',
+      path: '/late',
+      minimum: 'none',
+      handle: async () => ({
+        ...jsonResponse({ shown: 'raw' }),
+        late: () => jsonResponse({ shown: sealed ? 'sealed' : 'raw' }),
+      }),
+    };
+    const surface = surfaceOf([route]);
+    const dispatching = surface.http;
+    const handle = await new BunApiServer().listen(
+      {
+        ...surface,
+        http: {
+          dispatch: async request => {
+            const answered = await dispatching.dispatch(request);
+            await Promise.resolve();
+            sealed = true;
+            return answered;
+          },
+        },
+      },
+      BIND,
+    );
+    running.push(handle);
+
+    // Act
+    const response = await fetch(`${handle.url}/late`);
+
+    // Assert
+    should(await response.json()).deepEqual({ shown: 'sealed' });
+  });
+
   it('should name a version skew to the protocol client that reads the header it writes', async () => {
     // Arrange
     // B5: the daemon wrote `x-ferretry-version` while the client read `x-fy-version`, so a skew

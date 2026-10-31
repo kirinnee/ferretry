@@ -11,6 +11,19 @@ import { isTerminalSessionStatus, type TranscriptEntry } from '../lib/session-sc
 import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../lib/slash-commands.ts';
 import { classifySystemText } from '../lib/system-blocks.ts';
 import { IMAGE_READ_TOOL, type ToolResultData, type ToolUseData } from '../lib/tool-extract.ts';
+import {
+  EMPTY_HISTORY,
+  historyLog,
+  historyMeetsTail,
+  joinLogs,
+  type LogPage,
+  oldestStart,
+  type TranscriptHistory,
+  type TranscriptHistoryStatus,
+  withGap,
+  withOlder,
+  withTail,
+} from '../lib/transcript-history.ts';
 import { readUserMessage } from '../lib/user-message.ts';
 import { fieldHash } from './session-chat-model.ts';
 
@@ -371,12 +384,13 @@ export const transcriptEntriesFromLog = (
   return projectPackCalls(projectDeliveries(projectRecords(records, now), clientName), clientName);
 };
 
-type SessionWorkspaceReadApi = Pick<IFyApiClient, 'get' | 'logs'> & {
-  /** The session's send ledger. Optional: a reader that does not show sends never asks. */
-  readonly sends?: (id: string) => Promise<readonly unknown[]>;
-  /** The session's durable queue. Optional, and an older daemon without one answers an empty list. */
-  readonly queue?: (id: string) => Promise<readonly QueuedMessage[]>;
-};
+type SessionWorkspaceReadApi = Pick<IFyApiClient, 'get' | 'logs'> &
+  Partial<Pick<IFyApiClient, 'logPage'>> & {
+    /** The session's send ledger. Optional: a reader that does not show sends never asks. */
+    readonly sends?: (id: string) => Promise<readonly unknown[]>;
+    /** The session's durable queue. Optional, and an older daemon without one answers an empty list. */
+    readonly queue?: (id: string) => Promise<readonly QueuedMessage[]>;
+  };
 
 export interface SessionWorkspaceRefreshEnvironment {
   readonly visible: () => boolean;
@@ -433,8 +447,13 @@ export interface SessionWorkspaceRefreshInput {
   readonly intervalMs?: number;
   readonly environment: SessionWorkspaceRefreshEnvironment;
   readonly onTranscript: (entries: readonly TranscriptEntry[]) => void;
-  /** Every good read's raw log text, before it is parsed: what the session cache keeps for the next open. */
+  /**
+   * Every good read's raw TAIL text, before it is parsed: what the session cache keeps for the next
+   * open. Older pages the reader scrolled up through are not kept — the next open starts at the tail.
+   */
   readonly onLog?: (text: string) => void;
+  /** What the top of the chat offers, whenever it changes (`lib/transcript-history.ts`). */
+  readonly onHistory?: (status: TranscriptHistoryStatus) => void;
   readonly onSession: (view: SessionView) => void;
   /** Every refresh's send ledger, when the api reads one. A failed read keeps the previous rows. */
   readonly onSends?: (sends: readonly unknown[]) => void;
@@ -481,8 +500,25 @@ export interface SessionWorkspaceRefreshControl {
    * {@link ACTED_WATCH_MS} from now, whatever {@link SessionWorkspaceRefreshInput.relaxed} answers.
    */
   readonly acted: () => void;
+  /**
+   * Read the page of history just older than the oldest one on screen and put it in front. One at a
+   * time: a call while one is loading is the same load. Nothing to do at the start of the conversation,
+   * or on a daemon that cannot page.
+   */
+  readonly loadOlder: () => Promise<void>;
   readonly stop: () => void;
 }
+
+/** How many events one gap read may hold, and how many reads may fill one gap before the history restarts. */
+const GAP_PAGE_LIMIT = 2_000;
+const GAP_ROUNDS = 4;
+
+/** A refusal with this HTTP status and code, read off whatever error class carried it. */
+const refusedWith = (reason: unknown, status: number, code: string): boolean =>
+  typeof reason === 'object' &&
+  reason !== null &&
+  (reason as { readonly status?: unknown }).status === status &&
+  (reason as { readonly code?: unknown }).code === code;
 
 const errorMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
 
@@ -505,6 +541,106 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
   /** When the reader last acted, on the same clock. */
   let actedAt = Number.NEGATIVE_INFINITY;
   let settle: unknown;
+  /** The pages on screen. Only the tail is read on a poll; the reader's scrolling adds the rest. */
+  let history: TranscriptHistory = EMPTY_HISTORY;
+  /** False once the daemon answered that it has no page route: it is read with `logs` from then on. */
+  let paging = input.api.logPage !== undefined;
+  let older: 'idle' | 'loading' | 'error' = 'idle';
+  let olderLoad: Promise<void> | null = null;
+  let said: TranscriptHistoryStatus | undefined;
+
+  const historyStatus = (): TranscriptHistoryStatus => {
+    if (!paging || history.tail === null) return 'unavailable';
+    if (older !== 'idle') return older;
+    return oldestStart(history) === 0 ? 'start' : 'more';
+  };
+  const sayHistory = (): void => {
+    const status = historyStatus();
+    if (status === said) return;
+    said = status;
+    input.onHistory?.(status);
+  };
+
+  /** `[from, before)` of the transcript in as many reads as it takes, or nothing if it will not come whole. */
+  const readGap = async (
+    logPage: NonNullable<SessionWorkspaceReadApi['logPage']>,
+    from: number,
+    before: number,
+    file: string,
+  ): Promise<LogPage | undefined> => {
+    let log = '';
+    let end = before;
+    for (let round = 0; round < GAP_ROUNDS; round += 1) {
+      const page = await logPage(input.sessionId, { before: end, from, limit: GAP_PAGE_LIMIT, file });
+      log = joinLogs(page.log, log);
+      if (page.start <= from) return { log, start: page.start, file: page.file };
+      end = page.start;
+    }
+    return undefined;
+  };
+
+  /**
+   * The tail the cache keeps, having joined it to the held history when the daemon pages; `log` is the
+   * plain `logs` tail when it does not. A paged history is rendered from `history` as it stands when
+   * the whole refresh lands, so an older page that arrived meanwhile is not painted over.
+   */
+  const readTranscript = async (): Promise<{ readonly log?: string; readonly tail: string }> => {
+    const logPage = input.api.logPage;
+    if (paging && logPage !== undefined) {
+      try {
+        const tail = await logPage(input.sessionId);
+        const outcome = withTail(history, tail);
+        if (outcome.kind === 'applied') history = outcome.history;
+        else {
+          const gap = await readGap(logPage, outcome.from, outcome.before, outcome.file).catch(() => undefined);
+          history = gap === undefined ? { ...EMPTY_HISTORY, tail } : withGap(history, gap, tail);
+        }
+        return { tail: tail.log };
+      } catch (reason) {
+        if (!refusedWith(reason, 404, 'unknown_route')) throw reason;
+        paging = false;
+        history = EMPTY_HISTORY;
+      }
+    }
+    const log = await input.api.logs(input.sessionId);
+    return { log, tail: log };
+  };
+
+  const loadOlder = (): Promise<void> => {
+    const logPage = input.api.logPage;
+    const before = oldestStart(history);
+    const file = history.tail?.file;
+    if (olderLoad !== null) return olderLoad;
+    if (stopped || !paging || logPage === undefined || before === null || before === 0 || file === undefined)
+      return Promise.resolve();
+    older = 'loading';
+    sayHistory();
+    olderLoad = logPage(input.sessionId, { before, file })
+      .then(
+        page => {
+          if (stopped) return;
+          history = withOlder(history, page, before);
+          older = 'idle';
+          // The tail moved while the page was in flight: the next read fills between them, then shows both.
+          if (historyMeetsTail(history)) input.onTranscript(transcriptEntriesFromLog(historyLog(history)));
+          else void refresh(true);
+        },
+        (reason: unknown) => {
+          if (stopped) return;
+          older = 'idle';
+          // The session's transcript is another file now: what was held names nothing in it.
+          if (refusedWith(reason, 409, 'log_cursor_stale')) {
+            history = EMPTY_HISTORY;
+            void refresh(true);
+          } else older = 'error';
+        },
+      )
+      .finally(() => {
+        olderLoad = null;
+        if (!stopped) sayHistory();
+      });
+    return olderLoad;
+  };
 
   const refresh = (afterCurrent = false): Promise<void> => {
     if (stopped || !environment.visible()) return Promise.resolve();
@@ -512,7 +648,7 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
 
     lastReadAt = environment.now?.() ?? lastReadAt;
     inflight = Promise.allSettled([
-      input.api.logs(input.sessionId),
+      readTranscript(),
       input.api.get(input.sessionId),
       // A daemon that cannot answer the ledger still shows its transcript: the sends are an overlay.
       input.api.sends?.(input.sessionId) ?? Promise.resolve(undefined),
@@ -528,8 +664,9 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
         const quiet = input.quiet ?? (() => false);
         let silenced = false;
         if (logs.status === 'fulfilled') {
-          input.onLog?.(logs.value);
-          input.onTranscript(transcriptEntriesFromLog(logs.value));
+          input.onLog?.(logs.value.tail);
+          input.onTranscript(transcriptEntriesFromLog(logs.value.log ?? historyLog(history)));
+          sayHistory();
         } else if (quiet(logs.reason)) silenced = true;
         else errors.push(`Transcript: ${errorMessage(logs.reason)}`);
         if (!silenced) input.onTranscriptUnbound?.(logs.status === 'rejected' && isTranscriptUnbound(logs.reason));
@@ -591,6 +728,7 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     refresh,
     nudge,
     acted,
+    loadOlder,
     stop: () => {
       if (stopped) return;
       stopped = true;

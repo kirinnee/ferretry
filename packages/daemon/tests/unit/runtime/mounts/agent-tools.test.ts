@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
 import { AGENT_TOOL_MAX_TEXT_CHARS, AgentToolResultSchema, SurfaceControlViewSchema } from '@ferretry/protocol';
 import should from 'should';
+import type { CapabilityDemand, CapabilityGuard, GrantDecision } from '../../../../src/lib/api/capability.ts';
+import type { ApiResponse } from '../../../../src/lib/api/http.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { AGENT_SESSION_CAPABILITY_HEADER, agentToolRoutes } from '../../../../src/lib/runtime/mounts/agent-tools.ts';
@@ -240,6 +242,86 @@ describe('a person’s tool routes', () => {
   });
 });
 
+/** A guard for a paired device the operator granted the browser but, per `denied`, not the files. */
+const guardDenying = (denied: ReadonlySet<string>, governed = true): CapabilityGuard => {
+  const decide = (demand: CapabilityDemand): GrantDecision =>
+    denied.has(demand.capability) ? { allowed: false, refusal: 'not-granted' } : { allowed: true, refusal: 'granted' };
+  return { decide, governance: () => ({ governed, decide }), explain: () => undefined };
+};
+
+const servedUnder = (guard: CapabilityGuard) => {
+  const world = agentToolWorld();
+  const dispatch = new ApiDispatcher(
+    new ApiRouter(agentToolRoutes(world.service, world.identities)),
+    CREDENTIALS,
+    guard,
+  );
+  return { world, dispatch };
+};
+
+const FILE_CALLS = [
+  { tool: 'browser.upload', name: 'app', selector: '#f', files: ['a.txt'] },
+  { tool: 'browser.download', name: 'app' },
+  { tool: 'browser.pdf', name: 'app' },
+] as const;
+
+describe('a person’s file tools need the filesystem grant as well as the browser', () => {
+  const route = '/v1/sessions/s1/surfaces/browser/tools';
+
+  it('should refuse each file tool for a device with the browser but not the filesystem, before the browser is touched', async () => {
+    // Arrange
+    const { world, dispatch } = servedUnder(guardDenying(new Set(['filesystem'])));
+    await dispatch.dispatch(deviceCall(route, { tool: 'browser.open', name: 'app' }));
+    world.audit.entries.length = 0;
+
+    // Act
+    const answers = [];
+    for (const call of FILE_CALLS) answers.push(await dispatch.dispatch(deviceCall(route, call)));
+    const click = await dispatch.dispatch(deviceCall(route, { tool: 'browser.click', name: 'app', selector: 'a' }));
+
+    // Assert
+    should(answers.map(answer => answer.status)).deepEqual([403, 403, 403]);
+    should(jsonBody(answers[0] as ApiResponse)).match({
+      error: /filesystem permission/u,
+      code: 'grant_not_granted',
+    });
+    should(world.browser.fileActions).deepEqual([]);
+    should(world.files.prepared).deepEqual([]);
+    should(click.status).equal(200);
+  });
+
+  it('should serve the file tools to a device that holds both grants', async () => {
+    const { world, dispatch } = servedUnder(guardDenying(new Set()));
+    await dispatch.dispatch(deviceCall(route, { tool: 'browser.open', name: 'app' }));
+
+    const answer = await dispatch.dispatch(deviceCall(route, { tool: 'browser.pdf', name: 'app' }));
+
+    should(answer.status).equal(200);
+    should(world.browser.fileActions).deepEqual([{ action: 'pdf' }]);
+  });
+
+  it('should fail closed when the route cannot say where the caller stands', async () => {
+    const guard: CapabilityGuard = { ...guardDenying(new Set()), governance: () => undefined as never };
+    const { world, dispatch } = servedUnder(guard);
+
+    const answer = await dispatch.dispatch(deviceCall(route, FILE_CALLS[2]));
+
+    should(answer.status).equal(403);
+    should(jsonBody(answer)).match({ error: /cannot say whether this caller may use files/u });
+    should(world.browser.fileActions).deepEqual([]);
+  });
+
+  it('should not hold the owner at the machine to the filesystem grant', async () => {
+    const { world, dispatch } = servedUnder(GRANTED);
+    await dispatch.dispatch(personCall(route, { tool: 'browser.open', name: 'app' }));
+
+    const answer = await dispatch.dispatch(personCall(route, FILE_CALLS[2]));
+
+    should(answer.status).equal(200);
+    should(world.browser.fileActions).deepEqual([{ action: 'pdf' }]);
+  });
+});
+
 describe('take over and hand back', () => {
   it('should record who took a surface over, list it, and clear it on hand back', async () => {
     // Arrange
@@ -332,6 +414,37 @@ describe('the agent tools routes — publication at the transport', () => {
     should(answered.status).equal(409);
     should(String(answered.body)).not.containEql(SCREEN);
   });
+
+  it.each([['an agent'], ['a person']])(
+    'should not spell a screen read for %s when a hold begins after the route last checked',
+    async (who: string) => {
+      let held = false;
+      const world = agentToolWorld({ quarantinedUntil: () => (held ? Date.now() + 60_000 : undefined) });
+      await world.service.call({ kind: 'agent', sessionId: 's1' }, { tool: 'terminal.open', name: 'dev' });
+      world.terminals.screens.set('000000000001', SCREEN);
+      const publish = world.service.publish.bind(world.service);
+      let publications = 0;
+      world.service.publish = result => {
+        publications += 1;
+        if (publications === 2) queueMicrotask(() => (held = true));
+        return publish(result);
+      };
+      const dispatch = new ApiDispatcher(
+        new ApiRouter(agentToolRoutes(world.service, world.identities)),
+        CREDENTIALS,
+        GRANTED,
+      );
+      const call = { tool: 'terminal.read', name: 'dev' } as const;
+
+      const answered = await dispatch.dispatch(
+        who === 'an agent' ? agentCall(call) : personCall('/v1/sessions/s1/surfaces/terminals/tools', call),
+      );
+
+      should(publications).equal(3);
+      should(answered.status).equal(409);
+      should(String(answered.body)).not.containEql(SCREEN);
+    },
+  );
 
   it('should not spell a screen read for a person when a hold begins after the service last checked', async () => {
     const dispatch = await racing();

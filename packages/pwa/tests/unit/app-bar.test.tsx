@@ -750,6 +750,40 @@ describe('AppTabBar', () => {
     await mounted.unmount();
   });
 
+  it('offers What’s new in More when the shell has a door, closes the sheet and opens the notes', async () => {
+    setViewport(PHONE);
+    let opened = 0;
+    const mounted = await mount(tabBar({ whatsNew: { open: () => (opened += 1), unread: true } }));
+    const more = mounted.container.querySelector('[data-app-tab="more"]') as HTMLButtonElement;
+    await interact(() => more.dispatchEvent(new Event('click', { bubbles: true })));
+    const sheet = document.getElementById(more.getAttribute('aria-controls') as string) as HTMLElement;
+    const row = sheet.querySelector('[data-app-more-whats-new]') as HTMLButtonElement;
+    expect(row.textContent).toContain('What’s new');
+    expect(row.querySelector('[data-app-more-whats-new-unread]')?.textContent).toBe('New');
+
+    await interact(() => row.dispatchEvent(new Event('click', { bubbles: true })));
+
+    expect(opened).toBe(1);
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    await mounted.unmount();
+  });
+
+  it('lists What’s new in More without a New badge once it has been read, and not at all without a door', async () => {
+    setViewport(PHONE);
+    let mounted = await mount(tabBar({ whatsNew: { open: () => {}, unread: false } }));
+    let more = mounted.container.querySelector('[data-app-tab="more"]') as HTMLButtonElement;
+    await interact(() => more.dispatchEvent(new Event('click', { bubbles: true })));
+    expect(document.querySelector('[data-app-more-whats-new]')).not.toBeNull();
+    expect(document.querySelector('[data-app-more-whats-new-unread]')).toBeNull();
+    await mounted.unmount();
+
+    mounted = await mount(tabBar());
+    more = mounted.container.querySelector('[data-app-tab="more"]') as HTMLButtonElement;
+    await interact(() => more.dispatchEvent(new Event('click', { bubbles: true })));
+    expect(document.querySelector('[data-app-more-whats-new]')).toBeNull();
+    await mounted.unmount();
+  });
+
   it('closes More when it is dismissed without a pick', async () => {
     setViewport(PHONE);
     const mounted = await mount(tabBar());

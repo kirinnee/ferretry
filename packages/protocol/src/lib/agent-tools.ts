@@ -13,6 +13,35 @@ import {
   refineBrowserScreenshot,
   refineBrowserTarget,
 } from './browser-target.ts';
+import {
+  BROWSER_CONSOLE_MAX_LIMIT,
+  BROWSER_DIALOG_PROMPT_MAX_CHARS,
+  BROWSER_NETWORK_FILTER_MAX_CHARS,
+  BROWSER_RESOURCE_TYPES,
+  BROWSER_WAIT_MAX_MS,
+  BROWSER_WAIT_TEXT_MAX_CHARS,
+  BrowserConsoleLevelSchema,
+  BrowserDialogActionSchema,
+  BrowserElementStateSchema,
+  BrowserEmulationShape,
+  BrowserLoadStateSchema,
+  BrowserRequestIdSchema,
+  BrowserResourceTypeSchema,
+} from './browser-page-lifecycle.ts';
+import {
+  BROWSER_MAX_SCROLL_TEXT_CHARS,
+  BrowserMouseActionSchema,
+  BrowserPressKeysSchema,
+  BrowserScrollDeltaSchema,
+  BrowserScrollPagesSchema,
+  BrowserSelectValuesSchema,
+  browserDragShape,
+  browserFormFieldsOf,
+  refineBrowserDrag,
+  refineBrowserHighlight,
+  refineBrowserMouse,
+  refineBrowserScroll,
+} from './browser-pointer.ts';
 import { InstantSchema } from './common.ts';
 import type { AgentConfigToolName } from './config-files.ts';
 import {
@@ -76,6 +105,15 @@ export const AGENT_TOOL_MAX_URL_CHARS = 2_048;
 export const AGENT_TOOL_MAX_SELECTOR_CHARS = 1_024;
 /** The longest folder a terminal may be opened in. */
 export const AGENT_TOOL_MAX_FOLDER_CHARS = 1_024;
+/** The longest path an agent may name a file by (one to upload, or where to save one). */
+export const AGENT_TOOL_MAX_PATH_CHARS = 1_024;
+/** The most files one `browser.upload` carries. */
+export const AGENT_TOOL_MAX_UPLOAD_FILES = 20;
+/** The largest one file an upload may carry, and the most one call may carry in all. */
+export const AGENT_TOOL_MAX_UPLOAD_FILE_BYTES = 50 * 1024 * 1024;
+export const AGENT_TOOL_MAX_UPLOAD_CALL_BYTES = 200 * 1024 * 1024;
+/** The largest file a download or a PDF may be saved as. */
+export const AGENT_TOOL_MAX_DOWNLOAD_BYTES = 500 * 1024 * 1024;
 /** The longest sentence an agent may leave the owner when it hands a surface over. */
 export const AGENT_TOOL_MAX_ASK_CHARS = 280;
 
@@ -133,6 +171,24 @@ const SelectorSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_SELECTOR_CHAR
 
 /** The element a browser act names: a ref from a page snapshot (`e12`), or a selector. */
 const ElementTargetShape = { selector: SelectorSchema.optional(), ref: BrowserRefSchema.optional() };
+
+/**
+ * A file an upload names: a path inside the session's own folder (relative to it, or absolute under it), or
+ * an attachment the owner put in this session's chat (`att_` and its sha-256).
+ */
+export const ATTACHMENT_ID_PATTERN = /^att_[a-f0-9]{64}$/u;
+export const AgentUploadFileSchema = z.union([
+  z.string().trim().min(1).max(AGENT_TOOL_MAX_PATH_CHARS),
+  z.strictObject({ attachment: z.string().regex(ATTACHMENT_ID_PATTERN, 'an attachment id is att_ and 64 hex digits') }),
+]);
+export type AgentUploadFile = z.infer<typeof AgentUploadFileSchema>;
+
+/** How `browser.upload` hands files over: into a file input (or a file chooser), or dropped on a dropzone. */
+export const BrowserUploadModeSchema = z.enum(['input', 'drop']);
+export type BrowserUploadMode = z.infer<typeof BrowserUploadModeSchema>;
+
+/** Where a saved file goes: a path inside the session's own folder. */
+const SaveAsSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_PATH_CHARS);
 
 /** Where in history `browser.navigate` goes instead of to a URL. */
 export const BrowserHistoryStepSchema = z.enum(['back', 'forward', 'reload']);
@@ -275,6 +331,209 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     })
     .superRefine(refineBrowserTarget({ point: false, required: false }))
     .superRefine(refineBrowserScreenshot),
+  z
+    .strictObject({
+      tool: z.literal('browser.dialog'),
+      name: SurfaceKeySchema,
+      /** Answer the dialog the page is waiting on: accept it (OK) or dismiss it (Cancel). */
+      action: BrowserDialogActionSchema,
+      /** A `prompt` dialog's answer. */
+      promptText: z.string().max(BROWSER_DIALOG_PROMPT_MAX_CHARS).optional(),
+    })
+    .refine(
+      call => call.promptText === undefined || call.action === 'accept',
+      'promptText answers a prompt, so it goes with accept',
+    ),
+  z
+    .strictObject({
+      tool: z.literal('browser.tabs'),
+      action: z.enum(['list', 'adopt']),
+      /** `adopt`: the popup to take on, by the id a list showed. */
+      id: SurfaceKeySchema.optional(),
+      /** `adopt`: the name to give it. */
+      as: SurfaceNameSchema.optional(),
+    })
+    .refine(
+      call =>
+        call.action === 'adopt'
+          ? call.id !== undefined && call.as !== undefined
+          : call.id === undefined && call.as === undefined,
+      'adopt needs the popup id and the name to give it; list takes neither',
+    ),
+  z
+    .strictObject({
+      tool: z.literal('browser.wait_for'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      /** With a ref or selector: what the element should be. Defaults to visible. */
+      state: BrowserElementStateSchema.optional(),
+      text: z.string().min(1).max(BROWSER_WAIT_TEXT_MAX_CHARS).optional(),
+      textGone: z.string().min(1).max(BROWSER_WAIT_TEXT_MAX_CHARS).optional(),
+      /** A part of the page's address. */
+      url: z.string().min(1).max(BROWSER_WAIT_TEXT_MAX_CHARS).optional(),
+      load: BrowserLoadStateSchema.optional(),
+      /** Just wait this many milliseconds. */
+      time: z.number().int().min(1).max(BROWSER_WAIT_MAX_MS).optional(),
+      timeoutMs: z.number().int().min(100).max(BROWSER_WAIT_MAX_MS).optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: false }))
+    .superRefine((call, context) => {
+      const named = [call.selector ?? call.ref, call.text, call.textGone, call.url, call.load, call.time].filter(
+        value => value !== undefined,
+      ).length;
+      if (named !== 1)
+        context.addIssue({
+          code: 'custom',
+          message: 'wait for exactly one thing: a ref or selector, text, textGone, url, load or time',
+        });
+      if (call.state !== undefined && call.selector === undefined && call.ref === undefined)
+        context.addIssue({ code: 'custom', message: 'state goes with a ref or selector' });
+    }),
+  z.strictObject({
+    tool: z.literal('browser.console'),
+    name: SurfaceKeySchema,
+    /** This level and worse. */
+    level: BrowserConsoleLevelSchema.optional(),
+    /** Only entries after this number, as a previous call reported it. */
+    since: z.number().int().min(0).optional(),
+    limit: z.number().int().min(1).max(BROWSER_CONSOLE_MAX_LIMIT).optional(),
+  }),
+  z
+    .strictObject({
+      tool: z.literal('browser.network'),
+      name: SurfaceKeySchema,
+      action: z.enum(['list', 'get']),
+      /** `get`: the request to show, by the id a list named. */
+      id: BrowserRequestIdSchema.optional(),
+      /** `list`: only URLs containing this text. */
+      filter: z.string().min(1).max(BROWSER_NETWORK_FILTER_MAX_CHARS).optional(),
+      /** `list`: only these kinds of request. */
+      types: z.array(BrowserResourceTypeSchema).min(1).max(BROWSER_RESOURCE_TYPES.length).optional(),
+    })
+    .superRefine((call, context) => {
+      if (call.action === 'get' && call.id === undefined)
+        context.addIssue({ code: 'custom', message: 'get needs the id of a request from a list' });
+      if (call.action === 'list' && call.id !== undefined)
+        context.addIssue({ code: 'custom', message: 'list takes a filter, not an id' });
+      if (call.action === 'get' && (call.filter !== undefined || call.types !== undefined))
+        context.addIssue({ code: 'custom', message: 'get takes an id, not a filter' });
+    }),
+  z
+    .strictObject({ tool: z.literal('browser.emulate'), name: SurfaceKeySchema, ...BrowserEmulationShape })
+    .refine(
+      call => Object.entries(call).some(([key, value]) => key !== 'tool' && key !== 'name' && value !== undefined),
+      'name something to emulate, or reset: true',
+    ),
+  z
+    .strictObject({
+      tool: z.literal('browser.upload'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      files: z.array(AgentUploadFileSchema).min(1).max(AGENT_TOOL_MAX_UPLOAD_FILES),
+      /** `input` (the default) fills a file input or answers the file chooser a click opens; `drop` drops them on a dropzone. */
+      mode: BrowserUploadModeSchema.optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: true })),
+  z.strictObject({
+    tool: z.literal('browser.download'),
+    name: SurfaceKeySchema,
+    /** Which download, by the id an act reported; the page's latest when absent. */
+    id: z
+      .string()
+      .regex(/^dl-[a-z0-9]{1,16}$/u, 'a download id looks like dl-3')
+      .optional(),
+    /** Where to save it, inside the session's own folder; `downloads/<its name>` when absent. */
+    saveAs: SaveAsSchema.optional(),
+    /** Replace a file already there; without it an existing file is never touched. */
+    overwrite: z.literal(true).optional(),
+  }),
+  z.strictObject({
+    tool: z.literal('browser.pdf'),
+    name: SurfaceKeySchema,
+    /** Where to save it, inside the session's own folder; `downloads/<page title>.pdf` when absent. */
+    saveAs: SaveAsSchema.optional(),
+    overwrite: z.literal(true).optional(),
+  }),
+  z
+    .strictObject({
+      tool: z.literal('browser.hover'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      x: BrowserCoordinateSchema.optional(),
+      y: BrowserCoordinateSchema.optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: true, required: true })),
+  z
+    .strictObject({
+      tool: z.literal('browser.drag'),
+      name: SurfaceKeySchema,
+      ...browserDragShape(SelectorSchema),
+    })
+    .superRefine(refineBrowserDrag),
+  z
+    .strictObject({
+      tool: z.literal('browser.mouse'),
+      name: SurfaceKeySchema,
+      action: BrowserMouseActionSchema,
+      x: BrowserCoordinateSchema.optional(),
+      y: BrowserCoordinateSchema.optional(),
+      button: BrowserMouseButtonSchema.optional(),
+      deltaX: BrowserScrollDeltaSchema.optional(),
+      deltaY: BrowserScrollDeltaSchema.optional(),
+    })
+    .superRefine(refineBrowserMouse),
+  z
+    .strictObject({
+      tool: z.literal('browser.press'),
+      name: SurfaceKeySchema,
+      keys: BrowserPressKeysSchema,
+      /** Focus this element first. */
+      ...ElementTargetShape,
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: false })),
+  z
+    .strictObject({
+      tool: z.literal('browser.scroll'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      /** Scroll the first place this text shows up into view. */
+      text: z.string().min(1).max(BROWSER_MAX_SCROLL_TEXT_CHARS).optional(),
+      deltaX: BrowserScrollDeltaSchema.optional(),
+      deltaY: BrowserScrollDeltaSchema.optional(),
+      /** Screens: 1 is one screen down, -1 one screen up. */
+      pages: BrowserScrollPagesSchema.optional(),
+    })
+    .superRefine(refineBrowserScroll),
+  z
+    .strictObject({
+      tool: z.literal('browser.select'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      values: BrowserSelectValuesSchema,
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: true })),
+  z
+    .strictObject({
+      tool: z.literal('browser.check'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      /** `true` ticks, `false` unticks. */
+      checked: z.boolean(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: true })),
+  z.strictObject({
+    tool: z.literal('browser.fill_form'),
+    name: SurfaceKeySchema,
+    fields: browserFormFieldsOf(SelectorSchema),
+  }),
+  z
+    .strictObject({
+      tool: z.literal('browser.highlight'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      clear: z.literal(true).optional(),
+    })
+    .superRefine(refineBrowserHighlight),
   z.strictObject({ tool: z.literal('browser.close'), name: SurfaceKeySchema }),
   z.strictObject({
     tool: z.literal('browser.ask_owner'),
@@ -300,6 +559,9 @@ const REPEATABLE_AGENT_TOOLS: ReadonlySet<string> = new Set<AgentToolName | Agen
   'browser.list',
   'browser.read',
   'browser.screenshot',
+  'browser.tabs',
+  'browser.wait_for',
+  'browser.console',
   'config.read',
   'config.validate',
 ]);
@@ -326,6 +588,24 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'browser.type',
   'browser.read',
   'browser.screenshot',
+  'browser.dialog',
+  'browser.tabs',
+  'browser.wait_for',
+  'browser.console',
+  'browser.network',
+  'browser.emulate',
+  'browser.upload',
+  'browser.download',
+  'browser.pdf',
+  'browser.hover',
+  'browser.drag',
+  'browser.mouse',
+  'browser.press',
+  'browser.scroll',
+  'browser.select',
+  'browser.check',
+  'browser.fill_form',
+  'browser.highlight',
   'browser.close',
   'browser.ask_owner',
 ];
@@ -347,6 +627,8 @@ export const AgentSurfaceSchema = z.strictObject({
    * nor on anything a person has taken over.
    */
   available: z.boolean().optional(),
+  /** A popup: the page that opened it. Listed so an agent can tell which tabs are its own pages' popups. */
+  openerId: z.string().min(1).max(128).optional(),
 });
 export type AgentSurface = z.infer<typeof AgentSurfaceSchema>;
 

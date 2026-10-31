@@ -41,6 +41,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Sparkles,
   SquareKanban,
   Users,
 } from 'lucide-react';
@@ -60,6 +61,7 @@ import {
   type Route,
 } from '../lib/pages/routes.ts';
 import { BottomSheet } from './bottom-sheet.tsx';
+import { Badge } from './primitives.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
 import { UnreadBadge } from './unread-badge.tsx';
@@ -554,6 +556,8 @@ export interface AppTabBarProps {
   readonly agendaCount?: number;
   /** Cards to test plus cards waiting on the owner, across every machine: the Board tab's badge. */
   readonly boardCount?: number;
+  /** The shell's What's new door: a row in More, so release notes are findable from the phone's own menu. */
+  readonly whatsNew?: { readonly open: () => void; readonly unread: boolean };
 }
 
 /** The Board tab's count: the same pill as the Inbox's, announced as what it counts. */
@@ -595,6 +599,7 @@ export function AppTabBar({
   onOpenPalette,
   agendaCount = 0,
   boardCount = 0,
+  whatsNew,
 }: AppTabBarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const moreId = useId();
@@ -684,6 +689,32 @@ export function AppTabBar({
               </RouteLink>
             );
           })}
+          {whatsNew === undefined ? null : (
+            <button
+              type="button"
+              className="kt-navpill min-h-[48px] text-left"
+              data-app-more-whats-new=""
+              onClick={() => {
+                select();
+                whatsNew.open();
+              }}
+            >
+              <span className="flex w-5 shrink-0 justify-center" aria-hidden="true">
+                <Sparkles size={20} />
+              </span>
+              <span className="flex min-w-0 flex-col">
+                <span className="flex items-center gap-sm font-semibold">
+                  What’s new
+                  {whatsNew.unread ? (
+                    <Badge tone="accent" data-app-more-whats-new-unread="">
+                      New
+                    </Badge>
+                  ) : null}
+                </span>
+                <span className="kt-navpill__sub">See the latest changes to Ferretry</span>
+              </span>
+            </button>
+          )}
         </nav>
       </BottomSheet>
     </>

@@ -111,6 +111,51 @@ describe('AgentToolsClient', () => {
     ]);
   });
 
+  it('should wait for a page in slices, stop when it matches, and sleep a time wait only once', async () => {
+    // Arrange
+    const port = gateway([
+      { summary: 'still', matched: false },
+      { summary: 'still', matched: false },
+      { summary: 'there', matched: true },
+      { summary: 'slept' },
+    ]);
+    const client = new AgentToolsClient(both(port), { capability: 'cap-1' });
+    const call = { tool: 'browser.wait_for', name: 'app', text: 'Welcome' } as const;
+
+    // Act
+    const found = await client.browserWait({ call, totalMs: 120_000 }, 's1');
+    const slept = await client.browserWait({
+      call: { tool: 'browser.wait_for', name: 'app', time: 3_000 },
+      totalMs: 120_000,
+    });
+
+    // Assert
+    should(found.matched).be.true();
+    should(slept.summary).equal('slept');
+    should(port.sent.map(sent => JSON.parse(String(sent.init?.body)))).deepEqual([
+      { ...call, timeoutMs: 25_000 },
+      { ...call, timeoutMs: 25_000 },
+      { ...call, timeoutMs: 25_000 },
+      { tool: 'browser.wait_for', name: 'app', time: 3_000 },
+    ]);
+  });
+
+  it('should give a page wait up after its total budget, whatever the slices', async () => {
+    // Arrange
+    const port = gateway(Array.from({ length: 8 }, () => ({ summary: 'still', matched: false })));
+    const client = new AgentToolsClient(both(port), { capability: 'cap-1' });
+
+    // Act
+    const result = await client.browserWait({
+      call: { tool: 'browser.wait_for', name: 'app', url: '/done' },
+      totalMs: 60_000,
+    });
+
+    // Assert
+    should(result.matched).be.false();
+    should(port.sent.map(sent => JSON.parse(String(sent.init?.body)).timeoutMs)).deepEqual([25_000, 25_000, 10_000]);
+  });
+
   it('should take over, hand back and read control state on a person’s routes', async () => {
     // Arrange
     const view = { sessionId: 's1', driving: [], takeovers: [], handed: [], opened: [], asked: [] };

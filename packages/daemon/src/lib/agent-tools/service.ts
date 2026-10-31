@@ -7,18 +7,35 @@ import {
   type AgentToolResult,
   type AuditDetail,
   type AuditOutcome,
+  BROWSER_WAIT_DEFAULT_MS,
+  BROWSER_WAIT_SLICE_MS,
   type BrowserActionResult,
+  type BrowserDialogInfo,
+  type BrowserDownloadNotice,
+  type BrowserElementTarget,
+  type BrowserEmulation,
+  type BrowserPageLifecycleRequest,
   type BrowserTargetFields,
+  type BrowserWaitCondition,
   browserReadModeOf,
   type InputAgentView,
+  browserTargetOf,
   type SurfaceController,
   type SurfaceControlRequest,
   type SurfaceControlView,
   type SurfaceKind,
   type SurfaceOpener,
 } from '@ferretry/protocol';
+import { AGENT_FILE_LIMITS, AgentFileError, type AgentFiles, extensionOf, sizeWords } from '../agent-files/index.ts';
 import type { AuditSink } from '../audit/types.ts';
-import { type BrowserPageAction, BrowserSessionError, type BrowserSubsystem } from '../browser/runtime/index.ts';
+import {
+  BrowserSessionError,
+  type BrowserFileAction,
+  type BrowserLifecycleOutcome,
+  type BrowserPageAction,
+  type BrowserSubsystem,
+  pendingDialogOf,
+} from '../browser/runtime/index.ts';
 import { BrowserTransportError } from '../browser/transport/worker-protocol.ts';
 import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import { InputRequestError } from '../input-requests/errors.ts';
@@ -76,7 +93,12 @@ const WAIT_TAIL_LINES = 40;
 
 export interface AgentToolPorts {
   readonly terminals: Pick<TerminalSubsystem, 'list' | 'create' | 'write' | 'text' | 'foreground' | 'close'>;
-  readonly browser: Pick<BrowserSubsystem, 'status' | 'openPage' | 'actOnPage' | 'closePage'>;
+  readonly browser: Pick<
+    BrowserSubsystem,
+    'status' | 'openPage' | 'actOnPage' | 'filesOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
+  >;
+  /** What the file tools may reach: the session's own folder and its attachments, nothing else. */
+  readonly files: Pick<AgentFiles, 'prepareUpload' | 'save'>;
   readonly control: SurfaceControl;
   readonly policy: AgentControlPolicy;
   readonly audit: AuditSink;
@@ -108,13 +130,66 @@ const DRIVING_TOOLS: ReadonlySet<AgentToolCall['tool']> = new Set([
   'browser.navigate',
   'browser.click',
   'browser.type',
+  'browser.upload',
+  'browser.hover',
+  'browser.drag',
+  'browser.mouse',
+  'browser.press',
+  'browser.scroll',
+  'browser.select',
+  'browser.check',
+  'browser.fill_form',
+  'browser.highlight',
 ]);
 
-/** A page's text as it came back, before redaction: what was read, and where the page is now. */
+/** The browser tools that act on a page (every browser tool but list, open, close and ask_owner). */
+type PageToolName =
+  | 'browser.navigate'
+  | 'browser.click'
+  | 'browser.type'
+  | 'browser.read'
+  | 'browser.screenshot'
+  | 'browser.hover'
+  | 'browser.drag'
+  | 'browser.mouse'
+  | 'browser.press'
+  | 'browser.scroll'
+  | 'browser.select'
+  | 'browser.check'
+  | 'browser.fill_form'
+  | 'browser.highlight';
+
+/** The tools that move a file between a page and the session's folder: they need the `files` switch as well as `browser`. */
+const FILE_TOOLS: ReadonlySet<AgentToolCall['tool']> = new Set(['browser.upload', 'browser.download', 'browser.pdf']);
+
+/** A page's text as it came back, before redaction: what was read, where the page is now, what its dialog says, and the names its downloads suggested. */
 interface PageReading {
   readonly url?: string;
   readonly text?: string;
+  readonly dialog?: string;
+  /** File names a page suggested for its downloads. */
+  readonly names?: readonly string[];
 }
+
+/** What a call learned that the audit should keep, beside what the call itself said. */
+interface CallFacts {
+  surface?: ResolvedSurface;
+  pane?: ResolvedSurface;
+  detail?: AuditDetail;
+}
+
+type PageRows = Awaited<ReturnType<AgentToolPorts['browser']['status']>>['pages'];
+
+/** The tools that read or change a page's life — a dialog, a wait, its logs, its device. */
+type LifecycleCall = Extract<
+  AgentToolCall,
+  {
+    readonly tool: 'browser.dialog' | 'browser.wait_for' | 'browser.console' | 'browser.network' | 'browser.emulate';
+  }
+>;
+
+/** How far up a popup's opener chain ownership is followed. */
+const MAX_OPENER_DEPTH = 8;
 
 /** The kind of surface a call is about; `input.wait` is about a request, not a surface. */
 const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
@@ -150,18 +225,20 @@ export class AgentToolService {
   private readonly bindings = new WeakMap<AgentToolResult, PaneBinding>();
 
   async call(caller: AgentToolCaller, call: AgentToolCall): Promise<AgentToolResult> {
-    const facts: { surface?: ResolvedSurface; pane?: ResolvedSurface } = {};
+    const facts: CallFacts = {};
     let result: AgentToolResult;
     try {
       const kind = kindOf(call);
       if (caller.kind === 'agent' && kind !== undefined && !(await this.ports.policy.allows(kind)))
         throw new AgentToolError('forbidden', controlRefusal(kind));
+      if (caller.kind === 'agent' && FILE_TOOLS.has(call.tool) && !(await this.ports.policy.allows('files')))
+        throw new AgentToolError('forbidden', controlRefusal('files'));
       result = await this.dispatch(caller, call, facts);
-      await this.record(caller, call, facts.surface, 'succeeded');
+      await this.record(caller, call, facts, 'succeeded');
     } catch (error) {
       const refusal = translate(error);
       const failed = refusal === undefined || refusal.code === 'upstream_failed';
-      await this.record(caller, call, facts.surface, failed ? 'failed' : 'refused');
+      await this.record(caller, call, facts, failed ? 'failed' : 'refused');
       throw refusal ?? error;
     }
     const pane = facts.pane ?? facts.surface;
@@ -242,17 +319,15 @@ export class AgentToolService {
     }
   }
 
-  private async dispatch(
-    caller: AgentToolCaller,
-    call: AgentToolCall,
-    facts: { surface?: ResolvedSurface; pane?: ResolvedSurface },
-  ): Promise<AgentToolResult> {
+  private async dispatch(caller: AgentToolCaller, call: AgentToolCall, facts: CallFacts): Promise<AgentToolResult> {
     const { sessionId } = caller;
     switch (call.tool) {
       case 'terminal.list':
         return await this.listTerminals(caller);
       case 'browser.list':
         return await this.listPages(caller);
+      case 'browser.tabs':
+        return await this.tabs(caller, call, facts);
       case 'terminal.open': {
         const opened = await this.ports.terminals.create(
           sessionId,
@@ -306,7 +381,7 @@ export class AgentToolService {
         );
         facts.surface = surface;
         if (caller.kind === 'agent') await this.assertAgentMay(sessionId, surface);
-        const result = await this.act(caller, call, surface);
+        const result = await this.act(caller, call, surface, facts);
         await this.drove(caller, call, surface);
         return result;
       }
@@ -318,9 +393,18 @@ export class AgentToolService {
     caller: AgentToolCaller,
     call: Exclude<
       AgentToolCall,
-      { readonly tool: 'terminal.list' | 'browser.list' | 'terminal.open' | 'browser.open' | 'input.wait' }
+      {
+        readonly tool:
+          | 'terminal.list'
+          | 'browser.list'
+          | 'browser.tabs'
+          | 'terminal.open'
+          | 'browser.open'
+          | 'input.wait';
+      }
     >,
     surface: ResolvedSurface,
+    facts: CallFacts,
   ): Promise<AgentToolResult> {
     const { sessionId } = caller;
     const reference = surfaceReference(surface.surface, surface.name ?? surface.id);
@@ -389,19 +473,162 @@ export class AgentToolService {
         await this.ports.browser.closePage(sessionId, surface.id, this.browserGuard(caller, surface));
         this.ports.control.forget(sessionId, surface);
         return { summary: `Closed ${reference}.` };
+      case 'browser.dialog':
+      case 'browser.wait_for':
+      case 'browser.console':
+      case 'browser.network':
+      case 'browser.emulate':
+        return await this.lifecycle(caller, call, surface, reference, facts);
+      case 'browser.upload':
+      case 'browser.download':
+      case 'browser.pdf':
+        return await this.files(caller, call, surface, reference, facts);
       default:
-        return await this.browse(caller, call, surface, reference);
+        return await this.browse(caller, call, surface, reference, facts);
+    }
+  }
+
+  /** `browser.tabs`: the session's pages with their popups, or take on a popup under a name. */
+  private async tabs(
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly tool: 'browser.tabs' }>,
+    facts: CallFacts,
+  ): Promise<AgentToolResult> {
+    if (call.action === 'list') return await this.listPages(caller, true);
+    const { sessionId } = caller;
+    const surface = await this.resolve(sessionId, 'browser', call.id ?? '');
+    facts.surface = surface;
+    if (caller.kind === 'agent') await this.assertAgentMay(sessionId, surface);
+    const reference = surfaceReference('browser', surface.name ?? surface.id);
+    if (surface.openerId === undefined)
+      throw new AgentToolError(
+        'bad_request',
+        `${reference} is not a popup: only a page another page opened can be adopted.`,
+      );
+    if (surface.name !== undefined) throw new AgentToolError('conflict', `${reference} already has a name; use it.`);
+    const name = call.as ?? '';
+    const opener: SurfaceOpener | undefined = caller.kind === 'agent' ? { by: 'agent', sessionId } : caller.openedBy;
+    await this.ports.browser.adoptPage(sessionId, surface.id, name, opener);
+    facts.surface = { ...surface, name, ...(opener === undefined ? {} : { openedBy: opener }) };
+    await this.announce(caller, facts.surface, undefined);
+    return {
+      summary: `Adopted the popup ${surface.id} (opened by ${surface.openerId}) as ${surfaceReference('browser', name)}. Use it by that name.`,
+    };
+  }
+
+  /** The page-lifecycle tools, each as one call to the page's lifecycle port. */
+  private async lifecycle(
+    caller: AgentToolCaller,
+    call: LifecycleCall,
+    surface: ResolvedSurface,
+    reference: string,
+    facts: CallFacts,
+  ): Promise<AgentToolResult> {
+    const guard = this.browserGuard(caller, surface);
+    const send = async (request: BrowserPageLifecycleRequest): Promise<BrowserLifecycleOutcome> =>
+      await this.ports.browser.lifecycleOnPage(caller.sessionId, surface.id, request, guard);
+    switch (call.tool) {
+      case 'browser.dialog': {
+        const out = await send({
+          op: 'dialog',
+          action: call.action,
+          ...(call.promptText === undefined ? {} : { promptText: call.promptText }),
+        });
+        if (out.reply.dialogType !== undefined)
+          facts.detail = { dialogType: out.reply.dialogType, accepted: call.action === 'accept' };
+        const read = await this.scrubbed({ text: out.reply.text, ...dialogOf(out.dialog) });
+        return { summary: `On ${reference}: ${read.text ?? ''}.${dialogNote(out.dialog, read.dialog)}` };
+      }
+      case 'browser.wait_for':
+        return await this.waitFor(caller, call, surface, reference, send);
+      case 'browser.console': {
+        const out = await send({
+          op: 'console',
+          ...(call.level === undefined ? {} : { level: call.level }),
+          ...(call.since === undefined ? {} : { since: call.since }),
+          ...(call.limit === undefined ? {} : { limit: call.limit }),
+        });
+        const read = await this.scrubbed({ text: out.reply.text, ...dialogOf(out.dialog) });
+        return {
+          summary: `The console of ${reference}.${dialogNote(out.dialog, read.dialog)}`,
+          output: clipOutput(read.text ?? ''),
+        };
+      }
+      case 'browser.network': {
+        const out = await send({
+          op: 'network',
+          action: call.action,
+          ...(call.id === undefined ? {} : { id: call.id }),
+          ...(call.filter === undefined ? {} : { filter: call.filter }),
+          ...(call.types === undefined ? {} : { types: call.types }),
+        });
+        const read = await this.scrubbed({ text: out.reply.text, ...dialogOf(out.dialog) });
+        const what = call.action === 'get' ? `Request ${call.id ?? ''} of` : 'The requests of';
+        return {
+          summary: `${what} ${reference}.${dialogNote(out.dialog, read.dialog)}`,
+          output: call.action === 'get' ? clipReading(read.text ?? '') : clipOutput(read.text ?? ''),
+        };
+      }
+      case 'browser.emulate': {
+        const { tool: _tool, name: _name, ...emulation } = call;
+        const out = await send({ op: 'emulate', emulation: emulation as BrowserEmulation });
+        const read = await this.scrubbed({ text: out.reply.text, ...dialogOf(out.dialog) });
+        return {
+          summary: `${read.text ?? 'Emulation applied'} on ${reference}.${dialogNote(out.dialog, read.dialog)}`,
+        };
+      }
+    }
+  }
+
+  /**
+   * `browser.wait_for`: ONE SECOND AT A TIME, with the takeover guard between slices, so a wait ends the
+   * moment a person takes the page over — the way `terminal.wait` does. A dialog that opens ends it too,
+   * since it blocks the page: the result says so.
+   */
+  private async waitFor(
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly tool: 'browser.wait_for' }>,
+    surface: ResolvedSurface,
+    reference: string,
+    send: (request: BrowserPageLifecycleRequest) => Promise<BrowserLifecycleOutcome>,
+  ): Promise<AgentToolResult> {
+    const condition = waitConditionOf(call);
+    if (condition.kind === 'time') {
+      for (let left = condition.ms; left > 0; left -= BROWSER_WAIT_SLICE_MS) {
+        await this.ports.sleep(Math.min(BROWSER_WAIT_SLICE_MS, left));
+        if (caller.kind === 'agent') await this.assertFree(caller.sessionId, surface);
+      }
+      return { summary: `Waited ${String(condition.ms)} ms on ${reference}.`, matched: true };
+    }
+    const timeoutMs = call.timeoutMs ?? BROWSER_WAIT_DEFAULT_MS;
+    const deadline = this.ports.clock.now() + timeoutMs;
+    for (let waited = 0; ; ) {
+      const slice = Math.max(1, Math.min(BROWSER_WAIT_SLICE_MS, timeoutMs - waited));
+      const out = await send({ op: 'wait', condition, timeoutMs: slice });
+      waited += slice;
+      if (out.reply.matched === true)
+        return { summary: `The wait on ${reference} is over: it happened.`, matched: true };
+      if (out.dialog !== undefined) {
+        const read = await this.scrubbed(dialogOf(out.dialog));
+        return {
+          summary: `The wait on ${reference} stopped: the page is blocked by a dialog.${dialogNote(out.dialog, read.dialog)}`,
+          matched: false,
+        };
+      }
+      if (waited >= timeoutMs || this.ports.clock.now() >= deadline)
+        return {
+          summary: `Still waiting on ${reference}: the wait timed out after ${String(timeoutMs)} ms.`,
+          matched: false,
+        };
     }
   }
 
   private async browse(
     caller: AgentToolCaller,
-    call: Extract<
-      AgentToolCall,
-      { readonly tool: 'browser.navigate' | 'browser.click' | 'browser.type' | 'browser.read' | 'browser.screenshot' }
-    >,
+    call: Extract<AgentToolCall, { readonly tool: PageToolName }>,
     surface: ResolvedSurface,
     reference: string,
+    facts: CallFacts,
   ): Promise<AgentToolResult> {
     const answer: BrowserActionResult = await this.ports.browser.actOnPage(
       caller.sessionId,
@@ -415,12 +642,19 @@ export class AgentToolService {
       readonly screenshotBase64?: unknown;
       readonly screenshotFormat?: unknown;
     } = 'result' in answer ? answer.result : {};
+    const dialog = pendingDialogOf(page);
+    const started = 'result' in answer ? (answer.result.downloads ?? []) : [];
     const read = await this.scrubbed({
       ...(page.url === undefined ? {} : { url: page.url }),
       ...(typeof page.text === 'string' ? { text: page.text } : {}),
+      ...dialogOf(dialog),
+      ...(started.length === 0 ? {} : { names: started.map(notice => notice.name) }),
     });
     const at = read.url === undefined ? '' : ` (now at ${read.url})`;
-    const check = humanCheckNote(answer, surface.id);
+    const check =
+      humanCheckNote(answer, surface.id) + dialogNote(dialog, read.dialog) + downloadsNote(started, read.names);
+    const secret = 'result' in answer && answer.result.passwordField === true ? passwordNote(call.tool) : '';
+    if (secret !== '') facts.detail = { ...facts.detail, passwordField: true };
     if (read.text !== undefined && call.tool === 'browser.read') {
       const mode = browserReadModeOf(call);
       if (call.find !== undefined && read.text === '')
@@ -439,16 +673,83 @@ export class AgentToolService {
         screenshotBase64: page.screenshotBase64,
         ...(page.screenshotFormat === 'jpeg' ? { screenshotFormat: 'jpeg' as const } : {}),
       };
-    return { summary: `Done on ${reference}${at}.${check}` };
+    return { summary: `Done on ${reference}${at}.${secret}${check}` };
+  }
+
+  /**
+   * The file tools. An upload hands the page files the file service has confined to the session's folder (or
+   * the session's own attachments); a download or a PDF is staged by the browser and SAVED by the file service,
+   * which alone decides where — under the session's folder, never over an existing file unless asked.
+   */
+  private async files(
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly tool: 'browser.upload' | 'browser.download' | 'browser.pdf' }>,
+    surface: ResolvedSurface,
+    reference: string,
+    facts: CallFacts,
+  ): Promise<AgentToolResult> {
+    const { sessionId } = caller;
+    const guard = this.browserGuard(caller, surface);
+    if (call.tool === 'browser.upload') {
+      const prepared = await this.ports.files.prepareUpload(sessionId, call.files);
+      facts.detail = uploadFacts(prepared.files);
+      let answer: Awaited<ReturnType<BrowserSubsystem['filesOnPage']>>;
+      try {
+        answer = await this.ports.browser.filesOnPage(
+          sessionId,
+          surface.id,
+          {
+            action: 'upload',
+            target: elementTargetOf(call),
+            paths: prepared.files.map(file => file.path),
+            mode: call.mode ?? 'input',
+          },
+          guard,
+        );
+      } finally {
+        await prepared.release();
+      }
+      const started = answer.result.downloads ?? [];
+      const read = await this.scrubbed({
+        url: answer.result.url,
+        ...(started.length === 0 ? {} : { names: started.map(notice => notice.name) }),
+      });
+      const how = call.mode === 'drop' ? 'Dropped' : 'Gave';
+      return {
+        summary: `${how} ${plural(prepared.files.length, 'file')} (${sizeWords(prepared.files.reduce((sum, file) => sum + file.size, 0))}) ${call.mode === 'drop' ? 'onto' : 'to'} ${reference} (now at ${read.url ?? answer.result.url}).${humanCheckNote(answer, surface.id)}${downloadsNote(started, read.names)}`,
+      };
+    }
+    const action: BrowserFileAction =
+      call.tool === 'browser.download'
+        ? { action: 'download', ...(call.id === undefined ? {} : { downloadId: call.id }) }
+        : { action: 'pdf' };
+    const answer = await this.ports.browser.filesOnPage(sessionId, surface.id, action, guard);
+    if (answer.staged === undefined) throw new AgentToolError('upstream_failed', 'The browser staged no file to save.');
+    const read = await this.scrubbed({ names: [answer.staged.name] });
+    const name = read.names?.[0] ?? answer.staged.name;
+    const saved = await this.ports.files.save(
+      sessionId,
+      { ...answer.staged, name },
+      { saveAs: call.saveAs, overwrite: call.overwrite === true, maxBytes: AGENT_FILE_LIMITS.downloadBytes },
+    );
+    const extension = extensionOf(saved.name);
+    facts.detail = { size: saved.size, ...(extension === undefined ? {} : { extension }) };
+    const what = call.tool === 'browser.pdf' ? 'Printed' : 'Saved';
+    return {
+      summary: `${what} ${reference} as ${saved.saved} (${sizeWords(saved.size)}) in this session's folder.${humanCheckNote(answer, surface.id)}`,
+    };
   }
 
   /** A page's reading with every vault secret masked, under one vault open — or refused, never served raw. */
   private async scrubbed(reading: PageReading): Promise<PageReading> {
-    if (reading.url === undefined && reading.text === undefined) return reading;
+    // A reading carries only the parts a page returned, so an empty one has nothing to mask.
+    if (Object.keys(reading).length === 0) return reading;
     try {
       return await this.ports.redactor.batch(scrub => ({
         ...(reading.url === undefined ? {} : { url: scrub.text(reading.url) }),
         ...(reading.text === undefined ? {} : { text: scrub.text(reading.text) }),
+        ...(reading.dialog === undefined ? {} : { dialog: scrub.text(reading.dialog) }),
+        ...(reading.names === undefined ? {} : { names: reading.names.map(name => scrub.text(name)) }),
       }));
     } catch {
       throw new AgentToolError(
@@ -596,22 +897,33 @@ export class AgentToolService {
     return shown('terminal', surfaces);
   }
 
-  private async listPages(caller: AgentToolCaller): Promise<AgentToolResult> {
+  private async listPages(caller: AgentToolCaller, tabs = false): Promise<AgentToolResult> {
     const status = await this.ports.browser.status(caller.sessionId);
     const surfaces = await Promise.all(
       status.pages.map(async page =>
-        this.listed(caller, {
-          surface: 'browser',
-          id: page.id,
-          title: page.title,
-          url: page.url,
-          ...(page.name === undefined ? {} : { name: page.name }),
-          ...(page.openedBy === undefined ? {} : { openedBy: page.openedBy }),
-          ...(page.incognito === true ? { incognito: true } : {}),
-        }),
+        this.listed(
+          caller,
+          {
+            surface: 'browser',
+            id: page.id,
+            title: page.title,
+            url: page.url,
+            ...(page.name === undefined ? {} : { name: page.name }),
+            ...(page.openedBy === undefined ? {} : { openedBy: page.openedBy }),
+            ...(page.openerId === undefined ? {} : { openerId: page.openerId }),
+            ...(page.incognito === true ? { incognito: true } : {}),
+          },
+          status.pages,
+        ),
       ),
     );
-    return shown('browser', surfaces);
+    const listing = shown('browser', surfaces);
+    const popups = (listing.surfaces ?? []).filter(row => row.openerId !== undefined && row.name === undefined);
+    if (!tabs || popups.length === 0) return listing;
+    return {
+      ...listing,
+      summary: `${listing.summary} Popups with no name yet: ${popups.map(row => row.id).join(', ')}; give one a name with browser.tabs (action "adopt", id, as).`,
+    };
   }
 
   /**
@@ -621,6 +933,7 @@ export class AgentToolService {
   private async listed(
     caller: AgentToolCaller,
     row: ResolvedSurface & { readonly title: string; readonly url?: string },
+    pages?: PageRows,
   ): Promise<AgentSurface | undefined> {
     const base: AgentSurface = {
       id: row.id,
@@ -628,9 +941,10 @@ export class AgentToolService {
       title: row.title,
       ...(row.incognito === true ? { incognito: true } : {}),
       ...(row.url === undefined ? {} : { url: row.url }),
+      ...(row.openerId === undefined ? {} : { openerId: row.openerId }),
     };
     if (caller.kind !== 'agent') return base;
-    const available = await this.assertAgentMay(caller.sessionId, row).then(
+    const available = await this.assertAgentMay(caller.sessionId, row, pages).then(
       () => true,
       () => false,
     );
@@ -644,6 +958,7 @@ export class AgentToolService {
       readonly name?: string;
       readonly openedBy?: SurfaceOpener;
       readonly incognito?: true;
+      readonly openerId?: string;
     }[] =
       surface === 'terminal'
         ? (await this.ports.terminals.list(sessionId)).terminals
@@ -662,17 +977,46 @@ export class AgentToolService {
       ...(found.name === undefined ? {} : { name: found.name }),
       ...(found.openedBy === undefined ? {} : { openedBy: found.openedBy }),
       ...(found.incognito === true ? { incognito: true } : {}),
+      ...(found.openerId === undefined ? {} : { openerId: found.openerId }),
     };
   }
 
   /** Whether an agent may act on this surface now: it is the agent's, and nobody is holding it. */
-  private async assertAgentMay(sessionId: string, surface: ResolvedSurface): Promise<void> {
-    if (!openedByAgent(surface.openedBy, sessionId) && !(await this.ports.control.isHanded(sessionId, surface)))
+  private async assertAgentMay(sessionId: string, surface: ResolvedSurface, pages?: PageRows): Promise<void> {
+    const mine =
+      openedByAgent(surface.openedBy, sessionId) ||
+      (await this.ports.control.isHanded(sessionId, surface)) ||
+      (await this.popupOfMine(sessionId, surface, pages));
+    if (!mine)
       throw new AgentToolError(
         'forbidden',
         `${surfaceReference(surface.surface, surface.name ?? surface.id)} is a person's, not yours: you may use it only if they hand it to you. Ask them, or open your own.`,
       );
     await this.assertFree(sessionId, surface);
+  }
+
+  /**
+   * Whether a page is a popup of one of the agent's own: its opener chain — the opener records the
+   * daemon keeps, never a claim — ends at a page this agent opened or was handed.
+   */
+  private async popupOfMine(sessionId: string, surface: ResolvedSurface, known?: PageRows): Promise<boolean> {
+    if (surface.surface !== 'browser' || surface.openerId === undefined) return false;
+    const pages = known ?? (await this.ports.browser.status(sessionId)).pages;
+    let openerId: string | undefined = surface.openerId;
+    for (let depth = 0; depth < MAX_OPENER_DEPTH && openerId !== undefined; depth += 1) {
+      const opener = pages.find(page => page.id === openerId);
+      if (opener === undefined) return false;
+      const resolved: ResolvedSurface = {
+        surface: 'browser',
+        id: opener.id,
+        ...(opener.name === undefined ? {} : { name: opener.name }),
+        ...(opener.openedBy === undefined ? {} : { openedBy: opener.openedBy }),
+      };
+      if (openedByAgent(opener.openedBy, sessionId) || (await this.ports.control.isHanded(sessionId, resolved)))
+        return true;
+      openerId = opener.openerId;
+    }
+    return false;
   }
 
   /** Whether a person holds THIS surface. Holding one tab or terminal holds nothing else. */
@@ -736,9 +1080,10 @@ export class AgentToolService {
   private async record(
     caller: AgentToolCaller,
     call: AgentToolCall,
-    surface: ResolvedSurface | undefined,
+    facts: CallFacts,
     outcome: AuditOutcome,
   ): Promise<void> {
+    const surface = facts.surface;
     const key = surface === undefined ? ('name' in call ? call.name : undefined) : (surface.name ?? surface.id);
     const kind = kindOf(call);
     const detail: AuditDetail = {
@@ -746,6 +1091,7 @@ export class AgentToolService {
       by: caller.kind,
       ...(key === undefined || kind === undefined ? {} : { surface: surfaceReference(kind, key) }),
       ...callFacts(call),
+      ...facts.detail,
     };
     await this.ports.audit.record({
       event: 'agent.tool',
@@ -820,6 +1166,80 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return { sensitivity: call.sensitivity };
     case 'input.wait':
       return { timeoutMs: call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS };
+    case 'browser.dialog':
+      return {
+        action: call.action,
+        ...(call.promptText === undefined ? {} : { promptTextLength: call.promptText.length }),
+      };
+    case 'browser.tabs':
+      return { action: call.action };
+    case 'browser.wait_for':
+      return { waitKind: waitConditionOf(call).kind, timeoutMs: call.timeoutMs ?? BROWSER_WAIT_DEFAULT_MS };
+    case 'browser.console':
+      return {
+        ...(call.level === undefined ? {} : { level: call.level }),
+        ...(call.since === undefined ? {} : { since: call.since }),
+        ...(call.limit === undefined ? {} : { limit: call.limit }),
+      };
+    case 'browser.network':
+      return {
+        action: call.action,
+        ...(call.filter === undefined ? {} : { filterLength: call.filter.length }),
+        ...(call.types === undefined ? {} : { types: call.types.length }),
+      };
+    case 'browser.emulate':
+      return {
+        fields: Object.entries(call)
+          .filter(([key, value]) => key !== 'tool' && key !== 'name' && value !== undefined)
+          .map(([key]) => key)
+          .join(','),
+      };
+    case 'browser.upload':
+      return { ...targetFacts(call), files: call.files.length, mode: call.mode ?? 'input' };
+    case 'browser.download':
+      return call.id === undefined ? {} : { download: call.id };
+    case 'browser.pdf':
+      return {};
+    case 'browser.hover':
+      return targetFacts(call);
+    case 'browser.drag':
+      return {
+        from: dragEndFacts(call.fromRef, call.fromSelector, call.fromX),
+        to: dragEndFacts(call.toRef, call.toSelector, call.toX),
+        ...(call.steps === undefined ? {} : { steps: call.steps }),
+      };
+    case 'browser.mouse':
+      return {
+        mouse: call.action,
+        ...(call.x === undefined ? {} : { point: true }),
+        ...(call.button === undefined ? {} : { button: call.button }),
+      };
+    case 'browser.press':
+      return { keys: call.keys.length, ...targetFacts(call) };
+    case 'browser.scroll':
+      return {
+        scroll:
+          call.text !== undefined
+            ? 'text'
+            : call.pages !== undefined
+              ? 'pages'
+              : call.deltaX === undefined && call.deltaY === undefined
+                ? 'element'
+                : 'distance',
+        ...targetFacts(call),
+        ...(call.text === undefined ? {} : { textLength: call.text.length }),
+      };
+    case 'browser.select':
+      return { ...targetFacts(call), values: call.values.length };
+    case 'browser.check':
+      return { ...targetFacts(call), checked: call.checked };
+    case 'browser.fill_form':
+      return {
+        fields: call.fields.length,
+        textLength: call.fields.reduce((sum, field) => sum + (field.text?.length ?? 0), 0),
+      };
+    case 'browser.highlight':
+      return call.clear === true ? { clear: true } : targetFacts(call);
     default:
       return {};
   }
@@ -844,6 +1264,34 @@ function inputSummary(view: InputAgentView): string {
   }
 }
 
+/** The one thing a `browser.wait_for` waits for. The call schema already holds it to exactly one. */
+function waitConditionOf(call: Extract<AgentToolCall, { readonly tool: 'browser.wait_for' }>): BrowserWaitCondition {
+  const target = browserTargetOf(call);
+  if (target !== undefined && target.kind !== 'point')
+    return { kind: 'element', target, state: call.state ?? 'visible' };
+  if (call.text !== undefined) return { kind: 'text', text: call.text };
+  if (call.textGone !== undefined) return { kind: 'textGone', text: call.textGone };
+  if (call.url !== undefined) return { kind: 'url', url: call.url };
+  if (call.load !== undefined) return { kind: 'load', state: call.load };
+  return { kind: 'time', ms: call.time ?? 1 };
+}
+
+const dialogOf = (dialog: BrowserDialogInfo | undefined): { readonly dialog?: string } =>
+  dialog === undefined ? {} : { dialog: dialog.message };
+
+/** Told after any act on a page that has a dialog waiting: what it says, and what to do. */
+function dialogNote(dialog: BrowserDialogInfo | undefined, scrubbedMessage: string | undefined): string {
+  if (dialog === undefined) return '';
+  return ` A ${dialog.type} dialog is waiting on this page: "${scrubbedMessage ?? ''}". The page can do nothing until it is answered: use browser.dialog with accept or dismiss (it is dismissed on its own after 30 seconds).`;
+}
+
+/** One end of a drag, for the audit: a ref, a short selector, or only that it was a point. */
+function dragEndFacts(ref: string | undefined, selector: string | undefined, x: number | undefined): string {
+  if (ref !== undefined) return ref;
+  if (selector !== undefined) return `selector:${auditSelector(selector)}`;
+  return x === undefined ? 'unknown' : 'point';
+}
+
 /** What an act pointed at, for the audit: a ref, a short selector, or only that it was a point. */
 function targetFacts(fields: BrowserTargetFields): AuditDetail {
   if (fields.ref !== undefined) return { ref: fields.ref };
@@ -853,16 +1301,8 @@ function targetFacts(fields: BrowserTargetFields): AuditDetail {
 }
 
 /** The browser's own action for an agent tool's call. */
-function pageActionOf(
-  call: Extract<
-    AgentToolCall,
-    { readonly tool: 'browser.navigate' | 'browser.click' | 'browser.type' | 'browser.read' | 'browser.screenshot' }
-  >,
-): BrowserPageAction {
-  const element = {
-    ...(call.tool !== 'browser.navigate' && call.selector !== undefined ? { selector: call.selector } : {}),
-    ...(call.tool !== 'browser.navigate' && call.ref !== undefined ? { ref: call.ref } : {}),
-  };
+function pageActionOf(call: Extract<AgentToolCall, { readonly tool: PageToolName }>): BrowserPageAction {
+  const element = elementOfCall(call);
   switch (call.tool) {
     case 'browser.navigate':
       return call.url === undefined ? { action: call.history ?? 'reload' } : { action: 'navigate', url: call.url };
@@ -899,7 +1339,90 @@ function pageActionOf(
         ...(call.fullPage === true ? { fullPage: true } : {}),
         ...(call.format === undefined ? {} : { format: call.format }),
       };
+    case 'browser.hover':
+      return { action: 'hover', ...element, ...pointOf(call) };
+    case 'browser.drag': {
+      const { tool: _tool, name: _name, ...ends } = call;
+      return { action: 'drag', ...ends };
+    }
+    case 'browser.mouse': {
+      const { tool: _tool, name: _name, action: mouseAction, ...rest } = call;
+      return { action: 'mouse', mouseAction, ...rest };
+    }
+    case 'browser.press':
+      return { action: 'press', keys: call.keys, ...element };
+    case 'browser.scroll':
+      return {
+        action: 'scroll',
+        ...element,
+        ...(call.text === undefined ? {} : { text: call.text }),
+        ...(call.deltaX === undefined ? {} : { deltaX: call.deltaX }),
+        ...(call.deltaY === undefined ? {} : { deltaY: call.deltaY }),
+        ...(call.pages === undefined ? {} : { pages: call.pages }),
+      };
+    case 'browser.select':
+      return { action: 'select', ...element, values: call.values };
+    case 'browser.check':
+      return { action: 'check', ...element, checked: call.checked };
+    case 'browser.fill_form':
+      return { action: 'fill-form', fields: call.fields };
+    case 'browser.highlight':
+      return { action: 'highlight', ...element, ...(call.clear === true ? { clear: true as const } : {}) };
   }
+}
+
+/** The element an upload aims at, as the browser takes it. */
+function elementTargetOf(fields: BrowserTargetFields): BrowserElementTarget {
+  return fields.ref !== undefined
+    ? { kind: 'ref', ref: fields.ref }
+    : { kind: 'selector', selector: fields.selector as string };
+}
+
+/** The most uploaded files an audit record names; it holds twelve facts in all. */
+const AUDIT_NAMED_FILES = 4;
+
+/** The audit facts of an upload's files: their total size, and the first few by leaf name and size — never a path or content. */
+function uploadFacts(files: readonly { readonly name: string; readonly size: number }[]): AuditDetail {
+  const named: AuditDetail = {};
+  files.slice(0, AUDIT_NAMED_FILES).forEach((file, index) => {
+    named[`file${String(index + 1)}`] = `${file.name.slice(0, AGENT_FILE_LIMITS.nameChars)} (${String(file.size)} B)`;
+  });
+  return { bytes: files.reduce((sum, file) => sum + file.size, 0), ...named };
+}
+
+/** What an agent is told when a page has started downloads: each one's name and size, and how to keep it. */
+function downloadsNote(downloads: readonly BrowserDownloadNotice[], names: readonly string[] | undefined): string {
+  return downloads
+    .map((notice, index) => {
+      const name = names?.[index] ?? notice.name;
+      if (notice.state === 'failed') return ` A download (${name}) failed.`;
+      if (notice.state === 'downloading')
+        return ` A download started: ${name} is still arriving — save it with browser_download (id ${notice.id}) in a moment.`;
+      return ` A download started: ${name}, ${sizeWords(notice.size ?? 0)} — save it with browser_download (id ${notice.id}).`;
+    })
+    .join('');
+}
+
+/** The element fields of a page tool's call, if it carries any. */
+function elementOfCall(call: object): { selector?: string; ref?: string } {
+  const { selector, ref } = call as { selector?: unknown; ref?: unknown };
+  return {
+    ...(typeof selector === 'string' ? { selector } : {}),
+    ...(typeof ref === 'string' ? { ref } : {}),
+  };
+}
+
+function pointOf(call: { readonly x?: number | undefined; readonly y?: number | undefined }) {
+  return call.x === undefined || call.y === undefined ? {} : { x: call.x, y: call.y };
+}
+
+/**
+ * Told when an act put text in a password field. A real secret never belongs in a tool call: it would
+ * sit in the agent's transcript. The owner types it, on a page handed to them.
+ */
+function passwordNote(tool: PageToolName): string {
+  const wrote = tool === 'browser.fill_form' ? 'filled' : 'typed into';
+  return ` That act ${wrote} a password field. A real secret must never go in a tool call: hand the page to the owner with browser_ask_owner so they type it themselves.`;
 }
 
 /** Told after a snapshot: the refs in it are what every act accepts. */
@@ -930,6 +1453,7 @@ function translate(error: unknown): AgentToolError | undefined {
   if (error instanceof InputRequestError)
     return new AgentToolError(error.code === 'gone' ? 'not_found' : error.code, error.message);
   if (error instanceof TerminalMountError) return new AgentToolError(error.code, error.message);
+  if (error instanceof AgentFileError) return new AgentToolError(error.code, error.message);
   if (error instanceof BrowserTransportError) return fromWorker(error);
   if (!(error instanceof BrowserSessionError)) return undefined;
   if (error.code === 'launch_failed') return new AgentToolError('unavailable', browserUnavailable(error.message));

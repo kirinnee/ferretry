@@ -12,7 +12,7 @@ import {
   type AgentToolResult,
 } from '@ferretry/protocol';
 import { z } from 'zod';
-import type { TerminalWait } from '../agent-tools/client.ts';
+import type { BrowserWait, TerminalWait } from '../agent-tools/client.ts';
 import { renderToolResult } from '../agent-tools/controller.ts';
 import { instructionsReport, renderInstructionsReport } from '../instructions/report.ts';
 import { MCP_CONFIG_TOOLS, MCP_INSTRUCTIONS_TOOL, MCP_LESSON_TOOLS, MCP_TOOLS } from './tools.ts';
@@ -43,6 +43,8 @@ const MCP_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as cons
 export interface McpToolsPort {
   call(call: AgentToolCall): Promise<AgentToolResult>;
   wait(wait: TerminalWait): Promise<AgentToolResult>;
+  /** A `browser.wait_for` that may span several requests, like {@link wait}. */
+  browserWait(wait: BrowserWait): Promise<AgentToolResult>;
   /** One `config.*` call, as the agent (docs/config-files.md). */
   config(call: AgentConfigToolCall): Promise<AgentConfigToolResult>;
   /** One `lessons.suggest` call, as the agent (docs/learning.md). */
@@ -106,6 +108,11 @@ const WaitArgumentsSchema = z
     'give "text" to wait for, or "exit": true — one of them',
   );
 
+/** `browser_wait_for`'s arguments: the wire call, but with a budget that may span several requests. */
+const BrowserWaitArgumentsSchema = z.looseObject({
+  timeoutMs: z.number().int().min(100).max(AGENT_TOOL_MAX_TOTAL_WAIT_MS).optional(),
+});
+
 const failure = (id: JsonRpcId, code: number, message: string): JsonRpcResponse => ({
   jsonrpc: '2.0',
   id,
@@ -162,11 +169,35 @@ function content(result: AgentToolResult) {
  * declares with `false` as readily as it leaves it out, and both mean "off", so `false` is dropped
  * here rather than refused there.
  */
-const ON_ONLY_FLAGS: ReadonlySet<string> = new Set(['incognito', 'double', 'submit', 'slowly', 'boxes', 'fullPage']);
+const ON_ONLY_FLAGS: ReadonlySet<string> = new Set([
+  'incognito',
+  'double',
+  'submit',
+  'slowly',
+  'boxes',
+  'fullPage',
+  'reset',
+  'overwrite',
+  'clear',
+]);
+/** The same flags one level down, inside an emulation's `media` and `network`. */
+const ON_ONLY_NESTED: Readonly<Record<string, readonly string[]>> = { media: ['print'], network: ['offline'] };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 function withoutUnsetFlags(args: Readonly<Record<string, unknown>>): Record<string, unknown> {
   return Object.fromEntries(
-    Object.entries(args).filter(([key, value]) => !(ON_ONLY_FLAGS.has(key) && value === false)),
+    Object.entries(args)
+      .filter(([key, value]) => !(ON_ONLY_FLAGS.has(key) && value === false))
+      .map(([key, value]) => {
+        const nested = ON_ONLY_NESTED[key];
+        if (nested === undefined || !isRecord(value)) return [key, value];
+        return [
+          key,
+          Object.fromEntries(Object.entries(value).filter(([k, v]) => !(nested.includes(k) && v === false))),
+        ];
+      }),
   );
 }
 
@@ -269,6 +300,19 @@ export class McpServer {
           name,
           ...(text === undefined ? { exit: true } : { text }),
           totalMs: timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS,
+        });
+        return { jsonrpc: '2.0', id, result: content(result) };
+      }
+      if (tool.tool === 'browser.wait_for') {
+        const budget = BrowserWaitArgumentsSchema.safeParse(args);
+        if (!budget.success) return { jsonrpc: '2.0', id, result: toolError(refusal(budget.error)) };
+        const rest = Object.entries(withoutUnsetFlags(args)).filter(([key]) => key !== 'timeoutMs');
+        const probe = AgentToolCallSchema.safeParse({ ...Object.fromEntries(rest), tool: tool.tool });
+        if (!probe.success) return { jsonrpc: '2.0', id, result: toolError(refusal(probe.error)) };
+        if (probe.data.tool !== 'browser.wait_for') throw new Error('browser_wait_for is browser.wait_for');
+        const result = await this.tools.browserWait({
+          call: probe.data,
+          totalMs: budget.data.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS,
         });
         return { jsonrpc: '2.0', id, result: content(result) };
       }

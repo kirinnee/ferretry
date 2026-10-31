@@ -24,6 +24,8 @@ import {
 
 /** How long one act may wait for its element before it is refused. */
 export const BROWSER_ACT_TIMEOUT_MS = 30_000;
+/** How long a look at an element's own attributes may take: the element is already there. */
+export const BROWSER_PROBE_TIMEOUT_MS = 2_000;
 /** The most a read hands back; the daemon clips again to its own wire bound. */
 export const BROWSER_MAX_READ_CHARS = 200_000;
 /** The most matching lines a `find` hands back. */
@@ -41,6 +43,7 @@ export interface ActableLocator {
   fill(value: string, options: { readonly timeout: number }): Promise<void>;
   pressSequentially(text: string, options: { readonly timeout: number }): Promise<void>;
   press(key: string, options: { readonly timeout: number }): Promise<void>;
+  getAttribute(name: string, options: { readonly timeout: number }): Promise<string | null>;
   innerText(options: { readonly timeout: number }): Promise<string>;
   ariaSnapshot(options: {
     readonly timeout: number;
@@ -49,6 +52,23 @@ export interface ActableLocator {
     readonly boxes?: boolean;
   }): Promise<string>;
   screenshot(options: { readonly timeout: number; readonly type: BrowserScreenshotFormat }): Promise<Uint8Array>;
+  setInputFiles(files: string[], options: { readonly timeout: number }): Promise<void>;
+  /** Runs a function expression (as text) in the element; the answer is read, never trusted. */
+  evaluate(expression: string): Promise<unknown>;
+  scrollIntoViewIfNeeded(options: { readonly timeout: number }): Promise<void>;
+  boundingBox(options: {
+    readonly timeout: number;
+  }): Promise<{ readonly x: number; readonly y: number; readonly width: number; readonly height: number } | null>;
+}
+
+/** The file dialog a click opened. */
+export interface ActableFileChooser {
+  setFiles(files: string[], options: { readonly timeout: number }): Promise<void>;
+}
+
+/** A raw DevTools session on the page — only for the acts Playwright has no call for. */
+export interface ActableCdp {
+  send(method: string, params: Readonly<Record<string, unknown>>): Promise<unknown>;
 }
 
 export interface ActablePage {
@@ -72,6 +92,7 @@ export interface ActablePage {
     ): Promise<void>;
   };
   readonly keyboard: { down(key: string): Promise<void>; up(key: string): Promise<void> };
+  waitForEvent(event: 'filechooser', options: { readonly timeout: number }): Promise<ActableFileChooser>;
 }
 
 export interface BrowserClickOptions {
@@ -149,19 +170,35 @@ export async function clickOn(
   }
 }
 
+/**
+ * Whether this element is a password input. A real secret never belongs in a tool call, so the acts that
+ * put text in a field look first and say so; a field the check cannot read is simply not flagged.
+ */
+export async function isPasswordField(element: Pick<ActableLocator, 'getAttribute'>): Promise<boolean> {
+  const type = await element.getAttribute('type', { timeout: BROWSER_PROBE_TIMEOUT_MS }).catch(() => null);
+  return type?.trim().toLowerCase() === 'password';
+}
+
+/** What typing into a field found worth telling the agent. */
+export interface BrowserTypeOutcome {
+  readonly passwordField: boolean;
+}
+
 /** Replaces what a field holds with `text` — at once, or one key at a time — and presses Enter if asked. */
 export async function typeInto(
   page: ActablePage,
   target: BrowserElementTarget,
   text: string,
   options: BrowserTypeOptions = {},
-): Promise<void> {
+): Promise<BrowserTypeOutcome> {
   const field = await browserElementOf(page, target);
+  const passwordField = await isPasswordField(field);
   if (options.slowly === true) {
     await field.fill('', { timeout: BROWSER_ACT_TIMEOUT_MS });
     await field.pressSequentially(text, { timeout: BROWSER_ACT_TIMEOUT_MS });
   } else await field.fill(text, { timeout: BROWSER_ACT_TIMEOUT_MS });
   if (options.submit === true) await field.press('Enter', { timeout: BROWSER_ACT_TIMEOUT_MS });
+  return { passwordField };
 }
 
 /**
@@ -214,6 +251,70 @@ export async function shootPage(
           await browserElementOf(page, options.target)
         ).screenshot({ timeout: BROWSER_ACT_TIMEOUT_MS, type: format });
   return { base64: Buffer.from(bytes).toString('base64'), format };
+}
+
+/** How the files reach the page: into a file field (a dialog counts), or dropped on the element like a drag from the desktop. */
+export type BrowserUploadMode = 'input' | 'drop';
+
+const IS_FILE_INPUT = '(element) => element.tagName === "INPUT" && element.type === "file"';
+
+/**
+ * Hands `paths` (already confined by the daemon, absolute) to the page.
+ *
+ * INPUT: a `<input type=file>` takes them directly; anything else is clicked while the page's file
+ * dialog is awaited, and the dialog is answered with them — the way a person's click would. DROP: the
+ * element is scrolled into view and a drag-enter, drag-over and drop carrying the files land on its
+ * centre, for a drop zone that has no input behind it.
+ */
+export async function uploadFiles(
+  page: ActablePage,
+  cdp: ActableCdp,
+  target: BrowserElementTarget,
+  paths: readonly string[],
+  mode: BrowserUploadMode = 'input',
+): Promise<void> {
+  if (paths.length === 0) throw new Error('there is nothing to upload');
+  const element = await browserElementOf(page, target);
+  if (mode === 'input') {
+    if ((await element.evaluate(IS_FILE_INPUT)) === true) {
+      await element.setInputFiles([...paths], { timeout: BROWSER_ACT_TIMEOUT_MS });
+      return;
+    }
+    const chooser = page.waitForEvent('filechooser', { timeout: BROWSER_ACT_TIMEOUT_MS });
+    // A click that opens no dialog leaves this rejecting on the timeout; it is awaited below either way.
+    chooser.catch(() => undefined);
+    await element.click({ timeout: BROWSER_ACT_TIMEOUT_MS });
+    await (await chooser).setFiles([...paths], { timeout: BROWSER_ACT_TIMEOUT_MS });
+    return;
+  }
+  await element.scrollIntoViewIfNeeded({ timeout: BROWSER_ACT_TIMEOUT_MS });
+  const box = await element.boundingBox({ timeout: BROWSER_ACT_TIMEOUT_MS });
+  if (box === null || box.width <= 0 || box.height <= 0)
+    throw new Error('that element has no visible area to drop onto');
+  const x = Math.round(box.x + box.width / 2);
+  const y = Math.round(box.y + box.height / 2);
+  const data = { items: [], files: [...paths], dragOperationsMask: 1 };
+  for (const type of ['dragEnter', 'dragOver', 'drop'] as const)
+    await cdp.send('Input.dispatchDragEvent', { type, x, y, data });
+}
+
+/** The one-sentence refusal a window-mode browser earns for a PDF. */
+export const PDF_NEEDS_HEADLESS =
+  'PDF export needs the headless browser mode: a visible Chrome window cannot print to PDF, so switch the session browser to headless and try again';
+
+/** The page printed to PDF, as base64. */
+export async function printPdf(cdp: ActableCdp): Promise<string> {
+  let answer: unknown;
+  try {
+    answer = await cdp.send('Page.printToPDF', { printBackground: true, transferMode: 'ReturnAsBase64' });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/not implemented|not supported/iu.test(message)) throw new Error(PDF_NEEDS_HEADLESS);
+    throw error;
+  }
+  const data = (answer as { readonly data?: unknown } | null)?.data;
+  if (typeof data !== 'string' || data === '') throw new Error('the browser printed nothing');
+  return data;
 }
 
 /**

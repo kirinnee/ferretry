@@ -43,6 +43,8 @@ export interface QuarantineHold {
 export class QuarantineRegistry {
   private readonly held = new Map<string, Entry[]>();
   private next = 0;
+  /** Every id this process minted since boot: a replay never owns those, whatever the journal says of them. */
+  private readonly minted = new Set<string>();
   private locked: number | true | undefined;
 
   constructor(
@@ -78,7 +80,9 @@ export class QuarantineRegistry {
 
   /**
    * Bring a hold back as the journal had it (a restart): with its end time, or still unresolved. It adds
-   * the hold, keeping its id, and never replaces another. Nothing comes back for an end time that has passed.
+   * the hold, keeping its id, and never replaces another. Nothing comes back for an end time that has passed,
+   * or for an id this process minted: that hold is live (a delivery admitted while the replay ran) and keeps
+   * its own state until its owner settles or releases it.
    */
   restore(
     sessionId: string,
@@ -88,11 +92,9 @@ export class QuarantineRegistry {
   ): QuarantineHold | undefined {
     this.purge();
     if ((until !== 'in-flight' && until <= this.clock.now()) || names.length === 0) return undefined;
+    if (this.minted.has(id) || this.entryById(sessionId, id) !== undefined) return undefined;
     const hold: QuarantineHold = { id, sessionId, names: [...new Set(names)] };
-    this.held.set(sessionId, [
-      ...(this.held.get(sessionId) ?? []).filter(entry => entry.id !== id),
-      { id, names: hold.names, until },
-    ]);
+    this.held.set(sessionId, [...(this.held.get(sessionId) ?? []), { id, names: hold.names, until }]);
     return hold;
   }
 
@@ -103,6 +105,7 @@ export class QuarantineRegistry {
 
   unlock(): void {
     this.locked = undefined;
+    this.minted.clear();
   }
 
   /** Every terminal of one session is held for a window from now: its journal could not be replayed. */
@@ -180,6 +183,10 @@ export class QuarantineRegistry {
     return [...this.held.keys()];
   }
 
+  private entryById(sessionId: string, id: string): Entry | undefined {
+    return (this.held.get(sessionId) ?? []).find(entry => entry.id === id);
+  }
+
   private entry(hold: QuarantineHold): Entry | undefined {
     return (this.held.get(hold.sessionId) ?? []).find(entry => entry.id === hold.id);
   }
@@ -198,6 +205,7 @@ export class QuarantineRegistry {
       this.next += 1;
       id = `${owner}/${String(this.next)}`;
     } while (taken.has(id));
+    this.minted.add(id);
     return id;
   }
 

@@ -10,8 +10,9 @@
 import { formatTaskRef } from '@ferretry/protocol';
 import { CornerDownRight } from 'lucide-react';
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ANSWER_AT_REST, type BoardAnswerState } from '../../lib/board-done.ts';
+import { ANSWER_AT_REST, answerRowOf, type BoardAnswerState } from '../../lib/board-done.ts';
 import { isAgentTask } from '../../lib/board-human.ts';
+import type { BoardModel } from '../../lib/board-model.ts';
 import { cardSegments } from '../../lib/board-present.ts';
 import {
   SUMMARY_SECTIONS,
@@ -22,7 +23,6 @@ import {
   summarySections,
 } from '../../lib/board-summary.ts';
 import { type BoardCardOf, type BoardListRow, listRows } from '../../lib/board-view.ts';
-import type { BoardModel } from '../../lib/board-model.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { ToTestActions } from './board-card.tsx';
 import { BoardDoneAction } from './board-done-action.tsx';
@@ -217,7 +217,7 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
   const place = env.places.get(card.key);
   const done = action && place !== undefined ? env.doneFor?.(card, place) : undefined;
   const moves = action && place !== undefined ? env.movesFor(card, place) : undefined;
-  const verdict = moves !== undefined && row.category === 'verify';
+  const answerRow = answerRowOf({ category: row.category, movable: moves !== undefined, done: done?.done ?? null });
   const answer = env.answerFor?.(card) ?? ANSWER_AT_REST;
   const href = env.hrefFor(card);
   const extras = cardSegments(task, { names: env.names, now: env.now, category: row.category, machine: null }).filter(
@@ -271,7 +271,7 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
         <span className="fy-board-summary__when">{entry.when}</span>
       </div>
       <div className="fy-board-summary__act">
-        {verdict ? (
+        {answerRow === 'verdict' && moves !== undefined ? (
           <ToTestActions answer={answer} card={card} done={done} moves={moves} touch={env.touch === true} />
         ) : done === undefined ? null : (
           <BoardDoneAction

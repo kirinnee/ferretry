@@ -197,6 +197,33 @@ describe('QuarantineRegistry', () => {
     should(quarantine.until(SESSION, ['a'])).equal(clock.ms + 120_000);
   });
 
+  it('should leave a live hold as it is when a replay names its id, and still bring back what it minted nothing for', () => {
+    const { clock, quarantine } = registry();
+    quarantine.lock();
+    const live = quarantine.begin(SESSION, ['dev', '000000000001'], 'req');
+
+    const again = quarantine.restore(SESSION, ['dev', '000000000001'], 'in-flight', live.id);
+    const other = quarantine.restore(SESSION, ['old'], 'in-flight', 'gone/1');
+    quarantine.unlock();
+
+    should(again).be.undefined();
+    should(other?.id).equal('gone/1');
+    should(quarantine.unresolved(SESSION).map(hold => hold.id)).eql([live.id, 'gone/1']);
+    quarantine.settle(live);
+    clock.ms += 1;
+    should(quarantine.unresolved(SESSION).map(hold => hold.id)).eql(['gone/1']);
+  });
+
+  it('should not let a replay replace a hold already in the registry under that id', () => {
+    const { quarantine } = registry();
+    quarantine.restore(SESSION, ['a'], 'in-flight', 'r/1');
+
+    const again = quarantine.restore(SESSION, ['b'], 'in-flight', 'r/1');
+
+    should(again).be.undefined();
+    should(quarantine.until(SESSION, ['b'])).be.undefined();
+  });
+
   it('should restore an unresolved hold with all its names, holding until it is settled to a fresh window', () => {
     const { clock, quarantine } = registry();
     quarantine.lock();

@@ -668,7 +668,16 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     actOnPage: async () => {
       throw new Error('not exercised by the surface inventory');
     },
+    filesOnPage: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
     closePage: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    lifecycleOnPage: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    adoptPage: async () => {
       throw new Error('not exercised by the surface inventory');
     },
     releaseSession: async () => undefined,
@@ -843,6 +852,7 @@ describe('the mounted daemon surface', () => {
       9 + // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
       2 + // the performance profile: start one, and read it back by id (`fy daemon profile`)
       1 + // one transcript image by its handle: the log's `[fy-image …]` marker, governed exactly like `logs` (docs/grants.md)
+      1 + // one page of the chat's transcript, the tail or the page before a byte, governed exactly like `logs` (docs/grants.md)
       1 + // handing a web address to this computer's own browser (loopback caller only)
       3 + // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
       3 + // a ferret's processes: the list, one process's output, and Stop
@@ -1197,6 +1207,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/events',
       'GET /v1/sessions/:sessionId/snapshot',
       'GET /v1/sessions/:sessionId/logs',
+      'GET /v1/sessions/:sessionId/log-page',
       'GET /v1/sessions/:sessionId/messages',
       'GET /v1/sessions/:sessionId/transcript-images/:handle',
       // The attach proof. It sits with the operator reads but authorizes a local process action

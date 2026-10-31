@@ -192,6 +192,8 @@ const probe = {
   stages: [] as string[],
   checks: 0,
   frames: 0,
+  /** Every stage a check ran in: what "watched at every stage" means, whatever the frame rate was. */
+  checkedStages: [] as string[],
   violations: [] as Violation[],
   done: false,
   goto: (_index: number): void => undefined,
@@ -207,6 +209,7 @@ const first = new Map<string, Element>();
 const check = (): void => {
   if (document.querySelector('.fy-transcript-content') === null) return;
   probe.checks += 1;
+  if (!probe.checkedStages.includes(probe.stage)) probe.checkedStages.push(probe.stage);
   for (const send of sends) {
     const found = bubblesFor(send.marker);
     if (found.length !== 1) {

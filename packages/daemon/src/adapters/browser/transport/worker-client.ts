@@ -1,8 +1,9 @@
 import { dirname } from 'node:path';
 import type {
   BrowserElementTarget,
+  BrowserPageLifecycleReply,
+  BrowserPageLifecycleRequest,
   BrowserInputEvent,
-  BrowserPageActionSnapshot,
   BrowserPageSnapshot,
   BrowserScreencastFrame,
   BrowserScreenshotFormat,
@@ -11,6 +12,7 @@ import type {
 } from '@ferretry/protocol';
 import {
   type BrowserAutomation,
+  type BrowserPageActed,
   BrowserFrameGovernor,
   BrowserTransportError,
   type BrowserClickOptions,
@@ -18,16 +20,29 @@ import {
   type BrowserReadOptions,
   type BrowserScreenshotOptions,
   type BrowserTypeOptions,
+  type BrowserUploadMode,
+  type PointerAct,
   WorkerLineAssembler,
+  type WorkerStagedFile,
   type WorkerSnapshotResult,
   boundedReadText,
   boundedScreenshot,
   encodeWorkerRequest,
+  normalizeLifecycleReply,
   normalizeWorkerActionSnapshot,
+  normalizeWorkerDialog,
   normalizeWorkerSnapshot,
+  normalizeWorkerStaged,
   parseWorkerLine,
 } from '../../../lib/index.ts';
 import { SystemFrameClock } from './system-frame-clock.ts';
+
+/** A worker answer as a snapshot, with the dialog the acted page is waiting on beside it. */
+function acted(raw: unknown): BrowserPageActed {
+  const snapshot = unwrap(normalizeWorkerActionSnapshot(raw));
+  const dialog = normalizeWorkerDialog(raw);
+  return dialog === undefined ? snapshot : { ...snapshot, dialog };
+}
 
 export const READY_TIMEOUT_MS = 15_000;
 export const REQUEST_TIMEOUT_MS = 60_000;
@@ -45,6 +60,8 @@ export interface WorkerClientOptions {
   readonly workerExecutable?: boolean;
   /** Argument the worker connects to; opaque to the client. */
   readonly endpoint: string;
+  /** The daemon-owned directory the worker stages downloads and PDFs in; without one it stages nothing. */
+  readonly stageDirectory?: string;
   readonly cwd?: string;
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly readyTimeoutMs?: number;
@@ -161,9 +178,11 @@ export class BrowserWorkerClient implements BrowserAutomation {
   /** Spawns the worker and waits for its ready record, killing it if that never arrives. */
   static async connect(options: WorkerClientOptions): Promise<BrowserWorkerClient> {
     const child = Bun.spawn(
-      options.workerExecutable
-        ? [options.workerEntry, options.endpoint]
-        : [options.runtime, options.workerEntry, options.endpoint],
+      [
+        ...(options.workerExecutable ? [options.workerEntry] : [options.runtime, options.workerEntry]),
+        options.endpoint,
+        ...(options.stageDirectory === undefined ? [] : [options.stageDirectory]),
+      ],
       {
         cwd: options.cwd ?? dirname(options.workerEntry),
         env: workerEnvironment(options.environment ?? {}),
@@ -189,11 +208,11 @@ export class BrowserWorkerClient implements BrowserAutomation {
     }
   }
 
-  navigate(pageId: string, url: string): Promise<BrowserPageActionSnapshot> {
+  navigate(pageId: string, url: string): Promise<BrowserPageActed> {
     return this.action('navigate', { pageId, url });
   }
 
-  click(pageId: string, target: BrowserTarget, options: BrowserClickOptions = {}): Promise<BrowserPageActionSnapshot> {
+  click(pageId: string, target: BrowserTarget, options: BrowserClickOptions = {}): Promise<BrowserPageActed> {
     return this.action('click', { pageId, target, ...options });
   }
 
@@ -202,45 +221,76 @@ export class BrowserWorkerClient implements BrowserAutomation {
     target: BrowserElementTarget,
     text: string,
     options: BrowserTypeOptions = {},
-  ): Promise<BrowserPageActionSnapshot> {
+  ): Promise<BrowserPageActed> {
     return this.action('type', { pageId, target, text, ...options });
   }
 
-  async read(
-    pageId: string,
-    options: BrowserReadOptions = {},
-  ): Promise<BrowserPageActionSnapshot & { readonly text: string }> {
+  pointer(pageId: string, act: PointerAct): Promise<BrowserPageActed> {
+    return this.action('pointer', { pageId, act });
+  }
+
+  async read(pageId: string, options: BrowserReadOptions = {}): Promise<BrowserPageActed & { readonly text: string }> {
     const raw = await this.request('read', { pageId, ...options });
-    return { ...unwrap(normalizeWorkerActionSnapshot(raw)), text: boundedReadText(raw) };
+    return { ...acted(raw), text: boundedReadText(raw) };
   }
 
   async screenshot(
     pageId: string,
     options: BrowserScreenshotOptions = {},
   ): Promise<
-    BrowserPageActionSnapshot & {
+    BrowserPageActed & {
       readonly screenshotBase64: string;
       readonly screenshotFormat: BrowserScreenshotFormat;
     }
   > {
     const raw = await this.request('screenshot', { pageId, ...options });
     return {
-      ...unwrap(normalizeWorkerActionSnapshot(raw)),
+      ...acted(raw),
       screenshotBase64: boundedScreenshot(raw),
       // An older worker sends no format; its screenshots were always PNG.
       screenshotFormat: (raw as { screenshotFormat?: unknown }).screenshotFormat === 'jpeg' ? 'jpeg' : 'png',
     };
   }
 
-  back(pageId: string): Promise<BrowserPageActionSnapshot> {
+  upload(
+    pageId: string,
+    target: BrowserElementTarget,
+    paths: readonly string[],
+    mode: BrowserUploadMode,
+  ): Promise<BrowserPageActed> {
+    return this.action('upload', { pageId, target, paths, mode });
+  }
+
+  async download(
+    pageId: string,
+    downloadId?: string,
+  ): Promise<BrowserPageActed & { readonly staged: WorkerStagedFile }> {
+    return await this.staged('download', { pageId, ...(downloadId === undefined ? {} : { downloadId }) });
+  }
+
+  async pdf(pageId: string): Promise<BrowserPageActed & { readonly staged: WorkerStagedFile }> {
+    return await this.staged('pdf', { pageId });
+  }
+
+  private async staged(
+    method: string,
+    params: Readonly<Record<string, unknown>>,
+  ): Promise<BrowserPageActed & { readonly staged: WorkerStagedFile }> {
+    const raw = await this.request(method, params);
+    const staged = normalizeWorkerStaged(raw);
+    if (staged === undefined) throw new BrowserTransportError('upstream_failed', 'browser worker staged no file', 502);
+    return { ...unwrap(normalizeWorkerActionSnapshot(raw)), staged };
+  }
+
+  back(pageId: string): Promise<BrowserPageActed> {
     return this.action('back', { pageId });
   }
 
-  forward(pageId: string): Promise<BrowserPageActionSnapshot> {
+  forward(pageId: string): Promise<BrowserPageActed> {
     return this.action('forward', { pageId });
   }
 
-  reload(pageId: string): Promise<BrowserPageActionSnapshot> {
+  reload(pageId: string): Promise<BrowserPageActed> {
     return this.action('reload', { pageId });
   }
 
@@ -248,20 +298,20 @@ export class BrowserWorkerClient implements BrowserAutomation {
     return unwrap(normalizeWorkerSnapshot(await this.request('location', pageId === undefined ? {} : { pageId })));
   }
 
-  newPage(options: { readonly url?: string; readonly incognito?: boolean }): Promise<BrowserPageActionSnapshot> {
+  newPage(options: { readonly url?: string; readonly incognito?: boolean }): Promise<BrowserPageActed> {
     return this.action('newPage', {
       ...(options.url === undefined ? {} : { url: options.url }),
       ...(options.incognito === true ? { incognito: true } : {}),
     });
   }
 
-  closePage(pageId: string): Promise<BrowserPageActionSnapshot> {
+  closePage(pageId: string): Promise<BrowserPageActed> {
     this.casts.get(pageId)?.governor.dispose();
     this.casts.delete(pageId);
     return this.action('closePage', { pageId });
   }
 
-  resize(pageId: string, viewport: BrowserViewport): Promise<BrowserPageActionSnapshot> {
+  resize(pageId: string, viewport: BrowserViewport): Promise<BrowserPageActed> {
     return this.action('resize', { pageId, width: viewport.width, height: viewport.height });
   }
 
@@ -366,8 +416,16 @@ export class BrowserWorkerClient implements BrowserAutomation {
     }
   }
 
-  private async action(method: string, params: Readonly<Record<string, unknown>>): Promise<BrowserPageActionSnapshot> {
-    return unwrap(normalizeWorkerActionSnapshot(await this.request(method, params)));
+  async lifecycle(
+    pageId: string,
+    request: BrowserPageLifecycleRequest,
+  ): Promise<BrowserPageActed & { readonly lifecycle: BrowserPageLifecycleReply }> {
+    const raw = await this.request('lifecycle', { pageId, request });
+    return { ...acted(raw), lifecycle: normalizeLifecycleReply(raw) };
+  }
+
+  private async action(method: string, params: Readonly<Record<string, unknown>>): Promise<BrowserPageActed> {
+    return acted(await this.request(method, params));
   }
 
   private async request(method: string, params: Readonly<Record<string, unknown>>): Promise<unknown> {

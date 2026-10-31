@@ -40,6 +40,7 @@ describe('FyApiClient construction and generic requests', () => {
       'history',
       'interrupt',
       'list',
+      'logPage',
       'logs',
       'messages',
       'migrate',

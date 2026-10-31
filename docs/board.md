@@ -118,6 +118,13 @@ board's To test. A card with nothing to say lands by its lane's category, as a r
 and safe under races: runs never overlap, a card someone (not the daemon) refiled to Unfiled on purpose stays there,
 and a ferret whose folder names no board is asked again only after ten minutes.
 
+A project registered before projects got lanes (or by hand, with none proposed yet) is given the lanes its folder
+suggests first (`InferredLaneProposer`: unconfirmed, live at once, the owner's one agenda choice raised as the card's
+ferret), and the card is refiled in the same pass. A project whose `origin` uses an SSH host alias
+(`github-personal:kirinnee/ferretry.git`, with `HostName github.com` in `~/.ssh/config`) is known by its GitHub
+repository too: the daemon asks `ssh -G <alias>` where the alias goes, which reads the ssh config and connects to
+nothing.
+
 `fy board lanes show|propose|edit --project <name|id>` and `fy board --project <name|id|all>` name a board by its
 name or id, wherever the flag is written on the line.
 
@@ -372,7 +379,9 @@ than that move merges. History names the fact; no move is ever typed into a chat
 ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)).
 
 The watcher itself polls GitHub through the host's `gh` about once a minute while a repository has an open linked
-PR, and every ten minutes otherwise, and after `gh` is missing or signed out.
+PR, and every ten minutes otherwise, and after `gh` is missing or signed out. Every tick also re-reads each open card's lane set
+and reconciles the card against it, PRs that can no longer change included, so a lane set that gains a lane (the
+boot migrations) moves its cards on the first tick after boot, with no call to GitHub.
 
 ## Dependencies
 

@@ -62,6 +62,8 @@ export interface AgendaAddOptions extends AgendaCommandOptions, Omit<BriefFlags,
   readonly jsonFile?: string;
   /** A Markdown file for the body; `-` reads standard input. */
   readonly bodyFile?: string;
+  /** `--offer-close`: the owner's tap may also close the card the item belongs to. */
+  readonly offerClose?: boolean;
 }
 
 /** Flags that reword an open item. */
@@ -180,7 +182,8 @@ export class AgendaController {
       file,
     );
     requireBrief(composed);
-    const request = flag.card === undefined ? composed : await this.#withCard(composed, flag.card);
+    const carded = flag.card === undefined ? composed : await this.#withCard(composed, flag.card);
+    const request = options.offerClose === true ? await this.#withOfferClose(carded) : carded;
     const sessionId = this.#target(options);
 
     // The board is read first so the item just raised can be named by identity rather than guessed at
@@ -394,6 +397,22 @@ export class AgendaController {
     if ((await this.gateway.features()).includes(DAEMON_FEATURES.agendaTask)) return { ...request, task: card };
     this.out.diagnostic(
       `this daemon is older than agenda items tied to cards, so the item is raised without ${formatTaskRef(card)}; update the daemon to tie it`,
+    );
+    return request;
+  }
+
+  /**
+   * The add with `offerClose`, sent only to a daemon that reports `agenda.offer-close.1`: an older one refuses
+   * the whole add over the field, so the item is raised without the Done button there and the person is told.
+   */
+  async #withOfferClose(
+    request: Extract<AgendaActionRequest, { action: 'add' }>,
+  ): Promise<Extract<AgendaActionRequest, { action: 'add' }>> {
+    if ((await this.gateway.features()).includes(DAEMON_FEATURES.agendaOfferClose)) {
+      return { ...request, offerClose: true };
+    }
+    this.out.diagnostic(
+      'this daemon is older than the Done button on agenda items, so the item is raised without it; update the daemon to offer it',
     );
     return request;
   }

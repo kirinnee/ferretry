@@ -9,8 +9,10 @@ import type {
 import should from 'should';
 import {
   type BrowserIdlePolicy,
+  type BrowserPageAction,
   BrowserSessionError,
   BrowserSessionService,
+  pendingDialogOf,
 } from '../../../../src/lib/browser/runtime/service.ts';
 import type { BrowserAutomation } from '../../../../src/lib/browser/transport/automation-contracts.ts';
 
@@ -27,6 +29,10 @@ class Tabs {
   readonly casts = new Map<string, Set<(frame: BrowserScreencastFrame) => void>>();
   pages: Page[] = [{ id: 'p0', url: 'about:blank', title: '' }];
   castFailure: Error | undefined;
+  /** A dialog the worker reports on the page of every result, as a worker with a dialog open does. */
+  dialog: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; message: string } | undefined;
+  /** While set, a click does not return: the page's queue is stuck behind it, as it is behind a dialog. */
+  clickGate: Promise<void> | undefined;
   private minted = 0;
   private exited!: (code: number) => void;
   readonly exit = new Promise<number>(resolve => {
@@ -67,10 +73,23 @@ class Tabs {
       this.pages = this.pages.map(page => (page.id === pageId ? { ...page, url } : page));
       return this.acted('navigate', pageId);
     },
-    click: async pageId => this.acted('click', pageId),
+    click: async pageId => {
+      await this.clickGate;
+      return { ...this.acted('click', pageId), ...(this.dialog === undefined ? {} : { dialog: this.dialog }) };
+    },
     type: async pageId => this.acted('type', pageId),
+    pointer: async (pageId, act) => this.acted(`pointer-${act.action}`, pageId),
     read: async (pageId, options) => ({ ...this.acted(`read-${options?.mode ?? 'text'}`, pageId), text: 'hello' }),
     screenshot: async pageId => ({ ...this.acted('screenshot', pageId), screenshotBase64: 'iVBOR' }),
+    upload: async pageId => this.acted('upload', pageId),
+    download: async pageId => ({
+      ...this.acted('download', pageId),
+      staged: { path: '/stage/dl-1', name: 'report.csv', size: 3 },
+    }),
+    pdf: async pageId => ({
+      ...this.acted('pdf', pageId),
+      staged: { path: '/stage/pdf-1', name: 'page.pdf', size: 5 },
+    }),
     back: async pageId => this.acted('back', pageId),
     forward: async pageId => this.acted('forward', pageId),
     reload: async pageId => this.acted('reload', pageId),
@@ -92,6 +111,11 @@ class Tabs {
       return { ...this.state(), actedPageId: pageId };
     },
     resize: async (pageId, viewport) => this.acted(`resize-${String(viewport.width)}`, pageId),
+    lifecycle: async (pageId, request) => ({
+      ...this.acted(`lifecycle-${request.op}`, pageId),
+      ...(this.dialog === undefined ? {} : { dialog: this.dialog }),
+      lifecycle: { text: `did ${request.op}`, ...(request.op === 'wait' ? { matched: true } : {}) },
+    }),
     startScreencast: async (pageId, _viewport, listener) => {
       if (this.castFailure !== undefined) throw this.castFailure;
       const set = this.casts.get(pageId) ?? new Set();
@@ -186,6 +210,18 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
       { action: 'screenshot' },
     ] as const)
       await service.actOnPage('s1', 'app', action);
+    const pointerActions: BrowserPageAction[] = [
+      { action: 'hover', ref: 'e1' },
+      { action: 'drag', fromRef: 'e1', toRef: 'e2' },
+      { action: 'mouse', mouseAction: 'up' },
+      { action: 'press', keys: ['Enter'] },
+      { action: 'scroll', pages: 1 },
+      { action: 'select', ref: 'e1', values: ['a'] },
+      { action: 'check', ref: 'e1', checked: true },
+      { action: 'fill-form', fields: [{ ref: 'e1', text: 'a' }] },
+      { action: 'highlight', clear: true },
+    ];
+    for (const action of pointerActions) await service.actOnPage('s1', 'app', action);
     const foreign = await failure(service.actOnPage('s1', other.id, { action: 'click', selector: 'a' }));
 
     // Assert — every act went to s1's page; s2's page of the same name was never touched.
@@ -195,6 +231,9 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
       `type:${app.id}`,
       `read-a11y:${app.id}`,
       `screenshot:${app.id}`,
+      ...['hover', 'drag', 'mouse', 'press', 'scroll', 'select', 'check', 'fill-form', 'highlight'].map(
+        kind => `pointer-${kind}:${app.id}`,
+      ),
     ]);
     should(foreign).match({ code: 'not_found' });
   });
@@ -248,6 +287,61 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
     );
     should(refused.message).equal('a person holds it');
     should(tabs.calls.filter(call => call.startsWith('click'))).deepEqual([]);
+  });
+
+  it('should run the file tools on the named page, return what the worker staged, and keep the page list current', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    const app = await service.openPage('s1', 'app');
+
+    // Act
+    const uploaded = await service.filesOnPage('s1', 'app', {
+      action: 'upload',
+      target: { kind: 'selector', selector: '#f' },
+      paths: ['/upload/0'],
+      mode: 'input',
+    });
+    const downloaded = await service.filesOnPage('s1', 'app', { action: 'download' });
+    const printed = await service.filesOnPage('s1', app.id, { action: 'pdf' });
+
+    // Assert
+    should(tabs.calls.filter(call => !call.startsWith('new'))).deepEqual([
+      `upload:${app.id}`,
+      `download:${app.id}`,
+      `pdf:${app.id}`,
+    ]);
+    should(uploaded.staged).be.undefined();
+    should(downloaded.staged).deepEqual({ path: '/stage/dl-1', name: 'report.csv', size: 3 });
+    should(printed.staged).deepEqual({ path: '/stage/pdf-1', name: 'page.pdf', size: 5 });
+    should(printed.result).not.have.property('staged');
+    should(printed.status.pages.map(page => page.id)).containEql(app.id);
+  });
+
+  it('should keep one session’s file tools off another session’s page, and refuse a page that is not there', async () => {
+    const { tabs, service } = harness();
+    const other = await service.openPage('s2', 'app');
+    await service.openPage('s1', 'mine');
+
+    const foreign = await failure(service.filesOnPage('s1', other.id, { action: 'pdf' }));
+    const missing = await failure(service.filesOnPage('s1', 'nope', { action: 'download' }));
+
+    should(foreign).match({ code: 'not_found' });
+    should(missing).match({ code: 'not_found' });
+    should(tabs.calls.filter(call => call.startsWith('pdf') || call.startsWith('download'))).deepEqual([]);
+  });
+
+  it('should let a guard refuse a file act from inside the page’s queue, before the browser is touched', async () => {
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+
+    const refused = await failure(
+      service.filesOnPage('s1', 'app', { action: 'pdf' }, async () => {
+        throw new BrowserSessionError('conflict', 'a person holds it');
+      }),
+    );
+
+    should(refused.message).equal('a person holds it');
+    should(tabs.calls.filter(call => call.startsWith('pdf'))).deepEqual([]);
   });
 
   it('should refuse a name in use, and a page past the session’s or the machine’s cap — never hide it', async () => {
@@ -626,3 +720,165 @@ describe('the machine agent browser — its life', () => {
 function activeOf(status: unknown): string {
   return (status as { readonly activePageId: string }).activePageId;
 }
+
+describe('the machine agent browser — a page’s lifecycle', () => {
+  it('should answer a dialog and read the logs without waiting for the act the dialog is blocking', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    const app = await service.openPage('s1', 'app');
+    let release: () => void = () => undefined;
+    tabs.clickGate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const stuck = service.actOnPage('s1', 'app', { action: 'click', selector: 'button' });
+    await Promise.resolve();
+
+    // Act
+    const dialog = await service.lifecycleOnPage('s1', 'app', { op: 'dialog', action: 'accept' });
+    const logs = await service.lifecycleOnPage('s1', 'app', { op: 'console' });
+    const requests = await service.lifecycleOnPage('s1', 'app', { op: 'network', action: 'list' });
+    release();
+    await stuck;
+
+    // Assert
+    should(dialog.reply.text).equal('did dialog');
+    should(logs.reply.text).equal('did console');
+    should(requests.reply.text).equal('did network');
+    should(tabs.calls).containEql(`lifecycle-dialog:${app.id}`);
+  });
+
+  it('should queue a wait and an emulation behind the page’s other work', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    let release: () => void = () => undefined;
+    tabs.clickGate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const stuck = service.actOnPage('s1', 'app', { action: 'click', selector: 'button' });
+    await Promise.resolve();
+
+    // Act
+    const waiting = service.lifecycleOnPage('s1', 'app', {
+      op: 'wait',
+      condition: { kind: 'load', state: 'load' },
+      timeoutMs: 500,
+    });
+    await new Promise(resolve => setTimeout(resolve, 10));
+    const before = tabs.calls.filter(call => call.startsWith('lifecycle'));
+    release();
+    await stuck;
+    const outcome = await waiting;
+
+    // Assert
+    should(before).deepEqual([]);
+    should(outcome.reply).deepEqual({ text: 'did wait', matched: true });
+  });
+
+  it('should let a guard refuse a lifecycle request, queued or not', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    const guard = async (): Promise<void> => {
+      throw new BrowserSessionError('conflict', 'a person holds it');
+    };
+
+    // Act
+    const dialog = await failure(service.lifecycleOnPage('s1', 'app', { op: 'dialog', action: 'dismiss' }, guard));
+    const wait = await failure(
+      service.lifecycleOnPage('s1', 'app', { op: 'wait', condition: { kind: 'time', ms: 5 }, timeoutMs: 100 }, guard),
+    );
+
+    // Assert
+    should(dialog.message).equal('a person holds it');
+    should(wait.message).equal('a person holds it');
+    should(tabs.calls.filter(call => call.startsWith('lifecycle'))).deepEqual([]);
+  });
+
+  it('should refuse a lifecycle request on a page of another session', async () => {
+    // Arrange
+    const { service } = harness();
+    const other = await service.openPage('s2', 'app');
+
+    // Act
+    const refused = await failure(service.lifecycleOnPage('s1', other.id, { op: 'console' }));
+
+    // Assert
+    should(refused.code).equal('not_found');
+  });
+
+  it('should hand the dialog a lifecycle request left pending back to the agent’s service', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    tabs.dialog = { type: 'confirm', message: 'Leave the page?' };
+
+    // Act
+    const outcome = await service.lifecycleOnPage('s1', 'app', { op: 'console' });
+
+    // Assert
+    should(outcome.dialog).deepEqual({ type: 'confirm', message: 'Leave the page?' });
+  });
+
+  it('should keep a dialog off the person’s response but on the agent’s', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    tabs.dialog = { type: 'alert', message: 'Saved' };
+
+    // Act
+    const agents = await service.actOnPage('s1', 'app', { action: 'click', selector: 'a' });
+    const person = await service.act('s1', { action: 'click', selector: 'a' });
+
+    // Assert
+    const resultOf = (response: object): unknown => ('result' in response ? response.result : undefined);
+    should(pendingDialogOf(resultOf(agents))).deepEqual({ type: 'alert', message: 'Saved' });
+    should(pendingDialogOf(resultOf(person))).be.undefined();
+    should(resultOf(person)).not.have.property('dialog');
+  });
+
+  it('should pass an emulated viewport and a reset through to the worker', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+
+    // Act
+    await service.lifecycleOnPage('s1', 'app', { op: 'emulate', emulation: { viewport: { width: 390, height: 844 } } });
+    await service.lifecycleOnPage('s1', 'app', { op: 'emulate', emulation: { reset: true } });
+
+    // Assert
+    should(tabs.calls.filter(call => call.startsWith('lifecycle-emulate'))).have.length(2);
+  });
+
+  it('should name an unnamed popup and credit the agent that adopted it', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    const app = await service.openPage('s1', 'app');
+    tabs.pages.push({ id: 'popup', url: 'https://pop.test/', title: '', openerId: app.id });
+
+    // Act
+    const adopted = await service.adoptPage('s1', 'popup', 'checkout', { by: 'agent', sessionId: 's1' });
+    const listed = (await service.status('s1')).pages.find(page => page.id === 'popup');
+    const again = await failure(service.adoptPage('s1', 'popup', 'other'));
+    const taken = await failure(service.adoptPage('s1', 'p0', 'app'));
+
+    // Assert
+    should(adopted).match({ id: 'popup', name: 'checkout', openedBy: { by: 'agent', sessionId: 's1' } });
+    should(listed).match({ name: 'checkout', openerId: app.id });
+    should(again.code).equal('conflict');
+    should(taken.code).equal('not_found');
+  });
+
+  it('should refuse to adopt a page to a name this session already uses', async () => {
+    // Arrange
+    const { tabs, service } = harness();
+    const app = await service.openPage('s1', 'app');
+    tabs.pages.push({ id: 'popup', url: 'https://pop.test/', title: '', openerId: app.id });
+
+    // Act
+    const taken = await failure(service.adoptPage('s1', 'popup', 'app'));
+
+    // Assert
+    should(taken.code).equal('conflict');
+  });
+});

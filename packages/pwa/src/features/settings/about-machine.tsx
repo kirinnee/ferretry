@@ -26,9 +26,9 @@ import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
 import { Badge, Button } from '../../shell/primitives.tsx';
-import { useWhatsNewEntry } from '../whats-new/whats-new-host.tsx';
 import { CommandBlock } from '../onboarding/command-block.tsx';
 import { browserClipboardWriter, type ClipboardWriter } from '../onboarding/copy-button.tsx';
+import { useWhatsNewEntry } from '../whats-new/whats-new-host.tsx';
 import {
   changelogRelease,
   checkWords,
@@ -311,6 +311,23 @@ export interface AboutMachineSurfaceProps {
   readonly write?: ClipboardWriter;
 }
 
+/** The release notes ship inside the app, so their door stays open when this machine's update read does not answer. */
+function WhatsNewDoor() {
+  const whatsNew = useWhatsNewEntry();
+  if (whatsNew === null) return null;
+  return (
+    <Button size="sm" className="mt-3 min-h-[44px]" onClick={whatsNew.open} data-about-whats-new="">
+      <Sparkles size={13} aria-hidden="true" />
+      What’s new
+      {whatsNew.unread ? (
+        <Badge tone="accent" data-about-whats-new-unread="">
+          New
+        </Badge>
+      ) : null}
+    </Button>
+  );
+}
+
 /** The panel bound to one machine: reads its view, re-reads while an update runs, and sends requests. */
 export function AboutMachineSurface({
   connection,
@@ -407,6 +424,7 @@ export function AboutMachineSurface({
           It runs a Ferretry from before update checks. Update it once with the package manager you installed it with
           and restart it; after that it says here when a newer version exists.
         </p>
+        <WhatsNewDoor />
       </section>
     );
   if (loaded.kind === 'failed')
@@ -416,6 +434,7 @@ export function AboutMachineSurface({
         <p className="mb-0 mt-1 text-cell leading-base text-muted">
           This browser could not read what this machine runs: {loaded.reason}
         </p>
+        <WhatsNewDoor />
       </section>
     );
 

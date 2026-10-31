@@ -1826,6 +1826,29 @@ body {
 .kt-utabs[data-more-end='true'] .kt-utabs__strip {
   --fade-end: 28px;
 }
+/* The edge chevron: the fade alone hid a half-clipped label. It spans the strip height, so the hit area is tall. */
+.kt-utabs__more {
+  position: absolute;
+  top: 0;
+  bottom: var(--divider-width);
+  display: grid;
+  width: 40px;
+  place-items: center;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+}
+.kt-utabs .kt-utabs__more--start {
+  left: 0;
+  /* theme-literal-ok: transparent is the far end of a fade into the page, not a theme colour */
+  background: linear-gradient(to right, var(--bg) 55%, transparent);
+}
+.kt-utabs .kt-utabs__more--end {
+  right: 0;
+  /* theme-literal-ok: transparent is the far end of a fade into the page, not a theme colour */
+  background: linear-gradient(to left, var(--bg) 55%, transparent);
+}
 .kt-utab {
   display: inline-flex;
   align-items: center;

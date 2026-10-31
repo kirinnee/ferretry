@@ -215,7 +215,7 @@ export class InputRequestService {
     };
     this.held.set(requestId, held);
     this.noteRaise(sessionId, now);
-    await this.record(request, 'input.requested', { kind: 'agent' }, auditDetail(request));
+    await this.record(request, 'input.requested', { kind: 'agent' }, this.auditOf(request, held.names));
     return this.view(held);
   }
 
@@ -286,6 +286,11 @@ export class InputRequestService {
    */
   private quarantined(sessionId: string, names: readonly string[]): boolean {
     return this.deps.quarantine.until(sessionId, names) !== undefined;
+  }
+
+  /** The audit detail as it reads NOW: a hold taken since the facts were seen hides the program they named. */
+  private auditOf(request: InputRequest, names: readonly string[]): InputAuditDetail {
+    return auditDetail(request, this.quarantined(request.sessionId, names));
   }
 
   private async project(
@@ -825,7 +830,13 @@ export class InputRequestService {
     held.request = { ...held.request, state: 'pending' };
     if (held.checkFailures >= INPUT_MAX_CHECK_FAILURES)
       await this.finish(held, 'refused', 'check_failures', undefined, { closeCard: true, tellAgent: true });
-    else await this.record(held.request, 'input.refused', { kind: 'daemon' }, { ...auditDetail(held.request), reason });
+    else
+      await this.record(
+        held.request,
+        'input.refused',
+        { kind: 'daemon' },
+        { ...this.auditOf(held.request, held.names), reason },
+      );
   }
 
   private async finish(
@@ -856,7 +867,7 @@ export class InputRequestService {
             ...(options.entry === undefined ? {} : { entry: options.entry }),
           }
         : undefined;
-    const seenDetail = auditDetail(held.request, this.quarantined(held.request.sessionId, held.names));
+    const seen = held.request;
     const { observed: _seen, observedDigest: _digest, ...rest } = held.request;
     held.request = {
       ...rest,
@@ -874,7 +885,7 @@ export class InputRequestService {
             : 'cancelled';
     await this.journalQuietly(request, kind, reason, options.submitted);
     await this.record(request, `input.${kind}`, by ?? { kind: 'daemon' }, {
-      ...seenDetail,
+      ...this.auditOf(seen, held.names),
       ...(reason === undefined ? {} : { reason }),
       ...(state === 'delivered'
         ? {
@@ -1030,7 +1041,7 @@ function askOf(facts: InputTargetFacts, sensitivity: InputRequest['sensitivity']
   return sensitivity === 'plain' ? `${where}. ${PLAIN_FLAG}` : where;
 }
 
-function auditDetail(request: InputRequest, quarantined = false): InputAuditDetail {
+function auditDetail(request: InputRequest, quarantined: boolean): InputAuditDetail {
   const facts = request.observed;
   return {
     targetKind: request.target.kind,

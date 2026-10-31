@@ -159,6 +159,10 @@ function mountVerbs(
         '--task [card]',
         'the board card this item belongs to (F18 or &F18; your focus card when omitted); a bare --task is the older --todo',
       )
+      .option(
+        '--offer-close',
+        'give the owner a "Done · closes <card>" button: one tap resolves this item AND closes its card (needs --task, or your focus card; on by default for a to-do or review on a card waiting to be tried)',
+      )
       .option('--todo', 'a to-do: the human does something; nothing to choose (steps with no question imply it)')
       .option(
         '-o, --option <label>',

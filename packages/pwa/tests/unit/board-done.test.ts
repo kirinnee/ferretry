@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { LANE_TEMPLATES } from '@ferretry/protocol';
 import {
   ANSWER_AT_REST,
+  answerRowOf,
   boardDone,
   doneLabel,
   doneLaneOf,
@@ -9,8 +10,8 @@ import {
   isReleaseLane,
   notGoodLaneOf,
 } from '../../src/lib/board-done.ts';
-import { laneSetFor } from './board-support.ts';
 import { must } from '../support/dom.ts';
+import { laneSetFor } from './board-support.ts';
 
 const lanes = laneSetFor();
 
@@ -113,5 +114,26 @@ describe('the lanes Done and Not good go to', () => {
 
   it('starts every card at rest', () => {
     expect(ANSWER_AT_REST).toEqual({ pressed: null, error: null });
+  });
+});
+
+describe('answerRowOf', () => {
+  const done = { kind: 'done', laneId: 'closed' } as const;
+  const reopen = { kind: 'reopen', laneId: 'implement' } as const;
+
+  it('gives a movable card in a verify lane the verdict row, even where a Done-only row is on offer', () => {
+    expect(answerRowOf({ category: 'verify', movable: true, done })).toBe('verdict');
+    expect(answerRowOf({ category: 'verify', movable: true, done: null })).toBe('verdict');
+  });
+
+  it('gives any other card with a Done the Done-only row', () => {
+    expect(answerRowOf({ category: 'shipped', movable: true, done })).toBe('done');
+    expect(answerRowOf({ category: 'verify', movable: false, done })).toBe('done');
+  });
+
+  it('draws nothing without a Done, and never a Reopen as a row', () => {
+    expect(answerRowOf({ category: 'shipped', movable: true, done: null })).toBeNull();
+    expect(answerRowOf({ category: 'closed', movable: true, done: reopen })).toBeNull();
+    expect(answerRowOf({ category: null, movable: false, done: null })).toBeNull();
   });
 });

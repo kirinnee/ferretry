@@ -237,6 +237,39 @@ describe('UnderlineTabs', () => {
     expect(nav(mounted.container).getAttribute('data-more-end')).toBe('false');
   });
 
+  it('puts a chevron on each edge that has more tabs, and pages the strip when it is pressed', async () => {
+    mounted = await mount(strip('two'));
+    const container = mounted.container;
+    const end = must(container.querySelector<HTMLButtonElement>('[data-utabs-more="end"]'), 'the end chevron');
+    const start = must(container.querySelector<HTMLButtonElement>('[data-utabs-more="start"]'), 'the start chevron');
+    expect(end.getAttribute('aria-label')).toBe('Show more Studio views');
+    expect(start.getAttribute('aria-label')).toBe('Show earlier Studio views');
+    expect(end.tabIndex).toBe(-1);
+
+    await interact(() => end.click());
+    expect(scrolls.at(-1)).toEqual({ left: 160, behavior: 'smooth' });
+    await interact(() => start.click());
+    expect(scrolls.at(-1)).toEqual({ left: 90, behavior: 'smooth' });
+  });
+
+  it('pages without animation for a reader who asked for reduced motion, and without element scrollTo', async () => {
+    window.matchMedia = (() => ({ matches: true }) as MediaQueryList) as typeof window.matchMedia;
+    mounted = await mount(strip('two'));
+    const end = must(mounted.container.querySelector<HTMLButtonElement>('[data-utabs-more="end"]'), 'the end chevron');
+    await interact(() => end.click());
+    expect(scrolls.at(-1)).toEqual({ left: 160, behavior: 'auto' });
+
+    HTMLElement.prototype.scrollTo = undefined as unknown as typeof HTMLElement.prototype.scrollTo;
+    await interact(() => end.click());
+    expect(list(mounted.container).scrollLeft).toBe(230);
+  });
+
+  it('shows no chevron when every tab fits', async () => {
+    geometry.strip = { clientWidth: 300, scrollWidth: 300 };
+    mounted = await mount(strip('three'));
+    expect(mounted.container.querySelector('[data-utabs-more]')).toBeNull();
+  });
+
   it('shows no fade at all when every tab fits', async () => {
     geometry.strip = { clientWidth: 300, scrollWidth: 300 };
     mounted = await mount(strip('three'));

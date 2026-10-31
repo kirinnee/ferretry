@@ -1,3 +1,56 @@
+## [4.151.0](https://github.com/kirinnee/ferretry/compare/v4.150.0...v4.151.0) (2026-10-31)
+
+### Features
+
+* **browser:** upload, download and pdf file tools ([#1087](https://github.com/kirinnee/ferretry/issues/1087)) ([a39a0af](https://github.com/kirinnee/ferretry/commit/a39a0af362f4c14fd3419c3ac9a806695813fdcb))
+
+### Fixes
+
+* **daemon:** ignore a pressure read that finishes after stop ([#1098](https://github.com/kirinnee/ferretry/issues/1098)) ([1f72a64](https://github.com/kirinnee/ferretry/commit/1f72a64ed4f400db1f0693f3b6d10f62be0952fd))
+* **pwa:** visible close and a failure-proof door for What's new on phones ([#1096](https://github.com/kirinnee/ferretry/issues/1096)) ([de87390](https://github.com/kirinnee/ferretry/commit/de87390f37675c2f57379831c0a460587ce554c1))
+
+## [4.150.0](https://github.com/kirinnee/ferretry/compare/v4.149.0...v4.150.0) (2026-10-31)
+
+### Features
+
+* **agenda:** Done · closes &F12 resolves the item and closes its card in one tap ([#1082](https://github.com/kirinnee/ferretry/issues/1082)) ([c4aa542](https://github.com/kirinnee/ferretry/commit/c4aa5424267cef5acb8ef8af4cf5e4e5390491c6))
+
+### Fixes
+
+* **pwa:** one Done row per board card ([#1093](https://github.com/kirinnee/ferretry/issues/1093)) ([fa83149](https://github.com/kirinnee/ferretry/commit/fa83149e7fa4c480efd7f1eac1ac608b076910e3))
+
+## [4.149.0](https://github.com/kirinnee/ferretry/compare/v4.148.0...v4.149.0) (2026-10-31)
+
+### Features
+
+* **browser:** page lifecycle tools — dialog, tabs, wait_for, console, network, emulate ([#1086](https://github.com/kirinnee/ferretry/issues/1086)) ([738078b](https://github.com/kirinnee/ferretry/commit/738078b3f657c3d9372b8029d28b620f5a0da81f))
+
+### Fixes
+
+* **board:** refile Unfiled cards to projects with no lanes or an ssh-alias origin ([#1091](https://github.com/kirinnee/ferretry/issues/1091)) ([9164f9a](https://github.com/kirinnee/ferretry/commit/9164f9ac46d73abb501ecf107165ee7b3d2c817f))
+
+## [4.148.0](https://github.com/kirinnee/ferretry/compare/v4.147.0...v4.148.0) (2026-10-31)
+
+### Features
+
+* **browser:** act on snapshot refs and points, and scrub what pages show ([#1078](https://github.com/kirinnee/ferretry/issues/1078)) ([a17c82a](https://github.com/kirinnee/ferretry/commit/a17c82a5f2e5f8dfa9bc2cc87270ebf59b823192))
+* **browser:** Browser settings tab and Test proxy check ([#1080](https://github.com/kirinnee/ferretry/issues/1080)) ([79a92cb](https://github.com/kirinnee/ferretry/commit/79a92cba9b2196c5d354af8a6f3aaf3caae216e7))
+* **pwa:** Table to-test rows get the card's Done and Not good ([#1084](https://github.com/kirinnee/ferretry/issues/1084)) ([38858c6](https://github.com/kirinnee/ferretry/commit/38858c682828feb469835b7cc48f7c127585f112))
+
+### Fixes
+
+* **daemon:** release what a boot acquires while a stop during boot runs ([#1085](https://github.com/kirinnee/ferretry/issues/1085)) ([47fa20a](https://github.com/kirinnee/ferretry/commit/47fa20a2aecc00687ec03ea2475358203b7c9867))
+
+## [4.147.0](https://github.com/kirinnee/ferretry/compare/v4.146.0...v4.147.0) (2026-10-31)
+
+### Features
+
+* **pwa:** side-panel board is human-only by default, with a full-chat expand ([#1076](https://github.com/kirinnee/ferretry/issues/1076)) ([be7fe8f](https://github.com/kirinnee/ferretry/commit/be7fe8fbf02713a97a3e99d0fe891719d88b2080))
+
+### Fixes
+
+* **board:** keep lanes right: re-resolve Unfiled cards, quick gets To test, done never stalls ([#1079](https://github.com/kirinnee/ferretry/issues/1079)) ([89321e2](https://github.com/kirinnee/ferretry/commit/89321e2601b7b761d67d2e4b8b993c306f682b7c))
+
 ## [4.146.0](https://github.com/kirinnee/ferretry/compare/v4.145.0...v4.146.0) (2026-10-30)
 
 ### Features

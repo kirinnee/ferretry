@@ -2,12 +2,14 @@ import type {
   AgendaConfirms,
   AgendaId,
   AgendaItem,
+  AgendaKind,
   AgendaResponse,
   AgendaSnapshot,
   AgendaSource,
   ResolvedAgendaItem,
   TaskRef,
 } from '@ferretry/protocol';
+import { agendaCardKind } from '@ferretry/protocol';
 import {
   type AgendaActor,
   type AgendaChange,
@@ -113,6 +115,17 @@ export function isAgendaSessionId(value: string): boolean {
   return SESSION_ID.test(value);
 }
 
+/** Whether a card waits in the lane where released work is tried (Released · to test). */
+export interface AgendaCardLanes {
+  inToTest(task: TaskRef): Promise<boolean>;
+}
+
+/** No card is known to be in the to-test lane: nothing is offered to close by default. */
+export const NO_AGENDA_CARD_LANES: AgendaCardLanes = { inToTest: async () => false };
+
+/** The kinds of item whose card the owner is most likely to close with the answer: a to-do or a review. */
+const CLOSE_OFFERED_KINDS: ReadonlySet<AgendaKind> = new Set<AgendaKind>(['task', 'review']);
+
 export class AgendaService {
   constructor(
     private readonly repository: AgendaLedgerRepository,
@@ -123,6 +136,8 @@ export class AgendaService {
     private readonly focus: AgendaFocusSource = NO_AGENDA_FOCUS,
     /** Who started whom: a sub-ferret raises and changes nothing here. Absent, every agent is a lead. */
     private readonly subFerrets: SubFerretDirectory = NO_SUB_FERRETS,
+    /** Which cards wait in the to-test lane: a to-do or review on one offers to close it by default. */
+    private readonly cards: AgendaCardLanes = NO_AGENDA_CARD_LANES,
   ) {}
 
   async list(sessionId: string): Promise<AgendaQueryResult<AgendaSnapshot>> {
@@ -146,7 +161,16 @@ export class AgendaService {
         ? { ...request, title: DAEMON_TITLES[actor.cause] }
         : request;
     const carded = titled.task === undefined ? await this.withFocusCard(sessionId, titled) : titled;
-    return this.apply(sessionId, { action: 'raise', actor, request: carded, at: this.clock.now() });
+    const offered = await this.withOfferClose(carded);
+    return this.apply(sessionId, { action: 'raise', actor, request: offered, at: this.clock.now() });
+  }
+
+  /** A to-do or review on a card in the to-test lane offers to close it, unless the add already said so. */
+  private async withOfferClose(request: RaiseAgendaRequest): Promise<RaiseAgendaRequest> {
+    if (request.offerClose !== undefined || request.task === undefined || request.notice === true) return request;
+    if (!CLOSE_OFFERED_KINDS.has(agendaCardKind(request))) return request;
+    const waiting = await this.cards.inToTest(request.task).catch(() => false);
+    return waiting ? { ...request, offerClose: true } : request;
   }
 
   /** An add that names no card takes the raising session's focus card, when it has one (§2.6). */

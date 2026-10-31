@@ -23,6 +23,7 @@ import {
   agendaBriefOf,
   agendaBriefRequiredProblems,
   agendaNoticeProblems,
+  agendaOfferCloseProblems,
   agendaOptionDetailProblems,
   agendaWakeAt,
   MAX_AGENDA_DETAIL_LENGTH,
@@ -111,6 +112,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly task?: TaskRef;
   /** The input request an `input` card presents (`AgendaInputRef`); only the daemon raises one. */
   readonly input?: AgendaInputRef;
+  /** The owner's one tap may close `task` too (`DAEMON_FEATURES.agendaOfferClose`); needs a card. */
+  readonly offerClose?: true;
 }
 
 /** The writing an edit may change: never the ask, the kind, the answers, the reason or who raised the item. */
@@ -556,6 +559,11 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   }
   const noticeProblem = agendaNoticeProblems(request)[0];
   if (noticeProblem !== undefined) return failure('invalid', noticeProblem);
+  const offerCloseProblem = agendaOfferCloseProblems(request)[0];
+  if (offerCloseProblem !== undefined) return failure('invalid', offerCloseProblem);
+  if (request.offerClose === true && request.task === undefined) {
+    return failure('invalid', 'there is no card to close: name it with --task F12 (--offer-close needs a card)');
+  }
   const optionDetailProblem = agendaOptionDetailProblems(request)[0];
   if (optionDetailProblem !== undefined) return failure('invalid', optionDetailProblem);
   if (request.notice === true && actor.kind === 'human') {
@@ -624,6 +632,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.confirms === undefined ? {} : { confirms: request.confirms }),
       ...(request.task === undefined ? {} : { task: request.task }),
       ...(request.input === undefined ? {} : { input: request.input }),
+      ...(request.offerClose === true ? { offerClose: true as const } : {}),
     },
     actor,
   );
