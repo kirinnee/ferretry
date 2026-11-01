@@ -5,6 +5,44 @@ import type { RulesApiClient } from '../../../src/lib/rules/ports';
 
 const STAGE = `srs_${'a'.repeat(24)}`;
 const SIGN_IN = `si_${'1'.repeat(16)}`;
+const RULE = `sr_${'b'.repeat(24)}`;
+
+const STAGED = {
+  stage: STAGE,
+  rule: RULE,
+  revision: 1,
+  signIn: SIGN_IN,
+  account: { id: 'GITHUB_WORK', label: 'work github' },
+  place: { kind: 'site', domains: ['github.com'], match: [] },
+  summary: ['Sign in as GITHUB_WORK at github.com'],
+  fields: ['password'],
+  totp: false,
+  root: false,
+  autoRecipe: false,
+  scope: { kind: 'any' },
+  expiresAt: '2026-12-01T12:00:00.000Z',
+  stageExpiresAt: '2026-11-01T12:02:00.000Z',
+};
+
+const RULE_VIEW = {
+  id: RULE,
+  revision: 1,
+  signIn: SIGN_IN,
+  account: STAGED.account,
+  place: STAGED.place,
+  fields: ['password'],
+  totp: false,
+  scope: { kind: 'any' },
+  createdAt: '2026-11-01T12:00:00.000Z',
+  expiresAt: '2026-12-01T12:00:00.000Z',
+  status: 'active',
+  usage: { count: 0 },
+  flags: [],
+  approvedWith: { deviceId: `fy_device_id_${'1'.repeat(22)}` },
+};
+
+const headerNames = (init: RequestInit | undefined): string[] =>
+  Object.keys((init?.headers ?? {}) as object).map(name => name.toLowerCase());
 
 function rig(reply: unknown) {
   const calls: { path: string; init: RequestInit | undefined }[] = [];
@@ -49,5 +87,51 @@ describe('ProtocolRulesGateway', () => {
     const revoked = rig({ id: 'sr_x', revoked: true });
     await revoked.gateway.revoke('sr_x');
     should(revoked.calls[0]?.path).equal('/v1/sign-in-rules/sr_x');
+  });
+
+  it('should confirm a stage in the app and read its state on the stage routes', async () => {
+    const confirmed = rig(STAGED);
+    should((await confirmed.gateway.confirmInApp(STAGE)).stage).equal(STAGE);
+    should(confirmed.calls[0]?.path).equal(`/v1/sign-in-rules/stages/${STAGE}/confirm-in-app`);
+    should(confirmed.calls[0]?.init?.method).equal('POST');
+    should(headerNames(confirmed.calls[0]?.init)).not.containEql('x-fy-session');
+
+    const viewed = rig({ ...STAGED, state: 'denied' });
+    should((await viewed.gateway.view(STAGE)).state).equal('denied');
+    should(viewed.calls[0]?.path).equal(`/v1/sign-in-rules/stages/${STAGE}`);
+    should(viewed.calls[0]?.init?.method).equal(undefined);
+  });
+
+  it('should send a staged draft as JSON on the stages route', async () => {
+    const { calls, gateway } = rig(STAGED);
+    await gateway.stage({ signIn: SIGN_IN, fields: ['password'], uses: 2 });
+    should(calls[0]?.path).equal('/v1/sign-in-rules/stages');
+    should(calls[0]?.init?.method).equal('POST');
+    should(JSON.parse(String(calls[0]?.init?.body))).eql({ signIn: SIGN_IN, fields: ['password'], uses: 2 });
+    should(headerNames(calls[0]?.init)).containEql('content-type');
+  });
+
+  it('should narrow a rule on its own route, and refuse an empty narrowing before sending it', async () => {
+    const { calls, gateway } = rig(RULE_VIEW);
+    should((await gateway.narrow(RULE, { dropTotp: true })).id).equal(RULE);
+    should(calls[0]?.path).equal(`/v1/sign-in-rules/${RULE}/narrow`);
+    should(calls[0]?.init?.method).equal('POST');
+    should(JSON.parse(String(calls[0]?.init?.body))).eql({ dropTotp: true });
+    await gateway.narrow(RULE, {}).then(
+      () => should.fail('', '', 'sent an empty narrowing'),
+      () => undefined,
+    );
+    should(calls).have.length(1);
+  });
+
+  it('should read the daemon features from its health, and none when it cannot be read', async () => {
+    const reported: RulesApiClient = { request: async () => ({ features: ['sign-in-rules'] }) as never };
+    should(await new ProtocolRulesGateway(reported).features()).eql(['sign-in-rules']);
+    const unreadable: RulesApiClient = {
+      request: async () => {
+        throw new Error('down');
+      },
+    };
+    should(await new ProtocolRulesGateway(unreadable).features()).eql([]);
   });
 });

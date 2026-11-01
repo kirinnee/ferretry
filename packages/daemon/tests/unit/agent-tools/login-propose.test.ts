@@ -253,6 +253,52 @@ describe('account.propose with preapprove (a suggestion of a standing rule)', ()
     should(refused.message).containEql('3 rules this hour');
   });
 
+  it('should give a neutral refusal, never the cause, when the suggestion fails for any other reason', async () => {
+    // Arrange
+    const world = agentToolWorld({
+      ruleSuggestions: {
+        suggest: async () => {
+          throw new Error('vault exploded: secret-detail');
+        },
+      },
+    });
+
+    // Act
+    const alone = (await world.service
+      .call(agent, { tool: 'account.propose', signIn: SI_VERCEL, preapprove: true, why: 'y' })
+      .catch((caught: unknown) => caught)) as AgentToolError;
+
+    // Assert
+    should(alone.code).equal('unavailable');
+    should(alone.message).not.containEql('secret-detail');
+  });
+
+  it('should say a failed suggestion in the summary, not throw, when a recipe was filed in the same call', async () => {
+    // Arrange
+    const world = agentToolWorld({
+      recipes: { scrubbedAccounts: async listing => listing, propose: async () => PENDING },
+      ruleSuggestions: {
+        suggest: async () => {
+          throw new Error('vault exploded: secret-detail');
+        },
+      },
+    });
+
+    // Act
+    const result = await world.service.call(agent, {
+      tool: 'account.propose',
+      signIn: SI_VERCEL,
+      recipe: 'x',
+      preapprove: true,
+      why: 'y',
+    });
+
+    // Assert
+    should(result.recipe).match({ state: 'pending' });
+    should(result.summary).containEql('The suggestion could not be raised right now.');
+    should(result.summary).not.containEql('secret-detail');
+  });
+
   it('should still need a recipe or a suggestion: a call with neither is not a call', () => {
     should(() => AgentToolCallSchema.parse({ tool: 'account.propose', signIn: SI_VERCEL, why: 'y' })).throw();
     should(AgentToolCallSchema.parse({ tool: 'account.propose', signIn: SI_VERCEL, preapprove: true, why: 'y' })).match(

@@ -1,7 +1,6 @@
 import type {
   IFyApiClient,
   SignInRuleDraft,
-  SignInRuleEligibility,
   SignInRuleList,
   SignInRuleNarrow,
   SignInRuleStaged,
@@ -21,7 +20,6 @@ interface IRulesOutput {
  */
 export interface IRulesGateway {
   list(): Promise<SignInRuleList>;
-  eligibility(signIn: string): Promise<SignInRuleEligibility>;
   stage(draft: SignInRuleDraft): Promise<SignInRuleStaged>;
   confirmInApp(stage: string): Promise<SignInRuleStaged>;
   view(stage: string): Promise<SignInRuleStageView>;

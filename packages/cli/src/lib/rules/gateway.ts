@@ -2,8 +2,6 @@ import {
   HealthViewSchema,
   type SignInRuleDraft,
   SignInRuleDraftSchema,
-  type SignInRuleEligibility,
-  SignInRuleEligibilitySchema,
   type SignInRuleList,
   SignInRuleListSchema,
   type SignInRuleNarrow,
@@ -38,14 +36,6 @@ export class ProtocolRulesGateway implements IRulesGateway {
 
   async list(): Promise<SignInRuleList> {
     return await this.client.request('/v1/sign-in-rules', SignInRuleListSchema, { headers: this.#headers });
-  }
-
-  async eligibility(signIn: string): Promise<SignInRuleEligibility> {
-    return await this.client.request(
-      `/v1/sign-in-rules/eligibility?signIn=${encodeURIComponent(signIn)}`,
-      SignInRuleEligibilitySchema,
-      { headers: this.#headers },
-    );
   }
 
   async stage(draft: SignInRuleDraft): Promise<SignInRuleStaged> {

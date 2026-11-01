@@ -360,7 +360,10 @@ around Ferretry: every ferret can read Ferretry's own state-home files. Every pl
 - **The caps are taken before anything awaits.** At most **one pending suggestion per sign-in per session** and
   **three an hour per session**, reserved in the same synchronous run that checks them, so calls sent together cannot
   all pass. A refused call gives its place back. A suggestion lives in memory only and ends after 24 hours (the card
-  closes with it); the owner can also dismiss it (`DELETE /v1/sign-in-rules/suggestions/:sid`).
+  closes with it). The owner can dismiss it (`DELETE /v1/sign-in-rules/suggestions/:sid`) or close its card on the
+  agenda: either way it leaves the owner's sheet and the card closes with the note "The owner closed this card.", but a
+  **tombstone** stays until the original expiry, so the sign-in still counts as waiting and a retry gets the same
+  "already suggested" answer as while the owner is silent. A dismissed suggestion does not free its place.
 - **What the ferret is told.** One line: it suggested a rule for the host, the owner decides, it will not hear back, and
   it must not ask again. A refusal is only ever about the sign-in it can already read (a sign-in that goes through
   another account, one that is not a password, a program no rule covers, an unknown id) or about its own earlier

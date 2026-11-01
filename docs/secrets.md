@@ -730,7 +730,7 @@ Every route is `caller: 'person'` ([grants.md](grants.md)).
 | `DELETE /v1/sign-in-rules/:id`                        | revoke one rule                                                   | `secrets.use`                       |
 | `POST /v1/accounts/:id/sign-in-rules/revoke`          | revoke every rule of an account                                   | `secrets.use`                       |
 | `GET /v1/sign-in-rules/suggestions`                   | the rules ferrets suggested, still waiting (memory only)          | `secrets.use`                       |
-| `DELETE /v1/sign-in-rules/suggestions/:sid`           | turn a suggestion down; its card closes                           | `secrets.use`                       |
+| `DELETE /v1/sign-in-rules/suggestions/:sid`           | turn a suggestion down; its card closes, a tombstone stays        | `secrets.use`                       |
 
 Each change is a kept `security.changed` record ([audit.md](audit.md)). None holds a username or a value.
 

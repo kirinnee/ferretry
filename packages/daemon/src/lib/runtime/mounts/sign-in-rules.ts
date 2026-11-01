@@ -293,7 +293,9 @@ function suggestionRoutes(suggestions: SignInRuleSuggestions): readonly ApiRoute
       handle: async context => {
         const names = refusedAccountNames(context, 'read the standing rules ferrets suggested');
         if (names !== undefined) return names;
-        return jsonResponse(SignInRuleSuggestionListSchema.parse(owned(() => suggestions.list(owner(context)))));
+        const caller = owner(context);
+        await suggestions.reconcile();
+        return jsonResponse(SignInRuleSuggestionListSchema.parse(owned(() => suggestions.list(caller))));
       },
     },
     {

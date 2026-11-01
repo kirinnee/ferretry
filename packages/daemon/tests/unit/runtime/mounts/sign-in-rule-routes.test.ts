@@ -145,6 +145,7 @@ async function served() {
         raised.push(card.ask);
         return { ok: true, id: `A${String(raised.length)}` };
       },
+      isOpen: async () => true,
       close: async () => undefined,
     },
     redact: async text => text,

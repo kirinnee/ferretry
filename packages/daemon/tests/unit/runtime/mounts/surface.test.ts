@@ -775,7 +775,11 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   }),
   signInRuleSuggestions: new SignInRuleSuggestions({
     accounts: { listing: async () => ({ accounts: [], signIns: [], keys: new Map() }) },
-    agenda: { raise: async () => ({ ok: false, message: 'not exercised' }), close: async () => undefined },
+    agenda: {
+      raise: async () => ({ ok: false, message: 'not exercised' }),
+      close: async () => undefined,
+      isOpen: async () => true,
+    },
     redact: async text => text,
     audit: { record: async () => undefined },
     clock: { now: () => 0 },

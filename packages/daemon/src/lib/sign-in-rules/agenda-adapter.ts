@@ -12,7 +12,7 @@ const SUGGESTION_CARD_ACTOR: AgendaActor = { kind: 'daemon', cause: 'secure-copy
  * approval: it opens the owner's create sheet with nothing ticked.
  */
 export class SignInRuleSuggestionAgendaAdapter implements SignInRuleSuggestionAgendaPort {
-  constructor(private readonly agenda: Pick<AgendaService, 'raise' | 'resolve'>) {}
+  constructor(private readonly agenda: Pick<AgendaService, 'raise' | 'resolve' | 'list'>) {}
 
   async raise(
     sessionId: string,
@@ -37,6 +37,11 @@ export class SignInRuleSuggestionAgendaAdapter implements SignInRuleSuggestionAg
     return outcome.item === undefined
       ? { ok: false, message: 'the agenda kept no card for this suggestion' }
       : { ok: true, id: outcome.item.id };
+  }
+
+  async isOpen(sessionId: string, id: string): Promise<boolean> {
+    const listed = await this.agenda.list(sessionId);
+    return listed.ok ? listed.value.items.some(item => item.id === id) : true;
   }
 
   async close(sessionId: string, id: string, note: string): Promise<void> {

@@ -66,18 +66,22 @@ const LISTING = 'rules ls';
 
 const placeWords = (place: SignInRuleView['place']): string => placeKeys(place).map(showUntrusted).join(', ');
 
+/** The amber line for a sign-in whose recipe takes a ferret's edits unreviewed. */
+export const AUTO_RECIPE_WARNING = "Its recipe takes a ferret's edits without your review.";
+
 /**
  * The warnings a staged or listed rule carries, drawn from its STRUCTURED flags and never from its summary's words,
  * which may be clipped (secrev-1301 L2): the red root line and the residual sentence for a terminal rule, the red
- * one-factor line for a code, and the honest limit on every rule.
+ * one-factor line for a code, the auto-recipe line, and the honest limit on every rule.
  */
 export function ruleWarnings(
-  rule: { readonly root: boolean; readonly totp: boolean },
+  rule: { readonly root: boolean; readonly totp: boolean; readonly autoRecipe: boolean },
   red: (text: string) => string,
 ): readonly string[] {
   return [
     ...(rule.root ? [red(SIGN_IN_RULE_ROOT_WARNING), SIGN_IN_RULE_TERMINAL_HONEST_LIMIT] : []),
     ...(rule.totp ? [red(LOGIN_ONE_FACTOR_WARNING)] : []),
+    ...(rule.autoRecipe ? [AUTO_RECIPE_WARNING] : []),
     SIGN_IN_RULE_HONEST_LIMIT,
   ];
 }
@@ -96,7 +100,12 @@ function renderRule(rule: SignInRuleView, red: (text: string) => string): string
   if (rule.suspended !== undefined)
     lines.push(`   stopped ${rule.suspended.at}: ${rule.suspended.because} (fy rules resume ${rule.id.slice(0, 11)})`);
   if (rule.unverified === true) lines.push('   not checked yet: it fills nothing until the daemon has checked it');
-  lines.push(...ruleWarnings({ root: rule.flags.includes('root'), totp: rule.totp }, red).map(line => `   ${line}`));
+  lines.push(
+    ...ruleWarnings(
+      { root: rule.flags.includes('root'), totp: rule.totp, autoRecipe: rule.flags.includes('auto-recipe') },
+      red,
+    ).map(line => `   ${line}`),
+  );
   return lines.join('\n');
 }
 
@@ -259,6 +268,7 @@ export class RulesController {
       throw new Error(
         'standing sign-in rules can only be confirmed in the app, and this daemon does not report them yet: nothing was staged',
       );
+    const startedMs = this.ports.nowMs();
     const staged = await gateway.stage(draft);
     if (staged.root && !features.includes(DAEMON_FEATURES.signInRulesTerminal)) {
       await gateway.drop(staged.stage).catch(() => undefined);
@@ -274,10 +284,30 @@ export class RulesController {
     );
     await this.#showLink(confirming.stage, options);
     const state = await this.#wait(staged.stage);
+    const elsewhere = state === 'denied' ? await this.#approvedElsewhere(draft.signIn, startedMs) : undefined;
     this.ports.out.success(
       options.json === true
-        ? JSON.stringify({ stage: staged.stage, rule: staged.rule, state }, null, 2)
-        : OUTCOME[state](staged),
+        ? JSON.stringify(
+            {
+              stage: staged.stage,
+              rule: staged.rule,
+              state,
+              ...(elsewhere === undefined ? {} : { approvedElsewhere: elsewhere.id }),
+            },
+            null,
+            2,
+          )
+        : elsewhere === undefined
+          ? OUTCOME[state](staged)
+          : `Approved in the app (from another stage): ${elsewhere.id} until ${elsewhere.expiresAt}`,
+    );
+  }
+
+  /** A newer stage for the same sign-in turns this one `denied`; a rule the owner approved from it is in force, not refused. */
+  async #approvedElsewhere(signIn: string, sinceMs: number): Promise<SignInRuleView | undefined> {
+    const { rules } = await this.ports.gateway.list();
+    return rules.find(
+      rule => rule.signIn === signIn && rule.status === 'active' && Date.parse(rule.createdAt) >= sinceMs,
     );
   }
 

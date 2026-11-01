@@ -92,7 +92,69 @@ describe('a rule suggestion card on the real agenda', () => {
 
     // Assert
     should(parsed?.entries.map(entry => (entry.item as { resolutionNote?: string }).resolutionNote)).eql([
-      'The owner dismissed this suggestion.',
+      'The owner closed this card.',
     ]);
+  });
+
+  it('should see a card the owner resolved on the agenda as closed, and an open one as open', async () => {
+    // Arrange
+    const w = agendaWorld();
+    const made = await w.suggestions.suggest('s1', { signIn: GITHUB, why: 'daily' });
+    const adapter = new SignInRuleSuggestionAgendaAdapter(w.agenda);
+    const id = made.agenda as string;
+
+    // Act
+    const before = await adapter.isOpen('s1', id);
+    await w.agenda.resolve('s1', made.agenda as never, { kind: 'human' } as never, 'done');
+    const after = await adapter.isOpen('s1', id);
+    const missing = await adapter.isOpen('no-such-session', id);
+
+    // Assert — an unreadable agenda must never end a suggestion
+    should(before).be.true();
+    should(after).be.false();
+    should(missing).be.true();
+  });
+
+  it('should end the suggestion when the owner closes its card on the agenda, and keep the ferret blocked', async () => {
+    // Arrange
+    const w = agendaWorld();
+    const made = await w.suggestions.suggest('s1', { signIn: GITHUB, why: 'daily' });
+    await w.agenda.resolve('s1', made.agenda as never, { kind: 'human' } as never, 'done');
+
+    // Act
+    await w.suggestions.reconcile();
+    const retry = await w.suggestions.suggest('s1', { signIn: GITHUB, why: 'again' }).catch(error => error);
+
+    // Assert
+    should(w.suggestions.list({ kind: 'owner', actor: { kind: 'host' } }).suggestions).eql([]);
+    should(retry).match({ code: 'capacity' });
+    should(w.suggestions.waiting('s1', GITHUB)).be.true();
+  });
+
+  it('should refuse, with no suggestion staged, when the agenda keeps no card', async () => {
+    // Arrange
+    const w = agendaWorld();
+    const inner = new SignInRuleSuggestionAgendaAdapter({
+      raise: async () => ({ ok: true, item: undefined }),
+      resolve: async () => ({ ok: true }),
+      list: async () => ({ ok: true, value: { items: [] } }),
+    } as never);
+    const suggestions = new SignInRuleSuggestions({
+      accounts: { listing: async () => listing() },
+      agenda: inner,
+      redact: async text => text,
+      audit: { record: async () => undefined },
+      clock: { now: () => NOW },
+      ids: { suggestionId: () => `srg_${'2'.repeat(16)}` as SignInRuleSuggestionId },
+    });
+
+    // Act
+    const refused = await suggestions.suggest('s1', { signIn: GITHUB, why: 'daily' }).catch(error => error);
+
+    // Assert
+    should(refused).be.instanceOf(Error);
+    should(suggestions.list({ kind: 'owner', actor: { kind: 'host' } }).suggestions).eql([]);
+    should(suggestions.waiting('s1', GITHUB)).be.false();
+    should(w.ledgers.size).equal(0);
   });
 });

@@ -52,6 +52,8 @@ export interface SignInRuleSuggestionAgendaPort {
     card: SignInRuleSuggestionCard,
   ): Promise<{ readonly ok: true; readonly id: string } | { readonly ok: false; readonly message: string }>;
   close(sessionId: string, id: string, note: string): Promise<void>;
+  /** Whether the card is still open on the agenda: the owner may close it there instead of in the sheet. */
+  isOpen(sessionId: string, id: string): Promise<boolean>;
 }
 
 /** The daemon's words for the card. Nothing here is the ferret's. */
@@ -114,6 +116,7 @@ interface Pending {
 }
 
 const HOUR_MS = 3_600_000;
+const CLOSED_NOTE = 'The owner closed this card.';
 const randomSuggestionId = (): SignInRuleSuggestionId => `srg_${randomBytes(8).toString('hex')}`;
 
 const oneLine = (text: string, max: number): string => {
@@ -132,6 +135,11 @@ export function suggestionHost(place: Place): string {
 
 export class SignInRuleSuggestions {
   readonly #pending = new Map<SignInRuleSuggestionId, Pending>();
+  /**
+   * Suggestions the owner turned down, by either door. They stay in `#pending` until their own expiry so `waiting()`
+   * keeps answering as if the owner had not answered: the ferret can never tell a "no" from silence.
+   */
+  readonly #turnedDown = new Set<SignInRuleSuggestionId>();
   /** Session → the sign-ins whose suggestion is being raised right now, so two calls together can't both pass. */
   readonly #raising = new Map<string, Set<SignInId>>();
   readonly #raised = new Map<string, number[]>();
@@ -205,20 +213,34 @@ export class SignInRuleSuggestions {
   list(caller: PasteRuleCaller): SignInRuleSuggestionList {
     this.#requireOwner(caller);
     this.sweep();
-    return { suggestions: [...this.#pending.values()].map(viewOf) };
+    return {
+      suggestions: [...this.#pending.values()].filter(pending => !this.#turnedDown.has(pending.id)).map(viewOf),
+    };
   }
 
-  /** The owner turns one down: it and its card end. Anything already gone is simply gone. */
+  /** The owner turns one down: it leaves the sheet and its card closes, but the ferret is still told it is waiting. */
   async dismiss(caller: PasteRuleCaller, id: SignInRuleSuggestionId): Promise<boolean> {
     this.#requireOwner(caller);
-    return await this.#end(id, 'The owner dismissed this suggestion.');
+    const pending = this.#pending.get(id);
+    if (pending === undefined || this.#turnedDown.has(id)) return false;
+    this.#turnedDown.add(id);
+    await this.ports.agenda.close(pending.sessionId, pending.agenda, CLOSED_NOTE).catch(() => undefined);
+    return true;
+  }
+
+  /** A card the owner closed on the agenda is a "no" like a dismissal: it leaves the sheet and keeps the ferret blocked. */
+  async reconcile(): Promise<void> {
+    for (const pending of [...this.#pending.values()]) {
+      if (this.#turnedDown.has(pending.id)) continue;
+      const open = await this.ports.agenda.isOpen(pending.sessionId, pending.agenda).catch(() => true);
+      if (!open) this.#turnedDown.add(pending.id);
+    }
   }
 
   /** Ends every suggestion past its day, with its card. */
   sweep(): void {
     const now = this.ports.clock.now();
-    for (const pending of this.#pending.values())
-      if (pending.expiresAt <= now) void this.#end(pending.id, 'This suggestion expired.');
+    for (const pending of this.#pending.values()) if (pending.expiresAt <= now) void this.#expire(pending);
   }
 
   /** Whether a suggestion is waiting for this sign-in from this session. */
@@ -229,12 +251,10 @@ export class SignInRuleSuggestions {
     );
   }
 
-  async #end(id: SignInRuleSuggestionId, note: string): Promise<boolean> {
-    const pending = this.#pending.get(id);
-    if (pending === undefined) return false;
-    this.#pending.delete(id);
-    await this.ports.agenda.close(pending.sessionId, pending.agenda, note).catch(() => undefined);
-    return true;
+  async #expire(pending: Pending): Promise<void> {
+    this.#pending.delete(pending.id);
+    if (this.#turnedDown.delete(pending.id)) return;
+    await this.ports.agenda.close(pending.sessionId, pending.agenda, 'This suggestion expired.').catch(() => undefined);
   }
 
   #requireOwner(caller: PasteRuleCaller): void {
