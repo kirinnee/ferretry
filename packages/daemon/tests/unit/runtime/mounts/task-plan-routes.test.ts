@@ -408,3 +408,28 @@ describe('the task-plan routes: reading', () => {
     should(jsonBody(unknown).code).equal('not_found');
   });
 });
+
+describe('the task-plan routes: the accounts a plan names (secrev-1261)', () => {
+  it('should refuse a device without secrets.use every route that answers account names, as /v1/accounts does', async () => {
+    const { dispatch, service } = await served(withoutGrant({ capability: 'secrets', axis: 'use' }));
+    const plan = await service.propose(SESSION, { lines: [SIGN_IN, PASTE] });
+    const staged = await service.stage({ kind: 'owner', actor: { kind: 'host' } }, SESSION, plan.id, {
+      lines: [{ line: 0 }],
+    });
+    const stage = staged.outcome === 'staged' ? staged.staged.stage : '';
+
+    const answers = [
+      await dispatch.dispatch(request({ method: 'GET', path: '/v1/task-plans', headers: human })),
+      await dispatch.dispatch(request({ method: 'GET', path: base(plan.id), headers: human })),
+      await dispatch.dispatch(post(`${base(plan.id)}/approval`, { lines: [{ line: 1 }] })),
+      await dispatch.dispatch(request({ method: 'GET', path: `${base(plan.id)}/approval/${stage}`, headers: human })),
+      await dispatch.dispatch(post(`${base(plan.id)}/approval/${stage}/commit`, {})),
+      await dispatch.dispatch(post(`${base(plan.id)}/revoke`, {})),
+    ];
+    const names = answers.map(answer => JSON.stringify(jsonBody(answer)));
+
+    should(answers.map(answer => answer.status)).eql([403, 403, 403, 403, 403, 403]);
+    should(names.join()).not.match(/kirin-work|GitHub work/u);
+    should(service.get({ kind: 'owner', actor: { kind: 'host' } }, SESSION, plan.id).state).equal('pending');
+  });
+});

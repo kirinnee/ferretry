@@ -975,3 +975,91 @@ describe('boundSelection: the bytes a passkey is bound to', () => {
     should(right.lines.map(line => line.line)).eql([0, 1]);
   });
 });
+
+describe('TaskPlanService: secrev-1261', () => {
+  it('should hold the caps when proposals arrive together: 7 at once raise 3 (L1)', async () => {
+    const w = world();
+    await w.rules.load();
+
+    const settled = await Promise.allSettled(
+      Array.from({ length: 7 }, async () => await w.service.propose(SESSION, { lines: [PASTE] })),
+    );
+
+    should(settled.filter(each => each.status === 'fulfilled')).have.length(3);
+    should(settled.flatMap(each => (each.status === 'rejected' ? [(each.reason as SecureCopyError).code] : []))).eql([
+      'capacity',
+      'capacity',
+      'capacity',
+      'capacity',
+    ]);
+    should(w.cards).have.length(3);
+    should(w.service.list(HOST, SESSION)).have.length(3);
+  });
+
+  it('should give a refused proposal its place and its count this hour back (L1)', async () => {
+    const w = world();
+    await w.rules.load();
+    const listing = w.ports.accounts.listing;
+    w.ports.accounts.listing = async () => {
+      throw new Error('damaged');
+    };
+    for (let index = 0; index < TASK_PLAN_MAX_PROPOSALS_PER_HOUR; index += 1)
+      should((await refused(w.service.propose(SESSION, { lines: [WORK_LINE] }))).code).equal('unavailable');
+    w.ports.accounts.listing = listing;
+
+    const kept = await Promise.all([
+      w.service.propose(SESSION, { lines: [WORK_LINE] }),
+      w.service.propose(SESSION, { lines: [PASTE] }),
+      w.service.propose(SESSION, { lines: [PAGE_PASTE] }),
+    ]);
+
+    should(kept.map(plan => plan.state)).eql(['pending', 'pending', 'pending']);
+  });
+
+  it("should show only the machine's own stage as asked at the machine (L3)", async () => {
+    const w = world();
+    await w.rules.load();
+    const plan = await w.service.propose(SESSION, { lines: [WORK_LINE] });
+    const fromPhone = await staged(w, plan, { lines: [{ line: 0 }] });
+
+    const error = await refused(() => w.service.confirmInApp(PHONE, SESSION, plan.id, fromPhone.stage));
+
+    should(error).match({ status: 404, code: 'stage_not_found' });
+    should(w.service.get(HOST, SESSION, plan.id)).not.have.property('machineStage');
+    should(w.service.viewStage(PHONE, SESSION, plan.id, fromPhone.stage).state).equal('waiting');
+  });
+
+  it('should answer a paste-only plan once when two answers arrive together', async () => {
+    const w = world();
+    await w.rules.load();
+    const plan = await w.service.propose(SESSION, { lines: [PASTE, PAGE_PASTE] });
+
+    const [first, second] = await Promise.allSettled([
+      w.service.stage(HOST, SESSION, plan.id, { lines: [{ line: 0 }] }),
+      w.service.stage(HOST, SESSION, plan.id, { lines: [{ line: 0 }, { line: 1 }] }),
+    ]);
+
+    should(first.status).equal('fulfilled');
+    should(second).match({ status: 'rejected', reason: { code: 'conflict' } });
+    should(w.rules.list(HOST)).have.length(1);
+  });
+
+  it('should refuse an empty paste plan, raising no card', async () => {
+    const w = world();
+    await w.rules.load();
+
+    should((await refused(w.service.proposePastes(SESSION, []))).code).equal('bad_request');
+    should(w.cards).eql([]);
+  });
+
+  it('should decline the whole plan, sign-in lines included, when the paste-plan route ticks nothing', async () => {
+    const w = world();
+    await w.rules.load();
+    const plan = await w.service.propose(SESSION, { lines: [WORK_LINE, PASTE] });
+
+    const settled = await w.service.approveCopyItems(HOST, SESSION, plan.id, []);
+
+    should(settled).match({ state: 'declined', approved: [] });
+    should(w.service.get(HOST, SESSION, plan.id).lines.map(line => line.state)).eql(['declined', 'declined']);
+  });
+});

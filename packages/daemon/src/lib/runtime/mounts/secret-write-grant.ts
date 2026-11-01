@@ -27,6 +27,18 @@ export function refusedPageInput(context: RouteContext, act = 'allow a value int
   return refusedExtra(context, { capability: 'browser', axis: 'use' }, act, 'that needs the browser permission');
 }
 
+/**
+ * A route that answers ACCOUNT NAMES (labels, usernames, places) through another capability's route, as a task plan's
+ * candidates do, also needs what `GET /v1/accounts` needs: `secrets.use`. A device denied the accounts must not read
+ * them through a plan instead.
+ */
+export function refusedAccountNames(
+  context: RouteContext,
+  act = 'read the accounts a task plan names',
+): ApiResponse | undefined {
+  return refusedExtra(context, { capability: 'secrets', axis: 'use' }, act, 'that needs the secrets permission');
+}
+
 /** One more demand behind a route that already passed its own: the refusal, or `undefined` when allowed. */
 function refusedExtra(
   context: RouteContext,

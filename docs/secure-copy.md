@@ -233,6 +233,7 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
 - **A plan's rules live in memory only.** They are kept apart from the owner's own rules, never written to the rules
   file, and end with their plan: at its expiry, when it is revoked, and when its session ends. A restart forgets them,
   so those pastes ask again. Plan rules a store from before this change still holds are dropped when the daemon reads it.
+  The owner's rules and the plans' pastes share one cap of 50, so the rules listing always fits.
 - **The rules file** (`<state>/secure-copy/rules.json`) holds the owner's own rules (made in Settings or with
   `fy copy rules`) and the profile-targets setting: routes, counts and one switch, never a value. These stay on disk
   across a restart. One that cannot be read is NO rules: every paste then asks the owner.
@@ -291,7 +292,9 @@ The rules the contract fixes:
   `unavailable` when it is not in Accounts, signs in through a provider ("ClickUp via Google"), or is a terminal tool
   other than `sudo`, `su` or `doas`. Two lines that resolve to one sign-in, or a sign-in of the other kind, are
   refused with no card. The ferret's reason is masked by the vault redactor before it is kept, shown or audited.
-  At most 3 plans wait and 3 are in force per session, and a session raises at most 6 an hour.
+  At most 3 plans wait and 3 are in force per session, and a session raises at most 6 an hour. A proposal takes its
+  place against these caps before it awaits anything, so proposals sent together can't all pass; a refused one gives
+  its place back.
 - **One card, raised only by the daemon.** The card carries the `taskPlan` ref (and the paste-plan ref when the plan
   has paste lines, so an older app answers those as it always did). A ferret's agenda add has no field for either,
   and the agenda refuses a plain answer to the card (`use_input_form`): only the plan routes answer it. Every card
@@ -310,7 +313,8 @@ The rules the contract fixes:
   and its sign-in grants are made together, or the plan stays pending. No device with a passkey: `409
 passkey_required` ("Add a passkey in Settings › Security first"); paste lines can still be approved alone.
 - **At the machine.** `fy` stages the same way, then `POST …/approval/:stage/confirm-in-app` shows the selection on
-  the plan's OWN card (`machineStage`) for the passkey in the app; no second card is raised. `GET …/approval/:stage`
+  the plan's OWN card (`machineStage`) for the passkey in the app; no second card is raised. Only a stage the machine
+  made can be shown this way, so "Asked at the machine" is always true; a paired device commits its own stage directly. `GET …/approval/:stage`
   answers `waiting`, `approved`, `denied` or `expired`. The machine reads and drops only the stages it made; a
   paired device, where the passkey lives, answers any. `DELETE …/approval/:stage` drops one, approving nothing.
 - **Revoke, one tap, no passkey.** `POST …/task-plans/:pid/revoke` with `{ lines }` ends those lines, or every line
@@ -319,7 +323,8 @@ passkey_required` ("Add a passkey in Settings › Security first"); paste lines 
   their grants. No route edits a plan; more lines are a new plan.
 - **Owner only, twice.** Every plan route is `caller: 'person'`, so a ferret's session credential is refused
   `owner_only` before a body is read; the service refuses an agent caller again. `GET /v1/task-plans` and
-  `GET …/task-plans/:pid` are the owner's reads.
+  `GET …/task-plans/:pid` are the owner's reads. A plan names your accounts (labels, usernames, places), so every
+  route that answers a plan or a stage's summary also needs `secrets.use`, as `GET /v1/accounts` does.
 - **The kept paste-plan routes** answer from task plans: `GET /v1/copy-plans` lists the waiting plans with paste
   lines, as paste plans of those lines only, and `POST …/copy-plans/:pid/approve { items }` reads each item through
   `taskPlanLineOfCopyItem`. An item a plan doesn't have is `400`; a sign-in line can never be ticked this way.

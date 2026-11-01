@@ -23,7 +23,7 @@ import { SecureCopyError } from '../../secure-copy/errors.ts';
 import type { PasteRuleCaller } from '../../secure-copy/rules.ts';
 import { TaskPlanError, TaskPlanProofMissing, type TaskPlanService } from '../../task-plans/service.ts';
 import { ownerActorOf } from './input-requests.ts';
-import { refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
+import { refusedAccountNames, refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
 
 /**
  * THE OWNER'S TASK-PLAN ROUTES (docs/secure-copy.md, "Task plans"): read the plans, answer one, and revoke.
@@ -40,6 +40,10 @@ import { refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret
  * Answering LOOSENS what a ferret may do unasked, so the stage, commit and confirm demand `terminal.configure`, plus
  * `browser.use` for a page sign-in or a paste into a page and `secrets.configure` for a paste into the store, as the
  * paste-plan route always did. Reading, dropping a stage and revoking only narrow, and demand `terminal.use`.
+ *
+ * A plan names the owner's accounts (labels, usernames, places) and a stage's summary words them, so every route that
+ * answers either also needs `secrets.use`, exactly as `GET /v1/accounts` does: a device denied the accounts reads
+ * none of them through a plan.
  */
 
 const STATUS: Readonly<Record<SecureCopyError['code'], number>> = {
@@ -148,6 +152,8 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
       path: '/v1/task-plans',
       ...USE,
       handle: async context => {
+        const names = refusedAccountNames(context);
+        if (names !== undefined) return names;
         const session = context.request.query.get('session')?.[0];
         if (session !== undefined && !SESSION.test(session))
           throw new ApiError(400, 'the session in the query is not usable', 'bad_request');
@@ -161,6 +167,8 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
       ...USE,
       handle: async context => {
         const { caller, sessionId, planId } = at(context);
+        const names = refusedAccountNames(context);
+        if (names !== undefined) return names;
         return jsonResponse(TaskPlanSchema.parse(owned(() => plans.get(caller, sessionId, planId))));
       },
     },
@@ -177,7 +185,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
           plan,
           approval.lines.map(tick => tick.line),
         );
-        const refused = refusedReach(context, reach);
+        const refused = refusedReach(context, reach) ?? refusedAccountNames(context);
         if (refused !== undefined) return refused;
         const answer = await plans.stage(caller, sessionId, planId, approval).catch(taskPlanAnswered);
         if (answer.outcome === 'answered' && reach.store) spentSecretWrite(context);
@@ -191,6 +199,8 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
       handle: async context => {
         const { caller, sessionId, planId } = at(context);
         const stage = stageOf(context);
+        const names = refusedAccountNames(context);
+        if (names !== undefined) return names;
         return jsonResponse(
           TaskPlanStageViewSchema.parse(owned(() => plans.viewStage(caller, sessionId, planId, stage))),
         );
@@ -207,7 +217,7 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
         const view = owned(() => plans.viewStage(caller, sessionId, planId, stage));
         const plan = owned(() => plans.get(caller, sessionId, planId));
         const reach = reaches(plan, view.lines);
-        const refused = refusedReach(context, reach);
+        const refused = refusedReach(context, reach) ?? refusedAccountNames(context);
         if (refused !== undefined) return refused;
         try {
           // EVERY CALLER proves it: no `governance` read for the proof, so the machine's token skips nothing.
@@ -258,6 +268,8 @@ export function taskPlanRoutes(plans: TaskPlanService): readonly ApiRoute[] {
       ...USE,
       handle: async context => {
         const { caller, sessionId, planId } = at(context);
+        const names = refusedAccountNames(context);
+        if (names !== undefined) return names;
         const { lines } = await parseBody(context.request, TaskPlanRevokeSchema);
         return jsonResponse(
           TaskPlanSchema.parse(await plans.revoke(caller, sessionId, planId, lines).catch(taskPlanAnswered)),

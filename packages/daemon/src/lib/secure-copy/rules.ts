@@ -150,7 +150,8 @@ export class PasteRuleService implements InputPasteRules {
     const owner = requireOwner(caller);
     await this.ready;
     this.purge();
-    if (this.rules.length >= COPY_MAX_RULES)
+    // ONE cap for the owner's rules and the plans' pastes together: the listing holds both, and must always parse.
+    if (this.rules.length + this.planRules.length >= COPY_MAX_RULES)
       throw new SecureCopyError('capacity', `there are already ${String(COPY_MAX_RULES)} rules; remove one first`);
     const now = this.ports.clock.now();
     const rule: PasteRule = {
@@ -184,10 +185,10 @@ export class PasteRuleService implements InputPasteRules {
   ): readonly PasteRule[] {
     const owner = requireOwner(caller);
     this.purge();
-    if (this.planRules.length + pastes.length > COPY_MAX_RULES)
+    if (this.rules.length + this.planRules.length + pastes.length > COPY_MAX_RULES)
       throw new SecureCopyError(
         'capacity',
-        `that would hold more than ${String(COPY_MAX_RULES)} planned pastes; revoke a plan first`,
+        `that would hold more than ${String(COPY_MAX_RULES)} rules and planned pastes; remove a rule or revoke a plan first`,
       );
     const now = new Date(this.ports.clock.now()).toISOString();
     const made = pastes.map(

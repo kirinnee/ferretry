@@ -186,8 +186,9 @@ const OPEN_STATES: ReadonlySet<TaskPlanState> = new Set(['pending', 'approved'])
 const randomStageId = (): TaskPlanStageId => `tps_${randomBytes(12).toString('hex')}`;
 
 /** The caller's key: a paired device by its id, the owner at the machine as one. */
+const HOST_KEY = 'host';
 const ownerKey = (caller: Extract<PasteRuleCaller, { kind: 'owner' }>): string =>
-  caller.actor.kind === 'device' ? `device:${caller.actor.deviceId}` : 'host';
+  caller.actor.kind === 'device' ? `device:${caller.actor.deviceId}` : HOST_KEY;
 
 function requireOwner(caller: PasteRuleCaller): Extract<PasteRuleCaller, { kind: 'owner' }> {
   if (caller.kind !== 'owner')
@@ -230,6 +231,8 @@ export class TaskPlanService {
   readonly #answering = new Set<string>();
   /** When each session raised its plans in the last hour. */
   readonly #raised = new Map<string, number[]>();
+  /** Proposals each session has under way: past the caps, not yet kept or refused. */
+  readonly #proposing = new Map<string, number>();
   readonly #newStageId: () => TaskPlanStageId;
 
   constructor(private readonly ports: TaskPlanPorts) {
@@ -258,6 +261,25 @@ export class TaskPlanService {
     this.sweep();
     const now = this.ports.clock.now();
     this.#assertRoom(sessionId, now);
+    // RESERVED before anything awaits, so proposals sent together can't all pass the caps: this one counts as waiting
+    // and as raised this hour until it is kept or refused, and a refused one gives both back.
+    const slot = this.#reserve(sessionId, now);
+    try {
+      const plan = await this.#raise(sessionId, asks, parsed.data.expiresInSeconds, now, slot);
+      return plan;
+    } finally {
+      slot.release();
+    }
+  }
+
+  /** The body of {@link propose}, once its slot is reserved: resolve, check, raise the card, keep the plan. */
+  async #raise(
+    sessionId: string,
+    asks: readonly TaskPlanLineAsk[],
+    expiresInSeconds: number | undefined,
+    now: number,
+    slot: { kept(): void },
+  ): Promise<TaskPlan> {
     const signIns = asks.some(ask => ask.kind !== 'paste');
     const listing = signIns
       ? await this.ports.accounts.listing().catch(() => {
@@ -281,9 +303,7 @@ export class TaskPlanService {
         `line ${String(repeated + 1)} names a sign-in another line already names: one sign-in, one line`,
       );
     const id = this.ports.ids.planId();
-    const expiresAt = new Date(
-      now + (parsed.data.expiresInSeconds ?? TASK_PLAN_DEFAULT_LIFETIME_SECONDS) * 1000,
-    ).toISOString();
+    const expiresAt = new Date(now + (expiresInSeconds ?? TASK_PLAN_DEFAULT_LIFETIME_SECONDS) * 1000).toISOString();
     // The record's own rules, checked before any card is raised: a line resolved into something it refuses is a bug.
     const draft = TaskPlanSchema.parse({
       v: 1,
@@ -306,7 +326,7 @@ export class TaskPlanService {
     if (!card.ok) throw new SecureCopyError('unavailable', card.message);
     const plan = TaskPlanSchema.parse({ ...draft, agendaItemId: card.id });
     this.#plans.set(id, plan);
-    this.#raised.set(sessionId, [...(this.#raised.get(sessionId) ?? []), now]);
+    slot.kept();
     await this.#auditRaised(plan);
     return plan;
   }
@@ -479,6 +499,9 @@ export class TaskPlanService {
     const owner = requireOwner(caller);
     this.sweep();
     const held = this.#ownStage(owner, sessionId, planId, stage, { finished: false });
+    // The card says "Asked at the machine": only a stage the machine made may say so. A paired device confirms its own
+    // selection with its passkey directly.
+    if (held.owner !== HOST_KEY) throw this.#stageGone();
     const plan = this.#pending(sessionId, planId);
     this.#plans.set(
       planId,
@@ -631,9 +654,41 @@ export class TaskPlanService {
 
   // ── Inside ────────────────────────────────────────────────────────────────────────────────────────
 
+  /**
+   * Holds one proposal's place against the caps until it is kept (it is a pending plan then) or refused (its place
+   * and its count this hour are given back). Synchronous, so two proposals can never both take the last place.
+   */
+  #reserve(sessionId: string, now: number): { kept(): void; release(): void } {
+    this.#proposing.set(sessionId, (this.#proposing.get(sessionId) ?? 0) + 1);
+    this.#raised.set(sessionId, [...(this.#raised.get(sessionId) ?? []), now]);
+    let open = true;
+    let kept = false;
+    const leave = (): void => {
+      if (!open) return;
+      open = false;
+      const left = (this.#proposing.get(sessionId) ?? 1) - 1;
+      if (left <= 0) this.#proposing.delete(sessionId);
+      else this.#proposing.set(sessionId, left);
+    };
+    return {
+      kept: () => {
+        kept = true;
+        leave();
+      },
+      release: () => {
+        leave();
+        if (kept) return;
+        const times = [...(this.#raised.get(sessionId) ?? [])];
+        times.splice(times.lastIndexOf(now), 1);
+        this.#raised.set(sessionId, times);
+      },
+    };
+  }
+
   #assertRoom(sessionId: string, now: number): void {
     const held = [...this.#plans.values()].filter(plan => plan.sessionId === sessionId);
-    if (held.filter(plan => plan.state === 'pending').length >= TASK_PLAN_MAX_PENDING_PER_SESSION)
+    const waiting = held.filter(plan => plan.state === 'pending').length + (this.#proposing.get(sessionId) ?? 0);
+    if (waiting >= TASK_PLAN_MAX_PENDING_PER_SESSION)
       throw new SecureCopyError(
         'capacity',
         `${String(TASK_PLAN_MAX_PENDING_PER_SESSION)} plans are already waiting on the owner; wait for one to be answered`,

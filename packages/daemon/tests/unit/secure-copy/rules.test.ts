@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { COPY_MAX_RULES, type InputTargetFacts, type PasteRule, type PasteRuleSettings } from '@ferretry/protocol';
+import {
+  COPY_MAX_RULES,
+  type InputTargetFacts,
+  type PasteRule,
+  PasteRuleListSchema,
+  type PasteRuleSettings,
+} from '@ferretry/protocol';
 import should from 'should';
 import { type PasteRuleCaller, PasteRuleService, routeOf, SecureCopyError } from '../../../src/lib/index.ts';
 import { FACTS } from '../input-requests/support.ts';
@@ -602,5 +608,25 @@ describe('PasteRuleService: taking back one of a plan’s pastes', () => {
     should(service.list(OWNER)).eql([]);
     should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
     should(stored.rules).be.undefined();
+  });
+});
+
+describe('PasteRuleService: one cap for the owner’s rules and the plans’ pastes (secrev-1261 L2)', () => {
+  it('should keep the listing within its schema: no plan or rule past the combined cap of 50', async () => {
+    const { service, ms } = rules();
+    await service.load();
+    for (let index = 0; index < COPY_MAX_RULES - 1; index += 1)
+      await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL });
+    const plan = (line: number) => ({ line, from: GH, to: VERCEL_TERMINAL, uses: 1 });
+
+    const tooMany = await refused(() =>
+      service.fromPlan(OWNER, 's1', 'b'.repeat(32), [plan(0), plan(1)], ms.now + 1e6),
+    );
+    service.fromPlan(OWNER, 's1', 'b'.repeat(32), [plan(0)], ms.now + 1e6);
+    const oneMore = await refused(service.create(OWNER, { from: GH, to: VERCEL_TERMINAL }));
+
+    should([tooMany.code, oneMore.code]).eql(['capacity', 'capacity']);
+    should(PasteRuleListSchema.safeParse({ rules: service.list(OWNER) }).success).be.true();
+    should(service.list(OWNER)).have.length(COPY_MAX_RULES);
   });
 });
