@@ -507,9 +507,19 @@ async function pairToMemberMachine(world: World, person: Person): Promise<string
   });
 }
 
-/** Back to "Shared with me" in the same browser: a fresh load, unlocked with the member passkey. */
-async function backToShared(person: Person, world: World, publisherId: string): Promise<void> {
-  await open(person, `${world.origin.origin}/shared`);
+/**
+ * Back to "Shared with me" in the same browser, unlocked with the member passkey.
+ *
+ * A fresh load by default. `inApp` switches page inside the open document instead, the way a person
+ * moves on from the machine they just paired: the install sheet offers the projects this document has
+ * already read from the machine, and a fresh `/shared` load has read none.
+ */
+async function backToShared(person: Person, world: World, publisherId: string, inApp = false): Promise<void> {
+  if (inApp) {
+    await person.page.evaluate(
+      `(() => { history.pushState({}, '', '/shared'); window.dispatchEvent(new PopStateEvent('popstate')); })()`,
+    );
+  } else await open(person, `${world.origin.origin}/shared`);
   const seen = await reachAny(
     person,
     ['[data-shared-catalog]', '[data-publisher-unlock]', '[data-shared-offline]'],
@@ -617,7 +627,7 @@ async function installJourney(world: World): Promise<void> {
   const alice = await newPerson(world, 'alice');
   const minted = await joinNewMember(world, alice, 'Alice', [world.teamCatalog]);
   await pairToMemberMachine(world, alice);
-  await backToShared(alice, world, minted.publisherId);
+  await backToShared(alice, world, minted.publisherId, true);
   await reviewSkill(world, alice, world.teamCatalog, SKILL_TEAM);
 
   await step(world.journey, 'alice:install-target', async () => {
