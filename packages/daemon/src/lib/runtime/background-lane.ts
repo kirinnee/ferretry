@@ -3,7 +3,7 @@ import type { ActivityLedger } from './liveness.ts';
 /**
  * ONE LANE FOR THE DAEMON'S HOUSEKEEPING, OPENED ONLY ONCE THE DAEMON HAS SETTLED.
  *
- * Analytics ingestion, the fleet refresh, the terminal reaper and Warden autoMigrate each ran on their own
+ * Analytics ingestion, the fleet refresh and the terminal reaper each ran on their own
  * timer, and every one of them fired at boot. On a large Mac fleet — thirty-six sessions, transcripts of
  * 200 MB, thousands of Codex rollouts — they all read and parsed at the same moment the daemon was trying
  * to answer its first requests, and the event loop stalled for seconds at a time until the daemon

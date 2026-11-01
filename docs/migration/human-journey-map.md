@@ -155,13 +155,11 @@ claim that the requested capability works.
 5. **Complete the orchestration surface.** Mount a PWA task board (the route
    currently redirects away), then verify parent/child and task-board actions
    from a launched agent after step 2.
-6. **Surface the automatic failover an operator already has.** Same-family
-   enforcement, the manual PWA sheet and the opt-in quota-triggered failover
-   loop are all mounted; the loop acts only on measured exhaustion and
-   positively confirmed same-kind headroom, and goes through the preflight.
-   What is left is reach, not safety: give it a route so `fy` and the PWA can
-   configure the pool and read the tick's account, and decide whether consent
-   should also be per session rather than only per account.
+6. **Surface the automatic move an operator already has.** Same-family
+   enforcement, the manual PWA sheet and the Warden's autoMigrate are all
+   mounted; autoMigrate acts on the targets in the Warden settings and reports
+   `no_target` when none fits. What is left is reach: let `fy` and the PWA
+   edit those targets, and decide whether consent should also be per session.
 7. **Finish the fleet editor where it stops at accounts.** Creating an account
    and editing its layer are mounted, and so is preparing a fresh host; removing
    an account, moving one, and editing `profiles`, `variants`, `commands`,

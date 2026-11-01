@@ -204,14 +204,14 @@ housekeeping worker:
 
 ### 2.2 What stays on main, and why
 
-| Stays on main                                                                                                            | Why                                                                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `CredentialStatusService`: its `SingleFlight`, `observe`/`checkNow`/`view` policy, `InMemoryCredentialStatusStore` heads | The flight is shared with launch renewal (U12) and Check now. A second lock in the worker would break the "Check now joins the in-flight read" promise. Policy is cheap; only its **ports** move.                  |
-| `CachedUsageFeed`, `WatchedUsageFeed`, the provider-quota reader                                                         | Every route and failover reads them on main. Environment-login quotas go through `OutboundProviderAuthorizer`, one of the six vault holders `docs/secrets.md:40-47` names. The worker must never become a seventh. |
-| `ConfigFilesService` and its watcher                                                                                     | The config owner. It has its own queue, the accepted-record write and `configChanges`.                                                                                                                             |
-| Session index reads (`listSessions`, `readConfig`) for Codex attribution and analytics discovery                         | `DaemonStorage` owns the SQLite handle and the document cache (stage 3 §2.4). Main sends the worker _paths_, never a storage handle.                                                                               |
-| Codex **Check now** refresh (`#codexRefresh`, `ProcessFleetTokenRefreshPort`)                                            | Person-initiated, under the flight, and it rewrites the canonical `auth.json` through the harness. Its follow-up active read does go through the worker port.                                                      |
-| Analytics SQLite, reaper kills, warden decisions, failover migrations, every journal append                              | Same rule as stage 3: anything holding a lock, the index or the in-process listeners.                                                                                                                              |
+| Stays on main                                                                                                            | Why                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CredentialStatusService`: its `SingleFlight`, `observe`/`checkNow`/`view` policy, `InMemoryCredentialStatusStore` heads | The flight is shared with launch renewal (U12) and Check now. A second lock in the worker would break the "Check now joins the in-flight read" promise. Policy is cheap; only its **ports** move.                   |
+| `CachedUsageFeed`, `WatchedUsageFeed`, the provider-quota reader                                                         | Every route and the Warden read them on main. Environment-login quotas go through `OutboundProviderAuthorizer`, one of the six vault holders `docs/secrets.md:40-47` names. The worker must never become a seventh. |
+| `ConfigFilesService` and its watcher                                                                                     | The config owner. It has its own queue, the accepted-record write and `configChanges`.                                                                                                                              |
+| Session index reads (`listSessions`, `readConfig`) for Codex attribution and analytics discovery                         | `DaemonStorage` owns the SQLite handle and the document cache (stage 3 §2.4). Main sends the worker _paths_, never a storage handle.                                                                                |
+| Codex **Check now** refresh (`#codexRefresh`, `ProcessFleetTokenRefreshPort`)                                            | Person-initiated, under the flight, and it rewrites the canonical `auth.json` through the harness. Its follow-up active read does go through the worker port.                                                       |
+| Analytics SQLite, reaper kills, warden decisions and migrations, every journal append                                    | Same rule as stage 3: anything holding a lock, the index or the in-process listeners.                                                                                                                               |
 
 ### 2.3 Protocol
 
@@ -367,14 +367,14 @@ changes it.
 - Consumption on _other devices_ signed into the same account can only be seen by asking the provider.
 - Windows reset at `resets_at`.
 
-**Why 60 s is kept for now.** It is the declared default, failover's freshness gate is built around it, and
+**Why 60 s is kept for now.** It is the declared default, the Warden's freshness gate is built around it, and
 changing it is a behaviour change.
 
 **Recommendation (Q1): move the default to 300 s, plus one read at each window's `resets_at` + 30 s.**
 
 - Resets are then seen within 30 s, which is better than now.
 - Consumption elsewhere is seen within 5 minutes. 300 s is `USAGE_REFRESH_MS`, the documented conservative
-  default (`feed-policy.ts:15`), and also failover's default tick, so failover could not act faster anyway.
+  default (`feed-policy.ts:15`), so the Warden could not act on fresher data than that anyway.
 - On the Mac that turns about 2 `security` spawns a minute into 0.4.
 
 ### 3.3 macOS Keychain: detecting a changed item cheaply
@@ -456,8 +456,8 @@ reading)`, `rateLimits(session, reading)`, `jobResult`, `tick`.
 - `fleetCredentials.list()` and the routes and catalog facts that call it directly read `views(...)`.
 - The logins route, `republish()` and the tools snapshot stop re-reading credentials.
 
-**Freshness semantics for failover and the warden.** The snapshot's `at` must stay "when the evidence was
-collected": the oldest contributing reading, not the projection time. Otherwise failover's freshness gate would
+**Freshness semantics for the warden.** The snapshot's `at` must stay "when the evidence was
+collected": the oldest contributing reading, not the projection time. Otherwise the Warden's freshness gate would
 trust a reading it should not. A unit test pins this.
 
 ## 4. Staging — behaviour-identical PRs
@@ -776,7 +776,7 @@ it is acceptable for config. A test pins writeOwn → load.
 ### 5.2 Faster is still different
 
 PR 3 sees a sign-in, sign-out or token refresh within about 1 s instead of up to one interval. That is
-visible: Settings updates sooner, and failover sees a re-signed-in login sooner. It is the same shape as stage
+visible: Settings updates sooner, and the Warden sees a re-signed-in login sooner. It is the same shape as stage
 3's exit-speed question. Accept it, or delay publication to the interval for parity (Q4)?
 
 ### 5.3 macOS unknowns

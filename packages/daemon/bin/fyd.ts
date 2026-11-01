@@ -13961,8 +13961,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // freshness. The handle is registered for cancellation like every other acquisition, so a stopped
   // daemon does not leave a timer firing at closed storage.
   /**
-   * The housekeeping lane: analytics ingestion, the fleet refresh, the terminal reaper and quota
-   * failover, run one at a time and only once the lane opens, `backgroundDelayMs` after serving.
+   * The housekeeping lane: analytics ingestion, the fleet refresh and the terminal reaper, run one at
+   * a time and only once the lane opens, `backgroundDelayMs` after serving.
    *
    * Every one of them used to fire at boot on its own timer, all at once, while the daemon was trying to
    * answer its first requests — on a large Mac fleet the loop stalled until it answered nothing at all.

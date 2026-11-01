@@ -55,14 +55,13 @@ the native one is trusted.
 
 ### The one thing that will silently break routing if it is got wrong
 
-`AccountUsage.agent` is **not** an account id. It is the name a session is launched with:
-Warden autoMigrate calls `migrate(session.id, migration.target.agent)`, and the advisor matches
-on the same field. A `FleetUsage` row carries only `accountId` and `kind`, so a source **must join back
+`AccountUsage.agent` is **not** an account id. It is the name a session is launched with,
+and the advisor and other usage consumers match on that field. (Warden autoMigrate does not read it: it
+chooses a `FleetRuntimeView` from the fleet catalog facts.) A `FleetUsage` row carries only `accountId` and `kind`, so a source **must join back
 to the manifest** and use `account.wrapper`.
 
 Mapping an account id into `agent` would type-check, pass every schema, produce a plausible-looking
-`/usage` document — and then silently match nothing, so failover would quietly stop moving sessions off
-exhausted accounts. This is the same shape as the false exhaustion that
+`/usage` document — and then silently match nothing, so the advisor would quietly stop matching exhausted accounts. This is the same shape as the false exhaustion that
 [kfleet-map.md](kfleet-map.md) records under F: internal measures all look fine while the fleet stops
 working.
 
