@@ -126,8 +126,9 @@ describe('BunTmuxProcess', () => {
       // Assert
       const listed = await readFile(argv, 'utf8');
       should(listed).not.containEql(capability);
-      should(listed).not.containEql('6e');
-      should(listed.trimEnd().split('\n')).deepEqual([
+      const args = listed.trimEnd().split('\n');
+      should(args).not.containEql('6e');
+      should(args).deepEqual([
         '-u',
         '-S',
         join(root, 'isolated.sock'),
