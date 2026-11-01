@@ -138,8 +138,11 @@ export interface StateHomes {
   readonly homes: readonly KnownDirectory[];
   /** Folders inside a home that ARE reachable (e.g. the fleet's assets), by name and identity. */
   readonly openings: readonly KnownDirectory[];
-  /** The home's key files and folders by identity, so a bind mount of one of them alone is still seen. */
-  readonly pinned: readonly { readonly device: bigint; readonly inode: bigint }[];
+  /**
+   * The home's key files and folders by identity, so a bind mount of one of them alone is still seen — and by
+   * `place`, the real path of where each one is, which is the one place a folder walk may meet it.
+   */
+  readonly pinned: readonly { readonly device: bigint; readonly inode: bigint; readonly place: string }[];
   readonly [stateHomesBrand]: true;
 }
 
@@ -213,10 +216,16 @@ export async function resolveStateHomes(
     );
   const pinned = await Promise.all(
     (input.pinned ?? []).map(async path => {
-      const entry = await disk.identity(absolute(path, 'a pinned path')).catch(() => {
+      const named = absolute(path, 'a pinned path');
+      const entry = await disk.identity(named).catch(() => {
         throw new StateHomeUnresolvedError();
       });
-      return entry === undefined ? [] : [{ device: entry.device, inode: entry.inode }];
+      if (entry === undefined) return [];
+      // The entry itself is never followed, so its place is its real folder plus its own name.
+      const folder = await disk.realpath(dirname(named)).catch(() => {
+        throw new StateHomeUnresolvedError();
+      });
+      return [{ device: entry.device, inode: entry.inode, place: join(folder, basename(named)) }];
     }),
   );
   const homes = await known(input.homes);
@@ -651,6 +660,8 @@ async function placedFolderProblem(
 export type FolderDisk = Pick<GuardDisk, 'realpath' | 'identity' | 'openDirectory' | 'mkdir' | 'list' | 'unlink'> & {
   /** Removes the EMPTY folder at `path` (`rmdir`), which never follows a link. */
   rmdir(path: string): Promise<void>;
+  /** Descriptor paths were asked for and this host has none (Linux without `/proc`). */
+  readonly missingDescriptorPaths?: boolean;
 };
 
 /** A checked folder whose place no longer leads to it, so nothing more is reached through it by path. */
@@ -673,6 +684,12 @@ export interface GuardedFolder {
   /** Its real path when it was checked. */
   readonly path: string;
   readonly identity: FileIdentity;
+  /**
+   * Whether its entries are reached THROUGH the descriptor (Linux `/proc`). When not, each step re-proves the
+   * folder and then goes by path, which a swap timed between the two can still redirect — so a caller that moves
+   * or deletes a name it did not mint refuses to do that in a folder somebody else can swap.
+   */
+  readonly anchored: boolean;
   /** A path that reaches the ONE entry `leaf` in this folder (a name with no `/`). */
   entry(leaf: string): Promise<string>;
   /** A path that reaches the folder itself, to list it. */
@@ -699,6 +716,7 @@ function checkedFolder(handle: GuardDirectoryHandle, place: string, disk: Folder
   return {
     path: place,
     identity: handle.identity,
+    anchored: handle.entryPath('.') !== undefined,
     entry: async leaf => {
       if (!isOneEntry(leaf)) throw new TypeError(`name one entry of the folder, not a path: ${leaf}`);
       const through = handle.entryPath(leaf);
@@ -722,7 +740,8 @@ function boundHome(homes: StateHomes | undefined, place: string, entry: FileIden
   if (homes === undefined) return undefined;
   const home = homes.homes.find(directory => same(directory, entry));
   if (home !== undefined) return home.real === place ? undefined : home.named;
-  return homes.pinned.some(key => same(key, entry)) ? (homes.homes[0]?.named ?? place) : undefined;
+  const pin = homes.pinned.find(key => same(key, entry));
+  return pin === undefined || pin.place === place ? undefined : (homes.homes[0]?.named ?? place);
 }
 
 /**
@@ -788,9 +807,10 @@ function homeHolding(
  * - **Inside a home by name** (a runtime's folder lives in the state home by design): reached from that home's
  *   real path one folder at a time, each opened THROUGH the one above WITHOUT FOLLOWING A LINK. A link anywhere
  *   below the home is `link`, so a folder a harness swapped for a link into the home's secrets is never entered.
- * - **Anywhere else** (a host `~/.claude`, which may well be a link into a dotfiles checkout): links are followed,
- *   and where it lands must be outside every home by real path and identity, then opened and proven to be the
- *   folder at that real place.
+ * - **Anywhere else** (a host `~/.claude`, which may well be a link into a dotfiles checkout): links are followed
+ *   to find where it lands, which must be outside every home by real path and identity. That real path is then
+ *   walked from `/` the same way, through each folder's descriptor without following a link, so the handle is
+ *   on the folder the check was about; a link met on the way is `changed`.
  *
  * Either way, a folder that is a home by identity anywhere but at its own place (a bind mount) is `state-home`,
  * and with `make` the missing folders are made through their checked parents. `homes` absent judges no home and
@@ -806,6 +826,8 @@ export async function openFolderOutsideStateHomes(
   const holding = homes === undefined ? undefined : homeHolding(homes, target);
   let start: string;
   let below: readonly string[];
+  // Outside the homes, how many of `below` are folders already there (the rest are made).
+  let present = 0;
   if (holding !== undefined) {
     start = holding.home.real;
     below = relative(holding.name, target)
@@ -826,30 +848,33 @@ export async function openFolderOutsideStateHomes(
       if (verdict.inside) return refused('state-home', verdict.home);
     }
     if ((await disk.identity(real))?.kind !== 'directory') return refused('not-a-folder');
-    start = real;
-    below = missing;
+    // Walked from the root, one folder at a time through the one above and without following a link, exactly
+    // like the in-home branch: opening `real` by path would follow every folder above it, and a check made by
+    // path afterwards can be satisfied by flipping one of them back and forth in the right order. `real` is
+    // canonical, so a link met on the way means it changed.
+    const segments = real.split(sep).filter(segment => segment !== '');
+    start = sep;
+    below = [...segments, ...missing];
+    present = segments.length;
   }
   const top = await disk.openDirectory(start).catch(() => undefined);
   if (top === undefined) return refused('changed');
-  const topProblem =
-    holding !== undefined
-      ? same(holding.home, top.identity)
-        ? undefined
-        : refused('changed')
-      : await placedFolderProblem(start, top.identity, disk);
+  const topProblem = holding === undefined || same(holding.home, top.identity) ? undefined : refused('changed');
   if (topProblem !== undefined) {
     await top.close();
     return topProblem;
   }
   let folder = checkedFolder(top, start, disk);
-  for (const segment of below) {
+  for (const [index, segment] of below.entries()) {
+    const existing = index < present;
     let next: Guarded<GuardedFolder>;
     try {
-      next = await openFolderBelow(folder, segment, homes, disk, options);
+      next = await openFolderBelow(folder, segment, homes, disk, existing ? {} : options);
     } finally {
       await folder.close();
     }
-    if (!next.ok) return next;
+    // A folder of the canonical path that is now a link, or gone, is one that changed since it was resolved.
+    if (!next.ok) return existing && (next.rule === 'link' || next.rule === 'not-found') ? refused('changed') : next;
     folder = next.value;
   }
   return { ok: true, value: folder };

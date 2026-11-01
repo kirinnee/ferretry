@@ -99,6 +99,7 @@ function renderApply(apply: FleetApplyOutcome): RenderedOutcome {
         );
       }
       if (apply.result.lockResidue) lines.push(`Remove ${apply.result.lockResidue} before the next change.`);
+      for (const { path, reason } of apply.result.skipped ?? []) lines.push(`Left ${path} as it was: ${reason}`);
       return { ok: true, text: lines.join('\n') };
     }
     case 'committed-with-history-failure':

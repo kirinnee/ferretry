@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { closeSync, constants, openSync, readSync, type Stats } from 'node:fs';
+import { type BigIntStats, closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { cp, link, lstat, mkdir, open, readdir, readFile, realpath, stat, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
@@ -16,6 +16,7 @@ import {
   type FleetProvisioner,
   type FleetWriteOperation,
   type SettingsLayerSource,
+  type SkippedDestination,
 } from '../lib/provisioning.ts';
 import {
   mergeSettingsLayers,
@@ -26,9 +27,9 @@ import {
 } from '../lib/settings.ts';
 import type { SharedHistoryMigration } from '../lib/shared-history.ts';
 import { fencedBy } from '../lib/state-home-fence.ts';
-import type { GuardedFolder } from '../lib/state-home-guard.ts';
+import type { FolderDisk, GuardedFolder } from '../lib/state-home-guard.ts';
 import { type FleetApplyLock, type FleetApplyLockOptions, fleetApplyLockFor } from './apply-lock.ts';
-import { DestinationFolders, readRegularFile } from './destination-folders.ts';
+import { ConfinedDestinationError, DestinationFolders, readRegularFile } from './destination-folders.ts';
 import {
   assertSourceUnfenced,
   copyFencedSource,
@@ -149,10 +150,10 @@ const traversesDestination = (operation: FleetWriteOperation): boolean =>
  * A file too large to hash yields `undefined`: not knowing is not the same as knowing it is ours,
  * and the retract treats it as a reason to keep the tree rather than a reason to remove it.
  */
-async function identityOf(target: string, information: Stats): Promise<string | undefined> {
+async function identityOf(target: string, information: BigIntStats): Promise<string | undefined> {
   if (information.isDirectory()) return `dir:${information.dev}:${information.ino}`;
-  if (information.size > MAX_PUBLISH_DIGEST_BYTES) return undefined;
-  const digest = await contentProof(target, information.size);
+  if (information.size > BigInt(MAX_PUBLISH_DIGEST_BYTES)) return undefined;
+  const digest = await contentProof(target, Number(information.size));
   if (digest === undefined) return undefined;
   const { dev, ino, size, mtimeMs, mode, uid, gid } = information;
   return `file:${dev}:${ino}:${size}:${mtimeMs}:${mode}:${uid}:${gid}:${digest}`;
@@ -177,12 +178,18 @@ async function identityOf(target: string, information: Stats): Promise<string | 
  * somewhere it should not. A link aimed at a FIFO would otherwise block on open and turn a
  * mis-timed swap into a retract that never returns, which is a worse failure than a refusal.
  *
+ * Opened without blocking and refused unless it IS a regular file: the name sits in the account's own folder,
+ * so a pipe can be put there between the caller's `lstat` and this open, and a blocking open of one would freeze
+ * the daemon holding the apply claim. A pipe, a device or a socket is refused: a publish of one fails, and a
+ * retract that meets one keeps the tree.
+ *
  * Synchronous for the reason `readRegularFile` is: every file of a published tree is proved, and Bun's
  * asynchronous file-handle calls cost more than reading a small file whole.
  */
 async function contentProof(target: string, size: number): Promise<string | undefined> {
-  const descriptor = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const descriptor = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
+    if (!fstatSync(descriptor).isFile()) throw new Error(`refusing to read ${target}: it is no longer a regular file`);
     const bytes = Buffer.alloc(size);
     let filled = 0;
     while (filled < size) {
@@ -274,6 +281,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
      * home to protect (a test of the copy itself) leaves it out.
      */
     private readonly sourceFence?: SourceFence,
+    /** The destination side's disk; a test names one without descriptor paths, as macOS has. */
+    private readonly destinationDisk?: FolderDisk,
   ) {
     if (allowedRoots.length === 0) {
       throw new Error('at least one allowed fleet root is required');
@@ -289,9 +298,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
   /**
    * The destination side, judged against the same fence: nothing below a runtime's top folder is reached by path
    * (`./destination-folders.ts`). With no fence, every entry is still reached through a checked folder handle.
+   * `tops` are the runtimes' own folders, below which a platform without descriptor paths moves and removes nothing.
    */
-  private async destinationFolders(): Promise<DestinationFolders> {
-    return new DestinationFolders((await this.resolvedSourceFence())?.homes);
+  private async destinationFolders(tops: readonly string[] = []): Promise<DestinationFolders> {
+    return new DestinationFolders((await this.resolvedSourceFence())?.homes, this.destinationDisk, tops);
   }
 
   /**
@@ -377,8 +387,12 @@ export class FileFleetProvisioner implements FleetProvisioner {
   ): Promise<FleetApplyResult> {
     await this.preflightApply(plan, documents);
 
-    const journal = new FileMutationJournal(target => this.assertWritablePath(target), await this.destinationFolders());
+    const journal = new FileMutationJournal(
+      target => this.assertWritablePath(target),
+      await this.destinationFolders(plan.manifest.accounts.map(account => account.home)),
+    );
     const prunedWrappers: string[] = [];
+    const skipped: SkippedDestination[] = [];
     let operationCount = 0;
     let stage = 'the configuration and asset documents';
 
@@ -396,7 +410,16 @@ export class FileFleetProvisioner implements FleetProvisioner {
         // destination.
         await this.assertOperationWritable(operation);
         const mark = journal.beginOperation();
-        const pruned = await this.applyOperation(operation, journal);
+        let pruned: readonly string[] | undefined;
+        try {
+          pruned = await this.applyOperation(operation, journal);
+        } catch (error) {
+          // Refused before anything was moved or removed (see `ConfinedDestinationError`): this operation is
+          // left as the disk has it, and the result says so.
+          if (!(error instanceof ConfinedDestinationError)) throw error;
+          skipped.push({ path: operation.path, reason: error.message });
+          pruned = undefined;
+        }
         await journal.sealOperation(mark);
         if (pruned === undefined) continue;
         operationCount += 1;
@@ -413,7 +436,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
     // Committed. Cleanup from here is best-effort and never reclassifies a successful apply.
     const backupResidue = await journal.discard();
-    const residue = backupResidue.length === 0 ? {} : { backupResidue };
+    const residue = {
+      ...(backupResidue.length === 0 ? {} : { backupResidue }),
+      ...(skipped.length === 0 ? {} : { skipped }),
+    };
 
     const committed = (sharedHistory: FleetApplyPreview['sharedHistory']): FleetApplyCommittedState => ({
       accountCount: plan.manifest.accounts.length,
@@ -488,9 +514,12 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
   private async assertExpected(document: FleetDocumentWrite, journal: FileMutationJournal): Promise<void> {
     const found =
-      (await journal.withBackup(document.path, async backup =>
-        new Bun.CryptoHasher('sha256').update(await readFile(backup)).digest('hex'),
-      )) ?? ABSENT_DOCUMENT_REVISION;
+      (await journal.withBackup(document.path, async backup => {
+        // A document that was a link is the owner's own (a config file kept in a dotfiles checkout), read as the
+        // link leads; anything else is read without following a link put there since.
+        const bytes = (await lstat(backup)).isSymbolicLink() ? await readFile(backup) : await readRegularFile(backup);
+        return new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+      })) ?? ABSENT_DOCUMENT_REVISION;
     if (found === document.expect) return;
     throw new Error(
       `refusing to write ${document.path}: it is not what this change was composed against, so applying would discard the newer version`,
@@ -789,6 +818,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
     }
 
     if (operation.kind === 'copy') {
+      // A copy stages a tree beside the destination and removes it after, by every name in it: where that removal
+      // could be redirected (`ConfinedDestinationError`), nothing is staged at all.
+      if (await journal.folders.confined(folder)) throw new ConfinedDestinationError(operation.path);
       // Profile assets may be files or directories. Dereference every source link: a copied account
       // home must not reintroduce a symlink beneath FY_HOME, where StateFileSystem deliberately
       // rejects symlink components to prevent an operation escaping its state-home boundary.
@@ -944,13 +976,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const folder = await journal.folders.existing(directory);
     if (folder === undefined) return [];
     try {
-      let entries: readonly string[];
-      try {
-        entries = await readdir(await folder.self());
-      } catch {
-        return [];
-      }
-
+      const entries = await readdir(await folder.self());
       const pruned: string[] = [];
       for (const entry of entries.toSorted()) {
         if (keep.has(entry)) continue;
@@ -1008,13 +1034,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const folder = await journal.folders.existing(directory);
     if (folder === undefined) return;
     try {
-      let entries: readonly string[];
-      try {
-        entries = await readdir(await folder.self());
-      } catch {
-        return;
-      }
-
+      const entries = await readdir(await folder.self());
       for (const entry of entries.toSorted()) {
         if (keep.has(entry)) continue;
         // A backup or staging name belongs to this very batch; sweeping one away would destroy the only
@@ -1049,9 +1069,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
       for (const entry of only) {
         if (keep.has(entry) || isMutationReservedName(entry) || !isSingleComponent(entry)) continue;
         const target = path.join(directory, entry);
-        let information: Stats;
+        let information: BigIntStats;
         try {
-          information = await lstat(await folder.entry(entry));
+          information = await lstat(await folder.entry(entry), { bigint: true });
         } catch (error) {
           if (isMissing(error)) continue;
           throw error;
@@ -1184,7 +1204,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       }
       await this.publish(folder, temporary, destination, journal);
     } finally {
-      await discardQuietly(journal.folders, folder, temporary);
+      await journal.folders.removeOwnFile(folder, temporary).catch(() => undefined);
       await folder.close();
     }
   }
@@ -1217,7 +1237,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       // `link` is the no-replace primitive: it fails rather than overwriting, so a destination that
       // reappeared between the capture and here is refused instead of silently replaced.
       await link(await folder.entry(staged), await folder.entry(leaf));
-      await journal.folders.remove(folder, staged);
+      await journal.folders.removeOwnFile(folder, staged);
       return;
     }
     // A directory has no no-replace rename: `rename` will happily replace an empty one, taking its
@@ -1308,7 +1328,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       const entry = expected.get(relative);
       // No proof was taken, so there is nothing this could match against. Keep the tree.
       if (entry === undefined || entry.identity === undefined) return false;
-      const information = await lstat(target);
+      const information = await lstat(target, { bigint: true });
       if (information.isDirectory() !== entry.directory) return false;
       if ((await identityOf(target, information)) !== entry.identity) return false;
       matched += 1;
@@ -1357,14 +1377,14 @@ export class FileFleetProvisioner implements FleetProvisioner {
     // `mkdirat`, which Node does not expose.
     const made = await folders.child(destination.folder, destination.leaf, destination.path);
     try {
-      const opened = await stat(await made.self());
+      const opened = await stat(await made.self(), { bigint: true });
       created.push({ relative, directory: true, identity: await identityOf(await made.self(), opened) });
       const source = await folders.child(staged.folder, staged.leaf, `the staged copy of ${destination.path}`);
       try {
         for (const entry of await readdir(await source.self(), { withFileTypes: true })) {
           const from = await source.entry(entry.name);
           const child = relative === '' ? entry.name : `${relative}/${entry.name}`;
-          const information = await lstat(from);
+          const information = await lstat(from, { bigint: true });
           // Every child is reached through the handle above, so a swap cannot redirect it. The name is
           // still re-identified before each child: a destination that no longer leads to this directory
           // is refused rather than finished somewhere nobody resolving it will find.
@@ -1373,7 +1393,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
             await this.publishTree(
               { folder: source, leaf: entry.name },
               { folder: made, leaf: entry.name, path: path.join(destination.path, entry.name) },
-              information.mode & MODE_BITS,
+              Number(information.mode) & MODE_BITS,
               created,
               child,
               folders,
@@ -1413,8 +1433,8 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * be published somewhere nobody resolving the name reaches. `at` reaches the name through its parent's
    * handle; `destination` names it in the report.
    */
-  private async assertUnswapped(at: string, opened: Stats, destination: string): Promise<void> {
-    const current = await lstat(at);
+  private async assertUnswapped(at: string, opened: BigIntStats, destination: string): Promise<void> {
+    const current = await lstat(at, { bigint: true });
     if (!current.isDirectory() || current.ino !== opened.ino || current.dev !== opened.dev) {
       throw new Error(`refusing to publish into ${destination}: it was replaced while the tree was being written`);
     }
@@ -1440,7 +1460,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
   private async publishFile(
     from: string,
     to: string,
-    information: Stats,
+    information: BigIntStats,
     shown: string = to,
   ): Promise<string | undefined> {
     // The copy dereferences its sources, so a link, a socket or a device here is not something this

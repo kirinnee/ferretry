@@ -7,6 +7,7 @@ import {
   openFolderOutsideStateHomes,
   removeEntryWithin,
   resolveStateHomes,
+  StateHomeUnresolvedError,
 } from '../../src/lib/state-home-guard.ts';
 import { FakeGuardDisk } from './fake-guard-disk.ts';
 
@@ -246,6 +247,129 @@ describe('openFolderOutsideStateHomes — the edges of opening and making', () =
 
     // Act + Assert
     should(await rule(openFolderOutsideStateHomes('/fy/fleet', homes, disk))).equal('changed');
+  });
+});
+
+describe('secrev-1262 M1 — a folder outside the homes is walked from the root, not opened by path', () => {
+  /** A host `~/.claude` that is a real folder, and another runtime's skills inside the home it could be flipped to. */
+  const host = async () => {
+    const { disk, homes } = await world();
+    disk.dir('/host/claude');
+    disk.dir('/host/claude/skills');
+    disk.dir('/fy/fleet/homes/other');
+    disk.dir('/fy/fleet/homes/other/skills');
+    disk.file('/fy/fleet/homes/other/skills/victim', 3, 'abc');
+    /** Flips `/host/claude` between the real folder and a link to the other runtime, as `RENAME_EXCHANGE` does. */
+    const flip = (toLink: boolean): void => {
+      const linked = disk.entries.get('/host/claude')?.kind === 'link';
+      if (toLink === linked) return;
+      if (toLink) {
+        disk.move('/host/claude', '/host/.claude-real');
+        disk.link('/host/claude', '/fy/fleet/homes/other');
+      } else {
+        disk.entries.delete('/host/claude');
+        disk.move('/host/.claude-real', '/host/claude');
+      }
+    };
+    return { disk, homes, flip };
+  };
+
+  it('should refuse when the folder is flipped to a link at the open and back for the checks', async () => {
+    // Arrange — the order that passed the old check by path: a link in place at the open, the real folder for the
+    // `realpath`, the link again for the `lstat` (so its device and inode match what was opened).
+    const { disk, homes, flip } = await host();
+    let opened = false;
+    disk.beforeOpen = path => {
+      if (path.endsWith('/claude') || path.endsWith('/claude/skills')) flip(true);
+    };
+    disk.afterOpen = () => {
+      opened = true;
+      flip(false);
+    };
+    const identity = disk.identity.bind(disk);
+    disk.identity = async path => {
+      if (opened && path === '/host/claude/skills') flip(true);
+      return await identity(path);
+    };
+
+    // Act
+    const result = await openFolderOutsideStateHomes('/host/claude/skills', homes, disk);
+
+    // Assert — refused, and no handle on the other runtime's folder was ever handed back.
+    should(result.ok ? 'ok' : result.rule).equal('changed');
+  });
+
+  it('should refuse a folder of the resolved path that is gone by the time it is walked', async () => {
+    // Arrange
+    const { disk, homes } = await host();
+    disk.beforeOpen = path => {
+      if (!path.endsWith('/host')) return;
+      disk.beforeOpen = undefined;
+      disk.move('/host/claude', '/host/elsewhere');
+    };
+
+    // Act + Assert
+    should(await rule(openFolderOutsideStateHomes('/host/claude/skills', homes, disk))).equal('changed');
+  });
+
+  it('should hand back the very folder it resolved when nothing moves', async () => {
+    // Arrange
+    const { disk, homes } = await host();
+
+    // Act
+    const folder = await opened(openFolderOutsideStateHomes('/host/claude/skills', homes, disk));
+
+    // Assert
+    should(folder.path).equal('/host/claude/skills');
+    should(folder.anchored).be.true();
+  });
+});
+
+describe('secrev-1262 L3 — pinned key folders are known by where they are', () => {
+  it('should walk through a pinned folder at its own place and refuse it bound anywhere else', async () => {
+    // Arrange — `fleet/homes` is a pinned key: every runtime's folder is reached through it, and a bind of it
+    // into a runtime would put every other runtime's credentials under that runtime.
+    const { disk } = await world();
+    const homes = await resolveStateHomes(
+      { homes: ['/fy', '/fy/state', '/fy/config'], openings: ['/fy/fleet/assets'], pinned: ['/fy/fleet/homes'] },
+      disk,
+    );
+    disk.bind(`${SKILLS}/stale/all-homes`, '/fy/fleet/homes');
+
+    // Act + Assert
+    should((await opened(openFolderOutsideStateHomes(SKILLS, homes, disk))).path).equal(SKILLS);
+    should(await rule(openFolderOutsideStateHomes(`${SKILLS}/stale/all-homes`, homes, disk))).equal('state-home');
+  });
+
+  it('should fail closed for a pinned key whose folder cannot be resolved', async () => {
+    // Arrange — the key is there when it is looked at, and its folder cannot be resolved the moment after.
+    const { disk } = await world();
+    const realpath = disk.realpath.bind(disk);
+    let resolved = 0;
+    disk.realpath = async path => {
+      if (path === '/fy/state') resolved += 1;
+      if (path === '/fy/state' && resolved > 1) throw Object.assign(new Error(`EACCES ${path}`), { code: 'EACCES' });
+      return await realpath(path);
+    };
+
+    // Act
+    const outcome = await resolveStateHomes({ homes: ['/fy'], pinned: ['/fy/state/secrets.key'] }, disk).catch(
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(outcome).be.instanceOf(StateHomeUnresolvedError);
+  });
+
+  it('should say a folder reached by path is not anchored to its descriptor', async () => {
+    // Arrange
+    const { disk, homes } = await world(false);
+
+    // Act
+    const folder = await opened(openFolderOutsideStateHomes(SKILLS, homes, disk));
+
+    // Assert
+    should(folder.anchored).be.false();
   });
 });
 

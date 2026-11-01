@@ -144,9 +144,14 @@ const historySummary = (previews: readonly SharedHistoryPreview[]): readonly Fle
   }));
 
 /** Residue is optional on the wire, so an apply that left none says nothing rather than empty. */
-const residueOf = (value: { readonly backupResidue?: readonly string[]; readonly lockResidue?: string }) => ({
+const residueOf = (value: {
+  readonly backupResidue?: readonly string[];
+  readonly lockResidue?: string;
+  readonly skipped?: readonly { readonly path: string; readonly reason: string }[];
+}) => ({
   ...(value.backupResidue === undefined ? {} : { backupResidue: [...value.backupResidue] }),
   ...(value.lockResidue === undefined ? {} : { lockResidue: value.lockResidue }),
+  ...(value.skipped === undefined ? {} : { skipped: value.skipped.map(({ path, reason }) => ({ path, reason })) }),
 });
 
 export const applyResultSummary = (result: FleetApplyResult): FleetWireApplyResult => ({

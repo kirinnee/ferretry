@@ -1,4 +1,6 @@
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
+import path from 'node:path';
 import {
   type FolderDisk,
   type GuardedFolder,
@@ -48,13 +50,31 @@ class DestinationRefusedError extends Error {
         return "a symbolic link stands where a folder must be, inside this daemon's state home, so it is not followed";
       case 'not-a-folder':
         return 'it is not a folder';
-      case 'changed':
-        return 'it changed while it was being checked';
       default:
         return `the state-home guard refused it (${rule})`;
     }
   }
 }
+
+/**
+ * A move or a delete this platform cannot make safely, so it is not made: the folder is reached by path (no
+ * descriptor paths — macOS) and is below a runtime's top folder, where the runtime's harness can swap it for a link
+ * between the check and the step. The provisioner skips the operation and says so in its result; a rollback reports
+ * the entry it could not take back.
+ */
+export class ConfinedDestinationError extends Error {
+  constructor(readonly target: string) {
+    super(
+      `not moving or removing ${target} on this platform: its folder is reached by path below a runtime's top folder, where a swap timed between the check and the step could redirect it into the state home`,
+    );
+    this.name = 'ConfinedDestinationError';
+  }
+}
+
+const strictlyInside = (root: string, candidate: string): boolean => {
+  const relative = path.relative(root, candidate);
+  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+};
 
 /**
  * THE PROVISIONER'S DESTINATION SIDE, through the one state-home guard (`../lib/state-home-guard.ts`).
@@ -68,15 +88,46 @@ class DestinationRefusedError extends Error {
  *
  * `homes` absent (a provisioner given no fence, as in a test of the copy itself) judges no home and still reaches
  * every entry through a checked handle.
+ *
+ * **Where there are no descriptor paths (macOS), it fails closed below a runtime's top folder** (`tops`, the
+ * runtimes' own folders): every step there re-proves the folder and then goes by path, and a swap timed between the
+ * two could still redirect a rename or an unlink into the home. So no name there is moved aside or removed
+ * ({@link ConfinedDestinationError}); only a temporary this apply minted under a random name is ever unlinked. A
+ * Linux host asked for descriptor paths that has no `/proc` refuses every apply rather than reading every folder
+ * as empty.
  */
 export class DestinationFolders {
+  private realTops: Promise<readonly string[]> | undefined;
+
   constructor(
     private readonly homes: StateHomes | undefined,
     private readonly disk: FolderDisk = new NodeGuardDisk(),
+    private readonly tops: readonly string[] = [],
   ) {}
+
+  /** Whether moving aside or removing a name in `folder` is refused here (see the class). */
+  async confined(folder: GuardedFolder): Promise<boolean> {
+    if (folder.anchored) return false;
+    this.realTops ??= Promise.all(this.tops.map(async top => await realpath(top).catch(() => path.resolve(top))));
+    return (await this.realTops).some(top => strictlyInside(top, folder.path));
+  }
+
+  /** Throws {@link ConfinedDestinationError} for `target`, a name in `folder`, when moving it aside is refused here. */
+  async assertMayMove(folder: GuardedFolder, target: string): Promise<void> {
+    if (await this.confined(folder)) throw new ConfinedDestinationError(target);
+  }
+
+  private reachable(): void {
+    if (this.disk.missingDescriptorPaths === true) {
+      throw new Error(
+        'refusing to provision: this host has no /proc/self/fd, so no destination folder can be reached through its descriptor',
+      );
+    }
+  }
 
   /** The folder at `folder`, checked, or `undefined` when it (or a folder above it) is not there. */
   async existing(folder: string): Promise<GuardedFolder | undefined> {
+    this.reachable();
     const opened = await openFolderOutsideStateHomes(folder, this.homes, this.disk);
     if (opened.ok) return opened.value;
     if (opened.rule === 'not-found') return undefined;
@@ -85,6 +136,7 @@ export class DestinationFolders {
 
   /** The folder at `folder`, checked, made first (each missing folder with `mode`) when it is not there. */
   async made(folder: string, mode: number): Promise<GuardedFolder> {
+    this.reachable();
     const opened = await openFolderOutsideStateHomes(folder, this.homes, this.disk, { make: mode });
     if (opened.ok) return opened.value;
     throw new DestinationRefusedError(folder, opened.rule, opened.home);
@@ -99,11 +151,23 @@ export class DestinationFolders {
 
   /** Removes `leaf` of the checked `folder` — a file, a link, or a whole tree — never following a link. */
   async remove(folder: GuardedFolder, leaf: string): Promise<void> {
+    await this.assertMayMove(folder, path.join(folder.path, leaf));
     await removeEntryWithin(folder, leaf, this.homes, this.disk);
+  }
+
+  /**
+   * Unlinks a FILE this apply created under a random name (a temporary, a staged copy of a file). Allowed even where
+   * {@link remove} is not: a swap can only redirect it to a name nobody else has. Already gone is done.
+   */
+  async removeOwnFile(folder: GuardedFolder, leaf: string): Promise<void> {
+    await this.disk.unlink(await folder.entry(leaf)).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    });
   }
 
   /** Removes the EMPTY folder `leaf` of the checked `folder` (`rmdir`, which never follows a link). */
   async removeEmpty(folder: GuardedFolder, leaf: string): Promise<void> {
+    await this.assertMayMove(folder, path.join(folder.path, leaf));
     await this.disk.rmdir(await folder.entry(leaf));
   }
 

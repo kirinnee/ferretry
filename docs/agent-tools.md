@@ -623,10 +623,13 @@ descriptor (Linux `/proc/self/fd/N/<leaf>`):
 - **Inside the home by name** (every fleet runtime), each folder is opened from the home down, one at a time, through
   the one above, **without following a link**. A link anywhere on the way refuses the apply ("a symbolic link stands
   where a folder must be") and it rolls back, so the skills sweep never lists the home's files as "stale skills".
-- **Anywhere else** (a host `~/.claude`, which may be a link into a dotfiles checkout) links are followed, and where
-  the folder lands must be outside every home by real path and identity.
+- **Anywhere else** (a host `~/.claude`, which may be a link into a dotfiles checkout) links are followed only to
+  find where the folder lands, which must be outside every home by real path and identity. That real path is then
+  walked from `/` the same way, one folder at a time without following a link, so the handle is on the folder that
+  was checked; a link met on the way (the folder flipped since) refuses the apply.
 - **By identity everywhere:** a folder that is a home's device and inode anywhere but at that home's own place — a
-  bind mount — is refused.
+  bind mount — is refused, and so is one of the home's key files and folders (`fleet/homes`, `state/sessions`, the
+  token and vault files) met anywhere but where it is.
 - **Undo and cleanup reopen the folder and must find the same one.** Each moved-aside entry records its folder's
   device and inode; restoring it, and deleting the backup once the apply commits, reopens the folder and refuses one
   that is not that folder. A backup whose folder was swapped is kept and reported (`backupResidue`, or unrestored),
@@ -636,9 +639,17 @@ descriptor (Linux `/proc/self/fd/N/<leaf>`):
 - **Reads never follow a final link** (`O_NOFOLLOW`): a settings file or wrapper swapped for a link after it was
   looked at is refused rather than merged into what the harness reads.
 
-On macOS there is no descriptor path, so each step re-proves the folder — same real path, same device and inode —
-right before it: a swap that has happened is refused, one landing between that proof and the step is the declared
-residue. The shared-history migration (`file-shared-history.ts`), which moves history folders between runtime homes
+**On macOS it fails closed below a runtime's own folder.** There is no descriptor path, so each step re-proves the
+folder — same real path, same device and inode — and then goes by path, and a swap timed between the two could still
+redirect a rename or a delete into the home (two such wins would move `state/secrets.key` aside and then delete it).
+So below a runtime's own folder nothing is moved aside or removed at all: replacing an entry that is already there,
+a copy, and every sweep (`skills/` included) are **skipped**, and the apply's result names each one ("Left … as it
+was"); a rollback that would have to take back something it created there reports it instead. The runtime's own
+folder (its `settings.json`, `CLAUDE.md`, credential link) is written as usual, since its harness cannot swap the
+folder itself. What remains on macOS is that a NEW name can still land in the home if a folder is swapped at the
+exact moment it is created (`O_EXCL`: never over an existing file), and that a host runtime's own folder
+(`~/.claude`, whose parent the agent can write) has the re-proof only. A Linux host without `/proc` refuses
+every apply instead of reading every folder as empty. The shared-history migration (`file-shared-history.ts`), which moves history folders between runtime homes
 and the shared pool, still works by path and is not covered by this yet.
 
 ## Sub-ferrets and the Ferretry verbs

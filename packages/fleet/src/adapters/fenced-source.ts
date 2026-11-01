@@ -40,6 +40,8 @@ const MAX_SOURCE_ENTRIES = 100_000;
 export interface SourceFence extends StateHomeFence {
   /** Defaults to {@link HARD_LINK_ROOTS}. A root is used only once proven immutable, so naming one grants nothing. */
   readonly hardLinkRoots?: readonly string[];
+  /** The home's key files and folders, judged by identity wherever they are met (`resolveStateHomes`). */
+  readonly pinned?: readonly string[];
 }
 
 /** The fence as the disk has it now. */
@@ -96,7 +98,10 @@ export async function resolveSourceFence(
   // A store that cannot be proven immutable (absent, or writable by this user) is no exception at all.
   const immutable = await resolveImmutableRoots(fence.hardLinkRoots ?? HARD_LINK_ROOTS, disk).catch(() => undefined);
   return {
-    homes: await resolveStateHomes({ homes: fence.homes, openings }, disk),
+    homes: await resolveStateHomes(
+      { homes: fence.homes, openings, ...(fence.pinned === undefined ? {} : { pinned: fence.pinned }) },
+      disk,
+    ),
     links: { hops: 'every', hardLinks: immutable === undefined ? 'refuse' : { allowUnder: immutable } },
     disk,
   };

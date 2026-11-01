@@ -1,4 +1,4 @@
-import { type BigIntStats, constants, createReadStream, rmdirSync, unlinkSync } from 'node:fs';
+import { type BigIntStats, constants, createReadStream, existsSync, rmdirSync, unlinkSync } from 'node:fs';
 import { access, type FileHandle, lstat, mkdir, open, readdir, readFile, readlink, realpath } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import type {
@@ -76,13 +76,26 @@ async function opened(path: string, flags: number, mode?: number): Promise<[File
  */
 export class NodeGuardDisk implements GuardDisk, FolderDisk {
   /**
+   * Asked for descriptor paths, but this host has no `descriptorFolder` (a container or sandbox without `/proc`).
+   * Entries are then reached by path, re-proved before each step, and a caller that needs descriptor paths to
+   * act safely can refuse loudly instead of acting on folders that read as empty.
+   */
+  readonly missingDescriptorPaths: boolean;
+  private readonly throughDescriptors: boolean;
+
+  /**
    * `throughDescriptors`: reach a folder's entries through its open descriptor (Linux `/proc`). `groupDatabase`:
-   * the group file read for this user's listed groups — a test names another.
+   * the group file read for this user's listed groups — a test names another. `descriptorFolder`: where an open
+   * descriptor is reached by number — a test names one that is not there.
    */
   constructor(
-    private readonly throughDescriptors: boolean = process.platform === 'linux',
+    throughDescriptors: boolean = process.platform === 'linux',
     private readonly groupDatabase: string = '/etc/group',
-  ) {}
+    private readonly descriptorFolder: string = '/proc/self/fd',
+  ) {
+    this.missingDescriptorPaths = throughDescriptors && !existsSync(descriptorFolder);
+    this.throughDescriptors = throughDescriptors && !this.missingDescriptorPaths;
+  }
 
   async realpath(path: string): Promise<string> {
     return await realpath(path);
@@ -126,7 +139,8 @@ export class NodeGuardDisk implements GuardDisk, FolderDisk {
     const [handle, identity] = await opened(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     return {
       identity,
-      entryPath: leaf => (this.throughDescriptors ? `/proc/self/fd/${String(handle.fd)}/${leaf}` : undefined),
+      entryPath: leaf =>
+        this.throughDescriptors ? `${this.descriptorFolder}/${String(handle.fd)}/${leaf}` : undefined,
       chmod: async mode => await handle.chmod(mode),
       close: async () => await handle.close(),
     };

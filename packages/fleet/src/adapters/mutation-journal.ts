@@ -25,10 +25,16 @@
  * link into the state home after the capture is refused, never written through, and a backup is only
  * ever deleted from the very folder it was moved aside in, re-checked right before, by a removal that
  * never follows a link.
+ *
+ * That holds where entries are reached through the folder's descriptor (Linux `/proc`). Where they are
+ * not (macOS), each step re-proves the folder and then goes by path, so a swap timed between the two
+ * could redirect it: there, below a runtime's top folder, **nothing is moved aside or removed at all**
+ * (`ConfinedDestinationError`) — the operation that would need it is skipped and reported, and a
+ * rollback that would need it reports the entry instead.
  */
 import { randomUUID } from 'node:crypto';
-import type { Stats } from 'node:fs';
-import { lstat, readdir, rename } from 'node:fs/promises';
+import { type BigIntStats, lstatSync, readdirSync } from 'node:fs';
+import { lstat, rename } from 'node:fs/promises';
 import path from 'node:path';
 import type { DisplacedState, UnrestoredPath } from '../lib/provisioning.ts';
 import type { GuardedFolder } from '../lib/state-home-guard.ts';
@@ -135,7 +141,7 @@ function reasonOf(error: unknown): string {
 }
 
 /** Enough of one entry to notice any edit to it: identity, size, timestamp and permissions. */
-function fingerprintOf(relative: string, information: Stats): string {
+function fingerprintOf(relative: string, information: BigIntStats): string {
   // `ctimeMs` moves on a chmod and a chown as well as on a write, so it catches changes that leave
   // content and timestamps alone — but it also moves when the entry itself is renamed. The root of
   // a summary is exactly the entry rollback renames aside before re-examining it, so its ctime is
@@ -175,14 +181,17 @@ interface SealWalk {
  * have to agree. Sorting per directory is what replaced sorting every entry at the end — the step
  * that forced the whole summary into an array and capped a sealable tree at a couple of thousand
  * entries.
+ *
+ * Synchronous calls, like `readRegularFile`: one `lstat` per entry of a skills tree, where Bun's asynchronous
+ * form costs many times the call itself.
  */
 async function summarise(directory: string, prefix: string, walk: SealWalk): Promise<boolean> {
-  for (const name of (await readdir(directory)).toSorted()) {
+  for (const name of readdirSync(directory).toSorted()) {
     if (walk.visited >= MAX_SEAL_ENTRIES) return true;
     walk.visited += 1;
     const relative = prefix === '' ? name : `${prefix}/${name}`;
     const child = path.join(directory, name);
-    const information = await lstat(child);
+    const information = lstatSync(child, { bigint: true });
     walk.hasher.update(`${fingerprintOf(relative, information)}\n`);
     if (information.isDirectory() && (await summarise(child, relative, walk))) return true;
   }
@@ -295,9 +304,9 @@ export class FileMutationJournal {
   }
 
   private async identify(target: string): Promise<Seal> {
-    let information: Awaited<ReturnType<typeof lstat>>;
+    let information: BigIntStats;
     try {
-      information = await lstat(target);
+      information = await lstat(target, { bigint: true });
     } catch (error) {
       if (!isMissing(error)) throw error;
       return { present: false };
@@ -305,7 +314,7 @@ export class FileMutationJournal {
     if (information.isFile()) {
       return {
         present: true,
-        fingerprint: `${fingerprintOf('', information)}:${await contentDigest(target, information.size)}`,
+        fingerprint: `${fingerprintOf('', information)}:${await contentDigest(target, Number(information.size))}`,
       };
     }
     if (!information.isDirectory()) return { present: true, fingerprint: fingerprintOf('', information) };
@@ -345,28 +354,31 @@ export class FileMutationJournal {
     // this batch's own work. The caller is told, because clearing it is then safe and clearing
     // anything else would be destroying a stranger's file.
     if (this.#captured.has(resolved)) return false;
-    this.#captured.add(resolved);
+    // Marked as this batch's only once it IS recorded: a capture refused part-way (a move this platform will
+    // not make) must not leave a later capture believing the path is already this batch's to clear.
+    const record = (entry: JournalEntry): true => {
+      this.#entries.push(entry);
+      this.#captured.add(resolved);
+      return true;
+    };
 
     const leaf = path.basename(resolved);
     const move = async (holder: GuardedFolder | undefined): Promise<boolean> => {
-      if (holder === undefined) {
-        this.#entries.push({ kind: 'remove', path: resolved });
-        return true;
-      }
+      if (holder === undefined) return record({ kind: 'remove', path: resolved });
       const identity = { device: holder.identity.device, inode: holder.identity.inode };
       const at = await holder.entry(leaf);
       try {
         await lstat(at);
       } catch (error) {
         if (!isMissing(error)) throw error;
-        this.#entries.push({ kind: 'remove', path: resolved, folder: identity });
-        return true;
+        return record({ kind: 'remove', path: resolved, folder: identity });
       }
+      // Where a swap could redirect the move (no descriptor paths, below a runtime's top), nothing is moved.
+      await this.folders.assertMayMove(holder, resolved);
       const backupLeaf = `${BACKUP_PREFIX}${randomUUID()}`;
       await rename(at, await holder.entry(backupLeaf));
       const backup = path.join(path.dirname(resolved), backupLeaf);
-      this.#entries.push({ kind: 'restore', path: resolved, backup, backupLeaf, folder: identity });
-      return true;
+      return record({ kind: 'restore', path: resolved, backup, backupLeaf, folder: identity });
     };
     if (folder !== undefined) return await move(folder);
     return await this.folders.within(path.dirname(resolved), move);
@@ -462,8 +474,9 @@ export class FileMutationJournal {
       if (entry.kind !== 'restore') continue;
       try {
         await this.within(entry, async folder => {
-          // Its folder is gone, and the backup with it.
-          if (folder !== undefined) await this.folders.remove(folder, entry.backupLeaf);
+          // Its folder is not where it was: the backup went with it, still on disk somewhere, so it is named.
+          if (folder === undefined) throw new Error(`the folder holding ${entry.backup} is gone`);
+          await this.folders.remove(folder, entry.backupLeaf);
         });
       } catch {
         remaining.push(entry.backup);
@@ -566,6 +579,7 @@ export class FileMutationJournal {
   ): Promise<void> {
     const displacedLeaf = `${DISPLACED_PREFIX}${randomUUID()}`;
     const displaced = path.join(path.dirname(target), displacedLeaf);
+    await this.folders.assertMayMove(folder, target);
     try {
       await rename(await folder.entry(path.basename(target)), await folder.entry(displacedLeaf));
     } catch (error) {

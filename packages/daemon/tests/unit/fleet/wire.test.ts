@@ -260,6 +260,23 @@ describe('applyResultSummary', () => {
     should(actual.backupResidue).deepEqual(['/state/fleet/bin/.fy-fleet-backup-abc']);
     should(actual.lockResidue).equal('/state/fleet/.fy-fleet-apply.lock');
   });
+
+  it('should carry what an apply left as the disk has it, and why', () => {
+    // Act
+    const actual = applyResultSummary({
+      accountCount: 1,
+      operationCount: 1,
+      manifestPath: '/state/fleet/manifest.json',
+      prunedWrappers: [],
+      sharedHistory: [],
+      skipped: [{ path: '/state/fleet/homes/one/skills', reason: 'not moving or removing it on this platform' }],
+    });
+
+    // Assert
+    should(actual.skipped).deepEqual([
+      { path: '/state/fleet/homes/one/skills', reason: 'not moving or removing it on this platform' },
+    ]);
+  });
 });
 
 describe('the committed state a history failure reports', () => {
