@@ -17,6 +17,7 @@ import { type AgendaAskOption, type AgendaCardAnswer, GOT_IT_LABEL } from '@ferr
 import { ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, Ellipsis, LoaderCircle, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import type { AnswerDirection } from '../../lib/agenda-answers.ts';
+import { plainLabel } from '../../lib/plain-label.ts';
 
 const ARROWS: Readonly<Record<AnswerDirection, ReactNode>> = {
   left: <ArrowLeft size={14} aria-hidden="true" />,
@@ -185,7 +186,7 @@ function AnswerButton({
       type="button"
     >
       {answer.direction === 'right' ? null : arrow}
-      <span className="fy-attn-answer__label">{answer.label}</span>
+      <span className="fy-attn-answer__label">{plainLabel(answer.label)}</span>
       {recommended ? <RecommendedTag /> : null}
       {answer.direction === 'right' ? arrow : null}
       {swipeHints ? <span className="sr-only">, or {SWIPE_WORD[answer.direction]}</span> : null}
@@ -329,7 +330,7 @@ export function AgendaActions({
               title={option.description}
               type="button"
             >
-              {option.label}
+              {plainLabel(option.label)}
               {sameLabel(option.label, recommended) ? <RecommendedTag /> : null}
               {option.description === undefined ? null : (
                 <span className="sr-only" id={`${hintId}-${option.label}`}>

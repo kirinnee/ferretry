@@ -14,6 +14,7 @@
 import { type AgendaFormField, FORM_NO, FORM_YES, formFieldRequired } from '@ferretry/protocol';
 import { type ReactNode, useId } from 'react';
 import { agendaForms, type FormPicks, toggled } from '../../lib/agenda-form-state.ts';
+import { plainLabel } from '../../lib/plain-label.ts';
 
 type Prose = (text: string) => ReactNode;
 
@@ -61,7 +62,7 @@ function Choices({
             onClick={() => onPick(option.label)}
             type="button"
           >
-            {option.label}
+            {plainLabel(option.label)}
             {isRecommended(field, option.label) ? <span className="fy-form__rec">Recommended</span> : null}
           </button>
         ))}

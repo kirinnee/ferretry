@@ -1394,13 +1394,20 @@
    The list's row clips itself (overflow hidden, for the swipe) and an overflow-hidden flex item may shrink to nothing, so
    in the run's fixed-height column the row was squeezed to the box and cut off mid-step. Here the row keeps its own
    height, the box scrolls, and the title line and the answer row stay on the box's edges the way the agenda item's do.
+   A card shorter than the box GROWS to fill it (flex-grow, never shrink), the answer row at its foot, so there is no
+   empty space under it.
    `overflow: clip` clips the same but is not a scroll container, which sticky needs to see the box. */
 .fy-inbox-step > .fy-totest-list,
 .fy-inbox-step .fy-totest {
-  flex: 0 0 auto;
+  flex: 1 0 auto;
 }
 .fy-inbox-step .fy-totest {
+  display: flex;
+  flex-direction: column;
   overflow: clip;
+}
+.fy-inbox-step .fy-totest__surface {
+  flex: 1 0 auto;
 }
 .fy-inbox-step .fy-totest__top {
   position: sticky;
@@ -1410,6 +1417,7 @@
   padding-block: var(--gap-xs);
 }
 .fy-inbox-step .fy-totest__actions {
+  margin-top: auto;
   position: sticky;
   bottom: 0;
   z-index: 1;

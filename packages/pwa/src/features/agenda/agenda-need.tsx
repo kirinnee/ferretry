@@ -20,6 +20,7 @@
 
 import { AGENDA_NEED_HEADING, AGENDA_SHAPE_LEADS, type AgendaQuestion, type AgendaShape } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
+import { plainLabel } from '../../lib/plain-label.ts';
 
 type Prose = (text: string) => ReactNode;
 
@@ -36,7 +37,7 @@ export interface WantedAnswer {
 export const wantedAnswers = (questions: readonly AgendaQuestion[], hasSteps: boolean): readonly WantedAnswer[] => [
   ...questions.map(each => ({
     question: each.question,
-    choices: (each.options ?? []).map(option => option.label),
+    choices: (each.options ?? []).map(option => plainLabel(option.label)),
     ...(each.recommended === undefined ? {} : { suggested: each.recommended }),
   })),
   ...(hasSteps ? [{ question: 'Have you done the steps below?', choices: [] }] : []),
