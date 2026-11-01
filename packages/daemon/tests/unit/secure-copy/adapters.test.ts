@@ -205,3 +205,42 @@ describe('a paste plan card on the real agenda', () => {
     should(resolved.ok).be.true();
   });
 });
+
+describe('a paste plan card kept from an older daemon', () => {
+  it('should still refuse a plain answer to a card that carries only the paste-plan ref', async () => {
+    const ledgers = new Map<string, AgendaLedger>();
+    const agenda = new AgendaService(
+      {
+        read: async sessionId => ledgers.get(sessionId) ?? null,
+        transact: async (sessionId, apply) => {
+          const mutation = apply(ledgers.get(sessionId) ?? null);
+          if (mutation.ok && mutation.changed) ledgers.set(sessionId, mutation.ledger);
+          return mutation;
+        },
+      },
+      { now: () => '2026-10-31T12:00:00Z' },
+      { has: async sessionId => sessionId === 's1' },
+      { raised: async () => undefined },
+    );
+    const raised = await agenda.raise(
+      's1',
+      {
+        source: 'question',
+        sourceRef: 'b'.repeat(32),
+        kind: 'permission',
+        copyPlan: { planId: 'b'.repeat(32) },
+        subject: 'Allow these pastes?',
+        why: 'Allow these pastes?',
+        howToResolve: 'Tick them on the card.',
+      },
+      { kind: 'daemon', cause: 'secure-copy' },
+    );
+    const id = raised.ok ? raised.item?.id : undefined;
+
+    const answered = await agenda.answer('s1', id as never, { kind: 'permission', decision: 'approved' } as never, {
+      kind: 'human',
+    });
+
+    should(answered).match({ ok: false, error: { code: 'use_input_form', message: /is a paste plan/u } });
+  });
+});

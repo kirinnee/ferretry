@@ -6,7 +6,6 @@ import {
   type AuditDetail,
   type CopyPlan,
   type CopyPlanItem,
-  canonicalTaskPlanApproval,
   copyPlanOf,
   type SignInChoiceContext,
   type SignInId,
@@ -42,7 +41,7 @@ import {
 import type { AuditSink } from '../audit/types.ts';
 import { SecureCopyError } from '../secure-copy/errors.ts';
 import type { PasteRuleCaller, PasteRuleService } from '../secure-copy/rules.ts';
-import { type PlanListing, PlanAskMismatch, pinsOf, repeatedSignIn, resolveLine } from './resolve.ts';
+import { boundSelection, type PlanListing, PlanAskMismatch, pinsOf, repeatedSignIn, resolveLine } from './resolve.ts';
 import {
   answeredNote,
   answeredTell,
@@ -273,8 +272,7 @@ export class TaskPlanService {
     try {
       lines = asks.map((ask, index) => resolveLine(ask, index, whys[index] ?? '', listing, choice));
     } catch (error) {
-      if (error instanceof PlanAskMismatch) throw new SecureCopyError('bad_request', error.message);
-      throw error;
+      throw error instanceof PlanAskMismatch ? new SecureCopyError('bad_request', error.message) : error;
     }
     const repeated = repeatedSignIn(lines);
     if (repeated !== undefined)
@@ -286,7 +284,8 @@ export class TaskPlanService {
     const expiresAt = new Date(
       now + (parsed.data.expiresInSeconds ?? TASK_PLAN_DEFAULT_LIFETIME_SECONDS) * 1000,
     ).toISOString();
-    const draft = TaskPlanSchema.safeParse({
+    // The record's own rules, checked before any card is raised: a line resolved into something it refuses is a bug.
+    const draft = TaskPlanSchema.parse({
       v: 1,
       id,
       sessionId,
@@ -296,21 +295,16 @@ export class TaskPlanService {
       raisedAt: new Date(now).toISOString(),
       expiresAt,
     } satisfies TaskPlan);
-    if (!draft.success)
-      throw new SecureCopyError(
-        'bad_request',
-        `the plan is not usable: ${draft.error.issues[0]?.message ?? 'invalid'}`,
-      );
     const card = await this.ports.agenda.raise(sessionId, {
       planId: id,
       pastes: lines.some(line => line.kind === 'paste'),
-      ask: planAsk(draft.data),
-      context: planContext(draft.data),
-      howToResolve: planHowToResolve(draft.data),
+      ask: planAsk(draft),
+      context: planContext(draft),
+      howToResolve: planHowToResolve(draft),
       expiresAt,
     });
     if (!card.ok) throw new SecureCopyError('unavailable', card.message);
-    const plan = TaskPlanSchema.parse({ ...draft.data, agendaItemId: card.id });
+    const plan = TaskPlanSchema.parse({ ...draft, agendaItemId: card.id });
     this.#plans.set(id, plan);
     this.#raised.set(sessionId, [...(this.#raised.get(sessionId) ?? []), now]);
     await this.#auditRaised(plan);
@@ -394,12 +388,7 @@ export class TaskPlanService {
         'approving a sign-in on a task plan needs a passkey: add a passkey in Settings › Security first (paste lines can still be approved on their own)',
       );
     const pins = await this.#pinsFor(plan, selection.lines);
-    const canonical = canonicalTaskPlanApproval(plan, checked.data, pins);
-    if (!canonical.ok)
-      throw new SecureCopyError(
-        'bad_request',
-        canonical.line === undefined ? canonical.reason : `line ${String(canonical.line + 1)}: ${canonical.reason}`,
-      );
+    const canonical = boundSelection(plan, checked.data, pins);
     // The plan may have been answered while the pins were read.
     const still = this.#pending(sessionId, planId);
     for (const held of this.#stages.values())
@@ -463,10 +452,8 @@ export class TaskPlanService {
     if (!claim(taskPlanApprovalSubject(held.id, held.canonical))) throw new TaskPlanProofMissing();
     held.committing = true;
     try {
-      // The bytes the passkey proved are re-made from the plan as it is now: a plan that changed is not committed.
-      const again = canonicalTaskPlanApproval(plan, held.approval, held.pins);
-      if (!again.ok || again.text !== held.canonical)
-        throw new SecureCopyError('conflict', 'the plan changed since this selection was staged; stage it again');
+      // The proof is bound to the stage's own bytes. A pending plan is never edited (only `machineStage`, which is not
+      // bound, comes and goes), so the plan these bytes were made from is the plan answered here.
       const settled = await this.#answer(owner, plan, held.lines, 'passkey', held.pins);
       this.#finish(held, 'approved');
       return settled;
@@ -527,13 +514,7 @@ export class TaskPlanService {
     if (lines.some(line => line === undefined))
       throw new SecureCopyError('bad_request', `the plan has ${String(projected.items.length)} items`);
     const approval = { lines: lines.map(line => ({ line: line as number })) };
-    const selection = taskPlanSelection(plan, approval);
-    if (selection.ok && taskPlanSelectionNeedsPasskey(selection.lines))
-      throw new TaskPlanError(
-        409,
-        TASK_PLAN_ERROR_CODES.needsPasskey,
-        'that selection ticks a sign-in, which needs your passkey: answer the plan on its card in the app',
-      );
+    // Every line an item maps to is a paste line, so this is answered at once and never staged for a passkey.
     const answer = await this.stage(caller, sessionId, planId, approval);
     const settled = answer.outcome === 'answered' ? copyPlanOf(answer.plan) : undefined;
     if (settled === undefined) throw new SecureCopyError('conflict', 'the plan was not answered');
@@ -678,16 +659,12 @@ export class TaskPlanService {
     const pins = new Map<number, TaskPlanLinePins>();
     for (const tick of selected) {
       if (tick.kind === 'paste') continue;
+      // The selection already holds the line to one of its own candidates; a line without one gets no pins, and the
+      // canonical bytes refuse a ticked sign-in line with none.
       const line = plan.lines[tick.line];
-      const candidate =
-        line === undefined || line.kind === 'paste'
-          ? undefined
-          : line.candidates.find(each => each.signIn === tick.signIn);
-      if (line === undefined || line.kind === 'paste' || candidate === undefined)
-        throw new SecureCopyError(
-          'bad_request',
-          `line ${String(tick.line + 1)}: pick one of the accounts the card lists`,
-        );
+      if (line === undefined || line.kind === 'paste') continue;
+      const candidate = line.candidates.find(each => each.signIn === tick.signIn);
+      if (candidate === undefined) continue;
       const key = await this.ports.accounts.keyOf(candidate.account.id).catch(() => undefined);
       const read = pinsOf(line.kind, candidate, listing, key);
       if (!read.ok)

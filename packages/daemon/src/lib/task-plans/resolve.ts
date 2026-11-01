@@ -2,6 +2,7 @@ import {
   type AccountKey,
   type AccountSummary,
   type AccountList,
+  canonicalTaskPlanApproval,
   chosenSignIn,
   type GrantMissReason,
   type LoginObserved,
@@ -10,14 +11,18 @@ import {
   type SignInField,
   type SignInSummary,
   TASK_PLAN_MAX_CANDIDATES,
+  type TaskPlan,
+  type TaskPlanApproval,
   type TaskPlanCandidate,
   type TaskPlanLine,
   type TaskPlanLineAsk,
   type TaskPlanLineFlag,
   type TaskPlanLinePins,
+  type TaskPlanSelectedLine,
   taskPlanCoversTool,
   taskPlanKeysFitLine,
 } from '@ferretry/protocol';
+import { SecureCopyError } from '../secure-copy/errors.ts';
 
 /**
  * RESOLVING A FERRET'S ASKS AGAINST THE OWNER'S ACCOUNTS (docs/secure-copy.md, "Task plans").
@@ -263,4 +268,22 @@ export function pinsOf(
       ...(identities === undefined ? {} : { identities: [...identities] }),
     },
   };
+}
+
+/**
+ * THE BYTES A SELECTION'S PASSKEY IS BOUND TO, and the lines they tick: `canonicalTaskPlanApproval` over the plan, the
+ * owner's ticks and the pins just read. Refused as a bad selection when they can't be made: a ticked sign-in line with
+ * no pins, or pins of the wrong kind (a page line on a `tool@host`, a terminal line on anything but sudo, su or doas).
+ */
+export function boundSelection(
+  plan: TaskPlan,
+  approval: TaskPlanApproval,
+  pins: ReadonlyMap<number, TaskPlanLinePins>,
+): { readonly text: string; readonly lines: readonly TaskPlanSelectedLine[] } {
+  const canonical = canonicalTaskPlanApproval(plan, approval, pins);
+  if (canonical.ok) return { text: canonical.text, lines: canonical.lines };
+  throw new SecureCopyError(
+    'bad_request',
+    canonical.line === undefined ? canonical.reason : `line ${String(canonical.line + 1)}: ${canonical.reason}`,
+  );
 }

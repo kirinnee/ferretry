@@ -584,3 +584,23 @@ describe('PasteRuleService: a task plan’s pastes live in memory, the owner’s
     should(service.list(OWNER)).eql([]);
   });
 });
+
+describe('PasteRuleService: taking back one of a plan’s pastes', () => {
+  it('should remove a plan rule by its id from memory, writing nothing', async () => {
+    const { service, ms, stored } = rules();
+    await service.load();
+    const [made] = service.fromPlan(
+      OWNER,
+      's1',
+      'b'.repeat(32),
+      [{ line: 0, from: GH, to: VERCEL_TERMINAL, uses: 2 }],
+      ms.now + 3_600_000,
+    );
+
+    await service.revoke(PHONE, made?.id ?? '');
+
+    should(service.list(OWNER)).eql([]);
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
+    should(stored.rules).be.undefined();
+  });
+});

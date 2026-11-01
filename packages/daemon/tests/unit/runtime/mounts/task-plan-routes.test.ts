@@ -374,3 +374,37 @@ describe('the task-plan routes: revoke, and the kept paste-plan route', () => {
     );
   });
 });
+
+describe('the task-plan routes: reading', () => {
+  it("should list every plan, or one session's, and refuse a session the query can't name", async () => {
+    const { dispatch, service } = await served();
+    const mine = await service.propose(SESSION, { lines: [PASTE] });
+    await service.propose('other-session', { lines: [PASTE] });
+
+    const all = await dispatch.dispatch(request({ method: 'GET', path: '/v1/task-plans', headers: human }));
+    const one = await dispatch.dispatch(
+      request({ method: 'GET', path: '/v1/task-plans', query: [['session', SESSION]], headers: human }),
+    );
+    const bad = await dispatch.dispatch(
+      request({ method: 'GET', path: '/v1/task-plans', query: [['session', '../x']], headers: human }),
+    );
+
+    should((jsonBody(all).plans as unknown[]).length).equal(2);
+    should(jsonBody(one)).match({ plans: [{ id: mine.id, sessionId: SESSION }] });
+    should((jsonBody(one).plans as unknown[]).length).equal(1);
+    should(bad.status).equal(400);
+  });
+
+  it('should answer a plan this daemon does not hold, or another session’s, as not found', async () => {
+    const { dispatch, service } = await served();
+    const plan = await service.propose(SESSION, { lines: [PASTE] });
+
+    const unknown = await dispatch.dispatch(request({ method: 'GET', path: base('c'.repeat(32)), headers: human }));
+    const elsewhere = await dispatch.dispatch(
+      request({ method: 'GET', path: `/v1/sessions/other-session/task-plans/${plan.id}`, headers: human }),
+    );
+
+    should([unknown.status, elsewhere.status]).eql([404, 404]);
+    should(jsonBody(unknown).code).equal('not_found');
+  });
+});

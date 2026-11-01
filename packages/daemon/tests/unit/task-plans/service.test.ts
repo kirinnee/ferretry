@@ -27,6 +27,7 @@ import {
   TaskPlanError,
   TaskPlanProofMissing,
   TaskPlanService,
+  boundSelection,
 } from '../../../src/lib/index.ts';
 import { FACTS } from '../input-requests/support.ts';
 
@@ -808,5 +809,169 @@ describe('TaskPlanService: the audit', () => {
       why: 'check Actions',
     });
     should(JSON.stringify(w.audits)).not.match(/kirin-work|hunter2/u);
+  });
+});
+
+describe('TaskPlanService: the edges of each step', () => {
+  it('should raise no plan with a sign-in line when the accounts cannot be read, and stage none either', async () => {
+    const w = world();
+    await w.rules.load();
+    const plan = await w.service.propose(SESSION, { lines: [WORK_LINE] });
+    w.ports.accounts.listing = async () => {
+      throw new Error('damaged');
+    };
+
+    const raised = await refused(w.service.propose(SESSION, { lines: [SITE_LINE] }));
+    const stage = await refused(w.service.stage(PHONE, SESSION, plan.id, { lines: [{ line: 0 }] }));
+
+    should([raised.code, stage.code]).eql(['unavailable', 'unavailable']);
+    should(w.cards).have.length(1);
+    should((await w.service.propose(SESSION, { lines: [PASTE] })).state).equal('pending');
+  });
+
+  it('should refuse a selection that ticks one line twice, from any caller of the service', async () => {
+    const w = world();
+    await w.rules.load();
+    const plan = await w.service.propose(SESSION, { lines: [PASTE] });
+
+    const error = await refused(w.service.stage(HOST, SESSION, plan.id, { lines: [{ line: 0 }, { line: 0 }] }));
+
+    should(error).match({ code: 'bad_request', message: /tick each line once/u });
+  });
+
+  it('should refuse a sign-in that stopped being a password sign-in before it was staged', async () => {
+    const w = world();
+    await w.rules.load();
+    const plan = await w.service.propose(SESSION, { lines: [WORK_LINE] });
+    w.state.listing = {
+      ...w.state.listing,
+      signIns: w.state.listing.signIns.map(each =>
+        each.id === SI.work ? ({ ...each, method: { kind: 'sso', name: 'Okta' } } as SignInSummary) : each,
+      ),
+    };
+
+    const error = await refused(w.service.stage(PHONE, SESSION, plan.id, { lines: [{ line: 0 }] }));
+
+    should(error).match({ code: 'conflict', message: /no longer one a plan can cover/u });
+  });
+
+  it('should word a terminal line as root on its passkey dialog', async () => {
+    const w = world();
+    await w.rules.load();
+    const plan = await w.service.propose(SESSION, { lines: [SUDO_LINE] });
+
+    const stage = await staged(w, plan, { lines: [{ line: 0 }] });
+
+    should(stage.summary).eql([
+      'Line 1: type the password of kirin · kirin on sudo@kirin-box; this gives the ferret root there, 1 use',
+    ]);
+  });
+
+  it('should show the owner the last second factor the daemon saw, the newest one', async () => {
+    const w = world();
+    await w.rules.load();
+    const older = { value: 'code', observedAt: '2026-10-01T00:00:00.000Z', count: 1 } as const;
+    const newer = { value: 'push', observedAt: '2026-10-20T00:00:00.000Z', count: 1 } as const;
+    w.state.listing = {
+      ...w.state.listing,
+      signIns: w.state.listing.signIns.map(each =>
+        each.id === SI.home
+          ? ({
+              ...each,
+              observed: [
+                { ...HISTORY, identity: '1111111111111111', secondFactor: newer },
+                { ...HISTORY, identity: '2222222222222222', secondFactor: older },
+                { ...HISTORY, at: 'elsewhere.example', identity: '3333333333333333', secondFactor: older },
+              ],
+            } as SignInSummary)
+          : each,
+      ),
+    };
+
+    const plan = await w.service.propose(SESSION, { lines: [{ ...WORK_LINE, signIn: SI.home }] });
+
+    should(plan.lines[0]).match({ candidates: [{ signIn: SI.home, lastSecondFactor: newer }] });
+  });
+
+  it('should refuse a revoke of chosen lines on a plan still waiting, or of a line the owner did not allow', async () => {
+    const w = world();
+    await w.rules.load();
+    const waiting = await w.service.propose(SESSION, { lines: [PASTE, PAGE_PASTE] });
+    const answered = await w.service.propose(SESSION, { lines: [PASTE, PAGE_PASTE] });
+    await w.service.stage(HOST, SESSION, answered.id, { lines: [{ line: 0 }] });
+
+    const early = await refused(w.service.revoke(HOST, SESSION, waiting.id, [0]));
+    const declined = await refused(w.service.revoke(HOST, SESSION, answered.id, [1]));
+
+    should(early).match({ code: 'bad_request', message: /not answered yet/u });
+    should(declined).match({ code: 'bad_request', message: /only a line you allowed/u });
+    should(w.service.get(HOST, SESSION, answered.id).lines.map(line => line.state)).eql(['approved', 'declined']);
+  });
+
+  it('should name the sessions that hold a plan, for the daemon to ask whether each ended', async () => {
+    const w = world();
+    await w.rules.load();
+    await w.service.propose(SESSION, { lines: [PASTE] });
+    await w.service.propose('s2', { lines: [PASTE] });
+    await w.service.propose('s2', { lines: [PAGE_PASTE] });
+
+    should(w.service.sessions()).eql([SESSION, 's2']);
+  });
+
+  it('should refuse an answer that would put a fourth plan in force, making nothing', async () => {
+    const w = world();
+    await w.rules.load();
+    const [first, second, third] = [
+      await w.service.propose(SESSION, { lines: [PASTE] }),
+      await w.service.propose(SESSION, { lines: [PASTE] }),
+      await w.service.propose(SESSION, { lines: [PASTE] }),
+    ];
+    for (const plan of [first, second]) await w.service.stage(HOST, SESSION, plan.id, { lines: [{ line: 0 }] });
+    const fourth = await w.service.propose(SESSION, { lines: [PASTE] });
+    await w.service.stage(HOST, SESSION, third.id, { lines: [{ line: 0 }] });
+
+    const error = await refused(w.service.stage(HOST, SESSION, fourth.id, { lines: [{ line: 0 }] }));
+
+    should(error.code).equal('capacity');
+    should(w.service.get(HOST, SESSION, fourth.id).state).equal('pending');
+    should(w.rules.list(HOST)).have.length(3);
+  });
+
+  it('should let go of a waiting passkey stage when the plan is answered or revoked another way', async () => {
+    const w = world();
+    await w.rules.load();
+    const answered = await w.service.propose(SESSION, { lines: [WORK_LINE, PASTE] });
+    const revoked = await w.service.propose(SESSION, { lines: [WORK_LINE] });
+    const first = await staged(w, answered, { lines: [{ line: 0 }] });
+    const second = await staged(w, revoked, { lines: [{ line: 0 }] });
+
+    await w.service.stage(PHONE, SESSION, answered.id, { lines: [{ line: 1 }] });
+    await w.service.revoke(PHONE, SESSION, revoked.id);
+
+    should(w.service.viewStage(PHONE, SESSION, answered.id, first.stage).state).equal('denied');
+    should(w.service.viewStage(PHONE, SESSION, revoked.id, second.stage).state).equal('denied');
+    should([w.service.boundSubjectOf(first.stage), w.service.boundSubjectOf(second.stage)]).eql([undefined, undefined]);
+  });
+});
+
+describe('boundSelection: the bytes a passkey is bound to', () => {
+  it('should refuse a ticked sign-in line with no pins, or with pins of the wrong kind', async () => {
+    const w = world();
+    await w.rules.load();
+    const plan = await w.service.propose(SESSION, { lines: [WORK_LINE, PASTE] });
+    const approval = { lines: [{ line: 0 }, { line: 1 }] };
+    const terminalKey = new Map([[0, { accountKey: KEYS.GITHUB_WORK as AccountKey, placeKeys: ['sudo@kirin-box'] }]]);
+
+    const none = await refused(() => boundSelection(plan, approval, new Map()));
+    const wrong = await refused(() => boundSelection(plan, approval, terminalKey));
+    const right = boundSelection(
+      plan,
+      approval,
+      new Map([[0, { accountKey: KEYS.GITHUB_WORK as AccountKey, placeKeys: ['github.com'] }]]),
+    );
+
+    should(none).match({ code: 'bad_request', message: /line 1: the line has no pins/u });
+    should(wrong).match({ code: 'bad_request', message: /line 1: a page sign-in is pinned to web hosts only/u });
+    should(right.lines.map(line => line.line)).eql([0, 1]);
   });
 });

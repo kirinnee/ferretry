@@ -16,7 +16,6 @@ import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { SecureCopyError } from '../../secure-copy/errors.ts';
 import type { PasteRuleCaller, PasteRuleService } from '../../secure-copy/rules.ts';
 import type { TaskPlanService } from '../../task-plans/service.ts';
 import { ownerActorOf } from './input-requests.ts';
@@ -42,21 +41,6 @@ import { taskPlanAnswered } from './task-plans.ts';
  * (`allow-profile-targets`), which this route then spends. Turning it OFF only narrows, and asks no more than
  * `terminal.use`.
  */
-
-const STATUS: Readonly<Record<SecureCopyError['code'], number>> = {
-  bad_request: 400,
-  not_found: 404,
-  conflict: 409,
-  forbidden: 403,
-  capacity: 429,
-  unavailable: 503,
-  upstream_failed: 502,
-};
-
-function answered(error: unknown): never {
-  if (error instanceof SecureCopyError) throw new ApiError(STATUS[error.code], error.message, error.code);
-  throw error;
-}
 
 const ruleOwner = (context: RouteContext): PasteRuleCaller => ({ kind: 'owner', actor: ownerActorOf(context) });
 
@@ -184,7 +168,7 @@ export function secureCopyRoutes(
         const loosens = settings.allowProfileTargets && !rules.currentSettings(caller).allowProfileTargets;
         const refused = loosens ? profileTargetsRefusal(context) : undefined;
         if (refused !== undefined) return refused;
-        return jsonResponse(await rules.changeSettings(caller, settings).catch(answered));
+        return jsonResponse(await rules.changeSettings(caller, settings).catch(taskPlanAnswered));
       },
     },
     {
@@ -204,7 +188,7 @@ export function secureCopyRoutes(
             ? refusedPageInput(context, 'approve pastes into a page')
             : undefined;
         if (refused !== undefined) return refused;
-        const rule = await rules.create(caller, request).catch(answered);
+        const rule = await rules.create(caller, request).catch(taskPlanAnswered);
         if (intoStore) spentSecretWrite(context);
         return jsonResponse(rule, 201);
       },
@@ -218,7 +202,7 @@ export function secureCopyRoutes(
       noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
-        await rules.revoke(caller, param(context, 'ruleId', ID)).catch(answered);
+        await rules.revoke(caller, param(context, 'ruleId', ID)).catch(taskPlanAnswered);
         return jsonResponse({ removed: true });
       },
     },
