@@ -52,7 +52,7 @@ import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
-import { decideAskedBy } from './origin.ts';
+import { cardAudience, decideAskedBy } from './origin.ts';
 import type {
   ActivityDeriver,
   AgendaLinkSource,
@@ -102,6 +102,16 @@ export interface BoardServiceDependencies {
   readonly attachments?: BoardAttachmentSource;
   /** What the owner said to a session, for deciding whether a card's ask is theirs. Absent, no ask matches. */
   readonly ownerWords?: OwnerWords;
+  /**
+   * Told after every committed write of a card, by any path (docs/board.md § Gates ask the owner): the gate items
+   * follow the card's lane from here. Total in spirit: a failure is a diagnostic, never the write's.
+   */
+  readonly gates?: CardWriteObserver;
+}
+
+/** What follows a card's lane after each write: the gate items (`GateItems`). */
+export interface CardWriteObserver {
+  written(id: BoardTaskId): Promise<void>;
 }
 
 /** What `fy signal done` did to the ferret's focus card. */
@@ -735,6 +745,7 @@ export class BoardService {
       ...viaOf(caller),
       standing,
       ...(handsDown ? { handsDown } : {}),
+      audience: cardAudience(card),
       laneSet,
       index,
       laneSets: new Map([...laneSets, [card.projectId, laneSet]]),
@@ -852,6 +863,9 @@ export class BoardService {
         .changed(session, { projectId, taskIds: [task.id] })
         .catch((error: unknown) => this.warn(`could not publish board.changed for ${formatTaskRef(task)}`, error));
     }
+    await this.ports.gates
+      ?.written(task.id)
+      .catch((error: unknown) => this.warn(`could not bring the gate item of ${formatTaskRef(task)} in line`, error));
   }
 
   /** Tells the card's ferret it was sent back — unless the ferret doing it is who sent it. */

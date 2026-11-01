@@ -528,13 +528,15 @@ grant. This replaced the old `task-boards` access list. The code is `packages/da
 | `owner-human` | the owner: loopback, or a device the `fleet` grant let in  | everything, including owner gates and dependency overrides                       |
 |               | (on the admin token it is recorded as `admin-token`)       |                                                                                  |
 | `owner`       | the card's owner ferret                                    | the assignee's writes, plus re-plan                                              |
+|               |                                                            | and, on an INTERNAL card, passing its gates                                      |
 | `ancestor`    | a ferret above the owner in the `parent` chain of sessions | the same as the owner                                                            |
 | `assignee`    | the ferret doing it                                        | move, note, link, block, edit files, clarify, reopen, report an external trigger |
 | `daemon`      | the daemon's own automation                                | trigger moves, link cache, refile                                                |
 | `reader`      | any other ferret                                           | read; depend, but only from its own card                                         |
 
-Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a card into a lane with
-an owner gate, and only the owner closes. Reaching the routes at all is a `fleet` capability matter for a caller
+Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a card on through an
+owner gate, and only the owner closes — except on an internal card, whose owner ferret and its leads pass its gates
+and close it ([Gates ask the owner](#gates-ask-the-owner)). Reaching the routes at all is a `fleet` capability matter for a caller
 who is not on this host ([grants.md](grants.md)).
 
 ## Done and Not good
@@ -563,6 +565,73 @@ reaches. A `401 unauthorized` on an upload reads "pair it again from Settings", 
 
 While a move is in flight, the pressed button shows a spinner and both answers are disabled; a refusal is
 shown next to them.
+
+## Gates ask the owner
+
+A lane whose stage is a **gate** waits on the owner (Plan/Design's OK to build, Released · to test's Done / Not good;
+a lane stored without a stage reads with one, `laneStage` in `@ferretry/protocol`). The owner is asked on the agenda,
+never by the ferret: a card that reaches a gate raises **one** agenda item, and that item is the gate's only signal.
+The code is `GateItems` (`packages/daemon/src/lib/board/gate-items.ts`); the wire is `AgendaItem.gate`
+([agenda.md](agenda.md#gate-items)).
+
+**Entering.** After every committed write of a card, by any path — a move, a trigger, PR facts, a refile,
+`fy signal done`, a lane edit's relocation — a card the owner asked for (external, below) that sits in a gate lane
+has its one item: raised by the daemon on its ferret's agenda (the assignee's, else the owner ferret's, running or
+stopped), `task` naming the card, kind `choice`, the gate's options as its answers, `sourceRef`
+`gate:<card>:<lane>:<entry>` where `entry` is the history `seq` of the event that put the card there. The same
+entry is never raised twice, open or closed, so a restart, a second write or the owner's Not needed asks nothing
+again. At boot every card already waiting at a gate gets its item once, in the background. A card none of whose
+sessions the daemon knows gets no item and the daemon log says so.
+
+**Answering** is the owner's alone: at the machine (the admin token, recorded `admin-token` on the card) or from a
+paired device the `fleet` grant lets use the board — exactly who could have moved the card on the Board. The card
+moves FIRST, through `BoardService` as the owner, so authority, history and the done and reopen ladders are the
+board's own; only a move that went through answers the item, and a refused move leaves it open with the reason
+(`409 gate_not_moved`).
+
+| Option outcome          | The card                                                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `next`, `lane`, `close` | moves there, reason "<option> (from the Inbox)"; Done tells the ferret in the done ladder's one line                  |
+| `reopen-with-agenda`    | needs the owner's words (`400` without): reopened to the set's Not good lane as the owner's Not good is, the words a  |
+|                         | clarification and sent to the ferret by the reopen ladder, and ONE follow-up conversation (below)                     |
+| "Not yet"               | the extra answer of a gate with one option: the card stays; words, if given, are a clarification and reach the ferret |
+| Not needed (dismiss)    | the card stays where it is; that entry asks nothing again                                                             |
+
+**The follow-up.** Not good opens one conversation about the card: a `reply` item raised by the daemon on behalf
+of the card's ferret (`sourceRef` `gate-followup:<card>:<entry>`), on the ferret's turn in discussion, named in the
+reopen's reason ("… — talk it over on !A12"). The ferret answers it like its own: `edit` or `surface` hands it to
+the owner, `done` closes it (a sub-ferret's lead does that, as with every item on a sub-ferret's agenda). The owner's
+answer reaches the ferret as on its own item. It closes by itself when the card next reaches the gate.
+
+**Leaving.** A card that leaves the gate any other way — the owner's move on the Board, PR facts, a drop, a refile —
+has its open gate item resolved quietly: "the card moved on".
+
+**Nobody else answers.** A ferret, a lead over its sub-ferret (`overSubFerret`) and the daemon are refused every
+verb that would answer, close or reword a gate item (`answer`, `done`, `dismiss`, `edit`, `surface`); a ferret's
+raise that carries a `gate`, a `gate:` reference or a discussion start is refused too. The agenda's state machine
+holds this, not the app.
+
+**Notifications.** The gate item buzzes the phone once, at its raise, and is never counted in a stop's push
+([notifications.md](notifications.md#when-the-phone-buzzes)). Nothing else announces the gate: no task notice, no
+second push. A daemon that raises gate items lists `board.gate-items.1` on `GET /v1/health`, and the app hides its
+own to-test rows only for such a machine.
+
+**Internal cards.** A card a ferret made for its own errand (`askedBy: agent`: the stored answer, else the ask's source —
+one helper, `cardAudience` in `origin.ts`) never raises a gate item, never buzzes and is not in the Inbox.
+Its owner ferret, or a lead above it, passes its gate with an ordinary `fy task move`, closing included; its assignee,
+a sub-ferret and any other ferret are still refused. An external card's gate stays the owner's: a ferret is refused
+`owner-gate` and told the owner is asked in the Inbox, so it raises no agenda item of its own for it.
+
+| Standing             | External card's gate | Internal card's gate |
+| -------------------- | -------------------- | -------------------- |
+| `owner-human`        | passes               | passes               |
+| `owner`, `ancestor`  | refused              | passes               |
+| `assignee`, `reader` | refused              | refused              |
+| `daemon`             | PR facts only        | PR facts only        |
+
+**GAPS.** The Inbox's Not good carries words only: the agenda answer has no field for files, so a picture still goes
+through the Board's Not good. A closed gate item is remembered only as long as the agenda keeps it
+(`MAX_AGENDA_RESOLUTIONS`): a card left at a gate the owner dismissed long ago may ask again once its record is gone.
 
 ## Activity and staleness
 

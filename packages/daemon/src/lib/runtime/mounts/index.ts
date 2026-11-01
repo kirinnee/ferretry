@@ -48,6 +48,7 @@ import type { PublishedCarrierView } from '../published-carriers.ts';
 import { agendaRoutes, type DirectNotificationSubsystem } from './agenda.ts';
 import { agendaClearRoutes } from './agenda-clear.ts';
 import { configFilesConfirmations } from './agenda-confirms.ts';
+import type { AgendaGatePort } from './agenda-gates.ts';
 import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
 import { agentToolRoutes, sessionCredentialDirectory } from './agent-tools.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
@@ -265,6 +266,8 @@ export interface MountedSubsystems {
   readonly agendaReplies: AgendaRepliesSubsystem;
   /** The owner's bulk "clear all from agent ferrets". */
   readonly agendaClearer: AgendaAgentClearer;
+  /** A card's gate items (docs/board.md § Gates ask the owner): the owner's answer to one moves the card first. */
+  readonly gateItems?: AgendaGatePort;
   readonly pins: PinService;
   /** The owner's unsent composer, shared live between their own devices and never journaled. */
   readonly sharedDrafts: SharedDraftService;
@@ -702,6 +705,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
           subsystems.notifications,
           subsystems.agendaReplies,
           configFilesConfirmations(subsystems.configFiles.service, subsystems.audit),
+          subsystems.gateItems,
         ),
         ...agendaClearRoutes(subsystems.agendaClearer),
         ...pinRoutes(subsystems.pins),

@@ -92,6 +92,28 @@ export function pingNotificationPayload(
 }
 
 /**
+ * THE PUSH A CARD'S GATE MAKES (docs/board.md § Gates ask the owner): once, when its item is raised. The card's
+ * title, and the lane's ask with what to try; a tap opens the item, where the owner answers it.
+ */
+export function gateNotificationPayload(
+  sessionId: string,
+  item: AgendaItem,
+  snapshot: AgendaSnapshot,
+): SessionNotificationPayload {
+  return PushNotificationPayloadSchema.parse({
+    version: 1,
+    eventKey: `agenda-gate:${item.id}`,
+    sessionId,
+    kind: 'attention',
+    title: agendaNotificationTitle(agendaTitle(item)),
+    body: clipAtWord(oneLine(item.subject), AGENDA_PUSH_BODY_LENGTH),
+    tag: `attention-${sessionId}`,
+    url: agendaNotificationPath(sessionId, item.id),
+    count: agendaBadgeCount(snapshot),
+  }) as SessionNotificationPayload;
+}
+
+/**
  * What the one push says when an item's `neededBy` has come within the warning window: the card's title,
  * and the time left (or that it passed) ahead of its ask.
  */

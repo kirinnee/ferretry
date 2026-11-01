@@ -7,6 +7,7 @@ import {
   type NotificationIdentity,
   notificationKey,
   phoneApprovalNotificationPayload,
+  gateNotificationPayload,
   pingNotificationPayload,
   type SessionNotificationPayload,
   stopShows,
@@ -87,6 +88,13 @@ export class NotificationService implements AgendaRaisedObserver {
    * else raised — an agenda item, a warden's card — waits for the stop or the deadline. Total.
    */
   async raised(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
+    if (item.gate !== undefined) {
+      // A card's gate: its one push, under the same once-per-item key a notice's ping has.
+      await this.announce({ sessionId, agendaId: item.id, ping: true }, item, () =>
+        gateNotificationPayload(sessionId, item, snapshot),
+      );
+      return;
+    }
     if (item.notice !== true || item.ping !== true) return;
     await this.announce({ sessionId, agendaId: item.id, ping: true }, item, () =>
       pingNotificationPayload(sessionId, item, snapshot),
@@ -99,7 +107,8 @@ export class NotificationService implements AgendaRaisedObserver {
    * stop; asking again for the same stop is no second push. Total.
    */
   async stopped(sessionId: string, stoppedAt: string, snapshot: AgendaSnapshot): Promise<void> {
-    const [first, ...rest] = ownerTurnItems(snapshot.items);
+    // A card's gate item made its own push at its raise: a stop never names it again.
+    const [first, ...rest] = ownerTurnItems(snapshot.items).filter(item => item.gate === undefined);
     if (first === undefined) return;
     await this.announce(
       { sessionId, agendaId: first.id, stoppedAt },

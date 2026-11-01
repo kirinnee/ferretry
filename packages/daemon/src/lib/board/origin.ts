@@ -19,6 +19,7 @@
  * as human, which errs toward showing the owner a card.
  */
 import type { BoardTask, BoardTaskAskedBy, BoardTaskId, BoardTaskOrigin, TaskRef } from '@ferretry/protocol';
+import type { CardAudience } from './authority.ts';
 import type { BoardIndex } from './graph.ts';
 
 /** An ask source that names the owner, in any of the ways ferrets write it down. */
@@ -113,3 +114,11 @@ export const decideAskedBy = async (
   const session = askSessionOf(card);
   return session !== undefined && ownerWordsMatch(card.ask.text, await said(session)) ? 'person' : 'agent';
 };
+
+/**
+ * Who a card's gates ask: the ONE reading of "a person asked for it" the gates use (docs/board.md § Gates ask the
+ * owner). The card's stored `askedBy`, else (a card stored before it) the ask's source ({@link cardAskedBy}). An
+ * external card's gate raises an item for the owner; an internal card's gate is its lead's to pass.
+ */
+export const cardAudience = (card: Pick<BoardTask, 'ask' | 'askedBy'>): CardAudience =>
+  (card.askedBy ?? cardAskedBy(card)) === 'person' ? 'external' : 'internal';

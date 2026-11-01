@@ -299,7 +299,7 @@ describe('moving a card', () => {
 
     // Assert
     should(refused.code).equal('owner-gate');
-    should(refused.message).containEql('fy agenda add --task F1');
+    should(refused.message).containEql('the daemon asks them in the Inbox');
     should(stored(ports).laneId).equal('implement');
     should(lastEvent(ports)?.actor).eql({ kind: 'owner' });
   });

@@ -5,7 +5,7 @@ How a ferret tells the owner something, and exactly when the owner's phone buzze
 Two rules carry everything here:
 
 - **The Inbox is the owner's channel; the phone is the exception.** Everything a ferret sends lands in the
-  Inbox and moves its badge. The phone buzzes only at the three moments in [When the phone buzzes](#when-the-phone-buzzes).
+  Inbox and moves its badge. The phone buzzes only at the moments in [When the phone buzzes](#when-the-phone-buzzes).
 - **Every ferret gets the notify rule; only some keep an agenda.** Plain notices are for everyone.
   Agenda items — things only the owner can decide or do — are for ferrets in
   [agenda mode](#agenda-mode). The agenda itself is [agenda.md](agenda.md).
@@ -35,7 +35,7 @@ verbatim; `fy` is the binary name):
 
 ## When the phone buzzes
 
-Only these four. Everything else — a new item while the ferret works, an edit, a change of whose turn it
+Only these five. Everything else — a new item while the ferret works, an edit, a change of whose turn it
 is, a notice without `--ping`, the owner's own moves — moves the Inbox badge and nothing more.
 
 | #   | Moment                                                                                     | Push                                                              | How often                               |
@@ -44,6 +44,11 @@ is, a notice without `--ping`, the owner's own moves — moves the Inbox badge a
 | 2   | An item's **`neededBy`** comes within `attention.deadlineWarnHours` (default 3 hours)      | The item's title; "Needed in 25 min" / "Overdue" ahead of its ask | Once per item                           |
 | 3   | A notice with **`--ping`**                                                                 | The notice's summary                                              | Once per notice                         |
 | 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**              | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
+| 5   | A card the owner asked for **reaches a gate** ([board.md](board.md#gates-ask-the-owner))   | The card's title; the lane's ask ("Try it: …", "OK to build? …")  | Once per gate item, at its raise        |
+
+A gate item is the gate's one signal: it pushes at its raise (row 5) and never again inside a stop, so a ferret that
+stops with only a gate item waiting makes no stop push, and one with other items too counts only those. An internal
+card (a ferret's own errand) raises no gate item, so it never buzzes.
 
 An input card always counts as inside the window (row 2), so it pushes once the moment it is raised, unless it is
 **quiet** (below). An

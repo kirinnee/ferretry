@@ -47,7 +47,15 @@ import {
   type TaskRef,
   variantLanes,
 } from '@ferretry/protocol';
-import { type BoardOperation, type BoardStanding, mayDo, OPERATION_STANDINGS, refusalMessage } from './authority.ts';
+import {
+  type BoardOperation,
+  type BoardStanding,
+  type CardAudience,
+  mayDo,
+  mayPassGate,
+  OPERATION_STANDINGS,
+  refusalMessage,
+} from './authority.ts';
 import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
@@ -79,6 +87,11 @@ export interface CardContext {
   readonly laneSets: LaneSets;
   /** The version this daemon runs, for `release.running`; absent or `null` when it is not known. */
   readonly runningVersion?: string | null;
+  /**
+   * Who the card's gates ask (`CardAudience`): an internal card's owner ferret and leads pass its gates themselves.
+   * Absent reads as `external`, the strict reading: only the owner passes a gate.
+   */
+  readonly audience?: CardAudience;
   /**
    * The files the request carries, as the service found them in the attachment store; absent when it carries
    * none. Only a reopen takes them.
@@ -169,9 +182,17 @@ const requireOpen = (card: BoardTask, doing: string): void => {
   }
 };
 
-/** Only the owner enters an owner-gated closed lane: the refusal for anyone else. */
-const requireOwnerForClosed = (lane: Lane, standing: BoardStanding, card: Pick<BoardTask, 'id'>): void => {
-  if (lane.category === 'closed' && lane.ownerGate === true && standing !== 'owner-human') {
+/**
+ * Only the owner enters an owner-gated closed lane — or, on an internal card moved, its owner ferret or a lead
+ * (`mayPassGate`): the refusal for anyone else.
+ */
+const requireOwnerForClosed = (
+  lane: Lane,
+  standing: BoardStanding,
+  card: Pick<BoardTask, 'id'>,
+  audience: CardAudience = 'external',
+): void => {
+  if (lane.category === 'closed' && lane.ownerGate === true && !mayPassGate(standing, audience)) {
     throw new BoardError(
       'owner-gate',
       `only the owner closes a card; move ${formatTaskRef(card)} to the lane before ${lane.name} and the owner closes it`,
@@ -195,12 +216,15 @@ const move = (card: BoardTask, to: string, reason: string | undefined, context: 
     throw new BoardError('reason-required', `moving ${ref} back from ${from.name} to ${target.name} needs a reason`);
   }
   const gated = needsOwner(context.laneSet, card.laneId, to);
-  if (gated.ok && gated.value && context.standing !== 'owner-human') {
-    requireOwnerForClosed(target, context.standing, card);
+  const audience = context.audience ?? 'external';
+  if (gated.ok && gated.value && !mayPassGate(context.standing, audience)) {
+    requireOwnerForClosed(target, context.standing, card, audience);
     throw new BoardError(
       'owner-gate',
-      `only the owner moves ${ref} on from ${from.name}; raise the ask with \`fy agenda add --task ${card.id}\``,
-      ['owner-human'],
+      audience === 'internal'
+        ? `only its owner ferret or a lead above it moves ${ref} on from ${from.name}`
+        : `only the owner moves ${ref} on from ${from.name}: the daemon asks them in the Inbox, so raise no agenda item for it`,
+      audience === 'internal' ? ['owner-human', 'owner', 'ancestor'] : ['owner-human'],
     );
   }
   if (rank(context.laneSet, to) > rank(context.laneSet, card.laneId)) {
