@@ -51,6 +51,7 @@ import {
   swipeThreshold,
 } from '../../lib/agenda-inbox.ts';
 import { usePrefersReducedMotion } from '../../shell/bottom-sheet.tsx';
+import { SwipeReveal } from './swipe-reveal.tsx';
 import {
   isTouch,
   lockOf,
@@ -472,14 +473,15 @@ export function AgendaSwipeDeck({
           </div>
         ))
         .reverse()}
+      {top === undefined ? null : <SwipeReveal active={intent?.direction === 'down' ? 'down' : null} />}
       {top === undefined ? null : (
         <div
           className="fy-attn-deck__top"
           data-dragging={drag === null ? undefined : ''}
           data-has-up={targets.up === undefined ? undefined : ''}
           data-swipe-direction={intent?.direction ?? undefined}
-          // What letting go would do — kept on the card for tests and assistive tech, never drawn: the owner wants no
-          // floating banner naming the option, only the card that follows the finger.
+          // What letting go would do — kept on the card for tests and assistive tech. Only ↓ is also drawn, on the ground
+          // the card uncovers ({@link SwipeReveal}); the answers stay unnamed, the card just follows the finger.
           data-swipe-committed={intent?.committed || undefined}
           data-swipe-empty={(intent?.direction != null && aim === undefined) || undefined}
           data-swipe-answer={aim?.label}

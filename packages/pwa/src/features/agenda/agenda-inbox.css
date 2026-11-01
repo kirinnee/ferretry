@@ -1428,3 +1428,30 @@
 .fy-inbox-step .fy-totest:has(.fy-snooze__popover) {
   overflow: visible;
 }
+/* The ground a pulled card uncovers, above the card's resting place: the action letting go would do. */
+.fy-swipe-reveal {
+  position: absolute;
+  z-index: 3;
+  inset: 0 0 22px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--gap-xs);
+  padding: var(--gap-md);
+  border-radius: var(--radius-panel);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+  pointer-events: none;
+}
+.fy-swipe-reveal[data-tone='quiet'] {
+  color: var(--muted);
+}
+.fy-swipe-reveal[data-tone='ok'] {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+.fy-swipe-reveal[data-tone='err'] {
+  background: var(--err-bg);
+  color: var(--err);
+}

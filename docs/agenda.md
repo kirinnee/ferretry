@@ -452,7 +452,8 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   - **Not needed is a button only**, the pill in the card's top bar (no arrow, no swipe), into the same undo window
     as any answer. A notice has no Not needed (it is cleared, not dismissed). The item's › also skips.
 
-  A held drag is stamped with what letting go would do (there is no hint line under the card). Every answer
+  A held drag is stamped with what letting go would do (there is no hint line under the card); a card pulled down shows
+  "Skip" on the ground it uncovers, in the to-test rows' style. Every answer
   goes into the same undo window as a tap. Reduced motion (the OS preference or Settings › Appearance › Motion) drops
   the fly-off and the spring.
 

@@ -518,6 +518,32 @@ describe('Down is Skip', () => {
     await mounted.unmount();
   });
 
+  it('names Skip on the ground the card uncovers while it is pulled down, and only then', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay], { onSkip: () => undefined }));
+    const reveal = (): HTMLElement | null => mounted.container.querySelector<HTMLElement>('[data-swipe-reveal]');
+    expect(reveal()).toBeNull();
+    const target = await dragBy(mounted, 0, 120);
+    expect(reveal()?.getAttribute('data-swipe-reveal')).toBe('down');
+    expect(reveal()?.textContent).toBe('Skip');
+    expect(reveal()?.getAttribute('aria-hidden')).toBe('true');
+    await release(target, 0, 120);
+    expect(reveal()).toBeNull();
+    await mounted.unmount();
+  });
+
+  it('draws no reveal on a sideways pull, nor where the deck cannot skip', async () => {
+    const fake = fakeInbox();
+    const sideways = await mount(deckPage(fake, [threeWay, twoWay], { onSkip: () => undefined }));
+    await dragBy(sideways, 60, 4);
+    expect(sideways.container.querySelector('[data-swipe-reveal]')).toBeNull();
+    await sideways.unmount();
+    const still = await mount(deckPage(fakeInbox(), [threeWay, twoWay]));
+    await dragBy(still, 0, 120);
+    expect(still.container.querySelector('[data-swipe-reveal]')).toBeNull();
+    await still.unmount();
+  });
+
   it('never dismisses on a drag down where the deck cannot skip, and the card does not follow it', async () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [threeWay, twoWay]));

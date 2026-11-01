@@ -18,8 +18,9 @@
  *   the card's own row, in the options list's order: ← the first, ↑ the second, → the third — and ↓ is Skip,
  *   as everywhere: the next item, nothing sent, the skipped item stays open. "Not needed" is its own button, never a swipe. On touch the card's top bar and answer row swipe on their own,
  *   exactly as in the chat; the item's head and the who-and-what line are the deck's. A swipe goes into the same
- *   undo window as a tap; reduced motion drops the fly-off. NO TEACHING TEXT: no hint line, no banner naming the
- *   answer mid-drag, no key caption. A phone also gets "Answer quickly", the deck from the top; a wide screen walks
+ *   undo window as a tap; reduced motion drops the fly-off. NO TEACHING TEXT: no hint line, no key caption and no banner
+ *   naming an answer mid-drag; the one thing drawn is "Skip" on the ground a card pulled down uncovers (`SwipeReveal`,
+ *   where any later down-gesture goes). A phone also gets "Answer quickly", the deck from the top; a wide screen walks
  *   the rows with j/k (or ↑/↓) and Enter opens one.
  * - FILTERS: Open / Snoozed (n) / Replied (n) / Resolved — a snoozed or replied item is parked: off the open list and the
  *   badge until it wakes, is unsnoozed, or the ferret re-opens it — a machine filter (once there is more than one machine), Find, and — from
