@@ -1,3 +1,9 @@
+## [4.205.1](https://github.com/kirinnee/ferretry/compare/v4.205.0...v4.205.1) (2026-11-01)
+
+### Fixes
+
+* **pwa:** keep the snooze menu on screen and let the run's to-test card scroll ([#1257](https://github.com/kirinnee/ferretry/issues/1257)) ([505a436](https://github.com/kirinnee/ferretry/commit/505a4367251db9a7ab2d0469909c7188265b464c))
+
 ## [4.205.0](https://github.com/kirinnee/ferretry/compare/v4.204.2...v4.205.0) (2026-11-01)
 
 ### Features

@@ -1,3 +1,9 @@
+## [4.205.0](https://github.com/kirinnee/ferretry/compare/v4.204.2...v4.205.0) (2026-11-01)
+
+### Features
+
+* **cli:** fy account over accounts, sign-ins and 2FA keys (R1-6) ([#1253](https://github.com/kirinnee/ferretry/issues/1253)) ([71954a0](https://github.com/kirinnee/ferretry/commit/71954a0b0ca6ef01987f443023c2f42a2e8f7168))
+
 ## [4.204.2](https://github.com/kirinnee/ferretry/compare/v4.204.1...v4.204.2) (2026-11-01)
 
 ### Fixes
