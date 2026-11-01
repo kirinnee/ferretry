@@ -1,4 +1,6 @@
-import { afterEach, describe, it } from 'bun:test';
+import { afterEach, describe, it, spyOn } from 'bun:test';
+import { constants } from 'node:fs';
+import * as fs from 'node:fs/promises';
 import {
   chmod,
   link,
@@ -16,6 +18,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import { FileFleetProvisioner } from '../../src/adapters/file-provisioner.ts';
+import { STAGE_PREFIX } from '../../src/adapters/mutation-journal.ts';
 import type { FleetManifest } from '../../src/lib/manifest.ts';
 import type { FleetApplyPlan, FleetWriteOperation } from '../../src/lib/provisioning.ts';
 
@@ -273,5 +276,72 @@ describe('the provisioner component-source fence', () => {
 
     // Assert
     should(message).match(/is a hard link/u);
+  });
+});
+
+describe('secrev-1260 L3 — the staged copy before it is published', () => {
+  const swapForTokenLink = async (staged: string, token: string): Promise<void> => {
+    await rm(staged, { force: true });
+    await symlink(token, staged);
+  };
+
+  it('should set the staged copy’s mode through a no-follow descriptor, so a link swapped in changes no token', async () => {
+    // Arrange: the moment the provisioner opens the staged copy to set its mode, the harness has swapped it for a
+    // link to the admin token (it can write the account's folder the copy is staged in).
+    const { home, outside, runtime, apply } = await world();
+    const token = path.join(home, 'api-token');
+    const tokenMode = (await stat(token)).mode & 0o777;
+    const real = fs.open;
+    const flags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+    const openSpy = spyOn(fs, 'open').mockImplementation((async (target: string, mode: number, ...rest: unknown[]) => {
+      if (mode === flags && path.basename(String(target)).startsWith(STAGE_PREFIX))
+        await swapForTokenLink(String(target), token);
+      return await (real as (...args: unknown[]) => Promise<unknown>)(target, mode, ...rest);
+    }) as unknown as typeof fs.open);
+
+    try {
+      // Act
+      const failed = await refusal(
+        apply({ kind: 'copy', source: path.join(outside, 'CLAUDE.md'), path: path.join(runtime, 'CLAUDE.md') }),
+      );
+
+      // Assert
+      should(failed).match(/ELOOP|symbolic link/u);
+      should((await stat(token)).mode & 0o777).equal(tokenMode);
+      await should(readlink(path.join(runtime, 'CLAUDE.md'))).be.rejected();
+    } finally {
+      openSpy.mockRestore();
+    }
+  });
+
+  it('should refuse to publish a staged entry that is not a regular file, as a link swapped in after the copy is', async () => {
+    // Arrange: the staged copy is swapped for a link to the token just before the publish looks at it.
+    const { home, outside, runtime, apply } = await world();
+    const token = path.join(home, 'api-token');
+    const real = fs.lstat;
+    let swapped = false;
+    const lstatSpy = spyOn(fs, 'lstat').mockImplementation((async (target: string, ...rest: unknown[]) => {
+      if (!swapped && path.basename(String(target)).startsWith(STAGE_PREFIX)) {
+        swapped = true;
+        await swapForTokenLink(String(target), token);
+      }
+      return await (real as (...args: unknown[]) => Promise<unknown>)(target, ...rest);
+    }) as unknown as typeof fs.lstat);
+
+    try {
+      // Act
+      const failed = await refusal(
+        apply({ kind: 'copy', source: path.join(outside, 'CLAUDE.md'), path: path.join(runtime, 'CLAUDE.md') }),
+      );
+
+      // Assert: nothing published under the account's name, and the token untouched.
+      should(swapped).be.true();
+      should(failed).match(/not a regular file/u);
+      await should(readlink(path.join(runtime, 'CLAUDE.md'))).be.rejected();
+      await should(stat(path.join(runtime, 'CLAUDE.md'))).be.rejected();
+      should(await readFile(token, 'utf8')).eql('fy_admin_secret\n');
+    } finally {
+      lstatSpy.mockRestore();
+    }
   });
 });

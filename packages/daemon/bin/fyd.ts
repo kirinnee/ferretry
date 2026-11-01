@@ -530,6 +530,7 @@ import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts
 import { ExecutableCodePrograms } from '../src/adapters/system/executable-code-programs.ts';
 import { KernelProgramProof } from '../src/adapters/system/kernel-program-proof.ts';
 import { NodeStateHomes } from '../src/adapters/system/node-state-homes.ts';
+import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts';
 import { machineProgramHomes } from '../src/adapters/system/profile-program.ts';
 import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
 import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader.ts';
@@ -1141,6 +1142,7 @@ import {
   SessionAttachService,
   SessionBoardResolver,
   SessionConsoleService,
+  refuseStateHomeStart,
   SessionControlError,
   type SessionControlFailure,
   type SessionControlSubsystem,
@@ -2507,6 +2509,26 @@ interface StartFastPorts {
   readonly codexChoices: (executable: string, cwd: string) => Promise<readonly RuntimeModelChoice[]>;
 }
 
+/**
+ * The state home's key files and folders, recognised by IDENTITY wherever they are reached — so a bind mount of one
+ * of them alone is still refused. The one list the agent file tools, the session-file routes and the start checks
+ * share (docs/agent-tools.md § The state home).
+ */
+function stateHomeKeys(paths: FoundationPaths): readonly string[] {
+  return [
+    join(paths.home, 'api-token'),
+    join(paths.home, 'api-warden-token'),
+    join(paths.home, 'tmux.sock'),
+    ...[SECRETS_KEY, SECRETS_DOCUMENT, MCP_OAUTH_SECRETS_DOCUMENT, LOGIN_SECRETS_DOCUMENT, 'passkeys.json'].map(name =>
+      join(paths.state, name),
+    ),
+    paths.daemonIdentity,
+    paths.fleet,
+    join(paths.fleet, 'homes'),
+    paths.sessions,
+  ];
+}
+
 function createSessionControlSubsystem(
   storage: DaemonStorage,
   sessions: SessionDirectorySubsystem,
@@ -2579,6 +2601,8 @@ function createSessionControlSubsystem(
    * the launch. Total: a board failure is said on stderr and never fails the start.
    */
   cards: Pick<SessionCards, 'open'>,
+  /** The daemon's own directories: a start a session made is refused a folder inside them (`refuseStateHomeStart`). */
+  stateHomes: StateHomeReach,
 ): SessionControlSubsystem {
   /** Request id to the session it started, plus the exact body it started from, for this process's
    *  lifetime. The body is kept VERBATIM because the recovery read identifies it by digest. */
@@ -2596,7 +2620,7 @@ function createSessionControlSubsystem(
   };
 
   return {
-    start: async (request, requestId, payload, delegation) => {
+    start: async (request, requestId, payload, delegation, caller) => {
       const already = spent.get(requestId);
       if (already !== undefined) {
         if (already.payload !== payload)
@@ -2681,6 +2705,9 @@ function createSessionControlSubsystem(
       // BEFORE the plan, because the callsign is what the harness's own remote-control session is
       // named after: a plan built on the requested name and a document recording the fallback would
       // disagree about who this session is.
+      // An agent's start, judged by identity on the folder it will record and spawn in — not the name the route
+      // checked — after the parent and its limits (a damaged parent is that fault, not this one), before any write.
+      await refuseStateHomeStart(stateHomes, caller, cwd);
       const teammate = await claimCallsign(callsigns, id, request);
       const planned = planner.plan({
         id,
@@ -4579,11 +4606,13 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             ...(request.effort === undefined ? {} : { effort: request.effort }),
           };
           const payload = JSON.stringify(start);
-          const view = await parts.control.start(start, crypto.randomUUID(), payload).catch((error: unknown) => {
-            if (error instanceof SessionControlError && error.failure === 'callsign_taken')
-              throw new WardenCallsignTakenError(request.teammate ?? '');
-            throw error;
-          });
+          const view = await parts.control
+            .start(start, crypto.randomUUID(), payload, undefined, DAEMON_START)
+            .catch((error: unknown) => {
+              if (error instanceof SessionControlError && error.failure === 'callsign_taken')
+                throw new WardenCallsignTakenError(request.teammate ?? '');
+              throw error;
+            });
           return {
             sessionId: view.config.id,
             createdAt: view.config.createdAt,
@@ -7369,6 +7398,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   let bootProgress: BootProgress | undefined;
   const environment = new RuntimeEnvironment(process.env, () => userHome);
   const paths = createFoundationPaths(resolveStateHome(environment.stateHomeInput()));
+  // No session file read for a ferret, and no session it starts, reaches these (docs/agent-tools.md § The state home).
+  const stateHomeReach = new NodeStateHomes([paths.home, paths.state, paths.config], stateHomeKeys(paths));
   const messageTokenKey = sessionMessageTokenKeyFile(paths.state);
   /**
    * ONE durable private key owner for both message cursors and fork-selection bindings.
@@ -10143,6 +10174,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               codexChoices: async (executable, cwd) => await codexRuntimeModels.get(executable, cwd),
             },
             boardWorld.cards,
+            stateHomeReach,
           ),
           attachmentStore,
         ),
@@ -11707,10 +11739,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         probe: packProbe,
         cards: boardWorld.cards,
         // Parsed here, so a field Pack leaves out takes the start schema's own default
-        start: async (input, delegation) => {
+        start: async (input, delegation, caller) => {
           const request = StartSessionRequestSchema.parse(input);
           try {
-            return await sessionControl.start(request, crypto.randomUUID(), JSON.stringify(request), delegation);
+            return await sessionControl.start(
+              request,
+              crypto.randomUUID(),
+              JSON.stringify(request),
+              delegation,
+              caller,
+            );
           } catch (error) {
             if (
               error instanceof SessionControlError &&
@@ -11761,6 +11799,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             request,
             crypto.randomUUID(),
             JSON.stringify(request),
+            undefined,
+            DAEMON_START,
           ),
         status: async reference => {
           const id = tryParseSessionId(reference);
@@ -12329,22 +12369,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               // Every file tool stays out of these however a path reaches them (docs/agent-tools.md#files).
               stateHomes: [paths.home, paths.state, paths.config],
               // Its key files and folders by identity too, so a bind mount of one of them alone is still refused.
-              pinned: [
-                join(paths.home, 'api-token'),
-                join(paths.home, 'api-warden-token'),
-                join(paths.home, 'tmux.sock'),
-                ...[
-                  SECRETS_KEY,
-                  SECRETS_DOCUMENT,
-                  MCP_OAUTH_SECRETS_DOCUMENT,
-                  LOGIN_SECRETS_DOCUMENT,
-                  'passkeys.json',
-                ].map(name => join(paths.state, name)),
-                paths.daemonIdentity,
-                paths.fleet,
-                join(paths.fleet, 'homes'),
-                paths.sessions,
-              ],
+              pinned: stateHomeKeys(paths),
               token: () => crypto.randomUUID().replaceAll('-', ''),
               now: () => Date.now(),
             });
@@ -12479,8 +12504,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionFilesystem: new SessionFilesystem(sessionRootPinner(), new RunnerSessionGit(new BunGitRunner())),
         // Derived from the session id alone — a caller asks for `scope=media`, never for a directory.
         sessionMediaRoot: id => createSessionPaths(paths, parseSessionId(id)).media,
-        // No session file read for a ferret, and no session it starts, reaches these (docs/agent-tools.md).
-        stateHomes: new NodeStateHomes([paths.home, paths.state, paths.config]),
+        stateHomes: stateHomeReach,
         scratchGc,
         // Constructed here: the service holds only a rate window, and the launcher starts nothing until a
         // loopback caller asks.

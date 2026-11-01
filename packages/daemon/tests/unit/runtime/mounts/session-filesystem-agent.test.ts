@@ -24,7 +24,7 @@ import {
   sessionDirectory,
   sessionView,
 } from './support.ts';
-import { homesOf } from './state-homes-support.ts';
+import { homesOf, homesPinned } from './state-homes-support.ts';
 
 /**
  * The working-tree read for an AGENT caller (docs/agent-tools.md § "Reading a session's files"): a ferret
@@ -37,7 +37,7 @@ const USER_HOME = '/home/me';
 
 const homes: StateHomeReach = {
   resolve: async () => homesOf(HOME, `${HOME}/state`, `${HOME}/config`),
-  realpath: async path => path,
+  holding: async () => undefined,
 };
 
 /** The owner's session, the ferret's own, its sub-ferret and that one's sub-ferret, and a sibling. */
@@ -281,7 +281,9 @@ describe('the state home, for an agent', () => {
       resolve: async () => {
         throw new Error('ENOENT');
       },
-      realpath: async () => undefined,
+      holding: async () => {
+        throw new Error('ENOENT');
+      },
     };
     const unresolved = fixture(undefined, { stateHomes: broken });
     const unwired = fixture(undefined, { stateHomes: null });
@@ -357,5 +359,119 @@ describe('an agent with no session of its own', () => {
       should(refusal?.code).eql('not_own_session');
     }
     should(pinner.pinnedCwds).eql([]);
+  });
+});
+
+describe('secrev-1260 M1 — the home by identity, not only by name', () => {
+  /** A walk component: the root's own (100), the home's (device 1, inode 1, as `homesOf` makes it), or any other. */
+  const component = (ino: number, dev = 1) => ({ dev: BigInt(dev), ino: BigInt(ino), ctimeMs: 1000, mode: 0o40755 });
+  const ROOT = component(100);
+  const HOME_ITSELF = component(1);
+
+  /** `~` on a case-insensitive disk: `.FERRETRY` is not the home's name, but it IS the home. */
+  const folded = () =>
+    treeOf(
+      [
+        '',
+        directory([
+          { name: '.FERRETRY', type: 'dir' },
+          { name: 'notes.md', type: 'file' },
+        ]),
+      ],
+      ['notes.md', textFile('notes\n')],
+      ['.FERRETRY', { ...directory([{ name: 'api-token', type: 'file' }]), identities: [ROOT, HOME_ITSELF] }],
+      ['.FERRETRY/api-token', textFile('fy_admin_secret\n', { identities: [ROOT, HOME_ITSELF, component(102)] })],
+    );
+
+  it('should refuse a path that spells the home another way, when the walk opens the home itself', async () => {
+    // Arrange
+    const { asFerret, as } = fixture({ rootReal: USER_HOME, tree: folded() });
+
+    // Act
+    const token = await asFerret(fileOf(FERRET_SESSION, '.FERRETRY/api-token'));
+    const listing = await asFerret({
+      path: `/v1/sessions/${FERRET_SESSION}/fs`,
+      query: [['path', '.FERRETRY']],
+      headers: human,
+    });
+    const notes = await asFerret(fileOf(FERRET_SESSION, 'notes.md'));
+    const person = await as(fileOf(FERRET_SESSION, '.FERRETRY/api-token'));
+
+    // Assert
+    should([token.status, jsonBody(token).code]).eql([403, 'denied']);
+    should(JSON.stringify(jsonBody(token))).not.match(/fy_admin_secret/u);
+    should(listing.status).eql(403);
+    should([notes.status, person.status]).eql([200, 200]);
+  });
+
+  it('should refuse every read of a session folder that IS the home under another name, as a bind mount is', async () => {
+    // Arrange
+    const tree = treeOf(['a.ts', textFile('body\n')]);
+    tree.set('', { ...directory([{ name: 'a.ts', type: 'file' }]), identities: [HOME_ITSELF] });
+    const { asFerret } = fixture({ rootReal: '/mnt/elsewhere', tree });
+
+    // Act
+    const read = await asFerret(fileOf(FERRET_SESSION, 'a.ts'));
+    const list = await asFerret({ path: `/v1/sessions/${FERRET_SESSION}/fs`, headers: human });
+
+    // Assert
+    should([read.status, list.status]).eql([403, 403]);
+  });
+
+  it('should refuse a key file bound into the session folder under another name', async () => {
+    // Arrange: the walk's last component is the pinned admin token's inode.
+    const pinnedReach: StateHomeReach = {
+      resolve: async () => homesPinned([HOME], [{ device: 9n, inode: 77n }]),
+      holding: async () => undefined,
+    };
+    const { asFerret } = fixture(
+      { tree: treeOf(['innocent.md', textFile('fy_admin_secret\n', { identities: [ROOT, component(77, 9)] })]) },
+      { stateHomes: pinnedReach },
+    );
+
+    // Act
+    const read = await asFerret(fileOf(FERRET_SESSION, 'innocent.md'));
+
+    // Assert
+    should([read.status, jsonBody(read).code]).eql([403, 'denied']);
+  });
+
+  it('should leave a name in the home by identity out of the file index', async () => {
+    // Arrange
+    const { asFerret } = fixture(
+      { rootReal: USER_HOME, tree: folded() },
+      { git: { listFiles: () => ({ paths: ['.FERRETRY/api-token', 'notes.md'], truncated: false }) } },
+    );
+
+    // Act
+    const index = await asFerret({ path: `/v1/sessions/${FERRET_SESSION}/fs/index`, headers: human });
+
+    // Assert
+    should((jsonBody(index) as unknown as { files: { path: string }[] }).files.map(f => f.path)).eql(['notes.md']);
+  });
+});
+
+describe('the file index for an agent, in ordinary folders', () => {
+  it('should keep a name whose folder the walk proves is not the home', async () => {
+    // Arrange: a tracked file one folder down, in a session folder well away from the home.
+    const { asFerret } = fixture(
+      {
+        tree: treeOf(
+          ['src', directory([{ name: 'a.ts', type: 'file' }])],
+          ['src/a.ts', textFile('body\n')],
+          ['src/b.ts', textFile('body\n')],
+        ),
+      },
+      { git: { listFiles: () => ({ paths: ['src/a.ts', 'src/b.ts'], truncated: false }) } },
+    );
+
+    // Act
+    const index = await asFerret({ path: `/v1/sessions/${FERRET_SESSION}/fs/index`, headers: human });
+
+    // Assert: both kept, the folder walked once for the two of them.
+    should((jsonBody(index) as unknown as { files: { path: string }[] }).files.map(f => f.path)).eql([
+      'src/a.ts',
+      'src/b.ts',
+    ]);
   });
 });

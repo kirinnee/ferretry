@@ -1,4 +1,4 @@
-import { type StateHomes, stateHomeByName } from '@ferretry/fleet';
+import type { StateHomes } from '@ferretry/fleet';
 import { isAgentCaller } from './agent-caller.ts';
 import { ApiError } from './error.ts';
 import type { RouteContext } from './route.ts';
@@ -12,9 +12,25 @@ import type { RouteContext } from './route.ts';
 export interface StateHomeReach {
   /** Every directory, resolved now. Throws when one cannot be: the caller then refuses (fail closed). */
   resolve(): Promise<StateHomes>;
-  /** The real path of `path`, or `undefined` when nothing is there yet. */
-  realpath(path: string): Promise<string | undefined>;
+  /**
+   * The home `path` is inside, judged the way the guard judges (`judgeOutsideStateHomes`): as named, at every link
+   * hop, by real path and by IDENTITY up to `/` — so case folding and a bind mount do not hide it. `undefined` when
+   * it is outside every home or not there at all; throws when the homes cannot be resolved.
+   */
+  holding(path: string): Promise<string | undefined>;
 }
+
+/**
+ * Who asked for a start, as the boundary decided it (`callerIsAgent`): carried beside the request rather than in
+ * it, because a body is the caller's to write. A start the daemon makes for itself (the Warden, Pack clean-up) has
+ * no caller and is not an agent's.
+ */
+export interface StartCaller {
+  readonly agent: boolean;
+}
+
+/** The daemon's own start: no agent asked for it. */
+export const DAEMON_START: StartCaller = { agent: false };
 
 /** The code an agent's start in the state home is refused with. */
 const STATE_HOME_CODE = 'state_home';
@@ -45,15 +61,22 @@ export async function stateHomeLaunchRefusal(
   cwd: string | undefined,
 ): Promise<void> {
   if (cwd === undefined || !isAgentCaller(context)) return;
-  const homes = await resolvedStateHomes(reach);
-  const real = await reach?.realpath(cwd).catch(() => undefined);
-  const verdict = [cwd, ...(real === undefined ? [] : [real])]
-    .map(path => stateHomeByName(homes, path))
-    .find(answer => answer.inside);
-  if (verdict?.inside === true)
+  const home = await stateHomeHoldingCwd(reach, cwd).catch(() => {
     throw new ApiError(
-      403,
-      `a ferret never starts a session inside this daemon's state home (${verdict.home}), which holds this machine's credentials: choose a project folder`,
-      STATE_HOME_CODE,
+      503,
+      'this daemon cannot resolve its own state home, so it does nothing for an agent that could reach it',
+      'state_home_unresolved',
     );
+  });
+  if (home !== undefined) throw new ApiError(403, stateHomeStartMessage(home), STATE_HOME_CODE);
 }
+
+/** The home a start's working folder is in, or `undefined`. Throws when the homes cannot be resolved. */
+export async function stateHomeHoldingCwd(reach: StateHomeReach | undefined, cwd: string): Promise<string | undefined> {
+  if (reach === undefined) throw new Error('no state home');
+  return await reach.holding(cwd);
+}
+
+/** What a start refused for its folder is told. */
+export const stateHomeStartMessage = (home: string): string =>
+  `a ferret never starts a session inside this daemon's state home (${home}), which holds this machine's credentials: choose a project folder`;

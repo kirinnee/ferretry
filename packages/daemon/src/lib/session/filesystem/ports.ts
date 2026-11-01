@@ -28,8 +28,9 @@ import type { FsEntryType } from './types.ts';
  * inode. `mode` catches a type change that preserved the inode.
  */
 export interface ComponentIdentity {
-  readonly dev: number;
-  readonly ino: number;
+  /** Exact, as a `bigint` stat gives it: an inode past 2^53 rounded to a number could match another, or miss. */
+  readonly dev: bigint;
+  readonly ino: bigint;
   readonly ctimeMs: number;
   readonly mode: number;
 }

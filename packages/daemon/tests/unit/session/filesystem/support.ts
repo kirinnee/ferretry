@@ -62,8 +62,8 @@ export type FakeTree = Map<string, FakeNode>;
 function identitiesFor(rel: string): readonly ComponentIdentity[] {
   const depth = rel === '' ? 0 : rel.split('/').length;
   return Array.from({ length: depth + 1 }, (_unused, index) => ({
-    dev: 1,
-    ino: 100 + index,
+    dev: 1n,
+    ino: BigInt(100 + index),
     ctimeMs: 1000,
     mode: 0o40755,
   }));

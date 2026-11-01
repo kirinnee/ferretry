@@ -31,18 +31,16 @@ import { NodeGuardDisk } from './node-guard-disk.ts';
 /** Where a source may be a hard link: the Nix store, root-owned and immutable. */
 export const HARD_LINK_ROOTS: readonly string[] = ['/nix/store'];
 
-/** The most bytes one copied file may hold, and the most files one source may bring: a runtime, not a disk. */
+/** The most one source may bring — per file, in all, and in entries (files and folders): a runtime, not a disk. */
 const MAX_SOURCE_FILE_BYTES = 256 * 1024 * 1024;
-const MAX_SOURCE_FILES = 100_000;
+const MAX_SOURCE_TOTAL_BYTES = 1024 * 1024 * 1024;
+const MAX_SOURCE_ENTRIES = 100_000;
 
 /** The provisioner's fence: the state homes, the asset tree open inside them, and where a hard link may be. */
 export interface SourceFence extends StateHomeFence {
   /** Defaults to {@link HARD_LINK_ROOTS}. A root is used only once proven immutable, so naming one grants nothing. */
   readonly hardLinkRoots?: readonly string[];
 }
-
-/** This process's group ids, which the immutability proof needs: a store its own group can write is not closed. */
-const processGroups = (): readonly number[] => [...(process.getgroups?.() ?? []), process.getegid?.() ?? -1];
 
 /** The fence as the disk has it now. */
 export interface ResolvedSourceFence {
@@ -75,7 +73,7 @@ export class FencedSourceError extends Error {
       case 'loop':
         return 'it links back into itself';
       case 'too-many':
-        return 'it holds too many files';
+        return 'it holds too many files and folders, or too many bytes';
       default:
         return `the state-home guard refused it (${rule})`;
     }
@@ -83,22 +81,20 @@ export class FencedSourceError extends Error {
 }
 
 /**
- * Resolves the configured fence. A home that cannot be resolved throws (the apply is refused, fail closed); an
- * asset tree that does not exist yet holds no source, so it is no opening.
+ * Resolves the configured fence. A home that cannot be resolved throws (the apply is refused, fail closed), and so
+ * does an asset tree that is, or holds, a home; an asset tree that does not exist yet holds no source, so it is no
+ * opening.
  */
 export async function resolveSourceFence(
   fence: SourceFence,
   disk: GuardDisk = new NodeGuardDisk(),
-  groups: readonly number[] = processGroups(),
 ): Promise<ResolvedSourceFence> {
   const openings: string[] = [];
   for (const directory of fence.open) {
     if ((await disk.realpath(directory).catch(() => undefined)) !== undefined) openings.push(directory);
   }
   // A store that cannot be proven immutable (absent, or writable by this user) is no exception at all.
-  const immutable = await resolveImmutableRoots(fence.hardLinkRoots ?? HARD_LINK_ROOTS, disk, groups).catch(
-    () => undefined,
-  );
+  const immutable = await resolveImmutableRoots(fence.hardLinkRoots ?? HARD_LINK_ROOTS, disk).catch(() => undefined);
   return {
     homes: await resolveStateHomes({ homes: fence.homes, openings }, disk),
     links: { hops: 'every', hardLinks: immutable === undefined ? 'refuse' : { allowUnder: immutable } },
@@ -155,7 +151,8 @@ export async function copyFencedSource(resolved: ResolvedSourceFence, source: st
   const copied = await copyTreeOutsideStateHomes(source, to, resolved.homes, resolved.disk, {
     ...resolved.links,
     maxFileBytes: MAX_SOURCE_FILE_BYTES,
-    maxFiles: MAX_SOURCE_FILES,
+    maxTotalBytes: MAX_SOURCE_TOTAL_BYTES,
+    maxFiles: MAX_SOURCE_ENTRIES,
   });
   if (!copied.ok) throw new FencedSourceError(source, copied.rule, copied.home);
 }

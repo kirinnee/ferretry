@@ -31,20 +31,23 @@ function machine(store: 'multi-user' | 'single-user'): FakeGuardDisk {
   disk.dir('/nix/store');
   if (store === 'multi-user') disk.own('/nix/store', 0, 0o1775, 30_000);
   else disk.own('/nix/store', USER, 0o755, 100);
-  disk.file('/nix/store/abc-skill/SKILL.md', 9, 'A skill.\n', 0o444);
+  // The store's own folders and files are root's, as a multi-user store's are.
+  for (const folder of ['/nix/store/abc-skill', '/nix/store/def-skill']) {
+    disk.dir(folder);
+    disk.own(folder, 0, 0o555);
+  }
+  disk.file('/nix/store/abc-skill/SKILL.md', 9, 'A skill.\n');
+  disk.own('/nix/store/abc-skill/SKILL.md', 0, 0o444);
   disk.hardLink('/nix/store/def-skill/SKILL.md', '/nix/store/abc-skill/SKILL.md');
   return disk;
 }
 
-const fenceOf = (disk: FakeGuardDisk) =>
-  resolveSourceFence({ homes: [HOME], open: [`${HOME}/fleet/assets`] }, disk, [USER, 100]);
+const fenceOf = (disk: FakeGuardDisk) => resolveSourceFence({ homes: [HOME], open: [`${HOME}/fleet/assets`] }, disk);
 
 describe('a hard-linked component source', () => {
   it('should be read from a multi-user Nix store, where identical files share one inode', async () => {
     // Arrange
     const disk = machine('multi-user');
-    disk.dir('/nix/store/abc-skill');
-    disk.dir('/nix/store/def-skill');
 
     // Act
     const text = await readFencedSource(await fenceOf(disk), '/nix/store/def-skill/SKILL.md', 1024);
@@ -74,8 +77,6 @@ describe('a hard-linked component source', () => {
   it('should be refused even in the store when this user owns it, as a single-user Nix install does', async () => {
     // Arrange
     const disk = machine('single-user');
-    disk.dir('/nix/store/abc-skill');
-    disk.dir('/nix/store/def-skill');
 
     // Act
     const refusal = await assertSourceUnfenced(await fenceOf(disk), '/nix/store/def-skill/SKILL.md').then(

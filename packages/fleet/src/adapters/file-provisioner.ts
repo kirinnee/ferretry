@@ -93,6 +93,20 @@ const isSingleComponent = (name: string): boolean =>
  * cause — or turn a published write into a spurious rollback. Leftovers carry a reserved prefix,
  * are skipped by the sweep, and are inert.
  */
+/**
+ * Sets a staged copy's mode THROUGH a descriptor opened without following a link. The staged name sits in the
+ * account's own folder, which its harness can write, so a `chmod` by path could be redirected by a link swapped in
+ * there — onto a file in the state home. A link there now is refused (`ELOOP`) instead.
+ */
+async function chmodStaged(staged: string, mode: number): Promise<void> {
+  const handle = await open(staged, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    await handle.chmod(mode);
+  } finally {
+    await handle.close();
+  }
+}
+
 async function discardQuietly(staged: string): Promise<void> {
   try {
     await rm(staged, { recursive: true, force: true });
@@ -761,7 +775,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
         else await copyFencedSource(fence, operation.source, staged);
         // A template linked out of a read-only store copies as 0444; force the copied root writable
         // so a harness can rewrite a file it owns. Directories remain private to the account.
-        await chmod(staged, operation.mode ?? (source.isDirectory() ? 0o700 : 0o644));
+        await chmodStaged(staged, operation.mode ?? (source.isDirectory() ? 0o700 : 0o644));
         if (!(await journal.capture(operation.path))) await rm(operation.path, { recursive: true, force: true });
         await this.publish(staged, operation.path, journal);
       } finally {
@@ -1101,6 +1115,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
   private async publish(staged: string, destination: string, journal: FileMutationJournal): Promise<void> {
     const information = await lstat(staged);
     if (!information.isDirectory()) {
+      // The copy makes regular files only: anything else at the staged name was put there since, by whoever can
+      // write the account's folder, and is not published under the account's name.
+      if (!information.isFile())
+        throw new Error(`refusing to publish ${destination}: the staged entry is not a regular file`);
       // `link` is the no-replace primitive: it fails rather than overwriting, so a destination that
       // reappeared between the capture and here is refused instead of silently replaced.
       await link(staged, destination);

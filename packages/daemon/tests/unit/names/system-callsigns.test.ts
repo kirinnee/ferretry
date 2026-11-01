@@ -14,6 +14,7 @@ import {
 import { SessionControlError, type SessionControlSubsystem } from '../../../src/lib/runtime/mounts/session-control.ts';
 import { withSystemCallsign } from '../../../src/lib/runtime/mounts/system-session-control.ts';
 import { issuerOver, MemoryCounters } from './system-callsigns-support.ts';
+import { DAEMON_START } from '../../../src/lib/api/state-homes.ts';
 
 const NOW = Date.parse('2026-08-01T00:00:00.000Z');
 const POOL = ['ada', 'bea', 'cy', 'dot', 'eve'];
@@ -165,9 +166,9 @@ describe('starting a system session', () => {
     const pack = withSystemCallsign(control, issuerOver(), 'pack');
 
     // Act
-    await learning.start(request('Learning Miner'), 'a', 'ignored');
-    await learning.start(request('Lesson Scan'), 'b', 'ignored');
-    await pack.start(request('Clean up'), 'c', 'ignored');
+    await learning.start(request('Learning Miner'), 'a', 'ignored', undefined, DAEMON_START);
+    await learning.start(request('Lesson Scan'), 'b', 'ignored', undefined, DAEMON_START);
+    await pack.start(request('Clean up'), 'c', 'ignored', undefined, DAEMON_START);
 
     // Assert
     should(started.map(entry => entry.teammate)).deepEqual(['learning-000001', 'learning-000002', 'pack-000001']);
@@ -186,7 +187,13 @@ describe('starting a system session', () => {
     } as unknown as SessionControlSubsystem;
 
     // Act
-    await withSystemCallsign(control, issuerOver(), 'pack').start(request('Clean up'), 'a', 'stale');
+    await withSystemCallsign(control, issuerOver(), 'pack').start(
+      request('Clean up'),
+      'a',
+      'stale',
+      undefined,
+      DAEMON_START,
+    );
 
     // Assert
     should(JSON.parse(payloads[0] ?? '{}')).containEql({ teammate: 'pack-000001', name: 'Clean up' });
@@ -205,9 +212,15 @@ describe('starting a system session', () => {
       }) as unknown as SessionControlSubsystem;
 
     // Act
-    await withSystemCallsign(refusing(1), issuerOver(), 'learning').start(request('x'), 'a', '');
+    await withSystemCallsign(refusing(1), issuerOver(), 'learning').start(
+      request('x'),
+      'a',
+      '',
+      undefined,
+      DAEMON_START,
+    );
     const second = await withSystemCallsign(refusing(99), issuerOver(), 'learning')
-      .start(request('x'), 'b', '')
+      .start(request('x'), 'b', '', undefined, DAEMON_START)
       .catch((error: unknown) => error);
 
     // Assert
@@ -228,7 +241,7 @@ describe('starting a system session', () => {
 
     // Act
     const actual = await withSystemCallsign(control, issuerOver(), 'pack')
-      .start(request('x'), 'a', '')
+      .start(request('x'), 'a', '', undefined, DAEMON_START)
       .catch((error: unknown) => error);
 
     // Assert

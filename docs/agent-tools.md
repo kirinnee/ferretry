@@ -576,8 +576,9 @@ own session credential, the admin token naming its session, a warden) is held to
   folder swapped for a link into it — nothing whose real path is inside the home is read, listed into, diffed,
   read from `HEAD`, put in the file index or named in the change list (`403 denied`, "inside this daemon's state
   home"). A listing marks the home `denied`. The check is made inside the same descriptor-pinned walk the read
-  uses, which never follows a link, so the pinned root's real path plus the walked name IS what is read. The one
-  opening is the session's own media folder (`scope=media`), mapped onto the home by its configured prefix,
+  uses, which never follows a link — by name, and by IDENTITY: every folder the walk opens, and what it opens
+  last, is compared by device and inode with the homes and their key files, so `.FERRETRY` on a case-insensitive
+  disk, or a bind mount of the home under another name, is refused like the home itself. The one opening is the session's own media folder (`scope=media`), mapped onto the home by its configured prefix,
   never by resolving the folder itself.
 - **No hard link.** A file with more than one name is refused to an agent (`403 denied`), judged from the opened
   descriptor's own `fstat`: a hard link to `api-token` left in a session folder is the same inode as the token,
@@ -592,7 +593,10 @@ session's files, a Warden session's included. A daemon that cannot resolve its s
 A ferret's `POST /v1/sessions` and `fy new --cwd` (`POST /v1/pack/new`) are refused `403 state_home` when the
 working folder is inside the home, named there or reached through a link — a session's folder is what its agent
 reads freely, so a child started in `~/.ferretry` would hold the tokens. This is asked before the terminal gate,
-which a caller on loopback skips. The owner may start a session anywhere.
+which a caller on loopback skips, and asked AGAIN of the canonical folder the start records and spawns in — by
+identity — for every start a session makes (`parent` set), so a folder flipped into the home between the two, or a
+`fy new` that inherits a parent's folder in the home, is refused too. The owner and the Warden may start a session
+anywhere.
 
 ### Component sources
 
@@ -602,7 +606,11 @@ an **error** in the configuration check (`fy config check`, `config.validate`, e
 into effect, and an older accepted version naming it is retired rather than kept. The provisioner refuses it
 again at apply time, on every link hop and the real path, reading each file through the descriptor it checked;
 the component-text reader treats it as absent. The fleet's asset tree (`<fleet>/assets`) is the opening, by
-where a source REALLY is: an asset linked into the rest of the home is refused.
+where a source REALLY is: an asset linked into the rest of the home is refused, and an asset tree that is, or holds,
+a home refuses every apply. A copy is bounded — 100,000 files and folders, 1 GiB in all, a folder reached twice is
+a loop — and writes through the folders it checked. A LINK (an asset-tree reference) is judged when it is made;
+the folder it points to is not walked then, and the harness resolves it again when it reads, as the agent it runs
+for.
 
 ## Sub-ferrets and the Ferretry verbs
 

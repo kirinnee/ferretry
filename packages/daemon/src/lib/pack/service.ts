@@ -29,6 +29,7 @@ import type {
   StartSessionRequestInput,
 } from '@ferretry/protocol';
 import { formatTaskRef, taskTitleFor } from '@ferretry/protocol';
+import type { StartCaller } from '../api/state-homes.ts';
 import { cardFooterLine, type Delegation, type DelegationOutcome, type SessionCards } from '../board/index.ts';
 import { admitChild, type ParentFacts } from './admission.ts';
 import { buildInventory } from './cleanup/inventory.ts';
@@ -74,7 +75,11 @@ export interface PackPorts {
    * Starts the sub-ferret; throws {@link PackStartRefused} when admission refuses it. `delegation` is its
    * board card, reserved under the lead's focus card; the start writes it with the session.
    */
-  start(request: StartSessionRequestInput, delegation?: Delegation): Promise<SessionView>;
+  start(
+    request: StartSessionRequestInput,
+    delegation: Delegation | undefined,
+    caller: StartCaller,
+  ): Promise<SessionView>;
   /** The lead's side of the sub-ferret's card (`SessionCards.delegate`), taken just before the first start. */
   cards: Pick<SessionCards, 'delegate'>;
   jev: PackJevPort;
@@ -221,7 +226,8 @@ export class PackService {
     };
   }
 
-  async newChild(request: PackNewRequest): Promise<PackNewOutcome> {
+  /** `caller`: who asked, as the boundary decided it — an agent's start is held out of the state home. */
+  async newChild(request: PackNewRequest, caller: StartCaller): Promise<PackNewOutcome> {
     const settings = await this.ports.settings();
     const config = settings.config;
     if (!config.enabled)
@@ -256,7 +262,7 @@ export class PackService {
     const ordered =
       request.auto === true ? await this.automatic(request) : this.named(request, await this.ports.facts());
     if ('refusal' in ordered) return refused(ordered.refusal, []);
-    return await this.tryInOrder(request, ordered, cwd, config, parent?.id);
+    return await this.tryInOrder(request, ordered, cwd, config, parent?.id, caller);
   }
 
   /** The one runtime the ferret named, checked before anything is probed. */
@@ -349,6 +355,7 @@ export class PackService {
     cwd: string,
     config: PackConfig,
     parent: string | undefined,
+    caller: StartCaller,
   ): Promise<PackNewOutcome> {
     const attempts: PackAttempt[] = [];
     let last: PackRefusal | undefined;
@@ -420,6 +427,7 @@ export class PackService {
             name: request.name ?? taskTitleFor(request.task, 'Sub-ferret'),
           },
           delegation,
+          caller,
         );
         attempts.push({ runtime, ...named, outcome: 'started', probe, probeMs: probed.outcome.ms });
         const childCard = startedCard(view, delegation, card?.notes ?? []);

@@ -120,7 +120,7 @@ async function newChild(
     );
   // Never in the state home, the same rule a ferret's `POST /v1/sessions` start meets.
   await stateHomeLaunchRefusal(context, stateHomes, request.cwd);
-  const outcome = await subsystem.service.newChild(request);
+  const outcome = await subsystem.service.newChild(request, { agent: isAgentCaller(context) });
   return jsonResponse(PackNewOutcomeSchema.parse(outcome), outcome.outcome === 'started' ? 201 : 200);
 }
 

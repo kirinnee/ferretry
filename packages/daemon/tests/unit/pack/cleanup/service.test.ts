@@ -20,6 +20,7 @@ import {
 import type { PackProbeOutcome, PackProbeRequest } from '../../../../src/lib/pack/probe.ts';
 import { issuerOver } from '../../names/system-callsigns-support.ts';
 import { sessionView } from '../../runtime/mounts/support.ts';
+import { DAEMON_START } from '../../../../src/lib/api/state-homes.ts';
 
 const NOW = '2026-10-22T12:00:00.000Z';
 const IN_EFFECT = 'Opus for everything I do.';
@@ -119,7 +120,7 @@ function build(
           { start: record, stop: async () => ({}) as SessionView, recover: async () => undefined },
           options.issuer,
           'pack',
-        ).start(request, 'run', JSON.stringify(request));
+        ).start(request, 'run', JSON.stringify(request), undefined, DAEMON_START);
   const service = new CleanUpService({
     inventory: async () =>
       inventory(

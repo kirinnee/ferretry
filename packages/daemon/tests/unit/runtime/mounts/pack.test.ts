@@ -574,7 +574,7 @@ describe('POST /v1/pack/new in the state home', () => {
   const HOME = '/home/me/.ferretry';
   const stateHomes: StateHomeReach = {
     resolve: async () => homesOf(HOME),
-    realpath: async path => path,
+    holding: async path => (path.startsWith(HOME) ? HOME : undefined),
   };
   const gated = (subsystem: PackSubsystem): ApiDispatcher =>
     new ApiDispatcher(new ApiRouter(packRoutes(subsystem, stateHomes)), CREDENTIALS, GRANTED);

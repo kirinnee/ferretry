@@ -63,6 +63,8 @@ export interface GuardDirectoryHandle {
   readonly identity: FileIdentity;
   /** A path that reaches `leaf` in this open folder (Linux `/proc/self/fd/N/leaf`), or `undefined` where there is none. */
   entryPath(leaf: string): string | undefined;
+  /** Sets the folder's permission bits through THIS descriptor (`fchmod`), never by a path a link could redirect. */
+  chmod(mode: number): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -80,8 +82,14 @@ export interface GuardDisk {
   readlink(path: string): Promise<string>;
   list(path: string): Promise<readonly string[]>;
   mkdir(path: string, mode: number): Promise<void>;
-  chmod(path: string, mode: number): Promise<void>;
   unlink(path: string): Promise<void>;
+  /**
+   * This process's group ids as they stand NOW — its supplementary groups, its effective group, and every group the
+   * group database lists it in (a member may join one with `sg` at any time). Read here, never handed in by a caller.
+   */
+  groups(): Promise<readonly number[]>;
+  /** Whether this process may write in `path` (`access(W_OK)`): mode bits, ACLs and its groups all counted. */
+  writable(path: string): Promise<boolean>;
 }
 
 /** Why the guard refused. `state-home`: inside a home. `outside`: outside the folder the caller confined it to. */
@@ -172,8 +180,9 @@ const same = (a: { readonly device: bigint; readonly inode: bigint }, b: FileIde
 /**
  * Each home (and each opening) by name, by real path and by device+inode, and each `pinned` file or folder
  * inside them by device+inode (one not there yet is skipped: nothing can be bound to it). Throws
- * {@link StateHomeUnresolvedError} when a home cannot be resolved or is not a folder, and a `TypeError` for a
- * relative path.
+ * {@link StateHomeUnresolvedError} when a home cannot be resolved or is not a folder, when an OPENING is a home or
+ * holds one (an asset tree linked to the home, or to the folder above it, would open the whole fence: openings are
+ * asked first), and a `TypeError` for a relative path.
  */
 export async function resolveStateHomes(
   input: {
@@ -203,36 +212,57 @@ export async function resolveStateHomes(
       return entry === undefined ? [] : [{ device: entry.device, inode: entry.inode }];
     }),
   );
-  return {
-    homes: await known(input.homes),
-    openings: await known(input.openings ?? []),
-    pinned: pinned.flat(),
-  } as unknown as StateHomes;
+  const homes = await known(input.homes);
+  const openings = await known(input.openings ?? []);
+  const keys = pinned.flat();
+  for (const opening of openings) {
+    const opensAHome = homes.some(
+      home => within(opening.real, home.real) || (opening.device === home.device && opening.inode === home.inode),
+    );
+    if (opensAHome || keys.some(key => key.device === opening.device && key.inode === opening.inode))
+      throw new StateHomeUnresolvedError();
+  }
+  return { homes, openings, pinned: keys } as unknown as StateHomes;
+}
+
+type ClosedDisk = Pick<GuardDisk, 'identity' | 'writable'>;
+
+/**
+ * Whether the entry at `path` is closed to this process: owned by root (uid 0), never writable by other, writable by
+ * its group only when this process is NOT in that group, and refused a write by the kernel itself
+ * (`access(W_OK)`, which also counts ACLs the mode bits do not show). A folder must also BE a folder.
+ */
+async function closedToThisProcess(
+  path: string,
+  kind: 'file' | 'directory',
+  groups: readonly number[],
+  disk: ClosedDisk,
+): Promise<boolean> {
+  const entry = await disk.identity(path);
+  if (entry?.kind !== kind || entry.owner !== 0 || (entry.mode & 0o002) !== 0) return false;
+  if ((entry.mode & 0o020) !== 0 && groups.includes(entry.group)) return false;
+  return kind === 'file' || !(await disk.writable(path).catch(() => true));
 }
 
 /**
- * Proves each root closed to this process: its real path and every folder above it are folders owned by root
- * (uid 0), never writable by other, and writable by their group only when this process is NOT in that group —
- * a multi-user Nix store is `root:nixbld 1775`, written by build users only. So nothing this process (or an
- * agent it runs) does can put a hard link, or a rename, under it. A single-user Nix store, owned by its user,
- * does NOT qualify. `groups` are this process's group ids (its supplementary groups and its effective group, which the caller reads). Throws
- * {@link MutableRootError} for any root that fails.
+ * Proves each root closed to this process: its real path and every folder above it are folders closed to it (see
+ * {@link closedToThisProcess}) — a multi-user Nix store is `root:nixbld 1775`, written by build users only. So
+ * nothing this process (or an agent it runs) does can put a hard link, or a rename, under it. A single-user Nix
+ * store, owned by its user, does NOT qualify. The process's groups are read from the disk port, never handed in.
+ * Throws {@link MutableRootError} for any root that fails.
  */
 export async function resolveImmutableRoots(
   roots: readonly string[],
-  disk: Pick<GuardDisk, 'realpath' | 'identity'>,
-  groups: readonly number[],
+  disk: Pick<GuardDisk, 'realpath' | 'identity' | 'groups' | 'writable'>,
 ): Promise<ImmutableRoots> {
+  const groups = await disk.groups();
   const real = await Promise.all(
     roots.map(async root => {
       const resolved = await disk.realpath(absolute(root, 'an immutable root')).catch(() => {
         throw new MutableRootError(root);
       });
       for (let current = resolved; ; current = dirname(current)) {
-        const entry = await disk.identity(current);
-        const groupWrites = (entry?.mode ?? 0) & 0o020 && groups.includes(entry?.group ?? -1);
-        if (entry?.kind !== 'directory' || entry.owner !== 0 || (entry.mode & 0o002) !== 0 || groupWrites)
-          throw new MutableRootError(root);
+        if (!(await closedToThisProcess(current, 'directory', groups, disk))) throw new MutableRootError(root);
         if (dirname(current) === current) return resolved;
       }
     }),
@@ -340,8 +370,28 @@ async function hopInsideHome(homes: StateHomes, path: string, disk: GuardDisk): 
   return OUTSIDE;
 }
 
-const hardLinkAllowed = (options: GuardLinkOptions, real: string): boolean =>
-  typeof options.hardLinks === 'object' && options.hardLinks.allowUnder.roots.some(root => within(root, real));
+/**
+ * Whether a file with several names at `real` may be used: it lies under an immutable root, it is itself owned by
+ * root, and every folder from its own up to that root is closed to this process the way the root is. A root proven
+ * immutable can still hold a folder this user owns (`/usr/local/bin` under a root-owned `/usr/local`), where a
+ * hard link to one of its secrets could be put — and that link would be owned by the user, not by root.
+ */
+async function hardLinkAllowed(
+  options: GuardLinkOptions,
+  real: string,
+  disk: ClosedDisk & Pick<GuardDisk, 'groups'>,
+): Promise<boolean> {
+  if (typeof options.hardLinks !== 'object') return false;
+  const root = options.hardLinks.allowUnder.roots.find(candidate => within(candidate, real));
+  if (root === undefined) return false;
+  const groups = await disk.groups();
+  if (!(await closedToThisProcess(real, 'file', groups, disk))) return false;
+  for (let current = dirname(real); within(root, current); current = dirname(current)) {
+    if (!(await closedToThisProcess(current, 'directory', groups, disk))) return false;
+    if (current === root || dirname(current) === current) break;
+  }
+  return true;
+}
 
 /** Where a path really is and what is there, once judged outside every home. */
 export interface JudgedPath {
@@ -372,7 +422,11 @@ export async function judgeOutsideStateHomes(
   const verdict = await stateHomeOf(homes, real, disk);
   if (verdict.inside) return refused('state-home', verdict.home);
   const identity = await disk.identity(real);
-  return identity === undefined ? refused('not-found') : { ok: true, value: { real, identity } };
+  if (identity === undefined) return refused('not-found');
+  // A caller that links to the file reaches its inode however it is named: the open's hard-link rule applies here too.
+  if (identity.kind === 'file' && identity.links > 1 && !(await hardLinkAllowed(options, real, disk)))
+    return refused('hard-link');
+  return { ok: true, value: { real, identity } };
 }
 
 /**
@@ -395,7 +449,7 @@ export async function openOutsideStateHomes(
   if (handle === undefined) return refused('changed');
   const problem =
     (await openedProblem(homes, real, handle.identity, disk)) ??
-    (handle.identity.links > 1 && !hardLinkAllowed(options, real) ? refused('hard-link') : undefined);
+    (handle.identity.links > 1 && !(await hardLinkAllowed(options, real, disk)) ? refused('hard-link') : undefined);
   if (problem !== undefined) {
     await handle.close();
     return problem;
@@ -575,10 +629,23 @@ async function openedFolderProblem(
   return verdict.inside ? refused('state-home', verdict.home) : undefined;
 }
 
+/** Why an opened folder is not the one at `place` (a real path): not a folder, or not the folder there now. */
+async function placedFolderProblem(
+  place: string,
+  opened: FileIdentity,
+  disk: GuardDisk,
+): Promise<{ readonly ok: false; readonly rule: GuardRule } | undefined> {
+  if (opened.kind !== 'directory') return refused('not-a-file');
+  const again = await disk.realpath(place).catch(() => undefined);
+  return again !== place || !same(opened, await disk.identity(place)) ? refused('changed') : undefined;
+}
+
 export interface GuardTreeOptions extends GuardLinkOptions {
   /** The most bytes one file may hold. */
   readonly maxFileBytes: number;
-  /** The most files the copy may make. */
+  /** The most bytes the whole copy may write. */
+  readonly maxTotalBytes: number;
+  /** The most entries — files AND folders — the copy may make. */
   readonly maxFiles: number;
 }
 
@@ -586,8 +653,18 @@ export interface GuardTreeOptions extends GuardLinkOptions {
  * Copies the file or folder at `source` to `destination`, following every link (like `cp -RL`) and keeping each
  * file's permission bits. EVERY file and folder is judged where it really lands, and each file is read through
  * {@link openOutsideStateHomes}; the first refusal stops the copy (what was copied stays, for the caller to
- * remove). A folder met twice on one branch is a `loop`, and more than `maxFiles` files is `too-many`. The
- * destination is the caller's to have checked.
+ * remove).
+ *
+ * WRITTEN THROUGH CHECKED FOLDERS. Where the copy goes is the caller's (a runtime's home is inside the state home
+ * by design), but it lands exactly there: the destination's folder is opened and checked first, and every entry is
+ * made THROUGH an open folder (`entryPath`, Linux `/proc`) where the platform allows. Each folder the copy makes
+ * is opened without following a link and checked to be the folder at its real place — so a link swapped in sends
+ * nothing anywhere else — before anything is written into it; its mode is set through that descriptor. Without `/proc` (macOS) a folder swapped
+ * after its check can still receive a NEW entry (never an overwrite), the declared residue of path writes.
+ *
+ * BOUNDED. A folder met twice anywhere in the copy is a `loop` (a link graph can otherwise multiply one folder
+ * without end), more than `maxFiles` entries — files and folders — is `too-many`, and more than `maxTotalBytes`
+ * written is `too-many` too.
  */
 export async function copyTreeOutsideStateHomes(
   source: string,
@@ -596,25 +673,27 @@ export async function copyTreeOutsideStateHomes(
   disk: GuardDisk,
   options: GuardTreeOptions,
 ): Promise<Guarded<{ readonly files: number; readonly bytes: number }>> {
-  const totals = { files: 0, bytes: 0 };
+  const totals = { files: 0, bytes: 0, entries: 0 };
+  const seen = new Set<string>();
   const links: GuardLinkOptions = {
     ...(options.hardLinks === undefined ? {} : { hardLinks: options.hardLinks }),
     ...(options.hops === undefined ? {} : { hops: options.hops }),
   };
-  const copy = async (
-    from: string,
-    to: string,
-    branch: ReadonlySet<string>,
-  ): Promise<{ readonly ok: false; readonly rule: GuardRule; readonly home?: string } | undefined> => {
+  type Refusal = { readonly ok: false; readonly rule: GuardRule; readonly home?: string };
+  /** `at`: where to make the entry (through an open folder where possible); `place`: its real path. */
+  const copy = async (from: string, at: string, place: string): Promise<Refusal | undefined> => {
     const real = await disk.realpath(from).catch(() => undefined);
     if (real === undefined) return refused('not-found');
     const entry = await disk.identity(real);
+    if (totals.entries >= options.maxFiles) return refused('too-many');
+    totals.entries += 1;
     if (entry?.kind !== 'directory') {
-      if (totals.files >= options.maxFiles) return refused('too-many');
       const opened = await openOutsideStateHomes(from, homes, disk, links);
       if (!opened.ok) return opened;
       try {
-        totals.bytes += await opened.value.copyTo(to, options.maxFileBytes, opened.value.identity.mode);
+        const left = options.maxTotalBytes - totals.bytes;
+        if (opened.value.identity.size > left) return refused('too-many');
+        totals.bytes += await opened.value.copyTo(at, Math.min(options.maxFileBytes, left), opened.value.identity.mode);
         totals.files += 1;
       } finally {
         await opened.value.close();
@@ -628,17 +707,44 @@ export async function copyTreeOutsideStateHomes(
     const verdict = await stateHomeOf(homes, real, disk);
     if (verdict.inside) return refused('state-home', verdict.home);
     const key = `${String(entry.device)}:${String(entry.inode)}`;
-    if (branch.has(key)) return refused('loop');
+    if (seen.has(key)) return refused('loop');
+    seen.add(key);
     // Writable while it is filled (a Nix store folder is 0555), then given its own mode, as `cp` does.
-    await disk.mkdir(to, entry.mode | 0o700);
-    const below = new Set([...branch, key]);
-    for (const name of await disk.list(real)) {
-      const problem = await copy(join(real, name), join(to, name), below);
+    const made = await disk
+      .mkdir(at, entry.mode | 0o700)
+      .then(async () => await disk.openDirectory(at))
+      .catch(() => undefined);
+    if (made === undefined) return refused('changed');
+    try {
+      // The folder just made is the one at its real place — not one a link put there.
+      const problem = await placedFolderProblem(place, made.identity, disk);
       if (problem !== undefined) return problem;
+      for (const name of await disk.list(real)) {
+        const below = await copy(join(real, name), made.entryPath(name) ?? join(place, name), join(place, name));
+        if (below !== undefined) return below;
+      }
+      await made.chmod(entry.mode);
+    } finally {
+      await made.close();
     }
-    await disk.chmod(to, entry.mode);
     return undefined;
   };
-  const problem = await copy(absolute(source, 'the source'), absolute(destination, 'the destination'), new Set());
-  return problem ?? { ok: true, value: totals };
+  const target = absolute(destination, 'the destination');
+  const leaf = basename(target);
+  const parentReal = await disk.realpath(dirname(target)).catch(() => undefined);
+  if (parentReal === undefined) return refused('not-found');
+  const parent = await disk.openDirectory(parentReal).catch(() => undefined);
+  if (parent === undefined) return refused('changed');
+  try {
+    const parentProblem = await placedFolderProblem(parentReal, parent.identity, disk);
+    if (parentProblem !== undefined) return parentProblem;
+    const problem = await copy(
+      absolute(source, 'the source'),
+      parent.entryPath(leaf) ?? join(parentReal, leaf),
+      join(parentReal, leaf),
+    );
+    return problem ?? { ok: true, value: { files: totals.files, bytes: totals.bytes } };
+  } finally {
+    await parent.close();
+  }
 }

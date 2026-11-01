@@ -1,5 +1,17 @@
 import { type BigIntStats, constants, createReadStream } from 'node:fs';
-import { chmod, type FileHandle, lstat, mkdir, open, readdir, readlink, realpath, unlink } from 'node:fs/promises';
+import {
+  access,
+  type FileHandle,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  readlink,
+  realpath,
+  unlink,
+} from 'node:fs/promises';
+import { userInfo } from 'node:os';
 import type {
   FileIdentity,
   GuardDirectoryHandle,
@@ -73,8 +85,14 @@ async function opened(path: string, flags: number, mode?: number): Promise<[File
  * `/proc/self/fd/N/<leaf>`, so a folder swapped after it was checked is never written into.
  */
 export class NodeGuardDisk implements GuardDisk {
-  /** `throughDescriptors`: reach a folder's entries through its open descriptor (Linux `/proc`). */
-  constructor(private readonly throughDescriptors: boolean = process.platform === 'linux') {}
+  /**
+   * `throughDescriptors`: reach a folder's entries through its open descriptor (Linux `/proc`). `groupDatabase`:
+   * the group file read for this user's listed groups — a test names another.
+   */
+  constructor(
+    private readonly throughDescriptors: boolean = process.platform === 'linux',
+    private readonly groupDatabase: string = '/etc/group',
+  ) {}
 
   async realpath(path: string): Promise<string> {
     return await realpath(path);
@@ -119,6 +137,7 @@ export class NodeGuardDisk implements GuardDisk {
     return {
       identity,
       entryPath: leaf => (this.throughDescriptors ? `/proc/self/fd/${String(handle.fd)}/${leaf}` : undefined),
+      chmod: async mode => await handle.chmod(mode),
       close: async () => await handle.close(),
     };
   }
@@ -162,11 +181,40 @@ export class NodeGuardDisk implements GuardDisk {
     await mkdir(path, { mode });
   }
 
-  async chmod(path: string, mode: number): Promise<void> {
-    await chmod(path, mode);
-  }
-
   async unlink(path: string): Promise<void> {
     await unlink(path);
   }
+
+  async groups(): Promise<readonly number[]> {
+    const live = [...(process.getgroups?.() ?? []), ...(process.getegid === undefined ? [] : [process.getegid()])];
+    return [...new Set([...live, ...(await listedGroups(this.groupDatabase, userInfo().username))])];
+  }
+
+  async writable(path: string): Promise<boolean> {
+    try {
+      await access(path, constants.W_OK);
+      return true;
+    } catch (error) {
+      if (codeOf(error) === 'EACCES' || codeOf(error) === 'EPERM' || codeOf(error) === 'EROFS') return false;
+      throw error;
+    }
+  }
+}
+
+/**
+ * The groups the group file lists `user` in: a listed member may join one with `sg` without a password, so it
+ * counts as this process's even before the process holds it. Where the file is absent (macOS keeps groups in its
+ * directory service) only the live groups count, and `access(W_OK)` remains the check that does not guess. Any
+ * OTHER failure to read it throws: a proof that cannot see the group list must not conclude the store is closed.
+ */
+async function listedGroups(database: string, user: string): Promise<readonly number[]> {
+  const text = await readFile(database, 'utf8').catch((error: unknown) => {
+    if (codeOf(error) === 'ENOENT') return '';
+    throw error;
+  });
+  return text.split('\n').flatMap(line => {
+    const [, , gid, members] = line.split(':');
+    const id = Number(gid);
+    return Number.isInteger(id) && (members ?? '').split(',').includes(user) ? [id] : [];
+  });
 }

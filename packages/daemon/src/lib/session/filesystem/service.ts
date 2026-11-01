@@ -97,12 +97,25 @@ function fenceRefusal(fence: SessionReadFence | undefined, rootReal: string, rel
   const target = rel === '' ? rootReal : posix.join(rootReal, rel);
   if (fence.opening.some(opening => withinFolder(opening, target))) return undefined;
   const verdict = stateHomeByName(fence.homes, target);
-  return verdict.inside
-    ? new FsError(
-        'denied',
-        `that path is inside this daemon's state home (${verdict.home}), which holds this machine's credentials, so it is not read for an agent`,
-      )
-    : undefined;
+  return verdict.inside ? homeRefusal(verdict.home) : undefined;
+}
+
+const homeRefusal = (home: string): FsError =>
+  new FsError(
+    'denied',
+    `that path is inside this daemon's state home (${home}), which holds this machine's credentials, so it is not read for an agent`,
+  );
+
+/**
+ * The home a walk passed through BY IDENTITY, or `undefined`. A name is not enough: a case-insensitive disk
+ * (macOS) opens `.FERRETRY` as `.ferretry`, and a bind mount gives the home another name entirely. The pinned walk
+ * records the device and inode of every folder it opened and of what it opened last, so each is compared with
+ * every home and every pinned key file.
+ */
+function identityHome(fence: SessionReadFence, identities: readonly ComponentIdentity[]): string | undefined {
+  const keys = [...fence.homes.homes, ...fence.homes.pinned];
+  const hit = identities.some(identity => keys.some(key => key.device === identity.dev && key.inode === identity.ino));
+  return hit ? (fence.homes.homes[0]?.named ?? 'FY_HOME') : undefined;
 }
 
 /**
@@ -127,21 +140,47 @@ function hardLinkRefusal(
  * which reads as a name no read would serve. Closing it closes the pin.
  */
 function fencedRoot(pinned: PinnedRoot, fence: SessionReadFence): PinnedRoot {
-  const refused = (rel: string): FsError | undefined => fenceRefusal(fence, pinned.rootReal, rel);
+  const named = (rel: string): FsError | undefined => fenceRefusal(fence, pinned.rootReal, rel);
+  const open = async (rel: string, options?: PinnedOpenOptions): Promise<PinnedTarget> => {
+    const refusal = named(rel);
+    if (refusal !== undefined) throw refusal;
+    const target = await pinned.open(rel, options);
+    const home = identityHome(fence, target.identities);
+    if (home === undefined) return target;
+    await target.close();
+    throw homeRefusal(home);
+  };
+  // The probe answers from names, so each FOLDER a name sits in is walked once, by identity, and remembered.
+  const folders = new Map<string, Promise<boolean>>();
+  const inHome = async (rel: string): Promise<boolean> => {
+    const folder = posix.dirname(rel);
+    if (folder === '.') return false;
+    let known = folders.get(folder);
+    if (known === undefined) {
+      known = open(folder, { wantDirectory: true }).then(
+        async target => {
+          await target.close();
+          return false;
+        },
+        () => true,
+      );
+      folders.set(folder, known);
+    }
+    return await known;
+  };
   return {
     rootReal: pinned.rootReal,
     policyCwd: pinned.policyCwd,
-    open: async (rel, options) => {
-      const refusal = refused(rel);
-      if (refusal !== undefined) throw refusal;
-      return await pinned.open(rel, options);
-    },
+    open,
     probe: () => {
       const inner = pinned.probe();
       return {
         classify: async (rels, budget) => {
+          const fenced = new Set<string>();
+          for (const rel of rels) if (named(rel) !== undefined || (await inHome(rel))) fenced.add(rel);
+          const refused = (rel: string): boolean => fenced.has(rel);
           const kinds = await inner.classify(
-            rels.filter(rel => refused(rel) === undefined),
+            rels.filter(rel => !refused(rel)),
             budget,
           );
           // The same prefix the inner probe answered: a fenced name is `unsupported`, and the answer stops
@@ -149,7 +188,7 @@ function fencedRoot(pinned: PinnedRoot, fence: SessionReadFence): PinnedRoot {
           const answered: PinnedFileKind[] = [];
           let next = 0;
           for (const rel of rels) {
-            if (refused(rel) !== undefined) {
+            if (refused(rel)) {
               answered.push('unsupported');
               continue;
             }
@@ -352,7 +391,15 @@ export class SessionFilesystem {
       await pinned.close();
       throw refusal;
     }
-    return fencedRoot(pinned, fence);
+    const fenced = fencedRoot(pinned, fence);
+    // The root by identity too: a folder bound to the home has a name outside it.
+    try {
+      await (await fenced.open('', { wantDirectory: true })).close();
+    } catch (error) {
+      await pinned.close();
+      throw error;
+    }
+    return fenced;
   }
 
   /** The session root, freshly resolved. A since-deleted worktree is a clean `not_found`. */

@@ -12,6 +12,7 @@ import {
   type RawSessionInput,
   type SessionDigest,
 } from '../../lib/learning/index.ts';
+import { DAEMON_START } from '../../lib/api/state-homes.ts';
 import type { FoundationPaths } from '../../lib/paths.ts';
 import type { FileSystemPort } from '../../lib/ports.ts';
 import type { SessionControlSubsystem } from '../../lib/runtime/mounts/session-control.ts';
@@ -139,7 +140,13 @@ export class LearningMiner {
       ...(this.config().model === undefined ? {} : { model: this.config().model }),
     };
     const payload = JSON.stringify(request);
-    const miner = await this.sessionControl.start(request, `learning:${manifest.runId}`, payload);
+    const miner = await this.sessionControl.start(
+      request,
+      `learning:${manifest.runId}`,
+      payload,
+      undefined,
+      DAEMON_START,
+    );
     const pending = {
       ...manifest,
       sessionsWithSignal: batch.length,
@@ -327,7 +334,13 @@ export class LearningMiner {
       cwd: this.paths.home,
       ...(model === undefined ? {} : { model }),
     };
-    const miner = await this.sessionControl.start(request, `learning:${name}`, JSON.stringify(request));
+    const miner = await this.sessionControl.start(
+      request,
+      `learning:${name}`,
+      JSON.stringify(request),
+      undefined,
+      DAEMON_START,
+    );
     await this.store.writeRunManifest({
       ...this.emptyManifest(undefined, sessionIds.length),
       runId: name,

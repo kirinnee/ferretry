@@ -22,6 +22,7 @@ import {
 import type { Delegation, DelegationRequest } from '../../../src/lib/board/index.ts';
 import { sessionView } from '../runtime/mounts/support.ts';
 import { catalog, choice, entry, facts, packConfig, runtime } from './support.ts';
+import { DAEMON_START as OWNER } from '../../../src/lib/api/state-homes.ts';
 
 const PROMPT = 'Everyday work: opus at high; then haiku for chores.';
 const GUIDE_FILE: ModelsGuideFile = { prompt: PROMPT };
@@ -245,7 +246,7 @@ describe('PackService.newChild refusals before anything is probed', () => {
     const { subject, probes, starts } = build({ config: packConfig({ enabled: false }), parents: { p1: PARENT } });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main' }), OWNER);
 
     // Assert
     should(outcome).deepEqual({
@@ -261,7 +262,7 @@ describe('PackService.newChild refusals before anything is probed', () => {
     const { subject } = build();
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main', parent: 'ghost' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', parent: 'ghost' }), OWNER);
 
     // Assert
     should(refusalOf(outcome)).deepEqual({
@@ -275,7 +276,7 @@ describe('PackService.newChild refusals before anything is probed', () => {
     const { subject } = build({ parents: { p1: { ...PARENT, pack: false } } });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main' }), OWNER);
 
     // Assert
     should(refusalOf(outcome)).deepEqual({
@@ -290,7 +291,7 @@ describe('PackService.newChild refusals before anything is probed', () => {
     const { subject } = build({ parents: { p1: { ...PARENT, runningChildren: 4 } } });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main' }), OWNER);
 
     // Assert
     should(refusalOf(outcome)?.code).equal('limit_reached');
@@ -301,7 +302,7 @@ describe('PackService.newChild refusals before anything is probed', () => {
     const { subject } = build();
 
     // Act
-    const outcome = await subject.newChild({ task: 'fix', runtime: 'claude-main' });
+    const outcome = await subject.newChild({ task: 'fix', runtime: 'claude-main' }, OWNER);
 
     // Assert
     should(refusalOf(outcome)).deepEqual({
@@ -315,7 +316,7 @@ describe('PackService.newChild refusals before anything is probed', () => {
     const { subject, probes } = build({ parents: { p1: PARENT } });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'nope' }));
+    const outcome = await subject.newChild(request({ runtime: 'nope' }), OWNER);
 
     // Assert
     should(refusalOf(outcome)).deepEqual({
@@ -331,7 +332,7 @@ describe('PackService.newChild refusals before anything is probed', () => {
     const { subject, probes } = build({ parents: { p1: PARENT } });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main', model: 'haiku' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', model: 'haiku' }), OWNER);
 
     // Assert
     should(refusalOf(outcome)?.code).equal('model_unavailable');
@@ -347,6 +348,7 @@ describe('PackService.newChild with a named runtime', () => {
     // Act
     const outcome = await subject.newChild(
       request({ runtime: 'claude-main', model: 'opus', effort: 'high', name: 'Fix It', mode: 'interactive' }),
+      OWNER,
     );
 
     // Assert
@@ -392,6 +394,7 @@ describe('PackService.newChild with a named runtime', () => {
     // Act
     const outcome = await subject.newChild(
       request({ runtime: 'claude-main-wrapper', cwd: '/elsewhere', model: 'opus' }),
+      OWNER,
     );
 
     // Assert
@@ -406,8 +409,11 @@ describe('PackService.newChild with a named runtime', () => {
     const boilerplate = 'You are an implementer. Read /tmp/briefs/x.md and follow it exactly.';
 
     // Act
-    await subject.newChild(request({ runtime: 'claude-main', model: 'opus', task: 'Fix the login redirect bug now' }));
-    await subject.newChild(request({ runtime: 'claude-main', model: 'opus', task: boilerplate }));
+    await subject.newChild(
+      request({ runtime: 'claude-main', model: 'opus', task: 'Fix the login redirect bug now' }),
+      OWNER,
+    );
+    await subject.newChild(request({ runtime: 'claude-main', model: 'opus', task: boilerplate }), OWNER);
 
     // Assert
     should(starts[0]?.name).equal('Fix the Login Redirect Bug');
@@ -419,7 +425,7 @@ describe('PackService.newChild with a named runtime', () => {
     const { subject, starts } = build({ parents: { p1: { ...PARENT, cwd: '/tmp/work' } }, scratch: ['/tmp/work'] });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main-wrapper', model: 'opus' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main-wrapper', model: 'opus' }), OWNER);
 
     // Assert
     should(outcome.outcome).equal('started');
@@ -434,9 +440,11 @@ describe('PackService.newChild with a named runtime', () => {
     // Act
     const refused = await refusing.subject.newChild(
       request({ runtime: 'claude-main-wrapper', cwd: '/tmp/claude-1/scratchpad' }),
+      OWNER,
     );
     const allowed = await allowing.subject.newChild(
       request({ runtime: 'claude-main-wrapper', cwd: '/tmp/claude-1/scratchpad', allowScratch: true }),
+      OWNER,
     );
 
     // Assert
@@ -465,8 +473,8 @@ describe('PackService.newChild with a named runtime', () => {
     const { subject, probes, starts } = build({ runtimes: [defaulted, bare] });
 
     // Act
-    const first = await subject.newChild({ task: 'fix', runtime: 'claude-default', cwd: '/w' });
-    const second = await subject.newChild({ task: 'fix', runtime: 'bare', cwd: '/w' });
+    const first = await subject.newChild({ task: 'fix', runtime: 'claude-default', cwd: '/w' }, OWNER);
+    const second = await subject.newChild({ task: 'fix', runtime: 'bare', cwd: '/w' }, OWNER);
 
     // Assert
     should(probes.map(([probe]) => probe.model)).deepEqual(['opus', undefined]);
@@ -496,7 +504,7 @@ describe('PackService.newChild with a named runtime', () => {
     });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main', model: 'opus' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', model: 'opus' }), OWNER);
 
     // Assert
     const refusal = {
@@ -527,7 +535,7 @@ describe('PackService.newChild with a named runtime', () => {
     });
 
     // Act
-    const outcome = await subject.newChild(request({ auto: true }));
+    const outcome = await subject.newChild(request({ auto: true }), OWNER);
 
     // Assert
     should(outcome.outcome).equal('started');
@@ -547,7 +555,7 @@ describe('PackService.newChild with a named runtime', () => {
     });
 
     // Act
-    const outcome = await subject.newChild({ task: 'fix', runtime: 'bare', cwd: '/w' });
+    const outcome = await subject.newChild({ task: 'fix', runtime: 'bare', cwd: '/w' }, OWNER);
 
     // Assert
     should(refusalOf(outcome)?.message).equal('bare did not answer a "reply OK" check: no output.');
@@ -558,7 +566,7 @@ describe('PackService.newChild with a named runtime', () => {
     const { subject } = build({ parents: { p1: PARENT }, cached: ['claude-main-wrapper'] });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main', model: 'opus' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', model: 'opus' }), OWNER);
 
     // Assert
     should(outcome.outcome === 'started' && outcome.attempts[0]?.probe).equal('cached');
@@ -570,7 +578,7 @@ describe('PackService.newChild with a named runtime', () => {
     const { subject } = build({ parents: { p1: PARENT }, startError: new PackStartRefused(refusal) });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main', model: 'opus' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', model: 'opus' }), OWNER);
 
     // Assert
     should(outcome).deepEqual({
@@ -585,7 +593,7 @@ describe('PackService.newChild with a named runtime', () => {
     const { subject } = build({ parents: { p1: PARENT }, startError: new Error('disk full') });
 
     // Act
-    const failure = subject.newChild(request({ runtime: 'claude-main', model: 'opus' }));
+    const failure = subject.newChild(request({ runtime: 'claude-main', model: 'opus' }), OWNER);
 
     // Assert
     await should(failure).rejectedWith('disk full');
@@ -608,8 +616,8 @@ describe('PackService.newChild --auto', () => {
     const forced = build({ parents: { p1: PARENT } });
 
     // Act
-    const first = await plain.subject.newChild(request({ auto: true }));
-    await forced.subject.newChild(request({ auto: true, effort: 'low' }));
+    const first = await plain.subject.newChild(request({ auto: true }), OWNER);
+    await forced.subject.newChild(request({ auto: true, effort: 'low' }), OWNER);
 
     // Assert
     should(first.outcome === 'started' && first.decidedBy).equal('routing');
@@ -629,7 +637,7 @@ describe('PackService.newChild --auto', () => {
     });
 
     // Act
-    const outcome = await subject.newChild(request({ auto: true }));
+    const outcome = await subject.newChild(request({ auto: true }), OWNER);
 
     // Assert
     should(probes.map(([probe]) => probe.model)).deepEqual(['opus', 'haiku', 'sonnet']);
@@ -650,7 +658,7 @@ describe('PackService.newChild --auto', () => {
     const { subject, starts } = build({ parents: { p1: PARENT }, guideFile: { prompt: 'Use glm-9 for everything.' } });
 
     // Act
-    const outcome = await subject.newChild(request({ auto: true }));
+    const outcome = await subject.newChild(request({ auto: true }), OWNER);
 
     // Assert
     should(outcome.outcome === 'started' && outcome.attempts).have.length(1);
@@ -668,8 +676,8 @@ describe('PackService.newChild --auto', () => {
     const empty = build({ parents: { p1: PARENT }, runtimes: [] });
 
     // Act
-    const outcome = await subject.newChild(request({ auto: true }));
-    const nothing = await empty.subject.newChild(request({ auto: true }));
+    const outcome = await subject.newChild(request({ auto: true }), OWNER);
+    const nothing = await empty.subject.newChild(request({ auto: true }), OWNER);
 
     // Assert
     should(refusalOf(outcome)).deepEqual({
@@ -690,7 +698,7 @@ describe('PackService.newChild --auto', () => {
     });
 
     // Act
-    const outcome = await subject.newChild(request({ auto: true }));
+    const outcome = await subject.newChild(request({ auto: true }), OWNER);
 
     // Assert
     should(outcome.outcome).equal('refused');
@@ -710,7 +718,7 @@ describe('PackService.newChild --auto with Jev deciding', () => {
     const { subject, ranks, recorded, starts } = build({ config: jev, parents: { p1: PARENT } });
 
     // Act
-    const outcome = await subject.newChild(request({ auto: true }));
+    const outcome = await subject.newChild(request({ auto: true }), OWNER);
 
     // Assert
     should(ranks).have.length(1);
@@ -733,7 +741,7 @@ describe('PackService.newChild --auto with Jev deciding', () => {
     const { subject, ranks, recorded, starts } = build({ config: jev, parents: { p1: PARENT }, spent: 0.25 });
 
     // Act
-    const outcome = await subject.newChild(request({ auto: true }));
+    const outcome = await subject.newChild(request({ auto: true }), OWNER);
 
     // Assert
     should(ranks).be.empty();
@@ -754,7 +762,7 @@ describe('PackService.newChild --auto with Jev deciding', () => {
     });
 
     // Act
-    const outcome = await subject.newChild(request({ auto: true }));
+    const outcome = await subject.newChild(request({ auto: true }), OWNER);
 
     // Assert
     should(recorded).be.empty();
@@ -770,7 +778,7 @@ describe('PackService.newChild --auto with Jev deciding', () => {
     const { subject, ranks } = build({ config: jev, parents: { p1: PARENT }, runtimes: [CLAUDE_FAST] });
 
     // Act
-    const outcome = await subject.newChild(request({ auto: true }));
+    const outcome = await subject.newChild(request({ auto: true }), OWNER);
 
     // Assert
     should(ranks).be.empty();
@@ -800,7 +808,7 @@ describe("a sub-ferret's card", () => {
     });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main' }), OWNER);
 
     // Assert
     should(delegated).match([['p1', { brief: 'fix the bug' }, true]]);
@@ -827,7 +835,7 @@ describe("a sub-ferret's card", () => {
     });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main', cwd: '/work/other' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', cwd: '/work/other' }), OWNER);
 
     // Assert
     should(delegated[0]?.[2]).be.false();
@@ -847,7 +855,7 @@ describe("a sub-ferret's card", () => {
     });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main', card: 'F9' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', card: 'F9' }), OWNER);
 
     // Assert
     should(delegated[0]?.[1].card).equal('F9');
@@ -868,7 +876,7 @@ describe("a sub-ferret's card", () => {
     });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main', card: 'F9' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', card: 'F9' }), OWNER);
 
     // Assert
     should(starts).be.empty();
@@ -887,8 +895,8 @@ describe("a sub-ferret's card", () => {
     const refused = build({ parents: { p1: PARENT }, delegate: { notes: ['No card was made: the board is down'] } });
 
     // Act
-    const unmade = await missed.subject.newChild(request({ runtime: 'claude-main' }));
-    const none = await refused.subject.newChild(request({ runtime: 'claude-main' }));
+    const unmade = await missed.subject.newChild(request({ runtime: 'claude-main' }), OWNER);
+    const none = await refused.subject.newChild(request({ runtime: 'claude-main' }), OWNER);
 
     // Assert
     should(unmade.outcome === 'started' && unmade.card).deepEqual({
@@ -906,8 +914,8 @@ describe("a sub-ferret's card", () => {
     const plain = build();
 
     // Act
-    const outcome = await subject.newChild({ task: 'fix', runtime: 'claude-main', cwd: '/w' });
-    const bare = await plain.subject.newChild({ task: 'fix', runtime: 'claude-main', cwd: '/w' });
+    const outcome = await subject.newChild({ task: 'fix', runtime: 'claude-main', cwd: '/w' }, OWNER);
+    const bare = await plain.subject.newChild({ task: 'fix', runtime: 'claude-main', cwd: '/w' }, OWNER);
 
     // Assert
     should(delegated).be.empty();
@@ -924,7 +932,7 @@ describe("a sub-ferret's card", () => {
     });
 
     // Act
-    const outcome = await subject.newChild(request({ runtime: 'claude-main' }));
+    const outcome = await subject.newChild(request({ runtime: 'claude-main' }), OWNER);
 
     // Assert
     should(outcome.outcome).equal('refused');
