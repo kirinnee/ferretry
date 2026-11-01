@@ -266,13 +266,41 @@ describe('reading the account model from the configuration files', () => {
     await writeFile(path.join(root, 'main.md'), 'Main guidance.\n');
     await writeFile(path.join(root, 'huge.md'), 'x'.repeat(1024 * 1024 + 1));
 
+    const home = await temporary();
+    const fence = { homes: [home], open: [] };
+
     // Act
     const texts = await Promise.all(
-      ['main.md', 'huge.md', 'missing.md', '.'].map(async name => await readComponentText(path.join(root, name))),
+      ['main.md', 'huge.md', 'missing.md', '.'].map(
+        async name => await readComponentText(path.join(root, name), fence),
+      ),
     );
 
     // Assert
     should(texts).deepEqual(['Main guidance.\n', undefined, undefined, undefined]);
+  });
+
+  it('should read nothing from inside the state home, named directly or through a link, but read its asset tree', async () => {
+    // Arrange: the daemon's admin token, a link to it from outside, and an asset inside the home.
+    const home = await temporary();
+    const outside = await temporary();
+    await writeFile(path.join(home, 'api-token'), 'fy_admin_secret\n');
+    await mkdir(path.join(home, 'fleet', 'assets'), { recursive: true });
+    await writeFile(path.join(home, 'fleet', 'assets', 'CLAUDE.md'), 'Shared guidance.\n');
+    await symlink(path.join(home, 'api-token'), path.join(outside, 'innocent.md'));
+    const fence = { homes: [home], open: [path.join(home, 'fleet', 'assets')] };
+
+    // Act
+    const texts = await Promise.all(
+      [
+        path.join(home, 'api-token'),
+        path.join(outside, 'innocent.md'),
+        path.join(home, 'fleet', 'assets', 'CLAUDE.md'),
+      ].map(async file => await readComponentText(file, fence)),
+    );
+
+    // Assert
+    should(texts).deepEqual([undefined, undefined, 'Shared guidance.\n']);
   });
 
   it('should say what a document is now: its digest, absent, or a refusal when it cannot be read', async () => {

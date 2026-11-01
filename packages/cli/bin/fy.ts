@@ -1259,6 +1259,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   // `path`, `schema` and `guide` read the files directly, so they work with the daemon stopped.
   ({ program, world, client }) => {
     const stateHome = resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME);
+    const assetsDirectory = join(stateHome, 'fleet', 'assets');
     registerConfigCommands(
       program,
       new ConfigController(
@@ -1268,6 +1269,17 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         BINARY_NAME,
         text => new Bun.CryptoHasher('sha256').update(text).digest('hex'),
         new StdinConfigText(),
+        // The daemon's own check: a component source inside the state home is an error (docs/secrets.md).
+        {
+          componentSources: {
+            fence: {
+              homes: [stateHome, join(stateHome, 'state'), join(stateHome, CONFIG_DIRECTORY_NAME)],
+              open: [assetsDirectory],
+            },
+            userHome: resolveUserHome(world.environment),
+            assetsDirectory,
+          },
+        },
       ),
     );
   },

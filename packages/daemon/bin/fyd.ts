@@ -186,6 +186,7 @@ import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
 import {
+  componentSourceFence,
   fileFleetCatalogDeps,
   readDeclaredAccountModel,
   sessionStatusOf,
@@ -7457,6 +7458,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     digest: text => new Bun.CryptoHasher('sha256').update(text).digest('hex'),
     now: () => new Date(),
     changes: configChanges,
+    // A component source inside this daemon's own files is an error, never in effect (docs/secrets.md).
+    checkContext: {
+      componentSources: {
+        fence: componentSourceFence(paths),
+        userHome,
+        assetsDirectory: join(paths.fleet, 'assets'),
+      },
+    },
   });
   const configLocations = { configDirectory: paths.config, fleetDirectory: paths.fleet };
   // The login window is created before a state home is opened, while browser sessions are created

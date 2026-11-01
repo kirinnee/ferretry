@@ -17,6 +17,7 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
+import { fencedBy } from '../lib/state-home-fence.ts';
 import { FleetManifestSchema } from '../lib/manifest.ts';
 import {
   ABSENT_DOCUMENT_REVISION,
@@ -40,6 +41,14 @@ import {
 } from '../lib/settings.ts';
 import type { SharedHistoryMigration } from '../lib/shared-history.ts';
 import { type FleetApplyLock, type FleetApplyLockOptions, fleetApplyLockFor } from './apply-lock.ts';
+import {
+  assertSourceUnfenced,
+  copyFencedSource,
+  FencedSourceError,
+  type ResolvedSourceFence,
+  resolveSourceFence,
+  type SourceFence,
+} from './fenced-source.ts';
 import { FileMutationJournal, isMutationReservedName, STAGE_PREFIX } from './mutation-journal.ts';
 
 const CodexSqliteOriginalSchema = z.discriminatedUnion('present', [
@@ -252,11 +261,22 @@ export class FileFleetProvisioner implements FleetProvisioner {
     allowedRoots: readonly string[],
     private readonly sharedHistory?: SharedHistoryMigration,
     private readonly lockOptions: FleetApplyLockOptions = {},
+    /**
+     * The daemon's own directories, which no copy or link may take a source from
+     * (`../lib/state-home-fence.ts`). Absent, sources are not fenced — only a caller with no state
+     * home to protect (a test of the copy itself) leaves it out.
+     */
+    private readonly sourceFence?: SourceFence,
   ) {
     if (allowedRoots.length === 0) {
       throw new Error('at least one allowed fleet root is required');
     }
     this.allowedRoots = allowedRoots.map(root => path.resolve(root));
+  }
+
+  /** The source fence as the disk has it now, or `undefined` when sources are not fenced. */
+  private async resolvedSourceFence(): Promise<ResolvedSourceFence | undefined> {
+    return this.sourceFence === undefined ? undefined : await resolveSourceFence(this.sourceFence);
   }
 
   /**
@@ -508,6 +528,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
         pendingFolders.add(folder);
       }
     }
+    const fence = await this.resolvedSourceFence();
     for (const operation of operations) {
       // A LINK IS CHECKED EXACTLY LIKE A COPY, and it has to be checked HERE rather than left to the
       // write. `cp` fails on a missing source and `symlink` does not: it creates a dangling link
@@ -519,7 +540,14 @@ export class FileFleetProvisioner implements FleetProvisioner {
         // somebody signs in, and the harness writes it through the link.
         if (operation.kind === 'symlink' && operation.dangling === true) continue;
         const source = path.resolve(operation.source);
-        if (!pending.has(source) && !pendingFolders.has(source)) await stat(operation.source);
+        if (pending.has(source) || pendingFolders.has(source)) {
+          // Not on the disk yet — nor, on a first apply, the asset tree it lands in — so only its name can be
+          // asked, against the fence as configured; the guard asks again when it is copied.
+          const home = this.sourceFence === undefined ? undefined : fencedBy(this.sourceFence, source);
+          if (home !== undefined) throw new FencedSourceError(operation.source, 'state-home', home);
+        } else if (fence === undefined) await stat(operation.source);
+        // Every hop and the real path, before anything is written: a fenced source refuses the apply whole.
+        else await assertSourceUnfenced(fence, operation.source);
         continue;
       }
       if (operation.kind !== 'settings') continue;
@@ -705,6 +733,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
       // empty, and anything that has appeared since belongs to somebody else: letting `symlink`
       // fail with EEXIST surfaces that as a refusal instead of deleting their work.
       if (!(await journal.capture(operation.path))) await rm(operation.path, { recursive: true, force: true });
+      // Asked again at the write: what the link leads to is read later by the harness, so this is the last
+      // moment the daemon can refuse it. A credential link is the planner's own and leads into the home.
+      const fence = operation.dangling === true ? undefined : await this.resolvedSourceFence();
+      if (fence !== undefined) await assertSourceUnfenced(fence, operation.source);
       await symlink(operation.source, operation.path);
       return [];
     }
@@ -721,7 +753,12 @@ export class FileFleetProvisioner implements FleetProvisioner {
       // exclusive primitives and unwinds exactly what it created if it cannot finish.
       const staged = path.join(path.dirname(operation.path), `${STAGE_PREFIX}${randomUUID()}`);
       try {
-        await cp(operation.source, staged, { recursive: source.isDirectory(), dereference: true });
+        // Fenced: each file is checked and read through the descriptor that was checked, so a source
+        // swapped for a link into the state home after the preflight copies nothing.
+        const fence = await this.resolvedSourceFence();
+        if (fence === undefined)
+          await cp(operation.source, staged, { recursive: source.isDirectory(), dereference: true });
+        else await copyFencedSource(fence, operation.source, staged);
         // A template linked out of a read-only store copies as 0444; force the copied root writable
         // so a harness can rewrite a file it owns. Directories remain private to the account.
         await chmod(staged, operation.mode ?? (source.isDirectory() ? 0o700 : 0o644));

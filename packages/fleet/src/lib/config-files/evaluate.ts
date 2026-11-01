@@ -41,7 +41,7 @@ import { z } from 'zod';
 import type { AccountModel } from '../account/schema.ts';
 import type { ModelCatalog, ModelCatalogFile } from '../models/schema.ts';
 import { type ProviderPreset, type ProviderPresetFile, presetFromFile } from '../presets/schema.ts';
-import { type CheckedConfigFile, checkConfigFile, schemaIssues } from './check.ts';
+import { type CheckedConfigFile, type ConfigCheckContext, checkConfigFile, schemaIssues } from './check.ts';
 import {
   type ConfigValues,
   configLoosening,
@@ -85,6 +85,8 @@ export interface ConfigEvaluationInput {
   readonly accepted: AcceptedConfigFiles;
   /** A file's etag: sha256 of its UTF-8 bytes, hex — the provisioner's revision, so the two agree. */
   digest(text: string): string;
+  /** What the check knows about this machine — its state home, for the component-source fence. */
+  readonly context?: ConfigCheckContext;
 }
 
 /** Everything in effect. */
@@ -132,9 +134,13 @@ const singletonValue = <K extends SingletonKind>(kind: K, candidate: Candidate |
   (candidate?.checked.value ?? SINGLETON_DEFAULTS[kind]) as (typeof SINGLETON_DEFAULTS)[K];
 
 /** A stored accepted entry, re-checked: a release that changed a schema can retire an old good file. */
-function acceptedCandidate(path: string, accepted: AcceptedConfigFile | undefined): Candidate | undefined {
+function acceptedCandidate(
+  path: string,
+  accepted: AcceptedConfigFile | undefined,
+  context: ConfigCheckContext = {},
+): Candidate | undefined {
   if (accepted === undefined) return undefined;
-  const checked = checkConfigFile(path, accepted.text);
+  const checked = checkConfigFile(path, accepted.text, context);
   return checked.ok ? { checked, text: accepted.text, etag: accepted.etag } : undefined;
 }
 
@@ -152,7 +158,7 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
   /** The logins with a budget in effect before this round: what a runtime may not leave unconfirmed. */
   const budgeted = new Set(
     Object.entries(input.accepted).flatMap(([path, accepted]) => {
-      const candidate = acceptedCandidate(path, accepted);
+      const candidate = acceptedCandidate(path, accepted, input.context);
       if (candidate === undefined || candidate.checked.address.kind !== 'login') return [];
       const login = candidate.checked.value as ConfigValues['login'];
       return login.budget === undefined ? [] : [candidate.checked.address.name];
@@ -190,17 +196,17 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
     });
     if (address === undefined) continue;
     states.set(path, { address, state: 'invalid' });
-    const previous = acceptedCandidate(path, input.accepted[path]);
+    const previous = acceptedCandidate(path, input.accepted[path], input.context);
     if (previous === undefined) continue;
     effective.set(path, previous);
     next[path] = { etag: previous.etag, text: previous.text };
   }
   for (const file of [...input.files].toSorted((left, right) => left.path.localeCompare(right.path))) {
-    const checked = checkConfigFile(file.path, file.text);
+    const checked = checkConfigFile(file.path, file.text, input.context);
     issues.push(...checked.issues);
     if (checked.address === undefined) continue;
     const address = checked.address;
-    const previous = acceptedCandidate(file.path, input.accepted[file.path]);
+    const previous = acceptedCandidate(file.path, input.accepted[file.path], input.context);
     const keepPrevious = (state: ConfigFileState): void => {
       states.set(file.path, { address, state });
       if (previous === undefined) return;
@@ -242,7 +248,7 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
   // A file that was in effect and is gone: a deletion, which is an edit to the defaults.
   for (const [path, accepted] of Object.entries(input.accepted)) {
     if (onDisk.has(path)) continue;
-    const previous = acceptedCandidate(path, accepted);
+    const previous = acceptedCandidate(path, accepted, input.context);
     if (previous === undefined) continue;
     const address = previous.checked.address;
     if (isSingleton(address)) {
@@ -349,7 +355,7 @@ function assembleFleet(
       );
     }
     for (const path of changes) {
-      const previous = acceptedCandidate(path, input.accepted[path]);
+      const previous = acceptedCandidate(path, input.accepted[path], input.context);
       if (previous === undefined) {
         effective.delete(path);
         delete next[path];

@@ -16,6 +16,7 @@ import {
   configSchemaId,
 } from '@ferretry/protocol';
 import type { z } from 'zod';
+import { type ComponentSourceRule, componentSourceProblem } from '../state-home-fence.ts';
 import { CONFIG_FILE_SCHEMAS, type ConfigValues, configValue } from './kinds.ts';
 import { findRawSecrets, RAW_SECRET_FIX, RAW_SECRET_MESSAGE } from './secrets.ts';
 import { readConfigText, type TextPosition } from './yaml-text.ts';
@@ -121,8 +122,45 @@ function renamedKeyWarnings(
   });
 }
 
+/** What a check knows about this machine beyond the file. Absent, only what the file alone decides is checked. */
+export interface ConfigCheckContext {
+  /**
+   * The component-source fence (`../state-home-fence.ts`): a component whose `file` or `directory`
+   * names the daemon's state home is an error, so it never comes into effect.
+   */
+  readonly componentSources?: ComponentSourceRule;
+}
+
+/** The fields of a component that name a document on the disk. */
+const COMPONENT_SOURCE_FIELDS = ['file', 'directory'] as const;
+
+/** A component source that names the daemon's own state home, as an error at the field that names it. */
+function fencedSourceIssues(
+  path: string,
+  value: unknown,
+  rule: ComponentSourceRule,
+  locate: (path: readonly PropertyKey[]) => TextPosition | undefined,
+): ConfigIssue[] {
+  if (typeof value !== 'object' || value === null) return [];
+  return COMPONENT_SOURCE_FIELDS.flatMap(field => {
+    const reference = (value as Record<string, unknown>)[field];
+    const problem = typeof reference === 'string' ? componentSourceProblem(rule, reference) : undefined;
+    return problem === undefined
+      ? []
+      : [
+          {
+            path,
+            ...at(locate([field])),
+            severity: 'error' as const,
+            message: `${field}: ${problem}`,
+            fix: 'name a document outside the Ferretry home, or put a copy of it in the fleet asset folder',
+          },
+        ];
+  });
+}
+
 /** Check one file, found at `path` relative to the config directory, with this text. */
-export function checkConfigFile(path: string, text: string): ConfigFileCheck {
+export function checkConfigFile(path: string, text: string, context: ConfigCheckContext = {}): ConfigFileCheck {
   const address = classifyConfigPath(path);
   if (address === undefined) {
     return {
@@ -171,6 +209,11 @@ export function checkConfigFile(path: string, text: string): ConfigFileCheck {
   if (!parsed.success) {
     return { ok: false, address, issues: schemaIssues(path, parsed.error, read.read.locate) };
   }
+  const fenced =
+    address.kind === 'component' && context.componentSources !== undefined
+      ? fencedSourceIssues(path, parsed.data, context.componentSources, read.read.locate)
+      : [];
+  if (fenced.length > 0) return { ok: false, address, issues: fenced };
   return {
     ok: true,
     address,

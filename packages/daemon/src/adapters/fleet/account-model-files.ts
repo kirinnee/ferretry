@@ -9,11 +9,12 @@
  * unconfirmed loosening.
  */
 
-import { lstat, readFile, stat } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import {
   ABSENT_DOCUMENT_REVISION,
   type AccountModel,
+  type StateHomeFence,
   claudeStatuslineCommand,
   type FleetDocumentWrite,
   type FleetLayout,
@@ -28,7 +29,12 @@ import {
   runtimeIdsPath,
   SharedHistoryMigration,
 } from '@ferretry/fleet';
-import { FileFleetProvisioner, FileSharedHistoryFileSystem } from '@ferretry/fleet/adapters';
+import {
+  FileFleetProvisioner,
+  FileSharedHistoryFileSystem,
+  readFencedSource,
+  resolveSourceFence,
+} from '@ferretry/fleet/adapters';
 import { configFilePath, type SessionStatus, SessionStatusSchema } from '@ferretry/protocol';
 import type { ConfigFilesService } from '../../lib/config-files/index.ts';
 import type { AccountDocumentReading, FleetCatalogServiceDeps } from '../../lib/fleet/catalog-service.ts';
@@ -120,12 +126,25 @@ export async function readDeclaredAccountModel(
   return reading.format === 'none' ? undefined : reading.model;
 }
 
-/** One component document's text, or `undefined` when it is absent, not a file, too large or unreadable. */
-export async function readComponentText(path: string): Promise<string | undefined> {
+/**
+ * The component-source fence over this daemon's own directories, as configured: no component may read, copy
+ * or link a document inside them, the fleet's asset tree excepted (docs/secrets.md#what-the-state-home-fence-refuses).
+ */
+export const componentSourceFence = (
+  paths: Pick<FoundationPaths, 'home' | 'state' | 'config' | 'fleet'>,
+): StateHomeFence => ({
+  homes: [paths.home, paths.state, paths.config],
+  open: [join(paths.fleet, 'assets')],
+});
+
+/**
+ * One component document's text, or `undefined` when it is absent, not a file, too large, unreadable — or
+ * behind the fence, which reads exactly like a document that is not there: the configuration check has
+ * already said why (an error at the field), and a body that is never read is never in a runtime.
+ */
+export async function readComponentText(path: string, fence: StateHomeFence): Promise<string | undefined> {
   try {
-    const entry = await stat(path);
-    if (!entry.isFile() || entry.size > MAX_COMPONENT_BYTES) return undefined;
-    return await readFile(path, 'utf8');
+    return await readFencedSource(await resolveSourceFence(fence), path, MAX_COMPONENT_BYTES);
   } catch {
     return undefined;
   }
@@ -154,7 +173,7 @@ export function sessionStatusOf(raw: unknown): SessionStatus | undefined {
 
 /** What the composition root hands the catalogue: its own collaborators, and nothing it would build twice. */
 export interface FileFleetCatalogOptions {
-  readonly paths: Pick<FoundationPaths, 'home' | 'fleet' | 'fleetManifest'>;
+  readonly paths: Pick<FoundationPaths, 'home' | 'state' | 'config' | 'fleet' | 'fleetManifest'>;
   readonly userHome: string;
   readonly hostCodexHome?: string;
   /** Every session's status, as its state document says it: {@link sessionStatusOf} reads one. */
@@ -224,6 +243,7 @@ async function wrappersCurrent(binDirectory: string, operations: FleetModelApply
 export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCatalogServiceDeps {
   const { paths, userHome, sessionRecords: records } = options;
   const allowedRoots = [paths.home, userHome];
+  const sourceFence = componentSourceFence(paths);
   const layout: FleetLayout = {
     stateHome: paths.home,
     userHome,
@@ -253,7 +273,7 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
         { configDirectory: options.configDirectory, fleetDirectory: paths.fleet },
         fresh,
       ),
-    readAsset: readComponentText,
+    readAsset: async path => await readComponentText(path, sourceFence),
     documentRevision,
     ids,
     locate: options.locate,
@@ -269,7 +289,12 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     machineName: options.machineName,
     credentials: options.credentials,
     provisioner: acknowledgingProvisioner(
-      new FileFleetProvisioner(allowedRoots, new SharedHistoryMigration(new FileSharedHistoryFileSystem(allowedRoots))),
+      new FileFleetProvisioner(
+        allowedRoots,
+        new SharedHistoryMigration(new FileSharedHistoryFileSystem(allowedRoots)),
+        {},
+        sourceFence,
+      ),
       options.config,
       options.configDirectory,
     ),

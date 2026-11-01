@@ -82,6 +82,7 @@ export {
   sharedHistoryPoolRequests,
   sharedHistoryPoolRoot,
 } from './shared-history.ts';
+export * from './state-home-fence.ts';
 export * from './state-home-guard.ts';
 export * from './token-refresh.ts';
 export * from './usage.ts';

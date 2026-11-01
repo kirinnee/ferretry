@@ -1,4 +1,4 @@
-import { configJsonSchema, evaluateConfigFiles, setUpFerretrySkill } from '@ferretry/fleet';
+import { type ConfigCheckContext, configJsonSchema, evaluateConfigFiles, setUpFerretrySkill } from '@ferretry/fleet';
 import {
   CONFIG_SCHEMA_IDS,
   ConfigInvalidBodySchema,
@@ -76,6 +76,8 @@ export class ConfigController {
     private readonly bin: string,
     private readonly digest: (text: string) => string,
     private readonly input: IConfigInput,
+    /** What the daemon also checks against this machine: the component-source fence over its state home. */
+    private readonly checkContext: ConfigCheckContext = {},
   ) {}
 
   /** The config directory, or one file in it, absolute. */
@@ -100,6 +102,7 @@ export class ConfigController {
       unreadable,
       accepted: await this.files.accepted(),
       digest: text => this.digest(text),
+      context: this.checkContext,
     });
     const report = { files: evaluation.files.length, issues: evaluation.issues, pending: evaluation.pending };
     this.out.success(options.json === true ? JSON.stringify(report, null, 2) : renderConfigReport(report, this.bin));
