@@ -1,11 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { gateFollowupReference, gateReference } from '../../src/lib/agenda-gate.ts';
 import {
   DAEMON_SOURCE_REF_PREFIXES,
+  harnessQuestionRef,
+  harnessToolUseId,
   isDaemonSourceRef,
   isHarnessQuestionId,
 } from '../../src/lib/agenda-source-refs.ts';
-import { gateFollowupReference, gateReference } from '../../src/lib/agenda-gate.ts';
 import { laneProposalReference } from '../../src/lib/board-lanes.ts';
 
 describe('reserved source references (docs/agenda.md § Reserved sourceRefs)', () => {
@@ -19,6 +21,7 @@ describe('reserved source references (docs/agenda.md § Reserved sourceRefs)', (
       'handover:',
       'budget:',
       'prompt:',
+      'question:',
     ]);
     for (const ref of [
       laneProposalReference('11111111-1111-4111-8111-111111111111', 2),
@@ -29,6 +32,7 @@ describe('reserved source references (docs/agenda.md § Reserved sourceRefs)', (
       'handover:req-1',
       'budget:claude:week:2026-11-08T00:00:00.000Z',
       'prompt:dialog-1',
+      'question:toolu_1',
     ]) {
       should(isDaemonSourceRef(ref)).be.true();
     }
@@ -36,16 +40,16 @@ describe('reserved source references (docs/agenda.md § Reserved sourceRefs)', (
     should(isDaemonSourceRef('toolu_01T4KnfY1in2GTL7P9wUmRtt')).be.false();
   });
 
-  it('refuses a harness question id in any daemon grammar, or with a colon, empty or too long', () => {
+  it('refuses a harness question id in any daemon grammar, empty, or too long once namespaced', () => {
     for (const prefix of DAEMON_SOURCE_REF_PREFIXES) should(isHarnessQuestionId(`${prefix}x`)).be.false();
     should(isHarnessQuestionId('lanes:11111111-1111-4111-8111-111111111111:2')).be.false();
-    should(isHarnessQuestionId('anything:else')).be.false();
     should(isHarnessQuestionId('')).be.false();
     should(isHarnessQuestionId('   ')).be.false();
-    should(isHarnessQuestionId('x'.repeat(513))).be.false();
+    should(isHarnessQuestionId('x'.repeat(504))).be.false();
+    should(isHarnessQuestionId('x'.repeat(503))).be.true();
   });
 
-  it('takes the ids real harnesses write', () => {
+  it('takes the ids real harnesses write, a colon in one included', () => {
     for (const id of [
       'toolu_01T4KnfY1in2GTL7P9wUmRtt',
       'toolu_1',
@@ -54,8 +58,15 @@ describe('reserved source references (docs/agenda.md § Reserved sourceRefs)', (
       'question-codex',
       'tool-1',
       'tool 10',
+      'functions.Name:0',
     ]) {
       should(isHarnessQuestionId(id)).be.true();
     }
+  });
+
+  it('namespaces a harness question and reads its tool id back', () => {
+    should(harnessQuestionRef('functions.Name:0')).equal('question:functions.Name:0');
+    should(harnessToolUseId('question:functions.Name:0')).equal('functions.Name:0');
+    should(harnessToolUseId('toolu_1')).equal('toolu_1');
   });
 });

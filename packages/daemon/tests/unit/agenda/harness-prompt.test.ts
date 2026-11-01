@@ -115,7 +115,6 @@ describe('harnessWait', () => {
       'handover:req-1',
       'budget:claude:week:x',
       'prompt:dialog-1',
-      'no:colons',
     ]) {
       const state = running({
         status: 'awaiting_question',
@@ -140,7 +139,7 @@ describe('harnessWait', () => {
     const wait = harnessWait(running({ status: 'awaiting_question', pendingQuestion: long, turnState: 'needs-input' }));
 
     // Assert
-    should(wait?.sourceRef).equal('toolu_1');
+    should(wait?.sourceRef).equal('question:toolu_1');
     should(wait?.request.source).equal('question');
     should(wait?.request.ask).deepEqual({
       kind: 'multiple-choice',
@@ -398,7 +397,7 @@ describe('HarnessPromptAgenda', () => {
     should(repository.reads).equal(reads);
     const listed = await service.list(SESSION);
     should(listed.ok && listed.value.items.map(item => [item.sourceRef, item.raisedBy])).deepEqual([
-      ['toolu_1', 'daemon'],
+      ['question:toolu_1', 'daemon'],
     ]);
   });
 
@@ -415,9 +414,9 @@ describe('HarnessPromptAgenda', () => {
     const cleared = await service.list(SESSION);
 
     // Assert
-    should(changed.ok && changed.value.items.map(item => item.sourceRef)).deepEqual(['toolu_2']);
+    should(changed.ok && changed.value.items.map(item => item.sourceRef)).deepEqual(['question:toolu_2']);
     should(changed.ok && changed.value.resolved.map(item => [item.sourceRef, item.resolvedBy])).deepEqual([
-      ['toolu_1', 'daemon'],
+      ['question:toolu_1', 'daemon'],
     ]);
     should(cleared.ok && cleared.value.count).equal(0);
   });
@@ -673,7 +672,7 @@ describe('HarnessPromptAnswerDelivery', () => {
     should(raised).deepEqual(['A1', 'A2']);
     const listed = await service.list(SESSION);
     should(listed.ok && listed.value.items.map(item => [item.sourceRef, item.subject])).deepEqual([
-      ['toolu_2', 'Your answer did not reach the ferret. Answer again.'],
+      ['question:toolu_2', 'Your answer did not reach the ferret. Answer again.'],
     ]);
   });
 

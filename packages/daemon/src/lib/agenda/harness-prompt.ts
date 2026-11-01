@@ -1,4 +1,9 @@
 import {
+  isDaemonSourceRef,
+  HARNESS_QUESTION_REF_PREFIX,
+  harnessToolUseId,
+  harnessQuestionRef,
+  agendaCardKind,
   isHarnessQuestionId,
   AGENDA_ASK_TARGET_LENGTH,
   type AgendaAsk,
@@ -131,7 +136,7 @@ export function harnessQuestionRequest(pending: PendingQuestion, failed = false)
   const ask = questionAsk(pending, questions);
   return {
     source: 'question',
-    sourceRef: pending.toolUseId,
+    sourceRef: harnessQuestionRef(pending.toolUseId),
     title: failed ? 'Your answer did not arrive' : 'Question from the ferret',
     kind: kindOfAsk(ask),
     subject: failed ? 'Your answer did not reach the ferret. Answer again.' : clip(first, AGENDA_ASK_TARGET_LENGTH),
@@ -228,7 +233,7 @@ export function harnessWait(state: unknown): HarnessWait | undefined {
   if (pending !== undefined) {
     // The ferret's harness wrote this id: one shaped like the daemon's own references is no question to raise.
     if (!isHarnessQuestionId(pending.toolUseId)) return undefined;
-    return { sourceRef: pending.toolUseId, request: harnessQuestionRequest(pending) };
+    return { sourceRef: harnessQuestionRef(pending.toolUseId), request: harnessQuestionRequest(pending) };
   }
   return current.turnState === 'needs-input' ? consolePromptWait(current) : undefined;
 }
@@ -243,9 +248,25 @@ export function refusedQuestionId(state: unknown): string | undefined {
   return id === undefined || isHarnessQuestionId(id) ? undefined : id;
 }
 
-/** Whether a board row is one this producer raised. */
+/** Text a ferret chose, fit for one log line: every control character and line break shown as `?`. */
+const printable = (text: string): string => [...text].map(char => (/\p{Cc}/u.test(char) ? '?' : char)).join('');
+
+/**
+ * Whether a board row is one this producer raised: its own `question:` and `prompt:` references. Every other daemon
+ * producer raises `question` items too (input and secret cards, phone approvals, 2FA seeds, login recipes, task
+ * plans), so the source alone is never enough. A question raised before the namespace (its bare tool id) is still
+ * this producer's when it carries none of the others' marks and is no recipe card (a to-do).
+ */
 export function isHarnessPromptItem(item: AgendaItem | ResolvedAgendaItem): boolean {
-  return item.source === 'question' && item.raisedBy === 'daemon' && item.sourceRef !== null;
+  if (item.source !== 'question' || item.raisedBy !== 'daemon' || item.sourceRef === null) return false;
+  if (item.sourceRef.startsWith(HARNESS_QUESTION_REF_PREFIX) || isHarnessConsolePromptRef(item.sourceRef)) return true;
+  const marked =
+    item.input !== undefined ||
+    item.phoneApproval !== undefined ||
+    item.twoFactorSeed !== undefined ||
+    item.taskPlan !== undefined ||
+    agendaCardKind(item) === 'task';
+  return !marked && !isDaemonSourceRef(item.sourceRef);
 }
 
 export type HarnessAnswerMapping =
@@ -364,8 +385,10 @@ export class HarnessPromptAgenda {
     if (this.seen.get(sessionId) === key) return;
     const refused = refusedQuestionId(state);
     if (refused !== undefined) {
+      // The id is the ferret's own text: no control characters or line breaks reach the log.
+      const shown = printable(refused).slice(0, 80);
       this.diagnostics.warn(
-        `${sessionId}: a question whose id (${refused.slice(0, 80)}) is shaped like a daemon reference was not raised`,
+        `${sessionId}: a question whose id (${shown}) is shaped like a daemon reference was not raised`,
       );
     }
     // A session with no wait and nothing open on its board has nothing to clear.
@@ -437,8 +460,8 @@ export class HarnessPromptAnswerDelivery implements AgendaChangeObserver {
     const item = change.addressed;
     if (change.change !== 'answered' || change.via !== 'board' || change.actor.kind !== 'human') return;
     if (item === undefined || item.response === undefined || !isHarnessPromptItem(item)) return;
-    const toolUseId = item.sourceRef as string;
-    if (isHarnessConsolePromptRef(toolUseId)) return;
+    if (isHarnessConsolePromptRef(item.sourceRef as string)) return;
+    const toolUseId = harnessToolUseId(item.sourceRef as string);
     const failure = await this.drive(sessionId, item.id, toolUseId, item.response);
     if (failure === undefined) return;
     await this.journal

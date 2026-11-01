@@ -256,17 +256,21 @@ If the card cannot be raised the set stays live and the response says `agenda: "
 
 Some daemon producers ACT on the owner's answer to their item: a lane proposal's Accept confirms lanes, a gate item's
 answer moves a card. So the grammars the daemon writes `sourceRef` in — `lanes:`, `gate:`, `gate-followup:`,
-`warden:`, `warden-orphan:`, `handover:`, `budget:`, `prompt:` (`DAEMON_SOURCE_REF_PREFIXES` in
+`warden:`, `warden-orphan:`, `handover:`, `budget:`, `prompt:`, `question:` (`DAEMON_SOURCE_REF_PREFIXES` in
 `@ferretry/protocol`) — are the daemon's alone, held at both ends:
 
 - **Nothing a ferret writes carries one.** An agenda add names no reference at all (`forbidden` for a ferret and the
-  owner alike), and a harness question — whose tool id the ferret's own question file supplies — is raised only for an
-  id a provider could have written: no `:` (Claude's `toolu_…`, Codex's `call_…` have none; every daemon grammar
-  does) and no reserved prefix (`isHarnessQuestionId`). Any other is not raised, and the daemon log says so.
+  owner alike). A harness question's tool id comes from the ferret's own question file, so its item is namespaced,
+  `question:<tool id>` (a provider's id taken as written, a colon included), and an id that is itself in a daemon
+  grammar, blank or too long is not raised at all; the daemon log says so, with the id's control characters made
+  harmless.
 - **Every consumer checks the producer, not just the reference.** A lane proposal's Accept counts only on the daemon's
   own `task`-source card (`acceptedProposal`); a gate item is the `task` source with its `gate`, and its follow-up
   the daemon's `task` source too — so a question naming either moves no card, routes no words to a ferret, and, raised
-  and closed first, suppresses no real item.
+  and closed first, suppresses no real item. The harness settles only its own `question:` and `prompt:` items (and a
+  question raised before the namespace that carries no other producer's mark): an input or secret card, a phone
+  approval, a 2FA seed, a login recipe or a task plan — all `question` items too — is never closed by a console
+  prompt coming and going.
 
 ## Confirming a configuration change
 
