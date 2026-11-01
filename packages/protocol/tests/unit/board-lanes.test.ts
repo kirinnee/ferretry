@@ -5,6 +5,9 @@ import {
   categoryOf,
   DependencyUntilSchema,
   defaultLaneTargets,
+  ExternalLaneTriggerSchema,
+  GateOptionSchema,
+  GateOutcomeSchema,
   firstLaneOfCategory,
   isBackwardMove,
   isBlockerDone,
@@ -20,6 +23,7 @@ import {
   LaneSchema,
   type LaneSet,
   LaneSetSchema,
+  LaneStageSchema,
   LaneTemplateNameSchema,
   LaneTriggerSchema,
   LaneVariantsSchema,
@@ -33,7 +37,9 @@ import {
   laneTargets,
   needsOwner,
   nextLane,
+  PLAN_GATE,
   QUICK_TO_TEST_LANE,
+  VERIFY_GATE,
   StaleAfterSchema,
   staleAfterMinutes,
   variantLanes,
@@ -103,6 +109,11 @@ const VALID: readonly SchemaCase[] = [
   { name: 'template name', schema: LaneTemplateNameSchema, value: 'ops' },
   { name: 'renames', schema: LaneRenamesSchema, value: { plan: 'Investigate' } },
   { name: 'until', schema: DependencyUntilSchema, value: 'released' },
+  { name: 'external trigger', schema: ExternalLaneTriggerSchema, value: 'deploy.done' },
+  { name: 'gate outcome', schema: GateOutcomeSchema, value: { kind: 'lane', laneId: 'implement' } },
+  { name: 'gate option', schema: GateOptionSchema, value: { id: 'ship', label: 'Ship it', outcome: { kind: 'next' } } },
+  { name: 'gate stage', schema: LaneStageSchema, value: VERIFY_GATE },
+  { name: 'automatic stage', schema: LaneStageSchema, value: { kind: 'auto', triggers: ['deploy.done'] } },
 ];
 
 const INVALID: readonly SchemaCase[] = [
@@ -124,6 +135,61 @@ const INVALID: readonly SchemaCase[] = [
   { name: 'no lanes', schema: LaneLayoutSchema, value: layout([]) },
   { name: 'unknown template', schema: LaneTemplateNameSchema, value: 'kanban' },
   { name: 'rename to blank', schema: LaneRenamesSchema, value: { plan: '' } },
+  { name: 'observed trigger reported', schema: ExternalLaneTriggerSchema, value: 'pr.merged' },
+  { name: 'lane outcome with no lane', schema: GateOutcomeSchema, value: { kind: 'lane' } },
+  { name: 'outcome with extra field', schema: GateOutcomeSchema, value: { kind: 'close', laneId: 'closed' } },
+  {
+    name: 'long option label',
+    schema: GateOptionSchema,
+    value: { id: 'ok', label: 'x'.repeat(25), outcome: { kind: 'next' } },
+  },
+  {
+    name: 'two-line option label',
+    schema: GateOptionSchema,
+    value: { id: 'ok', label: 'OK\nnow', outcome: { kind: 'next' } },
+  },
+  {
+    name: 'upper-case option id',
+    schema: GateOptionSchema,
+    value: { id: 'OK', label: 'OK', outcome: { kind: 'next' } },
+  },
+  { name: 'gate with no options', schema: LaneStageSchema, value: { kind: 'gate', options: [] } },
+  {
+    name: 'gate with four options',
+    schema: LaneStageSchema,
+    value: {
+      kind: 'gate',
+      options: ['a', 'b', 'c', 'd'].map(id => ({ id, label: id, outcome: { kind: 'next' } })),
+    },
+  },
+  {
+    name: 'gate with a repeated option id',
+    schema: LaneStageSchema,
+    value: {
+      kind: 'gate',
+      options: [
+        { id: 'ok', label: 'OK', outcome: { kind: 'next' } },
+        { id: 'ok', label: 'Close', outcome: { kind: 'close' } },
+      ],
+    },
+  },
+  {
+    name: 'gate that reopens twice',
+    schema: LaneStageSchema,
+    value: {
+      kind: 'gate',
+      options: [
+        { id: 'no', label: 'No', outcome: { kind: 'reopen-with-agenda' } },
+        { id: 'never', label: 'Never', outcome: { kind: 'reopen-with-agenda' } },
+      ],
+    },
+  },
+  { name: 'stage of no kind', schema: LaneStageSchema, value: { kind: 'manual', triggers: [] } },
+  {
+    name: 'automatic stage repeating a trigger',
+    schema: LaneStageSchema,
+    value: { kind: 'auto', triggers: ['pr.merged', 'pr.merged'] },
+  },
 ];
 
 describe('board lane schemas', () => {
@@ -213,7 +279,14 @@ describe('lane templates', () => {
 
   it('should give Ferretry its action-first lanes, triggers, gates and thresholds', () => {
     should(FERRETRY.lanes).deepEqual([
-      { id: 'todo', name: 'Todo', category: 'backlog', staleAfter: '3d', emphasis: 'progress' },
+      {
+        id: 'todo',
+        name: 'Todo',
+        category: 'backlog',
+        staleAfter: '3d',
+        emphasis: 'progress',
+        stage: { kind: 'auto', triggers: [] },
+      },
       {
         id: 'plan',
         name: 'Plan/Design',
@@ -222,6 +295,7 @@ describe('lane templates', () => {
         ownerGate: true,
         staleAfter: '2h',
         emphasis: 'action',
+        stage: PLAN_GATE,
       },
       {
         id: 'implement',
@@ -230,8 +304,17 @@ describe('lane templates', () => {
         enterOn: ['work.started', 'pr.opened', 'pr.ready'],
         staleAfter: '4h',
         emphasis: 'progress',
+        stage: { kind: 'auto', triggers: ['work.started', 'pr.opened', 'pr.ready'] },
       },
-      { id: 'merged', name: 'Merged', category: 'shipped', enterOn: ['pr.merged'], staleAfter: '3d', emphasis: 'info' },
+      {
+        id: 'merged',
+        name: 'Merged',
+        category: 'shipped',
+        enterOn: ['pr.merged'],
+        staleAfter: '3d',
+        emphasis: 'info',
+        stage: { kind: 'auto', triggers: ['pr.merged'] },
+      },
       {
         id: 'released',
         name: 'Released · to test',
@@ -239,8 +322,16 @@ describe('lane templates', () => {
         enterOn: ['release.published'],
         ownerGate: true,
         emphasis: 'action',
+        stage: VERIFY_GATE,
       },
-      { id: 'closed', name: 'Closed', category: 'closed', ownerGate: true, emphasis: 'info' },
+      {
+        id: 'closed',
+        name: 'Closed',
+        category: 'closed',
+        ownerGate: true,
+        emphasis: 'info',
+        stage: { kind: 'auto', triggers: [] },
+      },
     ]);
     should(FERRETRY.doneLane).equal('closed');
     should(FERRETRY.notGoodLane).equal('implement');
@@ -288,6 +379,7 @@ describe('lane templates', () => {
       category: 'closed',
       enterOn: ['release.published'],
       emphasis: 'info',
+      stage: { kind: 'auto', triggers: ['release.published'] },
     });
     should(closing('pr')).deepEqual({
       id: 'merged',
@@ -295,6 +387,7 @@ describe('lane templates', () => {
       category: 'closed',
       enterOn: ['pr.merged'],
       emphasis: 'info',
+      stage: { kind: 'auto', triggers: ['pr.merged'] },
     });
     should(closing('quick')?.ownerGate).be.true();
     should(closing('ops')?.ownerGate).be.true();
@@ -319,6 +412,7 @@ describe('lane templates', () => {
       enterOn: ['pr.merged', 'release.published', 'signal.done'],
       ownerGate: true,
       emphasis: 'action',
+      stage: VERIFY_GATE,
     });
     should(quick.lanes.map(entry => entry.id)).deepEqual(['todo', 'doing', 'to-test', 'closed']);
     should(entered('pr.merged')).equal('to-test');
