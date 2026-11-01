@@ -14,6 +14,7 @@ import {
   laptop,
   originCard,
   PROJECT,
+  unasked,
   workstation,
 } from '../board-support.ts';
 
@@ -362,7 +363,7 @@ describe('BoardPage — human and agent tasks', () => {
   });
 
   it('shows every card and hides the toggle when the daemon does not say who asked', async () => {
-    const { root } = await open();
+    const { root } = await open({ open: unasked(OPEN) });
     expect(titles(root)).toHaveLength(4);
     expect(toggle(root)).toBeNull();
   });

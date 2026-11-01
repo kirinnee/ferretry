@@ -1,36 +1,42 @@
 /**
- * HUMAN CARDS AND AGENT CARDS: who a card was asked for.
+ * HUMAN CARDS AND INTERNAL CARDS: who a card was asked for.
  *
  * The Board shows what the owner asked for. A card a ferret made for other ferrets (a sub-ferret's card, a
- * Warden remedy) is an AGENT card: hidden unless "Show agent tasks" is on, and then drawn under the human
- * card it serves.
+ * Warden remedy) is an INTERNAL card: hidden unless the "Internal" filter is on, and then drawn under the human
+ * card it serves. Internal cards never reach an overview count while it is off.
  *
- * THE DAEMON OWNS THE FACT: it sends `origin` and `humanParent` on a card, both optional on the wire. A
- * daemon that sends neither is an older one, and the app does not guess: it shows every card and hides the
- * toggle ({@link splitAvailable}). Nothing else in the app reads those two fields, nor `askedBy`, the stricter
- * "a person asked" the cards to test are limited to ({@link askedByPerson}); there, silence reads as no.
+ * THE DAEMON OWNS THE FACT: it sends `askedBy` (person | agent), `origin` (human | agent) and `humanParent`
+ * on a card, all optional on the wire. {@link taskAsker} is the ONE place the first two are read: `askedBy`
+ * is the answer, and `origin` is what an older daemon that sends no `askedBy` still says. A daemon that
+ * sends neither is older still, and the app does not guess: it shows every card and hides the filter
+ * ({@link splitAvailable}). {@link askedByPerson} is the stricter "a person asked" the cards to test are
+ * limited to; there, silence reads as no.
  */
 
 import type { TaskRef } from '@ferretry/protocol';
 
-type TaskOrigin = 'human' | 'agent';
+type TaskAsker = 'person' | 'agent';
 
 /** A field a newer daemon sends on a card; an older one sends nothing. */
 const declared = (task: object, name: string): unknown => (name in task ? Reflect.get(task, name) : undefined);
 
-/** Who this card was asked for, as the daemon said; `null` when it said nothing. */
-export const taskOrigin = (task: object): TaskOrigin | null => {
-  const value = declared(task, 'origin');
-  return value === 'human' || value === 'agent' ? value : null;
+/** Who asked for this card, as the daemon said (`askedBy`, else its older `origin`); `null` when it said nothing. */
+export const taskAsker = (task: object): TaskAsker | null => {
+  const asked = declared(task, 'askedBy');
+  if (asked === 'person' || asked === 'agent') return asked;
+  const origin = declared(task, 'origin');
+  if (origin === 'human') return 'person';
+  return origin === 'agent' ? 'agent' : null;
 };
 
-export const isAgentTask = (task: object): boolean => taskOrigin(task) === 'agent';
+/** An INTERNAL card: one a ferret asked for, not a person. */
+export const isAgentTask = (task: object): boolean => taskAsker(task) === 'agent';
 
 /** Whether the daemon says a person asked for this card; a daemon that says nothing reads as "no". */
 export const askedByPerson = (task: object): boolean => declared(task, 'askedBy') === 'person';
 
 /** Whether the daemons behind these cards say who asked for a card: without it there is nothing to split. */
-export const splitAvailable = (tasks: readonly object[]): boolean => tasks.some(task => taskOrigin(task) !== null);
+export const splitAvailable = (tasks: readonly object[]): boolean => tasks.some(task => taskAsker(task) !== null);
 
 /** The card an agent card serves, as the daemon declared it: `undefined` when the daemon said nothing, `null` for none. */
 const declaredHumanParent = (task: object): TaskRef | null | undefined => {

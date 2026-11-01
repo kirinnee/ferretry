@@ -42,7 +42,7 @@ export interface UseChatCardInput {
    * costs the daemon nothing: the chip says `No card` from the session's own config.
    */
   readonly reading: boolean;
-  /** "Show agent tasks": the Tasks tab draws the cards ferrets made for other ferrets. */
+  /** "Internal": the Tasks tab draws the cards ferrets made for other ferrets. */
   readonly agents: boolean;
 }
 

@@ -1,17 +1,17 @@
 /**
  * THE GROUND A SWIPE UNCOVERS: while a card is pulled down, the area it leaves bare names what letting go would do —
- * the compass (`agenda-compass.ts`): ↓ Skip, ↓← Skip, ↓→ Not needed, ↓↓ Snooze and its three lengths.
+ * the compass (`agenda-compass.ts`): ↓ Skip, ↓← Skip, ↓→ Not needed, ↓↓ Snooze and its shared choices.
  */
 
 import { Clock, type LucideIcon, SkipForward, X } from 'lucide-react';
-import { SNOOZE_LENGTHS } from './agenda-compass.ts';
+import { snoozePicks } from '../../lib/agenda-snooze.ts';
 
 const COMPASS_ARROWS: Readonly<Record<string, string>> = { skip: '↓←', 'not-needed': '↓→', snooze: '↓↓' };
 
 /**
  * THE COMPASS (see `agenda-compass.ts`), drawn on the same ground: ↓← Skip, ↓→ Not needed, ↓↓ Snooze, and — once the
- * drag is that far down — the three lengths of ↓↓↓. `slot` is the compass's reading (`down`, `down-left`, `down-right`,
- * `down-down`, `down-down-1h`…); the one it names is lit. A direction the host cannot do is not drawn.
+ * drag is that far down — the shared snooze choices of ↓↓↓ (1 hour, 4 hours, Tomorrow 9:00, Custom…). `slot` is the compass's reading (`down`, `down-left`, `down-right`,
+ * `down-down`, `down-down-hour`…); the one it names is lit. A direction the host cannot do is not drawn.
  */
 export function SwipeCompass({
   slot,
@@ -29,7 +29,7 @@ export function SwipeCompass({
     (name === 'snooze' && slot.startsWith('down-down'))
       ? true
       : undefined;
-  const lengths = slot.startsWith('down-down') && slot !== 'down-down' ? slot.slice('down-down-'.length) : null;
+  const picked = slot.startsWith('down-down') && slot !== 'down-down' ? slot.slice('down-down-'.length) : null;
   const cell = (name: 'skip' | 'not-needed' | 'snooze', Icon: LucideIcon, label: string) => (
     <span className="fy-swipe-compass__cell" data-active={lit(name)} data-compass-cell={name} key={name}>
       <Icon size={16} />
@@ -53,14 +53,14 @@ export function SwipeCompass({
       {snooze ? <span className="fy-swipe-compass__row">{cell('snooze', Clock, 'Snooze')}</span> : null}
       {snooze && slot.startsWith('down-down') ? (
         <span className="fy-swipe-compass__row" data-compass-lengths="">
-          {SNOOZE_LENGTHS.map(length => (
+          {snoozePicks(Date.now()).map(pick => (
             <span
               className="fy-swipe-compass__cell"
-              data-active={lengths === length.id ? true : undefined}
-              data-compass-length={length.id}
-              key={length.id}
+              data-active={picked === pick.id ? true : undefined}
+              data-compass-length={pick.id}
+              key={pick.id}
             >
-              {length.label}
+              {pick.label}
             </span>
           ))}
         </span>

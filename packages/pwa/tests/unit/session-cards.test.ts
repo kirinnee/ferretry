@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { NO_BOARD_FILTERS } from '../../src/lib/board-model.ts';
 import { projectCards, resolveCardReference, sessionCards } from '../../src/lib/session-cards.ts';
-import { boardModelOf, card, laptop, originCard, phone } from './board-support.ts';
+import { boardModelOf, card, laptop, originCard, phone, unasked } from './board-support.ts';
 
 const SESSION = 'session-a';
 
@@ -20,11 +20,13 @@ describe('sessionCards', () => {
   });
 
   test('marks a card the human did not raise, unless it waits on them', async () => {
-    const model = await boardModelOf([
-      card('F1', { owner: SESSION, createdBy: { kind: 'owner' } }),
-      card('F2', { owner: SESSION }),
-      card('F3', { owner: SESSION, createdBy: { kind: 'daemon' } }),
-    ]);
+    const model = await boardModelOf(
+      unasked([
+        card('F1', { owner: SESSION, createdBy: { kind: 'owner' } }),
+        card('F2', { owner: SESSION }),
+        card('F3', { owner: SESSION, createdBy: { kind: 'daemon' } }),
+      ]),
+    );
 
     const byId = new Map(sessionCards(model, laptop.daemonId, SESSION).map(entry => [entry.id, entry]));
 
@@ -97,13 +99,27 @@ describe('projectCards', () => {
     expect(projectCards(model, phone.daemonId, SESSION)).toEqual([]);
   });
 
+  test('reads askedBy before origin, and origin when that is all the daemon sends', async () => {
+    const model = await boardModelOf(
+      [
+        card('F1', { owner: SESSION, askedBy: 'agent' }),
+        Object.assign(card('F2', { owner: SESSION }), { askedBy: undefined, origin: 'agent' }),
+      ],
+      { ...NO_BOARD_FILTERS, agents: true },
+    );
+
+    const byId = new Map(projectCards(model, laptop.daemonId, SESSION).map(entry => [entry.id, entry]));
+
+    expect(byId.get('F1')?.agentAsked).toBe(true);
+    expect(byId.get('F2')?.agentAsked).toBe(true);
+  });
+
   test('asks the daemon who a card was for, and only guesses for a daemon that does not say', async () => {
     const model = await boardModelOf(
       [
         originCard('F1', 'human', null, { owner: SESSION }),
         originCard('F2', 'agent', { id: 'F1' }, { owner: SESSION, createdBy: { kind: 'owner' } }),
-        card('F3', { owner: SESSION }),
-        card('F4', { owner: SESSION, createdBy: { kind: 'owner' } }),
+        ...unasked([card('F3', { owner: SESSION }), card('F4', { owner: SESSION, createdBy: { kind: 'owner' } })]),
       ],
       { ...NO_BOARD_FILTERS, agents: true },
     );

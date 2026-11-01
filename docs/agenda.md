@@ -190,7 +190,8 @@ would lose it when the ferret still needs something.
 
 The owner can put an open item away ("we are waiting for approval"): **for** a while or **until** a time — 1 hour,
 4 hours, tomorrow 9:00 in their own time zone, or a time they pick. In the app it is the clock in the item's head
-(never a button in the answer row); on the command line `fy agenda snooze <id> --for 4h | --until 17:00`, and
+(never a button in the answer row), and on a phone the Inbox swipe-down compass offers the same four choices (one
+list, `snoozePicks`, for both; Custom… asks for the time on a sheet); on the command line `fy agenda snooze <id> --for 4h | --until 17:00`, and
 `fy agenda unsnooze <id>` brings it back now.
 
 - **It wakes on its own** at `until`, or at its `neededBy` when that is sooner — a deadline is never slept

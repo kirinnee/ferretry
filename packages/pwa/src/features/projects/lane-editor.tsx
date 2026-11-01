@@ -1,5 +1,7 @@
 import {
   type BoardProject,
+  type GateOption,
+  gateOptions,
   LANE_CATEGORIES,
   LANE_TEMPLATES,
   type LaneCategory,
@@ -8,28 +10,42 @@ import {
   type LaneTrigger,
   LaneTriggerSchema,
   MAX_BOARD_LANES,
+  MAX_GATE_OPTIONS,
   type TaskWorkflow,
 } from '@ferretry/protocol';
-import { ArrowDown, ArrowLeft, ArrowUp, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useBoardActions, useBoardProjects } from '../../hooks/use-board.ts';
 import type { BoardActions } from '../../lib/board-actions.ts';
 import { type FerretNames, ferretNamer } from '../../lib/board-present.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import {
+  addGateOption,
   addLane,
+  canSwitchStage,
   CATEGORY_LABELS,
   deleteLane,
   draftChanged,
   draftFromLaneSet,
   draftProblems,
   draftToEdit,
+  gateLabelProblem,
+  isReportedTrigger,
   type LaneDraft,
+  laneStageKind,
   laneWriteMessage,
   moveLane,
+  OUTCOME_LABELS,
+  outcomeFromValue,
+  outcomeValue,
+  removeGateOption,
   renameLane,
+  reopenTaken,
+  setGateOptionLabel,
+  setGateOptionOutcome,
   setLaneCategory,
   setLaneOwnerGate,
+  setLaneStageKind,
   setLaneStaleAfter,
   setLaneTriggers,
   setWorkflowLane,
@@ -54,6 +70,139 @@ const toggleChipClass = (on: boolean): string =>
   on
     ? 'rounded-control border border-accent-border bg-accent-soft px-xs py-0.5 text-2xs font-medium text-accent'
     : 'rounded-control border border-border bg-surface-2 px-xs py-0.5 text-2xs text-muted line-through';
+
+const STAGE_CHOICES = [
+  { kind: 'gate', label: 'Gate' },
+  { kind: 'auto', label: 'Automatic' },
+] as const;
+
+/** Gate or Automatic, as one segmented switch: a gate waits for the owner's answer, an automatic lane moves on its triggers. */
+function StageSwitch({
+  laneId,
+  laneName,
+  kind,
+  busy,
+  onPick,
+}: {
+  readonly laneId: string;
+  readonly laneName: string;
+  readonly kind: 'gate' | 'auto';
+  readonly busy: boolean;
+  readonly onPick: (kind: 'gate' | 'auto') => void;
+}) {
+  return (
+    <div
+      className="relative inline-flex overflow-hidden rounded-control border border-border"
+      role="radiogroup"
+      aria-label={`Stage of ${laneName}`}
+      data-lane-stage-switch={laneId}
+    >
+      {STAGE_CHOICES.map(choice => (
+        <label
+          className={`inline-flex h-control items-center px-control-x text-meta has-[:focus-visible]:outline-focus has-[:focus-visible]:-outline-offset-2 ${
+            choice.kind === kind ? 'bg-accent-soft font-medium text-accent' : 'bg-surface-2 text-muted'
+          }`}
+          key={choice.kind}
+        >
+          <input
+            checked={choice.kind === kind}
+            className="sr-only"
+            data-stage={choice.kind}
+            disabled={busy}
+            name={`stage-${laneId}`}
+            onChange={() => {
+              if (choice.kind !== kind) onPick(choice.kind);
+            }}
+            type="radio"
+          />
+          {choice.label}
+        </label>
+      ))}
+    </div>
+  );
+}
+
+/** The 1–3 answers a gate offers, each a label and where it sends the card. */
+function GateOptions({
+  draft,
+  laneId,
+  options,
+  busy,
+  onChange,
+}: {
+  readonly draft: LaneDraft;
+  readonly laneId: string;
+  readonly options: readonly GateOption[];
+  readonly busy: boolean;
+  readonly onChange: (next: LaneDraft) => void;
+}) {
+  const lane = draft.lanes.find(entry => entry.id === laneId);
+  if (lane === undefined) return null;
+  const others = draft.lanes.filter(entry => entry.id !== laneId);
+  return (
+    <div className="grid gap-xs" data-lane-gate={laneId}>
+      <p className="m-0 text-meta text-muted">The answers you can give a card here, and where each one sends it.</p>
+      <ul className="m-0 grid list-none gap-xs p-0">
+        {options.map((option, position) => {
+          const ordinal = `option ${String(position + 1)} of ${lane.name}`;
+          const value = outcomeValue(option.outcome);
+          return (
+            <li className="flex flex-wrap items-center gap-xs" key={option.id} data-gate-option={option.id}>
+              <input
+                className={`${fieldClass} w-40 grow`}
+                aria-label={`Label of ${ordinal}`}
+                aria-invalid={gateLabelProblem(option.label) !== null}
+                value={option.label}
+                disabled={busy}
+                onChange={event => onChange(setGateOptionLabel(draft, laneId, option.id, event.currentTarget.value))}
+              />
+              <select
+                className={fieldClass}
+                aria-label={`Outcome of ${ordinal}`}
+                value={value}
+                disabled={busy}
+                onChange={event => {
+                  const outcome = outcomeFromValue(event.currentTarget.value);
+                  if (outcome !== null) onChange(setGateOptionOutcome(draft, laneId, option.id, outcome));
+                }}
+              >
+                <option value="next">{OUTCOME_LABELS.next}</option>
+                {others.map(entry => (
+                  <option key={entry.id} value={`lane:${entry.id}`}>
+                    Go to {entry.name}
+                  </option>
+                ))}
+                <option value="reopen" disabled={reopenTaken(lane, option.id)}>
+                  {OUTCOME_LABELS['reopen-with-agenda']}
+                </option>
+                <option value="close">{OUTCOME_LABELS.close}</option>
+              </select>
+              <button
+                className="kt-btn kt-btn--sm"
+                type="button"
+                aria-label={`Remove ${ordinal}`}
+                disabled={busy || options.length <= 1}
+                onClick={() => onChange(removeGateOption(draft, laneId, option.id))}
+              >
+                <X size={12} aria-hidden="true" />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <div>
+        <button
+          className="kt-btn kt-btn--sm"
+          type="button"
+          disabled={busy || options.length >= MAX_GATE_OPTIONS}
+          onClick={() => onChange(addGateOption(draft, laneId))}
+        >
+          <Plus size={12} aria-hidden="true" /> Add option
+        </button>
+      </div>
+    </div>
+  );
+}
 
 type LaneEditorActions = Pick<BoardActions, 'acceptLanes' | 'saveLanes' | 'adoptTemplate'>;
 
@@ -126,6 +275,7 @@ function LaneRow({
   const base = useId();
   if (lane === undefined) return null;
   const triggers = lane.enterOn ?? [];
+  const stageKind = laneStageKind(lane);
   const toggleTrigger = (trigger: LaneTrigger) =>
     onChange(
       setLaneTriggers(
@@ -161,24 +311,30 @@ function LaneRow({
             </option>
           ))}
         </select>
-        <label
-          className="flex items-center gap-xs text-meta text-muted"
-          htmlFor={`${base}-gate`}
-          title={
-            lane.category === 'closed'
-              ? 'The owner must move cards into this lane.'
-              : 'The owner must move cards out of this lane.'
-          }
-        >
-          <input
-            id={`${base}-gate`}
-            type="checkbox"
-            checked={lane.ownerGate === true}
-            disabled={busy}
-            onChange={event => onChange(setLaneOwnerGate(draft, lane.id, event.currentTarget.checked))}
+        {canSwitchStage(lane) ? (
+          <StageSwitch
+            laneId={lane.id}
+            laneName={lane.name}
+            kind={stageKind}
+            busy={busy}
+            onPick={kind => onChange(setLaneStageKind(draft, lane.id, kind))}
           />
-          Only you move it on
-        </label>
+        ) : (
+          <label
+            className="flex items-center gap-xs text-meta text-muted"
+            htmlFor={`${base}-gate`}
+            title="The owner must move cards into this lane."
+          >
+            <input
+              id={`${base}-gate`}
+              type="checkbox"
+              checked={lane.ownerGate === true}
+              disabled={busy}
+              onChange={event => onChange(setLaneOwnerGate(draft, lane.id, event.currentTarget.checked))}
+            />
+            Only you close it
+          </label>
+        )}
         <label className="ml-sm flex items-center gap-xs text-meta text-muted">
           Stale after
           <input
@@ -221,6 +377,9 @@ function LaneRow({
           </button>
         </span>
       </div>
+      {stageKind === 'gate' ? (
+        <GateOptions draft={draft} laneId={lane.id} options={gateOptions(lane)} busy={busy} onChange={onChange} />
+      ) : null}
       <details data-lane-triggers={lane.id}>
         <summary className="cursor-pointer text-meta text-muted">
           Moves a card in when:{' '}
@@ -240,6 +399,9 @@ function LaneRow({
               onClick={() => toggleTrigger(trigger)}
             >
               {TRIGGER_LABELS[trigger]}
+              {isReportedTrigger(trigger) ? (
+                <span className="font-normal text-muted"> · reported with fy task trigger</span>
+              ) : null}
             </button>
           ))}
         </div>

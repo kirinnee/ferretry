@@ -2,9 +2,9 @@
  * The chat's Tasks tab as the address says it: expanded or not, agent tasks shown or not (`board-chat-url.ts`).
  *
  * Expanding PUSHES an entry, so the browser's Back collapses the board. Collapsing steps back over that entry
- * when it is the one before this and "Show agent tasks" has not changed since (then the page returns exactly
+ * when it is the one before this and "Internal" has not changed since (then the page returns exactly
  * as it was); otherwise it rewrites the entry in place, so a choice made while expanded survives the collapse.
- * "Show agent tasks" REPLACES the entry: it is a way of looking at the same page, not a place to come back to.
+ * "Internal" REPLACES the entry: it is a way of looking at the same page, not a place to come back to.
  */
 
 import { useMemo, useRef, useState } from 'react';

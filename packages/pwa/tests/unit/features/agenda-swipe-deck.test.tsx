@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { AgendaCard } from '../../../src/features/agenda/agenda-card.tsx';
+import { AgendaSnoozeMenu } from '../../../src/features/agenda/agenda-snooze-menu.tsx';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import {
   AgendaSwipeDeck,
@@ -12,6 +13,7 @@ import {
 import { AgendaUndoToast } from '../../../src/features/agenda/agenda-undo-toast.tsx';
 import { swipeTargets } from '../../../src/lib/agenda-answers.ts';
 import { DISMISS_ACTION, type InboxCard, snoozeAction, swipeIntent, swipeMap } from '../../../src/lib/agenda-inbox.ts';
+import { snoozePicks } from '../../../src/lib/agenda-snooze.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   agendaItem,
@@ -781,7 +783,7 @@ describe('The compass (a long pull down, the pointer kept down)', () => {
     await mounted.unmount();
   });
 
-  it('shows the three snooze lengths only as the pull goes further down', async () => {
+  it('shows the snooze choices only as the pull goes further down', async () => {
     const mounted = await mount(compassDeck(fakeInbox(), []));
     await dragBy(mounted, 0, 120);
     expect(mounted.container.querySelector('[data-compass-lengths]')).toBeNull();
@@ -793,8 +795,23 @@ describe('The compass (a long pull down, the pointer kept down)', () => {
     const lengths = [...deep.container.querySelectorAll('[data-compass-length]')].map(entry =>
       entry.getAttribute('data-compass-length'),
     );
-    expect(lengths).toEqual(['1h', '4h', '1d']);
+    expect(lengths).toEqual(['hour', 'hours', 'tomorrow', 'custom']);
     await deep.unmount();
+  });
+
+  it('offers the very same choices as the card-head snooze clock', async () => {
+    const deep = await mount(compassDeck(fakeInbox(), []));
+    await dragBy(deep, 0, 96 + 2 * 56 + 10);
+    const compass = [...deep.container.querySelectorAll('[data-compass-length]')].map(entry => entry.textContent);
+    await deep.unmount();
+    const menu = await mount(<AgendaSnoozeMenu onSnooze={() => undefined} triggerClass="trigger" />);
+    await interact(() =>
+      must(menu.container.querySelector<HTMLButtonElement>('[data-agenda-snooze]'), 'clock').click(),
+    );
+    const clock = [...menu.container.querySelectorAll('[role="menuitem"]')].map(entry => entry.textContent);
+    await menu.unmount();
+    expect(compass).toEqual(clock);
+    expect(compass).toEqual(snoozePicks(Date.now()).map(pick => pick.label));
   });
 
   it('skips on ↓← and sends nothing', async () => {
@@ -835,11 +852,12 @@ describe('The compass (a long pull down, the pointer kept down)', () => {
     await mounted.unmount();
   });
 
-  it('snoozes for 1 h, 4 h or 1 day at ↓↓↓, by where the finger lets go', async () => {
-    for (const [dx, hours] of [
-      [-70, 1],
-      [0, 4],
-      [70, 24],
+  it('snoozes for 1 hour, 4 hours or until tomorrow at ↓↓↓, by where the finger lets go', async () => {
+    const ahead = [3_600_000, 4 * 3_600_000, null] as const;
+    for (const [dx, wanted] of [
+      [-100, ahead[0]],
+      [-32, ahead[1]],
+      [32, ahead[2]],
     ] as const) {
       const fake = fakeInbox();
       const snoozes: string[] = [];
@@ -848,10 +866,45 @@ describe('The compass (a long pull down, the pointer kept down)', () => {
       await swipe(mounted, dx, 96 + 2 * 56 + 10);
       expect(snoozes).toHaveLength(1);
       const wait = Date.parse(snoozes[0] as string) - before;
-      expect(Math.abs(wait - hours * 3_600_000)).toBeLessThan(5_000);
+      if (wanted === null) expect(snoozes[0]).toBe(snoozePicks(Date.now())[2]?.until ?? '');
+      else expect(Math.abs(wait - wanted)).toBeLessThan(5_000);
       expect(pending(fake)).toEqual(['Snooze']);
       await mounted.unmount();
     }
+  });
+
+  it('asks for the time on Custom…, springing the card back, and snoozes once it is given', async () => {
+    const fake = fakeInbox();
+    const snoozes: string[] = [];
+    const mounted = await mount(compassDeck(fake, [], snoozes));
+    await swipe(mounted, 100, 96 + 2 * 56 + 10);
+    expect(snoozes).toEqual([]);
+    expect(topId(mounted)).toBe('A3');
+    const sheet = must(mounted.container.querySelector<HTMLElement>('[data-deck-custom]'), 'the custom sheet');
+    const form = must(sheet.querySelector<HTMLFormElement>('[data-snooze-custom]'), 'the custom form');
+    await interact(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(snoozes).toHaveLength(1);
+    expect(Date.parse(snoozes[0] as string) - Date.now()).toBeGreaterThan(3_000_000);
+    expect(pending(fake)).toEqual(['Snooze']);
+    expect(mounted.container.querySelector('[data-deck-custom]')).toBeNull();
+    await mounted.unmount();
+  });
+
+  it('drops the Custom… sheet on Cancel and changes nothing', async () => {
+    const fake = fakeInbox();
+    const snoozes: string[] = [];
+    const mounted = await mount(compassDeck(fake, [], snoozes));
+    await swipe(mounted, 100, 96 + 2 * 56 + 10);
+    const cancel = must(
+      mounted.container.querySelector<HTMLButtonElement>('[data-deck-custom] .fy-attn-deck__custom-cancel'),
+      'Cancel',
+    );
+    await interact(() => cancel.click());
+    expect(mounted.container.querySelector('[data-deck-custom]')).toBeNull();
+    expect(snoozes).toEqual([]);
+    expect(pending(fake)).toEqual([]);
+    expect(topId(mounted)).toBe('A3');
+    await mounted.unmount();
   });
 
   it('changes nothing when let go at ↓↓ before a length is picked', async () => {

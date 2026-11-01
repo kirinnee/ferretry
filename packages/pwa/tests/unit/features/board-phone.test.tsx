@@ -20,6 +20,7 @@ import {
   originCard,
   OTHER_PROJECT,
   PROJECT,
+  unasked,
 } from '../board-support.ts';
 
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
@@ -274,7 +275,7 @@ describe('Board on a phone — counts and filters', () => {
     expect(written.get('view')).toBe('list');
   });
 
-  it('keeps "Agent tasks" in the bar beside Filters, where a thumb finds it', async () => {
+  it('keeps "Internal" in the bar beside Filters, where a thumb finds it', async () => {
     const split = [
       originCard('F1', 'human', null, { laneId: 'implement' }),
       originCard('F2', 'agent', { id: 'F1' }, { laneId: 'implement' }),
@@ -284,10 +285,10 @@ describe('Board on a phone — counts and filters', () => {
       root.querySelector<HTMLInputElement>('.fy-board-filters__bar [data-filter="agents"]'),
       'the agents toggle',
     );
-    expect(toggle.closest('label')?.textContent).toBe('Agent tasks');
+    expect(toggle.closest('label')?.textContent).toBe('Internal');
     await click(root, '[data-filter="agents"]');
     expect(searches).toEqual(['agents=1']);
-    expect((await open()).root.querySelector('[data-filter="agents"]')).toBeNull();
+    expect((await open('', {}, unasked(OPEN))).root.querySelector('[data-filter="agents"]')).toBeNull();
   });
 
   it('keeps the filters out of the page until the Filters button opens them in a sheet', async () => {

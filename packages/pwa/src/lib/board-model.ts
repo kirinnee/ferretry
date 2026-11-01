@@ -124,7 +124,7 @@ export interface BoardFilters {
   readonly activity: BoardActivityFilter | null;
   /** The cards the owner created or that wait on the owner. */
   readonly mine: boolean;
-  /** "Show agent tasks": cards ferrets made for other ferrets. Off, the board is what the owner asked for. */
+  /** "Internal": cards ferrets made for other ferrets. Off, the board is what the owner asked for. */
   readonly agents: boolean;
   /** A lane id, or a lane name in the card's own project (case does not matter). */
   readonly lane: string | null;
@@ -168,7 +168,7 @@ const parseDateRange = (params: URLSearchParams, name: string): BoardDateRange =
   return from === null && to === null ? NO_DATE_RANGE : { preset: null, from, to };
 };
 
-/** The URL parameter "Show agent tasks" lives in, on the Board and on a ferret's Tasks tab alike. */
+/** The URL parameter "Internal" lives in, on the Board and on a ferret's Tasks tab alike. */
 export const AGENTS_PARAM = 'agents';
 
 const writeDateRange = (params: URLSearchParams, name: string, range: BoardDateRange): void => {
@@ -420,7 +420,7 @@ export interface BoardModel {
   readonly quarantined: readonly BoardQuarantine[];
   /** More than one machine is in the model: the page shows a machine chip. */
   readonly multiMachine: boolean;
-  /** The machines say who asked for a card, so "Show agent tasks" means something; an older daemon says nothing. */
+  /** The machines say who asked for a card, so "Internal" means something; an older daemon says nothing. */
   readonly splitsAgents: boolean;
 }
 

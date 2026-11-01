@@ -13,21 +13,32 @@ import {
   type BoardResult,
   boardErr,
   boardOk,
+  type GateOption,
+  GateOptionSchema,
+  type GateOutcome,
+  gateOptions,
+  isExternalTrigger,
   type Lane,
   type LaneCategory,
   LaneNameSchema,
   type LaneSet,
+  type LaneStage,
   type LaneTemplateName,
   type LaneTrigger,
   type LaneVariants,
   laneEditProblems,
   closedLaneProblems,
   laneLayoutProblems,
+  laneStage,
   MAX_BOARD_LANES,
+  MAX_GATE_LABEL_LENGTH,
+  MAX_GATE_OPTIONS,
   MAX_LANE_ID_LENGTH,
+  PLAN_GATE,
   StaleAfterSchema,
   type TaskWorkflow,
   TaskWorkflowSchema,
+  VERIFY_GATE,
 } from '@ferretry/protocol';
 import type { LaneWriteError } from './board-client.ts';
 
@@ -97,21 +108,34 @@ export const renameLane = (draft: LaneDraft, id: string, name: string): LaneDraf
   replaceLane(draft, id, lane => ({ ...lane, name }));
 
 /**
- * The category, the gate and (for an automatic stage) the triggers are what a lane's stage is read from, so
- * changing one drops the stage the lane stored: it reads the stage its fields now describe (`laneStage`)
- * instead of a stale one. A gate keeps its options when only its triggers change: they say how a card
- * enters the lane, the gate how it leaves.
+ * A lane's stage survives a change of category when the new category can hold it: a gate is owner-gated
+ * unless the lane is a verify lane (the owner's by category), and the closed lane is never a gate, so a gate
+ * moved there is dropped and the lane reads the stage its fields describe. The emphasis follows the category.
  */
 export const setLaneCategory = (draft: LaneDraft, id: string, category: LaneCategory): LaneDraft =>
-  replaceLane(draft, id, ({ emphasis: _emphasis, stage: _stage, ...lane }) => ({ ...lane, category }));
+  replaceLane(draft, id, ({ emphasis: _emphasis, ...lane }) => {
+    const moved = { ...lane, category };
+    if (moved.stage?.kind !== 'gate') return moved;
+    if (category === 'closed') {
+      const { stage: _stage, ...ungated } = moved;
+      return ungated;
+    }
+    return category === 'verify' ? moved : { ...moved, ownerGate: true };
+  });
 
-/** The triggers that move a card into the lane; none removes the field, which the protocol wants. */
+/**
+ * The triggers that move a card into the lane; none removes the field, which the protocol wants. An automatic
+ * stage names the same triggers, so it is kept in step; a gate keeps its options (the triggers say how a card
+ * enters the lane, the gate how it leaves).
+ */
 export const setLaneTriggers = (draft: LaneDraft, id: string, triggers: readonly LaneTrigger[]): LaneDraft =>
-  replaceLane(draft, id, ({ enterOn: _, stage, ...lane }) => {
-    const kept = stage?.kind === 'gate' ? { ...lane, stage } : lane;
+  replaceLane(draft, id, ({ enterOn: _, ...lane }) => {
+    const kept =
+      lane.stage?.kind === 'auto' ? { ...lane, stage: { kind: 'auto' as const, triggers: [...triggers] } } : lane;
     return triggers.length === 0 ? kept : { ...kept, enterOn: [...triggers] };
   });
 
+/** Only the closed lane is switched by hand: its gate is its entrance. A stage the new gate would contradict is dropped. */
 export const setLaneOwnerGate = (draft: LaneDraft, id: string, ownerGate: boolean): LaneDraft =>
   replaceLane(draft, id, ({ ownerGate: _, stage: _stage, ...lane }) =>
     ownerGate ? { ...lane, ownerGate: true } : lane,
@@ -122,6 +146,130 @@ export const setLaneStaleAfter = (draft: LaneDraft, id: string, staleAfter: stri
   replaceLane(draft, id, ({ staleAfter: _, ...lane }) =>
     staleAfter.trim() === '' ? lane : { ...lane, staleAfter: staleAfter.trim() },
   );
+
+/** Whether a lane has a stage switch: the closed lane is the owner's alone, so it has none. */
+export const canSwitchStage = (lane: Pick<Lane, 'category'>): boolean => lane.category !== 'closed';
+
+export const laneStageKind = (lane: Pick<Lane, 'category' | 'enterOn' | 'ownerGate' | 'stage'>): LaneStage['kind'] =>
+  laneStage(lane).kind;
+
+/**
+ * Makes a lane a gate or an automatic step. A gate starts as the plan gate (the verify gate on a verify lane)
+ * and owner-gates a lane that is not a verify lane; an automatic stage enters on the lane's own triggers and
+ * is not owner-gated, which is what the protocol requires of the fields a stage mirrors. The closed lane has no
+ * stage, and a lane already in that stage is left as it is.
+ */
+export const setLaneStageKind = (draft: LaneDraft, id: string, kind: LaneStage['kind']): LaneDraft =>
+  replaceLane(draft, id, ({ emphasis: _emphasis, ...lane }) => {
+    if (!canSwitchStage(lane) || laneStageKind(lane) === kind) return { emphasis: _emphasis, ...lane };
+    if (kind === 'gate') {
+      return lane.category === 'verify'
+        ? { ...lane, stage: VERIFY_GATE }
+        : { ...lane, stage: PLAN_GATE, ownerGate: true };
+    }
+    const { ownerGate: _ownerGate, ...open } = lane;
+    return { ...open, stage: { kind: 'auto', triggers: [...(lane.enterOn ?? [])] } };
+  });
+
+/** Applies `change` to a gate's options; a lane that is not a gate, and a change that is no change, leave the draft alone. */
+const changeGate = (
+  draft: LaneDraft,
+  id: string,
+  change: (options: readonly GateOption[], lane: Lane) => readonly GateOption[],
+): LaneDraft => {
+  const lane = draft.lanes.find(entry => entry.id === id);
+  if (lane === undefined || laneStageKind(lane) !== 'gate') return draft;
+  const before = gateOptions(lane);
+  const after = change(before, lane);
+  if (after === before) return draft;
+  return replaceLane(draft, id, entry => ({ ...entry, stage: { kind: 'gate', options: [...after] } }));
+};
+
+const optionSlug = (label: string): string => {
+  const words = label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .slice(0, MAX_GATE_LABEL_LENGTH - 4)
+    .replace(/-+$/gu, '');
+  return /^[a-z]/u.test(words) ? words : 'option';
+};
+
+/** An option id for `label` that no option of the gate has. */
+const freshOptionId = (options: readonly GateOption[], label: string): string => {
+  const taken = new Set(options.map(option => option.id));
+  const base = optionSlug(label);
+  if (!taken.has(base)) return base;
+  for (let count = 2; ; count += 1) {
+    const candidate = `${base}-${String(count)}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+};
+
+/** Adds an option that moves the card on, up to {@link MAX_GATE_OPTIONS}. */
+export const addGateOption = (draft: LaneDraft, id: string): LaneDraft =>
+  changeGate(draft, id, options =>
+    options.length >= MAX_GATE_OPTIONS
+      ? options
+      : [...options, { id: freshOptionId(options, 'Option'), label: 'Option', outcome: { kind: 'next' } }],
+  );
+
+/** Removes an option; a gate keeps at least one. */
+export const removeGateOption = (draft: LaneDraft, id: string, optionId: string): LaneDraft =>
+  changeGate(draft, id, options =>
+    options.length <= 1 || !options.some(option => option.id === optionId)
+      ? options
+      : options.filter(option => option.id !== optionId),
+  );
+
+/** A label as typed (the problems name a bad one live); an option's id never changes with its label. */
+export const setGateOptionLabel = (draft: LaneDraft, id: string, optionId: string, label: string): LaneDraft =>
+  changeGate(draft, id, options => options.map(option => (option.id === optionId ? { ...option, label } : option)));
+
+/** Whether an option other than `exceptOptionId` already reopens with a conversation: a gate has one at most. */
+export const reopenTaken = (
+  lane: Pick<Lane, 'category' | 'enterOn' | 'ownerGate' | 'stage'>,
+  exceptOptionId: string,
+): boolean =>
+  gateOptions(lane).some(option => option.id !== exceptOptionId && option.outcome.kind === 'reopen-with-agenda');
+
+/** Points an option somewhere. A second reopen, and a lane that is the gate's own, are refused. */
+export const setGateOptionOutcome = (draft: LaneDraft, id: string, optionId: string, outcome: GateOutcome): LaneDraft =>
+  changeGate(draft, id, (options, lane) => {
+    if (outcome.kind === 'reopen-with-agenda' && reopenTaken(lane, optionId)) return options;
+    if (outcome.kind === 'lane' && outcome.laneId === id) return options;
+    return options.map(option => (option.id === optionId ? { ...option, outcome } : option));
+  });
+
+/** What a gate option does, as the value a picker holds: `next`, `close`, `reopen` or `lane:<id>`. */
+export const outcomeValue = (outcome: GateOutcome): string => {
+  switch (outcome.kind) {
+    case 'lane':
+      return `lane:${outcome.laneId}`;
+    case 'reopen-with-agenda':
+      return 'reopen';
+    default:
+      return outcome.kind;
+  }
+};
+
+export const outcomeFromValue = (value: string): GateOutcome | null => {
+  if (value === 'next' || value === 'close') return { kind: value };
+  if (value === 'reopen') return { kind: 'reopen-with-agenda' };
+  const laneId = value.startsWith('lane:') ? value.slice('lane:'.length) : '';
+  return laneId === '' ? null : { kind: 'lane', laneId };
+};
+
+/** Each kind of outcome as the owner reads it on the picker. */
+export const OUTCOME_LABELS: Readonly<Record<GateOutcome['kind'], string>> = {
+  next: 'Next lane',
+  lane: 'A specific lane',
+  'reopen-with-agenda': 'Not good (reopen and talk)',
+  close: 'Close',
+};
+
+/** Whether a trigger is one somebody reports with `fy task trigger`, which Ferretry cannot see for itself. */
+export const isReportedTrigger = (trigger: LaneTrigger): boolean => isExternalTrigger(trigger);
 
 const slug = (name: string): string => {
   const words = name
@@ -161,6 +309,22 @@ export const addLane = (draft: LaneDraft, name = 'New lane'): LaneDraft => {
   return withLanes(draft, lanes, variants);
 };
 
+/** A gate option that named the removed lane goes where its cards go, or on when that is the gate's own lane. */
+const retargetGate = (lane: Lane, removed: string, target: string): Lane => {
+  if (lane.stage?.kind !== 'gate') return lane;
+  const names = lane.stage.options.some(option => option.outcome.kind === 'lane' && option.outcome.laneId === removed);
+  if (!names) return lane;
+  const options = lane.stage.options.map(option =>
+    option.outcome.kind === 'lane' && option.outcome.laneId === removed
+      ? {
+          ...option,
+          outcome: target === lane.id ? ({ kind: 'next' } as const) : ({ kind: 'lane', laneId: target } as const),
+        }
+      : option,
+  );
+  return { ...lane, stage: { kind: 'gate', options } };
+};
+
 /**
  * Removes a lane and says where its cards go. Cards already promised to this lane by an earlier delete go
  * to the same place, so no relocation ever points at a lane that is gone.
@@ -171,7 +335,7 @@ export const deleteLane = (draft: LaneDraft, id: string, target: string): BoardR
   if (target === id || !draft.lanes.some(lane => lane.id === target)) {
     return boardErr({ code: 'unknown-target', laneId: target });
   }
-  const lanes = draft.lanes.filter(lane => lane.id !== id);
+  const lanes = draft.lanes.filter(lane => lane.id !== id).map(lane => retargetGate(lane, id, target));
   const redirected = Object.fromEntries(
     Object.entries(draft.relocate).map(([from, to]) => [from, to === id ? target : to]),
   );
@@ -190,6 +354,14 @@ export const setWorkflowLane = (draft: LaneDraft, workflow: TaskWorkflow, id: st
   return next.length === 0 ? draft : withLanes(draft, draft.lanes, { ...draft.variants, [workflow]: next });
 };
 
+/** What is wrong with an option label as typed, or null when it is fine. */
+export const gateLabelProblem = (label: string): string | null => {
+  if (GateOptionSchema.shape.label.safeParse(label).success) return null;
+  return label.trim() === ''
+    ? 'An option needs a label.'
+    : `An option label is one line of at most ${String(MAX_GATE_LABEL_LENGTH)} characters.`;
+};
+
 /**
  * Everything wrong with a draft, live: each lane's name and duration, the layout rules the protocol owns
  * (`laneLayoutProblems`, `closedLaneProblems`), and the lanes removed with no place for their cards (`laneEditProblems`).
@@ -206,6 +378,10 @@ export const draftProblems = (current: Pick<LaneSet, 'lanes'>, draft: LaneDraft)
     }
     if (lane.staleAfter !== undefined && !StaleAfterSchema.safeParse(lane.staleAfter).success) {
       problems.push({ laneId: lane.id, message: `"${lane.staleAfter}" is not a duration like 30m, 2h or 3d.` });
+    }
+    for (const option of lane.stage?.kind === 'gate' ? lane.stage.options : []) {
+      const message = gateLabelProblem(option.label);
+      if (message !== null) problems.push({ laneId: lane.id, message });
     }
   }
   if (draft.lanes.length > MAX_BOARD_LANES) {
@@ -247,7 +423,18 @@ export const draftToEdit = (
   action: 'edit',
   version: current.version,
   layout: {
-    lanes: draft.lanes.map(lane => ({ ...lane, name: lane.name.trim() })),
+    lanes: draft.lanes.map(lane => ({
+      ...lane,
+      name: lane.name.trim(),
+      ...(lane.stage?.kind === 'gate'
+        ? {
+            stage: {
+              kind: 'gate' as const,
+              options: lane.stage.options.map(option => ({ ...option, label: option.label.trim() })),
+            },
+          }
+        : {}),
+    })),
     variants: draft.variants,
   },
   relocate: draft.relocate,

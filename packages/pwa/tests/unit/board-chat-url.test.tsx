@@ -65,7 +65,7 @@ describe('useChatTasksUrl', () => {
     expect(moves.navigated).toEqual([{ to: '/d/laptop/s/S1?agenda=A3&tasks=full', replace: false }]);
   });
 
-  test('changes "Show agent tasks" in place', async () => {
+  test('changes "Internal" in place', async () => {
     const { moves, seen } = await rig('?tasks=full');
     await interact(() => must(seen.view, 'view').setAgents(true));
     expect(moves.navigated).toEqual([{ to: '/d/laptop/s/S1?tasks=full&agents=1', replace: true }]);
@@ -83,7 +83,7 @@ describe('useChatTasksUrl', () => {
     expect(opened.moves.backed).toEqual([]);
   });
 
-  test('collapses in place when "Show agent tasks" changed while expanded, so the choice survives', async () => {
+  test('collapses in place when "Internal" changed while expanded, so the choice survives', async () => {
     const moves: Moves = { navigated: [], backed: [] };
     const seen: { view?: ChatTasksView } = {};
     const router = {

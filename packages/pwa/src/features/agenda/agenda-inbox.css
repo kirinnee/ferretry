@@ -1521,3 +1521,28 @@
   color: inherit;
   font-weight: inherit;
 }
+
+/* The Custom… of the compass asks for a time on a sheet laid over the card it springs back to. */
+.fy-attn-deck__custom {
+  position: absolute;
+  z-index: 6;
+  inset: var(--gap-md) var(--gap-md) auto;
+  display: flex;
+  flex-direction: column;
+  border: var(--stroke-panel) solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  box-shadow: var(--shadow-popover, 0 8px 24px rgb(0 0 0 / 0.25));
+}
+.fy-attn-deck__custom .fy-snooze__custom {
+  border-top: 0;
+  margin-top: 0;
+}
+.fy-attn-deck__custom-cancel {
+  min-height: var(--control-min, 44px);
+  border: 0;
+  border-top: var(--stroke) solid var(--divider-color);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+}
