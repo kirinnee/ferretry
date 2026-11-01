@@ -10,9 +10,12 @@ import { type DaemonCredentialOptions, daemonConnection } from '../../../bin/fy.
 import { readDaemonToken } from '../../../src/adapters/daemon/api-token.ts';
 import {
   DaemonInstanceCache,
+  type DecidedConnection,
   HealthInstanceReader,
+  RevisitedConnection,
   SessionBearerTransport,
 } from '../../../src/adapters/daemon/session-credential.ts';
+import { AS_OWNER_NOTE } from '../../../src/lib/daemon/credential.ts';
 
 /**
  * RF-3: a ferret's `fy` and MCP server present the ferret's OWN credential (docs/secrets.md § "What a
@@ -221,15 +224,71 @@ describe("a ferret's fy presents its own credential", () => {
     should(daemon.seen.join('\n')).not.containEql('k3y-from-before-the-prefix');
   });
 
-  it('should use the admin token for --as-owner, without asking the daemon which it takes', async () => {
+  it('should use the admin token for --as-owner, without asking the daemon which it takes, and say so', async () => {
     // Act
-    const connection = await daemonConnection(ferret(), root, undefined, spyOptions({ asOwner: true }));
+    const notes: string[] = [];
+    const connection = await daemonConnection(
+      ferret(),
+      root,
+      undefined,
+      spyOptions({ asOwner: true, note: line => notes.push(line) }),
+    );
     await call(connection);
 
-    // Assert
+    // Assert — the one place the act shows: the daemon cannot tell it from the owner's shell.
     should(connection.credential).equal('admin');
     should(daemon.seen).deepEqual([`Bearer ${ADMIN}`]);
     should(daemon.healthReads).equal(0);
+    should(notes).deepEqual([AS_OWNER_NOTE]);
+  });
+
+  it('should say nothing for --as-owner where there is no ferret credential to set aside', async () => {
+    const notes: string[] = [];
+    await daemonConnection(
+      { FY_HOME: root, FY_URL: daemon.url },
+      root,
+      undefined,
+      spyOptions({ asOwner: true, note: line => notes.push(line) }),
+    );
+
+    should(notes).be.empty();
+  });
+
+  it('should move a long-lived process onto the bearer once the daemon offers it, without reading api-token again', async () => {
+    // Arrange — `fy mcp serve` first connects while the daemon does not take the credential (mid-upgrade).
+    daemon.features = [];
+    let now = 0;
+    const instances = new DaemonInstanceCache(
+      new HealthInstanceReader(baseUrl => FyApiClient.connect({ baseUrl, token: 'unauthenticated', version: '1.0.0' })),
+    );
+    const connection = new RevisitedConnection<FyApiClient>(
+      async () => {
+        const decided = await daemonConnection(ferret(), root, undefined, spyOptions({ instances }));
+        const client = await FyApiClient.connect({
+          baseUrl: decided.baseUrl,
+          token: decided.token,
+          version: decided.version,
+          ...(decided.transport === undefined ? {} : { transport: decided.transport }),
+        });
+        return decided.revisit === undefined ? { client } : { client, revisit: decided.revisit };
+      },
+      async baseUrl => await instances.refresh(baseUrl),
+      () => now,
+    );
+    const request = async (): Promise<unknown> =>
+      await (await connection.client()).request('/v1/thing', OK, { method: 'POST', body: '{}' });
+    await request();
+
+    // Act — the daemon restarts as a build that offers it; the process keeps running.
+    daemon.features = [DAEMON_FEATURES.sessionCredential];
+    daemon.pid = 4_102;
+    await request();
+    now = 30_000;
+    await request();
+
+    // Assert — the admin token until the next look, the bearer after it, and the file read once.
+    should(daemon.seen).deepEqual([`Bearer ${ADMIN}`, `Bearer ${ADMIN}`, `Bearer ${BEARER}`]);
+    should(adminReads).have.length(1);
   });
 
   it('should keep FY_TOKEN as the explicit override inside a ferret', async () => {
@@ -337,5 +396,86 @@ describe('the session bearer transport', () => {
     // Assert
     should(response.status).equal(401);
     should(sends).equal(1);
+  });
+});
+
+describe('a connection decided once and looked at again', () => {
+  const OFFERS = { pid: 1, features: [DAEMON_FEATURES.sessionCredential] };
+  const DECLINES = { pid: 1, features: [] as string[] };
+
+  function held(revisit: DecidedConnection<string>['revisit']): {
+    readonly connection: RevisitedConnection<string>;
+    readonly decisions: () => number;
+    readonly rereads: () => number;
+    answer: (baseUrl: string) => Promise<{ pid: number | undefined; features: readonly string[] }>;
+    now: number;
+  } {
+    let decisions = 0;
+    let rereads = 0;
+    const state = {
+      answer: async (_baseUrl: string): Promise<{ pid: number | undefined; features: readonly string[] }> => DECLINES,
+      now: 0,
+    };
+    const connection = new RevisitedConnection<string>(
+      async () => {
+        decisions += 1;
+        return revisit === undefined
+          ? { client: `client-${String(decisions)}` }
+          : { client: `client-${String(decisions)}`, revisit };
+      },
+      async baseUrl => {
+        rereads += 1;
+        return await state.answer(baseUrl);
+      },
+      () => state.now,
+      1_000,
+    );
+    return Object.assign(state, { connection, decisions: () => decisions, rereads: () => rereads });
+  }
+
+  it('should never look again at a connection that set no credential aside', async () => {
+    const fixture = held(undefined);
+    await fixture.connection.client();
+    fixture.now = 5_000;
+
+    should(await fixture.connection.client()).equal('client-1');
+    should(fixture.rereads()).equal(0);
+  });
+
+  it('should keep its client while the same daemon still declines, and look only once per interval', async () => {
+    const fixture = held({ baseUrl: 'http://127.0.0.1:1', pid: 1 });
+    await fixture.connection.client();
+    await fixture.connection.client();
+    fixture.now = 1_000;
+    await fixture.connection.client();
+    await fixture.connection.client();
+
+    should(fixture.rereads()).equal(1);
+    should(fixture.decisions()).equal(1);
+  });
+
+  it('should decide again for a different daemon at that address, or one that now offers it', async () => {
+    const restarted = held({ baseUrl: 'http://127.0.0.1:1', pid: 1 });
+    await restarted.connection.client();
+    restarted.answer = async () => ({ pid: 2, features: [] });
+    restarted.now = 1_000;
+    should(await restarted.connection.client()).equal('client-2');
+
+    const upgraded = held({ baseUrl: 'http://127.0.0.1:1', pid: 1 });
+    await upgraded.connection.client();
+    upgraded.answer = async () => OFFERS;
+    upgraded.now = 1_000;
+    should(await upgraded.connection.client()).equal('client-2');
+  });
+
+  it('should keep its client when the daemon cannot be asked', async () => {
+    const fixture = held({ baseUrl: 'http://127.0.0.1:1', pid: 1 });
+    await fixture.connection.client();
+    fixture.answer = async () => {
+      throw new Error('daemon away');
+    };
+    fixture.now = 1_000;
+
+    should(await fixture.connection.client()).equal('client-1');
   });
 });

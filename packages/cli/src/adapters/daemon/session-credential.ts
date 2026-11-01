@@ -1,6 +1,10 @@
 import type { IFyApiClient, IFyHttpTransport } from '@ferretry/protocol';
 import { z } from 'zod';
-import { type DaemonInstanceFacts, mayFallBackAfterRefusal } from '../../lib/daemon/credential.ts';
+import {
+  type DaemonInstanceFacts,
+  mayFallBackAfterRefusal,
+  presentsSessionBearer,
+} from '../../lib/daemon/credential.ts';
 
 /**
  * The two facts of `/v1/health` the credential choice reads. Not the full `HealthViewSchema`: a newer
@@ -104,5 +108,61 @@ export class SessionBearerTransport implements IFyHttpTransport {
     );
     headers.set('authorization', `Bearer ${admin}`);
     return await this.inner.send(url, { ...init, headers });
+  }
+}
+
+/** A client decided once, and whether a ferret's own credential may yet replace it. */
+export interface DecidedConnection<C> {
+  readonly client: C;
+  /**
+   * Present when a ferret's credential was set aside because the daemon did not offer it: the daemon to ask
+   * again, and the instance (pid) that said no.
+   */
+  readonly revisit?: { readonly baseUrl: string; readonly pid: number | undefined };
+}
+
+/** How long a long-lived process trusts a daemon's "I do not take session credentials" before asking again. */
+const SESSION_REVISIT_MS = 30_000;
+
+/**
+ * The connection a long-lived process (`fy mcp serve`) holds, decided on first use.
+ *
+ * A ferret's process that was answered "no `session.credential.1`" — a wildcard bind, a daemon mid-upgrade —
+ * is NOT held on the admin token for its whole life. At most every {@link SESSION_REVISIT_MS}, before a
+ * request, the daemon's health is read again: a daemon that now offers the credential, or a different
+ * instance at that URL (another pid), gets a fresh decision, so the bearer is picked up after an upgrade
+ * without the pane restarting. The same instance still saying no keeps the client it has. A failed read
+ * keeps it too: there is no bearer to switch to until a daemon offers one.
+ */
+export class RevisitedConnection<C> {
+  #held: Promise<DecidedConnection<C>> | undefined;
+  #checkedAt = 0;
+
+  constructor(
+    private readonly decide: () => Promise<DecidedConnection<C>>,
+    private readonly reread: (baseUrl: string) => Promise<DaemonInstanceFacts>,
+    private readonly nowMs: () => number,
+    private readonly everyMs: number = SESSION_REVISIT_MS,
+  ) {}
+
+  async client(): Promise<C> {
+    if (this.#held === undefined) {
+      this.#held = this.decide();
+      this.#checkedAt = this.nowMs();
+    }
+    const held = await this.#held;
+    const revisit = held.revisit;
+    if (revisit === undefined || this.nowMs() - this.#checkedAt < this.everyMs) return held.client;
+    this.#checkedAt = this.nowMs();
+    let fresh: DaemonInstanceFacts;
+    try {
+      fresh = await this.reread(revisit.baseUrl);
+    } catch {
+      return held.client;
+    }
+    if (!presentsSessionBearer(fresh) && fresh.pid === revisit.pid) return held.client;
+    const next = this.decide();
+    this.#held = next;
+    return (await next).client;
   }
 }

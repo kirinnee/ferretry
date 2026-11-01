@@ -449,7 +449,8 @@ its own).
 name) and no `FY_TOKEN`, they send `Authorization: Bearer fys_…` to a daemon that lists `session.credential.1`
 and never open `api-token`; every refusal is the answer, and only a `401` from a daemon that no longer lists
 the feature falls back, once. An older daemon gets the admin token plus `x-ferretry-session-id`, as before, and
-`fy --as-owner` is a person's way back to the admin token inside a pane. The whole order and its limits:
+`fy --as-owner` is a person's way back to the admin token inside a pane — not a permission, since anything
+that can read `api-token` can pass it. The whole order and its limits:
 [secrets.md](secrets.md#what-a-ferrets-fy-presents). An older `fy` keeps working with the header.
 
 ## Sub-ferrets and the Ferretry verbs

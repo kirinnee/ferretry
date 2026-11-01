@@ -51,6 +51,7 @@ import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
 import {
   DaemonInstanceCache,
   HealthInstanceReader,
+  RevisitedConnection,
   SessionBearerTransport,
 } from '../src/adapters/daemon/session-credential';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
@@ -118,9 +119,11 @@ import { CopyController } from '../src/lib/copy/controller';
 import { ProtocolCopyGateway } from '../src/lib/copy/gateway';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import {
+  AS_OWNER_NOTE,
   type CredentialPlan,
   credentialPlan,
   paneCredentialValue,
+  paneCredentialWarnings,
   presentsSessionBearer,
 } from '../src/lib/daemon/credential';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
@@ -318,6 +321,8 @@ function registerDoctorCommand(program: Command, world: CliWorld): void {
     .command('doctor')
     .description('check host dependencies and what each missing program prevents')
     .action(async () => {
+      // Inside a ferret's pane: which credential its fy and tools would present, said before anything else.
+      for (const warning of paneCredentialWarnings(environment)) world.io.warn(warning);
       const daemon = DAEMON_NAME;
       const executable = Bun.which(daemon, { PATH: environment.PATH ?? '' });
       if (executable === null)
@@ -425,8 +430,11 @@ export async function daemonConnection(
   credential: CredentialPlan['kind'];
   /** Present for a session bearer: the one place a `401` may re-read health and fall back. */
   transport?: IFyHttpTransport;
+  /** Present when a ferret's credential was set aside because this daemon did not offer it. */
+  revisit?: { baseUrl: string; pid: number | undefined };
 }> {
   const plan = credentialPlan(environment, { asOwner: options.asOwner === true });
+  if (plan.kind === 'admin' && plan.why === 'as-owner') options.note?.(AS_OWNER_NOTE);
   const stateHome = resolveDaemonStateHome(homeDirectory, environment.FY_HOME, PRODUCT_NAME);
   const baseUrl = await daemonBaseUrl(environment, stateHome);
   const version = assertSemver(pkg.version);
@@ -447,7 +455,8 @@ export async function daemonConnection(
     // The same rule for the ferret's own credential: it is the ferret's whole authority.
     await assertOwnLoopbackListener(baseUrl, 'the session credential', listeners);
     const instances = options.instances ?? defaultInstances();
-    if (presentsSessionBearer(await instances.facts(baseUrl))) {
+    const facts = await instances.facts(baseUrl);
+    if (presentsSessionBearer(facts)) {
       const transport = new SessionBearerTransport(options.transport ?? new FetchHttpTransport(), plan.bearer, {
         reread: async () => await instances.refresh(baseUrl),
         adminToken,
@@ -455,6 +464,7 @@ export async function daemonConnection(
       });
       return { baseUrl, token: plan.bearer, version, credential: 'session', transport };
     }
+    return { baseUrl, token: await adminToken(), version, credential: 'admin', revisit: { baseUrl, pid: facts.pid } };
   }
   return { baseUrl, token: await adminToken(), version, credential: 'admin' };
 }
@@ -499,18 +509,29 @@ function lazyDaemonConnection(
   restartPatience?: DaemonRestartPatience,
   credentials: () => DaemonCredentialOptions = () => ({}),
 ): () => Promise<IFyApiClient> {
-  let connected: Promise<FyApiClient> | undefined;
-  return (): Promise<FyApiClient> =>
-    (connected ??= daemonConnection(environment, homeDirectory, undefined, credentials()).then(
-      ({ baseUrl, token, version, transport }) =>
-        FyApiClient.connect({
-          baseUrl,
-          token,
-          version,
-          ...(transport === undefined ? {} : { transport }),
-          ...(restartPatience === undefined ? {} : { restartPatience }),
-        }),
-    ));
+  // A ferret's process left on the admin token asks again later (`RevisitedConnection`): `fy mcp serve` lives
+  // as long as its pane, and must pick its own credential up once the daemon offers it.
+  const connection = new RevisitedConnection<FyApiClient>(
+    async () => {
+      const { baseUrl, token, version, transport, revisit } = await daemonConnection(
+        environment,
+        homeDirectory,
+        undefined,
+        credentials(),
+      );
+      const client = await FyApiClient.connect({
+        baseUrl,
+        token,
+        version,
+        ...(transport === undefined ? {} : { transport }),
+        ...(restartPatience === undefined ? {} : { restartPatience }),
+      });
+      return revisit === undefined ? { client } : { client, revisit };
+    },
+    async baseUrl => await (credentials().instances ?? defaultInstances()).refresh(baseUrl),
+    () => Date.now(),
+  );
+  return async (): Promise<FyApiClient> => await connection.client();
 }
 
 /**
@@ -1618,10 +1639,14 @@ export function registerDomain(program: Command, world: CliWorld): void {
   const patience = restartPatience(world, ownSessionId);
   // One health read per daemon for the whole invocation, waiting out a restart as a ferret's `fy` does.
   const instances = defaultInstances(patience);
+  // Each note once per invocation, however many connections it opens.
+  const noted = new Set<string>();
   const credentials = (): DaemonCredentialOptions => ({
     asOwner: program.opts<{ asOwner?: boolean }>().asOwner === true,
     instances,
     note: line => {
+      if (noted.has(line)) return;
+      noted.add(line);
       world.io.diagnostic(`${BINARY_NAME}: ${line}`);
     },
   });

@@ -6,6 +6,7 @@ import {
   mayFallBackAfterRefusal,
   paneCredential,
   paneCredentialValue,
+  paneCredentialWarnings,
   presentsSessionBearer,
 } from '../../../src/lib/daemon/credential.ts';
 
@@ -61,6 +62,10 @@ describe('which credential an invocation presents', () => {
     });
   });
 
+  it('should call --as-owner at a plain shell what it is: no ferret credential to set aside', () => {
+    should(credentialPlan({}, { asOwner: true })).deepEqual({ kind: 'admin', why: 'no-session' });
+  });
+
   it('should skip the ferret credential for --as-owner', () => {
     should(credentialPlan({ FY_SESSION_TOKEN: BEARER }, { asOwner: true })).deepEqual({
       kind: 'admin',
@@ -91,5 +96,25 @@ describe('when a daemon is answered with the bearer, and the one way off it', ()
     should(mayFallBackAfterRefusal(401, OLDER)).be.true();
     should(mayFallBackAfterRefusal(403, OLDER)).be.false();
     should(mayFallBackAfterRefusal(404, OLDER)).be.false();
+  });
+});
+
+describe('what fy doctor says about a pane’s credential', () => {
+  it('should say nothing at a person’s own shell, FY_TOKEN or not', () => {
+    should(paneCredentialWarnings({ FY_TOKEN: 'script' })).be.empty();
+    should(paneCredentialWarnings({})).be.empty();
+  });
+
+  it('should say nothing for a ferret that presents its own credential', () => {
+    should(paneCredentialWarnings({ FY_SESSION_ID: 'mvx-1', FY_SESSION_TOKEN: BEARER })).be.empty();
+  });
+
+  it('should warn when FY_TOKEN is set inside a pane, by its credential or its session id alone', () => {
+    should(paneCredentialWarnings({ FY_SESSION_TOKEN: BEARER, FY_TOKEN: 'leaked-in' })).have.length(1);
+    should(paneCredentialWarnings({ FY_SESSION_ID: 'mvx-1', FY_TOKEN: 'leaked-in' })[0]).match(/FY_TOKEN is set/u);
+  });
+
+  it('should tell a pane from before the prefix to restart', () => {
+    should(paneCredentialWarnings({ FY_SESSION_BOARD_CAPABILITY: 'unprefixed' })[0]).match(/fy restart/u);
   });
 });

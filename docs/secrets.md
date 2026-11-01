@@ -184,15 +184,32 @@ admin token. In order:
   downgraded) is the request sent once more with the admin token, with a one-line note on stderr. Anything
   else, the read failing included, reports the `401`.
 - **An older daemon**, or one reached on a bind where no session bearer resolves, does not list the feature, so
-  it gets the admin token as before and its ferrets keep `fy send`.
+  it gets the admin token as before and its ferrets keep `fy send`. A long-lived process left on the admin
+  token this way (`fy mcp serve`) reads the daemon's health again at most every 30 s, and moves to its own
+  credential as soon as the daemon offers it or another daemon instance (a new pid) answers at that address.
 - **A pane from before the `fys_` prefix** holds an unprefixed value. It is never sent as a bearer — only on
   the agent tools' own `x-fy-session-capability` header, as before — and that pane's `fy` uses the admin token
   until the pane restarts.
 - **Never off this machine.** Neither credential goes to a non-loopback `FY_URL` (that needs `FY_TOKEN`), and
   each goes only to a listener this user owns.
 - **`fy --as-owner …`** skips step 2. It is for a person who attached to a ferret's pane and wants their own
-  rights there. It works only where `api-token` is readable, so it is a convenience, not a permission: a
-  ferret can type it too, and doing so is the same visible act as reading the file.
+  rights there. **It is not a permission.** Any process that can read `api-token` can pass it, so a ferret can
+  too, and a prompt injection that says "run `fy --as-owner …`" gets past these refusals exactly as one that
+  says "read `~/.ferretry/api-token`" does — until the sandbox that denies ferrets that file, when the flag
+  fails because the file cannot be read. The daemon cannot tell its calls from the owner's shell; the only
+  trace is the command line and one stderr line, which lands in the ferret's own tool output:
+  `fy: --as-owner: acting with the host admin token, not this ferret’s credential`. Inside a pane, the board, agenda,
+  notify, session, work-search and `--session` terminal and browser commands still send `x-ferretry-session-id`
+  under it, so those acts stay the ferret's (`peer:<id>`) and are still refused on person routes; only
+  commands that send no session header (config, secrets, the daemon group, …) act as the owner.
+- **`FY_TOKEN` in a pane wins.** Step 1 comes first, so a shell rc that exports `FY_TOKEN` puts every ferret
+  whose shell reads it on the admin token, silently. `fy doctor` inside a pane warns about it, and about a
+  pane whose credential is from before the prefix.
+- **Codex shells.** Codex's `shell_environment_policy` default excludes, when a config turns them on
+  (`ignore_default_excludes = false`), strip every variable whose name contains `TOKEN`, `KEY` or `SECRET`
+  from the shell its commands run in — `FY_SESSION_TOKEN` included. Ferretry does not override that choice.
+  `FY_SESSION_BOARD_CAPABILITY`, which `fy` reads too, survives it, so a Codex ferret's `fy` still finds its
+  credential (measured on Codex 0.156.1, whose default strips neither); that name stays while Codex runs ferrets.
 - **Restart ferrets to wall them.** A running ferret's `fy` presents its credential at once, because its pane
   already carries one. Its MCP server is the `fy` it started with and keeps the admin token until the pane
   restarts (`fy restart --all`), and a pane launched before the prefix needs the same restart.

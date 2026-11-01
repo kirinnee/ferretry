@@ -11,6 +11,11 @@ const SESSION_BEARER_PREFIX = 'fys_';
  * Where a ferret's pane carries its own credential: the documented name first, then the older one. The
  * daemon writes both with one value (`session/lifecycle/policy.ts` `sessionPaneEnvironment`), so the order
  * only matters to a hand-built environment, and the documented name wins there.
+ *
+ * KEEP THE OLDER NAME while Codex runs ferrets: Codex's `shell_environment_policy` default excludes, when a
+ * config turns them on (`ignore_default_excludes = false`), strip every variable whose name contains
+ * `TOKEN`, `KEY` or `SECRET` from its shell — `FY_SESSION_TOKEN` included — and `FY_SESSION_BOARD_CAPABILITY`
+ * is the name that survives them (measured on Codex 0.156.1, whose default keeps both).
  */
 const SESSION_TOKEN_VARIABLES = ['FY_SESSION_TOKEN', 'FY_SESSION_BOARD_CAPABILITY'] as const;
 
@@ -71,10 +76,38 @@ export function credentialPlan(
 ): CredentialPlan {
   const explicit = environment.FY_TOKEN?.trim() ?? '';
   if (explicit !== '') return { kind: 'explicit', token: explicit };
-  if (options.asOwner) return { kind: 'admin', why: 'as-owner' };
   const pane = paneCredential(environment);
+  if (options.asOwner) return { kind: 'admin', why: pane.kind === 'none' ? 'no-session' : 'as-owner' };
   if (pane.kind === 'bearer') return { kind: 'session', bearer: pane.value };
   return { kind: 'admin', why: pane.kind === 'legacy' ? 'legacy-session' : 'no-session' };
+}
+
+/**
+ * Said on stderr, once, when `--as-owner` sets this ferret's own credential aside: the daemon cannot tell
+ * the result from the owner's shell, so the command's own output is the one place the act shows.
+ */
+export const AS_OWNER_NOTE = '--as-owner: acting with the host admin token, not this ferret’s credential';
+
+/**
+ * What `fy doctor` says about the credential a ferret's pane would present. Inside a pane (`FY_SESSION_ID`
+ * or a pane credential), an `FY_TOKEN` wins over the ferret's own credential, so a shell rc that exports it
+ * silently puts every ferret on the admin token; and a credential from before the `fys_` prefix is never
+ * presented as a bearer.
+ */
+export function paneCredentialWarnings(environment: Readonly<Record<string, string | undefined>>): readonly string[] {
+  const pane = paneCredential(environment);
+  const inPane = pane.kind !== 'none' || (environment.FY_SESSION_ID?.trim() ?? '') !== '';
+  if (!inPane) return [];
+  const warnings: string[] = [];
+  if ((environment.FY_TOKEN?.trim() ?? '') !== '')
+    warnings.push(
+      'FY_TOKEN is set in this ferret’s environment, so its fy and tools present that token instead of the ferret’s own credential; unset it (a shell rc that exports it reaches every ferret)',
+    );
+  if (pane.kind === 'legacy')
+    warnings.push(
+      'this ferret’s credential is from before the fys_ prefix, so its fy uses the admin token; restart the ferret (fy restart <id>) to give it one it can present',
+    );
+  return warnings;
 }
 
 /** What one `/v1/health` answer says about a daemon, as far as the credential choice is concerned. */

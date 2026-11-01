@@ -73,14 +73,15 @@ describe("a ferret's fy and MCP server, wired as they ship", () => {
     await tokenFile(0o600);
 
     // Act
-    await new InProcessCliDriver().run(['--as-owner', 'search', 'anything'], {
+    const result = await new InProcessCliDriver().run(['--as-owner', 'search', 'anything'], {
       FY_HOME: root,
       FY_URL: url,
       FY_SESSION_TOKEN: BEARER,
     });
 
-    // Assert
+    // Assert — and it says so once, on stderr, so the act is in the ferret's own tool output.
     should(seen.map(each => each.authorization)).deepEqual([`Bearer ${ADMIN}`]);
+    should(result.err.split('--as-owner: acting with the host admin token').length - 1).equal(1);
   });
 
   it('should present the bearer from the MCP server too', async () => {
