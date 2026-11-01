@@ -138,6 +138,7 @@ import {
   type LoginIndexDocument,
   type LoginIndexStore,
   LoginVault,
+  narrowAccountVault,
   type StoredLoginIndex,
   type SecretChildOutcome,
   type SecretChildRunner,
@@ -2053,12 +2054,13 @@ export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
   const loginIndex = world.loginIndex ?? new MemoryLoginIndex();
   const loginSealed = world.loginSealed ?? new MemorySecretDocuments();
   const vault = new LoginVault(loginIndex, loginSealed, cipher);
-  const logins = new LoginDirectory(loginIndex, loginSealed, cipher, clock, { seals: vault });
+  const narrow = narrowAccountVault(vault);
+  const logins = new LoginDirectory(loginIndex, loginSealed, cipher, clock, { seals: narrow.seals });
   return {
     directory,
     logins,
     accounts: logins.accounts,
-    lookAlike: vault,
+    lookAlike: narrow.lookAlike,
     // Login recipes over the same store; nothing is masked in these fixtures, so no recipe is refused for a value.
     loginRecipes: new LoginRecipeService({
       logins,

@@ -240,14 +240,12 @@ export class LoginDirectory {
     // A provider that is gone, or the account itself, is refused before anything else is said about the change.
     const method = change.method === undefined ? template?.method : methodRecord(change.method, draft.accounts, id);
     if (places.length === 0) {
-      const keeps =
-        change.method !== undefined ||
-        typeof change.recipe === 'string' ||
-        change.autoApplyRecipe === true ||
-        template?.recipe !== undefined ||
-        template?.proposals !== undefined ||
-        template?.method !== undefined;
-      if (keeps && (template !== undefined || change.match === undefined))
+      // Never a lossy write: a method, a recipe or auto-apply the change brings, or the sign-in it would remove still
+      // holds, has nowhere to go without a place, so it is refused rather than answered as saved.
+      const brings = method !== undefined || typeof change.recipe === 'string' || change.autoApplyRecipe === true;
+      const holds =
+        template?.recipe !== undefined || template?.proposals !== undefined || template?.method !== undefined;
+      if (brings || holds)
         throw new LoginEntryError(
           'no_sign_in',
           `${account.label} would sign in nowhere, and a method or recipe needs a place; name where it signs in`,

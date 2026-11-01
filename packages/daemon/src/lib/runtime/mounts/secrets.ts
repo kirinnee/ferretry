@@ -445,7 +445,12 @@ function accountRoutes(
       minimum: 'operator',
       capability: SECRETS_USE,
       noStore: true,
-      handle: async () => await listAccounts(accounts, recipes),
+      // The OWNER's view: which fields each account holds, which 2FA keys Ferretry makes codes for and whether they
+      // worked, every username and place. A ferret reads `/v1/accounts/hint` instead.
+      handle: async context => {
+        ownerOnly(context, 'list the accounts');
+        return await listAccounts(accounts, recipes);
+      },
     },
     {
       method: 'GET',

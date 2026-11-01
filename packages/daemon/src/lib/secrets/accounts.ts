@@ -864,8 +864,20 @@ export class AccountDirectory {
     });
   }
 
+  /**
+   * `keep`'s password, or `from`'s when `keep` has none. Two DIFFERENT passwords are refused: the one not kept would be
+   * swept at the commit and lost for good, exactly as a differing seed would be.
+   */
   private async mergedSeals(draft: AccountDraft, keep: AccountRecord, from: AccountRecord) {
-    if (keep.seals.password !== undefined || from.seals.password === undefined) return { ...keep.seals };
+    if (from.seals.password === undefined) return { ...keep.seals };
+    if (keep.seals.password !== undefined) {
+      if (!(await this.anySame(from.seals.password, [keep.seals.password])))
+        throw new LoginEntryError(
+          'merge_refused',
+          `${keep.label} and ${from.label} keep different passwords; change one of them first`,
+        );
+      return { ...keep.seals };
+    }
     return { password: await this.moved(draft, from.seals.password, keep.key, 'password') };
   }
 
@@ -1121,12 +1133,32 @@ function providersWithoutLink(version1: LoginIndexDocument, migrated: AccountInd
   return [...named].sort();
 }
 
-/** The refusal a broken store rule reads as: a via problem, a place taken, a limit, or the rest. */
+/**
+ * The refusal a broken store rule reads as: a via problem, a limit, or the rest. A place an account already signs in at
+ * is refused by every write before it gets here (`assertPlaceFree`, the merge's own check), so it is not one of them.
+ */
 function refusalFor(path: readonly (string | number)[], message: string): Error {
   if (path.includes('viaKey') || message.startsWith('via links')) return new LoginEntryError('bad_via', message);
-  if (path.at(-1) === 'place') return new LoginEntryError('place_taken', message);
   if (path.length <= 2 && /at most/u.test(message)) return new SecretStoreError('full', message);
   return new LoginEntryError('invalid_change', message);
+}
+
+/**
+ * The ONLY parts of an {@link AccountVault} handed past the redactor and the input service, as fresh closures: the
+ * directory's seal port (a merge) and the look-alike answer (a route). Neither object is the vault, so nothing that
+ * holds one can reach `values()` or `fill()`, whatever it is cast to.
+ */
+export function narrowAccountVault(vault: AccountVault): {
+  readonly seals: AccountSealPort;
+  readonly lookAlike: { lookAlike(): Promise<readonly (readonly AccountId[])[]> };
+} {
+  return {
+    seals: Object.freeze({
+      reseal: async (from: string, to: string) => await vault.reseal(from, to),
+      sameValue: async (left: string, right: string) => await vault.sameValue(left, right),
+    }),
+    lookAlike: Object.freeze({ lookAlike: async () => await vault.lookAlike() }),
+  };
 }
 
 /** The fields a card keeps in one account at once: the plain username, the secret password, or both. */
@@ -1252,8 +1284,9 @@ export class AccountVault implements AccountSealPort {
 
   /**
    * "THESE LOOK LIKE ONE ACCOUNT": groups of accounts with the same username (trimmed, case-folded) AND the same
-   * password, compared HERE in constant time over equal-length digests. Pairs the owner said to keep apart are left
-   * out. The answer is HANDLES ONLY, computed on demand and never written anywhere: "these share a password" is derived
+   * password, compared HERE in constant time over equal-length digests. No group ever holds a pair the owner said to
+   * keep apart: a set of look-alikes with such a pair inside is answered as its other pairs, two by two, so that
+   * "merge this group" can never fold a kept-apart pair together through a third account. The answer is HANDLES ONLY, computed on demand and never written anywhere: "these share a password" is derived
    * from secrets, and the index is a file anyone who can read it may read.
    */
   async lookAlike(): Promise<readonly (readonly AccountId[])[]> {
@@ -1289,17 +1322,32 @@ export class AccountVault implements AccountSealPort {
         const [leftId, left] = candidates[i] as readonly [string, AccountRecord];
         const [rightId, right] = candidates[j] as readonly [string, AccountRecord];
         if (foldedUsername(left.username as string) !== foldedUsername(right.username as string)) continue;
-        if (left.apartFrom?.includes(right.key) === true || right.apartFrom?.includes(left.key) === true) continue;
         const one = digests.get(leftId);
         const other = digests.get(rightId);
         if (one === undefined || other === undefined || !timingSafeEqual(one, other)) continue;
         parent.set(root(rightId), root(leftId));
       }
-    const groups = new Map<string, AccountId[]>();
-    for (const [handle] of candidates) groups.set(root(handle), [...(groups.get(root(handle)) ?? []), handle]);
-    return [...groups.values()]
-      .filter(group => group.length > 1)
-      .map(group => group.toSorted())
-      .toSorted((left, right) => (left[0] as string).localeCompare(right[0] as string));
+    const keyOf = new Map(candidates.map(([handle, account]) => [handle, account]));
+    const apart = (left: string, right: string): boolean => {
+      const one = keyOf.get(left) as AccountRecord;
+      const other = keyOf.get(right) as AccountRecord;
+      return one.apartFrom?.includes(other.key) === true || other.apartFrom?.includes(one.key) === true;
+    };
+    const classes = new Map<string, AccountId[]>();
+    for (const [handle] of candidates) classes.set(root(handle), [...(classes.get(root(handle)) ?? []), handle]);
+    const groups: AccountId[][] = [];
+    for (const members of classes.values()) {
+      const sorted = members.toSorted();
+      const pairs = sorted.flatMap((left, index) => sorted.slice(index + 1).map(right => [left, right] as const));
+      if (pairs.every(([left, right]) => !apart(left, right))) {
+        if (sorted.length > 1) groups.push(sorted);
+        continue;
+      }
+      for (const [left, right] of pairs) if (!apart(left, right)) groups.push([left, right]);
+    }
+    return groups.toSorted(
+      (left, right) =>
+        (left[0] as string).localeCompare(right[0] as string) || (left[1] as string).localeCompare(right[1] as string),
+    );
   }
 }

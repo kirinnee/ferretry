@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { type Place, PutLoginEntryRequestSchema, TotpParametersSchema } from '@ferretry/protocol';
 import should from 'should';
-import { LoginDirectory, totpCode } from '../../../src/lib/secrets/index.ts';
+import { AccountVault, LoginDirectory, narrowAccountVault, totpCode } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex } from '../runtime/mounts/support.ts';
 import { CLOCK, CountingSealed, daemonOver, SEED } from './accounts-fixtures.ts';
 
@@ -137,6 +137,21 @@ describe('these look like one account', () => {
     should(w.sealed.writes).equal(writes);
   });
 
+  it('should never answer a group holding a kept-apart pair, even through a third account (secrev-r1-2 L4)', async () => {
+    const w = await lookAlikes();
+    await w.directory.putAccount('THIRD', { label: 'Third', username: 'KIRIN', password: 'same-UNIQUE-pw-1' });
+    should(await w.vault.lookAlike()).deepEqual([['GH_BOX', 'GITHUB', 'THIRD']]);
+
+    await w.directory.apart('GITHUB', 'THIRD');
+
+    const groups = await w.vault.lookAlike();
+    should(groups).deepEqual([
+      ['GH_BOX', 'GITHUB'],
+      ['GH_BOX', 'THIRD'],
+    ]);
+    for (const group of groups) should(group.includes('GITHUB') && group.includes('THIRD')).be.false();
+  });
+
   it('should leave out a pair the owner kept apart', async () => {
     const w = await lookAlikes();
     await w.directory.apart('GITHUB', 'GH_BOX');
@@ -146,10 +161,10 @@ describe('these look like one account', () => {
 });
 
 describe('merging two accounts', () => {
-  async function pair() {
+  async function pair(fromPassword = 'same-UNIQUE-pw-1') {
     const w = world();
-    await w.directory.putAccount('KEEP', { label: 'GitHub', username: 'kirin', password: 'keep-UNIQUE-pw-1' });
-    await w.directory.putAccount('FROM', { label: 'gh', username: 'kirin', password: 'from-UNIQUE-pw-2' });
+    await w.directory.putAccount('KEEP', { label: 'GitHub', username: 'kirin', password: 'same-UNIQUE-pw-1' });
+    await w.directory.putAccount('FROM', { label: 'gh', username: 'kirin', password: fromPassword });
     const logins = new LoginDirectory(w.index, w.sealed, new FakeSecretCipher(), CLOCK);
     // FROM's seed, through the older route (the only way to save one before 2FA keys have routes of their own).
     await logins.put('FROM', PutLoginEntryRequestSchema.parse({ totp: { seed: SEED }, totpAcknowledged: true }));
@@ -177,11 +192,35 @@ describe('merging two accounts', () => {
     should(listing.accounts.map(account => account.id)).deepEqual(['KEEP', 'SITE']);
     should(listing.signIns.find(each => each.id === w.moved.id)?.recipe).equal('Run gh auth login as [[KEEP]]');
     should(listing.signIns.find(each => each.id === w.linked.id)?.method).deepEqual({ kind: 'github', via: 'KEEP' });
-    // KEEP's own password stays; the seed is KEEP's now, and FROM's ciphertext is gone.
-    should(await w.vault.fill('KEEP', 'password', 0)).equal('keep-UNIQUE-pw-1');
+    // One password (they were the same), the seed is KEEP's now, and FROM's ciphertext is gone.
+    should(await w.vault.fill('KEEP', 'password', 0)).equal('same-UNIQUE-pw-1');
     should(await w.vault.fill('KEEP', 'totp', 0)).equal(totpCode(SEED, TotpParametersSchema.parse({}), 0) as string);
     const keepKey = w.index.accounts.accounts.KEEP?.key as string;
     should(Object.keys((await w.sealed.read())?.entries ?? {}).every(name => name.startsWith(keepKey))).be.true();
+  });
+
+  it('should refuse, losing nothing, when the two accounts keep different passwords (secrev-r1-2 M1)', async () => {
+    const w = await pair('other-UNIQUE-pw-2');
+    const index = JSON.stringify(w.index.document);
+    const sealed = JSON.stringify(await w.sealed.read());
+
+    const refused = (await w.directory.merge('KEEP', 'FROM').catch((error: unknown) => error)) as Error & {
+      refusal?: string;
+    };
+
+    should(refused.refusal).equal('merge_refused');
+    should(refused.message).containEql('different passwords');
+    should(JSON.stringify(w.index.document)).equal(index);
+    should(JSON.stringify(await w.sealed.read())).equal(sealed);
+    should(await w.vault.fill('FROM', 'password', 0)).equal('other-UNIQUE-pw-2');
+    should(await w.vault.fill('KEEP', 'password', 0)).equal('same-UNIQUE-pw-1');
+  });
+
+  it("should take FROM's password when KEEP has none", async () => {
+    const w = await pair();
+    await w.directory.putAccount('KEEP', { password: null });
+    await w.directory.merge('KEEP', 'FROM');
+    should(await w.vault.fill('KEEP', 'password', 0)).equal('same-UNIQUE-pw-1');
   });
 
   it("should never drop FROM's seed when KEEP has a key of the same label that holds no seed", async () => {
@@ -268,6 +307,27 @@ describe('an older client writes a saved login', () => {
     should(await refusal(w.logins.propose('GITHUB', proposal()))).equal('account_has_sign_ins');
   });
 
+  it('should refuse a method or recipe for an account that signs in nowhere, never answering it saved (secrev-r1-2 L5)', async () => {
+    const w = world();
+    const logins = new LoginDirectory(w.index, w.sealed, new FakeSecretCipher(), CLOCK);
+    await logins.put('GOOGLE', PutLoginEntryRequestSchema.parse({ label: 'Google' }));
+    const before = JSON.stringify(w.index.document);
+    for (const body of [
+      { match: [], method: { kind: 'sso', name: 'Okta' } },
+      { match: [], recipe: 'Open accounts.google.com' },
+      { match: [], autoApplyRecipe: true },
+      { label: 'New', match: [], recipe: 'Open it' },
+    ])
+      should(
+        await refusal(logins.put(body.label === undefined ? 'GOOGLE' : 'NEW', PutLoginEntryRequestSchema.parse(body))),
+      ).equal('no_sign_in');
+    should(JSON.stringify(w.index.document)).equal(before);
+    // Back to a password, with nowhere to sign in, loses nothing: it is not refused.
+    should(
+      (await logins.put('GOOGLE', PutLoginEntryRequestSchema.parse({ match: [], method: { kind: 'password' } }))).id,
+    ).equal('GOOGLE');
+  });
+
   it('should map a change 1:1 onto the one sign-in, keeping its id', async () => {
     const w = world();
     const logins = new LoginDirectory(w.index, w.sealed, new FakeSecretCipher(), CLOCK);
@@ -305,3 +365,19 @@ function proposal() {
     proposedAt: '2026-10-31T09:00:00.000Z',
   };
 }
+
+describe('what of the vault is handed out (secrev-r1-2 L2)', () => {
+  it('should hand the directory and the route table closures that cannot reach values() or fill()', async () => {
+    const w = world();
+    const vault = new AccountVault(w.index, w.sealed, new FakeSecretCipher());
+    const narrow = narrowAccountVault(vault);
+    for (const part of [narrow.seals, narrow.lookAlike]) {
+      should(part).not.be.instanceOf(AccountVault);
+      should(Object.isFrozen(part)).be.true();
+      should(part as unknown as Record<string, unknown>).not.have.properties(['values', 'fill', 'documents']);
+    }
+    should(Object.keys(narrow.seals).sort()).deepEqual(['reseal', 'sameValue']);
+    should(Object.keys(narrow.lookAlike)).deepEqual(['lookAlike']);
+    should(await narrow.lookAlike.lookAlike()).deepEqual([]);
+  });
+});

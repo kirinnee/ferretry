@@ -67,7 +67,7 @@ only two things hold the `AccountVault` that opens it: the redactor (saved value
 `[redacted:login:<ID>:password]`) and the input-request service, which types one into the target the owner tapped
 "Use" for and answers only what happened. Two narrow parts of it are handed out, and neither answers a value: the
 directory holds its **seal port** (a merge moves a sealed value to the kept account inside the vault, and asks
-whether two seeds are the same), and the look-alike route holds its **look-alike answer** (handles only). `use`
+whether two values are the same), and the look-alike route holds its **look-alike answer** (handles only). Both are fresh closures (`narrowAccountVault`), never the vault itself, so nothing that holds one can reach a value. `use`
 cannot spend an account and `${secret:…}` cannot name one. The agent tool `account_hint` (`login_hint` still works) (and `GET /v1/secrets/logins/hint`) is
 handed the same `LoginDirectory`: it answers labels, sign-in methods, login domains and usernames, never a value.
 
@@ -238,6 +238,21 @@ masked, and no card offers a saved login. To go back:
 Every change made to accounts after the upgrade is lost: the older daemon sees the saved logins as they were. A
 value sealed after the upgrade stays in `login-secrets.json`, masked, until the older daemon's sweep removes it.
 
+**A password or seed you changed or deleted after the upgrade is gone from the restored index too.** The new daemon
+swept the old value once nothing pointed at it, but the restored `v: 1` index still names it. Both daemons then read
+the store as **damaged** — it fails closed, never empty:
+
+- the older daemon types nothing for that login ("lost its password") and its boot sweep keeps everything;
+- upgrading again, the migration finds a saved login naming a value that is not there, so it migrates nothing and
+  **every change refuses**, including the delete that would fix it.
+
+To repair it, in the **older** daemon, before upgrading again:
+
+1. Find the login the older daemon says has lost its password or 2FA seed.
+2. Type its password (or seed) again, or delete that login: `fy account edit <NAME> --password` (or `--totp`),
+   or `fy account rm <NAME>`; Settings › Accounts does the same.
+3. Upgrade. The index now names only values that are there, so it migrates.
+
 ### Routes
 
 All under the `secrets` capability (`use` to read, `configure` to change); every change is a kept
@@ -246,7 +261,7 @@ its body is read, exactly as for the vault (honest-client until a ferret has its
 
 | Route                                                     | Does                                                                   |
 | --------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `GET /v1/accounts`                                        | accounts and sign-ins; recipes masked at read time; damaged says so    |
+| `GET /v1/accounts`                                        | owner only: accounts and sign-ins; recipes masked; damaged says so     |
 | `GET /v1/accounts/hint?site=`                             | one hint per sign-in for the site, and the providers it leads to       |
 | `GET /v1/accounts/look-alike`                             | owner only: groups of accounts with the same username AND password     |
 | `PUT /v1/accounts/:id`                                    | create or change an account: label, username, password                 |
@@ -261,10 +276,10 @@ change. Until then the older `PUT /v1/secrets/logins/:id` with `totp` saves an a
 
 **"These look like one account" is offered, never automatic, and never stored.** It is computed on demand inside
 the vault: same username (trimmed, case-folded) and same password, compared in constant time. The answer is
-**handles only**; a pair the owner kept apart is left out. Writing it into the index would let anyone who can read
+**handles only**, and no group ever holds a pair the owner kept apart: a set of look-alikes with such a pair inside is answered two by two, so "merge this group" can never fold that pair together through a third account. Writing it into the index would let anyone who can read
 that file learn which accounts share a password. **Merge** moves the other account's sign-ins to the one kept,
 takes its password and seeds only when the kept one has none (resealed under the kept account's key, inside the
-vault), and is refused, with nothing changed, when both keep a different seed, when both sign in at one place, or
+vault), and is refused, with nothing changed, when both keep a different password or a different seed (the one not kept would be swept and lost), when both sign in at one place, or
 when a via link would point an account at itself; via links and `[[FROM]]` in recipes follow to the kept account.
 
 **The saved-login routes keep working for one release, as a projection.** `GET /v1/secrets/logins` (and its hint)

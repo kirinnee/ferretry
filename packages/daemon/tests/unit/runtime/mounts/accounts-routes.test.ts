@@ -14,6 +14,7 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { type SecretSubsystem, secretRoutes } from '../../../../src/lib/runtime/mounts/secrets.ts';
 import { jsonBody, request } from '../../api/support.ts';
+import { SecretStoreError } from '../../../../src/lib/secrets/index.ts';
 import { agentIn, CREDENTIALS, GRANTED, human, MemoryLoginIndex, secretSubsystem } from './support.ts';
 
 /**
@@ -149,6 +150,8 @@ describe('every account write is the owner’s', () => {
       ['POST', '/v1/accounts/GITHUB/merge'],
       ['POST', '/v1/accounts/GITHUB/apart'],
       ['GET', '/v1/accounts/look-alike'],
+      // The owner's listing too: which fields exist, which keys make codes (secrev-r1-2 L1). A ferret reads the hint.
+      ['GET', '/v1/accounts'],
       // The saved-login spellings of the same store.
       ['PUT', '/v1/secrets/logins/GITHUB'],
       ['POST', '/v1/secrets/logins/GITHUB/rename'],
@@ -223,5 +226,77 @@ describe('an older client over the account store', () => {
       ['SITE', 'site'],
       ['GOOGLE', 'provider'],
     ]);
+  });
+});
+
+describe('the account routes, the rest of their answers', () => {
+  it('should remove a sign-in and an account, and say 404 for one that is gone', async () => {
+    const w = await world();
+    should(await w.ok('DELETE', `/v1/accounts/sign-ins/${w.linked.id}`)).deepEqual({ id: w.linked.id, removed: true });
+    should((await dispatch(w.subsystem, 'DELETE', `/v1/accounts/sign-ins/${w.linked.id}`)).status).equal(404);
+    should(await w.ok('DELETE', '/v1/accounts/SITE')).deepEqual({ id: 'SITE', removed: true });
+    should((await dispatch(w.subsystem, 'DELETE', '/v1/accounts/SITE')).status).equal(404);
+    should((await dispatch(w.subsystem, 'PUT', '/v1/accounts/lower', { label: 'x' })).status).equal(400);
+    should((await dispatch(w.subsystem, 'DELETE', '/v1/accounts/sign-ins/nope')).status).equal(400);
+  });
+
+  it('should let the owner answer a proposal on a sign-in, and refuse a proposal id that is not one', async () => {
+    const w = await world();
+    const recipes = w.subsystem.loginRecipes as NonNullable<SecretSubsystem['loginRecipes']>;
+    await recipes.propose('ferret-1', 'SITE', 'Continue with Google, then pick kirin', 'it asks which account');
+    const proposalId = (
+      (await w.ok('GET', '/v1/accounts')) as { signIns: { id: string; proposals?: { id: string }[] }[] }
+    ).signIns.find(signIn => signIn.id === w.linked.id)?.proposals?.[0]?.id as string;
+    const path = `/v1/accounts/sign-ins/${w.linked.id}/recipe/proposals/${proposalId}`;
+
+    const approved = (await w.ok('POST', path, { decision: 'approve' })) as { recipe: string; recipeVersion: number };
+
+    should(approved.recipe).equal('Continue with Google, then pick kirin');
+    should(approved.recipeVersion).equal(2);
+    should((await dispatch(w.subsystem, 'POST', path, { decision: 'decline' })).status).equal(404);
+    should(
+      (
+        await dispatch(w.subsystem, 'POST', `/v1/accounts/sign-ins/${w.linked.id}/recipe/proposals/nope`, {
+          decision: 'approve',
+        })
+      ).status,
+    ).equal(400);
+  });
+
+  it('should serve no recipe, and take none, where nothing can check one for values', async () => {
+    const w = await world();
+    const { loginRecipes: _none, ...bare } = w.subsystem;
+    const listed = (await jsonBody(await dispatch(bare, 'GET', '/v1/accounts'))) as { signIns: object[] };
+    for (const signIn of listed.signIns) should(signIn).not.have.properties(['recipe', 'recipeVersion', 'proposals']);
+    should((await dispatch(bare, 'PUT', `/v1/accounts/sign-ins/${w.linked.id}`, { recipe: 'x' })).status).equal(503);
+    const changed = await dispatch(bare, 'PUT', `/v1/accounts/sign-ins/${w.linked.id}`, { autoApplyRecipe: true });
+    should(((await jsonBody(changed)) as { autoApplyRecipe: boolean }).autoApplyRecipe).be.true();
+    const added = await dispatch(bare, 'POST', '/v1/accounts/SITE/sign-ins', {
+      place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
+    });
+    should(added.status).equal(200);
+    should(
+      secretRoutes(bare).some(route => route.path === '/v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId'),
+    ).be.false();
+  });
+
+  it('should say a damaged store is damaged, on the list, the hint and look-alike — never an empty answer', async () => {
+    const broken = secretSubsystem({
+      loginIndex: new MemoryLoginIndex(new SecretStoreError('unreadable', 'login-entries.json is not JSON')),
+    });
+    const listed = (await jsonBody(await dispatch(broken, 'GET', '/v1/accounts'))) as {
+      health: string;
+      diagnosis: string;
+    };
+    should(listed.health).equal('damaged');
+    should(listed.diagnosis).containEql('not JSON');
+    should((await dispatch(broken, 'GET', '/v1/accounts/hint?site=github.com')).status).equal(500);
+    should((await dispatch(broken, 'GET', '/v1/accounts/look-alike')).status).equal(500);
+    should((await dispatch(broken, 'GET', '/v1/accounts/hint')).status).equal(400);
+  });
+
+  it('should serve no look-alike route where the daemon holds no look-alike answer', () => {
+    const { lookAlike: _none, ...bare } = secretSubsystem();
+    should(secretRoutes(bare).some(route => route.path === '/v1/accounts/look-alike')).be.false();
   });
 });
