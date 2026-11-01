@@ -472,6 +472,7 @@ function Inbox({
     cards: (extra === undefined ? OWNER : [extra, ...OWNER]).filter(card => !held.has(card.key)),
     withFerret: FERRET,
     reading: false,
+    unavailable: [],
     resolved: [],
     resolvedReading: false,
     parked: PARKED,

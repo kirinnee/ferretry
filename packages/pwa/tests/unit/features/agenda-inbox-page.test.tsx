@@ -10,6 +10,7 @@ import {
   waitingWords,
 } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import { secondsLeft } from '../../../src/features/agenda/agenda-undo-toast.tsx';
+import type { AgendaInbox } from '../../../src/hooks/use-agenda-inbox.ts';
 import { type InboxCard, type InboxResolved, inboxCardKey } from '../../../src/lib/agenda-inbox.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
@@ -46,15 +47,19 @@ const bare = inboxCard(
 const page = (
   fake: FakeInbox,
   cards: readonly InboxCard[],
-  props: Partial<AgendaInboxPageProps> & { reading?: boolean } = {},
+  props: Partial<AgendaInboxPageProps> & {
+    reading?: boolean;
+    unavailable?: AgendaInbox['unavailable'];
+  } = {},
   navigated: string[] = [],
 ) => {
-  const { reading = false, ...rest } = props;
+  const { reading = false, unavailable = [], ...rest } = props;
   return (
     <InboxHarness
       cards={cards}
       fake={fake}
       reading={reading}
+      unavailable={unavailable}
       render={inbox => (
         <AgendaInboxPage
           clock={fake.clock.now}
@@ -167,6 +172,40 @@ describe('AgendaInboxPage states', () => {
     expect(mounted.container.querySelector('h1')?.textContent).toBe('Inbox');
     expect(mounted.container.textContent).not.toContain('Attention');
     expect(mounted.container.querySelector('[aria-label="Find in Inbox"]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('says a machine it could not read on its own line, and neither "Nothing needs you" nor a spinner', async () => {
+    const asleep = [{ daemonId: daemonId('laptop'), machineName: 'Laptop', items: 1 }];
+    const mounted = await mount(page(fakeInbox(), [], { unavailable: asleep }));
+    expect(mounted.container.querySelector('[data-agenda-unreadable]')?.textContent).toBe(
+      'Couldn’t read 1 item on Laptop. Trying again.',
+    );
+    expect(mounted.container.querySelector('[data-agenda-empty]')).toBeNull();
+    expect(mounted.container.querySelector('[data-agenda-reading]')).toBeNull();
+    expect(mounted.container.querySelector('[data-agenda-updating]')).toBeNull();
+    // Its item is counted in the heading, as every badge counts it.
+    expect(mounted.container.querySelector('h1 [data-unread-badge]')?.getAttribute('data-count')).toBe('1');
+    await mounted.unmount();
+  });
+
+  it('draws the Inbox title with its count on a wide screen, and none on a phone, whose top bar carries both', async () => {
+    const wide = await mount(page(fakeInbox(), [threeWay]));
+    expect(wide.container.querySelector('h1 [data-unread-badge]')?.getAttribute('data-count')).toBe('1');
+    await wide.unmount();
+    const phone = await mount(page(fakeInbox(), [threeWay], { phone: true }));
+    expect(phone.container.querySelector('h1')).toBeNull();
+    expect(phone.container.querySelector('main')?.getAttribute('aria-label')).toBe('Inbox');
+    // The filters stay in the head row.
+    expect(phone.container.querySelector('[aria-label="Find in Inbox"]')).not.toBeNull();
+    await phone.unmount();
+  });
+
+  it('does not say nothing needs the reader while a machine holds items it could not read', async () => {
+    const asleep = [{ daemonId: daemonId('laptop'), machineName: 'Laptop', items: 2 }];
+    const mounted = await mount(page(fakeInbox(), [withFerret], { unavailable: asleep }));
+    expect(mounted.container.textContent).not.toContain('Nothing needs you right now.');
+    expect(mounted.container.querySelector('[data-agenda-unreadable]')?.textContent).toContain('2 items on Laptop');
     await mounted.unmount();
   });
 

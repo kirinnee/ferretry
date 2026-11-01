@@ -16,9 +16,11 @@ import {
   type InboxCard,
   inboxCardKey,
   inboxCards,
+  inboxCount,
   inboxOptions,
   inboxParked,
   inboxResolved,
+  inboxUnavailable,
   NEEDS_INFO_ACTION,
   needsYouCount,
   needsYouItems,
@@ -98,6 +100,51 @@ describe('unread conversations', () => {
       [STUDIO, 'a', 'Studio'],
     ]);
     expect(unreadTotal(entries)).toBe(3);
+  });
+
+  describe('the Inbox count', () => {
+    const askedForInfo = { ...item('A2', 2), waitingOn: 'ferret', askedAt: at(3), waitingFor: 'info' } as AgendaItem;
+    const notice = { ...item('A3', 3), notice: true } as AgendaItem;
+    const entries = unreadSessions([
+      // The summary counts the item waiting for more information and leaves the notification out: 2.
+      { daemonId: STUDIO, name: 'Studio', sessions: [waiting('read', summary(2, 3))] },
+      { daemonId: LAPTOP, name: 'Laptop', sessions: [waiting('down', summary(3, 1))] },
+    ]);
+    const boards = new Map([['read', board('read', [item('A1', 1), askedForInfo, notice])]]);
+    const boardFor = (_daemonId: DaemonId, sessionId: string) => boards.get(sessionId);
+    const cards = inboxCards(entries, boardFor);
+    const held = (entry: (typeof entries)[number]) => boards.has(entry.view.config.id);
+
+    test('should count a read board by its deck, and an unread one by its summary, never both', () => {
+      // The deck holds A1 and the notification; the item waiting on its ferret is not in it.
+      expect(cards.map(card => card.item.id)).toEqual(['A3', 'A1']);
+      expect(inboxCount(entries, held, cards, 0)).toBe(2 + 3);
+      expect(inboxCount(entries, held, cards, 4)).toBe(2 + 3 + 4);
+    });
+
+    test('should leave out an answer still in its undo window, as the deck does', () => {
+      const deck = inboxCards(entries, boardFor, new Set([cards[0]?.key ?? '']));
+      expect(inboxCount(entries, held, deck, 0)).toBe(1 + 3);
+    });
+
+    test('should count nothing for an empty Inbox', () => {
+      expect(inboxCount([], () => false, [], 0)).toBe(0);
+    });
+
+    test('should name each machine whose boards could not be read, once, with its items', () => {
+      const more = unreadSessions([
+        {
+          daemonId: LAPTOP,
+          name: 'Laptop',
+          sessions: [waiting('down', summary(3, 1)), waiting('down2', summary(1, 2))],
+        },
+        { daemonId: STUDIO, name: 'Studio', sessions: [waiting('read', summary(2, 3))] },
+      ]);
+      expect(inboxUnavailable(more, entry => entry.daemonId === LAPTOP)).toEqual([
+        { daemonId: LAPTOP, machineName: 'Laptop', items: 4 },
+      ]);
+      expect(inboxUnavailable(more, () => false)).toEqual([]);
+    });
   });
 
   test('equal instants keep machine order, then session id', () => {
