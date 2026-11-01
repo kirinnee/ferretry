@@ -841,12 +841,16 @@ export function Composer({
         location?.kind === 'ready'
           ? `${typed === '' ? 'Here is where I am.' : typed}\n\n${formatLocationBlock(location.fix)}`
           : typed || 'See the attached files.';
+      // The clear the send carries, once this device's last keystroke is answered — a second at most, and
+      // nothing at all (the send still goes) if it is not.
+      const clear = shared.sendClear(mark);
+      const sharedDraft = clear instanceof Promise ? await clear : clear;
       const input = {
         message,
         ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
         now: interrupt,
         // The send itself takes its words out of the shared draft once it lands, composer or not.
-        ...(mark.sharedDraft === undefined ? {} : { sharedDraft: mark.sharedDraft }),
+        ...(sharedDraft === undefined ? {} : { sharedDraft }),
       };
       let sent: { readonly disposition?: unknown } | undefined;
       let requestId: string | undefined;
@@ -869,7 +873,7 @@ export function Composer({
             now: interrupt,
             // The "re" chips, kept with the message so a later attempt is still about the same item.
             references: referencesOf(api),
-            ...(mark.sharedDraft === undefined ? {} : { sharedDraft: mark.sharedDraft }),
+            ...(sharedDraft === undefined ? {} : { sharedDraft }),
           },
           { send: (target, body, requestId) => api.send(target, body, requestId) },
         );

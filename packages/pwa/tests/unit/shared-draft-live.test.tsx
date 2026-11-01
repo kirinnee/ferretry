@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   applyTextOp,
+  type SharedDraftSent,
   SHARED_DRAFT_STREAM_RESYNC_CLOSE,
   normalizeTextOp,
   type SharedDraftClientFrame,
@@ -839,6 +840,10 @@ describe('the second review (nathanael) — acceptance', () => {
     run(() => {
       mark = devices.hooks.laptop?.markSend();
     });
+    let carried: SharedDraftSent | undefined;
+    await runAsync(async () => {
+      if (mark !== undefined) carried = await devices.hooks.laptop?.sendClear(mark);
+    });
 
     // Act — the phone adds words before the send's answer comes back; then the send completes.
     devices.type('phone', 'hello unsent addition');
@@ -854,7 +859,7 @@ describe('the second review (nathanael) — acceptance', () => {
     expect(left).toBe(' unsent addition');
     expect(daemonSide.text).toBe(' unsent addition');
     expect(devices.texts.phone).toBe(' unsent addition');
-    expect(mark?.sharedDraft).toMatchObject({ base: 1, text: [-5] });
+    expect(carried).toMatchObject({ base: 1, text: [-5] });
     devices.unmount();
   });
 
@@ -895,5 +900,256 @@ describe('the second review (nathanael) — acceptance', () => {
     run(() => second.hooks.phone?.dismissConflict());
     expect(storage.phone.load(daemonSessionScope(daemon, 'sess one'))).toBe('');
     second.unmount();
+  });
+});
+
+describe('the send mark (rose N1, N3) and kept copies (N2)', () => {
+  test("N1: pressing send in A then working in B throws nothing, leaves B alone, and A's finish touches nothing here", async () => {
+    // Arrange — A has words; the person presses send there, then moves to B.
+    const daemonA = new FakeDaemon();
+    daemonA.text = 'words for A';
+    daemonA.history.push({ op: ['words for A'] });
+    const daemonB = new FakeDaemon();
+    daemonB.text = 'words for B';
+    daemonB.history.push({ op: ['words for B'] });
+    const open: DaemonStreamOpener = async (target, request) =>
+      await (request.path.includes('/sess%20A/') ? daemonA : daemonB).open(target, request);
+    const timers = new ManualTimers();
+    const seen: { text?: string; hook?: SharedDraft; switchTo?: (id: string) => void; type?: (t: string) => void } = {};
+    const Composer = () => {
+      const [sessionId, setSession] = useState('sess A');
+      const [draft, setDraft] = useState('');
+      const scope = useMemo(() => daemonSessionScope(daemon, sessionId), [sessionId]);
+      Object.assign(seen, { text: draft, switchTo: setSession, type: setDraft });
+      seen.hook = useSharedDraft({
+        daemon,
+        scope,
+        text: draft,
+        setText: setDraft,
+        open,
+        timers,
+        ids: fixedId,
+        restoreStore: new DaemonDraftStore(new MemoryStorage(), 'r'),
+      });
+      return null;
+    };
+    const root = render(<Composer />);
+    await settle();
+    let mark: SharedDraftSendMark | undefined;
+    run(() => {
+      mark = seen.hook?.markSend();
+    });
+
+    // Act — B: type, and hear another device's edit.
+    run(() => seen.switchTo?.('sess one'));
+    await settle();
+    run(() => seen.type?.('words for B, and mine'));
+    await settle();
+    run(() =>
+      daemonB.streams[0]?.deliver({
+        kind: 'edit',
+        applied: { generation: G, epoch: 0, rev: 9, text: ['> ', 21], add: [], remove: [] },
+        epoch: 0,
+        rev: 9,
+      }),
+    );
+    await settle();
+    let finished: string | null | undefined;
+    run(() => {
+      if (mark !== undefined) finished = seen.hook?.sent(mark);
+    });
+
+    // Assert
+    expect(finished).toBeNull();
+    expect(seen.text).toBe('> words for B, and mine');
+    run(() => root.unmount());
+  });
+
+  test('N1: a snapshot during a send never makes its finish throw, and never invents a clear', async () => {
+    // Arrange — the laptop presses send on "hello", carrying its clear.
+    const daemonSide = new FakeDaemon();
+    const devices = mountDevices(daemonSide, { laptop: '' });
+    await settle();
+    devices.type('laptop', 'hello');
+    await settle();
+    let mark: SharedDraftSendMark | undefined;
+    run(() => {
+      mark = devices.hooks.laptop?.markSend();
+    });
+    await runAsync(async () => {
+      if (mark !== undefined) await devices.hooks.laptop?.sendClear(mark);
+    });
+
+    // Act — the stream must start afresh (a whole snapshot, with words added elsewhere), then the send completes.
+    daemonSide.text = 'hello and newer words';
+    daemonSide.history.push({ op: [5, ' and newer words'] });
+    const first = daemonSide.streams[0] as FakeStream;
+    daemonSide.drop(first);
+    for (const closer of first.closers) closer({ code: SHARED_DRAFT_STREAM_RESYNC_CLOSE, reason: 'too large' });
+    await settle();
+    run(() => devices.timers.advance(1_000));
+    await settle();
+    expect(devices.texts.laptop).toBe('hello and newer words');
+    let left: string | null | undefined;
+    run(() => {
+      if (mark !== undefined) left = devices.hooks.laptop?.sent(mark);
+    });
+
+    // Assert — no throw; the newer words stay; the clear is the daemon's, from what the send carried.
+    expect(left).toBe('hello and newer words');
+    expect(devices.texts.laptop).toBe('hello and newer words');
+    devices.unmount();
+  });
+
+  test('N1: with the words lost and no clear carried, only a box still holding exactly what was sent is emptied', async () => {
+    const daemonSide = new FakeDaemon();
+    const devices = mountDevices(daemonSide, { laptop: '' });
+    await settle();
+    devices.type('laptop', 'same words');
+    await settle();
+    const lose = async () => {
+      const first = daemonSide.streams.at(-1) as FakeStream;
+      daemonSide.drop(first);
+      for (const closer of first.closers) closer({ code: SHARED_DRAFT_STREAM_RESYNC_CLOSE, reason: 'too large' });
+      await settle();
+      run(() => devices.timers.advance(1_000));
+      await settle();
+    };
+    let mark: SharedDraftSendMark | undefined;
+    run(() => {
+      mark = devices.hooks.laptop?.markSend();
+    });
+    await lose();
+    let left: string | null | undefined;
+    run(() => {
+      if (mark !== undefined) left = devices.hooks.laptop?.sent(mark);
+    });
+    await settle();
+    expect(left).toBe('');
+    expect(daemonSide.text).toBe('');
+
+    // And when the box holds something else by then, it is left alone.
+    devices.type('laptop', 'first');
+    await settle();
+    run(() => {
+      mark = devices.hooks.laptop?.markSend();
+    });
+    daemonSide.text = 'first, then other';
+    daemonSide.history.push({ op: [5, ', then other'] });
+    await lose();
+    run(() => {
+      if (mark !== undefined) left = devices.hooks.laptop?.sent(mark);
+    });
+    expect(left).toBe('first, then other');
+    devices.unmount();
+  });
+
+  test('N3: the clear waits for the last keystroke to be answered, then names the words exactly; it never blocks past the wait', async () => {
+    // Arrange — the laptop's last keystroke is still on its way when send is pressed.
+    const daemonSide = new FakeDaemon();
+    const devices = mountDevices(daemonSide, { laptop: '' });
+    await settle();
+    const stream = daemonSide.streams[0] as FakeStream;
+    devices.type('laptop', 'quick');
+    let mark: SharedDraftSendMark | undefined;
+    run(() => {
+      mark = devices.hooks.laptop?.markSend();
+    });
+    let carried: SharedDraftSent | undefined | 'pending' = 'pending';
+    const waiting = (async () => {
+      if (mark !== undefined) carried = await devices.hooks.laptop?.sendClear(mark);
+    })();
+
+    // Act — the keystroke is answered.
+    await settle();
+    await runAsync(async () => await waiting);
+
+    // Assert — the clear is at the answered revision.
+    expect(carried).toMatchObject({ base: 1, text: [-5] });
+    expect(stream.sent.filter(frame => frame.kind === 'edit')).toHaveLength(1);
+
+    // With no answer coming, it gives up at the wait and the send goes without it.
+    stream.alive = false;
+    devices.type('laptop', 'quick, and never answered');
+    run(() => {
+      mark = devices.hooks.laptop?.markSend();
+    });
+    let late: SharedDraftSent | undefined | 'pending' = 'pending';
+    const timedOut = (async () => {
+      if (mark !== undefined) late = await devices.hooks.laptop?.sendClear(mark, 500);
+    })();
+    await settle();
+    expect(late).toBe('pending');
+    run(() => devices.timers.advance(500));
+    await runAsync(async () => await timedOut);
+    expect(late).toBeUndefined();
+    devices.unmount();
+  });
+
+  test('N3: the wait ends at once on a session switch, with no clear', async () => {
+    // Arrange — a live stream that will never answer this device's last edit.
+    const daemonSide = new FakeDaemon();
+    const timers = new ManualTimers();
+    const seen: { hook?: SharedDraft; switchTo?: (id: string) => void; type?: (text: string) => void } = {};
+    const Composer = () => {
+      const [sessionId, setSession] = useState('sess one');
+      const [draft, setDraft] = useState('');
+      const scope = useMemo(() => daemonSessionScope(daemon, sessionId), [sessionId]);
+      Object.assign(seen, { switchTo: setSession, type: setDraft });
+      seen.hook = useSharedDraft({
+        daemon,
+        scope,
+        text: draft,
+        setText: setDraft,
+        open: daemonSide.open,
+        timers,
+        ids: fixedId,
+        restoreStore: new DaemonDraftStore(new MemoryStorage(), 'r'),
+      });
+      return null;
+    };
+    const root = render(<Composer />);
+    await settle();
+    (daemonSide.streams[0] as FakeStream).alive = false;
+    run(() => seen.type?.('typed, never answered'));
+    await settle();
+    const hook = seen.hook as SharedDraft;
+    const mark = hook.markSend();
+    let result: SharedDraftSent | undefined | 'pending' = 'pending';
+    const waiting = (async () => {
+      result = await hook.sendClear(mark);
+    })();
+    await settle();
+    expect(result).toBe('pending');
+
+    // Act — the person moves to another session; no time passes.
+    run(() => seen.switchTo?.('sess A'));
+    await runAsync(async () => await waiting);
+
+    // Assert
+    expect(result).toBeUndefined();
+    run(() => root.unmount());
+  });
+
+  test('N2: a second set of words waiting to be restored never costs the first, however long, across a reload', async () => {
+    // Arrange — two conflicts, long enough together to pass one draft's bound.
+    const daemonSide = new FakeDaemon();
+    daemonSide.text = 'server';
+    daemonSide.history.push({ op: ['server'] });
+    const storage = { phone: new DaemonDraftStore(new MemoryStorage(), 'restore') };
+    const first = mountDevices(daemonSide, { phone: 'a'.repeat(9_000) }, { restore: storage });
+    await settle();
+    first.unmount();
+    const second = mountDevices(daemonSide, { phone: 'b'.repeat(8_000) }, { restore: storage });
+    await settle();
+    second.unmount();
+
+    // Act — the page comes back.
+    const third = mountDevices(daemonSide, { phone: 'server' }, { restore: storage });
+    await settle();
+
+    // Assert — both still offered.
+    expect(third.hooks.phone?.conflict).toBe(`${'a'.repeat(9_000)}\n${'b'.repeat(8_000)}`);
+    third.unmount();
   });
 });

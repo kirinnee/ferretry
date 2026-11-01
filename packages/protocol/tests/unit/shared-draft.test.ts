@@ -273,6 +273,11 @@ describe('shared draft schemas', () => {
       },
       { name: 'an unknown frame', schema: draft.SharedDraftClientFrameSchema, value: { kind: 'snapshot' } },
       { name: 'an empty part', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'snapshot-text', text: '' } },
+      {
+        name: 'an edit id holding a NUL',
+        schema: draft.SharedDraftClientFrameSchema,
+        value: { kind: 'edit', id: 'a\u0000b', edit: { generation: 'g', epoch: 0, base: 0 } },
+      },
       { name: 'no parts', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'snapshot', snapshot, more: 0 } },
     ]);
   });

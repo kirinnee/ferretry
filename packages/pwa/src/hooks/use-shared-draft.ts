@@ -15,6 +15,7 @@
 import {
   applyTextOp,
   diffToTextOp,
+  textOpBaseLength,
   SHARED_DRAFT_STREAM_RESYNC_CLOSE,
   type SharedDraftClientFrame,
   type SharedDraftSent,
@@ -61,9 +62,42 @@ export interface SharedDraftPeer {
 /** One press of send, as `useSharedDraft` remembers it. Opaque to the composer. */
 export interface SharedDraftSendMark {
   readonly scope: string;
-  /** For the send request: the position the press saw, and the edit that takes its words out there. */
-  readonly sharedDraft?: SharedDraftSent;
 }
+
+/** How long a send waits for this device's last keystroke to be answered, to carry its clear. Never longer. */
+const SHARED_DRAFT_SEND_CLEAR_WAIT_MS = 1_000;
+
+/** Separate copies of words waiting to be restored, per session: each one a whole draft at most. */
+const RESTORE_COPIES = 5;
+const restoreScope = (scope: DaemonSessionScope, index: number): DaemonSessionScope => ({
+  ...scope,
+  sessionId: `${scope.sessionId}\u0000restore-${index}`,
+});
+const loadRestore = (store: Pick<DaemonDraftStore, 'load'>, scope: DaemonSessionScope): string[] =>
+  Array.from({ length: RESTORE_COPIES }, (_, index) => store.load(restoreScope(scope, index))).filter(
+    words => words !== '',
+  );
+const clearRestore = (store: Pick<DaemonDraftStore, 'clear'>, scope: DaemonSessionScope): void => {
+  for (let index = 0; index < RESTORE_COPIES; index += 1) store.clear(restoreScope(scope, index));
+};
+/**
+ * Keeps `words` as one more copy, never by growing an existing one: a copy is bounded like a draft, and a
+ * store that drops an oversized entry would drop the words already kept. Past {@link RESTORE_COPIES} the
+ * oldest goes.
+ */
+const keepRestore = (
+  store: Pick<DaemonDraftStore, 'load' | 'save' | 'clear'>,
+  scope: DaemonSessionScope,
+  words: string,
+): string[] => {
+  const copies = loadRestore(store, scope);
+  if (copies.includes(words)) return copies;
+  const next = [...copies, words].slice(-RESTORE_COPIES);
+  clearRestore(store, scope);
+  for (const [index, copy] of next.entries()) store.save(restoreScope(scope, index), copy);
+  return next;
+};
+const joinRestore = (copies: readonly string[]): string | null => (copies.length === 0 ? null : copies.join('\n'));
 
 /** Timers and the clock, injected so a test drives them. */
 export interface SharedDraftTimers {
@@ -105,12 +139,18 @@ export interface SharedDraft {
   readonly conflict: string | null;
   readonly restoreConflict: () => void;
   readonly dismissConflict: () => void;
-  /**
-   * The person pressed send: remembers what is being sent, and answers what the send should carry so the
-   * daemon can take it out of the draft once it lands (absent while this device has edits unanswered, or
-   * no stream yet: then only {@link sent} clears it).
-   */
+  /** The person pressed send: remembers what is being sent, against everything typed until it lands. */
   readonly markSend: () => SharedDraftSendMark;
+  /**
+   * What the send should carry so the daemon takes its words out once it lands. Waits — at most `waitMs`,
+   * and never across a session switch — for this device's last edit to be answered, since a clear "at
+   * revision n" must name exactly the words the person sees; answers nothing when it cannot, and the send
+   * goes without it, unblocked.
+   */
+  readonly sendClear: (
+    mark: SharedDraftSendMark,
+    waitMs?: number,
+  ) => SharedDraftSent | undefined | Promise<SharedDraftSent | undefined>;
   /**
    * The marked send went: takes EXACTLY its words out — not whatever the box holds now, which may be words
    * typed since, here or on another device — and answers the text left. `null` when the composer has moved
@@ -170,15 +210,32 @@ export function useSharedDraft({
    * since the press — here or on another device — so that when the send lands it removes those words and
    * nothing typed after them.
    */
-  const marked = useRef<{ mark: SharedDraftSendMark; op: TextOp } | null>(null);
+  const marked = useRef<{
+    readonly mark: SharedDraftSendMark;
+    /** `undefined` once it could not follow the text (a snapshot replaced it): the words are then not known. */
+    readonly op: TextOp | undefined;
+    /** The words as they were at the press. */
+    readonly text: string;
+    /** Whether the send carried its own clear, which the daemon applies. */
+    carried: boolean;
+  } | null>(null);
+  /** Moves the mark past one change. Total: a change it cannot follow loses the words, never throws. */
   const carry = useCallback((change: TextOp): void => {
     const current = marked.current;
-    if (current !== null) marked.current = { ...current, op: transformTextOps(change, current.op)[1] };
+    if (current === null || current.op === undefined) return;
+    // Two edits of the same text always transform; anything else means the words can no longer be followed.
+    const same = textOpBaseLength(change) === textOpBaseLength(current.op);
+    marked.current = { ...current, op: same ? transformTextOps(change, current.op)[1] : undefined };
   }, []);
+  /** Edits answered, and everything waiting for that. */
+  const settled = useRef(new Set<() => void>());
 
   const run = useCallback(
-    (step: SharedDraftStep): void => {
+    (step: SharedDraftStep, local = false): void => {
       if (step.remote !== undefined) carry(step.remote);
+      // The text replaced wholesale (a snapshot): no edit says how the marked words moved, so they are lost.
+      else if (!local && step.state.text !== state.current.text && marked.current !== null)
+        marked.current = { ...marked.current, op: undefined };
       state.current = step.state;
       for (const frame of step.send) {
         if (link.current === null) queued.current.push(frame);
@@ -187,10 +244,7 @@ export function useSharedDraft({
       if (step.conflict !== undefined) {
         // Kept apart from the draft BEFORE the draft is replaced, and added to anything already waiting —
         // a second conflict never costs the words of the first.
-        const waiting = restoreNow.current.load(scopeObjectNow.current);
-        const words = waiting === '' || waiting === step.conflict ? step.conflict : `${waiting}\n${step.conflict}`;
-        restoreNow.current.save(scopeObjectNow.current, words);
-        setConflict(words);
+        setConflict(joinRestore(keepRestore(restoreNow.current, scopeObjectNow.current, step.conflict)));
       }
       if (step.state.text !== textNow.current) {
         textNow.current = step.state.text;
@@ -199,6 +253,8 @@ export function useSharedDraft({
       }
       // A refusal: start again from the whole draft. Closing schedules the reconnect.
       if (step.resync === true) link.current?.close();
+      if (step.state.inflight === undefined && step.state.buffer === undefined)
+        for (const listener of [...settled.current]) listener();
     },
     [carry],
   );
@@ -207,9 +263,12 @@ export function useSharedDraft({
   useEffect(() => {
     if (!enabled) return;
     state.current = initialSharedDraftState(textNow.current);
+    // A send pressed in the session before is not this session's: its mark goes with it, and a send
+    // waiting to name its clear stops waiting now.
+    marked.current = null;
+    for (const listener of [...settled.current]) listener();
     // Words still waiting from an earlier visit, a reload, or another session's switch come back with it.
-    const waiting = restoreNow.current.load(scope);
-    setConflict(waiting === '' ? null : waiting);
+    setConflict(joinRestore(loadRestore(restoreNow.current, scope)));
     let stopped = false;
     let attempt = 0;
     let cancelRetry: (() => void) | undefined;
@@ -313,7 +372,7 @@ export function useSharedDraft({
   useEffect(() => {
     if (!enabled || text === state.current.text) return;
     carry(diffToTextOp(state.current.text, text));
-    run(applyLocalText(state.current, text, ids));
+    run(applyLocalText(state.current, text, ids), true);
     const now = timers.now();
     if (now - typingReported.current >= SHARED_DRAFT_TYPING_REPORT_MS) {
       typingReported.current = now;
@@ -329,31 +388,66 @@ export function useSharedDraft({
 
   const markSend = useCallback((): SharedDraftSendMark => {
     const current = state.current;
-    const op = diffToTextOp(current.text, '');
-    // The send can carry its clear only when this copy and the daemon agree on every word: with an edit
-    // still unanswered, a clear "at revision n" would not be the words the person sees.
-    const exact =
-      enabled &&
-      current.position !== undefined &&
-      current.inflight === undefined &&
-      current.buffer === undefined &&
-      !current.resyncing;
-    const mark: SharedDraftSendMark = {
-      scope: scopeKey,
-      ...(exact && current.position !== undefined
-        ? {
-            sharedDraft: {
-              generation: current.position.generation,
-              epoch: current.position.epoch,
-              base: current.position.rev,
-              text: op,
-            },
-          }
-        : {}),
-    };
-    marked.current = { mark, op };
+    const mark: SharedDraftSendMark = { scope: scopeNow.current };
+    marked.current = { mark, op: diffToTextOp(current.text, ''), text: current.text, carried: false };
     return mark;
-  }, [enabled, scopeKey]);
+  }, []);
+
+  const sendClear = useCallback(
+    (
+      mark: SharedDraftSendMark,
+      waitMs: number = SHARED_DRAFT_SEND_CLEAR_WAIT_MS,
+    ): SharedDraftSent | undefined | Promise<SharedDraftSent | undefined> => {
+      /** The clear, if it can be named exactly now: same session, mark still followed, nothing unanswered. */
+      const exact = (): SharedDraftSent | undefined => {
+        const ours = marked.current;
+        const current = state.current;
+        if (!enabled || ours?.mark !== mark || ours.op === undefined || mark.scope !== scopeNow.current)
+          return undefined;
+        if (current.position === undefined || current.inflight !== undefined || current.buffer !== undefined)
+          return undefined;
+        if (current.resyncing) return undefined;
+        ours.carried = true;
+        return {
+          generation: current.position.generation,
+          epoch: current.position.epoch,
+          base: current.position.rev,
+          text: ours.op,
+        };
+      };
+      const now = exact();
+      if (now !== undefined || !enabled) return now;
+      // Answered at once, not on a later tick, whenever there is nothing to wait for.
+      // Worth waiting for only an answer that is on its way: an edit in flight on a live stream. With no
+      // stream, or nothing sent, there is nothing to wait for and the send goes now.
+      const current = state.current;
+      const answering =
+        link.current !== null &&
+        current.position !== undefined &&
+        !current.resyncing &&
+        (current.inflight !== undefined || current.buffer !== undefined);
+      if (!answering) return undefined;
+      return new Promise<SharedDraftSent | undefined>(resolve => {
+        let cancel: (() => void) | undefined;
+        const done = (value: SharedDraftSent | undefined): void => {
+          settled.current.delete(listener);
+          cancel?.();
+          resolve(value);
+        };
+        const listener = (): void => {
+          // A session switch, or the mark gone, ends the wait at once: it is not this session's to clear.
+          if (marked.current?.mark !== mark || mark.scope !== scopeNow.current) done(undefined);
+          else {
+            const ready = exact();
+            if (ready !== undefined) done(ready);
+          }
+        };
+        settled.current.add(listener);
+        cancel = timers.after(waitMs, () => done(undefined));
+      });
+    },
+    [enabled, timers],
+  );
 
   const abandonSend = useCallback((mark: SharedDraftSendMark): void => {
     if (marked.current?.mark === mark) marked.current = null;
@@ -362,14 +456,21 @@ export function useSharedDraft({
   const sent = useCallback(
     (mark: SharedDraftSendMark, requestId?: string): string | null => {
       const current = marked.current;
-      if (current?.mark === mark) marked.current = null;
+      const ours = current?.mark === mark ? current : undefined;
+      if (ours !== undefined) marked.current = null;
       // The composer moved on: this send's session is not the one showing, and neither is its draft.
       if (mark.scope !== scopeNow.current) return null;
-      const left = current?.mark === mark ? applyTextOp(state.current.text, current.op) : '';
-      if (!enabled) return left;
+      const now = state.current.text;
+      // Exactly the sent words, when they are still known. When they are not — the text was replaced
+      // wholesale since — nothing is invented: a send that carried its clear has the daemon remove them, and
+      // otherwise only a box still holding exactly what was sent is emptied.
+      const known = ours?.op !== undefined && textOpBaseLength(ours.op) === now.length ? ours.op : undefined;
+      const exactlySent = ours !== undefined && !ours.carried && now === ours.text;
+      const left = known !== undefined ? applyTextOp(now, known) : exactlySent ? '' : now;
+      if (!enabled || left === now) return left;
       stopTyping.current?.();
       // Under the send's own id when it goes at once, so the daemon takes it for the same edit the send carried.
-      run(applyLocalText(state.current, left, requestId === undefined ? ids : () => requestId, true));
+      run(applyLocalText(state.current, left, requestId === undefined ? ids : () => requestId, true), true);
       link.current?.send({ kind: 'presence', typing: false });
       return left;
     },
@@ -379,14 +480,14 @@ export function useSharedDraft({
   const restoreConflict = useCallback((): void => {
     const words = conflict;
     if (words === null) return;
-    restoreNow.current.clear(scopeObjectNow.current);
+    clearRestore(restoreNow.current, scopeObjectNow.current);
     setConflict(null);
     const current = textNow.current;
     // Added to what is there, never in place of it: what is there is somebody's too.
     callbacks.current.setText(current.trim() === '' ? words : `${current}\n${words}`);
   }, [conflict]);
   const dismissConflict = useCallback((): void => {
-    restoreNow.current.clear(scopeObjectNow.current);
+    clearRestore(restoreNow.current, scopeObjectNow.current);
     setConflict(null);
   }, []);
 
@@ -394,7 +495,7 @@ export function useSharedDraft({
   const now = timers.now();
   const typing = [...peers.values()].filter(peer => peer.typing && now - peer.seenAt < SHARED_DRAFT_TYPING_SHOWN_MS);
 
-  return { typing, conflict, restoreConflict, dismissConflict, markSend, sent, abandonSend, live };
+  return { typing, conflict, restoreConflict, dismissConflict, markSend, sendClear, sent, abandonSend, live };
 }
 
 /** "also typing on Kirin's iPhone", "… on Kirin's iPhone and Desktop": the hint's words, or nothing. */

@@ -518,6 +518,16 @@ const PeerLabelSchema = z
   .regex(/^[^\r\n]*$/u, 'a device label is one line');
 
 /**
+ * The id a composer gives its edit. Never a NUL: the daemon joins author, stream and id with one, and an id
+ * holding it could not be read back — the composer would never recognise its own answer.
+ */
+const EditIdSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine(value => !value.includes('\u0000'), 'an edit id holds no NUL');
+
+/**
  * What a composer sends up its stream.
  *
  * - `edit` — one edit, tagged with an id the daemon's answer echoes, so the composer knows which of its
@@ -526,7 +536,7 @@ const PeerLabelSchema = z
  *   sequenced, and never shown back to the composer that sent it.
  */
 export const SharedDraftClientFrameSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('edit'), id: z.string().min(1).max(64), edit: SharedDraftEditSchema }),
+  z.strictObject({ kind: z.literal('edit'), id: EditIdSchema, edit: SharedDraftEditSchema }),
   z.strictObject({ kind: z.literal('presence'), typing: z.boolean(), selection: SelectionSchema.optional() }),
 ]);
 export type SharedDraftClientFrame = z.infer<typeof SharedDraftClientFrameSchema>;
@@ -558,7 +568,7 @@ export const SharedDraftServerFrameSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('snapshot-text'), text: z.string().min(1).max(SHARED_DRAFT_MAX_CHARS) }),
   z.strictObject({
     kind: z.literal('edit'),
-    id: z.string().min(1).max(64).optional(),
+    id: EditIdSchema.optional(),
     applied: SharedDraftEditResultSchema.shape.applied,
     epoch: NonNegativeIntegerSchema,
     rev: NonNegativeIntegerSchema,
@@ -566,14 +576,14 @@ export const SharedDraftServerFrameSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('ready') }),
   z.strictObject({
     kind: z.literal('ack'),
-    id: z.string().min(1).max(64),
+    id: EditIdSchema,
     applied: SharedDraftEditResultSchema.shape.applied,
     epoch: NonNegativeIntegerSchema,
     rev: NonNegativeIntegerSchema,
   }),
   z.strictObject({
     kind: z.literal('error'),
-    id: z.string().min(1).max(64),
+    id: EditIdSchema,
     code: z.string().min(1).max(64),
     message: z.string().max(1_000),
   }),
