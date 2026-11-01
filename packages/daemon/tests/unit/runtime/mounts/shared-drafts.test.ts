@@ -1,17 +1,19 @@
 import { describe, it } from 'bun:test';
 import { SHARED_DRAFT_MAX_CHARS } from '@ferretry/protocol';
 import should from 'should';
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
+import { type CapabilityGuard, NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
+import { sessionSendRoutes } from '../../../../src/lib/runtime/mounts/session-send.ts';
 import { ApiDispatcher, type ApiResponse, ApiRouter, ApiSocketDispatcher } from '../../../../src/lib/api/index.ts';
-import { SharedDraftPresence } from '../../../../src/lib/shared-drafts/index.ts';
+import { SharedDraftPresence, sharedDraftOrigin } from '../../../../src/lib/shared-drafts/index.ts';
 import {
   assertDraftOwner,
   SHARED_DRAFT_MAX_BODY_BYTES,
+  sentDraftClearer,
   sharedDraftRoutes,
   sharedDraftSocketRoutes,
 } from '../../../../src/lib/runtime/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { AT, agentIn, CREDENTIALS, human, sharedDraftService } from './support.ts';
+import { AT, agentIn, CREDENTIALS, FakeSessionSend, human, sharedDraftService } from './support.ts';
 
 const DEVICE = { deviceId: `fy_device_id_${'d'.repeat(22)}`, appSession: 'app-one' } as const;
 const MEMBER = { memberId: 'mbr_x', keyId: 'mk_x', appSession: 'app-one', sessionId: 'relay-1' } as const;
@@ -371,5 +373,84 @@ describe('shared draft stream route', () => {
       'another device',
       'this computer',
     ]);
+  });
+});
+
+describe('sentDraftClearer (&F331 H1)', () => {
+  it("takes out exactly what was sent, keeps words typed since, and only for the owner's own sends", async () => {
+    // Arrange — "hello" at revision 1; the person sends it; another device then adds " world".
+    const drafts = sharedDraftService(['s1']);
+    await drafts.edit('s1', { generation: 'gen-1', epoch: 0, base: 0, text: ['hello'] });
+    await drafts.edit('s1', { generation: 'gen-1', epoch: 0, base: 1, text: [5, ' world'] });
+    const clear = sentDraftClearer(drafts);
+    const sent = { generation: 'gen-1', epoch: 0, base: 1, text: [-5] };
+
+    // Act — a ferret's send is ignored; the owner's takes out "hello" only, once however often.
+    await clear('s1', 'peer:s1', 'req-1', sent);
+    await clear('s1', undefined, 'req-1', sent);
+    should((await drafts.read('s1')).text).equal('hello world');
+    await clear('s1', 'device:phone', 'req-1', sent);
+    await clear('s1', 'device:phone', 'req-1', sent);
+
+    // Assert
+    should(await drafts.read('s1')).match({ text: ' world', epoch: 0 });
+  });
+
+  it('is the same edit as the composer clearing it on its stream: whichever lands first, it applies once', async () => {
+    const drafts = sharedDraftService(['s1']);
+    await drafts.edit('s1', { generation: 'gen-1', epoch: 0, base: 0, text: ['sent'] });
+    // The composer's stream clear lands first, under the send's request id.
+    await drafts.edit(
+      's1',
+      { generation: 'gen-1', epoch: 0, base: 1, text: [-4], sent: true },
+      sharedDraftOrigin('device:phone', 'stream-7', 'req-9'),
+    );
+    const after = await drafts.read('s1');
+    should(after).match({ text: '', epoch: 1 });
+
+    // Then the send's own copy arrives: a repeat of the stream's, or a draft already moved on — never a second clear.
+    await sentDraftClearer(drafts)('s1', 'device:phone', 'req-9', {
+      generation: 'gen-1',
+      epoch: 0,
+      base: 1,
+      text: [-4],
+    }).catch(() => undefined);
+    should(await drafts.read('s1')).match({ text: '', epoch: 1, rev: 0 });
+  });
+});
+
+describe('shared drafts are ungoverned by grants, like sends (docs/grants.md, deliberately)', () => {
+  /** A guard that refuses every demand it is asked: a device whose grants deny everything. */
+  const denyEverything: CapabilityGuard = {
+    decide: () => ({ allowed: false, refusal: 'denied' }),
+    governance: () => ({ governed: true, decide: () => ({ allowed: false, refusal: 'denied' }) }),
+  } as unknown as CapabilityGuard;
+  const DEVICE_ID = `fy_device_id_${'g'.repeat(22)}`;
+  const device = { deviceId: DEVICE_ID, appSession: 'app-one' } as const;
+
+  it('declares no capability on the draft routes or the stream, the same as the send route', () => {
+    const drafts = sharedDraftService(['s1']);
+    const routes = [
+      ...sharedDraftRoutes(drafts),
+      ...sharedDraftSocketRoutes(drafts, {
+        presence: new SharedDraftPresence(),
+        deviceName: async () => undefined,
+        nextPeer: () => 'p',
+        clock: { nowMs: () => 0 },
+      }),
+    ];
+    should(routes.map(route => route.capability)).deepEqual([undefined, undefined, undefined]);
+    should(
+      sessionSendRoutes(new FakeSessionSend()).find(route => route.path.endsWith('/send'))?.capability,
+    ).be.undefined();
+  });
+
+  it('serves a paired device whose grants deny everything, on direct and relayed arrival alike', async () => {
+    const drafts = sharedDraftService(['s1']);
+    const dispatcher = new ApiDispatcher(new ApiRouter([...sharedDraftRoutes(drafts)]), CREDENTIALS, denyEverything);
+    for (const loopback of [true, false]) {
+      const read = await dispatcher.dispatch(request({ path: PATH, device, loopback }));
+      should(read.status).equal(200);
+    }
   });
 });

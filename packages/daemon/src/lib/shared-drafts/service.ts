@@ -60,6 +60,8 @@ import {
 export const SHARED_DRAFT_WRITE_DELAY_MS = 1_000;
 /** The longest a write that keeps failing waits between attempts: each failure doubles the wait up to this. */
 export const SHARED_DRAFT_WRITE_RETRY_MAX_MS = 60_000;
+/** Edits one draft takes in a second, from every device together. */
+export const SHARED_DRAFT_EDITS_PER_SECOND = 60;
 /** Drafts held in memory at once; the least recently used is written down and let go. */
 export const SHARED_DRAFT_MEMORY_LIMIT = 50;
 /**
@@ -85,17 +87,27 @@ export interface SharedDraftChange {
 
 export type SharedDraftListener = (change: SharedDraftChange) => void;
 
+/** An edit's answer; `repeatOf` when it was a repeat, answered by the edit it repeats instead of applied again. */
+export type SharedDraftEditOutcome = SharedDraftEditResult & { readonly repeatOf?: SharedDraftChange };
+
 const ORIGIN_SEPARATOR = '\u0000';
 
-/** The origin a stream's edit travels under: which stream sent it, and the id its composer gave it. */
-export const sharedDraftOrigin = (stream: string, editId: string): string => `${stream}${ORIGIN_SEPARATOR}${editId}`;
+/**
+ * The origin a stream's edit travels under: WHO sent it (the caller the boundary authenticated — a device,
+ * or the owner's shell), which stream, and the id its composer gave it. A repeated edit is recognised by
+ * author and id together, so an id another device happens to choose can never stand in for this one's.
+ */
+export const sharedDraftOrigin = (author: string, stream: string, editId: string): string =>
+  [author, stream, editId].join(ORIGIN_SEPARATOR);
 
-/** The two halves of an origin, when it has them. */
+/** The three parts of an origin, when it has them. */
 export const splitSharedDraftOrigin = (
   origin: string | undefined,
-): { readonly stream: string; readonly editId: string } | undefined => {
-  const at = origin?.indexOf(ORIGIN_SEPARATOR) ?? -1;
-  return origin === undefined || at === -1 ? undefined : { stream: origin.slice(0, at), editId: origin.slice(at + 1) };
+): { readonly author: string; readonly stream: string; readonly editId: string } | undefined => {
+  const parts = origin?.split(ORIGIN_SEPARATOR);
+  if (parts === undefined || parts.length !== 3) return undefined;
+  const [author, stream, editId] = parts as [string, string, string];
+  return { author, stream, editId };
 };
 
 interface LiveDraft {
@@ -113,6 +125,8 @@ interface LiveDraft {
   dirty: boolean;
   /** Writes in a row that failed; each one doubles the wait before the next attempt. */
   failures: number;
+  /** Edits taken in the current one-second window. */
+  window: { startedAt: number; count: number };
   timer?: { cancel(): void };
 }
 
@@ -159,6 +173,7 @@ export class SharedDraftService {
     private readonly scheduler: SharedDraftScheduler,
     private readonly generations: SharedDraftGenerationSource,
     private readonly memoryLimit: number = SHARED_DRAFT_MEMORY_LIMIT,
+    private readonly editsPerSecond: number = SHARED_DRAFT_EDITS_PER_SECOND,
   ) {}
 
   /** The draft as it stands now; an empty one for a session nobody has typed into. */
@@ -203,19 +218,33 @@ export class SharedDraftService {
   }
 
   /** Sequences one edit and answers with it as applied, and the draft after it. */
-  async edit(sessionId: string, edit: SharedDraftEdit, origin?: string): Promise<SharedDraftEditResult> {
+  async edit(sessionId: string, edit: SharedDraftEdit, origin?: string): Promise<SharedDraftEditOutcome> {
     return await this.#holding(sessionId, live => this.#apply(sessionId, live, edit, origin));
   }
 
-  #apply(sessionId: string, live: LiveDraft, edit: SharedDraftEdit, origin: string | undefined): SharedDraftEditResult {
+  #apply(
+    sessionId: string,
+    live: LiveDraft,
+    edit: SharedDraftEdit,
+    origin: string | undefined,
+  ): SharedDraftEditOutcome {
     const current = live.snapshot;
     // The same edit twice — sent again by a composer that reconnected before it heard the first landed —
     // is answered by the first and applied once. The composer already heard the first one, by its id.
-    const editId = splitSharedDraftOrigin(origin)?.editId;
-    if (editId !== undefined && edit.generation === current.generation) {
-      const first = live.history.find(change => splitSharedDraftOrigin(change.origin)?.editId === editId);
-      if (first !== undefined) return { applied: first.applied, snapshot: current };
+    const from = splitSharedDraftOrigin(origin);
+    if (from !== undefined && edit.generation === current.generation) {
+      const first = live.history.find(change => {
+        const earlier = splitSharedDraftOrigin(change.origin);
+        return earlier?.author === from.author && earlier.editId === from.editId;
+      });
+      if (first !== undefined) return { applied: first.applied, snapshot: current, repeatOf: first };
     }
+    // Typing is a few edits a second; past this the caller is not typing, and the draft is not its to flood.
+    const now = Date.parse(this.clock.now());
+    if (now - live.window.startedAt >= 1_000) live.window = { startedAt: now, count: 0 };
+    live.window.count += 1;
+    if (live.window.count > this.editsPerSecond)
+      throw new SharedDraftError('rate-limited', `a draft takes at most ${this.editsPerSecond} edits a second`);
     if (edit.generation !== current.generation)
       throw new SharedDraftError(
         'stale',
@@ -417,6 +446,7 @@ export class SharedDraftService {
       historyStart: snapshot.rev,
       dirty: false,
       failures: 0,
+      window: { startedAt: Number.NEGATIVE_INFINITY, count: 0 },
     };
     this.#live.set(sessionId, live);
     // Trimmed: the file shrinks too, so the next load has nothing to trim.

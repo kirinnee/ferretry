@@ -224,12 +224,20 @@ const fromSnapshot = (
   const fresh: SharedDraftSyncState = { text: snapshot.text, position, resyncing: false };
   const mine = state.text;
   if (mine === snapshot.text) return { state: fresh, send: [] };
-  // First contact, nothing on the daemon yet: what this device was already holding becomes the draft.
-  if (state.position === undefined && snapshot.text === '' && !state.resyncing) {
+  // First contact with a draft NOBODY HAS EVER TOUCHED (epoch 0, revision 0): what this device was
+  // already holding — a draft from before drafts were shared — becomes the draft. An empty draft that has
+  // been used is not that: it may be empty because its words were SENT, and this device's cached copy of
+  // them must never seed the next message on its own.
+  const untouched = snapshot.epoch === 0 && snapshot.rev === 0 && snapshot.text === '';
+  if (state.position === undefined && untouched && !state.resyncing) {
     const step = launch(fresh, { op: diffToTextOp('', mine), sent: false }, ids);
     return { state: { ...step.state, text: mine }, send: step.send };
   }
   if (mine.trim() === '') return { state: fresh, send: [] };
+  // A copy that was in step and had nothing unanswered simply missed what happened elsewhere — a send
+  // from another device, most often: the draft as it now stands is taken, and nothing is offered back.
+  const unanswered = state.inflight !== undefined || state.buffer !== undefined || state.resyncing;
+  if (state.position !== undefined && !unanswered) return { state: fresh, send: [] };
   return { state: fresh, send: [], conflict: mine };
 };
 

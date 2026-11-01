@@ -94,6 +94,7 @@ const ERROR_CODES: Readonly<Record<SharedDraftErrorCode, string>> = {
   'too-long': SHARED_DRAFT_ERROR_CODES.tooLong,
   'too-many-items': SHARED_DRAFT_ERROR_CODES.tooManyItems,
   invalid: SHARED_DRAFT_ERROR_CODES.invalid,
+  'rate-limited': SHARED_DRAFT_ERROR_CODES.rateLimited,
 };
 
 /** What one composer last said about its caret, kept so a composer that opens later sees it at once. */
@@ -158,6 +159,8 @@ export interface SharedDraftStreamTarget {
   readonly peer: string;
   /** The device this composer runs on, as the owner named it when pairing. */
   readonly device: string;
+  /** Who is on the other end, as the boundary authenticated it: what a repeated edit is matched on. */
+  readonly author: string;
   /** Where the composer's copy stood when it last had a stream, so only what it missed is sent. */
   readonly position?: { readonly generation: string; readonly epoch: number; readonly rev: number };
 }
@@ -225,6 +228,9 @@ export class SharedDraftStreamHandler implements SocketHandler {
     }
     if (this.#closed) return;
     this.#leave = this.presence.join(sessionId, peer, this.target.device, frame => this.#send(frame));
+    // Joining hands over the others' presence at once; a send that failed there closed this stream
+    // before `#leave` existed, so it leaves now rather than staying a member nobody removes.
+    if (this.#closed) this.#leave();
   }
 
   fromClient(frame: SocketFrame): void {
@@ -238,12 +244,22 @@ export class SharedDraftStreamHandler implements SocketHandler {
       this.#presence(parsed);
       return;
     }
-    const origin = sharedDraftOrigin(this.target.peer, parsed.id);
-    this.drafts.edit(this.target.sessionId, parsed.edit, origin).catch((error: unknown) => {
-      if (error instanceof SharedDraftError)
-        this.#send({ kind: 'error', id: parsed.id, code: ERROR_CODES[error.code], message: error.message });
-      else this.#fail(SHARED_DRAFT_STREAM_CLOSES.unavailable);
-    });
+    const origin = sharedDraftOrigin(this.target.author, this.target.peer, parsed.id);
+    this.drafts.edit(this.target.sessionId, parsed.edit, origin).then(
+      outcome => {
+        // A repeat applies nothing and notifies nobody, so it is answered here: with the edit it repeats,
+        // where that edit left the draft. A composer that already heard it ignores an answer it is not
+        // waiting for; one that had not hears its edit answered — never left waiting.
+        const first = outcome.repeatOf;
+        if (first !== undefined)
+          this.#send({ kind: 'ack', id: parsed.id, applied: first.applied, epoch: first.epoch, rev: first.rev });
+      },
+      (error: unknown) => {
+        if (error instanceof SharedDraftError)
+          this.#send({ kind: 'error', id: parsed.id, code: ERROR_CODES[error.code], message: error.message });
+        else this.#fail(SHARED_DRAFT_STREAM_CLOSES.unavailable);
+      },
+    );
   }
 
   close(): void {

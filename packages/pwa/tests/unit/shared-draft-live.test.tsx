@@ -12,12 +12,14 @@ import {
 import { useMemo, useState } from 'react';
 import {
   type SharedDraft,
+  type SharedDraftSendMark,
   type SharedDraftTimers,
   sharedDraftTypingHint,
   useSharedDraft,
 } from '../../src/hooks/use-shared-draft.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { DaemonDraftStore } from '../../src/lib/drafts.ts';
 import type { DaemonStreamOpener } from '../../src/lib/event-transport.ts';
 import type { RelayStreamRequest } from '../../src/lib/relay-carrier.ts';
 import type { RelayClientSession } from '../../src/lib/relay-session.ts';
@@ -46,6 +48,7 @@ interface FakeStream {
  */
 class FakeDaemon {
   text = '';
+  epoch = 0;
   readonly history: { op: TextOp; id?: string }[] = [];
   readonly streams: FakeStream[] = [];
   devices: string[] = [];
@@ -81,7 +84,7 @@ class FakeDaemon {
           v: 1,
           sessionId: 'sess one',
           generation: G,
-          epoch: 0,
+          epoch: this.epoch,
           rev: this.history.length,
           text: this.text,
           items: [],
@@ -146,6 +149,17 @@ class FakeDaemon {
   }
 }
 
+/** One device's browser storage. */
+class MemoryStorage {
+  readonly values = new Map<string, string>();
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+  setItem(key: string, value: string): void {
+    this.values.set(key, value);
+  }
+}
+
 /** A clock and timers a test moves by hand. */
 class ManualTimers implements SharedDraftTimers {
   clock = 1_000;
@@ -175,9 +189,14 @@ const settle = async (): Promise<void> =>
 const mountDevices = (
   daemonSide: FakeDaemon,
   initial: Readonly<Record<string, string>>,
-  options: { readonly open?: DaemonStreamOpener | null } = {},
+  options: {
+    readonly open?: DaemonStreamOpener | null;
+    /** Each device's own browser storage for words waiting to be restored; fresh ones unless given. */
+    readonly restore?: Readonly<Record<string, DaemonDraftStore>>;
+  } = {},
 ) => {
   const timers = new ManualTimers();
+  const restores: Record<string, DaemonDraftStore> = {};
   const hooks: Record<string, SharedDraft> = {};
   const texts: Record<string, string> = {};
   const setters: Record<string, (text: string) => void> = {};
@@ -185,6 +204,8 @@ const mountDevices = (
   const roots = Object.entries(initial).map(([name, text]) => {
     let id = 0;
     const ids = () => `${name}-${++id}`;
+    const restoreStore = options.restore?.[name] ?? new DaemonDraftStore(new MemoryStorage(), 'restore');
+    restores[name] = restoreStore;
     const Device = () => {
       const [draft, setDraft] = useState(text);
       texts[name] = draft;
@@ -200,12 +221,14 @@ const mountDevices = (
         ...(options.open === null ? {} : { open: options.open ?? daemonSide.open }),
         timers,
         ids,
+        restoreStore,
       });
       return null;
     };
     return render(<Device />);
   });
   return {
+    restores,
     timers,
     hooks,
     texts,
@@ -268,7 +291,10 @@ describe('useSharedDraft', () => {
     devices.type('laptop', 'ship it');
     await settle();
 
-    run(() => devices.hooks.laptop?.sent());
+    run(() => {
+      const hook = devices.hooks.laptop;
+      if (hook !== undefined) hook.sent(hook.markSend());
+    });
     await settle();
 
     expect(devices.texts.phone).toBe('');
@@ -401,7 +427,10 @@ describe('useSharedDraft', () => {
     const devices = mountDevices(new FakeDaemon(), { phone: 'no store' }, { open: null });
     await settle();
     expect(devices.hooks.phone?.live).toBe(false);
-    run(() => devices.hooks.phone?.sent());
+    run(() => {
+      const hook = devices.hooks.phone;
+      if (hook !== undefined) hook.sent(hook.markSend());
+    });
     devices.unmount();
   });
 
@@ -795,5 +824,76 @@ describe('openSharedDraftStream', () => {
         onClosed: () => undefined,
       }),
     ).rejects.toThrow('draft scope must belong to the requested daemon');
+  });
+});
+
+describe('the second review (nathanael) — acceptance', () => {
+  test('1: a send that lands after another device added words takes out only what was sent', async () => {
+    // Arrange — the laptop holds "hello" and presses send; the reply is slow.
+    const daemonSide = new FakeDaemon();
+    const devices = mountDevices(daemonSide, { phone: '', laptop: '' });
+    await settle();
+    devices.type('laptop', 'hello');
+    await settle();
+    let mark: SharedDraftSendMark | undefined;
+    run(() => {
+      mark = devices.hooks.laptop?.markSend();
+    });
+
+    // Act — the phone adds words before the send's answer comes back; then the send completes.
+    devices.type('phone', 'hello unsent addition');
+    await settle();
+    expect(devices.texts.laptop).toBe('hello unsent addition');
+    let left: string | null | undefined;
+    run(() => {
+      if (mark !== undefined) left = devices.hooks.laptop?.sent(mark);
+    });
+    await settle();
+
+    // Assert — only "hello" went; the phone's words stay, everywhere.
+    expect(left).toBe(' unsent addition');
+    expect(daemonSide.text).toBe(' unsent addition');
+    expect(devices.texts.phone).toBe(' unsent addition');
+    expect(mark?.sharedDraft).toMatchObject({ base: 1, text: [-5] });
+    devices.unmount();
+  });
+
+  test('3: a device closed before another device sent never republishes the sent words: they are offered instead', async () => {
+    // Arrange — the daemon's draft was used and sent: epoch 1, empty. The phone's browser still holds the old words.
+    const daemonSide = new FakeDaemon();
+    daemonSide.epoch = 1;
+    const devices = mountDevices(daemonSide, { phone: 'already sent' });
+
+    // Act — the phone opens.
+    await settle();
+
+    // Assert — nothing was published; the old words wait behind "Restore them".
+    expect(daemonSide.text).toBe('');
+    expect(daemonSide.history).toHaveLength(0);
+    expect(devices.texts.phone).toBe('');
+    expect(devices.hooks.phone?.conflict).toBe('already sent');
+    devices.unmount();
+  });
+
+  test('4: words waiting to be restored survive a remount (a reload, a session change), until restored or dismissed', async () => {
+    // Arrange — offline words meet a draft with other words: they wait to be restored.
+    const daemonSide = new FakeDaemon();
+    daemonSide.text = 'canonical server text';
+    daemonSide.history.push({ op: ['canonical server text'] });
+    const storage = { phone: new DaemonDraftStore(new MemoryStorage(), 'restore') };
+    const first = mountDevices(daemonSide, { phone: 'offline unique words' }, { restore: storage });
+    await settle();
+    expect(first.hooks.phone?.conflict).toBe('offline unique words');
+
+    // Act — the page goes away and comes back, as the canonical text.
+    first.unmount();
+    const second = mountDevices(daemonSide, { phone: 'canonical server text' }, { restore: storage });
+    await settle();
+
+    // Assert — still offered; and a second conflict adds to it rather than replacing it.
+    expect(second.hooks.phone?.conflict).toBe('offline unique words');
+    run(() => second.hooks.phone?.dismissConflict());
+    expect(storage.phone.load(daemonSessionScope(daemon, 'sess one'))).toBe('');
+    second.unmount();
   });
 });

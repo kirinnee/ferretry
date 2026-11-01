@@ -24,7 +24,7 @@ import {
 } from '../lib/composer-keybinding.ts';
 import { initialVimState, normalVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import { referencesOf } from '../lib/answer-chip.ts';
 import { useSendOutbox } from '../lib/store.tsx';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
@@ -44,7 +44,7 @@ import type { SttSettings } from '../lib/stt/stt-settings.ts';
 import type { WorkSearchPort } from '../lib/work-search.ts';
 import { addMenuActions, ComposerAddMenu } from './composer-add-menu.tsx';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
-import { sharedDraftTypingHint, useSharedDraft } from '../hooks/use-shared-draft.ts';
+import { type SharedDraftSendMark, sharedDraftTypingHint, useSharedDraft } from '../hooks/use-shared-draft.ts';
 import type { DaemonStreamOpener } from '../lib/event-transport.ts';
 import {
   type ComposerField,
@@ -92,6 +92,10 @@ interface SendFailure {
  * already be with the daemon, and a resend under a new id would apply it twice — the transcript's send
  * row settles that one, retrying under the original id only what it proves absent.
  */
+/** A message that could wait for the connection only in this tab's memory: not sent, and still in the box. */
+export const UNSTORED_SEND_COPY =
+  'Not sent — this device could not keep the message until the connection is back. Your message is still here; send it again once you are connected.';
+
 const sendFailure = (cause: unknown): SendFailure => {
   const delivery = carrierDelivery(cause);
   if (delivery === 'unsent')
@@ -445,6 +449,9 @@ export function Composer({
    * and the effect below then settles the state for every render after it.
    */
   const scopeKey = daemonSessionKey(scope);
+  /** The session showing now — what a send finishing after a switch is checked against. */
+  const scopeKeyNow = useRef(scopeKey);
+  scopeKeyNow.current = scopeKey;
   const [draftState, setDraftState] = useState(() => ({ key: scopeKey, text: draftStore.load(scope) }));
   const draft = draftState.key === scopeKey ? draftState.text : draftStore.load(scope);
   const setDraft = useCallback((text: string) => setDraftState({ key: daemonSessionKey(scope), text }), [scope]);
@@ -791,24 +798,37 @@ export function Composer({
    * queued behind a running turn instead.
    */
   /** Everything a message that reached the agent leaves behind in this composer, cleared. */
-  const finishSent = (): void => {
+  /**
+   * A send went. It may finish long after the press, and the composer may be showing ANOTHER session by
+   * then: that session's text, files and place are not this send's to empty, so only the sent session's
+   * saved draft is let go. Otherwise exactly the sent words leave the draft — on every device — and anything
+   * typed since, here or elsewhere, stays.
+   */
+  const finishSent = (mark: SharedDraftSendMark, sentScope: DaemonSessionScope, requestId?: string): void => {
+    const left = shared.sent(mark, requestId);
+    if (left === null || daemonSessionKey(sentScope) !== scopeKeyNow.current) {
+      draftStore.clear(sentScope);
+      onSent?.();
+      return;
+    }
     setRecalled(false);
     for (const provider of autocompleteProviders) provider.reset?.();
     attachments.clear();
     locating.current += 1;
     setLocation(null);
-    // Emptied on every device, not only this one: the message has gone.
-    shared.sent();
-    setDraft('');
+    setDraft(left);
     // The next message starts as text, not as commands.
     setVim(initialVimState);
-    draftStore.clear(scope);
+    if (left === '') draftStore.clear(sentScope);
     onSent?.();
   };
 
   const submit = async (interrupt = false) => {
     if (!canSubmit || submitLock.current) return;
     submitLock.current = true;
+    // What this press sends, remembered against everything typed before it lands.
+    const mark = shared.markSend();
+    const sentScope = scope;
     setSending(true);
     setError(null);
     setOccupied(null);
@@ -825,13 +845,16 @@ export function Composer({
         message,
         ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
         now: interrupt,
+        // The send itself takes its words out of the shared draft once it lands, composer or not.
+        ...(mark.sharedDraft === undefined ? {} : { sharedDraft: mark.sharedDraft }),
       };
       let sent: { readonly disposition?: unknown } | undefined;
+      let requestId: string | undefined;
       if (outbox === null) {
         sent = (await api.send(sessionId, input)) as typeof sent;
       } else {
         // Saved on this device first; the machine hears of it second. Offline, it stays and goes later.
-        const { entry, outcome } = await outbox.submit(
+        const { entry, outcome, stored } = await outbox.submit(
           {
             daemonId: daemon.daemonId,
             sessionId,
@@ -846,6 +869,7 @@ export function Composer({
             now: interrupt,
             // The "re" chips, kept with the message so a later attempt is still about the same item.
             references: referencesOf(api),
+            ...(mark.sharedDraft === undefined ? {} : { sharedDraft: mark.sharedDraft }),
           },
           { send: (target, body, requestId) => api.send(target, body, requestId) },
         );
@@ -853,12 +877,21 @@ export function Composer({
           await outbox.cancel(entry.id);
           throw outcome.error;
         }
+        // Waiting for the connection, and this device could not store it: it would live only in this tab.
+        // Emptying the draft now — on every device, since it is shared — would leave the words nowhere
+        // that survives the tab, so the message is taken back and the draft kept as it is.
+        if (outcome.kind === 'waiting' && !stored) {
+          await outbox.cancel(entry.id);
+          throw new Error(UNSTORED_SEND_COPY);
+        }
         sent = outcome.kind === 'sent' ? (outcome.result as typeof sent) : undefined;
+        requestId = entry.id;
       }
       // Remembered only while it waits in the agent's queue: ↑ in an empty box brings it back.
       lastQueued.current = isQueuedDisposition(sent?.disposition) ? { key: scopeKey, text: message } : null;
-      finishSent();
+      finishSent(mark, sentScope, requestId);
     } catch (cause) {
+      shared.abandonSend(mark);
       const held = occupiedDraftOf(cause);
       const typed = unconfirmedSendOf(cause);
       // Typed but never shown: the person's text, files and location stay exactly as they were, so the
@@ -919,6 +952,9 @@ export function Composer({
     if (pending === null || unconfirmedLock.current) return;
     unconfirmedLock.current = true;
     setUnconfirmed({ sendId: pending.sendId, busy: true });
+    // The words in the box are this send's: what they are at the tap is what leaves the draft.
+    const mark = shared.markSend();
+    const sentScope = scope;
     try {
       if (action === 'clear') {
         await api.cancelSend?.(sessionId, pending.sendId);
@@ -929,8 +965,9 @@ export function Composer({
       else await api.retrySend?.(sessionId, pending.sendId, true);
       lastQueued.current = null;
       setUnconfirmed(null);
-      finishSent();
+      finishSent(mark, sentScope);
     } catch (cause) {
+      shared.abandonSend(mark);
       const again = unconfirmedSendOf(cause) !== undefined;
       setUnconfirmed({
         sendId: pending.sendId,

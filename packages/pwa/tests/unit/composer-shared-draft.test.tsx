@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { SharedDraftServerFrame } from '@ferretry/protocol';
+import { useState } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -174,6 +175,101 @@ describe('the composer, sharing its draft', () => {
     });
     await settle();
     expect(text(view)).toBe('ab');
+    run(() => view.unmount());
+  });
+});
+
+describe('a send finishing after the person moved on (review H1, acceptance step 2)', () => {
+  test('never touches the session now showing: its words, its stream, its saved draft', async () => {
+    // Arrange — one composer that follows the session the person is on; session A's send will be slow.
+    const streams: Record<string, ReturnType<typeof streamOf>> = { s1: streamOf(), s2: streamOf() };
+    const open: DaemonStreamOpener = async (target, request) =>
+      (await (request.path.includes('/s1/') ? streams.s1 : streams.s2)?.open(target, request)) as never;
+    let release: (() => void) | undefined;
+    const send = async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+      return {};
+    };
+    const storage = new MemoryStorage();
+    const drafts = new DaemonDraftStore(storage);
+    let switchTo: ((sessionId: string) => void) | undefined;
+    const Page = () => {
+      const [sessionId, setSession] = useState('s1');
+      switchTo = setSession;
+      return (
+        <Composer
+          api={{ send } as never}
+          daemon={daemon}
+          draftStore={drafts}
+          openDraftStream={open}
+          sessionId={sessionId}
+        />
+      );
+    };
+    const view = render(<Page />);
+    await settle();
+    streams.s1?.push(snapshot('words for A'));
+    streams.s1?.push({ kind: 'ready' });
+    await settle();
+
+    // Act — send A, move to B before the answer, then the answer comes.
+    await runAsync(async () => {
+      void view.root.findByType('form').props.onSubmit({ preventDefault() {} });
+    });
+    run(() => switchTo?.('s2'));
+    await settle();
+    streams.s2?.push({
+      kind: 'snapshot',
+      snapshot: {
+        v: 1,
+        sessionId: 's2',
+        generation: 'g',
+        epoch: 0,
+        rev: 4,
+        text: 'words for B',
+        items: [],
+        updatedAt: AT,
+      },
+    });
+    streams.s2?.push({ kind: 'ready' });
+    await settle();
+    release?.();
+    await settle();
+
+    // Assert — B is exactly as it was; nothing went down B's stream; A's saved draft is let go.
+    expect(text(view)).toBe('words for B');
+    expect(streams.s2?.sent.filter(frame => frame.includes('"edit"'))).toEqual([]);
+    expect(drafts.load(daemonSessionScope(daemon, 's1'))).toBe('');
+    run(() => view.unmount());
+  });
+
+  test('a refused send leaves the draft exactly as it was, on every device', async () => {
+    const stream = streamOf();
+    const view = render(
+      <Composer
+        api={
+          {
+            send: async () => {
+              throw new Error('refused');
+            },
+          } as never
+        }
+        daemon={daemon}
+        draftStore={new DaemonDraftStore(new MemoryStorage())}
+        openDraftStream={stream.open}
+        sessionId="s1"
+      />,
+    );
+    await settle();
+    stream.push(snapshot('keep these'));
+    stream.push({ kind: 'ready' });
+    await settle();
+    await runAsync(async () => view.root.findByType('form').props.onSubmit({ preventDefault() {} }));
+    await settle();
+    expect(text(view)).toBe('keep these');
+    expect(stream.sent.filter(frame => frame.includes('"edit"'))).toEqual([]);
     run(() => view.unmount());
   });
 });

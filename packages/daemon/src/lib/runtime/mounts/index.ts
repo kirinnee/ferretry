@@ -93,7 +93,12 @@ import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
-import { type SharedDraftStreamSubsystem, sharedDraftRoutes, sharedDraftSocketRoutes } from './shared-drafts.ts';
+import {
+  type SharedDraftStreamSubsystem,
+  sentDraftClearer,
+  sharedDraftRoutes,
+  sharedDraftSocketRoutes,
+} from './shared-drafts.ts';
 import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
 import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catalogs.ts';
 import { type CopyListing, type RuleProgramHomes, secureCopyRoutes } from './secure-copy.ts';
@@ -689,7 +694,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // revive, the migration and the signal all do: each is a one-segment pattern under
         // `/v1/sessions/:sessionId` whose final literal no other route uses, so none can shadow or be
         // shadowed, and all belong above the deeper per-session subsystems.
-        ...sessionSendRoutes(subsystems.sessionSend),
+        ...sessionSendRoutes(subsystems.sessionSend, sentDraftClearer(subsystems.sharedDrafts)),
         ...sessionAnswerRoutes(subsystems.sessionAnswer),
         // Attachment routes are mounted before sends may honour attachment ids. Their
         // deeper unlock path cannot shadow this one-segment upload route.

@@ -6,6 +6,7 @@ import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { SocketRoute } from '../../api/socket.ts';
+import type { SentDraftClearer } from './session-send.ts';
 import {
   SharedDraftError,
   type SharedDraftErrorCode,
@@ -14,6 +15,7 @@ import {
   type SharedDraftStreamClock,
   SharedDraftStreamHandler,
   type SharedDraftStreamTarget,
+  sharedDraftOrigin,
 } from '../../shared-drafts/index.ts';
 
 /**
@@ -47,12 +49,16 @@ const ERROR_STATUS: Readonly<Record<SharedDraftErrorCode, readonly [number, stri
   stale: [409, SHARED_DRAFT_ERROR_CODES.stale],
   'too-long': [413, SHARED_DRAFT_ERROR_CODES.tooLong],
   'too-many-items': [413, SHARED_DRAFT_ERROR_CODES.tooManyItems],
+  'rate-limited': [429, SHARED_DRAFT_ERROR_CODES.rateLimited],
   invalid: [422, SHARED_DRAFT_ERROR_CODES.invalid],
 };
 
+/** Whether this caller is the owner: their own shell, or one of their paired devices. */
+const isDraftOwner = (actor: ApiActor | undefined): boolean => OWNER_ACTOR_KINDS.has(parseActor(actor ?? '').kind);
+
 /** Refuses anybody but the owner, before the draft is even looked at. */
 export function assertDraftOwner(actor: ApiActor | undefined): void {
-  if (!OWNER_ACTOR_KINDS.has(parseActor(actor ?? '').kind))
+  if (!isDraftOwner(actor))
     throw new ApiError(
       403,
       'a draft belongs to its owner until it is sent, so only the owner may read or edit it',
@@ -84,7 +90,9 @@ async function edit(drafts: SharedDraftService, context: RouteContext): Promise<
   assertDraftOwner(context.actor);
   const sessionId = pathSessionId(context);
   const request = await parseBody(context.request, SharedDraftEditSchema, { maxBytes: SHARED_DRAFT_MAX_BODY_BYTES });
-  return jsonResponse(await drafts.edit(sessionId, request).catch(reraise));
+  // The wire answer is the edit and the draft; whether it was a repeat is the stream's business.
+  const { repeatOf: _repeatOf, ...result } = await drafts.edit(sessionId, request).catch(reraise);
+  return jsonResponse(result);
 }
 
 export function sharedDraftRoutes(drafts: SharedDraftService): readonly ApiRoute[] {
@@ -175,6 +183,7 @@ export function sharedDraftSocketRoutes(
           sessionId,
           peer: subsystem.nextPeer(),
           device: await deviceLabel(subsystem, context.actor),
+          author: context.actor ?? '',
           ...(position === undefined ? {} : { position }),
         };
         return async downstream =>
@@ -182,4 +191,28 @@ export function sharedDraftSocketRoutes(
       },
     },
   ];
+}
+
+/**
+ * The send route's half of the shared draft: what an accepted send carried out of it is taken out, as one
+ * edit marked sent, keyed to the send's request id and its author — so the composer's own clear for the
+ * same send, or a retried send, is a repeat and applies nothing. ONLY THE OWNER'S sends do this: the send
+ * route serves ferrets too, and a ferret must never touch the owner's draft.
+ */
+export function sentDraftClearer(drafts: Pick<SharedDraftService, 'edit'>): SentDraftClearer {
+  return async (sessionId, actor, requestId, sent) => {
+    if (!isDraftOwner(actor) || actor === undefined) return;
+    await drafts.edit(
+      sessionId,
+      {
+        generation: sent.generation,
+        epoch: sent.epoch,
+        base: sent.base,
+        text: sent.text,
+        ...(sent.remove === undefined ? {} : { remove: sent.remove }),
+        sent: true,
+      },
+      sharedDraftOrigin(actor, 'send', requestId),
+    );
+  };
 }

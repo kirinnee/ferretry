@@ -425,6 +425,23 @@ export const SharedDraftEditSchema = z.strictObject({
 export type SharedDraftEdit = z.infer<typeof SharedDraftEditSchema>;
 
 /**
+ * What a send takes out of the shared draft, carried WITH the send: the position the composer saw when
+ * the person pressed send, and the edit that removes exactly what was sent from there. The daemon applies
+ * it once the send is accepted — transformed past anything typed since, so later words stay — and keys it
+ * to the send's request id, so a retried send, or the composer's own clear, never applies it twice. It
+ * travels with the send because the send can land with no composer left to clear anything: the page
+ * closed, the outbox sent it later, or the person moved to another session meanwhile.
+ */
+export const SharedDraftSentSchema = z.strictObject({
+  generation: SharedDraftGenerationSchema,
+  epoch: NonNegativeIntegerSchema,
+  base: NonNegativeIntegerSchema,
+  text: TextOpSchema,
+  remove: z.array(SharedDraftIdSchema).max(SHARED_DRAFT_MAX_ITEMS).readonly().optional(),
+});
+export type SharedDraftSent = z.infer<typeof SharedDraftSentSchema>;
+
+/**
  * The daemon's answer to an edit: the edit AS SEQUENCED — transformed past everything that landed
  * after its base, so any device at revision `rev - 1` of `epoch` can apply it — and the draft after it.
  *
@@ -457,6 +474,8 @@ export const SHARED_DRAFT_ERROR_CODES = {
   tooManyItems: 'shared_draft_too_many_items',
   /** The edit's text does not fit the draft it claims to be based on. */
   invalid: 'shared_draft_invalid',
+  /** More edits in a second than anybody types. */
+  rateLimited: 'shared_draft_rate_limited',
   /** Only the owner's own paired devices and own shell may read or edit a draft — never an agent. */
   ownerOnly: 'shared_draft_owner_only',
 } as const;

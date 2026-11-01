@@ -215,6 +215,11 @@ describe('shared draft schemas', () => {
       value: { applied: { generation: 'gen-1', epoch: 0, rev: 4, text: [5, '!'], add: [], remove: [] }, snapshot },
     },
     {
+      name: 'what a send takes out of the draft',
+      schema: draft.SharedDraftSentSchema,
+      value: { generation: 'gen-1', epoch: 0, base: 3, text: [-5, 2], remove: ['att-1'] },
+    },
+    {
       name: 'client edit frame',
       schema: draft.SharedDraftClientFrameSchema,
       value: { kind: 'edit', id: 'e1', edit: { generation: 'gen-1', epoch: 0, base: 3, text: [5, '!'] } },

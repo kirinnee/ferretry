@@ -61,6 +61,8 @@ const subject = (
     readonly sessions?: readonly string[];
     readonly memoryLimit?: number;
     readonly generation?: string;
+    readonly editsPerSecond?: number;
+    readonly clock?: { now(): string };
   } = {},
 ) => {
   const repository = options.repository ?? new MemoryDrafts();
@@ -69,10 +71,12 @@ const subject = (
   const service = new SharedDraftService(
     { has: async sessionId => known.has(sessionId) },
     repository,
-    { now: () => AT },
+    options.clock ?? { now: () => AT },
     timers,
     { next: () => options.generation ?? G },
     options.memoryLimit,
+    // These tests make hundreds of edits on a clock that never moves; the limit has a test of its own.
+    options.editsPerSecond ?? Number.POSITIVE_INFINITY,
   );
   return { service, repository, timers };
 };
@@ -508,14 +512,14 @@ describe('SharedDraftService', () => {
     const first = await service.edit(
       's1',
       { generation: G, epoch: 0, base: 0, text: ['once'] },
-      sharedDraftOrigin('old-stream', 'e1'),
+      sharedDraftOrigin('device:d1', 'old-stream', 'e1'),
     );
 
     // The composer reconnected and sent it again from a new stream.
     const again = await service.edit(
       's1',
       { generation: G, epoch: 0, base: 0, text: ['once'] },
-      sharedDraftOrigin('new-stream', 'e1'),
+      sharedDraftOrigin('device:d1', 'new-stream', 'e1'),
     );
 
     should(again.applied).deepEqual(first.applied);
@@ -525,6 +529,37 @@ describe('SharedDraftService', () => {
     await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [4, '!'] });
     should(splitSharedDraftOrigin(undefined)).be.undefined();
     should(splitSharedDraftOrigin('no-separator')).be.undefined();
+  });
+
+  it("4: never takes another device's edit for a repeat, even when it chose the same id", async () => {
+    const { service } = subject();
+    await service.edit(
+      's1',
+      { generation: G, epoch: 0, base: 0, text: ['phone '] },
+      sharedDraftOrigin('device:phone', 'p', 'e1'),
+    );
+    const laptop = await service.edit(
+      's1',
+      { generation: G, epoch: 0, base: 1, text: [6, 'laptop'] },
+      sharedDraftOrigin('device:laptop', 'l', 'e1'),
+    );
+    should(laptop.snapshot).match({ text: 'phone laptop', rev: 2 });
+  });
+
+  it('5: takes at most so many edits a second from every device together, and more the next second', async () => {
+    let now = Date.parse(AT);
+    const { service } = subject({ editsPerSecond: 3, clock: { now: () => new Date(now).toISOString() } });
+    for (let rev = 0; rev < 3; rev += 1)
+      await service.edit('s1', { generation: G, epoch: 0, base: rev, text: rev === 0 ? ['x'] : [rev, 'x'] });
+
+    await should(service.edit('s1', { generation: G, epoch: 0, base: 3, text: [3, 'x'] })).be.rejectedWith({
+      name: 'SharedDraftError',
+      code: 'rate-limited',
+    });
+    now += 1_000;
+    should(await service.edit('s1', { generation: G, epoch: 0, base: 3, text: [3, 'x'] })).match({
+      snapshot: { rev: 4 },
+    });
   });
 
   it('L2: refuses files and places whose names together would not fit one frame', async () => {

@@ -15,6 +15,7 @@ import {
   SharedDraftService,
   SharedDraftStreamHandler,
   type SharedDraftStreamTarget,
+  sharedDraftOrigin,
   snapshotFrames,
 } from '../../../src/lib/shared-drafts/index.ts';
 
@@ -69,7 +70,7 @@ const world = () => {
     const handler = new SharedDraftStreamHandler(
       service,
       presence,
-      { sessionId: 's1', device: `${target.peer}'s phone`, ...target },
+      { sessionId: 's1', device: `${target.peer}'s phone`, author: `device:${target.peer}`, ...target },
       downstream,
       clock,
     );
@@ -215,7 +216,7 @@ describe('SharedDraftStreamHandler', () => {
     const handler = new SharedDraftStreamHandler(
       service,
       presence,
-      { sessionId: 's1', peer: 'gone', device: 'Phone' },
+      { sessionId: 's1', peer: 'gone', author: 'device:gone', device: 'Phone' },
       downstream,
       { nowMs: () => 0 },
     );
@@ -229,6 +230,52 @@ describe('SharedDraftStreamHandler', () => {
     // Assert
     should(presence.members('s1')).equal(0);
     should(downstream.readyAt).be.undefined();
+  });
+
+  it('L3 (second review): a stream whose first presence send fails leaves presence as it found it', async () => {
+    // Arrange — one composer already open and typing.
+    const { open, presence, service } = world();
+    const phone = await open({ peer: 'phone' });
+    phone.handler.fromClient(JSON.stringify({ kind: 'presence', typing: true }));
+    should(presence.members('s1')).equal(1);
+
+    // Act — a second composer joins, and its socket refuses the presence frame it is handed on joining.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const refusing = new RecordingDownstream();
+      const send = refusing.send.bind(refusing);
+      refusing.send = frame => (String(frame).includes('"presence"') ? -1 : send(frame));
+      const handler = new SharedDraftStreamHandler(
+        service,
+        presence,
+        { sessionId: 's1', peer: `refused-${attempt}`, author: 'device:x', device: 'X' },
+        refusing,
+        { nowMs: () => 0 },
+      );
+      await handler.open();
+      handler.close();
+    }
+
+    // Assert — only the first composer is still there.
+    should(presence.members('s1')).equal(1);
+  });
+
+  it('L1 (second review): answers a repeated edit with the edit it repeats, so the sender never waits', async () => {
+    // Arrange — the phone's edit lands from its first stream.
+    const { open, service } = world();
+    await service.edit(
+      's1',
+      { generation: G, epoch: 0, base: 0, text: ['a'] },
+      sharedDraftOrigin('device:phone', 'old', 'p1'),
+    );
+    const phone = await open({ peer: 'phone', author: 'device:phone' });
+
+    // Act — the same device sends it again from its new stream.
+    phone.handler.fromClient(edit('p1', ['a'], 0));
+    await settle();
+
+    // Assert
+    should(phone.downstream.frames.at(-1)).match({ kind: 'ack', id: 'p1', rev: 1, applied: { text: ['a'] } });
+    should((await service.read('s1')).text).equal('a');
   });
 
   it('L2: sends a draft too big for one frame in parts, every part within the budget', async () => {
@@ -325,7 +372,7 @@ describe('SharedDraftStreamHandler', () => {
     } as unknown as SharedDraftService;
     const first = new RecordingDownstream();
     const second = new RecordingDownstream();
-    const target = { sessionId: 's1', peer: 'p', device: 'Phone' };
+    const target = { sessionId: 's1', peer: 'p', author: 'device:p', device: 'Phone' };
 
     // Act
     await new SharedDraftStreamHandler(broken, presence, target, first, { nowMs: () => 0 }).open();
@@ -342,13 +389,13 @@ describe('SharedDraftStreamHandler', () => {
   it("tells each composer where the owner's OTHER devices are typing, never its own, and when one closes", async () => {
     // Arrange
     const { open } = world();
-    const phone = await open({ peer: 'phone', device: 'Kirin’s iPhone' });
-    const laptop = await open({ peer: 'laptop', device: 'Desktop (Chrome)' });
+    const phone = await open({ peer: 'phone', author: 'device:phone', device: 'Kirin’s iPhone' });
+    const laptop = await open({ peer: 'laptop', author: 'device:laptop', device: 'Desktop (Chrome)' });
 
     // Act
     phone.handler.fromClient(JSON.stringify({ kind: 'presence', typing: true, selection: [3, 3] }));
     laptop.handler.fromClient(JSON.stringify({ kind: 'presence', typing: false }));
-    const tablet = await open({ peer: 'tablet', device: 'Tablet' });
+    const tablet = await open({ peer: 'tablet', author: 'device:tablet', device: 'Tablet' });
     phone.handler.close();
 
     // Assert
@@ -398,11 +445,17 @@ describe('SharedDraftStreamHandler', () => {
       new SharedDraftStreamHandler(
         service,
         presence,
-        { sessionId: 's1', peer: 'r', device: 'R', position: { generation: G, epoch: 0, rev: 1 } },
+        { sessionId: 's1', peer: 'r', author: 'device:r', device: 'R', position: { generation: G, epoch: 0, rev: 1 } },
         replayed,
         clock,
       ).open(),
-      new SharedDraftStreamHandler(service, presence, { sessionId: 's1', peer: 'f', device: 'F' }, fresh, clock).open(),
+      new SharedDraftStreamHandler(
+        service,
+        presence,
+        { sessionId: 's1', peer: 'f', author: 'device:f', device: 'F' },
+        fresh,
+        clock,
+      ).open(),
     ];
     await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [1, 'b'] });
     await Promise.all(opening);
@@ -428,7 +481,7 @@ describe('SharedDraftStreamHandler', () => {
     const handler = new SharedDraftStreamHandler(
       service,
       presence,
-      { sessionId: 's1', peer: 'x', device: 'X' },
+      { sessionId: 's1', peer: 'x', author: 'device:x', device: 'X' },
       throwing,
       { nowMs: () => 0 },
     );
