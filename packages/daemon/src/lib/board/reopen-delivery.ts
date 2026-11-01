@@ -70,7 +70,7 @@ export class ReopenDeliveryLadder implements ReopenNotifier {
 
   /** Walks the ladder and says where the line landed. */
   async deliver(notice: ReopenNotice): Promise<ReopenDelivered> {
-    const message = reopenMessage(notice.task, notice.by, notice.reason);
+    const message = reopenMessage(notice.task, notice.by, notice.reason, notice.byVia);
     const messenger = notice.by.kind === 'owner' ? this.ownerMessenger : this.messenger;
     return await walkLadder(
       messenger,

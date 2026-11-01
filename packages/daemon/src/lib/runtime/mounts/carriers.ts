@@ -76,6 +76,7 @@ export function carrierRoutes(carriers: PublishedCarrierView): readonly ApiRoute
       method: 'GET',
       path: '/v1/carriers',
       minimum: 'authenticated',
+      caller: 'any',
       // The entire value of this answer is that it is current. A cached copy would re-serve the
       // rendezvous the operator has just switched off, which is the failure the route exists to end.
       // The daemon holds ONE answer and reserving it is fine; a CLIENT holding a stale one is the bug.

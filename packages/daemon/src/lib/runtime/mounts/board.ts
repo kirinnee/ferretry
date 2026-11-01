@@ -59,8 +59,10 @@ export const BOARD_ERROR_STATUS: Readonly<Record<BoardErrorCode, number>> = {
 /**
  * Who is writing, from the SERVER-DERIVED actor (`api/actor.ts`), never from the body.
  *
- * - A ferret is a `peer:<session>`: an agent calling from inside its own pane.
- * - The owner is the human's own CLI or browser (`admin-cli`, `admin-ui`) or a paired device. A remote
+ * - A ferret is a `peer:<session>`: an agent calling from inside its own pane — with its own session
+ *   credential always, so such a caller is never the owner whatever its headers say.
+ * - The owner is the human's own CLI or browser (`admin-cli`, `admin-ui`) or a paired device; the first two are
+ *   recorded as `admin-token`, because a ferret holding that token looks exactly like them. A remote
  *   device reaches these routes only through the `fleet` capability, so it is the owner `docs/grants.md`
  *   lets in; a loopback caller is ungoverned, because somebody at the machine already has the machine.
  *
@@ -71,7 +73,9 @@ export const boardCaller = (actor: ApiActor | undefined): BoardCaller => {
   const parsed = parseActor(actor ?? '');
   if (parsed.kind === 'peer' && parsed.id !== undefined && parsed.id !== '')
     return { kind: 'ferret', sessionId: parsed.id };
-  if (parsed.kind === 'admin-cli' || parsed.kind === 'admin-ui') return { kind: 'owner' };
+  // The host's admin token with no ferret's credential: the owner at the machine OR a ferret that left its
+  // session out, and the daemon cannot tell which. It keeps the owner's authority and is RECORDED as the token.
+  if (parsed.kind === 'admin-cli' || parsed.kind === 'admin-ui') return { kind: 'owner', via: 'admin-token' };
   if (parsed.kind === 'device' && parsed.id !== undefined && parsed.id !== '') return { kind: 'owner' };
   throw new ApiError(403, 'only a ferret in its own pane or the owner may write to the board', 'forbidden');
 };
@@ -151,6 +155,7 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/board',
       minimum: 'operator',
+      caller: 'any',
       capability: fleet,
       noStore: true,
       compress: true,
@@ -160,6 +165,7 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/board/tasks',
       minimum: 'operator',
+      caller: 'any',
       capability: fleet,
       noStore: true,
       handle: async context => {
@@ -172,6 +178,7 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/board/skip',
       minimum: 'operator',
+      caller: 'any',
       capability: fleet,
       noStore: true,
       handle: async context => {
@@ -184,6 +191,7 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/board/tasks',
       minimum: 'operator',
+      caller: 'any',
       capability: fleet,
       noStore: true,
       handle: async context => await answer(async () => await board.taskByLegacyRef(legacyRefOf(context))),
@@ -192,6 +200,7 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/board/import',
       minimum: 'operator',
+      caller: 'person',
       capability: fleet,
       noStore: true,
       handle: async context => {
@@ -206,6 +215,7 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/board/tasks/:taskId',
       minimum: 'operator',
+      caller: 'any',
       capability: fleet,
       noStore: true,
       handle: async context => await answer(async () => await board.task(pathTaskId(context))),
@@ -214,6 +224,7 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/board/tasks/:taskId',
       minimum: 'operator',
+      caller: 'any',
       capability: fleet,
       noStore: true,
       handle: async context => {

@@ -5,7 +5,16 @@ import { type ApiCredentials, ApiDispatcher, type ApiResponse, ApiRouter } from 
 import type { AgendaLedger, AgendaLedgerRepository, AgendaMutation } from '../../../../src/lib/agenda/index.ts';
 import { agendaActor, agendaRoutes, type DirectNotificationSubsystem } from '../../../../src/lib/runtime/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { agentIn, agendaService, CREDENTIALS, human, NO_HELD_REPLIES } from './support.ts';
+import {
+  agentIn,
+  agendaService,
+  CREDENTIALS,
+  FERRET_ARRIVAL,
+  FERRET_SESSION,
+  ferretOwn,
+  human,
+  NO_HELD_REPLIES,
+} from './support.ts';
 
 /** A repository whose reads fail the way a damaged ledger file does. */
 class BrokenLedgerRepository implements AgendaLedgerRepository {
@@ -351,6 +360,32 @@ describe('attention routes', () => {
     // Assert
     should(response.status).equal(403);
     should(jsonBody(response)).have.property('code', 'forbidden');
+  });
+
+  it('should act for a ferret on its own credential as THAT session: never another, never the owner', async () => {
+    // Arrange — the credential names the session; the request sends no session header at all.
+    const dispatch = fixture();
+    const asFerret = (body: unknown, sessionId: string) => ({
+      ...post(body, ferretOwn),
+      ...FERRET_ARRIVAL,
+      path: `/v1/sessions/${sessionId}/attention`,
+    });
+    const ownersItem = await dispatch({ ...post(raise), path: `/v1/sessions/${FERRET_SESSION}/attention` });
+    const ownersId = (jsonBody(ownersItem).items as readonly { id: string }[])[0]?.id;
+
+    // Act
+    const own = await dispatch(asFerret({ ...raise, subject: 'its own ask' }, FERRET_SESSION));
+    const another = await dispatch(asFerret(raise, 's1'));
+    const theOwners = await dispatch(asFerret({ action: 'dismiss', id: ownersId }, FERRET_SESSION));
+
+    // Assert
+    should(own.status).equal(200);
+    should((jsonBody(own).items as readonly { raisedBy: string; raisedBySession?: string }[]).at(-1)).containDeep({
+      raisedBy: 'agent',
+      raisedBySession: FERRET_SESSION,
+    });
+    should([another.status, jsonBody(another).code]).deepEqual([403, 'forbidden']);
+    should([theOwners.status, jsonBody(theOwners).code]).deepEqual([403, 'forbidden']);
   });
 
   it('should report an action against an unknown item as not found', async () => {

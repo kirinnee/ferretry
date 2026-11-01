@@ -63,6 +63,12 @@ const FERRET: Caller = {
   credential: { kind: 'authenticated', tokenClass: 'admin' },
   governed: false,
 };
+/** A ferret on its OWN session credential: the handler refuses it by its class, with no header involved. */
+const FERRET_OWN: Caller = {
+  actor: 'peer:s1',
+  credential: { kind: 'authenticated', tokenClass: 'session', sessionId: 's1' },
+  governed: false,
+};
 
 const SHARE_VIEW = {
   shareId: SHARE,
@@ -296,6 +302,16 @@ describe('minting a share', () => {
     should(members.calls).deepEqual([]);
   });
 
+  it('refuses a ferret on its own session credential the same way, keyed on its class', async () => {
+    const members = new FakeMembers();
+
+    const answer = await drive(members, 'POST', '/v1/catalog-shares', MINT, { ...FERRET_OWN, proofs: 1 });
+
+    should([answer.status, answer.code]).deepEqual([403, 'forbidden']);
+    should(answer.claimedActs).deepEqual([]);
+    should(members.calls).deepEqual([]);
+  });
+
   it('refuses a body that is not a mint request, and spends no proof on it', async () => {
     const members = new FakeMembers();
 
@@ -386,6 +402,7 @@ describe('listing, which a ferret may do', () => {
     for (const [name, caller] of [
       ['the machine', HOST],
       ['a ferret', FERRET],
+      ['a ferret on its own credential', FERRET_OWN],
       ['a governed device', DEVICE],
     ] as const) {
       it(`lets ${name} GET ${path}, with no passkey`, async () => {
@@ -542,14 +559,19 @@ describe('removing a person, a browser, or a catalog', () => {
   ] as const;
 
   for (const [method, path, sentence] of owned) {
-    it(`refuses a ferret on ${method} ${path}`, async () => {
+    it(`refuses a ferret on ${method} ${path}, on the admin token or its own credential`, async () => {
       const members = new FakeMembers();
 
-      const answer = await drive(members, method, path, undefined, FERRET);
+      const answers = [
+        await drive(members, method, path, undefined, FERRET),
+        await drive(members, method, path, undefined, FERRET_OWN),
+      ];
 
-      should(answer.status).equal(403);
-      should(answer.code).equal('forbidden');
-      should(answer.message).containEql(sentence);
+      for (const answer of answers) {
+        should(answer.status).equal(403);
+        should(answer.code).equal('forbidden');
+        should(answer.message).containEql(sentence);
+      }
       should(members.calls).deepEqual([]);
     });
 

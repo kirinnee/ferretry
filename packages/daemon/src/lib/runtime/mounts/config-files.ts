@@ -51,7 +51,7 @@ import {
 } from '@ferretry/protocol';
 import { controlRefusal } from '../../agent-tools/policy.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
-import { isHumanAdminActor } from '../../api/actor.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
@@ -60,7 +60,7 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { ConfigFileConflictError, ConfigFileInvalidError, type ConfigFilesService } from '../../config-files/index.ts';
 import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
-import { AGENT_SESSION_CAPABILITY_HEADER } from './agent-tools.ts';
+import { presentedSessionCapability, TWO_SESSION_CREDENTIALS } from './agent-tools.ts';
 
 /** The configuration files as these routes need them, and the loop the composition root arms. */
 export interface ConfigFilesSubsystem {
@@ -76,10 +76,6 @@ export interface ConfigFilesSubsystem {
 const MAX_PUT_BODY_BYTES = CONFIG_FILE_MAX_BYTES * 2;
 
 const USE = { capability: 'fleet', axis: 'use' } as const;
-
-/** An agent: a caller that identified itself (`peer:`, a warden) rather than a person or the host. */
-const isAgentCaller = (context: RouteContext): boolean =>
-  context.credential !== undefined && context.credential.tokenClass !== 'device' && !isHumanAdminActor(context.actor);
 
 function addressOf(path: string): ConfigFileAddress {
   // Already checked by `ConfigFilePathSchema`; a path that does not classify never reaches here.
@@ -279,7 +275,10 @@ async function agentTool(subsystem: ConfigFilesSubsystem, call: AgentConfigToolC
 }
 
 async function agentCall(subsystem: ConfigFilesSubsystem, context: RouteContext): Promise<ApiResponse> {
-  const capability = headerValue(context.request, AGENT_SESSION_CAPABILITY_HEADER)?.trim() ?? '';
+  // A `fys_` bearer or the older header, exactly as the agent tools take it.
+  const presented = presentedSessionCapability(context.request);
+  if (presented.kind === 'two-different') throw new ApiError(401, TWO_SESSION_CREDENTIALS, 'unauthorized');
+  const capability = presented.kind === 'one' ? presented.capability : '';
   const identity = capability === '' ? undefined : await subsystem.identities.resolve(capability);
   if (identity === undefined) {
     const missing = capability === '';
@@ -301,6 +300,7 @@ export function configFilesRoutes(subsystem: ConfigFilesSubsystem): readonly Api
       method: 'GET',
       path: '/v1/config/status',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async () => jsonResponse(await subsystem.service.status()),
@@ -309,6 +309,7 @@ export function configFilesRoutes(subsystem: ConfigFilesSubsystem): readonly Api
       method: 'GET',
       path: '/v1/config/file',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async context => {
@@ -320,6 +321,7 @@ export function configFilesRoutes(subsystem: ConfigFilesSubsystem): readonly Api
       method: 'PUT',
       path: '/v1/config/file',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async context => await put(subsystem, context),
@@ -328,6 +330,7 @@ export function configFilesRoutes(subsystem: ConfigFilesSubsystem): readonly Api
       method: 'POST',
       path: '/v1/config/confirm',
       minimum: 'operator',
+      caller: 'person',
       capability: USE,
       noStore: true,
       handle: async context => await confirm(subsystem, context),
@@ -336,6 +339,7 @@ export function configFilesRoutes(subsystem: ConfigFilesSubsystem): readonly Api
       method: 'POST',
       path: '/v1/agent/config',
       minimum: 'none',
+      caller: 'any',
       privilegedOnly: true,
       noStore: true,
       handle: async context => await agentCall(subsystem, context),

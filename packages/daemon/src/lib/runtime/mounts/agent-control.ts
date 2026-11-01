@@ -1,4 +1,4 @@
-import { isHumanAdminActor } from '../../api/actor.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { SocketRoute } from '../../api/socket.ts';
@@ -25,10 +25,6 @@ const KIND_OF_CAPABILITY: Readonly<Record<string, AgentControlKind>> = {
   browser: 'browser',
   filesystem: 'files',
 };
-
-/** An agent: a caller authenticated with the host token that names its own pane, or a warden. */
-const isAgentCaller = (context: RouteContext): boolean =>
-  context.credential !== undefined && context.credential.tokenClass !== 'device' && !isHumanAdminActor(context.actor);
 
 async function gate(policy: AgentControlPolicy, kind: AgentControlKind, context: RouteContext): Promise<void> {
   if (!isAgentCaller(context) || (await policy.allows(kind))) return;

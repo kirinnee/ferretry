@@ -13,7 +13,8 @@ import {
 import { terminalRoutes } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import { agentToolWorld, PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, GRANTED, human } from './support.ts';
+import { handleDirectly } from './second-line.ts';
+import { agentIn, CREDENTIALS, fromFerret, GRANTED, human } from './support.ts';
 
 /**
  * The agent tools' HTTP surface, driven through the real router and authorization boundary.
@@ -283,7 +284,7 @@ describe('a person’s tool routes', () => {
     ]);
   });
 
-  it('should refuse an agent that names a session — taking over or handing on included — sending it to its own route', async () => {
+  it('should refuse an agent a person’s tool routes — taking over or handing on included — at the boundary', async () => {
     // Arrange
     const { world, dispatch } = served();
 
@@ -294,11 +295,22 @@ describe('a person’s tool routes', () => {
     const handback = await dispatch.dispatch(
       personCall('/v1/sessions/s1/surfaces/terminals/control', { action: 'handback', key: 'dev' }, agentIn('s1')),
     );
+    // A ferret's own credential is refused the same way: these are a PERSON's tool routes.
+    const own = await Promise.all(
+      [
+        '/v1/sessions/s1/surfaces/terminals/tools',
+        '/v1/sessions/s1/surfaces/terminals/control',
+        '/v1/sessions/s1/surfaces/browser/tools',
+        '/v1/sessions/s1/surfaces/browser/control',
+      ].map(async path => await dispatch.dispatch(fromFerret(personCall(path, { tool: 'terminal.list' })))),
+    );
 
     // Assert
-    should(refused.status).equal(403);
-    should(jsonBody(refused)).match({ error: /POST \/v1\/agent\/tools/u });
-    should(handback.status).equal(403);
+    should([refused.status, jsonBody(refused).code]).deepEqual([403, 'owner_only']);
+    should([handback.status, jsonBody(handback).code]).deepEqual([403, 'owner_only']);
+    should(own.map(answer => [answer.status, jsonBody(answer).code])).deepEqual(
+      Array.from({ length: 4 }, () => [403, 'owner_only']),
+    );
     should(world.audit.entries).deepEqual([]);
   });
 
@@ -645,5 +657,25 @@ describe('the session credential directory the boundary is wired with', () => {
         detail: { by: 'agent', reason: 'session_mismatch', route: long.slice(0, 160) },
       },
     ]);
+  });
+});
+
+describe('a person’s tool routes, their own second line', () => {
+  it('should still send a ferret’s own credential to its own route if the boundary ever let one through', async () => {
+    // Arrange
+    const world = agentToolWorld();
+
+    // Act
+    const answer = await handleDirectly(
+      agentToolRoutes(world.service, world.identities),
+      'POST',
+      '/v1/sessions/s1/surfaces/terminals/tools',
+      undefined,
+      { tool: 'terminal.list' },
+    );
+
+    // Assert
+    should([answer.status, answer.code]).deepEqual([403, 'forbidden']);
+    should(answer.message).match(/POST \/v1\/agent\/tools/u);
   });
 });

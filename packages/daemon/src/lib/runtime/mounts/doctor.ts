@@ -13,6 +13,7 @@ export function doctorRoutes(subsystem: DoctorSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/doctor',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async () => jsonResponse(DoctorReportSchema.parse(await subsystem.report())),
     },

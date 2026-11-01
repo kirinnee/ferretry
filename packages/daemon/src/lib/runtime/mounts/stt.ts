@@ -84,6 +84,7 @@ export function sttEnhancementRoutes(subsystem: SttEnhancementSubsystem): readon
       method: 'POST',
       path: '/v1/stt/enhance',
       minimum: 'operator',
+      caller: 'any',
       handle: async context => await enhance(subsystem, context),
     },
   ];

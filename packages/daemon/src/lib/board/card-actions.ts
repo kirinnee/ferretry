@@ -17,6 +17,7 @@
  */
 import {
   type BoardActor,
+  type BoardActorVia,
   type BoardAttachment,
   type BoardClarification,
   type BoardEditableField,
@@ -50,10 +51,24 @@ import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
 
+/** An event's actor and, beside it, how an owner actor acted (`BoardActorVia`). */
+const actorFields = (context: Pick<CardContext, 'actor' | 'actorVia'>) => ({
+  actor: context.actor,
+  ...(context.actorVia === undefined ? {} : { actorVia: context.actorVia }),
+});
+
+/** A clarification's author and, beside it, how an owner author acted. */
+const byFields = (context: Pick<CardContext, 'actor' | 'actorVia'>) => ({
+  by: context.actor,
+  ...(context.actorVia === undefined ? {} : { byVia: context.actorVia }),
+});
+
 /** The facts every rule may consult, gathered by the service before it calls one. */
 export interface CardContext {
   readonly now: string;
   readonly actor: BoardActor;
+  /** Recorded beside the actor, never inside it (`BoardActorVia`); absent for anyone but the admin token. */
+  readonly actorVia?: BoardActorVia;
   readonly standing: BoardStanding;
   /** The lanes of the card's own board. */
   readonly laneSet: LaneSet;
@@ -102,7 +117,7 @@ export const withEvent = (
   ...card,
   history: [
     ...card.history,
-    { ...event, seq: card.history.length + 1, at: context.now, actor: context.actor } as BoardTaskEvent,
+    { ...event, seq: card.history.length + 1, at: context.now, ...actorFields(context) } as BoardTaskEvent,
   ],
 });
 
@@ -208,7 +223,12 @@ const reopenTo = (
   ask: { readonly text: string; readonly source: string },
   context: CardContext,
 ): CardOutcome => {
-  const clarification: BoardClarification = { text: ask.text, source: ask.source, at: context.now, by: context.actor };
+  const clarification: BoardClarification = {
+    text: ask.text,
+    source: ask.source,
+    at: context.now,
+    ...byFields(context),
+  };
   const files = context.attachments;
   const reopened = withEvent(
     card,
@@ -706,7 +726,7 @@ export const applyAction = (
         text: action.text,
         source: action.source,
         at: context.now,
-        by: context.actor,
+        ...byFields(context),
       };
       return {
         task: {
@@ -758,6 +778,7 @@ export interface NewCardContext {
   readonly machineId: string;
   readonly now: string;
   readonly actor: BoardActor;
+  readonly actorVia?: BoardActorVia;
   readonly standing: BoardStanding;
   /** The accountable ferret: the creating session, or the assignee the owner named. */
   readonly owner: string;
@@ -802,6 +823,7 @@ export const newCard = (request: BoardTaskCreateRequest, context: NewCardContext
     order: null,
     createdAt: context.now,
     createdBy: context.actor,
-    history: [{ seq: 1, at: context.now, actor: context.actor, type: 'created', laneId: lane.id }],
+    ...(context.actorVia === undefined ? {} : { createdByVia: context.actorVia }),
+    history: [{ seq: 1, at: context.now, ...actorFields(context), type: 'created', laneId: lane.id }],
   };
 };

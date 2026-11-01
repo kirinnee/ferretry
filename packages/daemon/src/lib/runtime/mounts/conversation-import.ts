@@ -39,6 +39,7 @@ export function conversationImportRoutes(subsystem: ConversationImportSubsystem)
       method: 'GET',
       path: '/v1/imports/conversations',
       minimum: 'operator',
+      caller: 'any',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => {
@@ -61,6 +62,7 @@ export function conversationImportRoutes(subsystem: ConversationImportSubsystem)
       method: 'GET',
       path: '/v1/imports/conversations/:harness/:conversationId/preview',
       minimum: 'operator',
+      caller: 'any',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => {
@@ -77,6 +79,7 @@ export function conversationImportRoutes(subsystem: ConversationImportSubsystem)
       method: 'POST',
       path: '/v1/imports/conversations/adopt',
       minimum: 'operator',
+      caller: 'any',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => {

@@ -120,9 +120,10 @@ export const DAEMON_FEATURES = {
    * agree. A client that sees this name presents that credential and NEVER falls back to the host's admin
    * token, whatever the answer — a refusal from this daemon is the answer, not a sign it is old.
    *
-   * DEFINED, NOT YET ADVERTISED ({@link NOT_YET_REPORTED}): this build still refuses the credential on every
-   * route but the agent tools, so a client that switched to it on seeing the name would lose `fy send`,
-   * `fy notify` and the board with no way back. It is reported once the routes that take it exist.
+   * REPORTED SINCE EVERY ROUTE TAKES IT: a route declares `caller: 'person' | 'any'`, the credential is the
+   * caller's own on every `any` route a ferret's `fy` and MCP tools need (send, notify, the board, its
+   * agenda, signals, input requests, reads), and a `person` route refuses it with `403 owner_only` before
+   * anything is read.
    */
   sessionCredential: 'session.credential.1',
 } as const;
@@ -137,7 +138,6 @@ const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([
   DAEMON_FEATURES.accountsSignIns,
   DAEMON_FEATURES.twoFactorKeys,
   DAEMON_FEATURES.phoneApproval,
-  DAEMON_FEATURES.sessionCredential,
 ]);
 
 /** The names a daemon of this build reports, in a stable order. */

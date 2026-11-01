@@ -84,11 +84,20 @@ export function usageRoutes(
   const publicUsage = async () => jsonResponse(document(await currentSnapshot(scraped)));
   const versionedUsage = async () => jsonResponse(versionedDocument(await currentSnapshot(feed)));
   return [
-    { method: 'GET', path: '/usage', minimum: 'none', noStore: true, available: publicFeed, handle: publicUsage },
+    {
+      method: 'GET',
+      path: '/usage',
+      minimum: 'none',
+      caller: 'any',
+      noStore: true,
+      available: publicFeed,
+      handle: publicUsage,
+    },
     {
       method: 'GET',
       path: '/v1/usage',
       minimum: 'authenticated',
+      caller: 'any',
       noStore: true,
       handle: versionedUsage,
     },
@@ -96,6 +105,7 @@ export function usageRoutes(
       method: 'GET',
       path: '/metrics',
       minimum: 'none',
+      caller: 'any',
       noStore: true,
       available: publicFeed,
       handle: async () =>

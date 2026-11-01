@@ -16,7 +16,7 @@ import {
   SessionResultSchema,
   type SessionView,
 } from '@ferretry/protocol';
-import { isHumanAdminActor } from '../../api/actor.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
@@ -60,9 +60,7 @@ const CONFIGURE = { capability: 'fleet', axis: 'configure' } as const;
 
 /** Refuses a ferret's own credential: only a person (at the machine, or a paired device) does these. */
 function personOnly(context: RouteContext, act: string): void {
-  const agent =
-    context.credential !== undefined && context.credential.tokenClass !== 'device' && !isHumanAdminActor(context.actor);
-  if (agent) throw new ApiError(403, `only a person can ${act}; ask the owner`, 'forbidden');
+  if (isAgentCaller(context)) throw new ApiError(403, `only a person can ${act}; ask the owner`, 'forbidden');
 }
 
 async function view(subsystem: PackSubsystem): Promise<ApiResponse> {
@@ -107,7 +105,7 @@ async function recommend(subsystem: PackSubsystem, context: RouteContext): Promi
 }
 
 async function newChild(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
-  const request = await parseBody(context.request, PackNewRequestSchema);
+  const request = lineageOf(context, await parseBody(context.request, PackNewRequestSchema));
   if (request.cwd !== undefined && context.presentation !== undefined && !context.presentation.loopback)
     throw new ApiError(
       403,
@@ -116,6 +114,25 @@ async function newChild(subsystem: PackSubsystem, context: RouteContext): Promis
     );
   const outcome = await subsystem.service.newChild(request);
   return jsonResponse(PackNewOutcomeSchema.parse(outcome), outcome.outcome === 'started' ? 201 : 200);
+}
+
+/**
+ * A sub-ferret's parent, for a caller on its OWN session credential: the credential's session, always. A body
+ * `parent` naming another session is refused (that session would gain lineage over the child and be charged its
+ * limits), and an absent one is filled in, so a ferret can never start a parent-less child past the Pack switch
+ * and the sub-ferret limits. Any other caller is unchanged: the owner may start a child for any session, and the
+ * admin token naming a ferret's session stays honest-client until `fy` presents the credential (RF-3/RF-4).
+ */
+function lineageOf<T extends { readonly parent?: string }>(context: RouteContext, request: T): T {
+  const credential = context.credential;
+  if (credential?.tokenClass !== 'session') return request;
+  if (request.parent !== undefined && request.parent !== credential.sessionId)
+    throw new ApiError(
+      403,
+      'a ferret starts sub-ferrets only as itself; leave the parent out, the daemon reads it from your credential',
+      'parent_mismatch',
+    );
+  return { ...request, parent: credential.sessionId };
 }
 
 async function result(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
@@ -142,6 +159,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/pack',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async () => await view(subsystem),
@@ -150,6 +168,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/pack/inventory',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async () => jsonResponse(PackInventorySchema.parse(await subsystem.service.inventory())),
@@ -158,6 +177,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/pack/routing/clean-up',
       minimum: 'operator',
+      caller: 'person',
       capability: USE,
       noStore: true,
       handle: async context => await cleanUp(subsystem, context),
@@ -166,6 +186,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/pack/routing/jobs/:jobId',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async context => await job(subsystem, context),
@@ -174,6 +195,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/pack/routing/accept',
       minimum: 'operator',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context =>
@@ -185,6 +207,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/pack/routing/undo',
       minimum: 'operator',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context =>
@@ -194,6 +217,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/pack/recommend',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async context => await recommend(subsystem, context),
@@ -202,6 +226,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/pack/new',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await newChild(subsystem, context),
     },
@@ -209,6 +234,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/sessions/:sessionId/result',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await result(subsystem, context),
     },
@@ -216,6 +242,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'PATCH',
       path: '/v1/sessions/:sessionId/pack',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       handle: async context => await setSwitch(subsystem, context),
     },

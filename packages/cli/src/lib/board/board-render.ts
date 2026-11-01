@@ -1,4 +1,5 @@
 import {
+  ADMIN_TOKEN_ACTOR_WORDS,
   type AgendaRef,
   type BoardCounts,
   type BoardProject,
@@ -189,10 +190,11 @@ export function renderBoardMarkdown(
 
 // ─── one card in full ──────────────────────────────────────────────────────────────────────────
 
-const actorLabel = (actor: BoardTaskEvent['actor'], names: SessionNames): string => {
+const actorLabel = (event: Pick<BoardTaskEvent, 'actor' | 'actorVia'>, names: SessionNames): string => {
+  const actor = event.actor;
   if (actor.kind === 'ferret') return names(actor.sessionId);
   const via = actor.sessionId === undefined ? '' : ` via ${names(actor.sessionId)}`;
-  return `${actor.kind}${via}`;
+  return `${event.actorVia === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : actor.kind}${via}`;
 };
 
 /** One history line's wording, as the protocol spells it for every surface. */
@@ -278,7 +280,7 @@ export function renderCard(
 
   const history = card.history.map(
     event =>
-      `${String(event.seq).padStart(3)}  ${event.at}  ${actorLabel(event.actor, names)}  ${describeEvent(event, laneSet, names)}`,
+      `${String(event.seq).padStart(3)}  ${event.at}  ${actorLabel(event, names)}  ${describeEvent(event, laneSet, names)}`,
   );
   lines.push(...section('History', history.join('\n')));
   return lines.join('\n');

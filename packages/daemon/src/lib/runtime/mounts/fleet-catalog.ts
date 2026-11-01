@@ -37,6 +37,7 @@ import {
 } from '@ferretry/protocol';
 import type { z } from 'zod';
 import { parseBody, parseOptionalBody } from '../../api/body.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter } from '../../api/http.ts';
 import type { ApiResponse } from '../../api/http.ts';
@@ -88,6 +89,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       method: 'GET',
       path: '/v1/fleet/machine',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async context => await answer(FleetMachineViewSchema, () => subsystem.machine(context.governance)),
@@ -96,6 +98,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       method: 'GET',
       path: '/v1/fleet/components',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async () => await answer(FleetComponentCatalogSchema, () => subsystem.components()),
@@ -104,6 +107,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       method: 'GET',
       path: '/v1/fleet/profiles',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async () => await answer(FleetLayeredProfileCatalogSchema, () => subsystem.profiles()),
@@ -113,6 +117,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       method: 'POST',
       path: '/v1/fleet/profiles/preview',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async context => {
@@ -124,6 +129,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       method: 'GET',
       path: '/v1/fleet/runtimes',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async () => await answer(FleetRuntimeCatalogSchema, () => subsystem.runtimes()),
@@ -132,6 +138,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       method: 'POST',
       path: '/v1/fleet/proposals',
       minimum: 'operator',
+      caller: 'any',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => {
@@ -145,6 +152,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       method: 'GET',
       path: '/v1/fleet/proposals/:proposalId',
       minimum: 'operator',
+      caller: 'any',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => await answer(FleetAccountChangeViewSchema, () => subsystem.read(proposalId(context))),
@@ -153,6 +161,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       method: 'POST',
       path: '/v1/fleet/proposals/:proposalId/apply',
       minimum: 'operator',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => {
@@ -163,6 +172,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
             subsystem.apply(proposalId(context), context.governance, {
               presentation: context.presentation,
               spend: () => context.spendFreshStepUp?.(),
+              agent: isAgentCaller(context),
             }),
           );
         } catch (error) {

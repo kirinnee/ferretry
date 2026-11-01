@@ -46,6 +46,32 @@ import type { ApiRequest, ApiResponse, RouteParameters } from './http.ts';
  */
 export type CredentialMinimum = 'none' | 'authenticated' | 'operator' | 'admin-token';
 
+/**
+ * Who a route serves: `person` only, or `any` caller its other declarations admit, ferrets included.
+ *
+ * A FIFTH QUESTION, BESIDE THE FOUR ABOVE AND NOT ON THEIR LADDER. The credential minimum asks which
+ * class of credential; this asks whether the caller is a person (the owner's admin token with no
+ * ferret's session behind it, or a paired device) or an agent (a ferret's own session credential, a
+ * warden, or an admin-token call that names a ferret's session). It is answered by ONE predicate,
+ * `callerIsAgent` (`api/agent-caller.ts`), at the boundary and before any handler or body read, so a
+ * `person` route refuses a ferret with `403 owner_only` whatever the route would have done.
+ *
+ * - `person` — answering or declining a card, approving a plan, writing a secret, an account or a
+ *   sign-in, pairing, grants, security settings, confirming a held change, updating the machine, and
+ *   every other act a ferret must never take on the owner's behalf (`docs/grants.md` § "A ferret
+ *   session").
+ * - `any` — everything a ferret's own `fy` and MCP tools need: its sends and notices, its board card,
+ *   its own agenda items, its input requests, reads. A handler still refuses an agent the PARTS of an
+ *   `any` route that are the owner's (answering ANOTHER session's agenda item, an unheld config write),
+ *   keyed on the same predicate.
+ *
+ * WHAT IT IS NOT: a sandbox. A ferret that reads the admin token out of the state home and leaves its
+ * session out is, to this daemon, the owner at the machine (docs/agent-tools.md § "The ferret session
+ * credential"). This is the wall for a ferret that uses its tools and `fy` normally, prompt-injected
+ * or not.
+ */
+export type RouteCaller = 'person' | 'any';
+
 /** Everything a handler is allowed to know about the caller. */
 export interface RouteContext {
   readonly request: ApiRequest;
@@ -158,6 +184,14 @@ export interface RoutePattern {
 export interface ScopedRoute extends RoutePattern {
   /** The least credential class that may reach this route. */
   readonly minimum: CredentialMinimum;
+  /**
+   * Whether a FERRET may make this call, or only a person.
+   *
+   * REQUIRED, WITH NO DEFAULT, so every route — including every one added later — has had somebody
+   * decide, and the route-caller contract (`tests/unit/runtime/mounts/route-callers.ts`) makes changing
+   * the answer a reviewed diff. See {@link RouteCaller}.
+   */
+  readonly caller: RouteCaller;
   /** Whether the request must have arrived through a privileged carrier. */
   readonly privilegedOnly?: true;
   /**

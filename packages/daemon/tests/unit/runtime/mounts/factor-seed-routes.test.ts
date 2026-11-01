@@ -17,6 +17,8 @@ import { StepUpRegistry } from '../../../../src/lib/step-up/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   agentIn,
+  FERRET_ARRIVAL,
+  ferretOwn,
   CREDENTIALS,
   FakeSecretCipher,
   GRANTED,
@@ -50,7 +52,7 @@ interface Rig {
     method: string,
     path: string,
     body?: unknown,
-    as?: { readonly headers?: Record<string, string>; readonly device?: typeof DEVICE },
+    as?: { readonly headers?: Record<string, string>; readonly device?: typeof DEVICE; readonly pane?: true },
   ) => Promise<{ readonly status: number; readonly body: unknown; readonly consumed: boolean }>;
 }
 
@@ -100,6 +102,7 @@ async function rig(
         headers: as.headers ?? {},
         reads,
         ...(as.device === undefined ? {} : { device: as.device }),
+        ...(as.pane === true ? FERRET_ARRIVAL : {}),
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       }),
     );
@@ -500,25 +503,29 @@ describe('the old seed path and the other 2FA key routes', () => {
     // Arrange
     const r = await rig();
     const staged = await stage(r);
-    const ferret = { headers: agentIn('ferret-1') };
+    // On the admin token naming its session (an older fy), and on its own session credential.
+    const ferrets = [{ headers: agentIn('ferret-1') }, { headers: { ...ferretOwn }, pane: true as const }];
     const base = `/v1/accounts/GITHUB/factors`;
 
     // Act
-    const answers = [
-      await r.call('POST', base, { kind: 'sms', label: 'x' }, ferret),
-      await r.call('PATCH', `${base}/tf_000000000000`, { label: 'x' }, ferret),
-      await r.call('DELETE', `${base}/tf_000000000000`, undefined, ferret),
-      await r.call('POST', `${base}/seed`, stageBody(SEED), ferret),
-      await r.call('GET', `${base}/seed/${staged.stage}`, undefined, ferret),
-      await r.call('POST', `${base}/seed/${staged.stage}/commit`, undefined, ferret),
-      await r.call('POST', `${base}/seed/${staged.stage}/confirm-in-app`, { session: 'x' }, ferret),
-      await r.call('DELETE', `${base}/seed/${staged.stage}`, undefined, ferret),
-    ];
+    const answers = [];
+    for (const ferret of ferrets)
+      answers.push(
+        await r.call('POST', base, { kind: 'sms', label: 'x' }, ferret),
+        await r.call('PATCH', `${base}/tf_000000000000`, { label: 'x' }, ferret),
+        await r.call('DELETE', `${base}/tf_000000000000`, undefined, ferret),
+        await r.call('POST', `${base}/seed`, stageBody(SEED), ferret),
+        await r.call('GET', `${base}/seed/${staged.stage}`, undefined, ferret),
+        await r.call('POST', `${base}/seed/${staged.stage}/commit`, undefined, ferret),
+        await r.call('POST', `${base}/seed/${staged.stage}/confirm-in-app`, { session: 'x' }, ferret),
+        await r.call('DELETE', `${base}/seed/${staged.stage}`, undefined, ferret),
+      );
 
     // Assert
+    should(answers).have.length(16);
     for (const answer of answers) {
       should(answer.status).equal(403);
-      should(answer.body).match({ code: 'forbidden' });
+      should(answer.body).match({ code: 'owner_only' });
       should(answer.consumed).be.false();
     }
   });

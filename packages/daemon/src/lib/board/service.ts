@@ -11,7 +11,9 @@
  * caller still gets the card it changed.
  */
 import {
+  ADMIN_TOKEN_ACTOR_WORDS,
   type BoardActor,
+  type BoardActorVia,
   type BoardProjectId,
   type BoardQuery,
   type BoardReopenAttachments,
@@ -65,6 +67,7 @@ import type {
   ReopenNotifier,
   SessionFocus,
   SessionParents,
+  DoneNotice,
 } from './ports.ts';
 import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.ts';
 import { countsOf, inScope, pageOf, passesFilters } from './query.ts';
@@ -111,19 +114,39 @@ export interface SignalDoneOutcome {
 export const DEPENDENCY_SECTION = 'board:dependencies';
 
 /** The line a reopened card's ferret is told (§2.9): a plain sentence, with no tag around it. */
-export const reopenMessage = (task: Pick<BoardTask, 'id'>, by: BoardActor, reason: string): string =>
-  `${formatTaskRef(task)} was reopened by ${by.kind === 'owner' ? 'the owner' : (by.sessionId ?? `the ${by.kind}`)}: ${reason}`;
+export const reopenMessage = (
+  task: Pick<BoardTask, 'id'>,
+  by: BoardActor,
+  reason: string,
+  byVia?: BoardActorVia,
+): string => `${formatTaskRef(task)} was reopened by ${reopenerWords(by, byVia)}: ${reason}`;
+
+const reopenerWords = (by: BoardActor, byVia: BoardActorVia | undefined): string => {
+  if (by.kind === 'owner') return byVia === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : 'the owner';
+  return by.sessionId ?? `the ${by.kind}`;
+};
 
 /**
  * The line a card's ferret is told the owner closed it: a plain sentence, with no tag around it. A batch
  * (one ferret's cards closed together) lists them.
  */
-export const doneMessage = (tasks: readonly Pick<BoardTask, 'id' | 'title'>[]): string => {
+export const doneMessage = (
+  tasks: readonly Pick<BoardTask, 'id' | 'title'>[],
+  by: DoneNotice['by'] = 'owner',
+): string => {
   const named = tasks.map(task => `${formatTaskRef(task)} “${task.title}”`);
+  const who = by === 'owner' ? 'The owner' : `The${ADMIN_TOKEN_ACTOR_WORDS.slice('the'.length)}`;
   return named.length === 1
-    ? `The owner marked ${named[0]} done.`
-    : `The owner marked these cards done: ${named.join(', ')}.`;
+    ? `${who} marked ${named[0]} done.`
+    : `${who} marked these cards done: ${named.join(', ')}.`;
 };
+
+/**
+ * How a caller that acts as the owner is recorded beside its actor: `admin-token` for the host's token with no
+ * ferret's credential, so no surface shows it as the owner (`BoardActorVia`). Nothing for anyone else.
+ */
+const viaOf = (caller: BoardCaller): { readonly actorVia?: BoardActorVia } =>
+  caller.kind === 'owner' && caller.via === 'admin-token' ? { actorVia: 'admin-token' } : {};
 
 /** The board actor a caller is recorded as. */
 export const actorOf = (caller: BoardCaller): BoardActor => {
@@ -543,6 +566,7 @@ export class BoardService {
         machineId: facts.machineId,
         now: this.ports.clock.now(),
         actor: actorOf(facts.caller),
+        ...viaOf(facts.caller),
         standing: facts.caller.kind === 'owner' ? 'owner-human' : 'owner',
         owner: facts.owner,
         projectId: facts.projectId,
@@ -630,6 +654,7 @@ export class BoardService {
       now: this.ports.clock.now(),
       runningVersion: this.ports.runningVersion?.() ?? null,
       actor: actorOf(caller),
+      ...viaOf(caller),
       standing: await this.standing(caller, card),
       laneSet,
       index,
@@ -756,7 +781,12 @@ export class BoardService {
     if (reopened === undefined) return;
     if (caller.kind === 'ferret' && caller.sessionId === effectiveAssignee(task)) return;
     await this.ports.reopen
-      .reopened({ task, ...reopened, by: actorOf(caller) })
+      .reopened({
+        task,
+        ...reopened,
+        by: actorOf(caller),
+        ...(viaOf(caller).actorVia === undefined ? {} : { byVia: 'admin-token' as const }),
+      })
       .catch((error: unknown) => this.warn(`could not deliver the reopen of ${formatTaskRef(task)}`, error));
   }
 
@@ -771,7 +801,7 @@ export class BoardService {
     const laneSets = await this.laneSetsOf([after.projectId]);
     if (cardCategory(after, laneSets) !== 'closed' || cardCategory(before, laneSets) === 'closed') return;
     await this.ports.done
-      .done([{ task: after }])
+      .done([{ task: after, by: caller.via === 'admin-token' ? 'admin-token' : 'owner' }])
       .catch((error: unknown) => this.warn(`could not tell the ferret ${formatTaskRef(after)} is done`, error));
   }
 

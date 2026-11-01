@@ -83,6 +83,7 @@ const mirror: ApiRoute = {
   method: 'GET',
   path: '/mirror/:id',
   minimum: 'none',
+  caller: 'any',
   handle: async context =>
     jsonResponse({
       method: context.request.method,
@@ -129,6 +130,7 @@ describe('BunApiServer', () => {
       method: 'GET',
       path: '/late',
       minimum: 'none',
+      caller: 'any',
       handle: async () => ({
         ...jsonResponse({ shown: 'raw' }),
         late: () => jsonResponse({ shown: sealed ? 'sealed' : 'raw' }),
@@ -208,6 +210,7 @@ describe('BunApiServer', () => {
       method: 'GET',
       path: '/v1/local-healthz',
       minimum: 'none',
+      caller: 'any',
       privilegedOnly: true,
       handle: async () => jsonResponse({ ok: true }),
     });
@@ -244,6 +247,7 @@ describe('BunApiServer', () => {
       method: 'GET',
       path: '/teapot',
       minimum: 'none',
+      caller: 'any',
       noStore: true,
       handle: async () => textResponse('short and stout', 418, 'text/plain; charset=utf-8'),
     });
@@ -266,6 +270,7 @@ describe('BunApiServer', () => {
       method: 'GET',
       path: '/big',
       minimum: 'none',
+      caller: 'any',
       compress: true,
       handle: async () => jsonResponse(big),
     };
@@ -318,6 +323,7 @@ describe('BunApiServer', () => {
       method: 'POST',
       path: '/echo',
       minimum: 'none',
+      caller: 'any',
       handle: async context => jsonResponse({ received: await context.request.text() }),
     });
 
@@ -334,6 +340,7 @@ describe('BunApiServer', () => {
       method: 'GET',
       path: '/v1/private',
       minimum: 'operator',
+      caller: 'any',
       handle: async () => jsonResponse({ ok: true }),
     });
 
@@ -354,6 +361,7 @@ describe('BunApiServer', () => {
       method: 'POST',
       path: '/same-origin',
       minimum: 'none',
+      caller: 'any',
       handle: async () => {
         calls += 1;
         return jsonResponse({ ok: true });
@@ -375,6 +383,7 @@ describe('BunApiServer', () => {
       method: 'POST',
       path: '/v1/private',
       minimum: 'operator',
+      caller: 'any',
       handle: async () => jsonResponse({ ok: true }),
     });
     const origin = 'https://ferretry.pages.dev';
@@ -416,6 +425,7 @@ describe('BunApiServer', () => {
       method: 'POST',
       path: '/v1/fleet/proposals/:id/apply',
       minimum: 'operator',
+      caller: 'any',
       handle: async () => {
         calls += 1;
         return jsonResponse({ ok: true });
@@ -451,6 +461,7 @@ describe('BunApiServer', () => {
       method: 'GET',
       path: '/v1/sessions/:sessionId/logs',
       minimum: 'none',
+      caller: 'any',
       handle: async context =>
         conditional(textResponse('the transcript'), context.request.headers.get('if-none-match')),
     });
@@ -484,6 +495,7 @@ describe('BunApiServer', () => {
       method: 'POST',
       path: '/effect',
       minimum: 'none',
+      caller: 'any',
       handle: async () => {
         calls += 1;
         return jsonResponse({ ok: true });
@@ -573,6 +585,7 @@ describe('BunApiServer against a substituted host', () => {
           method: 'GET',
           path: '/v1/local-healthz',
           minimum: 'none',
+          caller: 'any',
           privilegedOnly: true,
           handle: async () => jsonResponse({ ok: true }),
         },
@@ -650,6 +663,7 @@ function recordingSocket(
     method: 'GET',
     path: '/v1/stream',
     minimum: 'operator',
+    caller: 'any',
     accept: async () => {
       if (options.refuse !== undefined) throw options.refuse;
       return async (downstream: SocketDownstream): Promise<SocketHandler> => {
@@ -714,6 +728,7 @@ function eventStreamSocket(scheduler: EventStreamScheduler, source: FleetEventSo
     method: 'GET',
     path: '/v1/stream',
     minimum: 'operator',
+    caller: 'any',
     accept: async () => async (downstream: SocketDownstream) =>
       new FleetEventStreamService(source, scheduler).handler(
         { kind: 'session', sessionId: 's1', after: 0 },
@@ -1204,6 +1219,7 @@ describe('BunApiServer request-body bounds', () => {
     method: 'POST',
     path: '/bounded',
     minimum: 'none',
+    caller: 'any',
     handle: async context => jsonResponse(await parseBody(context.request, AnySchema, { maxBytes: 64 })),
   };
 
@@ -1238,6 +1254,7 @@ describe('BunApiServer request-body bounds', () => {
           method: 'POST',
           path: '/echo',
           minimum: 'none',
+          caller: 'any',
           handle: async context => {
             calls += 1;
             return jsonResponse({ received: await context.request.text() });

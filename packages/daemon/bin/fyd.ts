@@ -7983,6 +7983,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         record: async (id, sessionCapabilityHash) => {
           await storage.updateConfig(id, current => ({ ...(jsonObject(current) ?? {}), sessionCapabilityHash }));
         },
+        erase: async id => {
+          await storage.updateConfig(id, current => {
+            const { sessionCapabilityHash: _revoked, ...rest } = jsonObject(current) ?? {};
+            return rest;
+          });
+        },
       },
     });
   // What a pane is LAUNCHED with: the stored environment over the per-ferret switches its record implies

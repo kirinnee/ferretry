@@ -63,20 +63,28 @@ class MemoryAccepted implements AcceptedConfigStore {
 }
 
 interface Caller {
-  readonly kind: 'host' | 'device' | 'agent';
+  readonly kind: 'host' | 'device' | 'agent' | 'ferret';
   readonly fresh?: boolean;
 }
 const HOST: Caller = { kind: 'host' };
 const DEVICE: Caller = { kind: 'device' };
 const FRESH_DEVICE: Caller = { kind: 'device', fresh: true };
 const FERRET: Caller = { kind: 'agent' };
+/** A ferret on its OWN session credential: refused by its class, with no header involved. */
+const FERRET_OWN: Caller = { kind: 'ferret' };
 
 const CREDENTIAL: Record<Caller['kind'], AuthenticatedCredential> = {
   host: { kind: 'authenticated', tokenClass: 'admin' },
   device: { kind: 'authenticated', tokenClass: 'device', deviceId: 'd1' },
   agent: { kind: 'authenticated', tokenClass: 'admin' },
+  ferret: { kind: 'authenticated', tokenClass: 'session', sessionId: 's1' },
 };
-const ACTOR: Record<Caller['kind'], string> = { host: 'admin-cli', device: 'device:d1', agent: 'peer:s1' };
+const ACTOR: Record<Caller['kind'], string> = {
+  host: 'admin-cli',
+  device: 'device:d1',
+  agent: 'peer:s1',
+  ferret: 'peer:s1',
+};
 
 interface World {
   readonly directory: MemoryDirectory;
@@ -230,11 +238,15 @@ describe('PUT /v1/accounts/defaults', () => {
 
   it('should refuse a ferret before reading the body, and write nothing', async () => {
     const w = await world();
-    const answer = await w.drive(FERRET, 'PUT', '/v1/accounts/defaults', SITE_LINE);
+    // On the admin token naming its session, and on its own session credential (the boundary refuses both
+    // first: the route is `caller: 'person'`; this is the handler's own second line).
+    for (const ferret of [FERRET, FERRET_OWN]) {
+      const answer = await w.drive(ferret, 'PUT', '/v1/accounts/defaults', SITE_LINE);
 
-    should(answer.status).equal(403);
-    should(answer.code).equal('forbidden');
-    should(answer.consumed).be.false();
+      should(answer.status).equal(403);
+      should(answer.code).equal('forbidden');
+      should(answer.consumed).be.false();
+    }
     should(text(w)).be.undefined();
   });
 

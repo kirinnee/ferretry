@@ -102,6 +102,7 @@ export function stepUpRoutes(service: StepUpService, seeds?: StagedSeedBinding):
       method: 'GET',
       path: '/v1/passkeys',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       // The panel that offers the first passkey must load on a machine that asks for one on opening.
       unlockExempt: true,
@@ -111,6 +112,7 @@ export function stepUpRoutes(service: StepUpService, seeds?: StagedSeedBinding):
       method: 'POST',
       path: '/v1/passkeys/options',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       // Served before an unlock: a device that has just paired holds no passkey, so registering one is
       // how it gets in at all. The service's own rule (the first window, or one the owner re-opened) is
@@ -127,6 +129,7 @@ export function stepUpRoutes(service: StepUpService, seeds?: StagedSeedBinding):
       method: 'POST',
       path: '/v1/passkeys',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       unlockExempt: true,
       handle: async context => {
@@ -138,6 +141,7 @@ export function stepUpRoutes(service: StepUpService, seeds?: StagedSeedBinding):
       method: 'POST',
       path: '/v1/step-up/options',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       handle: async context => {
         const body = await parseBody(context.request, StepUpOptionsRequestSchema);
@@ -164,6 +168,7 @@ export function stepUpRoutes(service: StepUpService, seeds?: StagedSeedBinding):
       method: 'POST',
       path: '/v1/step-up',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       handle: async context => {
         const body = await parseBody(context.request, StepUpAssertionSchema);
@@ -176,6 +181,7 @@ export function stepUpRoutes(service: StepUpService, seeds?: StagedSeedBinding):
       method: 'POST',
       path: '/v1/unlock/options',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       unlockExempt: true,
       handle: async context => {
@@ -189,6 +195,7 @@ export function stepUpRoutes(service: StepUpService, seeds?: StagedSeedBinding):
       method: 'POST',
       path: '/v1/unlock',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       unlockExempt: true,
       handle: async context => {
@@ -204,6 +211,7 @@ export function stepUpRoutes(service: StepUpService, seeds?: StagedSeedBinding):
       method: 'POST',
       path: '/v1/passkeys/registration-window',
       minimum: 'admin-token',
+      caller: 'person',
       noStore: true,
       handle: async context => {
         const body = await parseBody(context.request, PasskeyWindowRequestSchema);

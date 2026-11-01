@@ -114,8 +114,11 @@ caches them between reads, so plaintext lives no longer than the read that neede
   by name. A ferret gets a value into the store the way it gets any secret from the owner: an input
   request (the owner sees a card and types it) or a sealed copy pasted into the store ([secure
   copy](secure-copy.md)); both show the owner a card. The owner's `fy secret set` in a normal shell and
-  the app's write-only form keep working. This is an honest-client guard (`isHumanAdminActor`): it holds
-  against an honest or confused client, not one that forges its own identity header.
+  the app's write-only form keep working. Every one of these is a `caller: 'person'` route, refused with
+  `403 owner_only` at the authorization boundary to a ferret on its own session credential, to the admin
+  token naming a ferret's session, and to a warden (`callerIsAgent`, [agent-tools.md](agent-tools.md#who-a-ferret-may-be-every-route-says)).
+  It holds against an honest or confused client, and a prompt-injected one using its tools and `fy`, not
+  one that reads the admin token off the disk and leaves its session out.
 - **A credential in shell history or in `/proc`.** `fy secret set` takes no value argument, so it
   cannot be typed onto a command line.
 - **One file travelling without the other.** The vault at `<FY_HOME>/state/secrets.json` is
@@ -138,12 +141,13 @@ caches them between reads, so plaintext lives no longer than the read that neede
 - **Anyone who already has your user account on that machine.**
 - **A ferret that drops its identity, or reads the vault directly.** The refusal above is an
   **honest-client guard**, like the other owner-only rules (updating the daemon, confirming a configuration
-  change). It reads who is asking from the session id that `fy` sends from inside a ferret. An agent holds
-  the same admin token, so it can send raw HTTP without that header and look like the owner's shell. The
-  real limit is the one this whole section states: **agents run as the same user, with the admin token.**
-  Such an agent can also read `secrets.json` and `secrets.key` straight off the disk. The guard stops a
-  confused or prompt-injected agent from using the obvious route; it does not stop one that is working
-  around it. A per-session credential would, and is not built.
+  change). A ferret's own session credential is always refused it — the daemon reads who is asking from the
+  credential, never from a header. But the admin token is readable to the same user, so an agent can send
+  raw HTTP with that token and no session header and look like the owner's shell. The real limit is the one
+  this whole section states: **agents run as the same user, with the admin token in reach.** Such an agent
+  can also read `secrets.json` and `secrets.key` straight off the disk. The guard stops a confused or
+  prompt-injected agent from using the obvious route; it does not stop one that is working around it.
+  Only keeping ferrets out of the state home would.
 - **Two writers that are not the store's own routes.** Importing your harness setup
   (`fy`'s setup import and clone, through `/v1/fleet/proposals/:id/apply`) adds secrets read from this
   machine's harness files, and only under names the store does not hold, so it cannot replace one. An
@@ -348,10 +352,11 @@ pairing code, widening a device or any other act takes. Both directions are test
   only 3** (`429`), so nobody fills its memory by staging and a ferret holding junk stages never keeps the owner's
   app from staging. **Only the caller that staged a seed, or a paired device, may read, drop or card it** (another
   caller is told it is not waiting): the stage id is on the agenda card, so knowing it proves nothing.
-  **Until ferrets have their own credentials (RF-2/RF-3), "caller" is honest-client:** a ferret that uses the admin
-  token without its session header counts as the SAME caller as your own shell's `fy` (`admin-cli`), so it can use up
-  or drop the stages `fy` made — never save a seed (that still takes your passkey). A paired device always keeps its
-  own slot, so the app can always stage.
+  Every stage route is `caller: 'person'`, so a ferret on its own session credential (or naming its session) is
+  refused all of them before the body is read, and a session credential is keyed as its own caller even so.
+  **What is still honest-client:** a ferret that reads the admin token and sends no session at all counts as the
+  SAME caller as your own shell's `fy` (`admin-cli`), so it can use up or drop the stages `fy` made — never save a
+  seed (that still takes your passkey). A paired device always keeps its own slot, so the app can always stage.
 - **The old seed path is refused in the store itself** (`applySeed`), not only at its route: no caller, now or later,
   writes a seed except through the passkey-bound save.
 - **Write-only.** No route, command, log, agenda item or push answers a seed or a code made from it. After the save

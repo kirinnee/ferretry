@@ -3,6 +3,7 @@ import type { SharedCatalogSubsystem } from '../../../../src/lib/runtime/mounts/
 import { describe, it } from 'bun:test';
 import { ANALYTICS_PRICING_RATE_APPLICABILITY } from '@ferretry/protocol';
 import should from 'should';
+import type { ApiResponse } from '../../../../src/lib/api/http.ts';
 import { AUDITED_ROUTES, AUDITED_SOCKET_ROUTES } from '../../../../src/lib/audit/index.ts';
 import { BrowserProxyTester } from '../../../../src/lib/browser/proxy/index.ts';
 import { MemberDispatcher, type SharedRouteDeps } from '../../../../src/lib/catalog-members/shared-routes.ts';
@@ -25,9 +26,10 @@ import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
 import { MemoryTranscript } from '../../../support/transcript-images.ts';
-import { agentToolWorld } from '../../agent-tools/support.ts';
+import { agentToolWorld, PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { fixedClock, request } from '../../api/support.ts';
 import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
+import { OTHER_TABLE_CALLERS, ROUTE_CALLERS } from './route-callers.ts';
 import { inputRequestService } from '../../input-requests/support.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
@@ -64,6 +66,9 @@ import {
   sessionDirectory,
   sessionView,
 } from './support.ts';
+
+/** The daemon package, which the route-caller completeness check reads its route tables from. */
+const DAEMON_ROOT = new URL('../../../../', import.meta.url).pathname.replace(/\/$/u, '');
 
 /**
  * The complete surface the daemon process serves.
@@ -1724,6 +1729,154 @@ describe('the member sessions and the main table', () => {
     // …and the member table, handed the device's request with its admin bearer, answers one 401 and reads nothing.
     should(memberRoutes.length).be.above(0);
     should(asNobody.map(response => response.status)).deepEqual(memberRoutes.map(() => 401));
+  });
+});
+
+describe('who may call each route', () => {
+  const concrete = (path: string): string => path.replace(/[:*][A-Za-z]+/gu, 'x1');
+  /** A request whose body throws if anything reads it, so "refused before the body" is what is proved. */
+  const unread = (route: { readonly method: string; readonly path: string }, headers: Record<string, string>) => ({
+    ...request({ method: route.method, path: concrete(route.path), loopback: true, privilegedLoopback: true, headers }),
+    text: async (): Promise<string> => {
+      throw new Error(`${route.method} ${route.path} read its body`);
+    },
+  });
+  const answer = (route: { readonly method: string; readonly path: string }, response: ApiResponse) => ({
+    route: `${route.method} ${route.path}`,
+    status: response.status,
+    code: (JSON.parse(response.body) as { readonly code?: string }).code,
+  });
+
+  it('should declare who may call every route, so changing one is a reviewed diff', () => {
+    // Arrange
+    const mounted = subsystems();
+
+    // Act
+    const declared = [...mountedDaemonRoutes(base, mounted), ...mountedSocketRoutes(mounted)].map(
+      route => `${route.method} ${route.path} ${route.minimum} ${route.caller}`,
+    );
+
+    // Assert — the table is `route-callers.ts`; a route added, removed or reclassified changes that file.
+    should(declared).deepEqual([...ROUTE_CALLERS]);
+  });
+
+  it('should leave no route out of the contract, an optional subsystem’s included', async () => {
+    // Arrange — every `path: '…'` literal a route table in the daemon declares. A route behind an optional
+    // subsystem the world above forgot to supply would be missing from the mounted table, and so from the
+    // contract; this finds it from the source instead. The member table (`/v1/shared/*`) has its own key-based
+    // authority and no `caller`.
+    const sources = [
+      ...new Bun.Glob('src/lib/runtime/mounts/*.ts').scanSync(DAEMON_ROOT),
+      ...new Bun.Glob('src/lib/api/routes/*.ts').scanSync(DAEMON_ROOT),
+    ];
+    // A method beside its path is compared as the pair, so a new verb on a path the contract already lists
+    // cannot slip through; a path written apart from its method is compared as a path.
+    const routes = new Set<string>();
+    const paths = new Set<string>();
+    for (const source of sources) {
+      const text = await Bun.file(`${DAEMON_ROOT}/${source}`).text();
+      for (const found of text.matchAll(/method: '([A-Z]+)',\s*path: '(\/[^']+)'/gu))
+        if (found[1] !== undefined && found[2] !== undefined) routes.add(`${found[1]} ${found[2]}`);
+      for (const found of text.matchAll(/path: '(\/[^']+)'/gu)) if (found[1] !== undefined) paths.add(found[1]);
+    }
+    const contracted = [...ROUTE_CALLERS, ...OTHER_TABLE_CALLERS].map(line => line.split(' ').slice(0, 2).join(' '));
+    const contractedPaths = new Set(contracted.map(route => route.split(' ')[1] ?? ''));
+    const member = (route: string): boolean => route.includes(' /v1/shared/') || route.startsWith('/v1/shared/');
+
+    // Act
+    const missingRoutes = [...routes].filter(route => !contracted.includes(route) && !member(route));
+    const missingPaths = [...paths].filter(path => !contractedPaths.has(path) && !member(path));
+
+    // Assert
+    should(routes.size).be.above(300);
+    should(missingRoutes).deepEqual([]);
+    should(missingPaths).deepEqual([]);
+  });
+
+  it('should refuse every caller that is a ferret on every person route, before any handler reads the body', async () => {
+    // Arrange
+    const mounted = subsystems();
+    await mounted.grants.refresh();
+    const dispatcher = createMountedDispatcher(base, mounted);
+    const person = mountedDaemonRoutes(base, mounted).filter(route => route.caller === 'person');
+    // A ferret's own credential; the admin token naming a ferret's session (a pane from before the credential,
+    // or an older fy); and a warden. All three are agents, and none reaches a person route.
+    const ferrets: readonly Record<string, string>[] = [
+      { authorization: `Bearer ${PREFIXED_S1}` },
+      { authorization: `Bearer ${CREDENTIALS.admin}`, 'x-ferretry-session-id': 's1', 'x-ferretry-client': 'cli' },
+      { authorization: `Bearer ${CREDENTIALS.warden}` },
+    ];
+
+    // Act
+    const answers = [];
+    for (const headers of ferrets)
+      for (const route of person) answers.push(answer(route, await dispatcher.dispatch(unread(route, headers))));
+
+    // Assert
+    should(person.length).equal(ROUTE_CALLERS.filter(line => line.endsWith(' person')).length);
+    should(answers).deepEqual(
+      ferrets.flatMap(() =>
+        person.map(route => ({ route: `${route.method} ${route.path}`, status: 403, code: 'owner_only' })),
+      ),
+    );
+  });
+
+  it('should still serve a person on a person route: the owner at the machine is not refused as a ferret', async () => {
+    // Arrange — the owner's CLI, no session: the route is reached, so its own answer (whatever it is) comes back.
+    const mounted = subsystems();
+    await mounted.grants.refresh();
+    const dispatcher = createMountedDispatcher(base, mounted);
+    const route = { method: 'PATCH', path: '/v1/grants' };
+
+    // Act
+    const response = await dispatcher.dispatch(
+      request({
+        ...route,
+        loopback: true,
+        privilegedLoopback: true,
+        headers: { authorization: `Bearer ${CREDENTIALS.admin}`, 'x-ferretry-client': 'cli' },
+        body: '{}',
+      }),
+    );
+
+    // Assert
+    should(answer(route, response).code).not.equal('owner_only');
+  });
+
+  it('should take a ferret’s own credential on an any route, as that ferret and never as the owner', async () => {
+    // Arrange
+    const mounted = subsystems();
+    await mounted.grants.refresh();
+    const dispatcher = createMountedDispatcher(base, mounted);
+
+    // Act — a read every ferret makes (its session list), with no session header at all.
+    const response = await dispatcher.dispatch(
+      request({
+        method: 'GET',
+        path: '/v1/sessions',
+        loopback: true,
+        privilegedLoopback: true,
+        headers: { authorization: `Bearer ${PREFIXED_S1}` },
+      }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+  });
+
+  it('should never look up a ferret’s credential that did not arrive on this machine’s own carrier', async () => {
+    // Arrange
+    const mounted = subsystems();
+    await mounted.grants.refresh();
+    const dispatcher = createMountedDispatcher(base, mounted);
+
+    // Act — the same credential, from a remote carrier: a stranger's bearer.
+    const response = await dispatcher.dispatch(
+      request({ method: 'GET', path: '/v1/sessions', headers: { authorization: `Bearer ${PREFIXED_S1}` } }),
+    );
+
+    // Assert
+    should(response.status).equal(401);
   });
 });
 

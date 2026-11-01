@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import * as refs from '../../src/lib/board-refs.ts';
 import {
+  BoardActorViaSchema,
   BOARD_TASK_ID_PATTERN,
   BoardProjectIdSchema,
   BoardSkipSchema,
@@ -28,10 +29,12 @@ const VALID: readonly SchemaCase[] = [
   { name: 'project id', schema: BoardProjectIdSchema, value: '00000000-0000-4000-8000-000000000001' },
   { name: 'unfiled', schema: BoardProjectIdSchema, value: UNFILED_PROJECT_ID },
   { name: 'skip', schema: BoardSkipSchema, value: { reason: 'chit-chat', at: '2026-10-30T10:00:00.000Z' } },
+  { name: 'an owner actor that acted on the admin token', schema: BoardActorViaSchema, value: 'admin-token' },
 ];
 
 const INVALID: readonly SchemaCase[] = [
   { name: 'zero', schema: BoardTaskIdSchema, value: 'F0' },
+  { name: 'an actor label that is not the admin token', schema: BoardActorViaSchema, value: 'owner' },
   { name: 'leading zero', schema: BoardTaskIdSchema, value: 'F01' },
   { name: 'unknown kind', schema: BoardTaskIdSchema, value: 'X1' },
   { name: 'ten digits', schema: BoardTaskIdSchema, value: 'F1234567890' },

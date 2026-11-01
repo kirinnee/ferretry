@@ -43,6 +43,7 @@ export function webrtcRoutes(webrtc: WebRtcSignallingSubsystem): readonly ApiRou
       method: 'POST',
       path: '/v1/webrtc/offer',
       minimum: 'authenticated',
+      caller: 'any',
       // An answer names this machine's candidate addresses and the DTLS certificate fingerprint for one
       // connection; it is good for that connection only and must never be served again.
       noStore: true,

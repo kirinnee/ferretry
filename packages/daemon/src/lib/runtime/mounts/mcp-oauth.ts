@@ -70,6 +70,7 @@ export function mcpOAuthRoutes(subsystem: McpOAuthSubsystem): readonly ApiRoute[
       method: 'GET',
       path: '/v1/fleet/mcp-auth',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async () =>
@@ -79,6 +80,7 @@ export function mcpOAuthRoutes(subsystem: McpOAuthSubsystem): readonly ApiRoute[
       method: 'POST',
       path: '/v1/fleet/mcp-auth/:component',
       minimum: 'operator',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context =>
@@ -93,6 +95,7 @@ export function mcpOAuthRoutes(subsystem: McpOAuthSubsystem): readonly ApiRoute[
       method: 'DELETE',
       path: '/v1/fleet/mcp-auth/:component',
       minimum: 'operator',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context =>
@@ -104,6 +107,7 @@ export function mcpOAuthRoutes(subsystem: McpOAuthSubsystem): readonly ApiRoute[
       method: 'POST',
       path: '/v1/fleet/mcp-auth/flows/:flowId',
       minimum: 'operator',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context =>
@@ -118,6 +122,7 @@ export function mcpOAuthRoutes(subsystem: McpOAuthSubsystem): readonly ApiRoute[
       method: 'DELETE',
       path: '/v1/fleet/mcp-auth/flows/:flowId',
       minimum: 'operator',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context =>

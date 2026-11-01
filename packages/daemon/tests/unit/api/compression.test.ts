@@ -40,6 +40,7 @@ const route = (path: string, handle: ApiRoute['handle'], flags: Partial<ApiRoute
   method,
   path,
   minimum: 'none',
+  caller: 'any',
   handle,
   ...flags,
 });

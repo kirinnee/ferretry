@@ -48,6 +48,10 @@ class RecordingHashes implements SessionCapabilityHashStore {
     this.order.push('hash');
     this.recorded.push([id, hash]);
   }
+
+  async erase(): Promise<void> {
+    this.order.push('erase');
+  }
 }
 
 function harness() {
@@ -120,6 +124,7 @@ describe('the prefixed session credential, across a rotation', () => {
           await hashes.record(id, hash);
           stored = hash;
         },
+        erase: async () => {},
       },
     });
     const identities = new CredentialAgentIdentities(

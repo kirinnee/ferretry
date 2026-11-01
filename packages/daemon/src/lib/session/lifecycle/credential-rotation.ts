@@ -41,4 +41,8 @@ export class SessionCredentialRotation implements SessionCredentialRotator {
     await this.ports.hashes.record(id, credential.hash);
     return credential.hash;
   }
+
+  async revoke(id: SessionId): Promise<void> {
+    await this.ports.hashes.erase(id);
+  }
 }

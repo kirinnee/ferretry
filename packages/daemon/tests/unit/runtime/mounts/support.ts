@@ -196,16 +196,43 @@ export const IDS = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-
  * been given every capability — so a mount test is about its own routes, not the per-device half of
  * `effective = daemonWide ∧ device`, which `device-grants.test.ts` owns.
  */
+/** A ferret's own session credential, in the shape every launch mints, and the session it names. */
+const FERRET_CREDENTIAL = `fys_${'f'.repeat(43)}`;
+export const FERRET_SESSION = 'ferret-own';
+
 export const CREDENTIALS = {
   admin: 'admin-secret',
   warden: 'warden-secret',
   devices: { has: (_deviceId: string) => true, grants: (_deviceId: string) => DEFAULT_CAPABILITY_GRANTS },
+  sessions: {
+    resolve: async (capability: string) =>
+      capability === FERRET_CREDENTIAL ? { sessionId: FERRET_SESSION } : undefined,
+  },
 } as const;
 
 /** The human's CLI. */
 export const human = { authorization: `Bearer ${CREDENTIALS.admin}`, 'x-ferretry-client': 'cli' } as const;
-/** An agent calling from inside its own pane. */
+/** An agent calling from inside its own pane, on the admin token and its session header (an older fy). */
 export const agentIn = (sessionId: string) => ({ ...human, 'x-ferretry-session-id': sessionId });
+/**
+ * A ferret presenting its OWN session credential, as `fy` and the MCP server do. Looked up only for a request
+ * that arrived on this machine's privileged loopback carrier, so a case sends it with {@link FERRET_ARRIVAL}.
+ */
+export const ferretOwn = { authorization: `Bearer ${FERRET_CREDENTIAL}`, 'x-ferretry-client': 'cli' } as const;
+/** Where a pane's own request arrives from: this machine, over the privileged loopback carrier. */
+export const FERRET_ARRIVAL = { loopback: true, privilegedLoopback: true } as const;
+/**
+ * The same request as a ferret's pane sends it with its OWN credential ({@link ferretOwn}) from
+ * {@link FERRET_ARRIVAL}: the bearer replaced, and no session header, because the credential names the session.
+ */
+export const fromFerret = <T extends { readonly headers: ReadonlyMap<string, string> }>(asked: T): T => ({
+  ...asked,
+  ...FERRET_ARRIVAL,
+  headers: new Map([
+    ...[...asked.headers].filter(([name]) => name !== 'x-ferretry-session-id'),
+    ['authorization', ferretOwn.authorization],
+  ]),
+});
 
 /** A pin repository under the test's control: the domain rules are real, the storage is not. */
 class FakePinRepository implements PinRepository {
@@ -269,7 +296,7 @@ export function agendaService(repository: AgendaLedgerRepository = new FakeLedge
   return new AgendaService(
     repository,
     { now: () => AT },
-    { has: async sessionId => sessionId === 's1' },
+    { has: async sessionId => sessionId === 's1' || sessionId === FERRET_SESSION },
     { raised: async () => undefined },
   );
 }

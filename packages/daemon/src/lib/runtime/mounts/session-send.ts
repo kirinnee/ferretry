@@ -48,12 +48,10 @@ import { DEFAULT_SEND_PAGE, MAX_SEND_PAGE, type SendPageQuery, sendPage } from '
  * could only ever refuse. The same reasoning bounds the interrupt below: it stops a turn, and it
  * declines to ABANDON a rendered question.
  *
- * WHY `admin` SCOPE, on both. The signal mount's header gives the full argument and it holds here
- * unchanged: the daemon cannot yet turn a per-session credential into "the caller IS session X", and
- * a route that trusted a session-scoped token to name its own subject would let any holder send into
- * any other session. The fleet wrappers hold the admin token, which is how a peer send works today —
- * and the SENDER is taken from the server-derived actor rather than the body, so a caller still
- * cannot claim to be somebody else.
+ * WHO SENDS. The SENDER is the server-derived actor, never the body: a ferret's own session credential
+ * makes it `peer:<that session>` whatever any header says (`caller: 'any'`), and the admin token plus
+ * `x-ferretry-session-id` is the older honest-client form of the same. Being a ferret buys a SENDER
+ * identity, never a different TARGET's: the path names where the message goes, as for every caller.
  */
 
 /** Why a send or an interrupt could not be acted on. */
@@ -253,6 +251,7 @@ export function sessionSendRoutes(subsystem: SessionSendSubsystem): readonly Api
       method: 'POST',
       path: '/v1/sessions/:sessionId/send',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await send(subsystem, context),
     },
@@ -260,6 +259,7 @@ export function sessionSendRoutes(subsystem: SessionSendSubsystem): readonly Api
       method: 'POST',
       path: '/v1/sessions/:sessionId/interrupt',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await interrupt(subsystem, context),
     },
@@ -319,6 +319,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       method: 'GET',
       path: '/v1/sessions/:sessionId/sends',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       // A page, not the whole ledger (`session/send/page.ts`): the newest sends and every open one.
       handle: async context => await sendsPage(subsystem, context),
@@ -329,6 +330,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       method: 'GET',
       path: '/v1/sessions/:sessionId/queue',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => jsonResponse({ messages: await subsystem.queue(pathSessionId(context)).catch(refuse) }),
     },
@@ -338,6 +340,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       method: 'PATCH',
       path: '/v1/sessions/:sessionId/queue/:messageId',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => {
         const id = pathSessionId(context);
@@ -350,6 +353,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       method: 'DELETE',
       path: '/v1/sessions/:sessionId/queue/:messageId',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context =>
         jsonResponse(await subsystem.cancelQueued(pathSessionId(context), pathMessageId(context)).catch(refuse)),
@@ -358,6 +362,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       method: 'GET',
       path: '/v1/sessions/:sessionId/sends/:sendId',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context =>
         jsonResponse(await subsystem.sendStatus(pathSessionId(context), pathSendId(context)).catch(refuse)),
@@ -368,6 +373,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       method: 'GET',
       path: '/v1/sessions/:sessionId/handoffs/:name',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => {
         const name = SessionHandoffNameSchema.safeParse(decodeParameter(context.params.get('name') ?? ''));
@@ -379,6 +385,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       method: 'POST',
       path: '/v1/sessions/:sessionId/sends/:sendId/retry',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => {
         const id = pathSessionId(context);
@@ -394,6 +401,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       method: 'POST',
       path: '/v1/sessions/:sessionId/sends/:sendId/cancel',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => {
         const id = pathSessionId(context);
@@ -406,6 +414,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       method: 'POST',
       path: '/v1/sessions/:sessionId/sends/:sendId/enter',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => {
         const id = pathSessionId(context);
@@ -422,6 +431,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       method: 'POST',
       path: '/v1/sessions/:sessionId/composer',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {

@@ -45,6 +45,7 @@ import {
 } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
+import { OTHER_TABLE_CALLERS } from '../runtime/mounts/route-callers.ts';
 import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
 import type { SocketDownstream, SocketHandler } from '../../../src/lib/api/socket.ts';
 import {
@@ -302,6 +303,14 @@ const lastControl = (wire: Downstream) => {
 };
 
 describe('the direct carrier', () => {
+  it('should be the public socket the route-caller contract says it is', () => {
+    // Arrange / Act
+    const { route } = carrier();
+
+    // Assert — served by the tunnel listener's own table, so the mounted-table contract cannot see it.
+    should([`${route.method} ${route.path} ${route.minimum} ${route.caller}`]).deepEqual([...OTHER_TABLE_CALLERS]);
+  });
+
   it('should announce one session per socket and carry a proven device to the route table, stamped where it arrived', async () => {
     // Arrange
     const { route, requests } = carrier();

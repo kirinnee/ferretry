@@ -39,15 +39,16 @@ export function deviceActor(deviceId: string): `device:${string}` {
   return `${DEVICE_ACTOR_PREFIX}${deviceId}`;
 }
 
-/** Which bearer token authenticated the request. */
-export type TokenClass = 'admin' | 'warden' | 'device';
+/** Which credential authenticated the request. `session` is a ferret's own session credential. */
+export type TokenClass = 'admin' | 'warden' | 'device' | 'session';
 
 export interface ApiActorInput {
   readonly tokenClass: TokenClass;
   /** Registry-derived identity, present only for a device token. */
   readonly deviceId?: string;
   /** The acting pane's own session id, present when the request originates inside a teammate or
-   *  warden pane. Absent for the human's own shell and for the browser UI. */
+   *  warden pane. Absent for the human's own shell and for the browser UI. For a `session` credential
+   *  it is the session the CREDENTIAL names, never a header's. */
   readonly sessionId?: string;
   /** Client self-identification, e.g. `cli`. The browser sends nothing, so absent plus an admin
    *  token means the UI. */
@@ -66,6 +67,8 @@ export function resolveApiActor(input: ApiActorInput): ApiActor {
     return deviceId === undefined || deviceId === '' ? 'device' : deviceActor(deviceId);
   }
   const sessionId = input.sessionId?.trim();
+  // A ferret's own credential is ALWAYS that ferret — never the owner, whatever else the request says.
+  if (input.tokenClass === 'session') return peerActor(sessionId ?? '');
   if (input.tokenClass === 'warden')
     return sessionId === undefined || sessionId === '' ? 'warden' : wardenActor(sessionId);
   if (sessionId !== undefined && sessionId !== '') return peerActor(sessionId);

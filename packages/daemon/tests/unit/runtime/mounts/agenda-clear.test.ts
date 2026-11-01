@@ -5,7 +5,8 @@ import { AgendaAgentClearer } from '../../../../src/lib/agenda/index.ts';
 import { agendaClearRoutes } from '../../../../src/lib/runtime/mounts/agenda-clear.ts';
 import should from 'should';
 import { jsonBody, request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, human } from './support.ts';
+import { handleDirectly } from './second-line.ts';
+import { agentIn, CREDENTIALS, fromFerret, human } from './support.ts';
 
 function fixture() {
   const calls: string[] = [];
@@ -31,7 +32,7 @@ function fixture() {
     await dispatcher.dispatch(
       request({ method: 'POST', path: '/v1/agenda/clear-agents', headers, body: JSON.stringify(body) }),
     );
-  return { calls, post };
+  return { calls, post, dispatcher };
 }
 
 describe('POST /v1/agenda/clear-agents', () => {
@@ -62,13 +63,17 @@ describe('POST /v1/agenda/clear-agents', () => {
 
   it('should refuse a ferret’s credential and clear nothing', async () => {
     // Arrange
-    const { calls, post } = fixture();
+    const { calls, post, dispatcher } = fixture();
 
-    // Act
+    // Act — on the admin token naming its session, and on its own session credential.
     const response = await post({}, agentIn('s1'));
+    const own = await dispatcher.dispatch(
+      fromFerret(request({ method: 'POST', path: '/v1/agenda/clear-agents', headers: human, body: '{}' })),
+    );
 
     // Assert
     should(response.status).equal(403);
+    should([own.status, jsonBody(own).code]).deepEqual([403, 'owner_only']);
     should(calls).deepEqual([]);
   });
 
@@ -82,5 +87,22 @@ describe('POST /v1/agenda/clear-agents', () => {
     // Assert
     should(response.status).equal(400);
     should(calls).deepEqual([]);
+  });
+});
+
+describe('the handler’s own second line', () => {
+  it('should still refuse a ferret’s own credential if the boundary ever let one through', async () => {
+    // Arrange — the route is `caller: 'person'`; this proves the handler would refuse a ferret on its own.
+    const clearer = new AgendaAgentClearer(
+      { agentSessionIds: async () => [] },
+      { read: async () => null },
+      { dismiss: async () => ({ ok: true, changed: true }) as never },
+    );
+
+    // Act
+    const answer = await handleDirectly(agendaClearRoutes(clearer), 'POST', '/v1/agenda/clear-agents', undefined, {});
+
+    // Assert
+    should([answer.status, answer.code]).deepEqual([403, 'forbidden']);
   });
 });

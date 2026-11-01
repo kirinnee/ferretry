@@ -155,6 +155,8 @@ function agentControlWidened(current: FleetAgentControl, next: Partial<FleetAgen
 export interface FreshStepUpContext {
   readonly presentation: CapabilityPresentation | undefined;
   readonly spend: () => void;
+  /** Whether the caller is a ferret (`callerIsAgent`): a ferret never widens what ferrets may do. */
+  readonly agent: boolean;
 }
 
 // ── Ports ────────────────────────────────────────────────────────────────────────────────────────
@@ -599,6 +601,12 @@ export class FleetCatalogService {
       const model = await this.#assertCurrent(record);
       if (record.mutation.kind === 'machine.settings') {
         widensAgentControl = agentControlWidened(model.machine.agentControl, record.mutation.agentControl);
+        if (widensAgentControl && freshStepUp?.agent === true)
+          throw new ApiError(
+            403,
+            'a ferret cannot widen what ferrets may drive on this machine; the owner does',
+            'owner_only',
+          );
         if (widensAgentControl && governance.governed && freshStepUp?.presentation?.freshStepUp !== true) {
           throw new FleetCatalogFreshStepUpRequired();
         }

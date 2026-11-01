@@ -59,6 +59,7 @@ export function workSearchRoutes(search: WorkSearchSubsystem): readonly ApiRoute
       method: 'GET',
       path: '/v1/search',
       minimum: 'operator',
+      caller: 'any',
       capability: fleet,
       noStore: true,
       handle: async context => jsonResponse(await search.search(searchQueryOf(context))),
@@ -67,6 +68,7 @@ export function workSearchRoutes(search: WorkSearchSubsystem): readonly ApiRoute
       method: 'POST',
       path: '/v1/search/related',
       minimum: 'operator',
+      caller: 'any',
       capability: fleet,
       noStore: true,
       handle: async context =>

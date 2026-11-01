@@ -109,6 +109,7 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       method: 'GET',
       path: '/v1/catalogs',
       minimum: 'operator',
+      caller: 'any',
       capability: SHARING_USE,
       noStore: true,
       handle: async context =>
@@ -118,6 +119,7 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       method: 'POST',
       path: '/v1/catalogs',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {
@@ -130,6 +132,7 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       method: 'PATCH',
       path: '/v1/catalogs/:id',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {
@@ -143,6 +146,7 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       method: 'DELETE',
       path: '/v1/catalogs/:id',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {
@@ -155,6 +159,7 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       method: 'POST',
       path: '/v1/catalogs/:id/items/preview',
       minimum: 'operator',
+      caller: 'any',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {
@@ -167,6 +172,7 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       method: 'POST',
       path: '/v1/catalogs/:id/items',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {
@@ -180,6 +186,7 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       method: 'POST',
       path: '/v1/catalogs/:id/items/:itemId/versions',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {
@@ -194,6 +201,7 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       method: 'DELETE',
       path: '/v1/catalogs/:id/items/:itemId',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {
@@ -207,6 +215,7 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       method: 'POST',
       path: '/v1/catalogs/:id/export',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {

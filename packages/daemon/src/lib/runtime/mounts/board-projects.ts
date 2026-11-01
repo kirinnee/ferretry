@@ -10,8 +10,8 @@ import {
   LaneSetActionRequestSchema,
   type LaneSetChangeResponse,
 } from '@ferretry/protocol';
-import type { ApiActor } from '../../api/actor.ts';
 import { parseActor } from '../../api/actor.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
@@ -50,15 +50,24 @@ const FAILURE_STATUS: Readonly<Record<LaneSetFailure['code'], number>> = {
   'owner-only': 403,
 };
 
-/** The session id behind a ferret's actor (`peer:` or `warden:`), or `undefined` for the owner. */
-function ferretSession(actor: ApiActor | undefined): string | undefined {
-  const { kind, id } = parseActor(actor ?? '');
-  return (kind === 'peer' || kind === 'warden') && id !== undefined && id !== '' ? id : undefined;
+/**
+ * The session behind an AGENT caller, or `undefined` for a person. Who is an agent is the one class predicate's
+ * answer (`callerIsAgent`); which session is the actor's, which for a ferret's own credential is the
+ * credential's. An agent with no session to name — a bare warden — is refused, never taken for the owner.
+ */
+function ferretSession(context: RouteContext): string | undefined {
+  if (!isAgentCaller(context)) return undefined;
+  const { id } = parseActor(context.actor ?? '');
+  if (id === undefined || id.trim() === '')
+    throw new ApiError(403, 'an agent acts on the board only from its own session', 'forbidden');
+  return id;
 }
 
-async function laneActor(actor: ApiActor | undefined, sessions: SessionDirectorySubsystem): Promise<LaneActor> {
-  const sessionId = ferretSession(actor);
-  if (sessionId === undefined) return { kind: 'owner' };
+async function laneActor(context: RouteContext, sessions: SessionDirectorySubsystem): Promise<LaneActor> {
+  const sessionId = ferretSession(context);
+  // The admin token with no ferret's credential is the owner's authority, RECORDED as the token.
+  if (sessionId === undefined)
+    return context.credential?.tokenClass === 'admin' ? { kind: 'owner', via: 'admin-token' } : { kind: 'owner' };
   const view = await sessions.get(sessionId);
   const name = view?.config.label ?? view?.config.teammate ?? sessionId;
   return { kind: 'ferret', name, sessionId };
@@ -71,7 +80,7 @@ function projectId(context: RouteContext): BoardProjectId {
 }
 
 async function list(boards: BoardProjectsSubsystem, context: RouteContext): Promise<ApiResponse> {
-  const session = ferretSession(context.actor);
+  const session = ferretSession(context);
   const current = session === undefined ? null : await boards.projectOf(session);
   const body: BoardProjectsResponse = { projects: [...(await boards.projects())], current };
   return jsonResponse(body);
@@ -96,7 +105,7 @@ async function change(
     const refusal = await subFerretRefusal(sessionSubFerretDirectory(sessions), caller, 'edit the board lanes');
     if (refusal !== null) throw new ApiError(403, refusal, 'sub-ferret');
   }
-  const result = await boards.apply(id, request, await laneActor(context.actor, sessions));
+  const result = await boards.apply(id, request, await laneActor(context, sessions));
   if (result.ok) return jsonResponse(result.value);
   throw new ApiError(FAILURE_STATUS[result.error.code], describeLaneSetFailure(result.error), result.error.code);
 }
@@ -122,7 +131,7 @@ async function setSwitch(
 ): Promise<ApiResponse> {
   const id = projectId(context);
   const request = await parseBody(context.request, BoardSwitchRequestSchema);
-  if (ferretSession(context.actor) !== undefined) throw new ApiError(403, BOARD_SWITCH_OWNER_ONLY, 'owner-only');
+  if (isAgentCaller(context)) throw new ApiError(403, BOARD_SWITCH_OWNER_ONLY, 'owner-only');
   if ((await boards.project(id)) === undefined) throw new ApiError(404, `no board for project ${id}`, 'not-found');
   return jsonResponse(await switches.set(id, request.on));
 }
@@ -152,6 +161,7 @@ export function boardProjectRoutes(
       method: 'GET',
       path: '/v1/board/projects',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await guarded(() => list(boards, context)),
     },
@@ -159,6 +169,7 @@ export function boardProjectRoutes(
       method: 'GET',
       path: '/v1/board/projects/:projectId/lanes',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await guarded(() => read(boards, context)),
     },
@@ -166,6 +177,7 @@ export function boardProjectRoutes(
       method: 'POST',
       path: '/v1/board/projects/:projectId/lanes',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context => await guarded(() => change(boards, sessions, context)),
@@ -174,6 +186,7 @@ export function boardProjectRoutes(
       method: 'GET',
       path: '/v1/board/projects/:projectId/switch',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await guarded(() => readSwitch(boards, switches, context)),
     },
@@ -181,6 +194,7 @@ export function boardProjectRoutes(
       method: 'PUT',
       path: '/v1/board/projects/:projectId/switch',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context => await guarded(() => setSwitch(boards, switches, context)),

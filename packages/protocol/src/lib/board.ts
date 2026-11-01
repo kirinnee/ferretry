@@ -42,6 +42,7 @@ import {
   MachineIdSchema,
   type TaskRef,
   TaskRefSchema,
+  BoardActorViaSchema,
 } from './board-refs.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { type TaskKind, TaskKindSchema, TaskMessageSchema, TaskTitleSchema, TaskWorkflowSchema } from './tasks.ts';
@@ -136,6 +137,9 @@ export const formatAgendaRef = (ref: AgendaRef): string => `${AGENDA_REF_SIGIL}$
 /**
  * Who did something to a card. A ferret is always a session; the owner may have acted from one (a chat)
  * or from nowhere in particular (the Board page); the daemon names the session it acted for, if any.
+ *
+ * The union is CLOSED and each member strict, so it never grows: an older reader would refuse a whole board
+ * over one member it does not know. What the daemon knows beyond it travels beside it ({@link BoardActorVia}).
  */
 export const BoardActorSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('ferret'), sessionId: SessionIdSchema }),
@@ -154,6 +158,8 @@ export const BoardClarificationSchema = z.object({
   source: z.string().min(1).max(MAX_BOARD_SOURCE_LENGTH),
   at: InstantSchema,
   by: BoardActorSchema,
+  /** {@link BoardActorVia}: absent unless the owner actor was the admin token. */
+  byVia: BoardActorViaSchema.optional(),
 });
 export type BoardClarification = z.infer<typeof BoardClarificationSchema>;
 
@@ -295,6 +301,8 @@ const EventBase = {
   seq: PositiveIntegerSchema,
   at: InstantSchema,
   actor: BoardActorSchema,
+  /** {@link BoardActorVia}: absent unless the owner actor was the admin token. */
+  actorVia: BoardActorViaSchema.optional(),
 };
 
 /**
@@ -451,6 +459,8 @@ const BoardTaskShape = {
   order: NonNegativeIntegerSchema.nullable(),
   createdAt: InstantSchema,
   createdBy: BoardActorSchema,
+  /** {@link BoardActorVia}: absent unless the card was opened on the admin token. */
+  createdByVia: BoardActorViaSchema.optional(),
   history: z.array(BoardTaskEventSchema).min(1),
   legacyRef: LegacyTaskRefSchema.optional(),
 };

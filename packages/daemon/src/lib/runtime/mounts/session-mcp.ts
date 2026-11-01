@@ -25,6 +25,7 @@ import {
 } from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
 import type { CallerGovernance } from '../../api/capability.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -78,6 +79,7 @@ export function sessionMcpRoutes(subsystem: SessionMcpSubsystem): readonly ApiRo
       method: 'POST',
       path: '/v1/sessions/:sessionId/mcp/project/preview',
       minimum: 'operator',
+      caller: 'any',
       capability: FILESYSTEM_USE,
       noStore: true,
       handle: async context => {
@@ -90,6 +92,7 @@ export function sessionMcpRoutes(subsystem: SessionMcpSubsystem): readonly ApiRo
       method: 'POST',
       path: '/v1/sessions/:sessionId/mcp/login/preview',
       minimum: 'operator',
+      caller: 'any',
       capability: FLEET_USE,
       noStore: true,
       handle: async context => {
@@ -102,6 +105,7 @@ export function sessionMcpRoutes(subsystem: SessionMcpSubsystem): readonly ApiRo
       method: 'POST',
       path: '/v1/sessions/:sessionId/mcp/project',
       minimum: 'operator',
+      caller: 'any',
       capability: FILESYSTEM_CONFIGURE,
       noStore: true,
       handle: async context => {
@@ -114,6 +118,7 @@ export function sessionMcpRoutes(subsystem: SessionMcpSubsystem): readonly ApiRo
       method: 'POST',
       path: '/v1/sessions/:sessionId/mcp/login',
       minimum: 'operator',
+      caller: 'person',
       capability: FLEET_CONFIGURE,
       noStore: true,
       handle: async context => {
@@ -123,6 +128,7 @@ export function sessionMcpRoutes(subsystem: SessionMcpSubsystem): readonly ApiRo
           subsystem.addLogin(id, request, context.governance, {
             presentation: context.presentation,
             spend: () => context.spendFreshStepUp?.(),
+            agent: isAgentCaller(context),
           }),
         );
       },
@@ -131,6 +137,7 @@ export function sessionMcpRoutes(subsystem: SessionMcpSubsystem): readonly ApiRo
       method: 'GET',
       path: '/v1/sessions/:sessionId/mcp',
       minimum: 'operator',
+      caller: 'any',
       capability: FILESYSTEM_USE,
       noStore: true,
       handle: async context => {

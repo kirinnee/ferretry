@@ -1,11 +1,12 @@
 import {
+  DAEMON_FEATURES,
   daemonFeatureList,
   type HealthView,
   type IoPressureView,
   type LegacyWireUse,
   type SessionWorkerPool,
 } from '@ferretry/protocol';
-import type { ApiResponse } from '../../api/http.ts';
+import type { ApiRequest, ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
 import type { DaemonHealthReport } from '../../session/health/report.ts';
@@ -93,6 +94,7 @@ function view(
   sessionWorkers: SessionWorkerPool | undefined,
   io: IoPressureView | undefined,
   legacyWire: readonly LegacyWireUse[] | undefined,
+  sessionBearerResolves: boolean,
 ): HealthView {
   return {
     ok: report.ok,
@@ -123,12 +125,18 @@ function view(
     ...(io === undefined ? {} : { io }),
     ...(legacyWire === undefined ? {} : { legacyWire: [...legacyWire] }),
     // Stated by the protocol, which owns the names, so the app and this daemon cannot disagree about one.
-    features: [...daemonFeatureList()],
+    // EXCEPT the ferret session credential, which is offered only to a request that arrived where a session
+    // bearer could resolve (this machine's privileged loopback carrier). A client that sees it presents the
+    // credential and never falls back, so on a wildcard, LAN or tailscale bind — where no bearer is ever
+    // looked up — listing it would cut every ferret off from send, notify and the board.
+    features: daemonFeatureList().filter(
+      feature => sessionBearerResolves || feature !== DAEMON_FEATURES.sessionCredential,
+    ),
     time: report.time,
   };
 }
 
-async function health(subsystem: DaemonHealthSubsystem): Promise<ApiResponse> {
+async function health(subsystem: DaemonHealthSubsystem, request: ApiRequest): Promise<ApiResponse> {
   return jsonResponse(
     view(
       await subsystem.report(),
@@ -137,6 +145,8 @@ async function health(subsystem: DaemonHealthSubsystem): Promise<ApiResponse> {
       subsystem.sessionWorkers?.(),
       subsystem.io?.(),
       subsystem.legacyWire?.(),
+      // The very test the boundary uses before it looks a session bearer up (`presentedSession`).
+      request.privilegedLoopback === true,
     ),
   );
 }
@@ -151,8 +161,9 @@ export function daemonHealthRoutes(subsystem: DaemonHealthSubsystem): readonly A
       method: 'GET',
       path: '/v1/health',
       minimum: 'none',
+      caller: 'any',
       noStore: true,
-      handle: async () => await health(subsystem),
+      handle: async ({ request }) => await health(subsystem, request),
     },
   ];
 }

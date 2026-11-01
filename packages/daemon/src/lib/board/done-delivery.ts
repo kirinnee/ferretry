@@ -2,7 +2,8 @@
  * DELIVERING A DONE: when the OWNER marks a card done, its ferret is told in one plain message — "The
  * owner marked &F412 “Title” done." — down the same ladder a reopen takes (the assignee, then the card's
  * owner ferret). Cards closed together are grouped by who is told, so each ferret gets ONE message listing
- * them. The messenger is the owner's front, so the app shows the owner's chip.
+ * them. The messenger is the owner's front, so the app shows the owner's chip. A close made on the admin token
+ * says so instead of "The owner": that token may be a ferret without its own credential (`ADMIN_TOKEN_ACTOR_WORDS`).
  */
 import type { DoneNotice, DoneNotifier } from './ports.ts';
 import { type ReopenMessenger, rungsOf, walkLadder } from './reopen-delivery.ts';
@@ -19,17 +20,24 @@ export class DoneDeliveryLadder implements DoneNotifier {
   ) {}
 
   async done(notices: readonly DoneNotice[]): Promise<void> {
+    // Grouped by who is told AND by who closed them, so one message never names the wrong closer.
     const groups = new Map<string, DoneNotice[]>();
     for (const notice of notices) {
       const rungs = rungsOf(notice.task);
-      groups.set(rungs.join('\n'), [...(groups.get(rungs.join('\n')) ?? []), notice]);
+      const key = `${notice.by}\n${rungs.join('\n')}`;
+      groups.set(key, [...(groups.get(key) ?? []), notice]);
     }
-    for (const [rungs, group] of groups) {
+    for (const group of groups.values()) {
+      const [first] = group;
+      if (first === undefined) continue;
       await walkLadder(
         this.messenger,
         this.diagnostics,
-        rungs.split('\n'),
-        doneMessage(group.map(({ task }) => task)),
+        rungsOf(first.task),
+        doneMessage(
+          group.map(({ task }) => task),
+          first.by,
+        ),
         doneKey(group),
       );
     }

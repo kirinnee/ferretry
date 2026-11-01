@@ -170,11 +170,23 @@ describe('AskSection', () => {
           at: '2026-08-01T09:20:00.000Z',
           by: { kind: 'ferret', sessionId: LEAD },
         },
+        // The admin token with no ferret's credential: it may be you or a ferret, so it is said as the token.
+        {
+          text: 'Also tablets',
+          source: 'cli',
+          at: '2026-08-01T09:30:00.000Z',
+          by: { kind: 'owner' },
+          byVia: 'admin-token',
+        },
       ],
     });
     const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
     const lines = [...root.querySelectorAll('li')].map(item => item.textContent);
-    expect(lines).toEqual(['Clarified by you: Only on phones', 'Clarified by a ferret (Denisha): Behind a flag']);
+    expect(lines).toEqual([
+      'Clarified by you: Only on phones',
+      'Clarified by a ferret (Denisha): Behind a flag',
+      'Clarified by the admin token: Also tablets',
+    ]);
   });
 });
 
@@ -480,6 +492,30 @@ describe('HistorySection', () => {
     expect(rows[0]?.querySelector('.fy-board-detail__detail')?.textContent).toBe('wrong plan');
     expect(rows[1]?.textContent).toContain('Denisha');
     expect(rows[1]?.querySelector('.fy-board-detail__detail')).toBeNull();
+  });
+
+  it('says what the admin token may be, as a tooltip on its name and in words a phone shows too', async () => {
+    const task = card('F1', {
+      history: [
+        { seq: 1, at: at(0), actor: { kind: 'owner' }, actorVia: 'admin-token', type: 'created', laneId: 'todo' },
+      ],
+    });
+    const root = await show(<HistorySection context={context} now={NOW} task={task} />);
+    const name = must(root.querySelector('.fy-board-timeline__row strong'), 'the actor');
+    expect(name.textContent).toBe('Admin token');
+    expect(name.getAttribute('title')).toBe('the owner at this machine, or a ferret without its own credential');
+    expect(root.querySelector('[data-kind="actor-note"]')?.textContent).toBe(
+      ' (the owner at this machine, or a ferret without its own credential)',
+    );
+  });
+
+  it('gives no other actor a note or a tooltip', async () => {
+    const task = card('F1', {
+      history: [{ seq: 1, at: at(0), actor: { kind: 'owner' }, type: 'created', laneId: 'todo' }],
+    });
+    const root = await show(<HistorySection context={context} now={NOW} task={task} />);
+    expect(root.querySelector('.fy-board-timeline__row strong')?.hasAttribute('title')).toBe(false);
+    expect(root.querySelector('[data-kind="actor-note"]')).toBeNull();
   });
 
   it('shows small changes inline as muted rows, with nothing that folds', async () => {

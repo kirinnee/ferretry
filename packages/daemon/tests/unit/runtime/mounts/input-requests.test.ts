@@ -9,7 +9,8 @@ import type { InputRequestService } from '../../../../src/lib/input-requests/ser
 import { inputRequestRoutes } from '../../../../src/lib/runtime/mounts/input-requests.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
 import { FACTS, inputRequestService, RAISE, SESSION } from '../../input-requests/support.ts';
-import { agentIn, CREDENTIALS, GRANTED, human, withoutGrant, withoutSecretsConfigure } from './support.ts';
+import { handleDirectly } from './second-line.ts';
+import { agentIn, CREDENTIALS, fromFerret, GRANTED, human, withoutGrant, withoutSecretsConfigure } from './support.ts';
 
 /**
  * The owner's input-request routes, driven through the real router and authorization boundary with the
@@ -77,6 +78,24 @@ describe('the input request routes', () => {
     );
 
     should([deliver.status, cancel.status, list.status]).eql([403, 403, 403]);
+    should(reads.consumed).be.false();
+    should(writes).eql([]);
+  });
+
+  it('should refuse a ferret on its own session credential before it reads the body, on every route', async () => {
+    const { dispatch, writes, requestId, digest } = await served();
+    const reads = bodyReads();
+
+    const answers = [
+      await dispatch.dispatch(fromFerret(post(path(requestId, 'deliver'), deliverBody(digest), human, reads))),
+      await dispatch.dispatch(fromFerret(post(path(requestId, 'cancel'), {}, human, reads))),
+      await dispatch.dispatch(fromFerret(request({ method: 'GET', path: '/v1/input-requests', headers: human }))),
+      await dispatch.dispatch(
+        fromFerret(request({ method: 'GET', path: `/v1/sessions/${SESSION}/input-requests`, headers: human })),
+      ),
+    ];
+
+    should(answers.map(answer => [answer.status, jsonBody(answer).code])).eql(answers.map(() => [403, 'owner_only']));
     should(reads.consumed).be.false();
     should(writes).eql([]);
   });
@@ -211,8 +230,11 @@ describe('the quarantine routes', () => {
 
     const read = await dispatch.dispatch(list(agentIn(SESSION)));
     const stop = await dispatch.dispatch(end('dev', agentIn(SESSION)));
+    const ownRead = await dispatch.dispatch(fromFerret(list()));
+    const ownStop = await dispatch.dispatch(fromFerret(end('dev')));
 
-    should([read.status, stop.status]).eql([403, 403]);
+    should([read.status, stop.status, ownRead.status, ownStop.status]).eql([403, 403, 403, 403]);
+    should(jsonBody(ownStop).code).equal('owner_only');
   });
 });
 
@@ -333,12 +355,16 @@ describe('the picture of a page request', () => {
     const agent = await dispatch.dispatch(
       request({ method: 'GET', path: shotPath(open?.id ?? ''), headers: agentIn(SESSION) }),
     );
+    const own = await dispatch.dispatch(
+      fromFerret(request({ method: 'GET', path: shotPath(open?.id ?? ''), headers: human })),
+    );
 
     // Assert
     should(open?.pictured).be.true();
     should(owner.status).equal(200);
     should(jsonBody(owner)).eql(SHOT);
     should(agent.status).equal(403);
+    should([own.status, jsonBody(own).code]).eql([403, 'owner_only']);
   });
 
   it('should answer 404 for a request with no picture', async () => {
@@ -433,5 +459,24 @@ describe('allowing a paste into the secret store', () => {
 
     should(response.status).equal(403);
     should(blind.delivered).eql([]);
+  });
+});
+
+describe('the handlers’ own second line', () => {
+  it('should still refuse a ferret’s own credential an answer if the boundary ever let one through', async () => {
+    // Arrange
+    const { service } = inputRequestService();
+
+    // Act
+    const answer = await handleDirectly(
+      inputRequestRoutes(service),
+      'POST',
+      `/v1/sessions/${SESSION}/input-requests/ir_x/cancel`,
+      undefined,
+      {},
+    );
+
+    // Assert
+    should([answer.status, answer.code]).deepEqual([403, 'forbidden']);
   });
 });

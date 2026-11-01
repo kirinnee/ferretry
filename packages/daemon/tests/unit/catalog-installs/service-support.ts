@@ -41,7 +41,7 @@ import {
 import { crypto, publish, type Published } from '../../support/catalog-fixtures.ts';
 
 export const GOVERNANCE = { governed: false } as unknown as CallerGovernance;
-export const STEP_UP: FreshStepUpContext = { presentation: undefined, spend: () => undefined };
+export const STEP_UP: FreshStepUpContext = { presentation: undefined, spend: () => undefined, agent: false };
 export const ROOT = '/work/app';
 export const CALLER: CatalogCaller = { id: 'device:dev_a', mayListSecrets: true };
 

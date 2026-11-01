@@ -13,7 +13,8 @@ import {
 } from '../../../../src/lib/runtime/mounts/board.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { card, MemoryBoardStore, PROJECT, world } from '../../board/support.ts';
-import { agentIn, boardSubsystem, CREDENTIALS, grantSubsystem, human } from './support.ts';
+import { handleDirectly } from './second-line.ts';
+import { agentIn, boardSubsystem, CREDENTIALS, FERRET_SESSION, fromFerret, grantSubsystem, human } from './support.ts';
 
 const phone = { deviceId: 'fy_device_id_phone', appSession: 'app-one' } as const;
 
@@ -310,9 +311,36 @@ describe('the board mount', () => {
 
     // Assert
     should(moved.status).equal(200);
-    should(calls[0]?.caller).eql({ kind: 'owner' });
+    should(calls[0]?.caller).eql({ kind: 'owner', via: 'admin-token' });
     should(refused.status).equal(403);
     should(jsonBody(refused)).match({ code: 'forbidden', allowed: ['owner-human', 'owner', 'ancestor', 'assignee'] });
+  });
+
+  it('should move a card as a ferret on its own credential, and as the admin token without one', async () => {
+    // Arrange — the same move twice: from a ferret's pane with its OWN session credential (no session header at
+    // all), and on the admin token with no session (the owner at the machine, or a ferret that left it out).
+    const { calls, board } = recording();
+    const live = await dispatcher(board);
+    const move = (headers: Readonly<Record<string, string>>) =>
+      request({
+        method: 'POST',
+        path: '/v1/board/tasks/F1',
+        headers,
+        loopback: true,
+        body: JSON.stringify({ action: 'move', to: 'plan' }),
+      });
+
+    // Act
+    const own = await live.dispatch(fromFerret(move(human)));
+    const token = await live.dispatch(move(human));
+
+    // Assert — never the owner: the ferret is itself (so the board's own rule refuses it someone else's card),
+    // and the token keeps the owner's authority while it is recorded as the token.
+    should([own.status, jsonBody(own).code, token.status]).deepEqual([403, 'forbidden', 200]);
+    should(calls.map(call => call.caller)).eql([
+      { kind: 'ferret', sessionId: FERRET_SESSION },
+      { kind: 'owner', via: 'admin-token' },
+    ]);
   });
 
   it('should refuse a malformed action before it reaches the board', async () => {
@@ -375,10 +403,10 @@ describe('the board mount', () => {
 describe('the board caller', () => {
   it.each([
     { actor: 'peer:lead', expected: { kind: 'ferret', sessionId: 'lead' } },
-    { actor: 'admin-cli', expected: { kind: 'owner' } },
-    { actor: 'admin-ui', expected: { kind: 'owner' } },
+    { actor: 'admin-cli', expected: { kind: 'owner', via: 'admin-token' } },
+    { actor: 'admin-ui', expected: { kind: 'owner', via: 'admin-token' } },
     { actor: 'device:fy_device_id_phone', expected: { kind: 'owner' } },
-  ])('should read $actor as $expected.kind', ({ actor, expected }) => {
+  ])('should read $actor as $expected.kind ($expected.via)', ({ actor, expected }) => {
     // Assert
     should(boardCaller(actor)).eql(expected);
   });
@@ -422,5 +450,19 @@ describe('a board refusal on the wire', () => {
 
     // Assert
     should(() => reraiseBoardError(defect)).throw(defect);
+  });
+});
+
+describe('the board import’s own second line', () => {
+  it('should still refuse a ferret’s own credential if the boundary ever let one through', async () => {
+    // Arrange
+    const { board, calls } = recording();
+
+    // Act
+    const answer = await handleDirectly(boardRoutes(board), 'POST', '/v1/board/import', undefined, {});
+
+    // Assert
+    should([answer.status, answer.code]).deepEqual([403, 'forbidden']);
+    should(calls).deepEqual([]);
   });
 });

@@ -203,13 +203,9 @@ export function isPreKeyDeviceToken(bearer: string | undefined): boolean {
 /**
  * A request that DID authenticate, and as which kind of caller — as a route handler is handed it.
  *
- * A SESSION CREDENTIAL IS NOT ONE OF THESE YET, and that is enforced here rather than promised: the
- * boundary refuses a session credential on every route it authenticates, so no handler can be reached by
- * one, and this type says so — every `tokenClass` check in a handler stays exhaustive over what it can
- * actually be handed. Widening this is the change that lets a session credential reach a route, and it
- * makes the compiler name every handler that must then decide.
+ * A SESSION CREDENTIAL IS ONE OF THESE, on a `caller: 'any'` route only: the boundary refuses it on every
+ * `person` route before a handler runs (`ScopedRoute.caller`). A handler that branches on `tokenClass`
+ * must therefore decide what a ferret's own credential may do, and the compiler names every one that has
+ * not; a handler that asks only "person or agent?" asks `callerIsAgent` (`api/agent-caller.ts`).
  */
-export type AuthenticatedCredential = Exclude<
-  Extract<Authentication, { readonly kind: 'authenticated' }>,
-  { readonly tokenClass: 'session' }
->;
+export type AuthenticatedCredential = Extract<Authentication, { readonly kind: 'authenticated' }>;

@@ -24,7 +24,7 @@ import { type PackSubsystem, packRoutes } from '../../../../src/lib/runtime/moun
 import { SessionPackError } from '../../../../src/lib/session/pack/service.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { packConfig } from '../../pack/support.ts';
-import { agentIn, CREDENTIALS, GRANTED, human, sessionView } from './support.ts';
+import { agentIn, CREDENTIALS, FERRET_SESSION, fromFerret, GRANTED, human, sessionView } from './support.ts';
 
 /** The Pack mode routes, over the real dispatcher: what each status and body is made of. */
 
@@ -263,21 +263,27 @@ describe('the routing prompt clean-up routes', () => {
   it("should refuse a ferret's own credential every act that spends a model run or rewrites the prompt", async () => {
     // Arrange
     const subsystem = new FakePack();
-    const agent = (path: string, body: unknown) =>
-      dispatcher(subsystem).dispatch(
-        request({ method: 'POST', path, headers: agentIn('s1'), body: JSON.stringify(body) }),
-      );
+    // On the admin token naming its session (an older fy) and on its own session credential.
+    const asked = (path: string, body: unknown) =>
+      request({ method: 'POST', path, headers: agentIn('s1'), body: JSON.stringify(body) });
+    const agent = async (path: string, body: unknown) => [
+      await dispatcher(subsystem).dispatch(asked(path, body)),
+      await dispatcher(subsystem).dispatch(fromFerret(asked(path, body))),
+    ];
 
     // Act
-    const answers = await Promise.all([
-      agent('/v1/pack/routing/clean-up', {}),
-      agent('/v1/pack/routing/accept', { prompt: 'Opus.', suggested: SUGGESTED }),
-      agent('/v1/pack/routing/undo', {}),
-    ]);
+    const answers = (
+      await Promise.all([
+        agent('/v1/pack/routing/clean-up', {}),
+        agent('/v1/pack/routing/accept', { prompt: 'Opus.', suggested: SUGGESTED }),
+        agent('/v1/pack/routing/undo', {}),
+      ])
+    ).flat();
 
     // Assert
-    should(answers.map(answer => answer.status)).deepEqual([403, 403, 403]);
-    should(jsonBody(answers[0] as (typeof answers)[number]).code).equal('forbidden');
+    should(answers.map(answer => [answer.status, jsonBody(answer).code])).deepEqual(
+      Array.from({ length: 6 }, () => [403, 'owner_only']),
+    );
     should(subsystem.cleanUps).be.empty();
     should(subsystem.accepted).be.empty();
     should(subsystem.undone).equal(0);
@@ -398,6 +404,34 @@ describe('POST /v1/pack/new', () => {
     // Assert
     should(answer.status).equal(200);
     should(jsonBody(answer)).deepEqual({ ...refused });
+  });
+
+  it('should take a ferret’s own credential as the parent, and fill it in when the body names none', async () => {
+    // Arrange
+    const subsystem = new FakePack();
+    const { parent: _none, ...orphan } = body;
+
+    // Act
+    const named = await dispatcher(subsystem).dispatch(
+      fromFerret(call('POST', '/v1/pack/new', { ...body, parent: FERRET_SESSION })),
+    );
+    const filled = await dispatcher(subsystem).dispatch(fromFerret(call('POST', '/v1/pack/new', orphan)));
+
+    // Assert — the limits and the Pack switch are always the caller's own.
+    should([named.status, filled.status]).deepEqual([201, 201]);
+    should(subsystem.started.map(started => started.parent)).deepEqual([FERRET_SESSION, FERRET_SESSION]);
+  });
+
+  it('should refuse a ferret’s own credential naming another session as the parent (parent_mismatch)', async () => {
+    // Arrange
+    const subsystem = new FakePack();
+
+    // Act
+    const answer = await dispatcher(subsystem).dispatch(fromFerret(call('POST', '/v1/pack/new', body)));
+
+    // Assert
+    should([answer.status, jsonBody(answer).code]).deepEqual([403, 'parent_mismatch']);
+    should(subsystem.started).be.empty();
   });
 
   it('should let a caller at the machine name the sub-ferret’s folder', async () => {

@@ -43,6 +43,7 @@ function streamRoute(refusal?: unknown, minimum: CredentialMinimum = 'operator')
     method: 'GET',
     path: '/v1/sessions/:sessionId/stream',
     minimum,
+    caller: 'any',
     accept: async context => {
       if (refusal !== undefined) throw refusal;
       const attachment: SocketAttachment = async (downstream: SocketDownstream) => {

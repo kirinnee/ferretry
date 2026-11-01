@@ -29,6 +29,7 @@ export function browserProxyRoutes(subsystem: BrowserProxySubsystem): readonly A
       method: 'GET',
       path: '/v1/browser/state',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async () => {
@@ -40,6 +41,7 @@ export function browserProxyRoutes(subsystem: BrowserProxySubsystem): readonly A
       method: 'POST',
       path: '/v1/browser/proxy/test',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'browser', axis: 'configure' },
       noStore: true,
       handle: async context => {

@@ -270,6 +270,7 @@ describe('a flood by a paired device', () => {
           method: rule.method,
           path: rule.path,
           minimum: 'operator',
+          caller: 'any' as const,
           handle: async () => (fails ? { ...jsonResponse({}), status: 403 } : jsonResponse({ used: ['K'], name: 'K' })),
         }),
       ),
@@ -281,6 +282,7 @@ describe('a flood by a paired device', () => {
           method: 'GET',
           path: rule.path,
           minimum: 'operator',
+          caller: 'any' as const,
           accept: async () => async () => ({
             open: async () => undefined,
             fromClient: () => undefined,
@@ -490,6 +492,7 @@ describe('the security log on disk', () => {
       method: rule.method,
       path: rule.path,
       minimum: 'operator' as const,
+      caller: 'any' as const,
       handle: async () => ({ ...jsonResponse(JSON.parse(leaky)), status: 200 }),
     }));
     const grants = grantSubsystem({ grants: DEFAULT_CAPABILITY_GRANTS });

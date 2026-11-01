@@ -15,7 +15,7 @@ import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { DEFAULT_CAPABILITY_GRANTS, GrantError } from '../../../../src/lib/grants/index.ts';
 import { type GrantSubsystem, grantRoutes } from '../../../../src/lib/runtime/mounts/grants.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, grantSubsystem, human } from './support.ts';
+import { agentIn, CREDENTIALS, ferretOwn, grantSubsystem, human } from './support.ts';
 
 /**
  * The grant surface.
@@ -304,7 +304,29 @@ describe('changing the grants over the API', () => {
 
     // Assert
     should(answered.status).equal(403);
-    should(jsonBody(answered)).have.property('code', 'forbidden');
+    should(jsonBody(answered)).have.property('code', 'owner_only');
+  });
+
+  it('should refuse a ferret the patch, on its own credential or the admin token, before reading the body', async () => {
+    // Arrange — a ferret's own session credential, and the admin token naming a ferret's session (an older fy).
+    const { dispatcher } = await mount();
+    const ferret = (headers: Readonly<Record<string, string>>) => ({
+      ...request({ method: 'PATCH', path: '/v1/grants', headers, loopback: true, privilegedLoopback: true }),
+      text: async (): Promise<string> => {
+        throw new Error('the body was read');
+      },
+    });
+
+    // Act
+    const answers = await Promise.all(
+      [ferretOwn, agentIn('ferret-1')].map(async headers => await dispatcher.dispatch(ferret(headers))),
+    );
+
+    // Assert
+    should(answers.map(answered => [answered.status, jsonBody(answered).code])).deepEqual([
+      [403, 'owner_only'],
+      [403, 'owner_only'],
+    ]);
   });
 
   it('should refuse a patch that changes nothing rather than reporting success for it', async () => {

@@ -127,6 +127,15 @@ describe('editLaneSet', () => {
     should(actual.ok && actual.value).containDeep({ version: 2, confirmedBy: 'owner', proposedBy: 'koen' });
   });
 
+  it('should record an owner edit on the admin token as confirmed by the token', () => {
+    const actual = editLaneSet(proposed(), edit({ layout: withoutDoing(), relocate: { doing: 'todo' } }), {
+      kind: 'owner',
+      via: 'admin-token',
+    });
+
+    should(actual.ok && actual.value).containDeep({ confirmedBy: 'owner', confirmedVia: 'admin-token' });
+  });
+
   it('should leave a ferret edit unconfirmed and credit the ferret', () => {
     const actual = editLaneSet(proposed({ proposedBy: 'someone' }), edit(), FERRET);
 
@@ -162,6 +171,15 @@ describe('confirmLaneSet', () => {
     const actual = confirmLaneSet(proposed({ version: 4 }), 4);
 
     should(actual.ok && actual.value).containDeep({ version: 4, confirmedBy: 'owner' });
+  });
+
+  it('should record a confirmation on the admin token as the token, and a person’s plainly after it', () => {
+    const onToken = confirmLaneSet(proposed({ version: 4 }), 4, 'admin-token');
+    const byPerson = onToken.ok ? confirmLaneSet(onToken.value, 4) : onToken;
+
+    should(onToken.ok && onToken.value).containDeep({ confirmedBy: 'owner', confirmedVia: 'admin-token' });
+    should(byPerson.ok && byPerson.value).containDeep({ confirmedBy: 'owner' });
+    should(byPerson.ok && byPerson.value).not.have.property('confirmedVia');
   });
 
   it('should refuse a missing set and a moved-on version', () => {
