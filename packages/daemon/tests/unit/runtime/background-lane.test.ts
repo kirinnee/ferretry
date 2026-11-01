@@ -102,10 +102,10 @@ describe('BackgroundLane', () => {
     const log: string[] = [];
     const ledger = new ActivityLedger(clock);
     const lane = new BackgroundLane(ledger, async () => undefined);
-    const failing = manualJob(log, 'quota failover');
+    const failing = manualJob(log, 'fleet sweep');
     const next = manualJob(log, 'fleet refresh');
     lane.open();
-    lane.submit('quota failover', failing.work);
+    lane.submit('fleet sweep', failing.work);
     lane.submit('fleet refresh', next.work);
     await flush();
     const running = ledger.inFlight();
@@ -115,8 +115,8 @@ describe('BackgroundLane', () => {
     await flush();
 
     // Assert
-    should(running).deepEqual(['quota failover']);
-    should(log).deepEqual(['start quota failover', 'start fleet refresh']);
+    should(running).deepEqual(['fleet sweep']);
+    should(log).deepEqual(['start fleet sweep', 'start fleet refresh']);
   });
 
   it('should drop waiting jobs and accept no more once closed', async () => {

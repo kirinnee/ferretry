@@ -5,7 +5,7 @@ import type { TranscriptEvent } from '../../transcript/types.ts';
  * A SESSION PARKED ON "YOU'VE HIT YOUR … LIMIT".
  *
  * Claude Code answers an out-of-quota turn with its `/rate-limit-options` dialog, and the session sits
- * there with a live pane and a `running` status — so nothing downstream (quota failover, the Warden,
+ * there with a live pane and a `running` status — so nothing downstream (the Warden,
  * `fy recommend`) could tell its login was spent. This module reads that dialog as a quota fact and
  * says how the session's state document should record it. It never picks an option: all three change
  * what the person has chosen to wait for.

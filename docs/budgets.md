@@ -122,7 +122,7 @@ restart it reads the week again before it judges anything.
 | ------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `fy new`, `fy start`, resume, revive, auto-resume | Refused: the login is published unavailable, with the reason         | Same                                                                   |
 | `fy recommend`, Pack routing                      | Skipped; a Pack start that names it is refused with `over_budget`    | Same                                                                   |
-| Quota failover, `fy fleet recommend`              | Skip it                                                              | Same                                                                   |
+| Warden autoMigrate, `fy fleet recommend`          | Skip it                                                              | Same                                                                   |
 | Ferrets already running on it                     | Keep running                                                         | Interrupted, then stopped with their turn saved                        |
 | The owner                                         | Sees the state on the login (app, `fy login check`)                  | One notification with a ping, naming the ferrets stopped               |
 | The reset                                         | The next check (within a minute) publishes the login available again | Same; stopped ferrets stay stopped until someone resumes or moves them |

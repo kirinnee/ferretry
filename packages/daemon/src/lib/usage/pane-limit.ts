@@ -6,7 +6,7 @@ import type { HarnessDialog, SessionState } from '@ferretry/protocol';
  * The usage feed reads a login's windows from the provider and its own statusline; it cannot see a
  * spend limit that the provider only announces on the pane ("You've hit your org's monthly spend
  * limit"). A session parked on that dialog — or a Codex session whose turn its rollout says ended on the
- * login's limit — is recorded `rate_limited` (see `session/turn/usage-limit.ts`), and this module turns those sessions into the logins they prove spent, so the feed (quota failover)
+ * login's limit — is recorded `rate_limited` (see `session/turn/usage-limit.ts`), and this module turns those sessions into the logins they prove spent, so the feed (Warden autoMigrate)
  * and `fy recommend` count the login exhausted until the time the harness gave.
  *
  * Derived from session documents on every read — nothing is remembered here, so it survives a restart
