@@ -23,6 +23,7 @@ import {
   LaneSchema,
   type LaneSet,
   LaneSetSchema,
+  laneChangeWarnings,
   type PendingLaneSet,
   PendingLaneSetSchema,
   LaneStageSchema,
@@ -216,6 +217,31 @@ const INVALID: readonly SchemaCase[] = [
     value: { kind: 'auto', triggers: ['pr.merged', 'pr.merged'] },
   },
 ];
+
+describe('laneChangeWarnings', () => {
+  it('should name each lane a proposal removes, where its cards go, and each gate it makes automatic', () => {
+    // Arrange: WAITING (the pr lanes) drops Released · to test, its cards to Merged, and Closed (Merged closes).
+    const planned = {
+      ...WAITING,
+      lanes: WAITING.lanes.map(each =>
+        each.id === 'plan' ? { ...each, ownerGate: false, stage: { kind: 'auto' as const, triggers: [] } } : each,
+      ),
+      relocate: {},
+    };
+
+    // Act + Assert
+    should(laneChangeWarnings(FERRETRY, WAITING)).deepEqual([
+      'remove Released · to test and move its cards to Merged',
+      'remove Closed',
+    ]);
+    should(laneChangeWarnings(FERRETRY, planned)).deepEqual([
+      'make Plan/Design stop waiting for you',
+      'remove Released · to test',
+      'remove Closed',
+    ]);
+    should(laneChangeWarnings(FERRETRY, { lanes: FERRETRY.lanes, relocate: {} })).deepEqual([]);
+  });
+});
 
 describe('board lane schemas', () => {
   it('should round-trip every valid shape and refuse the rest', () => {

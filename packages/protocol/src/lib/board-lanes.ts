@@ -513,6 +513,29 @@ export const PendingLaneSetSchema = z
 export type PendingLaneSet = z.infer<typeof PendingLaneSetSchema>;
 
 /**
+ * What a waiting proposal would do that is the owner's to decide, in the owner's words, for its agenda card and
+ * the lane editor alike: each lane it removes and where that lane's cards go, and each gate ({@link laneStage})
+ * that would stop waiting for the owner. Empty when it does neither.
+ */
+export const laneChangeWarnings = (
+  live: { readonly lanes: readonly Lane[] },
+  pending: Pick<PendingLaneSet, 'lanes' | 'relocate'>,
+): readonly string[] => {
+  const name = (id: string): string => pending.lanes.find(lane => lane.id === id)?.name ?? id;
+  const warnings: string[] = [];
+  for (const lane of live.lanes) {
+    const kept = pending.lanes.find(candidate => candidate.id === lane.id);
+    const to = pending.relocate[lane.id];
+    if (kept === undefined) {
+      warnings.push(to === undefined ? `remove ${lane.name}` : `remove ${lane.name} and move its cards to ${name(to)}`);
+    } else if (laneStage(lane).kind === 'gate' && laneStage(kept).kind !== 'gate') {
+      warnings.push(`make ${lane.name} stop waiting for you`);
+    }
+  }
+  return warnings;
+};
+
+/**
  * A project's lanes. `version` rises with every edit, so an edit can say which set it was made against.
  * `confirmedBy` is `null` while the set is a proposal: live, but not yet accepted by the owner. `doneLane`
  * and `notGoodLane` are always there once parsed: a set from before them gets {@link defaultLaneTargets}.

@@ -310,7 +310,7 @@ test an automatic step and watch its card move on, or remove Released · to test
   B → …", which says the board keeps its lanes until the owner accepts and names what the change would do that is
   the owner's to decide: each lane it removes and where that lane's cards go, and each gate that would stop waiting
   for them. `fy board lanes show` adds one line, "Proposed by <ferret>, waiting for the owner", and the lane
-  editor a banner with its own Accept.
+  editor a banner with the same warnings and its own Accept (`laneChangeWarnings`, one wording for both).
 - **Accept makes it live, as the owner.** The owner's Accept on that card (only a person's answer counts: a lead
   may answer the daemon's items on its sub-ferret's agenda, and the daemon its own, but neither accepts lanes), or a
   `confirm` of the proposal's version from the lane editor, makes the proposal the live set, confirmed, and only

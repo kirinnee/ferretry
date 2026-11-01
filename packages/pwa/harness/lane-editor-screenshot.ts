@@ -1,8 +1,11 @@
 /**
- * Screenshots of the lane editor with its "Proposed by <ferret>, not confirmed" banner at a 390px phone and a
- * 1440px desktop, light and dark:
+ * Screenshots of the lane editor at a 390px phone and a 1440px desktop, light and dark:
  *
- *   bun harness/lane-editor-screenshot.ts [outDir]    # default /tmp/claude-1000, files board-u15-*.png
+ * - `board-u15-*.png`: its "Proposed by <ferret>, not confirmed" banner;
+ * - `lane-proposal-pending-*.png`: a ferret's change waiting for the owner, with what accepting it would do;
+ * - `lane-proposal-accepted-*.png`: the same page once the owner pressed that banner's Accept.
+ *
+ *   bun harness/lane-editor-screenshot.ts [outDir]    # default /tmp/claude-1000
  *
  * It bundles `lane-editor-page.tsx` (the real page over a fake daemon), serves it on an ephemeral loopback
  * port, aborts anything that leaves it, and fails when the page scrolls sideways.
@@ -59,6 +62,8 @@ const server = Bun.serve({
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
       });
+    // The theme's fonts live with the source, as the app bundles them; without them a shot shows fallbacks.
+    if (url.pathname.startsWith('/assets/fonts/')) return new Response(Bun.file(join(packageDir, 'src', url.pathname)));
     const built = Bun.file(join(buildDir, url.pathname));
     return new Response((await built.exists()) ? built : Bun.file(join(packageDir, 'public', url.pathname)));
   },
@@ -79,22 +84,26 @@ const PHONE = {
 const DESKTOP = { viewport: { width: 1_440, height: 900 } } as const;
 
 /** Every part of the page that scrolls on its own (a Kanban row does) is allowed; the document is not. */
-const open = async (context: BrowserContext, theme: string, view: string): Promise<Page> => {
+const settle = async (page: Page, view: string): Promise<void> => {
+  await page.waitForTimeout(200);
+  const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  if (wide > 0) fail(`${view} scrolls sideways by ${wide}px`);
+};
+
+const open = async (context: BrowserContext, theme: string, fixture: 'unconfirmed' | 'pending'): Promise<Page> => {
   const page = await context.newPage();
   await page.route('**/*', route =>
     route.request().url().startsWith(server.url.origin) ? route.continue() : route.abort(),
   );
-  await page.goto(`${server.url}?theme=${theme}&view=${view}`);
+  await page.goto(`${server.url}?theme=${theme}&fixture=${fixture}`);
   await page.locator('[data-fixture]').waitFor({ state: 'visible' });
-  await page.locator('[data-lane-banner="unconfirmed"]').waitFor({ state: 'visible' });
-  await page.waitForTimeout(200);
-  const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  if (wide > 0) fail(`${view} scrolls sideways by ${wide}px`);
+  await page.locator(`[data-lane-banner="${fixture}"]`).waitFor({ state: 'visible' });
+  await settle(page, fixture);
   return page;
 };
 
 const shot = async (page: Page, name: string): Promise<void> => {
-  const path = join(shotsDir, `board-u15-${name}.png`);
+  const path = join(shotsDir, `${name}.png`);
   await page.screenshot({ path });
   process.stdout.write(`📸 ${path}\n`);
 };
@@ -109,9 +118,18 @@ try {
         ['phone', phone],
         ['desktop', desktop],
       ] as const) {
-        const page = await open(context, theme, 'lane-editor');
-        await shot(page, `${scheme}-${label}`);
+        const page = await open(context, theme, 'unconfirmed');
+        await shot(page, `board-u15-${scheme}-${label}`);
         await page.close();
+        const waiting = await open(context, theme, 'pending');
+        await waiting.locator('[data-lane-warnings]').waitFor({ state: 'visible' });
+        await shot(waiting, `lane-proposal-pending-${scheme}-${label}`);
+        await waiting.locator('[data-lane-banner="pending"] button').click();
+        await waiting.locator('[data-lane-banner="pending"]').waitFor({ state: 'detached' });
+        await waiting.getByText('Version 4 · confirmed').waitFor({ state: 'visible' });
+        await settle(waiting, 'accepted');
+        await shot(waiting, `lane-proposal-accepted-${scheme}-${label}`);
+        await waiting.close();
       }
     } finally {
       await phone.close();

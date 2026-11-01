@@ -3,6 +3,7 @@ import {
   LANE_PROPOSAL_ANSWERS,
   LANE_TEMPLATES,
   type LaneSet,
+  laneChangeWarnings,
   laneProposalReference,
   type PendingLaneSet,
   type ResolvedAgendaItem,
@@ -15,7 +16,6 @@ import {
   acceptedProposal,
   LaneProposalAcceptance,
   laneChangeCard,
-  laneChangeWarnings,
   laneProposalCard,
 } from '../../../src/lib/board-projects/index.ts';
 import { FERRETRY_ID } from './support.ts';

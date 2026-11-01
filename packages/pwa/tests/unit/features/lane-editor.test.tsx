@@ -496,6 +496,44 @@ describe('a ferret’s change waiting for the owner', () => {
     expect(actions.calls).toEqual([{ accept: 2, projectId: PROJECT }]);
   });
 
+  it('says what accepting would do that is the owner’s to decide', async () => {
+    // Arrange: the proposal drops the verify lane and sends its cards to the closed lane.
+    const live = laneSetFor();
+    const verify = live.lanes.find(lane => lane.category === 'verify');
+    const closed = live.lanes.find(lane => lane.category === 'closed');
+    if (verify === undefined || closed === undefined) throw new Error('the fixture has a verify and a closed lane');
+    const base = waiting();
+    const risky: LaneSet = {
+      ...base,
+      pending: {
+        ...(base.pending as NonNullable<LaneSet['pending']>),
+        lanes: live.lanes.filter(lane => lane.id !== verify.id),
+        variants: {},
+        relocate: { [verify.id]: closed.id },
+      },
+    };
+
+    // Act
+    const view = await show(editor(risky));
+
+    // Assert
+    const warnings = must(view.container.querySelector('[data-lane-warnings]'), 'the warnings');
+    expect(warnings.textContent).toContain(
+      `Accepting would remove ${verify.name} and move its cards to ${closed.name}`,
+    );
+    expect(
+      must(view.container.querySelector('[data-lane-banner="pending"]'), 'banner').querySelector(
+        '[data-lane-warnings]',
+      ),
+    ).not.toBeNull();
+  });
+
+  it('lists no warnings for a change that only renames', async () => {
+    const view = await show(editor(waiting()));
+
+    expect(view.container.querySelector('[data-lane-warnings]')).toBeNull();
+  });
+
   it('shows no banner when nothing waits', async () => {
     const view = await show(editor(laneSetFor()));
 

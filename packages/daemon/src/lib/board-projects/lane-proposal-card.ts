@@ -12,8 +12,7 @@ import {
   type BoardProjectId,
   clipAtWord,
   LANE_PROPOSAL_ANSWERS,
-  type Lane,
-  laneStage,
+  laneChangeWarnings,
   type LaneSet,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_SUBJECT_LENGTH,
@@ -84,27 +83,6 @@ export const laneChangeCard = (projectName: string, live: LaneSet, pending: Pend
     howToResolve:
       'Choose Accept to switch the board to these lanes; any cards they move, move then. Choose Edit to change them in the Board lane editor; the board keeps its lanes until you save.',
   };
-};
-
-const isGate = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
-
-/**
- * What a proposal would do that is the owner's to decide, in the owner's words: each lane it removes and where
- * that lane's cards go, and each gate that would stop waiting for the owner. Empty when it does neither.
- */
-export const laneChangeWarnings = (live: Pick<LaneSet, 'lanes'>, pending: PendingLaneSet): readonly string[] => {
-  const name = (id: string): string => pending.lanes.find(lane => lane.id === id)?.name ?? id;
-  const warnings: string[] = [];
-  for (const lane of live.lanes) {
-    const kept = pending.lanes.find(candidate => candidate.id === lane.id);
-    const to = pending.relocate[lane.id];
-    if (kept === undefined) {
-      warnings.push(to === undefined ? `remove ${lane.name}` : `remove ${lane.name} and move its cards to ${name(to)}`);
-    } else if (isGate(lane) && !isGate(kept)) {
-      warnings.push(`make ${lane.name} stop waiting for you`);
-    }
-  }
-  return warnings;
 };
 
 /**

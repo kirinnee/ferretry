@@ -3,6 +3,7 @@ import {
   LANE_CATEGORIES,
   LANE_TEMPLATES,
   type LaneCategory,
+  laneChangeWarnings,
   type LaneTemplateName,
   type LaneTrigger,
   LaneTriggerSchema,
@@ -361,6 +362,7 @@ function LaneSetEditor({
   const proposed = laneSet.confirmedBy === null;
   // A ferret's change to these lanes, waiting for the owner: not the board's lanes until it is accepted.
   const { pending } = laneSet;
+  const warnings = pending === undefined ? [] : laneChangeWarnings(laneSet, pending);
 
   const change = (next: LaneDraft) => {
     setFailure(null);
@@ -407,6 +409,13 @@ function LaneSetEditor({
             <span className="text-meta text-muted">
               {pending.lanes.map(lane => lane.name).join(' → ')} · the board keeps the lanes below until you accept
             </span>
+            {warnings.length > 0 && (
+              <ul className="m-0 grid list-disc gap-xs pl-panel text-meta text-warn" data-lane-warnings="">
+                {warnings.map(warning => (
+                  <li key={warning}>Accepting would {warning}</li>
+                ))}
+              </ul>
+            )}
           </span>
           <button
             className="kt-btn kt-btn--sm"
