@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import {
   applyTextOp,
   SHARED_DRAFT_HISTORY_LIMIT,
+  SHARED_DRAFT_ITEMS_BUDGET,
+  sharedDraftFrameBytes,
   type SharedDraftItem,
   type SharedDraftSnapshot,
 } from '@ferretry/protocol';
@@ -538,6 +540,51 @@ describe('SharedDraftService', () => {
       name: 'SharedDraftError',
       code: 'too-many-items',
     });
+  });
+
+  it('trims a stored draft whose files and places no longer fit one frame, keeping the leading ones', async () => {
+    const longNamed = Array.from({ length: 20 }, (_, index) => ({
+      kind: 'attachment' as const,
+      id: `a${index}`,
+      name: '"'.repeat(255),
+      mime: 'image/png',
+      bytes: 1,
+    }));
+    const stored: SharedDraftSnapshot = {
+      v: 1,
+      sessionId: 's1',
+      generation: 'old',
+      epoch: 0,
+      rev: 3,
+      text: 'kept',
+      items: longNamed,
+      updatedAt: AT,
+    };
+    const repository = new MemoryDrafts({ s1: stored });
+    const { service, timers } = subject({ repository });
+
+    const read = await service.read('s1');
+    timers.fire();
+    await settle();
+
+    should(read.text).equal('kept');
+    should(read.items.length).be.above(0).and.below(20);
+    should(read.items).deepEqual(longNamed.slice(0, read.items.length));
+    should(sharedDraftFrameBytes(read.items)).be.belowOrEqual(SHARED_DRAFT_ITEMS_BUDGET);
+    // Written back trimmed, so the file on disk shrinks too.
+    should(repository.saved.map(snapshot => snapshot.items.length)).deepEqual([read.items.length]);
+  });
+
+  it('writes nothing back for a stored draft that already fits', async () => {
+    const { service, repository, timers } = subject({
+      repository: new MemoryDrafts({
+        s1: { v: 1, sessionId: 's1', generation: 'old', epoch: 0, rev: 0, text: '', items: [], updatedAt: AT },
+      }),
+    });
+    await service.read('s1');
+    timers.fire();
+    await settle();
+    should(repository.saved).be.empty();
   });
 
   it('loads one session once for callers that arrive together', async () => {

@@ -118,6 +118,17 @@ interface LiveDraft {
 
 const identity = (text: string): TextOp => (text.length === 0 ? [] : [text.length]);
 
+/** The leading items that fit {@link SHARED_DRAFT_ITEMS_BUDGET}. */
+const withinItemsBudget = (items: readonly SharedDraftItem[]): readonly SharedDraftItem[] => {
+  if (sharedDraftFrameBytes(items) <= SHARED_DRAFT_ITEMS_BUDGET) return items;
+  const kept: SharedDraftItem[] = [];
+  for (const item of items) {
+    if (sharedDraftFrameBytes([...kept, item]) > SHARED_DRAFT_ITEMS_BUDGET) break;
+    kept.push(item);
+  }
+  return kept;
+};
+
 const insertedChars = (op: TextOp): number =>
   op.reduce<number>((total, component) => total + (typeof component === 'string' ? component.length : 0), 0);
 
@@ -390,8 +401,15 @@ export class SharedDraftService {
       items: [],
       updatedAt: this.clock.now(),
     };
-    // A new life for this draft: no revision number a device held before is trusted in it.
-    const snapshot: SharedDraftSnapshot = { ...base, generation: this.generations.next() };
+    // A new life for this draft: no revision number a device held before is trusted in it. A draft saved
+    // before its files and places were bounded by size keeps only as many as fit one frame — a snapshot
+    // no stream could carry would close every composer that opened it, forever. Only the references go;
+    // the files stay where they are.
+    const snapshot: SharedDraftSnapshot = {
+      ...base,
+      items: withinItemsBudget(base.items),
+      generation: this.generations.next(),
+    };
     const live: LiveDraft = {
       snapshot,
       history: [],
@@ -401,6 +419,8 @@ export class SharedDraftService {
       failures: 0,
     };
     this.#live.set(sessionId, live);
+    // Trimmed: the file shrinks too, so the next load has nothing to trim.
+    if (snapshot.items.length !== base.items.length) this.#schedule(live);
     this.#evict();
     return live;
   }
