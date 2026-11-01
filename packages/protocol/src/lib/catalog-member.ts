@@ -20,6 +20,7 @@
  * list or audit event has a field for it (`tests/unit/catalog-member.test.ts` walks every schema).
  */
 import { z } from 'zod';
+import { isLoopbackLinkAddress } from './address.ts';
 import { PublishedCarriersSchema } from './carriers.ts';
 import { InstantSchema } from './common.ts';
 import { DaemonIdSchema, DaemonNameSchema, isDialableLinkAddress, readLinkFragmentFields } from './pairing.ts';
@@ -407,6 +408,26 @@ export function parseShareFragment(fragment: string): ShareLinkSeed {
   const parsedCode = CatalogShareCodeSchema.safeParse(code);
   if (!parsedCode.success) throw new Error('share link carries an invalid code');
   return { daemonUrl, daemonId: daemonId.data, code: parsedCode.data };
+}
+
+/** Said beside a share link that only a rendezvous carries: who is on the path, and what they can and cannot see. */
+export const SHARE_LINK_RELAYED_NOTICE =
+  'A person opening this link reaches this machine through the relay it is connected to. The relay sees when they connect and how much is sent, never the code, their keys, their name or the catalogs.';
+
+/**
+ * WHAT THE OWNER IS TOLD BESIDE A SHARE LINK, composed once for the share sheet and `fy catalog share`, as
+ * `localOnlyNotice` is for a pairing link. A daemon mints a loopback-address share link only when it dials a
+ * rendezvous another browser can discover (docs/catalogs.md), so a loopback link IS a relayed link and the
+ * disclosure belongs beside it. A direct link, or one that does not read, gets nothing.
+ */
+export function shareLinkNotice(link: string): string | undefined {
+  try {
+    return isLoopbackLinkAddress(parseShareFragment(new URL(link).hash).daemonUrl)
+      ? SHARE_LINK_RELAYED_NOTICE
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // ── The member passkey's name ────────────────────────────────────────────────────────────────────

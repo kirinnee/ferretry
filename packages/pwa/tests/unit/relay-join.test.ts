@@ -20,6 +20,8 @@ const HOSTED = 'wss://relay.ferretry.test';
 const CODE = CatalogShareCodeSchema.parse('fy_share_FAKEFAKEFAKEFAKEFAKEFA');
 const FINGERPRINT = `fy_daemon_${'A'.repeat(43)}`;
 
+const LOOPBACK = 'http://127.0.0.1:7077';
+
 const seedFor = (daemonId: string): ShareLinkSeed => ({ daemonUrl: 'https://studio.example', daemonId, code: CODE });
 
 const joinedFor = (daemonId: string) => ({
@@ -54,6 +56,20 @@ describe('the carriers a join walks', () => {
   it('should offer nothing for a fingerprint it cannot address', () => {
     should(joinCandidates(seedFor('sha256:legacy'), HOSTED)).eql([]);
   });
+
+  it('should try the rendezvous first and the loopback address last for a relay-only publisher', () => {
+    const candidates = joinCandidates({ daemonUrl: LOOPBACK, daemonId: FINGERPRINT }, HOSTED);
+    should(candidates).eql([
+      { kind: 'relay', relayUrl: HOSTED, operator: 'hosted' },
+      { kind: 'direct', daemonUrl: LOOPBACK },
+    ]);
+  });
+
+  it('should still offer a loopback address alone when this build discovered no rendezvous', () => {
+    should(joinCandidates({ daemonUrl: LOOPBACK, daemonId: FINGERPRINT }, undefined)).eql([
+      { kind: 'direct', daemonUrl: LOOPBACK },
+    ]);
+  });
 });
 
 describe('the carriers a member session may try', () => {
@@ -84,6 +100,18 @@ describe('the carriers a member session may try', () => {
       memberCandidates({ ...subscription, carriers: [{ kind: 'tunnel', url: 'https://t.example.com' }] }, undefined),
     ).have.length(1);
     should(memberCandidates({ ...subscription, daemonId: 'sha256:legacy' }, HOSTED)).eql([]);
+  });
+
+  it('should try every relay before a loopback address, which names this reader’s own computer', () => {
+    const methods = memberCandidates(
+      { daemonId: FINGERPRINT, daemonUrl: LOOPBACK, carriers: [{ kind: 'relay', url: 'wss://relay.mine.test' }] },
+      HOSTED,
+    );
+    should(methods.map(one => (one.kind === 'relay' ? one.relayUrl : one.daemonUrl))).eql([
+      'wss://relay.mine.test',
+      HOSTED,
+      LOOPBACK,
+    ]);
   });
 });
 
@@ -224,6 +252,26 @@ describe('walking the carriers to join', () => {
       directTimeoutMs: 30,
     });
     should(result).match({ kind: 'joined', carrier: { kind: 'relay' } });
+  });
+
+  it('should join a relay-only publisher over the rendezvous without dialling the loopback address', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joined: joinedFor(id.daemonId) });
+    const routes = dialByHost({ 'relay.ferretry.test': auto.dial });
+    const result = await joinPublisher({
+      crypto: relayCrypto,
+      seed: { daemonUrl: LOOPBACK, daemonId: id.daemonId, code: CODE },
+      clientName: 'phone',
+      keys: await testMemberKeys(),
+      hostedRelayUrl: HOSTED,
+      dial: routes.dial as never,
+      heartbeat: noHeartbeat,
+      directTimeoutMs: 30,
+      relayTimeoutMs: 30,
+    });
+    should(result).match({ kind: 'joined', carrier: { kind: 'relay' } });
+    should(routes.dialled).have.length(1);
+    should(routes.dialled[0]).startWith('wss://relay.ferretry.test/');
   });
 
   it('should stop at a refusal and not carry the code to the next carrier', async () => {

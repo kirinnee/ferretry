@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { SHARE_LINK_RELAYED_NOTICE } from '@ferretry/protocol';
 import should from 'should';
 import {
   existingMemberWarning,
@@ -17,6 +18,7 @@ import {
   KEY_ID,
   LATER,
   LINK,
+  RELAYED_LINK,
   MEMBER_ID,
   memberList,
   memberView,
@@ -189,6 +191,12 @@ describe('rendering the mint screen', () => {
     should(text).containEql('This is the only time the link is shown.');
     should(text).containEql(`\`fy catalog unshare ${SHARE_ID}\``);
     should(text).not.containEql('WARNING');
+  });
+
+  it('should say the relay carries a loopback-only machine’s link, right under it, and nothing for a direct one', () => {
+    const text = renderMint({ ...base, mint: { ...mintResponse(), link: RELAYED_LINK } });
+    should(text).containEql(`${RELAYED_LINK}\n${SHARE_LINK_RELAYED_NOTICE}\n`);
+    should(renderMint(base)).not.containEql(SHARE_LINK_RELAYED_NOTICE);
   });
 
   it('should never print the bare code beside the link', () => {

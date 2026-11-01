@@ -322,7 +322,10 @@ The questions above, answered for it ([design/catalogs.md](design/catalogs.md) ย
    `sharing.use` too: minting a share needs a fresh `share-catalog` passkey from a governed caller, and a
    ferret may list shares and members but never mint, end or revoke. The remote turn-off warning will need
    the "revoke FIRST" ordering [design/catalogs.md](design/catalogs.md) ยง3.6 describes now that members
-   can hold live sessions (built in 2b-2; revoking a member closes them).
+   can hold live sessions (built in 2b-2; revoking a member closes them). A share link a relay carries
+   changes none of this: it is minted under the same `sharing.use` and step-up, and the relay adds a
+   carrier for the sealed `join` and `member` records, never a route or a grant
+   ([catalogs.md](catalogs.md) "A link works on the carriers pairing uses").
 3. **So the way back on the control** is the same sentence every capability's remote turn-off carries:
    the host command `fy daemon config set sharing --use`. `sharing` has no "it also stops" note in the
    switch: in phase 1 turning it off stops nothing beyond the catalog routes.

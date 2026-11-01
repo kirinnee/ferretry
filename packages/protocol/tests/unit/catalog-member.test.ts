@@ -14,6 +14,8 @@ import {
   memberPasskeyName,
   parseShareFragment,
   SHARE_FRAGMENT_PATTERN,
+  SHARE_LINK_RELAYED_NOTICE,
+  shareLinkNotice,
   shareLinkUrl,
 } from '../../src/lib/catalog-member.ts';
 import { formatPairingFragment, PairingCodeSchema, parsePairingFragment } from '../../src/lib/pairing.ts';
@@ -175,6 +177,25 @@ describe('the share link', () => {
     expect(SHARE_FRAGMENT_PATTERN.test(`#${formatShareFragment(seed)}`)).toBe(true);
     expect(SHARE_FRAGMENT_PATTERN.test(`#v1;url=x;code=ABCD-EFGH;fp=${DAEMON}`)).toBe(false);
     expect(SHARE_FRAGMENT_PATTERN.test('#v2;share=x')).toBe(false);
+  });
+});
+
+describe('what the owner is told beside a share link', () => {
+  const APP = 'https://ferretry.pages.dev';
+
+  it('discloses the relay beside a link whose address is this computer itself', () => {
+    for (const daemonUrl of ['http://127.0.0.1:7077', 'http://localhost:7077', 'http://[::1]:7077']) {
+      expect(shareLinkNotice(shareLinkUrl(APP, { daemonUrl, daemonId: DAEMON, code: CODE }))).toBe(
+        SHARE_LINK_RELAYED_NOTICE,
+      );
+    }
+    expect(SHARE_LINK_RELAYED_NOTICE).toContain('never the code');
+  });
+
+  it('says nothing beside a direct link, or beside anything that is not a share link', () => {
+    expect(shareLinkNotice(shareLinkUrl(APP, { daemonUrl: URL_, daemonId: DAEMON, code: CODE }))).toBeUndefined();
+    expect(shareLinkNotice('not a link')).toBeUndefined();
+    expect(shareLinkNotice(`${APP}/join#v2;share=x`)).toBeUndefined();
   });
 });
 

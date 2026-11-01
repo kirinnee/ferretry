@@ -159,3 +159,10 @@ export class CapturingShareScreen implements IShareScreen {
     return this.writes.join('\n');
   }
 }
+
+/** The same share minted by a machine that answers only on loopback and is reached through its relay. */
+export const RELAYED_LINK = shareLinkUrl('https://ferretry.pages.dev', {
+  daemonUrl: 'http://127.0.0.1:7077',
+  daemonId: DaemonIdSchema.parse(DAEMON_ID),
+  code: SHARE_CODE,
+});

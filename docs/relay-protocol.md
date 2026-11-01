@@ -2451,7 +2451,12 @@ member's live sessions. The browser half is built in phase 2c (`join` and `membe
 A catalog **member** is a person a publisher shared catalogs with ([catalogs.md](catalogs.md) § Members),
 not a paired device. Their browser reaches the publisher through exactly the carriers a device uses —
 direct first, then the discovered rendezvous — and proves itself the same way, by signing this session's
-transcript with a key it made and cannot export. It adds two records to the sequence-1 union, each a
+transcript with a key it made and cannot export. **A publisher that answers only on loopback is reachable
+this way too**: its share gate is fed the same `discoverableRelayUrl` pairing's QR is drawn from, so it
+mints a link (loopback `url`, `fp`, no rendezvous named) exactly when another browser can discover the
+rendezvous it dials, and refuses only when neither an address nor such a rendezvous exists. For a loopback
+`url` the browser walks the rendezvous FIRST and the address last — for the join and for every later
+`member` session — since from another person's device that address names their own computer. It adds two records to the sequence-1 union, each a
 separate mode with its own terminal states, and **neither reaches a single route a device session
 reaches**.
 
