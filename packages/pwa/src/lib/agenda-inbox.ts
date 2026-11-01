@@ -525,7 +525,7 @@ export interface DeferredTimers {
   readonly now: () => number;
 }
 
-const browserDeferredTimers: DeferredTimers = {
+export const browserDeferredTimers: DeferredTimers = {
   setTimeout: (callback, milliseconds) => globalThis.setTimeout(callback, milliseconds),
   clearTimeout: handle => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
   now: () => Date.now(),

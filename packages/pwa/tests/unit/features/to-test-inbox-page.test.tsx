@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import type { ToTestHost } from '../../../src/features/agenda/to-test-rows.tsx';
-import { toTestCards, withTaskName } from '../../../src/lib/to-test-inbox.ts';
+import { splitSnoozed, toTestCards, withTaskName } from '../../../src/lib/to-test-inbox.ts';
 import { agendaItem, choices, fakeInbox, InboxHarness, inboxCard } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { boardModelOf, card, flush, laptop } from '../board-support.ts';
@@ -38,6 +38,15 @@ const rowsOf = () =>
     .then(toTestCards)
     .then(rows => rows.map(row => withTaskName(row, LEAD_TASKS)));
 
+const PARKED_UNTIL = '2026-08-02T16:00:00.000Z';
+
+const snoozedRows = () =>
+  boardModelOf([
+    card('F25', { laneId: 'tested', title: 'Parked try', snoozed: { until: PARKED_UNTIL, laneId: 'tested' } }),
+  ])
+    .then(toTestCards)
+    .then(rows => splitSnoozed(rows, NOW).snoozed);
+
 const owner = inboxCard(agendaItem('A3', { subject: 'Rebase onto main?', ask: choices('Rebase now', 'Wait') }));
 
 const open = async (
@@ -45,13 +54,19 @@ const open = async (
     readonly phone?: boolean;
     readonly agendaCards?: readonly (typeof owner)[];
     readonly moveTask?: (...args: never[]) => Promise<unknown>;
+    readonly snoozeTask?: (...args: never[]) => Promise<unknown>;
+    readonly snoozed?: boolean;
     readonly noHost?: boolean;
     readonly page?: Partial<AgendaInboxPageProps>;
   } = {},
 ) => {
   const fake = fakeInbox();
   const rows = await rowsOf();
-  const actions = fakeActions(options.moveTask === undefined ? {} : { moveTask: options.moveTask });
+  const parked = options.snoozed === true ? await snoozedRows() : [];
+  const actions = fakeActions({
+    ...(options.moveTask === undefined ? {} : { moveTask: options.moveTask }),
+    ...(options.snoozeTask === undefined ? {} : { snoozeTask: options.snoozeTask }),
+  });
   const navigated: string[] = [];
   const host: ToTestHost = {
     actions,
@@ -63,6 +78,7 @@ const open = async (
       cards={options.agendaCards ?? [owner]}
       fake={fake}
       toTest={rows}
+      toTestSnoozed={parked}
       render={inbox => (
         <AgendaInboxPage
           clock={fake.clock.now}
@@ -184,6 +200,81 @@ describe('Inbox — answering a card waiting for a try', () => {
     await interact(() => must(rowOf(root, 'F22').querySelector<HTMLElement>('[data-to-test-done]'), 'Done').click());
     await interact(() => flush());
     expect(rowOf(root, 'F22').querySelector('[data-to-test-error]')?.textContent).toBe('The closed lane is owner only');
+  });
+});
+
+const clock = (row: HTMLElement): HTMLElement =>
+  must(row.querySelector<HTMLElement>('[data-agenda-snooze]'), 'the clock button');
+
+const choose = async (label: string): Promise<void> => {
+  const item = must(
+    [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(entry => entry.textContent === label),
+    label,
+  );
+  await interact(() => item.click());
+  await interact(() => flush());
+};
+
+describe('Inbox — snoozing a card waiting for a try', () => {
+  it('gives each card the agenda clock, with the same choices', async () => {
+    const { root } = await open();
+    const button = clock(rowOf(root, 'F22'));
+    expect(button.getAttribute('aria-label')).toBe('Snooze: Try the board');
+    await interact(() => button.click());
+    const labels = [...document.body.querySelectorAll('[role="menuitem"]')].map(entry => entry.textContent);
+    expect(labels).toEqual(['1 hour', '4 hours', 'Tomorrow 9:00', 'Custom…']);
+  });
+
+  it('1 hour parks the card on its machine until an hour from now', async () => {
+    const { root, actions } = await open();
+    await interact(() => clock(rowOf(root, 'F22')).click());
+    await choose('1 hour');
+    expect(actions.calls).toEqual(['snoozeTask:["2026-08-02T13:00:00.000Z"]']);
+  });
+
+  it('says a refusal on the page', async () => {
+    const { root } = await open({ snoozeTask: async () => refusal('Only the owner can snooze') });
+    await interact(() => clock(rowOf(root, 'F22')).click());
+    await choose('4 hours');
+    expect(root.querySelector('[data-to-test-notice]')?.textContent).toBe('Only the owner can snooze');
+  });
+
+  it('leaves the swipes alone: Done, Not good and Skip are still the answers', async () => {
+    const { root } = await open();
+    const row = rowOf(root, 'F22');
+    expect(row.querySelector('[data-to-test-reveal="left"]')?.textContent).toContain('Done');
+    expect(row.querySelector('[data-to-test-reveal="right"]')?.textContent).toContain('Not good');
+    expect(row.querySelector('[data-to-test-reveal="down"]')?.textContent).toContain('Skip');
+  });
+
+  it('keeps a snoozed card out of the To test section and counts it under Snoozed', async () => {
+    const { root } = await open({ snoozed: true });
+    expect(root.querySelector('[data-agenda-section="to-test"]')?.querySelectorAll('[data-to-test]')).toHaveLength(2);
+    expect(root.querySelector('[data-to-test="F25"]') ?? null).toBeNull();
+    expect(
+      must(root.querySelector('[data-agenda-filter-option="snoozed"]'), 'the Snoozed filter').textContent,
+    ).toContain('(1)');
+  });
+
+  it('lists it under Snoozed with when it wakes, and Unsnooze wakes it now', async () => {
+    const { root, actions } = await open({ snoozed: true });
+    await interact(() =>
+      must(root.querySelector<HTMLElement>('[data-agenda-filter-option="snoozed"]'), 'Snoozed').click(),
+    );
+    const row = must(root.querySelector<HTMLElement>('[data-to-test-snoozed]'), 'the snoozed card');
+    expect(row.querySelector('[data-to-test-snoozed-title]')?.textContent).toBe('Parked try');
+    expect(row.querySelector('[data-to-test-wakes]')?.textContent).toMatch(/^Snoozed until /u);
+    await interact(() => must(row.querySelector<HTMLElement>('[data-to-test-unsnooze]'), 'Unsnooze').click());
+    await interact(() => flush());
+    expect(actions.calls).toEqual(['snoozeTask:[null]']);
+  });
+
+  it('says nothing matches, not that nothing is snoozed, when a filter hides the snoozed card', async () => {
+    const { root } = await open({ snoozed: true, page: { from: 'warden' } });
+    await interact(() =>
+      must(root.querySelector<HTMLElement>('[data-agenda-filter-option="snoozed"]'), 'Snoozed').click(),
+    );
+    expect(root.querySelector('[data-agenda-parked-empty]') ?? null).toBeNull();
   });
 });
 

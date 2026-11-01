@@ -125,6 +125,7 @@ export function InboxHarness({
   parked = [],
   loadResolved = () => undefined,
   toTest = [],
+  toTestSnoozed = [],
   render,
 }: {
   readonly fake: FakeInbox;
@@ -135,6 +136,7 @@ export function InboxHarness({
   readonly parked?: AgendaInbox['parked'];
   readonly loadResolved?: () => void;
   readonly toTest?: AgendaInbox['toTest'];
+  readonly toTestSnoozed?: AgendaInbox['toTestSnoozed'];
   readonly render: (inbox: AgendaInbox) => ReactElement;
 }) {
   const state = useSyncExternalStore(fake.deferred.subscribe, fake.deferred.getSnapshot);
@@ -155,6 +157,7 @@ export function InboxHarness({
     deferredState: state,
     connectionFor: () => undefined,
     toTest,
+    toTestSnoozed,
   };
   return render(inbox);
 }

@@ -45,6 +45,7 @@ export const fakeActions = (
     };
   const actions = {
     moveTask: verb('moveTask'),
+    snoozeTask: verb('snoozeTask'),
     reopen: verb('reopen'),
     depend: verb('depend'),
     undepend: verb('undepend'),

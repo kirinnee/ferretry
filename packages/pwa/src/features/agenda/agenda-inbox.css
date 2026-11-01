@@ -1363,6 +1363,27 @@
 .fy-totest__actions .kt-btn {
   min-height: 44px;
 }
+/* The clock sits apart from the answers, at the left; its menu opens upward so it is never under the card below. */
+.fy-totest__actions > .fy-snooze {
+  margin-right: auto;
+}
+.fy-totest__actions .fy-totest__snooze {
+  min-width: 44px;
+  padding-inline: var(--gap-sm);
+}
+.fy-totest__actions .fy-snooze__popover {
+  top: auto;
+  right: auto;
+  bottom: calc(100% + 4px);
+  left: 0;
+}
+/* A row with its menu open lets the menu out; a swipe (which needs the clip) cannot start while the menu is open. */
+.fy-totest:has(.fy-snooze__popover) {
+  overflow: visible;
+}
+.fy-totest:has(.fy-snooze__popover) .fy-totest__surface {
+  border-radius: inherit;
+}
 /* The title is a link, so a touch screen floors it at 44px and leaves a gap under it; the card's own Done / Not good buttons are its targets. */
 :root .fy-totest a.fy-totest__title {
   min-height: 0;

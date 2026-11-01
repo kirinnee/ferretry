@@ -6,7 +6,9 @@ import { boardModelOf, card, laptop } from './board-support.ts';
 const SELF = 's1';
 const ASK = { sessionId: 's1', id: 'A1' };
 
-const stackOf = async (extra: readonly ReturnType<typeof card>[]) => {
+const NOW = Date.parse('2026-08-02T12:00:00.000Z');
+
+const stackOf = async (extra: readonly ReturnType<typeof card>[], now = NOW) => {
   const model = await boardModelOf(extra);
   return cardStack(
     chatCards(model, {
@@ -16,6 +18,7 @@ const stackOf = async (extra: readonly ReturnType<typeof card>[]) => {
       relatives: new Set(),
       agents: false,
     }),
+    now,
   );
 };
 
@@ -55,6 +58,18 @@ describe('cardStack', () => {
     ]);
     expect(stack.map(entry => entry.rank)).toEqual(['rest']);
     expect(stack[0]?.toTest).toBeNull();
+  });
+
+  test('a snoozed card to test drops to the rest until its time is up', async () => {
+    const snoozed = card('F1', {
+      owner: SELF,
+      laneId: 'tested',
+      snoozed: { until: '2026-08-02T15:00:00.000Z', laneId: 'tested' },
+    });
+    const asleep = await stackOf([snoozed]);
+    expect(asleep.map(entry => [entry.rank, entry.toTest])).toEqual([['rest', null]]);
+    const awake = await stackOf([snoozed], Date.parse('2026-08-02T15:00:00.000Z'));
+    expect(awake.map(entry => entry.rank)).toEqual(['to-test']);
   });
 
   test('is empty when the ferret has no cards', async () => {

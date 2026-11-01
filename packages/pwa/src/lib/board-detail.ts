@@ -218,6 +218,12 @@ const describe = (event: BoardTaskEvent, context: HistoryContext): Pick<HistoryR
         detail: event.reason,
         minor: false,
       };
+    case 'snoozed':
+      return {
+        text: event.until === null ? 'woke it from snooze' : `snoozed it until ${event.until}`,
+        detail: null,
+        minor: true,
+      };
     case 'dropped':
       return { text: 'dropped it', detail: event.reason, minor: false };
     case 'migrated':

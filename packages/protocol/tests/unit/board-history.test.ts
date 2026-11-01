@@ -143,6 +143,12 @@ describe('describeBoardEvent', () => {
     should(say({ type: 'ordered', from: 3, to: null })).equal('ranked 3 → —');
   });
 
+  it('should describe a snooze and its wake', () => {
+    // Act + Assert
+    should(say({ type: 'snoozed', until: '2026-10-31T09:00:00.000Z' })).equal('snoozed until 2026-10-31T09:00:00.000Z');
+    should(say({ type: 'snoozed', until: null })).equal('woke from snooze');
+  });
+
   it('should describe a refile, with or without a reason', () => {
     // Act + Assert
     should(say({ type: 'refiled', fromProject: FERRETRY_ID, toProject: OTHER_ID, toLane: 'todo', reason: null })).equal(

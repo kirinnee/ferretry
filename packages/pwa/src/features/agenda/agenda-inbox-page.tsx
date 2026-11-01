@@ -71,16 +71,16 @@ import {
 } from '../../lib/agenda-inbox-list.ts';
 import { sendForm } from '../../lib/agenda-form-send.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
-import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
+import { agendaAuthor, agendaStatus, clockWords } from '../../lib/agenda-status.ts';
 import type { ModeFilter } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../lib/daemon-scope.ts';
 import { escapeCloses } from '../../lib/escape-closes.ts';
 import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
-import { daemonAgendaPath, daemonSessionPath } from '../../lib/pages/routes.ts';
+import { daemonAgendaPath, daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
-import { filterToTest } from '../../lib/to-test-inbox.ts';
+import { filterToTest, type ToTestCard } from '../../lib/to-test-inbox.ts';
 import { AgendaCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
@@ -96,7 +96,7 @@ import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
 import { ClearAgentsControl } from './clear-agents.tsx';
-import { type ToTestHost, ToTestList, useToTestAnswers } from './to-test-rows.tsx';
+import { type ToTestAnswers, type ToTestHost, ToTestList, useToTestAnswers } from './to-test-rows.tsx';
 import { ToTestStep } from './to-test-step.tsx';
 
 /**
@@ -669,11 +669,62 @@ function ParkedRow({
   );
 }
 
+/** One snoozed card to test: when it wakes, and the button that brings it back now. */
+function SnoozedToTestRow({
+  row,
+  answers,
+  now,
+  onNavigate,
+}: {
+  readonly row: ToTestCard;
+  readonly answers: ToTestAnswers;
+  readonly now: number | undefined;
+  readonly onNavigate: (to: string) => void;
+}) {
+  const wakes = row.snoozedUntil === null ? null : clockWords(row.snoozedUntil, now ?? Date.now());
+  const more = [row.taskName, row.card.machine, row.card.task.id].filter((text): text is string => text !== null);
+  return (
+    <li className="fy-parked-row" data-to-test-snoozed={row.key}>
+      <RouteLink
+        className="fy-inbox-row fy-parked-row__link"
+        onNavigate={onNavigate}
+        to={daemonBoardCardPath(row.card.daemonId, row.card.task.id)}
+      >
+        <span className="fy-inbox-row__top">
+          <span className="fy-inbox-row__title" data-to-test-snoozed-title="">
+            {row.card.task.title}
+          </span>
+        </span>
+        <span className="fy-inbox-row__meta">
+          <span data-to-test-wakes="">{wakes === null ? 'Snoozed' : `Snoozed until ${wakes}`}</span>
+          {more.map(text => (
+            <Fragment key={text}>
+              <span aria-hidden="true">·</span>
+              <span>{text}</span>
+            </Fragment>
+          ))}
+        </span>
+      </RouteLink>
+      <button
+        aria-label={`Unsnooze: ${row.card.task.title}`}
+        className="kt-btn fy-parked-row__back"
+        data-to-test-unsnooze=""
+        onClick={() => answers.snooze(row, null)}
+        type="button"
+      >
+        Unsnooze
+      </button>
+    </li>
+  );
+}
+
 /** The Snoozed and Replied filters: what is parked, each with the way back to the owner's list. */
 function InboxParkedList({
   inbox,
   filter,
   rows,
+  toTestRows,
+  answers,
   now,
   onNavigate,
   onClear,
@@ -681,12 +732,15 @@ function InboxParkedList({
   readonly inbox: AgendaInbox;
   readonly filter: ParkedReason;
   readonly rows: readonly InboxCard[];
+  /** The snoozed cards to test (the Snoozed filter only). */
+  readonly toTestRows: readonly ToTestCard[];
+  readonly answers: ToTestAnswers;
   readonly now: number | undefined;
   readonly onNavigate: (to: string) => void;
   readonly onClear: () => void;
 }) {
-  if (rows.length === 0)
-    return inbox.parked.length > 0 ? (
+  if (rows.length === 0 && toTestRows.length === 0)
+    return inbox.parked.length > 0 || (filter === 'snoozed' && inbox.toTestSnoozed.length > 0) ? (
       <NothingMatches onClear={onClear} />
     ) : inbox.resolvedReading ? (
       <InboxReading words="Reading agenda items…" />
@@ -700,6 +754,9 @@ function InboxParkedList({
       <ul aria-label={FILTER_WORDS[filter]} className="fy-parked-list">
         {rows.map(card => (
           <ParkedRow card={card} filter={filter} inbox={inbox} key={card.key} now={now} onNavigate={onNavigate} />
+        ))}
+        {toTestRows.map(row => (
+          <SnoozedToTestRow answers={answers} key={row.key} now={now} onNavigate={onNavigate} row={row} />
         ))}
       </ul>
       <p className="fy-attn-inbox__hint">
@@ -1064,11 +1121,16 @@ export function AgendaInboxPage({
     () => filterToTest(inbox.toTest, { machine: machineFilter, query, agendaOnly: from !== null || kind !== 'all' }),
     [inbox.toTest, machineFilter, query, from, kind],
   );
+  const snoozedToTest = useMemo(
+    () =>
+      filterToTest(inbox.toTestSnoozed, { machine: machineFilter, query, agendaOnly: from !== null || kind !== 'all' }),
+    [inbox.toTestSnoozed, machineFilter, query, from, kind],
+  );
   const toTestAnswers = useToTestAnswers(toTestHost, phone);
   const filtered = machineFilter !== null || query !== '' || from !== null || kind !== 'all';
   const snoozed = parkedBy(inbox.parked, 'snoozed');
   const replied = parkedBy(inbox.parked, 'replied');
-  const parkedCounts = { snoozed: snoozed.length, replied: replied.length };
+  const parkedCounts = { snoozed: snoozed.length + inbox.toTestSnoozed.length, replied: replied.length };
 
   // The deck deals what waits on the owner, in the order the page lists it: the agenda items, then the cards to test.
   const deckCards = groupCards([...sections.stopped, ...sections.needsYou]);
@@ -1394,14 +1456,21 @@ export function AgendaInboxPage({
       {banner}
       <AgentsBulk inbox={inbox} kind={kind} machines={machines} port={clearPort} />
       <OrphanedFailures inbox={inbox} />
+      {toTestAnswers.notice === null ? null : (
+        <p className="fy-totest__error" data-to-test-notice="" role="alert">
+          {toTestAnswers.notice}
+        </p>
+      )}
       {filter === 'snoozed' || filter === 'replied' ? (
         <InboxParkedList
+          answers={toTestAnswers}
           filter={filter}
           inbox={inbox}
           now={now}
           onClear={clearFilters}
           onNavigate={onNavigate}
           rows={filterInboxCards(filter === 'snoozed' ? snoozed : replied, listFilter)}
+          toTestRows={filter === 'snoozed' ? snoozedToTest : []}
         />
       ) : filter === 'resolved' ? (
         <InboxResolvedList

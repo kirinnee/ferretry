@@ -43,7 +43,7 @@ export function BoardCardsView({
   readonly taskNames: ReadonlyMap<string, string> | undefined;
   readonly toTestAnswers: ToTestAnswers | undefined;
 }): ReactElement | null {
-  const stack = cardStack(cards);
+  const stack = cardStack(cards, now);
   const [place, setPlace] = useState<Place>({ key: null, index: 0 });
   if (stack.length === 0) return null;
   const found = place.key === null ? -1 : stack.findIndex(entry => entry.card.key === place.key);

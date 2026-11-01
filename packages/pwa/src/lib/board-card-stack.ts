@@ -8,7 +8,7 @@
 
 import type { BoardCardPlace, BoardCardOf } from './board-view.ts';
 import { type ChatCards, chatDrawn } from './board-chat.ts';
-import { type ToTestCard, toTestOf } from './to-test-inbox.ts';
+import { isSnoozed, type ToTestCard, toTestOf } from './to-test-inbox.ts';
 
 export type StackRank = 'to-test' | 'waiting' | 'rest';
 
@@ -22,14 +22,16 @@ export interface StackCard {
 
 const RANKS: readonly StackRank[] = ['to-test', 'waiting', 'rest'];
 
-const entryOf = (card: BoardCardOf, place: BoardCardPlace | undefined): StackCard => {
-  const toTest = place?.category === 'verify' ? toTestOf(card, place.group) : null;
+const entryOf = (card: BoardCardOf, place: BoardCardPlace | undefined, now: number): StackCard => {
+  const row = place?.category === 'verify' ? toTestOf(card, place.group) : null;
+  // A snoozed card is put aside: it is not waiting for a try until its time is up.
+  const toTest = row !== null && isSnoozed(row, now) ? null : row;
   if (toTest !== null) return { card, place, rank: 'to-test', toTest };
   const waiting = card.task.activity === 'waiting' && card.task.waitingOnOwner.length > 0;
   return { card, place, rank: waiting ? 'waiting' : 'rest', toTest: null };
 };
 
-export const cardStack = (cards: ChatCards): readonly StackCard[] => {
-  const entries = chatDrawn(cards).map(card => entryOf(card, cards.places.get(card.key)));
+export const cardStack = (cards: ChatCards, now: number): readonly StackCard[] => {
+  const entries = chatDrawn(cards).map(card => entryOf(card, cards.places.get(card.key), now));
   return RANKS.flatMap(rank => entries.filter(entry => entry.rank === rank));
 };

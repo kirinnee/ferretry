@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  isSnoozed,
+  nextWake,
   releaseWords,
   sessionTaskNames,
+  splitSnoozed,
   type ToTestCard,
   toTestCards,
   toTestKey,
@@ -100,5 +103,60 @@ describe('the ferret’s task name on a card to test', () => {
     expect((row as ToTestCard).taskName).toBeNull();
     expect(withTaskName(row as ToTestCard, new Map()).taskName).toBeNull();
     expect(withTaskName(row as ToTestCard, undefined)).toBe(row as ToTestCard);
+  });
+});
+
+describe('snoozing a card to test', () => {
+  const NOW = Date.parse('2026-08-02T12:00:00.000Z');
+  const snoozedAt = (id: string, until: string, laneId = 'tested') =>
+    card(id, { laneId: 'tested', snoozed: { until, laneId } });
+
+  test('reads the snooze off the card while it is still in the lane it was snoozed in', async () => {
+    const rows = toTestCards(
+      await boardModelOf([snoozedAt('F1', '2026-08-02T15:00:00.000Z'), card('F2', { laneId: 'tested' })]),
+    );
+    expect(Object.fromEntries(rows.map(row => [row.card.task.id, row.snoozedUntil]))).toEqual({
+      F1: '2026-08-02T15:00:00.000Z',
+      F2: null,
+    });
+  });
+
+  test('ignores a snooze made in another lane: a card sent back and released again is awake', async () => {
+    const [row] = toTestCards(await boardModelOf([snoozedAt('F1', '2026-08-02T15:00:00.000Z', 'implement')]));
+    expect(row?.snoozedUntil).toBeNull();
+  });
+
+  test('puts a card aside until its time is up, then brings it back', async () => {
+    const rows = toTestCards(
+      await boardModelOf([
+        snoozedAt('F1', '2026-08-02T15:00:00.000Z'),
+        snoozedAt('F2', '2026-08-02T13:00:00.000Z'),
+        card('F3', { laneId: 'tested' }),
+      ]),
+    );
+    const before = splitSnoozed(rows, NOW);
+    expect(before.awake.map(row => row.card.task.id)).toEqual(['F3']);
+    expect(before.snoozed.map(row => row.card.task.id)).toEqual(['F2', 'F1']);
+    expect(isSnoozed(before.snoozed[0] as ToTestCard, NOW)).toBe(true);
+    const later = splitSnoozed(rows, Date.parse('2026-08-02T13:00:00.000Z'));
+    expect(later.awake.map(row => row.card.task.id).sort()).toEqual(['F2', 'F3']);
+    expect(later.snoozed.map(row => row.card.task.id)).toEqual(['F1']);
+  });
+
+  test('names the soonest wake, or none when nothing is snoozed', async () => {
+    const rows = toTestCards(
+      await boardModelOf([
+        snoozedAt('F1', '2026-08-02T15:00:00.000Z'),
+        snoozedAt('F2', '2026-08-02T13:00:00.000Z'),
+        card('F3', { laneId: 'tested' }),
+      ]),
+    );
+    expect(nextWake(rows, NOW)).toBe(Date.parse('2026-08-02T13:00:00.000Z'));
+    expect(
+      nextWake(
+        rows.filter(row => row.card.task.id === 'F3'),
+        NOW,
+      ),
+    ).toBeNull();
   });
 });

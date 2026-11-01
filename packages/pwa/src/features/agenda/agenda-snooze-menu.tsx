@@ -14,6 +14,8 @@ export interface AgendaSnoozeMenuProps {
   readonly onSnooze: (until: string) => void;
   readonly now?: number;
   readonly disabled?: boolean;
+  /** What the button is called to a screen reader (default: an agenda item). */
+  readonly label?: string;
   /** The button's own class: the item view's pager and the card header each size it their way. */
   readonly triggerClass: string;
 }
@@ -68,7 +70,13 @@ function CustomSnoozeForm({ now, onSnooze }: CustomFormProps) {
 const itemsOf = (root: HTMLElement | null): HTMLElement[] =>
   root === null ? [] : [...root.querySelectorAll<HTMLElement>('[role="menuitem"]')];
 
-export function AgendaSnoozeMenu({ onSnooze, now, disabled = false, triggerClass }: AgendaSnoozeMenuProps) {
+export function AgendaSnoozeMenu({
+  onSnooze,
+  now,
+  disabled = false,
+  label = 'Snooze this agenda item',
+  triggerClass,
+}: AgendaSnoozeMenuProps) {
   const [open, setOpen] = useState(false);
   const [custom, setCustom] = useState(false);
   const root = useRef<HTMLDivElement | null>(null);
@@ -124,7 +132,7 @@ export function AgendaSnoozeMenu({ onSnooze, now, disabled = false, triggerClass
         aria-controls={open ? menuId : undefined}
         aria-expanded={open}
         aria-haspopup="menu"
-        aria-label="Snooze this agenda item"
+        aria-label={label}
         className={triggerClass}
         data-agenda-snooze=""
         disabled={disabled}

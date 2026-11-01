@@ -710,6 +710,8 @@ describe('board mutations', () => {
       { action: 'edit', howToTest: '1. Open the Board' },
       { action: 'file', path: 'a.ts', release: true, reason: 'done' },
       { action: 'order', order: 2 },
+      { action: 'snooze', until: '2026-10-31T09:00:00.000Z' },
+      { action: 'snooze', until: null },
       { action: 'refile', projectId: PROJECT },
       { action: 'reparent', parent: { id: 'F85' }, reason: 'fits' },
       { action: 'reparent', parent: null },

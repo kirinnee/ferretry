@@ -60,6 +60,8 @@ export function describeBoardEvent(event: BoardTaskEvent, lane: BoardNamer, name
       return `released ${event.path}${event.reason === null ? '' : `: ${event.reason}`}`;
     case 'ordered':
       return `ranked ${event.from === null ? '—' : String(event.from)} → ${event.to === null ? '—' : String(event.to)}`;
+    case 'snoozed':
+      return event.until === null ? 'woke from snooze' : `snoozed until ${event.until}`;
     case 'refiled':
       return `refiled to ${event.toProject} (${lane(event.toLane)})${event.reason === null ? '' : `: ${event.reason}`}`;
     case 'reparented': {

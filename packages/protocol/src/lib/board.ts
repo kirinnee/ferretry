@@ -389,6 +389,8 @@ export const BoardTaskEventSchema = z.discriminatedUnion('type', [
     from: NonNegativeIntegerSchema.nullable(),
     to: NonNegativeIntegerSchema.nullable(),
   }),
+  /** The owner put the card aside until `until`, or woke it early (`until: null`). */
+  z.object({ ...EventBase, type: z.literal('snoozed'), until: InstantSchema.nullable() }),
   z.object({
     ...EventBase,
     type: z.literal('refiled'),
@@ -457,6 +459,12 @@ const BoardTaskShape = {
   /** Advisory: the files the work expects to touch. */
   files: z.array(z.string().min(1).max(MAX_BOARD_FILE_LENGTH)).max(MAX_BOARD_FILES),
   order: NonNegativeIntegerSchema.nullable(),
+  /**
+   * The owner's snooze: the card is put aside until `until`. It holds only while the card is still in `laneId`, the
+   * lane it was snoozed in, so a card sent back and released again is not hidden by an old snooze. Absent when never
+   * snoozed (and on a card stored before it existed).
+   */
+  snoozed: z.strictObject({ until: InstantSchema, laneId: LaneIdSchema }).nullable().optional(),
   createdAt: InstantSchema,
   createdBy: BoardActorSchema,
   /** {@link BoardActorVia}: absent unless the card was opened on the admin token. */
@@ -801,6 +809,8 @@ export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
     reason: reason.optional(),
   }),
   z.strictObject({ action: z.literal('order'), order: NonNegativeIntegerSchema.nullable() }),
+  /** Put the card aside until `until`, or wake it now with `null`. The owner's own, like Done. */
+  z.strictObject({ action: z.literal('snooze'), until: InstantSchema.nullable() }),
   /** Move the card under another card (or to the top level with `parent: null`); the reason goes in its history. */
   z.strictObject({ action: z.literal('reparent'), parent: TaskRefSchema.nullable(), reason: reason.optional() }),
   /** Move the card to another project's board; absent `laneId` means the same-category lane there. */
