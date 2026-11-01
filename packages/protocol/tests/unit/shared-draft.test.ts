@@ -227,7 +227,14 @@ describe('shared draft schemas', () => {
     {
       name: 'server presence frame',
       schema: draft.SharedDraftServerFrameSchema,
-      value: { kind: 'presence', peer: 'p1', device: 'Kirin’s iPhone', typing: true, selection: [2, 4] },
+      value: {
+        kind: 'presence',
+        peer: 'p1',
+        device: 'Kirin’s iPhone',
+        typing: true,
+        selection: [2, 4],
+        uploading: ['network-trace.png'],
+      },
     },
   ];
 
@@ -235,6 +242,11 @@ describe('shared draft schemas', () => {
     const applied = { generation: 'gen-1', epoch: 0, rev: 4, text: [5, '!'], add: [], remove: [] };
     assertRoundTrips([
       { name: 'presence up', schema: draft.SharedDraftClientFrameSchema, value: { kind: 'presence', typing: false } },
+      {
+        name: 'presence up, uploading',
+        schema: draft.SharedDraftClientFrameSchema,
+        value: { kind: 'presence', typing: true, uploading: ['a.png', 'b.pdf'] },
+      },
       { name: 'snapshot', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'snapshot', snapshot } },
       { name: 'edit', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'edit', applied, epoch: 0, rev: 4 } },
       {
@@ -279,6 +291,11 @@ describe('shared draft schemas', () => {
         value: { kind: 'edit', id: 'a\u0000b', edit: { generation: 'g', epoch: 0, base: 0 } },
       },
       { name: 'no parts', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'snapshot', snapshot, more: 0 } },
+      {
+        name: 'more uploads than a draft holds',
+        schema: draft.SharedDraftClientFrameSchema,
+        value: { kind: 'presence', typing: false, uploading: Array.from({ length: 21 }, (_, i) => `${i}.png`) },
+      },
     ]);
   });
 

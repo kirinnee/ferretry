@@ -104,6 +104,13 @@ export interface PendingAttachment {
   readonly error?: string;
   /** What an upload that has not finished is doing instead — waiting its turn, or retrying a drop. */
   readonly note?: string;
+  /**
+   * The file's size when `file` does not hold its bytes: a file another of the owner's devices attached,
+   * which this one only names.
+   */
+  readonly size?: number;
+  /** `false` for a placeholder this device cannot remove: another device's upload still on its way. */
+  readonly removable?: false;
 }
 
 /** The part of a rendered user block a pending send is matched against. */

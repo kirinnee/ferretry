@@ -10,6 +10,8 @@
  *   in this composer while this one's own words stay put.
  * - `conflict` — this device held words the daemon's draft did not: the daemon's draft is shown, and the
  *   person is offered theirs back ("Restore them").
+ * - `files` — another device attached a screenshot and a PDF (their chips, the picture drawn from the
+ *   daemon's copy) and is still uploading a third (a placeholder nobody here can remove).
  *
  * The daemon is faked IN THE PAGE: its stream answers with a snapshot, the other device's presence and
  * one edit, exactly in the frames `shared-draft.ts` defines. No network is used.
@@ -56,11 +58,46 @@ const machine = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.
 const drafts = new DaemonDraftStore(new Memory());
 if (scene === 'conflict') drafts.save(daemonSessionScope(machine, 's1'), 'Also check the refresh token expiry on Safari', 1);
 
+const files = scene === 'files'
+  ? [
+      { kind: 'attachment', id: 'att_shot', name: 'login-error.png', mime: 'image/png', bytes: 412_000 },
+      { kind: 'attachment', id: 'att_pdf', name: 'auth-flow.pdf', mime: 'application/pdf', bytes: 1_200_000 },
+    ]
+  : [];
+
+/** The daemon's copy of the screenshot: drawn here, so no network is used. */
+const screenshot = (): string => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 96;
+  canvas.height = 96;
+  const paint = canvas.getContext('2d');
+  if (paint !== null) {
+    const fill = paint.createLinearGradient(0, 0, 96, 96);
+    fill.addColorStop(0, '#7c8cf8');
+    fill.addColorStop(0.55, '#c084fc');
+    fill.addColorStop(1, '#f9a8d4');
+    paint.fillStyle = fill;
+    paint.fillRect(0, 0, 96, 96);
+    paint.fillStyle = '#ffffff';
+    paint.font = 'bold 22px sans-serif';
+    paint.fillText('401', 26, 56);
+  }
+  return canvas.toDataURL('image/png').split(',')[1] as string;
+};
+const fetcher = async (input: RequestInfo | URL) => {
+  const id = String(input).split('/').at(-1);
+  return Response.json({
+    attachment: { id, filename: 'login-error.png', mime: 'image/png', size: 412000, sha256: 'a'.repeat(64), createdAt: at },
+    base64: screenshot(),
+  });
+};
+
 const open = async (_daemon: unknown, request: { onData: (frame: { kind: 'text'; text: string }) => void }) => {
   const down = (frame: object, after = 0) =>
     setTimeout(() => request.onData({ kind: 'text', text: JSON.stringify(frame) }), after);
-  down({ kind: 'snapshot', snapshot: { v: 1, sessionId: 's1', generation: 'g', epoch: 0, rev: 1, text: theirs, items: [], updatedAt: at } });
+  down({ kind: 'snapshot', snapshot: { v: 1, sessionId: 's1', generation: 'g', epoch: 0, rev: 1, text: theirs, items: files, updatedAt: at } });
   down({ kind: 'ready' });
+  if (scene === 'files') down({ kind: 'presence', peer: 'other', device: other, typing: false, uploading: ['network-trace.png'] }, 10);
   if (scene === 'typing') {
     down({ kind: 'presence', peer: 'other', device: other, typing: true }, 10);
     down({
@@ -84,6 +121,7 @@ createRoot(root).render(
     </div>
     <Composer
       api={{ send: async () => ({}) } as never}
+      autocompleteFetcher={fetcher as never}
       daemon={machine}
       draftStore={drafts}
       openDraftStream={open as never}
@@ -153,7 +191,7 @@ try {
           new URL(route.request().url()).origin !== server.url.origin ? await route.abort() : await route.continue(),
         );
         const page = await context.newPage();
-        for (const scene of ['typing', 'conflict'] as const) {
+        for (const scene of ['typing', 'conflict', 'files'] as const) {
           const other = encodeURIComponent(device.other);
           await page.goto(`${server.url}?theme=studio-${scheme}&scene=${scene}&other=${other}`);
           await page.locator('[data-shared-draft]').waitFor({ state: 'visible' });
@@ -162,7 +200,11 @@ try {
             await page.waitForFunction(() =>
               (document.querySelector('textarea')?.value ?? document.body.innerText).includes('401 on refresh'),
             );
-          } else await page.locator('[data-composer-conflict]').waitFor({ state: 'visible' });
+          } else if (scene === 'conflict') await page.locator('[data-composer-conflict]').waitFor({ state: 'visible' });
+          else {
+            await page.getByText(`uploading on ${device.other}`).waitFor({ state: 'visible' });
+            await page.locator('img[src^="blob:"]').first().waitFor({ state: 'visible' });
+          }
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${scene} ${device.name} ${scheme} scrolls sideways by ${overflow}px`);
           const target = join(outDir, `shared-draft-${scene}-${device.name}-${scheme}.png`);

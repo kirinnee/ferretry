@@ -44,6 +44,7 @@ import type { SttSettings } from '../lib/stt/stt-settings.ts';
 import type { WorkSearchPort } from '../lib/work-search.ts';
 import { addMenuActions, ComposerAddMenu } from './composer-add-menu.tsx';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
+import { useSharedComposerItems } from './composer-shared-items.ts';
 import { type SharedDraftSendMark, sharedDraftTypingHint, useSharedDraft } from '../hooks/use-shared-draft.ts';
 import type { DaemonStreamOpener } from '../lib/event-transport.ts';
 import {
@@ -620,6 +621,16 @@ export function Composer({
     },
   });
   const typingHint = sharedDraftTypingHint(shared.typing);
+  /** The files and place, shared the same way: this device's, the others', and their uploads in progress. */
+  const sharedItems = useSharedComposerItems({
+    daemon,
+    scope,
+    shared,
+    attachments,
+    location,
+    setLocation,
+    ...(autocompleteFetcher === undefined ? {} : { fetcher: autocompleteFetcher }),
+  });
   const keyboardOpen = useKeyboardOpen();
   const inputModality = useInputModality();
   const bareEnterAction = composerEnterAction(
@@ -776,7 +787,8 @@ export function Composer({
     return () => clearTimeout(timer);
   }, [draft, draftStore, scope]);
 
-  const attachmentIds = attachments.readyIds;
+  // Every device's files, not only this one's: a send names what every screen shows.
+  const attachmentIds = sharedItems.attachmentIds;
   const attachmentHold = attachmentHoldNotice(attachments.uploading, attachments.failed);
   // Files alone are a message: the send still carries a sentence, because the route requires one and
   // the agent should be told why a list of paths arrived.
@@ -814,6 +826,7 @@ export function Composer({
     setRecalled(false);
     for (const provider of autocompleteProviders) provider.reset?.();
     attachments.clear();
+    sharedItems.sent();
     locating.current += 1;
     setLocation(null);
     setDraft(left);
@@ -1222,7 +1235,7 @@ export function Composer({
     setLocation(null);
   };
 
-  const viewerImages = attachments.entries.flatMap((entry): ViewerImage[] =>
+  const viewerImages = sharedItems.entries.flatMap((entry): ViewerImage[] =>
     entry.objectUrl
       ? [
           {
@@ -1231,7 +1244,7 @@ export function Composer({
             failed: false,
             alt: entry.file.name,
             filename: entry.file.name,
-            meta: formatAttachmentSize(entry.file.size),
+            meta: formatAttachmentSize(entry.size ?? entry.file.size),
           },
         ]
       : [],
@@ -1361,14 +1374,14 @@ export function Composer({
           onRetry={shareLocation}
         />
       )}
-      {attachments.entries.length === 0 ? null : (
+      {sharedItems.entries.length === 0 ? null : (
         <PendingAttachmentStrip
-          entries={attachments.entries}
+          entries={sharedItems.entries}
           onOpen={entry => {
             if (entry.objectUrl) setViewing(entry.localId);
-            else openLocalFile(entry.file);
+            else sharedItems.open(entry, openLocalFile);
           }}
-          onRemove={attachments.remove}
+          onRemove={sharedItems.remove}
           onRetry={attachments.retry}
         />
       )}
