@@ -1,3 +1,9 @@
+## [4.220.2](https://github.com/kirinnee/ferretry/compare/v4.220.1...v4.220.2) (2026-11-01)
+
+### Fixes
+
+* **board:** a ferret's lane change waits for the owner ([#1291](https://github.com/kirinnee/ferretry/issues/1291)) ([2075c9e](https://github.com/kirinnee/ferretry/commit/2075c9e0df3c8c294a0c69b3bb4ba17d307c5614))
+
 ## [4.220.1](https://github.com/kirinnee/ferretry/compare/v4.220.0...v4.220.1) (2026-11-01)
 
 ### Fixes
