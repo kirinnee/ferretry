@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import {
   applyTextOp,
   SHARED_DRAFT_HISTORY_LIMIT,
+  SHARED_DRAFT_ITEMS_BUDGET,
+  sharedDraftFrameBytes,
   type SharedDraftItem,
   type SharedDraftSnapshot,
 } from '@ferretry/protocol';
@@ -9,6 +11,10 @@ import should from 'should';
 import {
   SHARED_DRAFT_HISTORY_MAX_CHARS,
   SHARED_DRAFT_WRITE_DELAY_MS,
+  SHARED_DRAFT_WRITE_RETRY_MAX_MS,
+  type SharedDraftChange,
+  sharedDraftOrigin,
+  splitSharedDraftOrigin,
   type SharedDraftRepository,
   SharedDraftService,
 } from '../../../src/lib/shared-drafts/index.ts';
@@ -55,6 +61,8 @@ const subject = (
     readonly sessions?: readonly string[];
     readonly memoryLimit?: number;
     readonly generation?: string;
+    readonly editsPerSecond?: number;
+    readonly clock?: { now(): string };
   } = {},
 ) => {
   const repository = options.repository ?? new MemoryDrafts();
@@ -63,10 +71,12 @@ const subject = (
   const service = new SharedDraftService(
     { has: async sessionId => known.has(sessionId) },
     repository,
-    { now: () => AT },
+    options.clock ?? { now: () => AT },
     timers,
     { next: () => options.generation ?? G },
     options.memoryLimit,
+    // These tests make hundreds of edits on a clock that never moves; the limit has a test of its own.
+    options.editsPerSecond ?? Number.POSITIVE_INFINITY,
   );
   return { service, repository, timers };
 };
@@ -383,6 +393,233 @@ describe('SharedDraftService', () => {
       name: 'SharedDraftError',
       code: 'stale',
     });
+  });
+
+  it('tells every subscriber of the session about each edit, with its origin, until it unsubscribes', async () => {
+    const { service } = subject();
+    const heard: SharedDraftChange[] = [];
+    const other: SharedDraftChange[] = [];
+    const stop = service.subscribe('s1', change => heard.push(change));
+    service.subscribe('s1', () => {
+      throw new Error('a broken stream');
+    });
+    service.subscribe('s2', change => other.push(change));
+
+    await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['a'] }, 'phone');
+    stop();
+    stop();
+    await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [1, 'b'] });
+
+    should(heard).match([{ applied: { rev: 1 }, epoch: 0, rev: 1, origin: 'phone' }]);
+    should(other).be.empty();
+  });
+
+  it('says where a send left the draft: the next epoch, at revision 0', async () => {
+    const { service } = subject();
+    const heard: SharedDraftChange[] = [];
+    service.subscribe('s1', change => heard.push(change));
+    await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['x'] });
+    await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [-1], sent: true });
+    should(heard.map(change => [change.applied.epoch, change.epoch, change.rev])).deepEqual([
+      [0, 0, 1],
+      [0, 1, 0],
+    ]);
+  });
+
+  it('replays what a composer missed, or says it cannot', async () => {
+    const { service } = subject();
+    await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['a'] });
+    await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [1, 'b'] });
+
+    should((await service.since('s1', { generation: G, epoch: 0, rev: 1 }))?.map(change => change.rev)).deepEqual([2]);
+    should(await service.since('s1', { generation: G, epoch: 0, rev: 2 })).deepEqual([]);
+    should(await service.since('s1', { generation: 'old', epoch: 0, rev: 1 })).be.undefined();
+    should(await service.since('s1', { generation: G, epoch: 1, rev: 0 })).be.undefined();
+    should(await service.since('s1', { generation: G, epoch: 0, rev: 9 })).be.undefined();
+  });
+
+  it('never lets go of a draft an edit is holding, however many others load meanwhile', async () => {
+    // Arrange — one draft in memory; s1 is clean, so letting it go would drop it without a write.
+    const repository = new MemoryDrafts();
+    const { service } = subject({ repository, memoryLimit: 1 });
+    await service.read('s1');
+
+    // Act — an edit to s1 and a load of s2 start in the same tick.
+    const [edited] = await Promise.all([
+      service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['kept'] }),
+      service.read('s2'),
+    ]);
+    await settle();
+
+    // Assert — the edit landed on the draft that stays reachable: reading s1 sees it.
+    should(edited.snapshot.text).equal('kept');
+    should(await service.read('s1')).match({ text: 'kept', rev: 1 });
+  });
+
+  it('waits longer after each failed write, up to a ceiling, and schedules nothing once closed', async () => {
+    // Arrange
+    const repository = new MemoryDrafts();
+    repository.fail = true;
+    const { service, timers } = subject({ repository });
+    await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['x'] });
+
+    // Act — fire the timer each time, letting each write fail.
+    const delays: number[] = [];
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const next = timers.pending.at(-1);
+      if (next === undefined) break;
+      delays.push(next.milliseconds);
+      timers.fire();
+      await settle();
+    }
+    await service.close();
+    await settle();
+
+    // Assert
+    should(delays).deepEqual([
+      SHARED_DRAFT_WRITE_DELAY_MS,
+      2_000,
+      4_000,
+      8_000,
+      16_000,
+      32_000,
+      SHARED_DRAFT_WRITE_RETRY_MAX_MS,
+      SHARED_DRAFT_WRITE_RETRY_MAX_MS,
+    ]);
+    should(timers.pending.filter(entry => !entry.cancelled)).be.empty();
+  });
+
+  it('L4: keeps a draft with an open composer in memory, however many other drafts are read', async () => {
+    const { service } = subject({ memoryLimit: 1, generation: G });
+    const stop = service.subscribe('s1', () => undefined);
+    await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['open here'] });
+
+    await service.read('s2');
+    await service.read('s3');
+
+    // Still the same life of the draft: the composer's next edit merges.
+    should(await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [9, '!'] })).match({
+      snapshot: { text: 'open here!' },
+    });
+    stop();
+    stop();
+  });
+
+  it('L5: applies an edit sent twice once, answering the second with the first', async () => {
+    const { service } = subject();
+    const heard: SharedDraftChange[] = [];
+    service.subscribe('s1', change => heard.push(change));
+    const first = await service.edit(
+      's1',
+      { generation: G, epoch: 0, base: 0, text: ['once'] },
+      sharedDraftOrigin('device:d1', 'old-stream', 'e1'),
+    );
+
+    // The composer reconnected and sent it again from a new stream.
+    const again = await service.edit(
+      's1',
+      { generation: G, epoch: 0, base: 0, text: ['once'] },
+      sharedDraftOrigin('device:d1', 'new-stream', 'e1'),
+    );
+
+    should(again.applied).deepEqual(first.applied);
+    should(again.snapshot.text).equal('once');
+    should(heard).have.length(1);
+    // An edit with no id (the plain route) is never taken for a repeat.
+    await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [4, '!'] });
+    should(splitSharedDraftOrigin(undefined)).be.undefined();
+    should(splitSharedDraftOrigin('no-separator')).be.undefined();
+  });
+
+  it("4: never takes another device's edit for a repeat, even when it chose the same id", async () => {
+    const { service } = subject();
+    await service.edit(
+      's1',
+      { generation: G, epoch: 0, base: 0, text: ['phone '] },
+      sharedDraftOrigin('device:phone', 'p', 'e1'),
+    );
+    const laptop = await service.edit(
+      's1',
+      { generation: G, epoch: 0, base: 1, text: [6, 'laptop'] },
+      sharedDraftOrigin('device:laptop', 'l', 'e1'),
+    );
+    should(laptop.snapshot).match({ text: 'phone laptop', rev: 2 });
+  });
+
+  it('5: takes at most so many edits a second from every device together, and more the next second', async () => {
+    let now = Date.parse(AT);
+    const { service } = subject({ editsPerSecond: 3, clock: { now: () => new Date(now).toISOString() } });
+    for (let rev = 0; rev < 3; rev += 1)
+      await service.edit('s1', { generation: G, epoch: 0, base: rev, text: rev === 0 ? ['x'] : [rev, 'x'] });
+
+    await should(service.edit('s1', { generation: G, epoch: 0, base: 3, text: [3, 'x'] })).be.rejectedWith({
+      name: 'SharedDraftError',
+      code: 'rate-limited',
+    });
+    now += 1_000;
+    should(await service.edit('s1', { generation: G, epoch: 0, base: 3, text: [3, 'x'] })).match({
+      snapshot: { rev: 4 },
+    });
+  });
+
+  it('L2: refuses files and places whose names together would not fit one frame', async () => {
+    const { service } = subject();
+    const longNamed = Array.from({ length: 20 }, (_, index) => ({
+      kind: 'attachment' as const,
+      id: `a${index}`,
+      name: '"'.repeat(255),
+      mime: 'image/png',
+      bytes: 1,
+    }));
+    await should(service.edit('s1', { generation: G, epoch: 0, base: 0, add: longNamed })).be.rejectedWith({
+      name: 'SharedDraftError',
+      code: 'too-many-items',
+    });
+  });
+
+  it('trims a stored draft whose files and places no longer fit one frame, keeping the leading ones', async () => {
+    const longNamed = Array.from({ length: 20 }, (_, index) => ({
+      kind: 'attachment' as const,
+      id: `a${index}`,
+      name: '"'.repeat(255),
+      mime: 'image/png',
+      bytes: 1,
+    }));
+    const stored: SharedDraftSnapshot = {
+      v: 1,
+      sessionId: 's1',
+      generation: 'old',
+      epoch: 0,
+      rev: 3,
+      text: 'kept',
+      items: longNamed,
+      updatedAt: AT,
+    };
+    const repository = new MemoryDrafts({ s1: stored });
+    const { service, timers } = subject({ repository });
+
+    const read = await service.read('s1');
+    timers.fire();
+    await settle();
+
+    should(read.text).equal('kept');
+    should(read.items.length).be.above(0).and.below(20);
+    should(read.items).deepEqual(longNamed.slice(0, read.items.length));
+    should(sharedDraftFrameBytes(read.items)).be.belowOrEqual(SHARED_DRAFT_ITEMS_BUDGET);
+    // Written back trimmed, so the file on disk shrinks too.
+    should(repository.saved.map(snapshot => snapshot.items.length)).deepEqual([read.items.length]);
+  });
+
+  it('writes nothing back for a stored draft that already fits', async () => {
+    const { service, repository, timers } = subject({
+      repository: new MemoryDrafts({
+        s1: { v: 1, sessionId: 's1', generation: 'old', epoch: 0, rev: 0, text: '', items: [], updatedAt: AT },
+      }),
+    });
+    await service.read('s1');
+    timers.fire();
+    await settle();
+    should(repository.saved).be.empty();
   });
 
   it('loads one session once for callers that arrive together', async () => {

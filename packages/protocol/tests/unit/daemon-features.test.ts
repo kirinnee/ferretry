@@ -77,6 +77,21 @@ describe('daemon features', () => {
     should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.signInRules)).be.false();
   });
 
+  // secrev-1301 / lizzette (a): terminal standing rules are their own name, never reported by this build.
+  it('should name terminal standing rules on their own, and not report them even beside sign-in-rules.1', () => {
+    should(DAEMON_FEATURES.signInRulesTerminal).equal('sign-in-rules-terminal.1');
+    should(daemonFeatureList()).not.containEql('sign-in-rules-terminal.1');
+    should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.signInRulesTerminal)).be.false();
+    // The list takes nothing in: no config, environment, route or file can add a name to it.
+    should(daemonFeatureList.length).equal(0);
+    process.env['FY_FEATURES'] = 'sign-in-rules-terminal.1';
+    try {
+      should(daemonFeatureList()).not.containEql('sign-in-rules-terminal.1');
+    } finally {
+      delete process.env['FY_FEATURES'];
+    }
+  });
+
   it('should report approve-on-phone now that the app draws the card', () => {
     should(DAEMON_FEATURES.phoneApproval).equal('input.phone-approval.1');
     should(daemonFeatureList()).containEql('input.phone-approval.1');

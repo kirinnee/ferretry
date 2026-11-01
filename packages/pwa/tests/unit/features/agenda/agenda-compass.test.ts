@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  COMPASS_PICK_PX,
   COMPASS_ROW_PX,
   COMPASS_SIDE_PX,
   compassReading,
-  SNOOZE_LENGTHS,
-  snoozeUntil,
 } from '../../../../src/features/agenda/agenda-compass.ts';
 import { swipeThreshold } from '../../../../src/lib/agenda-inbox.ts';
+import { SNOOZE_PICK_IDS } from '../../../../src/lib/agenda-snooze.ts';
 
 const WIDTH = 390;
 const T = swipeThreshold(WIDTH);
@@ -46,12 +46,26 @@ describe('compassReading', () => {
     expect(reading.slot).toBe('down-down');
   });
 
-  it('picks 1 h, 4 h or 1 day by where the finger is at ↓↓↓', () => {
+  it('picks one of the shared snooze choices by where the finger is at ↓↓↓', () => {
     const y = T + 2 * COMPASS_ROW_PX;
-    expect(compassReading(-COMPASS_SIDE_PX, y, WIDTH).intent).toEqual({ kind: 'snooze', length: '1h' });
-    expect(compassReading(0, y, WIDTH).intent).toEqual({ kind: 'snooze', length: '4h' });
-    expect(compassReading(COMPASS_SIDE_PX, y, WIDTH).intent).toEqual({ kind: 'snooze', length: '1d' });
-    expect(compassReading(COMPASS_SIDE_PX, y, WIDTH).slot).toBe('down-down-1d');
+    const pick = (dx: number) => compassReading(dx, y, WIDTH).intent;
+    expect(pick(-2 * COMPASS_PICK_PX)).toEqual({ kind: 'snooze', pick: 'hour' });
+    expect(pick(-COMPASS_PICK_PX / 2)).toEqual({ kind: 'snooze', pick: 'hours' });
+    expect(pick(COMPASS_PICK_PX / 2)).toEqual({ kind: 'snooze', pick: 'tomorrow' });
+    expect(pick(2 * COMPASS_PICK_PX)).toEqual({ kind: 'snooze', pick: 'custom' });
+    expect(compassReading(2 * COMPASS_PICK_PX, y, WIDTH).slot).toBe('down-down-custom');
+    expect(pick(-1000)).toEqual({ kind: 'snooze', pick: 'hour' });
+    expect(pick(1000)).toEqual({ kind: 'snooze', pick: 'custom' });
+  });
+
+  it('has a place for every choice of the shared list, in its order, and no other', () => {
+    const y = T + 2 * COMPASS_ROW_PX;
+    const reached = new Set<string>();
+    for (let dx = -300; dx <= 300; dx += 8) {
+      const { intent } = compassReading(dx, y, WIDTH);
+      if (intent.kind === 'snooze') reached.add(intent.pick);
+    }
+    expect([...reached]).toEqual([...SNOOZE_PICK_IDS]);
   });
 
   it('drags back up out of the compass to the row above', () => {
@@ -72,17 +86,5 @@ describe('compassReading', () => {
   it('never reads an upward or a nearly flat drag as a compass', () => {
     expect(kind(0, -200)).toBe('cancel');
     expect(kind(200, 0)).toBe('cancel');
-  });
-});
-
-describe('snoozeUntil', () => {
-  const NOW = Date.parse('2026-11-01T09:00:00.000Z');
-  it('adds the length to now', () => {
-    expect(snoozeUntil('1h', NOW)).toBe('2026-11-01T10:00:00.000Z');
-    expect(snoozeUntil('4h', NOW)).toBe('2026-11-01T13:00:00.000Z');
-    expect(snoozeUntil('1d', NOW)).toBe('2026-11-02T09:00:00.000Z');
-  });
-  it('lists the three lengths in drawing order', () => {
-    expect(SNOOZE_LENGTHS.map(length => length.label)).toEqual(['1 h', '4 h', '1 day']);
   });
 });

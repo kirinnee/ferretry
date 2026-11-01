@@ -61,7 +61,7 @@ import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './da
 import { boundDaemonId, daemonRequest } from './daemon-transport.ts';
 import { type DeviceKeyStore, IndexedDbDeviceKeyStore, mintDeviceKey } from './device-keys.ts';
 import { defaultDeviceName, deviceNameSuffix, normalizedDeviceName } from './device-name.ts';
-import { documentDraftStore } from './drafts.ts';
+import { documentDraftStore, documentRestoreStore } from './drafts.ts';
 import { DaemonEventTransport, type DaemonStreamOpener } from './event-transport.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { KeyRotation } from './key-rotation.ts';
@@ -895,6 +895,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       notificationPreferences,
       pushDevices,
       documentDraftStore,
+      documentRestoreStore,
       workspaceLayouts,
       carrier,
       connectionHealth,

@@ -3,6 +3,12 @@ import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 
 /** The sole browser-storage key for composer drafts. */
 export const DRAFTS_KEY = 'fy-drafts-v1';
+/**
+ * Words a composer could not merge into the shared draft, kept until the person restores or dismisses
+ * them. Apart from the draft on purpose: the composer overwrites its draft with the shared one at once,
+ * and a reload or a session change must not take the only copy of the person's words with it.
+ */
+export const DRAFT_RESTORE_KEY = 'fy-draft-restore-v1';
 export const DRAFTS_VERSION = 1;
 export const MAX_DRAFTS = 50;
 export const MAX_DRAFT_LEN = 16_000;
@@ -107,9 +113,14 @@ export const removeDaemonDrafts = (store: DraftStore, daemonId: DaemonId): Draft
  */
 export class DaemonDraftStore {
   readonly #storage: DraftStorage | undefined;
+  readonly #key: string;
 
-  constructor(storage: DraftStorage | undefined = typeof localStorage === 'undefined' ? undefined : localStorage) {
+  constructor(
+    storage: DraftStorage | undefined = typeof localStorage === 'undefined' ? undefined : localStorage,
+    key: string = DRAFTS_KEY,
+  ) {
     this.#storage = storage;
+    this.#key = key;
   }
 
   load(scope: DaemonSessionScope): string {
@@ -135,7 +146,7 @@ export class DaemonDraftStore {
   #read(): DraftStore {
     if (!this.#storage) return emptyDraftStore();
     try {
-      return parseDraftStore(this.#storage.getItem(DRAFTS_KEY));
+      return parseDraftStore(this.#storage.getItem(this.#key));
     } catch {
       return emptyDraftStore();
     }
@@ -144,7 +155,7 @@ export class DaemonDraftStore {
   #write(store: DraftStore): void {
     if (!this.#storage) return;
     try {
-      this.#storage.setItem(DRAFTS_KEY, JSON.stringify(store));
+      this.#storage.setItem(this.#key, JSON.stringify(store));
       return;
     } catch {
       // Quota failures are deterministic for an unchanged document. Retain
@@ -162,7 +173,7 @@ export class DaemonDraftStore {
     while (lower <= upper) {
       const retained = Math.floor((lower + upper) / 2);
       try {
-        this.#storage.setItem(DRAFTS_KEY, JSON.stringify(evictDraftLru(store, retained)));
+        this.#storage.setItem(this.#key, JSON.stringify(evictDraftLru(store, retained)));
         lower = retained + 1;
       } catch {
         upper = retained - 1;
@@ -187,3 +198,9 @@ export class DaemonDraftStore {
  * so this is the one that has to be invalidated.
  */
 export const documentDraftStore = new DaemonDraftStore();
+
+/** The document-lifetime store of words waiting to be restored (`DRAFT_RESTORE_KEY`), invalidated with its daemon. */
+export const documentRestoreStore = new DaemonDraftStore(
+  typeof localStorage === 'undefined' ? undefined : localStorage,
+  DRAFT_RESTORE_KEY,
+);

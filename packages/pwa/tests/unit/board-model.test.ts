@@ -30,6 +30,7 @@ import {
   originCard,
   PROJECT,
   phone,
+  unasked,
   workstation,
 } from './board-support.ts';
 
@@ -154,8 +155,23 @@ describe('mergeBoard', () => {
     expect(counted([originCard('F9', 'agent', null, { laneId: 'tested' })]).toTest).toBe(2);
   });
 
+  it('keeps a card an agent asked for (askedBy alone) out of every count while Internal is off', () => {
+    const asked = (id: string, askedBy: 'person' | 'agent') => card(id, { laneId: 'tested', askedBy });
+    const cards = [asked('F1', 'person'), asked('F2', 'agent'), asked('F3', 'agent')];
+    const read = (agents: boolean) =>
+      mergeBoard([{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, toTest: 3, active: 3 } }], {
+        ...NO_BOARD_FILTERS,
+        agents,
+      });
+
+    expect(read(false).counts).toMatchObject({ toTest: 1, active: 1 });
+    expect(read(false).cards.map(entry => entry.task.id)).toEqual(['F1']);
+    expect(read(true).counts.toTest).toBe(3);
+    expect(read(true).cards.map(entry => entry.task.id)).toEqual(['F1', 'F2', 'F3']);
+  });
+
   it('shows every card and offers no toggle when the daemon does not say who asked', () => {
-    const machines = [data(laptop, 'laptop', [card('F1'), card('F2')])];
+    const machines = [data(laptop, 'laptop', unasked([card('F1'), card('F2')]))];
     const model = mergeBoard(machines, NO_BOARD_FILTERS);
     expect(model.cards.map(entry => entry.task.id)).toEqual(['F1', 'F2']);
     expect(model.splitsAgents).toBe(false);

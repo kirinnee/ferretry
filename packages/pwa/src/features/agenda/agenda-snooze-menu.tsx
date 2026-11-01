@@ -2,12 +2,13 @@
  * THE SNOOZE CONTROL — a small clock button that opens a menu: "1 hour", "4 hours", "Tomorrow 9:00" and
  * "Custom…" (a date-and-time field with a Snooze button). It sits beside the other header controls, never in the
  * answer row. Esc and a click outside close it; ↑ ↓ walk the choices. A time that has passed is refused where the
- * owner typed it. The times are decided in `lib/agenda-snooze.ts`; this only draws them.
+ * owner typed it. The choices are `snoozePicks` in `lib/agenda-snooze.ts` — the same list the swipe-down compass
+ * draws — and this only draws them.
  */
 
 import { Clock } from 'lucide-react';
 import { type FormEvent, type KeyboardEvent, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { customSnooze, localInputValue, snoozeChoices } from '../../lib/agenda-snooze.ts';
+import { customSnooze, localInputValue, snoozePicks } from '../../lib/agenda-snooze.ts';
 import { placeWithin } from './snooze-placement.ts';
 
 export interface AgendaSnoozeMenuProps {
@@ -24,12 +25,12 @@ export interface AgendaSnoozeMenuProps {
 const HOUR_MS = 3_600_000;
 const VIEWPORT_MARGIN_PX = 8;
 
-interface CustomFormProps {
+export interface CustomFormProps {
   readonly now: number;
   readonly onSnooze: (until: string) => void;
 }
 
-function CustomSnoozeForm({ now, onSnooze }: CustomFormProps) {
+export function CustomSnoozeForm({ now, onSnooze }: CustomFormProps) {
   const [value, setValue] = useState(() => localInputValue(now + HOUR_MS));
   const [problem, setProblem] = useState<string | null>(null);
   const fieldId = useId();
@@ -168,26 +169,30 @@ export function AgendaSnoozeMenu({
       {open ? (
         <div className="fy-snooze__popover" id={menuId} ref={popover}>
           <div aria-label="Snooze for" className="fy-snooze__list" ref={list} role="menu">
-            {snoozeChoices(at).map(choice => (
-              <button
-                className="fy-snooze__item"
-                key={choice.id}
-                onClick={() => snooze(choice.until)}
-                role="menuitem"
-                type="button"
-              >
-                {choice.label}
-              </button>
-            ))}
-            <button
-              aria-expanded={custom}
-              className="fy-snooze__item"
-              onClick={() => setCustom(shown => !shown)}
-              role="menuitem"
-              type="button"
-            >
-              Custom…
-            </button>
+            {snoozePicks(at).map(pick =>
+              pick.until === null ? (
+                <button
+                  aria-expanded={custom}
+                  className="fy-snooze__item"
+                  key={pick.id}
+                  onClick={() => setCustom(shown => !shown)}
+                  role="menuitem"
+                  type="button"
+                >
+                  {pick.label}
+                </button>
+              ) : (
+                <button
+                  className="fy-snooze__item"
+                  key={pick.id}
+                  onClick={() => snooze(pick.until as string)}
+                  role="menuitem"
+                  type="button"
+                >
+                  {pick.label}
+                </button>
+              ),
+            )}
           </div>
           {custom ? <CustomSnoozeForm now={at} onSnooze={snooze} /> : null}
         </div>

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import { customSnooze, localInputValue, snoozeChoices, tomorrowMorning } from '../../src/lib/agenda-snooze.ts';
+import {
+  customSnooze,
+  localInputValue,
+  SNOOZE_PICK_IDS,
+  snoozeChoices,
+  snoozePicks,
+  tomorrowMorning,
+} from '../../src/lib/agenda-snooze.ts';
 
 const local = (month: number, day: number, hour: number, minute = 0): number =>
   new Date(2026, month, day, hour, minute).getTime();
@@ -41,6 +48,26 @@ describe('snoozeChoices', () => {
     expect(choices[0]?.until).toBe(new Date(now + 3_600_000).toISOString());
     expect(choices[1]?.until).toBe(new Date(now + 4 * 3_600_000).toISOString());
     expect(choices[2]?.until).toBe(new Date(tomorrowMorning(now)).toISOString());
+  });
+});
+
+describe('snoozePicks', () => {
+  const now = local(9, 30, 15, 20);
+
+  it('is the one list every snooze surface offers: the three times, then Custom…', () => {
+    expect(snoozePicks(now).map(pick => [pick.id, pick.label])).toEqual([
+      ['hour', '1 hour'],
+      ['hours', '4 hours'],
+      ['tomorrow', 'Tomorrow 9:00'],
+      ['custom', 'Custom…'],
+    ]);
+    expect(SNOOZE_PICK_IDS).toEqual(['hour', 'hours', 'tomorrow', 'custom']);
+  });
+
+  it('gives each time its instant and Custom… none, because the owner types that one', () => {
+    const picks = snoozePicks(now);
+    expect(picks.slice(0, 3).map(pick => pick.until)).toEqual(snoozeChoices(now).map(choice => choice.until));
+    expect(picks[3]?.until).toBeNull();
   });
 });
 

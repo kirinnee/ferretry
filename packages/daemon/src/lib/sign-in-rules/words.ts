@@ -46,7 +46,10 @@ export const scopeWords = (scope: SignInRuleScope): string =>
 /** The day a rule ends, in the machine's words (UTC). */
 const dayOf = (instant: string): string => new Date(instant).toISOString().slice(0, 10);
 
-/** What the passkey approves, line by line, fields first. */
+/**
+ * What the passkey approves, line by line, fields first. A terminal rule's second line says it is ROOT, before the
+ * account and the place, so no clip of the list hides it (the dialog's red line reads the staged `root` flag itself).
+ */
 export function stagedSummary(facts: {
   readonly fields: readonly SignInField[];
   readonly account: AccountRef;
@@ -62,6 +65,9 @@ export function stagedSummary(facts: {
 }): readonly string[] {
   return [
     line(`Ferretry types the ${ruleFieldWords(facts.fields)} without asking`),
+    ...(facts.place.kind === 'terminal'
+      ? [line(`into ${facts.place.tool}: root on ${facts.place.host} for every ferret it covers`)]
+      : []),
     line(
       `${facts.account.label}${facts.username === undefined ? '' : ` · ${facts.username}`} ${placeWords(facts.place)}`,
     ),

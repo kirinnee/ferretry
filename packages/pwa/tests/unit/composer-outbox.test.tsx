@@ -183,3 +183,53 @@ describe('the composer with a device outbox', () => {
     expect(direct[0]).toHaveLength(2);
   });
 });
+
+describe('the composer with an outbox that cannot store (&F331 review)', () => {
+  test('offline with no storage on this device: not sent, the words stay in the box, and it says why', async () => {
+    // Arrange — this device's storage refuses every write; the machine cannot be reached.
+    const refusing = new MemoryOutboxBackend();
+    refusing.put = async () => {
+      throw new Error('quota exceeded');
+    };
+    const store = await createAppStore({
+      repository: new Memory(),
+      connectClient: async () =>
+        ({
+          send: async () => {
+            throw new FyTransportError('no carrier', '/send', false, undefined);
+          },
+        }) as unknown as FyApiClient,
+      fetcher: async () => Response.json({}),
+      outboxBackend: refusing,
+    });
+    store.connections.add(daemon);
+    const tree = render(
+      <StoreProvider store={store}>
+        <Composer
+          api={{
+            send: async () => {
+              throw new FyTransportError('no carrier', '/send', false, undefined);
+            },
+          }}
+          daemon={daemon}
+          draftStore={new DaemonDraftStore(new Memory())}
+          sessionId="s1"
+        />
+      </StoreProvider>,
+    );
+    run(() =>
+      tree.root
+        .findByType('textarea')
+        .props.onChange({ currentTarget: { value: 'keep me', selectionStart: 7, selectionEnd: 7 } }),
+    );
+
+    // Act
+    await runAsync(async () => tree.root.findByType('form').props.onSubmit({ preventDefault() {} }));
+
+    // Assert
+    expect(store.outbox.snapshot()).toEqual([]);
+    expect(tree.root.findByType('textarea').props.value).toBe('keep me');
+    expect(JSON.stringify(tree.toJSON())).toContain('could not keep the message');
+    run(() => tree.unmount());
+  });
+});

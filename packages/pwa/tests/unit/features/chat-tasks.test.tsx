@@ -340,7 +340,7 @@ describe('ChatTasks — moving about inside the drawer', () => {
   });
 });
 
-describe('ChatTasks — Show agent tasks and Expand', () => {
+describe('ChatTasks — Internal and Expand', () => {
   const agentCards = () => [
     originCard('F50', 'human', null, { owner: SELF, laneId: 'plan', title: 'Human ask' }),
     originCard(

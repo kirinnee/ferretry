@@ -19,7 +19,7 @@ export interface SharedDraftScheduler {
   after(milliseconds: number, action: () => void): { cancel(): void };
 }
 
-export type SharedDraftErrorCode = 'not-found' | 'stale' | 'too-long' | 'too-many-items' | 'invalid';
+export type SharedDraftErrorCode = 'not-found' | 'stale' | 'too-long' | 'too-many-items' | 'invalid' | 'rate-limited';
 
 export class SharedDraftError extends Error {
   constructor(

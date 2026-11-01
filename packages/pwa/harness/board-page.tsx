@@ -378,8 +378,8 @@ const BIG = Array.from({ length: 40 }, (_, index) => {
 const withOrigin = (cards: readonly BoardTaskView[], firstId: number): BoardTaskView[] =>
   cards.map((item, index) =>
     index % 4 === 1 && firstId >= 300
-      ? Object.assign(item, { origin: 'agent', humanParent: { id: `F${firstId + index - 1}` } })
-      : Object.assign(item, { origin: 'human', humanParent: null }),
+      ? Object.assign(item, { origin: 'agent', askedBy: 'agent', humanParent: { id: `F${firstId + index - 1}` } })
+      : Object.assign(item, { origin: 'human', askedBy: 'person', humanParent: null }),
   );
 const BIG_ON = new URLSearchParams(window.location.search).get('big') !== null;
 

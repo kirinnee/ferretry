@@ -14,7 +14,7 @@ import { InputAuditAdapter } from '../../../src/lib/input-requests/audit-adapter
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import { InputLoginAdapter } from '../../../src/lib/input-requests/login-adapter.ts';
 import { identityOf } from '../../../src/lib/input-requests/login-observer.ts';
-import type { InputCaller, InputCard, TypeResult } from '../../../src/lib/input-requests/ports.ts';
+import type { InputCaller, InputCard, TypeOptions, TypeResult } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
 import { LoginDirectory, LoginVault, totpCode } from '../../../src/lib/secrets/index.ts';
@@ -80,6 +80,31 @@ const codePage = loginPage({ navigationId: 'loader-2' }, [
   field('otp', {}, { type: 'text', autocomplete: 'one-time-code' }),
 ]);
 
+type TerminalFacts = Extract<InputTargetFacts, { readonly kind: 'terminal' }>;
+
+/** sudo asking for the password, every member of its group PROVED by the kernel to run it setuid root, echo off. */
+const sudoPrompt = (over: Partial<TerminalFacts> = {}): TerminalFacts => ({
+  kind: 'terminal',
+  paneProof: { paneId: '%3', pid: 4242, sessionCreated: 1_700_000_000 },
+  foreground: { pid: 4300, pgid: 4300, comm: 'sudo', argv: 'sudo -v' },
+  echo: 'off',
+  cursorRow: 1,
+  promptLine: '[sudo] password for kirin:',
+  promptLineDigest: 'a'.repeat(64),
+  program: 'sudo',
+  canonical: true,
+  recognisedConsumer: true,
+  trustedProgram: true,
+  ...over,
+});
+
+const SUDO_RAISE: InputRaise = {
+  target: { kind: 'terminal', key: 'dev' },
+  prompt: 'sudo wants your password',
+  sensitivity: 'secret',
+  submit: 'owner-default',
+};
+
 const SIGN_IN: InputRaise = {
   target: { kind: 'browser', key: 'app' },
   prompt: 'GitHub wants a login',
@@ -113,11 +138,14 @@ interface Options {
   actDuringRaise?: boolean;
   /** The daemon's dummy probe finds the password field hiding what is typed, so the raise's lock is the short one. */
   probes?: boolean;
+  /** Whether the fills read terminal rules (`sign-in-rules-terminal.1` reported); the rule service may still stage them. */
+  terminal?: boolean;
 }
 
 async function harness(options: Options = {}) {
   const writes: string[] = [];
   const armed: boolean[] = [];
+  const typeOptions: (TypeOptions | undefined)[] = [];
   const cards: InputCard[] = [];
   const quietAtRaise: boolean[] = [];
   const notes: string[] = [];
@@ -152,7 +180,16 @@ async function harness(options: Options = {}) {
       ...keyed,
       signIns: keyed.signIns.map(each => ({
         ...each,
-        observed: history.map(identity => tappedFact('github.com', 2, identity)),
+        // A terminal sign-in's history is the owner's taps into the proved sudo on this machine.
+        observed:
+          each.place.kind === 'terminal'
+            ? [
+                {
+                  ...tappedFact('sudo@kirin-box', 2, identityOf(sudoPrompt(), 'sudo@kirin-box')),
+                  surface: 'terminal' as const,
+                },
+              ]
+            : history.map(identity => tappedFact('github.com', 2, identity)),
       })),
     } as RuleListing;
   };
@@ -165,6 +202,7 @@ async function harness(options: Options = {}) {
     audit: { record: async entry => void ruleAudits.push(entry) },
     clock: { now: () => clock.now },
     warn: () => undefined,
+    terminalRules: () => true,
   });
   await rules.load();
   const keyOf = async (account: string) =>
@@ -175,6 +213,7 @@ async function harness(options: Options = {}) {
     ledger,
     keys: keyOf,
     advertised: () => options.advertised ?? true,
+    terminal: () => options.terminal ?? true,
     stampedProject: async () => options.project,
     clock: { now: () => clock.now },
   });
@@ -206,6 +245,7 @@ async function harness(options: Options = {}) {
     directory,
     writes,
     armed,
+    typeOptions,
     cards,
     quietAtRaise,
     notes,
@@ -229,6 +269,7 @@ async function harness(options: Options = {}) {
       observe: async () => ({ ok: true, facts }),
       type: async (_session, _target, typed, _submit, _expected, more) => {
         armed.push(more?.armClear === true);
+        typeOptions.push(more);
         options.onQueued?.(h as Harness);
         if (more?.proceed?.() === false) return 'target_changed';
         if ((options.written ?? 'typed') === 'typed') writes.push(...typed.map(value => value.text));
@@ -945,5 +986,376 @@ describe('a refusal the ferret can cause shows it nothing a card with no rule wo
     // The request itself keeps the longer lock (a card never shortens): only the ferret's reading is the raise's.
     const [request] = await h.service.list(HOST);
     should(request?.lock?.seconds).be.above(view.lockSeconds ?? 0);
+  });
+});
+
+// R3c-T (owner decision !A197): a terminal rule fills sudo, su or doas the KERNEL proved, through the guarded write.
+describe('a terminal rule types the password into a proved setuid sudo, and nowhere else (invariant 24)', () => {
+  /** Kirin's sudo password on this machine, as a sign-in at `sudo@kirin-box`. */
+  async function sudoSignIn(h: Harness): Promise<SignInId> {
+    await h.directory.put(
+      'KIRIN',
+      PutLoginEntryRequestSchema.parse({ label: 'Kirin', password: PASSWORD, match: ['sudo@kirin-box'] }),
+    );
+    const signIn = (await h.directory.accounts.list()).signIns.find(each => each.account === 'KIRIN');
+    if (signIn === undefined) throw new Error('no sign-in');
+    return signIn.id;
+  }
+
+  const sudoRule = async (h: Harness): Promise<SignInRuleId> =>
+    await ruleFor(h, await sudoSignIn(h), { fields: ['password'] });
+
+  it('should type the password once into the proved sudo, with Enter, close the card and log it by the rule', async () => {
+    // Arrange
+    const h = await harness();
+    h.setFacts(sudoPrompt());
+    const rule = await sudoRule(h);
+
+    // Act
+    const { view, request } = await raised(h, SUDO_RAISE);
+    await settled();
+
+    // Assert
+    should(h.writes).deepEqual([PASSWORD]);
+    should(h.armed).deepEqual([false]);
+    should(view.state).equal('delivered');
+    should(view.note).equal('Filled under a rule the owner approved in advance.');
+    should(request).be.undefined();
+    should(h.quietAtRaise).deepEqual([true]);
+    should(ruleOnDisk(h)?.usage).match({ count: 1, lastSession: SESSION });
+    should(h.audits.find(entry => entry.event === 'input.delivered')?.detail).match({
+      by: 'rule',
+      signInRule: rule,
+      revision: 1,
+      entry: 'KIRIN',
+    });
+    should(JSON.stringify([h.audits, h.ruleAudits, h.cards, h.notes, h.closes, h.tells])).not.containEql(PASSWORD);
+  });
+
+  const misses: readonly { readonly name: string; readonly facts: TerminalFacts; readonly reason?: string }[] = [
+    { name: 'a sudo not running setuid root', facts: sudoPrompt({ trustedProgram: undefined }), reason: 'not-system' },
+    { name: 'a prompt echoing what is typed', facts: sudoPrompt({ echo: 'on' }), reason: 'not-proved' },
+    {
+      name: 'a program not proved to ask for secrets',
+      facts: sudoPrompt({ recognisedConsumer: false }),
+      reason: 'not-proved',
+    },
+    // No proved program, so no `sudo@kirin-box` at all: no rule is even tried, and the card is a plain one.
+    {
+      name: 'a shell that only renamed itself sudo',
+      facts: sudoPrompt({ program: undefined, trustedProgram: undefined, recognisedConsumer: false }),
+    },
+    { name: 'a prompt not in line mode (a relay)', facts: sudoPrompt({ canonical: false }) },
+  ];
+  for (const each of misses)
+    it(`should type nothing into ${each.name}, suspend nothing, and leave the owner's card`, async () => {
+      // Arrange
+      const h = await harness();
+      h.setFacts(each.facts);
+      await sudoRule(h);
+
+      // Act
+      const { view, request } = await raised(h, SUDO_RAISE);
+      await settled();
+
+      // Assert
+      should(h.writes).deepEqual([]);
+      should(view.state).equal('pending');
+      if (each.reason === undefined) should(request?.preapproval).be.undefined();
+      else should(request?.preapproval).match({ by: 'rule', outcome: 'did-not-apply', reason: each.reason });
+      should(ruleOnDisk(h)?.suspended).be.undefined();
+      should(ruleOnDisk(h)?.usage.count).equal(0);
+    });
+
+  it('should type nothing into su under a rule for sudo: the proved program picks the key', async () => {
+    // Arrange — su is proved, but the rule is pinned to sudo@kirin-box
+    const h = await harness();
+    h.setFacts(sudoPrompt({ program: 'su', foreground: { pid: 4300, pgid: 4300, comm: 'su', argv: 'su -' } }));
+    await sudoRule(h);
+
+    // Act
+    const { view } = await raised(h, SUDO_RAISE);
+
+    // Assert
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+  });
+
+  it('should type nothing when the rule is revoked inside the terminal’s turn, right before the guarded write', async () => {
+    // Arrange
+    let revoked = false;
+    const h = await harness({
+      onQueued: at => {
+        if (revoked) return;
+        revoked = true;
+        const id = at.rules.fillable()[0]?.body.id;
+        // The owner's one-tap revoke lands between the last look and the tmux write: `proceed()` is asked after it.
+        if (id !== undefined) void at.rules.revoke({ kind: 'owner', actor: { kind: 'host' } }, id);
+      },
+    });
+    h.setFacts(sudoPrompt());
+    await sudoRule(h);
+
+    // Act
+    const { view } = await raised(h, SUDO_RAISE);
+    await settled();
+
+    // Assert
+    should(revoked).be.true();
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(h.store.document?.rules).have.length(0);
+  });
+
+  it('should type nothing when the rule is revoked at the last step before the write', async () => {
+    // Arrange
+    const h = await harness({
+      onJournal: async (type, at) => {
+        if (!type.endsWith('delivering')) return;
+        const id = at.rules.fillable()[0]?.body.id;
+        if (id !== undefined) await at.rules.revoke({ kind: 'owner', actor: { kind: 'host' } }, id);
+      },
+    });
+    h.setFacts(sudoPrompt());
+    await sudoRule(h);
+
+    // Act
+    const { view } = await raised(h, SUDO_RAISE);
+
+    // Assert
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+  });
+
+  it('should still fill after a page script whose origin could not be read: no page script reaches the terminal', async () => {
+    // Arrange
+    const h = await harness();
+    h.setFacts(sudoPrompt());
+    await sudoRule(h);
+    h.ruleGrants.scriptedOn(undefined);
+    await settled();
+
+    // Act
+    const { view } = await raised(h, SUDO_RAISE);
+
+    // Assert
+    should(h.writes).deepEqual([PASSWORD]);
+    should(view.state).equal('delivered');
+    should(ruleOnDisk(h)?.suspended).be.undefined();
+  });
+
+  // secrev-1301 / lizzette (b): a terminal rule on disk never fills while `sign-in-rules-terminal.1` is not reported.
+  it('should leave sudo a plain card, typing nothing, while terminal rules are not reported', async () => {
+    // Arrange — the rule is on disk; the fills don't read terminal rules
+    const h = await harness({ terminal: false });
+    h.setFacts(sudoPrompt());
+    await sudoRule(h);
+    const noRule = await harness({ terminal: false });
+    noRule.setFacts(sudoPrompt());
+    await sudoSignIn(noRule);
+
+    // Act
+    const { view, request } = await raised(h, SUDO_RAISE);
+    const plain = await raised(noRule, SUDO_RAISE);
+    await settled();
+
+    // Assert — no grant reached the matcher (no preapproval, not quiet), nothing typed, nothing suspended
+    should(h.ruleGrants.of(SESSION).some(grant => grant.surface === 'terminal')).be.false();
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(h.quietAtRaise).deepEqual([false]);
+    should(request?.preapproval).be.undefined();
+    should(h.typeOptions).deepEqual([]);
+    should(ruleOnDisk(h)?.suspended).be.undefined();
+    should(JSON.stringify(view)).equal(JSON.stringify(plain.view));
+    should(JSON.stringify(h.cards)).equal(JSON.stringify(noRule.cards));
+  });
+
+  it('should still fill a page rule while terminal rules are not reported', async () => {
+    const h = await harness({ terminal: false });
+    await ruleFor(h, await github(h));
+    const { view } = await raised(h);
+    should(view.state).equal('delivered');
+    should(h.writes).deepEqual([USERNAME, PASSWORD]);
+  });
+
+  it('should ask the target to prove the reader again before Enter, for a terminal rule only (secrev-1301 M1)', async () => {
+    const terminal = await harness();
+    terminal.setFacts(sudoPrompt());
+    await sudoRule(terminal);
+    await raised(terminal, SUDO_RAISE);
+    should(terminal.typeOptions[0]?.reprove).be.true();
+
+    const page = await harness();
+    await ruleFor(page, await github(page));
+    await raised(page);
+    should(page.typeOptions[0]?.reprove).be.undefined();
+  });
+
+  it('should suspend the rule, type nothing and give the use back when tmux’s guard refuses the write (M1)', async () => {
+    // Arrange
+    const options: Parameters<typeof harness>[0] = { written: 'guard_refused' };
+    const h = await harness(options);
+    h.setFacts(sudoPrompt());
+    await sudoRule(h);
+
+    // Act
+    const first = await raised(h, SUDO_RAISE);
+    await settled();
+    options.written = 'typed';
+    h.clock.now += 200_000;
+    // The owner dismisses the first card; the ferret raises again.
+    await h.service.cancel(SESSION, first.request?.id ?? '', HOST);
+    const second = await raised(h, SUDO_RAISE);
+
+    // Assert
+    should(h.writes).deepEqual([]);
+    should(first.view.state).equal('pending');
+    should(first.request?.preapproval).match({ by: 'rule', outcome: 'did-not-apply', reason: 'program-changed' });
+    should(ruleOnDisk(h)?.suspended?.because).equal('program-changed');
+    should(ruleOnDisk(h)?.usage.count).equal(0);
+    should(JSON.stringify(h.ruleAudits)).containEql('sign-in-rule-suspended');
+    // The next raise asks: the race got one try.
+    should(second.view.state).equal('pending');
+    should(second.request?.preapproval).match({ by: 'rule', reason: 'suspended' });
+  });
+
+  it('should not suspend the rule when the look before the write merely differs from the card (M1)', async () => {
+    const h = await harness({ written: 'target_changed' });
+    h.setFacts(sudoPrompt());
+    await sudoRule(h);
+    await raised(h, SUDO_RAISE).catch(() => undefined);
+    await settled();
+    should(h.writes).deepEqual([]);
+    should(ruleOnDisk(h)?.suspended).be.undefined();
+  });
+
+  it('should end the request and suspend the rule when the reader changed before Enter (M1)', async () => {
+    // Arrange
+    const h = await harness({ written: 'reader_changed' });
+    h.setFacts(sudoPrompt());
+    await sudoRule(h);
+
+    // Act
+    const { view } = await raised(h, SUDO_RAISE);
+    await settled();
+
+    // Assert — the value may have gone in, so it is never typed again and the use is spent
+    should(view.state).equal('refused');
+    should(ruleOnDisk(h)?.suspended?.because).equal('program-changed');
+    should(ruleOnDisk(h)?.usage.count).equal(1);
+  });
+
+  it('should suspend a terminal rule whose passkey left the registry, and type nothing (L3)', async () => {
+    const h = await harness();
+    h.setFacts(sudoPrompt());
+    await sudoRule(h);
+    h.proofs.held.clear();
+    const { request } = await raised(h, SUDO_RAISE);
+    await settled();
+    should(h.writes).deepEqual([]);
+    should(request?.preapproval).match({ by: 'rule', reason: 'proof-invalid' });
+    should(ruleOnDisk(h)?.suspended?.because).equal('passkey-removed');
+  });
+
+  it('should leave the ferret’s view byte-identical to no rule for misses that suspend or count (L3)', async () => {
+    const differentPrompt = sudoPrompt({ foreground: { pid: 4300, pgid: 4300, comm: 'sudo-rs', argv: 'sudo -v' } });
+    const cases: readonly {
+      readonly name: string;
+      readonly facts: TerminalFacts;
+      readonly draft?: Partial<SignInRuleDraft>;
+      readonly before?: (h: Harness, signIn: SignInId) => void;
+      readonly reason: string;
+      readonly suspended?: string;
+    }[] = [
+      {
+        name: 'a prompt outside the owner’s history',
+        facts: differentPrompt,
+        reason: 'form-changed',
+        suspended: 'form-changed',
+      },
+      {
+        name: 'a rule for another session',
+        facts: sudoPrompt(),
+        draft: { scope: { kind: 'session', session: OTHER } },
+        reason: 'out-of-scope',
+      },
+      {
+        name: 'a sign-in filled ten times this hour',
+        facts: sudoPrompt(),
+        before: (h, signIn) => {
+          for (let index = 0; index < 10; index += 1) {
+            const held = h.ledger.reserve(
+              { id: `plan:${'ab'.repeat(16)}:0`, signIn, remaining: 99 } as never,
+              `other-${String(index)}`,
+              ['password'],
+              'password',
+              h.clock.now,
+            );
+            if (typeof held !== 'string') h.ledger.spent(held, undefined);
+          }
+        },
+        reason: 'rate',
+      },
+    ];
+    for (const each of cases) {
+      // Arrange
+      const withRule = await harness();
+      withRule.setFacts(each.facts);
+      const signIn = await sudoSignIn(withRule);
+      await ruleFor(withRule, signIn, { fields: ['password'], ...each.draft });
+      each.before?.(withRule, signIn);
+      const noRule = await harness();
+      noRule.setFacts(each.facts);
+      await sudoSignIn(noRule);
+
+      // Act
+      const a = await raised(withRule, SUDO_RAISE);
+      const b = await raised(noRule, SUDO_RAISE);
+      await settled();
+
+      // Assert
+      should(withRule.writes).deepEqual([]);
+      should(a.request?.preapproval).match({ by: 'rule', reason: each.reason });
+      should(ruleOnDisk(withRule)?.suspended?.because).equal(each.suspended);
+      should(JSON.stringify(a.view)).equal(JSON.stringify(b.view));
+      should(JSON.stringify(withRule.cards)).equal(JSON.stringify(noRule.cards));
+      should(withRule.notes).deepEqual(noRule.notes);
+      should(withRule.tells).deepEqual(noRule.tells);
+      should(JSON.stringify(await withRule.service.agentView(SESSION, a.view.id, 0))).equal(
+        JSON.stringify(await noRule.service.agentView(SESSION, b.view.id, 0)),
+      );
+    }
+  });
+
+  it('should leave the ferret’s view, its agenda card and its words byte-identical to sudo with no rule (invariant 29)', async () => {
+    for (const facts of [
+      sudoPrompt({ trustedProgram: undefined }),
+      sudoPrompt({ echo: 'on' }),
+      sudoPrompt({ program: undefined, trustedProgram: undefined, recognisedConsumer: false }),
+    ]) {
+      // Arrange
+      const withRule = await harness();
+      withRule.setFacts(facts);
+      await sudoRule(withRule);
+      const noRule = await harness();
+      noRule.setFacts(facts);
+      await sudoSignIn(noRule);
+
+      // Act
+      const a = await raised(withRule, SUDO_RAISE);
+      const b = await raised(noRule, SUDO_RAISE);
+      await settled();
+
+      // Assert
+      should(withRule.writes).deepEqual([]);
+      should(JSON.stringify(a.view)).equal(JSON.stringify(b.view));
+      should(JSON.stringify(withRule.cards)).equal(JSON.stringify(noRule.cards));
+      should(withRule.notes).deepEqual(noRule.notes);
+      should(withRule.tells).deepEqual(noRule.tells);
+      should(JSON.stringify(await withRule.service.agentView(SESSION, a.view.id, 0))).equal(
+        JSON.stringify(await noRule.service.agentView(SESSION, b.view.id, 0)),
+      );
+    }
   });
 });

@@ -1330,8 +1330,9 @@ or nothing is typed:
 > is a normal card. How a rule is made, pinned, suspended and revoked is
 > [secrets › Standing sign-in rules](secrets.md#standing-sign-in-rules).
 
-A **standing rule** is one owner-signed permission for Ferretry to fill ONE page sign-in, for any ferret unless the
-owner narrowed its scope, until it expires (at most 90 days). It is the second source of grants beside plan lines,
+A **standing rule** is one owner-signed permission for Ferretry to fill ONE sign-in, for any ferret unless the owner
+narrowed its scope, until it expires: a page sign-in for at most 90 days, or sudo, su or doas in a terminal for at most 7
+(below). It is the second source of grants beside plan lines,
 through the same matcher, the same write and ONE ledger (`sign-in-grants/rules.ts`, `sources.ts`): the hourly rate
 counts plan and rule fills of a sign-in together, and neither source forgets the other's attempts or pins. Every check
 in the table above holds for a rule too, plus these:
@@ -1349,12 +1350,13 @@ in the table above holds for a rule too, plus these:
 
 - **Checked twice, then once more with nothing awaited.** The matcher runs at the raise and again at the write; before
   the second run the rule's proof and pinned facts are re-checked (a registry or account store that can't be read
-  fills nothing and suspends nothing). The last check before typing (`held()`, asked again inside the page's queue as
-  `proceed()`) is synchronous: the rule service still says its proof and facts checked out (`verified`, false while
-  any check is pending or a suspension is being written), the rule is still in force at that revision, still covers
-  every role being typed (a narrowing that dropped the code stops a code), its scope covers the session, and no page
-  script ran on its places since. A revoke, a suspension or a narrowing that lands while the fill looked or waited its
-  turn types nothing, and the use is given back.
+  fills nothing and suspends nothing). The last check before typing (`held()`, asked again as `proceed()` inside the
+  page's queue, or right before a terminal's guarded tmux write) is synchronous: the rule service still says its proof
+  and facts checked out (`verified`, false while any check is pending or a suspension is being written), the rule is
+  still in force at that revision, still covers every role being typed (a narrowing that dropped the code stops a
+  code), its scope covers the session, no agent script is running anywhere, and, for a page rule, no page script ran
+  on its places since. A revoke, a suspension or a narrowing that lands while the fill looked or waited its turn types
+  nothing, and the use is given back.
 - **One use, per session.** An attempt belongs to one session: another ferret's code step never joins it, and two
   ferrets signing in at once each spend their own use. A use is counted in memory the moment it is spent and written
   to the rule's record after the fill (a crash in between leaves one use uncounted).
@@ -1367,8 +1369,9 @@ in the table above holds for a rule too, plus these:
   made), and the one it left the page on. Each is tainted in memory at once, then every rule pinned to it is
   suspended on disk, so it outlasts a restart. While any agent script is running, NO rule fills anywhere, so nothing
   lands before the world's origin is known. A host that can't be read (an opaque origin, `about:blank` read from its
-  address, a worker too old to report one) taints EVERY rule, and so does a script that ran and then failed. Only `browser_eval`
-  is seen: a ferret editing the browser profile on disk, or an extension, is outside it.
+  address, a worker too old to report one) taints EVERY page rule, and so does a script that ran and then failed. A
+  terminal rule is no page's: its key is never a host, and no page script reaches the tmux pane it types into. Only
+  `browser_eval` is seen: a ferret editing the browser profile on disk, or an extension, is outside it.
 - **The clear suspends.** A password left in its field at the hold's end (`cleared`), or a clear that can't tell
   (`unknown`), suspends the rule (`did-not-move-on`), exactly as it stops a plan line. A write that could not say whether it
   typed (`uncertain`) gets the same clear and its own hold for the full window, and suspends the rule at once.
@@ -1386,8 +1389,25 @@ in the table above holds for a rule too, plus these:
   card's line comes from `grantMissLineFor` ("Your standing rule for this sign-in didn't apply: … The rule is suspended
   until you approve it again." for a miss that suspends). A filled card closes as "Filled under your standing rule on
   github.com."; it is raised quiet, and a miss buzzes once, with no edit to the card ([notifications](notifications.md)).
-- **Pages only, for now.** A rule's signed `surface` is `page`; a sudo, su or doas password stays covered per task by a
-  plan line until terminal rules land.
+- **Terminal rules: sudo, su or doas only** (owner decision !A197). A rule's signed `surface` is `page` or `terminal`.
+  A terminal rule is pinned to exactly one `sudo@host`, `su@host` or `doas@host`, types the password alone, lasts a
+  day unless the owner says otherwise and a week at most, and is drawn red as root. It fills only where every terminal
+  check of the table above holds, the same rows a plan line's terminal fill passes (10t–12t): the program PROVED by the
+  kernel ([who reads the terminal](#who-reads-the-terminal)), every process of the foreground group setuid root, line
+  mode, echo off, a known secret reader, the proved tool and this machine exactly the pinned key, one password field;
+  and row 17, the prompt the owner's own taps have history with. Then the guarded write: `proceed()` is asked right
+  before the tmux `if-shell` guard (pane pid, foreground command, cursor row, pane alive), so a revoke landing there
+  types nothing. Under a rule the password goes in without Enter, and Enter follows only once the kernel proves again
+  that the same setuid process leads the foreground group; a reader that changed, or a write the guard refused after a
+  matching look, types nothing more and suspends the rule (`program-changed`). A program swapped in between the last
+  kernel check and the typing can still read the password once; the rule then suspends, so it cannot be retried under
+  that approval ([secrets › Terminal rules](secrets.md#terminal-rules-sudo-su-or-doas)). Terminal rules fill only while
+  the daemon reports `sign-in-rules-terminal.1`, which this build does not: until then sudo is always a plain card. A program the kernel did not prove has no key at all: a shell that renamed itself `sudo` makes no rule
+  even be tried, and the card is a plain one. A setuid sudo with echo on, a prompt not proved to ask for secrets, or a
+  sudo not running setuid root (`not-proved`, `not-system`) types nothing and suspends nothing. Any other program
+  (ssh, npm, passwd) can never have a rule (`tool-not-covered`). Its history is the owner's own taps into a proved
+  setuid sudo, su or doas ([secrets › What can have a rule](secrets.md#what-can-have-a-rule)), and a miss leaves the
+  ferret's view byte-identical to sudo with no rule, as for a page.
 - **A ferret can only suggest one.** `account.propose` takes `preapprove: true` (then `recipe` is optional), which will
   raise a card that opens the owner's sheet with nothing ticked. Until that handler lands, the daemon refuses such a
   call whole (`unavailable`) and files no recipe from it.
@@ -1417,6 +1437,17 @@ What it does NOT do, said plainly:
 
 > This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop a
 > ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
+
+- **A sudo rule gives every ferret root on demand while it lasts** (`SIGN_IN_RULE_ROOT_WARNING`, red on every terminal
+  rule), and **the program is proved by the kernel, not by its name** (`SIGN_IN_RULE_TERMINAL_HONEST_LIMIT`): what
+  reads the password is a setuid program root installed, but whoever starts it picks the name it runs under, so a ferret
+  could start another such program (`passwd`, say) as `sudo`:
+
+> This gives every ferret on this machine root whenever it asks, while the rule lasts.
+
+> Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a
+> process gave itself. A ferret starts that program, so it could start another program root installed under the name
+> sudo.
 
 ## Who reads the terminal
 

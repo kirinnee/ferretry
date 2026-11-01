@@ -10,7 +10,7 @@
  *    hold as a mini tree.
  *
  * The tab has two sizes, one renderer: `side` in the Info panel, and `page` when the host lets it fill the chat
- * (`onExpand`), where the same cards and lanes are drawn at the Board page's density. "Show agent tasks" is the
+ * (`onExpand`), where the same cards and lanes are drawn at the Board page's density. "Internal" is the
  * Board page's own toggle and filter: off, only the owner's cards are drawn; on, an agent card sits under the
  * human card it serves.
  *
@@ -35,7 +35,7 @@ import { daemonBoardCardPath } from '../../lib/pages/routes.ts';
 import type { ToTestAnswers } from '../agenda/to-test-rows.tsx';
 import { BoardCard, type BoardCardMoves, type BoardDensity } from './board-card.tsx';
 import { BoardCardsView } from './board-cards-view.tsx';
-import { AgentsToggle } from './board-filters.tsx';
+import { InternalToggle } from './board-filters.tsx';
 import { BoardLane } from './board-lane.tsx';
 import type { BoardDoneControl } from './board-views.tsx';
 
@@ -60,7 +60,7 @@ export interface BoardSideTabProps {
   readonly doneFor?: (card: BoardCardOf, place: BoardCardPlace) => BoardDoneControl | undefined;
   /** `side` in the Info panel; `page` when the tab fills the chat. */
   readonly density?: BoardDensity;
-  /** "Show agent tasks" on or off. */
+  /** "Internal" on or off. */
   readonly onAgents: (agents: boolean) => void;
   /** Expands the tab to the whole chat (at `side`) or collapses it back to the panel (at `page`); absent: no button. */
   readonly onExpand?: () => void;
@@ -122,10 +122,9 @@ function Toolbar({
     <div className="fy-board-side__bar" data-board-side-bar="">
       <ViewToggle onView={onView} view={view} />
       {chat.splitsAgents && view !== 'cards' ? (
-        <AgentsToggle
+        <InternalToggle
           filters={{ ...NO_BOARD_FILTERS, agents: chat.agents }}
           onChange={next => onAgents(next.agents)}
-          short
         />
       ) : null}
       {onExpand === undefined ? null : (

@@ -390,9 +390,16 @@ an app that predates stages reads every lane right, and the helpers that read th
 `laneUse`) answer as they did. `needsOwner` reads the stage as well as `ownerGate`: a move forward out of any gate
 is the owner's, so a ferret's move out of a `verify` lane is refused `owner-gate` even where the lane is not
 owner-gated (before stages it went through), and a move and a report agree on every gate. An app that predates stages drops the field when it saves a set,
-and the lanes then read their derived stages again: only options the owner had changed are lost. The lane editor
-drops a lane's stored stage when its category or its gate changes, or the triggers of an automatic one, so a saved
-lane is never refused for a stage its fields no longer describe.
+and the lanes then read their derived stages again: only options the owner had changed are lost.
+
+**The lane editor sets the stage.** Each lane row (the closed lane excepted, which only the owner moves cards into)
+has a segmented switch, **Gate** or **Automatic**. A gate shows its options, one to three: a label of at most 24
+characters and where it sends the card (the next lane, a named lane, **Not good** (reopen and talk, at most one per
+gate) or **Close**). Switching a lane to Gate starts from `PLAN_GATE`, or `VERIFY_GATE` on a `verify` lane, and sets
+`ownerGate`; switching back to Automatic clears it. An automatic lane shows its trigger chips, and the two that
+nothing watches (`pr.review_approved`, `deploy.done`) are marked "reported with fy task trigger". The editor sends
+the `stage` it drew with the lane and lets the protocol normalise the mirrors. It drops a lane's stored stage when its
+category changes, so a saved lane is never refused for a stage its fields no longer describe.
 
 `gateOptions(lane)` lists a lane's options, none for an automatic stage. `gateOutcomeLane(laneSet, workflow,
 laneId, optionId)` says where an option sends a card: `{ option, lane }`, or `not-a-gate`, `unknown-option`,
@@ -529,8 +536,10 @@ and its lead writes them.
 
 ## Human and agent cards
 
-The Board shows what the OWNER asked for by default, and folds the rest away behind "Show agent tasks", each agent
-card under its `humanParent` where it has one. `origin` is derived at read time by one pure rule, `cardOrigin` in
+The Board shows what the OWNER asked for by default, and folds the rest away behind the **Internal** filter (off
+unless chosen), each agent card under its `humanParent` where it has one. A card is internal when the daemon says
+`askedBy: agent`; the app reads that through one helper (`taskAsker`) that falls back to `origin` for a daemon
+that predates `askedBy`. On a desktop the toggle sits in the filter bar; on a phone it lives in the Filters sheet, so the header gains no row. While the filter is off, internal cards are in no lane, overview or Home count. `origin` is derived at read time by one pure rule, `cardOrigin` in
 `packages/daemon/src/lib/board/origin.ts`, and never stored. A card is **human** when:
 
 1. the owner made it (the Board page, a paired device, the admin CLI);
@@ -938,8 +947,8 @@ wherever it appears ([reference-standard.md](reference-standard.md)).
   - Anything running as the same user can delete a project's lane file under the state home, after which a
     ferret's proposal for it goes live as a first one (the admin-token GAP's class: the host's user is the owner).
 
-- **The lane editor cannot set a gate's options or a stage yet**, nor `fy` report a trigger. A gate already raises
-  its one Inbox item ([Gates ask the owner](#gates-ask-the-owner)).
+- **`fy` cannot report a trigger yet.** The lane editor marks `pr.review_approved` and `deploy.done` as "reported
+  with fy task trigger"; until that command exists they are reported with `{ "action": "trigger" }`.
 - **`pr.review_approved` is reported, not watched.** The watcher asks GitHub for a PR's state, checks and merge,
   not its review decision, so for now an approval is reported (`{ "action": "trigger" }`).
 - **A daemon or an app that predates the two new triggers cannot read a lane that uses one.** Its trigger list is

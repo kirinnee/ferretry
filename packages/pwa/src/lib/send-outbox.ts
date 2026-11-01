@@ -13,6 +13,7 @@
 // leave holds the ones behind it: the reader typed them in that order, and the ferret should read them so.
 // Sessions are independent of each other.
 
+import type { SharedDraftSent } from '@ferretry/protocol';
 import { withReferences } from './agenda-reply.ts';
 import { attachmentErrorMessage } from './attachments.ts';
 import { carrierDelivery } from './relay-carrier.ts';
@@ -49,6 +50,11 @@ export interface OutboxEntry {
   readonly reason?: string;
   /** A machine answered "no" (not "I can't be reached"): the person must edit or cancel it. */
   readonly refused?: true;
+  /**
+   * What this message takes out of the owner's shared draft, sent WITH it so the daemon clears exactly
+   * that once the message lands — however much later, and whether or not a composer is still open.
+   */
+  readonly sharedDraft?: SharedDraftSent;
 }
 
 /** Where entries are kept. IndexedDB in a browser; a Map in a test. */
@@ -75,7 +81,12 @@ export class MemoryOutboxBackend implements OutboxBackend {
 export interface OutboxSender {
   send(
     sessionId: string,
-    input: { readonly message: string; readonly attachmentIds?: string[]; readonly now?: boolean },
+    input: {
+      readonly message: string;
+      readonly attachmentIds?: string[];
+      readonly now?: boolean;
+      readonly sharedDraft?: SharedDraftSent;
+    },
     requestId: string,
   ): Promise<unknown>;
   upload(sessionId: string, file: OutboxFile): Promise<string>;
@@ -163,6 +174,8 @@ export interface OutboxEnqueue {
   readonly now?: boolean;
   /** The Agenda items it is about; see {@link OutboxEntry.references}. */
   readonly references?: readonly string[];
+  /** See {@link OutboxEntry.sharedDraft}. */
+  readonly sharedDraft?: SharedDraftSent;
 }
 
 export class SendOutbox {
@@ -228,6 +241,11 @@ export class SendOutbox {
 
   /** Writes the message to this device and returns. Nothing is requested until {@link submit} or {@link drain}. */
   async enqueue(input: OutboxEnqueue): Promise<OutboxEntry> {
+    return (await this.#enqueue(input)).entry;
+  }
+
+  /** Enqueues, and says whether the entry reached this device's storage or lives only in this tab. */
+  async #enqueue(input: OutboxEnqueue): Promise<{ readonly entry: OutboxEntry; readonly stored: boolean }> {
     await this.load();
     this.#seq += 1;
     const entry: OutboxEntry = {
@@ -239,25 +257,25 @@ export class SendOutbox {
       attachmentIds: [...(input.attachmentIds ?? [])],
       files: [...(input.files ?? [])],
       now: input.now === true,
+      ...(input.sharedDraft === undefined ? {} : { sharedDraft: input.sharedDraft }),
       createdAt: new Date(this.#clock()).toISOString(),
       seq: this.#seq,
     };
     this.#entries.set(entry.id, entry);
     this.#publish();
-    await this.#persist(entry);
-    return entry;
+    return { entry, stored: await this.#persist(entry) };
   }
 
   /** Enqueues, drains the session and says how THIS entry ended. */
   async submit(
     input: OutboxEnqueue,
     via?: OutboxVia,
-  ): Promise<{ readonly entry: OutboxEntry; readonly outcome: OutboxOutcome }> {
-    const entry = await this.enqueue(input);
+  ): Promise<{ readonly entry: OutboxEntry; readonly outcome: OutboxOutcome; readonly stored: boolean }> {
+    const { entry, stored } = await this.#enqueue(input);
     await this.drain(entry.daemonId, entry.sessionId, via === undefined ? undefined : { id: entry.id, send: via.send });
     const outcome = this.#outcomes.get(entry.id) ?? { kind: 'waiting', reason: WAITING_REASON };
     this.#outcomes.delete(entry.id);
-    return { entry, outcome };
+    return { entry, outcome, stored };
   }
 
   /** Sends one session's entries in order, stopping at the first that cannot leave. */
@@ -393,6 +411,7 @@ export class SendOutbox {
           message: withReferences(current.message, current.references ?? []),
           ...(current.attachmentIds.length === 0 ? {} : { attachmentIds: [...current.attachmentIds] }),
           ...(current.now ? { now: true } : {}),
+          ...(current.sharedDraft === undefined ? {} : { sharedDraft: current.sharedDraft }),
         },
         current.id,
       );
@@ -429,8 +448,12 @@ export class SendOutbox {
     return false;
   }
 
-  async #persist(entry: OutboxEntry): Promise<void> {
-    await this.#backend.put(entry).catch(() => undefined);
+  /** Writes an entry to this device's storage; `false` when storage refused it and it lives only in this tab. */
+  async #persist(entry: OutboxEntry): Promise<boolean> {
+    return await this.#backend.put(entry).then(
+      () => true,
+      () => false,
+    );
   }
 
   #publish(): void {

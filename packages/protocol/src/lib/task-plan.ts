@@ -145,6 +145,7 @@ export const GRANT_MISS_REASONS = [
   'no-history',
   'code-without-sign-in',
   'scripted-origin',
+  'program-changed',
   // At propose time only: the line is `unavailable`.
   'not-in-accounts',
   'via-provider',
@@ -162,7 +163,7 @@ export const TASK_PLAN_UNAVAILABLE_REASONS = [
 
 /**
  * The misses that STOP a line (or SUSPEND a standing rule): every later fill under it asks. There is no resume; a new
- * plan, or a rule approved again, is a new passkey. The last four come only from a rule's own checks.
+ * plan, or a rule approved again, is a new passkey. The last five come only from a rule's own checks.
  */
 export const GRANT_STOPPING_REASONS = [
   'place-changed',
@@ -173,6 +174,7 @@ export const GRANT_STOPPING_REASONS = [
   'factor-changed',
   'proof-invalid',
   'scripted-origin',
+  'program-changed',
 ] as const satisfies readonly GrantMissReason[];
 
 /**
@@ -212,6 +214,7 @@ const GRANT_MISS_WORDS = {
   'no-history': "you haven't signed in to this form yourself from the app yet",
   'code-without-sign-in': 'the card asks for a code outside a sign-in the rule filled',
   'scripted-origin': 'a ferret ran a page script on this site',
+  'program-changed': 'the program reading the terminal changed while Ferretry was typing',
   'not-in-accounts': "it isn't in Accounts: add it in Settings › Accounts, or you'll be asked",
   'via-provider': 'it signs in through another account: the ferret should plan that sign-in',
   'tool-not-covered': "Ferretry can't prove where this program sends the password",

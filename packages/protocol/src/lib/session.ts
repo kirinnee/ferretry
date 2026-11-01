@@ -15,6 +15,7 @@ import { SessionLiveActivitySchema, SessionTranscriptMovedSchema } from './sessi
 import { PermissionRequestSchema } from './session-permission.ts';
 import { SessionProvenanceSchema } from './session-provenance.ts';
 import { SessionTransferEdgeSchema } from './session-transfer-edge.ts';
+import { SharedDraftSentSchema } from './shared-draft.ts';
 
 export type { Harness } from './session-base.ts';
 export { HarnessSchema } from './session-base.ts';
@@ -1147,6 +1148,8 @@ export const SendRequestSchema = z.strictObject({
   attachmentIds: z.array(z.string()).optional(),
   now: z.boolean().optional(),
   replyExpected: z.boolean().optional(),
+  /** What this send takes out of the owner's shared draft once it is accepted (`shared-draft.ts`). */
+  sharedDraft: SharedDraftSentSchema.optional(),
 });
 export type SendRequest = z.infer<typeof SendRequestSchema>;
 

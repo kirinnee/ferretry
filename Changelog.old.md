@@ -1,3 +1,15 @@
+## [4.221.0](https://github.com/kirinnee/ferretry/compare/v4.220.2...v4.221.0) (2026-11-01)
+
+### Features
+
+* **daemon:** one shared item in many catalogs, and a default catalog (catalogs 3c-2) ([#1300](https://github.com/kirinnee/ferretry/issues/1300)) ([b2c7e9e](https://github.com/kirinnee/ferretry/commit/b2c7e9e6a587adf8ac4de26e6cbf38cb5f8e7014))
+
+## [4.220.2](https://github.com/kirinnee/ferretry/compare/v4.220.1...v4.220.2) (2026-11-01)
+
+### Fixes
+
+* **board:** a ferret's lane change waits for the owner ([#1291](https://github.com/kirinnee/ferretry/issues/1291)) ([2075c9e](https://github.com/kirinnee/ferretry/commit/2075c9e0df3c8c294a0c69b3bb4ba17d307c5614))
+
 ## [4.220.1](https://github.com/kirinnee/ferretry/compare/v4.220.0...v4.220.1) (2026-11-01)
 
 ### Fixes

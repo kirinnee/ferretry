@@ -413,46 +413,93 @@ describe('matchSignInGrant: the ferret’s words can only prevent', () => {
   });
 });
 
-describe('matchSignInGrant: terminal lines are sudo, su or doas running setuid root', () => {
-  const sudoGrant = (): SignInGrant =>
-    grant({
-      surface: 'terminal',
-      fields: new Set(['password']),
-      pins: { placeKeys: ['sudo@kirin-box'], recipeVersion: undefined, identities: undefined },
-    });
-  const sudoListing = {
-    signIns: [site({ place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' } })],
-  };
-  const sudoSeen = (facts: TerminalFacts, matchKey = 'sudo@kirin-box'): GrantSighting =>
-    sighting({ facts, matchKey, fields: [{ id: 'value', label: 'Password', sensitivity: 'secret' }] }, sudoListing);
+// Run for both sources (R3c-T, invariant 24): a terminal rule passes exactly the rows a terminal plan line does.
+for (const source of ['plan', 'rule'] as const)
+  describe(`matchSignInGrant: terminal ${source === 'plan' ? 'lines' : 'rules'} are sudo, su or doas running setuid root`, () => {
+    const sudoGrant = (): SignInGrant =>
+      (source === 'plan' ? grant : ruleGrant)({
+        surface: 'terminal',
+        fields: new Set(['password']),
+        pins: {
+          placeKeys: ['sudo@kirin-box'],
+          recipeVersion: undefined,
+          // A rule pins the prompt the owner's own taps went into; a plan line pins its first fill.
+          identities: source === 'plan' ? undefined : [identityOf(terminal(), 'sudo@kirin-box') as string],
+        },
+      });
+    const sudoListing = {
+      signIns: [site({ place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' } })],
+    };
+    const sudoSeen = (facts: TerminalFacts, matchKey = 'sudo@kirin-box'): GrantSighting =>
+      sighting({ facts, matchKey, fields: [{ id: 'value', label: 'Password', sensitivity: 'secret' }] }, sudoListing);
 
-  it('should fill a proved, setuid-root sudo prompt in line mode with echo off', () => {
-    should(reasonOf(sudoGrant(), sudoSeen(terminal()))).equal('filled');
+    it('should fill a proved, setuid-root sudo prompt in line mode with echo off', () => {
+      should(reasonOf(sudoGrant(), sudoSeen(terminal()))).equal('filled');
+    });
+
+    const rows: readonly { readonly name: string; readonly facts: TerminalFacts; readonly reason: string }[] = [
+      {
+        name: 'an unproved program (a shell renamed sudo)',
+        facts: terminal({ program: undefined, trustedProgram: undefined }),
+        reason: 'not-proved',
+      },
+      { name: 'echo on', facts: terminal({ echo: 'on' }), reason: 'not-proved' },
+      { name: 'raw mode', facts: terminal({ canonical: false }), reason: 'not-proved' },
+      { name: 'not a known secret reader', facts: terminal({ recognisedConsumer: false }), reason: 'not-proved' },
+      { name: 'not setuid root', facts: terminal({ trustedProgram: undefined }), reason: 'not-system' },
+      {
+        name: 'passwd (a getpass program, not a plan tool)',
+        facts: terminal({ program: 'passwd', foreground: { pid: 11, pgid: 11, comm: 'passwd', argv: 'passwd' } }),
+        reason: 'not-system',
+      },
+    ];
+    for (const row of rows)
+      it(`should not fill ${row.name}: ${row.reason}`, () => {
+        // The match key follows the PROVED program, so a renamed shell and passwd would not even be at sudo@kirin-box;
+        // the row still proves the checks behind it on their own.
+        should(reasonOf(sudoGrant(), sudoSeen(row.facts))).equal(row.reason);
+      });
+
+    it('should not fill su or doas at a grant pinned to sudo, nor another machine’s sudo', () => {
+      should(reasonOf(sudoGrant(), sudoSeen(terminal({ program: 'su' }), 'su@kirin-box'))).equal('not-here');
+      should(reasonOf(sudoGrant(), sudoSeen(terminal(), 'sudo@other-box'))).equal('not-here');
+      // An unproved program has no key at all.
+      should(
+        reasonOf(
+          sudoGrant(),
+          sighting(
+            {
+              facts: terminal({ program: undefined }),
+              matchKey: undefined,
+              fields: [{ id: 'value', label: 'Password', sensitivity: 'secret' }],
+            },
+            sudoListing,
+          ),
+        ),
+      ).equal('not-here');
+    });
+
+    it('should not type a username or a code into sudo, even under a grant that names them', () => {
+      const wide = { ...sudoGrant(), fields: new Set(['username', 'password'] as const) } as SignInGrant;
+      const seen = sighting(
+        {
+          facts: terminal(),
+          matchKey: 'sudo@kirin-box',
+          fields: [{ id: 'value', label: 'Username', sensitivity: 'plain' }],
+        },
+        sudoListing,
+      );
+      should(reasonOf(wide, seen)).equal('field-not-covered');
+    });
+
+    if (source === 'rule')
+      it('should never pin a new prompt: one the owner’s taps never went into is a changed form, none at all no history', () => {
+        const elsewhere = sudoSeen(terminal({ foreground: { pid: 11, pgid: 11, comm: 'sudo-rs', argv: 'sudo -v' } }));
+        should(reasonOf(sudoGrant(), elsewhere)).equal('form-changed');
+        const untapped = { ...sudoGrant(), pins: { ...sudoGrant().pins, identities: [] } };
+        should(reasonOf(untapped, sudoSeen(terminal()))).equal('no-history');
+      });
   });
-
-  const rows: readonly { readonly name: string; readonly facts: TerminalFacts; readonly reason: string }[] = [
-    {
-      name: 'an unproved program (a shell renamed sudo)',
-      facts: terminal({ program: undefined, trustedProgram: undefined }),
-      reason: 'not-proved',
-    },
-    { name: 'echo on', facts: terminal({ echo: 'on' }), reason: 'not-proved' },
-    { name: 'raw mode', facts: terminal({ canonical: false }), reason: 'not-proved' },
-    { name: 'not a known secret reader', facts: terminal({ recognisedConsumer: false }), reason: 'not-proved' },
-    { name: 'not setuid root', facts: terminal({ trustedProgram: undefined }), reason: 'not-system' },
-    {
-      name: 'passwd (a getpass program, not a plan tool)',
-      facts: terminal({ program: 'passwd', foreground: { pid: 11, pgid: 11, comm: 'passwd', argv: 'passwd' } }),
-      reason: 'not-system',
-    },
-  ];
-  for (const row of rows)
-    it(`should not fill ${row.name}: ${row.reason}`, () => {
-      // The match key follows the PROVED program, so a renamed shell and passwd would not even be at sudo@kirin-box;
-      // the row still proves the checks behind it on their own.
-      should(reasonOf(sudoGrant(), sudoSeen(row.facts))).equal(row.reason);
-    });
-});
 
 describe('matchSignInGrant: a standing rule’s own checks (R3c-4)', () => {
   const PROJECT = '0b4cbd4a-6f1c-4d3c-9d55-2a3f5f1c9e01';

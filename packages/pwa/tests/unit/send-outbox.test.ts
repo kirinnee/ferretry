@@ -434,3 +434,27 @@ describe('SendOutbox', () => {
     await backend.delete('zzz');
   });
 });
+
+describe('SendOutbox — whether a message reached this device (&F331 review)', () => {
+  test('says the message is stored when storage took it, and not when storage refused', async () => {
+    const host = machine({ up: false });
+    const stored = await outboxOver(new MemoryOutboxBackend(), host).submit(input('kept'));
+    const refusing = new MemoryOutboxBackend();
+    refusing.put = async () => {
+      throw new Error('quota');
+    };
+    const unstored = await outboxOver(refusing, host).submit(input('in memory only'));
+    expect([stored.stored, stored.outcome.kind]).toEqual([true, 'waiting']);
+    expect([unstored.stored, unstored.outcome.kind]).toEqual([false, 'waiting']);
+  });
+
+  test('sends what a message takes out of the shared draft with it, however much later it leaves', async () => {
+    const host = machine({ up: false });
+    const outbox = outboxOver(new MemoryOutboxBackend(), host);
+    const sharedDraft = { generation: 'g', epoch: 0, base: 2, text: [-5] };
+    await outbox.submit({ ...input('later'), sharedDraft });
+    host.state.up = true;
+    await outbox.drainAll();
+    expect(host.received.at(-1)).toMatchObject({ message: 'later', sharedDraft });
+  });
+});

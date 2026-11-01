@@ -21,7 +21,7 @@ import {
   parseTaskRef,
   type TaskRef,
 } from '@ferretry/protocol';
-import { ArrowLeft, Check, ChevronDown, Ellipsis, MessageSquare, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ChevronDown, Ellipsis, MessageSquare, X } from 'lucide-react';
 import { Component, type ErrorInfo, type FormEvent, type ReactNode, useId, useMemo, useState } from 'react';
 import { DaemonTaskReferences } from '../../../components/daemon-task-references.tsx';
 import { type BoardMachine, useBoardTask } from '../../../hooks/use-board.ts';
@@ -604,22 +604,6 @@ function DetailBody({
           )}
           {verdict === null || task.dropped !== null ? null : (
             <fieldset aria-label="Your verdict" className="fy-board-detail__verdict">
-              {verdict.closeLaneId === null ? null : (
-                <button
-                  aria-busy={pressed === 'works'}
-                  className="kt-btn"
-                  data-pending={pressed === 'works' ? '' : undefined}
-                  data-variant="primary"
-                  data-verdict="works"
-                  disabled={busy}
-                  title={doneTitle({ kind: 'done', laneId: verdict.closeLaneId }, task.title)}
-                  onClick={() => requestMove(verdict.closeLaneId as string, 'works')}
-                  type="button"
-                >
-                  <AnswerIcon icon={Check} pending={pressed === 'works'} size={14} />
-                  Done
-                </button>
-              )}
               {verdict.reworkLaneId === null ? null : (
                 <button
                   aria-busy={pressed === 'not-good'}
@@ -636,8 +620,24 @@ function DetailBody({
                   }}
                   type="button"
                 >
-                  <AnswerIcon icon={X} pending={pressed === 'not-good'} size={14} />
+                  <AnswerIcon icon={ArrowLeft} pending={pressed === 'not-good'} size={14} />
                   Not good
+                </button>
+              )}
+              {verdict.closeLaneId === null ? null : (
+                <button
+                  aria-busy={pressed === 'works'}
+                  className="kt-btn"
+                  data-pending={pressed === 'works' ? '' : undefined}
+                  data-variant="primary"
+                  data-verdict="works"
+                  disabled={busy}
+                  title={doneTitle({ kind: 'done', laneId: verdict.closeLaneId }, task.title)}
+                  onClick={() => requestMove(verdict.closeLaneId as string, 'works')}
+                  type="button"
+                >
+                  Done
+                  <AnswerIcon icon={ArrowRight} pending={pressed === 'works'} size={14} />
                 </button>
               )}
             </fieldset>

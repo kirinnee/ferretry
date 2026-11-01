@@ -399,6 +399,14 @@ describe('BoardDetail — the verdict', () => {
     expect(root.querySelectorAll('[data-verdict] svg')).toHaveLength(2);
   });
 
+  it('puts Not good ← on the left and Done → on the right', async () => {
+    const { root } = await open({ task: card('F1', tested) });
+    const buttons = [...root.querySelectorAll<HTMLElement>('fieldset.fy-board-detail__verdict > button')];
+    expect(buttons.map(b => b.dataset.verdict)).toEqual(['not-good', 'works']);
+    expect(buttons[0]?.firstElementChild?.classList.contains('lucide-arrow-left')).toBe(true);
+    expect(buttons[1]?.lastElementChild?.classList.contains('lucide-arrow-right')).toBe(true);
+  });
+
   it('puts How to test as numbered steps right above Done and Not good', async () => {
     const { root } = await open({
       task: card('F1', {

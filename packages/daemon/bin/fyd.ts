@@ -875,9 +875,11 @@ import {
   FleetLaunchEnvironment,
   FleetLaunchRenewal,
   FleetManifestUnreadableError,
+  FleetPublication,
   FleetReading,
   FleetRefreshService,
   FleetSecretReferences,
+  PublishedFleetInventory,
   FleetWardenAgents,
   ForeignHistoryImporter,
   type FoundationPaths,
@@ -1214,6 +1216,7 @@ import {
   type SessionTranscriptSearch,
   type SessionTranscriptTail,
   SharedCatalogService,
+  SharedDraftPresence,
   SharedDraftService,
   SharedFleetBacklog,
   type SharingRepairOutcome,
@@ -7860,11 +7863,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       }
     },
   };
+  /**
+   * The fleet as published, kept apart from the applies that republish it: an apply moves the manifest
+   * aside before linking its replacement in, and a read in that gap would find no fleet at all — which
+   * is how a start during the boot's catalog republish launched past its missing-credential refusal.
+   * ONE for the process: the inventory below reads under it, and the catalogue's provisioner applies
+   * under it (lib/fleet/publication.ts).
+   */
+  const fleetPublication = new FleetPublication();
   /** The published fleet, read fresh on every call. ONE inventory for the whole process: the
    *  recommender's advice and a start's account resolution must not disagree about what the fleet is. */
-  const accounts = new RuntimeAwareAccountInventory(
-    new ManifestAccountInventory(stateFiles, paths.fleetManifest),
-    new RuntimeIdsFile(stateFiles, runtimeIdsPath(paths.fleet)),
+  const accounts = new PublishedFleetInventory(
+    new RuntimeAwareAccountInventory(
+      new ManifestAccountInventory(stateFiles, paths.fleetManifest),
+      new RuntimeIdsFile(stateFiles, runtimeIdsPath(paths.fleet)),
+    ),
+    fleetPublication,
   );
   /** Stops the app-server daemon a Codex runtime started, once nothing uses that runtime (U12). */
   const codexAppServers = new CodexAppServerSupervisor({
@@ -8040,7 +8054,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     executable: () => Bun.which('Xvfb', { PATH: process.env.PATH }) ?? undefined,
     missing: () => xvfbMissingMessage(command => Bun.which(command, { PATH: process.env.PATH }) !== null),
   });
-  const publishedManifest = async () => await readFleetManifest(stateFiles, paths.fleetManifest);
+  /** The published manifest itself, read between applies like the inventory: mid-apply it is not there at all. */
+  const publishedManifest = async () =>
+    await fleetPublication.reading(async () => await readFleetManifest(stateFiles, paths.fleetManifest));
   /** The fleet's declared probe interval. A host with no readable configuration keeps the default. */
   const declaredUsageRefreshMs = async (): Promise<number> =>
     usageRefreshMs(
@@ -10803,6 +10819,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         audit: auditLog,
         clock: { now: () => Date.now() },
         warn: message => void process.stderr.write(`sign-in rules: ${message}\n`),
+        terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),
       });
       connectSignInRules(signInRules, {
         accounts: accountDirectory,
@@ -10823,6 +10840,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return key.success ? key.data : undefined;
         },
         advertised: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRules),
+        terminal: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),
         stampedProject: async sessionId => await stampedProjectOf(signInRuleSessions, sessionId),
         clock: { now: () => Date.now() },
         warn: message => void process.stderr.write(`sign-in rules: ${message}\n`),
@@ -11628,6 +11646,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           config: configFiles,
           configDirectory: paths.config,
           pinned: stateHomeKeys(paths),
+          publication: fleetPublication,
         }),
         modelCatalogs: async () => await modelCatalogService.sources(),
         publishedManifest: async () => await publishedManifest(),
@@ -12468,6 +12487,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // A generation must never repeat across restarts, so it is random rather than counted.
           { next: () => crypto.randomUUID() },
         ),
+        // Who has each session's composer open, and on which of the owner's devices. Memory only.
+        sharedDraftStream: {
+          presence: new SharedDraftPresence(),
+          deviceName: async deviceId => (await pairing.devices()).find(device => device.id === deviceId)?.name,
+          nextPeer: () => crypto.randomUUID(),
+          clock: { nowMs: () => Date.now() },
+        },
         sessions: withRevive(
           withContext(
             withOutdated(sessions, { outdated: outdatedFor, now: () => Date.parse(clock.now()), ttlMs: 5_000 }),
@@ -13863,7 +13889,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // taken by a flow nobody can see any more.
   cleanups.push(async () => await subsystems.harnessLogin.shutdown());
   // A draft typed in the last second is still only in memory; it is written down before the daemon goes.
-  cleanups.push(async () => await subsystems.sharedDrafts.flush());
+  cleanups.push(async () => await subsystems.sharedDrafts.close());
   // A standing rule's suspension or use whose write failed is written before the daemon goes, if it can be.
   cleanups.push(async () => await subsystems.signInRules.flush());
   // The FIRST self-check runs before the address is bound, so the daemon's very first health answer

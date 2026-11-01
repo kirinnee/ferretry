@@ -2,6 +2,9 @@ import { describe, it } from 'bun:test';
 import {
   SIGN_IN_RULE_CLOCK_SKEW_SECONDS,
   SIGN_IN_RULE_DEFAULT_SECONDS,
+  SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS,
+  SIGN_IN_RULE_TERMINAL_MAX_SECONDS,
+  type SignInRuleDraft,
   type SignInRuleRecord,
   type SignInRuleStageId,
 } from '@ferretry/protocol';
@@ -260,25 +263,54 @@ describe('stage and commit: a fresh passkey bound to the bytes written (invarian
 });
 
 describe('what can have a rule, and the stage refusals (invariants 23, 24, 15, 36)', () => {
-  it('should refuse a terminal sign-in, a provider sign-in and one the owner never tapped in, before any passkey', async () => {
-    // Arrange
-    const w = await world();
+  it('should refuse a terminal program but sudo, su or doas, a provider sign-in and one never tapped in, before any passkey', async () => {
+    // Arrange — ssh and npm on this machine, both with the owner's terminal taps
+    const base = listing();
+    const tool = (id: string, place: object) =>
+      signIn({
+        id: id as never,
+        account: 'SUDO' as never,
+        place,
+        observed: [
+          {
+            ...tappedFact('x'),
+            at: `${(place as { tool: string }).tool}@${(place as { dest?: string }).dest ?? 'kirin-box'}`,
+            surface: 'terminal',
+          },
+        ],
+      } as never);
+    const SSH = 'si_00000000000000b1';
+    const NPM = 'si_00000000000000b2';
+    const w = await world({
+      listing: {
+        ...base,
+        signIns: [
+          ...base.signIns,
+          tool(SSH, { kind: 'terminal', tool: 'ssh', host: 'kirin-box', dest: 'prod.example.com' }),
+          tool(NPM, { kind: 'terminal', tool: 'npm', host: 'kirin-box' }),
+        ],
+      } as never,
+    });
 
     // Act
-    const sudo = await refusal(w.service.stage(deviceOwner(), { signIn: SUDO, fields: ['password'] }));
+    const ssh = await refusal(w.service.stage(deviceOwner(), { signIn: SSH as never, fields: ['password'] }));
+    const npm = await refusal(w.service.stage(deviceOwner(), { signIn: NPM as never, fields: ['password'] }));
     const via = await refusal(w.service.stage(deviceOwner(), { ...DRAFT, signIn: VIA_GOOGLE }));
     const untapped = await refusal(w.service.stage(deviceOwner(), { ...DRAFT, signIn: UNTAPPED }));
-    const eligible = await w.service.eligibility(deviceOwner(), SUDO);
+    const eligible = await w.service.eligibility(deviceOwner(), SSH as never);
 
-    // Assert
-    should([sudo.status, sudo.code]).eql([409, 'tool_not_covered']);
+    // Assert — invariant 24: no rule for another program, ever
+    for (const refused of [ssh, npm]) should([refused.status, refused.code]).eql([409, 'tool_not_covered']);
+    should(ssh.message).equal(
+      'A standing rule covers a page sign-in, or sudo, su or doas in a terminal; not this program',
+    );
     should([via.status, via.code]).eql([409, 'via_provider']);
     should([untapped.status, untapped.code, untapped.message]).eql([
       409,
       'no_history',
       'Sign in yourself twice from the app first',
     ]);
-    should(eligible).eql({ signIn: SUDO, eligible: false, because: 'tool-not-covered' });
+    should(eligible).eql({ signIn: SSH, eligible: false, because: 'tool-not-covered' });
     should(w.service.challengeOf(`srs_${'0'.repeat(24)}` as SignInRuleStageId, DEVICE)).be.undefined();
   });
 
@@ -622,4 +654,195 @@ describe('expiry', () => {
     should(w.audits[1]?.detail?.['because']).equal('sign-in-gone');
     should(rules(w).map(rule => rule.body.id)).not.containEql(view.id);
   });
+});
+
+// R3c-T (owner decision !A197): standing rules for sudo, su or doas, red, a day by default, a week at most.
+describe('a terminal rule: sudo, su or doas, the password only, root (invariants 24, 36)', () => {
+  const SUDO_DRAFT: SignInRuleDraft = { signIn: SUDO, fields: ['password'] };
+
+  it('should stage sudo as a terminal rule flagged root, for a day, and say root before the account', async () => {
+    // Arrange
+    const w = await world();
+
+    // Act
+    const eligible = await w.service.eligibility(deviceOwner(), SUDO);
+    const staged = await w.service.stage(deviceOwner(), SUDO_DRAFT);
+
+    // Assert
+    should(eligible).eql({ signIn: SUDO, eligible: true });
+    should(staged).containDeep({
+      signIn: SUDO,
+      place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
+      fields: ['password'],
+      totp: false,
+      root: true,
+      expiresAt: new Date(NOW + SIGN_IN_RULE_TERMINAL_DEFAULT_SECONDS * 1_000).toISOString(),
+    });
+    should(staged.summary.slice(0, 3)).eql([
+      'Ferretry types the password without asking',
+      'into sudo: root on kirin-box for every ferret it covers',
+      'sudo on sudo@kirin-box',
+    ]);
+  });
+
+  it('should commit it with the passkey and list it with its terminal place and the root flag', async () => {
+    // Arrange
+    const w = await world();
+
+    // Act
+    const { view } = await approved(w, SUDO_DRAFT);
+    const record = rules(w)[0];
+
+    // Assert
+    should(view).containDeep({
+      signIn: SUDO,
+      place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
+      fields: ['password'],
+      flags: ['root'],
+      status: 'active',
+    });
+    should(record?.body).containDeep({
+      surface: 'terminal',
+      fields: ['password'],
+      pins: { placeKeys: ['sudo@kirin-box'] },
+    });
+    should(actions(w)).eql(['sign-in-rule-created']);
+  });
+
+  it('should take up to 7 days, never more, and refuse a username or a code', async () => {
+    // Arrange
+    const w = await world();
+
+    // Act
+    const week = await w.service.stage(deviceOwner(), {
+      ...SUDO_DRAFT,
+      lifetimeSeconds: SIGN_IN_RULE_TERMINAL_MAX_SECONDS,
+    });
+    const longer = await refusal(
+      w.service.stage(deviceOwner(), { ...SUDO_DRAFT, lifetimeSeconds: SIGN_IN_RULE_TERMINAL_MAX_SECONDS + 1 }),
+    );
+    const month = await refusal(
+      w.service.stage(deviceOwner(), { ...SUDO_DRAFT, lifetimeSeconds: SIGN_IN_RULE_DEFAULT_SECONDS }),
+    );
+    const username = await refusal(w.service.stage(deviceOwner(), { signIn: SUDO, fields: ['username', 'password'] }));
+    const code = await refusal(w.service.stage(deviceOwner(), { ...SUDO_DRAFT, totp: true, totpAcknowledged: true }));
+
+    // Assert
+    should(week.expiresAt).equal(new Date(NOW + SIGN_IN_RULE_TERMINAL_MAX_SECONDS * 1_000).toISOString());
+    should([longer.status, longer.message]).eql([400, 'a terminal rule lasts at most 7 days']);
+    should([month.status, month.message]).eql([400, 'a terminal rule lasts at most 7 days']);
+    for (const refused of [username, code])
+      should([refused.status, refused.message]).eql([400, 'a terminal rule types the password only']);
+  });
+
+  it('should refuse sudo the owner never tapped into, before any passkey', async () => {
+    // Arrange — the owner's taps went into sudo once only
+    const base = listing();
+    const w = await world({
+      listing: {
+        ...base,
+        signIns: base.signIns.map(each =>
+          each.id === SUDO
+            ? { ...each, observed: [{ ...tappedFact('sudo@kirin-box', 1), surface: 'terminal' }] }
+            : each,
+        ),
+      } as never,
+    });
+
+    // Act
+    const refused = await refusal(w.service.stage(deviceOwner(), SUDO_DRAFT));
+
+    // Assert
+    should([refused.status, refused.code]).eql([409, 'no_history']);
+  });
+
+  it('should suspend it when its tool or host drifts, or it stops being a terminal sign-in, and stay suspended', async () => {
+    for (const place of [
+      { kind: 'terminal', tool: 'su', host: 'kirin-box' },
+      { kind: 'terminal', tool: 'sudo', host: 'other-box' },
+      { kind: 'site', domains: ['sudo.example'], match: [] },
+    ]) {
+      // Arrange
+      const w = await world();
+      await approved(w, SUDO_DRAFT);
+      const base = listing();
+      const moved = { ...base, signIns: base.signIns.map(each => (each.id === SUDO ? { ...each, place } : each)) };
+
+      // Act
+      await w.service.accountsChanged(moved as never);
+      await w.service.accountsChanged(base as never);
+
+      // Assert
+      should((await w.service.list(HOST_OWNER)).rules[0]).containDeep({
+        status: 'suspended',
+        suspended: { because: 'place-changed' },
+      });
+    }
+  });
+
+  it('should still show where it was approved for once its sign-in is gone or became a site: its signed sudo key', async () => {
+    const pinned = { kind: 'terminal', tool: 'sudo', host: 'kirin-box' };
+    const base = listing();
+    for (const after of [
+      { ...base, signIns: base.signIns.filter(each => each.id !== SUDO) },
+      {
+        ...base,
+        signIns: base.signIns.map(each =>
+          each.id === SUDO ? { ...each, place: { kind: 'site', domains: ['sudo.example'], match: [] } } : each,
+        ),
+      },
+    ]) {
+      // Arrange
+      const w = await world();
+      await approved(w, SUDO_DRAFT);
+
+      // Act
+      await w.service.accountsChanged(after as never);
+      w.state.listing = after as never;
+      const [rule] = (await w.service.list(HOST_OWNER)).rules;
+
+      // Assert — the root flag and the terminal place come from the signed body, never from the listing now
+      should(rule).containDeep({ status: 'suspended', place: pinned, flags: ['root'] });
+      should(rule?.place).eql(pinned);
+    }
+  });
+
+  it('should not be suspended by a page script, even one whose origin could not be read', async () => {
+    // Arrange
+    const w = await world();
+    await approved(w, SUDO_DRAFT);
+    const { view: page } = await approved(w);
+
+    // Act
+    await w.service.scriptedOn('kirin-box');
+    await w.service.scriptedEverywhere();
+
+    // Assert — the page rule is suspended, the terminal one is not
+    const listed = (await w.service.list(HOST_OWNER)).rules;
+    should(listed.find(rule => rule.id === page.id)?.suspended?.because).equal('scripted-origin');
+    should(listed.find(rule => rule.signIn === SUDO)).containDeep({ status: 'active' });
+  });
+});
+
+// secrev-1301 / lizzette (b): with `sign-in-rules-terminal.1` off, no terminal rule can be made.
+describe('terminal rules stay off until sign-in-rules-terminal.1 is reported', () => {
+  for (const [name, terminalRules] of [
+    ['the gate off', false],
+    ['no gate wired at all', 'absent'],
+  ] as const)
+    it(`should refuse to stage sudo and say it is not covered, with ${name}, before any passkey`, async () => {
+      // Arrange
+      const w = await world({ terminalRules });
+
+      // Act
+      const refused = await refusal(w.service.stage(deviceOwner(), { signIn: SUDO, fields: ['password'] }));
+      const eligible = await w.service.eligibility(deviceOwner(), SUDO);
+      const page = await w.service.stage(deviceOwner(), DRAFT);
+
+      // Assert
+      should([refused.status, refused.code]).eql([409, 'tool_not_covered']);
+      should(eligible).eql({ signIn: SUDO, eligible: false, because: 'tool-not-covered' });
+      should(page.root).be.false();
+      should(w.service.challengeOf(`srs_${'0'.repeat(24)}` as SignInRuleStageId, DEVICE)).be.undefined();
+    });
 });

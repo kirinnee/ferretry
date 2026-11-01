@@ -583,7 +583,7 @@ export class InputRequestService {
     let written = false;
     try {
       await this.attempt(held, body, { kind: 'rule', ruleId }, typed => {
-        written = typed === 'typed' || typed === 'uncertain';
+        written = typed === 'typed' || typed === 'uncertain' || typed === 'reader_changed';
       });
       this.deps.rules?.spent(ruleId);
     } catch {
@@ -704,7 +704,7 @@ export class InputRequestService {
           body,
           actor,
           typed => {
-            written = typed === 'typed' || typed === 'uncertain';
+            written = typed === 'typed' || typed === 'uncertain' || typed === 'reader_changed';
             if (typed === 'typed') held.request = { ...held.request, preapproval: preapprovalOf(grant, 'filled') };
           },
           {
@@ -733,7 +733,7 @@ export class InputRequestService {
               );
             },
             typed: (job, holdMs, names) => this.clearBeforeHoldEnds(held, grant, grants, job, holdMs, names),
-            uncertain: async () => await grants.stopped(grant, 'did-not-move-on').catch(() => undefined),
+            uncertain: async because => await grants.stopped(grant, because).catch(() => undefined),
           },
         );
         settle();
@@ -1830,6 +1830,10 @@ export class InputRequestService {
           ...(clear === undefined ? {} : { armClear: true }),
           // Asked again inside the target's own turn: a write that waited in the page's queue may find the line gone.
           ...(grant === undefined ? {} : { proceed: () => grant.held() }),
+          // A standing rule's terminal fill: the reader proved again before Enter, and a refused guard said as such.
+          ...(grant !== undefined && by.kind === 'sign-in-rule' && request.target.kind === 'terminal'
+            ? { reprove: true }
+            : {}),
         })
         .catch((): TypeResult => 'uncertain');
       wrote?.(outcome);
@@ -1848,7 +1852,7 @@ export class InputRequestService {
           })
           .catch(() => undefined);
       };
-      if (outcome === 'uncertain') {
+      if (outcome === 'uncertain' || outcome === 'reader_changed') {
         await this.settle(hold);
         hold = undefined;
         // A grant fill's password may have landed (secrev-1282b F2): it gets the same clear, and the clear's own hold for
@@ -1860,7 +1864,8 @@ export class InputRequestService {
               (held.request.lock?.seconds ?? INPUT_QUARANTINE_SECONDS) * 1000,
               holdNames(request, held.names),
             );
-          await grant.uncertain();
+          // A reader that changed before Enter is the race a standing terminal rule bounds (secrev-1301 M1).
+          await grant.uncertain(outcome === 'reader_changed' ? 'program-changed' : 'did-not-move-on');
         }
         await stored(true);
         await this.finish(held, 'refused', 'interrupted', undefined, {
@@ -1881,6 +1886,15 @@ export class InputRequestService {
         await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
         throw new GrantMissed('expired');
       }
+      if (outcome === 'guard_refused' && grant !== undefined) {
+        // tmux's own guard refused a standing rule's terminal write after a look that matched (secrev-1301 M1): the
+        // reader changed in the race between the kernel's look and the write. Nothing was typed, and the rule is
+        // suspended, so it cannot be retried under that approval; the card is the owner's.
+        await this.letGo(hold);
+        hold = undefined;
+        await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
+        throw new GrantMissed('program-changed');
+      }
       if (outcome !== 'typed') {
         await this.letGo(hold);
         hold = undefined;
@@ -1888,7 +1902,11 @@ export class InputRequestService {
         // Nothing was typed: the target changed between the last look and the write. The same target found
         // again redraws the card; it is never typed into within this Send.
         const gone: ObserveResult = { ok: false, reason: 'target_gone' };
-        return await this.redrawOrRefuse(held, await this.refound(held, gone), outcome);
+        return await this.redrawOrRefuse(
+          held,
+          await this.refound(held, gone),
+          outcome === 'guard_refused' ? 'target_changed' : outcome,
+        );
       }
       await this.settle(hold);
       hold = undefined;
@@ -3109,6 +3127,9 @@ interface GrantWrite {
   held(): boolean;
   /** A page password was typed, or may have been: what to check and empty before the hold (`holdMs`, on `names`) ends. */
   typed(job: ClearJob, holdMs: number, names: readonly string[]): void;
-  /** The write may have typed something and could not say: the grant stops. */
-  uncertain(): Promise<void>;
+  /**
+   * The write may have typed something and could not say (`did-not-move-on`), or a standing rule's terminal reader
+   * changed before Enter (`program-changed`): the grant stops.
+   */
+  uncertain(because: 'did-not-move-on' | 'program-changed'): Promise<void>;
 }

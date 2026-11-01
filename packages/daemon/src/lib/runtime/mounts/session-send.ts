@@ -9,6 +9,7 @@ import {
   SendCancelRequestSchema,
   type SendRecord,
   SendRequestSchema,
+  type SharedDraftSent,
   type SendResult,
   SendRetryRequestSchema,
   SendSubmitRequestSchema,
@@ -198,20 +199,40 @@ function senderSessionId(context: RouteContext): string | undefined {
 }
 
 /** Hands a running session its next turn. */
-async function send(subsystem: SessionSendSubsystem, context: RouteContext): Promise<ApiResponse> {
+/**
+ * Takes what a send carried out of the owner's shared draft (`SharedDraftSentSchema`). Optional: a table
+ * built without drafts simply ignores the field.
+ */
+export type SentDraftClearer = (
+  sessionId: string,
+  actor: string | undefined,
+  requestId: string,
+  sent: SharedDraftSent,
+) => Promise<void>;
+
+async function send(
+  subsystem: SessionSendSubsystem,
+  context: RouteContext,
+  clearDraft: SentDraftClearer | undefined,
+): Promise<ApiResponse> {
   const id = pathSessionId(context);
   const request = await parseBody(context.request, SendRequestSchema);
   const sender = senderSessionId(context);
+  const requestId = sendId(context);
   const result = await subsystem
     .send(id, {
       message: request.message,
-      sendId: sendId(context),
+      sendId: requestId,
       ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
       ...(request.now === undefined ? {} : { now: request.now }),
       ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
       ...(sender === undefined ? {} : { senderSessionId: sender }),
     })
     .catch(refuse);
+  // Only once the send is accepted, and never at the send's expense: a draft that moved on, or a clearer
+  // that refused, leaves the message exactly as sent.
+  if (request.sharedDraft !== undefined && clearDraft !== undefined)
+    await clearDraft(id, context.actor, requestId, request.sharedDraft).catch(() => undefined);
   return jsonResponse(result);
 }
 
@@ -245,7 +266,7 @@ async function interrupt(subsystem: SessionSendSubsystem, context: RouteContext)
  * `noStore` because both answers are a live session view whose status is exactly what the call
  * changed; a cached one shows the session as it was before the turn started or stopped.
  */
-export function sessionSendRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] {
+export function sessionSendRoutes(subsystem: SessionSendSubsystem, clearDraft?: SentDraftClearer): readonly ApiRoute[] {
   return [
     {
       method: 'POST',
@@ -253,7 +274,7 @@ export function sessionSendRoutes(subsystem: SessionSendSubsystem): readonly Api
       minimum: 'operator',
       caller: 'any',
       noStore: true,
-      handle: async context => await send(subsystem, context),
+      handle: async context => await send(subsystem, context, clearDraft),
     },
     {
       method: 'POST',

@@ -1008,7 +1008,13 @@ describe('daemon boot lifecycle', () => {
     // Assert
     should(code).equal(0);
     should(usage.status).equal(200);
-    should((await usage.json()) as { ready: boolean }).have.property('ready', false);
+    // No account to show, whichever side of the first refresh this read lands on. `ready` is NOT
+    // asserted: `machine.yaml` is a fleet file, so the boot republishes an empty fleet, and a refresh
+    // that overlaps that apply now waits for it (lib/fleet/publication.ts) and answers ready with no
+    // accounts — where it used to read the moved-aside manifest as no fleet at all.
+    should((await usage.json()) as { accounts: readonly unknown[] })
+      .have.property('accounts')
+      .which.deepEqual([]);
     should(metrics.status).equal(200);
     should(unauthorized.status).equal(401);
   });

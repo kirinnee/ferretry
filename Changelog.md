@@ -1,3 +1,21 @@
+## [4.222.0](https://github.com/kirinnee/ferretry/compare/v4.221.0...v4.222.0) (2026-11-01)
+
+### Features
+
+* **pwa:** keep the composer the same on every device with the session open ([#1287](https://github.com/kirinnee/ferretry/issues/1287)) ([5f16862](https://github.com/kirinnee/ferretry/commit/5f168627767668ec73f2362701d7a75a06ee0cfe)), closes [#1233](https://github.com/kirinnee/ferretry/issues/1233) [1287/#1294](https://github.com/1287/ferretry/issues/1294)
+* **pwa:** lane stages in the lane editor, Internal board filter, shared snooze choices ([#1303](https://github.com/kirinnee/ferretry/issues/1303)) ([84d6669](https://github.com/kirinnee/ferretry/commit/84d66698ef9a786d0b4adaec3dacb619741dac84))
+* **sign-in-rules:** standing rules for sudo, su and doas, kernel-proved (R3c-T) ([#1301](https://github.com/kirinnee/ferretry/issues/1301)) ([c23051c](https://github.com/kirinnee/ferretry/commit/c23051c54e77d72e4d1cd52c81fe0e7dbdb59dab))
+
+### Fixes
+
+* **daemon:** judge a start against a published fleet, never mid-apply ([#1305](https://github.com/kirinnee/ferretry/issues/1305)) ([d248f90](https://github.com/kirinnee/ferretry/commit/d248f90142a2aa5f42fab5860ea454b3928be8f9))
+
+## [4.221.0](https://github.com/kirinnee/ferretry/compare/v4.220.2...v4.221.0) (2026-11-01)
+
+### Features
+
+* **daemon:** one shared item in many catalogs, and a default catalog (catalogs 3c-2) ([#1300](https://github.com/kirinnee/ferretry/issues/1300)) ([b2c7e9e](https://github.com/kirinnee/ferretry/commit/b2c7e9e6a587adf8ac4de26e6cbf38cb5f8e7014))
+
 ## [4.220.2](https://github.com/kirinnee/ferretry/compare/v4.220.1...v4.220.2) (2026-11-01)
 
 ### Fixes

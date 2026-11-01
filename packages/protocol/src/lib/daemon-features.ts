@@ -163,6 +163,14 @@ export const DAEMON_FEATURES = {
    * the one-tap button only where the machine reports it, and opens the review sheet otherwise.
    */
   catalogQuickAdd: 'catalogs.quick-add.1',
+  /**
+   * Standing rules for TERMINAL sign-ins (sudo, su or doas: root on demand, sign-in-rules.ts): staged, offered to the
+   * matcher and filled only while the daemon reports this name, beside `sign-in-rules.1`. A daemon that does not report
+   * it refuses to stage one (`tool_not_covered`) and offers no terminal rule to a fill, whatever its file holds.
+   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): it stays unadvertised when `sign-in-rules.1` is, until a
+   * human-led review of the terminal write path (secrev-1301) signs it off.
+   */
+  signInRulesTerminal: 'sign-in-rules-terminal.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];
@@ -171,7 +179,10 @@ export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURE
  * Names whose app-side half may land first: the app can already gate on them, but no daemon of this build reports
  * them, because the daemon-side half is not built yet. Removing a name from here is how the daemon starts to offer it.
  */
-const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([DAEMON_FEATURES.signInRules]);
+const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([
+  DAEMON_FEATURES.signInRules,
+  DAEMON_FEATURES.signInRulesTerminal,
+]);
 
 /** The names a daemon of this build reports, in a stable order. */
 export const daemonFeatureList = (): readonly DaemonFeature[] =>

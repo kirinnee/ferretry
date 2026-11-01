@@ -53,7 +53,9 @@ import {
 import { usePrefersReducedMotion } from '../../shell/bottom-sheet.tsx';
 import { DeckDownContext } from './deck-down-context.ts';
 import { SwipeCompass } from './swipe-reveal.tsx';
-import { type CompassAvailable, compassReading, type SnoozeLength, snoozeUntil } from './agenda-compass.ts';
+import { snoozePicks } from '../../lib/agenda-snooze.ts';
+import { type CompassAvailable, compassReading } from './agenda-compass.ts';
+import { CustomSnoozeForm } from './agenda-snooze-menu.tsx';
 import {
   isLongPress,
   isTouch,
@@ -189,7 +191,8 @@ export const deckIntent = (
 const compassWord = (intent: ReturnType<typeof compassReading>['intent'] | undefined): string => {
   if (intent === undefined) return 'Skip';
   if (intent.kind === 'not-needed') return 'Not needed';
-  if (intent.kind === 'snooze') return `Snooze ${intent.length}`;
+  if (intent.kind === 'snooze')
+    return `Snooze ${snoozePicks(Date.now()).find(pick => pick.id === intent.pick)?.label ?? ''}`.trim();
   if (intent.kind === 'snooze-pick') return 'Snooze';
   return 'Skip';
 };
@@ -353,6 +356,7 @@ export function AgendaSwipeDeck({
   const reduced = useReducedMotion(reducedMotion);
   const [drag, setDrag] = useState<RawDrag | null>(null);
   const [leaving, setLeaving] = useState<Leaving | null>(null);
+  const [custom, setCustom] = useState<InboxCard | null>(null);
   const gesture = useRef<Gesture | null>(null);
   const deck = useRef<HTMLDivElement | null>(null);
   /** Focus was in the deck when a card left: the next card takes it, so the keyboard keeps its place. */
@@ -423,13 +427,27 @@ export function AgendaSwipeDeck({
   };
 
   /** Snooze, by the compass or its buttons: the card goes down and the host snoozes it. */
-  const snooze = (card: InboxCard, length: SnoozeLength, from: Drag): void => {
+  const snooze = (card: InboxCard, until: string, from: Drag): void => {
     if (onSnooze === undefined) return;
     refocus.current = deck.current?.contains(document.activeElement) === true;
     gesture.current = null;
     setDrag(null);
     if (!reduced) setLeaving({ card, direction: 'down', from });
-    onSnooze(card, snoozeUntil(length, Date.now()));
+    setCustom(null);
+    onSnooze(card, until);
+  };
+
+  /** A pick of the shared list on the compass: a ready time snoozes; Custom… springs the card back and asks for one. */
+  const snoozeByPick = (card: InboxCard, id: string, from: Drag): void => {
+    const pick = snoozePicks(Date.now()).find(candidate => candidate.id === id);
+    if (pick === undefined) return;
+    if (pick.until !== null) {
+      snooze(card, pick.until, from);
+      return;
+    }
+    gesture.current = null;
+    setDrag(null);
+    setCustom(card);
   };
 
   /** A swipe or arrow toward `direction`: its answer goes; a "Needs changes" has none, so the card springs back. */
@@ -519,7 +537,7 @@ export function AgendaSwipeDeck({
       const { intent } = compassReading(current.dx, current.dy, current.width, available);
       if (intent.kind === 'skip') skip(top, from);
       else if (intent.kind === 'not-needed') dismiss(top, from);
-      else if (intent.kind === 'snooze') snooze(top, intent.length, from);
+      else if (intent.kind === 'snooze') snoozeByPick(top, intent.pick, from);
       else setDrag(null);
       return;
     }
@@ -626,6 +644,14 @@ export function AgendaSwipeDeck({
               )}
             </AgendaCardFrame>
           </DeckDownContext.Provider>
+        </div>
+      )}
+      {custom === null || top?.key !== custom.key ? null : (
+        <div aria-label="Snooze until" className="fy-attn-deck__custom" data-deck-custom="" role="dialog">
+          <CustomSnoozeForm now={Date.now()} onSnooze={until => snooze(custom, until, { dx: 0, dy: 0 })} />
+          <button className="fy-attn-deck__custom-cancel" onClick={() => setCustom(null)} type="button">
+            Cancel
+          </button>
         </div>
       )}
       {leaving === null ? null : (

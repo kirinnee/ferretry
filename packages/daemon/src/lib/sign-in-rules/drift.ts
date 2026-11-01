@@ -12,7 +12,7 @@ import {
   type SignInSummary,
   type TwoFactorKeySummary,
 } from '@ferretry/protocol';
-import { ineligibleBecause, tappedIdentities } from './eligibility.ts';
+import { ineligibleBecause, ruleSurfaceOf, tappedIdentities } from './eligibility.ts';
 
 /**
  * PINNED FACTS AND THEIR DRIFT (docs/secrets.md, "Standing sign-in rules"). Pure: a listing comes in, pins or a
@@ -68,9 +68,9 @@ export type PinsSnapshot =
   | { readonly ok: false; readonly because: SignInRuleIneligible | 'not-found' | 'no-code-key' };
 
 /**
- * WHAT A RULE FOR THIS SIGN-IN WOULD BE PINNED TO NOW, or why there can't be one: gone, not eligible (a terminal or
- * provider sign-in, no password, no tapped history), or a code asked for an account with no key Ferretry makes codes
- * for. `totp` pins the key the code comes from ({@link pinnedFactor}).
+ * WHAT A RULE FOR THIS SIGN-IN WOULD BE PINNED TO NOW, or why there can't be one: gone, not eligible (a terminal program
+ * other than sudo, su or doas, a provider sign-in, no password, no tapped history), or a code asked for an account with
+ * no key Ferretry makes codes for. `totp` pins the key the code comes from ({@link pinnedFactor}).
  */
 export function snapshotPins(listing: RuleListing, signInId: SignInId, totp: boolean): PinsSnapshot {
   const at = found(listing, signInId);
@@ -125,7 +125,7 @@ export function samePins(left: SignInRulePins, right: SignInRulePins): boolean {
  * - `account-changed`: the sign-in moved to another account (a merge: another key), the account was renamed, its
  *   username changed, or the sign-in no longer types a password of its own (another method, or "via" a provider). The
  *   same refusal {@link snapshotPins} makes, so the stage, the commit and the follower agree (secrev-1274a L4).
- * - `place-changed`: its login domains changed, or it is no longer a page sign-in.
+ * - `place-changed`: its login domains or its `tool@host` changed, or it is no longer the surface the rule is for.
  * - `recipe-changed`: its recipe version moved (the owner's edit, an approved proposal or an auto-applied one).
  * - `factor-changed`: any 2FA key added, removed, changed in kind, or given or stripped of its seed.
  * - `form-changed`: a pinned field identity is no longer observed at the sign-in's domains (a new form replaced it).
@@ -140,7 +140,8 @@ export function ruleDrift(body: SignInRuleBody, listing: RuleListing): SignInRul
   if (account.id !== pins.account || account.username !== pins.username) return 'account-changed';
   if (signIn.via !== undefined || signIn.method.via !== undefined || signIn.method.kind !== 'password')
     return 'account-changed';
-  if (signIn.place.kind !== 'site' || !sameSet(placeKeys(signIn.place), pins.placeKeys)) return 'place-changed';
+  if (ruleSurfaceOf(signIn) !== body.surface || !sameSet(placeKeys(signIn.place), pins.placeKeys))
+    return 'place-changed';
   if (signIn.recipeVersion !== pins.recipeVersion) return 'recipe-changed';
   if (factorFingerprint(account.factors) !== pins.factors) return 'factor-changed';
   const keys = new Set(pins.placeKeys);

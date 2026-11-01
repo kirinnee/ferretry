@@ -164,7 +164,7 @@ try {
         ['desktop', desktop],
       ] as const) {
         const panel = await open(context, theme, 'card', 'tasks', 'kanban');
-        if ((await panel.locator('[data-filter="agents"]').count()) === 0) fail('no Show agent tasks toggle');
+        if ((await panel.locator('[data-filter="agents"]').count()) === 0) fail('no Internal toggle');
         await shot(panel, `panel-${scheme}-${label}`, 'board-v3e');
         await panel.locator('[data-board-side-expand="expand"]').click();
         await panel.locator('[data-board-full] .fy-board-card').first().waitFor({ state: 'visible' });

@@ -190,6 +190,11 @@ export interface WorldOptions {
   readonly load?: boolean;
   /** The stage's nonce, as the system CSPRNG would draw it; a test may hand a broken one. */
   readonly nonce?: () => string;
+  /**
+   * Whether `sign-in-rules-terminal.1` is reported (on here unless a test turns it off; the daemon has it off), or
+   * `absent`: no gate wired at all.
+   */
+  readonly terminalRules?: boolean | 'absent';
 }
 
 export async function world(options: WorldOptions = {}) {
@@ -229,6 +234,7 @@ export async function world(options: WorldOptions = {}) {
       ...(options.nonce === undefined ? {} : { nonce: options.nonce }),
     },
     warn: message => void warnings.push(message),
+    ...(options.terminalRules === 'absent' ? {} : { terminalRules: () => options.terminalRules !== false }),
   });
   if (options.load !== false) await service.load();
   return { service, store, proofs, audits, clock, state, warnings };

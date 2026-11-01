@@ -425,6 +425,23 @@ export const SharedDraftEditSchema = z.strictObject({
 export type SharedDraftEdit = z.infer<typeof SharedDraftEditSchema>;
 
 /**
+ * What a send takes out of the shared draft, carried WITH the send: the position the composer saw when
+ * the person pressed send, and the edit that removes exactly what was sent from there. The daemon applies
+ * it once the send is accepted — transformed past anything typed since, so later words stay — and keys it
+ * to the send's request id, so a retried send, or the composer's own clear, never applies it twice. It
+ * travels with the send because the send can land with no composer left to clear anything: the page
+ * closed, the outbox sent it later, or the person moved to another session meanwhile.
+ */
+export const SharedDraftSentSchema = z.strictObject({
+  generation: SharedDraftGenerationSchema,
+  epoch: NonNegativeIntegerSchema,
+  base: NonNegativeIntegerSchema,
+  text: TextOpSchema,
+  remove: z.array(SharedDraftIdSchema).max(SHARED_DRAFT_MAX_ITEMS).readonly().optional(),
+});
+export type SharedDraftSent = z.infer<typeof SharedDraftSentSchema>;
+
+/**
  * The daemon's answer to an edit: the edit AS SEQUENCED — transformed past everything that landed
  * after its base, so any device at revision `rev - 1` of `epoch` can apply it — and the draft after it.
  *
@@ -457,6 +474,126 @@ export const SHARED_DRAFT_ERROR_CODES = {
   tooManyItems: 'shared_draft_too_many_items',
   /** The edit's text does not fit the draft it claims to be based on. */
   invalid: 'shared_draft_invalid',
+  /** More edits in a second than anybody types. */
+  rateLimited: 'shared_draft_rate_limited',
   /** Only the owner's own paired devices and own shell may read or edit a draft — never an agent. */
   ownerOnly: 'shared_draft_owner_only',
 } as const;
+
+// ── The live stream: every open composer for one session, kept in step ───────────────────────────
+
+/**
+ * The most bytes one stream frame may take ON THE WIRE. A relay record holds about 64 KiB, and a frame is
+ * JSON-escaped twice on the way (once as the frame, again inside the record), so a 16,000-character
+ * draft of quotes or control characters is far bigger than its length. Every frame is measured by
+ * {@link sharedDraftFrameBytes} and kept under this: a composer splits its edits, and the daemon splits
+ * a snapshot into parts.
+ */
+export const SHARED_DRAFT_STREAM_FRAME_BUDGET = 40_000;
+
+/**
+ * The most bytes a draft's files and places may take on the wire, together. Twenty items with names
+ * of 255 quote marks would not fit one frame; this keeps room for a part of the text in every snapshot.
+ */
+export const SHARED_DRAFT_ITEMS_BUDGET = 16_000;
+
+/** The most bytes one composer's edit frame may take: room left for the daemon's own fields when it echoes it. */
+export const SHARED_DRAFT_EDIT_BUDGET = 32_000;
+
+/** The close code that means "this stream could not carry a frame; read the whole draft again". */
+export const SHARED_DRAFT_STREAM_RESYNC_CLOSE = 4413;
+
+/** What a frame costs on the wire, escaped twice, in UTF-8 bytes. */
+export const sharedDraftFrameBytes = (frame: unknown): number =>
+  new TextEncoder().encode(JSON.stringify(JSON.stringify(frame))).length;
+
+/** A text selection as `[start, end]` UTF-16 offsets into the draft. */
+const SelectionSchema = z.tuple([NonNegativeIntegerSchema, NonNegativeIntegerSchema]).readonly();
+
+/** Device labels are shown to a person, so they are bounded and single-line like any other label. */
+const PeerLabelSchema = z
+  .string()
+  .min(1)
+  .max(SHARED_DRAFT_LABEL_MAX)
+  .regex(/^[^\r\n]*$/u, 'a device label is one line');
+
+/**
+ * The id a composer gives its edit. Never a NUL: the daemon joins author, stream and id with one, and an id
+ * holding it could not be read back — the composer would never recognise its own answer.
+ */
+const EditIdSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .refine(value => !value.includes('\u0000'), 'an edit id holds no NUL');
+
+/**
+ * What a composer sends up its stream.
+ *
+ * - `edit` — one edit, tagged with an id the daemon's answer echoes, so the composer knows which of its
+ *   own edits an `ack` or an `error` is about.
+ * - `presence` — where this composer's caret is and whether the person is typing. Never stored, never
+ *   sequenced, and never shown back to the composer that sent it.
+ */
+export const SharedDraftClientFrameSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('edit'), id: EditIdSchema, edit: SharedDraftEditSchema }),
+  z.strictObject({ kind: z.literal('presence'), typing: z.boolean(), selection: SelectionSchema.optional() }),
+]);
+export type SharedDraftClientFrame = z.infer<typeof SharedDraftClientFrameSchema>;
+
+/**
+ * What the daemon sends down a composer's stream.
+ *
+ * - `snapshot` — the whole draft. First, when the composer could not be caught up edit by edit. A draft
+ *   too big for one frame comes as a `snapshot` holding the first part of its text and `more`, then that
+ *   many `snapshot-text` frames with the rest, in order.
+ * - `edit` — an edit as sequenced, and the epoch and revision the draft is at after it (a send that
+ *   emptied the draft moves the epoch on and the revision back to 0). `id` is the id the composer that
+ *   made it gave it: a composer catching up after a reconnect may find its OWN edit here, landed while
+ *   it was away, and must take it as answered rather than send it again.
+ * - `ready` — the catch-up is over and everything after is live: the moment to send again whatever
+ *   edit is still unanswered.
+ * - `ack` — this composer's own edit as sequenced, with the same "after".
+ * - `error` — this composer's own edit was refused, with the daemon's code.
+ * - `presence` / `left` — another of the owner's open composers: which device, its caret, whether the
+ *   person is typing there; and that it closed.
+ */
+export const SharedDraftServerFrameSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('snapshot'),
+    snapshot: SharedDraftSnapshotSchema,
+    /** How many `snapshot-text` frames follow with the rest of the text, when the draft did not fit one frame. */
+    more: z.number().int().positive().max(1_000).optional(),
+  }),
+  z.strictObject({ kind: z.literal('snapshot-text'), text: z.string().min(1).max(SHARED_DRAFT_MAX_CHARS) }),
+  z.strictObject({
+    kind: z.literal('edit'),
+    id: EditIdSchema.optional(),
+    applied: SharedDraftEditResultSchema.shape.applied,
+    epoch: NonNegativeIntegerSchema,
+    rev: NonNegativeIntegerSchema,
+  }),
+  z.strictObject({ kind: z.literal('ready') }),
+  z.strictObject({
+    kind: z.literal('ack'),
+    id: EditIdSchema,
+    applied: SharedDraftEditResultSchema.shape.applied,
+    epoch: NonNegativeIntegerSchema,
+    rev: NonNegativeIntegerSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('error'),
+    id: EditIdSchema,
+    code: z.string().min(1).max(64),
+    message: z.string().max(1_000),
+  }),
+  z.strictObject({
+    kind: z.literal('presence'),
+    peer: z.string().min(1).max(64),
+    device: PeerLabelSchema,
+    typing: z.boolean(),
+    selection: SelectionSchema.optional(),
+  }),
+  z.strictObject({ kind: z.literal('left'), peer: z.string().min(1).max(64) }),
+]);
+export type SharedDraftServerFrame = z.infer<typeof SharedDraftServerFrameSchema>;
