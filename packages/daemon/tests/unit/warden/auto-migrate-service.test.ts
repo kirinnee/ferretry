@@ -428,3 +428,47 @@ describe('WardenAutoMigrateService.relocate', () => {
     should(result.action?.outcome).equal('held');
   });
 });
+
+describe('WardenAutoMigrateService when a port fails', () => {
+  it('should record an unexpected failure once, journal it, and not try again this episode', async () => {
+    // Arrange
+    const journal: string[] = [];
+    let looks = 0;
+    const service = new WardenAutoMigrateService({
+      facts: async () => {
+        looks += 1;
+        throw new Error('the fleet catalog could not be read');
+      },
+      ownerHold: async () => undefined,
+      blockingJobs: async () => [],
+      askToStopJobs: async () => undefined,
+      stopJobs: async () => ({ stopped: [], survivors: [] }),
+      migrate: async () => undefined,
+      notifyOwner: async () => undefined,
+      emit: async () => undefined,
+      journal: { record: type => void journal.push(type) },
+    });
+
+    // Act
+    const first = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: EMPTY_AUTO_MIGRATE_MEMORY,
+      nowMs: NOW,
+    });
+    const second = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: first.memory,
+      nowMs: NOW + MINUTE,
+    });
+
+    // Assert
+    should(first.actions.map(action => [action.outcome, action.detail])).deepEqual([
+      ['failed', 'Not moved: the fleet catalog could not be read.'],
+    ]);
+    should(journal).deepEqual(['fleet.warden_auto_migrate_failed']);
+    should(second.actions).deepEqual([]);
+    should(looks).equal(1);
+  });
+});

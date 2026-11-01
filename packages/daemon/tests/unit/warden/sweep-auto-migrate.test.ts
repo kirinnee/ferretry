@@ -105,3 +105,49 @@ describe('moving a ferret that hit a limit, in the sweep', () => {
     should(moved).deepEqual([]);
   });
 });
+
+describe('moving in the sweep when the mover fails', () => {
+  const broken = (relocated?: Partial<Awaited<ReturnType<WardenAutoMigrateService['relocate']>>>) =>
+    ({
+      run: async () => {
+        throw new Error('disk full');
+      },
+      relocate: async () => {
+        if (relocated === undefined) throw new Error('disk full');
+        return { memory: { sessions: {} }, moved: false, ...relocated };
+      },
+    }) as unknown as WardenAutoMigrateService;
+
+  it('should journal a mover that threw and still finish the sweep', async () => {
+    // Arrange
+    const subject = harness({ config: moving(), fleet: [limited()], autoMigrate: broken() });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.journal.map(entry => entry.type)).containEql('fleet.warden_auto_migrate_failed');
+    should(subject.state().lastSweepAt).not.be.undefined();
+  });
+
+  it('should answer not moved when the budget move threw, and keep what the sweep remembered', async () => {
+    // Arrange
+    const thrown = harness({ config: moving(), fleet: [limited()], autoMigrate: broken() });
+    const kept = harness({
+      config: moving(),
+      fleet: [limited()],
+      state: { autoMigrate: { sessions: { other: { moves: [new Date(Date.parse('2026-01-01')).toISOString()] } } } },
+      autoMigrate: broken({}),
+    });
+
+    // Act
+    const threw = await thrown.service.relocate('s1', 'budget_exceeded');
+    const nothing = await kept.service.relocate('s1', 'budget_exceeded');
+
+    // Assert
+    should(threw).be.false();
+    should(thrown.journal.map(entry => entry.type)).containEql('fleet.warden_auto_migrate_failed');
+    should(nothing).be.false();
+    should(Object.keys(kept.state().autoMigrate?.sessions ?? {})).deepEqual(['other']);
+  });
+});

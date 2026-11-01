@@ -341,6 +341,8 @@ describe('moving a ferret that hit a limit', () => {
     expect(forced).toContain('the first ready one of claude-b → glm-a');
     expect(forced).toContain('at most 2 times an hour');
     expect(forced).toContain('The Warden stops its own background jobs first if it must.');
+    expect(autoMigrateSummary(moving({ maxMovesPerHour: 9, waitMinutes: 0 }))).toContain('(fix) times an hour');
+    expect(autoMigrateSummary(moving({ waitMinutes: 0 }))).toContain('waits (fix), then tells you');
   });
 
   it('should check its numbers whenever it is on, even with both layers off, and the wait only while it waits', () => {

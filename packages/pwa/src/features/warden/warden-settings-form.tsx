@@ -436,9 +436,8 @@ function MoveToAnotherLogin({
               />
             ))}
             <p className="m-0 text-meta leading-base text-muted">
-              {moving.targets.length === 0
-                ? 'None ticked yet.'
-                : `Tried in this order: ${moving.targets.join(' → ')}. A login of another provider is used only when it is named here; another kind of CLI never is.`}
+              Tried in this order: {moving.targets.join(' → ')}. A login of another provider is used only when it is
+              named here; another kind of CLI never is.
             </p>
           </fieldset>
         )}

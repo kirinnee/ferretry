@@ -2,14 +2,13 @@ import { describe, expect, it } from 'bun:test';
 import type { WardenAccount, WardenConfig, WardenLogin } from '@ferretry/protocol';
 import { useState } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
-
-import type { PickerAccount } from '../../../src/lib/account-picker-catalog.ts';
 import { WardenSettingsForm, wardenPrivacyNote } from '../../../src/features/warden/warden-settings-form.tsx';
 import {
   type JevKeyStatus,
   wardenConfigPatchFrom,
   wardenFormErrors,
 } from '../../../src/features/warden/warden-settings-model.ts';
+import type { PickerAccount } from '../../../src/lib/account-picker-catalog.ts';
 import { render, run } from '../../support/react.ts';
 import { wardenConfig } from '../../support/warden.ts';
 
@@ -723,6 +722,38 @@ describe('WardenSettingsForm: moving a ferret that hit a limit', () => {
     expect(last(changes).autoMigrate.forceStopBackground).toBe(true);
     expect(text(renderer)).not.toContain('Wait for the ferret to stop them (min)');
     expect(text(renderer)).toContain('never anything else');
+    run(() => renderer.unmount());
+  });
+});
+
+describe('WardenSettingsForm: moving, the remaining choices', () => {
+  const moving = (changes: Partial<WardenConfig['autoMigrate']> = {}) =>
+    wardenConfig({ autoMigrate: { ...wardenConfig().autoMigrate, enabled: true, ...changes } });
+
+  it('should tick a trigger back on, last in the list', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(<Harness initial={moving({ when: ['budget_exceeded'] })} changes={changes} />);
+
+    // Act
+    run(() => option(renderer, 'It hits a usage limit').props.onChange({ target: { checked: true } }));
+
+    // Assert
+    expect(last(changes).autoMigrate.when).toEqual(['budget_exceeded', 'rate_limited']);
+    run(() => renderer.unmount());
+  });
+
+  it('should keep a named list when its own choice is picked again', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(<Harness initial={moving({ targets: ['glm-a'] })} changes={changes} />);
+
+    // Act
+    run(() => option(renderer, 'Only these, in order').props.onChange());
+
+    // Assert
+    expect(last(changes).autoMigrate.targets).toEqual(['glm-a']);
+    expect(text(renderer)).toContain('Tried in this order: ');
     run(() => renderer.unmount());
   });
 });
