@@ -122,6 +122,7 @@
         "harness/input-card-screenshot.tsx",
         "harness/secure-copy-screenshot.tsx",
         "harness/credential-tabs-screenshot.tsx",
+        "harness/provisioner-skipped-screenshot.tsx",
         "harness/question-form-screenshot.tsx",
         "harness/question-stepper-screenshot.tsx",
         "harness/dialog-card-screenshot.tsx",

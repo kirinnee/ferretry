@@ -166,4 +166,30 @@ describe('FleetApplyOutcomeSchema', () => {
       }).success,
     ).be.false();
   });
+
+  it('should accept a skipped entry attributed to a runtime and refuse a half attribution', () => {
+    // Arrange
+    const outcome = (skipped: unknown) => ({
+      outcome: 'committed',
+      result: {
+        accountCount: 1,
+        operationCount: 1,
+        manifestPath: '/state/fleet/manifest.json',
+        prunedWrappers: [],
+        sharedHistory: [],
+        skipped,
+      },
+    });
+
+    // Act + Assert — `within` is the path relative to the runtime folder, so a browser never learns the folder.
+    should(
+      FleetApplyOutcomeSchema.safeParse(
+        outcome([{ path: '/h/skills/review', reason: 'a link', runtime: ACCOUNT_ID, within: 'skills/review' }]),
+      ).success,
+    ).be.true();
+    should(FleetApplyOutcomeSchema.safeParse(outcome([{ path: '/h/x', reason: 'a link' }])).success).be.true();
+    should(
+      FleetApplyOutcomeSchema.safeParse(outcome([{ path: '/h/x', reason: 'a link', runtime: 'not-an-id' }])).success,
+    ).be.false();
+  });
 });

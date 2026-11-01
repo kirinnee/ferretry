@@ -246,7 +246,16 @@ const residueShape = {
    * descriptor (macOS), nothing below a runtime's top folder is moved aside or removed.
    */
   skipped: z
-    .array(z.strictObject({ path: z.string().min(1), reason: z.string().min(1) }))
+    .array(
+      z.strictObject({
+        path: z.string().min(1),
+        reason: z.string().min(1),
+        /** The runtime (its account id) whose folder holds `path`. Absent when `path` is in no runtime's folder. */
+        runtime: z.uuid().optional(),
+        /** `path` relative to that runtime's folder: all a browser shows, never the folder's own place on disk. */
+        within: z.string().min(1).optional(),
+      }),
+    )
     .readonly()
     .optional(),
 };

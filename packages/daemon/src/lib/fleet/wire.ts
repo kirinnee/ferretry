@@ -143,24 +143,44 @@ const historySummary = (previews: readonly SharedHistoryPreview[]): readonly Fle
     links: preview.links,
   }));
 
+type RuntimeFolder = { readonly id: string; readonly home: string };
+
+/** Which runtime a skipped path is in, and the path inside that runtime's folder; neither when it is in no runtime's folder. */
+const skippedEntry = (
+  { path, reason }: { readonly path: string; readonly reason: string },
+  accounts: readonly RuntimeFolder[],
+) => {
+  for (const { id, home } of accounts) {
+    const folder = `${home.replace(/\/+$/u, '')}/`;
+    if (path.startsWith(folder)) return { path, reason, runtime: id, within: path.slice(folder.length) };
+  }
+  return { path, reason };
+};
+
 /** Residue is optional on the wire, so an apply that left none says nothing rather than empty. */
-const residueOf = (value: {
-  readonly backupResidue?: readonly string[];
-  readonly lockResidue?: string;
-  readonly skipped?: readonly { readonly path: string; readonly reason: string }[];
-}) => ({
+const residueOf = (
+  value: {
+    readonly backupResidue?: readonly string[];
+    readonly lockResidue?: string;
+    readonly skipped?: readonly { readonly path: string; readonly reason: string }[];
+  },
+  accounts: readonly RuntimeFolder[],
+) => ({
   ...(value.backupResidue === undefined ? {} : { backupResidue: [...value.backupResidue] }),
   ...(value.lockResidue === undefined ? {} : { lockResidue: value.lockResidue }),
-  ...(value.skipped === undefined ? {} : { skipped: value.skipped.map(({ path, reason }) => ({ path, reason })) }),
+  ...(value.skipped === undefined ? {} : { skipped: value.skipped.map(entry => skippedEntry(entry, accounts)) }),
 });
 
-export const applyResultSummary = (result: FleetApplyResult): FleetWireApplyResult => ({
+export const applyResultSummary = (
+  result: FleetApplyResult,
+  accounts: readonly RuntimeFolder[] = [],
+): FleetWireApplyResult => ({
   accountCount: result.accountCount,
   operationCount: result.operationCount,
   manifestPath: result.manifestPath,
   prunedWrappers: [...result.prunedWrappers],
   sharedHistory: historySummary(result.sharedHistory),
-  ...residueOf(result),
+  ...residueOf(result, accounts),
 });
 
 const committedSummary = (committed: FleetApplyCommittedState): FleetWireCommittedState => ({
@@ -170,7 +190,7 @@ const committedSummary = (committed: FleetApplyCommittedState): FleetWireCommitt
   manifest: manifestSummary(committed.manifest),
   prunedWrappers: [...committed.prunedWrappers],
   sharedHistory: historySummary(committed.sharedHistory),
-  ...residueOf(committed),
+  ...residueOf(committed, committed.manifest.accounts),
 });
 
 /**

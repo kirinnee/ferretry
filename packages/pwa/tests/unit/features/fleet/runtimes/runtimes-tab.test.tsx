@@ -537,3 +537,115 @@ describe('Runtimes tab › Import conversations', () => {
     await view.unmount();
   });
 });
+
+describe('Runtimes tab › items the provisioner skipped', () => {
+  const ONE = '00000000-0000-4000-8000-0000000000a1';
+  const HOME = '/home/kirin/.ferretry/fleet/homes/claude-default';
+  const RAW = `not moving or removing ${HOME}/skills/review on this platform`;
+  const runtimes = [runtime({ name: 'claude-default', id: ONE }), ...RUNTIMES.runtimes.slice(1)];
+
+  const applied = (skipped: readonly Record<string, string>[]) => ({
+    outcome: 'applied',
+    apply: {
+      outcome: 'committed',
+      result: {
+        accountCount: 1,
+        operationCount: 2,
+        manifestPath: '/home/kirin/.ferretry/fleet/manifest.json',
+        prunedWrappers: [],
+        sharedHistory: [],
+        ...(skipped.length === 0 ? {} : { skipped }),
+      },
+    },
+  });
+
+  const addRuntimeThenList = async (outcome: unknown, listed: readonly FleetRuntimeView[] = runtimes) => {
+    const view = await open({
+      routes: {
+        ...reads(listed),
+        'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call),
+        [APPLY]: outcome,
+      },
+    });
+    await click(view.container, '[data-add-runtime]');
+    await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
+    await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
+    await click(view.container, '[data-change-submit]');
+    await settle();
+    await click(view.container, '[data-add-runtime-finish="list"]');
+    return view;
+  };
+
+  it('says nothing about a runtime when nothing was skipped', async () => {
+    const view = await addRuntimeThenList(applied([]));
+    expect(view.container.querySelector('[data-runtime-skipped]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('shows a quiet line under the runtime that opens a list with the path inside the runtime and a plain reason', async () => {
+    const view = await addRuntimeThenList(
+      applied([
+        { path: `${HOME}/skills/review`, reason: RAW, runtime: ONE, within: 'skills/review' },
+        { path: `${HOME}/commands/ship.md`, reason: RAW, runtime: ONE, within: 'commands/ship.md' },
+      ]),
+    );
+    const line = must(view.container.querySelector<HTMLElement>('[data-runtime-skipped="claude-default"]'), 'line');
+    const toggle = must(line.querySelector<HTMLButtonElement>('button'), 'toggle');
+    expect(toggle.textContent).toContain('2 items skipped');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(line.querySelector('ul')).toBeNull();
+
+    await interact(() => toggle.click());
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const items = [...line.querySelectorAll('li')];
+    expect(items.map(item => item.querySelector('code')?.textContent)).toEqual(['skills/review', 'commands/ship.md']);
+    expect(items[0]?.textContent).toContain('left as it was');
+    expect(view.container.textContent).not.toContain('/home/kirin');
+    expect(view.container.textContent).not.toContain('not moving or removing');
+    await view.unmount();
+  });
+
+  it('shows the same line on the runtime’s own page', async () => {
+    const view = await addRuntimeThenList(
+      applied([{ path: `${HOME}/skills/review`, reason: RAW, runtime: ONE, within: 'skills/review' }]),
+    );
+    window.location.hash = '#machines/studio-mac/runtimes/claude-default';
+    await interact(() => window.dispatchEvent(new window.Event('hashchange')));
+    const line = must(
+      view.container.querySelector<HTMLElement>('[data-runtime-page] [data-runtime-skipped="claude-default"]'),
+      'page line',
+    );
+    expect(line.textContent).toContain('1 item skipped');
+    await view.unmount();
+  });
+
+  it('forgets the skipped items once a later change skips nothing', async () => {
+    let outcome: unknown = applied([
+      { path: `${HOME}/skills/review`, reason: RAW, runtime: ONE, within: 'skills/review' },
+    ]);
+    const view = await open({
+      routes: {
+        ...reads(runtimes),
+        'POST /v1/fleet/proposals': (call: Call) => stagedFrom(call),
+        [APPLY]: () => outcome,
+      },
+    });
+    const addOne = async (): Promise<void> => {
+      await click(view.container, '[data-add-runtime]');
+      await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
+      await click(view.container, '[data-add-runtime-profile="Claude hooks"] input');
+      await click(view.container, '[data-change-submit]');
+      await settle();
+      await click(view.container, '[data-add-runtime-finish="list"]');
+    };
+    await addOne();
+    expect(view.container.querySelector('[data-runtime-skipped]')).not.toBeNull();
+
+    outcome = applied([]);
+    await addOne();
+
+    expect(view.container.querySelector('[data-runtime-skipped]')).toBeNull();
+    await view.unmount();
+  });
+});

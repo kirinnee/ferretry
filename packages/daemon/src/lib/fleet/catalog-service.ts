@@ -974,7 +974,10 @@ export class FleetCatalogService {
       try {
         const result = await this.deps.provisioner.apply(payload.plan, payload.documents);
         if (record.mutation.kind === 'runtime.rename') await this.#renameSessions(record.mutation);
-        return { outcome: 'applied', apply: { outcome: 'committed', result: applyResultSummary(result) } };
+        return {
+          outcome: 'applied',
+          apply: { outcome: 'committed', result: applyResultSummary(result, payload.plan.manifest.accounts) },
+        };
       } catch (error) {
         if (error instanceof FleetApplyFailureError) return { outcome: 'applied', apply: applyFailureSummary(error) };
         throw new FleetCatalogRefusal('fleet_change_failed', errorMessage(error));
