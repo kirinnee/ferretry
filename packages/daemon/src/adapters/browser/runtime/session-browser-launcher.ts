@@ -294,8 +294,9 @@ class LeasedBrowser implements BrowserAutomation {
   inputRefind: BrowserAutomation['inputRefind'] = (pageId, expected, fields) =>
     this.worker.inputRefind(pageId, expected, fields);
   inputShot: BrowserAutomation['inputShot'] = (pageId, facts) => this.worker.inputShot(pageId, facts);
-  inputType: BrowserAutomation['inputType'] = (pageId, expected, values, submit) =>
-    this.worker.inputType(pageId, expected, values, submit);
+  inputType: BrowserAutomation['inputType'] = (pageId, expected, values, submit, options) =>
+    this.worker.inputType(pageId, expected, values, submit, options);
+  inputClear: NonNullable<BrowserAutomation['inputClear']> = (pageId, job) => this.worker.inputClear(pageId, job);
   location: BrowserAutomation['location'] = pageId => this.worker.location(pageId);
   newPage: BrowserAutomation['newPage'] = options => this.worker.newPage(options);
   closePage: BrowserAutomation['closePage'] = pageId => this.worker.closePage(pageId);

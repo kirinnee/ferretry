@@ -1241,11 +1241,71 @@ tag `pa-<id>` ([notifications](notifications.md#high-priority)).
 While it waits, the ferret is told only the state and, once the sign-in moved on, `secondFactor: 'push'`
 (`PhoneApprovalAgentView`). It is **never told the number**.
 
+### Task plan fills: a sign-in the owner approved in advance
+
+> **Waits for the app.** The daemon fills under a plan line only while it reports `task-plan.1`, and it reports it
+> only once the app draws the plan card (R3a-5). Until then every approved line is ignored and every raise is the
+> usual card. The plan itself (lines, ticks, the passkey, revoke) is [secure copy › Task plans](secure-copy.md#task-plans).
+
+A ferret's [task plan](secure-copy.md#task-plans) line that the owner ticked, with a passkey, is a **grant**: a
+permission to fill ONE sign-in without a tap. The ferret still raises `browser_request_input` or
+`terminal_request_input` as usual; when a grant covers the card, Ferretry fills it itself and closes the card.
+
+**One shared matcher** (`packages/daemon/src/lib/sign-in-grants/`) decides, on what the daemon saw. It runs at the
+raise, on the raise's facts, and again at the write, on the facts looked at before typing. Every check must hold,
+or nothing is typed:
+
+| #       | Check                                                                                                                                                                                                                                                                                         | Miss                                                                                                 |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| 1       | The line is in force: not expired, this very session (a sub-ferret is another), not stopped, uses left                                                                                                                                                                                        | `expired` · `other-session` · `stopped` · `used-up`                                                  |
+| 2       | The sign-in still exists, is still a password sign-in of its own, and still belongs to the account (its immutable key)                                                                                                                                                                        | `sign-in-gone`                                                                                       |
+| 3       | Its login domains (or `tool@host`) are those pinned at approval                                                                                                                                                                                                                               | `place-changed` (stops the line)                                                                     |
+| 4       | Its recipe version is the one pinned                                                                                                                                                                                                                                                          | `recipe-changed` (stops the line)                                                                    |
+| 5       | The target's key is one of the pinned keys **exactly**: no parent domain, no look-alike, never a site's `match` host                                                                                                                                                                          | `not-here`                                                                                           |
+| 6       | Every field is a role the line covers; `private` never; a code needs the code tick; one username and one password at most                                                                                                                                                                     | `field-not-covered` · `code-not-ticked`                                                              |
+| 7       | The ferret's `secretHint`, if any, names this sign-in or its account (it can only prevent)                                                                                                                                                                                                    | `ferret-named-another`                                                                               |
+| 8       | The account holds every value it must type (username, password, an automatic 2FA key)                                                                                                                                                                                                         | `account-lacks-field`                                                                                |
+| 9       | At most 10 fills an hour of one sign-in, 30 grant fills an hour in one session                                                                                                                                                                                                                | `rate`                                                                                               |
+| 10–16   | A page: `https:` (not merely secure), every field in the page's own origin, the password a visible, uncovered `<input type=password>`, every other field visible and uncovered, no human check, **no page script the ferret ever ran in this session**, a code field the daemon may type into | `not-https` · `frame` · `password-field` · `field-hidden` · `challenge` · `scripted` · `code-target` |
+| 10t–12t | A terminal: the program PROVED by the kernel, line mode, echo off, a known secret reader; every process of the foreground group setuid root, and the tool `sudo`, `su` or `doas`; one field, the password                                                                                     | `not-proved` · `not-system` · `field-not-covered`                                                    |
+| 17      | The form's identity is one the sign-in has history with (for a password), and the one the first fill of this field set pinned                                                                                                                                                                 | `form-changed` (stops the line)                                                                      |
+
+- **The form is pinned per field set** (`username`, `password`, `password+username`, `totp`): a two-step sign-in
+  shows a different form at each step. A sign-in with no history passes every check above on its first fill and
+  pins what it filled; every later fill of that field set must match it.
+- **What is typed** is what a tap types: the account's username and password, opened inside the use boundary after
+  every check that can refuse, and a code Ferretry makes only when the line's code tick was approved. Enter is
+  pressed unless the ferret raised the card with `submit: 'agent'`. The write gets the same lock and hold as a tap,
+  never a shorter one.
+- **Uses are spent synchronously** (`SignInGrantLedger`), inside the session lock, counting fills still in flight,
+  so two raises can't both spend a line's last use. One use is one sign-in attempt: username, password and code
+  steps within three minutes spend one use. A write that typed nothing gives the use back; an uncertain one spends
+  it. With several lines for one sign-in, the one that expires first is used first.
+- **A miss is the usual card.** Nothing is typed, the card stays for the owner, and the owner's view of the request
+  carries `preapproval: { by: 'plan', plan, line, outcome: 'did-not-apply', reason }`; the app draws one line from
+  `grantMissLine` ("Task plan line 2 didn't apply: the sign-in form changed since you approved it"). The ferret is
+  told one sentence for every reason (`TASK_PLAN_MISS_AGENT_NOTE`), and the agenda card's context gets one line in
+  the same words whatever the reason, because a ferret can read its own session's agenda: a reason like
+  `account-lacks-field` would say which secret fields an account holds.
+- **A filled card closes at once**, so the agenda history shows "Filled under your task plan (line 2) on
+  github.com." It is raised **quiet**: it does not buzz the owner's phone ([notifications](notifications.md)).
+- **A password left in a field is emptied, and the line stops.** Before a grant types a password into a page, the
+  browser arms a `pagehide` listener in an isolated world that empties every password input when the page is hidden
+  (the back/forward cache would otherwise keep the value). When the page hold ends, the daemon asks the browser
+  whether the field STILL holds what was typed. It sends only a salted SHA-256 of it, made at the write, and the
+  browser compares in an isolated world. A field that still holds it is emptied and the line stops
+  (`did-not-move-on`); `unknown` stops it too. The test is about the value, not navigation: a single-page app that
+  swapped the form has moved on once the field no longer holds it. Terminals need none: a line-mode prompt
+  consumes the line.
+- **Audited, never a value.** `input.delivered` carries `by: 'plan'`, the plan, the line and the sign-in beside the
+  usual names and flags. A miss is recorded as `input.requested` with `preapproval: 'did-not-apply'`, the plan, the
+  line and `because`. A stopped line is recorded as `task-plan-line-stopped`.
+
 ### Later, and off by default: standing permission
 
-Placing a saved login **without a tap** is not built. A later phase may add it as an explicit owner opt-in,
-per entry and per target ("standing permission for `SUDO_KIRIN_BOX` on `sudo@kirin-box`"), **off by
-default**, revocable, and audited on every use. Until then every placement is a tap.
+A **standing** permission (R3c) reuses the same matcher, ledger, clear and reasons: an explicit owner opt-in, per
+sign-in, **off by default**, revocable, and audited on every use. Until then a placement without a tap happens only
+under a task plan line, as above.
 
 ## Who reads the terminal
 
@@ -1336,6 +1396,13 @@ makes the card stricter.
 - **The quarantine hides the pane from the agent's reads, not from the pane's program.** An agent that
   can send keys can still make the program print what it received; the agent's `terminal.read` of it is
   refused, but a process the agent started in another pane or a file it redirected to is not covered.
+- **A task plan is for honest-client ferrets** (RF-5 is no-go: nobody can be walled on this machine). Ferrets
+  here can read Ferretry's own files, so this stops misuse through their tools and page text, not a ferret that goes
+  around Ferretry. A ferret that reads the admin token or `secrets.key` through its shell can already do everything a
+  plan grants, and more: against it a plan is moot, not weakened. What the plan machinery still holds against is a
+  ferret using its tools normally (it can only ask; the owner ticks, a passkey confirms, the daemon matches) and page
+  text or terminal output steering where a value goes: it can't add a line, approve one, or move a fill to another
+  origin, a frame, a hidden or text field, or a renamed program.
 - **A `plain` value is visible by design.** It is marked on the card.
 - **A browser `private` value can appear in an after-screenshot** (a later phase).
 - **A one-time `code` is weaker than `private` on purpose** (the owner's decision, see [one-time codes](#one-time-codes-code)).

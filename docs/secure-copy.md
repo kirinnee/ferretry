@@ -242,9 +242,11 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
 
 > **Not filling yet.** The daemon raises, resolves, stages, approves and revokes plans
 > (`packages/daemon/src/lib/task-plans/`), and an approved paste line pastes as a rule did. An approved sign-in line
-> is pinned and kept, but no sign-in is typed under a plan until the shared matcher lands (R3a-4), and no daemon
-> reports `task-plan.1` until the app draws the plan card (R3a-5). The agent tool `task_plan` is listed in MCP
-> and the owner answers with `fy plan` (R3a-3); `secure.preapprove` still raises paste-only task plans.
+> is pinned and kept, and the shared matcher that fills under it is built
+> ([input requests › Task plan fills](input-requests.md#task-plan-fills-a-sign-in-the-owner-approved-in-advance)), but
+> it fills only while the daemon reports `task-plan.1`, and no daemon reports it until the app draws the plan card
+> (R3a-5). The agent tool `task_plan` is listed in MCP and the owner answers with `fy plan` (R3a-3);
+> `secure.preapprove` still raises paste-only task plans.
 
 A task plan widens the paste plan. One card holds up to 10 lines, each with 1–5 uses (1 by default), for 2 hours
 by default (5 minutes to 1 day). A line is one of three kinds:

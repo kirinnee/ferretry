@@ -8,6 +8,7 @@ import type {
   TypeOptions,
   TypeResult,
 } from './ports.ts';
+import type { ClearJob, ClearOutcome } from '../sign-in-grants/clear.ts';
 
 /**
  * Sends each request to the adapter for its kind of target: a terminal's (one value, one write), a page's, or the
@@ -64,7 +65,7 @@ export class InputTargetRouter implements InputTargetPort {
     if (target.kind === 'browser')
       return this.browser === undefined
         ? 'target_gone'
-        : await this.browser.type(sessionId, target, values, submit, expected);
+        : await this.browser.type(sessionId, target, values, submit, expected, options);
     const [only, ...rest] = values;
     // A terminal shows one prompt at a time: anything but exactly one value is refused with nothing typed.
     if (only === undefined || rest.length > 0) return 'target_changed';
@@ -84,6 +85,12 @@ export class InputTargetRouter implements InputTargetPort {
   ): Promise<'hidden' | 'shown' | 'aborted'> {
     if (target.kind !== 'browser' || this.browser?.probe === undefined) return 'aborted';
     return await this.browser.probe(sessionId, target, facts, fieldIds);
+  }
+
+  /** Only a page is cleared: a terminal's line-mode prompt consumes what was typed. */
+  async clear(sessionId: string, target: InputTarget, job: ClearJob): Promise<ClearOutcome> {
+    if (target.kind !== 'browser' || this.browser?.clear === undefined) return 'unknown';
+    return await this.browser.clear(sessionId, target, job);
   }
 
   async shoot(sessionId: string, target: InputTarget, facts: InputTargetFacts): Promise<InputShot | undefined> {

@@ -1,10 +1,12 @@
 import {
   type AccountId,
+  type AccountKey,
   type AgendaId,
   type CopyMeta,
   copyHandle,
   factorAskWords,
   fillRoleFor,
+  type GrantMissReason,
   INPUT_DEFAULT_EXPIRY_SECONDS,
   INPUT_ERROR_CODES,
   INPUT_JOURNAL_EVENT_TYPES,
@@ -48,11 +50,17 @@ import {
   type SignInId,
   savedRolesOf,
   strongestSensitivity,
+  TASK_PLAN_MISS_AGENT_NOTE,
   type TwoFactorId,
   unpadInputValue,
   worstRisk,
 } from '@ferretry/protocol';
 import { LoginEntryError, type LoginFieldValues } from '../secrets/accounts.ts';
+import { type ClearJob, clearJobOf } from '../sign-in-grants/clear.ts';
+import type { GrantReservation } from '../sign-in-grants/ledger.ts';
+import { type GrantMatch, type GrantSighting, matchSignInGrant, type SignInGrant } from '../sign-in-grants/matcher.ts';
+import type { SignInGrantSource } from '../sign-in-grants/plans.ts';
+import { GRANT_MISS_CONTEXT_LINE, stopsTheLine } from '../sign-in-grants/reasons.ts';
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
@@ -235,6 +243,11 @@ export interface InputRequestServiceDependencies {
   /** The owner's pre-approval rules. Absent: every paste waits for the owner. */
   readonly rules?: InputPasteRules;
   /**
+   * Sign-ins the owner approved in advance on a task plan (`sign-in-grants`): a card a line covers is filled under it
+   * after every check holds again. Absent, or not `enabled()`: every sign-in waits for the owner.
+   */
+  readonly grants?: SignInGrantSource;
+  /**
    * Told about every value typed into a terminal or a page, once it landed: the facts a saved login keeps
    * (docs/input-requests.md, "Login recipes") come only from here, and so does whether a code Ferretry made went
    * through (`codeTyped`). Absent: no facts are kept.
@@ -263,6 +276,8 @@ export class InputRequestService {
    */
   private readonly raising = new Map<string, { readonly sessionId: string; readonly subject: PushSubject }>();
   private readonly raises = new Map<string, number[]>();
+  /** Requests being filled under a grant or a rule right now: their cards do not buzz (`quietCard`). */
+  private readonly quiet = new Set<string>();
   private readonly lock = new SessionLock();
 
   constructor(private readonly deps: InputRequestServiceDependencies) {}
@@ -365,68 +380,152 @@ export class InputRequestService {
       copy === undefined
         ? ((await this.codeTitle(sessionId, fields, matchKey, raise.secretHint, raise.factor)) ?? titleOf(fields))
         : PASTE_TITLE;
-    this.raising.set(requestId, { sessionId, subject: sensitivity === 'code' ? 'one-time-code' : 'other' });
-    const card = await this.deps.agenda
-      .raise(sessionId, {
+    // A paste a rule covers is reserved BEFORE the card is raised, so the card can be raised quiet: it is filled and
+    // closed at once, and must not buzz the owner's phone for the moment it was open (`quietCard`).
+    const ruleId =
+      copy === undefined ? undefined : this.ruleFor(sessionId, copy, seen.facts, fields, seen.profileProgram);
+    if (ruleId !== undefined || (copy === undefined && this.grantLikely(sessionId, target, matchKey, now)))
+      this.quiet.add(requestId);
+    try {
+      return await this.present(sessionId, raise, target, {
         requestId,
+        now,
+        seen,
+        shown,
+        expiresAt,
+        fields,
+        sensitivity,
+        shot,
+        lock,
+        probed,
+        step,
+        matchKey,
         title,
-        ask: copy === undefined ? askOf(shown, fields) : pasteAskOf(copy, shown),
+        upgraded,
+        ...(copy === undefined ? {} : { copy }),
+        ...(ruleId === undefined ? {} : { ruleId }),
+      });
+    } finally {
+      this.quiet.delete(requestId);
+    }
+  }
+
+  /** The rest of a raise, once what the card says is decided: the card, the journal, the record and any fill in advance. */
+  private async present(
+    sessionId: string,
+    raise: InputRaise,
+    target: InputTarget,
+    raised: {
+      readonly requestId: string;
+      readonly now: number;
+      readonly seen: Extract<ObserveResult, { readonly ok: true }>;
+      readonly shown: InputTargetFacts;
+      readonly expiresAt: string;
+      readonly fields: InputRequestField[];
+      readonly sensitivity: InputSensitivity;
+      readonly shot: InputShot | undefined;
+      readonly lock: InputRequest['lock'];
+      readonly probed: boolean;
+      readonly step: number | undefined;
+      readonly matchKey: string | undefined;
+      readonly title: string;
+      readonly upgraded: Set<string>;
+      readonly copy?: CopyMeta;
+      readonly ruleId?: string;
+    },
+  ): Promise<InputAgentView> {
+    const {
+      requestId,
+      now,
+      seen,
+      shown,
+      expiresAt,
+      fields,
+      sensitivity,
+      shot,
+      lock,
+      probed,
+      step,
+      matchKey,
+      title,
+      upgraded,
+      copy,
+    } = raised;
+    let ruleId = raised.ruleId;
+    try {
+      this.raising.set(requestId, { sessionId, subject: sensitivity === 'code' ? 'one-time-code' : 'other' });
+      const card = await this.deps.agenda
+        .raise(sessionId, {
+          requestId,
+          title,
+          ask: copy === undefined ? askOf(shown, fields) : pasteAskOf(copy, shown),
+          prompt: raise.prompt,
+          blocking: raise.blocking ?? sensitivity === 'secret',
+          expiresAt,
+          ...(raise.chain === undefined ? {} : { chain: raise.chain }),
+        })
+        .finally(() => this.raising.delete(requestId));
+      if (!card.ok) throw new InputRequestError('unavailable', card.message);
+      const request: InputRequest = {
+        id: requestId,
+        sessionId,
+        agendaItemId: card.id,
+        ...(copy === undefined ? {} : { source: { kind: 'sealed' as const, name: copy.name, from: copy.from } }),
+        target: raise.target,
         prompt: raise.prompt,
-        blocking: raise.blocking ?? sensitivity === 'secret',
+        sensitivity,
+        fields,
+        submit: raise.submit,
+        raisedAt: instant(now),
         expiresAt,
         ...(raise.chain === undefined ? {} : { chain: raise.chain }),
-      })
-      .finally(() => this.raising.delete(requestId));
-    if (!card.ok) throw new InputRequestError('unavailable', card.message);
-    const request: InputRequest = {
-      id: requestId,
-      sessionId,
-      agendaItemId: card.id,
-      ...(copy === undefined ? {} : { source: { kind: 'sealed' as const, name: copy.name, from: copy.from } }),
-      target: raise.target,
-      prompt: raise.prompt,
-      sensitivity,
-      fields,
-      submit: raise.submit,
-      raisedAt: instant(now),
-      expiresAt,
-      ...(raise.chain === undefined ? {} : { chain: raise.chain }),
-      ...(step === undefined ? {} : { step }),
-      observed: shown,
-      risk: pasteRisk(worstRisk(fields.map(field => field.risk)), copy),
-      observedDigest: digestFacts(seen.facts),
-      ...(shot === undefined ? {} : { pictured: true as const }),
-      ...(lock === undefined ? {} : { lock }),
-      state: 'pending',
-    };
-    try {
-      await this.journal(request, 'requested');
-    } catch {
-      await this.deps.agenda.close(sessionId, card.id, 'Input request could not be recorded.');
-      throw new InputRequestError('unavailable', 'Ferretry could not record the request, so it did not ask the owner');
+        ...(step === undefined ? {} : { step }),
+        observed: shown,
+        risk: pasteRisk(worstRisk(fields.map(field => field.risk)), copy),
+        observedDigest: digestFacts(seen.facts),
+        ...(shot === undefined ? {} : { pictured: true as const }),
+        ...(lock === undefined ? {} : { lock }),
+        state: 'pending',
+      };
+      try {
+        await this.journal(request, 'requested');
+      } catch {
+        await this.deps.agenda.close(sessionId, card.id, 'Input request could not be recorded.');
+        throw new InputRequestError(
+          'unavailable',
+          'Ferretry could not record the request, so it did not ask the owner',
+        );
+      }
+      const held: Held = {
+        request,
+        names: [target.key, ...(seen.names ?? [])],
+        checkFailures: 0,
+        rebinds: 0,
+        binding: bindingOf(seen.facts),
+        title,
+        formerCards: [],
+        ...(seen.facts.kind === 'browser' ? { raisedOn: seen.facts.navigationId } : {}),
+        ...(matchKey === undefined ? {} : { matchKey }),
+        ...(raise.secretHint === undefined ? {} : { hint: raise.secretHint }),
+        deliveries: new Map(),
+        waiters: new Set(),
+        ...(shot === undefined ? {} : { shot }),
+        ...(probed ? { probed: true } : {}),
+        upgraded,
+      };
+      this.held.set(requestId, held);
+      this.noteRaise(sessionId, now);
+      await this.record(request, 'input.requested', { kind: 'agent' }, this.auditOf(request));
+      if (ruleId !== undefined) {
+        const reserved = ruleId;
+        ruleId = undefined;
+        await this.underRule(held, reserved, seen.facts, raise.submit, seen.profileProgram);
+      } else if (copy === undefined) await this.underGrant(held, seen.facts, raise);
+      return this.view(held);
+    } finally {
+      // A rule reserved for a card that was never raised or held is given back: nothing was typed under it.
+      if (ruleId !== undefined) this.deps.rules?.release(ruleId);
     }
-    const held: Held = {
-      request,
-      names: [target.key, ...(seen.names ?? [])],
-      checkFailures: 0,
-      rebinds: 0,
-      binding: bindingOf(seen.facts),
-      title,
-      formerCards: [],
-      ...(seen.facts.kind === 'browser' ? { raisedOn: seen.facts.navigationId } : {}),
-      ...(matchKey === undefined ? {} : { matchKey }),
-      ...(raise.secretHint === undefined ? {} : { hint: raise.secretHint }),
-      deliveries: new Map(),
-      waiters: new Set(),
-      ...(shot === undefined ? {} : { shot }),
-      ...(probed ? { probed: true } : {}),
-      upgraded,
-    };
-    this.held.set(requestId, held);
-    this.noteRaise(sessionId, now);
-    await this.record(request, 'input.requested', { kind: 'agent' }, this.auditOf(request));
-    if (copy !== undefined) await this.underRule(held, copy, seen.facts, raise.submit, seen.profileProgram);
-    return this.view(held);
   }
 
   /**
@@ -437,14 +536,11 @@ export class InputRequestService {
    */
   private async underRule(
     held: Held,
-    copy: CopyMeta,
+    ruleId: string,
     facts: InputTargetFacts,
     submit: InputRaise['submit'],
     profile?: ProfileProgram,
   ): Promise<void> {
-    if (!hidesTyping(facts) || !ruleMayPaste(copy, facts, held.request.fields)) return;
-    const ruleId = this.deps.rules?.reserve(held.request.sessionId, copy.from, facts, profile?.name);
-    if (ruleId === undefined) return;
     // With no proved program, only the owner's profile could have matched: the write and the log name it.
     if (facts.kind === 'terminal' && facts.program === undefined && profile !== undefined) held.pastedInto = profile;
     const body: InputDeliverBody = {
@@ -462,7 +558,279 @@ export class InputRequestService {
     } catch {
       if (written) this.deps.rules?.spent(ruleId);
       else this.deps.rules?.release(ruleId);
+      // The card stays for the owner: it is no longer quiet, and the daemon's edit makes it buzz as any raise does.
+      await this.unquiet(held, RULE_MISS_CONTEXT_LINE);
     }
+  }
+
+  /**
+   * The owner's pre-approval rule a paste may go out under, RESERVED now (before its card is raised) so the card can be
+   * raised quiet. Only a target that hides what is typed, and only what a rule may paste unasked (`ruleMayPaste`).
+   */
+  private ruleFor(
+    sessionId: string,
+    copy: CopyMeta,
+    facts: InputTargetFacts,
+    fields: readonly InputRequestField[],
+    profile: ProfileProgram | undefined,
+  ): string | undefined {
+    if (!hidesTyping(facts) || !ruleMayPaste(copy, facts, fields)) return undefined;
+    return this.deps.rules?.reserve(sessionId, copy.from, facts, profile?.name);
+  }
+
+  /**
+   * While a request is being filled under a task-plan line or a pre-approval rule, its card is QUIET: it is raised and
+   * closed at once, so the push its raise would make (an input card's deadline push fires the moment it is raised) must
+   * not buzz the owner's phone. A fill that does not happen clears it, and the card then pushes as any raise does.
+   * Daemon-side only: the card on the wire is unchanged.
+   */
+  quietCard(sessionId: string, requestId: string): boolean {
+    if (!this.quiet.has(requestId)) return false;
+    const raising = this.raising.get(requestId);
+    const held = this.held.get(requestId);
+    return (raising?.sessionId ?? held?.request.sessionId) === sessionId;
+  }
+
+  /** The grants of this session whose pinned keys hold this target's key: in force first, the soonest to expire first. */
+  private grantsAt(sessionId: string, matchKey: string | undefined): readonly SignInGrant[] {
+    const grants = this.deps.grants;
+    if (grants === undefined || matchKey === undefined || !grants.enabled()) return [];
+    const here = grants.of(sessionId).filter(grant => grant.pins.placeKeys.includes(matchKey));
+    return [...here.filter(grant => grant.state === 'in-force'), ...here.filter(grant => grant.state !== 'in-force')];
+  }
+
+  /** Whether a grant in force is about this target: the card is then raised quiet, and the fill decides after. */
+  private grantLikely(sessionId: string, target: InputTarget, matchKey: string | undefined, now: number): boolean {
+    if (target.kind === 'secret') return false;
+    return this.grantsAt(sessionId, matchKey).some(grant => grant.state === 'in-force' && grant.expiresAt > now);
+  }
+
+  /**
+   * A SIGN-IN THE OWNER APPROVED IN ADVANCE on a task plan (docs/input-requests.md, "Task plan fills"): filled now,
+   * under the line, as one guarded write with the card raised, audited and closed so it shows in the history. Runs
+   * inside the raise's turn of the session lock, after the card is held.
+   *
+   * The shared matcher runs here on the raise's facts and again in {@link attempt} on the facts looked at before the
+   * write; every check holds or nothing is typed. A miss leaves the card for the owner with `preapproval` saying which
+   * line did not apply and why (the owner's view only), and stops the line when the miss says the form, the recipe or
+   * the place changed. A use is spent synchronously by the ledger; it is given back only when nothing may have been
+   * typed. Total: a fill that cannot be tried is a normal card.
+   */
+  private async underGrant(held: Held, facts: InputTargetFacts, raise: InputRaise): Promise<void> {
+    const grants = this.deps.grants;
+    const { sessionId } = held.request;
+    const here = this.grantsAt(sessionId, held.matchKey);
+    if (grants === undefined || here.length === 0) return;
+    let chosen: SignInGrant | undefined;
+    try {
+      const decided = await this.decideGrant(held, facts, here, grants);
+      chosen = decided.grant;
+      if (!decided.ok) return await this.grantMissed(held, decided.grant, decided.reason);
+      const { grant, match, reservation } = decided;
+      const actor: InputActor = { kind: 'plan', planId: grant.plan?.id ?? '', line: grant.plan?.line ?? 0 };
+      const body: InputDeliverBody = {
+        deliveryId: crypto.randomUUID(),
+        observedDigest: held.request.observedDigest ?? '',
+        entry: match.account,
+        signIn: grant.signIn,
+        ...(match.factor !== undefined && match.fills.includes('totp') ? { factor: match.factor } : {}),
+        // Under a plan nobody else could press Send: Enter goes after the last value unless the ferret submits itself.
+        submit: raise.submit !== 'agent',
+      };
+      let written = false;
+      let identity = match.identity;
+      const settle = (): void => {
+        if (grants.ledger.spent(reservation, identity)) grants.used(grant, this.deps.clock.now());
+      };
+      try {
+        await this.attempt(
+          held,
+          body,
+          actor,
+          typed => {
+            written = typed === 'typed' || typed === 'uncertain';
+            if (typed === 'typed') held.request = { ...held.request, preapproval: preapprovalOf(grant, 'filled') };
+          },
+          {
+            recheck: async seen => {
+              const again = await this.matchAgain(held, seen, grant, grants);
+              if (!again.ok) throw new GrantMissed(again.reason);
+              identity = again.identity;
+            },
+            typed: (job, holdMs) => this.clearAfterHold(held, grant, grants, job, holdMs),
+          },
+        );
+        settle();
+      } catch (error) {
+        if (written) settle();
+        else grants.ledger.release(reservation);
+        await this.grantMissed(held, grant, error instanceof GrantMissed ? error.reason : undefined);
+      }
+    } catch {
+      // A fill that could not be tried leaves the owner's card as it is.
+      if (chosen !== undefined) await this.grantMissed(held, chosen, undefined).catch(() => undefined);
+      else await this.unquiet(held, GRANT_MISS_CONTEXT_LINE);
+    }
+  }
+
+  /**
+   * Which grant fills this card: the first in force (soonest to expire) that the matcher passes and the ledger has a use
+   * and room for; else the first miss, in that order, so a line spent or stopped still says why.
+   */
+  private async decideGrant(
+    held: Held,
+    facts: InputTargetFacts,
+    here: readonly SignInGrant[],
+    grants: SignInGrantSource,
+  ): Promise<
+    | {
+        readonly ok: true;
+        readonly grant: SignInGrant;
+        readonly match: Extract<GrantMatch, { readonly ok: true }>;
+        readonly reservation: GrantReservation;
+      }
+    | { readonly ok: false; readonly grant: SignInGrant; readonly reason: GrantMissReason }
+  > {
+    const first = here[0] as SignInGrant;
+    const seen = await this.sightingOf(held, facts, held.request.fields, here, grants);
+    if (seen === undefined) return { ok: false, grant: first, reason: 'sign-in-gone' };
+    let missed: { readonly grant: SignInGrant; readonly reason: GrantMissReason } | undefined;
+    for (const grant of here) {
+      const match = matchSignInGrant(grant, seen, grants.ledger.pinned(grant.id));
+      if (!match.ok) {
+        missed ??= { grant, reason: match.reason };
+        continue;
+      }
+      const reservation = grants.ledger.reserve(
+        { id: grant.id, signIn: grant.signIn, remaining: grant.remaining },
+        held.request.sessionId,
+        match.fieldSet,
+        seen.now,
+      );
+      if (typeof reservation !== 'string') return { ok: true, grant, match, reservation };
+      missed ??= { grant, reason: reservation };
+    }
+    return { ok: false, ...(missed ?? { grant: first, reason: 'not-here' }) };
+  }
+
+  /** The matcher again at the write, on the facts just looked at, with the accounts read again. */
+  private async matchAgain(
+    held: Held,
+    looked: Extract<ObserveResult, { readonly ok: true }>,
+    grant: SignInGrant,
+    grants: SignInGrantSource,
+  ): Promise<GrantMatch> {
+    const { request } = held;
+    // A copy of the upgrades: the write's own `observedAs` records them; this only reads what the fields are now.
+    const fields = observedAs(
+      request.fields,
+      looked.facts,
+      new Set(held.upgraded),
+      request.prompt,
+      looked.codeProgram === true,
+    );
+    const seen = await this.sightingOf(held, looked.facts, fields, [grant], grants);
+    if (seen === undefined) return { ok: false, reason: 'sign-in-gone' };
+    return matchSignInGrant(grant, seen, grants.ledger.pinned(grant.id));
+  }
+
+  /** What the matcher reads: the daemon's facts, the accounts and their keys now, and whether the ferret ran a script. */
+  private async sightingOf(
+    held: Held,
+    facts: InputTargetFacts,
+    fields: readonly InputRequestField[],
+    grants: readonly SignInGrant[],
+    source: SignInGrantSource,
+  ): Promise<GrantSighting | undefined> {
+    const listing = await this.deps.logins?.listing().catch(() => undefined);
+    if (listing === undefined) return undefined;
+    const accounts = new Set(
+      grants.flatMap(grant => listing.signIns.filter(each => each.id === grant.signIn).map(each => each.account)),
+    );
+    const keys = new Map<AccountId, AccountKey>();
+    for (const account of accounts) {
+      const key = await source.keyOf(account);
+      if (key !== undefined) keys.set(account, key);
+    }
+    const { sessionId } = held.request;
+    return {
+      sessionId,
+      facts,
+      matchKey: targetMatchKey(facts, this.deps.hostName ?? ''),
+      fields,
+      listing,
+      keys,
+      // Any page script the ferret EVER ran in this session: stricter than "on this document".
+      scripted: this.tainted(sessionId, Number.POSITIVE_INFINITY),
+      ...(held.hint === undefined ? {} : { hint: held.hint }),
+      now: this.deps.clock.now(),
+    };
+  }
+
+  /**
+   * A grant did not fill this card: it stays for the owner, who reads which line did not apply and why (their view
+   * only), and the card is no longer quiet. A miss that says the form, the recipe or the place changed stops the line.
+   * Audited, never a value. A request that already ended (an uncertain write) says nothing more.
+   */
+  private async grantMissed(held: Held, grant: SignInGrant, reason: GrantMissReason | undefined): Promise<void> {
+    if (held.request.state !== 'pending') {
+      this.quiet.delete(held.request.id);
+      return;
+    }
+    held.request = { ...held.request, preapproval: preapprovalOf(grant, 'did-not-apply', reason) };
+    if (reason !== undefined && stopsTheLine(reason)) await this.deps.grants?.stopped(grant, reason);
+    await this.record(
+      held.request,
+      'input.requested',
+      { kind: 'daemon' },
+      {
+        ...this.auditOf(held.request),
+        preapproval: 'did-not-apply',
+        ...(grant.plan === undefined ? {} : { plan: grant.plan.id, line: grant.plan.line }),
+        ...(reason === undefined ? {} : { because: reason }),
+      },
+    );
+    await this.unquiet(held, GRANT_MISS_CONTEXT_LINE);
+  }
+
+  /**
+   * A card raised quiet is the owner's to answer after all: it buzzes again, and the daemon's line on it (the same words
+   * whatever went wrong: the ferret can read its own agenda) is a daemon edit, which makes the buzz settle at once.
+   */
+  private async unquiet(held: Held, line: string): Promise<void> {
+    const { request } = held;
+    if (!this.quiet.delete(request.id) || request.state !== 'pending') return;
+    await this.deps.agenda
+      .note?.(
+        request.sessionId,
+        request.agendaItemId,
+        { prompt: request.prompt, ...(request.chain === undefined ? {} : { chain: request.chain }) },
+        line,
+      )
+      .catch(() => undefined);
+  }
+
+  /**
+   * WHEN THE PAGE HOLD ENDS, a password a grant fill typed must not still be sitting in its field: the browser checks
+   * each field against a salted hash of what was typed and empties one that still holds it. `cleared` or `unknown`
+   * (fails closed) stops the line (`did-not-move-on`): the page didn't move on as the owner approved.
+   */
+  private clearAfterHold(
+    held: Held,
+    grant: SignInGrant,
+    grants: SignInGrantSource,
+    job: ClearJob,
+    holdMs: number,
+  ): void {
+    const { sessionId, target } = held.request;
+    void this.deps.timers
+      .after(holdMs)
+      .then(async () => {
+        const outcome =
+          (await this.deps.target.clear?.(sessionId, target, job).catch(() => 'unknown' as const)) ?? 'unknown';
+        if (outcome !== 'moved') await grants.stopped(grant, 'did-not-move-on');
+      })
+      .catch(() => undefined);
   }
 
   /**
@@ -1187,6 +1555,8 @@ export class InputRequestService {
     by: InputActor,
     /** Told what the one write came to, the moment it returns: a caller that must know whether a value may be in the target. */
     wrote?: (typed: TypeResult) => void,
+    /** A fill under a task-plan line: the grant is matched again on the facts looked at, and a page password is cleared later. */
+    grant?: GrantWrite,
   ): Promise<InputDeliverResult> {
     const { request } = held;
     held.request = { ...request, state: 'delivering' };
@@ -1228,6 +1598,8 @@ export class InputRequestService {
       const seen =
         looked.ok && digestFacts(looked.facts) === request.observedDigest ? looked : await this.lookAgain(held, looked);
       if (codeFields.length > 0) this.guardCodeTarget(held, seen, codeFields);
+      // A fill under a grant: every check holds again on what was just seen, before anything is opened or typed.
+      await grant?.recheck(seen);
       // A secure copy is opened HERE, like a saved value: after every check that can refuse without typing, and only to be typed.
       if (pasted !== undefined)
         typed.set((request.fields[0] as InputRequestField).id, await this.openCopy(held, pasted));
@@ -1265,6 +1637,19 @@ export class InputRequestService {
         hold = undefined;
         throw new InputRequestError('unavailable', 'Ferretry could not record the attempt, so nothing was typed');
       }
+      // A grant fill that types a password into a page has its fields emptied on `pagehide` (armed before the write) and
+      // checked when the hold ends.
+      const clear =
+        grant === undefined
+          ? undefined
+          : clearJobOf(
+              seen.facts,
+              fields.map((field, index) => ({
+                field: field.id,
+                text: (values[index] as InputFieldValue).text,
+                secret: field.sensitivity === 'secret',
+              })),
+            );
       // Every value that is masked is held before it is typed, so a read racing the write already hides it.
       for (const [index, field] of fields.entries())
         if (maskedFromReads(field, typed))
@@ -1274,6 +1659,7 @@ export class InputRequestService {
           // A code left visible on the strength of a proven code program is typed only while one still holds it.
           codeProgram: seen.codeProgram === true && fields.some(field => field.sensitivity === 'code'),
           ...(by.kind === 'rule' && held.pastedInto !== undefined ? { profileProgram: held.pastedInto } : {}),
+          ...(clear === undefined ? {} : { armClear: true }),
         })
         .catch((): TypeResult => 'uncertain');
       wrote?.(outcome);
@@ -1317,6 +1703,7 @@ export class InputRequestService {
       }
       await this.settle(hold);
       hold = undefined;
+      if (clear !== undefined) grant?.typed(clear, (held.request.lock?.seconds ?? INPUT_QUARANTINE_SECONDS) * 1000);
       if (pasted !== undefined) this.deps.sealed?.used(request.sessionId, pasted);
       await stored(false);
       const saved =
@@ -1340,6 +1727,7 @@ export class InputRequestService {
         ...(body.entry === undefined ? {} : { entry: body.entry }),
         ...(saved === undefined ? {} : { saved: saved.ok }),
         ...(made === undefined ? {} : { factor: made }),
+        ...(by.kind === 'plan' && body.signIn !== undefined ? { signIn: body.signIn } : {}),
       });
       // Not awaited either: whether a code Ferretry made went through is seen after the submit, by the observer.
       if (made !== undefined && submitted)
@@ -1811,6 +2199,8 @@ export class InputRequestService {
       unsettled?: boolean;
       /** The 2FA key a code the daemon made and typed came from. */
       factor?: TwoFactorId;
+      /** The sign-in a task-plan line filled. */
+      signIn?: SignInId;
     },
   ): Promise<void> {
     const at = instant(this.deps.clock.now());
@@ -1858,6 +2248,7 @@ export class InputRequestService {
             submitted: options.submitted ?? false,
             ...(options.entry === undefined ? {} : { entry: options.entry }),
             ...(options.factor === undefined ? {} : { factor: options.factor }),
+            ...(options.signIn === undefined ? {} : { signIn: options.signIn }),
             ...(options.saved === undefined ? {} : { saved: options.saved }),
             ...(held.pastedInto === undefined ? {} : { profileProgram: held.pastedInto.path }),
           }
@@ -1867,7 +2258,9 @@ export class InputRequestService {
       await this.deps.agenda.close(
         request.sessionId,
         request.agendaItemId,
-        noteOf(state, reason, request.target.kind, options.unsettled === true),
+        state === 'delivered' && by?.kind === 'plan'
+          ? planFilledNote(by.line, held.matchKey)
+          : noteOf(state, reason, request.target.kind, options.unsettled === true),
       );
     if (options.tellAgent)
       await this.deps.notifier.tell(
@@ -1919,10 +2312,18 @@ export class InputRequestService {
             note: `The page is showing a captcha: hand it to the owner with browser_ask_owner ("complete the captcha") and wait; never try to solve it. ${request.agendaItemId} waits for the owner too.`,
           }
         : pending
-          ? { note: `Waiting for the owner on ${request.agendaItemId}.` }
+          ? {
+              // One sentence for every reason a plan line did not apply: a reason could say which secret fields exist.
+              note:
+                request.preapproval?.outcome === 'did-not-apply'
+                  ? `${TASK_PLAN_MISS_AGENT_NOTE} Waiting for the owner on ${request.agendaItemId}.`
+                  : `Waiting for the owner on ${request.agendaItemId}.`,
+            }
           : request.outcome?.by.kind === 'rule'
             ? { note: 'Pasted under a rule the owner approved in advance.' }
-            : {}),
+            : request.outcome?.by.kind === 'plan'
+              ? { note: PLAN_FILLED_AGENT_NOTE }
+              : {}),
     };
   }
 
@@ -2394,6 +2795,8 @@ function tellOf(
   if (kind === 'secret') return storeTellOf(request, state, reason, uncertain, unsettled);
   if (uncertain)
     return `${request.agendaItemId} was interrupted while the owner's value was going into %${kind}:${key}; it may be partly or fully typed there. Read the ${surface} before you act once its quarantine allows; if you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
+  if (state === 'delivered' && request.outcome?.by.kind === 'plan')
+    return `${request.agendaItemId}: Ferretry filled the sign-in on %${kind}:${key} under your task plan. Read the ${surface} to continue once its quarantine allows.`;
   if (state === 'delivered' && request.source !== undefined)
     return `${request.agendaItemId}: ${copyHandle(request.source.name)} was pasted into %${kind}:${key}. Read the ${surface} to continue once its quarantine allows.`;
   if (state === 'delivered')
@@ -2416,4 +2819,46 @@ function storeTellOf(
   if (state === 'delivered')
     return `${request.agendaItemId}: ${handle} was saved as the secret ${key}. Use it as \${secret:${key}}; you can never read it.`;
   return `${request.agendaItemId} ended without saving ${handle} (${state}${reason === undefined ? '' : `: ${reasonWords(reason, request.target.kind, unsettled)}`}). If you still need it saved, call secure_paste again or ask the owner.`;
+}
+
+/** What the ferret's view says once a task-plan line filled its card. */
+const PLAN_FILLED_AGENT_NOTE = 'Filled under your task plan.';
+
+/** The line a paste card that a rule did not fill after all carries: the same words whatever went wrong. */
+const RULE_MISS_CONTEXT_LINE = "A paste rule you approved didn't apply here, so you're asked as usual.";
+
+/** How a card a task-plan line filled closes, for the agenda history: the line and where, never the account. */
+function planFilledNote(line: number, matchKey: string | undefined): string {
+  return `Filled under your task plan (line ${String(line + 1)})${matchKey === undefined ? '' : ` on ${matchKey}`}.`;
+}
+
+/** The owner's note on a card about the plan line tried on it: filled, or did not apply (and why, when known). */
+function preapprovalOf(
+  grant: SignInGrant,
+  outcome: 'filled' | 'did-not-apply',
+  reason?: GrantMissReason,
+): InputRequest['preapproval'] {
+  return {
+    by: 'plan',
+    plan: grant.plan?.id ?? '',
+    line: grant.plan?.line ?? 0,
+    outcome,
+    ...(outcome === 'did-not-apply' && reason !== undefined ? { reason } : {}),
+  };
+}
+
+/** A grant's second match, at the write, failed: nothing is typed, and the card stays for the owner. */
+class GrantMissed extends Error {
+  constructor(readonly reason: GrantMissReason) {
+    super('a task plan line did not cover this card; nothing was typed');
+    this.name = 'GrantMissed';
+  }
+}
+
+/** What a write under a grant does beyond a tap's: matches again on what was looked at, and clears a password later. */
+interface GrantWrite {
+  /** Throws (nothing typed) when the grant no longer covers the facts just seen. */
+  recheck(seen: Extract<ObserveResult, { readonly ok: true }>): Promise<void>;
+  /** A page password was typed: what to check and empty once the hold (`holdMs`) ends. */
+  typed(job: ClearJob, holdMs: number): void;
 }

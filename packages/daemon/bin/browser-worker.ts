@@ -51,8 +51,13 @@ import {
 import { recogniseBrowserChallenge } from '../src/lib/browser/transport/challenge.ts';
 import { type CopyablePage, readCopyElement } from '../src/lib/browser/transport/copy-read.ts';
 import { DownloadStage } from '../src/lib/browser/transport/download-stage.ts';
-import type { BrowserInputFacts, BrowserInputValue } from '../src/lib/browser/transport/input-contracts.ts';
+import type {
+  BrowserInputClearJob,
+  BrowserInputFacts,
+  BrowserInputValue,
+} from '../src/lib/browser/transport/input-contracts.ts';
 import {
+  clearInputFields,
   describeInputDocument,
   probeInputFields,
   readInputText,
@@ -585,10 +590,60 @@ async function inputType(params: Readonly<Record<string, unknown>>): Promise<Rec
     return { outcome: 'target_changed' };
   }
   try {
-    return { outcome: await typeInputFields(inputSubject(page), expected, values, params.submit === true) };
+    return {
+      outcome: await typeInputFields(
+        inputSubject(page),
+        expected,
+        values,
+        params.submit === true,
+        params.armClear === true ? { armClear: true } : {},
+      ),
+    };
   } catch {
     return { outcome: 'uncertain' };
   }
+}
+
+/**
+ * A grant fill's check when its page hold ends. A page that is gone holds nothing (`moved`); anything malformed or
+ * failing is `unknown`, which stops the line. The job carries salted hashes, never a value.
+ */
+async function inputClear(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  let page: Page;
+  try {
+    page = targetPage(params.pageId);
+  } catch {
+    return { outcome: 'moved' };
+  }
+  try {
+    return { outcome: await clearInputFields(inputSubject(page), clearJobParam(params.job)) };
+  } catch {
+    return { outcome: 'unknown' };
+  }
+}
+
+/** A clear job as the daemon sent it, checked field by field: a node, a 128-bit salt and a SHA-256 digest each. */
+function clearJobParam(raw: unknown): BrowserInputClearJob {
+  const job = (raw ?? {}) as Record<string, unknown>;
+  if (typeof job.navigationId !== 'string' || job.navigationId === '' || !Array.isArray(job.fields))
+    throw new Error('a clear job needs a document and fields');
+  const fields = job.fields.map(item => {
+    const field = (item ?? {}) as Record<string, unknown>;
+    if (
+      typeof field.frameId !== 'string' ||
+      typeof field.backendNodeId !== 'number' ||
+      !Number.isInteger(field.backendNodeId) ||
+      field.backendNodeId <= 0 ||
+      typeof field.salt !== 'string' ||
+      !/^[0-9a-f]{32}$/u.test(field.salt) ||
+      typeof field.digest !== 'string' ||
+      !/^[0-9a-f]{64}$/u.test(field.digest)
+    )
+      throw new Error('a clear field needs a node, a salt and a digest');
+    return { frameId: field.frameId, backendNodeId: field.backendNodeId, salt: field.salt, digest: field.digest };
+  });
+  if (fields.length === 0 || fields.length > 8) throw new Error('a clear job names 1 to 8 fields');
+  return { navigationId: job.navigationId, fields };
 }
 
 /** The dummy probe: anything malformed or failing is `aborted`, which only ever makes the lock longer. */
@@ -970,6 +1025,8 @@ async function act(request: Request): Promise<Record<string, unknown>> {
       return await inputType(params);
     case 'inputProbe':
       return await inputProbe(params);
+    case 'inputClear':
+      return await inputClear(params);
     case 'pointer': {
       const page = targetPage(params.pageId);
       const outcome = await performPointerAct(page as unknown as PointerPage, pointerActParam(params.act));

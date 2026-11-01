@@ -26,6 +26,9 @@ import {
   type BrowserInputObservation,
   type BrowserInputOutcome,
   type BrowserInputShot,
+  type BrowserInputClearJob,
+  type BrowserInputClearOutcome,
+  type BrowserInputTypeOptions,
   type BrowserInputValue,
   type BrowserPageActed,
   type BrowserPushNumberRead,
@@ -552,13 +555,34 @@ export class BrowserWorkerClient implements BrowserAutomation {
     expected: BrowserInputFacts,
     values: readonly BrowserInputValue[],
     submit: boolean,
+    options?: BrowserInputTypeOptions,
   ): Promise<BrowserInputOutcome> {
     try {
-      const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.type, { pageId, expected, values, submit });
+      const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.type, {
+        pageId,
+        expected,
+        values,
+        submit,
+        ...(options?.armClear === true ? { armClear: true } : {}),
+      });
       const outcome = (raw as { outcome?: unknown } | null)?.outcome;
       return outcome === 'typed' || outcome === 'target_changed' || outcome === 'target_gone' ? outcome : 'uncertain';
     } catch {
       return 'uncertain';
+    }
+  }
+
+  /**
+   * A grant fill's check when its page hold ends: the job carries salted hashes, never a value. Any failure or odd
+   * answer is `unknown`, which stops the line.
+   */
+  async inputClear(pageId: string, job: BrowserInputClearJob): Promise<BrowserInputClearOutcome> {
+    try {
+      const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.clear, { pageId, job });
+      const outcome = (raw as { outcome?: unknown } | null)?.outcome;
+      return outcome === 'cleared' || outcome === 'moved' ? outcome : 'unknown';
+    } catch {
+      return 'unknown';
     }
   }
 

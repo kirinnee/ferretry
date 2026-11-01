@@ -1,6 +1,14 @@
 import type { BrowserElementTarget, InputShot, InputTarget, InputTargetFacts } from '@ferretry/protocol';
 import type { BrowserInputFieldsPort, BrowserPushNumberRead } from '../browser/transport/input-contracts.ts';
-import type { InputFieldValue, InputTargetField, InputTargetPort, ObserveResult, TypeResult } from './ports.ts';
+import type { ClearJob, ClearOutcome } from '../sign-in-grants/clear.ts';
+import type {
+  InputFieldValue,
+  InputTargetField,
+  InputTargetPort,
+  ObserveResult,
+  TypeOptions,
+  TypeResult,
+} from './ports.ts';
 
 /**
  * The browser as the input bridge needs it: run one look, picture or write on a session's named page, inside
@@ -86,18 +94,43 @@ export class PageInputTarget implements InputTargetPort {
     values: readonly InputFieldValue[],
     submit: boolean,
     expected: InputTargetFacts,
+    options?: TypeOptions,
   ): Promise<TypeResult> {
     if (target.kind !== 'browser' || expected.kind !== 'browser') return 'target_gone';
     let began = false;
     try {
       return await this.host.inputOnPage(sessionId, target.key, async (port, pageId) => {
         if (pageId !== expected.pageId) return 'target_changed';
+        // A browser that cannot arm the clear a grant fill asks for types nothing: the clear is part of the fill.
+        if (options?.armClear === true && port.inputClear === undefined) return 'target_changed';
         began = true;
-        return await port.inputType(pageId, expected, values, submit);
+        return await port.inputType(
+          pageId,
+          expected,
+          values,
+          submit,
+          ...(options?.armClear === true ? [{ armClear: true as const }] : []),
+        );
       });
     } catch {
       // A failure before the write began typed nothing; one after it may have typed part of the values.
       return began ? 'uncertain' : 'target_gone';
+    }
+  }
+
+  /**
+   * A grant fill's check when the page hold ends (`sign-in-grants/clear.ts`), in the page's own queue: a field that still
+   * holds what was typed is emptied. A page that is gone, or now another page, holds nothing: `moved`. Anything that
+   * goes wrong is `unknown`, which stops the line.
+   */
+  async clear(sessionId: string, target: InputTarget, job: ClearJob): Promise<ClearOutcome> {
+    if (target.kind !== 'browser') return 'unknown';
+    try {
+      return await this.host.inputOnPage(sessionId, target.key, async (port, pageId) =>
+        port.inputClear === undefined ? ('unknown' as const) : await port.inputClear(pageId, job),
+      );
+    } catch {
+      return 'unknown';
     }
   }
 

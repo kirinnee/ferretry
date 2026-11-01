@@ -87,6 +87,7 @@ export * from './catalog-members/index.ts';
 export * from './shared-catalogs/index.ts';
 export * from './shared-drafts/index.ts';
 export * from './secure-copy/index.ts';
+export * from './sign-in-grants/index.ts';
 export * from './task-plans/index.ts';
 export * from './security/index.ts';
 export * from './session/attach/index.ts';
