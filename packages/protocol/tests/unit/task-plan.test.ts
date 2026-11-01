@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { z } from 'zod';
 import { addTwoFactorKeySubject } from '../../src/lib/accounts.ts';
+import { AgendaActionRequestSchema } from '../../src/lib/agenda.ts';
 import { AgentToolCallSchema, AgentToolResultSchema, taskPlanCallOf } from '../../src/lib/agent-tools.ts';
 import { sha256Hex } from '../../src/lib/mcp-oauth.ts';
 import { CopyPlanSchema } from '../../src/lib/secure-copy.ts';
@@ -132,6 +133,15 @@ const approvedPlan = (totp: boolean, can: boolean): TaskPlan =>
     ],
   });
 
+/** A selection staged for its passkey, as the stage route answers it. */
+const STAGED = {
+  stage: STAGE,
+  plan: PLAN_ID,
+  lines: [0, 2],
+  summary: ['Line 1: sign in as GitHub · kirinnee on github.com with its password, 1 use', 'Line 3: paste, 1 use'],
+  expiresAt: AT,
+};
+
 const cases: SchemaCase[] = [
   { name: 'stage id', schema: plans.TaskPlanStageIdSchema, value: STAGE },
   { name: 'line number', schema: plans.TaskPlanLineNumberSchema, value: 9 },
@@ -178,6 +188,18 @@ const cases: SchemaCase[] = [
   { name: 'agent view', schema: plans.TaskPlanAgentViewSchema, value: taskPlanAgentView(approvedPlan(true, true)) },
   { name: 'approval', schema: plans.TaskPlanApprovalSchema, value: APPROVAL },
   { name: 'pins', schema: plans.TaskPlanLinePinsSchema, value: PINS.get(0) },
+  { name: 'staged selection', schema: plans.TaskPlanStagedSchema, value: STAGED },
+  { name: 'stage state', schema: plans.TaskPlanStageStateSchema, value: 'denied' },
+  { name: 'stage view', schema: plans.TaskPlanStageViewSchema, value: { ...STAGED, state: 'waiting' } },
+  { name: 'answered at once', schema: plans.TaskPlanApprovalAnswerSchema, value: { outcome: 'answered', plan: PLAN } },
+  { name: 'answer staged', schema: plans.TaskPlanApprovalAnswerSchema, value: { outcome: 'staged', staged: STAGED } },
+  {
+    name: 'confirming',
+    schema: plans.TaskPlanConfirmingSchema,
+    value: { stage: STAGE, plan: PLAN_ID, agendaItemId: 'A1' },
+  },
+  { name: 'revoke all', schema: plans.TaskPlanRevokeSchema, value: {} },
+  { name: 'revoke lines', schema: plans.TaskPlanRevokeSchema, value: { lines: [0, 2] } },
 ];
 
 describe('task plan schemas', () => {
@@ -916,5 +938,37 @@ describe('a paste-plan item is not a line number (secrev-1258 info 1)', () => {
       undefined,
     ]);
     should(plans.taskPlanLineOfCopyItem(plan({ lines: [SIGN_IN_LINE] }), 0)).be.undefined();
+  });
+});
+
+describe('the owner routes’ shapes (R3a-2)', () => {
+  it('should refuse a staged selection with no line, an unknown stage state, or a revoke naming a line twice', () => {
+    assertRejects([
+      {
+        name: 'a stage with no line',
+        schema: plans.TaskPlanStagedSchema,
+        value: { ...STAGED, lines: [], summary: [] },
+      },
+      {
+        name: 'a stage of a 2FA seed',
+        schema: plans.TaskPlanStagedSchema,
+        value: { ...STAGED, stage: `st_${'1'.repeat(24)}` },
+      },
+      { name: 'a summary on two lines', schema: plans.TaskPlanStagedSchema, value: { ...STAGED, summary: ['a\nb'] } },
+      { name: 'a stage committed', schema: plans.TaskPlanStageViewSchema, value: { ...STAGED, state: 'committed' } },
+      { name: 'a revoke naming a line twice', schema: plans.TaskPlanRevokeSchema, value: { lines: [1, 1] } },
+      { name: 'a revoke with an empty list', schema: plans.TaskPlanRevokeSchema, value: { lines: [] } },
+      { name: 'a revoke with a field of its own', schema: plans.TaskPlanRevokeSchema, value: { all: true } },
+    ]);
+  });
+});
+
+describe('the agenda taskPlan ref is the daemon’s only (R3a-2)', () => {
+  it("should refuse a ferret's agenda add that carries a taskPlan ref, while the same add without one passes", () => {
+    const add = { action: 'add', subject: 'Allow these for this task?', why: 'a task', howToResolve: 'tick them' };
+
+    should(AgendaActionRequestSchema.safeParse(add).success).be.true();
+    should(AgendaActionRequestSchema.safeParse({ ...add, taskPlan: { planId: PLAN_ID } }).success).be.false();
+    should(AgendaActionRequestSchema.safeParse({ ...add, copyPlan: { planId: PLAN_ID } }).success).be.false();
   });
 });

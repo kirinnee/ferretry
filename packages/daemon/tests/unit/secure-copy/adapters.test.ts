@@ -4,7 +4,7 @@ import should from 'should';
 import { FilePasteRuleStore } from '../../../src/adapters/index.ts';
 import { type AgendaLedger, type AgendaLedgerRepository, AgendaService } from '../../../src/lib/agenda/index.ts';
 import { parseAgendaLedger } from '../../../src/lib/agenda/state-machine.ts';
-import { CopyPlanAgendaAdapter } from '../../../src/lib/index.ts';
+import { TaskPlanAgendaAdapter } from '../../../src/lib/index.ts';
 
 const OFF = { allowProfileTargets: false };
 const RULE: PasteRule = {
@@ -63,11 +63,11 @@ describe('FilePasteRuleStore', () => {
   });
 });
 
-describe('CopyPlanAgendaAdapter', () => {
+describe('TaskPlanAgendaAdapter', () => {
   it("should raise a permission card as the daemon, pointing at its plan, answered by the plan's own form", async () => {
     const raised: unknown[] = [];
     const resolved: unknown[] = [];
-    const adapter = new CopyPlanAgendaAdapter({
+    const adapter = new TaskPlanAgendaAdapter({
       raise: async (sessionId, request, actor) => {
         raised.push({ sessionId, request, actor });
         return { ok: true, item: { id: 'A4' } } as never;
@@ -80,8 +80,10 @@ describe('CopyPlanAgendaAdapter', () => {
 
     const card = await adapter.raise('s1', {
       planId: 'b'.repeat(32),
+      pastes: true,
       ask: 'Allow?',
       context: '1. x',
+      howToResolve: 'Tick the pastes you allow on the card, or at the machine: `fy copy plan approve`.',
       expiresAt: '2026-10-31T14:00:00.000Z',
     });
     await adapter.close('s1', 'A4', 'done');
@@ -94,6 +96,7 @@ describe('CopyPlanAgendaAdapter', () => {
         actor: { kind: 'daemon', cause: 'secure-copy' },
         request: {
           kind: 'permission',
+          taskPlan: { planId: 'b'.repeat(32) },
           copyPlan: { planId: 'b'.repeat(32) },
           subject: 'Allow?',
           context: '1. x',
@@ -110,21 +113,53 @@ describe('CopyPlanAgendaAdapter', () => {
   });
 
   it('should answer in words when the agenda refuses or keeps no card', async () => {
-    const refusing = new CopyPlanAgendaAdapter({
+    const refusing = new TaskPlanAgendaAdapter({
       raise: async () => ({ ok: false, error: { message: 'too many open items' } }) as never,
       resolve: async () => ({ ok: true }) as never,
     });
-    const empty = new CopyPlanAgendaAdapter({
+    const empty = new TaskPlanAgendaAdapter({
       raise: async () => ({ ok: true, item: undefined }) as never,
       resolve: async () => {
         throw new Error('gone');
       },
     });
-    const card = { planId: 'b'.repeat(32), ask: 'a', context: 'c', expiresAt: '2026-10-31T14:00:00.000Z' };
+    const card = {
+      planId: 'b'.repeat(32),
+      pastes: false,
+      ask: 'a',
+      context: 'c',
+      howToResolve: 'h',
+      expiresAt: '2026-10-31T14:00:00.000Z',
+    };
 
     should(await refusing.raise('s1', card)).eql({ ok: false, message: 'too many open items' });
     should(await empty.raise('s1', card)).eql({ ok: false, message: 'the agenda kept no card for this plan' });
     await empty.close('s1', 'A1', 'quietly');
+  });
+});
+
+describe('TaskPlanAgendaAdapter: a plan with no paste line', () => {
+  it('should carry the task-plan ref only, so no app reads it as a paste plan', async () => {
+    const raised: { request: Record<string, unknown> }[] = [];
+    const adapter = new TaskPlanAgendaAdapter({
+      raise: async (_sessionId, request) => {
+        raised.push({ request: request as never });
+        return { ok: true, item: { id: 'A2' } } as never;
+      },
+      resolve: async () => ({ ok: true }) as never,
+    });
+
+    await adapter.raise('s1', {
+      planId: 'c'.repeat(32),
+      pastes: false,
+      ask: 'Allow?',
+      context: '1. sign in',
+      howToResolve: 'Tick the lines you allow on the card in the app.',
+      expiresAt: '2026-10-31T14:00:00.000Z',
+    });
+
+    should(raised[0]?.request).match({ taskPlan: { planId: 'c'.repeat(32) } });
+    should(raised[0]?.request).not.have.property('copyPlan');
   });
 });
 
@@ -145,12 +180,14 @@ describe('a paste plan card on the real agenda', () => {
       { has: async sessionId => sessionId === 's1' },
       { raised: async () => undefined },
     );
-    const adapter = new CopyPlanAgendaAdapter(agenda);
+    const adapter = new TaskPlanAgendaAdapter(agenda);
 
     const card = await adapter.raise('s1', {
       planId: 'b'.repeat(32),
+      pastes: true,
       ask: 'Allow?',
       context: '1. x',
+      howToResolve: 'Tick the pastes you allow on the card, or at the machine: `fy copy plan approve`.',
       expiresAt: '2026-10-31T14:00:00.000Z',
     });
     const id = card.ok ? card.id : 'A0';
@@ -161,8 +198,49 @@ describe('a paste plan card on the real agenda', () => {
     const resolved = await agenda.resolve('s1', id as never, { kind: 'human' });
 
     should(card.ok).be.true();
-    should(answered).match({ ok: false, error: { code: 'use_input_form' } });
+    // The task-plan guard answers first: the card is answered by its ticks and passkey, never a plain answer.
+    should(answered).match({ ok: false, error: { code: 'use_input_form', message: /is a task plan/u } });
     should(parsed?.entries.map(entry => entry.item.copyPlan)).eql([{ planId: 'b'.repeat(32) }]);
+    should(parsed?.entries.map(entry => entry.item.taskPlan)).eql([{ planId: 'b'.repeat(32) }]);
     should(resolved.ok).be.true();
+  });
+});
+
+describe('a paste plan card kept from an older daemon', () => {
+  it('should still refuse a plain answer to a card that carries only the paste-plan ref', async () => {
+    const ledgers = new Map<string, AgendaLedger>();
+    const agenda = new AgendaService(
+      {
+        read: async sessionId => ledgers.get(sessionId) ?? null,
+        transact: async (sessionId, apply) => {
+          const mutation = apply(ledgers.get(sessionId) ?? null);
+          if (mutation.ok && mutation.changed) ledgers.set(sessionId, mutation.ledger);
+          return mutation;
+        },
+      },
+      { now: () => '2026-10-31T12:00:00Z' },
+      { has: async sessionId => sessionId === 's1' },
+      { raised: async () => undefined },
+    );
+    const raised = await agenda.raise(
+      's1',
+      {
+        source: 'question',
+        sourceRef: 'b'.repeat(32),
+        kind: 'permission',
+        copyPlan: { planId: 'b'.repeat(32) },
+        subject: 'Allow these pastes?',
+        why: 'Allow these pastes?',
+        howToResolve: 'Tick them on the card.',
+      },
+      { kind: 'daemon', cause: 'secure-copy' },
+    );
+    const id = raised.ok ? raised.item?.id : undefined;
+
+    const answered = await agenda.answer('s1', id as never, { kind: 'permission', decision: 'approved' } as never, {
+      kind: 'human',
+    });
+
+    should(answered).match({ ok: false, error: { code: 'use_input_form', message: /is a paste plan/u } });
   });
 });

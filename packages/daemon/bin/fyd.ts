@@ -57,6 +57,7 @@ import {
   type AnalyticsPricingRate,
   type AskToStopJobsResult,
   type AutoResumeSummary,
+  AccountKeySchema,
   CatalogMemberKeyIdSchema,
   CONFIG_ACCEPTED_FILE,
   type ConversionPreview,
@@ -774,9 +775,9 @@ import {
   type ConversionCheckPort,
   type ConversionSummary as ConvertedConversationSummary,
   type CopyPageHost,
-  CopyPlanAgendaAdapter,
-  CopyPlanService,
   CredentialAgentIdentities,
+  TaskPlanAgendaAdapter,
+  TaskPlanService,
   CredentialUsageSource,
   canServeModel,
   chooseRelayCarrierSources,
@@ -10586,11 +10587,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         warn: message => void process.stderr.write(`secure copy: ${message}\n`),
       });
       void asActivity(activities, 'secure-copy-rules', async () => await pasteRules.load())();
-      const copyPlans = new CopyPlanService({
-        agenda: new CopyPlanAgendaAdapter(agenda),
+      // A ferret's task plan (docs/secure-copy.md, "Task plans"): its sign-ins and pastes, pre-approved on one card. In
+      // memory only: a restart forgets every plan, its pastes and its grants, and every fill then asks again.
+      const copyPlans = new TaskPlanService({
+        agenda: new TaskPlanAgendaAdapter(agenda),
         rules: pasteRules,
+        accounts: {
+          listing: async () => await accountDirectory.list(),
+          keyOf: async id => {
+            const key = AccountKeySchema.safeParse((await accountDirectory.seedTarget(id).catch(() => undefined))?.key);
+            return key.success ? key.data : undefined;
+          },
+        },
+        choice: signInChoice,
+        passkeys: { any: async () => await seedPasskeys.any() },
+        redact: async text => await secretRedactor.redact(text),
         tell: async (sessionId, agendaId, message) =>
           void (await agendaReplies.add(sessionId, agendaId, message).catch(() => undefined)),
+        audit: auditLog,
         clock: { now: () => Date.now() },
         ids: { planId: () => crypto.randomUUID().replaceAll('-', '') },
       });
@@ -10673,6 +10687,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             ...copyPageRecords.sessions(),
             ...loginObserver.sessions(),
             ...phoneApprovals.sessions(),
+            ...copyPlans.sessions(),
           ])) {
             const id = tryParseSessionId(sessionId);
             const state =
@@ -10683,6 +10698,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               secureCopies.drop(sessionId);
               loginObserver.forget(sessionId);
               await phoneApprovals.sessionEnded(sessionId);
+              // A plan ends with its session: its card closes, and its pastes and grants go at once.
+              await copyPlans.sessionEnded(sessionId);
             }
           }
         }),
@@ -12351,7 +12368,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             list: sessionId => secureCopies.list(sessionId),
             discard: (sessionId, name) => secureCopies.discard(sessionId, name),
           },
-          plans: { propose: async (sessionId, items, expires) => await copyPlans.propose(sessionId, items, expires) },
+          plans: {
+            propose: async (sessionId, items, expires) => await copyPlans.proposePastes(sessionId, items, expires),
+          },
           copyPages: copyPageRecords,
           accounts: accountDirectory,
           signInChoice,

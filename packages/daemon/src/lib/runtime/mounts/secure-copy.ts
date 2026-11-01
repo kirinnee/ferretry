@@ -6,6 +6,7 @@ import {
   type PasteRuleList,
   PasteRuleSettingsSchema,
   type PasteRuleSettingsView,
+  taskPlanLineOfCopyItem,
   STEP_UP_ACTS,
   STEP_UP_REQUIRED_CODE,
   type StepUpRequiredBody,
@@ -15,11 +16,11 @@ import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { SecureCopyError } from '../../secure-copy/errors.ts';
-import type { CopyPlanService } from '../../secure-copy/plans.ts';
 import type { PasteRuleCaller, PasteRuleService } from '../../secure-copy/rules.ts';
+import type { TaskPlanService } from '../../task-plans/service.ts';
 import { ownerActorOf } from './input-requests.ts';
 import { refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
+import { taskPlanAnswered } from './task-plans.ts';
 
 /**
  * THE OWNER'S ROUTES FOR SECURE COPY (docs/secure-copy.md): the copies a session holds (descriptions only), the
@@ -40,21 +41,6 @@ import { refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret
  * (`allow-profile-targets`), which this route then spends. Turning it OFF only narrows, and asks no more than
  * `terminal.use`.
  */
-
-const STATUS: Readonly<Record<SecureCopyError['code'], number>> = {
-  bad_request: 400,
-  not_found: 404,
-  conflict: 409,
-  forbidden: 403,
-  capacity: 429,
-  unavailable: 503,
-  upstream_failed: 502,
-};
-
-function answered(error: unknown): never {
-  if (error instanceof SecureCopyError) throw new ApiError(STATUS[error.code], error.message, error.code);
-  throw error;
-}
 
 const ruleOwner = (context: RouteContext): PasteRuleCaller => ({ kind: 'owner', actor: ownerActorOf(context) });
 
@@ -124,7 +110,7 @@ function profileTargetsRefusal(context: RouteContext): ReturnType<typeof jsonRes
 export function secureCopyRoutes(
   copies: CopyListing,
   rules: PasteRuleService,
-  plans: CopyPlanService,
+  plans: TaskPlanService,
   homes?: RuleProgramHomes,
 ): readonly ApiRoute[] {
   return [
@@ -182,7 +168,7 @@ export function secureCopyRoutes(
         const loosens = settings.allowProfileTargets && !rules.currentSettings(caller).allowProfileTargets;
         const refused = loosens ? profileTargetsRefusal(context) : undefined;
         if (refused !== undefined) return refused;
-        return jsonResponse(await rules.changeSettings(caller, settings).catch(answered));
+        return jsonResponse(await rules.changeSettings(caller, settings).catch(taskPlanAnswered));
       },
     },
     {
@@ -202,7 +188,7 @@ export function secureCopyRoutes(
             ? refusedPageInput(context, 'approve pastes into a page')
             : undefined;
         if (refused !== undefined) return refused;
-        const rule = await rules.create(caller, request).catch(answered);
+        const rule = await rules.create(caller, request).catch(taskPlanAnswered);
         if (intoStore) spentSecretWrite(context);
         return jsonResponse(rule, 201);
       },
@@ -216,7 +202,7 @@ export function secureCopyRoutes(
       noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
-        await rules.revoke(caller, param(context, 'ruleId', ID)).catch(answered);
+        await rules.revoke(caller, param(context, 'ruleId', ID)).catch(taskPlanAnswered);
         return jsonResponse({ removed: true });
       },
     },
@@ -228,7 +214,8 @@ export function secureCopyRoutes(
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
-        const body: CopyPlanList = { plans: [...plans.list(ruleOwner(context))] };
+        // The task plans waiting with paste lines, as paste plans: their paste lines only, numbered as items.
+        const body: CopyPlanList = { plans: [...plans.copyPlans(ruleOwner(context))] };
         return jsonResponse(body);
       },
     },
@@ -244,14 +231,21 @@ export function secureCopyRoutes(
         const body = await parseBody(context.request, CopyPlanApproveSchema);
         const sessionId = param(context, 'sessionId', SESSION);
         const planId = param(context, 'planId', ID);
-        const plan = plans.list(caller, sessionId).find(candidate => candidate.id === planId);
-        const into = (kind: string) => body.items.some(index => plan?.items[index]?.to.kind === kind);
+        // An item is a PASTE ITEM number, read back into its plan line, never a line number: item 0 is never line 0.
+        const plan = plans.copyPlans(caller, sessionId).some(candidate => candidate.id === planId)
+          ? plans.get(caller, sessionId, planId)
+          : undefined;
+        const into = (kind: string) =>
+          body.items.some(index => {
+            const line = plan === undefined ? undefined : plan.lines[taskPlanLineOfCopyItem(plan, index) ?? -1];
+            return line?.kind === 'paste' && line.to.kind === kind;
+          });
         const intoStore = into('secret');
         const refused =
           (intoStore ? refusedSecretWrite(context, 'approve pastes into the secret store') : undefined) ??
           (into('browser') ? refusedPageInput(context, 'approve pastes into a page') : undefined);
         if (refused !== undefined) return refused;
-        const answer = await plans.approve(caller, sessionId, planId, body.items).catch(answered);
+        const answer = await plans.approveCopyItems(caller, sessionId, planId, body.items).catch(taskPlanAnswered);
         if (intoStore) spentSecretWrite(context);
         return jsonResponse(answer);
       },

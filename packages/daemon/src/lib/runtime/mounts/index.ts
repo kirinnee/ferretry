@@ -26,7 +26,7 @@ import { observedRoutes } from '../../performance/observed-routes.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
 import type { PinService } from '../../pins/index.ts';
 import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
-import type { CopyPlanService } from '../../secure-copy/plans.ts';
+import type { TaskPlanService } from '../../task-plans/service.ts';
 import type { PasteRuleService } from '../../secure-copy/rules.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
 import type { SharedDraftService } from '../../shared-drafts/index.ts';
@@ -96,6 +96,7 @@ import { sharedDraftRoutes } from './shared-drafts.ts';
 import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
 import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catalogs.ts';
 import { type CopyListing, type RuleProgramHomes, secureCopyRoutes } from './secure-copy.ts';
+import { taskPlanRoutes } from './task-plans.ts';
 import { securityRoutes } from './security.ts';
 import { type SessionAddressBook, sessionAddressedRoutes, sessionAddressedSockets } from './session-addressing.ts';
 import { type SessionAgendaModeSubsystem, sessionAgendaModeRoutes } from './session-agenda-mode.ts';
@@ -407,11 +408,12 @@ export interface MountedSubsystems {
   readonly inputRequests: InputRequestService;
   /** Approving a sign-in on the phone (docs/input-requests.md, "Approve on your phone"); absent: no such routes. */
   readonly phoneApprovals?: PhoneApprovalService;
-  /** Secure copy (docs/secure-copy.md): copies by description, pre-approval rules and paste plans. */
+  /** Secure copy (docs/secure-copy.md): copies by description, pre-approval rules and ferrets' task plans. */
   readonly secureCopy: {
     readonly copies: CopyListing;
     readonly rules: PasteRuleService;
-    readonly plans: CopyPlanService;
+    /** Task plans (RAM only): the paste-plan routes answer from them too. */
+    readonly plans: TaskPlanService;
     /** Where a terminal rule's program lives, so a rule into the owner's own profile says so. */
     readonly homes?: RuleProgramHomes;
   };
@@ -535,7 +537,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // The passkey step-up sits beside pairing too: it is how a paired device proves its owner is
         // holding it. Every path is under `/v1/passkeys` or `/v1/step-up`, which nothing else uses, and
         // there are no patterns among them, so it can neither shadow nor be shadowed.
-        ...stepUpRoutes(subsystems.stepUp, subsystems.secrets.seeds),
+        ...stepUpRoutes(subsystems.stepUp, subsystems.secrets.seeds, subsystems.secureCopy.plans),
         // The machine's security settings sit beside the step-up they tune. `/v1/security` is a fixed
         // literal no other subsystem uses, so it can neither shadow nor be shadowed.
         ...securityRoutes(subsystems.security),
@@ -712,6 +714,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
           subsystems.secureCopy.plans,
           subsystems.secureCopy.homes,
         ),
+        // `/v1/task-plans` and `/v1/sessions/:sessionId/task-plans/*` are literals no other subsystem uses.
+        ...taskPlanRoutes(subsystems.secureCopy.plans),
         ...terminalRoutes(subsystems.terminals),
         // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
         // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the

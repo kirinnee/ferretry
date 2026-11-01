@@ -5,7 +5,13 @@ import type { CallerGovernance, CapabilityGuard } from '../../../../src/lib/api/
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import type { ApiRoute, RouteContext } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { CopyPlanService, EphemeralValues, PasteRuleService, SecureCopyService } from '../../../../src/lib/index.ts';
+import {
+  EphemeralValues,
+  type PasteRuleCaller,
+  PasteRuleService,
+  SecureCopyService,
+  TaskPlanService,
+} from '../../../../src/lib/index.ts';
 import { secureCopyRoutes } from '../../../../src/lib/runtime/mounts/secure-copy.ts';
 import type { ApiRequest } from '../../../../src/lib/api/http.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
@@ -19,6 +25,13 @@ const TOKEN = 'vcp_ROUTE-NEVER-RETURNS-77';
 const RULE = { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' } } as const;
 const INTO_STORE = { kind: 'secret', name: 'VERCEL_TOKEN' } as const;
 const INTO_PAGE = { kind: 'browser', origin: 'https://vercel.com' } as const;
+const OWNER: PasteRuleCaller = { kind: 'owner', actor: { kind: 'host' } };
+/** Where a plan's pastes went: the rules held in MEMORY, by destination kind (the store never holds them). */
+const planned = (rules: PasteRuleService) =>
+  rules
+    .list(OWNER)
+    .filter(rule => rule.plan !== undefined)
+    .map(rule => rule.to.kind);
 
 async function served(guard: CapabilityGuard = GRANTED) {
   const clock = { now: () => Date.parse('2026-10-31T12:00:00.000Z') };
@@ -49,14 +62,18 @@ async function served(guard: CapabilityGuard = GRANTED) {
     warn: () => undefined,
   });
   await rules.load();
-  const plans = new CopyPlanService({
+  const plans = new TaskPlanService({
     agenda: { raise: async () => ({ ok: true, id: 'A1' }), close: async () => undefined },
     rules,
+    accounts: { listing: async () => ({ accounts: [], signIns: [] }), keyOf: async () => undefined },
+    passkeys: { any: async () => true },
+    redact: async text => text,
     tell: async () => undefined,
+    audit: { record: async () => undefined },
     clock,
     ids: { planId: () => 'b'.repeat(32) },
   });
-  const plan = await plans.propose(SESSION, [
+  const plan = await plans.proposePastes(SESSION, [
     { ...RULE, why: 'the deploy token' },
     { from: RULE.from, to: INTO_STORE, why: 'kept for the deploy script' },
     { from: RULE.from, to: INTO_PAGE, why: 'the env page' },
@@ -136,8 +153,8 @@ describe('the secure copy routes', () => {
     should(stored.rules).eql([]);
   });
 
-  it('should approve a plan item into a one-use rule for that session', async () => {
-    const { dispatch, stored, plan } = await served();
+  it('should approve a plan item into a one-use rule for that session, kept in memory only', async () => {
+    const { dispatch, stored, plan, rules } = await served();
 
     const answer = await dispatch.dispatch(
       post(`/v1/sessions/${SESSION}/copy-plans/${plan.id}/approve`, { items: [0] }),
@@ -145,7 +162,8 @@ describe('the secure copy routes', () => {
 
     should(answer.status).equal(200);
     should(jsonBody(answer)).match({ state: 'approved', approved: [0] });
-    should(stored.rules).match([{ sessionId: SESSION, remaining: 1, plan: plan.id }]);
+    should(rules.list(OWNER)).match([{ sessionId: SESSION, remaining: 1, plan: plan.id }]);
+    should(stored.rules).be.undefined();
   });
 
   it("should list a session's copies by description, never by value", async () => {
@@ -202,8 +220,8 @@ describe('the secure copy routes, when a service fails unexpectedly', () => {
       { list: () => [] },
       {} as never,
       {
-        list: () => [],
-        approve: async () => {
+        copyPlans: () => [],
+        approveCopyItems: async () => {
           throw new Error('the board fell over');
         },
       } as never,
@@ -243,9 +261,9 @@ describe('approving pastes into the secret store', () => {
 
     should(both.status).equal(403);
     should(jsonBody(both)).match({ code: 'grant_step_up_required', demand: { capability: 'secrets' } });
-    should(refusing.stored.rules ?? []).eql([]);
+    should(planned(refusing.rules)).eql([]);
     should(first.status).equal(200);
-    should(terminalOnly.stored.rules?.map(rule => rule.to.kind)).eql(['terminal']);
+    should(planned(terminalOnly.rules)).eql(['terminal']);
   });
 
   it('should add a rule into the store for a caller holding the grant', async () => {
@@ -284,8 +302,8 @@ describe('approving pastes into a page', () => {
     );
 
     should([page.status, rest.status]).eql([403, 200]);
-    should(refused.stored.rules ?? []).eql([]);
-    should(others.stored.rules?.map(rule => rule.to.kind)).eql(['terminal', 'secret']);
+    should(planned(refused.rules)).eql([]);
+    should(planned(others.rules)).eql(['terminal', 'secret']);
   });
 });
 

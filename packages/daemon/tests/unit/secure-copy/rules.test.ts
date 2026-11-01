@@ -1,19 +1,13 @@
 import { describe, it } from 'bun:test';
 import {
   COPY_MAX_RULES,
-  type CopyPlanItem,
   type InputTargetFacts,
   type PasteRule,
+  PasteRuleListSchema,
   type PasteRuleSettings,
 } from '@ferretry/protocol';
 import should from 'should';
-import {
-  CopyPlanService,
-  type PasteRuleCaller,
-  PasteRuleService,
-  routeOf,
-  SecureCopyError,
-} from '../../../src/lib/index.ts';
+import { type PasteRuleCaller, PasteRuleService, routeOf, SecureCopyError } from '../../../src/lib/index.ts';
 import { FACTS } from '../input-requests/support.ts';
 
 const OWNER: PasteRuleCaller = { kind: 'owner', actor: { kind: 'host' } };
@@ -269,115 +263,7 @@ describe('PasteRuleService: matching a paste', () => {
   });
 });
 
-const PLAN_ITEMS: readonly CopyPlanItem[] = [
-  { from: GH, to: VERCEL_TERMINAL, why: 'the deploy token' },
-  { from: GH, to: { kind: 'terminal', program: 'fly' }, why: 'the fly token' },
-];
-
-function plans() {
-  const made = rules();
-  const cards: { sessionId: string; ask: string; context: string }[] = [];
-  const closed: string[] = [];
-  const told: string[] = [];
-  let id = 0;
-  const service = new CopyPlanService({
-    agenda: {
-      raise: async (sessionId, card) => {
-        cards.push({ sessionId, ask: card.ask, context: card.context });
-        return { ok: true, id: `A${String(cards.length)}` };
-      },
-      close: async (_sessionId, cardId, note) => void closed.push(`${cardId}: ${note}`),
-    },
-    rules: made.service,
-    tell: async (_sessionId, _agenda, message) => void told.push(message),
-    clock: { now: () => made.ms.now },
-    ids: { planId: () => (++id).toString(16).padStart(32, 'b') },
-  });
-  return { ...made, rules: made.service, service, cards, closed, told };
-}
-
-describe('CopyPlanService', () => {
-  it("should raise one card listing every planned paste, the agent's words marked as its own", async () => {
-    const p = plans();
-    await p.rules.load();
-
-    const plan = await p.service.propose('s1', PLAN_ITEMS);
-
-    should(plan).match({ state: 'pending', agendaItemId: 'A1', expiresAt: '2026-10-31T14:00:00.000Z' });
-    should(p.cards).eql([
-      {
-        sessionId: 's1',
-        ask: 'Allow these 2 pastes once each, without asking, until 2026-10-31 14:00 UTC?',
-        context:
-          '1. what gh prints → vercel in a terminal. The agent says: the deploy token\n2. what gh prints → fly in a terminal. The agent says: the fly token',
-      },
-    ]);
-  });
-
-  it('should make a one-use rule for this session per allowed item, close the card and tell the ferret', async () => {
-    const p = plans();
-    await p.rules.load();
-    const plan = await p.service.propose('s1', PLAN_ITEMS);
-
-    const settled = await p.service.approve(OWNER, 's1', plan.id, [1]);
-
-    should(settled).match({ state: 'approved', approved: [1] });
-    should(p.rules.list(OWNER)).match([{ to: { program: 'fly' }, sessionId: 's1', remaining: 1, plan: plan.id }]);
-    should(p.closed).eql(['A1: The owner allowed 2 of 2.']);
-    should(p.told[0]).containEql('Each allowed paste goes through once with secure.paste');
-  });
-
-  it('should decline a plan approved with no items, making no rule', async () => {
-    const p = plans();
-    await p.rules.load();
-    const plan = await p.service.propose('s1', PLAN_ITEMS);
-
-    should((await p.service.approve(OWNER, 's1', plan.id, [])).state).equal('declined');
-    should(p.rules.list(OWNER)).eql([]);
-    should(p.told[0]).containEql('declined');
-  });
-
-  it('should refuse an agent, another session, an unknown or settled plan and an item it does not have', async () => {
-    const p = plans();
-    await p.rules.load();
-    const plan = await p.service.propose('s1', PLAN_ITEMS);
-
-    should((await refused(p.service.approve(AGENT, 's1', plan.id, [0]))).code).equal('forbidden');
-    should((await refused(() => p.service.list(AGENT))).code).equal('forbidden');
-    should((await refused(p.service.approve(OWNER, 's2', plan.id, [0]))).code).equal('not_found');
-    should((await refused(p.service.approve(OWNER, 's1', 'c'.repeat(32), [0]))).code).equal('not_found');
-    should((await refused(p.service.approve(OWNER, 's1', plan.id, [2]))).code).equal('bad_request');
-    await p.service.approve(OWNER, 's1', plan.id, [0]);
-    should((await refused(p.service.approve(OWNER, 's1', plan.id, [1]))).code).equal('conflict');
-    should(p.rules.list(OWNER)).have.length(1);
-  });
-
-  it('should hold at most three plans waiting per session', async () => {
-    const p = plans();
-    await p.rules.load();
-    for (let index = 0; index < 3; index += 1) await p.service.propose('s1', PLAN_ITEMS);
-
-    should((await refused(p.service.propose('s1', PLAN_ITEMS))).code).equal('capacity');
-    should((await p.service.propose('s2', PLAN_ITEMS)).state).equal('pending');
-    should(p.service.list(OWNER, 's1')).have.length(3);
-  });
-
-  it('should expire a plan nobody answered, close its card and forget it later', async () => {
-    const p = plans();
-    await p.rules.load();
-    const plan = await p.service.propose('s1', PLAN_ITEMS, 600);
-
-    p.ms.now += 600_000;
-    p.service.sweep();
-    await settle();
-
-    should(p.service.list(OWNER)).eql([]);
-    should(p.closed).eql(['A1: The paste plan expired.']);
-    should((await refused(p.service.approve(OWNER, 's1', plan.id, [0]))).code).equal('not_found');
-  });
-});
-
-describe('PasteRuleService and plans: the rest of the routes', () => {
+describe('PasteRuleService: the rest of the routes', () => {
   it('should match a page or clipboard copy by origin, into a page by origin', async () => {
     const { service } = rules();
     await service.load();
@@ -433,23 +319,6 @@ describe('PasteRuleService and plans: the rest of the routes', () => {
     should(service.reserve('s1', GH_COPY, AT_VERCEL)).equal(rule.id);
   });
 
-  it('should refuse a plan that would hold more rules than the cap, making none', async () => {
-    const p = plans();
-    await p.rules.load();
-    for (let index = 0; index < COPY_MAX_RULES - 1; index += 1)
-      await p.rules.create(OWNER, { from: GH, to: VERCEL_TERMINAL });
-    const plan = await p.service.propose('s1', PLAN_ITEMS);
-
-    should((await refused(p.service.approve(OWNER, 's1', plan.id, [0, 1]))).code).equal('capacity');
-    should(p.rules.list(OWNER)).have.length(COPY_MAX_RULES - 1);
-  });
-
-  it('should refuse an empty plan', async () => {
-    const p = plans();
-
-    should((await refused(p.service.propose('s1', []))).code).equal('bad_request');
-  });
-
   it('should word every kind of route', () => {
     should(
       routeOf({ kind: 'browser', origin: 'https://github.com' }, { kind: 'browser', origin: 'https://vercel.com' }),
@@ -460,7 +329,7 @@ describe('PasteRuleService and plans: the rest of the routes', () => {
   });
 });
 
-describe('PasteRuleService and plans: what the security review found', () => {
+describe('PasteRuleService: what the security review found', () => {
   it('should keep a spent use spent when the store cannot be written, so a counted rule allows no more', async () => {
     const { service, disk } = rules();
     await service.load();
@@ -511,21 +380,6 @@ describe('PasteRuleService and plans: what the security review found', () => {
     await adding;
 
     should(stored.rules).have.length(2);
-  });
-
-  it('should answer a plan once when two answers arrive together', async () => {
-    const p = plans();
-    await p.rules.load();
-    const plan = await p.service.propose('s1', PLAN_ITEMS);
-
-    const [first, second] = await Promise.allSettled([
-      p.service.approve(OWNER, 's1', plan.id, [0]),
-      p.service.approve(OWNER, 's1', plan.id, [0, 1]),
-    ]);
-
-    should(first.status).equal('fulfilled');
-    should(second).match({ status: 'rejected', reason: { code: 'conflict' } });
-    should(p.rules.list(OWNER)).have.length(1);
   });
 });
 
@@ -600,5 +454,179 @@ describe('PasteRuleService: the owner settings (profile targets)', () => {
     await should(service.changeSettings(OWNER, { allowProfileTargets: true })).be.rejectedWith(/could not save/u);
     should(service.currentSettings(OWNER)).eql({ allowProfileTargets: false });
     should(stored.settings).be.undefined();
+  });
+});
+
+describe('PasteRuleService: a task plan’s pastes live in memory, the owner’s rules on disk', () => {
+  const PLAN = 'b'.repeat(32);
+  const FLY_TERMINAL = { kind: 'terminal', program: 'fly' } as const;
+  const AT_FLY: InputTargetFacts = { ...AT_VERCEL, foreground: { ...FACTS.foreground, comm: 'fly' }, program: 'fly' };
+
+  /** A store whose every write is counted, kept across a "restart" (a second service on the same store). */
+  function counted() {
+    const made = rules();
+    const writes: { rules: readonly PasteRule[]; settings: PasteRuleSettings }[] = [];
+    let id = 100;
+    const restart = () =>
+      new PasteRuleService({
+        store: {
+          read: async () =>
+            made.stored.rules === undefined
+              ? undefined
+              : { rules: made.stored.rules, settings: made.stored.settings ?? { allowProfileTargets: false } },
+          write: async next => {
+            writes.push(next);
+            made.stored.rules = next.rules;
+            made.stored.settings = next.settings;
+          },
+        },
+        clock: { now: () => made.ms.now },
+        ids: { ruleId: () => (++id).toString(16).padStart(32, '0') },
+        warn: () => undefined,
+      });
+    return { ...made, writes, restart };
+  }
+
+  it('should write nothing for a plan’s pastes, honour their uses, and forget them on a restart', async () => {
+    const { writes, restart, ms } = counted();
+    const first = restart();
+    await first.load();
+
+    first.fromPlan(OWNER, 's1', PLAN, [{ line: 2, from: GH, to: VERCEL_TERMINAL, uses: 2 }], ms.now + 3_600_000);
+    const one = first.reserve('s1', GH_COPY, AT_VERCEL);
+    first.spent(one as string);
+    const two = first.reserve('s1', GH_COPY, AT_VERCEL);
+    first.spent(two as string);
+    await settle();
+    const second = restart();
+    await second.load();
+
+    should(writes).eql([]);
+    should([one, two]).eql([one, one]);
+    should(first.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
+    should(first.planUses(PLAN)).eql(new Map([[2, 0]]));
+    should(second.list(OWNER)).eql([]);
+    should(second.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
+  });
+
+  it('should keep the owner’s standing rules and the profile setting on disk across a restart', async () => {
+    const { writes, restart, ms } = counted();
+    const first = restart();
+    await first.load();
+
+    const standing = await first.create(OWNER, { from: GH, to: VERCEL_TERMINAL });
+    await first.changeSettings(OWNER, { allowProfileTargets: true });
+    first.fromPlan(OWNER, 's1', PLAN, [{ line: 0, from: GH, to: FLY_TERMINAL, uses: 1 }], ms.now + 3_600_000);
+    const second = restart();
+    await second.load();
+
+    should(writes).have.length(2);
+    should(writes.flatMap(write => write.rules.map(rule => rule.id))).eql([standing.id, standing.id]);
+    should(second.list(OWNER).map(rule => rule.id)).eql([standing.id]);
+    should(second.currentSettings(OWNER)).eql({ allowProfileTargets: true });
+    should(second.reserve('s1', GH_COPY, AT_VERCEL)).equal(standing.id);
+    should(second.reserve('s1', GH_COPY, AT_FLY)).be.undefined();
+  });
+
+  it('should drop the plan rules a store from before still holds, and never honour them', async () => {
+    const { stored, restart } = counted();
+    stored.rules = [
+      {
+        id: 'a'.repeat(32),
+        from: GH,
+        to: VERCEL_TERMINAL,
+        sessionId: 's1',
+        remaining: 1,
+        used: 0,
+        createdAt: '2026-10-31T00:00:00.000Z',
+        createdBy: { kind: 'host' },
+        plan: PLAN,
+      },
+    ];
+    const service = restart();
+    await service.load();
+
+    should(service.list(OWNER)).eql([]);
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
+  });
+
+  it('should end a plan’s pastes by line or whole, and spend a plan rule only in its own session', async () => {
+    const { service, ms, stored } = rules();
+    await service.load();
+    service.fromPlan(
+      OWNER,
+      's1',
+      PLAN,
+      [
+        { line: 0, from: GH, to: VERCEL_TERMINAL, uses: 1 },
+        { line: 1, from: GH, to: FLY_TERMINAL, uses: 1 },
+      ],
+      ms.now + 3_600_000,
+    );
+
+    should(service.reserve('s2', GH_COPY, AT_VERCEL)).be.undefined();
+    service.endPlan(PLAN, [0]);
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
+    should(service.planUses(PLAN)).eql(new Map([[1, 1]]));
+    service.endPlan(PLAN);
+    should(service.reserve('s1', GH_COPY, AT_FLY)).be.undefined();
+    should(stored.rules).be.undefined();
+  });
+
+  it('should refuse a plan’s pastes for an agent, and a set that would not fit, making none', async () => {
+    const { service, ms } = rules();
+    await service.load();
+    const many = Array.from({ length: COPY_MAX_RULES + 1 }, (_, line) => ({
+      line,
+      from: GH,
+      to: VERCEL_TERMINAL,
+      uses: 1,
+    }));
+
+    should((await refused(() => service.fromPlan(AGENT, 's1', PLAN, many.slice(0, 1), ms.now + 1))).code).equal(
+      'forbidden',
+    );
+    should((await refused(() => service.fromPlan(OWNER, 's1', PLAN, many, ms.now + 1))).code).equal('capacity');
+    should(service.list(OWNER)).eql([]);
+  });
+});
+
+describe('PasteRuleService: taking back one of a plan’s pastes', () => {
+  it('should remove a plan rule by its id from memory, writing nothing', async () => {
+    const { service, ms, stored } = rules();
+    await service.load();
+    const [made] = service.fromPlan(
+      OWNER,
+      's1',
+      'b'.repeat(32),
+      [{ line: 0, from: GH, to: VERCEL_TERMINAL, uses: 2 }],
+      ms.now + 3_600_000,
+    );
+
+    await service.revoke(PHONE, made?.id ?? '');
+
+    should(service.list(OWNER)).eql([]);
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).be.undefined();
+    should(stored.rules).be.undefined();
+  });
+});
+
+describe('PasteRuleService: one cap for the owner’s rules and the plans’ pastes (secrev-1261 L2)', () => {
+  it('should keep the listing within its schema: no plan or rule past the combined cap of 50', async () => {
+    const { service, ms } = rules();
+    await service.load();
+    for (let index = 0; index < COPY_MAX_RULES - 1; index += 1)
+      await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL });
+    const plan = (line: number) => ({ line, from: GH, to: VERCEL_TERMINAL, uses: 1 });
+
+    const tooMany = await refused(() =>
+      service.fromPlan(OWNER, 's1', 'b'.repeat(32), [plan(0), plan(1)], ms.now + 1e6),
+    );
+    service.fromPlan(OWNER, 's1', 'b'.repeat(32), [plan(0)], ms.now + 1e6);
+    const oneMore = await refused(service.create(OWNER, { from: GH, to: VERCEL_TERMINAL }));
+
+    should([tooMany.code, oneMore.code]).eql(['capacity', 'capacity']);
+    should(PasteRuleListSchema.safeParse({ rules: service.list(OWNER) }).success).be.true();
+    should(service.list(OWNER)).have.length(COPY_MAX_RULES);
   });
 });

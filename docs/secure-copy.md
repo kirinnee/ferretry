@@ -228,15 +228,23 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
   (none declines), or ticks them on the card, a permission card whose own Allow and Decline answer it (the
   generic agenda answer is refused). Each allowed item becomes a rule for that session allowing one paste until
   the plan's expiry, which the card states (two hours by default, a day at most: a longer route is the owner's to add as a
-  rule). Two answers arriving together make the rules once. Closing the card approves nothing. Plans live in RAM: a restart forgets them.
-- **The rules file** (`<state>/secure-copy/rules.json`) holds routes and counts, never a value. One that cannot
-  be read is NO rules: every paste then asks the owner.
+  rule). Two answers arriving together make the rules once. Closing the card approves nothing. A paste plan is now a
+  [task plan](#task-plans) of paste lines only, answered the same way.
+- **A plan's rules live in memory only.** They are kept apart from the owner's own rules, never written to the rules
+  file, and end with their plan: at its expiry, when it is revoked, and when its session ends. A restart forgets them,
+  so those pastes ask again. Plan rules a store from before this change still holds are dropped when the daemon reads it.
+  The owner's rules and the plans' pastes share one cap of 50, so the rules listing always fits.
+- **The rules file** (`<state>/secure-copy/rules.json`) holds the owner's own rules (made in Settings or with
+  `fy copy rules`) and the profile-targets setting: routes, counts and one switch, never a value. These stay on disk
+  across a restart. One that cannot be read is NO rules: every paste then asks the owner.
 
 ### Task plans
 
-> **Not live yet.** The wire contract is in `packages/protocol/src/lib/task-plan.ts`. No daemon proposes, stages or
-> fills a plan yet, and none reports `task-plan.1`. `POST /v1/step-up/options` refuses `approve-task-plan` with
-> `404 stage_not_found` and mints no challenge, until the plan service binds it.
+> **Not filling yet.** The daemon raises, resolves, stages, approves and revokes plans
+> (`packages/daemon/src/lib/task-plans/`), and an approved paste line pastes as a rule did. An approved sign-in line
+> is pinned and kept, but no sign-in is typed under a plan until the shared matcher lands (R3a-4), and no daemon
+> reports `task-plan.1` until the app draws the plan card (R3a-5). The agent tool `task_plan` is not listed in MCP
+> yet (R3a-3); `secure.preapprove` raises paste-only task plans today.
 
 A task plan widens the paste plan. One card holds up to 10 lines, each with 1–5 uses (1 by default), for 2 hours
 by default (5 minutes to 1 day). A line is one of three kinds:
@@ -274,6 +282,56 @@ The rules the contract fixes:
   never a line number: `taskPlanLineOfCopyItem` maps it back, so "approve item 0" can't land on a sign-in line.
 - **The app ships first.** An input card a plan fills carries a `plan` actor and a `preapproval` note, and an
   older app's strict parse refuses them. So `task-plan.1` stays unreported until the app draws the plan card.
+
+#### How a plan is raised and answered
+
+- **Raised by the ferret, drawn by the daemon.** `TaskPlanService.propose` takes the call's lines and expiry and
+  nothing else: no page, no terminal, no facts. Each line is resolved against Accounts: a named sign-in is that one
+  account ("Ferret chose this"); a site or `tool@host` lists every password sign-in saved for it (at most 8), with
+  the owner's own default for the project, folder or site preselected (never the ferret's hint) or nothing. A line is
+  `unavailable` when it is not in Accounts, signs in through a provider ("ClickUp via Google"), or is a terminal tool
+  other than `sudo`, `su` or `doas`. Two lines that resolve to one sign-in, or a sign-in of the other kind, are
+  refused with no card. The ferret's reason is masked by the vault redactor before it is kept, shown or audited.
+  At most 3 plans wait and 3 are in force per session, and a session raises at most 6 an hour. A proposal takes its
+  place against these caps before it awaits anything, so proposals sent together can't all pass; a refused one gives
+  its place back.
+- **One card, raised only by the daemon.** The card carries the `taskPlan` ref (and the paste-plan ref when the plan
+  has paste lines, so an older app answers those as it always did). A ferret's agenda add has no field for either,
+  and the agenda refuses a plain answer to the card (`use_input_form`): only the plan routes answer it. Every card
+  says: "Ferrets here can read Ferretry's own files, so this stops misuse through their tools and page text, not a
+  ferret that goes around Ferretry."
+- **Stage, passkey, commit.** `POST /v1/sessions/:sid/task-plans/:pid/approval` with the ticks and picks. Nothing
+  ticked declines the plan; paste lines only are approved at once, with no passkey. Any ticked sign-in line is
+  STAGED (`201`, `{ stage: "tps_…", summary, expiresAt }`): the daemon snapshots its pins from Accounts now (a
+  sign-in removed, moved to another account or with other login domains than the card showed is refused) and holds
+  the canonical bytes for 2 minutes. One stage per plan: a new one drops the old. The app runs the passkey for
+  `approve-task-plan` with the stage as its subject (`POST /v1/step-up/options` binds the challenge to that
+  stage's subject; an unknown or finished stage is `404 stage_not_found`), then sends
+  `POST …/approval/:stage/commit`. The commit takes only a fresh proof for that act bound to THAT stage's subject,
+  once; without one it answers the ordinary step-up demand. It never reads the grants, an unlock or
+  `stepUpOnActions`, so the machine's token can never commit a sign-in line. All or nothing: the plan's paste rules
+  and its sign-in grants are made together, or the plan stays pending. No device with a passkey: `409
+passkey_required` ("Add a passkey in Settings › Security first"); paste lines can still be approved alone.
+- **At the machine.** `fy` stages the same way, then `POST …/approval/:stage/confirm-in-app` shows the selection on
+  the plan's OWN card (`machineStage`) for the passkey in the app; no second card is raised. Only a stage the machine
+  made can be shown this way, so "Asked at the machine" is always true; a paired device commits its own stage directly. `GET …/approval/:stage`
+  answers `waiting`, `approved`, `denied` or `expired`. The machine reads and drops only the stages it made; a
+  paired device, where the passkey lives, answers any. `DELETE …/approval/:stage` drops one, approving nothing.
+- **Revoke, one tap, no passkey.** `POST …/task-plans/:pid/revoke` with `{ lines }` ends those lines, or every line
+  with none; a plan still waiting is declined whole. Its pastes and grants go at once. A plan also ends at its
+  expiry and when its session ends, its card closed. Plans live in RAM: a restart forgets them, their pastes and
+  their grants. No route edits a plan; more lines are a new plan.
+- **Owner only, twice.** Every plan route is `caller: 'person'`, so a ferret's session credential is refused
+  `owner_only` before a body is read; the service refuses an agent caller again. `GET /v1/task-plans` and
+  `GET …/task-plans/:pid` are the owner's reads. A plan names your accounts (labels, usernames, places), so every
+  route that answers a plan or a stage's summary also needs `secrets.use`, as `GET /v1/accounts` does.
+- **The kept paste-plan routes** answer from task plans: `GET /v1/copy-plans` lists the waiting plans with paste
+  lines, as paste plans of those lines only, and `POST …/copy-plans/:pid/approve { items }` reads each item through
+  `taskPlanLineOfCopyItem`. An item a plan doesn't have is `400`; a sign-in line can never be ticked this way.
+- **Audit, never a value.** The service writes `security.changed` itself: `task-plan-raised` (one record per line:
+  its kind, uses, sign-in or route and the masked reason), `task-plan-answered` (who, the proof, the expiry, the lines
+  allowed and declined), `task-plan-line-approved` (one per allowed line: the sign-in, account, fields and uses) and
+  `task-plan-ended` (`revoked`, `expired` or `session-ended`). A restart writes nothing.
 
 ## Programs in your own profile
 

@@ -20,7 +20,8 @@ import {
   type PairingSubsystem,
   type ScratchGcSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
-import { CopyPlanService, PasteRuleService } from '../../../../src/lib/secure-copy/index.ts';
+import { PasteRuleService } from '../../../../src/lib/secure-copy/index.ts';
+import { TaskPlanService } from '../../../../src/lib/task-plans/index.ts';
 import { SecuritySettingsService } from '../../../../src/lib/security/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
@@ -753,12 +754,16 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       ids: { ruleId: () => '0'.repeat(32) },
       warn: () => undefined,
     });
-    const plans = new CopyPlanService({
+    const plans = new TaskPlanService({
       agenda: {
         raise: async () => ({ ok: false, message: 'not exercised by the surface inventory' }),
         close: async () => undefined,
       },
       rules,
+      accounts: { listing: async () => ({ accounts: [], signIns: [] }), keyOf: async () => undefined },
+      passkeys: { any: async () => false },
+      redact: async text => text,
+      audit: { record: async () => undefined },
       tell: async () => undefined,
       clock: { now: () => 0 },
       ids: { planId: () => '0'.repeat(32) },
@@ -944,6 +949,7 @@ describe('the mounted daemon surface', () => {
       8 + // 2FA keys: add, relabel and remove one, and a seed’s stage, read, passkey-bound commit, confirm-in-app and drop (docs/secrets.md)
       3 + // approving a sign-in on the phone: the list, one approval, and "Not me" (docs/input-requests.md)
       8 + // secure copy: a session's copies, the rules (list, add, remove, settings read and change), the paste plans and an answer to one (docs/secure-copy.md)
+      8 + // task plans: the list, one plan, a selection's stage, read, passkey-bound commit, confirm-in-app and drop, and revoke (docs/secure-copy.md)
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
       7 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
       9 + // the catalogs this machine publishes: list, make, change, delete, preview, add, publish, withdraw and export (docs/catalogs.md)
@@ -1291,6 +1297,15 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/copy-rules/:ruleId',
       'GET /v1/copy-plans',
       'POST /v1/sessions/:sessionId/copy-plans/:planId/approve',
+      // Task plans: read them, stage a selection (a sign-in needs its passkey to commit), confirm it in the app, revoke.
+      'GET /v1/task-plans',
+      'GET /v1/sessions/:sessionId/task-plans/:planId',
+      'POST /v1/sessions/:sessionId/task-plans/:planId/approval',
+      'GET /v1/sessions/:sessionId/task-plans/:planId/approval/:stage',
+      'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/commit',
+      'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app',
+      'DELETE /v1/sessions/:sessionId/task-plans/:planId/approval/:stage',
+      'POST /v1/sessions/:sessionId/task-plans/:planId/revoke',
       'GET /v1/sessions/:sessionId/terminals',
       'POST /v1/sessions/:sessionId/terminals',
       'GET /v1/sessions/:sessionId/terminals/:terminalId',
