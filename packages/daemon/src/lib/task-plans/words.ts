@@ -56,16 +56,20 @@ const fieldWords = (fields: readonly string[]): string => {
   return named.length <= 1 ? (named[0] ?? '') : `${named.slice(0, -1).join(', ')} and ${named.at(-1) ?? ''}`;
 };
 
-/** What one line asks, in the daemon's words, before the owner has picked an account. */
+/**
+ * What one line asks, in the daemon's words, before the owner has picked an account. It NAMES NO ACCOUNT: the card's
+ * text is the agenda's, which a device without `secrets.use` and the ferret itself can read, so it says only where the
+ * sign-in is. The account's label and username come from the plan route, which needs `secrets.use` (secrev-1261 L4).
+ */
 function lineAsk(line: TaskPlanLine): string {
   if (line.kind === 'paste') return `Paste ${routeOf(line.from, line.to)} (${uses(line.uses)})`;
   const [only] = line.candidates;
   const who =
     line.candidates.length === 1 && only !== undefined
-      ? candidateWords(only)
+      ? `the saved account ${placeWords(only.place)}`
       : line.candidates.length === 0
         ? 'an account not in Accounts'
-        : `one of ${String(line.candidates.length)} accounts`;
+        : `one of ${String(line.candidates.length)} saved accounts`;
   const what =
     line.kind === 'terminal-sign-in'
       ? `Type the password of ${who} (root there)`
@@ -85,7 +89,7 @@ export function planAsk(plan: Pick<TaskPlan, 'lines' | 'expiresAt'>): string {
   );
 }
 
-/** The card's context: one numbered line each, the ferret's words marked as its own, and the honest limit. */
+/** The card's context (agenda text, so it names no account): one numbered line each, the ferret's words marked as its own, and the honest limit. */
 export function planContext(plan: Pick<TaskPlan, 'lines'>): string {
   const room = Math.floor((MAX_AGENDA_DETAIL_LENGTH - TASK_PLAN_HONEST_LIMIT.length - 8) / plan.lines.length) - 2;
   const lines = plan.lines.map(line =>

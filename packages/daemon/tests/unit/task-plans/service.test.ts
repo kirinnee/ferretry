@@ -17,12 +17,14 @@ import {
   type TaskPlanStageId,
 } from '@ferretry/protocol';
 import should from 'should';
+import { type AgendaLedger, AgendaService } from '../../../src/lib/agenda/index.ts';
 import type { AuditEntry } from '../../../src/lib/audit/types.ts';
 import {
   type PasteRuleCaller,
   PasteRuleService,
   SecureCopyError,
   TASK_PLAN_HONEST_LIMIT,
+  TaskPlanAgendaAdapter,
   type TaskPlanCard,
   TaskPlanError,
   TaskPlanProofMissing,
@@ -1061,5 +1063,36 @@ describe('TaskPlanService: secrev-1261', () => {
 
     should(settled).match({ state: 'declined', approved: [] });
     should(w.service.get(HOST, SESSION, plan.id).lines.map(line => line.state)).eql(['declined', 'declined']);
+  });
+});
+
+describe('TaskPlanService: the card names no account (secrev-1261 L4)', () => {
+  it('should leave every account label and username out of the agenda card a terminal-only device or the ferret reads', async () => {
+    const ledgers = new Map<string, AgendaLedger>();
+    const agenda = new AgendaService(
+      {
+        read: async sessionId => ledgers.get(sessionId) ?? null,
+        transact: async (sessionId, apply) => {
+          const mutation = apply(ledgers.get(sessionId) ?? null);
+          if (mutation.ok && mutation.changed) ledgers.set(sessionId, mutation.ledger);
+          return mutation;
+        },
+      },
+      { now: () => '2026-11-01T12:00:00Z' },
+      { has: async sessionId => sessionId === SESSION },
+      { raised: async () => undefined },
+    );
+    const w = world();
+    await w.rules.load();
+    const service = new TaskPlanService({ ...w.ports, agenda: new TaskPlanAgendaAdapter(agenda) });
+
+    await service.propose(SESSION, { lines: [WORK_LINE, SITE_LINE, SUDO_LINE, PASTE] });
+    const card = JSON.stringify(ledgers.get(SESSION));
+
+    for (const name of ['GitHub work', 'GitHub home', 'kirin-work', 'kirinnee', 'GITHUB_WORK', 'GITHUB_HOME', 'KIRIN'])
+      should(card).not.containEql(name);
+    should(card).containEql('the saved account on github.com');
+    should(card).containEql('one of 2 saved accounts');
+    should(card).containEql('the saved account on sudo@kirin-box');
   });
 });

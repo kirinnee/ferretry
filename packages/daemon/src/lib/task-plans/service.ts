@@ -223,6 +223,11 @@ const tickedLines = (plan: TaskPlan): readonly number[] =>
   plan.lines.filter(line => line.state === 'approved' || line.state === 'used-up').map(line => line.line);
 
 export class TaskPlanService {
+  /**
+   * The plans, by id. A PENDING PLAN IS NEVER EDITED: no route changes its lines, ticks, expiry or session, and the only
+   * field that comes and goes while it waits is `machineStage`, which is not in the bytes a passkey is bound to. That is
+   * why a commit needs no second look at the plan: the stage's canonical bytes are the plan answered.
+   */
   readonly #plans = new Map<string, TaskPlan>();
   /** The pins of every ticked sign-in line in force, by plan and line. Dropped with the line. */
   readonly #pins = new Map<string, Map<number, TaskPlanLinePins>>();
