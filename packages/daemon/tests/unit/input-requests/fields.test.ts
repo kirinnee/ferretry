@@ -207,6 +207,32 @@ function build(
   };
 }
 
+/** One account that signs in on the login page's host, with a username and a password. */
+const GOOGLE_COM: Pick<AccountList, 'accounts' | 'signIns'> = {
+  accounts: [
+    {
+      id: 'GOOGLE_COM',
+      label: 'google_com',
+      username: 'kirin',
+      fields: { password: true, totp: false },
+      factors: [],
+      signIns: ['si_00000000000000f1'],
+      createdAt: 'a',
+      updatedAt: 'a',
+    },
+  ],
+  signIns: [
+    {
+      id: 'si_00000000000000f1',
+      account: 'GOOGLE_COM',
+      place: { kind: 'site', domains: ['accounts.google.com'], match: ['accounts.google.com'] },
+      method: { kind: 'password' },
+      createdAt: 'a',
+      updatedAt: 'a',
+    },
+  ],
+};
+
 async function raisedLogin(options: Parameters<typeof build>[0] = {}, raise: InputRaise = LOGIN) {
   const built = build(options);
   const view = await built.service.raise(SESSION, raise);
@@ -368,7 +394,7 @@ describe('a card of several fields', () => {
   });
 
   it('should fill the fields not typed from one saved login, each by its role', async () => {
-    const { service, request, writes, fills } = await raisedLogin();
+    const { service, request, writes, fills } = await raisedLogin({ listing: GOOGLE_COM });
 
     await service.deliver(
       SESSION,
@@ -379,7 +405,7 @@ describe('a card of several fields', () => {
       }),
       HOST,
     );
-    const second = await raisedLogin();
+    const second = await raisedLogin({ listing: GOOGLE_COM });
     await second.service.deliver(
       SESSION,
       second.request.id,
@@ -975,6 +1001,129 @@ describe('when the page changes under the card (#B100)', () => {
     should(reasons).eql(['target_changed', 'target_changed', 'target_changed']);
     should(await service.list(HOST)).eql([]);
     should(closed.length).equal(1);
+    should(writes).eql([]);
+  });
+});
+
+describe('a deliver types a saved account only as the card offers it now (secrev-1234 L1)', () => {
+  const account = (id: string, fields = { password: true, totp: false }) => ({
+    id,
+    label: id.toLowerCase(),
+    username: `${id.toLowerCase()}@example.com`,
+    fields,
+    factors: [],
+    signIns: [],
+    createdAt: 'a',
+    updatedAt: 'a',
+  });
+  const site = (id: string, owner: string, host: string, extra: object = {}) => ({
+    id,
+    account: owner,
+    place: { kind: 'site' as const, domains: [host], match: [host] },
+    method: { kind: 'password' as const },
+    createdAt: 'a',
+    updatedAt: 'a',
+    ...extra,
+  });
+  /** The page (accounts.google.com) is where SITE signs in, through the OKTA provider. */
+  const throughProvider = (linked: boolean): Pick<AccountList, 'accounts' | 'signIns'> => ({
+    accounts: [account('SITE', { password: false, totp: false }), account('OKTA')],
+    signIns: [
+      site('si_0000000000000a01', 'OKTA', 'login.okta.test'),
+      site(
+        'si_0000000000000a02',
+        'SITE',
+        'accounts.google.com',
+        linked
+          ? {
+              method: { kind: 'sso', name: 'Okta', via: 'OKTA' },
+              via: { account: { id: 'OKTA', label: 'okta' }, signIn: 'si_0000000000000a01' },
+            }
+          : // The migration dropped the via link: the method is kept, the provider named nowhere.
+            { method: { kind: 'sso', name: 'Okta' } },
+      ),
+    ],
+  });
+
+  it('should type nothing from the provider on a page that signs in through it, linked or not', async () => {
+    for (const linked of [true, false]) {
+      const { service, request, writes, fills } = await raisedLogin({ listing: throughProvider(linked) });
+      should(request.saved?.offers).eql([]);
+
+      const refusal = await refused(
+        service.deliver(SESSION, request.id, send(request.observedDigest ?? '', { entry: 'OKTA' }), HOST),
+      );
+
+      should(refusal.code).equal('bad_request');
+      should(refusal.message).equal('OKTA is not offered for this target; nothing was typed');
+      should(fills).eql([]);
+      should(writes).eql([]);
+    }
+  });
+
+  it('should type no 2FA code from an account that does not sign in here', async () => {
+    const elsewhere = {
+      accounts: [account('GITLAB', { password: true, totp: true })],
+      signIns: [site('si_0000000000000a03', 'GITLAB', 'gitlab.com')],
+    };
+    const code: InputRaise = {
+      ...LOGIN,
+      fields: [{ id: 'email', sensitivity: 'code', element: { kind: 'selector', selector: '#identifierId' } }],
+    };
+    const { service, request, writes, fills } = await raisedLogin({ listing: elsewhere }, code);
+    should(request.saved?.offers).eql([]);
+
+    const refusal = await refused(
+      service.deliver(SESSION, request.id, send(request.observedDigest ?? '', { entry: 'GITLAB' }), HOST),
+    );
+
+    should(refusal.code).equal('bad_request');
+    should(fills).eql([]);
+    should(writes).eql([]);
+  });
+
+  it("should refuse the account's own sign-in from another place: only the one matched here is its offer's", async () => {
+    const two = {
+      accounts: [account('GOOGLE')],
+      signIns: [
+        site('si_0000000000000a04', 'GOOGLE', 'accounts.google.com'),
+        site('si_0000000000000a05', 'GOOGLE', 'mail.google.com'),
+      ],
+    };
+    const { service, request, writes, fills } = await raisedLogin({ listing: two });
+    should(request.saved?.offers.map(offer => [offer.id, offer.signIn])).eql([['GOOGLE', 'si_0000000000000a04']]);
+    const tap = (signIn: string) =>
+      service.deliver(SESSION, request.id, send(request.observedDigest ?? '', { entry: 'GOOGLE', signIn }), HOST);
+
+    const refusal = await refused(tap('si_0000000000000a05'));
+
+    should(refusal.code).equal('bad_request');
+    should(refusal.message).equal('that sign-in of GOOGLE is not the one that signs in here; nothing was typed');
+    should(fills).eql([]);
+    should(writes).eql([]);
+    await tap('si_0000000000000a04');
+    should(writes).have.length(1);
+  });
+
+  it('should refuse a sign-in with an account picked by hand, which has none here', async () => {
+    const byHand = {
+      accounts: [account('GITLAB')],
+      signIns: [site('si_0000000000000a06', 'GITLAB', 'gitlab.com')],
+    };
+    const { service, request, writes, fills } = await raisedLogin({ listing: byHand });
+    should(request.saved?.offers.map(offer => [offer.id, offer.matched])).eql([['GITLAB', false]]);
+
+    const refusal = await refused(
+      service.deliver(
+        SESSION,
+        request.id,
+        send(request.observedDigest ?? '', { entry: 'GITLAB', signIn: 'si_0000000000000a06' }),
+        HOST,
+      ),
+    );
+
+    should(refusal.code).equal('bad_request');
+    should(fills).eql([]);
     should(writes).eql([]);
   });
 });

@@ -360,6 +360,24 @@ describe('a proposal is keyed by the SIGN-IN it is for', () => {
     should(w.audits.at(-1)).containDeep({ subject: 'GITHUB', detail: { action: 'login-recipe-auto', signIn: w.site } });
   });
 
+  it('should never give a recipe set after a clear a version an earlier recipe had (secrev-1234 L2)', async () => {
+    const w = await twoPlaces();
+    const versionOf = async () =>
+      (await w.directory.accounts.list()).signIns.find(signIn => signIn.id === w.site)?.recipeVersion;
+    await w.directory.accounts.putSignIn(w.site, { recipe: 'Open github.com' });
+    should(await versionOf()).equal(1);
+    await w.directory.accounts.putSignIn(w.site, { recipe: null });
+    // No reader shows a version without a recipe; the counter is kept behind it.
+    should(await versionOf()).be.undefined();
+    // Clearing none is no change.
+    await w.directory.accounts.putSignIn(w.site, { recipe: null });
+    // A ferret's proposal, auto-applied after the clear, is a new version: never v1 again.
+    await w.directory.accounts.putSignIn(w.site, { autoApplyRecipe: true });
+    const applied = await w.service.propose('s1', { signIn: w.site }, 'Open github.com/login', 'why');
+    should(applied.state).equal('applied');
+    should(await versionOf()).equal(3);
+  });
+
   it("should bump the sign-in's version when the owner approves", async () => {
     const w = await twoPlaces();
     const proposed = await w.service.propose('s1', { signIn: w.ssh }, 'Type the passphrase', 'why');

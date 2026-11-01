@@ -14,7 +14,7 @@ import { type LoginDelivery, LoginObserver } from '../../../src/lib/input-reques
 import type { InputCaller, InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
-import { LoginDirectory, LoginVault, totpCode } from '../../../src/lib/secrets/index.ts';
+import { LoginDirectory, LoginEntryError, LoginVault, totpCode } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments } from '../runtime/mounts/support.ts';
 
 /**
@@ -395,6 +395,25 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     should(h.writes).deepEqual([PASSWORD]);
   });
 
+  it('should drop the one-tap offer when a redrawn card is on a prompt that left line mode (secrev-1234 L3)', async () => {
+    const h = harness();
+    await savedOnce(h);
+    const { request } = await raised(h);
+    should(request.saved?.offers[0]?.matched).be.true();
+    // The same pane, program, echo and prompt: the card is redrawn, but a relay now reads what is typed.
+    h.setFacts({ ...sudoFacts(), canonical: false } as InputTargetFacts);
+
+    await refusal(
+      h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'SUDO_KIRIN_BOX'), HOST),
+    );
+    const redrawn = (await h.service.list(HOST)).find(candidate => candidate.id === request.id);
+
+    should(redrawn?.observedDigest).not.equal(request.observedDigest);
+    should(redrawn?.saved).not.have.property('match');
+    should(redrawn?.saved?.offers.some(offer => offer.matched || offer.primary === true)).be.false();
+    should(h.writes).deepEqual([]);
+  });
+
   it('should not match a look-alike program on the same host', async () => {
     const h = harness({ facts: sudoFacts('sudo-fake', 'sudo-fake') });
     await savedOnce(h);
@@ -706,6 +725,10 @@ describe('the refusals around saved logins, each with nothing typed', () => {
         },
       }),
     });
+    await h.directory.put(
+      'ANY',
+      PutLoginEntryRequestSchema.parse({ label: 'any', match: ['sudo@kirin-box'], password: PASSWORD }),
+    );
     const { request } = await raised(h);
     const refused = await refusal(
       h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'ANY'), HOST),
@@ -715,8 +738,32 @@ describe('the refusals around saved logins, each with nothing typed', () => {
     should(h.writes).deepEqual([]);
   });
 
+  it("should refuse by the vault's own words when the account changed between the check and the fill", async () => {
+    for (const [error, code] of [
+      [new LoginEntryError('unknown_login', 'there is no saved login ANY'), 'not_found'],
+      [new LoginEntryError('no_such_field', 'ANY keeps no password'), 'bad_request'],
+    ] as const) {
+      const h = harness({ logins: port => ({ ...port, fill: async () => await Promise.reject(error) }) });
+      await h.directory.put(
+        'ANY',
+        PutLoginEntryRequestSchema.parse({ label: 'any', match: ['sudo@kirin-box'], password: PASSWORD }),
+      );
+      const { request } = await raised(h);
+      const refused = await refusal(
+        h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'ANY'), HOST),
+      );
+      should(refused.code).equal(code);
+      should(refused.message).equal(`${error.message}; nothing was typed`);
+      should(h.writes).deepEqual([]);
+    }
+  });
+
   it('should refuse a saved value that would press keys, without saying what it was', async () => {
     const h = harness({ logins: port => ({ ...port, fill: async () => 'line-one\nline-two' }) });
+    await h.directory.put(
+      'ANY',
+      PutLoginEntryRequestSchema.parse({ label: 'any', match: ['sudo@kirin-box'], password: PASSWORD }),
+    );
     const { request } = await raised(h);
     const refused = await refusal(
       h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'ANY'), HOST),

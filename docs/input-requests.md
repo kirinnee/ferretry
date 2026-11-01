@@ -733,8 +733,10 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   An approval is refused (`stale_proposal`) when the recipe changed after the proposal was made, because the owner
   was shown a diff from the older text. Only an owner who turns **auto-apply** on for that ONE sign-in lets a
   proposal apply at once; that is audited (`login-recipe-auto`, with the sign-in) and marked as the ferret's.
-  **Every applied change** (an owner edit, an approval, an auto-apply) bumps that sign-in's `recipeVersion`; the
-  same text written again does not.
+  **Every applied change** (an owner edit, an approval, an auto-apply, a clear) bumps that sign-in's
+  `recipeVersion`; the same text written again, or clearing no recipe, does not. The counter is kept while there is
+  no recipe (nothing shows it then), so a recipe set after a clear never reuses a version: (sign-in, version) names
+  one text, ever.
 - **Page text never writes a recipe.** The daemon never reads a recipe off a page, and nothing a page says becomes a
   fact. A recipe changes only by the owner's edit, the owner's approval, or the owner's per-login auto-apply.
 - **GAPs and limits.**
@@ -806,9 +808,13 @@ accounts that may be picked by hand.
   hex write, the quarantine, the risk flag. The value is opened **inside the daemon**, after every check that
   can refuse without typing, and goes only into that write.
 - **A saved value never passes through the app.** The card sends the entry's handle (and the offer's `signIn`);
-  the daemon resolves it. A `signIn` that is not one of that account's is refused (`bad_request`) before anything is
-  opened or typed — the same answer whether it is another account's or none. The value always comes from the
-  account; the sign-in says where the facts of the write go.
+  the daemon resolves it. **The card's rules are the daemon's, not only the app's list**: at Send it draws the offers
+  again (`savedForFields`, over the fields the owner did not type) and refuses (`bad_request`), before anything is
+  opened or typed, an account that is not offered there now (a provider on a page that signs in through it, a 2FA
+  code from an account that does not sign in here), and a `signIn` that is not that offer's matched sign-in: one of
+  another account (the same answer whether it is another account's or none), one of this account at another place,
+  or any with an account picked by hand. The value always comes from the account; the sign-in says where the facts
+  of the write go.
 - **Which field it fills** follows the request: the password for a `secret`, the 2FA code for a `code`
   (or `private`) request, the username for a `plain` one. An entry that does not hold that field is not offered.
 - **A mismatch is never the primary.** A look-alike program, another host or another site is not matched. An

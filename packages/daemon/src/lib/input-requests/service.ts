@@ -217,6 +217,12 @@ export interface InputRequestServiceDependencies {
 
 const instant = (ms: number): string => new Date(ms).toISOString();
 
+/** The target key a card offers saved accounts for, set from the latest sighting, or cleared when it names none. */
+function rekey(held: Held, matchKey: string | undefined): void {
+  if (matchKey === undefined) delete held.matchKey;
+  else held.matchKey = matchKey;
+}
+
 /** What a card offers from a store that cannot be read: nothing, and the owner can still type. */
 const NO_ACCOUNTS: SavedListing = { accounts: [], signIns: [] };
 
@@ -860,8 +866,8 @@ export class InputRequestService {
     }
     held.names = [target.key, ...(seen.names ?? [])];
     held.binding = bindingOf(seen.facts);
-    const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
-    if (matchKey !== undefined) held.matchKey = matchKey;
+    // Always the key of what was seen NOW: a prompt that left line mode (or a page that names no key) keeps no one-tap.
+    rekey(held, targetMatchKey(seen.facts, this.deps.hostName ?? ''));
     const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
     held.request = {
       ...request,
@@ -961,12 +967,13 @@ export class InputRequestService {
       const typed = pasted === undefined ? typedValues(request, body) : new Map<string, string>();
       if (body.entry !== undefined && this.deps.logins === undefined)
         throw new InputRequestError('bad_request', 'this daemon keeps no saved logins; type the value instead');
-      // The sign-in the owner tapped must be one of the account it types from: checked before anything is opened or typed.
-      if (body.signIn !== undefined) await this.guardSignIn(body.entry as LoginEntryId, body.signIn);
       const kept = body.save === undefined ? undefined : this.guardSave(request, typed);
       // The owner's card is older than the request (it was redrawn since): nothing is wrong with the target, so
       // nothing is counted; the card reads the request again and the owner checks it before sending.
       if (body.observedDigest !== request.observedDigest) throw targetRebound(request.target.kind);
+      // A saved account is typed only as the card offers it NOW, and the tapped sign-in must be its offer's: the rules of
+      // the card are the daemon's, not only the app's list. Checked before anything is opened or typed.
+      if (body.entry !== undefined) await this.guardOffered(held, body.entry, body.signIn, typed);
       const submitted = body.submit && request.submit !== 'agent';
       const looked = await this.deps.target.observe(request.sessionId, request.target, request.fields.map(pointerOf));
       const seen =
@@ -1205,15 +1212,37 @@ export class InputRequestService {
   }
 
   /**
-   * A deliver's `signIn` must be one of `entry`'s account, or nothing is typed: the one tap is for that account's sign-in,
-   * and the facts of the write go to it. The same refusal whether the sign-in is another account's or none at all.
+   * A deliver that types from a saved account types only what the card would offer NOW, drawn by the same
+   * `savedForFields` over the fields the owner did not type: never a 2FA code from an account that does not sign in here,
+   * nothing by hand on a page a sign-in reaches through a provider, never a provider where it is not matched. A
+   * `signIn` must be one of `entry`'s account (the same refusal whether it is another account's or none at all), and
+   * the one the daemon matched here for that offer: the one tap is that sign-in's, and the facts of the write go to it.
    */
-  private async guardSignIn(entry: LoginEntryId, signIn: SignInId): Promise<void> {
+  private async guardOffered(
+    held: Held,
+    entry: LoginEntryId,
+    signIn: SignInId | undefined,
+    typed: ReadonlyMap<string, string>,
+  ): Promise<void> {
     const listing = await this.deps.logins?.listing().catch(() => undefined);
     if (listing === undefined)
       throw new InputRequestError('unavailable', 'Ferretry could not read the saved accounts, so nothing was typed');
-    if (listing.signIns.find(each => each.id === signIn)?.account !== entry)
+    if (!listing.accounts.some(account => account.id === entry))
+      throw new InputRequestError('not_found', `there is no saved login ${entry}; nothing was typed`);
+    if (signIn !== undefined && listing.signIns.find(each => each.id === signIn)?.account !== entry)
       throw new InputRequestError('bad_request', `that sign-in is not one of ${entry}; nothing was typed`);
+    // At least one: an `entry` with every field typed was already refused (`typedValues`).
+    const filled = held.request.fields.filter(field => !typed.has(field.id));
+    const offer = savedForFields(filled, held.matchKey, listing, { hint: held.hint }).offers.find(
+      each => each.id === entry,
+    );
+    if (offer === undefined)
+      throw new InputRequestError('bad_request', `${entry} is not offered for this target; nothing was typed`);
+    if (signIn !== undefined && offer.signIn !== signIn)
+      throw new InputRequestError(
+        'bad_request',
+        `that sign-in of ${entry} is not the one that signs in here; nothing was typed`,
+      );
   }
 
   /** The value a saved login types for one field. Refuses with the entry's name, never its value. */
@@ -1410,8 +1439,8 @@ export class InputRequestService {
     const { request } = held;
     held.rebinds += 1;
     held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
-    const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
-    if (matchKey !== undefined) held.matchKey = matchKey;
+    // Always the key of what was seen NOW: a prompt that left line mode (or a page that names no key) keeps no one-tap.
+    rekey(held, targetMatchKey(seen.facts, this.deps.hostName ?? ''));
     // A card redrawn onto another document than the one it was raised on says so, above any other flag but red.
     const moved =
       seen.facts.kind === 'browser' && held.raisedOn !== undefined && seen.facts.navigationId !== held.raisedOn;
