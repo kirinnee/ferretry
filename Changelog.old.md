@@ -1,3 +1,21 @@
+## [4.189.0](https://github.com/kirinnee/ferretry/compare/v4.188.0...v4.189.0) (2026-10-31)
+
+### Features
+
+* **input:** the code sensitivity for one-time codes, and high-priority code pushes (R0b) ([#1206](https://github.com/kirinnee/ferretry/issues/1206)) ([3e32166](https://github.com/kirinnee/ferretry/commit/3e32166dbf306fe56387ff73ccad074c05122af4))
+
+## [4.188.0](https://github.com/kirinnee/ferretry/compare/v4.187.1...v4.188.0) (2026-10-31)
+
+### Features
+
+* **daemon:** one fast search over cards and agenda items, with a related check ([#1196](https://github.com/kirinnee/ferretry/issues/1196)) ([5b1dc02](https://github.com/kirinnee/ferretry/commit/5b1dc02bb2124cd3e16dbacbc52e92e36e15607a))
+
+## [4.187.1](https://github.com/kirinnee/ferretry/compare/v4.187.0...v4.187.1) (2026-10-31)
+
+### Fixes
+
+* **pwa:** no band above the composer in a chat with no agenda ([#1212](https://github.com/kirinnee/ferretry/issues/1212)) ([a14cb7a](https://github.com/kirinnee/ferretry/commit/a14cb7a2e6d69dd24e806e8851a763d475ed2792))
+
 ## [4.187.0](https://github.com/kirinnee/ferretry/compare/v4.186.0...v4.187.0) (2026-10-31)
 
 ### Features

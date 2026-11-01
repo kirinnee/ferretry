@@ -12,11 +12,15 @@ opens an agenda item only if it needs something from them to fix it. The ferret'
 (`AGENDA_INSTRUCTION`, [notifications.md](notifications.md#agenda-mode)).
 
 **A question the owner asks is answered on the agenda too.** The owner reads the agenda, not every reply, so an answer
-given only in chat can be missed. When the owner asks a question, the ferret answers in chat **and** raises one
-`--kind info` item holding the answer: the premise is the question and the situation, the ask or body is the answer,
-short and plain, readable with no chat open. The owner closes it once read. It is one item per question; a follow-up on
-the same topic edits that item (`fy agenda edit`) rather than adding another. This is the one case where an item carries
-no ask of the owner. It is still information only the ferret can give, and it is not tracking: no "please test/verify".
+given only in chat can be missed. When the owner asks a question ABOUT an open item ("[re !A163 …] what is X?"), the
+ferret answers ON that item: `fy agenda edit !A163 --question-answer "<text>"` brings it back with an "Answer to your
+question" block above its own options, which stay visible and answerable. **A question item keeps its own answer shape
+until the owner answers it with one of its answers, or the ferret closes it with `done`.** The owner's reply never turns
+it into a Got it, and an answer is never a separate `--kind info` item standing in for it: tapping Got it on an info item
+resolves only that info item, never the question it was about. A question the owner asks about nothing in particular
+gets one `--kind info` item holding the answer (premise = the question, ask or body = the answer, readable with no chat
+open); a follow-up edits that item rather than adding another. `fy agenda done` on a question the owner has not
+answered asks for `--reason`, and the item reads as **withdrawn**, never as answered.
 
 The daemon owns the model: the state machine is `packages/daemon/src/lib/agenda/state-machine.ts`,
 the wire contract is `packages/protocol/src/lib/agenda.ts`. This page says what they mean.

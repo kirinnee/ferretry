@@ -1,5 +1,11 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import { type HarnessDialog, MCP_OAUTH_PATH, type PermissionRequest, type SessionView } from '@ferretry/protocol';
+import {
+  DAEMON_FEATURES,
+  type HarnessDialog,
+  MCP_OAUTH_PATH,
+  type PermissionRequest,
+  type SessionView,
+} from '@ferretry/protocol';
 import { type FyApiClient, FyHttpError } from '@ferretry/protocol/client';
 import { Copy } from 'lucide-react';
 import { type ComponentProps, cloneElement, type ReactElement } from 'react';
@@ -37,6 +43,7 @@ import { SessionWorkspace } from '../../src/features/workspace/session-workspace
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
 import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
+import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
 import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
 import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -48,7 +55,7 @@ import {
   type SessionChatClient,
   SessionChatPage,
 } from '../../src/lib/pages/session-chat-page.tsx';
-import { DaemonClientProvider } from '../../src/lib/store.tsx';
+import { type AppStore, DaemonClientProvider, StoreProvider } from '../../src/lib/store.tsx';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import { createSurfaceEventHub } from '../../src/lib/surface-control.ts';
 import { DaemonUsageStore } from '../../src/lib/usage-store.ts';
@@ -69,6 +76,7 @@ import {
 } from './board-support.ts';
 import { factoryFor } from './features/fleet/mcp-sign-in-support.ts';
 import '../support/dom.ts';
+import { healthOf } from '../support/health.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
 import { settleUntil } from '../support/settle.ts';
@@ -128,14 +136,16 @@ const withSessionSearch = (page: ReactElement<ComponentProps<typeof SessionChatP
 const renderSessionChatPage = (
   page: ReactElement<ComponentProps<typeof SessionChatPage>>,
   daemon?: (connection: unknown) => Promise<FyApiClient>,
+  store?: AppStore,
 ) => {
-  const tree = withSessionSearch(
+  const searched = withSessionSearch(
     cloneElement(page, {
       workspaceLayouts: page.props.workspaceLayouts ?? new WorkspaceLayoutStore(NO_STORAGE),
       workspaceRails: page.props.workspaceRails ?? new WorkspaceRailPreferenceStore(NO_STORAGE),
       formFactor: page.props.formFactor ?? (page.props.presentation === 'sheet' ? 'phone' : 'desktop'),
     }),
   );
+  const tree = store === undefined ? searched : <StoreProvider store={store}>{searched}</StoreProvider>;
   return render(daemon === undefined ? tree : <DaemonClientProvider client={daemon}>{tree}</DaemonClientProvider>);
 };
 
@@ -1639,6 +1649,52 @@ describe('SessionChatPage', () => {
       expect(page.root.findAllByType(BoardSideTab)).toHaveLength(0);
     } finally {
       run(() => page.unmount());
+    }
+  });
+
+  test('the composer searches the daemon’s work only on a machine whose health offers it, and names each card’s project', async () => {
+    const current = sessionView('shared', { config: { projectId: PROJECT } });
+    const wires = new AgendaWireDirectory();
+    const board = new DaemonBoardStore(
+      fakePort({
+        projects: async () => [{ id: PROJECT, name: 'Relay', path: '/work/relay', laneSet: laneSetFor() }],
+      }),
+      fakeEnvironment(),
+    );
+    const store = { agendaWire: wires, board } as unknown as AppStore;
+    const mountPage = () =>
+      renderSessionChatPage(
+        <SessionChatPage
+          board={board}
+          client={client([], current)}
+          connection={alpha}
+          context={contextDependencies()}
+          entries={[]}
+          onSessionChange={() => undefined}
+          presentation="pane"
+          session={current}
+        />,
+        fakeDaemon().factory,
+        store,
+      );
+
+    const without = mountPage();
+    try {
+      await flush();
+      expect(without.root.findByType(Composer).props.autocompleteWorkSearch).toBeUndefined();
+    } finally {
+      run(() => without.unmount());
+    }
+
+    wires.note(alpha.daemonId, { kind: 'read', health: healthOf('4.130.0', [DAEMON_FEATURES.workSearch]) });
+    const offered = mountPage();
+    try {
+      await flush();
+      const props = offered.root.findByType(Composer).props;
+      expect(props.autocompleteWorkSearch).toBeDefined();
+      expect(props.autocompleteProjectNames.get(PROJECT)).toBe('Relay');
+    } finally {
+      run(() => offered.unmount());
     }
   });
 

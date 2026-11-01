@@ -36,7 +36,7 @@ export const NOTIFICATION_PAYLOAD_VERSION = 1;
  * status bar from its alpha alone (`scripts/local/gen-pwa-icons.sh`). Same-origin paths, so a push
  * never names an image service. Platforms without one of them (iOS has no badge) simply ignore it.
  */
-export const NOTIFICATION_ICON = '/icons/icon-192.png';
+export const NOTIFICATION_ICON = '/icons/icon-any-192.png';
 export const NOTIFICATION_BADGE = '/icons/badge-96.png';
 
 /** The mark, as notification options. */
@@ -66,7 +66,28 @@ export interface NotificationPayload {
   /** Absent on a fleet summary. */
   readonly sessionId?: string;
   readonly kind?: PushNotificationKind;
+  /** A high-priority push from a daemon (a one-time code waiting): see {@link urgentNotificationOptions}. */
+  readonly urgency?: 'high';
 }
+
+/**
+ * What a HIGH push asks the platform for, beyond an ordinary one: stay on screen until the reader acts
+ * (`requireInteraction`), sound and buzz again even though a notification with this tag may be showing (`renotify`,
+ * `silent: false`, `vibrate`). Each platform honours what it supports and ignores the rest: Chrome on Android and
+ * desktop keep it and sound it; iOS and iPadOS web apps show it but expose no interruption level, so a Focus mode can
+ * still hold it (docs/notifications.md, "High priority"). An ordinary push asks for nothing new.
+ */
+export interface UrgentNotificationOptions {
+  readonly requireInteraction?: true;
+  readonly renotify?: true;
+  readonly silent?: false;
+  readonly vibrate?: readonly number[];
+}
+
+export const urgentNotificationOptions = (payload: Pick<NotificationPayload, 'urgency'>): UrgentNotificationOptions =>
+  payload.urgency === 'high'
+    ? { requireInteraction: true, renotify: true, silent: false, vibrate: [200, 100, 200] }
+    : {};
 
 /** Projects a planned spec into the payload the OS and the wire both accept. */
 export const notificationPayload = (spec: NotificationSpec): NotificationPayload => ({
@@ -181,6 +202,7 @@ export const showGroupedNotification = async (
     tag: payload.tag,
     renotify: false,
     data: plan.data,
+    ...urgentNotificationOptions(payload),
   };
   await registration.showNotification(payload.title, options);
   return 'shown';

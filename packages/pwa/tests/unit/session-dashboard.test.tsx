@@ -134,8 +134,8 @@ describe('SessionDashboard', () => {
     expect(view.root.findAllByProps({ 'aria-label': 'Focus folder ferretry' })).toHaveLength(0);
     expect(view.root.findByProps({ children: 'All folders' }).props.className).toContain('hidden sm:inline');
     expect(view.root.findByProps({ children: 'New session' }).props.className).toContain('hidden sm:inline');
-    clickLink(view.root.findByProps({ href: '/d/dashboard-daemon' }));
-    expect(events).toEqual(['exit', '/d/dashboard-daemon']);
+    clickLink(view.root.findByProps({ href: '/d/dashboard-daemon/sessions' }));
+    expect(events).toEqual(['exit', '/d/dashboard-daemon/sessions']);
   });
 
   it('distinguishes loading, unscoped empty, scoped empty, recovery, and errors', () => {

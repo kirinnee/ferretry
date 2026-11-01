@@ -92,6 +92,23 @@ describe('the input request routes', () => {
     should(response.body).not.containEql(VALUE);
   });
 
+  it('should refuse a deliver naming a 2FA key, and type nothing, until this daemon makes codes per key', async () => {
+    const { dispatch, writes, requestId, digest } = await served();
+    const body = {
+      deliveryId: crypto.randomUUID(),
+      observedDigest: digest,
+      entry: 'SUDO_X',
+      factor: 'tf_000000000001',
+      submit: true,
+    };
+
+    const response = await dispatch.dispatch(post(path(requestId, 'deliver'), body));
+
+    should(response.status).equal(400);
+    should(jsonBody(response).code).equal('bad_request');
+    should(writes).eql([]);
+  });
+
   it('should deliver for a paired device', async () => {
     const { dispatch, writes, requestId, digest } = await served();
 

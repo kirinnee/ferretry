@@ -22,7 +22,7 @@
  */
 
 import type { AgendaCardAnswer, AgendaItem } from '@ferretry/protocol';
-import { ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { useQuoteMenu } from '../../components/quote-menu.tsx';
 import { useDoneClose } from '../../hooks/use-done-close.ts';
@@ -40,6 +40,7 @@ import { AgendaItemCard } from './agenda-item-card.tsx';
 import { AgendaItemHistory } from './agenda-item-history.tsx';
 import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
+import { StackPager } from './stack-pager.tsx';
 import { useDoneCloseFlow } from './use-done-close-flow.ts';
 
 export interface AgendaItemViewProps {
@@ -76,6 +77,11 @@ export interface AgendaItemViewProps {
    * row's place, and the arrow keys answer nothing.
    */
   readonly settled?: ReactNode;
+  /**
+   * Where a question the owner replied to stands (`agenda-settled.tsx`): drawn above the answer row, which stays
+   * live — the reply does not answer the question, so its own options stay answerable.
+   */
+  readonly parkedNote?: ReactNode;
   /** The form an `input` item is answered with (`InputCardHost`): drawn in the card, in the answer row's place. */
   readonly inputForm?: ReactNode;
   /** A ferret's paste plan (`CopyPlanHost`): drawn in the card, in the answer row's place. */
@@ -134,6 +140,7 @@ export function AgendaItemView({
   closeLabel = 'Back to the chat',
   quoteScope = null,
   settled,
+  parkedNote,
   inputForm,
   planForm,
   daemonId,
@@ -210,27 +217,7 @@ export function AgendaItemView({
                   <AgendaStatusPill status={status} />
                 </span>
               )}
-              <button
-                aria-label="Previous item"
-                className="fy-item-view__step"
-                disabled={onPrevious === undefined}
-                onClick={onPrevious}
-                type="button"
-              >
-                <ChevronLeft aria-hidden="true" size={18} />
-              </button>
-              <span className="fy-item-view__where" data-agenda-where="">
-                {position.index + 1} of {position.total}
-              </span>
-              <button
-                aria-label="Next item"
-                className="fy-item-view__step"
-                disabled={onNext === undefined}
-                onClick={onNext}
-                type="button"
-              >
-                <ChevronRight aria-hidden="true" size={18} />
-              </button>
+              <StackPager index={position.index} onNext={onNext} onPrevious={onPrevious} total={position.total} />
               {onSnooze === undefined ? null : (
                 <AgendaSnoozeMenu disabled={busy} now={now} onSnooze={onSnooze} triggerClass="fy-item-view__step" />
               )}
@@ -266,6 +253,7 @@ export function AgendaItemView({
             {...(onProgress === undefined ? {} : { onProgress })}
             {...(doneClose === undefined ? {} : { doneClose })}
             {...(settled === undefined ? {} : { settled })}
+            {...(parkedNote === undefined ? {} : { parkedNote })}
             {...(inputForm === undefined ? {} : { inputForm })}
             {...(planForm === undefined ? {} : { planForm })}
             {...(quoteScope === null ? {} : { onRequestChanges: requestChanges })}

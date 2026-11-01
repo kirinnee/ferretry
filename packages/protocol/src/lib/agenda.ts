@@ -364,6 +364,11 @@ export const AgendaBriefShape = {
   steps: z.array(prose(MAX_AGENDA_STEP_LENGTH)).min(1).max(MAX_AGENDA_STEPS).optional(),
   /** Instructions that are not a list, as one Markdown document. */
   body: prose(MAX_AGENDA_BODY_LENGTH).optional(),
+  /**
+   * The ferret's answer to the owner's QUESTION about the item, shown above the item's own options, which stay live:
+   * the ask is still waiting for the owner's own answer, and this block never closes it.
+   */
+  questionAnswer: prose(MAX_AGENDA_BODY_LENGTH).optional(),
 };
 
 /** The structured fields of an item, alone. */
@@ -388,6 +393,7 @@ export const agendaBriefOf = (value: AgendaBrief): AgendaBrief => ({
   ...(value.links === undefined ? {} : { links: value.links }),
   ...(value.steps === undefined ? {} : { steps: value.steps }),
   ...(value.body === undefined ? {} : { body: value.body }),
+  ...(value.questionAnswer === undefined ? {} : { questionAnswer: value.questionAnswer }),
 });
 
 /** Every option label an item offers: its ask's options, each question's options and its `choose` answers. */
@@ -571,6 +577,7 @@ export const AgendaRevisableFieldSchema = z.enum([
   'links',
   'steps',
   'body',
+  'questionAnswer',
 ]);
 export type AgendaRevisableField = z.infer<typeof AgendaRevisableFieldSchema>;
 
@@ -696,6 +703,16 @@ export const AgendaCopyPlanRefSchema = z.strictObject({ planId: z.string().regex
 export type AgendaCopyPlanRef = z.infer<typeof AgendaCopyPlanRefSchema>;
 
 /**
+ * The approve-on-phone card an `info` item presents (phone-approval.ts): nothing typed, nothing of the ferret's shown,
+ * answered by the owner's phone and settled only by what the daemon sees. Only the daemon raises one. An app from
+ * before these cards drops the ref and shows a plain info card with the daemon's subject, which holds no number.
+ */
+export const AgendaPhoneApprovalRefSchema = z.strictObject({
+  id: z.string().regex(/^pa_[0-9a-f]{24}$/u, 'a phone approval id is pa_ and 24 hex digits'),
+});
+export type AgendaPhoneApprovalRef = z.infer<typeof AgendaPhoneApprovalRefSchema>;
+
+/**
  * What an `input` card may not be, and must be: it carries its request, and no ask, answers, steps or
  * confirmation of its own (the form answers it), and it is never a notice. Anything but an `input` card
  * carries no request.
@@ -789,6 +806,8 @@ const AgendaItemBaseShape = {
   input: AgendaInputRefSchema.optional(),
   /** The paste plan a card presents: the plan's own form answers it, never the generic answer. */
   copyPlan: AgendaCopyPlanRefSchema.optional(),
+  /** The approve-on-phone card an `info` item presents; only an `info` item carries one. */
+  phoneApproval: AgendaPhoneApprovalRefSchema.optional(),
 };
 
 export const AgendaItemSchema = z
@@ -821,6 +840,13 @@ export const AgendaItemSchema = z
     }
     for (const problem of agendaInputProblems(value)) {
       context.addIssue({ code: 'custom', message: problem, path: ['input'] });
+    }
+    if (value.phoneApproval !== undefined && value.kind !== 'info') {
+      context.addIssue({
+        code: 'custom',
+        message: 'only an info card presents a phone approval',
+        path: ['phoneApproval'],
+      });
     }
     if (value.sourceSeq !== undefined && value.source !== 'agent-raised') {
       context.addIssue({ code: 'custom', message: 'sourceSeq is valid only for agent-raised agenda items' });

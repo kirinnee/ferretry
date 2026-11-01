@@ -29,6 +29,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
+import type { AgendaId } from '@ferretry/protocol';
 import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, Search, SkipForward, X, Zap } from 'lucide-react';
 import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
@@ -78,6 +79,7 @@ import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { daemonAgendaPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
+import { filterToTest } from '../../lib/to-test-inbox.ts';
 import { AgendaCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
@@ -93,6 +95,7 @@ import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
 import { ClearAgentsControl } from './clear-agents.tsx';
+import { type ToTestHost, ToTestList, useToTestAnswers } from './to-test-rows.tsx';
 
 /**
  * Where a card came from: the FERRET that asked (its callsign, else the row's title), what it is working
@@ -725,6 +728,18 @@ export interface AgendaInboxPageProps {
   readonly from?: InboxSource | null;
   /** Lifts the source filter: the host drops `?from=` from the address. */
   readonly onClearFrom?: () => void;
+  /**
+   * An item a notification tap asked for: its card opens as soon as it is among the open ones. `settled` says the
+   * machine's conversations have been read, so a missing card means the item is no longer open — and then
+   * `onOpenSettled(false)` lets the host send the reader to the conversation instead.
+   */
+  readonly open?: {
+    readonly daemonId: DaemonId;
+    readonly sessionId: string;
+    readonly id: AgendaId;
+    readonly settled: boolean;
+  } | null;
+  readonly onOpenSettled?: (opened: boolean) => void;
   /** Starts the "With ferrets" section open (a harness). */
   readonly withFerretsOpen?: boolean;
   /**
@@ -734,7 +749,12 @@ export interface AgendaInboxPageProps {
   readonly renderComposer?: (card: InboxCard) => ReactNode;
   /** How "Clear all from agent ferrets" reaches the machines. Absent: the Agents filter has no such button. */
   readonly clearPort?: ClearPort;
+  /** How the "Ready to test" items move their cards (the Board's own verbs). Absent: they list, and refuse to move. */
+  readonly toTestHost?: ToTestHost;
 }
+
+/** How long a tapped notification's item may take to appear among the open ones before its chat opens instead. */
+const OPEN_WAIT_MS = 5_000;
 
 /** Everything a row needs besides the card itself. */
 interface RowEnv {
@@ -897,17 +917,22 @@ function Section({
   env,
   open,
   onToggle,
+  extra = null,
+  extraCount = 0,
 }: {
   readonly id: string;
   readonly title: string;
   readonly groups: readonly FerretGroup[];
   readonly env: RowEnv;
+  /** Rows of another kind that sit in this section, above its ferrets (the cards to test). */
+  readonly extra?: ReactNode;
+  readonly extraCount?: number;
   /** Present when the section folds. */
   readonly open?: boolean;
   readonly onToggle?: () => void;
 }) {
   const bodyId = useId();
-  const count = groups.reduce((total, group) => total + group.items.length + group.notices.length, 0);
+  const count = groups.reduce((total, group) => total + group.items.length + group.notices.length, extraCount);
   const shown = open ?? true;
   const heading =
     onToggle === undefined ? (
@@ -941,6 +966,7 @@ function Section({
       {heading}
       {shown ? (
         <ul className="fy-inbox-section__groups" id={bodyId}>
+          {extra === null ? null : <li className="fy-inbox-section__extra">{extra}</li>}
           {groups.map(group => (
             <GroupView env={env} group={group} key={group.key} />
           ))}
@@ -991,11 +1017,14 @@ export function AgendaInboxPage({
   readConversation,
   reducedMotion,
   initialOpen,
+  open = null,
+  onOpenSettled,
   from = null,
   onClearFrom,
   withFerretsOpen = false,
   renderComposer,
   clearPort,
+  toTestHost,
 }: AgendaInboxPageProps) {
   const headingId = useId();
   const [cursor, setCursor] = useState<string | null>(null);
@@ -1018,6 +1047,11 @@ export function AgendaInboxPage({
   const visible = filterInboxCards(inbox.cards, listFilter);
   const withFerret = filterInboxCards(inbox.withFerret, listFilter);
   const sections = useMemo(() => inboxSections(visible, withFerret), [visible, withFerret]);
+  const toTestRows = useMemo(
+    () => filterToTest(inbox.toTest, { machine: machineFilter, query, agendaOnly: from !== null || kind !== 'all' }),
+    [inbox.toTest, machineFilter, query, from, kind],
+  );
+  const toTestAnswers = useToTestAnswers(toTestHost, phone);
   const filtered = machineFilter !== null || query !== '' || from !== null || kind !== 'all';
   const snoozed = parkedBy(inbox.parked, 'snoozed');
   const replied = parkedBy(inbox.parked, 'replied');
@@ -1080,9 +1114,9 @@ export function AgendaInboxPage({
     row?.scrollIntoView?.({ block: 'nearest' });
   }, [selectedKey, rowRefs]);
 
-  const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length;
-  const empty = inbox.cards.length === 0 && inbox.withFerret.length === 0;
-  const nothingForYou = inbox.cards.length === 0;
+  const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length + inbox.toTest.length;
+  const empty = inbox.cards.length === 0 && inbox.withFerret.length === 0 && inbox.toTest.length === 0;
+  const nothingForYou = inbox.cards.length === 0 && inbox.toTest.length === 0;
   const updating =
     filter === 'open'
       ? inbox.reading && !empty
@@ -1098,6 +1132,40 @@ export function AgendaInboxPage({
     setDeckAt(order[0] ?? null);
     setDeckOpen(true);
   };
+  // A tapped notification's item opens as a card once it is among the open ones; a few seconds without it
+  // (or a settled read that lacks it) mean it is no longer open, and the host takes the reader to its chat.
+  const openedFor = useRef<string | null>(null);
+  const wantedKey = open === null ? null : `${open.daemonId}\u0000${open.sessionId}\u0000${open.id}`;
+  const openSettled = open?.settled === true;
+  const openCard =
+    open === null
+      ? undefined
+      : inbox.cards.find(
+          card => card.daemonId === open.daemonId && card.view.config.id === open.sessionId && card.item.id === open.id,
+        );
+  const openCardKey = openCard?.key;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `openAt` and the host callback are re-made every render; the target and what it resolves to are the inputs
+  useEffect(() => {
+    if (wantedKey === null || openedFor.current === wantedKey) return;
+    if (openCardKey !== undefined) {
+      openedFor.current = wantedKey;
+      setFilter('open');
+      openAt(openCardKey);
+      onOpenSettled?.(true);
+      return;
+    }
+    const giveUp = (): void => {
+      openedFor.current = wantedKey;
+      onOpenSettled?.(false);
+    };
+    if (openSettled && !inbox.reading) {
+      giveUp();
+      return;
+    }
+    const timer = setTimeout(giveUp, OPEN_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [wantedKey, openCardKey, openSettled, inbox.reading]);
+
   // An open item is the deck's top card, on a phone and a wide screen alike.
   const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || atEnd);
 
@@ -1151,7 +1219,8 @@ export function AgendaInboxPage({
     </header>
   );
 
-  const nothingShown = sections.stopped.length + sections.needsYou.length + sections.withFerrets.length === 0;
+  const nothingShown =
+    sections.stopped.length + sections.needsYou.length + sections.withFerrets.length + toTestRows.length === 0;
   const openBody =
     empty && !filtered ? (
       inbox.reading ? (
@@ -1180,6 +1249,16 @@ export function AgendaInboxPage({
         )}
         {sections.needsYou.length === 0 ? null : (
           <Section env={env} groups={sections.needsYou} id="needs-you" title="Needs you" />
+        )}
+        {toTestRows.length === 0 ? null : (
+          <Section
+            env={env}
+            extra={<ToTestList answers={toTestAnswers} now={now} onNavigate={onNavigate} rows={toTestRows} />}
+            extraCount={toTestRows.length}
+            groups={[]}
+            id="to-test"
+            title="To test"
+          />
         )}
         {sections.withFerrets.length === 0 ? null : (
           <Section
@@ -1298,6 +1377,7 @@ export function AgendaInboxPage({
       ) : (
         openBody
       )}
+      {toTestAnswers.composer}
       <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
     </main>
   );

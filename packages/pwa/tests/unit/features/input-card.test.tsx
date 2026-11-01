@@ -102,6 +102,20 @@ describe('the card', () => {
     expect(q('[data-input-save]')).toBeNull();
   });
 
+  it('shows a one-time code as it is typed, says the ferret can see it, flags it neutral and offers no Save', async () => {
+    const { q } = await show(requestOf('code', { saved: saved({ saves: undefined }) }));
+    const field = must(q<HTMLInputElement>('[data-input-value]'), 'the field');
+
+    expect(field.type).toBe('text');
+    expect(field.getAttribute('autocomplete')).toBe('one-time-code');
+    // A device code may hold letters: no numeric pad.
+    expect(field.getAttribute('inputmode')).toBeNull();
+    expect(q('[data-input-reveal]')).toBeNull();
+    expect(q('[data-input-risk]')?.getAttribute('data-input-risk')).toBe('neutral');
+    expect(q('[data-input-risk]')?.textContent).toContain('One-time code: the ferret can see it.');
+    expect(q('[data-input-lock]')).toBeNull();
+    expect(q('[data-input-save]')).toBeNull();
+  });
   it('says a plain answer is not secret', async () => {
     const { q } = await show(requestOf('plain'));
 

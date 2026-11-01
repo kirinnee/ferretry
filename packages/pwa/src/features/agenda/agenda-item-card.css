@@ -336,6 +336,20 @@
   margin: 0;
 }
 
+/* The ferret's answer to a question the owner asked about this item: above the options, which stay live. */
+.fy-card__answered {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--ok-bg, var(--accent-soft));
+}
+.fy-card__answered .fy-card__label {
+  color: var(--ok, var(--accent-strong));
+}
+
 /* "What I need from you": exactly the ask, in one framed block under the situation — the question, the options or
    steps or numbered answers, and the plain instruction last. A neutral surface with a strong edge, so it reads apart
    from the two tinted situation blocks above it in both themes. */

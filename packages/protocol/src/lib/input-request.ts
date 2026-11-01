@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SignInIdSchema, TwoFactorIdSchema } from './account-ids.ts';
 import { AgendaIdSchema } from './agenda.ts';
 import { BrowserChallengeProviderSchema, BrowserRefSchema } from './browser-target.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
@@ -48,7 +49,7 @@ export const INPUT_SHORT_LOCK_SECONDS = 10;
  *   the value after submit and move on (a saved login's observed facts).
  * - `probed-field`: one password field on a secure page into which Ferretry typed a throwaway value, did not find it in
  *   the page's text, and cleared it again, with no request or socket it could see and no navigation meanwhile.
- * - `code`: a one-time code shows as it is typed.
+ * - `code`: a `private` value shows as it is typed (a one-time `code` field has no lock at all).
  * - `not-proven`: nothing proved that this target hides what is typed.
  */
 export const INPUT_LOCK_REASONS = ['hidden-terminal', 'proven-field', 'probed-field', 'code', 'not-proven'] as const;
@@ -66,7 +67,7 @@ export const INPUT_LOCK_WORDS: Readonly<Record<InputLockReason, string>> = {
   'hidden-terminal': 'A local password prompt (sudo, su, doas or passwd) with typing hidden.',
   'proven-field': 'A password field Ferretry has seen hide the value and move on after signing in.',
   'probed-field': "A password field: a test value Ferretry typed did not show in the page's text.",
-  code: 'A one-time code shows on screen as it is typed.',
+  code: 'This value shows on screen as it is typed.',
   'not-proven': 'Ferretry has not proven that this target hides what is typed.',
 };
 
@@ -113,14 +114,32 @@ export const InputDeliveryIdSchema = z.uuid();
 export type InputDeliveryId = z.infer<typeof InputDeliveryIdSchema>;
 
 /**
- * How careful the daemon is with what is typed:
+ * How careful the daemon is with what is typed, most careful first:
  * - `secret`: a password, passphrase or token. Echo must be off or the field a password field; masked
  *   from reads; never shown back; may be saved to the secret store.
- * - `private`: an OTP, 2FA code, username or e-mail. May be visible on screen; masked from reads for a window.
- * - `plain`: nothing sensitive (a hostname, "y"). Only the target binding is checked.
+ * - `private`: a value that is not one-time but shows on screen as it is typed (rare). Masked from reads for a
+ *   window, and the target is kept from the ferret for the full lock.
+ * - `code`: a one-time code (2FA, an e-mail or SMS verification code, a device code). NOT secret: the ferret may see
+ *   it, and may type one itself. No lock and no masking, except a code the DAEMON made from a saved 2FA seed: no tool,
+ *   result or route RETURNS it, and its text is masked from text reads; the ferret may still see it on screen (a
+ *   screenshot, a scripted read), as the owner allowed (docs/input-requests.md, "One-time codes").
+ * - A `code` field the daemon sees going into a password field or prompt is handled as `secret` instead.
+ * - `plain`: nothing sensitive (a username, a hostname, "y"). Only the target binding is checked.
  */
-export const InputSensitivitySchema = z.enum(['secret', 'private', 'plain']);
+export const INPUT_SENSITIVITIES = ['secret', 'private', 'code', 'plain'] as const;
+export const InputSensitivitySchema = z.enum(INPUT_SENSITIVITIES);
 export type InputSensitivity = z.infer<typeof InputSensitivitySchema>;
+
+/**
+ * A sensitivity as a CLIENT reads it off a request: one this build does not know (a newer daemon's) reads as
+ * `secret`, the most careful, so a card is never drawn or answered as `plain` because its kind is new. A build
+ * from before `code` existed has the closed enum here and refuses the whole request instead: also closed, never
+ * plain. The daemon never parses a request, so this leniency is a reader's only.
+ */
+export const ReadInputSensitivitySchema = z.preprocess(
+  raw => (typeof raw === 'string' && !(INPUT_SENSITIVITIES as readonly string[]).includes(raw) ? 'secret' : raw),
+  InputSensitivitySchema,
+);
 
 /** Who presses Enter: the agent afterwards, the owner offered the choice, or the owner's default is on. */
 export const InputSubmitModeSchema = z.enum(['agent', 'offer-owner', 'owner-default']);
@@ -208,8 +227,18 @@ export const InputRaiseSchema = z
     /**
      * The saved login the ferret expects to be used. A HINT only: the daemon decides what matches the target,
      * a hint never makes an entry the one-tap choice, and the answer is the same whether such an entry exists.
+     * An account handle, or a sign-in (`si_…`). A daemon from before sign-ins refuses a `si_` hint, and one that
+     * does not yet keep them (no `accounts.signins.1`) names no sign-in, so the hint orders nothing: a client sends
+     * one only where the daemon reports the feature. Either way a hint can only choose among the sign-ins the daemon
+     * itself matched (accounts.ts `chosenSignIn`).
      */
-    secretHint: LoginEntryIdSchema.optional(),
+    secretHint: z.union([LoginEntryIdSchema, SignInIdSchema]).optional(),
+    /**
+     * The 2FA key the code is from, as `account_hint` listed it: names the card ("Code sent to ••42 (SMS)"). A HINT
+     * like `secretHint`: used only if it is a key of the account of a sign-in the daemon matched, otherwise ignored,
+     * never an error that would say whether such a key exists. A daemon from before 2FA keys ignores it.
+     */
+    factor: TwoFactorIdSchema.optional(),
     /**
      * The value comes from a secure copy the agent holds (`sealed:<name>`, docs/secure-copy.md), not from the
      * owner's keyboard: the owner only allows it. The daemon treats every field as `secret` whatever it says.
@@ -243,7 +272,7 @@ export function savedRolesOf(
 ): ReadonlyMap<string, 'username' | 'password'> | undefined {
   const roles = new Map<string, 'username' | 'password'>();
   for (const field of fields) {
-    if (field.sensitivity === 'private') continue;
+    if (field.sensitivity === 'private' || field.sensitivity === 'code') continue;
     const role = field.sensitivity === 'secret' ? 'password' : 'username';
     if ([...roles.values()].includes(role)) return undefined;
     roles.set(field.id, role);
@@ -257,7 +286,7 @@ export function inputRaiseFields(raise: Pick<InputRaise, 'sensitivity' | 'fields
   return [{ id: INPUT_SINGLE_FIELD_ID, sensitivity: raise.sensitivity ?? 'secret' }];
 }
 
-const SENSITIVITY_RANK: Readonly<Record<InputSensitivity, number>> = { plain: 0, private: 1, secret: 2 };
+const SENSITIVITY_RANK: Readonly<Record<InputSensitivity, number>> = { plain: 0, code: 1, private: 2, secret: 3 };
 
 /** The most careful sensitivity among some fields: what the card, the journal and the audit record as the request's. */
 export function strongestSensitivity(fields: readonly { readonly sensitivity: InputSensitivity }[]): InputSensitivity {
@@ -430,12 +459,18 @@ export type InputOutcome = z.infer<typeof InputOutcomeSchema>;
 
 /**
  * HOW RISKY THE VALUE IS TO TYPE where it is going, as a flag on the card and never a refusal: the owner
- * decides. green = typing hidden and a program known to ask for secrets; amber = it may show on screen, or
- * the program is not known to ask; red = not a secret, the ferret can see it. `reason` is one sentence.
+ * decides. green = typing hidden and a program known to ask for secrets; neutral = a one-time code, which is not
+ * secret and goes where it was asked for; amber = it may show on screen, or the program is not known to ask; red =
+ * not a secret, the ferret can see it. `reason` is one sentence.
  */
-export const INPUT_RISK_LEVELS = ['green', 'amber', 'red'] as const;
+export const INPUT_RISK_LEVELS = ['green', 'neutral', 'amber', 'red'] as const;
+export type InputRiskLevel = (typeof INPUT_RISK_LEVELS)[number];
 export const InputRiskSchema = z.strictObject({
-  level: z.enum(INPUT_RISK_LEVELS),
+  /** A level this build does not know (a newer daemon's) reads as `amber`: a warning, never a pass. */
+  level: z.preprocess(
+    raw => (typeof raw === 'string' && !(INPUT_RISK_LEVELS as readonly string[]).includes(raw) ? 'amber' : raw),
+    z.enum(INPUT_RISK_LEVELS),
+  ),
   reason: boundedLine(240),
 });
 export type InputRisk = z.infer<typeof InputRiskSchema>;
@@ -448,14 +483,15 @@ export type InputRisk = z.infer<typeof InputRiskSchema>;
 export const InputRequestFieldSchema = z.strictObject({
   id: InputFieldIdSchema,
   label: FieldLabelSchema,
-  sensitivity: InputSensitivitySchema,
+  /** Read as a client reads it: a kind this build does not know is `secret`. */
+  sensitivity: ReadInputSensitivitySchema,
   element: InputFieldElementSchema.optional(),
   /** Absent while the daemon is re-observing. */
   risk: InputRiskSchema.optional(),
 });
 export type InputRequestField = z.infer<typeof InputRequestFieldSchema>;
 
-const RISK_RANK: Readonly<Record<InputRisk['level'], number>> = { green: 0, amber: 1, red: 2 };
+const RISK_RANK: Readonly<Record<InputRiskLevel, number>> = { green: 0, neutral: 1, amber: 2, red: 3 };
 
 /** The worst of some fields' risks: what the card's header flag says. `undefined` when none is known yet. */
 export function worstRisk(risks: readonly (InputRisk | undefined)[]): InputRisk | undefined {
@@ -481,7 +517,7 @@ export const InputRequestSchema = z.strictObject({
   target: InputTargetSchema,
   prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
   /** The most careful of the fields' sensitivities: what the journal and the audit record. */
-  sensitivity: InputSensitivitySchema,
+  sensitivity: ReadInputSensitivitySchema,
   /** The values the card asks for, in the order the daemon types them. A terminal's request has exactly one. */
   fields: z.array(InputRequestFieldSchema).min(1).max(INPUT_MAX_FIELDS),
   submit: InputSubmitModeSchema,
@@ -566,6 +602,12 @@ export const InputDeliverBodySchema = z
       .optional(),
     /** A saved login, by its handle: the daemon types the fields the request needs from it. */
     entry: LoginEntryIdSchema.optional(),
+    /**
+     * The saved account's 2FA key whose code the daemon makes ("Use code from Ferretry · Authy backup"), with `entry`.
+     * NOT YET TAKEN: a daemon of this build refuses a deliver that names one, until the code-card change checks that
+     * the key is the matched account's and holds a seed; absent, the account's first key in offer order is used.
+     */
+    factor: TwoFactorIdSchema.optional(),
     /** Allow a paste: the daemon types the secure copy the request names (`request.source`), never one the body names. */
     sealed: z.literal(true).optional(),
     /** Press Enter / submit after typing. */
@@ -589,6 +631,13 @@ export const InputDeliverBodySchema = z
   .superRefine((body, context) => {
     if (body.padded !== undefined && (body.entry !== undefined || body.fields !== undefined)) {
       context.addIssue({ code: 'custom', message: 'padded is the one value of a one-field card: send it alone' });
+    }
+    if (body.factor !== undefined && body.entry === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a 2FA key is one of a saved account: send it with entry',
+        path: ['factor'],
+      });
     }
     if (body.sealed === true && (body.padded !== undefined || body.entry !== undefined || body.fields !== undefined)) {
       context.addIssue({ code: 'custom', message: 'sealed allows a paste: send it alone, with no value' });
@@ -814,7 +863,7 @@ const LENGTH_WIDTH = 5;
 const hasControlCharacter = (text: string): boolean => /\p{Cc}/u.test(text);
 
 /**
- * Why a value may not be typed as a `sensitivity`, or `undefined` when it may. A `secret` or `private`
+ * Why a value may not be typed as a `sensitivity`, or `undefined` when it may. A `secret`, `private` or `code`
  * value with a control character or a newline would press keys ("this would press keys"); `plain` may
  * carry a Tab. Empty and over-long values are refused for every sensitivity.
  */

@@ -1,5 +1,5 @@
 /**
- * Screenshots of a shared surface (a terminal and a browser page) at rest and full screen, in both themes
+ * Screenshots of a shared surface (a terminal; the browser bar has its own visual test) at rest and full screen, in both themes
  * on a desktop and on a phone: the one slim control row with the agent-control chip, the icon buttons and
  * the Full screen toggle.
  *
@@ -34,14 +34,11 @@ const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
 import { SessionTerminalDeck } from '../../src/components/session-terminal-deck.tsx';
 import { AgentControlMarker } from '../../src/features/workspace/agent-control-marker.tsx';
-import { SurfaceFrame } from '../../src/features/workspace/surface-frame.tsx';
-import { BrowserSurfaceList } from '../../src/features/browser/browser-surface-list.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { terminalListing, terminalView } from '../../tests/support/terminal-deck.ts';
 
 const params = new URLSearchParams(location.search);
-const surface = params.get('surface') ?? 'terminal';
 const state = params.get('state') ?? 'agent';
 if (params.get('overlay') === '1') {
   Element.prototype.requestFullscreen = undefined;
@@ -101,61 +98,18 @@ const marker = (extra = {}) => (
   />
 );
 
-const page = (id, name, url, title) => ({ id, name, url, title, ownerSessionId: 'hadi', ownerName: 'Hadi' });
-const pages = [
-  page('PAGE1', 'app', 'https://app.example.test/dashboard', 'Dashboard'),
-  page('PAGE2', 'docs', 'https://docs.example.test/guide', 'Guide'),
-];
-const browserStatus = {
-  sessionId: 'hadi', state: 'running', pages, viewport: { width: 1280, height: 800 }, viewers: 0,
-  persistentProfile: true, idleTimeoutSeconds: 900, capacity: { running: 2, maximum: 60 },
-};
-
-function FakePage() {
-  return (
-    <div style={{ flex: 1, minHeight: 0, background: 'var(--surface, #fff)', border: '1px solid var(--line, #ddd)', padding: 24 }}>
-      <h1 style={{ fontSize: 22, fontWeight: 600 }}>Dashboard</h1>
-      <p style={{ opacity: 0.7, marginTop: 8 }}>A page the agent is driving, drawn full height.</p>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginTop: 20 }}>
-        {['Builds', 'Deploys', 'Errors', 'Latency'].map(card => (
-          <div key={card} style={{ border: '1px solid var(--line, #ddd)', borderRadius: 8, padding: 16 }}>{card}</div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 function Strip({ children }) {
   return (
     <div data-fixture-tabs="" style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '6px 10px', borderBottom: '1px solid var(--line, #ddd)', fontSize: 13 }}>
-      <span style={{ fontWeight: 600 }}>{surface === 'terminal' ? 'dev server' : 'app'}</span>
+      <span style={{ fontWeight: 600 }}>dev server</span>
       <span style={{ opacity: 0.6 }}>shared session</span>
       {children}
     </div>
   );
 }
 
-const body = surface === 'terminal' ? (
+const body = (
   <SessionTerminalDeck connection={connection} scope={scope} dependencies={deps} focusTerminalId={ID} solo surfaceStatus={marker()} />
-) : (
-  <SurfaceFrame dataBrowser="app" hostsControls marker={marker()}>
-    {controls => (
-      <>
-        <BrowserSurfaceList
-          status={browserStatus}
-          selectedPageId="PAGE1"
-          sessionName="Hadi"
-          driverFor={p => (p.id === 'PAGE1' && state !== 'ask' ? { name: 'Hadi' } : null)}
-          takenOver={() => state === 'human'}
-          onOpenPage={noop}
-          onClosePage={noop}
-          onNewPage={noop}
-          trailing={controls}
-        />
-        <FakePage />
-      </>
-    )}
-  </SurfaceFrame>
 );
 
 createRoot(document.getElementById('root')).render(
@@ -236,7 +190,7 @@ try {
         await context.route('**/*', async route =>
           new URL(route.request().url()).origin !== server.url.origin ? await route.abort() : await route.continue(),
         );
-        for (const surface of ['terminal', 'browser'] as const) {
+        for (const surface of ['terminal'] as const) {
           for (const state of ['agent', 'human', 'ask'] as const) {
             const wanted = state === 'agent' || (theme === 'studio-dark' && vp === 'desktop') || vp === 'phone';
             if (!wanted) continue;

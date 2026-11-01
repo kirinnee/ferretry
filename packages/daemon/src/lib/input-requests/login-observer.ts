@@ -222,7 +222,7 @@ export class LoginObserver {
     if (identity === undefined) return;
     const surface = delivery.facts.kind === 'browser' ? 'page' : 'terminal';
     const base = { at: place, surface, identity } as const;
-    const codeField = delivery.fields.some(field => field.sensitivity === 'private');
+    const codeField = delivery.fields.some(field => field.sensitivity === 'code' || field.sensitivity === 'private');
     const passwordField = delivery.fields.some(field => field.sensitivity === 'secret');
     if (codeField) this.codeSeen(delivery, place);
     const login = delivery.login;

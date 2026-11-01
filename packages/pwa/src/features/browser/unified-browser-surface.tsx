@@ -14,12 +14,19 @@
  * the preview warning is honest, and "Open in real browser" is always one tap
  * away.
  *
- * There is exactly ONE tab strip and it lives inside the REAL engine, driven by
- * the daemon's own Chrome pages. Preview keeps an independent linear history and
+ * ONE BAR, NOT FIVE. The page's name (and its pages), the address, ONE state chip,
+ * back / forward / reload and a ⋯ menu are a single row (`BrowserBar`). What used to be
+ * a status row, a controls row, a banner and a footer is a fact the chip ranks
+ * (`browser-bar-model.ts`) or an entry in the menu. A notice that matters — a page
+ * held for the owner, a hand-over ask, a human check, a failure — stays in the bar as
+ * the chip, with its detail and its action one tap away.
+ *
+ * There is exactly ONE page list and it is the bar's page menu, driven by the
+ * daemon's own Chrome pages. Preview keeps an independent linear history and
  * invents no tabs of its own.
  *
- * NO ENGINE IS FORKED HERE. The remote half is `RemoteBrowserPane` with its own
- * navigation row switched off: the toolbar dispatches through the pane's single
+ * NO ENGINE IS FORKED HERE. The remote half is `RemoteBrowserPane` hosted: it draws
+ * no row of its own, and the bar dispatches through the pane's single
  * `useRemoteBrowser` instance, so there is one poll, one snapshot and one Chrome
  * per pairing — never a second transport racing the first.
  *
@@ -38,23 +45,37 @@ import type { BrowserAction } from '@ferretry/protocol';
 import {
   ArrowLeft,
   ArrowRight,
+  ClipboardPaste,
   ExternalLink,
+  Expand,
   Globe2,
+  Hand,
+  Maximize2,
+  Minimize2,
   Monitor,
-  MoreVertical,
+  Network,
+  Power,
+  PowerOff,
   RefreshCw,
+  Scan,
   ShieldAlert,
+  Undo2,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState, type ComponentType, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 
 import type { BrowserLoginSnapshot } from '../../lib/browser-login.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonSessionKey, type DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { Button } from '../../shell/primitives.tsx';
+import type { SurfaceFullscreen } from '../workspace/surface-frame.tsx';
+import { BrowserBar } from './browser-bar.tsx';
+import { type BrowserBarControl, browserChip } from './browser-bar-model.ts';
+import { BrowserChallengeBanner, shownChallenge } from './browser-challenge-banner.tsx';
+import { BrowserSurfaceList, browserPageLabel } from './browser-surface-list.tsx';
 import { browserDestination, type BrowserDestination } from './in-app-browser-model.ts';
 import { InAppBrowserFrame, type InAppBrowserFrameProps } from './in-app-browser.tsx';
-import { remoteBrowserPage } from './remote-browser-chrome.tsx';
+import { remoteBrowserPage, remoteBrowserProxyTitle } from './remote-browser-chrome.tsx';
 import { useSettledBusy } from './use-settled-busy.ts';
 import { RemoteBrowserPane, type RemoteBrowserPaneProps, type RemoteBrowserPaneState } from './remote-browser-pane.tsx';
 import {
@@ -108,9 +129,28 @@ export interface UnifiedBrowserSurfaceProps {
    */
   readonly onOpenLoginWindow?: () => Promise<BrowserLoginSnapshot>;
   readonly dependencies?: UnifiedBrowserDependencies;
-  /** False when the host lists the session's pages itself: the real engine then draws no tab strip. */
-  readonly showPageTabs?: boolean;
+  /** What the session workspace knows that this surface cannot: the page's name, who drives it, its pages. */
+  readonly host?: BrowserBarHost;
 }
+
+/**
+ * The host's side of the bar. Every field is optional in spirit: a surface with no host is a plain browser,
+ * with the daemon's own Chrome pages in the page menu and no one to take over from.
+ */
+export interface BrowserBarHost {
+  /** What the page is called (`app` in `%browser:app`). */
+  readonly name: string;
+  /** The session's pages, as the host lists them. Absent: the daemon's own Chrome pages are listed here. */
+  readonly pages?: ReactNode;
+  readonly control?: BrowserBarControl & {
+    readonly onTakeOver: () => void;
+    readonly onHandBack: () => void;
+    readonly onDismissAsk?: () => void;
+  };
+  readonly fullscreen?: SurfaceFullscreen;
+}
+
+const NO_CONTROL: BrowserBarControl = { driver: null, ask: null, takenOver: false };
 
 /** The `open` action that resumes Chrome, carrying a link only when one is due. */
 const resumeRemote = (memory: BrowserSessionMemory | null, destination: BrowserDestination | null): BrowserAction =>
@@ -128,11 +168,17 @@ const loginFailure = (caught: unknown): string =>
  * fresh `runAction` whenever its own `scope`/`daemon`/`transport` props change
  * identity — which a host that rebuilds those props each render does on every
  * pass. Re-rendering on the wrapper would feed that churn straight back into the
- * pane and loop without bound. Only the three fields that reach the toolbar
+ * pane and loop without bound. Only the fields that reach the bar
  * decide a render; the dispatcher is kept imperatively and is always the newest.
  */
 const sameRemoteView = (previous: RemoteBrowserPaneState | null, next: RemoteBrowserPaneState): boolean =>
-  previous !== null && previous.status === next.status && previous.busy === next.busy && previous.error === next.error;
+  previous !== null &&
+  previous.status === next.status &&
+  previous.busy === next.busy &&
+  previous.error === next.error &&
+  previous.connection === next.connection &&
+  previous.fit === next.fit &&
+  previous.viewportMode === next.viewportMode;
 
 /** The first value with something in it: a control's name must never read blank. */
 const firstNonEmpty = (...values: readonly (string | undefined)[]): string =>
@@ -148,7 +194,7 @@ export function UnifiedBrowserSurface({
   isActive = true,
   onOpenLoginWindow,
   dependencies = DEFAULT_UNIFIED_BROWSER_DEPENDENCIES,
-  showPageTabs = true,
+  host,
 }: UnifiedBrowserSurfaceProps) {
   // Fail here rather than deep inside a request: a mismatched pair would drive
   // one daemon's Chrome under another daemon's name, which is the exact bug the
@@ -161,12 +207,9 @@ export function UnifiedBrowserSurface({
   const [previewHistory, setPreviewHistory] = useState(() => createPreviewHistory(destination));
   const [remote, setRemote] = useState<RemoteBrowserPaneState | null>(null);
   const [address, setAddress] = useState(destination?.href ?? '');
-  const [menuOpen, setMenuOpen] = useState(false);
   const [loginBusy, setLoginBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const editingRef = useRef(false);
   const incomingRef = useRef<BrowserDestination | null>(destination);
   const remoteRef = useRef<RemoteBrowserPaneState | null>(null);
@@ -209,7 +252,6 @@ export function UnifiedBrowserSurface({
       setRemote(null);
       setError(null);
       setLoginBusy(false);
-      setMenuOpen(false);
       remoteRef.current = null;
       // AND THE QUEUE, which is the same staleness one step further back. An
       // action the reader aimed at the previous pairing sits here whenever they
@@ -312,29 +354,6 @@ export function UnifiedBrowserSurface({
     if (!editingRef.current) setAddress(currentUrl);
   }, [currentUrl]);
 
-  // Outside pointer or Escape closes the ⋯ menu and returns focus to its
-  // trigger, exactly like the side-pane tab picker.
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (!menuRef.current?.contains(target) && !menuTriggerRef.current?.contains(target)) setMenuOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.stopPropagation();
-      setMenuOpen(false);
-      window.requestAnimationFrame(() => menuTriggerRef.current?.focus());
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [menuOpen]);
-
   const chooseEngine = (next: BrowserEngine): void => {
     if (next === engine) return;
     setEngine(next);
@@ -352,8 +371,7 @@ export function UnifiedBrowserSurface({
     dispatchRemote({ action: 'open' });
   };
 
-  const navigate = (event: FormEvent<HTMLFormElement>): void => {
-    event.preventDefault();
+  const navigate = (): void => {
     const resolution = resolveBrowserAddress(address, currentUrl === '' ? undefined : currentUrl);
     if (resolution.kind === 'error') {
       setError(resolution.message);
@@ -423,256 +441,415 @@ export function UnifiedBrowserSurface({
     engine === 'preview' ? !previewCanGoForward(previewHistory) : remotePage?.canGoForward === false;
   const loading = engine === 'remote' && remotePage?.pageState === 'loading';
   const working = useSettledBusy(remoteBusy || loading);
-  const menuTitle = firstNonEmpty(remoteLocation?.title, currentUrl, 'Browser controls');
   const Heading = presentation === 'pane' ? 'h2' : 'h1';
-  const menuId = `${titleId}-menu`;
+  const control = host?.control ?? NO_CONTROL;
+  const challenge = engine === 'remote' ? shownChallenge(remote?.status ?? null) : null;
+  const heldErrors = [error, engine === 'remote' ? (remote?.error ?? null) : null].filter(
+    (message): message is string => message !== null,
+  );
+  const chip = browserChip({
+    engine,
+    status: engine === 'remote' ? (remote?.status ?? null) : null,
+    connection: remote?.connection ?? 'detached',
+    busy: remoteBusy,
+    errors: heldErrors,
+    challenge,
+    control,
+  });
+  const activePage = remotePage?.pages.find(candidate => candidate.id === remotePage.activePageId);
+  const barName = host?.name ?? (activePage === undefined ? 'Browser' : browserPageLabel(activePage));
+  const status = engine === 'remote' ? (remote?.status ?? null) : null;
+  const running = status?.state === 'running';
+  const menuTitle = firstNonEmpty(remoteLocation?.title, currentUrl, 'Browser controls');
+  const canTakeOver =
+    host?.control !== undefined && !control.takenOver && (control.driver !== null || control.ask !== null);
+
+  const dismissErrors = (): void => {
+    setError(null);
+    remote?.clearError();
+  };
+
+  // The page list: the host's, or — for a surface with no host — the daemon's own Chrome pages.
+  const pages: ReactNode =
+    host?.pages ??
+    (engine === 'remote' && remote !== null ? (
+      <BrowserSurfaceList
+        driverFor={() => null}
+        onClosePage={candidate => dispatchRemote({ action: 'close-page', pageId: candidate.id })}
+        onNewPage={() => dispatchRemote({ action: 'new-page' })}
+        onOpenPage={candidate => dispatchRemote({ action: 'activate-page', pageId: candidate.id })}
+        selectedPageId={remotePage?.activePageId ?? ''}
+        status={status}
+        takenOver={() => false}
+      />
+    ) : undefined);
+
+  const takeOver =
+    host?.control === undefined ? null : (
+      <Button
+        type="button"
+        variant="primary"
+        onClick={host.control.onTakeOver}
+        className="min-h-[44px] w-full justify-center gap-xs"
+      >
+        <Hand size={16} aria-hidden="true" className="shrink-0" />
+        Take over
+      </Button>
+    );
+  const handBack =
+    host?.control === undefined ? null : (
+      <Button
+        type="button"
+        variant="primary"
+        onClick={host.control.onHandBack}
+        className="min-h-[44px] w-full justify-center gap-xs"
+      >
+        <Undo2 size={16} aria-hidden="true" className="shrink-0" />
+        Hand back
+      </Button>
+    );
+
+  const chipDetail = (
+    <div className="grid gap-2 text-meta leading-base text-fg" data-browser-chip-kind={chip.kind}>
+      {chip.kind === 'challenge' && challenge !== null ? (
+        <BrowserChallengeBanner challenge={challenge} />
+      ) : (
+        <p className="m-0 font-medium">{chip.summary}</p>
+      )}
+      {chip.kind === 'owner' && (
+        <p className="m-0 text-muted">The agent cannot type into this page until you hand it back.</p>
+      )}
+      {chip.kind === 'ask' && control.ask !== null && (
+        <p className="m-0 text-muted">{control.ask.agent} handed this page to you.</p>
+      )}
+      {chip.kind === 'error' &&
+        [
+          ...heldErrors,
+          ...(remotePage?.pageError === undefined || heldErrors.includes(remotePage.pageError)
+            ? []
+            : [remotePage.pageError]),
+        ]
+          .filter(message => message !== chip.summary)
+          .map(message => (
+            <p key={message} role="alert" className="m-0 break-words text-err">
+              {message}
+            </p>
+          ))}
+      {chip.kind === 'disconnected' && (
+        <p className="m-0 text-muted">The page is still running on the machine. This view keeps trying to reconnect.</p>
+      )}
+      {chip.kind === 'stopped' && (
+        <Button
+          type="button"
+          variant="primary"
+          disabled={remoteBusy}
+          onClick={() => dispatchRemote({ action: 'start' })}
+          className="min-h-[44px] w-full justify-center gap-xs"
+        >
+          <Power size={16} aria-hidden="true" className="shrink-0" />
+          Start browser
+        </Button>
+      )}
+      {(chip.kind === 'ask' || chip.kind === 'challenge' || chip.kind === 'agent') && canTakeOver ? takeOver : null}
+      {chip.kind === 'owner' ? handBack : null}
+      {chip.kind === 'ask' && host?.control?.onDismissAsk !== undefined && (
+        <Button type="button" onClick={host.control.onDismissAsk} className="min-h-[44px] w-full justify-center">
+          Dismiss
+        </Button>
+      )}
+      {chip.kind === 'error' && (
+        <Button type="button" onClick={dismissErrors} className="min-h-[44px] w-full justify-center">
+          Dismiss
+        </Button>
+      )}
+    </div>
+  );
+
+  const item = 'min-h-[44px] w-full !justify-start gap-xs sm:min-h-[36px]';
+  const menu = (
+    <>
+      <fieldset
+        aria-label="Browser engine"
+        className="flex items-center rounded-control border border-strong bg-surface-2 p-0.5"
+      >
+        <Button
+          type="button"
+          variant={engine === 'preview' ? 'primary' : 'ghost'}
+          aria-pressed={engine === 'preview'}
+          onClick={() => chooseEngine('preview')}
+          className="min-h-[44px] flex-1 justify-center px-2"
+        >
+          Preview
+        </Button>
+        <Button
+          type="button"
+          variant={engine === 'remote' ? 'primary' : 'ghost'}
+          aria-pressed={engine === 'remote'}
+          onClick={() => chooseEngine('remote')}
+          className="min-h-[44px] flex-1 justify-center px-2"
+        >
+          Real
+        </Button>
+      </fieldset>
+
+      <div className="mt-2 text-meta leading-base text-muted">
+        {engine === 'preview' ? (
+          <p className="m-0 flex items-start gap-xs">
+            <ShieldAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0 text-warn" />
+            <span>
+              Preview accepts the address, but a site can refuse to load in an embedded reader and this reader cannot
+              tell when it does. Real is the full interactive browser.
+            </span>
+          </p>
+        ) : (
+          <div className="grid gap-1">
+            <p className="m-0 flex items-start gap-xs">
+              <Monitor size={14} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />
+              <span className="min-w-0 break-words">
+                {remoteBusy
+                  ? 'Working…'
+                  : loading
+                    ? 'Loading page…'
+                    : firstNonEmpty(remoteLocation?.title, 'Shared Chrome · persistent session')}
+              </span>
+            </p>
+            {status !== null && (
+              <p className="m-0" data-browser-governor="">
+                {status.viewport.width}×{status.viewport.height} · {status.viewers} viewer
+                {status.viewers === 1 ? '' : 's'} · {Math.round(status.idleTimeoutSeconds / 60)}m idle stop
+                {status.lastActor === undefined
+                  ? ''
+                  : ` · last input ${status.lastActor.kind === 'human' ? 'you' : 'agent'} (${status.lastActor.action})`}
+              </p>
+            )}
+            {status?.state === 'running' && status.proxy !== undefined && (
+              <p
+                className="m-0 flex items-start gap-xs"
+                data-browser-proxy-chip=""
+                title={remoteBrowserProxyTitle(status.proxy)}
+              >
+                <Network size={14} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />
+                <span>Via proxy {status.proxy.url}</span>
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-2 grid gap-1 border-t border-border-soft pt-2">
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={remoteBusy || forwardDisabled}
+          onClick={goForward}
+          className={`${item} sm:hidden`}
+        >
+          <ArrowRight size={16} aria-hidden="true" className="shrink-0" />
+          Forward
+        </Button>
+        {engine === 'remote' && remote !== null && (
+          <>
+            {running ? (
+              <Button
+                type="button"
+                variant="danger"
+                disabled={remoteBusy}
+                onClick={() => dispatchRemote({ action: 'stop' })}
+                className={item}
+              >
+                <PowerOff size={16} aria-hidden="true" className="shrink-0" />
+                Stop browser
+              </Button>
+            ) : (
+              <Button
+                variant="ghost"
+                type="button"
+                disabled={remoteBusy || status?.state === 'starting'}
+                onClick={() => dispatchRemote({ action: 'start' })}
+                className={item}
+              >
+                <Power size={16} aria-hidden="true" className="shrink-0" />
+                Start browser
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              type="button"
+              disabled={!running || remote.connection !== 'connected'}
+              onClick={remote.pasteFromClipboard}
+              className={item}
+            >
+              <ClipboardPaste size={16} aria-hidden="true" className="shrink-0" />
+              Paste
+            </Button>
+            <Button
+              variant="ghost"
+              type="button"
+              disabled={!running}
+              aria-pressed={remote.fit}
+              onClick={remote.toggleFit}
+              className={item}
+            >
+              <Expand size={16} aria-hidden="true" className="shrink-0" />
+              {remote.fit ? 'Fit' : '1:1'}
+            </Button>
+            <Button
+              variant="ghost"
+              type="button"
+              disabled={!running}
+              aria-pressed={remote.viewportMode === 'desktop'}
+              onClick={remote.toggleViewportMode}
+              className={item}
+              title="On a phone, desktop fit keeps a 1280×800 viewport and scales it to width"
+            >
+              {remote.viewportMode === 'desktop' ? (
+                <Monitor size={16} aria-hidden="true" className="shrink-0" />
+              ) : (
+                <Scan size={16} aria-hidden="true" className="shrink-0" />
+              )}
+              {remote.viewportMode === 'desktop' ? 'Desktop fit' : 'Responsive'}
+            </Button>
+          </>
+        )}
+        {canTakeOver && host?.control !== undefined && (
+          <Button variant="ghost" type="button" onClick={host.control.onTakeOver} className={item}>
+            <Hand size={16} aria-hidden="true" className="shrink-0" />
+            Take over
+          </Button>
+        )}
+        {control.takenOver && host?.control !== undefined && (
+          <Button variant="ghost" type="button" onClick={host.control.onHandBack} className={item}>
+            <Undo2 size={16} aria-hidden="true" className="shrink-0" />
+            Hand back
+          </Button>
+        )}
+        {host?.fullscreen !== undefined && (
+          <Button
+            variant="ghost"
+            type="button"
+            aria-pressed={host.fullscreen.active}
+            onClick={host.fullscreen.toggle}
+            className={item}
+            aria-label={host.fullscreen.active ? 'Exit full screen' : 'Full screen'}
+            title={host.fullscreen.active ? 'Exit full screen (Esc, or Shift+Esc while typing in it)' : 'Full screen'}
+          >
+            {host.fullscreen.active ? (
+              <Minimize2 size={16} aria-hidden="true" className="shrink-0" />
+            ) : (
+              <Maximize2 size={16} aria-hidden="true" className="shrink-0" />
+            )}
+            {host.fullscreen.active ? 'Exit full screen' : 'Full screen'}
+          </Button>
+        )}
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={remoteBusy}
+          onClick={openInRealBrowser}
+          className={item}
+          aria-label="Open in real browser"
+          title="Open this address in the persistent real browser"
+        >
+          <Monitor size={16} aria-hidden="true" className="shrink-0" />
+          <span className="truncate">Open in real browser</span>
+        </Button>
+        {externalDestination === null ? (
+          // A real disabled control, not a decorated span: an
+          // aria-disabled div is unreachable and unannounced.
+          <Button
+            type="button"
+            variant="ghost"
+            disabled
+            className={item}
+            aria-label="This browser address cannot be opened externally"
+          >
+            <ExternalLink size={16} aria-hidden="true" className="shrink-0" />
+            <span className="truncate">Open externally</span>
+          </Button>
+        ) : (
+          <a
+            href={externalDestination.href}
+            target="_blank"
+            rel="noreferrer"
+            className={`kt-btn ${item}`}
+            data-variant="ghost"
+            aria-label="Open externally in a new tab"
+            title="Open externally"
+          >
+            <ExternalLink size={16} aria-hidden="true" className="shrink-0" />
+            <span className="truncate">Open externally</span>
+          </a>
+        )}
+        <Button
+          type="button"
+          onClick={onClose}
+          variant="ghost"
+          className={item}
+          aria-label="Done browsing"
+          title="Done"
+        >
+          <X size={16} aria-hidden="true" className="shrink-0" />
+          <span>Done</span>
+        </Button>
+      </div>
+    </>
+  );
 
   return (
     <section className="flex min-h-0 flex-1 flex-col bg-surface" aria-label="Browser">
-      <header className="shrink-0 border-b border-border-soft px-2 py-1.5">
-        {/* Visually hidden: the bar carries the controls, but the host's
-            aria-labelledby still resolves to a real "Browser" name. */}
-        <Heading id={titleId} className="sr-only">
-          Browser
-        </Heading>
-        {/* On a phone the address takes the whole first line (it was ~90px between six controls) and the
-            navigation buttons wrap under it; the ⋯ menu stays at the top right, beside the address. */}
-        <div className="flex items-start gap-xs sm:items-center">
-          <form onSubmit={navigate} className="flex min-w-0 flex-1 flex-wrap items-center gap-xs sm:flex-nowrap">
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={remoteBusy || backDisabled}
-              onClick={goBack}
-              className="min-h-[44px] min-w-[44px] justify-center p-0"
-              aria-label={`Back in ${engineName}`}
-              title="Back"
-            >
-              <ArrowLeft size={16} aria-hidden="true" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={remoteBusy || forwardDisabled}
-              onClick={goForward}
-              className="min-h-[44px] min-w-[44px] justify-center p-0"
-              aria-label={`Forward in ${engineName}`}
-              title="Forward"
-            >
-              <ArrowRight size={16} aria-hidden="true" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={remoteBusy}
-              onClick={reload}
-              className="min-h-[44px] min-w-[44px] justify-center p-0"
-              aria-label={`Reload ${engineName}`}
-              title="Reload"
-            >
-              <RefreshCw size={16} aria-hidden="true" />
-            </Button>
-            <label className="order-first flex min-h-[44px] min-w-0 flex-1 basis-full items-center gap-xs rounded-control border border-strong bg-surface-2 px-2 sm:order-none sm:basis-0">
-              <span className="sr-only">URL or DuckDuckGo search</span>
-              <Globe2 size={14} aria-hidden="true" className="shrink-0 text-muted" />
-              {/* Typed text is NOT reset on blur: tapping Go blurs this input
-                  first, and restoring the previous URL there submitted the OLD
-                  address. Only the editing flag is cleared. */}
-              <input
-                value={address}
-                onChange={event => setAddress(event.target.value)}
-                onFocus={() => {
-                  editingRef.current = true;
-                }}
-                onBlur={() => {
-                  editingRef.current = false;
-                }}
-                placeholder="URL or DuckDuckGo search"
-                inputMode="url"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                className="h-10 min-w-0 flex-1 bg-transparent font-mono text-meta text-fg placeholder:text-muted"
-              />
-            </label>
-            <Button
-              type="submit"
-              variant="primary"
-              disabled={remoteBusy || address.trim() === ''}
-              className="min-h-[44px] min-w-[44px] justify-center px-2"
-            >
-              Go
-            </Button>
-          </form>
-
-          {/* One bar: every secondary control folds into this ⋯ menu — engine
-              selection and the escape actions. The daemon's own governor and
-              lifecycle readouts stay inside the real engine, which owns them. */}
-          <span className="relative flex shrink-0 items-center">
-            <Button
-              ref={menuTriggerRef}
-              type="button"
-              variant="ghost"
-              onClick={() => setMenuOpen(open => !open)}
-              aria-haspopup="dialog"
-              aria-expanded={menuOpen}
-              aria-controls={menuOpen ? menuId : undefined}
-              aria-label="Browser controls"
-              title={menuTitle}
-              className="min-h-[44px] min-w-[44px] justify-center p-0"
-            >
-              <MoreVertical size={16} aria-hidden="true" />
-            </Button>
-            {menuOpen && (
-              <div
-                ref={menuRef}
-                id={menuId}
-                role="dialog"
-                aria-label="Browser controls"
-                className="absolute right-0 top-full z-50 mt-1 w-[min(300px,calc(100vw-16px))] overflow-y-auto rounded-panel border border-border bg-surface p-2 shadow-popover"
-                style={{ maxHeight: 'min(70dvh, 460px)' }}
-              >
-                <fieldset
-                  aria-label="Browser engine"
-                  className="flex items-center rounded-control border border-strong bg-surface-2 p-0.5"
-                >
-                  <Button
-                    type="button"
-                    variant={engine === 'preview' ? 'primary' : 'ghost'}
-                    aria-pressed={engine === 'preview'}
-                    onClick={() => chooseEngine('preview')}
-                    className="min-h-[44px] flex-1 justify-center px-2"
-                  >
-                    Preview
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={engine === 'remote' ? 'primary' : 'ghost'}
-                    aria-pressed={engine === 'remote'}
-                    onClick={() => chooseEngine('remote')}
-                    className="min-h-[44px] flex-1 justify-center px-2"
-                  >
-                    Real
-                  </Button>
-                </fieldset>
-
-                <div className="mt-2 text-meta leading-base text-muted">
-                  {engine === 'preview' ? (
-                    <p className="m-0 flex items-start gap-xs">
-                      <ShieldAlert size={14} aria-hidden="true" className="mt-0.5 shrink-0 text-warn" />
-                      <span>
-                        Preview accepts the address, but a site can refuse to load in an embedded reader and this reader
-                        cannot tell when it does. Real is the full interactive browser.
-                      </span>
-                    </p>
-                  ) : (
-                    <p className="m-0 flex items-start gap-xs">
-                      <Monitor size={14} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />
-                      <span className="min-w-0 break-words">
-                        {remoteBusy
-                          ? 'Working…'
-                          : loading
-                            ? 'Loading page…'
-                            : firstNonEmpty(remoteLocation?.title, 'Shared Chrome · persistent session')}
-                      </span>
-                    </p>
-                  )}
-                </div>
-
-                <div className="mt-2 grid gap-1 border-t border-border-soft pt-2">
-                  <Button
-                    type="button"
-                    variant="primary"
-                    disabled={remoteBusy}
-                    onClick={() => {
-                      setMenuOpen(false);
-                      openInRealBrowser();
-                    }}
-                    className="min-h-[44px] w-full justify-center gap-xs"
-                    aria-label="Open in real browser"
-                    title="Open this address in the persistent real browser"
-                  >
-                    <Monitor size={16} aria-hidden="true" className="shrink-0" />
-                    <span className="truncate">Open in real browser</span>
-                  </Button>
-                  {externalDestination === null ? (
-                    // A real disabled control, not a decorated span: an
-                    // aria-disabled div is unreachable and unannounced.
-                    <Button
-                      type="button"
-                      disabled
-                      className="min-h-[44px] w-full justify-center gap-xs"
-                      aria-label="This browser address cannot be opened externally"
-                    >
-                      <ExternalLink size={16} aria-hidden="true" className="shrink-0" />
-                      <span className="truncate">Open externally</span>
-                    </Button>
-                  ) : (
-                    <a
-                      href={externalDestination.href}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={() => setMenuOpen(false)}
-                      className="kt-btn min-h-[44px] w-full justify-center gap-xs"
-                      aria-label="Open externally in a new tab"
-                      title="Open externally"
-                    >
-                      <ExternalLink size={16} aria-hidden="true" className="shrink-0" />
-                      <span className="truncate">Open externally</span>
-                    </a>
-                  )}
-                  <Button
-                    type="button"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      onClose();
-                    }}
-                    className="min-h-[44px] w-full justify-center gap-xs"
-                    aria-label="Done browsing"
-                    title="Done"
-                  >
-                    <X size={16} aria-hidden="true" className="shrink-0" />
-                    <span>Done</span>
-                  </Button>
-                </div>
-              </div>
-            )}
-          </span>
+      {/* Visually hidden: the bar carries the controls, but the host's
+          aria-labelledby still resolves to a real "Browser" name. */}
+      <Heading id={titleId} className="sr-only">
+        Browser
+      </Heading>
+      <BrowserBar
+        name={barName}
+        address={address}
+        onAddressChange={setAddress}
+        onAddressFocus={() => {
+          editingRef.current = true;
+        }}
+        // Typed text is NOT reset on blur: tapping Go blurs this input first, and restoring the
+        // previous URL there submitted the OLD address. Only the editing flag is cleared.
+        onAddressBlur={() => {
+          editingRef.current = false;
+        }}
+        onNavigate={navigate}
+        navigateDisabled={remoteBusy || address.trim() === ''}
+        chip={chip}
+        chipDetail={chipDetail}
+        back={{
+          label: `Back in ${engineName}`,
+          disabled: remoteBusy || backDisabled,
+          onClick: goBack,
+          icon: <ArrowLeft size={16} aria-hidden="true" />,
+        }}
+        forward={{
+          label: `Forward in ${engineName}`,
+          disabled: remoteBusy || forwardDisabled,
+          onClick: goForward,
+          icon: <ArrowRight size={16} aria-hidden="true" />,
+        }}
+        reload={{
+          label: `Reload ${engineName}`,
+          disabled: remoteBusy,
+          onClick: reload,
+          icon: <RefreshCw size={16} aria-hidden="true" />,
+        }}
+        menu={menu}
+        menuTitle={menuTitle}
+        {...(pages === undefined ? {} : { pages })}
+        working={engine === 'remote' && working}
+        resetKey={scopeKey}
+      />
+      {error !== null && (
+        <div role="alert" className="sr-only">
+          {error}
         </div>
-
-        {/* Mounted for the whole remote engine, never on and off: a row that appears with the work
-            pushed the toolbar and page view down by its height and back, over and over. Only its opacity
-            follows the (debounced) busy flag. */}
-        {engine === 'remote' && (
-          <div
-            className={`mt-1 h-0.5 w-full overflow-hidden rounded-full bg-surface-2 transition-opacity ${working ? 'opacity-100' : 'opacity-0'}`}
-            role="status"
-            aria-live="polite"
-            data-browser-progress=""
-          >
-            <span className="sr-only">{working ? (remoteBusy ? 'Working…' : 'Loading page…') : ''}</span>
-          </div>
-        )}
-
-        {error !== null && (
-          <div
-            role="alert"
-            className="mt-1 rounded-control border border-err/30 bg-err-bg px-2 py-1.5 text-meta text-err"
-          >
-            {error}
-          </div>
-        )}
-      </header>
+      )}
 
       {engine === 'remote' ? (
-        <RemotePane
-          daemon={daemon}
-          scope={scope}
-          isActive={isActive}
-          showNavigation={false}
-          showPageTabs={showPageTabs}
-          onStateChange={remoteStateChanged}
-        />
+        <RemotePane daemon={daemon} scope={scope} isActive={isActive} hosted onStateChange={remoteStateChanged} />
       ) : previewEntry !== null ? (
         // Keyed by address AND revision: re-opening the address the reader is
         // already on is a reload request, and only a changed key remounts the

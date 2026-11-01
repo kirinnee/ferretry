@@ -1,9 +1,10 @@
 /**
- * THE PER-CHAT "TASKS" TAB: the board filtered to this ferret, drawn small, as a Kanban or as a List.
+ * THE PER-CHAT "TASKS" TAB: the board filtered to this ferret, drawn small, as Cards, a Kanban or a List.
  *
- * Both views draw the same cards (`chatDrawn`) with the same `BoardCard` at `density="side"`, so switching
- * changes how they are arranged and nothing else:
- *  - **Kanban** (the default): one narrow column per lane that holds one of this ferret's cards, scrolling
+ * Every view draws the same cards (`chatDrawn`), so switching changes how they are arranged and nothing else:
+ *  - **Cards** (the default): one card at a time with `‹ n of N ›`, what needs the owner first; a card waiting for a
+ *    try is the shared Done / Not good row (swipe on a phone), the rest are the `BoardCard` the other views draw.
+ *  - **Kanban**: one narrow column per lane that holds one of this ferret's cards, scrolling
  *    sideways, snapping a column at a time.
  *  - **List**: the focus card, the cards it owns (one collapsible lane each), then the cards its sub-ferrets
  *    hold as a mini tree.
@@ -19,7 +20,7 @@
  */
 
 import { formatTaskRef } from '@ferretry/protocol';
-import { Columns3, List, Maximize2, Minimize2 } from 'lucide-react';
+import { Columns3, Layers, List, Maximize2, Minimize2 } from 'lucide-react';
 import { type ReactElement, useCallback, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import type { BoardChat, ChatKanbanLane } from '../../lib/board-chat.ts';
@@ -31,7 +32,9 @@ import type { BoardCardOf, BoardCardPlace } from '../../lib/board-view.ts';
 import { addReferenceMessage, addReferenceToComposer } from '../../lib/composer-references.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonBoardCardPath } from '../../lib/pages/routes.ts';
+import type { ToTestAnswers } from '../agenda/to-test-rows.tsx';
 import { BoardCard, type BoardCardMoves, type BoardDensity } from './board-card.tsx';
+import { BoardCardsView } from './board-cards-view.tsx';
 import { AgentsToggle } from './board-filters.tsx';
 import { BoardLane } from './board-lane.tsx';
 import type { BoardDoneControl } from './board-views.tsx';
@@ -63,9 +66,12 @@ export interface BoardSideTabProps {
   readonly onDropCard?: (card: BoardCardOf, lane: ChatKanbanLane) => void;
   /** The owner's answer in flight on a card, and its last refusal; every card is at rest when absent. */
   readonly answerFor?: (card: BoardCardOf) => BoardAnswerState;
+  /** The shared Done / Not good row for a card waiting for a try (the Cards view); absent: such a card is drawn as any other. */
+  readonly toTestAnswers?: ToTestAnswers;
 }
 
 const VIEWS: readonly { readonly id: BoardSideView; readonly label: string; readonly Icon: typeof List }[] = [
+  { id: 'cards', label: 'Cards', Icon: Layers },
   { id: 'kanban', label: 'Kanban', Icon: Columns3 },
   { id: 'list', label: 'List', Icon: List },
 ];
@@ -150,6 +156,7 @@ export function BoardSideTab({
   dragging = null,
   onDropCard,
   answerFor,
+  toTestAnswers,
 }: BoardSideTabProps): ReactElement {
   const { cards, status } = chat;
   const draggedGroup = dragging === null ? null : (cards.places.get(dragging.key)?.group.key ?? null);
@@ -230,7 +237,9 @@ export function BoardSideTab({
         )
       ) : (
         <>
-          {view === 'kanban' ? (
+          {view === 'cards' ? (
+            <BoardCardsView cards={cards} draw={draw} now={now} onOpenCard={onOpenCard} toTestAnswers={toTestAnswers} />
+          ) : view === 'kanban' ? (
             <div className={density === 'page' ? 'fy-board-kanban' : 'fy-board-side__kanban'} data-board-side-kanban="">
               {cards.lanes.map(lane => (
                 <BoardLane

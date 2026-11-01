@@ -16,6 +16,13 @@ import {
 import { ArrowDown, ArrowDownUp, ArrowUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
+import {
+  type AnalyticsCostGaps,
+  costGapEntries,
+  costGapReason,
+  sumCostGaps,
+  unpricedLabel,
+} from './analytics-cost-gaps.ts';
 import { formatDollars } from './analytics-overview.ts';
 
 export type AnalyticsSortKey =
@@ -27,6 +34,7 @@ export type AnalyticsSortKey =
   | 'cacheWrite'
   | 'total'
   | 'cost'
+  | 'costNow'
   | 'metric';
 export type AnalyticsSortDirection = 'asc' | 'desc';
 export type AnalyticsAggregateResponse = Extract<AnalyticsResponse, { readonly kind: 'aggregate' }>;
@@ -40,7 +48,14 @@ export interface AnalyticsTableRow {
   readonly cacheRead: AnalyticsMeasure;
   readonly cacheWrite: AnalyticsMeasure;
   readonly total: AnalyticsMeasure;
+  /** What the tokens cost at the rate in force on each session's day. */
   readonly cost: AnalyticsMeasure;
+  /** The same tokens at the catalog rate as of today. */
+  readonly costNow: AnalyticsMeasure;
+  /** `costNow` in dollars, for a spend query that prints dollars and cents. */
+  readonly costNowDollars: AnalyticsMeasure;
+  /** Why some sessions have no cost, counted by reason; absent when every session has one. */
+  readonly costGaps?: AnalyticsCostGaps | undefined;
   /** The selected metric in its own unit (dollars, seconds, a count); unknown when none is selected. */
   readonly metric: AnalyticsMeasure;
 }
@@ -63,7 +78,13 @@ export const ANALYTICS_TABLE_COLUMNS: readonly Column[] = [
   {
     key: 'cost',
     header: 'Equivalent API cost',
-    hint: 'what these tokens would cost at API rates; never billed spend',
+    hint: 'what these tokens would cost at API rates, at the rate in force the day each session ran; never billed spend',
+    numeric: true,
+  },
+  {
+    key: 'costNow',
+    header: "At today's prices",
+    hint: 'the same tokens at the API rates in the catalog today; never billed spend',
     numeric: true,
   },
 ];
@@ -98,6 +119,7 @@ export const ANALYTICS_METRIC_LABELS: { readonly [M in AnalyticsMetric]: string 
   tokens_cache_write: 'Cache write tokens',
   tokens_reasoning: 'Reasoning tokens',
   cost_usd: 'Equivalent API cost',
+  cost_now_usd: "At today's prices",
   turns: 'Turns',
   sessions: 'Sessions',
   duration_active_seconds: 'Active time',
@@ -110,7 +132,12 @@ export const analyticsMetricMeasure = (result: AnalyticsAggregateResult, metric:
   const { measure } = ANALYTICS_METRIC_MEASURES[metric];
   if (measure === 'sessions') return { value: result.sessions, known: result.sessions, total: result.sessions };
   // The protocol owns the arithmetic: the unit scale, and the division of a per-turn ratio.
-  return { ...result[measure], value: analyticsMetricValue(result, metric) };
+  // A daemon older than the today-price figure sends no measure for it: unknown, never zero.
+  const { knownSum, ...stated } = (result[measure] as AnalyticsMeasure | undefined) ?? UNKNOWN_MEASURE;
+  const value = analyticsMetricValue(result, metric);
+  // A lower bound is a sum, so it scales like one; a ratio of sums has no lower bound.
+  if (knownSum === undefined || value !== null || ANALYTICS_RATIO_METRICS.has(metric)) return { ...stated, value };
+  return { ...stated, value, knownSum: knownSum * ANALYTICS_METRIC_MEASURES[metric].scale };
 };
 
 /** Flattens a daemon response without inventing a value for missing pricing. */
@@ -128,11 +155,18 @@ export const analyticsTableRows = (
     cacheWrite: result.cacheWriteInputTokens,
     total: result.tokens,
     cost: result.equivalentApiCostUsdMicros,
+    costNow: result.equivalentApiCostCurrentUsdMicros ?? UNKNOWN_MEASURE,
+    costNowDollars: analyticsMetricMeasure(result, 'cost_now_usd'),
+    costGaps: result.costGaps,
     metric: metric ? analyticsMetricMeasure(result, metric) : UNKNOWN_MEASURE,
   }));
 
 const measureFor = (row: AnalyticsTableRow, key: AnalyticsSortKey): AnalyticsMeasure | undefined =>
   key === 'group' || key === 'sessions' ? undefined : row[key];
+
+/** What a group is known to be worth: its value, or the part of it that sessions did state. */
+const sortableValue = (measure: AnalyticsMeasure | undefined): number | null =>
+  measure?.value ?? measure?.knownSum ?? null;
 
 /** Unknown numeric values remain last in either order; they are never zero. */
 export const sortAnalyticsRows = (
@@ -145,8 +179,8 @@ export const sortAnalyticsRows = (
     .map((row, index) => ({ row, index }))
     .sort((left, right) => {
       if (key === 'group') return sign * left.row.group.localeCompare(right.row.group) || left.index - right.index;
-      const a = key === 'sessions' ? left.row.sessions : (measureFor(left.row, key)?.value ?? null);
-      const b = key === 'sessions' ? right.row.sessions : (measureFor(right.row, key)?.value ?? null);
+      const a = key === 'sessions' ? left.row.sessions : sortableValue(measureFor(left.row, key));
+      const b = key === 'sessions' ? right.row.sessions : sortableValue(measureFor(right.row, key));
       if (a === null && b === null) return left.index - right.index;
       if (a === null) return 1;
       if (b === null) return -1;
@@ -156,13 +190,13 @@ export const sortAnalyticsRows = (
 };
 
 /**
- * Adds the groups that are complete and counts the ones that are not. A group with an unpriced session
- * has no value of its own, so the sum covers the complete groups only and `known < total` says so — the
- * renderer prints it as a lower bound ("≥ $614.80") instead of letting one unpriced session erase it.
+ * Adds what every group states: its value, or for an incomplete group the part its stated sessions
+ * add up to. `known < total` says the sum is short, and the renderer prints it as a lower bound
+ * ("≥ $614.80") instead of letting one unpriced session erase it.
  */
 const sumMeasures = (measures: readonly AnalyticsMeasure[]): AnalyticsMeasure => ({
-  value: measures.some(measure => measure.value !== null)
-    ? measures.reduce((sum, measure) => sum + (measure.value ?? 0), 0)
+  value: measures.some(measure => sortableValue(measure) !== null)
+    ? measures.reduce((sum, measure) => sum + (sortableValue(measure) ?? 0), 0)
     : null,
   known: measures.reduce((sum, measure) => sum + measure.known, 0),
   total: measures.reduce((sum, measure) => sum + measure.total, 0),
@@ -179,15 +213,21 @@ export const analyticsTotalRow = (rows: readonly AnalyticsTableRow[]): Analytics
   cacheWrite: sumMeasures(rows.map(row => row.cacheWrite)),
   total: sumMeasures(rows.map(row => row.total)),
   cost: sumMeasures(rows.map(row => row.cost)),
+  costNow: sumMeasures(rows.map(row => row.costNow)),
+  costNowDollars: sumMeasures(rows.map(row => row.costNowDollars)),
+  costGaps: sumCostGaps(rows.map(row => row.costGaps)),
   metric: sumMeasures(rows.map(row => row.metric)),
 });
 
 const lowerBound = (measure: AnalyticsMeasure): string => (measure.known < measure.total ? '≥ ' : '');
 
-export const formatTokenMeasure = (measure: AnalyticsMeasure | undefined): string =>
-  measure?.value === null || measure === undefined
-    ? '—'
-    : `${lowerBound(measure)}${NUMBER_FORMAT.format(measure.value)}`;
+/** The figure to print: the group's value, or the lower bound its stated sessions add up to. */
+const shownValue = (measure: AnalyticsMeasure | undefined): number | null => sortableValue(measure);
+
+export const formatTokenMeasure = (measure: AnalyticsMeasure | undefined): string => {
+  const value = shownValue(measure);
+  return value === null || measure === undefined ? '—' : `${lowerBound(measure)}${NUMBER_FORMAT.format(value)}`;
+};
 
 /** Whole dollars and fractional micros are formatted without a floating dollar value. */
 export const formatUsdMicros = (value: bigint): string => {
@@ -198,15 +238,20 @@ export const formatUsdMicros = (value: bigint): string => {
   return `${sign}$${whole.toLocaleString('en-US')}.${fraction}`;
 };
 
-export const formatEquivalentCost = (measure: AnalyticsMeasure | undefined): string =>
-  measure?.value === null || measure === undefined
+export const formatEquivalentCost = (measure: AnalyticsMeasure | undefined): string => {
+  const value = shownValue(measure);
+  return value === null || measure === undefined
     ? 'Unpriced'
-    : `${lowerBound(measure)}${formatUsdMicros(BigInt(Math.round(measure.value)))}`;
+    : `${lowerBound(measure)}${formatUsdMicros(BigInt(Math.round(value)))}`;
+};
 
 export const coverageNote = (measure: AnalyticsMeasure | undefined): string | undefined => {
   const resolved = measure ?? UNKNOWN_MEASURE;
   return resolved.known < resolved.total ? `${resolved.known}/${resolved.total}` : undefined;
 };
+
+const isCostMetric = (metric: AnalyticsMetric | undefined): boolean =>
+  metric === 'cost_usd' || metric === 'cost_now_usd';
 
 const METRIC_COLUMN: Column = { key: 'metric', header: 'Value', numeric: true };
 
@@ -218,11 +263,17 @@ export const analyticsColumnsFor = (
   if (aggregation === 'count')
     return ANALYTICS_TABLE_COLUMNS.filter(column => column.key === 'group' || column.key === 'sessions');
   if (metric === undefined) return ANALYTICS_TABLE_COLUMNS;
-  return [
-    ANALYTICS_TABLE_COLUMNS[0]!,
-    { ...METRIC_COLUMN, header: ANALYTICS_METRIC_LABELS[metric] },
-    ANALYTICS_TABLE_COLUMNS[1]!,
-  ];
+  const named = { ...METRIC_COLUMN, header: ANALYTICS_METRIC_LABELS[metric] };
+  // Spend always reads with both prices and the tokens behind it, so the two costs sit side by side.
+  if (metric === 'cost_usd')
+    return [
+      ANALYTICS_TABLE_COLUMNS[0]!,
+      named,
+      ANALYTICS_TABLE_COLUMNS.find(column => column.key === 'costNow')!,
+      { ...ANALYTICS_TABLE_COLUMNS.find(column => column.key === 'total')!, header: 'Tokens' },
+      ANALYTICS_TABLE_COLUMNS[1]!,
+    ];
+  return [ANALYTICS_TABLE_COLUMNS[0]!, named, ANALYTICS_TABLE_COLUMNS[1]!];
 };
 
 /**
@@ -264,44 +315,88 @@ export const formatDurationSeconds = (seconds: number): string => {
 
 /** A metric's value in its own unit; the gap is worded per metric, never a zero. */
 export const formatMetricMeasure = (metric: AnalyticsMetric, measure: AnalyticsMeasure): string => {
-  if (measure.value === null) return metric === 'cost_usd' ? 'Unpriced' : 'Unknown';
+  const isCost = metric === 'cost_usd' || metric === 'cost_now_usd';
+  const value = shownValue(measure);
+  if (value === null) return isCost ? 'Unpriced' : 'Unknown';
   const bound = lowerBound(measure);
   // The metric column is read, not audited: to the cent, as every other cost on the page.
-  if (metric === 'cost_usd') return `${bound}${formatDollars(measure.value)}`;
-  if (metric.startsWith('duration_')) return `${bound}${formatDurationSeconds(measure.value)}`;
-  return `${bound}${NUMBER_FORMAT.format(measure.value)}`;
+  if (isCost) return `${bound}${formatDollars(value)}`;
+  if (metric.startsWith('duration_')) return `${bound}${formatDurationSeconds(value)}`;
+  return `${bound}${NUMBER_FORMAT.format(value)}`;
 };
 
 /** The gap said in words: "priced 3 of 5". Present only when some sessions are missing. */
 export const metricCoverageNote = (metric: AnalyticsMetric, measure: AnalyticsMeasure): string | undefined =>
   measure.known < measure.total
-    ? `${metric === 'cost_usd' ? 'priced' : 'known'} ${measure.known} of ${measure.total}`
+    ? `${isCostMetric(metric) ? 'priced' : 'known'} ${measure.known} of ${measure.total}`
     : undefined;
 
-function MetricCell({ metric, measure }: { readonly metric: AnalyticsMetric; readonly measure: AnalyticsMeasure }) {
-  const note = metricCoverageNote(metric, measure);
+function MetricCell({
+  metric,
+  measure,
+  gaps,
+}: {
+  readonly metric: AnalyticsMetric;
+  readonly measure: AnalyticsMeasure;
+  readonly gaps?: AnalyticsCostGaps | undefined;
+}) {
+  const note = gaps ? undefined : metricCoverageNote(metric, measure);
   return (
     <td className="whitespace-nowrap px-cell-x py-row-y text-right font-mono tabular-nums text-fg">
-      <span className={measure.value === null ? 'text-muted' : 'font-semibold'}>
+      <span className={shownValue(measure) === null ? 'text-muted' : 'font-semibold'}>
         {formatMetricMeasure(metric, measure)}
       </span>
       {note && <span className="ml-1 text-2xs text-faint">{note}</span>}
+      <UnpricedReasons gaps={gaps} />
     </td>
   );
 }
 
-function MeasureCell({ measure, cost = false }: { readonly measure: AnalyticsMeasure; readonly cost?: boolean }) {
+/** "10 unpriced", openable: the reasons the sessions have no cost, biggest first. Never guessed. */
+function UnpricedReasons({
+  gaps,
+  className,
+}: {
+  readonly gaps: AnalyticsCostGaps | undefined;
+  readonly className?: string;
+}) {
+  const label = unpricedLabel(gaps);
+  if (label === undefined || gaps === undefined) return null;
+  return (
+    <details className={cn('text-2xs text-faint', className)} data-analytics-unpriced="">
+      <summary className="cursor-pointer select-none">{label}</summary>
+      <ul className="m-0 list-none p-0">
+        {costGapEntries(gaps).map(([reason, count]) => (
+          <li key={reason}>
+            {NUMBER_FORMAT.format(count)} · {costGapReason(reason)}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+function MeasureCell({
+  measure,
+  cost = false,
+  gaps,
+}: {
+  readonly measure: AnalyticsMeasure;
+  readonly cost?: boolean;
+  readonly gaps?: AnalyticsCostGaps | undefined;
+}) {
   const coverage = coverageNote(measure);
   return (
     <td className="whitespace-nowrap px-cell-x py-row-y text-right font-mono tabular-nums text-fg">
-      <span className={cost && measure.value !== null ? 'font-semibold' : undefined}>
+      <span className={cost && shownValue(measure) !== null ? 'font-semibold' : undefined}>
         {cost ? formatEquivalentCost(measure) : formatTokenMeasure(measure)}
       </span>
-      {coverage && (
+      {coverage && !gaps && (
         <span className="ml-1 text-2xs text-faint" title={`counted for ${coverage} sessions`}>
           [{coverage}]
         </span>
       )}
+      <UnpricedReasons gaps={gaps} />
     </td>
   );
 }
@@ -340,9 +435,25 @@ function Row({
               {NUMBER_FORMAT.format(row.sessions)}
             </td>
           );
+        if (column.key === 'costNow' && metric === 'cost_usd')
+          return <MetricCell key={column.key} metric="cost_now_usd" measure={row.costNowDollars} gaps={row.costGaps} />;
         if (column.key === 'metric' && metric)
-          return <MetricCell key={column.key} metric={metric} measure={row.metric} />;
-        return <MeasureCell key={column.key} measure={row[column.key]} cost={column.key === 'cost'} />;
+          return (
+            <MetricCell
+              key={column.key}
+              metric={metric}
+              measure={row.metric}
+              gaps={isCostMetric(metric) ? row.costGaps : undefined}
+            />
+          );
+        return (
+          <MeasureCell
+            key={column.key}
+            measure={row[column.key]}
+            cost={column.key === 'cost' || column.key === 'costNow'}
+            gaps={column.key === 'cost' ? row.costGaps : undefined}
+          />
+        );
       })}
     </tr>
   );
@@ -380,8 +491,19 @@ function AnalyticsResultList({
               <span className="mono text-right tabular-nums text-fg">{formatMetricMeasure(metric, row.metric)}</span>
               <span className="text-2xs text-muted">
                 {NUMBER_FORMAT.format(row.sessions)} session{row.sessions === 1 ? '' : 's'}
+                {metric === 'cost_usd' ? ` · ${formatTokenMeasure(row.total)} tokens` : ''}
               </span>
-              <span className="text-right text-2xs text-faint">{note}</span>
+              {metric === 'cost_usd' && row.costNow.total > 0 ? (
+                <span className="text-right text-2xs text-muted">
+                  today{' '}
+                  <span className="mono tabular-nums">{formatMetricMeasure('cost_now_usd', row.costNowDollars)}</span>
+                </span>
+              ) : (
+                <span className="text-right text-2xs text-faint">
+                  {isCostMetric(metric) && row.costGaps ? undefined : note}
+                </span>
+              )}
+              {isCostMetric(metric) && <UnpricedReasons gaps={row.costGaps} className="col-span-2" />}
             </li>
           );
         })}
@@ -391,6 +513,7 @@ function AnalyticsResultList({
     <ul className="kt-panel m-0 grid list-none p-0 sm:hidden" data-analytics-result-list="">
       {rows.map(row => {
         const coverage = coverageNote(row.cost);
+        const showNow = cost && row.costNow.total > 0;
         return (
           <li
             key={row.key}
@@ -411,11 +534,16 @@ function AnalyticsResultList({
               {NUMBER_FORMAT.format(row.sessions)} session{row.sessions === 1 ? '' : 's'}
               {cost ? ` · ${formatTokenMeasure(row.total)} tokens` : ''}
             </span>
-            {cost && coverage ? (
+            {showNow ? (
+              <span className="text-right text-2xs text-muted">
+                today <span className="mono tabular-nums">{formatEquivalentCost(row.costNow)}</span>
+              </span>
+            ) : cost && coverage && !row.costGaps ? (
               <span className="text-right text-2xs text-faint">priced for {coverage}</span>
             ) : (
               <span />
             )}
+            {cost && <UnpricedReasons gaps={row.costGaps} className="col-span-2" />}
           </li>
         );
       })}
@@ -428,6 +556,18 @@ export interface AnalyticsResultTableProps {
   readonly caption?: string;
   /** The selected metric: its column comes first and carries the sort. */
   readonly metric?: AnalyticsMetric;
+  /** The date "today's prices" are read at, as the page shows it; defaults to the current day. */
+  readonly today?: string;
+}
+
+/** Says which rate each cost uses, so two figures for one thing are never a puzzle. */
+function RateLegend({ today }: { readonly today: string }) {
+  return (
+    <p className="m-0 text-2xs text-muted" data-analytics-rate-legend="">
+      <strong className="font-semibold">At the time</strong>: each session at the rate in force the day it ran.{' '}
+      <strong className="font-semibold">At today's prices</strong> ({today}): the same tokens at the catalog rate now.
+    </p>
+  );
 }
 
 /** A responsive, sortable aggregate ledger from one daemon-bound response. */
@@ -435,6 +575,7 @@ export function AnalyticsResultTable({
   response,
   caption = 'Analytics aggregate result',
   metric,
+  today = new Date().toISOString().slice(0, 10),
 }: AnalyticsResultTableProps) {
   const [sort, setSort] = useState<{ key: AnalyticsSortKey; direction: AnalyticsSortDirection } | null>(null);
   const columns = analyticsColumnsFor(response.aggregation, metric);
@@ -461,8 +602,10 @@ export function AnalyticsResultTable({
       </p>
     );
 
+  const showsCost = columns.some(column => column.key === 'cost') || isCostMetric(shownMetric);
   return (
     <div className="grid min-w-0 gap-2">
+      {showsCost && <RateLegend today={today} />}
       <AnalyticsResultList
         rows={total ? [...sorted, total] : sorted}
         cost={columns.some(column => column.key === 'cost')}

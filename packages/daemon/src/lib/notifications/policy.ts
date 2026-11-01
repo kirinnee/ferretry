@@ -126,6 +126,11 @@ export function wokeNotificationPayload(
   }) as SessionNotificationPayload;
 }
 
+/** The item a stop's push shows and opens: the one blocking now, else the oldest waiting. */
+export function stopShows(waiting: readonly [AgendaItem, ...AgendaItem[]]): AgendaItem {
+  return waiting.find(item => item.blockingNow === true) ?? waiting[0];
+}
+
 /** The longest ferret name a stop's title carries whole; the count after it must survive a lock screen. */
 const STOPPED_NAME_LENGTH = 24;
 
@@ -140,7 +145,7 @@ export function stoppedNotificationPayload(
   waiting: readonly [AgendaItem, ...AgendaItem[]],
   snapshot: AgendaSnapshot,
 ): SessionNotificationPayload {
-  const first = waiting.find(item => item.blockingNow === true) ?? waiting[0];
+  const first = stopShows(waiting);
   const count = waiting.length;
   const name = agendaNotificationTitle(clipAtWord(oneLine(ferret), STOPPED_NAME_LENGTH));
   return PushNotificationPayloadSchema.parse({

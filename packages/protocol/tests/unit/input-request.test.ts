@@ -120,6 +120,24 @@ describe('raising an input request', () => {
     should(parsed.submit).equal('offer-owner');
   });
 
+  it('should take a hint naming an account or a sign-in, and nothing else', () => {
+    // Arrange
+    const raise = { target: { kind: 'terminal', key: 'dev' }, prompt: 'p', sensitivity: 'secret' };
+
+    // Act / Assert — an older raise (a handle) still parses; a sign-in id parses where accounts exist
+    should(InputRaiseSchema.safeParse({ ...raise, secretHint: 'SUDO_KIRIN_BOX' }).success).be.true();
+    should(InputRaiseSchema.safeParse({ ...raise, secretHint: 'si_0123456789abcdef' }).success).be.true();
+    for (const hint of ['si_0123', 'sudo_kirin_box', 'si_0123456789ABCDEF', ''])
+      should(InputRaiseSchema.safeParse({ ...raise, secretHint: hint }).success).be.false();
+  });
+
+  it('should take the 2FA key a code is from, by its id only', () => {
+    const raise = { target: { kind: 'browser', key: 'app' }, prompt: 'p', sensitivity: 'private' };
+    should(InputRaiseSchema.safeParse({ ...raise, factor: 'tf_000000000001' }).success).be.true();
+    for (const factor of ['tf_0001', 'Authenticator app', 'si_0123456789abcdef', 'TF_000000000001'])
+      should(InputRaiseSchema.safeParse({ ...raise, factor }).success).be.false();
+  });
+
   it('should refuse anything the agent could use to claim what the daemon observes', () => {
     for (const extra of [{ observed: TERMINAL_FACTS }, { echo: 'off' }, { origin: 'https://github.com' }]) {
       should(
@@ -376,6 +394,25 @@ describe('delivering', () => {
     ).be.false();
   });
 
+  it('should refuse a sign-in in a deliver until the daemon checks that it belongs to the account', () => {
+    // Arrange
+    const tapped = { deliveryId: DELIVERY, observedDigest: DIGEST, entry: 'GITHUB_KIRINNEE', submit: true };
+
+    // Act / Assert — accepted and ignored, a sign-in of ANOTHER account would ride along unchecked; so it is refused
+    should(InputDeliverBodySchema.safeParse(tapped).success).be.true();
+    should(InputDeliverBodySchema.safeParse({ ...tapped, signIn: 'si_0123456789abcdef' }).success).be.false();
+  });
+
+  it('should name a 2FA key only with the saved account it belongs to', () => {
+    // Arrange
+    const tapped = { deliveryId: DELIVERY, observedDigest: DIGEST, entry: 'GITHUB_KIRINNEE', submit: true };
+
+    // Act / Assert
+    should(InputDeliverBodySchema.safeParse({ ...tapped, factor: 'tf_000000000001' }).success).be.true();
+    should(InputDeliverBodySchema.safeParse({ ...body, factor: 'tf_000000000001' }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...tapped, factor: 'GITHUB_KIRINNEE' }).success).be.false();
+  });
+
   it('should refuse a delivery id that is not a UUID and a body with a plain value field', () => {
     should(InputDeliverBodySchema.safeParse({ ...body, deliveryId: 'again' }).success).be.false();
     should(InputDeliverBodySchema.safeParse({ ...body, value: 'hunter2' }).success).be.false();
@@ -613,5 +650,92 @@ describe('the schemas that must never hold a value', () => {
   it('should list requests and refuse a list that carries anything else', () => {
     should(InputRequestListSchema.parse({ requests: [] })).deepEqual({ requests: [] });
     should(InputRequestListSchema.safeParse({ requests: [], value: 'x' }).success).be.false();
+  });
+});
+
+describe('a one-time code (`code`)', () => {
+  it('should rank code above plain and below private and secret', () => {
+    // Arrange
+    const of = (...kinds: ('secret' | 'private' | 'code' | 'plain')[]) =>
+      strongestSensitivity(kinds.map(sensitivity => ({ sensitivity })));
+
+    // Act / Assert — the card, the journal and the audit record the strongest field.
+    should(of('plain', 'code')).equal('code');
+    should(of('code', 'private')).equal('private');
+    should(of('code', 'secret')).equal('secret');
+    should(of('code')).equal('code');
+  });
+
+  it('should refuse a code that would press keys and never keep one as a saved login', () => {
+    // Act / Assert
+    should(inputValueProblem('123 456', 'code')).be.undefined();
+    should(inputValueProblem('12\t34', 'code')).containEql('press keys');
+    should(inputValueProblem('12\n34', 'code')).containEql('press keys');
+    should(savedRolesOf([{ id: 'code', sensitivity: 'code' }])).be.undefined();
+    should([
+      ...(savedRolesOf([
+        { id: 'email', sensitivity: 'plain' },
+        { id: 'password', sensitivity: 'secret' },
+        { id: 'code', sensitivity: 'code' },
+      ])?.entries() ?? []),
+    ]).eql([
+      ['email', 'username'],
+      ['password', 'password'],
+    ]);
+  });
+
+  it('should rank a neutral flag above green and below amber', () => {
+    // Arrange
+    const green = { level: 'green', reason: 'A password field on a secure page.' } as const;
+    const neutral = { level: 'neutral', reason: 'One-time code: the ferret can see it.' } as const;
+    const amber = { level: 'amber', reason: 'Not https.' } as const;
+
+    // Act / Assert
+    should(worstRisk([green, neutral])).equal(neutral);
+    should(worstRisk([neutral, amber])).equal(amber);
+  });
+
+  it('should take code from an agent and refuse a sensitivity it does not know, never reading it as plain', () => {
+    // Act / Assert — the raise stays closed: an unknown word is a refusal the agent can correct.
+    should(
+      InputRaiseSchema.safeParse({
+        target: { kind: 'terminal', key: 'dev' },
+        prompt: 'the 2FA code',
+        sensitivity: 'code',
+      }).success,
+    ).be.true();
+    should(
+      InputRaiseSchema.safeParse({ target: { kind: 'terminal', key: 'dev' }, prompt: 'x', sensitivity: 'otp' }).success,
+    ).be.false();
+  });
+
+  it('should read a sensitivity or risk level this build does not know as secret and amber, never plain', () => {
+    // Arrange — a request from a NEWER daemon, with a kind and a level this client was built without.
+    const newer = {
+      ...REQUEST,
+      sensitivity: 'passkey-pin',
+      fields: [{ id: 'value', label: 'PIN', sensitivity: 'passkey-pin', risk: { level: 'violet', reason: 'New.' } }],
+      risk: { level: 'violet', reason: 'New.' },
+    };
+
+    // Act
+    const read = InputRequestListSchema.parse({ requests: [newer] }).requests[0];
+
+    // Assert
+    should(read?.sensitivity).equal('secret');
+    should(read?.fields[0]?.sensitivity).equal('secret');
+    should(read?.fields[0]?.risk?.level).equal('amber');
+    should(read?.risk?.level).equal('amber');
+  });
+
+  it('should be refused whole by a client built before code existed, so an older app never draws it as plain', () => {
+    // Arrange — the three-value enum every client before this change was built with.
+    const older = z.enum(['secret', 'private', 'plain']);
+    const olderRequest = z.object({ sensitivity: older, fields: z.array(z.object({ sensitivity: older })) });
+    const code = { ...REQUEST, sensitivity: 'code', fields: [{ id: 'value', label: 'Code', sensitivity: 'code' }] };
+
+    // Act / Assert — the request still parses here, and an old reader refuses it rather than guessing.
+    should(InputRequestSchema.parse(code).sensitivity).equal('code');
+    should(olderRequest.safeParse(code).success).be.false();
   });
 });

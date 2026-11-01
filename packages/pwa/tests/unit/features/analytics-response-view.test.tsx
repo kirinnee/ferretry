@@ -92,6 +92,7 @@ const aggregate = (): AnalyticsResponse =>
         cacheWrite1hInputTokens: { value: 0, known: 1, total: 1 },
         reasoningTokens: { value: null, known: 0, total: 1 },
         equivalentApiCostUsdMicros: { value: 1_250_000, known: 1, total: 1 },
+        equivalentApiCostCurrentUsdMicros: { value: 1_250_000, known: 1, total: 1 },
         turns: { value: 1, known: 1, total: 1 },
         durationMs: { value: 1, known: 1, total: 1 },
         activeDurationMs: { value: 1, known: 1, total: 1 },

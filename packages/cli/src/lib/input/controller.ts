@@ -1,6 +1,7 @@
 import {
   type InputDeliverBody,
   type InputRequest,
+  type InputSensitivity,
   inputValueProblem,
   LOGIN_LABEL_MAX_LENGTH,
   LOGIN_PASSWORD_MIN_LENGTH,
@@ -16,6 +17,14 @@ import {
   renderInputList,
   showUntrusted,
 } from './render.ts';
+
+/** What the prompt says beside "hidden" about who may see the value: nothing for a secret or a private value. */
+const FLAGS: Readonly<Record<InputSensitivity, string>> = {
+  secret: '',
+  private: '',
+  code: ', a one-time code: the ferret can see it',
+  plain: ', not secret: the ferret can see it',
+};
 
 /** Options every input command accepts. */
 export interface InputCommandOptions {
@@ -142,7 +151,7 @@ export class InputController {
     } else if (request.fields.length > 1) {
       const fields: { field: string; padded: string }[] = [];
       for (const field of request.fields) {
-        const flag = field.sensitivity === 'plain' ? ', not secret: the ferret can see it' : '';
+        const flag = FLAGS[field.sensitivity];
         const value = await this.ports.prompt.askHidden(
           `${showUntrusted(field.label)} for !${request.agendaItemId} (hidden${flag}): `,
         );
@@ -162,7 +171,9 @@ export class InputController {
         ...(saveAs === undefined ? {} : { save: { entry: saveAs, label: saveLabel(request, saveAs, options.label) } }),
       };
     } else {
-      const value = await this.ports.prompt.askHidden(`value for !${request.agendaItemId} (hidden): `);
+      const value = await this.ports.prompt.askHidden(
+        `value for !${request.agendaItemId} (hidden${FLAGS[request.sensitivity]}): `,
+      );
       const problem = inputValueProblem(value, request.sensitivity);
       if (problem !== undefined) throw new Error(problem);
       if (saveAs !== undefined && request.saved?.saves === 'password' && value.length < LOGIN_PASSWORD_MIN_LENGTH) {

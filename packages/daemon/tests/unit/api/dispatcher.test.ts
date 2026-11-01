@@ -1750,6 +1750,46 @@ describe('spending a single-use step-up', () => {
 
       should(claimed).deepEqual([false]);
     });
+
+    it('should never let the machine, or any proof minted so far, stand in for an act every caller must prove', async () => {
+      // Arrange — a witness that would hand over a proof for anything, and a route asking for add-2fa-key
+      const asked: unknown[] = [];
+      const witness: StepUpWitness = {
+        held: () => true,
+        claimFresh: (_subject, act) => {
+          asked.push(act);
+          return true;
+        },
+      };
+      const claimed: boolean[] = [];
+      const stage = `st_${'a'.repeat(24)}`;
+      const route: ApiRoute = {
+        method: 'POST',
+        path: '/v1/claims',
+        minimum: 'operator',
+        capability: { capability: 'fleet', axis: 'use' },
+        handle: async context => {
+          claimed.push(context.claimFreshStepUp?.('add-2fa-key', stage) === true);
+          // @ts-expect-error — an act every caller must prove names the one subject its proof is bound to
+          claimed.push(context.claimFreshStepUp?.('add-2fa-key') === true);
+          return jsonResponse({});
+        },
+      };
+      const dispatcher = (guard: CapabilityGuard) =>
+        new ApiDispatcher(new ApiRouter([route]), credentials, guard, undefined, witness);
+
+      // Act — a paired device, and the machine's own admin token (this guard answers every caller ungoverned)
+      await dispatcher(guardDeciding({ allowed: true, refusal: 'granted' })).dispatch(
+        request({ method: 'POST', path: '/v1/claims', device: DEVICE }),
+      );
+      await dispatcher(guardDeciding({ allowed: true, refusal: 'granted' })).dispatch(
+        request({ method: 'POST', path: '/v1/claims', headers: { authorization: 'Bearer admin-secret' } }),
+      );
+
+      // Assert — refused every time, and no proof was spent on it
+      should(claimed).deepEqual([false, false, false, false]);
+      should(asked).deepEqual([]);
+    });
   });
 
   it('should serve an allowed stepped-up act when the witness has nothing to spend', async () => {

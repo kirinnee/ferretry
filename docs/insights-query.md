@@ -94,26 +94,63 @@ A metric is what a query is about. Each one maps to one field of the aggregate r
 `analyticsRawMetricValue(row, metric)` return it in the metric's unit. Every response still carries
 every measure, so a table can show them all while a chart plots the chosen one.
 
-| Metric                             | Unit    | Exact definition (per session, then aggregated)                                                         |
-| ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------- |
-| `tokens`                           | tokens  | gross input + output, summed over every request in the transcript (one per Claude `message.id`)         |
-| `tokens_input`                     | tokens  | gross input: uncached + cache read + cache write (Claude); the prompt total (Codex)                     |
-| `tokens_output`                    | tokens  | output, reasoning included                                                                              |
-| `tokens_cache_read`                | tokens  | input served from cache, a subset of `tokens_input`                                                     |
-| `tokens_cache_write`               | tokens  | input written to cache, a subset of `tokens_input`                                                      |
-| `tokens_reasoning`                 | tokens  | the part of output a harness names as reasoning (Codex); null where it names none (Claude)              |
-| `cost_usd`                         | USD     | equivalent API cost at the rate in force when the row was ingested, **not** a bill (subscriptions)      |
-| `turns`                            | turns   | owner prompts in the transcript (see [Turns](#turns)); the daemon's send counter when none was readable |
-| `sessions`                         | count   | the group's session count; `sum(sessions)` = `count`                                                    |
-| `duration_active_seconds`          | seconds | active time, [defined below](#duration)                                                                 |
-| `duration_wall_seconds`            | seconds | wall time: session finish − session start                                                               |
-| `duration_active_seconds_per_turn` | seconds | Σ active time ÷ Σ turns over the group: a **ratio of sums**                                             |
+| Metric                             | Unit    | Exact definition (per session, then aggregated)                                                          |
+| ---------------------------------- | ------- | -------------------------------------------------------------------------------------------------------- |
+| `tokens`                           | tokens  | gross input + output, summed over every request in the transcript (one per Claude `message.id`)          |
+| `tokens_input`                     | tokens  | gross input: uncached + cache read + cache write (Claude); the prompt total (Codex)                      |
+| `tokens_output`                    | tokens  | output, reasoning included                                                                               |
+| `tokens_cache_read`                | tokens  | input served from cache, a subset of `tokens_input`                                                      |
+| `tokens_cache_write`               | tokens  | input written to cache, a subset of `tokens_input`                                                       |
+| `tokens_reasoning`                 | tokens  | the part of output a harness names as reasoning (Codex); null where it names none (Claude)               |
+| `cost_usd`                         | USD     | equivalent API cost at the rate in force the day the session ran (stored at ingest), **not** a bill      |
+| `cost_now_usd`                     | USD     | the same tokens at the catalog's rate as of the moment of the read ("at today's prices"), **not** a bill |
+| `turns`                            | turns   | owner prompts in the transcript (see [Turns](#turns)); the daemon's send counter when none was readable  |
+| `sessions`                         | count   | the group's session count; `sum(sessions)` = `count`                                                     |
+| `duration_active_seconds`          | seconds | active time, [defined below](#duration)                                                                  |
+| `duration_wall_seconds`            | seconds | wall time: session finish − session start                                                                |
+| `duration_active_seconds_per_turn` | seconds | Σ active time ÷ Σ turns over the group: a **ratio of sums**                                              |
 
 Token, cost and duration figures are **evidence or null**. A session whose transcript could not be
 found, read whole or accounted for has null token columns and a recorded refusal. It is never counted
 as zero (see the analytics mount's contract in `packages/daemon/src/lib/runtime/mounts/analytics.ts`).
 For why costs read "Unpriced" and where prices come from, see
 [the model catalog's Prices section](model-catalog.md).
+
+### A group some sessions could not state
+
+A measure's `value` is non-null only when **every** session in the group stated a figure. When some did
+not, `value` is null and the measure carries what is still true:
+
+- `known` of `total` sessions stated a figure, and
+- `knownSum` (a `sum` only) is the total of the sessions that did — a **lower bound**, never an estimate.
+
+A client prints it as "≥ $412.50" with the unpriced count beside it; it must not print "Unpriced" for a group
+that has a `knownSum`, and a roll-up adds `knownSum` into the total, which stays a lower bound while any
+group is incomplete. A group where nothing was stated has no `knownSum` and reads "Unpriced". A ratio of
+sums has no lower bound.
+
+An aggregate row also carries `costGaps`: the sessions that have no cost, counted by reason
+(`transcript_unresolved`, `transcript_unreadable`, `transcript_damaged`, `transcript_incomplete`,
+`no_usage_evidence`, `ambiguous_token_accounting`, or a pricing reason such as `missing_pricing_model`,
+`unknown_pricing_model`, `pricing_outside_validity_window`, `incomplete_token_counts`). A raw row carries its own
+`costGap`. The reasons are evidence gaps (no transcript, no model name), not missing prices: the catalog
+prices every model the fleet runs. `unknown` means no reason survived.
+
+### Two costs: at the time and at today's prices
+
+`cost_usd` is the stored cost: each session priced when it was ingested, with the rate whose validity window
+contains the session's day. `cost_now_usd` re-prices the **same tokens** at read time with the catalog rate
+in force today, so a price change is visible against what history cost. Both are equivalent API cost, never
+spend. They coincide while a model has one rate valid since the beginning (the catalog's default); they
+diverge as soon as dated rates exist. `cost_now_usd` is null for a session with no tokens or no current rate,
+never a guess.
+
+### Short model names
+
+`model` and `pricing_model` group by the canonical catalog identity, so a session that says `opus` and one that
+says `claude-opus-5-5` are one row. The tier aliases `opus`, `sonnet` and `haiku` belong to the Anthropic
+catalog's pinned model for that tier; another catalog's model that happens to be called `opus` does not create
+a second identity.
 
 ### The ratio metric
 

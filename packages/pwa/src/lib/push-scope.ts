@@ -26,7 +26,8 @@
 import type { PushNotificationPayload } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 import { notificationBrand } from './notify.ts';
-import { daemonSessionPath, daemonSessionsPath } from './pages/routes.ts';
+import { agendaTargetFromSearch, inboxTargetPath } from './agenda-inbox.ts';
+import { daemonHomePath, daemonSessionPath, parseRoute } from './pages/routes.ts';
 
 /** The path every per-machine push registration lives under. Never a page the app serves. */
 export const PUSH_SCOPE_ROOT = '/push/';
@@ -71,7 +72,7 @@ export const pushMachineOf = (scope: string, scriptUrl: string): PushMachine | n
 export const isPushScope = (scope: string): boolean => pushMachineOf(scope, scope) !== null;
 
 /** The pages one machine may open: its own sessions page and everything under it. */
-const machinePath = (machine: PushMachine): string => daemonSessionsPath(machine.daemonId as DaemonId);
+const machinePath = (machine: PushMachine): string => daemonHomePath(machine.daemonId as DaemonId);
 
 const withinMachine = (pathname: string, machine: PushMachine): boolean => {
   const root = machinePath(machine);
@@ -140,6 +141,22 @@ export const notificationUrl = (
   if (machine === null && target.pathname.startsWith(SESSION_RELATIVE)) return fallback.href;
   if (machine !== null && !withinMachine(target.pathname, machine)) return fallback.href;
   return target.href;
+};
+
+/**
+ * Where a TAP lands, given the page `notificationUrl` allowed: an Agenda push names its conversation AT
+ * an item (`/d/<id>/session/<sid>?attention=A3`), and the item is a card the owner answers in the Inbox, so
+ * the tap opens the Inbox at that card. The Inbox sends the reader on to the conversation itself when the
+ * item is no longer open (answered elsewhere, snoozed, on the ferret's turn). Every other page — a
+ * conversation with no item, settings — is returned untouched.
+ */
+export const notificationTapUrl = (allowed: string, origin: string): string => {
+  const url = URL.parse(allowed, origin);
+  if (url === null || url.origin !== origin) return allowed;
+  const route = parseRoute(url.pathname);
+  const item = agendaTargetFromSearch(url.search);
+  if (route.kind !== 'session' || item === null) return allowed;
+  return new URL(inboxTargetPath(route.daemonId, route.sessionId, item), origin).href;
 };
 
 /** Where a tap goes when the push named no page this worker may open. */

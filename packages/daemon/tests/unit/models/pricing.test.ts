@@ -235,3 +235,79 @@ describe('model catalog prices in analytics', () => {
     should(rates[0]?.pricingKey).match(/^model-catalog:long:[0-9a-f]{32}$/u);
   });
 });
+
+describe('short tier names in analytics pricing', () => {
+  const claudeUsage = (pricingModel: string): AnalyticsTokenUsage => ({
+    pricingModel,
+    createdAt: '2026-10-25T00:00:00.000Z',
+    inputTokens: 1_000,
+    cachedInputTokens: 0,
+    cacheWriteInputTokens: 0,
+    outputTokens: 1_000,
+  });
+
+  it('should resolve opus, sonnet and haiku to the models Anthropic’s catalog pins them to', () => {
+    // Arrange
+    const pricing = effectiveAnalyticsPricing([], built);
+
+    // Act
+    const actual = ['opus', 'sonnet', 'haiku', 'Opus'].map(name =>
+      snapshotAnalyticsUsagePricing(claudeUsage(name), pricing),
+    );
+
+    // Assert
+    should(actual.map(snapshot => (snapshot.kind === 'priced' ? snapshot.identity.modelId : snapshot.kind))).deepEqual([
+      'claude-opus-5-5',
+      'claude-sonnet-5-5',
+      'claude-haiku-5-5',
+      'claude-opus-5-5',
+    ]);
+  });
+
+  it('should price a short name exactly as the canonical id it names', () => {
+    // Arrange
+    const pricing = effectiveAnalyticsPricing([], built);
+
+    // Act
+    const short = snapshotAnalyticsUsagePricing(claudeUsage('opus'), pricing);
+    const canonical = snapshotAnalyticsUsagePricing(claudeUsage('claude-opus-5-5'), pricing);
+
+    // Assert
+    should(short.kind).equal('priced');
+    should(short).match({
+      equivalentApiCostUsdMicros: (canonical as { equivalentApiCostUsdMicros: number }).equivalentApiCostUsdMicros,
+    });
+  });
+
+  it('should not let another catalog’s re-pinned tier slot claim the name', () => {
+    // Arrange: Z.ai pins "opus" to a GLM model, and so would any gateway.
+    const rates = modelCatalogPricingRates(built);
+
+    // Act
+    const owners = rates.filter(rate => rate.aliases.includes('opus')).map(rate => rate.modelId);
+
+    // Assert
+    should(owners).deepEqual(['claude-opus-5-5']);
+  });
+
+  it('should leave a short name to the operator when the operator prices the model', () => {
+    // Arrange
+    const operator = [operatorRate('claude-opus-5-5')];
+    const pricing = effectiveAnalyticsPricing(operator, built);
+
+    // Act
+    const actual = snapshotAnalyticsUsagePricing(claudeUsage('opus'), pricing);
+
+    // Assert: the operator's rate won the model, and took none of the catalog's aliases with it.
+    should(actual).match({ kind: 'unpriced', reason: 'unknown_pricing_model' });
+  });
+
+  it('should change the pricing fingerprint when the aliases do, so stored rows are re-priced', () => {
+    // Arrange
+    const withAliases = modelCatalogPricingRates(built);
+    const without = withAliases.map(rate => ({ ...rate, aliases: [] }));
+
+    // Act / Assert
+    should(analyticsPricingCatalogFingerprint(withAliases)).not.equal(analyticsPricingCatalogFingerprint(without));
+  });
+});

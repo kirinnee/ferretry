@@ -45,6 +45,7 @@ const pushCases: SchemaCase[] = [
   { name: 'notification payload', schema: push.PushNotificationPayloadSchema, value: sessionPayload },
   { name: 'delivery result', schema: push.PushDeliveryResultSchema, value: { delivered: 2, failed: 0 } },
   { name: 'push error', schema: push.PushErrorCodeSchema, value: 'invalid' },
+  { name: 'push urgency', schema: push.PushUrgencySchema, value: 'high' },
 ];
 
 describe('push schemas', () => {
@@ -443,5 +444,22 @@ describe('push schemas', () => {
     // An unrelated unknown field — one with no version-skew story — is still refused outright: the
     // tolerance above is for exactly one named legacy field, not a general relaxation.
     should(push.RegisterPushDeviceRequestSchema.safeParse({ ...registration, deviceId: DEVICE_ID }).success).be.false();
+  });
+});
+
+describe('high priority (the owner: "for 2FA notification, please make it high priority")', () => {
+  it('should make a one-time code high and everything else normal, in one rule', () => {
+    // Act / Assert
+    should(push.pushUrgencyFor('one-time-code')).equal('high');
+    should(push.pushUrgencyFor('other')).equal('normal');
+    should(push.PUSH_URGENT_TTL_SECONDS).equal(600);
+  });
+
+  it('should carry only urgency high on a payload, and refuse any other word', () => {
+    // Act / Assert
+    should(push.PushNotificationPayloadSchema.parse({ ...sessionPayload, urgency: 'high' })).containDeep({
+      urgency: 'high',
+    });
+    should(push.PushNotificationPayloadSchema.safeParse({ ...sessionPayload, urgency: 'low' }).success).be.false();
   });
 });

@@ -25,6 +25,17 @@ export function AgendaWireProbes({ machines }: { readonly machines: readonly Dae
   );
 }
 
+/**
+ * Whether this machine searches work by words, from the health the app already reads (never a read of its own):
+ * `undefined` outside the app store and until health answered.
+ */
+export function useWorkSearchOffered(daemonId: DaemonId | undefined): boolean | undefined {
+  const directory = useOptionalAppStore()?.agendaWire;
+  return useSyncExternalStore(directory?.subscribe ?? noWires.subscribe, () =>
+    daemonId === undefined ? undefined : directory?.workSearchOf(daemonId),
+  );
+}
+
 const noWires = { subscribe: () => () => undefined } as const;
 
 /** The spelling this machine's daemon speaks: the older one outside the app store and until health is read. */

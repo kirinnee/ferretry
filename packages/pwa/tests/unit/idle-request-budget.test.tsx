@@ -417,7 +417,7 @@ describe('the idle request budget', () => {
     `should keep an idle fleet page to ${String(FLEET_PAGE_BUDGET)} requests a minute`,
     async () => {
       // Act
-      const measured = await measure(`/d/${alpha.daemonId}`);
+      const measured = await measure(`/d/${alpha.daemonId}/sessions`);
 
       // Assert
       console.info(verdict('fleet page', measured));

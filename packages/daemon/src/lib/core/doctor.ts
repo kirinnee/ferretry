@@ -4,6 +4,7 @@ import {
   LOOPBACK_FIREWALL_MARKER_PATH,
   type LoopbackFirewallState,
 } from '@ferretry/protocol';
+import { type NotificationHealthReading, notificationHealthChecks } from '../notifications/health.ts';
 import { hasSubscriptionCrash, parseTmuxVersion, type TmuxReleaseReading, type TmuxVersion } from '../tmux/version.ts';
 import {
   type HarnessPreflight,
@@ -40,6 +41,12 @@ export interface DoctorReportInput {
    * the report not ready.
    */
   readonly userSlice?: UserSliceReading;
+  /**
+   * Whether this daemon can buzz a phone: its ledger, its enrolled devices and what became of its newest
+   * pushes. Absent when no daemon is running to ask (`fyd --check`) — the rows are then left out. Never
+   * makes the report not ready.
+   */
+  readonly notifications?: NotificationHealthReading;
 }
 
 const present = (
@@ -252,6 +259,7 @@ export function readDoctorReport(input: DoctorReportInput): DoctorReport {
     ...tmuxRelease(input.tmuxRelease),
     ...loopbackFirewall(input.loopbackFirewall),
     ...userSliceChecks(input.userSlice),
+    ...(input.notifications === undefined ? [] : notificationHealthChecks(input.notifications)),
     binary(input, 'bash', 'required', 'Generated fleet wrappers cannot run.'),
     binary(input, 'git', 'capability', 'Worktrees, project inspection, and repository features are unavailable.'),
     input.platform === 'darwin'

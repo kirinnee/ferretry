@@ -16,8 +16,9 @@
  * which is the only shape that cannot serve a stale daemon's fleet.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { SessionView, WorkHit } from '@ferretry/protocol';
 import type { LucideIcon } from 'lucide-react';
+import { agendaConversationPath } from '../lib/agenda-inbox.ts';
 import type { MachineSource } from '../lib/all-machines.ts';
 import { displayCallsign, shortSessionId } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
@@ -25,7 +26,9 @@ import type { DaemonId } from '../lib/daemon-connection.ts';
 // `fleet-grouping`'s `baseName` is what keeps a session searchable under the
 // same folder name the group header shows it under.
 import { baseName } from '../lib/fleet-grouping.ts';
-import { daemonSettingsPath } from '../lib/pages/routes.ts';
+import { daemonBoardCardPath, daemonSettingsPath } from '../lib/pages/routes.ts';
+import { formatReference } from '../lib/references.ts';
+import { workHitDescription, workHitKey, workProjectLabel } from '../lib/work-search.ts';
 import {
   type AppBarDestinationLike,
   type DestinationPaletteEntry,
@@ -108,11 +111,33 @@ export interface PaletteSettingsEntry {
   readonly href?: string;
 }
 
+/**
+ * One card or agenda item the daemon's work search found, projected into the row the palette draws.
+ * `muted` is a closed, dropped or addressed one: still findable, visibly past.
+ */
+export interface PaletteWork {
+  readonly hit: WorkHit;
+  readonly key: string;
+  /** The id the reference way: `&F412` for a card, `!A23` for an agenda item. */
+  readonly reference: string;
+  readonly stateLabel: string;
+  readonly muted: boolean;
+  readonly title: string;
+  /** The matched line, named by the field it came from; empty when the title already says it. */
+  readonly description: string;
+  /** Where it belongs: a card's project, an agenda item's owning ferret. */
+  readonly context: string;
+  /** Where Enter goes. */
+  readonly href: string;
+}
+
 export type PaletteResult =
   | { readonly kind: 'destination'; readonly entry: DestinationPaletteEntry }
   | { readonly kind: 'command'; readonly entry: PaletteCommand }
   | { readonly kind: 'settings'; readonly entry: PaletteSettingsEntry }
-  | { readonly kind: 'session'; readonly entry: PaletteSession };
+  | { readonly kind: 'session'; readonly entry: PaletteSession }
+  | { readonly kind: 'card'; readonly entry: PaletteWork }
+  | { readonly kind: 'agenda'; readonly entry: PaletteWork };
 
 /**
  * Stable element ids. The palette is a SINGLETON — its host mounts exactly one —
@@ -128,6 +153,9 @@ export const PALETTE_IDS = {
   destinationsHeading: 'fy-palette-group-destinations',
   settingsHeading: 'fy-palette-group-settings',
   sessionsHeading: 'fy-palette-group-sessions',
+  cardsHeading: 'fy-palette-group-cards',
+  agendaHeading: 'fy-palette-group-agenda',
+  filters: 'fy-palette-filters',
 } as const;
 
 /** The option id for one result, by kind. */
@@ -139,6 +167,10 @@ export const paletteResultId = (result: PaletteResult): string => {
       return `fy-palette-option-${result.entry.id}`;
     case 'settings':
       return `fy-palette-option-${result.entry.id}`;
+    case 'card':
+    case 'agenda':
+      // An agenda id is per session, so the hit's key (which carries the session) is the option's identity.
+      return `fy-palette-option-work-${result.entry.key.replaceAll(':', '-')}`;
     default:
       // Two machines can hold the same session id, so a listed machine is part of the option's id.
       return result.entry.daemonId === undefined
@@ -147,7 +179,7 @@ export const paletteResultId = (result: PaletteResult): string => {
   }
 };
 
-export type PaletteGroup = 'destinations' | 'commands' | 'settings' | 'sessions';
+export type PaletteGroup = 'destinations' | 'commands' | 'settings' | 'sessions' | 'cards' | 'agenda';
 
 /**
  * What each group is called. A resting palette is answering "where can I go and
@@ -165,6 +197,8 @@ const GROUP_HEADINGS: Readonly<Record<PaletteGroup, { readonly resting: string; 
   commands: { resting: 'Actions', searching: 'Commands' },
   settings: { resting: 'Commands', searching: 'Settings' },
   sessions: { resting: 'Recent sessions', searching: 'Sessions' },
+  cards: { resting: 'Cards', searching: 'Cards' },
+  agenda: { resting: 'Agenda', searching: 'Agenda' },
 };
 
 /** The heading one group shows, given whether the reader has typed anything. */
@@ -205,6 +239,70 @@ export const paletteSessionEntries = (views: readonly SessionView[], origin?: Pa
         ...(origin === undefined ? {} : { daemonId: origin.daemonId, machine: origin.machine }),
       };
     });
+
+/** Which kinds of work the finder shows, and whether closed work is among it. */
+export interface PaletteWorkFilter {
+  readonly kind: 'all' | 'task' | 'agenda';
+  /** Only work still to do; false shows closed, dropped and addressed work too, muted. */
+  readonly open: boolean;
+}
+
+/** The finder's resting filter: everything, so a finished card is still findable. */
+export const DEFAULT_PALETTE_WORK_FILTER: PaletteWorkFilter = { kind: 'all', open: false };
+
+/** The most rows of each kind while both are listed; one kind alone shows all the daemon returned. */
+export const MAX_WORK_ROWS_PER_KIND = 6;
+
+const ownerName = (daemon: DaemonId, sessionId: string, sessions: readonly PaletteSession[]): string => {
+  // Session ids collide across machines, and the hit is this machine's.
+  const owner = sessions.find(entry => entry.id === sessionId && (entry.daemonId ?? daemon) === daemon);
+  return owner === undefined ? shortSessionId(sessionId) : owner.callsign || owner.headline;
+};
+
+/**
+ * Projects the daemon's hits into rows, applying the filter HERE as well as on the wire: toggling a chip
+ * narrows the rows already on screen at once, and the previous answer (kept while the next loads) can
+ * never show a kind the reader just turned off.
+ */
+export const paletteWorkRows = (
+  hits: readonly WorkHit[],
+  filter: PaletteWorkFilter,
+  daemon: DaemonId,
+  sessions: readonly PaletteSession[],
+  projectNames?: ReadonlyMap<string, string>,
+): { readonly cards: readonly PaletteWork[]; readonly agenda: readonly PaletteWork[] } => {
+  const cards: PaletteWork[] = [];
+  const agenda: PaletteWork[] = [];
+  for (const hit of hits) {
+    if (filter.kind !== 'all' && hit.kind !== filter.kind) continue;
+    if (filter.open && hit.state !== 'open') continue;
+    const common = {
+      hit,
+      key: workHitKey(hit),
+      stateLabel: hit.standing,
+      muted: hit.state !== 'open',
+      title: hit.title,
+      description: workHitDescription(hit),
+    };
+    if (hit.kind === 'task') {
+      cards.push({
+        ...common,
+        reference: formatReference({ kind: 'task', id: hit.id }),
+        context: workProjectLabel(hit.projectId, projectNames),
+        href: daemonBoardCardPath(daemon, hit.id),
+      });
+    } else {
+      agenda.push({
+        ...common,
+        reference: formatReference({ kind: 'attention', id: hit.id }),
+        context: ownerName(daemon, hit.sessionId, sessions),
+        href: agendaConversationPath(daemon, hit.sessionId, hit.id),
+      });
+    }
+  }
+  const cap = filter.kind === 'all' ? MAX_WORK_ROWS_PER_KIND : Number.POSITIVE_INFINITY;
+  return { cards: cards.slice(0, cap), agenda: agenda.slice(0, cap) };
+};
 
 /** What the palette searches across machines: every reachable machine's sessions, and who is missing. */
 export interface MachinePaletteSessions {
@@ -269,6 +367,12 @@ export interface PaletteInput {
   readonly settings: readonly PaletteSettingsEntry[];
   /** Injected so ranking is deterministic under test. */
   readonly now?: number;
+  /** The daemon's work-search hits for this query; absent on a machine that cannot search. */
+  readonly work?: {
+    readonly hits: readonly WorkHit[];
+    readonly filter: PaletteWorkFilter;
+    readonly projectNames?: ReadonlyMap<string, string>;
+  };
 }
 
 export interface PaletteResults {
@@ -276,6 +380,8 @@ export interface PaletteResults {
   readonly commands: readonly PaletteCommand[];
   readonly settings: readonly PaletteSettingsEntry[];
   readonly sessions: readonly PaletteSession[];
+  readonly cards: readonly PaletteWork[];
+  readonly agenda: readonly PaletteWork[];
   /** Every group flattened, in rendered order. */
   readonly results: readonly PaletteResult[];
   /**
@@ -308,24 +414,42 @@ export const paletteResults = (input: PaletteInput): PaletteResults => {
       })
     : recentSessions(input.sessions);
 
+  const { cards, agenda } =
+    input.work === undefined || !input.query.trim()
+      ? { cards: [], agenda: [] }
+      : paletteWorkRows(input.work.hits, input.work.filter, input.daemon, input.sessions, input.work.projectNames);
+
   const results: PaletteResult[] = [
     ...destinations.map(entry => ({ kind: 'destination' as const, entry })),
     ...commands.map(entry => ({ kind: 'command' as const, entry })),
     ...settings.map(entry => ({ kind: 'settings' as const, entry })),
     ...sessions.map(entry => ({ kind: 'session' as const, entry })),
+    ...cards.map(entry => ({ kind: 'card' as const, entry })),
+    ...agenda.map(entry => ({ kind: 'agenda' as const, entry })),
   ];
 
   const commandsOffset = destinations.length;
   const settingsOffset = commandsOffset + commands.length;
   const sessionsOffset = settingsOffset + settings.length;
+  const cardsOffset = sessionsOffset + sessions.length;
+  const agendaOffset = cardsOffset + cards.length;
 
   return {
     destinations,
     commands,
     settings,
     sessions,
+    cards,
+    agenda,
     results,
-    offsets: { destinations: 0, commands: commandsOffset, settings: settingsOffset, sessions: sessionsOffset },
+    offsets: {
+      destinations: 0,
+      commands: commandsOffset,
+      settings: settingsOffset,
+      sessions: sessionsOffset,
+      cards: cardsOffset,
+      agenda: agendaOffset,
+    },
   };
 };
 

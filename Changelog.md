@@ -1,3 +1,31 @@
+## [4.190.0](https://github.com/kirinnee/ferretry/compare/v4.189.0...v4.190.0) (2026-11-01)
+
+### Features
+
+* **notifications:** skip an unreadable ledger line and say when pushes fail ([#1204](https://github.com/kirinnee/ferretry/issues/1204)) ([7bd0d5e](https://github.com/kirinnee/ferretry/commit/7bd0d5e66921df575e27ef9441ee1fcea50780f1))
+* **protocol:** accounts and sign-ins data model (R1-1) ([#1201](https://github.com/kirinnee/ferretry/issues/1201)) ([8e5eed1](https://github.com/kirinnee/ferretry/commit/8e5eed1353687635d9ae3a2439a92f1ce6631f58))
+* **pwa:** cards waiting for a try appear in the Inbox with swipe Done / Not good ([#1210](https://github.com/kirinnee/ferretry/issues/1210)) ([2d6d605](https://github.com/kirinnee/ferretry/commit/2d6d605dccd2446d3c35847fbc7782802ea109a8))
+* **pwa:** machine home overview at /d/:id ([#1214](https://github.com/kirinnee/ferretry/issues/1214)) ([90810f5](https://github.com/kirinnee/ferretry/commit/90810f5ed26cc5c0f3970c32243efead10790159))
+
+### Fixes
+
+* **agenda:** never let a question end with only Got it ([#1208](https://github.com/kirinnee/ferretry/issues/1208)) ([bae32dd](https://github.com/kirinnee/ferretry/commit/bae32dd9fcce098f5097a33b15ce52ad10677592))
+* **analytics:** price what we can, say why the rest is unpriced ([#1221](https://github.com/kirinnee/ferretry/issues/1221)) ([25f018c](https://github.com/kirinnee/ferretry/commit/25f018cb39d18423a2af24b601df3059a2a21df7))
+* **grants:** let Sharing follow Pairing for devices paired before it existed ([#1205](https://github.com/kirinnee/ferretry/issues/1205)) ([9555930](https://github.com/kirinnee/ferretry/commit/95559305c6bd9285e8891af6089c79bbc76dbd08))
+* **pwa:** a markdown table never paints over an agenda card's sticky head ([#1220](https://github.com/kirinnee/ferretry/issues/1220)) ([5ebfa20](https://github.com/kirinnee/ferretry/commit/5ebfa20ece9cdc3f2b325db846c18e3cdb9acb39))
+
+## [4.189.0](https://github.com/kirinnee/ferretry/compare/v4.188.0...v4.189.0) (2026-10-31)
+
+### Features
+
+* **input:** the code sensitivity for one-time codes, and high-priority code pushes (R0b) ([#1206](https://github.com/kirinnee/ferretry/issues/1206)) ([3e32166](https://github.com/kirinnee/ferretry/commit/3e32166dbf306fe56387ff73ccad074c05122af4))
+
+## [4.188.0](https://github.com/kirinnee/ferretry/compare/v4.187.1...v4.188.0) (2026-10-31)
+
+### Features
+
+* **daemon:** one fast search over cards and agenda items, with a related check ([#1196](https://github.com/kirinnee/ferretry/issues/1196)) ([5b1dc02](https://github.com/kirinnee/ferretry/commit/5b1dc02bb2124cd3e16dbacbc52e92e36e15607a))
+
 ## [4.187.1](https://github.com/kirinnee/ferretry/compare/v4.187.0...v4.187.1) (2026-10-31)
 
 ### Fixes

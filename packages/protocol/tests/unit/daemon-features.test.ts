@@ -48,6 +48,19 @@ describe('daemon features', () => {
     should(daemonFeatureList()).containEql('work.search.1');
   });
 
+  it('should name 2FA keys and approve-on-phone for the app to gate on, but report neither yet', () => {
+    should(DAEMON_FEATURES.twoFactorKeys).equal('accounts.2fa-keys.1');
+    should(DAEMON_FEATURES.phoneApproval).equal('input.phone-approval.1');
+    should(daemonFeatureList()).not.containEql('accounts.2fa-keys.1');
+    should(daemonFeatureList()).not.containEql('input.phone-approval.1');
+  });
+
+  it('should name accounts and sign-ins for the app to gate on, but not report it until the store lands', () => {
+    should(DAEMON_FEATURES.accountsSignIns).equal('accounts.signins.1');
+    should(daemonFeatureList()).not.containEql('accounts.signins.1');
+    should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.accountsSignIns)).be.false();
+  });
+
   it('should offer a feature only when the daemon listed it', () => {
     // Arrange
     const listed = { features: [DAEMON_FEATURES.packIdea4000] };

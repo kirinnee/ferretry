@@ -9,6 +9,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { paneState } from '../../support/browser-pane-state.ts';
 import { createRoot } from 'react-dom/client';
 import type { BrowserAction, BrowserStatus } from '@ferretry/protocol';
 import { RemoteBrowserControls, RemoteBrowserStatusBar } from '../../../src/features/browser/remote-browser-chrome.tsx';
@@ -64,7 +65,7 @@ function StandInPane({ onStateChange }: RemoteBrowserPaneProps) {
     window.__setLoading = setLoading;
   }, []);
   useEffect(() => {
-    onStateChange?.({ status: current, busy, error: null, runAction });
+    onStateChange?.(paneState({ status: current, busy, error: null, runAction }));
   }, [busy, current, onStateChange, runAction]);
 
   return (

@@ -73,7 +73,7 @@ describe('the term layer', () => {
     await interact(() => must(root.querySelector<HTMLElement>('a[href="#fy-term-9"]'), 'ghost').click());
     expect(root.querySelector('[data-agenda-term-tip]')).toBeNull();
     const plain = new MouseEvent('click', { bubbles: true, cancelable: true });
-    must(root.querySelector('a[href="https://x.test"]'), 'link').dispatchEvent(plain);
+    await interact(() => must(root.querySelector('a[href="https://x.test"]'), 'link').dispatchEvent(plain));
     expect(root.querySelector('[data-agenda-term-tip]')).toBeNull();
   });
 });

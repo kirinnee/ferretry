@@ -28,6 +28,7 @@ import {
   type AgendaSnapshot,
   CONVERSATION_IMPORT_PATH,
   DAEMON_CAPABILITIES,
+  DAEMON_FEATURES,
   DoctorReportSchema,
   type FyEvent,
   type FyEventStreamIdle,
@@ -40,6 +41,7 @@ import {
   type TunnelStatusView,
   type WardenAgendaView,
   type WardenStatusView,
+  type WorkHit,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 // `chooseConnection` is aliased so the relay's carrier choice reads as what it is here: a
@@ -82,6 +84,7 @@ import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.t
 import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
+import { healthOf } from '../support/health.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 import { fetcherDaemons, newDaemonIdentity, relayCrypto, testDevice } from '../support/relay.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -421,6 +424,8 @@ interface ShellOptions {
   readonly webrtcRttMs?: (daemonId: DaemonId) => Promise<number | undefined>;
   /** Attention actions a daemon was sent (POSTs to a session's board), as `sessionId:body`. */
   readonly agendaPosts?: string[];
+  /** The hits `GET /v1/search` answers; its health also lists `work.search.1`. Absent: a machine without the search. */
+  readonly workHits?: readonly WorkHit[];
   /** Each session's conversation as the messages route serves it, in one page; absent: an empty one. */
   readonly messages?: (sessionId: string) => readonly { readonly role: 'user' | 'assistant'; readonly text: string }[];
   /** The Warden status this daemon answers; the default is a quiet, freshly swept one. */
@@ -560,6 +565,11 @@ const appStore = async (
           setBy: 'owner',
         })),
       );
+    if (options.workHits !== undefined && new URL(url).pathname === '/v1/search') {
+      const kind = new URL(url).searchParams.get('kind');
+      const hits = options.workHits.filter(hit => kind === null || hit.kind === kind);
+      return Response.json({ hits, total: hits.length, indexed: { tasks: 1, agenda: 1 } });
+    }
     // Tasks search and its file index travel the carrier now, so they are answered here too.
     return sessionSearchFixture(new URL(url)) ?? Response.json({});
   };
@@ -735,6 +745,8 @@ const appStore = async (
           if (path === '/v1/fleet/runtimes' && options.accounts !== undefined)
             return { format: 'version-2', runtimes: options.accounts };
           if (options.fleet?.[path] !== undefined) return options.fleet[path];
+          if (path === '/v1/health' && options.workHits !== undefined)
+            return healthOf('4.130.0', [DAEMON_FEATURES.workSearch]);
           // Settings › Machine › Conversations reads machine.yaml; an empty file is a valid answer.
           if (path.startsWith('/v1/config/file?')) return { text: '', etag: 'fixture' };
           return path === '/v1/doctor' ? doctorReport : {};
@@ -2388,6 +2400,36 @@ describe('AppShell', () => {
     }
   });
 
+  it('opens the tapped notification’s item as a card in the Inbox and settles the address on the Inbox', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/inbox?session=shared&agenda=A3`, [alpha.daemonId], {
+      sessions: ['shared'],
+      listedAgenda: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
+      sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
+      attention: sessionId => agendaSnapshot(sessionId, [externalAgendaItem]),
+    });
+    try {
+      for (let turn = 0; turn < 8; turn += 1) await settle();
+      expect(view.container.querySelector('[data-agenda-view]')?.getAttribute('data-agenda-view')).toBe('A3');
+      expect(window.location.pathname).toBe(`/d/${ALPHA}/inbox`);
+      expect(window.location.search).toBe('');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('sends a tapped notification’s reader to its chat when the item is no longer open', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/inbox?session=shared&agenda=A9`, [alpha.daemonId], {
+      sessions: ['shared'],
+    });
+    try {
+      for (let turn = 0; turn < 8; turn += 1) await settle();
+      expect(window.location.pathname).toBe(`/d/${ALPHA}/session/shared`);
+      expect(window.location.search).toBe('?agenda=A9');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('draws the Board for a machine and keeps the view in the address, replacing the entry', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/board`, [alpha.daemonId], { sessions: ['shared'] });
     try {
@@ -2455,27 +2497,45 @@ describe('AppShell', () => {
     }
   });
 
+  it("titles the machine home with the machine's name, and falls back to its address only when unnamed", async () => {
+    const named = await renderShell(`/d/${ALPHA}`, [daemonConnection({ ...alpha, daemonName: 'Liftoff EC2' })]);
+    try {
+      await settle();
+      expect(named.view.container.querySelector('#machine-home-title')?.textContent).toBe('Liftoff EC2');
+    } finally {
+      await named.view.unmount();
+    }
+
+    const unnamed = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
+    try {
+      await settle();
+      expect(unnamed.view.container.querySelector('#machine-home-title')?.textContent).toBe(alpha.baseUrl);
+    } finally {
+      await unnamed.view.unmount();
+    }
+  });
+
   it('mounts every daemon-qualified destination through its own slot', async () => {
     const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { sessions: ['one'] });
     await settle();
     const announced = () => must(view.container.querySelector('[data-route]'), 'the route announcer').textContent;
 
-    expect(announced()).toBe('Sessions');
+    expect(announced()).toBe('Home');
 
     for (const [path, expected] of [
-      [`/d/${ALPHA}/new`, 'Sessions, New'],
-      [`/d/${ALPHA}/settings`, 'Sessions, Settings'],
+      [`/d/${ALPHA}/new`, 'Home, New'],
+      [`/d/${ALPHA}/settings`, 'Home, Settings'],
       // No `/d/${ALPHA}/accounts` row: Accounts is Fleet's child panel inside Settings now, so it has no
       // address and no crumb of its own. The scope comes from the path taken to it, which is the
       // defect this replaced — the crumb it used to have named the page and never the machine.
-      [`/d/${ALPHA}/warden`, 'Sessions, Warden'],
-      [`/d/${ALPHA}/analytics`, 'Sessions, Analytics'],
-      [`/d/${ALPHA}/learning`, 'Sessions, Learning'],
-      [`/d/${ALPHA}/inbox`, 'Sessions, Inbox'],
-      [`/d/${ALPHA}/board`, 'Sessions, Board'],
-      [`/d/${ALPHA}/queue`, 'Sessions, Queue'],
-      [`/d/${ALPHA}/history`, 'Sessions, Imported history'],
-      [`/d/${ALPHA}/session/one`, 'Sessions, one'],
+      [`/d/${ALPHA}/warden`, 'Home, Warden'],
+      [`/d/${ALPHA}/analytics`, 'Home, Analytics'],
+      [`/d/${ALPHA}/learning`, 'Home, Learning'],
+      [`/d/${ALPHA}/inbox`, 'Home, Inbox'],
+      [`/d/${ALPHA}/board`, 'Home, Board'],
+      [`/d/${ALPHA}/queue`, 'Home, Queue'],
+      [`/d/${ALPHA}/history`, 'Home, Imported history'],
+      [`/d/${ALPHA}/session/one`, 'Home, one'],
     ] as const) {
       await popTo(path);
       await settle();
@@ -2552,7 +2612,7 @@ describe('AppShell', () => {
       try {
         await settle();
         expect(chosenRuntime(view.container)).toBe('claude-auto-named');
-        expect(view.container.querySelector('[data-route]')?.textContent).toBe('Sessions, New');
+        expect(view.container.querySelector('[data-route]')?.textContent).toBe('Home, New');
       } finally {
         await view.unmount();
       }
@@ -2662,7 +2722,7 @@ describe('route change accessibility', () => {
     const announcer = must(view.container.querySelector('[data-route]'), 'the route announcer');
     expect(announcer.getAttribute('role')).toBe('status');
     expect(announcer.getAttribute('aria-live')).toBe('polite');
-    expect(announcer.textContent).toBe('Sessions');
+    expect(announcer.textContent).toBe('Home');
     // A page LOAD is not a navigation: the browser has already placed focus.
     expect(document.activeElement).not.toBe(announcer);
 
@@ -2703,7 +2763,7 @@ describe('route change accessibility', () => {
     await settle();
 
     expect(document.activeElement).toBe(announcer);
-    expect(announcer.textContent).toBe('Sessions, Settings');
+    expect(announcer.textContent).toBe('Home, Settings');
     // The SAME node, renamed: a live region replaced wholesale announces nothing.
     expect(view.container.querySelector('[data-route]')).toBe(announcer);
     expect(announcer.getAttribute('tabindex')).toBe('-1');
@@ -2717,6 +2777,7 @@ describe('route change accessibility', () => {
       [
         { kind: 'connection-picker' },
         { kind: 'setup' },
+        { kind: 'home', daemonId: id },
         { kind: 'sessions', daemonId: id },
         { kind: 'new-session', daemonId: id },
         { kind: 'projects', daemonId: id },
@@ -2733,16 +2794,17 @@ describe('route change accessibility', () => {
     expect(announcements).toEqual([
       'Daemons',
       'Set up',
-      'Sessions',
-      'Sessions, New',
-      'Sessions, Projects',
-      'Sessions, Projects, Project',
-      'Sessions, Projects, Project, Lanes',
-      'Sessions, shared',
-      'Sessions, Settings',
-      'Sessions, Warden',
-      'Sessions, Analytics',
-      'Sessions, Learning',
+      'Home',
+      'Home, Sessions',
+      'Home, New',
+      'Home, Projects',
+      'Home, Projects, Project',
+      'Home, Projects, Project, Lanes',
+      'Home, shared',
+      'Home, Settings',
+      'Home, Warden',
+      'Home, Analytics',
+      'Home, Learning',
     ]);
     // The daemon fingerprint is a credential-adjacent identifier, not a place.
     for (const announcement of announcements) expect(announcement).not.toContain('alpha');
@@ -2841,6 +2903,53 @@ const paletteOpen = (container: HTMLElement): boolean =>
   container.querySelector('[role="dialog"], [data-command-palette]') !== null;
 
 describe('the command palette shortcut', () => {
+  it('searches the daemon’s cards and agenda from the finder on a machine whose health offers work.search.1', async () => {
+    const project = '6f1c2f0e-3a4b-4c55-9d1e-0a7b8c9d1e2f';
+    const hits: WorkHit[] = [
+      {
+        kind: 'task',
+        id: 'F412',
+        projectId: project,
+        sessionId: null,
+        title: 'Harden the relay handshake',
+        state: 'open',
+        standing: 'Doing',
+        updatedAt: '2026-10-30T10:00:00.000Z',
+        match: { field: 'brief', line: 'the relay handshake drops' },
+        score: 3,
+      },
+      {
+        kind: 'agenda',
+        id: 'A3',
+        sessionId: 's1',
+        title: 'Which relay region should we pick?',
+        state: 'open',
+        standing: 'open',
+        updatedAt: '2026-10-30T10:00:00.000Z',
+        match: { field: 'body', line: 'frankfurt or virginia' },
+        score: 2,
+      },
+    ];
+    const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId], { workHits: hits });
+    await settle();
+    await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+    const input = must(document.getElementById('fy-palette-input'), 'the finder input') as HTMLInputElement;
+    await interact(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, 'relay handshake');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await settleUntil(
+      () => view.container.ownerDocument.body.textContent?.includes('Harden the relay handshake') === true,
+      'the finder to show the card the daemon found',
+      interact,
+    );
+
+    const text = view.container.ownerDocument.body.textContent ?? '';
+    expect(text).toContain('Which relay region should we pick?');
+    expect(text).not.toContain(project);
+    await view.unmount();
+  });
+
   it('opens the global finder with Cmd/Ctrl+K on a session route, not the session search', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
@@ -3212,7 +3321,7 @@ describe('the global destination and settings finder', () => {
   it('opens from a pull on an opted-in page scroller, and leaves an ordinary scroll alone', async () => {
     // The harness reports no fine pointer, so `useInputModality` resolves to the
     // conservative touch-affected state a phone gets.
-    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { sessions: ['s1'] });
+    const { view } = await renderShell(`/d/${ALPHA}/sessions`, [alpha.daemonId], { sessions: ['s1'] });
     await settle();
     const scroller = must(
       view.container.querySelector<HTMLElement>(`[${PULL_TO_PALETTE_ATTR}]`),
@@ -4928,7 +5037,7 @@ describe('the navigation cache', () => {
     // Arrange
     let live = 'assistant/message: First read of the conversation.';
     const valve = transcriptValve();
-    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], {
+    const { view } = await renderShell(`/d/${ALPHA}/sessions`, [alpha.daemonId], {
       sessions: ['shared'],
       transcript: () => live,
       transcriptGate: valve.gate,
@@ -4950,7 +5059,7 @@ describe('the navigation cache', () => {
       expect(transcriptText(view.container)).toContain('First read of the conversation.');
 
       // Act — Back to the list, then Forward into the chat while the daemon has not answered yet.
-      await returnTo(sessionsEntry, `/d/${ALPHA}`);
+      await returnTo(sessionsEntry, `/d/${ALPHA}/sessions`);
       const shellAfterBack = view.container.firstElementChild;
       const regionAfterBack = view.container.querySelector('[data-page-scroll-region]');
       valve.shut();
@@ -5050,18 +5159,18 @@ describe('the navigation cache', () => {
     }
   });
 
-  it('steps back to the sessions list from a failed session reached from it', async () => {
+  it('steps back to the home from a failed session reached from it', async () => {
     // Arrange
     const backs: string[] = [];
     const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { sessionFailure: 'daemon refused the read' });
     const restoreBack = patchGlobal(window.history, 'back', () => backs.push(window.location.pathname));
     try {
       await settle();
-      // Reached FROM the list (a notification tap, a link), so the list is the entry behind it.
+      // Reached FROM the home (a link), so the home is the entry behind it.
       await popTo(`/d/${ALPHA}/session/shared`);
       await settle();
       const sessions = must(
-        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Home'),
         'the error page’s way back',
       );
 
@@ -5076,7 +5185,7 @@ describe('the navigation cache', () => {
     }
   });
 
-  it('pushes the sessions list from a failed session opened by a deep link', async () => {
+  it('pushes the home from a failed session opened by a deep link', async () => {
     // Arrange
     const backs: string[] = [];
     const { view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
@@ -5086,7 +5195,7 @@ describe('the navigation cache', () => {
     try {
       await settle();
       const sessions = must(
-        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Home'),
         'the error page’s way back',
       );
 
@@ -5147,7 +5256,7 @@ describe('the navigation cache', () => {
     }
   });
 
-  it('steps back to the sessions list from New session opened from it', async () => {
+  it('steps back to the home from New session opened from it', async () => {
     // Arrange
     const backs: string[] = [];
     const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
@@ -5159,8 +5268,35 @@ describe('the navigation cache', () => {
       );
       await settle();
       const sessions = must(
-        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Home'),
         'the New session page’s way back',
+      );
+
+      // Act
+      await interact(() => sessions.click());
+
+      // Assert
+      expect(backs).toEqual([`/d/${ALPHA}/new`]);
+    } finally {
+      restoreBack();
+      await view.unmount();
+    }
+  });
+
+  it('names the way back from New session after the sessions list it was opened from', async () => {
+    // Arrange
+    const backs: string[] = [];
+    const { view } = await renderShell(`/d/${ALPHA}/sessions`, [alpha.daemonId]);
+    const restoreBack = patchGlobal(window.history, 'back', () => backs.push(window.location.pathname));
+    try {
+      await settle();
+      await interact(() =>
+        must(view.container.querySelector<HTMLAnchorElement>('main a[href$="/new"]'), 'the New session link').click(),
+      );
+      await settle();
+      const sessions = must(
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        'the New session page’s way back to the list',
       );
 
       // Act

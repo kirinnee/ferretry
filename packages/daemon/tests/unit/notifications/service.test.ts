@@ -97,6 +97,8 @@ function fixture(
     readonly push?: Push;
     readonly callLog?: string[];
     readonly warnings?: string[];
+    readonly subjectOf?: ConstructorParameters<typeof NotificationService>[0]['subjectOf'];
+    readonly now?: () => string;
   } = {},
 ) {
   const callLog = options.callLog ?? [];
@@ -113,8 +115,17 @@ function fixture(
       sessions,
       push,
       serial: new KeyedSerialExecutor(),
-      clock: { now: () => AT },
-      ...(options.warnings === undefined ? {} : { diagnostics: { warn: message => options.warnings?.push(message) } }),
+      clock: { now: options.now ?? (() => AT) },
+      ...(options.warnings === undefined
+        ? {}
+        : {
+            diagnostics: {
+              failed: (key: string, reason: string) => options.warnings?.push(`failed ${key}: ${reason}`),
+              made: (key: string, result: PushDeliveryResult) =>
+                options.warnings?.push(`made ${key}: ${result.delivered}/${result.failed}`),
+            },
+          }),
+      ...(options.subjectOf === undefined ? {} : { subjectOf: options.subjectOf }),
     }),
   };
 }
@@ -307,7 +318,7 @@ describe('NotificationService containment', () => {
     should(outcomeFailure.push.calls).equal(1);
   });
 
-  it('should say, through its diagnostics, a push it could not make or deliver', async () => {
+  it('should tell its diagnostics each push it made and each it could not make or deliver', async () => {
     // Arrange
     const unreadableWarnings: string[] = [];
     const unreadable = fixture({ warnings: unreadableWarnings });
@@ -317,14 +328,20 @@ describe('NotificationService containment', () => {
     undelivered.push.notifyHook = async () => {
       throw new Error('push failed');
     };
+    const madeWarnings: string[] = [];
+    const made = fixture({ warnings: madeWarnings });
 
     // Act
     await unreadable.service.stopped(SESSION, AT, snapshot);
     await undelivered.service.stopped(SESSION, AT, snapshot);
+    await made.service.stopped(SESSION, AT, snapshot);
+    await made.service.stopped(SESSION, AT, snapshot);
 
     // Assert
-    should(unreadableWarnings).eql([`push agenda:${SESSION}:stopped:${AT} was not made — ledger cannot be read`]);
-    should(undeliveredWarnings).eql([`push agenda:${SESSION}:stopped:${AT} was not delivered — push failed`]);
+    const key = `agenda:${SESSION}:stopped:${AT}`;
+    should(unreadableWarnings).eql([`failed ${key}: ledger cannot be read`]);
+    should(undeliveredWarnings).eql([`failed ${key}: push failed`]);
+    should(madeWarnings).eql([`made ${key}: 2/0`]);
   });
 
   it('should stay total when its diagnostics throw', async () => {
@@ -338,7 +355,10 @@ describe('NotificationService containment', () => {
       serial: new KeyedSerialExecutor(),
       clock: { now: () => AT },
       diagnostics: {
-        warn: () => {
+        failed: () => {
+          throw new Error('stderr closed');
+        },
+        made: () => {
           throw new Error('stderr closed');
         },
       },
@@ -346,6 +366,10 @@ describe('NotificationService containment', () => {
 
     // Act / Assert
     await should(service.stopped(SESSION, AT, snapshot)).be.fulfilled();
+    world.ledger.failFind = false;
+    await should(service.stopped(SESSION, AT, snapshot)).be.fulfilled();
+    should(world.push.calls).equal(1);
+    should(world.ledger.records.map(record => record.phase)).eql(['requested', 'outcome']);
   });
 });
 
@@ -516,5 +540,86 @@ describe('NotificationRecordSchema across the agenda rename', () => {
     should(
       NotificationRecordSchema.safeParse({ ...base, key: `agenda:${OTHER}:A1:ping`, origin: 'agenda' }).success,
     ).be.false();
+  });
+});
+
+describe('NotificationService high priority', () => {
+  /** A2 is an input card asking for a one-time code; nothing else is. */
+  const codeCard = (_session: string, candidate: { readonly id: string }) =>
+    candidate.id === 'A2' ? ('one-time-code' as const) : ('other' as const);
+
+  it('should push a stop at high priority only when the item it shows is the code card', async () => {
+    // Arrange — the code card A2 blocks, so the stop shows it; in the other stop A1 is shown and A2 only waits.
+    const shown = fixture({ subjectOf: codeCard });
+    const behind = fixture({ subjectOf: codeCard });
+    const blockingCode = AgendaItemSchema.parse({ ...second, blockingNow: true });
+
+    // Act
+    await shown.service.stopped(
+      SESSION,
+      AT,
+      AgendaSnapshotSchema.parse({ ...twoWaiting, items: [item, blockingCode] }),
+    );
+    await behind.service.stopped(SESSION, AT, twoWaiting);
+
+    // Assert — a throwaway code card cannot make every other push loud.
+    should(shown.push.dispatches[0]?.urgency).equal('high');
+    should(shown.push.dispatches[0]?.payload).containDeep({
+      urgency: 'high',
+      tag: `attention-${SESSION}:A2`,
+      url: `/session/${SESSION}?attention=A2`,
+    });
+    should(behind.push.dispatches[0]?.urgency).be.undefined();
+    should(behind.push.dispatches[0]?.payload).not.have.property('urgency');
+  });
+
+  it('should push everything else as before: no urgency, the shared tag', async () => {
+    // Arrange
+    const world = fixture({ subjectOf: codeCard });
+
+    // Act
+    await world.service.stopped(SESSION, AT, snapshot);
+
+    // Assert
+    should(world.push.dispatches[0]?.urgency).be.undefined();
+    should(world.push.dispatches[0]?.payload).not.have.property('urgency');
+    should(world.push.dispatches[0]?.payload.tag).equal(`attention-${SESSION}`);
+  });
+
+  it('should send at most six high pushes a rolling hour, daemon-wide, and the rest at normal priority', async () => {
+    // Arrange — every item is a code card; the clock is moved by hand.
+    let now = Date.parse(AT);
+    const world = fixture({ subjectOf: () => 'one-time-code', now: () => new Date(now).toISOString() });
+    const card = (n: number) => AgendaItemSchema.parse({ ...due, id: `A${String(n)}` });
+
+    // Act — seven code cards in one hour, then one more an hour after the first.
+    for (let n = 1; n <= 7; n += 1) await world.service.deadline(SESSION, card(n), snapshot);
+    now += 3_600_000;
+    await world.service.deadline(SESSION, card(8), snapshot);
+
+    // Assert — still one push per card; only the urgency is capped.
+    should(world.push.dispatches.map(dispatch => dispatch.urgency ?? 'normal')).eql([
+      'high',
+      'high',
+      'high',
+      'high',
+      'high',
+      'high',
+      'normal',
+      'high',
+    ]);
+    should(world.push.dispatches[6]?.payload).not.have.property('urgency');
+  });
+
+  it('should push a code card past its deadline at high priority too', async () => {
+    // Arrange
+    const world = fixture({ subjectOf: codeCard });
+    const code = AgendaItemSchema.parse({ ...due, id: 'A2' });
+
+    // Act
+    await world.service.deadline(SESSION, code, snapshot);
+
+    // Assert
+    should(world.push.dispatches[0]?.urgency).equal('high');
   });
 });

@@ -264,6 +264,26 @@ describe('step-up routes', () => {
     should(world.service.claimFresh(browser, 'catalog-install')).be.true();
   });
 
+  it('should mint no proof for adding a 2FA key until this daemon stages one to bind it to', async () => {
+    // Arrange
+    const world = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]) });
+    const dispatcher = await world.surface;
+    const body = json({ origin: ORIGIN, act: 'add-2fa-key', subject: `st_${'a'.repeat(24)}` });
+
+    // Act
+    const options = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/step-up/options', body, ...asDevice }),
+    );
+    const stepped = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/step-up', body: assertionBody, ...asDevice }),
+    );
+
+    // Assert — no challenge was issued for the act, so no assertion can be stamped with it
+    should(options.status).equal(400);
+    should(stepped.status).not.equal(200);
+    should(world.service.claimFresh(browser, 'add-2fa-key')).be.false();
+  });
+
   it('should never cache an answer, success or refusal', async () => {
     // Arrange
     const dispatcher = await mount().surface;

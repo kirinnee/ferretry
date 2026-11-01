@@ -33,6 +33,7 @@ import {
   type InputShot,
   type InputTarget,
   type InputTargetFacts,
+  type PushSubject,
   loginDomainsOf,
   type LoginObserved,
   inputRaiseFields,
@@ -70,7 +71,7 @@ import type {
 } from './ports.ts';
 import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
 import { bindingOf, mayRebind } from './rebind.ts';
-import { lockFor, longerLock, probeable } from './lock.ts';
+import { heldFromView, lockFor, longerLock, passwordTarget, probeable } from './lock.ts';
 import type { LoginObserver } from './login-observer.ts';
 import { savedForFields, targetMatchKey } from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
@@ -117,12 +118,18 @@ const QUARANTINE_MS = INPUT_QUARANTINE_SECONDS * 1000;
 
 const FINAL = new Set<InputRequest['state']>(['delivered', 'refused', 'expired', 'cancelled']);
 
-const TITLES = { secret: 'Needs a secret', private: 'Needs a code', plain: 'Needs an answer' } as const;
+const TITLES = {
+  secret: 'Needs a secret',
+  private: 'Needs a private value',
+  code: 'Needs a code',
+  plain: 'Needs an answer',
+} as const;
 const LOGIN_TITLE = 'Needs a login';
 /** What a field is called on the card when the agent gave it no label. */
 const FIELD_LABELS: Readonly<Record<InputSensitivity, string>> = {
   secret: 'Password',
-  private: 'Code',
+  private: 'Private value',
+  code: 'Code',
   plain: 'Value',
 };
 /** The longest a chain is counted: a login is a few steps, not a loop. */
@@ -152,6 +159,8 @@ interface Held {
   navigation?: string;
   /** The daemon's dummy probe at raise found its throwaway value in no read of the page (lock.ts). */
   probed?: boolean;
+  /** The `code` fields the daemon saw going into a password (`observedAs`): handled as `secret` from then on. */
+  readonly upgraded: Set<string>;
 }
 
 /**
@@ -199,6 +208,11 @@ const isFinal = (request: InputRequest): boolean => FINAL.has(request.state);
 
 export class InputRequestService {
   private readonly held = new Map<string, Held>();
+  /**
+   * What a card being raised is about, by request id, while `agenda.raise` runs: the card's push is made INSIDE that
+   * raise (the deadline push, buzz.ts), before the request is held, so `pushSubjectOf` must already know it.
+   */
+  private readonly raising = new Map<string, { readonly sessionId: string; readonly subject: PushSubject }>();
   private readonly raises = new Map<string, number[]>();
   private readonly lock = new SessionLock();
 
@@ -252,7 +266,6 @@ export class InputRequestService {
     const now = this.deps.clock.now();
     this.guardRate(sessionId, target, now);
     const raised = inputRaiseFields(raise);
-    const sensitivity = strongestSensitivity(raised);
     const seen = await this.deps.target.observe(sessionId, target, raised.map(pointerOf));
     if (!seen.ok) {
       throw new InputRequestError(
@@ -265,7 +278,10 @@ export class InputRequestService {
     const shown = await this.project(sessionId, seen.facts, [target.key, ...(seen.names ?? [])]);
     const expiresAt = instant(now + (raise.expiresInSeconds ?? INPUT_DEFAULT_EXPIRY_SECONDS) * 1000);
     const requestId = this.deps.ids.requestId();
-    const fields = withRisk(raised.map(cardField), seen.facts);
+    // A code aimed at a password is a secret (observedAs): what the card, the lock, the mask and the journal all use.
+    const upgraded = new Set<string>();
+    const fields = observedAs(raised.map(cardField), seen.facts, upgraded, raise.prompt);
+    const sensitivity = strongestSensitivity(fields);
     // A page is pictured now, before the owner is asked and long before anything is typed into it.
     const shot =
       seen.facts.kind === 'browser'
@@ -273,7 +289,9 @@ export class InputRequestService {
         : undefined;
     // How long the target is kept from the ferret after the write (lock.ts): only what the daemon saw decides it.
     // The dummy probe runs after the picture, so the picture shows the page as it was.
-    const observedFacts = sensitivity === 'plain' || target.kind === 'secret' ? [] : await this.observedFacts();
+    // A card of plain values and one-time codes is kept from nobody (lock.ts, heldFromView): no facts, probe or lock.
+    const kept = heldFromView(fields) && target.kind !== 'secret';
+    const observedFacts = kept ? await this.observedFacts() : [];
     // At the raise only a page script the ferret ever ran counts: acts before the card are the ferret's own business.
     const context = {
       observed: observedFacts,
@@ -281,7 +299,7 @@ export class InputRequestService {
       steered: this.tainted(sessionId, Number.POSITIVE_INFINITY),
     };
     const probed =
-      sensitivity !== 'plain' && probeable(seen.facts, fields, context)
+      kept && probeable(seen.facts, fields, context)
         ? (await this.deps.target
             .probe?.(
               sessionId,
@@ -291,20 +309,20 @@ export class InputRequestService {
             )
             .catch(() => 'aborted' as const)) === 'hidden'
         : false;
-    const lock =
-      sensitivity === 'plain' || target.kind === 'secret'
-        ? undefined
-        : lockFor(seen.facts, fields, { ...context, probed });
+    const lock = kept ? lockFor(seen.facts, fields, { ...context, probed }) : undefined;
     const step = raise.chain === undefined ? undefined : this.stepAfter(sessionId, raise.chain);
-    const card = await this.deps.agenda.raise(sessionId, {
-      requestId,
-      title: copy === undefined ? titleOf(fields) : PASTE_TITLE,
-      ask: copy === undefined ? askOf(shown, fields) : pasteAskOf(copy, shown),
-      prompt: raise.prompt,
-      blocking: raise.blocking ?? sensitivity === 'secret',
-      expiresAt,
-      ...(raise.chain === undefined ? {} : { chain: raise.chain }),
-    });
+    this.raising.set(requestId, { sessionId, subject: sensitivity === 'code' ? 'one-time-code' : 'other' });
+    const card = await this.deps.agenda
+      .raise(sessionId, {
+        requestId,
+        title: copy === undefined ? titleOf(fields) : PASTE_TITLE,
+        ask: copy === undefined ? askOf(shown, fields) : pasteAskOf(copy, shown),
+        prompt: raise.prompt,
+        blocking: raise.blocking ?? sensitivity === 'secret',
+        expiresAt,
+        ...(raise.chain === undefined ? {} : { chain: raise.chain }),
+      })
+      .finally(() => this.raising.delete(requestId));
     if (!card.ok) throw new InputRequestError('unavailable', card.message);
     const request: InputRequest = {
       id: requestId,
@@ -347,6 +365,7 @@ export class InputRequestService {
       waiters: new Set(),
       ...(shot === undefined ? {} : { shot }),
       ...(probed ? { probed: true } : {}),
+      upgraded,
     };
     this.held.set(requestId, held);
     this.noteRaise(sessionId, now);
@@ -512,10 +531,31 @@ export class InputRequestService {
     return this.deps.values.scrub(sessionId, text);
   }
 
-  /** The pending request on a surface, so an agent cannot type into the field the owner has been asked about. */
-  pendingOn(sessionId: string, target: { readonly kind: string; readonly key: string }): AgendaId | undefined {
+  /**
+   * What a request's push is about (`pushUrgencyFor`): a pending card whose strongest field is a one-time `code` is
+   * `one-time-code`, and is pushed at high priority; anything else, or a request this daemon does not hold, is `other`.
+   */
+  pushSubjectOf(sessionId: string, requestId: string): PushSubject {
+    const raising = this.raising.get(requestId);
+    if (raising !== undefined) return raising.sessionId === sessionId ? raising.subject : 'other';
+    const held = this.held.get(requestId);
+    if (held === undefined || held.request.sessionId !== sessionId || isFinal(held.request)) return 'other';
+    return held.request.sensitivity === 'code' ? 'one-time-code' : 'other';
+  }
+
+  /**
+   * The pending request on a surface, so an agent cannot type into the field the owner has been asked about. Asked
+   * for `typing`, a card of one-time codes only does not count: the ferret may type a code itself (one it read from
+   * an inbox it has), so it is never kept off the surface for one. Any other field on the card still blocks.
+   */
+  pendingOn(
+    sessionId: string,
+    target: { readonly kind: string; readonly key: string },
+    options?: { readonly typing?: boolean },
+  ): AgendaId | undefined {
     for (const { request } of this.held.values()) {
       if (request.sessionId !== sessionId || isFinal(request)) continue;
+      if (options?.typing === true && request.fields.every(field => field.sensitivity === 'code')) continue;
       if (request.target.kind === target.kind && request.target.key === target.key) return request.agendaItemId;
     }
     return undefined;
@@ -782,6 +822,7 @@ export class InputRequestService {
       rebinds: 0,
       deliveries: new Map(),
       waiters: new Set(),
+      upgraded: new Set(),
     };
     this.held.set(request.id, held);
     // A paste's copy lived in the memory of the daemon that stopped: it is gone, so the paste is too.
@@ -804,10 +845,11 @@ export class InputRequestService {
     held.binding = bindingOf(seen.facts);
     const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
     if (matchKey !== undefined) held.matchKey = matchKey;
-    const fields = withRisk(request.fields, seen.facts);
+    const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt);
     held.request = {
       ...request,
       fields,
+      sensitivity: strongestSensitivity(fields),
       observed: await this.project(request.sessionId, seen.facts, held.names),
       risk: worstRisk(fields.map(field => field.risk)),
       observedDigest: digestFacts(seen.facts),
@@ -838,6 +880,7 @@ export class InputRequestService {
       rebinds: 0,
       deliveries: new Map(),
       waiters: new Set(),
+      upgraded: new Set(),
     };
     this.held.set(request.id, held);
     await this.finish(held, 'refused', 'interrupted', undefined, { closeCard: true, tellAgent: true, uncertain: true });
@@ -921,11 +964,15 @@ export class InputRequestService {
       }
       held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
       if (seen.facts.kind === 'browser') held.navigation = seen.facts.navigationId;
+      // Checked again at the write, AFTER any saved value was opened (so a saved login still fills the role the owner
+      // chose): a code field now going into a password is held, masked and recorded as a secret. Never back.
+      const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt);
+      held.request = { ...held.request, fields, sensitivity: strongestSensitivity(fields) };
       // The secret store is no surface anybody reads, so there is nothing to hold from view. The lock is looked at
       // again from the facts just seen, and the longer of that and the card's is kept: a card never shortens.
-      if (request.sensitivity !== 'plain' && request.target.kind !== 'secret') {
+      if (heldFromView(fields) && request.target.kind !== 'secret') {
         // At the write, any act of the ferret on a page since the card was raised voids a page's proof as well.
-        const now = lockFor(seen.facts, request.fields, {
+        const now = lockFor(seen.facts, fields, {
           observed: await this.observedFacts(),
           probed: held.probed === true,
           submitted,
@@ -936,15 +983,15 @@ export class InputRequestService {
         hold = await this.holdFor(request, held.names, lock.seconds * 1000);
       }
       try {
-        await this.journal(request, 'delivering', undefined, undefined, body.deliveryId);
+        await this.journal(held.request, 'delivering', undefined, undefined, body.deliveryId);
       } catch {
         await this.letGo(hold);
         hold = undefined;
         throw new InputRequestError('unavailable', 'Ferretry could not record the attempt, so nothing was typed');
       }
-      // Every value that is not plain is masked from reads before it is typed, so a read racing the write already hides it.
-      for (const [index, field] of request.fields.entries())
-        if (field.sensitivity !== 'plain')
+      // Every value that is masked is held before it is typed, so a read racing the write already hides it.
+      for (const [index, field] of fields.entries())
+        if (maskedFromReads(field, typed))
           this.deps.values.hold(request.sessionId, (values[index] as InputFieldValue).text, request.agendaItemId);
       const outcome: TypeResult = await this.deps.target
         .type(request.sessionId, request.target, values, submitted, seen.facts)
@@ -1037,7 +1084,7 @@ export class InputRequestService {
     if (roles === undefined)
       throw new InputRequestError(
         'bad_request',
-        request.fields.every(field => field.sensitivity === 'private')
+        request.fields.every(field => field.sensitivity === 'private' || field.sensitivity === 'code')
           ? 'a one-time code is not saved; add the 2FA seed to a saved login in Settings instead'
           : 'this card cannot be kept as one saved login (it has two usernames or two passwords); send without saving',
       );
@@ -1318,7 +1365,7 @@ export class InputRequestService {
     // A card redrawn onto another document than the one it was raised on says so, above any other flag but red.
     const moved =
       seen.facts.kind === 'browser' && held.raisedOn !== undefined && seen.facts.navigationId !== held.raisedOn;
-    const fields = withRisk(request.fields, seen.facts).map(field =>
+    const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt).map(field =>
       moved ? { ...field, risk: worstRisk([NEW_DOCUMENT_FLAG, field.risk]) as InputRisk } : field,
     );
     // The new picture is taken before the owner is asked again, exactly as at raise.
@@ -1610,8 +1657,36 @@ function pointerOf(field: { readonly id: string; readonly element?: InputRequest
   return field.element === undefined ? { id: field.id } : { id: field.id, element: field.element };
 }
 
-function withRisk(fields: readonly InputRequestField[], facts: InputTargetFacts): InputRequestField[] {
-  return fields.map(field => ({ ...field, risk: riskOf(field, facts) }));
+const UPGRADED_FLAG = 'Treated as a secret: this is a password field.';
+/** The ferret's words that ask for a password, PIN or passphrase. */
+const PASSWORD_WORDS = /pass(?:word|phrase|wd)|(?:^|[^a-z])pin(?:[^a-z]|$)/iu;
+const AMBER_AT_LEAST: Readonly<Record<InputRisk['level'], InputRisk['level']>> = {
+  green: 'amber',
+  neutral: 'amber',
+  amber: 'amber',
+  red: 'red',
+};
+
+/**
+ * The fields as the daemon handles them, each with its flag. A `code` field whose target the daemon saw is a password
+ * (`passwordTarget`) is handled as a `secret` from then on (`upgraded`, never undone): hidden on the card, locked,
+ * masked, blocking the ferret's typing and journalled as `secret`. Its flag says so, at least amber, because the
+ * ferret called a password a code.
+ */
+function observedAs(
+  fields: readonly InputRequestField[],
+  facts: InputTargetFacts,
+  upgraded: Set<string>,
+  prompt: string,
+): InputRequestField[] {
+  return fields.map(field => {
+    // The ferret's own words (its prompt, the field's label or id) may only ever RAISE a code to a secret.
+    const said = PASSWORD_WORDS.test(prompt) || PASSWORD_WORDS.test(field.label) || PASSWORD_WORDS.test(field.id);
+    if (field.sensitivity === 'code' && (said || passwordTarget(facts, field.id))) upgraded.add(field.id);
+    if (!upgraded.has(field.id)) return { ...field, risk: riskOf(field, facts) };
+    const secret = { ...field, sensitivity: 'secret' as const };
+    return { ...secret, risk: { level: AMBER_AT_LEAST[riskOf(secret, facts).level], reason: UPGRADED_FLAG } };
+  });
 }
 
 /**
@@ -1676,6 +1751,17 @@ function typedValues(request: InputRequest, body: InputDeliverBody): Map<string,
   return typed;
 }
 
+/**
+ * Whether a delivered value is held in the redaction window (masked from every read): a `secret` and a `private`
+ * value always; a `plain` value never; a one-time `code` only when the DAEMON made it from a saved 2FA seed (not in
+ * `typed`): defence in depth for text reads. No tool, result or route RETURNS a daemon-made code; the ferret may still
+ * see it on screen (a screenshot, a scripted read), which the owner allowed. A code the owner typed is not secret.
+ */
+function maskedFromReads(field: InputRequestField, typed: ReadonlyMap<string, string>): boolean {
+  if (field.sensitivity === 'plain') return false;
+  return field.sensitivity !== 'code' || !typed.has(field.id);
+}
+
 const PLAIN_FLAG = 'Not secret: the ferret can see this value.';
 /**
  * A page card redrawn onto a new document: the field looks the same, but the page may not be the one you were asked
@@ -1686,7 +1772,10 @@ const NEW_DOCUMENT_FLAG: InputRisk = {
   reason:
     'The page loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the one you meant.',
 };
-const PRIVATE_FLAG = 'This code will show on screen while the terminal is hidden from the ferret for 2 minutes.';
+const PRIVATE_FLAG = 'This value will show on screen while the terminal is hidden from the ferret for 2 minutes.';
+/** A one-time code is not secret: neutral, neither the red of a plain value nor the amber of a private one. */
+const CODE_FLAG: InputRisk = { level: 'neutral', reason: 'One-time code: the ferret can see it.' };
+const CODE_ASK = 'One-time code: the ferret can see this value.';
 
 /**
  * The flag a card carries, from what was seen at the target: it is never a refusal, the owner decides. The
@@ -1701,6 +1790,7 @@ function riskOf(field: Pick<InputRequestField, 'id' | 'sensitivity'>, facts: Inp
       : { level: 'green', reason: 'Saved encrypted on this machine; ferrets can use it by name and never read it.' };
   if (facts.kind === 'browser') return pageRiskOf(field, facts);
   if (sensitivity === 'private') return { level: 'amber', reason: PRIVATE_FLAG };
+  if (sensitivity === 'code') return CODE_FLAG;
   if (facts.echo === 'on')
     return {
       level: 'amber',
@@ -1721,7 +1811,7 @@ function riskOf(field: Pick<InputRequestField, 'id' | 'sensitivity'>, facts: Inp
   return { level: 'green', reason: 'Typing is hidden and the program is one known to ask for a password.' };
 }
 
-const PAGE_PRIVATE_FLAG = 'This code will show on the page; Ferretry hides the page from the ferret for 2 minutes.';
+const PAGE_PRIVATE_FLAG = 'This value will show on the page; Ferretry hides the page from the ferret for 2 minutes.';
 /**
  * A page field's flag, worst first: the field the agent named is missing or hidden, covered or off screen, the page is not secure (http
  * crosses the network in the clear), the field sits in a frame from another site, or a secret is going into a
@@ -1747,6 +1837,8 @@ function pageRiskOf(
   if (found.frameOrigin !== facts.origin)
     return { level: 'amber', reason: 'This field is inside a frame from another site, not the page itself.' };
   if (field.sensitivity === 'private') return { level: 'amber', reason: PAGE_PRIVATE_FLAG };
+  // Where a code lands still counts (the checks above): a code typed into the wrong place is the one way to abuse it.
+  if (field.sensitivity === 'code') return CODE_FLAG;
   // Only a password input masks what is typed. `autocomplete="current-password"` is a hint about the field's role
   // and leaves a text input showing the value, so it never earns green.
   if (found.field.type?.toLowerCase() !== 'password')
@@ -1763,7 +1855,8 @@ function titleOf(fields: readonly InputRequestField[]): string {
 function askOf(facts: InputTargetFacts, fields: readonly InputRequestField[]): string {
   const it = fields.length === 1 ? 'it' : 'them';
   const where = facts.kind === 'terminal' ? 'Type it into the terminal' : `Type ${it} into the page`;
-  return fields.some(field => field.sensitivity === 'plain') ? `${where}. ${PLAIN_FLAG}` : where;
+  if (fields.some(field => field.sensitivity === 'plain')) return `${where}. ${PLAIN_FLAG}`;
+  return fields.some(field => field.sensitivity === 'code') ? `${where}. ${CODE_ASK}` : where;
 }
 
 function auditDetail(request: InputRequest): InputAuditDetail {

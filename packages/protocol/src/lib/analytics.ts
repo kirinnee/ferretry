@@ -47,6 +47,9 @@ export const AnalyticsMetricSchema = z.enum([
   'tokens_cache_write',
   'tokens_reasoning',
   'cost_usd',
+  // The same tokens re-priced at the catalog's CURRENT rates, where `cost_usd` is what the rate in
+  // force when each session ran made them cost.
+  'cost_now_usd',
   'turns',
   'sessions',
   'duration_active_seconds',
@@ -108,6 +111,13 @@ export const AnalyticsMeasureSchema = z
     value: z.number().finite().nullable(),
     known: NonNegativeIntegerSchema,
     total: NonNegativeIntegerSchema,
+    /**
+     * A `sum`'s lower bound: the total of the sessions that stated a figure, present only when some
+     * did not (`value` is then null, because a partial sum is not the group's total). A reader shows it
+     * as "at least", never as the value. Absent from a daemon older than this field and from complete or
+     * non-sum measures.
+     */
+    knownSum: z.number().finite().nonnegative().optional(),
   })
   .superRefine((value, context) => {
     if (value.known > value.total) {
@@ -145,6 +155,12 @@ export const AnalyticsAggregateResultSchema = z.object({
    */
   reasoningTokens: AnalyticsMeasureSchema,
   equivalentApiCostUsdMicros: AnalyticsMeasureSchema,
+  /**
+   * The same sessions' tokens priced at the catalog's current rates, in USD micros. DEFAULTED on read
+   * for the reason `activeDurationMs` is: an older daemon says nothing about it, which is a measure
+   * with no evidence and never a zero.
+   */
+  equivalentApiCostCurrentUsdMicros: AnalyticsMeasureSchema.default({ value: null, known: 0, total: 0 }),
   turns: AnalyticsMeasureSchema,
   /** Wall time: session finish − session start, in milliseconds. */
   durationMs: AnalyticsMeasureSchema,
@@ -157,6 +173,13 @@ export const AnalyticsAggregateResultSchema = z.object({
   activeDurationMs: AnalyticsMeasureSchema.default({ value: null, known: 0, total: 0 }),
   timeToFirstOutputMs: AnalyticsMeasureSchema,
   contextEndPercent: AnalyticsMeasureSchema,
+  /**
+   * Why the sessions without a cost have none: a count per reason (a pricing reason such as
+   * `unknown_pricing_model`, or a transcript refusal such as `transcript_damaged`). Sums to the group's
+   * `equivalentApiCostUsdMicros.total - known`. Absent from an older daemon, and empty-or-absent when
+   * every session is priced.
+   */
+  costGaps: z.record(z.string(), PositiveIntegerSchema).optional(),
 });
 export type AnalyticsAggregateResult = z.infer<typeof AnalyticsAggregateResultSchema>;
 
@@ -177,6 +200,12 @@ export const AnalyticsRawSessionSchema = z.object({
   createdAt: InstantSchema.nullable(),
   pricingModel: z.string().nullable(),
   equivalentApiCostUsdMicros: z.number().finite().nonnegative().nullable(),
+  /**
+   * This session's tokens priced at the catalog's current rates, stamped when the query ran and never
+   * stored. Null when the session has no token evidence or the catalog holds no current rate for its
+   * model; absent from a daemon older than this field.
+   */
+  equivalentApiCostCurrentUsdMicros: z.number().finite().nonnegative().nullable().optional(),
   tokens: z.number().finite().nonnegative().nullable(),
   inputTokens: z.number().finite().nonnegative().nullable(),
   outputTokens: z.number().finite().nonnegative().nullable(),
@@ -192,6 +221,11 @@ export const AnalyticsRawSessionSchema = z.object({
    * reports no reasoning figure has said nothing, and a stated zero says the session did none.
    */
   reasoningTokens: z.number().finite().nonnegative().nullable(),
+  /**
+   * Why this session has no cost (see `costGaps` on the aggregate); absent when it has one, and from a
+   * daemon older than this field, which reads as "no reason given", never as "priced".
+   */
+  costGap: z.string().nullable().optional(),
   turns: z.number().finite().nonnegative().nullable(),
   durationMs: z.number().finite().nonnegative().nullable(),
   /** See the aggregate measure. Defaulted on read for the same older-daemon reason. */
@@ -299,6 +333,7 @@ export const ANALYTICS_METRIC_MEASURES: {
   tokens_cache_write: { measure: 'cacheWriteInputTokens', scale: 1 },
   tokens_reasoning: { measure: 'reasoningTokens', scale: 1 },
   cost_usd: { measure: 'equivalentApiCostUsdMicros', scale: 1e-6 },
+  cost_now_usd: { measure: 'equivalentApiCostCurrentUsdMicros', scale: 1e-6 },
   turns: { measure: 'turns', scale: 1 },
   sessions: { measure: 'sessions', scale: 1 },
   duration_active_seconds: { measure: 'activeDurationMs', scale: 1e-3 },
@@ -321,7 +356,8 @@ export function analyticsMetricValue(result: AnalyticsAggregateResult, metric: A
     if (result[measure].total !== result[per].total) return null;
     return ratio(result[measure].value, result[per].value, scale);
   }
-  const value = result[measure].value;
+  // A measure a machine did not send (one older than the today-price figure) is unknown, never zero.
+  const value = (result[measure] as AnalyticsMeasure | undefined)?.value ?? null;
   return value === null ? null : value * scale;
 }
 
@@ -334,6 +370,7 @@ const RAW_METRIC_FIELDS = {
   tokens_cache_write: 'cacheWriteInputTokens',
   tokens_reasoning: 'reasoningTokens',
   cost_usd: 'equivalentApiCostUsdMicros',
+  cost_now_usd: 'equivalentApiCostCurrentUsdMicros',
   turns: 'turns',
   sessions: null,
   duration_active_seconds: 'activeDurationMs',
