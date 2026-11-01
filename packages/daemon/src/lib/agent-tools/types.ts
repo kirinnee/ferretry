@@ -9,6 +9,8 @@ import type {
   CopyPlanItem,
   InputAgentView,
   InputRaise,
+  PhoneApprovalAgentView,
+  PhoneApprovalRaise,
   SurfaceKind,
   SurfaceOpener,
 } from '@ferretry/protocol';
@@ -139,6 +141,16 @@ export interface AgentCopyPagesPort {
   documents(sessionId: string, names: readonly (string | undefined)[]): readonly string[];
   saw(sessionId: string, names: readonly (string | undefined)[], navigationId: string): void;
   seen(sessionId: string, names: readonly (string | undefined)[]): readonly string[];
+}
+
+/**
+ * What the agent tools ask of phone approvals (docs/input-requests.md, "Approve on your phone"): raise one with
+ * `push: true` on a request tool, and wait on its `pa_` id. It throws `InputRequestError` for a refusal. Nothing it
+ * returns carries the number: the agent is told where the approval stands, and nothing else.
+ */
+export interface AgentPhoneApprovalPort {
+  raise(sessionId: string, agentName: string | undefined, raise: PhoneApprovalRaise): Promise<PhoneApprovalAgentView>;
+  agentView(sessionId: string, id: string, waitMs: number): Promise<PhoneApprovalAgentView>;
 }
 
 /** What `secure.preapprove` asks: raise one card listing the pastes the agent plans. Nothing in it is a value. */

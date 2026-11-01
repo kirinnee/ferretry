@@ -6,6 +6,8 @@ import {
   type InputRequest,
   type InputRequestList,
   type InputShot,
+  PhoneApprovalIdSchema,
+  type PhoneApprovalList,
 } from '@ferretry/protocol';
 import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
@@ -14,6 +16,7 @@ import type { ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { InputRequestError } from '../../input-requests/errors.ts';
+import type { PhoneApprovalService } from '../../input-requests/phone-approval.ts';
 import type { InputCaller } from '../../input-requests/ports.ts';
 import type { InputRequestService } from '../../input-requests/service.ts';
 import { refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret-write-grant.ts';
@@ -210,6 +213,66 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
         const caller = ownerOf(context);
         await parseBody(context.request, InputCancelBodySchema);
         return jsonResponse(await service.cancel(sessionOf(context), requestOf(context), caller).catch(answered));
+      },
+    },
+  ];
+}
+
+function approvalOf(context: RouteContext): string {
+  const parsed = PhoneApprovalIdSchema.safeParse(context.params.get('approvalId') ?? '');
+  if (!parsed.success) throw new ApiError(400, 'the approval id in the path is not usable', 'bad_request');
+  return parsed.data;
+}
+
+/**
+ * THE OWNER'S ROUTES FOR APPROVING A SIGN-IN ON THE PHONE (docs/input-requests.md, "Approve on your phone"): read the
+ * approvals the cards are drawn from, and "Not me — stop". Owner only, as every input route. THERE IS NO ROUTE THAT
+ * SETS `moved-on`: only the daemon's own look at the page or terminal does, so neither the ferret nor the owner can
+ * claim a sign-in went through.
+ */
+export function phoneApprovalRoutes(service: PhoneApprovalService): readonly ApiRoute[] {
+  const run = <T>(work: () => T): T => {
+    try {
+      return work();
+    } catch (error) {
+      return answered(error);
+    }
+  };
+  return [
+    {
+      method: 'GET',
+      path: '/v1/phone-approvals',
+      minimum: 'operator',
+      caller: 'person',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: context => {
+        const body: PhoneApprovalList = { approvals: [...run(() => service.list(ownerOf(context)))] };
+        return Promise.resolve(jsonResponse(body));
+      },
+    },
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/phone-approvals/:approvalId',
+      minimum: 'operator',
+      caller: 'person',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: context =>
+        Promise.resolve(
+          jsonResponse(run(() => service.get(ownerOf(context), sessionOf(context), approvalOf(context)))),
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/phone-approvals/:approvalId/refuse',
+      minimum: 'operator',
+      caller: 'person',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: async context => {
+        const caller = ownerOf(context);
+        return jsonResponse(await service.refuse(caller, sessionOf(context), approvalOf(context)).catch(answered));
       },
     },
   ];

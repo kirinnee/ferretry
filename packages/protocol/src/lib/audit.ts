@@ -36,7 +36,10 @@ import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
  * and `surface.control` a person taking a surface over from an agent or handing it back. The `input.*`
  * events are the secure input bridge (docs/input-requests.md): a request raised, delivered, refused,
  * expired or cancelled, named by the program or host that reads it and never by what was typed.
- * `link.opened` is a web address handed to this computer’s own browser, named by host only.
+ * `link.opened` is a web address handed to this computer’s own browser, named by host only. The
+ * `phone-approval.*` events are a push the owner approves on their phone (docs/input-requests.md, "Approve on your
+ * phone"): asked for, refused with "Not me — stop", and how it ended, named by the account, the site and the ferret,
+ * never by the number on the card.
  */
 export const AUDIT_EVENTS = [
   'device.paired',
@@ -88,6 +91,9 @@ export const AUDIT_EVENTS = [
   'input.quarantine_revealed',
   'link.opened',
   'session.credential-refused',
+  'phone-approval.raised',
+  'phone-approval.refused',
+  'phone-approval.settled',
 ] as const;
 export const AuditEventSchema = z.enum(AUDIT_EVENTS);
 export type AuditEvent = z.infer<typeof AuditEventSchema>;

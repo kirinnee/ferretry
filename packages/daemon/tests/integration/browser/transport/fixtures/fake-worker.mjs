@@ -144,6 +144,38 @@ function copyReply(id, params) {
   else reply(id, true, { read });
 }
 
+/** A push-number read; the page id picks the answer, so one fixture covers each path. */
+function pushNumberReply(id, params) {
+  const page = params?.pageId;
+  const base = { origin: 'https://login.microsoftonline.com', navigationId: 'loader-1', provider: 'microsoft' };
+  if (page === 'none') reply(id, true, { read: { ...base, missing: 'none-found' } });
+  else if (page === 'pointed')
+    reply(id, true, {
+      read: {
+        origin: 'https://login.example.test',
+        navigationId: 'loader-1',
+        number: {
+          value: params?.element?.ref === 'e9' ? '17' : '0',
+          from: 'pointed',
+          frameOrigin: 'https://login.example.test',
+        },
+      },
+    });
+  else if (page === 'both')
+    reply(id, true, {
+      read: { ...base, missing: 'none-found', number: { value: '42', from: 'microsoft', frameOrigin: base.origin } },
+    });
+  else if (page === 'long')
+    reply(id, true, { read: { ...base, number: { value: '4242424', from: 'microsoft', frameOrigin: base.origin } } });
+  else if (page === 'extra')
+    reply(id, true, {
+      read: { ...base, number: { value: '42', from: 'microsoft', frameOrigin: base.origin }, said: 'fake-42' },
+    });
+  else if (page === 'source')
+    reply(id, true, { read: { ...base, number: { value: '42', from: 'ferret', frameOrigin: base.origin } } });
+  else reply(id, true, { read: { ...base, number: { value: '42', from: 'microsoft', frameOrigin: base.origin } } });
+}
+
 /** The input bridge's four calls; the page id picks the answer, so one fixture covers each path. */
 function inputReply(id, method, params) {
   const page = params?.pageId;
@@ -236,6 +268,10 @@ function handle({ id, method, params }) {
   }
   if (method === 'copyRead') {
     copyReply(id, params);
+    return;
+  }
+  if (method === 'pushNumberRead') {
+    pushNumberReply(id, params);
     return;
   }
   // A request's own argument selects the reply behaviour, so one fixture covers every path.

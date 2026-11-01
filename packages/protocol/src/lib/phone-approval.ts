@@ -186,6 +186,12 @@ export const PhoneApprovalSchema = z
   });
 export type PhoneApproval = z.infer<typeof PhoneApprovalSchema>;
 
+/** `GET /v1/phone-approvals`: the approvals still waiting, oldest first. Owner only. */
+export const PhoneApprovalListSchema = z.strictObject({
+  approvals: z.array(PhoneApprovalSchema).max(64).readonly(),
+});
+export type PhoneApprovalList = z.infer<typeof PhoneApprovalListSchema>;
+
 /**
  * WHAT THE FERRET IS TOLD while it waits (`input_wait` with a `pa_` id): where the approval stands and, once the
  * sign-in moved on, that it was a push. NEVER THE NUMBER, the account the daemon matched or anything else on the card.
@@ -212,15 +218,30 @@ export interface PhoneApprovalWords {
   readonly where: string;
   /** What to do with the number: "Tap 42 on your phone", "Enter 123 in Duo Mobile". Absent: no number. */
   readonly numberLine?: string;
+  /**
+   * Where a number from the element the ferret pointed at came from, said on the card under the number: the browser
+   * read it on a sign-in page, but the ferret chose which element. Absent for a provider's own page, and with no number.
+   */
+  readonly numberSource?: string;
   /** Why there is no number, and what to do instead. Absent: there is one. */
   readonly noNumber?: string;
   /** The line every card ends with. */
   readonly warning: string;
   /** The agenda item's subject: what an app that does not know these cards shows. Never the number. */
   readonly subject: string;
-  /** The push's body: the number first when there is one (owner decision !A171), else where to look for it. */
+  /**
+   * The push's body: the number first when there is one (owner decision !A171), else where to look for it. A sign-in
+   * Ferretry doesn't know is never named by its host here: the ferret chose that host by navigating, and a lock screen
+   * shows it with no card around it.
+   */
   readonly push: string;
 }
+
+/** What a card says under a number read from the element the ferret pointed at. */
+export const PHONE_APPROVAL_POINTED_SOURCE = 'Read from the element the ferret pointed at, on this sign-in page.';
+
+/** The heading of every approve-on-phone card and push: no ferret's push may read as it (`agendaNotificationTitle`). */
+export const PHONE_APPROVAL_TITLE = 'Approve on your phone';
 
 /** The line every approve-on-phone card carries. */
 export const PHONE_APPROVAL_WARNING = 'Never use a number a ferret tells you.';
@@ -259,12 +280,13 @@ export function phoneApprovalWords(
   const terminal = approval.surface === 'terminal';
   const place = terminal ? 'in a terminal' : host === undefined ? 'on a page' : `on ${host}`;
   const account = approval.account;
-  const who =
+  const known =
     account === undefined
-      ? `a sign-in Ferretry doesn't know, ${place}`
+      ? undefined
       : approval.username === undefined
         ? account.label
         : `${account.label} · ${approval.username}`;
+  const who = known ?? `a sign-in Ferretry doesn't know, ${place}`;
   const where = terminal
     ? 'in a terminal'
     : approval.via !== undefined && account !== undefined
@@ -281,16 +303,20 @@ export function phoneApprovalWords(
     number !== undefined
       ? undefined
       : NO_NUMBER_WORDS[terminal ? 'terminal' : (approval.numberMissing ?? 'none-found')];
+  const pointed = number?.from === 'pointed';
   const subject = cut(`Approve on your phone: ${who}`, MAX_AGENDA_SUBJECT_LENGTH);
+  // The push names a sign-in it doesn't know without its host (see `push`), and says when the ferret chose the element.
+  const pushWho = known ?? "a sign-in Ferretry doesn't know";
   const push =
     numberLine !== undefined
-      ? `${numberLine}: ${who}`
-      : `Approve on your phone: ${who} — ${terminal ? 'check the terminal' : 'open for the number'}`;
+      ? `${numberLine}${pointed ? ' (read where the ferret pointed)' : ''}: ${pushWho}`
+      : `Approve on your phone: ${pushWho} — ${terminal ? 'check the terminal' : 'open for the number'}`;
   return {
-    title: 'Approve on your phone',
+    title: PHONE_APPROVAL_TITLE,
     who,
     where,
     ...(numberLine === undefined ? {} : { numberLine }),
+    ...(pointed ? { numberSource: PHONE_APPROVAL_POINTED_SOURCE } : {}),
     ...(noNumber === undefined ? {} : { noNumber }),
     warning: PHONE_APPROVAL_WARNING,
     subject,

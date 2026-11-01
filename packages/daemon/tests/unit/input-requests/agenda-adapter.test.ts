@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { AgendaId } from '@ferretry/protocol';
+import { type AgendaId, AgendaItemSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
   type AgendaLedger,
@@ -12,6 +12,7 @@ import {
   InputAgendaAdapter,
   InputAgentNotifierAdapter,
   InputCardClosedObserver,
+  PhoneApprovalAgendaAdapter,
 } from '../../../src/lib/input-requests/agenda-adapter.ts';
 import type { InputCard } from '../../../src/lib/input-requests/ports.ts';
 
@@ -332,5 +333,60 @@ describe('InputAgentNotifierAdapter', () => {
     // Assert
     should(queued).deepEqual([[SESSION, 'A7', 'The owner typed the value.']]);
     await should(broken.tell(SESSION, 'A7', 'x')).be.fulfilled();
+  });
+});
+
+/** The approve-on-phone card on the real agenda (docs/input-requests.md, "Approve on your phone"). */
+describe('PhoneApprovalAgendaAdapter on the real agenda', () => {
+  it('should raise an info card carrying the ref, refuse a generic answer, survive the ledger and close', async () => {
+    // Arrange
+    const ledgers = new Map<string, AgendaLedger>();
+    const repository: AgendaLedgerRepository = {
+      read: async sessionId => ledgers.get(sessionId) ?? null,
+      transact: async (sessionId, apply) => {
+        const mutation = apply(ledgers.get(sessionId) ?? null);
+        if (mutation.ok && mutation.changed) ledgers.set(sessionId, mutation.ledger);
+        return mutation;
+      },
+    };
+    const agenda = new AgendaService(
+      repository,
+      { now: () => '2026-11-01T10:00:00Z' },
+      { has: async sessionId => sessionId === 's1' },
+      { raised: async () => undefined },
+    );
+    const adapter = new PhoneApprovalAgendaAdapter(agenda);
+    const approvalId = `pa_${'0'.repeat(23)}1`;
+
+    // Act
+    const raised = await adapter.raise('s1', {
+      approvalId,
+      title: 'Approve on your phone',
+      subject: 'Approve on your phone: ClickUp · a@gmail.com',
+      why: 'ClickUp · a@gmail.com: ClickUp via Okta on company.okta.com.',
+      context: 'Asked by lizzette.\nNever use a number a ferret tells you.',
+      howToResolve: 'Approve the sign-in on your phone if you expected it.',
+    });
+    const id = raised.ok ? raised.id : ('A0' as never);
+    const open = await adapter.open('s1');
+    const answered = await agenda.answer('s1', id, { kind: 'ack' } as never, { kind: 'human' });
+    const parsed = parseAgendaLedger(JSON.parse(JSON.stringify(ledgers.get('s1'))), 's1');
+    await adapter.close('s1', id, 'The sign-in went through.');
+
+    // Assert
+    should(raised.ok).be.true();
+    should(open).eql([id]);
+    should(answered).match({ ok: false, error: { code: 'use_input_form' } });
+    const item = parsed?.entries[0]?.item;
+    should(item).match({
+      kind: 'info',
+      raisedBy: 'daemon',
+      title: 'Approve on your phone',
+      phoneApproval: { id: approvalId },
+    });
+    should(item).not.have.property('neededBy');
+    should(AgendaItemSchema.safeParse(item).success).be.true();
+    should(ledgers.get('s1')?.entries[0]?.lifecycle).not.equal('active');
+    should(await adapter.open('s1')).eql([]);
   });
 });

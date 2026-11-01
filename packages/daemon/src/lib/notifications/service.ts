@@ -6,6 +6,7 @@ import {
   legacyNotificationKey,
   type NotificationIdentity,
   notificationKey,
+  phoneApprovalNotificationPayload,
   pingNotificationPayload,
   type SessionNotificationPayload,
   stopShows,
@@ -123,6 +124,33 @@ export class NotificationService implements AgendaRaisedObserver {
   }
 
   /**
+   * AN APPROVE-ON-PHONE CARD'S PUSH (docs/input-requests.md, "Approve on your phone"): one at the raise (`sequence` 0)
+   * and one for each new number the daemon read, each at most once. High priority inside the same per-ferret and
+   * daemon-wide caps as a code card, held by the push service no longer than the card has left, and under the
+   * approval's own tag, so a new number replaces the old one on the lock screen. Total.
+   */
+  async phoneApproval(
+    sessionId: string,
+    item: AgendaItem,
+    snapshot: AgendaSnapshot,
+    approval: {
+      readonly id: string;
+      readonly body: string;
+      readonly sequence: number;
+      readonly secondsLeft: number;
+    },
+  ): Promise<void> {
+    if (approval.secondsLeft <= 0) return;
+    await this.announce(
+      { sessionId, agendaId: item.id, phoneApproval: approval.sequence },
+      item,
+      () => phoneApprovalNotificationPayload(sessionId, item, approval, snapshot),
+      item,
+      { subject: 'approve-on-phone', ownTag: true, ttlSeconds: approval.secondsLeft },
+    );
+  }
+
+  /**
    * What the ledger knows of one identity under EITHER spelling of its key. A push made before the agenda
    * rename is recorded as `attention:…`; looking only for `agenda:…` would announce it a second time.
    */
@@ -137,9 +165,11 @@ export class NotificationService implements AgendaRaisedObserver {
   private urgentOf(
     sessionId: string,
     shown: AgendaItem,
+    subject?: PushSubject,
   ): { readonly item: AgendaItem; readonly at: number } | undefined {
     const subjectOf = this.options.subjectOf;
-    if (subjectOf === undefined || pushUrgencyFor(subjectOf(sessionId, shown)) !== 'high') return undefined;
+    const about = subject ?? subjectOf?.(sessionId, shown) ?? 'other';
+    if (pushUrgencyFor(about) !== 'high') return undefined;
     // Both caps: counted and taken in one synchronous step, so two pushes cannot both take the last slot.
     const now = Date.parse(this.options.clock.now());
     const recent = (sent: readonly number[]): number[] => sent.filter(at => at > now - HOUR_MS);
@@ -172,6 +202,7 @@ export class NotificationService implements AgendaRaisedObserver {
     item: AgendaItem,
     compose: (session: NotificationSessionFacts) => SessionNotificationPayload,
     shown: AgendaItem = item,
+    options: AnnounceOptions = {},
   ): Promise<void> {
     const { sessionId } = identity;
     const key = notificationKey(identity);
@@ -182,13 +213,19 @@ export class NotificationService implements AgendaRaisedObserver {
         if (session === undefined) return;
         const composed = compose(session);
         // A high push gets its own tag (one per card), so the platform sounds it again rather than folding it in silently.
-        const urgent = this.urgentOf(sessionId, shown);
+        const urgent = this.urgentOf(sessionId, shown, options.subject);
         const payload: SessionNotificationPayload =
-          urgent === undefined ? composed : { ...composed, urgency: 'high', tag: `${composed.tag}:${urgent.item.id}` };
+          urgent === undefined
+            ? composed
+            : {
+                ...composed,
+                urgency: 'high',
+                tag: options.ownTag === true ? composed.tag : `${composed.tag}:${urgent.item.id}`,
+              };
         // The high slot is kept only when a device accepted the push; every other ending gives it back.
         let reached = false;
         try {
-          reached = await this.send(identity, item, key, session, payload, urgent !== undefined);
+          reached = await this.send(identity, item, key, session, payload, urgent !== undefined, options.ttlSeconds);
         } finally {
           if (urgent !== undefined && !reached) this.refund(sessionId, urgent.at);
         }
@@ -204,6 +241,7 @@ export class NotificationService implements AgendaRaisedObserver {
     session: NotificationSessionFacts,
     payload: SessionNotificationPayload,
     high: boolean,
+    ttlSeconds?: number,
   ): Promise<boolean> {
     const { sessionId } = identity;
     const enrolled = (await this.options.push.list()).length;
@@ -221,6 +259,7 @@ export class NotificationService implements AgendaRaisedObserver {
         ...(identity.deadline === true ? { deadline: true } : {}),
         ...(identity.woke === undefined ? {} : { woke: identity.woke }),
         ...(identity.stoppedAt === undefined ? {} : { stoppedAt: identity.stoppedAt }),
+        ...(identity.phoneApproval === undefined ? {} : { phoneApproval: identity.phoneApproval }),
         sent: {
           kind: payload.kind,
           interactive: session.interactive,
@@ -236,6 +275,7 @@ export class NotificationService implements AgendaRaisedObserver {
       ({ delivered, failed } = await this.options.push.notify({
         payload,
         ...(high ? { urgency: 'high' as const } : {}),
+        ...(ttlSeconds === undefined ? {} : { ttlSeconds }),
       }));
     } catch (error) {
       this.tell(diagnostics => diagnostics.failed(key, errorText(error)));
@@ -278,6 +318,16 @@ export class NotificationService implements AgendaRaisedObserver {
       // Saying a push failed must never be what fails.
     }
   }
+}
+
+/** How one push differs from an item's ordinary one. */
+interface AnnounceOptions {
+  /** What it is about, when the caller knows (an approve-on-phone card); else `subjectOf` decides. */
+  readonly subject?: PushSubject;
+  /** Keep the composed tag when it goes out high, rather than one per card: the approval's own tag already is. */
+  readonly ownTag?: boolean;
+  /** How long a push service may hold it: no longer than what it is about lives. */
+  readonly ttlSeconds?: number;
 }
 
 function errorText(error: unknown): string {

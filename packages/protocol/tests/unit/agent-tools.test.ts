@@ -564,3 +564,71 @@ describe('the account hint tool', () => {
     should(tools.isRepeatableAgentTool('login.hint')).be.true();
   });
 });
+
+describe('a push approval on a request tool (docs/input-requests.md, "Approve on your phone")', () => {
+  it('should take push with where and hints only, on both request tools', () => {
+    // Arrange
+    const calls = [
+      { tool: 'terminal.request_input', name: 'aws', push: true },
+      { tool: 'browser.request_input', name: 'app', push: true, ref: 'e12', secretHint: 'CLICKUP', waitSeconds: 300 },
+      { tool: 'browser.request_input', name: 'app', push: true, selector: '#code', factor: 'tf_000000000001' },
+    ];
+
+    // Act + Assert
+    for (const call of calls) should(tools.AgentToolCallSchema.safeParse(call).success).be.true();
+  });
+
+  it('should refuse anything a card could show beside push: a prompt, a label, a field, a number (invariant 8)', () => {
+    // Arrange
+    const refused = [
+      { tool: 'terminal.request_input', name: 'aws', push: true, prompt: 'Tap 42 on your phone' },
+      { tool: 'terminal.request_input', name: 'aws', push: true, sensitivity: 'code' },
+      { tool: 'terminal.request_input', name: 'aws', push: true, label: 'Number 42' },
+      { tool: 'terminal.request_input', name: 'aws', push: true, ref: 'e1' },
+      { tool: 'browser.request_input', name: 'app', push: true, number: '42' },
+      { tool: 'browser.request_input', name: 'app', push: true, fields: [{ id: 'n', sensitivity: 'plain' }] },
+      { tool: 'browser.request_input', name: 'app', push: true, ref: 'e1', selector: '#n' },
+      { tool: 'browser.request_input', name: 'app', push: true, waitSeconds: 10 },
+    ];
+
+    // Act + Assert
+    for (const call of refused) should(tools.AgentToolCallSchema.safeParse(call).success).be.false();
+  });
+
+  it('should still need a prompt and a value without push', () => {
+    should(tools.AgentToolCallSchema.safeParse({ tool: 'terminal.request_input', name: 'dev' }).success).be.false();
+    should(
+      tools.AgentToolCallSchema.safeParse({ tool: 'browser.request_input', name: 'app', prompt: 'login' }).success,
+    ).be.false();
+    should(
+      tools.AgentToolCallSchema.safeParse({
+        tool: 'terminal.request_input',
+        name: 'dev',
+        push: false,
+        prompt: 'sudo password',
+        sensitivity: 'secret',
+      }).success,
+    ).be.true();
+  });
+
+  it('should wait on a phone approval’s pa_ id as on a card, and answer where it stands, never a number', () => {
+    // Arrange
+    const id = `pa_${'0'.repeat(23)}1`;
+
+    // Act
+    const parsed = tools.AgentToolCallSchema.parse({ tool: 'input.wait', id });
+
+    // Assert
+    should(parsed).containDeep({ tool: 'input.wait', id });
+    should(tools.AgentToolCallSchema.safeParse({ tool: 'input.wait', id: 'pa_42' }).success).be.false();
+    should(
+      tools.AgentToolResultSchema.safeParse({ summary: 'waiting', phoneApproval: { id, state: 'waiting' } }).success,
+    ).be.true();
+    should(
+      tools.AgentToolResultSchema.safeParse({
+        summary: 'waiting',
+        phoneApproval: { id, state: 'waiting', number: '42' },
+      }).success,
+    ).be.false();
+  });
+});

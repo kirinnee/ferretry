@@ -90,6 +90,7 @@ import { runPageScript } from '../src/lib/browser/transport/page-script.ts';
 import { disablePasskeys } from '../src/lib/browser/transport/passkeys.ts';
 import { type PointerPosition, pointerAfter, pointerSequence } from '../src/lib/browser/transport/pointer.ts';
 import { type PointerPage, performPointerAct, pointerActParam } from '../src/lib/browser/transport/pointer-acts.ts';
+import { type PushNumberPage, readPushNumber } from '../src/lib/browser/transport/push-number-read.ts';
 
 const endpoint = process.argv[2];
 /** Where downloads and PDFs are staged for the daemon; without it the worker stages nothing. */
@@ -928,6 +929,19 @@ async function act(request: Request): Promise<Record<string, unknown>> {
           target,
           part,
           attribute,
+        ),
+      };
+    }
+    case 'pushNumberRead': {
+      const page = targetPage(params.pageId);
+      const element = params.element === undefined ? undefined : browserElementParam(params.element);
+      if (params.element !== undefined && element === undefined)
+        throw new Error('a push number read names its element');
+      return {
+        read: await readPushNumber(
+          page as unknown as PushNumberPage,
+          async () => await describeInputDocument(inputSubject(page)),
+          element,
         ),
       };
     }

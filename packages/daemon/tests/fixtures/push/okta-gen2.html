@@ -1,0 +1,60 @@
+<!-- PROVENANCE: reconstructed, NOT a live capture. Built from okta/okta-signin-widget@25feb4d9 (release okta-signin-widget-7.51.0): src/v2/view-builder/views/ov/NumberChallengePushView.js (className okta-verify-number-challenge, title key oie.okta_verify.push.sent), src/v2/view-builder/views/ov/NumberChallengePhoneView.js (the .number-challenge-section template, verbatim), and packages/@okta/i18n/src/properties/login.properties (oie.numberchallenge.instruction, oie.okta_verify.push.sent). The surrounding auth-container / o-form markup is the widget's usual Gen2 frame, abbreviated. Scrubbed: example tenant, a@example.com. Replace with a scrubbed live capture of a real Okta Identity Engine Gen2 number challenge. URL: https://example.okta.com/signin/verify/okta/push -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Example - Sign In</title>
+  </head>
+  <body>
+    <div id="okta-login-container">
+      <div id="okta-sign-in" class="auth-container main-container no-beacon" style="display: block">
+        <div class="okta-sign-in-header auth-header">
+          <h1><img src="/logo.png" class="auth-org-logo" alt="Example logo" /></h1>
+        </div>
+        <div class="auth-content">
+          <div class="auth-content-inner">
+            <div class="siw-main-view challenge-authenticator--okta_verify">
+              <div class="siw-main-header">
+                <div class="identifier-container"><span class="identifier no-translate">a@example.com</span></div>
+              </div>
+              <div class="siw-main-body">
+                <form
+                  method="POST"
+                  action="/idp/idx/authenticators/poll"
+                  data-se="o-form"
+                  class="ion-form o-form o-form-edit-mode okta-verify-number-challenge"
+                >
+                  <div data-se="o-form-content" class="o-form-content o-form-theme clearfix">
+                    <h2 data-se="o-form-head" class="okta-form-title o-form-head">Push notification sent</h2>
+                    <div class="o-form-error-container" data-se="o-form-error-container"></div>
+                    <div class="o-form-fieldset-container" data-se="o-form-fieldset-container">
+                      <div class="number-challenge-section">
+                        <p>
+                          On your mobile device, open the Okta Verify prompt, then tap <span class="strong">42</span> in
+                          Okta Verify to continue.
+                        </p>
+                        <div class="phone no-translate">
+                          <div class="phone--body">
+                            <div class="phone--screen">
+                              <span class="phone--number" data-se="challenge-number">42</span>
+                            </div>
+                            <div class="phone--home-button"></div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </form>
+              </div>
+              <div class="auth-footer">
+                <a href="#" class="link js-switchAuthenticator" data-se="switchAuthenticator"
+                  >Verify with something else</a
+                >
+                <a href="#" class="link js-cancel" data-se="cancel">Back to sign in</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

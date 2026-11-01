@@ -451,6 +451,7 @@ describe('high priority (the owner: "for 2FA notification, please make it high p
   it('should make a one-time code high and everything else normal, in one rule', () => {
     // Act / Assert
     should(push.pushUrgencyFor('one-time-code')).equal('high');
+    should(push.pushUrgencyFor('approve-on-phone')).equal('high');
     should(push.pushUrgencyFor('other')).equal('normal');
     should(push.PUSH_URGENT_TTL_SECONDS).equal(600);
   });

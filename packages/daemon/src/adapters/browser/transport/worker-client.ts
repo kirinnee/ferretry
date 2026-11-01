@@ -28,6 +28,7 @@ import {
   type BrowserInputShot,
   type BrowserInputValue,
   type BrowserPageActed,
+  type BrowserPushNumberRead,
   type BrowserReadOptions,
   type BrowserScreenshotOptions,
   BrowserTransportError,
@@ -102,6 +103,54 @@ function parseCopyRead(raw: unknown): BrowserCopyRead {
     'the browser answered the copy in a form Ferretry does not accept',
     502,
   );
+}
+
+const PUSH_NUMBER_PROVIDERS: ReadonlySet<unknown> = new Set(['okta', 'microsoft', 'google', 'duo']);
+const PUSH_NUMBER_SOURCES: ReadonlySet<unknown> = new Set([...PUSH_NUMBER_PROVIDERS, 'pointed']);
+const PUSH_NUMBER_MISSING: ReadonlySet<unknown> = new Set(['none-found', 'editable', 'changed']);
+const PUSH_NUMBER_KEYS: ReadonlySet<string> = new Set(['origin', 'navigationId', 'provider', 'number', 'missing']);
+const PUSH_NUMBER_VALUE_KEYS: ReadonlySet<string> = new Set(['value', 'from', 'frameOrigin']);
+
+/**
+ * A push-number read, checked before it is believed: exactly the shape `BrowserPushNumberRead` names, a number of one
+ * to six digits from a known source, and either a number or why there is none, never both. A malformed answer is
+ * refused in words that quote none of it.
+ */
+export function parsePushNumberRead(raw: unknown): BrowserPushNumberRead {
+  const refuse = (): never => {
+    throw new BrowserTransportError(
+      'upstream_failed',
+      'the browser answered the push number in a form Ferretry does not accept',
+      502,
+    );
+  };
+  const object = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+  const bounded = (value: unknown, limit: number): value is string =>
+    typeof value === 'string' && value !== '' && value.length <= limit;
+  if (!object(raw) || Object.keys(raw).some(key => !PUSH_NUMBER_KEYS.has(key))) return refuse();
+  const { origin, navigationId, provider, number, missing } = raw;
+  if (!bounded(origin, COPY_READ_LIMITS.origin) || !bounded(navigationId, COPY_READ_LIMITS.navigationId))
+    return refuse();
+  if (provider !== undefined && !PUSH_NUMBER_PROVIDERS.has(provider)) return refuse();
+  if ((number === undefined) === (missing === undefined)) return refuse();
+  const base = {
+    origin,
+    navigationId,
+    ...(provider === undefined ? {} : { provider: provider as NonNullable<BrowserPushNumberRead['provider']> }),
+  };
+  if (missing !== undefined)
+    return PUSH_NUMBER_MISSING.has(missing)
+      ? { ...base, missing: missing as NonNullable<BrowserPushNumberRead['missing']> }
+      : refuse();
+  if (!object(number) || Object.keys(number).some(key => !PUSH_NUMBER_VALUE_KEYS.has(key))) return refuse();
+  const { value, from, frameOrigin } = number;
+  if (typeof value !== 'string' || !/^[0-9]{1,6}$/u.test(value)) return refuse();
+  if (!PUSH_NUMBER_SOURCES.has(from) || !bounded(frameOrigin, COPY_READ_LIMITS.origin)) return refuse();
+  return {
+    ...base,
+    number: { value, from: from as NonNullable<BrowserPushNumberRead['number']>['from'], frameOrigin },
+  };
 }
 
 /** A field shot: a bounded PNG and a finite clip, or a refusal. */
@@ -430,6 +479,18 @@ export class BrowserWorkerClient implements BrowserAutomation {
 
   resize(pageId: string, viewport: BrowserViewport): Promise<BrowserPageActed> {
     return this.action('resize', { pageId, width: viewport.width, height: viewport.height });
+  }
+
+  /**
+   * The push number a page shows (push-number-read.ts), as a provider's view or the element a ferret pointed at shows
+   * it. Believed only in its exact shape; anything else is refused in words that quote none of it.
+   */
+  async pushNumberRead(pageId: string, element?: BrowserElementTarget): Promise<BrowserPushNumberRead> {
+    const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.pushNumber, {
+      pageId,
+      ...(element === undefined ? {} : { element }),
+    });
+    return parsePushNumberRead((raw as { read?: unknown } | null)?.read);
   }
 
   async inputDocument(pageId: string): Promise<BrowserInputDocument> {

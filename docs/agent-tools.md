@@ -18,7 +18,7 @@ the page and end with it. The reference grammar is unchanged — see
 
 `terminal.list` · `terminal.open(name, folder?, command?, askOwner?)` · `terminal.send(name, text?, keys?)` ·
 `terminal.read(name, lines?)` · `terminal.wait(name, text | exit, timeoutMs?)` · `terminal.close(name)` · `terminal.ask_owner(name, message?)` ·
-`terminal.request_input(name, prompt, sensitivity, submit?, expiresInSeconds?, blocking?, chain?)` · `input.wait(id, timeoutMs?)` ·
+`terminal.request_input(name, prompt, sensitivity, submit?, expiresInSeconds?, blocking?, chain?)` or `(name, push: true, secretHint?, factor?, waitSeconds?)` · `input.wait(id | pa_id, timeoutMs?)` ·
 `browser.list` · `browser.open(name, url?, incognito?, askOwner?)` · `browser.navigate(name, url | history)` ·
 `browser.click(name, target, button?, double?, modifiers?)` · `browser.type(name, target, text, submit?, slowly?)` ·
 `browser.read(name, mode: text | a11y | snapshot, target?, find?, depth?, boxes?)` ·
@@ -310,6 +310,10 @@ call.
 - **Logins go through the input bridge.** `browser_request_input` asks the owner for a form's values on one
   card (a `plain` e-mail and a `secret` password, say) and the daemon types each into its field; the agent
   never holds a secret. A captcha is never solved: the agent hands the page over.
+- **A push to approve on the phone** is `push: true` on either request tool, with no prompt (and on a page,
+  optionally the element showing the number). The daemon reads the number from the page itself and settles the
+  card when it sees the sign-in move on; the agent waits on the `pa_` id and is never told the number. See
+  [input requests › Approve on your phone](input-requests.md#approve-on-your-phone).
 - The CDP port listens on loopback and accepts no cross-origin WebSocket (`--remote-allow-origins` is
   gone; the worker sends no `Origin`).
 

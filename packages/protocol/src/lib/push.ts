@@ -131,11 +131,12 @@ export type PushUrgency = z.infer<typeof PushUrgencySchema>;
 
 /**
  * What a push is about, as far as how fast it must reach a phone. A one-time code is waited on for minutes, not
- * hours (the owner's ask: "for 2FA notification, please make it high priority"). The approve-on-phone card adds its
- * own subject here and nothing else changes.
+ * hours (the owner's ask: "for 2FA notification, please make it high priority"), and so is a push the owner approves
+ * on their phone (`approve-on-phone`, docs/input-requests.md "Approve on your phone"): the sign-in gives up on it in a
+ * minute or two.
  */
-export type PushSubject = 'one-time-code' | 'other';
-const URGENT_SUBJECTS: ReadonlySet<PushSubject> = new Set(['one-time-code']);
+export type PushSubject = 'one-time-code' | 'approve-on-phone' | 'other';
+const URGENT_SUBJECTS: ReadonlySet<PushSubject> = new Set(['one-time-code', 'approve-on-phone']);
 
 /** THE ONE RULE: which pushes are high priority. Everything else stays `normal`, which is also what an absent header means. */
 export function pushUrgencyFor(subject: PushSubject): PushUrgency {

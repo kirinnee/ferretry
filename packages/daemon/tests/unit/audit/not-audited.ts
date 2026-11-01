@@ -106,6 +106,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/sessions/:sessionId/input-requests/:requestId/cancel':
     'audited by the input-request service: input.cancelled, names and flags only',
   'GET /v1/sessions/:sessionId/input-quarantines': 'a read; names and end times only',
+  'POST /v1/sessions/:sessionId/phone-approvals/:approvalId/refuse':
+    'audited by the phone-approval service: phone-approval.refused, the account, the site and the ferret, never the number',
   'POST /v1/sessions/:sessionId/input-quarantines/:key/end':
     'audited by the input-request service: input.quarantine_ended, names and flags only',
   'DELETE /v1/sessions/:sessionId/terminals/:terminalId':

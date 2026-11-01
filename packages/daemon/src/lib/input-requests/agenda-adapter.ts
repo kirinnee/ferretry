@@ -1,9 +1,11 @@
 import type { AgendaId } from '@ferretry/protocol';
 import type { AgendaBoardChange, AgendaChangeObserver, AgendaService } from '../agenda/service.ts';
 import type { AgendaActor } from '../agenda/state-machine.ts';
+import type { PhoneApprovalAgendaPort, PhoneApprovalCard } from './phone-approval.ts';
 import type { InputAgendaPort, InputAgentNotifier, InputCard, InputCardResult } from './ports.ts';
 
 const INPUT_CARD_ACTOR: AgendaActor = { kind: 'daemon', cause: 'input-request' };
+const PHONE_APPROVAL_ACTOR: AgendaActor = { kind: 'daemon', cause: 'phone-approval' };
 
 /** Where the agent's own sentence starts in a card's context; everything after it is the prompt. */
 const PROMPT_MARKER = 'The agent says: ';
@@ -54,6 +56,48 @@ export class InputAgendaAdapter implements InputAgendaPort {
     const context = listed.value.items.find(item => item.id === id)?.context;
     const at = context?.indexOf(PROMPT_MARKER) ?? -1;
     return context == null || at < 0 ? undefined : context.slice(at + PROMPT_MARKER.length);
+  }
+}
+
+/**
+ * An approve-on-phone card (docs/input-requests.md, "Approve on your phone"): an `info` item carrying the approval's
+ * ref, every word the daemon's. Only the daemon raises one (the agenda's add route has no field for the ref), so the
+ * app draws the approve card only from a ref no ferret could set; an app that does not know the ref shows the
+ * daemon's subject as a plain note, with no number.
+ */
+export class PhoneApprovalAgendaAdapter implements PhoneApprovalAgendaPort {
+  constructor(private readonly agenda: Pick<AgendaService, 'raise' | 'resolve' | 'list'>) {}
+
+  async raise(sessionId: string, card: PhoneApprovalCard): Promise<InputCardResult> {
+    const outcome = await this.agenda.raise(
+      sessionId,
+      {
+        source: 'question',
+        sourceRef: card.approvalId,
+        kind: 'info',
+        title: card.title,
+        subject: oneLine(card.subject),
+        why: card.why,
+        context: card.context,
+        howToResolve: card.howToResolve,
+        phoneApproval: { id: card.approvalId },
+      },
+      PHONE_APPROVAL_ACTOR,
+    );
+    if (!outcome.ok) return { ok: false, message: outcome.error.message };
+    return outcome.item === undefined
+      ? { ok: false, message: 'the agenda kept no card for this approval' }
+      : { ok: true, id: outcome.item.id };
+  }
+
+  async close(sessionId: string, id: AgendaId, note: string): Promise<void> {
+    await this.agenda.resolve(sessionId, id, PHONE_APPROVAL_ACTOR, note).catch(() => undefined);
+  }
+
+  async open(sessionId: string): Promise<readonly AgendaId[]> {
+    const listed = await this.agenda.list(sessionId);
+    if (!listed.ok) return [];
+    return listed.value.items.filter(item => item.phoneApproval !== undefined).map(item => item.id);
   }
 }
 

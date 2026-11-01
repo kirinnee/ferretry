@@ -29,6 +29,10 @@ import { MemoryTranscript } from '../../../support/transcript-images.ts';
 import { agentToolWorld, PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { fixedClock, request } from '../../api/support.ts';
 import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
+import {
+  type PhoneApprovalDependencies,
+  PhoneApprovalService,
+} from '../../../../src/lib/input-requests/phone-approval.ts';
 import { OTHER_TABLE_CALLERS, ROUTE_CALLERS } from './route-callers.ts';
 import { inputRequestService } from '../../input-requests/support.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
@@ -732,6 +736,8 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     return { service: world.service, identities: world.identities };
   })(),
   inputRequests: inputRequestService().service,
+  // Only its routes are read here: nothing is raised, so none of its ports is reached.
+  phoneApprovals: new PhoneApprovalService({ enabled: () => false } as unknown as PhoneApprovalDependencies),
   secureCopy: (() => {
     const rules = new PasteRuleService({
       store: { read: async () => undefined, write: async () => undefined },
@@ -928,6 +934,7 @@ describe('the mounted daemon surface', () => {
       6 + // saved logins: the list, the ferret’s hint, put, rename, delete and the owner’s answer to a recipe proposal (docs/input-requests.md#saved-logins)
       13 + // accounts and sign-ins: the list, the hint, look-alike, an account’s put, rename, delete, merge and apart, a sign-in’s add, put, delete and recipe answer, and the owner’s default account for a place (docs/secrets.md)
       8 + // 2FA keys: add, relabel and remove one, and a seed’s stage, read, passkey-bound commit, confirm-in-app and drop (docs/secrets.md)
+      3 + // approving a sign-in on the phone: the list, one approval, and "Not me" (docs/input-requests.md)
       8 + // secure copy: a session's copies, the rules (list, add, remove, settings read and change), the paste plans and an answer to one (docs/secure-copy.md)
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
       7 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
@@ -1259,6 +1266,10 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/input-quarantines',
       'POST /v1/sessions/:sessionId/input-quarantines/:key/end',
       'POST /v1/sessions/:sessionId/input-requests/:requestId/cancel',
+      // Approving a sign-in on the phone: read the cards, and "Not me" (no route sets one moved-on).
+      'GET /v1/phone-approvals',
+      'GET /v1/sessions/:sessionId/phone-approvals/:approvalId',
+      'POST /v1/sessions/:sessionId/phone-approvals/:approvalId/refuse',
       // Secure copy: a session's copies by description, the owner's pre-approval rules and the ferrets' paste plans.
       'GET /v1/sessions/:sessionId/copies',
       'GET /v1/copy-rules',

@@ -35,6 +35,7 @@ const DAEMON_TITLES: Readonly<Record<DaemonAgendaCause, string>> = {
   'input-request': 'Needs a secret',
   'secure-copy': 'Asks to approve pastes in advance',
   'login-recipe': 'Suggests a login recipe',
+  'phone-approval': 'Approve on your phone',
 };
 
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;

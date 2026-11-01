@@ -672,3 +672,116 @@ describe('NotificationService high priority', () => {
     should(world.push.dispatches[0]?.urgency).equal('high');
   });
 });
+
+describe('NotificationService approve-on-phone push', () => {
+  const PA = 'pa_0123456789abcdef01234567';
+  const card = AgendaItemSchema.parse({
+    id: 'A9',
+    source: 'question',
+    sourceRef: PA,
+    title: 'Approve on your phone',
+    subject: 'Approve on your phone: ClickUp · a@gmail.com',
+    why: 'ClickUp · a@gmail.com: company.okta.com.',
+    waitingSince: AT,
+    howToResolve: 'Approve it on your phone.',
+    kind: 'info',
+    raisedBy: 'daemon',
+    raisedBySession: null,
+    raisedByName: null,
+    phoneApproval: { id: PA },
+  });
+  const approval = (sequence: number, body = 'Tap 42 on your phone: ClickUp · a@gmail.com') => ({
+    id: PA,
+    body,
+    sequence,
+    secondsLeft: 90,
+  });
+
+  it('should push high, under the approval’s own tag, held no longer than the card lives, in the daemon’s words (invariant 18)', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    await world.service.phoneApproval(SESSION, card, snapshot, approval(0));
+
+    // Assert — the body is the daemon-read number and the account (owner decision !A171), nothing else.
+    should(world.push.dispatches).have.length(1);
+    should(world.push.dispatches[0]).containDeep({ urgency: 'high', ttlSeconds: 90 });
+    should(world.push.dispatches[0]?.payload).eql({
+      version: 1,
+      eventKey: `phone-approval:${PA}`,
+      sessionId: SESSION,
+      kind: 'attention',
+      title: 'Approve on your phone',
+      body: 'Tap 42 on your phone: ClickUp · a@gmail.com',
+      tag: `pa-${PA}`,
+      url: `/session/${SESSION}?attention=A9`,
+      count: 1,
+      urgency: 'high',
+    });
+    should(requested(world)[0]).containDeep({ key: `agenda:${SESSION}:A9:phone-approval:0`, phoneApproval: 0 });
+  });
+
+  it('should push once per number: the same push again is no second one, a new number is', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    await world.service.phoneApproval(SESSION, card, snapshot, approval(0));
+    await world.service.phoneApproval(SESSION, card, snapshot, approval(0));
+    await world.service.phoneApproval(
+      SESSION,
+      card,
+      snapshot,
+      approval(1, 'Tap 17 on your phone: ClickUp · a@gmail.com'),
+    );
+
+    // Assert — both under one tag, so the second replaces the first on the lock screen.
+    should(world.push.dispatches.map(dispatch => dispatch.payload.body)).eql([
+      'Tap 42 on your phone: ClickUp · a@gmail.com',
+      'Tap 17 on your phone: ClickUp · a@gmail.com',
+    ]);
+    should(new Set(world.push.dispatches.map(dispatch => dispatch.payload.tag))).eql(new Set([`pa-${PA}`]));
+  });
+
+  it('should stay inside the per-ferret high caps, and keep its own tag when it goes out normal', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    for (let sequence = 0; sequence < 4; sequence += 1)
+      await world.service.phoneApproval(SESSION, card, snapshot, approval(sequence));
+
+    // Assert
+    should(world.push.dispatches.map(dispatch => dispatch.urgency ?? 'normal')).eql(['high', 'high', 'high', 'normal']);
+    should(world.push.dispatches[3]?.payload.tag).equal(`pa-${PA}`);
+  });
+
+  it('should push nothing for a card with no time left', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    await world.service.phoneApproval(SESSION, card, snapshot, { ...approval(0), secondsLeft: 0 });
+
+    // Assert
+    should(world.push.calls).equal(0);
+  });
+
+  it('should label a ferret’s own push that reads as the approve-on-phone push, in any letters', async () => {
+    // Arrange — two notices a ferret raised and asked to buzz for, titled like the daemon's push.
+    const world = fixture();
+    const latin = AgendaItemSchema.parse({ ...pinging, id: 'A5', title: 'Approve on your phone' });
+    const lookalike = AgendaItemSchema.parse({ ...pinging, id: 'A6', title: 'Аpprove оn your phone now' });
+
+    // Act
+    await world.service.raised(SESSION, latin, snapshot);
+    await world.service.raised(SESSION, lookalike, snapshot);
+
+    // Assert
+    should(world.push.dispatches.map(dispatch => dispatch.payload.title)).eql([
+      'Ferret “Approve on your phone”',
+      'Ferret “Аpprove оn your phone now”',
+    ]);
+  });
+});

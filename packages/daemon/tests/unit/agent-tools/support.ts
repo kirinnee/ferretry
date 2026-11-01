@@ -452,7 +452,16 @@ class FakeAgentFiles implements Pick<AgentFiles, 'prepareUpload' | 'save'> {
 export function agentToolWorld(
   extra: Pick<
     AgentToolPorts,
-    'input' | 'scrub' | 'quarantinedUntil' | 'copy' | 'plans' | 'copyPages' | 'accounts' | 'recipes' | 'loginActs'
+    | 'input'
+    | 'phoneApprovals'
+    | 'scrub'
+    | 'quarantinedUntil'
+    | 'copy'
+    | 'plans'
+    | 'copyPages'
+    | 'accounts'
+    | 'recipes'
+    | 'loginActs'
   > &
     Partial<Pick<AgentToolPorts, 'redactor'>> = {},
 ) {

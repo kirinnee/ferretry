@@ -72,6 +72,9 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'input.quarantine_revealed': 'A viewer chose to see a terminal a ferret was kept out of',
   'link.opened': 'A link was opened in this computer’s browser',
   'session.credential-refused': "A ferret's own session credential was refused",
+  'phone-approval.raised': 'A ferret asked you to approve a sign-in on your phone',
+  'phone-approval.refused': 'A sign-in to approve on your phone was refused: "Not me"',
+  'phone-approval.settled': 'A sign-in to approve on your phone ended',
 };
 
 /**
