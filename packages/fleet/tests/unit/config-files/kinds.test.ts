@@ -804,21 +804,13 @@ describe('configLoosening — account-defaults.yaml', () => {
   it('should hold nothing when the lines are the same, however they are ordered', () => {
     // Act + Assert
     should(
-      configLoosening(
-        'accountDefaults',
-        { sites: { 'a.com': A, 'b.com': B } },
-        { sites: { 'b.com': B, 'a.com': A } },
-      ),
+      configLoosening('accountDefaults', { sites: { 'a.com': A, 'b.com': B } }, { sites: { 'b.com': B, 'a.com': A } }),
     ).deepEqual([]);
   });
 
   it('should say a sentence once when two edits touch the same place', () => {
     // Act
-    const actual = configLoosening(
-      'accountDefaults',
-      { sites: { 'a.com': A } },
-      { sites: { 'a.com': B } },
-    );
+    const actual = configLoosening('accountDefaults', { sites: { 'a.com': A } }, { sites: { 'a.com': B } });
 
     // Assert
     should(actual).have.length(1);

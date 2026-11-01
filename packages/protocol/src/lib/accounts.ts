@@ -1065,7 +1065,14 @@ export const PutAccountDefaultRequestSchema = z
     }
     const line = request.account ?? ('A' as AccountId);
     const shaped = AccountDefaultsFileSchema.safeParse(
-      fileOfLines([{ scope: request.scope, key: request.key, account: line, ...(request.within === undefined ? {} : { within: request.within }) }]),
+      fileOfLines([
+        {
+          scope: request.scope,
+          key: request.key,
+          account: line,
+          ...(request.within === undefined ? {} : { within: request.within }),
+        },
+      ]),
     );
     if (!shaped.success)
       for (const issue of shaped.error.issues)

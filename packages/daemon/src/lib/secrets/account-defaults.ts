@@ -48,11 +48,6 @@ export interface AccountDefaultsDeps {
 export class AccountDefaults {
   constructor(private readonly deps: AccountDefaultsDeps) {}
 
-  /** The lines in effect: the last good version, and the tighter one while an edit waits for the owner. */
-  async inEffect(): Promise<AccountDefaultsFile> {
-    return (await this.deps.config.inEffect()).evaluation.effective.accountDefaults;
-  }
-
   /** The owner sets the line at `at` to `account`, or removes it with `null`. Answers the lines in effect after. */
   async set(
     at: Pick<AccountDefaultLine, 'scope' | 'within' | 'key'>,
@@ -108,8 +103,7 @@ export class AccountDefaults {
     for (const line of lines) {
       const problem = problemWith(line, handles, keysOf, projects);
       if (problem === undefined) continue;
-      const path =
-        line.scope === 'sites' ? [line.scope, line.key] : [line.scope, line.within ?? '', line.key];
+      const path = line.scope === 'sites' ? [line.scope, line.key] : [line.scope, line.within ?? '', line.key];
       const position = located?.ok === true ? located.read.locate(path) : undefined;
       issues.push({
         path: DEFAULTS_PATH,

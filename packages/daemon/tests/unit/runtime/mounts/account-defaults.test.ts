@@ -106,7 +106,8 @@ async function world(): Promise<World> {
   const projects: { id: string; name: string }[] = [];
   const defaults = new AccountDefaults({
     config,
-    projects: async () => projects.map(p => ({ ...p, path: '/srv', source: 'existing-folder', createdAt: '' })) as never,
+    projects: async () =>
+      projects.map(p => ({ ...p, path: '/srv', source: 'existing-folder', createdAt: '' })) as never,
   });
   const base = secretSubsystem();
   const subsystem: SecretSubsystem = { ...base, accountDefaults: defaults };
@@ -117,7 +118,10 @@ async function world(): Promise<World> {
     const found = new ApiRouter(secretRoutes(subsystem)).lookup(method, path);
     if (found.kind !== 'matched') throw new Error(`no route ${method} ${path}`);
     let spent = 0;
-    const governance: CallerGovernance = { governed: caller.kind === 'device', decide: () => ({ allowed: true, refusal: 'granted' }) };
+    const governance: CallerGovernance = {
+      governed: caller.kind === 'device',
+      decide: () => ({ allowed: true, refusal: 'granted' }),
+    };
     const context: RouteContext = {
       request: request({
         method,
@@ -149,7 +153,12 @@ async function world(): Promise<World> {
       return { status: error.status, code: error.code, spent };
     }
     const parsed = jsonBody(response) as Record<string, unknown>;
-    return { status: response.status, body: parsed, ...(typeof parsed.code === 'string' ? { code: parsed.code } : {}), spent };
+    return {
+      status: response.status,
+      body: parsed,
+      ...(typeof parsed.code === 'string' ? { code: parsed.code } : {}),
+      spent,
+    };
   };
   return { directory, config, subsystem, defaults, projects, drive };
 }
