@@ -214,10 +214,12 @@ import { registerRestartCommands } from '../src/lib/restart/commands';
 import { RestartController } from '../src/lib/restart/controller';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
+import { ProtocolAccountGateway as ProtocolSecretAccountGateway } from '../src/lib/secrets/account-gateway';
+import { AccountController } from '../src/lib/secrets/account-controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
+import { FactorKeyController } from '../src/lib/secrets/factor-keys-controller';
+import { SignInController } from '../src/lib/secrets/sign-in-controller';
 import { SecretController } from '../src/lib/secrets/controller';
-import { LoginEntryController } from '../src/lib/secrets/entry-controller';
-import { ProtocolLoginEntryGateway } from '../src/lib/secrets/entry-gateway';
 import { TwoFactorSeedController } from '../src/lib/secrets/factor-controller';
 import { ProtocolTwoFactorSeedGateway } from '../src/lib/secrets/factor-gateway';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
@@ -1080,25 +1082,34 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         new StdinSecretValue(BINARY_NAME),
         process.cwd(),
       ),
-      new LoginEntryController({
-        gateway: new ProtocolLoginEntryGateway(client),
-        out: world.io,
-        prompt: world.prompt,
-        interactive: world.interactive,
-        readRecipe: async source =>
-          source === '-'
-            ? await Bun.stdin.text()
-            : await Bun.file(isAbsolute(source) ? source : join(world.cwd, source)).text(),
-      }),
-      new TwoFactorSeedController({
-        gateway: new ProtocolTwoFactorSeedGateway(client),
-        out: world.io,
-        prompt: world.prompt,
-        interactive: world.interactive,
-        ownSessionId,
-        sleep: async ms => await Bun.sleep(ms),
-        nowMs: () => Date.now(),
-      }),
+      (() => {
+        const accountGateway = new ProtocolSecretAccountGateway(client);
+        const ports = {
+          gateway: accountGateway,
+          out: world.io,
+          prompt: world.prompt,
+          interactive: world.interactive,
+          readRecipe: async (source: string) =>
+            source === '-'
+              ? await Bun.stdin.text()
+              : await Bun.file(isAbsolute(source) ? source : join(world.cwd, source)).text(),
+        };
+        return {
+          accounts: new AccountController(ports),
+          signIns: new SignInController(ports),
+          factorKeys: new FactorKeyController(ports),
+          seeds: new TwoFactorSeedController({
+            gateway: new ProtocolTwoFactorSeedGateway(client),
+            accounts: accountGateway,
+            out: world.io,
+            prompt: world.prompt,
+            interactive: world.interactive,
+            ownSessionId,
+            sleep: async ms => await Bun.sleep(ms),
+            nowMs: () => Date.now(),
+          }),
+        };
+      })(),
     ),
   ({ program, world, client }) =>
     registerFilesystemCommands(program, new FilesystemController(new ProtocolFilesystemGateway(client), world.io)),

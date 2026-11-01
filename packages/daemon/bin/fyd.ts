@@ -10610,7 +10610,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       seedCards = inputRequestService;
       seedAgenda = new TwoFactorSeedAgendaAdapter(agenda);
       // Login recipes (docs/input-requests.md): every recipe text is checked against every value the daemon masks, and a
-      // ferret's proposal waits on a card the owner answers in Settings or with `fy account recipe`.
+      // ferret's proposal waits on a card the owner answers in Settings or with `fy account site recipe`.
       const loginRecipes = new LoginRecipeService({
         logins: loginDirectory,
         accounts: accountDirectory,

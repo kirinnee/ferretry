@@ -728,7 +728,7 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   a fourth pushes out the oldest and closes its card) and on an agenda card, "Recipe change for 'GitHub (kirinnee)'
   on github.com", that shows the changed lines and "The ferret says: …". **The card approves nothing**: the owner
   approves or declines in Settings › Accounts › the account › the place › Recipe, or with
-  `fy account recipe approve|decline <id> <proposal>`, through the owner-only
+  `fy account site recipe approve|decline <sign-in> <proposal>`, through the owner-only
   `POST /v1/accounts/sign-ins/:si/recipe/proposals/:proposalId` (or `/v1/secrets/logins/:id/…`, which finds the
   proposal on whichever of the account's sign-ins holds it; `secrets` configure, a kept `secrets.changed` record).
   An approval is refused (`stale_proposal`) when the recipe changed after the proposal was made, because the owner
@@ -903,10 +903,15 @@ explicit confirmation of this sentence (`LOGIN_TOTP_WARNING`), shown in the app 
 
 ### Managing them
 
-Settings › Accounts (the former "Saved logins") and `fy account ls|add|edit|rename|rm|recipe` (`fy secret entry …` is a hidden alias for one release) list entries (never values),
-add and edit the label, match, sign-in method (`--method`, `--via`, `--sso-name`), login domains (`--domain`)
-and username, replace a password, add or remove a 2FA seed, rename the handle and
-delete. Values are typed into a masked field or read from the TTY with echo off; never a flag.
+Settings › Accounts (the former "Saved logins") and `fy account` (`fy secret entry …` is a hidden alias for one release) list entries (never values).
+`fy account ls|add|edit|rename|rm|merge|apart|look-alike|hint` work on the account; `site ls|add|edit|rm` on its sign-ins (the
+place by `--domain`/`--for`, or `--tool`/`--host`/`--dest`; the method by `--method`, `--via`, `--sso-name`) with
+`site recipe show|set|clear|approve|decline`; `default set|rm` pick the account for a site, project or folder; and
+`factor ls|add|rm` the 2FA keys (`add --totp` stages a seed and waits for the passkey in the app; `--authenticator`,
+`--sms`, `--email`, `--push`, `--security-key` hold no value). Values are typed into a masked field or read from the TTY with
+echo off; never a flag. **Every write is a person route**: a ferret's call is answered `403 owner_only`, `fy` says so and tries
+no other credential. A daemon without the `/v1/accounts*` routes answers `404 unknown_route` and `fy` says to run `fy daemon update`.
+`fy account factor add --totp` makes the same owner-only read (`GET /v1/accounts`) before it shows the warning or asks for the key, so a refused caller never gets a seed prompt, and the typed key is dropped as soon as the stage request is answered, not held through the passkey wait.
 Routes: `GET /v1/secrets/logins`, `GET /v1/secrets/logins/hint?site=`, `PUT /v1/secrets/logins/:id` (create or change; an omitted field is kept,
 `null` removes it), `POST /v1/secrets/logins/:id/rename`, `DELETE /v1/secrets/logins/:id`, `POST /v1/secrets/logins/:id/recipe/proposals/:proposalId`, all `secrets`
 capability (`use` to list, `configure` to change) and each change a kept `secrets.changed` record.

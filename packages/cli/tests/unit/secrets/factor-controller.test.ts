@@ -11,11 +11,15 @@ import {
 import { FyHttpError } from '@ferretry/protocol/client';
 import { Command } from 'commander';
 import should from 'should';
-import { registerAccountCommands } from '../../../src/lib/secrets/entry-commands';
-import { LoginEntryController } from '../../../src/lib/secrets/entry-controller';
-import type { ILoginEntryGateway, ILoginEntryPrompt } from '../../../src/lib/secrets/entry-ports';
+import { registerAccountCommands } from '../../../src/lib/secrets/account-commands';
+import { AccountController } from '../../../src/lib/secrets/account-controller';
+import type { IAccountGateway, IAccountPrompt } from '../../../src/lib/secrets/account-ports';
+import { FactorKeyController } from '../../../src/lib/secrets/factor-keys-controller';
+import { SignInController } from '../../../src/lib/secrets/sign-in-controller';
 import { TwoFactorSeedController } from '../../../src/lib/secrets/factor-controller';
 import type { ITwoFactorSeedGateway } from '../../../src/lib/secrets/factor-gateway';
+import { OLD_DAEMON_MESSAGE, OWNER_ONLY_MESSAGE } from '../../../src/lib/secrets/account-gateway';
+import { FakeAccountGateway, LIST } from './account-rig';
 
 /**
  * `fy account factor add --totp` (docs/secrets.md, "2FA keys"): the key is typed at a hidden prompt, STAGED, and put
@@ -27,7 +31,7 @@ const SEED = 'JBSWY3DPEHPK3PXP';
 const URI = `otpauth://totp/GitHub:kirinnee?secret=${SEED}&issuer=GitHub`;
 const STAGE = `st_${'a'.repeat(24)}`;
 
-class FakePrompt implements ILoginEntryPrompt {
+class FakePrompt implements IAccountPrompt {
   readonly asked: string[] = [];
   readonly hidden: string[] = [];
   constructor(
@@ -95,13 +99,23 @@ class FakeSeeds implements ITwoFactorSeedGateway {
   }
 }
 
-function rig(options: { seeds?: FakeSeeds; prompt?: FakePrompt; session?: string; interactive?: boolean } = {}) {
+function rig(
+  options: {
+    seeds?: FakeSeeds;
+    prompt?: FakePrompt;
+    session?: string;
+    interactive?: boolean;
+    accounts?: FakeAccountGateway;
+  } = {},
+) {
   const seeds = options.seeds ?? new FakeSeeds();
+  const accounts = options.accounts ?? new FakeAccountGateway();
   const prompt = options.prompt ?? new FakePrompt([URI]);
   const messages: string[] = [];
   let now = 0;
   const controller = new TwoFactorSeedController({
     gateway: seeds,
+    accounts,
     out: { success: message => void messages.push(message) },
     prompt,
     interactive: options.interactive ?? true,
@@ -111,7 +125,7 @@ function rig(options: { seeds?: FakeSeeds; prompt?: FakePrompt; session?: string
     },
     nowMs: () => now,
   });
-  return { controller, seeds, prompt, messages };
+  return { controller, seeds, prompt, messages, accounts };
 }
 
 const fails = async (run: () => Promise<unknown>): Promise<string> => {
@@ -210,17 +224,19 @@ describe('fy account factor add --totp', () => {
     const root = new Command().name('fy').exitOverride();
     root.configureOutput({ writeOut: () => {}, writeErr: () => {} });
     const { controller } = rig({ session: 's' });
-    registerAccountCommands(
-      root,
-      new LoginEntryController({
-        gateway: {} as ILoginEntryGateway,
-        out: { success: () => {} },
-        prompt: new FakePrompt([]),
-        interactive: true,
-        readRecipe: async () => '',
-      }),
-      controller,
-    );
+    const ports = {
+      gateway: {} as IAccountGateway,
+      out: { success: () => {} },
+      prompt: new FakePrompt([]),
+      interactive: true,
+      readRecipe: async () => '',
+    };
+    registerAccountCommands(root, {
+      accounts: new AccountController(ports),
+      signIns: new SignInController(ports),
+      factorKeys: new FactorKeyController(ports),
+      seeds: controller,
+    });
     const add = root.commands
       .find(command => command.name() === 'account')
       ?.commands.find(command => command.name() === 'factor')
@@ -231,7 +247,62 @@ describe('fy account factor add --totp', () => {
 
     // Assert
     should(add).not.be.undefined();
-    should(takesValue.sort()).deepEqual(['--label', '--session']);
+    should(takesValue.sort()).deepEqual(['--app', '--ends-with', '--label', '--session', '--to']);
+  });
+});
+
+describe('fy account factor add --totp, before anything is typed', () => {
+  const http = (status: number, code?: string) => new FyHttpError('the daemon says no', status, code);
+
+  it('should read the person-only account list first, so a refused caller never sees the warning or the prompt', async () => {
+    // Arrange
+    const accounts = new FakeAccountGateway();
+    accounts.failures.set('list', http(403, 'owner_only'));
+    const { controller, prompt, seeds, messages } = rig({ session: 's', accounts });
+
+    // Act
+    const message = await fails(() => controller.add('GITHUB', { totp: true }));
+
+    // Assert
+    should(message).containEql(OWNER_ONLY_MESSAGE);
+    should(accounts.ops()).deepEqual(['list']);
+    should(messages).deepEqual([]);
+    should(prompt.asked).deepEqual([]);
+    should(prompt.hidden).deepEqual([]);
+    should(seeds.calls).deepEqual([]);
+  });
+
+  it('should name an older daemon before asking for the key', async () => {
+    // Arrange
+    const accounts = new FakeAccountGateway();
+    accounts.failures.set('list', http(404, 'unknown_route'));
+    const { controller, prompt } = rig({ session: 's', accounts });
+
+    // Act
+    const message = await fails(() => controller.add('GITHUB', { totp: true }));
+
+    // Assert
+    should(message).equal(OLD_DAEMON_MESSAGE);
+    should(prompt.hidden).deepEqual([]);
+  });
+
+  it('should refuse an account that does not exist, and a store that cannot be read, before asking for the key', async () => {
+    // Arrange
+    const damaged = rig({
+      session: 's',
+      accounts: new FakeAccountGateway({ ...LIST, health: 'damaged', diagnosis: 'the seal key is gone' }),
+    });
+    const missing = rig({ session: 's' });
+
+    // Act
+    const damagedMessage = await fails(() => damaged.controller.add('GITHUB', { totp: true }));
+    const missingMessage = await fails(() => missing.controller.add('NOPE', { totp: true }));
+
+    // Assert
+    should(damagedMessage).containEql('NOT gone');
+    should(damagedMessage).containEql('the seal key is gone');
+    should(missingMessage).containEql('no account NOPE');
+    for (const prompt of [damaged.prompt, missing.prompt]) should(prompt.hidden).deepEqual([]);
   });
 });
 
@@ -240,7 +311,7 @@ describe('fy account factor add --totp, when things go wrong', () => {
 
   it('should name an older daemon, carry the daemon’s own words, and pass anything else through', async () => {
     // Arrange
-    const old = rig({ session: 's', seeds: new FakeSeeds([], false, { stage: [http(404)] }) });
+    const old = rig({ session: 's', seeds: new FakeSeeds([], false, { stage: [http(404, 'unknown_route')] }) });
     const refused = rig({ session: 's', seeds: new FakeSeeds([], false, { stage: [http(409, 'passkey_required')] }) });
     const broken = rig({ session: 's', seeds: new FakeSeeds([], false, { stage: [new TypeError('socket')] }) });
 
@@ -304,17 +375,19 @@ describe('fy account factor add --totp, when things go wrong', () => {
     const root = new Command().name('fy').exitOverride();
     root.configureOutput({ writeOut: () => {}, writeErr: () => {} });
     const { controller, seeds } = rig({ session: 'lead-1' });
-    registerAccountCommands(
-      root,
-      new LoginEntryController({
-        gateway: {} as ILoginEntryGateway,
-        out: { success: () => {} },
-        prompt: new FakePrompt([]),
-        interactive: true,
-        readRecipe: async () => '',
-      }),
-      controller,
-    );
+    const ports = {
+      gateway: {} as IAccountGateway,
+      out: { success: () => {} },
+      prompt: new FakePrompt([]),
+      interactive: true,
+      readRecipe: async () => '',
+    };
+    registerAccountCommands(root, {
+      accounts: new AccountController(ports),
+      signIns: new SignInController(ports),
+      factorKeys: new FactorKeyController(ports),
+      seeds: controller,
+    });
 
     // Act
     await root.parseAsync(['node', 'fy', 'account', 'factor', 'add', 'GITHUB', '--totp', '--i-understand-totp']);

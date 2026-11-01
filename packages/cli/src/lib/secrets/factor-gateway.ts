@@ -10,7 +10,7 @@ import {
   type TwoFactorSeedStageView,
   TwoFactorSeedStageViewSchema,
 } from '@ferretry/protocol';
-import type { LoginEntryApiClient } from './entry-ports.ts';
+import type { AccountApiClient } from './account-ports.ts';
 
 /**
  * The 2FA seed routes `fy account factor add --totp` needs (docs/secrets.md, "2FA keys"): stage, put on the agenda,
@@ -26,7 +26,7 @@ const JSON_HEADERS = { 'content-type': 'application/json' };
 
 /** Speaks the seed routes through the protocol client, parsed both ways. No reply carries a seed. */
 export class ProtocolTwoFactorSeedGateway implements ITwoFactorSeedGateway {
-  constructor(private readonly client: LoginEntryApiClient) {}
+  constructor(private readonly client: AccountApiClient) {}
 
   async stage(account: string, body: StageTwoFactorSeedRequest): Promise<TwoFactorSeedStaged> {
     return await this.client.request(

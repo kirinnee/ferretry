@@ -167,7 +167,7 @@ export class LoginRecipeService {
       subject: `Recipe change for '${account.label}' ${placeWords(signIn.place)}`,
       // The card shows the CURRENT recipe too, which may hold a value kept after it was written: masked like any read.
       context: await this.masked(cardContext(signIn.recipe, recipe, why)),
-      howToResolve: `Approve or decline it in Settings › Accounts › ${account.label} › ${placeName(signIn.place)} › Recipe, or at the machine: \`fy account recipe approve ${account.id} ${proposal.id}\`.`,
+      howToResolve: `Approve or decline it in Settings › Accounts › ${account.label} › ${placeName(signIn.place)} › Recipe, or at the machine: \`fy account site recipe approve ${signIn.id} ${proposal.id}\`.`,
     });
     if (!card.ok) return { ...answer, state: 'pending' };
     await this.ports.accounts.proposalCardSignIn(signIn.id, proposal.id, card.id).catch(() => undefined);
@@ -311,7 +311,7 @@ const RECIPE_CARD_ACTOR: AgendaActor = { kind: 'daemon', cause: 'login-recipe' }
 
 /**
  * A proposal's card on the owner's agenda: a `task` ("look at this"), whose answers change nothing. The owner
- * approves or declines on the login's Recipe in Settings, or with `fy account recipe`, and the card closes.
+ * approves or declines on the login's Recipe in Settings, or with `fy account site recipe`, and the card closes.
  */
 export class RecipeAgendaAdapter implements RecipeAgendaPort {
   constructor(private readonly agenda: Pick<AgendaService, 'raise' | 'resolve'>) {}

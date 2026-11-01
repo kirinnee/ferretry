@@ -19,7 +19,7 @@ request instead of asking for the value; you answer it here, or on its card in t
   cancel <!A7>            declines the request
 
 There is no flag, argument, environment variable or pipe that carries the value: it is typed at the
-prompt, sent once, and dropped. \`--secret\` names an account (see \`account ls\`); the daemon
+prompt, sent once, and dropped. \`--secret\` names an account (see \`fy account ls\`); the daemon
 types it, so the value never reaches this command. A ferret cannot run these commands.
 \`answer\` presses Enter for you in a terminal (--no-enter to leave it); the card flags the
 risk (green, amber or red) before you type, and never refuses for it.`;
@@ -53,7 +53,7 @@ export function registerInputCommands(program: Command, controller: InputControl
     .option(JSON_FLAG, JSON_HELP)
     .option('--no-enter', 'type it without pressing Enter')
     .option('--enter', 'press Enter after typing (browser fields otherwise stay unsubmitted)')
-    .option('--secret <name>', 'type this saved login instead of reading a value (see `account ls`)')
+    .option('--secret <name>', 'type this account instead of reading a value (see `fy account ls`)')
     .option('--entry <name>', 'the same as --secret')
     .option('--save-as <name>', 'keep the value you type as this saved login (a new one, or an existing handle)')
     .option('--label <text>', 'the label a new saved login gets with --save-as')
