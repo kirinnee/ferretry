@@ -81,6 +81,21 @@ const CONFIRMS_DEPLOY: LaneSet = LaneSetSchema.parse({
   }),
 });
 
+/** A set with no verify lane: work, then live, then a deploy closes it (its closed lane has no gate). */
+const DEPLOY_CLOSES: LaneSet = LaneSetSchema.parse({
+  projectId: PROJECT,
+  version: 1,
+  confirmedBy: 'owner',
+  proposedBy: 'lead',
+  lanes: [
+    lane('todo', 'backlog'),
+    lane('doing', 'active', { enterOn: ['work.started'] }),
+    lane('live', 'shipped', { enterOn: ['pr.merged'] }),
+    lane('done', 'closed', { enterOn: ['deploy.done'] }),
+  ],
+  variants: {},
+});
+
 /** The same flow, where the deploy itself would close the card. */
 const CLOSES_ON_DEPLOY: LaneSet = LaneSetSchema.parse({
   ...LABELLING,
@@ -310,9 +325,42 @@ describe('a reported trigger', () => {
 
       // Assert
       should(error.code).equal('owner-gate');
-      should(error.message).equal('deploy.done would close &F1 in closed, and only the owner closes a card');
+      should(error.message).equal("deploy.done would close &F1 in closed, which only the owner's own move enters");
       should(ports.store.writes).eql([]);
     }
+  });
+
+  it('should leave closing to the owner even where the closed lane has no gate', async () => {
+    // Arrange: a set with no verify lane, whose ungated closed lane a deploy enters (a fact may close it).
+    for (const caller of [lead, child]) {
+      const { ports, service } = serviceWith(
+        [card({ laneId: 'live', owner: 'lead', assignee: 'child' })],
+        DEPLOY_CLOSES,
+        {
+          subFerrets: DIRECTORY,
+        },
+      );
+
+      // Act
+      const error = await refusal(service.act('F1', report('deploy.done'), caller));
+
+      // Assert
+      should(error.code).equal('owner-gate');
+      should(error.message).equal('deploy.done would close &F1 in done, and only the owner closes a card on a report');
+      should(ports.store.writes).eql([]);
+    }
+  });
+
+  it('should let the owner close on a report where the closed lane has no gate', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ laneId: 'live' })], DEPLOY_CLOSES);
+
+    // Act
+    await service.act('F1', report('deploy.done'), owner);
+
+    // Assert
+    should(stored(ports).laneId).equal('done');
+    should(lastEvent(ports)).match({ auto: true, trigger: 'deploy.done', reportedBy: { kind: 'owner' } });
   });
 
   it('should say so when the board has no lane for the event', async () => {

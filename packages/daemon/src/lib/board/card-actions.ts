@@ -337,8 +337,9 @@ export const gateOnTheWay = (
  * An external trigger somebody reported (the task action `trigger`): something Ferretry cannot see happened —
  * a deploy finished, a reviewer approved — so the card moves the way that trigger moves it. The move is the
  * daemon's, through {@link triggerMove}, so it is recorded `auto` with the trigger and `reportedBy` names
- * the caller. Never backward and never into an owner-gated closed lane; and the report of a non-owner never
- * passes a gate the owner has not answered: neither the card's own lane nor one its variant walks on the way
+ * the caller. Never backward and never into an owner-gated closed lane; the report of a non-owner never closes a
+ * card at all (a fact may close a set with no verify lane; a caller's word may not), and never passes a gate the
+ * owner has not answered: neither the card's own lane nor one its variant walks on the way
  * ({@link gateOnTheWay}). Already there, or past it, is no change.
  */
 const report = (
@@ -358,10 +359,13 @@ const report = (
   }
   const target = found.value;
   if (target.id === card.laneId) return { task: null };
-  if (target.category === 'closed' && target.ownerGate === true) {
+  // Only the owner closes on a report: a fact may close a set with no verify lane, a caller's word may not.
+  if (target.category === 'closed' && (target.ownerGate === true || context.standing !== 'owner-human')) {
     throw new BoardError(
       'owner-gate',
-      `${action.event} would close ${ref} in ${target.name}, and only the owner closes a card`,
+      target.ownerGate === true
+        ? `${action.event} would close ${ref} in ${target.name}, which only the owner's own move enters`
+        : `${action.event} would close ${ref} in ${target.name}, and only the owner closes a card on a report`,
       ['owner-human'],
     );
   }
