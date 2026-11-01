@@ -184,6 +184,8 @@ const isAppPage = (pathname: string): boolean =>
   pathname.startsWith('/app/') ||
   pathname.startsWith('/d/') ||
   pathname === '/setup' ||
+  // `/join` is left out on purpose: a notification tap must not route a tab away mid-join and drop the code.
+  pathname === '/shared' ||
   pathname === '/pair' ||
   pathname.startsWith('/pair/');
 

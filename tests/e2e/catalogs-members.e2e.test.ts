@@ -24,6 +24,7 @@ import {
   asOwner,
   bootDaemon,
   confirmPairing,
+  currentRoute,
   ensureOperatorPassword,
   launchProductBrowser,
   mintPairingLink,
@@ -407,6 +408,13 @@ async function open(person: Person, url: string): Promise<void> {
   await person.page.goto(url, { waitUntil: 'load', timeout: 30_000 });
 }
 
+/** Move to `path` inside the open document, as the app's own links do. */
+async function inApp(person: Person, path: string): Promise<void> {
+  await person.page.evaluate(
+    `(() => { history.pushState({}, '', ${JSON.stringify(path)}); window.dispatchEvent(new PopStateEvent('popstate')); })()`,
+  );
+}
+
 /** Set a `<select>` the way a person's choice does, and let the app hear it. */
 async function choose(person: Person, selector: string, value: string): Promise<void> {
   await reach(person, selector, `the ${selector} choice`);
@@ -415,7 +423,12 @@ async function choose(person: Person, selector: string, value: string): Promise<
     `[...document.querySelector(${quoted(selector)}).options].some(o => o.value === ${quoted(value)})`,
     30_000,
     `the choice ${value} in ${selector}`,
-  );
+  ).catch(async (error: unknown) => {
+    const offered = await person.page.evaluate<string>(
+      `JSON.stringify([...document.querySelector(${quoted(selector)}).options].map(o => o.value))`,
+    );
+    throw new Error(`${(error as Error).message}. Offered: ${offered}`);
+  });
   await person.page.evaluate(`(() => {
     const select = document.querySelector(${quoted(selector)});
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, ${quoted(value)});
@@ -507,9 +520,30 @@ async function pairToMemberMachine(world: World, person: Person): Promise<string
   });
 }
 
-/** Back to "Shared with me" in the same browser: a fresh load, unlocked with the member passkey. */
-async function backToShared(person: Person, world: World, publisherId: string): Promise<void> {
-  await open(person, `${world.origin.origin}/shared`);
+/**
+ * Back to "Shared with me" in the same browser, unlocked with the member passkey.
+ *
+ * A fresh `/shared` load by default. Given `viaMachine`, it loads that
+ * machine's Projects page first, then moves to `/shared` inside that document. The install sheet offers the projects this document has already
+ * read from the machine, only the machine's own pages read them, and a fresh `/shared` load has read none.
+ */
+async function backToShared(person: Person, world: World, publisherId: string, viaMachine?: string): Promise<void> {
+  if (viaMachine === undefined) await open(person, `${world.origin.origin}/shared`);
+  else {
+    await open(person, `${world.origin.origin}/d/${viaMachine}/projects`);
+    await waitUntil(
+      person.page,
+      `(document.body.textContent ?? '').includes('Member project')`,
+      30_000,
+      "the member machine's registered project on its Projects page",
+    ).catch(async (error: unknown) => {
+      const daemonSays = JSON.stringify(await owner(world.b, 'GET', '/v1/projects', undefined, [200])).slice(0, 400);
+      throw new Error(
+        `${(error as Error).message}. Route: ${String(await currentRoute(person.page))}. The page says: ${String(await textNow(person.page, 'body'))}. Rendered: ${(await renderedDataAttributes(person.page as never)).slice(0, 600)}. The machine lists: ${daemonSays}`,
+      );
+    });
+    await inApp(person, '/shared');
+  }
   const seen = await reachAny(
     person,
     ['[data-shared-catalog]', '[data-publisher-unlock]', '[data-shared-offline]'],
@@ -616,8 +650,8 @@ async function joinJourney(world: World): Promise<void> {
 async function installJourney(world: World): Promise<void> {
   const alice = await newPerson(world, 'alice');
   const minted = await joinNewMember(world, alice, 'Alice', [world.teamCatalog]);
-  await pairToMemberMachine(world, alice);
-  await backToShared(alice, world, minted.publisherId);
+  const machineId = await pairToMemberMachine(world, alice);
+  await backToShared(alice, world, minted.publisherId, machineId);
   await reviewSkill(world, alice, world.teamCatalog, SKILL_TEAM);
 
   await step(world.journey, 'alice:install-target', async () => {
