@@ -454,6 +454,11 @@ describe('the plan the daemon keeps', () => {
         value: withLine({ ...PASTE_LINE, remaining: 1 }, 2),
       },
       {
+        name: 'more uses left on a paste than asked',
+        schema: TaskPlanSchema,
+        value: withLine({ ...PASTE_LINE, state: 'approved', remaining: 2 }, 2),
+      },
+      {
         name: 'a staged selection naming a line the plan lacks',
         schema: TaskPlanSchema,
         value: { ...PLAN, machineStage: { stage: STAGE, lines: [3], askedAt: AT } },
@@ -464,6 +469,7 @@ describe('the plan the daemon keeps', () => {
         value: { ...approvedPlan(true, true), machineStage: { stage: STAGE, lines: [0], askedAt: AT } },
       },
     ]);
+    should(TaskPlanSchema.safeParse(withLine({ ...PASTE_LINE, state: 'approved', remaining: 1 }, 2)).success).be.true();
     should(
       TaskPlanSchema.safeParse(
         withLine({ ...SIGN_IN_LINE, state: 'unavailable', candidates: [], flags: [], because: 'not-in-accounts' }),
