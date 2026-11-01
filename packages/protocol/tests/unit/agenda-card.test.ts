@@ -297,3 +297,49 @@ describe('Discuss', () => {
     should(agendaInDiscussion({})).be.false();
   });
 });
+
+describe('a gate item', () => {
+  const gateItem = {
+    ...item,
+    source: 'agent-raised',
+    sourceRef: 'gate:F412:try-it:3',
+    raisedBy: 'daemon',
+    raisedBySession: null,
+    raisedByName: null,
+    kind: 'choice',
+    gate: {
+      cardId: 'F412',
+      laneId: 'try-it',
+      laneName: 'Try it',
+      entry: 3,
+      projectId: 'ferretry',
+      projectName: 'Ferretry',
+      options: [
+        { id: 'done', label: 'Done', outcome: 'close' },
+        { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+      ],
+    },
+  };
+  const parse = (value: unknown) => AgendaItemSchema.safeParse(value);
+
+  it('should carry the optional gate on a daemon item', () => {
+    const parsed = parse(gateItem);
+    should(parsed.success).be.true();
+  });
+
+  it('should still parse an item with no gate', () => {
+    const { gate: _gate, ...plain } = gateItem;
+    should(parse(plain).success).be.true();
+  });
+
+  it('should refuse a gate with a stray field or an unknown outcome', () => {
+    should(parse({ ...gateItem, gate: { ...gateItem.gate, extra: 1 } }).success).be.false();
+    should(
+      parse({ ...gateItem, gate: { ...gateItem.gate, options: [{ id: 'x', label: 'X', outcome: 'delete' }] } }).success,
+    ).be.false();
+  });
+
+  it('should refuse a gate with no options or more than three', () => {
+    should(parse({ ...gateItem, gate: { ...gateItem.gate, options: [] } }).success).be.false();
+  });
+});

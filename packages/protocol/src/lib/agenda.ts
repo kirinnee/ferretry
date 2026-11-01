@@ -826,6 +826,32 @@ export const AgendaPhoneApprovalRefSchema = z.strictObject({
 });
 export type AgendaPhoneApprovalRef = z.infer<typeof AgendaPhoneApprovalRefSchema>;
 
+/** What choosing a gate option does to its card (`gate` below): move on, reopen with the owner's words, or close. */
+export const AgendaGateOutcomeSchema = z.enum(['next', 'lane', 'reopen-with-agenda', 'close']);
+export type AgendaGateOutcome = z.infer<typeof AgendaGateOutcomeSchema>;
+
+export const AgendaGateOptionSchema = z.strictObject({
+  id: z.string().min(1).max(24),
+  label: singleLine(24),
+  outcome: AgendaGateOutcomeSchema,
+});
+export type AgendaGateOption = z.infer<typeof AgendaGateOptionSchema>;
+
+/**
+ * The gate of a board card this item stands for ("Try it", "OK to build?"): present on a daemon-raised choice item
+ * whose answer moves the card. An app from before the field drops it and shows a plain choice card, answered by label.
+ */
+export const AgendaGateSchema = z.strictObject({
+  cardId: z.string().min(1).max(64),
+  laneId: z.string().min(1).max(64),
+  laneName: z.string().min(1).max(80),
+  entry: PositiveIntegerSchema,
+  projectId: z.string().min(1).max(128),
+  projectName: z.string().min(1).max(120).optional(),
+  options: z.array(AgendaGateOptionSchema).min(1).max(3),
+});
+export type AgendaGate = z.infer<typeof AgendaGateSchema>;
+
 /**
  * A 2FA seed staged at the machine and waiting for the owner's passkey (docs/secrets.md, "2FA keys"): the card's
  * Allow runs the `add-2fa-key` ceremony bound to `stage` and saves it to `account`, and Deny drops it. The generic
@@ -939,6 +965,8 @@ const AgendaItemBaseShape = {
    * that named none. An older app reading a newer board drops the field.
    */
   task: TaskRefSchema.nullable().optional(),
+  /** The board gate this item stands for (`AgendaGate`); only a daemon-raised choice item carries one. */
+  gate: AgendaGateSchema.optional(),
   /**
    * The owner's one tap may close the linked card too: the answer row offers "Done · closes &F12". Set by
    * `fy agenda add --offer-close`, and by the daemon for a to-do or review on a card in the to-test lane.

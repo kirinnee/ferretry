@@ -1458,3 +1458,30 @@
   background: var(--err-bg);
   color: var(--err);
 }
+
+/* The compass: the same ground, with the second layer of the swipe down laid out on it. */
+.fy-swipe-compass {
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+.fy-swipe-compass__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--gap-sm);
+}
+.fy-swipe-compass__cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: var(--gap-xs) var(--gap-md);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-dot);
+  color: var(--muted);
+}
+.fy-swipe-compass__cell[data-active] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--fg);
+}

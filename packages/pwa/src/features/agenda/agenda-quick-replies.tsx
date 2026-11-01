@@ -26,6 +26,7 @@ import { cardLettered, letterOf } from '../../lib/agenda-options.ts';
 import { plainLabel } from '../../lib/plain-label.ts';
 import { DoneCloseChip, DoneCloseConfirm, DoneCloseError } from './agenda-done-close.tsx';
 import type { DoneCloseView } from './use-done-close-flow.ts';
+import { useDeckReadsDown } from './deck-down-context.ts';
 import { isDownSwipe } from './use-down-swipe.ts';
 
 const SWIPE_WORD: Readonly<Record<AnswerDirection, string>> = {
@@ -172,6 +173,7 @@ export function AgendaQuickReplies({
 }: AgendaQuickRepliesProps) {
   const gesture = useRef<Drag | null>(null);
   const swallow = useRef(false);
+  const deckReadsDown = useDeckReadsDown();
   const give = (action: InboxAction): void => {
     if (!busy) onAct(action);
   };
@@ -206,7 +208,8 @@ export function AgendaQuickReplies({
     if (!current.moved) return;
     swallow.current = true;
     if (isDownSwipe(current.dx, current.dy, current.width)) {
-      onSkip?.();
+      // On the deck the compass has this pull; the row's other swipes stay its own.
+      if (!deckReadsDown) onSkip?.();
       return;
     }
     const intent = swipeIntent(current.dx, current.dy, current.width, map);

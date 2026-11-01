@@ -11,7 +11,7 @@ import {
 } from '../../../src/features/agenda/agenda-swipe-deck.tsx';
 import { AgendaUndoToast } from '../../../src/features/agenda/agenda-undo-toast.tsx';
 import { swipeTargets } from '../../../src/lib/agenda-answers.ts';
-import { type InboxCard, swipeIntent, swipeMap } from '../../../src/lib/agenda-inbox.ts';
+import { DISMISS_ACTION, type InboxCard, snoozeAction, swipeIntent, swipeMap } from '../../../src/lib/agenda-inbox.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   agendaItem,
@@ -63,7 +63,12 @@ const page = (fake: FakeInbox, cards: readonly InboxCard[], props: Partial<Agend
 const deckPage = (
   fake: FakeInbox,
   cards: readonly InboxCard[],
-  props: { reducedMotion?: boolean; onSkip?: (card: InboxCard) => void } = {},
+  props: {
+    reducedMotion?: boolean;
+    onSkip?: (card: InboxCard) => void;
+    compass?: boolean;
+    snoozes?: string[];
+  } = {},
 ) => (
   <InboxHarness
     cards={cards}
@@ -76,6 +81,15 @@ const deckPage = (
           onAct={(card, action) => inbox.deferred.schedule(card, action)}
           reducedMotion={props.reducedMotion ?? true}
           {...(props.onSkip === undefined ? {} : { onSkip: props.onSkip })}
+          {...(props.compass !== true
+            ? {}
+            : {
+                onDismiss: (card: InboxCard) => inbox.deferred.schedule(card, DISMISS_ACTION),
+                onSnooze: (card: InboxCard, until: string) => {
+                  props.snoozes?.push(until);
+                  inbox.deferred.schedule(card, snoozeAction(until));
+                },
+              })}
           renderCard={(card, act) => <AgendaCard item={card.item} onAct={act} swipeHints />}
         />
         <AgendaUndoToast clock={fake.clock.now} inbox={inbox} />
@@ -525,7 +539,7 @@ describe('Down is Skip', () => {
     expect(reveal()).toBeNull();
     const target = await dragBy(mounted, 0, 120);
     expect(reveal()?.getAttribute('data-swipe-reveal')).toBe('down');
-    expect(reveal()?.textContent).toBe('Skip');
+    expect(reveal()?.textContent).toContain('Skip');
     expect(reveal()?.getAttribute('aria-hidden')).toBe('true');
     await release(target, 0, 120);
     expect(reveal()).toBeNull();
@@ -725,6 +739,135 @@ describe('a swipe from anywhere on the card', () => {
     await touch(fits, 'pointerdown', 100, 300);
     await touch(fits, 'pointermove', 220, 300);
     expect(stamp(mounted)?.getAttribute('data-swipe-direction')).toBe('right');
+    await mounted.unmount();
+  });
+});
+
+describe('The compass (a long pull down, the pointer kept down)', () => {
+  const compassDeck = (fake: FakeInbox, skipped: string[], snoozes: string[] = []) =>
+    deckPage(fake, [threeWay, twoWay], {
+      onSkip: card => skipped.push(card.item.id),
+      compass: true,
+      snoozes,
+    });
+  const cell = (mounted: Mounted, name: string): HTMLElement | null =>
+    mounted.container.querySelector<HTMLElement>(`[data-compass-cell="${name}"]`);
+
+  it('draws the compass past the Skip threshold, lighting Skip at plain ↓', async () => {
+    const mounted = await mount(compassDeck(fakeInbox(), []));
+    expect(mounted.container.querySelector('[data-swipe-compass]')).toBeNull();
+    await dragBy(mounted, 0, 120);
+    expect(mounted.container.querySelector('[data-swipe-compass]')).not.toBeNull();
+    expect(cell(mounted, 'skip')?.hasAttribute('data-active')).toBe(true);
+    expect(cell(mounted, 'not-needed')?.hasAttribute('data-active')).toBe(false);
+    await mounted.unmount();
+  });
+
+  it('shows the three snooze lengths only as the pull goes further down', async () => {
+    const mounted = await mount(compassDeck(fakeInbox(), []));
+    await dragBy(mounted, 0, 120);
+    expect(mounted.container.querySelector('[data-compass-lengths]')).toBeNull();
+    await dragBy(mounted, 0, 96 + 56 + 10);
+    expect(cell(mounted, 'snooze')?.hasAttribute('data-active')).toBe(true);
+    await mounted.unmount();
+    const deep = await mount(compassDeck(fakeInbox(), []));
+    await dragBy(deep, 0, 96 + 2 * 56 + 10);
+    const lengths = [...deep.container.querySelectorAll('[data-compass-length]')].map(entry =>
+      entry.getAttribute('data-compass-length'),
+    );
+    expect(lengths).toEqual(['1h', '4h', '1d']);
+    await deep.unmount();
+  });
+
+  it('skips on ↓← and sends nothing', async () => {
+    const fake = fakeInbox();
+    const skipped: string[] = [];
+    const mounted = await mount(compassDeck(fake, skipped));
+    const target = await dragBy(mounted, -70, 120);
+    expect(stamp(mounted)?.getAttribute('data-swipe-answer')).toBe('Skip');
+    await release(target, -70, 120);
+    expect(skipped).toEqual(['A3']);
+    expect(pendingActions(fake)).toEqual([]);
+    await mounted.unmount();
+  });
+
+  it('dismisses on ↓→ into the undo window, and Undo really un-dismisses', async () => {
+    const fake = fakeInbox();
+    const skipped: string[] = [];
+    const mounted = await mount(compassDeck(fake, skipped));
+    const target = await dragBy(mounted, 70, 120);
+    expect(stamp(mounted)?.getAttribute('data-swipe-answer')).toBe('Not needed');
+    await release(target, 70, 120);
+    expect(skipped).toEqual([]);
+    expect(pending(fake)).toEqual(['Dismiss']);
+    expect(toast(mounted).textContent).toContain('Dismiss');
+    await interact(() => undoButton(mounted).click());
+    expect(pending(fake)).toEqual([]);
+    await advance(fake, 10_000);
+    expect(fake.commits).toEqual([]);
+    await mounted.unmount();
+  });
+
+  it('sends the dismiss for real once the undo window passes', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(compassDeck(fake, []));
+    await swipe(mounted, 70, 120);
+    await advance(fake, 10_000);
+    expect(fake.commits.map(commit => commit.action.kind)).toEqual(['dismiss']);
+    await mounted.unmount();
+  });
+
+  it('snoozes for 1 h, 4 h or 1 day at ↓↓↓, by where the finger lets go', async () => {
+    for (const [dx, hours] of [
+      [-70, 1],
+      [0, 4],
+      [70, 24],
+    ] as const) {
+      const fake = fakeInbox();
+      const snoozes: string[] = [];
+      const mounted = await mount(compassDeck(fake, [], snoozes));
+      const before = Date.now();
+      await swipe(mounted, dx, 96 + 2 * 56 + 10);
+      expect(snoozes).toHaveLength(1);
+      const wait = Date.parse(snoozes[0] as string) - before;
+      expect(Math.abs(wait - hours * 3_600_000)).toBeLessThan(5_000);
+      expect(pending(fake)).toEqual(['Snooze']);
+      await mounted.unmount();
+    }
+  });
+
+  it('changes nothing when let go at ↓↓ before a length is picked', async () => {
+    const fake = fakeInbox();
+    const skipped: string[] = [];
+    const mounted = await mount(compassDeck(fake, skipped));
+    await swipe(mounted, 0, 96 + 56 + 10);
+    expect(skipped).toEqual([]);
+    expect(pending(fake)).toEqual([]);
+    expect(topId(mounted)).toBe('A3');
+    await mounted.unmount();
+  });
+
+  it('never starts a compass from a sideways drag that drifts down', async () => {
+    const fake = fakeInbox();
+    const skipped: string[] = [];
+    const mounted = await mount(compassDeck(fake, skipped));
+    const target = deckTop(mounted).querySelector('.fy-attn-card__title, .fy-attn-row__title') ?? deckTop(mounted);
+    await interact(() => target.dispatchEvent(pointer('pointerdown', 100, 300)));
+    await interact(() => target.dispatchEvent(pointer('pointermove', 150, 305)));
+    await interact(() => target.dispatchEvent(pointer('pointermove', 160, 460)));
+    await interact(() => target.dispatchEvent(pointer('pointerup', 160, 460)));
+    expect(skipped).toEqual([]);
+    expect(pending(fake)).toEqual([]);
+    await mounted.unmount();
+  });
+
+  it('keeps plain ↓ as Skip where the host offers neither Not needed nor Snooze', async () => {
+    const fake = fakeInbox();
+    const skipped: string[] = [];
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay], { onSkip: card => skipped.push(card.item.id) }));
+    await swipe(mounted, 70, 96 + 2 * 56 + 10);
+    expect(skipped).toEqual(['A3']);
+    expect(pending(fake)).toEqual([]);
     await mounted.unmount();
   });
 });

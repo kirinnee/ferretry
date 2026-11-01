@@ -1,39 +1,70 @@
 /**
- * THE GROUND A SWIPE UNCOVERS: while a card is pulled, the area it leaves bare names what letting go would do, in the
- * same words and tones as the to-test rows' reveals. One list of {@link SwipeRevealSpec}s says what a slot reads; a new
- * gesture layer (↓← Skip, ↓→ Not needed, ↓↓ Snooze) is one more spec with its own slot, not a new component.
+ * THE GROUND A SWIPE UNCOVERS: while a card is pulled down, the area it leaves bare names what letting go would do —
+ * the compass (`agenda-compass.ts`): ↓ Skip, ↓← Skip, ↓→ Not needed, ↓↓ Snooze and its three lengths.
  */
 
-import type { LucideIcon } from 'lucide-react';
-import { SkipForward } from 'lucide-react';
+import { Clock, type LucideIcon, SkipForward, X } from 'lucide-react';
+import { SNOOZE_LENGTHS } from './agenda-compass.ts';
 
-export interface SwipeRevealSpec {
-  /** What the gesture is called: `down`, and later `down-left`, `down-right`, `down-down`. */
-  readonly slot: string;
-  readonly label: string;
-  readonly icon: LucideIcon;
-  /** The tone family: `quiet` (nothing changes), `ok` or `err`. */
-  readonly tone: 'quiet' | 'ok' | 'err';
-}
+const COMPASS_ARROWS: Readonly<Record<string, string>> = { skip: '↓←', 'not-needed': '↓→', snooze: '↓↓' };
 
-/** What a card on the deck reveals today: only ↓, which is Skip. */
-const DECK_REVEALS: readonly SwipeRevealSpec[] = [{ slot: 'down', label: 'Skip', icon: SkipForward, tone: 'quiet' }];
-
-/** The reveal for `active` (a slot) is drawn; the others are not drawn at all. Decoration: the card carries the answer. */
-export function SwipeReveal({
-  reveals = DECK_REVEALS,
-  active,
+/**
+ * THE COMPASS (see `agenda-compass.ts`), drawn on the same ground: ↓← Skip, ↓→ Not needed, ↓↓ Snooze, and — once the
+ * drag is that far down — the three lengths of ↓↓↓. `slot` is the compass's reading (`down`, `down-left`, `down-right`,
+ * `down-down`, `down-down-1h`…); the one it names is lit. A direction the host cannot do is not drawn.
+ */
+export function SwipeCompass({
+  slot,
+  notNeeded,
+  snooze,
 }: {
-  readonly reveals?: readonly SwipeRevealSpec[];
-  readonly active: string | null;
+  readonly slot: string | null;
+  readonly notNeeded: boolean;
+  readonly snooze: boolean;
 }) {
-  const spec = reveals.find(reveal => reveal.slot === active);
-  if (spec === undefined) return null;
-  const Icon = spec.icon;
-  return (
-    <span aria-hidden="true" className="fy-swipe-reveal" data-swipe-reveal={spec.slot} data-tone={spec.tone}>
+  if (slot === null) return null;
+  const lit = (name: string): true | undefined =>
+    (name === 'skip' && (slot === 'down' || slot === 'down-left')) ||
+    (name === 'not-needed' && slot === 'down-right') ||
+    (name === 'snooze' && slot.startsWith('down-down'))
+      ? true
+      : undefined;
+  const lengths = slot.startsWith('down-down') && slot !== 'down-down' ? slot.slice('down-down-'.length) : null;
+  const cell = (name: 'skip' | 'not-needed' | 'snooze', Icon: LucideIcon, label: string) => (
+    <span className="fy-swipe-compass__cell" data-active={lit(name)} data-compass-cell={name} key={name}>
       <Icon size={16} />
-      {spec.label}
+      <span>
+        {COMPASS_ARROWS[name]} {label}
+      </span>
+    </span>
+  );
+  return (
+    <span
+      aria-hidden="true"
+      className="fy-swipe-reveal fy-swipe-compass"
+      data-swipe-compass=""
+      data-swipe-reveal={slot}
+      data-tone="quiet"
+    >
+      <span className="fy-swipe-compass__row">
+        {cell('skip', SkipForward, 'Skip')}
+        {notNeeded ? cell('not-needed', X, 'Not needed') : null}
+      </span>
+      {snooze ? <span className="fy-swipe-compass__row">{cell('snooze', Clock, 'Snooze')}</span> : null}
+      {snooze && slot.startsWith('down-down') ? (
+        <span className="fy-swipe-compass__row" data-compass-lengths="">
+          {SNOOZE_LENGTHS.map(length => (
+            <span
+              className="fy-swipe-compass__cell"
+              data-active={lengths === length.id ? true : undefined}
+              data-compass-length={length.id}
+              key={length.id}
+            >
+              {length.label}
+            </span>
+          ))}
+        </span>
+      ) : null}
     </span>
   );
 }
