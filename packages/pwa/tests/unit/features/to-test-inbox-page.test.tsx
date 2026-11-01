@@ -344,12 +344,12 @@ const drag = async (row: HTMLElement, dx: number, release: boolean): Promise<voi
   if (release) await interact(() => grip.dispatchEvent(pointer('pointerup', 100 + dx)));
 };
 
-const dragDown = async (row: HTMLElement, dy: number, release: boolean): Promise<void> => {
+const dragDown = async (row: HTMLElement, dy: number, release: boolean, dx = 0): Promise<void> => {
   const grip = must(row.querySelector<HTMLElement>('.fy-totest__top'), 'a place to grab');
   await interact(() => grip.dispatchEvent(pointer('pointerdown', 100)));
-  await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 300 + dy / 2 })));
-  await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 300 + dy })));
-  if (release) await interact(() => grip.dispatchEvent(pointer('pointerup', 100, { clientY: 300 + dy })));
+  await interact(() => grip.dispatchEvent(pointer('pointermove', 100 + dx / 2, { clientY: 300 + dy / 2 })));
+  await interact(() => grip.dispatchEvent(pointer('pointermove', 100 + dx, { clientY: 300 + dy })));
+  if (release) await interact(() => grip.dispatchEvent(pointer('pointerup', 100 + dx, { clientY: 300 + dy })));
 };
 
 describe('Inbox — swiping a card waiting for a try', () => {
@@ -398,11 +398,37 @@ describe('Inbox — swiping a card waiting for a try', () => {
     expect(row.getAttribute('data-swipe-direction')).toBeNull();
   });
 
-  it('a pull down to ↓↓ lets go into a snooze: 4 h when straight down', async () => {
+  it('a pull down to ↓↓ lets go into a snooze from the shared list: Tomorrow 9:00 when straight down', async () => {
     const { root, actions } = await open({ phone: true });
     await dragDown(rowOf(root, 'F22'), 220, true);
     await interact(() => flush());
-    expect(actions.calls).toEqual(['snoozeTask:["2026-08-02T16:00:00.000Z"]']);
+    expect(actions.calls).toEqual(['snoozeTask:["2026-08-03T09:00:00.000Z"]']);
+  });
+
+  it('asks for a time on Custom…, the card springing back, and snoozes once it is given', async () => {
+    const { root, actions } = await open({ phone: true });
+    const row = rowOf(root, 'F22');
+    await dragDown(row, 220, true, 140);
+    await interact(() => flush());
+    expect(actions.calls).toEqual([]);
+    const sheet = must(row.querySelector<HTMLElement>('[data-to-test-custom]'), 'the custom sheet');
+    const form = must(sheet.querySelector<HTMLFormElement>('[data-snooze-custom]'), 'the custom form');
+    await interact(() => form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    await interact(() => flush());
+    expect(actions.calls).toHaveLength(1);
+    expect(actions.calls[0]).toStartWith('snoozeTask:');
+    expect(row.querySelector('[data-to-test-custom]')).toBeNull();
+  });
+
+  it('drops the Custom… sheet on Cancel and changes nothing', async () => {
+    const { root, actions } = await open({ phone: true });
+    const row = rowOf(root, 'F22');
+    await dragDown(row, 220, true, 140);
+    await interact(() => flush());
+    const cancel = must(row.querySelector<HTMLButtonElement>('.fy-attn-deck__custom-cancel'), 'Cancel');
+    await interact(() => cancel.click());
+    expect(row.querySelector('[data-to-test-custom]')).toBeNull();
+    expect(actions.calls).toEqual([]);
   });
 
   it('a pull down is never a dismiss: the compass has no Not needed', async () => {

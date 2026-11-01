@@ -50,8 +50,8 @@ import {
   swipeIntent,
   swipeThreshold,
 } from '../../lib/agenda-inbox.ts';
-import { usePrefersReducedMotion } from '../../shell/bottom-sheet.tsx';
 import { snoozePicks } from '../../lib/agenda-snooze.ts';
+import { usePrefersReducedMotion } from '../../shell/bottom-sheet.tsx';
 import { type CompassAvailable, compassReading } from './agenda-compass.ts';
 import { CustomSnoozeForm } from './agenda-snooze-menu.tsx';
 import {

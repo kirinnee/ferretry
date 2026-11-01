@@ -4,7 +4,7 @@
  * box are the same on both.
  *
  * - THE WHOLE CARD IS THE SWIPE SURFACE, AND IT IS THE AGENDA DECK'S: right is Done, left is Not good, and a pull DOWN is the
- *   compass (↓ and ↓← Skip, ↓↓ Snooze 1 h / 4 h / 1 day; no Not needed — a card to test is never dismissed). Touch only,
+ *   compass (↓ and ↓← Skip, ↓↓ the shared snooze list, Custom… included; no Not needed — a card to test is never dismissed). Touch only,
  *   decided after the same slop, committed past the same threshold, never started on something the reader presses or inside a
  *   sideways scroller. DOWN IS READ FROM THE HEAD (the title line, the title link included) AND FROM A BODY THAT IS AT THE
  *   TOP OF ITS SCROLL (`startsAtScrollTop`); a drag down from a body with more above it is still the card scrolling.
@@ -21,6 +21,7 @@ import { ArrowLeft, ArrowRight, Check, SkipForward, X } from 'lucide-react';
 import { type PointerEvent, useEffect, useId, useRef, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import { swipeIntent, swipeThreshold } from '../../lib/agenda-inbox.ts';
+import { type SnoozePick, snoozePicks } from '../../lib/agenda-snooze.ts';
 import type { BoardActions } from '../../lib/board-actions.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
@@ -29,7 +30,8 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { type BoardAnswers, useBoardAnswers } from '../board/board-answers.tsx';
 import type { SendBackPorts } from '../board/board-send-back.tsx';
 import { cardProse, HowToTest } from '../board/detail/board-detail-sections.tsx';
-import { compassReading, type SnoozeLength, snoozeUntil } from './agenda-compass.ts';
+import { compassReading } from './agenda-compass.ts';
+import { CustomSnoozeForm } from './agenda-snooze-menu.tsx';
 import {
   isLongPress,
   isTouch,
@@ -146,12 +148,12 @@ interface RowSwipeAnswers {
   readonly onLeft: () => void;
   readonly onRight: () => void;
   readonly onSkip: () => void;
-  readonly onSnooze: (length: SnoozeLength) => void;
+  readonly onSnooze: (pick: SnoozePick['id']) => void;
 }
 
 /**
  * A swipe on one row, the deck's own: left is `onLeft`, right is `onRight`, and a pull down — from the head, or from a body
- * at the top of its scroll — is the compass (↓ and ↓← Skip, ↓↓ Snooze 1 h / 4 h / 1 day). The whole card is the surface.
+ * at the top of its scroll — is the compass (↓ and ↓← Skip, ↓↓ the shared snooze list). The whole card is the surface.
  */
 const useRowSwipe = ({ onLeft, onRight, onSkip, onSnooze }: RowSwipeAnswers, disabled: boolean) => {
   const gesture = useRef<{
@@ -230,7 +232,7 @@ const useRowSwipe = ({ onLeft, onRight, onSkip, onSnooze }: RowSwipeAnswers, dis
     if (current.axis === 'vertical') {
       const { intent } = compassReading(current.dx, current.dy, current.width, AVAILABLE);
       if (intent.kind === 'skip') onSkip();
-      else if (intent.kind === 'snooze') onSnooze(intent.length);
+      else if (intent.kind === 'snooze') onSnooze(intent.pick);
       return;
     }
     const intent = sidewaysIntent({ dx: current.dx, dy: 0, width: current.width });
@@ -308,12 +310,18 @@ function ToTestRow({
   const { done, notGood, snooze } = answers;
   const [infoOpen, setInfoOpen] = useState(false);
   const infoId = useId();
+  const [custom, setCustom] = useState(false);
   const swipe = useRowSwipe(
     {
       onLeft: () => notGood(row),
       onRight: () => done(row),
       onSkip: () => onSkip(row),
-      onSnooze: length => snooze(row, snoozeUntil(length, now ?? Date.now())),
+      onSnooze: id => {
+        const pick = snoozePicks(now ?? Date.now()).find(candidate => candidate.id === id);
+        if (pick === undefined) return;
+        if (pick.until === null) setCustom(true);
+        else snooze(row, pick.until);
+      },
     },
     busy,
   );
@@ -472,6 +480,20 @@ function ToTestRow({
           </div>
         </div>
       </div>
+      {custom ? (
+        <div aria-label="Snooze until" className="fy-attn-deck__custom" data-to-test-custom="" role="dialog">
+          <CustomSnoozeForm
+            now={Date.now()}
+            onSnooze={until => {
+              setCustom(false);
+              snooze(row, until);
+            }}
+          />
+          <button className="fy-attn-deck__custom-cancel" onClick={() => setCustom(false)} type="button">
+            Cancel
+          </button>
+        </div>
+      ) : null}
     </li>
   );
 }
