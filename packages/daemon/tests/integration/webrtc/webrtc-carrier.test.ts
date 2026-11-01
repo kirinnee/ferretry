@@ -48,6 +48,7 @@ import { LiveDeviceConnections } from '../../../src/lib/pairing/index.ts';
 import { DirectSession } from '../../../src/lib/relay/direct-carrier.ts';
 import { WebRtcCarrier } from '../../../src/lib/webrtc/index.ts';
 import { waitFor } from '../support/wait-for.ts';
+import { PeerWatch, withFreshOfferor } from '../support/webrtc-peer.ts';
 
 const crypto_ = new WebCryptoRelayCrypto();
 const DEVICE_ID = `fy_device_id_${'w'.repeat(22)}`;
@@ -126,6 +127,7 @@ function daemon() {
 
 interface Client {
   readonly peer: PeerConnection;
+  readonly watch: PeerWatch;
   readonly channel: DataChannel;
   readonly frames: RelayFrame[];
   readonly texts: string[];
@@ -134,36 +136,36 @@ interface Client {
 
 /** The browser: offers non-trickle, signals through the carrier, and waits for its channel to open. */
 async function connect(carrier: WebRtcCarrier): Promise<Client> {
+  return withFreshOfferor(() => connectOnce(carrier));
+}
+
+async function connectOnce(carrier: WebRtcCarrier): Promise<Client> {
   const peer = new PeerConnection('browser-under-test', { iceServers: [], bindAddress: '127.0.0.1' });
   cleanups.push(() => peer.close());
-  const gathered = new Promise<void>(resolve =>
-    peer.onGatheringStateChange(state => state === 'complete' && resolve()),
-  );
+  const watch = new PeerWatch('browser-under-test', peer);
   const channel = peer.createDataChannel(WEBRTC_SESSION_CHANNEL_LABEL);
-  const client = listen(peer, channel);
-  const opened = new Promise<void>(resolve => channel.onOpen(resolve));
-  await gathered;
+  const client = listen(peer, watch, channel);
+  await watch.gathered();
   const offer = peer.localDescription();
   if (offer === null) throw new Error('the browser peer produced no offer');
   const answered = await carrier.offer(offer.sdp, { deviceId: DEVICE_ID, appSession: APP_SESSION });
   if (answered.kind !== 'answered') throw new Error(answered.reason);
-  peer.setRemoteDescription(answered.sdp, 'answer');
-  await opened;
+  watch.answered(answered.sdp);
+  await watch.opened(channel, WEBRTC_SESSION_CHANNEL_LABEL);
   return client;
 }
 
 /** Another session on a peer that is already connected: a new channel, no signalling at all. */
-async function another(peer: PeerConnection): Promise<Client> {
-  const channel = peer.createDataChannel(WEBRTC_SESSION_CHANNEL_LABEL);
-  const opened = new Promise<void>(resolve => channel.onOpen(resolve));
-  const client = listen(peer, channel);
-  await opened;
+async function another(first: Client): Promise<Client> {
+  const channel = first.peer.createDataChannel(WEBRTC_SESSION_CHANNEL_LABEL);
+  const client = listen(first.peer, first.watch, channel);
+  await first.watch.opened(channel, WEBRTC_SESSION_CHANNEL_LABEL);
   return client;
 }
 
 /** Records what arrives on one channel. */
-function listen(peer: PeerConnection, channel: DataChannel): Client {
-  const client: Client = { peer, channel, frames: [], texts: [], closed: false };
+function listen(peer: PeerConnection, watch: PeerWatch, channel: DataChannel): Client {
+  const client: Client = { peer, watch, channel, frames: [], texts: [], closed: false };
   channel.onMessage(message => {
     if (typeof message === 'string') client.texts.push(message);
     else {
@@ -316,7 +318,7 @@ describe('the WebRTC carrier, two real peers in one process', () => {
     // Act
     first.channel.close();
     await until('the channel to close', () => first.closed);
-    const second = await another(first.peer);
+    const second = await another(first);
     const { channel, transcript } = await handshake(second);
     const proof = await signDeviceProof(
       crypto_,
