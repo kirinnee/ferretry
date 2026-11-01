@@ -1,3 +1,10 @@
+## [4.200.0](https://github.com/kirinnee/ferretry/compare/v4.199.1...v4.200.0) (2026-11-01)
+
+### Features
+
+* **cli:** a ferret's fy and MCP server present its own credential (RF-3) ([#1243](https://github.com/kirinnee/ferretry/issues/1243)) ([c46a365](https://github.com/kirinnee/ferretry/commit/c46a365b0fcc883caaed17726c01f7df4ef2f217))
+* **daemon:** approve-on-phone card, daemon side (R2-4) ([#1244](https://github.com/kirinnee/ferretry/issues/1244)) ([bd7e104](https://github.com/kirinnee/ferretry/commit/bd7e1049a8f07ef6c701c70a9dbb328d3c39c20b))
+
 ## [4.199.1](https://github.com/kirinnee/ferretry/compare/v4.199.0...v4.199.1) (2026-11-01)
 
 ### Fixes

@@ -1,3 +1,9 @@
+## [4.199.1](https://github.com/kirinnee/ferretry/compare/v4.199.0...v4.199.1) (2026-11-01)
+
+### Fixes
+
+* **pwa:** stop a queued note from drawing a sent message twice ([#1228](https://github.com/kirinnee/ferretry/issues/1228)) ([dd39742](https://github.com/kirinnee/ferretry/commit/dd397420b420cf4e33b2f66a4d9b8ed896611fd9))
+
 ## [4.199.0](https://github.com/kirinnee/ferretry/compare/v4.198.0...v4.199.0) (2026-11-01)
 
 ### Features
