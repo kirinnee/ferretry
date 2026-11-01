@@ -459,13 +459,15 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
   `Notify: the owner reads the Inbox, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run \`${fy} notify "<summary>" [--body "<detail>"]\`: a quiet Inbox notice. Add \`--ping\` only when it must reach their phone now. Never notify progress or chatter.`;
 
 /**
- * BOARD — when a ferret must make, move or leave a card on its project's board (`board-design.md` §3.2),
- * in every agent runtime's prompt. The board moves what a signal moves (a start, a PR, a release); this is
- * the rest, which only the ferret knows. The daemon's turn-end check backs it up (`board/turn-check.ts` in
- * the daemon). docs/board.md quotes this text verbatim.
+ * BOARD — whether a ferret makes a card at all, and how it works one it has (`board-design.md` §3.2), in every
+ * agent runtime's prompt. The board is OPT-IN (owner, 2026-11-01: "board is overkill — most ferrets should not
+ * use tasks or boards — ask before doing that"): a card only when the owner asked, a lead handed one, or the
+ * project's board is switched on; otherwise the ferret asks first. The board moves what a signal moves (a
+ * start, a PR, a release); this is the rest, which only the ferret knows. The daemon's turn-end check backs it
+ * up on a board that is on (`board/turn-check.ts` in the daemon). docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: all work is a card (&F412); agenda items are !A48. Search first (\`${fy} search\`); update or link a match instead of adding a duplicate. New ask, first: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>\` (${fy} new/start make one). Before To test: \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`. Lane by the work (\`${fy} board lanes show\`): plan → plan lane (owner OKs leaving), build → active: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked is no lane: \`${fy} agenda add --task <id>\` (owner), \`${fy} task depend\` (card), \`${fy} task block\` (else). \`${fy} task drop --reason\`, \`${fy} task focus <id>\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. Starts, PRs, merges, releases, \`${fy} signal done\` self-move; owner closes.`;
+  `Board: opt-in; most work needs no card. Make one only if the owner asked, your lead gave one, or \`${fy} board status\` says on; else ask: \`${fy} agenda add -k yesno\` "Track this on the board?". Search first (\`${fy} search\`); update or link a match instead of adding a duplicate. Make: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>\`. A card (&F412; agenda !A48): before To test \`${fy} task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"\`; lane by the work (\`${fy} board lanes show\`): \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} agenda add --task <id>\` (owner), \`${fy} task depend\` (card), \`${fy} task block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. PRs, merges, \`${fy} signal done\` self-move; owner closes.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
@@ -479,7 +481,7 @@ export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
     `Sub-ferret: you were started by a lead ferret. Report to it with \`${fy} send <lead-callsign> "<message>"\`; you cannot raise agenda items, notify the owner or move cards.`,
-    `Link your PR to your card: \`${fy} task link <id> --pr <url>\` (or \`--branch\`); add progress with \`${fy} task note\`. Your card moves itself: start, PR, merge, \`${fy} signal done\`. Your final report says how the owner tests it.`,
+    `If you have a card: link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`), progress \`${fy} task note\`; it moves itself (start, PR, merge, \`${fy} signal done\`). No card? Don't make one. Your final report says how the owner tests it.`,
   ].join('\n');
 
 /** What a lead is told after the base instruction: the notify rule, then the board rules. */

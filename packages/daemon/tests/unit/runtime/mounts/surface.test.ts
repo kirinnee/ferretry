@@ -380,6 +380,10 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     projectOf: async () => 'unfiled',
     apply: async () => ({ ok: false, error: { code: 'not-found', projectId: 'unfiled' } }),
   },
+  boardSwitches: {
+    read: async projectId => ({ projectId, on: false, setBy: 'default', setAt: null }),
+    set: async (projectId, on) => ({ projectId, on, setBy: 'owner', setAt: '2026-11-01T12:00:00.000Z' }),
+  },
   catalogs: {
     projects: async () => [],
     registerProject: async () => {
@@ -914,7 +918,7 @@ describe('the mounted daemon surface', () => {
       1 + // handing a web address to this computer's own browser (loopback caller only)
       3 + // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
       3 + // a ferret's processes: the list, one process's output, and Stop
-      3 + // the board's projects: the list, one project's lanes, and a propose, edit or confirm of them
+      5 + // the board's projects: the list, one project's lanes, a propose, edit or confirm of them, and its switch read and set
       7 + // the owner's input requests: the two lists, a page request's picture, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
       6 + // saved logins: the list, the ferret’s hint, put, rename, delete and the owner’s answer to a recipe proposal (docs/input-requests.md#saved-logins)
       12 + // accounts and sign-ins: the list, the hint, look-alike, an account’s put, rename, delete, merge and apart, and a sign-in’s add, put, delete and recipe answer (docs/secrets.md)
@@ -1129,6 +1133,8 @@ describe('the mounted daemon surface', () => {
       'GET /v1/board/projects',
       'GET /v1/board/projects/:projectId/lanes',
       'POST /v1/board/projects/:projectId/lanes',
+      'GET /v1/board/projects/:projectId/switch',
+      'PUT /v1/board/projects/:projectId/switch',
       'GET /v1/worktrees/removal',
       'POST /v1/worktrees/remove',
       'GET /v1/worktrees',

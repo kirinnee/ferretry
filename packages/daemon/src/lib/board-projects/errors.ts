@@ -29,3 +29,20 @@ export class LaneSetUnavailableError extends Error {
     this.detail = detail;
   }
 }
+
+/** What a caller is told when the board switch document is damaged. Fixed, for the reason above. */
+export const BOARD_SWITCH_UNAVAILABLE_MESSAGE = 'the board switch is damaged and cannot be served';
+
+/** The board switch document the daemon holds but refuses to use: a 503, never the caller's fault. */
+export class BoardSwitchUnavailableError extends Error {
+  readonly code = LANE_SET_UNAVAILABLE_CODE;
+
+  /** Which file, and what the decoder made of it. Diagnostic only — never sent to a client. */
+  readonly detail: string;
+
+  constructor(detail: string) {
+    super(BOARD_SWITCH_UNAVAILABLE_MESSAGE);
+    this.name = 'BoardSwitchUnavailableError';
+    this.detail = detail;
+  }
+}

@@ -1,8 +1,9 @@
 # The project board
 
-The contract for the board: where every piece of a ferret's work is tracked. One board per project, one card per
-piece of work, lanes the owner can rename, and a daemon that moves a card when a pull request or a release does.
-This page owns the subject; the pages it links own their own facts.
+The contract for the board: where a ferret's work is tracked when the owner wants it tracked. One board per project,
+one card per piece of work, lanes the owner can rename, and a daemon that moves a card when a pull request or a
+release does. **The board is opt-in** ([below](#the-board-is-opt-in)): most work needs no card. This page owns the
+subject; the pages it links own their own facts.
 
 | Subject                         | Owner                                          |
 | ------------------------------- | ---------------------------------------------- |
@@ -11,8 +12,42 @@ This page owns the subject; the pages it links own their own facts.
 | The agenda and its items        | [agenda.md](agenda.md)                         |
 | Who may call the board's routes | [grants.md](grants.md)                         |
 
-Most of the board is automatic: a start makes the card, a PR and a release move it. The sections below are the
-whole contract; the last ones are the part a ferret must do itself, and the backstop that catches it when it does not.
+Where the board is on, most of it is automatic: a start makes the card, a PR and a release move it. The sections
+below are the whole contract; the last ones are the part a ferret must do itself, and the backstop that catches it
+when it does not.
+
+## The board is opt-in
+
+The owner's decision (2026-11-01): "board is overkill — most ferrets should not use tasks or boards — ask before
+doing that". So each project's board has a switch, **off unless the owner turns it on**, and a ferret makes a card
+only when
+
+1. the owner asked for a card or the board,
+2. its lead handed it one (`fy new` under a card the lead holds, or `--card <id>`), or
+3. the project's board is on (`fy board status`).
+
+Otherwise it asks first: one agenda yes/no, "Track this on the board?". A card a ferret holds works as it always did,
+whatever the switch says.
+
+| Where the board is off                                    | What happens                                                                                                 |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `fy start`, the app's New session                         | no card is made                                                                                              |
+| `fy new`                                                  | a card only under the card the lead holds (the brief names it, or its focus), or the one `--card` hands over |
+| `fy task create`                                          | never refused (the owner may have said yes); a ferret is reminded that the board is off                      |
+| the [turn-end check](#the-turn-end-check)                 | silent                                                                                                       |
+| the sweep's stale and unblocked nudges, a PR or a release | unchanged: they only ever touch a card that exists, so only a ferret holding one hears them                  |
+
+**Only the owner throws the switch**: `fy board on|off [--project <name>]` from their own terminal, or **Use the
+board** on the project's page in the app. A ferret's `fy board on` is refused (`403 owner-only`), because the session
+it runs in rides on every call. The switch lives in `<home>/board/switch.json`
+(`packages/daemon/src/lib/board-projects/board-switch.ts`); a damaged one is refused and never overwritten, and a
+board whose switch cannot be read is treated as off.
+
+**Migration.** The first daemon with the switch decides every existing board once, at boot: **on** exactly where the
+owner (a person — never a ferret or the daemon) worked a card in the last 14 days — made, moved (Done is a move),
+reopened (Not good) or dropped one — and **off** everywhere else. Unfiled is always off. The boot log says which
+boards it switched on and off (`board switch: on for …; off for …`); the owner flips any of them afterwards. A board
+registered later starts off.
 
 ## Boards, cards and lanes at a glance
 
@@ -32,7 +67,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: all work is a card (&F412); agenda items are !A48. Search first (`fy search`); update or link a match instead of adding a duplicate. New ask, first: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>` (fy new/start make one). Before To test: `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`. Lane by the work (`fy board lanes show`): plan → plan lane (owner OKs leaving), build → active: `fy task move <id> <lane> --reason "<why>"`. Blocked is no lane: `fy agenda add --task <id>` (owner), `fy task depend` (card), `fy task block` (else). `fy task drop --reason`, `fy task focus <id>`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. Starts, PRs, merges, releases, `fy signal done` self-move; owner closes.
+Board: opt-in; most work needs no card. Make one only if the owner asked, your lead gave one, or `fy board status` says on; else ask: `fy agenda add -k yesno` "Track this on the board?". Search first (`fy search`); update or link a match instead of adding a duplicate. Make: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`. A card (&F412; agenda !A48): before To test `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`; lane by the work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy agenda add --task <id>` (owner), `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move; owner closes.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -66,7 +101,7 @@ carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` laun
 
 ```text
 Sub-ferret: you were started by a lead ferret. Report to it with `fy send <lead-callsign> "<message>"`; you cannot raise agenda items, notify the owner or move cards.
-Link your PR to your card: `fy task link <id> --pr <url>` (or `--branch`); add progress with `fy task note`. Your card moves itself: start, PR, merge, `fy signal done`. Your final report says how the owner tests it.
+If you have a card: link your PR `fy task link <id> --pr <url>` (or `--branch`), progress `fy task note`; it moves itself (start, PR, merge, `fy signal done`). No card? Don't make one. Your final report says how the owner tests it.
 ```
 
 Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen — go to its **lead** instead
@@ -463,8 +498,9 @@ card for the open items it finds that name none ([board-import.md](board-import.
 
 ## The turn-end check
 
-When a turn ends, the daemon reads it (`packages/daemon/src/lib/board/turn-check.ts`). If the turn did
-**mutating work** while the session had **no focus card in an open lane**, the ferret gets one queued message:
+When a turn ends, the daemon reads it (`packages/daemon/src/lib/board/turn-check.ts`) — **only on a board that is
+on** ([The board is opt-in](#the-board-is-opt-in)). If the turn did **mutating work** while the session had **no focus
+card in an open lane**, the ferret gets one queued message:
 
 ```text
 You changed code this turn without a card. Create one (fy task create …) or record why not: fy task skip "<why>"
@@ -516,6 +552,7 @@ Every `fy task` verb takes `--session <id>` (act as that session instead of the 
 | `fy task refile <id> --project`                   | move a card to another project's board; `--lane`, `--reason`                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `fy board`                                        | the board; `--project <name\|all>`, `--ferret`, `--mine`, `--kind`, `--pr`, `--activity`, `--state`, `--closed`, `--query`, `--json`, `--md`                                                                                                                                                                                                                                                                                                                   |
 | `fy board lanes propose\|show\|edit`              | read or change a project's lane set; `--project`, `--rename`, `--remove`, `--into`                                                                                                                                                                                                                                                                                                                                                                             |
+| `fy board status`, `fy board on\|off`             | whether the project uses the board; switching it is the owner's ([The board is opt-in](#the-board-is-opt-in)); `--project`, `--json`                                                                                                                                                                                                                                                                                                                           |
 | `fy board import`                                 | import the old task files ([board-import.md](board-import.md))                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `fy project add <path>` / `ls`                    | register a folder as a project; list projects                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
@@ -535,6 +572,7 @@ The routes behind them, all needing the `fleet` capability at operator minimum f
 | `POST /v1/board/import`                         | run the import                                                              |
 | `GET /v1/board/projects`                        | list projects                                                               |
 | `GET, POST /v1/board/projects/:projectId/lanes` | read, propose or edit a lane set                                            |
+| `GET, PUT /v1/board/projects/:projectId/switch` | read whether the project uses the board; set it (the owner only)            |
 | `GET /v1/search`                                | find cards and agenda items by any words ([work-search.md](work-search.md)) |
 | `POST /v1/search/related`                       | the related check before filing                                             |
 

@@ -51,6 +51,7 @@ function tree() {
     skip: () => Promise.reject(new Error('not used')),
     projects: () => Promise.resolve(boards),
     sessions: () => Promise.resolve([]),
+    switchOf: projectId => Promise.resolve({ projectId, on: true, setBy: 'owner', setAt: null }),
   };
   const laneGateway: ILaneGateway = {
     projects: () => Promise.resolve(boards),
@@ -62,6 +63,8 @@ function tree() {
       changed.push({ projectId, request });
       return Promise.resolve({ laneSet: laneSet({ projectId, version: 4 }), agenda: 'raised' });
     },
+    switchOf: projectId => Promise.resolve({ projectId, on: false, setBy: 'default', setAt: null }),
+    setSwitch: (projectId, on) => Promise.resolve({ projectId, on, setBy: 'owner', setAt: null }),
   };
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });

@@ -8,6 +8,7 @@ import { FERRETRY_ID, laneSet, listing, project } from './fixtures';
 
 const harness = (program = new Command().exitOverride()) => {
   const changes: { projectId: BoardProjectId; request: LaneSetActionRequest }[] = [];
+  const switched: { projectId: BoardProjectId; on: boolean }[] = [];
   const lines: string[] = [];
   const gateway: ILaneGateway = {
     projects: () => Promise.resolve(listing({ current: FERRETRY_ID as BoardProjectId })),
@@ -16,9 +17,14 @@ const harness = (program = new Command().exitOverride()) => {
       changes.push({ projectId, request });
       return Promise.resolve({ laneSet: laneSet({ version: 4 }), agenda: 'raised' });
     },
+    switchOf: projectId => Promise.resolve({ projectId, on: false, setBy: 'default', setAt: null }),
+    setSwitch: (projectId, on) => {
+      switched.push({ projectId, on });
+      return Promise.resolve({ projectId, on, setBy: 'owner', setAt: '2026-11-01T12:00:00.000Z' });
+    },
   };
   registerLaneCommands(program, { gateway, io: { success: line => lines.push(line) }, binaryName: 'fy' });
-  return { changes, lines, program };
+  return { changes, switched, lines, program };
 };
 
 const run = async (program: Command, ...args: string[]) => {
@@ -47,6 +53,20 @@ describe('the lane commands', () => {
     const { changes, program } = harness();
     await run(program, 'edit', '--rename', 'implement=look', '--remove', 'plan', '--into', 'todo');
     should(changes[0]?.request).have.property('action', 'edit');
+  });
+
+  it('should read and throw the board switch', async () => {
+    const { switched, lines, program } = harness();
+    await program.parseAsync(['bun', 'fy', 'board', 'status']);
+    await program.parseAsync(['bun', 'fy', 'board', 'on', '--project', 'Ferretry']);
+    await program.parseAsync(['bun', 'fy', 'board', 'off', '--json', '--project', 'Ferretry']);
+    should(lines[0]).startWith('Ferretry: board off — nobody switched it on.');
+    should(lines[1]).startWith('Ferretry: board on — set by the owner');
+    should(JSON.parse(lines[2] ?? '')).containEql({ on: false, setBy: 'owner' });
+    should(switched).eql([
+      { projectId: FERRETRY_ID, on: true },
+      { projectId: FERRETRY_ID, on: false },
+    ]);
   });
 
   it('should join a board group that already exists instead of making a second one', async () => {

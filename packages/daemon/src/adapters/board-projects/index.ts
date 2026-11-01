@@ -1,4 +1,5 @@
 export * from './agenda-lane-agenda.ts';
+export * from './file-board-switch-store.ts';
 export * from './file-lane-set-store.ts';
 export * from './git-project-facts.ts';
 export * from './git-repository-probe.ts';

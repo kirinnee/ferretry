@@ -40,6 +40,7 @@ function harness(
     readonly skip?: BoardSkip | null;
     readonly card?: () => Promise<BoardTaskResponse>;
     readonly readable?: boolean;
+    readonly boardOn?: boolean;
   } = {},
 ) {
   const sent: { sessionId: string; sendId: string; message: string }[] = [];
@@ -48,6 +49,7 @@ function harness(
   let now = 10 * HOUR;
   const ports: BoardTurnCheckPorts = {
     readable: async () => options.readable ?? true,
+    boardOn: async () => options.boardOn ?? true,
     tail: async (_sessionId, limit) => {
       tails.push(limit);
       return options.events ?? [owner('fix the bug'), call('Edit', { file_path: '/w/a.ts' })];
@@ -221,6 +223,16 @@ describe('BoardTurnCheck', () => {
     should(await new BoardTurnCheck(unreadable.ports, 'zz').check('s-1')).be.false();
     should(unreadable.tails).eql([]);
     should([...reading.sent, ...unreadable.sent]).eql([]);
+  });
+
+  it('should say nothing on a board that is off, however much the turn changed', async () => {
+    // Arrange
+    const h = harness({ boardOn: false });
+
+    // Act + Assert
+    should(await new BoardTurnCheck(h.ports, 'zz').check('s-1')).be.false();
+    should(h.sent).eql([]);
+    should(h.records).eql([]);
   });
 
   it('should say nothing while a skip stands', async () => {

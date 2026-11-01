@@ -1,4 +1,10 @@
-import { type BoardProject, type LaneSet, type LaneSetChangeResponse, laneUse } from '@ferretry/protocol';
+import {
+  type BoardProject,
+  type BoardSwitch,
+  type LaneSet,
+  type LaneSetChangeResponse,
+  laneUse,
+} from '@ferretry/protocol';
 
 /** The lanes in order: each one's id (to name it in `--rename`, `--remove` and `task move`) and when a card belongs there. */
 export function renderLaneSet(laneSet: LaneSet, projectName: string): string {
@@ -26,4 +32,17 @@ export function renderLaneChange(change: LaneSetChangeResponse, projectName: str
     failed: 'The lanes are live, but the agenda choice could not be raised — tell the owner yourself.',
   };
   return `${renderLaneSet(change.laneSet, projectName)}\n${note[change.agenda]}`;
+}
+
+/** Whether a project uses the board, who decided, and what that means for a ferret there. */
+export function renderBoardSwitch(state: BoardSwitch, projectName: string, binary: string): string {
+  const who: Record<BoardSwitch['setBy'], string> = {
+    default: 'nobody switched it on',
+    migration: `set when the board became opt-in (${state.setAt ?? 'unknown'})`,
+    owner: `set by the owner (${state.setAt ?? 'unknown'})`,
+  };
+  const meaning = state.on
+    ? 'Ferrets here keep a card for their work.'
+    : `Ferrets here make no card unless the owner asks for one or their lead hands them one. Switch it on: ${binary} board on --project ${projectName}`;
+  return `${projectName}: board ${state.on ? 'on' : 'off'} — ${who[state.setBy]}.\n${meaning}`;
 }

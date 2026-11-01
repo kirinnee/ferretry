@@ -61,5 +61,24 @@ export function registerLaneCommands(program: Command, dependencies: LaneCommand
       await controller.edit(target(options), options);
     });
 
+  // Whether the project uses the board at all (docs/board.md § The board is opt-in): read by anybody, thrown
+  // by the owner. They hang off `board` itself, so its own `--project` / `--json` reach them too.
+  const switched = <T>(command: Command): T => ({ ...board.opts(), ...command.opts() }) as T;
+  targeted(board.command('status'))
+    .description('whether this project uses the board: off, a ferret makes no card unless asked')
+    .action(async (_options: unknown, command: Command) => {
+      await controller.status(target(switched<TargetOptions>(command)));
+    });
+  for (const [verb, on] of [
+    ['on', true],
+    ['off', false],
+  ] as const) {
+    targeted(board.command(verb))
+      .description(`switch this project's board ${verb} (the owner's call; a ferret asks first)`)
+      .action(async (_options: unknown, command: Command) => {
+        await controller.turn(target(switched<TargetOptions>(command)), on);
+      });
+  }
+
   return group;
 }

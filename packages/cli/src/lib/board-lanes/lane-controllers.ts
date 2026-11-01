@@ -1,6 +1,6 @@
 import type { BoardProject } from '@ferretry/protocol';
 import { refuse } from '../tasks/errors';
-import { renderBoardLanes, renderLaneChange } from './lane-render';
+import { renderBoardLanes, renderBoardSwitch, renderLaneChange } from './lane-render';
 import {
   buildEditRequest,
   buildProposeRequest,
@@ -39,6 +39,20 @@ export class LaneController {
   async show(target: LaneTarget): Promise<void> {
     const project = await this.gateway.project((await this.target(target.project)).id);
     this.output.success(target.json ? asJson(project) : renderBoardLanes(project, this.binary));
+  }
+
+  /** `fy board status`: whether the project uses the board (docs/board.md § The board is opt-in). */
+  async status(target: LaneTarget): Promise<void> {
+    const board = await this.target(target.project);
+    const state = await this.gateway.switchOf(board.id);
+    this.output.success(target.json ? asJson(state) : renderBoardSwitch(state, board.name, this.binary));
+  }
+
+  /** `fy board on|off`: the owner's switch. The daemon refuses a ferret, which must ask the owner first. */
+  async turn(target: LaneTarget, on: boolean): Promise<void> {
+    const board = await this.target(target.project);
+    const state = await this.gateway.setSwitch(board.id, on);
+    this.output.success(target.json ? asJson(state) : renderBoardSwitch(state, board.name, this.binary));
   }
 
   async edit(target: LaneTarget, options: LaneEditOptions): Promise<void> {

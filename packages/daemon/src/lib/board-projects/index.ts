@@ -1,3 +1,4 @@
+export * from './board-switch.ts';
 export * from './errors.ts';
 export * from './inferred-lane-proposer.ts';
 export * from './lane-proposal-acceptance.ts';

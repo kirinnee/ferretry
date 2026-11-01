@@ -1,8 +1,19 @@
 import { describe, it } from 'bun:test';
-import type { BoardProject, BoardProjectId, LaneSetActionRequest, LaneSetChangeResponse } from '@ferretry/protocol';
+import type {
+  BoardProject,
+  BoardProjectId,
+  BoardSwitch,
+  LaneSetActionRequest,
+  LaneSetChangeResponse,
+} from '@ferretry/protocol';
 import should from 'should';
 import { LaneController } from '../../../src/lib/board-lanes/lane-controllers';
-import { renderBoardLanes, renderLaneChange, renderLaneSet } from '../../../src/lib/board-lanes/lane-render';
+import {
+  renderBoardLanes,
+  renderBoardSwitch,
+  renderLaneChange,
+  renderLaneSet,
+} from '../../../src/lib/board-lanes/lane-render';
 import type { ILaneGateway } from '../../../src/lib/board-lanes/ports';
 import { FERRETRY_ID, laneSet, listing, project } from './fixtures';
 
@@ -25,6 +36,17 @@ class FakeGateway implements ILaneGateway {
   change(projectId: BoardProjectId, request: LaneSetActionRequest) {
     this.changes.push({ projectId, request });
     return Promise.resolve({ laneSet: laneSet({ version: 4 }), agenda: this.agenda });
+  }
+
+  readonly switches: { projectId: BoardProjectId; on: boolean }[] = [];
+
+  switchOf(projectId: BoardProjectId): Promise<BoardSwitch> {
+    return Promise.resolve({ projectId, on: true, setBy: 'migration', setAt: '2026-11-01T12:00:00.000Z' });
+  }
+
+  setSwitch(projectId: BoardProjectId, on: boolean): Promise<BoardSwitch> {
+    this.switches.push({ projectId, on });
+    return Promise.resolve({ projectId, on, setBy: 'owner', setAt: '2026-11-01T12:00:00.000Z' });
   }
 }
 
@@ -73,6 +95,42 @@ describe('fy board lanes show', () => {
     should(lines[0]).match(
       /has no lanes yet\. Propose them: fy board lanes propose --template <template> --project Ferretry/u,
     );
+  });
+});
+
+describe('fy board status, on and off', () => {
+  it("should say whether the calling session's board is on, and who set it", async () => {
+    const { controller, lines } = harness();
+    await controller.status({ json: false });
+    should(lines[0]).equal(
+      'Ferretry: board on — set when the board became opt-in (2026-11-01T12:00:00.000Z).\nFerrets here keep a card for their work.',
+    );
+  });
+
+  it("should throw the owner's switch and print the daemon's answer", async () => {
+    const { controller, gateway, lines } = harness();
+    await controller.turn({ json: false, project: 'Ferretry' }, false);
+    await controller.turn({ json: true }, true);
+    should(gateway.switches).eql([
+      { projectId: FERRETRY_ID, on: false },
+      { projectId: FERRETRY_ID, on: true },
+    ]);
+    should(lines[0])
+      .match(/^Ferretry: board off — set by the owner/u)
+      .and.match(/fy board on --project Ferretry$/u);
+    should(JSON.parse(lines[1] ?? '')).containEql({ on: true });
+  });
+
+  it('should spell a board nobody decided, and a time it does not know', () => {
+    should(
+      renderBoardSwitch({ projectId: FERRETRY_ID as never, on: false, setBy: 'default', setAt: null }, 'Docs', 'fy'),
+    ).startWith('Docs: board off — nobody switched it on.');
+    should(
+      renderBoardSwitch({ projectId: FERRETRY_ID as never, on: true, setBy: 'owner', setAt: null }, 'Docs', 'fy'),
+    ).startWith('Docs: board on — set by the owner (unknown).');
+    should(
+      renderBoardSwitch({ projectId: FERRETRY_ID as never, on: true, setBy: 'migration', setAt: null }, 'Docs', 'fy'),
+    ).startWith('Docs: board on — set when the board became opt-in (unknown).');
   });
 });
 

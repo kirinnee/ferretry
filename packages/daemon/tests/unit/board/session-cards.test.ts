@@ -48,6 +48,8 @@ interface Options {
   readonly adoption?: SessionCardsPorts['adoption'];
   /** The board refuses to move a card on the session's start. */
   readonly failTrigger?: boolean;
+  /** The boards that are off; absent means every board is on. */
+  readonly off?: readonly BoardProjectId[];
 }
 
 const build = (options: Options = {}) => {
@@ -86,6 +88,7 @@ const build = (options: Options = {}) => {
   const cardsPorts: SessionCardsPorts = {
     board,
     lanes: lanesSource,
+    switches: { isOn: async projectId => !(options.off ?? []).includes(projectId) },
     proposer: {
       propose: async (projectId, sessionId) => {
         proposals.push([projectId, sessionId]);
@@ -203,6 +206,66 @@ describe('a session started with a brief', () => {
 
     // Assert
     should(stored(ports, 'F1').ask).deepEqual({ text: 'Survey the agenda', source: 'session:lead' });
+  });
+
+  describe('on a board that is off', () => {
+    it('should make no card for a start, and say nothing', async () => {
+      // Arrange
+      const { subject, ports, focus, warnings } = build({ off: [PROJECT] });
+
+      // Act
+      const opened = await subject.open({ sessionId: 'worker', brief: 'Survey the agenda' });
+
+      // Assert
+      should(opened).deepEqual({ notes: [] });
+      should([...ports.store.cards.keys()]).deepEqual([]);
+      should(focus.focused.get('worker')).be.undefined();
+      should(warnings).deepEqual([]);
+    });
+
+    it('should make no card for a fy new whose lead holds none, and say how to hand one', async () => {
+      // Arrange
+      const { subject, ports } = build({ off: [PROJECT] });
+
+      // Act
+      const outcome = await subject.delegate('lead', { brief: 'Build it', name: 'Build it' }, true);
+      const opened = await subject.open({ sessionId: 'child', brief: 'Build it', parent: 'lead' });
+
+      // Assert
+      should(outcome).deepEqual({
+        notes: [
+          'No card was made for the sub-ferret: the Ferretry board is off and you hold no card for this work. `fy new --card <id>` hands it one.',
+        ],
+      });
+      should(opened).deepEqual({ notes: [] });
+      should([...ports.store.cards.keys()]).deepEqual([]);
+    });
+
+    it("should name the lead's board when the child runs elsewhere", async () => {
+      // Arrange
+      const { subject } = build({ off: [OTHER_PROJECT], projects: { lead: OTHER_PROJECT } });
+
+      // Act
+      const outcome = await subject.delegate('lead', { brief: 'Build it', name: 'Build it' }, false);
+
+      // Assert
+      should(outcome.delegation).be.undefined();
+      should(outcome.notes[0]).startWith('No card was made for the sub-ferret: the Home board is off');
+    });
+
+    it("should still make the sub-ferret's card under the card its lead holds", async () => {
+      // Arrange
+      const { subject, focus } = build({ off: [PROJECT], cards: [card({ id: 'F1', owner: 'lead' })] });
+      focus.anchors.set('lead', { id: 'F1' });
+
+      // Act
+      const { delegation } = await subject.delegate('lead', { brief: 'Build it', name: 'Build it' }, true);
+      const opened = await subject.open({ sessionId: 'child', brief: 'Build it', parent: 'lead', delegation });
+
+      // Assert
+      should(delegation).match({ id: 'F2', existing: false, parent: { id: 'F1' } });
+      should(opened.card).match({ id: 'F2', owner: 'lead', assignee: 'child' });
+    });
   });
 
   describe('the parent of the card a fy new makes', () => {
@@ -492,6 +555,7 @@ describe('a session started with a brief', () => {
     const subject = new SessionCards({
       board: new BoardService(world({ lanes: projectLanes })),
       lanes: projectLanes,
+      switches: { isOn: async () => true },
       proposer: {
         propose: async (projectId, sessionId) => {
           proposals.push([projectId, sessionId]);

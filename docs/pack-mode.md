@@ -69,7 +69,7 @@ and the longest routing prompt:
 | Tools (terminals, browser pages)         | 1,154      | 289      | every agent runtime         |
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
-| Board (`fy task`, cards)                 | 640        | 160      | every agent runtime         |
+| Board (opt-in; `fy task`, cards)         | 817        | 204      | every agent runtime         |
 | Agenda (`fy agenda`, with answer shapes) | 1,152      | 288      | `FY_AGENDA=1`               |
 | Hypermedia                               | 1,503      | 376      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
@@ -223,9 +223,11 @@ fy new --auto --name "Fix Login Redirect" "<complete brief>"   # the decision mo
    check: `started claude-work (probe OK 640 ms)`, `(probe OK, cached)`, `refused … (probe failed 3436 ms)`.
 4. **Start**: the same session start every surface uses (callsign, launch, audit), with `parent` recorded and
    the brief followed by a footer telling the sub-ferret to finish with `fy signal done "<result>"`. The
-   sub-ferret gets a **board card** with the session: owned by the lead, assigned to the child, under the
-   lead's focus card (one is made from the lead's session first when it has none, and `fy new` says so), and
-   the footer names it (`Your card is &F413 on the Ferretry board`). The start no longer forces board access
+   sub-ferret gets a **board card** with the session when the lead's board is on, or when the lead holds a card
+   to put it under (the brief names it, or the lead's focus) or hands one over (`--card`): owned by the lead,
+   assigned to the child, and the footer names it (`Your card is &F413 on the Ferretry board`). On a board that
+   is off ([board.md](board.md#the-board-is-opt-in)) and with no card in hand, the child starts with none and
+   `fy new` says so. The start no longer forces board access
    `none`: authority on the board is ownership and lineage. A board failure never fails the start; `fy new`
    prints what it could not do. A
    harness that exits before it is ready fails the start with its exit status **and its last output lines**
@@ -300,7 +302,7 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   `fy notify`, every card verb except the two below, and editing a project's lanes. The message reads
   `Sub-ferrets don't <this>; tell your lead: fy send <lead-callsign> "…"`.
 - **Allowed:** `fy send` to the lead (and peers it names); `fy task note`, and `fy task link --pr` / `--branch`, on a card;
-  reading the board and the agenda. `fy new` still makes the sub-ferret's card.
+  reading the board and the agenda. `fy new` still makes the sub-ferret's card where it makes one at all.
 - **A lead looks after its sub-ferrets' agenda.** The lead — and any ancestor — may `edit`, `surface`, `done` and
   `dismiss` items on a session it started: `fy agenda done !A1 -s <sub-session>`. The daemon proves it by lineage
   (walking `config.parent` up from the target session, fail-closed on a cycle, a missing session or an unreadable
@@ -309,7 +311,7 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   are not covered, and the daemon's warden-escalation items are never the lead's to close. A sub-ferret that
   itself started a deeper session holds the same authority over that one.
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
-  report to your lead with `fy send`; link your PR to your card; the card moves itself (the daemon enters its working lane when the session starts). The Notify, Board and Agenda mode paragraphs are left
+  report to your lead with `fy send`; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
   out. Sizes with the default binary name: **lead 2339 characters** (3277 with Agenda mode on), **sub-ferret 1692**.
   `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
