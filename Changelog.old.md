@@ -1,3 +1,9 @@
+## [4.220.1](https://github.com/kirinnee/ferretry/compare/v4.220.0...v4.220.1) (2026-11-01)
+
+### Fixes
+
+* **pwa:** every &task reference opens its card on this machine ([#1295](https://github.com/kirinnee/ferretry/issues/1295)) ([126d1c1](https://github.com/kirinnee/ferretry/commit/126d1c1b3cbe3fcfbd18104abe028ede369ca3ef))
+
 ## [4.220.0](https://github.com/kirinnee/ferretry/compare/v4.219.0...v4.220.0) (2026-11-01)
 
 ### Features
