@@ -54,6 +54,7 @@
 import { afterAll } from 'bun:test';
 import type { Browser } from 'playwright-core';
 import { chromium } from 'playwright-core';
+import { type ClientConnection, ignoreLateProtocolEvents } from './late-protocol-events.ts';
 
 let shared: Promise<Browser> | null = null;
 
@@ -63,6 +64,9 @@ const launch = async (): Promise<Browser> => {
   // a missing engine into a green run that measured no browser at all.
   if (executablePath === null)
     throw new Error('❌ no Chromium binary found; this tier is real-browser evidence or nothing');
+  // The one client connection every Browser, Page and Frame in this process speaks through; see
+  // late-protocol-events.ts for why a page closing mid-event must not become an unhandled error.
+  ignoreLateProtocolEvents((chromium as unknown as { _connection: ClientConnection })._connection);
   return await chromium.launch({ executablePath, headless: true });
 };
 
