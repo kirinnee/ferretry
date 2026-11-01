@@ -192,6 +192,7 @@
         "tests/integration/fixtures/all-machines-scene.tsx",
         "tests/integration/fixtures/warden-daemons-scene.tsx",
         "tests/integration/fixtures/board-scroll-scene.tsx",
+        "tests/integration/fixtures/browser-tab-scene.tsx",
         "tests/integration/fixtures/one-machine-down-scene.tsx",
         "tests/integration/fixtures/machine-reorder-scene.tsx",
         "tests/integration/fixtures/nav-cache-scene.tsx",

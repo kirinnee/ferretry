@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { BrowserAction, BrowserPageSummary, BrowserStatus } from '@ferretry/protocol';
 import { useState } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
-import { FullscreenToggle } from '../../../src/components/fullscreen-toggle.tsx';
 import { FileInstanceSurface } from '../../../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../../../src/components/files-tab.tsx';
 import { SessionTerminalDeck } from '../../../src/components/session-terminal-deck.tsx';
@@ -443,22 +442,28 @@ describe('browser tabs', () => {
     try {
       await settle();
 
-      // Assert — both tabs carry the strip; only the page tab names a page, and it is brought into view.
-      const lists = page.root.findAllByType(BrowserSurfaceList);
-      expect(lists).toHaveLength(2);
-      expect(lists.map(list => list.props.selectedPageId).sort()).toEqual(['PAGE1', undefined]);
+      // Assert — both tabs hand their surface the session's pages (in the bar's page menu, closed until
+      // asked), and only the page tab names a page, which is brought into view.
+      const surfaces = page.root.findAllByType(UnifiedBrowserSurface);
+      expect(surfaces).toHaveLength(2);
       expect(browser.activated).toEqual(['PAGE1']);
       expect(browserEngineForSession(scope)).toBe('remote');
-      const surfaces = page.root.findAllByType(UnifiedBrowserSurface);
-      expect(surfaces.every(surface => surface.props.showPageTabs === false)).toBe(true);
-      const list = lists.find(candidate => candidate.props.selectedPageId === 'PAGE1') as ReactTestInstance;
+      const pageSurface = surfaces.find(surface => surface.props.host.name === 'app') as ReactTestInstance;
+      // One bar per tab: the agent marker and the Full screen button live in it, not in rows of their own.
+      expect(page.root.findAllByProps({ 'data-browser-bar': '' })).toHaveLength(2);
+      expect(page.root.findAllByType(AgentControlMarker)).toHaveLength(0);
+      expect(page.root.findAllByProps({ className: 'fy-ws-bar' })).toHaveLength(0);
+      expect(pageSurface.props.host.control.driver).toEqual({ name: 'Hadi' });
+      expect(pageSurface.props.host.control.takenOver).toBe(false);
+
+      const openPages = (): ReactTestInstance => {
+        run(() => pageSurface.findByProps({ 'data-browser-trigger': 'pages' }).props.onClick());
+        return pageSurface.findByType(BrowserSurfaceList);
+      };
+      const list = openPages();
+      expect(list.props.selectedPageId).toBe('PAGE1');
       expect(list.props.driverFor(APP)).toEqual({ name: 'Hadi' });
       expect(list.props.takenOver(APP)).toBe(false);
-      // The page tab's marker and its Full screen button sit in the strip's own first row.
-      const markers = list.findAllByType(AgentControlMarker);
-      expect(markers.map(marker => marker.props.driver)).toEqual([{ name: 'Hadi' }]);
-      expect(list.findAllByType(FullscreenToggle)).toHaveLength(1);
-      expect(page.root.findAllByProps({ className: 'fy-ws-bar' })).toHaveLength(0);
 
       // A chip opens that page's own tab: by name when it has one, else by id, labelled for a reader.
       run(() => list.props.onOpenPage(PR));
@@ -485,17 +490,15 @@ describe('browser tabs', () => {
     }
   });
 
-  test('without a page list, a browser tab keeps the engine page tabs and carries its controls in a slim bar of its own', async () => {
+  test('without a page list, a browser tab is still one bar, with no page list to open', async () => {
     const store = new WorkspaceLayoutStore(NO_STORAGE);
     store.update(scope, layout => openWorkspaceTab(layout, workspaceTab('browser', 'b1', { label: 'Browser' })));
     const { page } = mountWorkspace('desktop', { browser: browserEngine }, store);
     try {
       await settle();
       expect(page.root.findAllByType(BrowserSurfaceList)).toHaveLength(0);
-      expect(page.root.findByType(UnifiedBrowserSurface).props.showPageTabs).toBe(true);
-      const bar = page.root.findByProps({ className: 'fy-ws-bar' });
-      expect(bar.findAllByType(AgentControlMarker)).toHaveLength(1);
-      expect(bar.findAllByType(FullscreenToggle)).toHaveLength(1);
+      expect(page.root.findAllByProps({ 'data-browser-bar': '' })).toHaveLength(1);
+      expect(page.root.findAllByProps({ className: 'fy-ws-bar' })).toHaveLength(0);
       expect(browserEngineForSession(scope)).toBe('preview');
     } finally {
       run(() => page.unmount());

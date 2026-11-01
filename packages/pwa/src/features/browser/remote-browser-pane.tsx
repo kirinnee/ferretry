@@ -130,6 +130,14 @@ export interface RemoteBrowserPaneState {
   readonly busy: boolean;
   readonly error: string | null;
   readonly runAction: (action: BrowserAction) => void;
+  /** The display's state, for the host bar's one chip. */
+  readonly connection: RemoteBrowserConnection;
+  readonly fit: boolean;
+  readonly viewportMode: RemoteViewportMode;
+  readonly toggleFit: () => void;
+  readonly toggleViewportMode: () => void;
+  readonly pasteFromClipboard: () => void;
+  readonly clearError: () => void;
 }
 
 export interface RemoteBrowserPaneProps {
@@ -149,6 +157,12 @@ export interface RemoteBrowserPaneProps {
    * strip — so a reader is never shown the same pages twice.
    */
   readonly showPageTabs?: boolean;
+  /**
+   * True when the host draws the browser's ONE bar (status, pages, address, controls, notices): the pane
+   * then draws none of its own rows and publishes what the bar needs. Only the field that types into the
+   * page on a phone stays, because it has to be a real, visible control.
+   */
+  readonly hosted?: boolean;
   /** Publishes this pane's engine so a host can label and drive it. */
   readonly onStateChange?: (state: RemoteBrowserPaneState) => void;
   readonly onHumanActivity?: (kind: RemoteHumanActivity) => void;
@@ -170,6 +184,7 @@ export function RemoteBrowserPane({
   isActive = true,
   showNavigation = true,
   showPageTabs = true,
+  hosted = false,
   onStateChange,
   onHumanActivity,
   resizeDebounceMs = REMOTE_BROWSER_RESIZE_DEBOUNCE_MS,
@@ -266,9 +281,13 @@ export function RemoteBrowserPane({
 
   // Published after the render that produced it, so a host toolbar redraws from
   // the same snapshot the pane is showing rather than one frame behind it.
-  useEffect(() => {
-    onStateChange?.({ status, busy, error, runAction });
-  }, [busy, error, onStateChange, runAction, status]);
+  const toggleFit = useCallback(() => setFit(value => !value), []);
+  const toggleViewportMode = useCallback(() => {
+    // The negotiated viewport changes with the mode, so the suppression
+    // key has to be dropped or the switch would be a no-op.
+    lastViewportRef.current = '';
+    setViewportMode(value => (value === 'responsive' ? 'desktop' : 'responsive'));
+  }, []);
 
   const pasteFromClipboard = useCallback(async () => {
     const scopeEpoch = scopeEpochRef.current;
@@ -285,6 +304,35 @@ export function RemoteBrowserPane({
     if (viewerRef.current?.insertText(text) !== true)
       reportError('The remote display is not connected, so nothing was pasted into the page.');
   }, [readClipboardText, reportError]);
+
+  useEffect(() => {
+    onStateChange?.({
+      status,
+      busy,
+      error,
+      runAction,
+      connection,
+      fit,
+      viewportMode,
+      toggleFit,
+      toggleViewportMode,
+      pasteFromClipboard: () => void pasteFromClipboard(),
+      clearError,
+    });
+  }, [
+    busy,
+    clearError,
+    connection,
+    error,
+    fit,
+    onStateChange,
+    pasteFromClipboard,
+    runAction,
+    status,
+    toggleFit,
+    toggleViewportMode,
+    viewportMode,
+  ]);
 
   const onTextInput = (event: FormEvent<HTMLTextAreaElement>) => {
     if (composingRef.current || (event.nativeEvent as InputEvent).isComposing) return;
@@ -348,72 +396,78 @@ export function RemoteBrowserPane({
     );
   };
 
+  const typeField = (
+    <textarea
+      ref={textInputRef}
+      rows={1}
+      disabled={!running || !connected}
+      aria-label="Type into remote browser"
+      placeholder="Type into page…"
+      inputMode="text"
+      {...{ [KEYBOARD_CAPTURE_ATTRIBUTE]: '' }}
+      autoCapitalize="none"
+      autoCorrect="off"
+      spellCheck={false}
+      className="min-h-[44px] min-w-[10rem] flex-1 resize-none rounded-control border border-border bg-surface px-2 py-2 text-ui text-fg outline-none placeholder:text-muted md:hidden"
+      onInput={onTextInput}
+      onCompositionStart={() => {
+        composingRef.current = true;
+      }}
+      onCompositionEnd={onTextCompositionEnd}
+      onKeyDown={event => onTextKey(event, 'keyDown')}
+      onKeyUp={event => onTextKey(event, 'keyUp')}
+      onPaste={onTextPaste}
+      onBlur={() => viewerRef.current?.releaseKeys()}
+    />
+  );
+
   return (
     <section
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-surface"
       aria-label="Shared remote browser"
     >
-      <RemoteBrowserStatusBar status={status} connection={connection} busy={busy} />
-      {showPageTabs && <RemoteBrowserPageTabs status={status} busy={busy} onAction={runAction} />}
-      {showNavigation && (
-        <RemoteBrowserNavigation status={status} busy={busy} onAction={runAction} onInvalidAddress={reportError} />
+      {hosted && (
+        <div className="shrink-0 border-b border-border-soft px-1.5 py-1 md:hidden" data-browser-type-row="">
+          {typeField}
+        </div>
       )}
-      <RemoteBrowserControls
-        status={status}
-        connection={connection}
-        busy={busy}
-        fit={fit}
-        viewportMode={viewportMode}
-        onAction={runAction}
-        onToggleFit={() => setFit(value => !value)}
-        onToggleViewportMode={() => {
-          // The negotiated viewport changes with the mode, so the suppression
-          // key has to be dropped or the switch would be a no-op.
-          lastViewportRef.current = '';
-          setViewportMode(value => (value === 'responsive' ? 'desktop' : 'responsive'));
-        }}
-        onPasteFromClipboard={() => void pasteFromClipboard()}
-        trailingControl={
-          <textarea
-            ref={textInputRef}
-            rows={1}
-            disabled={!running || !connected}
-            aria-label="Type into remote browser"
-            placeholder="Type into page…"
-            inputMode="text"
-            {...{ [KEYBOARD_CAPTURE_ATTRIBUTE]: '' }}
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            className="min-h-[44px] min-w-[10rem] flex-1 resize-none rounded-control border border-border bg-surface px-2 py-2 text-ui text-fg outline-none placeholder:text-muted md:hidden"
-            onInput={onTextInput}
-            onCompositionStart={() => {
-              composingRef.current = true;
-            }}
-            onCompositionEnd={onTextCompositionEnd}
-            onKeyDown={event => onTextKey(event, 'keyDown')}
-            onKeyUp={event => onTextKey(event, 'keyUp')}
-            onPaste={onTextPaste}
-            onBlur={() => viewerRef.current?.releaseKeys()}
+      {!hosted && (
+        <>
+          <RemoteBrowserStatusBar status={status} connection={connection} busy={busy} />
+          {showPageTabs && <RemoteBrowserPageTabs status={status} busy={busy} onAction={runAction} />}
+          {showNavigation && (
+            <RemoteBrowserNavigation status={status} busy={busy} onAction={runAction} onInvalidAddress={reportError} />
+          )}
+          <RemoteBrowserControls
+            status={status}
+            connection={connection}
+            busy={busy}
+            fit={fit}
+            viewportMode={viewportMode}
+            onAction={runAction}
+            onToggleFit={toggleFit}
+            onToggleViewportMode={toggleViewportMode}
+            onPasteFromClipboard={() => void pasteFromClipboard()}
+            trailingControl={typeField}
           />
-        }
-      />
-      {challenge !== null && <BrowserChallengeBanner challenge={challenge} />}
-      {page?.pageError !== undefined && (
-        <div role="alert" className="shrink-0 border-b border-err/30 bg-err-bg px-3 py-2 text-meta text-err">
-          {page.pageError}
-        </div>
-      )}
-      {error !== null && (
-        <div
-          role="alert"
-          className="flex shrink-0 items-center gap-xs border-b border-err/30 bg-err-bg px-3 py-2 text-meta text-err"
-        >
-          <span className="min-w-0 flex-1 break-words">{error}</span>
-          <button type="button" onClick={clearError} className="min-h-[44px] min-w-[44px] shrink-0 text-muted">
-            Dismiss
-          </button>
-        </div>
+          {challenge !== null && <BrowserChallengeBanner challenge={challenge} />}
+          {page?.pageError !== undefined && (
+            <div role="alert" className="shrink-0 border-b border-err/30 bg-err-bg px-3 py-2 text-meta text-err">
+              {page.pageError}
+            </div>
+          )}
+          {error !== null && (
+            <div
+              role="alert"
+              className="flex shrink-0 items-center gap-xs border-b border-err/30 bg-err-bg px-3 py-2 text-meta text-err"
+            >
+              <span className="min-w-0 flex-1 break-words">{error}</span>
+              <button type="button" onClick={clearError} className="min-h-[44px] min-w-[44px] shrink-0 text-muted">
+                Dismiss
+              </button>
+            </div>
+          )}
+        </>
       )}
       <div
         ref={screenRef}
@@ -435,7 +489,7 @@ export function RemoteBrowserPane({
           createObjectUrl={createObjectUrl}
           revokeObjectUrl={revokeObjectUrl}
         />
-        {loading && (
+        {loading && !hosted && (
           <div
             className="pointer-events-none absolute inset-x-0 top-0 z-10 h-0.5 bg-accent"
             role="status"
@@ -470,7 +524,7 @@ export function RemoteBrowserPane({
           </div>
         )}
       </div>
-      <RemoteBrowserGovernor status={status} />
+      {!hosted && <RemoteBrowserGovernor status={status} />}
     </section>
   );
 }
