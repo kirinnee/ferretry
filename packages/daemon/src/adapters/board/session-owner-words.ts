@@ -227,9 +227,8 @@ export class SessionOwnerWords implements OwnerWords {
   private keep(id: SessionId, turns: ReadTurns): void {
     this.read.delete(id);
     this.read.set(id, turns);
-    while (this.read.size > OWNER_TURNS_KEPT) {
-      const oldest = this.read.keys().next().value;
-      if (oldest === undefined) break;
+    for (const oldest of this.read.keys()) {
+      if (this.read.size <= OWNER_TURNS_KEPT) break;
       this.read.delete(oldest);
     }
   }

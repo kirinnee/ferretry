@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { StorageSessionParents } from '../../../src/adapters/board/session-board-adapters.ts';
-import { SessionOwnerWords } from '../../../src/adapters/board/session-owner-words.ts';
+import { OWNER_TURNS_KEPT, SessionOwnerWords } from '../../../src/adapters/board/session-owner-words.ts';
 import {
   BunSqliteIndexFactory,
   DaemonStorageFactory,
@@ -222,5 +222,58 @@ describe('SessionOwnerWords over a real state home', () => {
     should(await decide(OWNER_ASK)).eql('person');
     should(await decide(`Owner (verbatim): "${OWNER_ASK}" and more words around it`)).eql('person');
     should(await decide('a different, unrelated ask entirely from the lead')).eql('agent');
+  });
+
+  it('should answer what it can read when the ledger or the turns directory is not a file it can read', async () => {
+    const { words, open, turn, say, turnsOf } = await fixture();
+    await open('lead');
+    await turn('lead', 2, 'turn words the owner said');
+    await mkdir(join(turnsOf('lead'), '..', 'channel', 'sends.jsonl'), { recursive: true });
+    should(await words.said('lead')).eql(['turn words the owner said']);
+
+    await open('other');
+    await say('other', 'm1', 'queued words the owner said');
+    await mkdir(join(turnsOf('other'), '..'), { recursive: true });
+    await writeFile(turnsOf('other'), 'a file where the turns directory should be');
+    should(await words.said('other')).eql(['queued words the owner said']);
+  });
+
+  it('should skip a turn it cannot read and a torn author file, and keep the rest', async () => {
+    const { words, open, turn, turnsOf } = await fixture();
+    await open('lead');
+    await turn('lead', 2, 'the owner said this');
+    await mkdir(join(turnsOf('lead'), 'turn-003.md'));
+    await turn('lead', 4, 'an author file that does not parse');
+    await writeFile(join(turnsOf('lead'), 'turn-004.by.json'), '{ torn');
+
+    should(await words.said('lead')).eql(['the owner said this', 'an author file that does not parse']);
+  });
+
+  it('should leave the first turn out when the lineage cannot be read', async () => {
+    const { ledger, open, turnOne, turn, turnsOf } = await fixture();
+    await open('lead');
+    await turnOne('lead', 'a brief nobody can prove the owner wrote');
+    await turn('lead', 2, 'the owner said this');
+    const queue = { list: async () => [] };
+    const lineage = {
+      parentOf: async (): Promise<string | undefined> => {
+        throw new Error('config.json unreadable');
+      },
+    };
+
+    should(await new SessionOwnerWords(queue, ledger, lineage, turnsOf).said('lead')).eql(['the owner said this']);
+  });
+
+  it('should keep a bounded number of sessions read and read one let go again in full', async () => {
+    const { ledger, parents, turnsOf } = await fixture();
+    const ids = Array.from({ length: OWNER_TURNS_KEPT + 1 }, (_, n) => `s${String(n)}`);
+    for (const id of ids) {
+      await mkdir(turnsOf(id), { recursive: true });
+      await writeFile(join(turnsOf(id), 'turn-002.md'), `words of ${id}`);
+    }
+    const words = new SessionOwnerWords({ list: async () => [] }, ledger, parents, turnsOf);
+    for (const id of ids) should(await words.said(id)).eql([`words of ${id}`]);
+
+    should(await words.said(ids[0] ?? '')).eql(['words of s0']);
   });
 });
