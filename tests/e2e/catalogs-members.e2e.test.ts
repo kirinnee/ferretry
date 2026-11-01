@@ -523,14 +523,19 @@ async function pairToMemberMachine(world: World, person: Person): Promise<string
  * Back to "Shared with me" in the same browser, unlocked with the member passkey.
  *
  * A fresh load by default. Given `viaMachine`, it moves inside the open document instead: to that
- * machine's home, then to `/shared`. The install sheet offers the projects this document has already
- * read from the machine, only the machine's home reads them, and a fresh `/shared` load has read none.
+ * machine's Projects page, then to `/shared`. The install sheet offers the projects this document has already
+ * read from the machine, only the machine's own pages read them, and a fresh `/shared` load has read none.
  */
 async function backToShared(person: Person, world: World, publisherId: string, viaMachine?: string): Promise<void> {
   if (viaMachine === undefined) await open(person, `${world.origin.origin}/shared`);
   else {
-    await inApp(person, `/d/${viaMachine}`);
-    await reach(person, '[data-home-all-sessions]', "the member machine's home");
+    await inApp(person, `/d/${viaMachine}/projects`);
+    await waitUntil(
+      person.page,
+      `(document.body.textContent ?? '').includes('Member project')`,
+      30_000,
+      "the member machine's registered project on its Projects page",
+    );
     await inApp(person, '/shared');
   }
   const seen = await reachAny(
