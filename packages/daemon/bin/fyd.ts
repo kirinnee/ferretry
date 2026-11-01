@@ -1214,6 +1214,7 @@ import {
   type SessionTranscriptSearch,
   type SessionTranscriptTail,
   SharedCatalogService,
+  SharedDraftPresence,
   SharedDraftService,
   SharedFleetBacklog,
   type SharingRepairOutcome,
@@ -12468,6 +12469,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // A generation must never repeat across restarts, so it is random rather than counted.
           { next: () => crypto.randomUUID() },
         ),
+        // Who has each session's composer open, and on which of the owner's devices. Memory only.
+        sharedDraftStream: {
+          presence: new SharedDraftPresence(),
+          deviceName: async deviceId => (await pairing.devices()).find(device => device.id === deviceId)?.name,
+          nextPeer: () => crypto.randomUUID(),
+          clock: { nowMs: () => Date.now() },
+        },
         sessions: withRevive(
           withContext(
             withOutdated(sessions, { outdated: outdatedFor, now: () => Date.parse(clock.now()), ttlMs: 5_000 }),
@@ -13863,7 +13871,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // taken by a flow nobody can see any more.
   cleanups.push(async () => await subsystems.harnessLogin.shutdown());
   // A draft typed in the last second is still only in memory; it is written down before the daemon goes.
-  cleanups.push(async () => await subsystems.sharedDrafts.flush());
+  cleanups.push(async () => await subsystems.sharedDrafts.close());
   // A standing rule's suspension or use whose write failed is written before the daemon goes, if it can be.
   cleanups.push(async () => await subsystems.signInRules.flush());
   // The FIRST self-check runs before the address is bound, so the daemon's very first health answer

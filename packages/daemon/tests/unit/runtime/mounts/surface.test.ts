@@ -26,6 +26,7 @@ import { TaskPlanService } from '../../../../src/lib/task-plans/index.ts';
 import { SecuritySettingsService } from '../../../../src/lib/security/index.ts';
 import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.ts';
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
+import { SharedDraftPresence } from '../../../../src/lib/shared-drafts/index.ts';
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
 import { MemoryTranscript } from '../../../support/transcript-images.ts';
 import { agentToolWorld, PREFIXED_S1 } from '../../agent-tools/support.ts';
@@ -383,6 +384,12 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   },
   pins: pinService([]),
   sharedDrafts: sharedDraftService(['s1']),
+  sharedDraftStream: {
+    presence: new SharedDraftPresence(),
+    deviceName: async () => 'Phone',
+    nextPeer: () => 'peer-1',
+    clock: { nowMs: () => 0 },
+  },
   sessions: sessionDirectory([sessionView('s1')]),
   sessionAddresses: {
     has: id => id === 's1',
@@ -951,7 +958,7 @@ describe('the mounted daemon surface', () => {
       7 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
       9 + // the catalogs this machine publishes: list, make, change, delete, preview, add, publish, withdraw and export (docs/catalogs.md)
       8 + // the people a catalog is shared with: mint, list and end a share; list, rename, revoke a member, remove a browser or a catalog (docs/catalogs.md)
-      2; // the shared draft: the owner's unsent composer, read and edited from any of their own devices (&F331)
+      3; // the shared draft: the owner's unsent composer, read, edited and streamed live to any of their own devices (&F331)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -1646,7 +1653,40 @@ describe('the mounted daemon surface', () => {
       'GET /v1/events',
       'GET /v1/sessions/:sessionId/terminals/:terminalId/stream',
       'GET /v1/sessions/:sessionId/browser/stream',
+      'GET /v1/sessions/:sessionId/shared-draft/stream',
     ]);
+  });
+
+  it("should refuse every ferret the shared draft's live stream before the protocol switches, and open it for the owner", async () => {
+    // Arrange
+    const mounted = subsystems();
+    await mounted.grants.refresh();
+    const dispatcher = createMountedSocketDispatcher(base, mounted);
+    const path = '/v1/sessions/s1/shared-draft/stream';
+    const ferrets: readonly Record<string, string>[] = [
+      { authorization: `Bearer ${PREFIXED_S1}` },
+      { authorization: `Bearer ${CREDENTIALS.admin}`, 'x-ferretry-session-id': 's1', 'x-ferretry-client': 'cli' },
+      { authorization: `Bearer ${CREDENTIALS.warden}` },
+    ];
+
+    // Act
+    const refused = await Promise.all(
+      ferrets.map(async headers => await dispatcher.upgrade(request({ path, headers }))),
+    );
+    const owner = await dispatcher.upgrade(request({ path, headers: human, loopback: true }));
+    const bare = await dispatcher.upgrade(
+      request({ path, headers: { authorization: `Bearer ${CREDENTIALS.admin}` }, loopback: true }),
+    );
+
+    // Assert
+    // Every ferret is refused before the switch: a ferret's own credential already at authentication (401
+    // on the socket table), the admin token naming a ferret's session and the warden as `owner_only` (403).
+    should(refused.map(decision => decision.outcome)).deepEqual(['refused', 'refused', 'refused']);
+    should(refused.slice(1).map(decision => (decision.outcome === 'refused' ? decision.response.status : 0))).deepEqual(
+      [403, 403],
+    );
+    should(owner.outcome).equal('accepted');
+    should(bare.outcome === 'refused' ? bare.response.status : 0).equal(403);
   });
 
   // THERE IS NO THIRD TABLE. A route that answered with the transport's own `Response` existed for
@@ -1888,6 +1928,8 @@ describe('who may call each route', () => {
     await mounted.grants.refresh();
     const dispatcher = createMountedDispatcher(base, mounted);
     const person = mountedDaemonRoutes(base, mounted).filter(route => route.caller === 'person');
+    // Person sockets are in the contract too; the test above this one refuses ferrets on them.
+    const personSockets = mountedSocketRoutes(mounted).filter(route => route.caller === 'person');
     // A ferret's own credential; the admin token naming a ferret's session (a pane from before the credential,
     // or an older fy); and a warden. All three are agents, and none reaches a person route.
     const ferrets: readonly Record<string, string>[] = [
@@ -1902,7 +1944,7 @@ describe('who may call each route', () => {
       for (const route of person) answers.push(answer(route, await dispatcher.dispatch(unread(route, headers))));
 
     // Assert
-    should(person.length).equal(ROUTE_CALLERS.filter(line => line.endsWith(' person')).length);
+    should(person.length + personSockets.length).equal(ROUTE_CALLERS.filter(line => line.endsWith(' person')).length);
     should(answers).deepEqual(
       ferrets.flatMap(() =>
         person.map(route => ({ route: `${route.method} ${route.path}`, status: 403, code: 'owner_only' })),

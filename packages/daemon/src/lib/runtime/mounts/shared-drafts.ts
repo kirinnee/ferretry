@@ -5,7 +5,16 @@ import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { SharedDraftError, type SharedDraftErrorCode, type SharedDraftService } from '../../shared-drafts/index.ts';
+import type { SocketRoute } from '../../api/socket.ts';
+import {
+  SharedDraftError,
+  type SharedDraftErrorCode,
+  type SharedDraftPresence,
+  type SharedDraftService,
+  type SharedDraftStreamClock,
+  SharedDraftStreamHandler,
+  type SharedDraftStreamTarget,
+} from '../../shared-drafts/index.ts';
 
 /**
  * The shared draft's surface: one session's unsent composer, read and edited by the owner's devices.
@@ -95,6 +104,82 @@ export function sharedDraftRoutes(drafts: SharedDraftService): readonly ApiRoute
       caller: 'person',
       noStore: true,
       handle: async context => await edit(drafts, context),
+    },
+  ];
+}
+
+/** What the live stream needs beyond the draft itself: who is on the other end, and an id for this stream. */
+export interface SharedDraftStreamSubsystem {
+  readonly presence: SharedDraftPresence;
+  /** The name the owner gave a paired device, or nothing when it has none (or is gone). */
+  deviceName(deviceId: string): Promise<string | undefined>;
+  /** A fresh id per stream: unguessable, and never reused while the daemon runs. */
+  nextPeer(): string;
+  readonly clock: SharedDraftStreamClock;
+}
+
+/** How the hint on the owner's other screens names this composer: "also typing on <this>". */
+async function deviceLabel(subsystem: SharedDraftStreamSubsystem, actor: ApiActor | undefined): Promise<string> {
+  const { kind, id } = parseActor(actor ?? '');
+  if (kind === 'device' && id !== undefined) return (await subsystem.deviceName(id)) ?? 'another device';
+  return 'this computer';
+}
+
+/** The three `after` coordinates, all or none: half a position is no position at all. */
+function streamPosition(context: RouteContext): SharedDraftStreamTarget['position'] {
+  const read = (name: string): string | undefined => {
+    const values = context.request.query.get(name) ?? [];
+    if (values.length > 1) throw new ApiError(400, `query parameter "${name}" may appear only once`, 'invalid_query');
+    return values[0];
+  };
+  const generation = read('generation');
+  const epoch = read('epoch');
+  const rev = read('rev');
+  if (generation === undefined && epoch === undefined && rev === undefined) return undefined;
+  const count = (value: string | undefined): number | undefined =>
+    value !== undefined && /^[0-9]{1,9}$/u.test(value) ? Number(value) : undefined;
+  const epochValue = count(epoch);
+  const revValue = count(rev);
+  if (
+    generation === undefined ||
+    generation === '' ||
+    generation.length > 64 ||
+    epochValue === undefined ||
+    revValue === undefined
+  )
+    throw new ApiError(400, 'generation, epoch and rev go together, as a draft position', 'invalid_query');
+  return { generation, epoch: epochValue, rev: revValue };
+}
+
+/**
+ * The live stream every open composer for a session holds (`shared-drafts/stream.ts`). The same owner
+ * gate as the routes above, and the session is proved to exist before the protocol switches, so an
+ * upgrade aimed at nothing is a 404 rather than a socket that dies.
+ */
+export function sharedDraftSocketRoutes(
+  drafts: SharedDraftService,
+  subsystem: SharedDraftStreamSubsystem,
+): readonly SocketRoute[] {
+  return [
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/shared-draft/stream',
+      minimum: 'operator',
+      caller: 'person',
+      accept: async context => {
+        assertDraftOwner(context.actor);
+        const sessionId = pathSessionId(context);
+        const position = streamPosition(context);
+        await drafts.read(sessionId).catch(reraise);
+        const target: SharedDraftStreamTarget = {
+          sessionId,
+          peer: subsystem.nextPeer(),
+          device: await deviceLabel(subsystem, context.actor),
+          ...(position === undefined ? {} : { position }),
+        };
+        return async downstream =>
+          new SharedDraftStreamHandler(drafts, subsystem.presence, target, downstream, subsystem.clock);
+      },
     },
   ];
 }

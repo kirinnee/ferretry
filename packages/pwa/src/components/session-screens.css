@@ -1633,6 +1633,46 @@ button.fy-receipt {
   margin: 0;
   padding: 0 4px;
 }
+/* Words this device held that the shared draft did not: offered back, never merged blindly. */
+.fy-composer-conflict {
+  align-items: center;
+  color: var(--warn, var(--fy-muted));
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 6px;
+  padding: 0 4px 6px;
+}
+.fy-composer-conflict > span {
+  flex: 1 1 100%;
+}
+/* "also typing on <device>": the owner's other screens, quietly, above the box. */
+.fy-composer-presence {
+  align-items: center;
+  color: var(--fy-muted);
+  display: flex;
+  font-size: 12px;
+  gap: 6px;
+  margin: 0;
+  padding: 0 4px 4px;
+}
+.fy-composer-presence__dot {
+  background: var(--fy-accent);
+  border-radius: var(--radius-dot, 9999px);
+  flex: none;
+  height: 7px;
+  width: 7px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-composer-presence__dot {
+    animation: fy-composer-presence-pulse 1.4s ease-in-out infinite;
+  }
+}
+@keyframes fy-composer-presence-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
 /* THE LIVE MARKDOWN EDITOR (Markdown, Notion-style and Rich text): a contenteditable document whose
    text IS the markdown source. Every marker stays in the document; these rules only decide how each
    line and run is painted, so a heading is really bigger and bold is really bold. */

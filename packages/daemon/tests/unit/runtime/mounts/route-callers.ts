@@ -363,6 +363,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'GET /v1/events operator any',
   'GET /v1/sessions/:sessionId/terminals/:terminalId/stream operator any',
   'GET /v1/sessions/:sessionId/browser/stream operator any',
+  'GET /v1/sessions/:sessionId/shared-draft/stream operator person',
 ];
 
 /**

@@ -460,3 +460,78 @@ export const SHARED_DRAFT_ERROR_CODES = {
   /** Only the owner's own paired devices and own shell may read or edit a draft — never an agent. */
   ownerOnly: 'shared_draft_owner_only',
 } as const;
+
+// ── The live stream: every open composer for one session, kept in step ───────────────────────────
+
+/** A text selection as `[start, end]` UTF-16 offsets into the draft. */
+const SelectionSchema = z.tuple([NonNegativeIntegerSchema, NonNegativeIntegerSchema]).readonly();
+
+/** Device labels are shown to a person, so they are bounded and single-line like any other label. */
+const PeerLabelSchema = z
+  .string()
+  .min(1)
+  .max(SHARED_DRAFT_LABEL_MAX)
+  .regex(/^[^\r\n]*$/u, 'a device label is one line');
+
+/**
+ * What a composer sends up its stream.
+ *
+ * - `edit` — one edit, tagged with an id the daemon's answer echoes, so the composer knows which of its
+ *   own edits an `ack` or an `error` is about.
+ * - `presence` — where this composer's caret is and whether the person is typing. Never stored, never
+ *   sequenced, and never shown back to the composer that sent it.
+ */
+export const SharedDraftClientFrameSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('edit'), id: z.string().min(1).max(64), edit: SharedDraftEditSchema }),
+  z.strictObject({ kind: z.literal('presence'), typing: z.boolean(), selection: SelectionSchema.optional() }),
+]);
+export type SharedDraftClientFrame = z.infer<typeof SharedDraftClientFrameSchema>;
+
+/**
+ * What the daemon sends down a composer's stream.
+ *
+ * - `snapshot` — the whole draft. First, when the composer could not be caught up edit by edit.
+ * - `edit` — an edit as sequenced, and the epoch and revision the draft is at after it (a send that
+ *   emptied the draft moves the epoch on and the revision back to 0). `id` is the id the composer that
+ *   made it gave it: a composer catching up after a reconnect may find its OWN edit here, landed while
+ *   it was away, and must take it as answered rather than send it again.
+ * - `ready` — the catch-up is over and everything after is live: the moment to send again whatever
+ *   edit is still unanswered.
+ * - `ack` — this composer's own edit as sequenced, with the same "after".
+ * - `error` — this composer's own edit was refused, with the daemon's code.
+ * - `presence` / `left` — another of the owner's open composers: which device, its caret, whether the
+ *   person is typing there; and that it closed.
+ */
+export const SharedDraftServerFrameSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('snapshot'), snapshot: SharedDraftSnapshotSchema }),
+  z.strictObject({
+    kind: z.literal('edit'),
+    id: z.string().min(1).max(64).optional(),
+    applied: SharedDraftEditResultSchema.shape.applied,
+    epoch: NonNegativeIntegerSchema,
+    rev: NonNegativeIntegerSchema,
+  }),
+  z.strictObject({ kind: z.literal('ready') }),
+  z.strictObject({
+    kind: z.literal('ack'),
+    id: z.string().min(1).max(64),
+    applied: SharedDraftEditResultSchema.shape.applied,
+    epoch: NonNegativeIntegerSchema,
+    rev: NonNegativeIntegerSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('error'),
+    id: z.string().min(1).max(64),
+    code: z.string().min(1).max(64),
+    message: z.string().max(1_000),
+  }),
+  z.strictObject({
+    kind: z.literal('presence'),
+    peer: z.string().min(1).max(64),
+    device: PeerLabelSchema,
+    typing: z.boolean(),
+    selection: SelectionSchema.optional(),
+  }),
+  z.strictObject({ kind: z.literal('left'), peer: z.string().min(1).max(64) }),
+]);
+export type SharedDraftServerFrame = z.infer<typeof SharedDraftServerFrameSchema>;

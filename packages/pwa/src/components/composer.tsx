@@ -1,4 +1,4 @@
-import type { IFyApiClient, SessionContext, SessionView } from '@ferretry/protocol';
+import { type IFyApiClient, type SessionContext, type SessionView, transformTextIndex } from '@ferretry/protocol';
 import { ArrowUp, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { OccupiedComposerNotice } from '../features/occupied-composer/occupied-composer-notice.tsx';
@@ -44,6 +44,8 @@ import type { SttSettings } from '../lib/stt/stt-settings.ts';
 import type { WorkSearchPort } from '../lib/work-search.ts';
 import { addMenuActions, ComposerAddMenu } from './composer-add-menu.tsx';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
+import { sharedDraftTypingHint, useSharedDraft } from '../hooks/use-shared-draft.ts';
+import type { DaemonStreamOpener } from '../lib/event-transport.ts';
 import {
   type ComposerField,
   type ComposerFieldKeyEvent,
@@ -193,6 +195,11 @@ export interface ComposerProps {
    * `autocompleteFetcher` — the host's carrier — to its own daemon and session.
    */
   readonly uploadAttachment?: ComposerAttachmentUploader;
+  /**
+   * Opens the live stream that keeps this draft the same on the owner's other devices. Absent means the
+   * store's carrier, which is what the app always uses; a harness or a test hands in its own.
+   */
+  readonly openDraftStream?: DaemonStreamOpener;
   /** The session's runtime chips (model, effort), drawn at the start of the status line. */
   readonly statusSlot?: ReactNode;
   /** How much of the context window the session has used; absent while the window or the size is unknown. */
@@ -400,6 +407,7 @@ export function Composer({
   suggestions,
   vimMode = false,
   uploadAttachment,
+  openDraftStream,
   statusSlot,
   context,
   compacting,
@@ -583,6 +591,28 @@ export function Composer({
   const pendingSelection = useRef<{ readonly value: string; readonly start: number; readonly end: number } | null>(
     null,
   );
+  /**
+   * The same draft on every one of the owner's devices with this session open (`hooks/use-shared-draft.ts`).
+   * Another device's edit moves this caret the way the edit moved the text, so typing here is never
+   * thrown to the end by somebody typing there.
+   */
+  const shared = useSharedDraft({
+    daemon,
+    scope,
+    text: draft,
+    setText: setDraft,
+    ...(openDraftStream === undefined ? {} : { open: openDraftStream }),
+    onRemote: (op, next) => {
+      const input = inputRef.current;
+      if (input === null) return;
+      pendingSelection.current = {
+        value: next,
+        start: transformTextIndex(input.selectionStart, op),
+        end: transformTextIndex(input.selectionEnd, op),
+      };
+    },
+  });
+  const typingHint = sharedDraftTypingHint(shared.typing);
   const keyboardOpen = useKeyboardOpen();
   const inputModality = useInputModality();
   const bareEnterAction = composerEnterAction(
@@ -767,6 +797,8 @@ export function Composer({
     attachments.clear();
     locating.current += 1;
     setLocation(null);
+    // Emptied on every device, not only this one: the message has gone.
+    shared.sent();
     setDraft('');
     // The next message starts as text, not as commands.
     setVim(initialVimState);
@@ -1258,6 +1290,23 @@ export function Composer({
       <label className="sr-only" htmlFor={`${fieldId}-input`}>
         Message
       </label>
+      {typingHint === null ? null : (
+        <p className="fy-composer-presence" data-composer-presence="" role="status">
+          <span aria-hidden="true" className="fy-composer-presence__dot" />
+          {typingHint}
+        </p>
+      )}
+      {shared.conflict === null ? null : (
+        <div className="fy-composer-conflict" data-composer-conflict="" role="status">
+          <span>Some words typed here could not be merged with your other device's.</span>
+          <button className="fy-composer-chip" type="button" onClick={shared.restoreConflict}>
+            Restore them
+          </button>
+          <button className="fy-composer-chip" type="button" onClick={shared.dismissConflict}>
+            Dismiss
+          </button>
+        </div>
+      )}
       {location === null ? null : (
         <PendingLocationChip
           disabled={sending}

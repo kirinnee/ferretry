@@ -9,6 +9,8 @@ import should from 'should';
 import {
   SHARED_DRAFT_HISTORY_MAX_CHARS,
   SHARED_DRAFT_WRITE_DELAY_MS,
+  SHARED_DRAFT_WRITE_RETRY_MAX_MS,
+  type SharedDraftChange,
   type SharedDraftRepository,
   SharedDraftService,
 } from '../../../src/lib/shared-drafts/index.ts';
@@ -383,6 +385,100 @@ describe('SharedDraftService', () => {
       name: 'SharedDraftError',
       code: 'stale',
     });
+  });
+
+  it('tells every subscriber of the session about each edit, with its origin, until it unsubscribes', async () => {
+    const { service } = subject();
+    const heard: SharedDraftChange[] = [];
+    const other: SharedDraftChange[] = [];
+    const stop = service.subscribe('s1', change => heard.push(change));
+    service.subscribe('s1', () => {
+      throw new Error('a broken stream');
+    });
+    service.subscribe('s2', change => other.push(change));
+
+    await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['a'] }, 'phone');
+    stop();
+    stop();
+    await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [1, 'b'] });
+
+    should(heard).match([{ applied: { rev: 1 }, epoch: 0, rev: 1, origin: 'phone' }]);
+    should(other).be.empty();
+  });
+
+  it('says where a send left the draft: the next epoch, at revision 0', async () => {
+    const { service } = subject();
+    const heard: SharedDraftChange[] = [];
+    service.subscribe('s1', change => heard.push(change));
+    await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['x'] });
+    await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [-1], sent: true });
+    should(heard.map(change => [change.applied.epoch, change.epoch, change.rev])).deepEqual([
+      [0, 0, 1],
+      [0, 1, 0],
+    ]);
+  });
+
+  it('replays what a composer missed, or says it cannot', async () => {
+    const { service } = subject();
+    await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['a'] });
+    await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [1, 'b'] });
+
+    should((await service.since('s1', { generation: G, epoch: 0, rev: 1 }))?.map(change => change.rev)).deepEqual([2]);
+    should(await service.since('s1', { generation: G, epoch: 0, rev: 2 })).deepEqual([]);
+    should(await service.since('s1', { generation: 'old', epoch: 0, rev: 1 })).be.undefined();
+    should(await service.since('s1', { generation: G, epoch: 1, rev: 0 })).be.undefined();
+    should(await service.since('s1', { generation: G, epoch: 0, rev: 9 })).be.undefined();
+  });
+
+  it('never lets go of a draft an edit is holding, however many others load meanwhile', async () => {
+    // Arrange — one draft in memory; s1 is clean, so letting it go would drop it without a write.
+    const repository = new MemoryDrafts();
+    const { service } = subject({ repository, memoryLimit: 1 });
+    await service.read('s1');
+
+    // Act — an edit to s1 and a load of s2 start in the same tick.
+    const [edited] = await Promise.all([
+      service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['kept'] }),
+      service.read('s2'),
+    ]);
+    await settle();
+
+    // Assert — the edit landed on the draft that stays reachable: reading s1 sees it.
+    should(edited.snapshot.text).equal('kept');
+    should(await service.read('s1')).match({ text: 'kept', rev: 1 });
+  });
+
+  it('waits longer after each failed write, up to a ceiling, and schedules nothing once closed', async () => {
+    // Arrange
+    const repository = new MemoryDrafts();
+    repository.fail = true;
+    const { service, timers } = subject({ repository });
+    await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['x'] });
+
+    // Act — fire the timer each time, letting each write fail.
+    const delays: number[] = [];
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const next = timers.pending.at(-1);
+      if (next === undefined) break;
+      delays.push(next.milliseconds);
+      timers.fire();
+      await settle();
+    }
+    await service.close();
+    await settle();
+
+    // Assert
+    should(delays).deepEqual([
+      SHARED_DRAFT_WRITE_DELAY_MS,
+      2_000,
+      4_000,
+      8_000,
+      16_000,
+      32_000,
+      SHARED_DRAFT_WRITE_RETRY_MAX_MS,
+      SHARED_DRAFT_WRITE_RETRY_MAX_MS,
+    ]);
+    should(timers.pending.filter(entry => !entry.cancelled)).be.empty();
   });
 
   it('loads one session once for callers that arrive together', async () => {

@@ -164,4 +164,6 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
 /** Protocol-switching routes the log does not record. */
 export const NOT_AUDITED_SOCKETS: Readonly<Record<string, string>> = {
   'GET /v1/events': 'the fleet event feed is a read: it shows what the caller could already list',
+  'GET /v1/sessions/:sessionId/shared-draft/stream':
+    "the owner's own unsent words at keystroke rate, to the owner's own devices; logging it would copy the draft into a log",
 };
