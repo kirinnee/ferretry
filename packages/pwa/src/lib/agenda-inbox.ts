@@ -32,7 +32,7 @@ import { answerActions, type InboxAction, type SwipeDirection, swipeTargets } fr
 import { clockWords } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
 import type { DaemonId } from './daemon-connection.ts';
-import { daemonSessionPath } from './pages/routes.ts';
+import { daemonAgendaPath, daemonSessionPath } from './pages/routes.ts';
 
 /** One machine's session list, as the inbox reads it. `sessions` is `null` before the first read. */
 export interface AgendaInboxSource {
@@ -158,6 +158,26 @@ export const agendaTargetFromSearch = (search: string): AgendaId | null => {
   const raw = params.get(AGENDA_LINK_PARAMETER) ?? params.get(LEGACY_ATTENTION_LINK_PARAMETER);
   const parsed = AgendaIdSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
+};
+
+/** The Inbox query parameter that names the conversation an item belongs to: `/inbox?session=<id>&agenda=A3`. */
+const INBOX_SESSION_PARAMETER = 'session';
+
+/** The item an Inbox link opens: the conversation it belongs to, and its id. */
+export interface InboxTarget {
+  readonly sessionId: string;
+  readonly id: AgendaId;
+}
+
+/** Where a tap on an Agenda notification lands: the Inbox, asking for this item's card. */
+export const inboxTargetPath = (daemonId: DaemonId, sessionId: string, id: AgendaId): string =>
+  `${daemonAgendaPath(daemonId)}?${INBOX_SESSION_PARAMETER}=${encodeURIComponent(sessionId)}&${AGENDA_LINK_PARAMETER}=${encodeURIComponent(id)}`;
+
+/** The item an Inbox link names, or `null` when it names none (or a malformed one). */
+export const inboxTargetFromSearch = (search: string): InboxTarget | null => {
+  const sessionId = new URLSearchParams(search).get(INBOX_SESSION_PARAMETER);
+  const id = agendaTargetFromSearch(search);
+  return sessionId === null || sessionId.trim() === '' || id === null ? null : { sessionId, id };
 };
 
 /** One card in the inbox: an open item, the conversation it belongs to, and the machine that runs it. */

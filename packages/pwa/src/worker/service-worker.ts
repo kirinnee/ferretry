@@ -43,6 +43,7 @@ import { notificationBrand, showGroupedNotification } from '../lib/notify.ts';
 import {
   filteredPushNotification,
   machineNotification,
+  notificationTapUrl,
   notificationUrl,
   pushMachineOf,
   unreadablePushTitle,
@@ -224,11 +225,9 @@ worker.addEventListener('notificationclick', event => {
   // Only this site's own pages, and only this machine's: a notification can never open another origin,
   // and one machine's notification can never open another machine's pages. One that names no page it
   // may open still opens the conversation it is about, on this machine.
-  const url = notificationUrl(
-    data?.url,
+  const url = notificationTapUrl(
+    notificationUrl(data?.url, origin, machine, typeof data?.sessionId === 'string' ? data.sessionId : undefined),
     origin,
-    machine,
-    typeof data?.sessionId === 'string' ? data.sessionId : undefined,
   );
   const openWindow = (target: string): Promise<unknown> => worker.clients.openWindow(target);
   event.waitUntil(

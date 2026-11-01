@@ -87,6 +87,8 @@ interface Manifest {
   readonly display: string;
   readonly background_color: string;
   readonly theme_color?: string;
+  readonly launch_handler?: { readonly client_mode: string };
+  readonly handle_links?: string;
   readonly icons: readonly ManifestIcon[];
 }
 
@@ -226,14 +228,38 @@ describe('the web app manifest', () => {
     expect(pngSize(maskable)).toEqual({ width: 512, height: 512 });
   });
 
-  it('serves a maskable icon at both sizes Android asks for', () => {
-    const maskable = manifest.icons.filter(icon => icon.purpose.split(' ').includes('maskable'));
-    expect(maskable.map(icon => icon.sizes).sort()).toEqual(['192x192', '512x512']);
-    // Declared `any maskable` rather than `maskable` alone: the art carries its
-    // own opaque field and safe zone, so it is correct unmasked too, and an icon
-    // set with no `any` candidate leaves contexts that do not mask with nothing.
-    for (const icon of maskable) expect(icon.purpose.split(' ')).toContain('any');
+  it('serves maskable and any icons as separate files at both sizes Android asks for', () => {
+    const byPurpose = (purpose: string) =>
+      manifest.icons.filter(icon => icon.type === 'image/png' && icon.purpose === purpose);
+    // `any maskable` on one file is poor practice: the launcher masks it with the padded art that
+    // looks tiny everywhere else, so each purpose gets its own render.
+    expect(
+      byPurpose('maskable')
+        .map(icon => icon.src)
+        .sort(),
+    ).toEqual(['/icons/icon-192.png', '/icons/icon-512.png']);
+    expect(
+      byPurpose('any')
+        .map(icon => icon.src)
+        .sort(),
+    ).toEqual(['/icons/icon-any-192.png', '/icons/icon-any-512.png']);
+    expect(
+      byPurpose('maskable')
+        .map(icon => icon.sizes)
+        .sort(),
+    ).toEqual(['192x192', '512x512']);
+    expect(
+      byPurpose('any')
+        .map(icon => icon.sizes)
+        .sort(),
+    ).toEqual(['192x192', '512x512']);
+    for (const icon of manifest.icons) expect(icon.purpose.split(' ')).toHaveLength(1);
     expect(manifest.icons.some(icon => icon.type === 'image/svg+xml')).toBe(true);
+  });
+
+  it('reuses the running app window and claims in-scope links, so a tap opens the installed app', () => {
+    expect(manifest.launch_handler).toEqual({ client_mode: 'focus-existing' });
+    expect(manifest.handle_links).toBe('preferred');
   });
 
   it('names the notification badge as its monochrome icon', () => {

@@ -2388,6 +2388,36 @@ describe('AppShell', () => {
     }
   });
 
+  it('opens the tapped notification’s item as a card in the Inbox and settles the address on the Inbox', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/inbox?session=shared&agenda=A3`, [alpha.daemonId], {
+      sessions: ['shared'],
+      listedAgenda: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
+      sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
+      attention: sessionId => agendaSnapshot(sessionId, [externalAgendaItem]),
+    });
+    try {
+      for (let turn = 0; turn < 8; turn += 1) await settle();
+      expect(view.container.querySelector('[data-agenda-view]')?.getAttribute('data-agenda-view')).toBe('A3');
+      expect(window.location.pathname).toBe(`/d/${ALPHA}/inbox`);
+      expect(window.location.search).toBe('');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('sends a tapped notification’s reader to its chat when the item is no longer open', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/inbox?session=shared&agenda=A9`, [alpha.daemonId], {
+      sessions: ['shared'],
+    });
+    try {
+      for (let turn = 0; turn < 8; turn += 1) await settle();
+      expect(window.location.pathname).toBe(`/d/${ALPHA}/session/shared`);
+      expect(window.location.search).toBe('?agenda=A9');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('draws the Board for a machine and keeps the view in the address, replacing the entry', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/board`, [alpha.daemonId], { sessions: ['shared'] });
     try {
