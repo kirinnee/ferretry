@@ -11090,6 +11090,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         agenda,
         new KeyedSerialExecutor(),
         new StorageHarnessPromptStates(storage),
+        // A question whose id is shaped like a daemon reference is not raised (docs/agenda.md § Reserved sourceRefs).
+        { warn: message => void process.stderr.write(`agenda: ${message}\n`) },
       );
       storage.subscribeStates((id, state) => void harnessPrompts.stateWritten(id, state));
       void harnessPrompts.reconcile(storage.listSessions().map(session => session.id)).catch(() => undefined);

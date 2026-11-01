@@ -252,6 +252,26 @@ as the owner; **Edit** points at the Board lane editor. A ferret's own edit leav
 owner's edit confirms it. The routes are `GET /v1/board/projects` and `GET|POST /v1/board/projects/:projectId/lanes`.
 If the card cannot be raised the set stays live and the response says `agenda: "failed"`.
 
+## Reserved sourceRefs
+
+Some daemon producers ACT on the owner's answer to their item: a lane proposal's Accept confirms lanes, a gate item's
+answer moves a card. So the grammars the daemon writes `sourceRef` in — `lanes:`, `gate:`, `gate-followup:`,
+`warden:`, `warden-orphan:`, `handover:`, `budget:`, `prompt:`, `question:` (`DAEMON_SOURCE_REF_PREFIXES` in
+`@ferretry/protocol`) — are the daemon's alone, held at both ends:
+
+- **Nothing a ferret writes carries one.** An agenda add names no reference at all (`forbidden` for a ferret and the
+  owner alike). A harness question's tool id comes from the ferret's own question file, so its item is namespaced,
+  `question:<tool id>` (a provider's id taken as written, a colon included), and an id that is itself in a daemon
+  grammar, blank or too long is not raised at all; the daemon log says so, with the id's control characters made
+  harmless.
+- **Every consumer checks the producer, not just the reference.** A lane proposal's Accept counts only on the daemon's
+  own `task`-source card (`acceptedProposal`); a gate item is the `task` source with its `gate`, and its follow-up
+  the daemon's `task` source too — so a question naming either moves no card, routes no words to a ferret, and, raised
+  and closed first, suppresses no real item. The harness settles only its own `question:` and `prompt:` items (and a
+  question raised before the namespace that carries no other producer's mark): an input or secret card, a phone
+  approval, a 2FA seed, a login recipe or a task plan — all `question` items too — is never closed by a console
+  prompt coming and going.
+
 ## Confirming a configuration change
 
 An edit that loosens what the machine may spend or do is **held** until the owner confirms it

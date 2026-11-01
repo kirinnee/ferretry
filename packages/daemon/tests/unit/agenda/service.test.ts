@@ -552,3 +552,24 @@ describe('an agenda item offers to close the card that waits to be tried', () =>
     should(offered(raised)).be.undefined();
   });
 });
+
+describe('reserved source references (docs/agenda.md § Reserved sourceRefs)', () => {
+  it('refuses a ferret, and the owner, any reference of their own choosing, a daemon grammar included', async () => {
+    // Arrange
+    const { service } = createService();
+
+    // Act
+    const tries = [];
+    for (const sourceRef of [
+      'lanes:11111111-1111-4111-8111-111111111111:2',
+      'gate:F1:tested:1',
+      'gate-followup:F1:1',
+    ]) {
+      tries.push(await service.raise(SESSION, { ...request, sourceRef }, AGENT));
+      tries.push(await service.raise(SESSION, { ...request, sourceRef }, { kind: 'human' }));
+    }
+
+    // Assert
+    for (const attempt of tries) should(attempt).match({ ok: false, error: { code: 'forbidden' } });
+  });
+});

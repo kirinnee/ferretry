@@ -366,10 +366,13 @@ function isGateItem(item: Pick<AgendaItem, 'gate' | 'source'>): boolean {
  * ferret, so the ferret whose board holds it edits, surfaces and closes it as its own.
  */
 export function isGateFollowupAgenda(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
+  return entry.origin.kind === 'daemon' && isGateFollowupItem(entry.item);
+}
+
+/** A gate follow-up as its item says: the gate producer's `task` source, raised by the daemon, under its reference. */
+export function isGateFollowupItem(item: Pick<AgendaItem, 'raisedBy' | 'source' | 'sourceRef'>): boolean {
   return (
-    entry.origin.kind === 'daemon' &&
-    entry.item.source === 'task' &&
-    parseGateFollowupReference(entry.item.sourceRef) !== undefined
+    item.raisedBy === 'daemon' && item.source === 'task' && parseGateFollowupReference(item.sourceRef) !== undefined
   );
 }
 

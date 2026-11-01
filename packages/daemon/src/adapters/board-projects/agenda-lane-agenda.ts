@@ -1,4 +1,8 @@
-import type { LaneProposalAgenda, LaneProposalCard } from '../../lib/board-projects/index.ts';
+import {
+  LANE_PROPOSAL_SOURCE,
+  type LaneProposalAgenda,
+  type LaneProposalCard,
+} from '../../lib/board-projects/index.ts';
 import type { AgendaMutation } from '../../lib/agenda/state-machine.ts';
 import type { RaiseAgendaRequest } from '../../lib/agenda/state-machine.ts';
 
@@ -22,7 +26,7 @@ export class AgendaLaneAgenda implements LaneProposalAgenda {
     const mutation = await this.attention.raise(
       sessionId,
       {
-        source: 'task',
+        source: LANE_PROPOSAL_SOURCE,
         sourceRef: reference,
         subject: card.subject,
         title: card.title,

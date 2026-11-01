@@ -1,9 +1,4 @@
-import {
-  type AgendaItem,
-  parseGateFollowupReference,
-  type ResolvedAgendaItem,
-  type SessionAgendaSummary,
-} from '@ferretry/protocol';
+import { type AgendaItem, type ResolvedAgendaItem, type SessionAgendaSummary } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
 import {
   boardReplyMessage,
@@ -21,7 +16,7 @@ import {
   type ReplyKey,
 } from './reply-batch.ts';
 import type { AgendaBoardChange, AgendaChangeObserver, AgendaLedgerRepository, AgendaService } from './service.ts';
-import { agendaSnapshot, emptyAgendaLedger } from './state-machine.ts';
+import { agendaSnapshot, emptyAgendaLedger, isGateFollowupItem } from './state-machine.ts';
 import { type AgendaModes, decoratedSummary, type SessionStops } from './stopped.ts';
 
 /** Every observer told, in order, each on its own: one that throws never silences the next. */
@@ -106,8 +101,7 @@ export class SessionAgendaProjection implements AgendaChangeObserver {
  * daemon opened on its behalf (`gate-followup:`), so the owner's words there reach it as on its own item.
  */
 const speaksFor = (item: AgendaItem | ResolvedAgendaItem, sessionId: string): boolean =>
-  (item.raisedBy === 'agent' && item.raisedBySession === sessionId) ||
-  (item.raisedBy === 'daemon' && parseGateFollowupReference(item.sourceRef) !== undefined);
+  (item.raisedBy === 'agent' && item.raisedBySession === sessionId) || isGateFollowupItem(item);
 
 /**
  * Tells a ferret the owner's answer to an item IT raised, as an ordinary message naming the item.
