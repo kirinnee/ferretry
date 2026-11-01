@@ -433,6 +433,11 @@ const sessionCases: SchemaCase[] = [
   { name: 'agent rename', schema: session.RenameSessionRequestSchema, value: { teammate: 'Mary-Jane2' } },
   { name: 'hypermedia switch', schema: session.SessionHypermediaPatchSchema, value: { enabled: false } },
   {
+    name: 'credential revoked',
+    schema: session.SessionCredentialRevokedSchema,
+    value: { sessionId: 'ms8-abcd1234', status: 'running' },
+  },
+  {
     name: 'hypermedia switch result',
     schema: session.SessionHypermediaPatchResultSchema,
     value: { view: sessionView, restartRequired: true, note: 'Hypermedia is off from the next launch.' },
