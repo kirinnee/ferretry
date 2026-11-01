@@ -44,6 +44,7 @@ Run \`${bin} config path\` for the directory. Inside it:
 | \`voice.yaml\` | who cleans up dictated text: \`postProcessing\`: \`provider\` (\`off\`, \`groq\`, \`cerebras\`, \`login\`), \`style\` (\`off\`, \`fix\`, \`polish\`), your own \`prompts\` for each style, \`useConversation\` and \`conversationMessages\` |
 | \`pack.yaml\` | Pack mode: \`enabled\`, \`decision\` (\`agent\` or \`jev\`), \`limits\` (\`interactiveChildren\`, \`autoChildren\`, \`maxDepth\`), \`probe\`, \`jev\` |
 | \`models-guide.yaml\` | the routing prompt: \`prompt\` — plain words, at most 1,200 characters, naming model ids in the order to try them (\`fy guide clean-up\` rewrites a rough one) |
+| \`account-defaults.yaml\` | which account a sign-in card offers first: \`sites\`, \`projects\` and \`folders\` map a site or tool@host to an account handle. Only the owner sets it: every line you add, change or remove is a suggestion held until the owner confirms it |
 
 Every file starts with a \`# yaml-language-server: $schema=…\` line. \`${bin} config schema <kind>\` prints the
 JSON Schema of a kind (\`${bin} config schema\` lists the kinds).

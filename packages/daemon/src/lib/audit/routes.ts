@@ -392,6 +392,14 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     detail: { action: 'login-delete' },
   },
   // Accounts and sign-ins (docs/secrets.md) are the same store: every change is kept, by handle or sign-in id only.
+  // The default account for a place: the subject is the file, never the place or the account (a place can be a folder).
+  {
+    method: 'PUT',
+    path: '/v1/accounts/defaults',
+    event: 'secrets.changed',
+    fixedSubject: 'account-defaults',
+    detail: { action: 'account-default-put' },
+  },
   {
     method: 'PUT',
     path: '/v1/accounts/:id',

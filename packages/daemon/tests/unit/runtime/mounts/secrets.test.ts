@@ -63,6 +63,7 @@ describe('the secret routes', () => {
       'PUT /v1/accounts/sign-ins/:signIn',
       'DELETE /v1/accounts/sign-ins/:signIn',
       'POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId',
+      'PUT /v1/accounts/defaults',
       'PUT /v1/accounts/:id',
       'POST /v1/accounts/:id/rename',
       'DELETE /v1/accounts/:id',

@@ -70,6 +70,7 @@ export const CONFIG_KIND_WORDS: Readonly<Record<ConfigFileKind, string>> = {
   voice: 'Voice',
   pack: 'Pack mode',
   modelsGuide: 'Routing prompt',
+  accountDefaults: 'Default accounts',
   preset: 'Provider presets',
   models: 'Model catalogs',
 };

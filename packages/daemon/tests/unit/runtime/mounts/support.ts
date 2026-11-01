@@ -138,6 +138,7 @@ import {
   LoginRecipeService,
   type LoginIndexDocument,
   type LoginIndexStore,
+  AccountDefaults,
   LoginVault,
   narrowAccountVault,
   type StoredLoginIndex,
@@ -2048,6 +2049,18 @@ export interface SecretWorld {
 const SECRET_CLOCK = { now: () => '2026-01-01T00:00:00.000Z' };
 
 /** The REAL secret subsystem over an in-memory vault. */
+const UNREACHED_CONFIG_FILES = {
+  load: async () => {
+    throw new Error('this fixture has no configuration files');
+  },
+  writeOwn: async () => {
+    throw new Error('this fixture has no configuration files');
+  },
+  acceptOwn: async () => {
+    throw new Error('this fixture has no configuration files');
+  },
+} as unknown as ConstructorParameters<typeof AccountDefaults>[0]['config'];
+
 export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
   const documents = world.documents ?? new MemorySecretDocuments();
   const cipher = new FakeSecretCipher();
@@ -2065,6 +2078,11 @@ export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
     directory,
     logins,
     accounts: logins.accounts,
+    // The route is mounted; a test that reads or writes the file builds its own over a real config service.
+    accountDefaults: new AccountDefaults({
+      config: UNREACHED_CONFIG_FILES,
+      listing: async () => await logins.accounts.list(),
+    }),
     lookAlike: narrow.lookAlike,
     // Login recipes over the same store; nothing is masked in these fixtures, so no recipe is refused for a value.
     loginRecipes: new LoginRecipeService({

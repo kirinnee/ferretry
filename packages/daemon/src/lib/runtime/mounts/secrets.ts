@@ -21,6 +21,8 @@ import {
   TwoFactorSeedStageViewSchema,
   type TwoFactorStageId,
   TwoFactorStageIdSchema,
+  PutAccountDefaultRequestSchema,
+  type PutAccountDefaultResult,
   PutAccountRequestSchema,
   PutSignInRequestSchema,
   RenameAccountRequestSchema,
@@ -62,6 +64,9 @@ import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
+  AccountDefaultNotUsable,
+  type AccountDefaults,
+  AccountDefaultsFileBroken,
   type AccountDirectory,
   type AccountListing,
   type AccountVault,
@@ -87,6 +92,7 @@ import {
   UnknownSecretError,
 } from '../../secrets/index.ts';
 import { parseActor } from '../../api/actor.ts';
+import { heldEditRefusal, spendHeldEditProof } from './config-files.ts';
 
 /**
  * The secret store's HTTP surface.
@@ -447,6 +453,7 @@ function accountRoutes(
   accounts: AccountDirectory | undefined,
   recipes: LoginRecipeService | undefined,
   lookAlike: Pick<AccountVault, 'lookAlike'> | undefined,
+  defaults: AccountDefaults | undefined,
 ): readonly ApiRoute[] {
   if (accounts === undefined) return [];
   /** An owner-only handler: a ferret is refused before the body is read, and a domain refusal is its HTTP answer. */
@@ -546,6 +553,41 @@ function accountRoutes(
               const { decision } = await parseBody(context.request, LoginRecipeDecisionSchema);
               return await recipes.decideSignIn(signIn, proposal.data, decision);
             }),
+          } satisfies ApiRoute,
+        ]),
+    // THE DEFAULT ACCOUNT FOR A PLACE (docs/config-files.md, account-defaults.yaml). Registered BEFORE `/:id`, which
+    // would otherwise read "defaults" as a handle. Every change to that file is HELD when anyone else makes it, so
+    // this is the owner's own act: a ferret is refused before the body is read, a paired device needs the passkey
+    // step-up for loosening a configuration file, and at the machine it is direct. The line is written and in effect
+    // in the same act. RF-2: this becomes `caller: 'person'`.
+    ...(defaults === undefined
+      ? []
+      : [
+          {
+            method: 'PUT',
+            path: '/v1/accounts/defaults',
+            ...configure,
+            handle: async (context: RouteContext) => {
+              if (isAgentCaller(context))
+                throw new ApiError(
+                  403,
+                  'a ferret cannot choose the default account for a place; the owner does. A suggestion goes in config/account-defaults.yaml, where it waits for the owner to confirm it',
+                  'forbidden',
+                );
+              const refused = heldEditRefusal(context, 'account-defaults.yaml', 'confirm');
+              if (refused !== undefined) return refused;
+              const change = await parseBody(context.request, PutAccountDefaultRequestSchema);
+              try {
+                const written = await defaults.set(change, change.account);
+                spendHeldEditProof(context);
+                return jsonResponse({ defaults: written } satisfies PutAccountDefaultResult);
+              } catch (error) {
+                if (error instanceof AccountDefaultsFileBroken)
+                  throw new ApiError(409, error.message, 'defaults_file_invalid');
+                if (error instanceof AccountDefaultNotUsable) throw new ApiError(409, error.message, 'no_sign_in_here');
+                return reraise(error);
+              }
+            },
           } satisfies ApiRoute,
         ]),
     {
@@ -941,6 +983,8 @@ export interface SecretSubsystem {
   readonly accounts?: AccountDirectory;
   /** The vault's one look-alike answer (handles only): the only part of it a route holds. */
   readonly lookAlike?: Pick<AccountVault, 'lookAlike'>;
+  /** The default account per place: the owner's one-line write of `config/account-defaults.yaml`. */
+  readonly accountDefaults?: AccountDefaults;
   /**
    * Staged 2FA seeds, waiting for the passkey bound to each. It holds sealed seeds in memory and never answers one.
    */
@@ -1033,7 +1077,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       handle: async context => await exportSecrets(subsystem.exports, context),
     },
     ...loginRoutes(subsystem.logins, subsystem.loginRecipes),
-    ...accountRoutes(subsystem.accounts, subsystem.loginRecipes, subsystem.lookAlike),
+    ...accountRoutes(subsystem.accounts, subsystem.loginRecipes, subsystem.lookAlike, subsystem.accountDefaults),
     ...factorRoutes(subsystem.accounts, subsystem.seeds),
   ];
 }

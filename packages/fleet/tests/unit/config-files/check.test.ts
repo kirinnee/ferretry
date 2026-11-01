@@ -466,3 +466,32 @@ describe('checkConfigFile: the agenda check switch renamed for the agenda wire',
     should(checkConfigFile('profiles/base.yaml', 'contents: []\n').issues).deepEqual([]);
   });
 });
+
+describe('checkConfigFile: account-defaults.yaml', () => {
+  it('should accept the three maps', () => {
+    // Act
+    const actual = checkConfigFile(
+      'account-defaults.yaml',
+      'sites:\n  app.clickup.com: CLICKUP_A\nprojects:\n  ferretry:\n    github.com: GITHUB\nfolders:\n  /srv/app:\n    github.com: GITHUB\n',
+    );
+
+    // Assert
+    should(actual.ok).be.true();
+    should(actual.issues).deepEqual([]);
+  });
+
+  it.each([
+    ['an unknown map', 'site:\n  github.com: GITHUB\n'],
+    ['a host in capitals', 'sites:\n  GitHub.com: GITHUB\n'],
+    ['a lower-case handle', 'sites:\n  github.com: github\n'],
+    ['a relative folder', 'folders:\n  work/app:\n    github.com: GITHUB\n'],
+    ['an account list where one handle belongs', 'sites:\n  github.com: [GITHUB, GITHUB_B]\n'],
+  ])('should fail %s, with the line it is on', (_name, text) => {
+    // Act
+    const actual = checkConfigFile('account-defaults.yaml', text);
+
+    // Assert
+    should(actual.ok).be.false();
+    should(actual.issues.some(issue => issue.severity === 'error' && issue.line !== undefined)).be.true();
+  });
+});

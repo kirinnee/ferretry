@@ -674,6 +674,7 @@ const CANONICAL_PATHS: Readonly<Record<ConfigSchemaId, string>> = {
   voice: 'voice.yaml',
   pack: 'pack.yaml',
   modelsGuide: 'models-guide.yaml',
+  accountDefaults: 'account-defaults.yaml',
   preset: 'presets/my-preset.yaml',
   models: 'models/my-provider.yaml',
   ...Object.fromEntries(CONFIG_COMPONENT_KINDS.map(kind => [`component-${kind}`, `components/${kind}/main.yaml`])),
@@ -766,5 +767,57 @@ describe('configLoosening — pack.yaml and models-guide.yaml', () => {
     // Assert
     should(actual).deepEqual([]);
     should(configValue('pack', {})).deepEqual(DEFAULT_PACK_CONFIG);
+  });
+});
+
+describe('configLoosening — account-defaults.yaml', () => {
+  const A = 'CLICKUP_A';
+  const B = 'CLICKUP_B';
+
+  it.each([
+    [
+      'an added site line',
+      {},
+      { sites: { 'app.clickup.com': A } },
+      ['changes which account a card offers first for app.clickup.com in every session on this machine'],
+    ],
+    [
+      'a changed project line',
+      { projects: { ferretry: { 'github.com': A } } },
+      { projects: { ferretry: { 'github.com': B } } },
+      ['changes which account a card offers first for github.com in project ferretry'],
+    ],
+    [
+      'a removed folder line',
+      { folders: { '/srv/app': { 'github.com': A } } },
+      {},
+      ['changes which account a card offers first for github.com in folder /srv/app'],
+    ],
+  ])('should hold %s', (_name, before, after, expected) => {
+    // Act
+    const actual = configLoosening('accountDefaults', before, after);
+
+    // Assert
+    should(actual).deepEqual(expected);
+  });
+
+  it('should hold nothing when the lines are the same, however they are ordered', () => {
+    // Act + Assert
+    should(
+      configLoosening('accountDefaults', { sites: { 'a.com': A, 'b.com': B } }, { sites: { 'b.com': B, 'a.com': A } }),
+    ).deepEqual([]);
+  });
+
+  it('should say a sentence once when two edits touch the same place', () => {
+    // Act
+    const actual = configLoosening('accountDefaults', { sites: { 'a.com': A } }, { sites: { 'a.com': B } });
+
+    // Assert
+    should(actual).have.length(1);
+  });
+
+  it('should start from no defaults', () => {
+    // Assert
+    should(SINGLETON_DEFAULTS.accountDefaults).deepEqual({});
   });
 });
