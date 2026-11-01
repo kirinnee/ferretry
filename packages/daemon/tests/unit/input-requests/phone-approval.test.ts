@@ -1,177 +1,25 @@
 import { describe, it } from 'bun:test';
-import type { AgendaId, InputTargetFacts, LoginObservation, PhoneApprovalRaise } from '@ferretry/protocol';
 import { PhoneApprovalRaiseSchema } from '@ferretry/protocol';
 import should from 'should';
-import type { BrowserPushNumberRead } from '../../../src/lib/browser/transport/input-contracts.ts';
 import { PhoneApprovalAuditAdapter } from '../../../src/lib/input-requests/audit-adapter.ts';
 import { InputRequestError } from '../../../src/lib/input-requests/errors.ts';
-import {
-  gatedNumber,
-  type PhoneApprovalAudit,
-  type PhoneApprovalCard,
-  PhoneApprovalService,
-} from '../../../src/lib/input-requests/phone-approval.ts';
-import type { InputCaller, ObserveResult } from '../../../src/lib/input-requests/ports.ts';
+import { gatedNumber } from '../../../src/lib/input-requests/phone-approval.ts';
 import type { SavedListing } from '../../../src/lib/input-requests/saved-logins.ts';
 import { phoneApprovalRoutes } from '../../../src/lib/runtime/mounts/input-requests.ts';
-
-const SESSION = 'session-1';
-const START = Date.parse('2026-11-01T10:00:00.000Z');
-const OWNER: InputCaller = { kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' };
-const AGENT: InputCaller = { kind: 'agent', sessionId: SESSION };
-
-const SI_CLICKUP = 'si_00000000000000c1';
-const SI_OKTA = 'si_00000000000000c2';
-const SI_AWS = 'si_00000000000000c3';
-
-/**
- * ClickUp signs in via the company's Okta; the Okta account signs in at company.okta.com; AWS is a terminal sign-in
- * (okta-aws-cli on this machine). ClickUp's account has one push key.
- */
-const LISTING = {
-  accounts: [
-    {
-      id: 'CLICKUP',
-      label: 'ClickUp',
-      username: 'a@gmail.com',
-      factors: [{ id: 'tf_000000000001', kind: 'push', label: 'Okta Verify on Pixel', app: 'okta-verify' }],
-    },
-    { id: 'OKTA', label: 'Okta', username: 'a@company.com', factors: [] },
-    { id: 'AWS', label: 'AWS', factors: [] },
-  ],
-  signIns: [
-    {
-      id: SI_CLICKUP,
-      account: 'CLICKUP',
-      place: { kind: 'site', domains: ['app.clickup.com'], match: [] },
-      via: { account: { id: 'OKTA', label: 'Okta' }, signIn: SI_OKTA },
-      observed: [{ at: 'company.okta.com', surface: 'page', identity: 'feedfacefeedface' }],
-    },
-    { id: SI_OKTA, account: 'OKTA', place: { kind: 'site', domains: ['company.okta.com'], match: [] } },
-    { id: SI_AWS, account: 'AWS', place: { kind: 'terminal', tool: 'okta-aws-cli', host: 'kirin-box' } },
-  ],
-} as unknown as SavedListing;
-
-const read = (
-  origin: string,
-  navigationId: string,
-  extra: Partial<BrowserPushNumberRead> = {},
-): BrowserPushNumberRead => ({ origin, navigationId, ...extra });
-const okta = (value: string, navigationId = 'doc-1', origin = 'https://company.okta.com'): BrowserPushNumberRead =>
-  read(origin, navigationId, {
-    provider: 'okta',
-    number: { value, from: 'okta', frameOrigin: origin },
-  });
-
-const terminalFacts = (promptLine: string, comm = 'okta-aws-cli'): InputTargetFacts =>
-  ({
-    kind: 'terminal',
-    paneProof: { paneId: '%3', pid: 1 },
-    foreground: { pid: 2, pgid: 2, comm, argv: comm },
-    echo: 'on',
-    cursorRow: 0,
-    promptLine,
-    promptLineDigest: promptLine.padEnd(64, '0').slice(0, 64),
-    program: comm,
-    canonical: true,
-    recognisedConsumer: false,
-  }) as unknown as InputTargetFacts;
-
-/** A clock that moves only when the test ticks, and timers that fire when it reaches them. */
-function world(options: { readonly enabled?: boolean; readonly listing?: SavedListing } = {}) {
-  let now = START;
-  let pending: { at: number; resolve: () => void }[] = [];
-  let ids = 0;
-  const page: { current?: { pageId: string; read: BrowserPushNumberRead } } = {
-    current: { pageId: 'page-1', read: okta('42') },
-  };
-  const terminal: { current: ObserveResult } = {
-    current: { ok: true, facts: terminalFacts('Waiting for approval…'), names: ['%3'] },
-  };
-  const cards: { sessionId: string; card: PhoneApprovalCard }[] = [];
-  const closed: { id: AgendaId; note: string }[] = [];
-  const pushes: { body: string; sequence: number; secondsLeft: number }[] = [];
-  const told: string[] = [];
-  const audits: Parameters<PhoneApprovalAudit['record']>[0][] = [];
-  const facts: { signIn: string; seen: LoginObservation }[] = [];
-  const looks: (PhoneApprovalRaise['element'] | undefined)[] = [];
-  const acted = { scripted: false, since: Number.NEGATIVE_INFINITY, terminalSince: Number.NEGATIVE_INFINITY };
-  const service = new PhoneApprovalService({
-    pages: {
-      look: async (_session, _key, element) => {
-        looks.push(element);
-        return page.current;
-      },
-    },
-    terminals: { observe: async () => terminal.current },
-    agenda: {
-      raise: async (sessionId, card) => {
-        cards.push({ sessionId, card });
-        return { ok: true, id: `A${String(cards.length)}` as AgendaId };
-      },
-      close: async (_session, id, note) => {
-        closed.push({ id, note });
-      },
-      open: async () => ['A7' as AgendaId],
-    },
-    push: {
-      push: async (_session, _agenda, approval) => {
-        pushes.push({ body: approval.body, sequence: approval.sequence, secondsLeft: approval.secondsLeft });
-      },
-    },
-    notifier: {
-      tell: async (_session, _agenda, message) => {
-        told.push(message);
-      },
-    },
-    audit: {
-      record: async entry => {
-        audits.push(entry);
-      },
-    },
-    clock: { now: () => now },
-    timers: {
-      after: async milliseconds =>
-        await new Promise<void>(resolve => pending.push({ at: now + milliseconds, resolve })),
-    },
-    ids: () => `pa_${(ids++).toString(16).padStart(24, '0')}`,
-    observer: {
-      tainted: (_session, kind, since) =>
-        kind === 'browser' ? acted.scripted || acted.since >= since : acted.terminalSince >= since,
-    },
-    logins: { listing: async () => options.listing ?? LISTING },
-    facts: {
-      observeSignIn: async (signIn, seen) => {
-        facts.push({ signIn, seen });
-      },
-    },
-    hostName: 'kirin-box',
-    enabled: () => options.enabled ?? true,
-  });
-  const flush = async (): Promise<void> => {
-    for (let round = 0; round < 4; round += 1) await new Promise(resolve => setTimeout(resolve, 0));
-  };
-  /** Moves the clock a second and lets the watch take its look. */
-  const tick = async (milliseconds = 1_000): Promise<void> => {
-    now += milliseconds;
-    const due = pending.filter(timer => timer.at <= now);
-    pending = pending.filter(timer => timer.at > now);
-    for (const timer of due) timer.resolve();
-    await flush();
-  };
-  const raise = async (raise: Record<string, unknown> = {}) =>
-    await service.raise(
-      SESSION,
-      'lizzette',
-      PhoneApprovalRaiseSchema.parse({ target: { kind: 'browser', key: 'app' }, secretHint: 'CLICKUP', ...raise }),
-    );
-  const actNow = (kind: 'browser' | 'terminal') => {
-    if (kind === 'browser') acted.since = now;
-    else acted.terminalSince = now;
-  };
-  return { service, page, terminal, cards, closed, pushes, told, audits, facts, looks, acted, tick, raise, actNow };
-}
-
+import {
+  AGENT,
+  OWNER,
+  okta,
+  read,
+  SESSION,
+  LISTING,
+  SI_AWS,
+  SI_CLICKUP,
+  SI_OKTA,
+  START,
+  terminalFacts,
+  world,
+} from './phone-approval-support.ts';
 describe('PhoneApprovalService raise', () => {
   it('should refuse a raise until the app that draws the card ships', async () => {
     // Arrange
@@ -543,6 +391,199 @@ describe('PhoneApprovalService settling (invariant 10)', () => {
 
     // Assert
     should(run.closed.map(each => each.id)).eql(['A7']);
+  });
+});
+
+describe('PhoneApprovalService refusals and the owner’s reads', () => {
+  it('should refuse a raise on a page or terminal the session does not have', async () => {
+    // Arrange
+    const run = world();
+    run.page.current = undefined;
+    run.terminal.current = { ok: false, reason: 'target_gone' };
+
+    // Act
+    const page = await run.raise().catch((error: unknown) => error);
+    const terminal = await run.service
+      .raise(SESSION, 'lizzette', PhoneApprovalRaiseSchema.parse({ target: { kind: 'terminal', key: 'aws' } }))
+      .catch((error: unknown) => error);
+
+    // Assert
+    should((page as InputRequestError).code).equal('not_found');
+    should((terminal as InputRequestError).code).equal('not_found');
+    should(run.cards).be.empty();
+  });
+
+  it('should keep two approvals waiting per session and ten raises an hour', async () => {
+    // Arrange
+    const waiting = world();
+    const hourly = world();
+    await waiting.raise({ target: { kind: 'browser', key: 'one' } });
+    await waiting.raise({ target: { kind: 'browser', key: 'two' } });
+    for (let n = 0; n < 10; n += 1) {
+      const view = await hourly.raise();
+      await hourly.service.refuse(OWNER, SESSION, view.id);
+    }
+
+    // Act
+    const third = await waiting.raise({ target: { kind: 'browser', key: 'three' } }).catch((error: unknown) => error);
+    const eleventh = await hourly.raise().catch((error: unknown) => error);
+
+    // Assert
+    should((third as InputRequestError).code).equal('capacity');
+    should((third as InputRequestError).message).match(/already has phone approvals waiting/u);
+    should((eleventh as InputRequestError).code).equal('capacity');
+    should((eleventh as InputRequestError).message).match(/last hour/u);
+  });
+
+  it('should list the waiting approvals oldest first and read one, for the owner only and in its own session', async () => {
+    // Arrange
+    const run = world();
+    const first = await run.raise({ target: { kind: 'browser', key: 'one' } });
+    await run.tick();
+    const second = await run.raise({ target: { kind: 'browser', key: 'two' } });
+    await run.service.refuse(OWNER, SESSION, first.id);
+
+    // Act
+    const listed = run.service.list(OWNER).map(approval => approval.id);
+    const mine = run.service.list(OWNER, SESSION).map(approval => approval.id);
+    const other = run.service.list(OWNER, 'session-2');
+    const byAgent = (() => {
+      try {
+        return run.service.list(AGENT);
+      } catch (error) {
+        return error;
+      }
+    })();
+    const elsewhere = (() => {
+      try {
+        return run.service.get(OWNER, 'session-2', second.id);
+      } catch (error) {
+        return error;
+      }
+    })();
+    const unknownRefusal = await run.service
+      .refuse(OWNER, SESSION, `pa_${'f'.repeat(24)}`)
+      .catch((error: unknown) => error);
+    const unknownWait = await run.service.agentView(SESSION, first.id.replace('0', 'f'), 0).catch((e: unknown) => e);
+    const again = await run.service.refuse(OWNER, SESSION, first.id);
+
+    // Assert — a refused one is no longer listed, and refusing it again leaves it as it ended.
+    should(listed).eql([second.id]);
+    should(mine).eql([second.id]);
+    should(other).be.empty();
+    should((byAgent as InputRequestError).code).equal('forbidden');
+    should((elsewhere as InputRequestError).code).equal('not_found');
+    should((unknownRefusal as InputRequestError).code).equal('not_found');
+    should((unknownWait as InputRequestError).code).equal('not_found');
+    should(again.state).equal('refused');
+    should(run.told).have.length(1);
+  });
+
+  it('should wake a ferret waiting on its approval the moment it ends', async () => {
+    // Arrange
+    const run = world();
+    const view = await run.raise();
+    const waited = run.service.agentView(SESSION, view.id, 30_000);
+
+    // Act
+    await run.service.refuse(OWNER, SESSION, view.id);
+
+    // Assert
+    should(await waited).eql({ id: view.id, state: 'refused' });
+  });
+
+  it('should end a session’s approvals with it and forget them', async () => {
+    // Arrange
+    const run = world();
+    const view = await run.raise();
+
+    // Act
+    const before = run.service.sessions();
+    await run.service.sessionEnded(SESSION);
+
+    // Assert
+    should(before).eql([SESSION]);
+    should(run.service.sessions()).be.empty();
+    should(run.closed[0]?.note).equal('The page or terminal closed.');
+    should(run.audits.at(-1)).containDeep({
+      event: 'phone-approval.settled',
+      approval: { id: view.id, state: 'gone' },
+    });
+  });
+});
+
+describe('PhoneApprovalService matching and watching edges', () => {
+  it('should name no account when the provider a chain reaches is not saved, or the chain never reaches the page', async () => {
+    // Arrange — the Okta account is gone from the listing; and a chain that loops back on itself.
+    const orphan = world({ listing: { ...LISTING, accounts: LISTING.accounts.filter(each => each.id !== 'OKTA') } });
+    const looping = world({
+      listing: {
+        accounts: LISTING.accounts,
+        signIns: LISTING.signIns.map(each =>
+          each.id === SI_OKTA
+            ? { ...each, via: { account: { id: 'CLICKUP', label: 'ClickUp' }, signIn: SI_CLICKUP } }
+            : each,
+        ),
+      } as SavedListing,
+    });
+    const microsoft = 'https://login.microsoftonline.com';
+    looping.page.current = { pageId: 'page-1', read: read(microsoft, 'doc-1', { provider: 'microsoft' }) };
+
+    // Act
+    const one = await orphan.raise();
+    const two = await looping.raise();
+
+    // Assert
+    should(orphan.service.get(OWNER, SESSION, one.id).account).be.undefined();
+    should(looping.service.get(OWNER, SESSION, two.id).account).be.undefined();
+  });
+
+  it('should keep the push fact under a fresh identity where the sign-in has none yet', async () => {
+    // Arrange — no hint: the Okta sign-in matches the page itself, and has no facts there.
+    const run = world();
+    await run.raise({ secretHint: undefined });
+
+    // Act
+    run.page.current = { pageId: 'page-1', read: read('https://app.clickup.com', 'doc-2') };
+    await run.tick();
+
+    // Assert
+    should(run.facts).have.length(1);
+    should(run.facts[0]).containDeep({ signIn: SI_OKTA, seen: { at: 'company.okta.com', secondFactor: 'push' } });
+    should(run.facts[0]?.seen.identity).match(/^[0-9a-f]{16}$/u);
+    should(run.facts[0]?.seen.identity).not.equal('feedfacefeedface');
+  });
+
+  it('should keep watching after a look that cannot be made', async () => {
+    // Arrange
+    const run = world();
+    const view = await run.raise();
+    run.acted.fail = 1;
+
+    // Act — the first look fails; the page then moves on.
+    await run.tick();
+    run.page.current = { pageId: 'page-1', read: read('https://app.clickup.com', 'doc-2') };
+    for (let second = 0; second < 3; second += 1) await run.tick();
+
+    // Assert
+    should(run.service.get(OWNER, SESSION, view.id).state).equal('moved-on');
+  });
+
+  it('should end a terminal’s approval gone when its pane closes', async () => {
+    // Arrange
+    const run = world();
+    const view = await run.service.raise(
+      SESSION,
+      'lizzette',
+      PhoneApprovalRaiseSchema.parse({ target: { kind: 'terminal', key: 'aws' } }),
+    );
+
+    // Act
+    run.terminal.current = { ok: false, reason: 'target_gone' };
+    await run.tick();
+
+    // Assert
+    should(run.service.get(OWNER, SESSION, view.id).state).equal('gone');
   });
 });
 

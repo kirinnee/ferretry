@@ -6,8 +6,9 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { finalised } from '../../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import type { InputRequestService } from '../../../../src/lib/input-requests/service.ts';
-import { inputRequestRoutes } from '../../../../src/lib/runtime/mounts/input-requests.ts';
+import { inputRequestRoutes, phoneApprovalRoutes } from '../../../../src/lib/runtime/mounts/input-requests.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
+import { SESSION as APPROVAL_SESSION, world } from '../../input-requests/phone-approval-support.ts';
 import { FACTS, inputRequestService, RAISE, SESSION } from '../../input-requests/support.ts';
 import { handleDirectly } from './second-line.ts';
 import { agentIn, CREDENTIALS, fromFerret, GRANTED, human, withoutGrant, withoutSecretsConfigure } from './support.ts';
@@ -478,5 +479,53 @@ describe('the handlers’ own second line', () => {
 
     // Assert
     should([answer.status, answer.code]).deepEqual([403, 'forbidden']);
+  });
+});
+
+describe('the phone approval routes', () => {
+  async function approvals() {
+    const run = world();
+    const view = await run.raise();
+    const dispatch = new ApiDispatcher(new ApiRouter(phoneApprovalRoutes(run.service)), CREDENTIALS, GRANTED);
+    return { run, dispatch, id: view.id };
+  }
+  const one = (id: string, session = APPROVAL_SESSION) => `/v1/sessions/${session}/phone-approvals/${id}`;
+
+  it('should list the waiting approvals and read one, with its number, for the owner', async () => {
+    const { dispatch, id } = await approvals();
+
+    const all = await dispatch.dispatch(request({ method: 'GET', path: '/v1/phone-approvals', headers: human }));
+    const read = await dispatch.dispatch(request({ method: 'GET', path: one(id), headers: human }));
+
+    should(all.status).equal(200);
+    should((jsonBody(all).approvals as { id: string }[]).map(each => each.id)).eql([id]);
+    should(read.status).equal(200);
+    should(jsonBody(read)).containDeep({ id, state: 'waiting', number: { value: '42' } });
+  });
+
+  it('should answer an unusable id, another session’s approval and an unknown one without reading anything', async () => {
+    const { dispatch, id } = await approvals();
+
+    const unusable = await dispatch.dispatch(request({ method: 'GET', path: one('pa_42'), headers: human }));
+    const elsewhere = await dispatch.dispatch(request({ method: 'GET', path: one(id, 'session-2'), headers: human }));
+    const unknown = await dispatch.dispatch(post(`${one(`pa_${'f'.repeat(24)}`)}/refuse`, {}));
+
+    should([unusable.status, elsewhere.status, unknown.status]).eql([400, 404, 404]);
+  });
+
+  it('should refuse the approval for the owner, and refuse an agent on every route', async () => {
+    const { dispatch, run, id } = await approvals();
+
+    const byAgent = await Promise.all([
+      dispatch.dispatch(request({ method: 'GET', path: '/v1/phone-approvals', headers: agentIn(APPROVAL_SESSION) })),
+      dispatch.dispatch(request({ method: 'GET', path: one(id), headers: agentIn(APPROVAL_SESSION) })),
+      dispatch.dispatch(post(`${one(id)}/refuse`, {}, agentIn(APPROVAL_SESSION))),
+    ]);
+    const refused = await dispatch.dispatch(post(`${one(id)}/refuse`, {}));
+
+    should(byAgent.map(response => response.status)).eql([403, 403, 403]);
+    should(refused.status).equal(200);
+    should(jsonBody(refused)).containDeep({ id, state: 'refused' });
+    should(run.told).have.length(1);
   });
 });

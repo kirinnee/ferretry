@@ -390,3 +390,27 @@ describe('PhoneApprovalAgendaAdapter on the real agenda', () => {
     should(await adapter.open('s1')).eql([]);
   });
 });
+
+describe('PhoneApprovalAgendaAdapter when the agenda keeps nothing', () => {
+  it('should say so rather than claim a card, and list none from a board it cannot read', async () => {
+    // Arrange — an agenda that refuses, one that answers without an item, and one whose board cannot be read.
+    const refusing = new PhoneApprovalAgendaAdapter({
+      raise: async () => ({ ok: false, error: { code: 'full', message: 'the board is full' } }),
+      list: async () => ({ ok: false, error: { code: 'not_found', message: 'no such session' } }),
+    } as never);
+    const empty = new PhoneApprovalAgendaAdapter({ raise: async () => ({ ok: true }) } as never);
+    const card = {
+      approvalId: `pa_${'0'.repeat(23)}1`,
+      title: 'Approve on your phone',
+      subject: 'Approve on your phone: ClickUp',
+      why: 'ClickUp: company.okta.com.',
+      context: 'Asked by lizzette.',
+      howToResolve: 'Approve it on your phone.',
+    };
+
+    // Act + Assert
+    should(await refusing.raise('s1', card)).eql({ ok: false, message: 'the board is full' });
+    should(await empty.raise('s1', card)).eql({ ok: false, message: 'the agenda kept no card for this approval' });
+    should(await refusing.open('s1')).eql([]);
+  });
+});

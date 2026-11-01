@@ -122,3 +122,33 @@ describe('AgentToolService — push: true on a request tool', () => {
     should(refused.code).equal('unavailable');
   });
 });
+
+describe('AgentToolService — what input.wait says of a phone approval', () => {
+  it('should say each state in words the ferret can act on, and never a number', async () => {
+    // Arrange
+    const phoneApprovals = new FakeApprovals();
+    const world = agentToolWorld({ phoneApprovals });
+    const states: PhoneApprovalAgentView[] = [
+      { id: ID, state: 'waiting' },
+      { id: ID, state: 'moved-on' },
+      { id: ID, state: 'timed-out' },
+      { id: ID, state: 'refused' },
+      { id: ID, state: 'gone' },
+    ];
+
+    // Act
+    const summaries: string[] = [];
+    for (const view of states) {
+      phoneApprovals.view = view;
+      summaries.push((await world.service.call(agent, { tool: 'input.wait', id: ID })).summary);
+    }
+
+    // Assert
+    should(summaries[0]).match(/still waiting/u);
+    should(summaries[1]).match(/moved on/u);
+    should(summaries[1]).not.match(/push/u);
+    should(summaries[2]).match(/ran out of time/u);
+    should(summaries[3]).match(/Stop signing in there/u);
+    should(summaries[4]).match(/closed/u);
+  });
+});

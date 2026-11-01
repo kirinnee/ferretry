@@ -194,15 +194,14 @@ const FINAL: ReadonlySet<PhoneApprovalState> = new Set(['moved-on', 'timed-out',
 const instant = (ms: number): string => new Date(ms).toISOString();
 const isFinal = (approval: PhoneApproval): boolean => FINAL.has(approval.state);
 
-/** An origin's host when it is one a number may be read on at all: https, no port, no credentials. */
+/**
+ * An origin's host when it is one a number may be read on at all: https and no port. The schema already proved it
+ * parses and IS its own origin (so it carries no credentials or path), so the URL below cannot throw.
+ */
 function httpsHost(origin: string): string | undefined {
   if (!PhoneApprovalOriginSchema.safeParse(origin).success) return undefined;
-  try {
-    const url = new URL(origin);
-    return url.port === '' && url.username === '' && url.password === '' ? url.hostname.toLowerCase() : undefined;
-  } catch {
-    return undefined;
-  }
+  const url = new URL(origin);
+  return url.port === '' ? url.hostname.toLowerCase() : undefined;
 }
 
 /**
