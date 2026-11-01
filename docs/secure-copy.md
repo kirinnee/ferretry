@@ -255,20 +255,23 @@ The rules the contract fixes:
   one sign-in are refused. The daemon resolves each line against Accounts and draws the card from what it found.
 - **The owner only narrows.** They tick lines and pick one of the daemon's candidate accounts (needed when there
   are two or more). They tick codes only where the ferret asked for them and the account can make them. They can't
-  raise uses, lengthen the plan or add a field (`taskPlanSelection`).
+  raise uses, lengthen the plan or add a field (`taskPlanSelection`). One account can be ticked on only one line, even when one
+  line named it and another reached it through a site picker; otherwise their uses would add up.
 - **Any ticked sign-in line needs a passkey, at the machine too.** The act is `approve-task-plan`, asked of every
   caller. Its proof is bound to `taskPlanApprovalSubject(stage, canonical)`:
   `sha256("ferretry.task-plan.v1\0" + stage + "\0" + sha256(canonical))`. `canonical` is the RFC 8785 JSON of the
   plan id, its session, its expiry and every ticked line with its pins: the account's immutable key, the login
   domains (or `tool@host`), the recipe version and the field identities with history. A change to any one of them
   changes the subject. A plan record with an approved sign-in line and no passkey answer, or a passkey answer from
-  the machine itself, doesn't parse. A selection of paste lines only keeps the paste plan's rule.
+  the machine itself, doesn't parse. Whatever the daemon resolved, the bytes bind a page line only to web hosts and a
+  terminal line only to `sudo`, `su` or `doas`. A selection of paste lines only keeps the paste plan's rule.
 - **The ferret learns nothing about secret fields.** Its view (`taskPlanAgentView`) has each line's state, the
   picked account's name and uses left. It has no `can`, `history`, flags, reasons or code tick. When a plan doesn't
   fill a card, the ferret gets one sentence for every reason. The owner's card gets the reason as a fixed sentence
   (`grantMissLine`).
 - **The old tool keeps working.** `secure.preapprove { items }` reads as a task plan of one-use paste lines
-  (`taskPlanCallOf`). Its answer is projected back to the old plan shape (`copyPlanOf`).
+  (`taskPlanCallOf`). Its answer is projected back to the old plan shape (`copyPlanOf`). An old item number is
+  never a line number: `taskPlanLineOfCopyItem` maps it back, so "approve item 0" can't land on a sign-in line.
 - **The app ships first.** An input card a plan fills carries a `plan` actor and a `preapproval` note, and an
   older app's strict parse refuses them. So `task-plan.1` stays unreported until the app draws the plan card.
 

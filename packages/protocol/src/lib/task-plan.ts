@@ -6,7 +6,7 @@ import {
   type TaskPlanStageId,
   TaskPlanStageIdSchema,
 } from './account-ids.ts';
-import { AccountRefSchema, PlaceKeySchema, PlaceSchema } from './accounts.ts';
+import { AccountRefSchema, type Place, PlaceKeySchema, PlaceSchema, placeKeys } from './accounts.ts';
 import { AgendaIdSchema } from './agenda.ts';
 import { canonicalJson } from './canonical-json.ts';
 import { InstantSchema } from './common.ts';
@@ -407,17 +407,33 @@ interface SignInLineFacts {
   readonly uses: number;
   readonly state: TaskPlanLineState;
   readonly fields: readonly SignInField[];
-  readonly candidates: readonly { readonly signIn: SignInId }[];
+  readonly candidates: readonly { readonly signIn: SignInId; readonly place: Place }[];
   readonly preselect?: { readonly signIn: SignInId } | undefined;
   readonly flags: readonly TaskPlanLineFlag[];
   readonly because?: GrantMissReason | undefined;
   readonly approved?: { readonly signIn: SignInId; readonly totp: boolean; readonly remaining: number } | undefined;
 }
 
+/**
+ * Whether match keys are ones a line of this kind may fill at: a page line only at web hosts (never a `tool@host`), a
+ * terminal line only at `sudo`, `su` or `doas` on a host. The one check behind the record, the candidates and the pins.
+ */
+export const taskPlanKeysFitLine = (kind: 'sign-in' | 'terminal-sign-in', keys: readonly string[]): boolean =>
+  keys.length > 0 && keys.every(key => (kind === 'sign-in' ? !key.includes('@') : taskPlanCoversTool(key)));
+
 /** What a sign-in line, as the daemon keeps it, may not be. */
 export const taskPlanSignInLineProblems = (line: SignInLineFacts): readonly string[] => {
   const candidates = new Set(line.candidates.map(candidate => candidate.signIn));
+  // An unavailable line can't be ticked, so it may show the owner a place it can't cover (an ssh sign-in, say).
+  const misplaced =
+    line.state !== 'unavailable' &&
+    line.candidates.some(
+      candidate =>
+        candidate.place.kind !== (line.kind === 'sign-in' ? 'site' : 'terminal') ||
+        (candidate.place.kind === 'terminal' && !taskPlanKeysFitLine(line.kind, placeKeys(candidate.place))),
+    );
   return [
+    ...(misplaced ? ['a page line offers sign-ins on sites, a terminal line sudo, su or doas only'] : []),
     ...(new Set(line.fields).size === line.fields.length ? [] : ['a line names each field once']),
     ...(line.kind === 'terminal-sign-in' && (line.fields.length !== 1 || line.fields[0] !== 'password')
       ? ['a terminal line fills the password only']
@@ -531,6 +547,12 @@ export const TaskPlanSchema = z
     const signInApproved = plan.lines.some(line => line.kind !== 'paste' && line.approved !== undefined);
     if (signInApproved && plan.answered?.proof !== 'passkey')
       problem('a sign-in line is approved only with a passkey', ['answered', 'proof']);
+    // One sign-in, one line: two lines approved for it would add their uses together.
+    const approvedSignIns = plan.lines.flatMap(line =>
+      line.kind === 'paste' || line.approved === undefined ? [] : [line.approved.signIn],
+    );
+    if (new Set(approvedSignIns).size !== approvedSignIns.length)
+      problem('one sign-in is approved on one line only', ['lines']);
   });
 export type TaskPlan = z.infer<typeof TaskPlanSchema>;
 
@@ -612,6 +634,14 @@ export function copyPlanOf(plan: TaskPlan): CopyPlan | undefined {
   };
 }
 
+/**
+ * The plan line a paste-plan item number stands for: the inverse of {@link copyPlanOf}'s numbering, which counts paste
+ * lines only. `undefined` for an item the plan doesn't have. A paste-plan route reads an item through this and never as
+ * a line number, so a legacy "approve item 0" can't land on sign-in line 0.
+ */
+export const taskPlanLineOfCopyItem = (plan: TaskPlan, item: number): number | undefined =>
+  Number.isInteger(item) && item >= 0 ? plan.lines.filter(line => line.kind === 'paste')[item]?.line : undefined;
+
 // ── The approval the owner sends, and the bytes its passkey is bound to ──────────────────────────────
 
 /**
@@ -668,6 +698,8 @@ export function taskPlanSelection(plan: TaskPlan, approval: TaskPlanApproval): T
   if (new Set(approval.lines.map(tick => tick.line)).size !== approval.lines.length)
     return { ok: false, reason: 'tick each line once' };
   const selected: TaskPlanSelectedLine[] = [];
+  /** The sign-ins already ticked, and on which line: one sign-in, one line, or their uses would add together. */
+  const picked = new Map<SignInId, number>();
   for (const tick of [...approval.lines].sort((left, right) => left.line - right.line)) {
     const refuse = (reason: string): TaskPlanSelection => ({ ok: false, line: tick.line, reason });
     const line = plan.lines[tick.line];
@@ -684,6 +716,9 @@ export function taskPlanSelection(plan: TaskPlan, approval: TaskPlanApproval): T
     if (signIn === undefined) return refuse('pick one of the accounts first');
     const candidate = line.candidates.find(entry => entry.signIn === signIn);
     if (candidate === undefined) return refuse('pick one of the accounts the card lists');
+    const already = picked.get(signIn);
+    if (already !== undefined) return refuse(`this account is already ticked on line ${String(already + 1)}`);
+    picked.set(signIn, line.line);
     const totp = tick.totp === true;
     if (totp && !line.fields.includes('totp')) return refuse('the ferret did not ask for codes on this line');
     if (totp && !candidate.can.totp) return refuse('this account has no automatic codes');
@@ -741,6 +776,16 @@ export function canonicalTaskPlanApproval(
     }
     const pinned = TaskPlanLinePinsSchema.safeParse(pins.get(line.line));
     if (!pinned.success) return { ok: false, line: line.line, reason: 'the line has no pins to bind' };
+    // Whatever the propose and the stage did, a page line binds only web hosts and a terminal line only sudo/su/doas.
+    if (!taskPlanKeysFitLine(line.kind, pinned.data.placeKeys))
+      return {
+        ok: false,
+        line: line.line,
+        reason:
+          line.kind === 'sign-in'
+            ? 'a page sign-in is pinned to web hosts only'
+            : 'a terminal sign-in is pinned to sudo, su or doas only',
+      };
     lines.push({
       line: line.line,
       kind: line.kind,
