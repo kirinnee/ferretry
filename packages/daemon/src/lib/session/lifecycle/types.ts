@@ -236,6 +236,16 @@ export interface SessionEnvironmentStore {
 export const SESSION_BOARD_CAPABILITY_VARIABLE = 'FY_SESSION_BOARD_CAPABILITY';
 
 /**
+ * The same credential under its documented name, `FY_SESSION_TOKEN` — the ferret's own bearer
+ * (docs/agent-tools.md § "The ferret session credential").
+ *
+ * DERIVED, NEVER STORED: a pane is handed it from {@link SESSION_BOARD_CAPABILITY_VARIABLE} at launch, so
+ * the two names can never hold different values. The older name stays for one release, because a
+ * wrapper or a binary from before this one reads only that.
+ */
+export const SESSION_TOKEN_VARIABLE = 'FY_SESSION_TOKEN';
+
+/**
  * The environment variable a pane reads its OWN session id from.
  *
  * It is a wire contract with the CLI exactly as the capability above is: `resolveConnection` sends

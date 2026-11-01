@@ -113,6 +113,17 @@ export const DAEMON_FEATURES = {
    * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the card ships in the app first.
    */
   phoneApproval: 'input.phone-approval.1',
+  /**
+   * A ferret session's own credential is a bearer class (docs/agent-tools.md § "The ferret session
+   * credential"): `Authorization: Bearer fys_…` names its session, and `x-ferretry-session-id` may only
+   * agree. A client that sees this name presents that credential and NEVER falls back to the host's admin
+   * token, whatever the answer — a refusal from this daemon is the answer, not a sign it is old.
+   *
+   * DEFINED, NOT YET ADVERTISED ({@link NOT_YET_REPORTED}): this build still refuses the credential on every
+   * route but the agent tools, so a client that switched to it on seeing the name would lose `fy send`,
+   * `fy notify` and the board with no way back. It is reported once the routes that take it exist.
+   */
+  sessionCredential: 'session.credential.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];
@@ -125,6 +136,7 @@ const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([
   DAEMON_FEATURES.accountsSignIns,
   DAEMON_FEATURES.twoFactorKeys,
   DAEMON_FEATURES.phoneApproval,
+  DAEMON_FEATURES.sessionCredential,
 ]);
 
 /** The names a daemon of this build reports, in a stable order. */

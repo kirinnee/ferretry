@@ -316,9 +316,11 @@ call.
 ## What is enforced, and where
 
 1. **An agent reaches only its own session.** `POST /v1/agent/tools` names no session anywhere: the
-   daemon hashes the credential presented on `x-fy-session-capability` and finds the one LIVE session
-   whose stored hash matches (constant-time). The call schema is strict, so a body `sessionId` is
-   refused; `x-ferretry-session-id` is not read. Surfaces are looked up in that session's listing only.
+   daemon hashes the credential presented as `Authorization: Bearer fys_…` or on `x-fy-session-capability`
+   and finds the one LIVE session whose stored hash matches (constant-time). The call schema is strict, so
+   a body `sessionId` is refused; `x-ferretry-session-id` may only agree with the credential, and one
+   naming another session is `401 session_mismatch`, audited. Surfaces are looked up in that session's
+   listing only.
    The credential (`FY_SESSION_BOARD_CAPABILITY`) is re-issued for every pane launch — the first one
    and every revive — and the previous one stops working at that moment, so a leaked copy dies with its
    pane; a daemon restart that leaves panes running does not change it.
@@ -361,6 +363,39 @@ call.
 9. **Bounds.** Text 16 KiB, 64 keys, 2000 lines read, 64 KiB returned, a 25 s wait per request (a client
    loops up to 120 s), URLs `http`/`https` only and 2 KiB, selectors 1 KiB; terminal creation is
    serialized, so two opens racing for one name leave one terminal.
+
+## The ferret session credential
+
+Every agent pane holds its own credential: 32 random bytes the daemon mints at each pane launch, keeps
+only the SHA-256 of (`sessionCapabilityHash` in the session's `config.json`), and writes into the pane as
+`FY_SESSION_TOKEN` — the documented name — and `FY_SESSION_BOARD_CAPABILITY`, the older name, kept for one
+release. It is also a **bearer class** of its own, `session`, beside the admin and warden tokens:
+
+- **Shape.** Every value minted now is `fys_` followed by 43 base64url characters, so the daemon knows a
+  session bearer from its shape and looks only those up. A value of any other prefix or length is answered
+  as a stranger without a lookup. A pane launched before the prefix holds an unprefixed value; it is still
+  accepted on `x-fy-session-capability`, the agent tools' header, until that pane is next launched.
+- **It names its session.** The session comes from the credential, never from `x-ferretry-session-id`.
+  Absent, the header is not needed; present and naming another session, the request is
+  `401 session_mismatch` and a `session.credential-refused` record — on every route, the agent tools'
+  included — names the session the credential named, never the credential.
+- **Revocation.** The lookup reads only ACTIVE sessions: a session that stops, completes, fails or is
+  deleted is no longer consulted, so its credential names nobody from that moment. Every pane launch
+  rotates it. A daemon restart keeps the hashes of sessions still running, because their panes survive it.
+- **From this machine only.** A session-shaped bearer is looked up only when the request arrived on the
+  privileged loopback carrier; from the tunnel, a LAN bind or any other remote carrier it is a stranger's,
+  answered without a lookup. A live and a dead credential get the same `401 unauthorized`.
+- **Not advertised yet.** `session.credential.1` is defined, and `GET /v1/health` will list it once routes
+  accept the credential. A client that sees it presents this credential and never falls back to the
+  admin token, whatever the answer — so listing it now would cut a ferret off from `fy send`.
+
+**What this release does NOT change yet.** A session bearer reaches nothing it could not reach before:
+on every route the authorization boundary authenticates it is refused — `401`, exactly as a stranger —
+and the only route that takes it is `POST /v1/agent/tools`, which reads it itself. `fy` and the MCP server
+still present the admin token plus `x-ferretry-session-id` everywhere else, so "ferret or person" outside
+the agent tools is still decided from that header (the [declared gap](#declared-gaps) below). Refusing a
+session credential on a person's route and admitting it on an agent's, per route, is the next step;
+`fy` and the MCP server presenting it instead of the admin token is the one after.
 
 ## Sub-ferrets and the Ferretry verbs
 

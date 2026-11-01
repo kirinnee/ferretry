@@ -5,9 +5,13 @@ import type { CapabilityDemand, CapabilityGuard, GrantDecision } from '../../../
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import type { ApiResponse } from '../../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { AGENT_SESSION_CAPABILITY_HEADER, agentToolRoutes } from '../../../../src/lib/runtime/mounts/agent-tools.ts';
+import {
+  AGENT_SESSION_CAPABILITY_HEADER,
+  agentToolRoutes,
+  sessionCredentialDirectory,
+} from '../../../../src/lib/runtime/mounts/agent-tools.ts';
 import { terminalRoutes } from '../../../../src/lib/runtime/mounts/terminals.ts';
-import { agentToolWorld } from '../../agent-tools/support.ts';
+import { agentToolWorld, PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, GRANTED, human } from './support.ts';
 
@@ -75,8 +79,9 @@ describe('the agent tools route', () => {
     should((await world.terminals.list('s2')).terminals).have.length(0);
   });
 
-  it('should ignore every other claim about which session is calling', async () => {
-    // Arrange — s2's credential, with a session header naming s1.
+  it('should refuse a session header that names another session, and audit it', async () => {
+    // Arrange — s2's credential, with a session header naming s1: the credential says who is calling, and a
+    // header that disagrees is an attribution nothing backs.
     const { world, dispatch } = served();
     await world.terminals.create('s1', { name: 'dev' });
 
@@ -84,13 +89,86 @@ describe('the agent tools route', () => {
     const spoofed = await dispatch.dispatch(
       agentCall({ tool: 'terminal.send', name: 'dev', text: 'rm -rf /' }, 'cap-s2', { 'x-ferretry-session-id': 's1' }),
     );
+    const agreeing = await dispatch.dispatch(
+      agentCall({ tool: 'terminal.list' }, 'cap-s2', { 'x-ferretry-session-id': 's2' }),
+    );
     const bodyClaim = await dispatch.dispatch(agentCall({ tool: 'terminal.list', sessionId: 's1' }, 'cap-s2'));
 
     // Assert
-    should(spoofed.status).equal(404);
-    should(jsonBody(spoofed)).match({ code: 'not_found' });
+    should(spoofed.status).equal(401);
+    should(jsonBody(spoofed)).match({ code: 'session_mismatch' });
+    should(agreeing.status).equal(200);
     should(bodyClaim.status).equal(400);
     should(world.terminals.typed.size).equal(0);
+    should(world.audit.entries[0]).match({
+      event: 'session.credential-refused',
+      subject: 's2',
+      outcome: 'refused',
+      detail: { by: 'agent', reason: 'session_mismatch', route: 'POST /v1/agent/tools' },
+    });
+  });
+
+  it('should take the session credential as a bearer, and still take an older one on its header', async () => {
+    // Arrange — a pane launched since the prefix presents `Authorization: Bearer fys_…`; one launched
+    // before it holds an unprefixed value, still accepted where it always was until that pane relaunches.
+    const { world, dispatch } = served();
+
+    // Act
+    const bearer = await dispatch.dispatch(
+      agentCall({ tool: 'terminal.open', name: 'dev' }, '', { authorization: `Bearer ${PREFIXED_S1}` }),
+    );
+    const legacy = await dispatch.dispatch(agentCall({ tool: 'terminal.list' }, 'cap-s1'));
+    const unprefixedBearer = await dispatch.dispatch(
+      agentCall({ tool: 'terminal.list' }, '', { authorization: 'Bearer cap-s1' }),
+    );
+
+    // Assert — both act for s1; an unprefixed value is not a bearer, so on its own it is no credential.
+    should(bearer.status).equal(200);
+    should((await world.terminals.list('s1')).terminals).have.length(1);
+    should(AgentToolResultSchema.parse(jsonBody(legacy)).surfaces).match([{ name: 'dev' }]);
+    should(unprefixedBearer.status).equal(401);
+    should(jsonBody(unprefixedBearer)).match({ code: 'missing_capability' });
+  });
+
+  it('should refuse a session bearer whose header names another session', async () => {
+    // Arrange
+    const { world, dispatch } = served();
+
+    // Act
+    const spoofed = await dispatch.dispatch(
+      agentCall({ tool: 'terminal.open', name: 'dev' }, '', {
+        authorization: `Bearer ${PREFIXED_S1}`,
+        'x-ferretry-session-id': 's2',
+      }),
+    );
+
+    // Assert
+    should(spoofed.status).equal(401);
+    should(jsonBody(spoofed)).match({ code: 'session_mismatch' });
+    should((await world.terminals.list('s1')).terminals).have.length(0);
+    should((await world.terminals.list('s2')).terminals).have.length(0);
+  });
+
+  it('should refuse two different session credentials on one request, and audit it', async () => {
+    // Arrange — s1's bearer beside s2's header: which session is calling has no single answer.
+    const { world, dispatch } = served();
+
+    // Act
+    const both = await dispatch.dispatch(
+      agentCall({ tool: 'terminal.open', name: 'dev' }, 'cap-s2', { authorization: `Bearer ${PREFIXED_S1}` }),
+    );
+    const same = await dispatch.dispatch(
+      agentCall({ tool: 'terminal.list' }, PREFIXED_S1, { authorization: `Bearer ${PREFIXED_S1}` }),
+    );
+
+    // Assert
+    should(both.status).equal(401);
+    should(same.status).equal(200);
+    should((await world.terminals.list('s2')).terminals).have.length(0);
+    should(world.audit.entries[0]).match({
+      outcome: 'refused',
+      detail: { by: 'agent', reason: 'two different session credentials' },
+    });
   });
 
   it('should refuse a caller with no credential, or one that names no session — and audit both', async () => {
@@ -522,5 +600,50 @@ describe('a person’s tool routes and secure copy', () => {
       "secure.copy is an agent's tool, not one a person's surface route takes",
     );
     should(world.audit.entries).deepEqual([]);
+  });
+});
+
+describe('the session credential directory the boundary is wired with', () => {
+  it("should answer with the agent tools' own resolver, naming only the session", async () => {
+    // Arrange
+    const { world } = served();
+    const directory = sessionCredentialDirectory(world.identities, world.audit);
+
+    // Act
+    const known = await directory.resolve(PREFIXED_S1);
+    const unknown = await directory.resolve(`fys_${'n'.repeat(43)}`);
+
+    // Assert — the session id and nothing else of the identity, such as its spoken name.
+    should(known).deepEqual({ sessionId: 's1' });
+    should(unknown).be.undefined();
+  });
+
+  it('should audit a refusal under the session the credential named, within the one-line bound', async () => {
+    // Arrange
+    const { world } = served();
+    const directory = sessionCredentialDirectory(world.identities, world.audit);
+    const long = `GET /v1/${'x'.repeat(400)}`;
+
+    // Act
+    await directory.refused?.({ reason: 'session_mismatch', sessionId: 's1', route: 'GET /v1/sessions' });
+    await directory.refused?.({ reason: 'session_mismatch', sessionId: 's2', route: long });
+
+    // Assert
+    should(world.audit.entries).deepEqual([
+      {
+        event: 'session.credential-refused',
+        actor: { kind: 'host' },
+        subject: 's1',
+        outcome: 'refused',
+        detail: { by: 'agent', reason: 'session_mismatch', route: 'GET /v1/sessions' },
+      },
+      {
+        event: 'session.credential-refused',
+        actor: { kind: 'host' },
+        subject: 's2',
+        outcome: 'refused',
+        detail: { by: 'agent', reason: 'session_mismatch', route: long.slice(0, 160) },
+      },
+    ]);
   });
 });

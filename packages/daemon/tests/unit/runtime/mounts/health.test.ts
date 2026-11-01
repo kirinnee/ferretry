@@ -256,6 +256,14 @@ describe('the daemon health mount and the session-worker pool', () => {
     should(view.features).deepEqual([...daemonFeatureList()]);
   });
 
+  it('should not report the ferret session credential while no route but the agent tools takes it', async () => {
+    // Arrange / Act
+    const view = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem())).body));
+
+    // Assert
+    should(view.features).not.containEql(DAEMON_FEATURES.sessionCredential);
+  });
+
   it('should report the agenda wire, so a newer app knows to dial the agenda routes', async () => {
     // Arrange / Act
     const view = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem())).body));

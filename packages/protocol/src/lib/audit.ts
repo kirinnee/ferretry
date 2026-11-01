@@ -87,6 +87,7 @@ export const AUDIT_EVENTS = [
   'input.quarantine_ended',
   'input.quarantine_revealed',
   'link.opened',
+  'session.credential-refused',
 ] as const;
 export const AuditEventSchema = z.enum(AUDIT_EVENTS);
 export type AuditEvent = z.infer<typeof AuditEventSchema>;

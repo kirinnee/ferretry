@@ -422,14 +422,17 @@ describe('the agent tools, through the production composition root', () => {
     const text = await result(await tool(hadiCapability, { tool: 'browser.read', name: 'app', mode: 'a11y' }));
     const shot = await result(await tool(hadiCapability, { tool: 'browser.screenshot', name: 'app' }));
 
-    // Marin, holding its own credential and claiming Hadi's session id, reaches nothing of Hadi's.
-    const crossTerminal = await tool(
+    // Marin, holding its own credential, reaches nothing of Hadi's by name — and claiming Hadi's session id
+    // beside it is a forged attribution, refused outright.
+    const crossTerminal = await tool(marinCapability, { tool: 'terminal.send', name: 'dev', text: 'rm -rf ~' });
+    const claimedHadi = await tool(
       marinCapability,
       { tool: 'terminal.send', name: 'dev', text: 'rm -rf ~' },
       {
         'x-ferretry-session-id': hadi,
       },
     );
+    const claimedHadiBody: unknown = await claimedHadi.json();
     const crossPage = await tool(marinCapability, { tool: 'browser.read', name: 'app' });
     const marinList = await result(await tool(marinCapability, { tool: 'terminal.list' }));
     const noCredential = await tool('', { tool: 'terminal.list' });
@@ -546,6 +549,12 @@ describe('the agent tools, through the production composition root', () => {
 
     // Nothing of Hadi's was reachable with Marin's credential, whatever else Marin claimed.
     should(crossTerminal.status).equal(404);
+    should(claimedHadi.status).equal(401);
+    should(claimedHadiBody).match({ code: 'session_mismatch' });
+    // Audited as its own event, naming the session the CREDENTIAL named — Marin's, not the claimed Hadi.
+    should(audit.records.filter(record => record.event === 'session.credential-refused')).match([
+      { outcome: 'refused', subject: marin, detail: { reason: 'session_mismatch', route: 'POST /v1/agent/tools' } },
+    ]);
     should(crossPage.status).equal(404);
     should(marinList.surfaces).deepEqual([]);
     should([noCredential.status, forged.status, asBody.status]).deepEqual([401, 403, 400]);

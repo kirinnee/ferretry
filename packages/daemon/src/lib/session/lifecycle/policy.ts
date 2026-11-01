@@ -17,8 +17,10 @@ import {
   type CreateSessionLifecycleRequest,
   type LifecycleSessionStatus,
   type RecordedSessionStatus,
+  SESSION_BOARD_CAPABILITY_VARIABLE,
   SESSION_ID_VARIABLE,
   SESSION_MEDIA_VARIABLE,
+  SESSION_TOKEN_VARIABLE,
   type SessionLifecycleEvent,
   type SessionLifecycleRecord,
   SessionLifecycleRecordSchema,
@@ -153,6 +155,10 @@ export function firstTurnInstruction(taskFile: string): string {
  * THE MEDIA FOLDER IS DERIVED TOO, and written last for the same reason as the id: a stored variable
  * must not be able to point an agent's "show this" files somewhere the media route does not read. So is
  * the question file Claude's hook records an asked question in: the observer reads only the session's own.
+ *
+ * THE SESSION TOKEN IS DERIVED as well: `FY_SESSION_TOKEN` is the stored credential under its documented
+ * name, written after the store so a stored value under that name can never name a different credential —
+ * and absent with it, so a session that holds none is not handed an empty one.
  */
 export function sessionPaneEnvironment(
   id: SessionId,
@@ -160,9 +166,12 @@ export function sessionPaneEnvironment(
   mode: 'auto' | 'interactive',
   files?: SessionPaneFiles,
 ): Readonly<Record<string, string>> {
+  const { [SESSION_TOKEN_VARIABLE]: _stale, ...kept } = stored;
+  const credential = stored[SESSION_BOARD_CAPABILITY_VARIABLE];
   return {
     [HYPERMEDIA_ENV]: mode === 'interactive' ? '1' : '0',
-    ...stored,
+    ...kept,
+    ...(credential === undefined || credential === '' ? {} : { [SESSION_TOKEN_VARIABLE]: credential }),
     [SESSION_ID_VARIABLE]: id,
     ...(files === undefined
       ? {}

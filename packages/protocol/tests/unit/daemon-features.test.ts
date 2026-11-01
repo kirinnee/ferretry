@@ -61,6 +61,13 @@ describe('daemon features', () => {
     should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.accountsSignIns)).be.false();
   });
 
+  it('should name the ferret session credential, but not report it before the routes that take it exist', () => {
+    // A client that sees it switches to the session credential and never falls back, so reporting it while
+    // every route but the agent tools still refuses that credential would take a ferret's fy send away.
+    should(DAEMON_FEATURES.sessionCredential).equal('session.credential.1');
+    should(daemonFeatureList()).not.containEql('session.credential.1');
+  });
+
   it('should offer a feature only when the daemon listed it', () => {
     // Arrange
     const listed = { features: [DAEMON_FEATURES.packIdea4000] };
