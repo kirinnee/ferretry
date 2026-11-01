@@ -414,6 +414,20 @@ describe('SharedDraftStreamHandler', () => {
     ]);
   });
 
+  it('passes on what another device is still uploading, and says nothing when it is uploading nothing', async () => {
+    const { open } = world();
+    const phone = await open({ peer: 'phone', device: 'Phone' });
+    const laptop = await open({ peer: 'laptop', device: 'Laptop' });
+
+    phone.handler.fromClient(JSON.stringify({ kind: 'presence', typing: false, uploading: ['trace.png'] }));
+    phone.handler.fromClient(JSON.stringify({ kind: 'presence', typing: false, uploading: [] }));
+
+    should(laptop.downstream.frames.filter(frame => frame.kind === 'presence')).deepEqual([
+      { kind: 'presence', peer: 'phone', device: 'Phone', typing: false, uploading: ['trace.png'] },
+      { kind: 'presence', peer: 'phone', device: 'Phone', typing: false },
+    ]);
+  });
+
   it('drops caret reports past the per-second budget instead of queueing them', async () => {
     // Arrange
     const { open, tick } = world();

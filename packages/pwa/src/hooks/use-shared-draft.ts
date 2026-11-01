@@ -2,6 +2,8 @@
  * THE COMPOSER'S SHARED DRAFT: the same words on every one of the owner's devices with this session open.
  *
  * The composer keeps its own `draft` state exactly as before; this hook only keeps that state in step.
+ * The files and places riding with the draft live HERE (`items`): the composer adds and removes them, and
+ * reads back the set every device agrees on.
  * Every change the person makes is turned into an edit and sent; every edit another device makes is
  * applied here and handed back through `setText`, with the edit itself (`onRemote`) so the composer can
  * keep the caret where the person left it. A send empties the draft everywhere (`sent`).
@@ -17,6 +19,7 @@ import {
   diffToTextOp,
   SHARED_DRAFT_STREAM_RESYNC_CLOSE,
   type SharedDraftClientFrame,
+  type SharedDraftItem,
   type SharedDraftSent,
   type SharedDraftServerFrame,
   type TextOp,
@@ -31,6 +34,7 @@ import type { DaemonStreamOpener } from '../lib/event-transport.ts';
 import { openSharedDraftStream, type SharedDraftStreamLink } from '../lib/shared-draft-stream.ts';
 import {
   applyDisconnect,
+  applyLocalItems,
   applyLocalText,
   applyResync,
   applyServerFrame,
@@ -47,6 +51,8 @@ const SHARED_DRAFT_TYPING_SHOWN_MS = 5_000;
 const SHARED_DRAFT_TYPING_IDLE_MS = 3_000;
 /** At most one "I am typing" report per this long: the daemon drops anything past four a second anyway. */
 const SHARED_DRAFT_TYPING_REPORT_MS = 1_000;
+/** The least time between two presence reports: under the daemon's four a second, with room for jitter. */
+const SHARED_DRAFT_PRESENCE_GAP_MS = 350;
 /** The longest wait between reconnect attempts. */
 const SHARED_DRAFT_RECONNECT_MAX_MS = 30_000;
 
@@ -55,8 +61,16 @@ export interface SharedDraftPeer {
   readonly peer: string;
   readonly device: string;
   readonly typing: boolean;
+  /** Files it is still uploading, by name. */
+  readonly uploading: readonly string[];
   /** When it last said anything, in this device's clock. */
   readonly seenAt: number;
+}
+
+/** A file another device is still uploading: shown here as a placeholder until it joins the draft. */
+export interface SharedDraftRemoteUpload {
+  readonly device: string;
+  readonly name: string;
 }
 
 /** One press of send, as `useSharedDraft` remembers it. Opaque to the composer. */
@@ -176,6 +190,17 @@ export interface SharedDraft {
   readonly abandonSend: (mark: SharedDraftSendMark) => void;
   /** Whether a stream is open right now. */
   readonly live: boolean;
+  /** The files and places every device agrees on, this device's unanswered changes included. */
+  readonly items: readonly SharedDraftItem[];
+  /** Adds and removes items; `remove` goes first, so an id in both replaces the item. */
+  readonly changeItems: (change: {
+    readonly add?: readonly SharedDraftItem[];
+    readonly remove?: readonly string[];
+  }) => void;
+  /** Files the owner's other devices are still uploading. */
+  readonly uploads: readonly SharedDraftRemoteUpload[];
+  /** Tells the other devices which files this one is uploading right now. */
+  readonly reportUploading: (names: readonly string[]) => void;
 }
 
 const randomId: SharedDraftIdSource = () => crypto.randomUUID();
@@ -223,6 +248,33 @@ export function useSharedDraft({
     setConflict(joinRestore(copies));
   }, []);
   const [live, setLive] = useState(false);
+  const [items, setItems] = useState<readonly SharedDraftItem[]>(state.current.items);
+  /** What this device last told the others, so a report about typing does not drop the uploads. */
+  const presence = useRef<{ typing: boolean; uploading: readonly string[] }>({ typing: false, uploading: [] });
+  /**
+   * At most one report per {@link SHARED_DRAFT_PRESENCE_GAP_MS}, and the LAST word always goes: a change
+   * inside the gap waits for its end and is sent as it then stands. The daemon drops reports past four a
+   * second, and if the one it dropped were "uploading nothing", another device's placeholder would stay.
+   */
+  const toldAt = useRef(Number.NEGATIVE_INFINITY);
+  const trailing = useRef<(() => void) | undefined>(undefined);
+  const tell = useCallback(
+    (change: Partial<{ typing: boolean; uploading: readonly string[] }>): void => {
+      presence.current = { ...presence.current, ...change };
+      const send = (): void => {
+        trailing.current = undefined;
+        toldAt.current = timers.now();
+        const { typing, uploading } = presence.current;
+        link.current?.send({ kind: 'presence', typing, ...(uploading.length === 0 ? {} : { uploading }) });
+      };
+      if (trailing.current !== undefined) return;
+      const wait = toldAt.current + SHARED_DRAFT_PRESENCE_GAP_MS - timers.now();
+      if (wait <= 0) send();
+      else trailing.current = timers.after(wait, send);
+    },
+    [timers],
+  );
+  useEffect(() => () => trailing.current?.(), []);
   /** Bumped by the timer that lets a stale "typing" go, so the hint re-renders without it. */
   const [, setTick] = useState(0);
 
@@ -239,6 +291,8 @@ export function useSharedDraft({
     readonly text: string;
     /** Whether the send carried its own clear, which the daemon applies. */
     carried: boolean;
+    /** The files and places in the draft at the press: they go with this message, ones added after do not. */
+    readonly itemIds: readonly string[];
   } | null>(null);
   /** Moves the mark past one change. Total: a change it cannot follow loses the words, never throws. */
   const carry = useCallback((change: TextOp): void => {
@@ -267,6 +321,7 @@ export function useSharedDraft({
         // a second conflict never costs the words of the first.
         offer(keepRestore(restoreNow.current, scopeObjectNow.current, step.conflict));
       }
+      setItems(step.state.items);
       if (step.state.text !== textNow.current) {
         textNow.current = step.state.text;
         if (step.remote !== undefined) callbacks.current.onRemote?.(step.remote, step.state.text);
@@ -288,6 +343,7 @@ export function useSharedDraft({
     // waiting to name its clear stops waiting now.
     marked.current = null;
     for (const listener of [...settled.current]) listener();
+    setItems([]);
     // Words still waiting from an earlier visit, a reload, or another session's switch come back with it.
     offer(loadRestore(restoreNow.current, scope));
     let stopped = false;
@@ -311,6 +367,7 @@ export function useSharedDraft({
           peer: frame.peer,
           device: frame.device,
           typing: frame.typing,
+          uploading: frame.uploading ?? [],
           seenAt: timers.now(),
         };
         setPeers(current => new Map(current).set(frame.peer, seen));
@@ -363,6 +420,8 @@ export function useSharedDraft({
         }
         link.current = opened;
         for (const frame of queued.current.splice(0)) opened.send(frame);
+        // A new stream starts with nobody knowing what this device is uploading.
+        if (presence.current.uploading.length > 0) tell({});
         setLive(true);
       } catch {
         if (stopped) return;
@@ -385,7 +444,7 @@ export function useSharedDraft({
     };
     // `scope` is memoised by the composer, and `timers` and `ids` are fixed for its life, so this runs
     // once per session the composer shows.
-  }, [daemon, enabled, ids, offer, opener, run, scope, timers]);
+  }, [daemon, enabled, ids, offer, opener, run, scope, tell, timers]);
 
   // The person's own changes, however they were made, become edits.
   const typingReported = useRef(0);
@@ -397,20 +456,21 @@ export function useSharedDraft({
     const now = timers.now();
     if (now - typingReported.current >= SHARED_DRAFT_TYPING_REPORT_MS) {
       typingReported.current = now;
-      link.current?.send({ kind: 'presence', typing: true });
+      tell({ typing: true });
     }
     stopTyping.current?.();
     stopTyping.current = timers.after(SHARED_DRAFT_TYPING_IDLE_MS, () => {
       typingReported.current = 0;
-      link.current?.send({ kind: 'presence', typing: false });
+      tell({ typing: false });
     });
-  }, [enabled, ids, run, text, timers, carry]);
+  }, [enabled, ids, run, tell, text, timers, carry]);
   useEffect(() => () => stopTyping.current?.(), []);
 
   const markSend = useCallback((): SharedDraftSendMark => {
     const current = state.current;
     const mark: SharedDraftSendMark = { scope: scopeNow.current };
-    marked.current = { mark, op: diffToTextOp(current.text, ''), text: current.text, carried: false };
+    const itemIds = current.items.map(item => item.id);
+    marked.current = { mark, op: diffToTextOp(current.text, ''), text: current.text, carried: false, itemIds };
     return mark;
   }, []);
 
@@ -434,6 +494,7 @@ export function useSharedDraft({
           epoch: current.position.epoch,
           base: current.position.rev,
           text: ours.op,
+          ...(ours.itemIds.length === 0 ? {} : { remove: ours.itemIds }),
         };
       };
       const now = exact();
@@ -488,14 +549,33 @@ export function useSharedDraft({
       const known = ours?.op !== undefined && textOpBaseLength(ours.op) === now.length ? ours.op : undefined;
       const exactlySent = ours !== undefined && !ours.carried && now === ours.text;
       const left = known !== undefined ? applyTextOp(now, known) : exactlySent ? '' : now;
-      if (!enabled || left === now) return left;
+      if (!enabled) return left;
+      // The files and places that went with it leave too — not ones added since, and none for a lost mark.
+      const gone = ours?.itemIds ?? [];
+      if (gone.length > 0) run(applyLocalItems(state.current, { remove: gone }, ids));
+      if (left === now) return left;
       stopTyping.current?.();
       // Under the send's own id when it goes at once, so the daemon takes it for the same edit the send carried.
       run(applyLocalText(state.current, left, requestId === undefined ? ids : () => requestId, true), true);
-      link.current?.send({ kind: 'presence', typing: false });
+      tell({ typing: false });
       return left;
     },
+    [enabled, ids, run, tell],
+  );
+
+  const changeItems = useCallback(
+    (change: { readonly add?: readonly SharedDraftItem[]; readonly remove?: readonly string[] }): void => {
+      if (enabled) run(applyLocalItems(state.current, change, ids));
+    },
     [enabled, ids, run],
+  );
+  const reportUploading = useCallback(
+    (names: readonly string[]): void => {
+      const before = presence.current.uploading;
+      if (!enabled || (before.length === names.length && before.every((name, index) => name === names[index]))) return;
+      tell({ uploading: [...names] });
+    },
+    [enabled, tell],
   );
 
   const restoreConflict = useCallback((): void => {
@@ -518,7 +598,23 @@ export function useSharedDraft({
   const now = timers.now();
   const typing = [...peers.values()].filter(peer => peer.typing && now - peer.seenAt < SHARED_DRAFT_TYPING_SHOWN_MS);
 
-  return { typing, conflict, restoreConflict, dismissConflict, markSend, sendClear, sent, abandonSend, live };
+  const uploads = [...peers.values()].flatMap(peer => peer.uploading.map(name => ({ device: peer.device, name })));
+
+  return {
+    typing,
+    conflict,
+    restoreConflict,
+    dismissConflict,
+    markSend,
+    sendClear,
+    sent,
+    abandonSend,
+    live,
+    items,
+    changeItems,
+    uploads,
+    reportUploading,
+  };
 }
 
 /** "also typing on Kirin's iPhone", "… on Kirin's iPhone and Desktop": the hint's words, or nothing. */

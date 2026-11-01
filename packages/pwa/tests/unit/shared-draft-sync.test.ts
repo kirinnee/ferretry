@@ -13,6 +13,8 @@ import {
 } from '@ferretry/protocol';
 import {
   applyDisconnect,
+  applyItems,
+  applyLocalItems,
   applyLocalText,
   applyResync,
   splitTextOp,
@@ -58,7 +60,7 @@ describe('applyLocalText', () => {
       { kind: 'edit', id: 'e1', edit: { generation: G, epoch: 0, base: 3, text: [2, '!'] } },
     ]);
     expect(second.send).toEqual([]);
-    expect(third.state.buffer).toEqual({ op: [3, '!?'], sent: false });
+    expect(third.state.buffer).toEqual({ op: [3, '!?'], add: [], remove: [], sent: false });
     expect(third.state.text).toBe('hi!!?');
   });
 
@@ -74,7 +76,7 @@ describe('applyLocalText', () => {
     const ids = counter('e');
     const typing = applyLocalText(synced('a'), 'ab', ids);
     const sent = applyLocalText(typing.state, '', ids, true);
-    expect(sent.state.buffer).toEqual({ op: [-2], sent: true });
+    expect(sent.state.buffer).toEqual({ op: [-2], add: [], remove: [], sent: true });
   });
 
   test('changes nothing for the same text, and only holds the text before the first snapshot', () => {
@@ -82,7 +84,10 @@ describe('applyLocalText', () => {
     const same = applyLocalText(synced('a'), 'a', ids);
     const early = applyLocalText(initialSharedDraftState(''), 'typed before connecting', ids);
     expect(same.send).toEqual([]);
-    expect(early).toEqual({ state: { text: 'typed before connecting', resyncing: false }, send: [] });
+    expect(early).toEqual({
+      state: { text: 'typed before connecting', items: [], serverItems: [], resyncing: false },
+      send: [],
+    });
   });
 });
 
@@ -95,6 +100,8 @@ describe('applyServerFrame', () => {
 
     expect(empty.state).toEqual({
       text: 'from the phone',
+      items: [],
+      serverItems: [],
       position: { generation: G, epoch: 0, rev: 4 },
       resyncing: false,
     });
@@ -142,7 +149,13 @@ describe('applyServerFrame', () => {
       { kind: 'ack', id: 'e2', applied: applied([2, 'c'], 3), epoch: 0, rev: 3 },
       ids,
     );
-    expect(idle.state).toEqual({ text: 'abc', position: { generation: G, epoch: 0, rev: 3 }, resyncing: false });
+    expect(idle.state).toEqual({
+      text: 'abc',
+      items: [],
+      serverItems: [],
+      position: { generation: G, epoch: 0, rev: 3 },
+      resyncing: false,
+    });
   });
 
   test("takes its own edit, replayed after a reconnect, as answered — and ignores answers that aren't its", () => {
@@ -369,5 +382,156 @@ describe('edits too big for one frame (review L2)', () => {
     expect(state.inflight).toBeUndefined();
     expect(state.resyncing).toBe(true);
     expect(applyServerFrame(state, snapshot('a', 2), ids).conflict).toBe('a typed');
+  });
+});
+
+describe('files and places in the shared draft', () => {
+  const photo = (id: string) => ({ kind: 'attachment' as const, id, name: `${id}.png`, mime: 'image/png', bytes: 4 });
+  const place = {
+    kind: 'location' as const,
+    id: 'location',
+    latitude: 1,
+    longitude: 2,
+    accuracyMeters: 5,
+    capturedAt: 9,
+  };
+
+  test('applies remove before add, once per id, keeping order', () => {
+    expect(applyItems([photo('a'), photo('b')], [photo('c'), photo('c'), photo('a')], ['a'])).toEqual([
+      photo('b'),
+      photo('c'),
+      photo('a'),
+    ]);
+  });
+
+  test('sends an added file as an edit that keeps the text, and folds later changes behind it', () => {
+    const ids = counter('e');
+    const first = applyLocalItems(synced('caption', 2), { add: [photo('a')] }, ids);
+    const second = applyLocalItems(first.state, { add: [photo('b')], remove: ['a'] }, ids);
+
+    expect(first.send).toEqual([
+      { kind: 'edit', id: 'e1', edit: { generation: G, epoch: 0, base: 2, text: [7], add: [photo('a')] } },
+    ]);
+    expect(first.state.items).toEqual([photo('a')]);
+    expect(second.send).toEqual([]);
+    expect(second.state.items).toEqual([photo('b')]);
+    // Folded: the buffered removal of "a" stays, "b" is added.
+    expect(second.state.buffer).toMatchObject({ add: [photo('b')], remove: ['a'] });
+  });
+
+  test('a file added then removed before anything was sent nets out in the buffer', () => {
+    const ids = counter('e');
+    let state = applyLocalText(synced('', 0), 'x', ids).state;
+    state = applyLocalItems(state, { add: [photo('a')] }, ids).state;
+    state = applyLocalItems(state, { remove: ['a'] }, ids).state;
+    expect(state.buffer).toMatchObject({ add: [], remove: ['a'] });
+    expect(state.items).toEqual([]);
+  });
+
+  test('removing what is not there is nothing at all', () => {
+    const state = synced('a');
+    expect(applyLocalItems(state, { remove: ['ghost'] }, counter('e'))).toEqual({ state, send: [] });
+  });
+
+  test("takes another device's files as they arrive, on top of this device's unanswered ones", () => {
+    const ids = counter('e');
+    const mine = applyLocalItems(synced('', 0), { add: [photo('mine')] }, ids).state;
+    const step = applyServerFrame(
+      mine,
+      {
+        kind: 'edit',
+        applied: { generation: G, epoch: 0, rev: 1, text: [], add: [photo('theirs')], remove: [] },
+        epoch: 0,
+        rev: 1,
+      },
+      ids,
+    );
+    expect(step.state.serverItems).toEqual([photo('theirs')]);
+    expect(step.state.items).toEqual([photo('theirs'), photo('mine')]);
+    const acked = applyServerFrame(
+      step.state,
+      {
+        kind: 'ack',
+        id: 'e1',
+        applied: { generation: G, epoch: 0, rev: 2, text: [], add: [photo('mine')], remove: [] },
+        epoch: 0,
+        rev: 2,
+      },
+      ids,
+    );
+    expect(acked.state.serverItems).toEqual([photo('theirs'), photo('mine')]);
+  });
+
+  test('on first contact, everything this device held joins the draft along with its words', () => {
+    const ids = counter('e');
+    const held = applyLocalItems(initialSharedDraftState('look'), { add: [photo('a'), place] }, ids).state;
+    const step = applyServerFrame(held, snapshot(''), ids);
+    expect(step.send).toEqual([
+      { kind: 'edit', id: 'e1', edit: { generation: G, epoch: 0, base: 0, text: ['look'], add: [photo('a'), place] } },
+    ]);
+    expect(step.state.items).toEqual([photo('a'), place]);
+  });
+
+  test('files are added again after a refusal or a first contact with other words, but words are offered back', () => {
+    const ids = counter('e');
+    // First contact, the daemon already has other words: this device's file still joins.
+    const first = applyServerFrame(
+      applyLocalItems(initialSharedDraftState('mine'), { add: [photo('a')] }, ids).state,
+      snapshot('theirs'),
+      ids,
+    );
+    expect(first.conflict).toBe('mine');
+    expect(first.send).toMatchObject([{ edit: { text: [6], add: [photo('a')] } }]);
+
+    // A refused edit that was adding a file, plus one added while waiting: both are added again.
+    let state = applyLocalItems(synced('', 0), { add: [photo('b')] }, ids).state;
+    state = applyServerFrame(state, { kind: 'error', id: 'e2', code: 'shared_draft_stale', message: 'x' }, ids).state;
+    state = applyLocalItems(state, { add: [photo('c')] }, ids).state;
+    const back = applyServerFrame(state, snapshot('', 0, 1), ids);
+    expect(back.send).toMatchObject([{ edit: { epoch: 1, add: [photo('b'), photo('c')] } }]);
+  });
+
+  test('a snapshot that already holds the files adds nothing again', () => {
+    const ids = counter('e');
+    const held = applyLocalItems(initialSharedDraftState(''), { add: [photo('a')] }, ids).state;
+    const frame: SharedDraftServerFrame = {
+      kind: 'snapshot',
+      snapshot: {
+        v: 1,
+        sessionId: 's1',
+        generation: G,
+        epoch: 0,
+        rev: 1,
+        text: '',
+        items: [photo('a')],
+        updatedAt: AT,
+      },
+    };
+    expect(applyServerFrame(held, frame, ids).send).toEqual([]);
+  });
+});
+
+describe('files and places with edits split for the wire', () => {
+  const photo = (id: string) => ({ kind: 'attachment' as const, id, name: `${id}.png`, mime: 'image/png', bytes: 4 });
+
+  test('a big first-contact push sends its files with the first part and the rest of the words after', () => {
+    const ids = counter('e');
+    const quotes = '"'.repeat(16_000);
+    const held = applyLocalItems(initialSharedDraftState(quotes), { add: [photo('a')] }, ids).state;
+    const step = applyServerFrame(held, snapshot(''), ids);
+    expect(step.send).toHaveLength(1);
+    expect(step.send[0]).toMatchObject({ edit: { add: [photo('a')] } });
+    expect(sharedDraftFrameBytes(step.send[0])).toBeLessThanOrEqual(SHARED_DRAFT_EDIT_BUDGET);
+    expect(step.state.buffer).toMatchObject({ add: [], remove: [] });
+    expect(step.state.items).toEqual([photo('a')]);
+  });
+
+  test('a resync after a frame too big remembers the files it was adding, to add again', () => {
+    const ids = counter('e');
+    const adding = applyLocalItems(synced('', 0), { add: [photo('a')] }, ids).state;
+    const resync = applyResync(adding);
+    expect(resync.lost).toEqual([photo('a')]);
+    expect(applyServerFrame(resync, snapshot('', 0, 1), ids).send).toMatchObject([{ edit: { add: [photo('a')] } }]);
+    expect(applyResync(synced('a')).lost).toBeUndefined();
   });
 });

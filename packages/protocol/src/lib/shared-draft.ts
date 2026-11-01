@@ -528,6 +528,12 @@ const EditIdSchema = z
   .refine(value => !value.includes('\u0000'), 'an edit id holds no NUL');
 
 /**
+ * Files a composer is still uploading, by name: the owner's other screens show them as placeholders
+ * until the upload lands and the file joins the draft as an item.
+ */
+const UploadingSchema = z.array(PeerLabelSchema).max(SHARED_DRAFT_MAX_ITEMS).readonly();
+
+/**
  * What a composer sends up its stream.
  *
  * - `edit` — one edit, tagged with an id the daemon's answer echoes, so the composer knows which of its
@@ -537,7 +543,12 @@ const EditIdSchema = z
  */
 export const SharedDraftClientFrameSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('edit'), id: EditIdSchema, edit: SharedDraftEditSchema }),
-  z.strictObject({ kind: z.literal('presence'), typing: z.boolean(), selection: SelectionSchema.optional() }),
+  z.strictObject({
+    kind: z.literal('presence'),
+    typing: z.boolean(),
+    selection: SelectionSchema.optional(),
+    uploading: UploadingSchema.optional(),
+  }),
 ]);
 export type SharedDraftClientFrame = z.infer<typeof SharedDraftClientFrameSchema>;
 
@@ -593,6 +604,7 @@ export const SharedDraftServerFrameSchema = z.discriminatedUnion('kind', [
     device: PeerLabelSchema,
     typing: z.boolean(),
     selection: SelectionSchema.optional(),
+    uploading: UploadingSchema.optional(),
   }),
   z.strictObject({ kind: z.literal('left'), peer: z.string().min(1).max(64) }),
 ]);

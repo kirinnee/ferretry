@@ -5,6 +5,7 @@ import {
   SHARED_DRAFT_STREAM_RESYNC_CLOSE,
   type SharedDraftClientFrame,
   SharedDraftClientFrameSchema,
+  type SharedDraftItem,
   type SharedDraftSent,
   type SharedDraftServerFrame,
   type TextOp,
@@ -50,6 +51,7 @@ interface FakeStream {
 class FakeDaemon {
   text = '';
   epoch = 0;
+  items: SharedDraftItem[] = [];
   readonly history: { op: TextOp; id?: string }[] = [];
   readonly streams: FakeStream[] = [];
   devices: string[] = [];
@@ -88,7 +90,7 @@ class FakeDaemon {
           epoch: this.epoch,
           rev: this.history.length,
           text: this.text,
-          items: [],
+          items: this.items,
           updatedAt: AT,
         },
       });
@@ -116,8 +118,8 @@ class FakeDaemon {
     for (const other of this.streams) if (other.alive) other.deliver({ kind: 'left', peer: stream.peer });
   }
 
-  private applied(op: TextOp, rev: number) {
-    return { generation: G, epoch: 0, rev, text: op, add: [], remove: [] };
+  private applied(op: TextOp, rev: number, add: readonly SharedDraftItem[] = [], remove: readonly string[] = []) {
+    return { generation: G, epoch: 0, rev, text: op, add, remove };
   }
 
   private receive(stream: FakeStream, text: string): void {
@@ -126,7 +128,13 @@ class FakeDaemon {
     if (frame.kind === 'presence') {
       for (const other of this.streams)
         if (other !== stream && other.alive)
-          other.deliver({ kind: 'presence', peer: stream.peer, device: stream.device, typing: frame.typing });
+          other.deliver({
+            kind: 'presence',
+            peer: stream.peer,
+            device: stream.device,
+            typing: frame.typing,
+            ...(frame.uploading === undefined ? {} : { uploading: frame.uploading }),
+          });
       return;
     }
     if (this.refuseNext || frame.edit.generation !== G || frame.edit.base > this.history.length) {
@@ -138,14 +146,21 @@ class FakeDaemon {
     for (const entry of this.history.slice(frame.edit.base)) op = transformTextOps(entry.op, op)[1];
     op = normalizeTextOp(op);
     this.text = applyTextOp(this.text, op);
+    // The daemon's own item rule: remove first, then add what is not already there.
+    const removing = frame.edit.remove ?? [];
+    const remove = this.items.filter(item => removing.includes(item.id)).map(item => item.id);
+    this.items = this.items.filter(item => !removing.includes(item.id));
+    const add = (frame.edit.add ?? []).filter(item => !this.items.some(existing => existing.id === item.id));
+    this.items = [...this.items, ...add];
     this.history.push({ op, id: frame.id });
     const rev = this.history.length;
+    const applied = this.applied(op, rev, add, remove);
     for (const other of this.streams)
       if (other.alive)
         other.deliver(
           other === stream
-            ? { kind: 'ack', id: frame.id, applied: this.applied(op, rev), epoch: 0, rev }
-            : { kind: 'edit', id: frame.id, applied: this.applied(op, rev), epoch: 0, rev },
+            ? { kind: 'ack', id: frame.id, applied, epoch: 0, rev }
+            : { kind: 'edit', id: frame.id, applied, epoch: 0, rev },
         );
   }
 }
@@ -299,7 +314,10 @@ describe('useSharedDraft', () => {
     await settle();
 
     expect(devices.texts.phone).toBe('');
-    expect(daemonSide.streams[1]?.sent.at(-2)).toMatchObject({ kind: 'edit', edit: { sent: true } });
+    expect(daemonSide.streams[1]?.sent.filter(frame => frame.kind === 'edit').at(-1)).toMatchObject({
+      kind: 'edit',
+      edit: { sent: true },
+    });
     devices.unmount();
   });
 
@@ -501,6 +519,93 @@ describe('useSharedDraft', () => {
     devices.unmount();
   });
 
+  test('a file attached on the phone shows on the laptop, a removal anywhere goes everywhere, and a send clears them', async () => {
+    // Arrange
+    const daemonSide = new FakeDaemon();
+    const devices = mountDevices(daemonSide, { phone: '', laptop: '' });
+    await settle();
+    const shot = { kind: 'attachment' as const, id: 'att_1', name: 'login-error.png', mime: 'image/png', bytes: 412 };
+    const pdf = { kind: 'attachment' as const, id: 'att_2', name: 'auth-flow.pdf', mime: 'application/pdf', bytes: 9 };
+
+    // Act / Assert — attached on the phone.
+    run(() => devices.hooks.phone?.changeItems({ add: [shot] }));
+    await settle();
+    expect(devices.hooks.laptop?.items).toEqual([shot]);
+
+    // The laptop adds one and removes the phone's.
+    run(() => devices.hooks.laptop?.changeItems({ add: [pdf], remove: ['att_1'] }));
+    await settle();
+    expect(devices.hooks.phone?.items).toEqual([pdf]);
+    expect(daemonSide.items).toEqual([pdf]);
+
+    // A send from the phone takes the words and the files with it, everywhere.
+    devices.type('phone', 'see attached');
+    await settle();
+    run(() => {
+      const hook = devices.hooks.phone;
+      if (hook !== undefined) hook.sent(hook.markSend());
+    });
+    await settle();
+    expect(devices.hooks.laptop?.items).toEqual([]);
+    expect(devices.texts.laptop).toBe('');
+    devices.unmount();
+  });
+
+  test('the laptop sees what the phone is still uploading, and that list follows it to a new stream', async () => {
+    // Arrange
+    const daemonSide = new FakeDaemon();
+    daemonSide.devices = ['Kirin’s iPhone', 'Desktop (Chrome)'];
+    const devices = mountDevices(daemonSide, { phone: '', laptop: '' });
+    await settle();
+
+    // Act — the phone starts an upload; telling again with the same names says nothing new.
+    run(() => devices.hooks.phone?.reportUploading(['network-trace.png']));
+    run(() => devices.hooks.phone?.reportUploading(['network-trace.png']));
+    await settle();
+
+    // Assert
+    expect(devices.hooks.laptop?.uploads).toEqual([{ device: 'Kirin’s iPhone', name: 'network-trace.png' }]);
+    const phoneStream = daemonSide.streams[0] as FakeStream;
+    expect(phoneStream.sent.filter(frame => frame.kind === 'presence')).toHaveLength(1);
+
+    // The phone's stream drops and comes back: the laptop hears about the upload again.
+    daemonSide.kill(phoneStream);
+    await settle();
+    run(() => devices.timers.advance(1_000));
+    await settle();
+    expect(daemonSide.streams[2]?.sent.at(-1)).toMatchObject({ kind: 'presence', uploading: ['network-trace.png'] });
+
+    // Finished: the placeholder goes, once the presence gap has passed.
+    run(() => devices.hooks.phone?.reportUploading([]));
+    run(() => devices.timers.advance(250));
+    await settle();
+    expect(devices.hooks.laptop?.uploads).toEqual([]);
+    devices.unmount();
+  });
+
+  test('L3: a burst of upload changes never leaves a stale placeholder: the last word always arrives', async () => {
+    // Arrange
+    const daemonSide = new FakeDaemon();
+    daemonSide.devices = ['Kirin’s iPhone', 'Desktop (Chrome)'];
+    const devices = mountDevices(daemonSide, { phone: '', laptop: '' });
+    await settle();
+
+    // Act — three files start and finish inside a quarter of a second.
+    for (const names of [['a.png'], ['a.png', 'b.png'], ['b.png'], []])
+      run(() => devices.hooks.phone?.reportUploading(names));
+    await settle();
+    const phoneStream = daemonSide.streams[0] as FakeStream;
+    const sentNow = phoneStream.sent.filter(frame => frame.kind === 'presence').length;
+    run(() => devices.timers.advance(250));
+    await settle();
+
+    // Assert — one report then, one after the gap with how things stand: nothing uploading.
+    expect(sentNow).toBe(1);
+    expect(phoneStream.sent.filter(frame => frame.kind === 'presence')).toHaveLength(2);
+    expect(devices.hooks.laptop?.uploads).toEqual([]);
+    devices.unmount();
+  });
+
   test('a composer that goes away closes its stream and opens nothing more', async () => {
     const daemonSide = new FakeDaemon();
     const devices = mountDevices(daemonSide, { phone: '' });
@@ -626,7 +731,7 @@ describe('switching sessions (review M1)', () => {
 });
 
 describe('sharedDraftTypingHint', () => {
-  const peer = (device: string) => ({ peer: device, device, typing: true, seenAt: 0 });
+  const peer = (device: string) => ({ peer: device, device, typing: true, uploading: [], seenAt: 0 });
   test('names one device, or several, once each', () => {
     expect(sharedDraftTypingHint([])).toBeNull();
     expect(sharedDraftTypingHint([peer('Phone'), peer('Phone')])).toBe('also typing on Phone');
@@ -1189,5 +1294,41 @@ describe('the send mark (rose N1, N3) and kept copies (N2)', () => {
     await settle();
     expect(fourth.hooks.phone?.conflict).toBe('b'.repeat(8_000));
     fourth.unmount();
+  });
+});
+
+describe('a send and the files beside it (review H1, phase 3)', () => {
+  test('takes out the files that were there when send was pressed, and keeps one attached after', async () => {
+    // Arrange — the phone attaches a screenshot and presses send; the answer is slow.
+    const daemonSide = new FakeDaemon();
+    const devices = mountDevices(daemonSide, { phone: '', laptop: '' });
+    await settle();
+    const shot = { kind: 'attachment' as const, id: 'att_1', name: 'shot.png', mime: 'image/png', bytes: 4 };
+    const later = { kind: 'attachment' as const, id: 'att_2', name: 'later.pdf', mime: 'application/pdf', bytes: 9 };
+    run(() => devices.hooks.phone?.changeItems({ add: [shot] }));
+    devices.type('phone', 'see attached');
+    await settle();
+    let mark: SharedDraftSendMark | undefined;
+    run(() => {
+      mark = devices.hooks.phone?.markSend();
+    });
+    let carried: SharedDraftSent | undefined;
+    await runAsync(async () => {
+      if (mark !== undefined) carried = await devices.hooks.phone?.sendClear(mark);
+    });
+    expect(carried?.remove).toEqual(['att_1']);
+
+    // Act — the laptop attaches another file before the send completes.
+    run(() => devices.hooks.laptop?.changeItems({ add: [later] }));
+    await settle();
+    run(() => {
+      if (mark !== undefined) devices.hooks.phone?.sent(mark);
+    });
+    await settle();
+
+    // Assert — only the sent file went.
+    expect(daemonSide.items).toEqual([later]);
+    expect(devices.hooks.laptop?.items).toEqual([later]);
+    devices.unmount();
   });
 });
