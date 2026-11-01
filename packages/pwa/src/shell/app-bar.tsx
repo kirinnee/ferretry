@@ -682,8 +682,12 @@ export function AppTabBar({
         closeLabel="Dismiss more places"
         panelClassName="px-panel pb-panel"
       >
-        <nav aria-label="More places" className="flex flex-col gap-xs pb-md">
-          <h2 className="m-0 mb-sm text-title font-semibold text-fg">More</h2>
+        <nav
+          aria-label="More places"
+          className="scroll-thin flex min-h-0 flex-1 flex-col gap-xs overflow-y-auto overscroll-contain pb-[calc(var(--gap-md)+var(--safe-bottom))]"
+          data-app-more-list=""
+        >
+          <h2 className="m-0 mb-sm shrink-0 text-title font-semibold text-fg">More</h2>
           {MORE_PLACES.map(id => {
             const destination = entry(id);
             return (
@@ -694,7 +698,7 @@ export function AppTabBar({
                 aria-current={active === id ? 'page' : undefined}
                 onClick={select}
                 data-app-more={id}
-                className="kt-navpill min-h-[48px]"
+                className="kt-navpill min-h-[48px] shrink-0"
               >
                 <span className="flex w-5 shrink-0 justify-center" aria-hidden="true">
                   {TAB_ICONS[id]}
@@ -709,7 +713,7 @@ export function AppTabBar({
           {whatsNew === undefined ? null : (
             <button
               type="button"
-              className="kt-navpill min-h-[48px] text-left"
+              className="kt-navpill min-h-[48px] shrink-0 text-left"
               data-app-more-whats-new=""
               onClick={() => {
                 select();

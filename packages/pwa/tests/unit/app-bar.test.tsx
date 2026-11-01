@@ -759,6 +759,25 @@ describe('AppTabBar', () => {
     await mounted.unmount();
   });
 
+  it('lets the More list scroll inside a sheet capped to the screen, so the last row is reachable on a short phone', async () => {
+    setViewport(PHONE);
+    const mounted = await mount(tabBar({ active: 'projects' }));
+    const more = mounted.container.querySelector('[data-app-tab="more"]') as HTMLButtonElement;
+    await interact(() => more.dispatchEvent(new Event('click', { bubbles: true })));
+    const sheet = document.getElementById(more.getAttribute('aria-controls') as string) as HTMLElement;
+    const list = sheet.querySelector('[data-app-more-list]') as HTMLElement;
+
+    expect(sheet.style.maxHeight).toContain('dvh');
+    expect(sheet.classList.contains('flex-col')).toBe(true);
+    expect(list.classList.contains('overflow-y-auto')).toBe(true);
+    expect(list.classList.contains('min-h-0')).toBe(true);
+    expect([...list.querySelectorAll('[data-app-more]')].every(row => row.classList.contains('shrink-0'))).toBe(true);
+    expect(list.className).toContain('--safe-bottom');
+    expect(list.querySelector('h2')?.textContent).toBe('More');
+
+    await mounted.unmount();
+  });
+
   it('offers What’s new in More when the shell has a door, closes the sheet and opens the notes', async () => {
     setViewport(PHONE);
     let opened = 0;

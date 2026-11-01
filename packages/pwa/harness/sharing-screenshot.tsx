@@ -188,10 +188,10 @@ if (['catalogs', 'shared', 'people', 'skills'].includes(view)) {
   );
 } else {
   createRoot(root).render(
-    <div className="kt-shell flex flex-col overflow-hidden" style={{ height: 760 }}>
+    <div className="kt-shell flex flex-col overflow-hidden" style={{ height: '100dvh' }}>
       <AppBar crumbs={[{ label: 'Home', href: '/d/studio/sessions' }, { label: 'Sharing' }]} daemon="studio" onOpenPalette={noop} onOpenSidebar={noop} sessionCount={2} active="sharing" tabBarShown themeToggle={<ThemeToggle touch />} />
       <div className="min-h-0 flex-1" />
-      <AppTabBar daemon="studio" active="sharing" onOpenPalette={noop} />
+      <AppTabBar daemon="studio" active="sharing" onOpenPalette={noop} whatsNew={{ open: noop, unread: true }} />
     </div>,
   );
 }
@@ -298,6 +298,44 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
     await page.locator('[data-app-tab="more"]').click();
     await page.locator('[data-app-more="sharing"]').waitFor({ state: 'visible' });
     await shot(page, 'phone-more-sheet', theme, vp, '[role="dialog"]');
+    for (const [label, size] of [
+      ['664', { width: 390, height: 664 }],
+      ['320x568', { width: 320, height: 568 }],
+    ] as const) {
+      await page.setViewportSize(size);
+      await open(page, theme, 'more');
+      await page.locator('[data-app-tab="more"]').click();
+      await page.locator('[data-app-more-whats-new]').waitFor({ state: 'attached' });
+      await page.waitForTimeout(400);
+      const list = page.locator('[data-app-more-list]');
+      const scrolls = await list.evaluate(node => node.scrollHeight > node.clientHeight);
+      if (!scrolls)
+        fail(
+          'the More list does not need to scroll at ' +
+            label +
+            ': ' +
+            JSON.stringify(
+              await list.evaluate(node => ({
+                ch: node.clientHeight,
+                sh: node.scrollHeight,
+                panel: node.parentElement?.getBoundingClientRect().height,
+                max: node.parentElement?.style.maxHeight,
+                ih: innerHeight,
+              })),
+            ),
+        );
+      await shot(page, 'phone-more-sheet-' + label + '-top', theme, vp, '[role="dialog"]');
+      await list.evaluate(node => {
+        node.scrollTop = node.scrollHeight;
+      });
+      await page.waitForTimeout(200);
+      const inView = await page.locator('[data-app-more-whats-new]').evaluate(node => {
+        const box = node.getBoundingClientRect();
+        return box.top >= 0 && box.bottom <= window.innerHeight;
+      });
+      if (!inView) fail('What’s new is not reachable by scrolling at ' + label);
+      await shot(page, 'phone-more-sheet-' + label + '-bottom', theme, vp, '[role="dialog"]');
+    }
   } else {
     await page.setViewportSize({ width: 1440, height: 900 });
     await open(page, theme, 'full');
