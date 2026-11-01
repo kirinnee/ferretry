@@ -11,7 +11,7 @@ import type { SessionSkillsInventory, SkillEntry, SkillFile } from '@ferretry/pr
 import { useCallback, useId, useState } from 'react';
 import { Markdown } from '../../components/markdown.tsx';
 import { CatalogItemRow } from '../catalogs/catalog-item-row.tsx';
-import { AddCatalogEntry, type CatalogRowsHost, useCatalogRows } from '../catalogs/catalog-row-tools.tsx';
+import { AddFromLinkLink, type CatalogRowsHost, useCatalogRows } from '../catalogs/catalog-row-tools.tsx';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { SKILL_SCOPE_LABEL, SKILL_SCOPE_TITLE, skillOverride, sortedSkills } from '../mcp/mcp-model.ts';
 import { skillHarnessLabel, skillInsertText } from '../skills/skills-catalog.ts';
@@ -115,8 +115,8 @@ export function ContextSkillsPanel({
           {skillHarnessLabel(harness)}
           {load.value.truncated ? ' · the list was cut short' : ''}
         </p>
+        {catalogs === undefined ? null : <AddFromLinkLink host={catalogs} />}
       </div>
-      {catalogs === undefined ? null : <AddCatalogEntry host={catalogs} />}
       {visible.length === 0 ? (
         <ContextNote>{contextEmptyCopy('skills', total, query, chipLabel)}</ContextNote>
       ) : (

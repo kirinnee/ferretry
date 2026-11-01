@@ -1,8 +1,9 @@
 /**
  * Skill and MCP rows with Share and Add on the side (docs/design/catalogs.md §3 and §8): the Skills list (a skill of
  * your own, one already shared with its version, one installed from someone, one overridden), the MCP list, the ⋯ menu
- * open, Share into the Share sheet, and Add on a skill in no catalog ending in "Share it now". On a phone and a
- * desktop, light and dark.
+ * open, Share into the Share sheet, and Add on a skill in no catalog ending in "Share it now". The MCP list has a ⋯ on
+ * every row, with Show details opened on two of them. Both lists carry one small "Add from a link…" link and no
+ * paste box. On a phone and a desktop, light and dark.
  *
  *   bun harness/catalogs-rows-screenshot.tsx      # writes harness/out/catalogs-rows-*.png
  *
@@ -100,7 +101,7 @@ const MCP = {
   servers: [
     server('github', { transport: 'http', target: 'https://github.example/mcp' }),
     server('linear', { transport: 'http', target: 'https://linear.example/mcp' }),
-    server('notion', { scope: 'project', transport: 'http', target: 'https://notion.example/mcp', project: { root: '/work/app' } }),
+    server('notion', { scope: 'project', transport: 'http', target: 'https://notion.example/mcp', project: { root: '/work/app', name: 'app' }, source: '/work/app/.mcp.json', runtimes: [{ runtime: 'claude-work', approval: 'approved' }] }),
     server('scratch', { scope: 'local', project: { root: '/work/app' } }),
   ],
 };
@@ -295,6 +296,15 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await open(page, theme, 'mcp');
   await page.locator('[data-row-from]').first().waitFor({ state: 'visible' });
   await shot(page, 'mcp', theme, vp, FRAME);
+
+  await page.locator('[data-context-mcp="scratch"] [data-row-more]').click();
+  await page.getByRole('menu').waitFor({ state: 'visible' });
+  await shot(page, 'mcp-menu-scratch', theme, vp, ['[data-frame]', '[role="menu"]']);
+  await page.getByRole('menuitem', { name: 'Show details' }).click();
+  await page.locator('[data-context-mcp="notion"] [data-row-more]').click();
+  await page.getByRole('menuitem', { name: 'Show details' }).click();
+  await page.locator('[data-mcp-details="notion"]').waitFor({ state: 'visible' });
+  await shot(page, 'mcp-details', theme, vp, FRAME);
 };
 
 try {

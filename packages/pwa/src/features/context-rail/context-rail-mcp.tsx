@@ -12,7 +12,7 @@ import type { McpInventory } from '@ferretry/protocol';
 import { Plus } from 'lucide-react';
 import { useState } from 'react';
 import { CatalogItemRow } from '../catalogs/catalog-item-row.tsx';
-import { AddCatalogEntry, type CatalogRowsHost, useCatalogRows } from '../catalogs/catalog-row-tools.tsx';
+import { AddFromLinkLink, type CatalogRowsHost, useCatalogRows } from '../catalogs/catalog-row-tools.tsx';
 import { McpServerDetails } from '../mcp/mcp-server-details.tsx';
 import { MCP_SCOPE_LABEL, MCP_SCOPE_TITLE, MCP_TRANSPORT_LABEL, sortedMcpServers } from '../mcp/mcp-model.ts';
 import { type McpActionsHost, McpServerRow, useMcpServerActions } from '../mcp/mcp-server-row.tsx';
@@ -118,6 +118,7 @@ export function ContextMcpPanel({
           {servers.length} server{servers.length === 1 ? '' : 's'} this ferret sees
         </span>
         <span className="flex flex-wrap items-center gap-sm">
+          {catalogs === undefined ? null : <AddFromLinkLink host={catalogs} />}
           {onAdd === undefined ? null : (
             <button className="fy-info-link" data-context-mcp-add="" onClick={onAdd} type="button">
               <Plus aria-hidden="true" size={12} /> Add…
@@ -125,7 +126,6 @@ export function ContextMcpPanel({
           )}
         </span>
       </div>
-      {catalogs === undefined ? null : <AddCatalogEntry host={catalogs} />}
       {inventory.problems.map(problem => (
         <p key={problem.source} className="m-0 break-words text-meta text-warn" data-context-mcp-problem="">
           {problem.message}
