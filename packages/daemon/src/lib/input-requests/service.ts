@@ -177,6 +177,11 @@ interface Held {
    * and may still be refused at its last check, so until the request really ends the ferret reads the card as it was.
    */
   agentSees?: InputRequest;
+  /**
+   * The lock the ferret reads after a grant fill that did not happen (delta F4): the one the card was raised with, though
+   * the request keeps the longer lock the attempt worked out (a card never shortens). Gone at the next write or the end.
+   */
+  agentLock?: { readonly lock: InputRequest['lock'] };
   /** Every name the terminal was seen under (its key and its id), so a quarantine on any of them seals it. */
   names: readonly string[];
   checkFailures: number;
@@ -692,6 +697,7 @@ export class InputRequestService {
       };
       // The ferret reads the card as it stood until the request really ends (a fill, or the card back for the owner).
       held.agentSees = held.request;
+      const raisedLock = held.request.lock;
       try {
         await this.attempt(
           held,
@@ -733,7 +739,11 @@ export class InputRequestService {
         settle();
       } catch (error) {
         if (written) settle();
-        else grants.ledger.release(reservation);
+        else {
+          grants.ledger.release(reservation);
+          // Nothing was typed: the ferret goes on reading the lock the card was raised with, as with no grant.
+          if (held.request.state === 'pending') held.agentLock = { lock: raisedLock };
+        }
         delete held.agentSees;
         await this.grantMissed(held, grant, error instanceof GrantMissed ? error.reason : undefined);
       } finally {
@@ -800,7 +810,12 @@ export class InputRequestService {
         match.fills,
         match.fieldSet,
         seen.now,
-        seen.matchKey,
+        {
+          place: seen.matchKey,
+          ...(facts.kind === 'browser' ? { pageId: facts.pageId, navigationId: facts.navigationId } : {}),
+          // The ferret did nothing to the session's pages since then (reads and waits are no acts).
+          untouchedSince: (at: number) => !this.tainted(held.request.sessionId, at),
+        },
       );
       if (typeof reservation !== 'string') return { ok: true, grant, match, reservation, project: seen.project };
       misses.push({ grant, reason: reservation });
@@ -1704,6 +1719,8 @@ export class InputRequestService {
   ): Promise<InputDeliverResult> {
     const { request } = held;
     held.request = { ...request, state: 'delivering' };
+    // A write begins: the lock the ferret reads is the one this write works out (a grant fill's own is hidden by agentSees).
+    delete held.agentLock;
     let hold: QuarantineHold | undefined;
     try {
       const pasted = request.source?.name;
@@ -1772,6 +1789,9 @@ export class InputRequestService {
         });
         const lock = request.lock === undefined ? now : longerLock(request.lock, now);
         held.request = { ...held.request, lock };
+        // A grant fill asks whether it still holds BEFORE the page is held from the ferret (delta F3): a refusal a ferret
+        // can cause (a script it starts, say) lands before anything it can read changes.
+        if (grant !== undefined && !grant.held()) throw new GrantMissed('expired');
         hold = await this.holdFor(request, held.names, lock.seconds * 1000);
       }
       try {
@@ -2384,6 +2404,7 @@ export class InputRequestService {
   ): Promise<void> {
     // The request ends here: the ferret reads it as it is from now on.
     delete held.agentSees;
+    delete held.agentLock;
     const at = instant(this.deps.clock.now());
     const source =
       options.sealed === true
@@ -2468,7 +2489,9 @@ export class InputRequestService {
 
   private view(held: Held): InputAgentView {
     const { names } = held;
-    const request = held.agentSees ?? held.request;
+    const shown = held.agentSees ?? held.request;
+    const request =
+      held.agentSees === undefined && held.agentLock !== undefined ? { ...shown, lock: held.agentLock.lock } : shown;
     const quarantined = this.quarantined(request.sessionId, names);
     const facts =
       request.observed?.kind === 'terminal' && quarantined ? maskedFacts(request.observed) : request.observed;

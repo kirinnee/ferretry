@@ -631,7 +631,9 @@ Two more limits are declared:
   being suspended (out of scope, say): the accounts are read, the miss is audited and the card is made to buzz. A
   ferret that measures its raises could so learn that some rule is about a sign-in, without spending it. Likewise an
   account change that suspends a rule takes one rules-file write and an audit record longer than one that does not.
-  What a ferret reads (its view, its words, its agenda card) stays byte-identical either way. This is accepted.
+  What a ferret reads (its view, its words, its agenda card) stays byte-identical either way, save a refusal in the last
+  milliseconds before typing, which can leave its page held for that moment (input-requests.md, "Standing rule
+  fills"). This is accepted.
 
 ### Routes
 

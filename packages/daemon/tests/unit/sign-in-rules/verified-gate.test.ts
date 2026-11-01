@@ -5,6 +5,7 @@ import {
   approved,
   DEVICE,
   deviceOwner,
+  GITHUB as GITHUB_SIGN_IN,
   listing,
   OTHER_DEVICE,
   signIn,
@@ -117,5 +118,38 @@ describe('verified(): false while a re-check is pending (secrev-1282b F3)', () =
     w.store.beforeWrite = undefined;
     await forgotten;
     should(w.service.verified(rule, 1)).be.false();
+  });
+});
+
+describe('verified(): false while an account change, a suspension, a revoke or a narrowing waits its turn (delta F5)', () => {
+  it('should read false from the moment each is asked for, and true again once one that changes nothing has run', async () => {
+    const w = await world();
+    const { view } = await approved(w, { signIn: GITHUB_SIGN_IN, fields: ['username', 'password'], uses: 5 });
+    const rule = view.id as SignInRuleId;
+    should(w.service.verified(rule, 1)).be.true();
+
+    const changed = w.service.accountsChanged(w.state.listing);
+    should(w.service.verified(rule, 1)).be.false();
+    await changed;
+    should(w.service.verified(rule, 1)).be.true();
+
+    const narrowed = w.service.narrow(deviceOwner(), rule, { uses: 4 });
+    should(w.service.verified(rule, 1)).be.false();
+    await narrowed;
+    should(w.service.verified(rule, 1)).be.true();
+
+    const suspended = w.service.suspend(rule, 'did-not-move-on', { revision: 1 });
+    should(w.service.verified(rule, 1)).be.false();
+    await suspended;
+    should(w.service.verified(rule, 1)).be.false();
+  });
+
+  it('should read false while a revoke waits its turn', async () => {
+    const w = await world();
+    const { view } = await approved(w);
+    const rule = view.id as SignInRuleId;
+    const revoked = w.service.revoke(deviceOwner(), rule);
+    should(w.service.verified(rule, 1)).be.false();
+    await revoked;
   });
 });

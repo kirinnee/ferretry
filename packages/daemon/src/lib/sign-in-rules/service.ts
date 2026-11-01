@@ -709,7 +709,7 @@ export class SignInRuleService {
     const checked = SignInRuleNarrowSchema.safeParse(narrow);
     if (!checked.success)
       throw new SignInRuleError(400, 'bad_request', checked.error.issues[0]?.message ?? 'not a narrowing');
-    const next = await this.#serial(async () => {
+    const next = await this.#checked(async () => {
       const record = this.#rule(id);
       const narrowed = signInRuleNarrowed(record, checked.data, this.ports.clock.now());
       if (!narrowed.ok) throw new SignInRuleError(400, 'bad_request', narrowed.reason);
@@ -734,7 +734,7 @@ export class SignInRuleService {
   async revoke(caller: PasteRuleCaller, id: SignInRuleId): Promise<void> {
     const owner = requireOwner(caller);
     this.#ready();
-    await this.#serial(async () => {
+    await this.#checked(async () => {
       const record = this.#rule(id);
       await this.#write(this.#records.filter(each => each.body.id !== id)).catch(this.#unsaved);
       this.#unverify(record);
@@ -747,7 +747,7 @@ export class SignInRuleService {
     const owner = requireOwner(caller);
     this.#ready();
     const listing = await this.ports.accounts.listing().catch(() => undefined);
-    return await this.#serial(async () => {
+    return await this.#checked(async () => {
       const held = new Set(listing?.signIns.filter(each => each.account === account).map(each => each.id) ?? []);
       const ending = this.#records.filter(each => each.body.pins.account === account || held.has(each.body.signIn));
       if (ending.length === 0) return { revoked: 0 };
@@ -773,7 +773,7 @@ export class SignInRuleService {
     because: SignInRuleSuspension,
     context: { readonly revision?: number; readonly sessionId?: string } = {},
   ): Promise<void> {
-    await this.#serial(async () => {
+    await this.#checked(async () => {
       await this.#suspendAll([{ id, because, revision: context.revision, sessionId: context.sessionId }]);
     });
   }
@@ -785,7 +785,7 @@ export class SignInRuleService {
    */
   async accountsChanged(listing: RuleListing): Promise<void> {
     // Queued behind a load still reading the file, so a change made meanwhile is checked against what it reads.
-    await this.#serial(async () => {
+    await this.#checked(async () => {
       if (this.#health !== 'ok') return;
       const suspending: Suspending[] = [];
       for (const record of this.#records) {
@@ -1077,6 +1077,19 @@ export class SignInRuleService {
   readonly #unsaved = (): never => {
     throw new SignInRuleError(503, 'unavailable', 'the standing rules could not be saved; nothing changed');
   };
+
+  /**
+   * {@link #serial}, counted as a check in flight from the moment it is asked for (delta F5): an account change, a
+   * suspension, a revoke or a narrowing waiting its turn already makes no rule read `verified`.
+   */
+  async #checked<T>(work: () => Promise<T>): Promise<T> {
+    this.#checking += 1;
+    try {
+      return await this.#serial(work);
+    } finally {
+      this.#checking -= 1;
+    }
+  }
 
   async #serial<T>(work: () => Promise<T>): Promise<T> {
     const run = this.#queue.then(work, work);

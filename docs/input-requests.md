@@ -1342,7 +1342,7 @@ in the table above holds for a rule too, plus these:
 | 1b  | Its scope covers the session: any ferret (the default; sub-ferrets too), exactly one session (never its children), or the sessions STAMPED with one board project (never a project read from a folder, never Unfiled)                                                                                                                             | `out-of-scope` (no suspension)                   |
 | 2b  | The account's handle and username are the ones approved                                                                                                                                                                                                                                                                                           | `account-changed` (suspends)                     |
 | 8   | The account's 2FA keys are as approved (any change), and a code comes only from the key the rule PINNED, still one Ferretry makes codes for; never the first key by `verified` order, which a ferret can steer                                                                                                                                    | `factor-changed` (suspends)                      |
-| 9   | A code-only step types only as a later step of an attempt in which this rule typed the password: the same session, the same place (the daemon-observed host), within three minutes                                                                                                                                                                | `code-without-sign-in`                           |
+| 9   | A code-only step types only as the NEXT STEP of the sign-in whose password this rule typed: the same session, the same tab, the same place (the daemon-observed host), on a document that tab navigated to since, within three minutes, with no act of the ferret on its pages in between                                                         | `code-without-sign-in`                           |
 | 15b | No page script ran on any of its login domains since it was approved, in ANY session (the machine-wide taint below)                                                                                                                                                                                                                               | `scripted-origin` (suspends)                     |
 | 17  | EVERY field set it fills is a form the owner's own taps have history with: a rule never pins a new form. A password form outside it suspends; a username-only step asks. One exception: a lone code box (field set exactly `totp`, one field, the code ticked) outside the history fills ONLY as row 9's join, pins nothing and starts no attempt | `form-changed` (suspends) · `no-history`         |
 | —   | Right before the second match, its stored passkey proof is checked again offline against the registry, and its pinned facts against the accounts now                                                                                                                                                                                              | `proof-invalid` or the drift's reason (suspends) |
@@ -1361,9 +1361,10 @@ in the table above holds for a rule too, plus these:
 - **The machine-wide script taint.** A rule fills for every ferret, in one shared browser profile, for weeks, so ferret
   A's script on github.com could plant what github.com's own code reads when ferret B's fill types. Every
   `browser_eval`, from any caller, taints three hosts: the one the page is on right before the script (read from the
-  live page inside its queue), the ORIGIN OF THE WORLD THE SCRIPT ACTUALLY RAN IN (read inside the same evaluation,
-  before the agent's code runs, and reported back by the browser worker: the page may move between the look and the
-  world being made), and the one it left the page on. Each is tainted in memory at once, then every rule pinned to it is
+  live page inside its queue), the ORIGIN OF THE WORLD THE SCRIPT ACTUALLY RAN IN (read by DevTools on that same world,
+  in evaluations of their own before and after the agent's code, and trusted only when both agree; never from anything
+  the agent's evaluation returns, which its source could forge: the page may move between the look and the world being
+  made), and the one it left the page on. Each is tainted in memory at once, then every rule pinned to it is
   suspended on disk, so it outlasts a restart. While any agent script is running, NO rule fills anywhere, so nothing
   lands before the world's origin is known. A host that can't be read (an opaque origin, `about:blank` read from its
   address, a worker too old to report one) taints EVERY rule, and so does a script that ran and then failed. Only `browser_eval`
@@ -1397,12 +1398,19 @@ in the table above holds for a rule too, plus these:
 What it does NOT do, said plainly:
 
 - **A rule checks where the password goes, not why.**
-- **A code page fills only right after the rule's own password.** The owner's history counts a form only when its
+- **A refusal that lands in the last moment before typing can show.** The fill asks whether the rule still holds
+  before the page is held from the ferret, so a refusal the ferret can cause (a script it starts, say) lands before
+  anything it can read changes. One that lands in the few milliseconds between taking that hold and typing (a revoke, a
+  script started in exactly that gap) leaves the page held from the ferret for that moment, which a card no rule was
+  about never does: a ferret polling its page could so learn that some rule was tried. It learns nothing more.- **A code page fills only right after the rule's own password.** The owner's history counts a form only when its
   secret went into a password box (`masked`), so a code page is never in it, however often you tap it. A rule with the
-  code ticked therefore types a code on a separate page only as a JOIN: the rule typed the password in this same
-  session, at this same place, within the last three minutes, and the code page has exactly one code box. It never pins
-  the code form and never starts an attempt, so a "confirm with 2FA" form outside a sign-in the rule filled asks you
-  (`code-without-sign-in`), and a page script on the place in between still suspends the rule.
+  code ticked therefore types a code on a separate page only as a JOIN to the sign-in it just did: the rule typed the
+  password in this same session, IN THIS SAME TAB, at this same place, within the last three minutes; the tab has since
+  navigated to a new document (the code page); the ferret has not clicked, typed, navigated or run a script on its pages
+  since (reading and waiting are fine; the rule's own Enter is the daemon's); and the code page has exactly one code box.
+  It never pins the code form and never starts an attempt. So a "confirm with 2FA" form in another tab, or one the
+  ferret steered to, asks you (`code-without-sign-in`), and a page script on the place in between still suspends the
+  rule. A site that shows its code step without loading a new document asks you too.
 - **A username-only page asks you** (`no-history`, no suspension): it is no password box either. So does a form that
   asks for the password and the code together when its code box is a plain text box.
 - **Every ferret is honest-client** (`SIGN_IN_RULE_HONEST_LIMIT`):

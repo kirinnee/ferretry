@@ -21,8 +21,10 @@ import { type ActableCdp, type ActablePage, browserElementOf } from './page-acts
 
 /** The most a script's answer may hand back; the daemon clips again to its own wire bound. */
 export const PAGE_SCRIPT_MAX_RESULT_CHARS = 200_000;
-/** The longest origin a script's answer may report; a longer one is dropped (it reads as unreadable), never cut. */
+/** The longest origin a world may report; a longer one is dropped (it reads as unreadable), never cut. */
 export const PAGE_SCRIPT_ORIGIN_MAX_CHARS = 2_048;
+/** How long one read of a world's origin may take. */
+const ORIGIN_READ_MS = 5_000;
 /** The name the isolated world carries in DevTools. */
 export const PAGE_SCRIPT_WORLD = 'ferretry-agent-script';
 
@@ -40,9 +42,11 @@ export interface PageScript {
 export interface PageScriptResult {
   readonly text: string;
   /**
-   * The origin of the document the script's world belongs to, read inside the same evaluation BEFORE the agent's code
-   * runs (secrev-1282a M2): the one origin that code could reach, whatever the page did between the daemon's look and
-   * the world being made. Absent when it could not be read (an opaque `null` origin reads as absent too).
+   * The origin of the document the script's world belongs to (secrev-1282a M2, delta F1): read by DevTools in SEPARATE
+   * evaluations of `location.origin` on that same world, one before the agent's code and one after, and given only when
+   * both agree. Nothing the agent's evaluation returns is read for it: its source can break out of the wrapper and
+   * return anything. A world belongs to one document, so a navigation destroys it and the second read fails. Absent when
+   * it could not be read, the two reads differ, or the origin is opaque (`null`) or too long.
    */
   readonly origin?: string;
 }
@@ -68,27 +72,22 @@ export type MarkMint = () => string;
 /**
  * The expression the isolated world evaluates. The agent's source is spliced in as the expression it
  * already is — it can only ever be the agent's own code, in the agent's own world. The mark is
- * spliced in as a JSON string, so no mark can break out of its quotes. Its FIRST step reads the world's
- * own origin, in the same evaluation, before the agent's code is even built: the answer carries both.
+ * spliced in as a JSON string, so no mark can break out of its quotes.
  */
 export function pageScriptExpression(source: string, mark: string | undefined): string {
   const element = mark === undefined ? 'undefined' : `document.querySelector(${JSON.stringify(`[${MARK}="${mark}"]`)})`;
   return `(async () => {
-  const origin = location.origin;
   const fn = (${source}
 );
   if (typeof fn !== 'function') throw new TypeError('the script is not a function: write () => … or (element) => …');
   const value = await fn(${element});
-  const text = (() => {
-    if (value === undefined) return 'undefined';
-    try {
-      const json = JSON.stringify(value);
-      return json === undefined ? String(value) : json;
-    } catch {
-      return String(value);
-    }
-  })();
-  return { origin: typeof origin === 'string' ? origin : null, text };
+  if (value === undefined) return 'undefined';
+  try {
+    const json = JSON.stringify(value);
+    return json === undefined ? String(value) : json;
+  } catch {
+    return String(value);
+  }
 })()`;
 }
 
@@ -102,6 +101,21 @@ function thrown(details: unknown): string {
         ? record.text
         : 'the script failed';
   return `the script threw: ${text.replace(/[\r\n][\s\S]*$/u, '')}`;
+}
+
+/**
+ * The origin of the world `contextId`, read by DevTools in an evaluation of its own with no agent code in it. `location`
+ * and its `origin` are unforgeable even in that world. `undefined` when the read fails or the origin is opaque or too long.
+ */
+async function worldOrigin(cdp: ActableCdp, contextId: number): Promise<string | undefined> {
+  const read = (await withinTime(
+    cdp.send('Runtime.evaluate', { expression: 'location.origin', contextId, returnByValue: true }),
+    ORIGIN_READ_MS,
+  ).catch(() => undefined)) as { result?: { value?: unknown }; exceptionDetails?: unknown } | undefined;
+  const value = read?.exceptionDetails === undefined ? read?.result?.value : undefined;
+  return typeof value === 'string' && value !== 'null' && value.length <= PAGE_SCRIPT_ORIGIN_MAX_CHARS
+    ? value
+    : undefined;
 }
 
 /** `work`, or a refusal once `ms` have passed without it settling. */
@@ -138,6 +152,8 @@ export async function runPageScript(
       grantUniveralAccess: false,
     })) as { executionContextId?: unknown };
     if (typeof world.executionContextId !== 'number') throw new Error('the browser made no world to run the script in');
+    // The world's origin, read before the agent's code runs and again after, each in an evaluation of its own.
+    const before = await worldOrigin(cdp, world.executionContextId);
     // DevTools' own timeout stops a script that runs; a script that only waits is stopped here.
     const answer = (await withinTime(
       cdp.send('Runtime.evaluate', {
@@ -151,17 +167,10 @@ export async function runPageScript(
     )) as { result?: { value?: unknown }; exceptionDetails?: unknown };
     if (answer.exceptionDetails !== undefined) throw new Error(thrown(answer.exceptionDetails));
     const value = answer.result?.value;
-    const reported =
-      value !== null && typeof value === 'object' ? (value as { origin?: unknown; text?: unknown }) : undefined;
-    const said = reported === undefined ? value : reported.text;
-    const origin =
-      typeof reported?.origin === 'string' &&
-      reported.origin !== 'null' &&
-      reported.origin.length <= PAGE_SCRIPT_ORIGIN_MAX_CHARS
-        ? reported.origin
-        : undefined;
+    const after = await worldOrigin(cdp, world.executionContextId);
+    const origin = before !== undefined && before === after ? before : undefined;
     return {
-      text: (typeof said === 'string' ? said : String(said)).slice(0, PAGE_SCRIPT_MAX_RESULT_CHARS),
+      text: (typeof value === 'string' ? value : String(value)).slice(0, PAGE_SCRIPT_MAX_RESULT_CHARS),
       ...(origin === undefined ? {} : { origin }),
     };
   } finally {

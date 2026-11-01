@@ -15,6 +15,8 @@ import {
 class FakeCdp implements ActableCdp {
   readonly sent: { readonly method: string; readonly params: Readonly<Record<string, unknown>> }[] = [];
   answer: unknown = { result: { value: '"Welcome"' } };
+  /** What each separate read of the world's origin answers, in turn (the last one repeats). */
+  origins: unknown[] = [{ result: { value: 'https://example.test' } }];
   frame: unknown = { frameTree: { frame: { id: 'frame-1' } } };
   world: unknown = { executionContextId: 7 };
   /** Never settle the evaluation, as a script that only waits never does. */
@@ -24,6 +26,11 @@ class FakeCdp implements ActableCdp {
     this.sent.push({ method, params });
     if (method === 'Page.getFrameTree') return this.frame;
     if (method === 'Page.createIsolatedWorld') return this.world;
+    if (params.expression === 'location.origin') {
+      const next = this.origins.length > 1 ? this.origins.shift() : this.origins[0];
+      if (next instanceof Error) throw next;
+      return next;
+    }
     if (this.hang) return await new Promise(() => undefined);
     return this.answer;
   }
@@ -80,10 +87,12 @@ describe('runPageScript', () => {
     const ran = await runPageScript(asPage(page()), cdp, { source: '() => document.title' }, () => 'mark-1');
 
     // Assert
-    should(ran).deepEqual({ text: '"Welcome"' });
+    should(ran).deepEqual({ text: '"Welcome"', origin: 'https://example.test' });
     should(cdp.sent.map(call => call.method)).deepEqual([
       'Page.getFrameTree',
       'Page.createIsolatedWorld',
+      'Runtime.evaluate',
+      'Runtime.evaluate',
       'Runtime.evaluate',
     ]);
     should(cdp.sent[1]?.params).deepEqual({
@@ -91,8 +100,11 @@ describe('runPageScript', () => {
       worldName: PAGE_SCRIPT_WORLD,
       grantUniveralAccess: false,
     });
-    should(cdp.sent[2]?.params).match({ contextId: 7, awaitPromise: true, returnByValue: true, timeout: 5_000 });
-    should(String(cdp.sent[2]?.params.expression)).containEql('() => document.title');
+    // The world's origin is read on its own, on the same world, before and after the agent's code.
+    should(cdp.sent[2]?.params).deepEqual({ expression: 'location.origin', contextId: 7, returnByValue: true });
+    should(cdp.sent[3]?.params).match({ contextId: 7, awaitPromise: true, returnByValue: true, timeout: 5_000 });
+    should(String(cdp.sent[3]?.params.expression)).containEql('() => document.title');
+    should(cdp.sent[4]?.params).deepEqual({ expression: 'location.origin', contextId: 7, returnByValue: true });
   });
 
   it('should hand the script its element by a one-time mark, and take the mark off afterwards', async () => {
@@ -113,7 +125,7 @@ describe('runPageScript', () => {
       'aria-ref=e1 set data-ferretry-script=mark-7',
       'aria-ref=e1 remove data-ferretry-script',
     ]);
-    should(String(cdp.sent[2]?.params.expression)).containEql(
+    should(String(cdp.sent[3]?.params.expression)).containEql(
       'document.querySelector("[data-ferretry-script=\\"mark-7\\"]")',
     );
   });
@@ -203,7 +215,7 @@ describe('runPageScript', () => {
 
     // Assert
     should((failure as Error).message).equal('the script ran past 20 ms and was stopped');
-    should(cdp.sent[2]?.params.timeout).equal(20);
+    should(cdp.sent[3]?.params.timeout).equal(20);
   });
 
   it('should hold the timeout inside its bounds', async () => {
@@ -214,7 +226,7 @@ describe('runPageScript', () => {
     await runPageScript(asPage(page()), cdp, { source: '() => 1', timeoutMs: 60_000 }, () => 'm');
 
     // Assert
-    should(cdp.sent[2]?.params.timeout).equal(10_000);
+    should(cdp.sent[3]?.params.timeout).equal(10_000);
   });
 
   it('should refuse a page with no frame, or a world the browser did not make', async () => {
@@ -255,16 +267,7 @@ describe('runPageScript', () => {
 });
 
 /** Runs a script expression here, as the isolated world would run it. */
-/** Evaluates the expression here, in a world whose `location` is `origin`: what the script answered, and the origin read. */
-const evaluateHere = async (
-  expression: string,
-  origin = 'https://example.test',
-): Promise<{ readonly origin: unknown; readonly text: unknown }> =>
-  (await (new Function('location', `return ${expression};`)({ origin }) as Promise<unknown>)) as {
-    readonly origin: unknown;
-    readonly text: unknown;
-  };
-const runHere = async (expression: string): Promise<unknown> => (await evaluateHere(expression)).text;
+const runHere = (expression: string): Promise<unknown> => new Function(`return ${expression};`)() as Promise<unknown>;
 
 describe('pageScriptExpression', () => {
   it('should call the function with no element when none was named, and turn what it returns into text', async () => {
@@ -292,35 +295,48 @@ describe('pageScriptExpression', () => {
   });
 });
 
-describe('runPageScript: the origin of the world the script ran in (secrev-1282a M2)', () => {
-  it('should answer the origin of the world it ran in beside the text, as the evaluation sees it', async () => {
-    should(await evaluateHere(pageScriptExpression('() => 1', undefined), 'https://gitlab.com')).deepEqual({
-      origin: 'https://gitlab.com',
-      text: '1',
-    });
-  });
-
-  it('should read the world’s own origin first, in the same evaluation, before the agent’s code is even built', () => {
-    const expression = pageScriptExpression('() => document.title', undefined);
-    const read = expression.indexOf('const origin = location.origin;');
-    should(read).be.above(-1);
-    should(read).be.below(expression.indexOf('() => document.title'));
-    should(expression.indexOf('await fn(')).be.above(read);
-  });
-
-  it('should answer the origin the evaluation reported beside the text', async () => {
+describe('runPageScript: the origin of the world the script ran in (secrev-1282a M2, delta F1)', () => {
+  it('should report the world’s real origin when the agent’s source breaks out of the wrapper to forge one', async () => {
+    // Arrange — the source closes the wrapper's bracket and returns its own answer before the wrapper's.
     const cdp = new FakeCdp();
-    cdp.answer = { result: { value: { origin: 'https://gitlab.com', text: '"Welcome"' } } };
-    const ran = await runPageScript(asPage(page()), cdp, { source: '() => document.title' }, () => 'm');
-    should(ran).deepEqual({ text: '"Welcome"', origin: 'https://gitlab.com' });
+    cdp.origins = [{ result: { value: 'https://victim.example' } }];
+    cdp.answer = { result: { value: { origin: 'https://decoy.example', text: 'ok' } } };
+    const source = "() => 1);\n  return { origin: 'https://decoy.example', text: 'ok' };\n  (0";
+
+    // Act
+    const ran = await runPageScript(asPage(page()), cdp, { source }, () => 'm');
+
+    // Assert — the origin comes only from DevTools' own reads, never from what the agent's evaluation returned.
+    should(ran.origin).equal('https://victim.example');
+    should(JSON.stringify(ran)).not.containEql('decoy');
   });
 
-  it('should answer no origin for an opaque one, one too long to trust, or none at all', async () => {
-    for (const origin of ['null', `https://${'a'.repeat(3_000)}.test`, null, 7]) {
+  it('should report no origin when the two reads differ, or the one after fails (the world was destroyed)', async () => {
+    const moved = new FakeCdp();
+    moved.origins = [{ result: { value: 'https://github.com' } }, { result: { value: 'https://gitlab.com' } }];
+    should(await runPageScript(asPage(page()), moved, { source: '() => 1' }, () => 'm')).not.have.property('origin');
+    const destroyed = new FakeCdp();
+    destroyed.origins = [
+      { result: { value: 'https://github.com' } },
+      new Error('Cannot find context with specified id'),
+    ];
+    should(await runPageScript(asPage(page()), destroyed, { source: '() => 1' }, () => 'm')).not.have.property(
+      'origin',
+    );
+  });
+
+  it('should report no origin for an opaque one, one too long, a read that threw, or one that is not text', async () => {
+    for (const read of [
+      { result: { value: 'null' } },
+      { result: { value: `https://${'a'.repeat(3_000)}.test` } },
+      { exceptionDetails: { text: 'ReferenceError' } },
+      { result: { value: 7 } },
+    ]) {
       const cdp = new FakeCdp();
-      cdp.answer = { result: { value: { origin, text: '1' } } };
-      const ran = await runPageScript(asPage(page()), cdp, { source: '() => 1' }, () => 'm');
-      should(ran).deepEqual({ text: '1' });
+      cdp.origins = [read];
+      should(await runPageScript(asPage(page()), cdp, { source: '() => 1' }, () => 'm')).deepEqual({
+        text: '"Welcome"',
+      });
     }
   });
 });

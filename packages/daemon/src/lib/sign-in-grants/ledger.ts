@@ -32,11 +32,32 @@ export interface LedgerGrant {
   /** `Infinity` for a standing rule with no cap. */
   readonly remaining: number;
   /**
-   * A code-only fill must JOIN an open attempt of this grant, in the same session, that already typed the password AT THE
-   * SAME PLACE (a standing rule): a stored code is never typed into a "confirm with 2FA" form outside a sign-in the
-   * grant filled. Otherwise `code-without-sign-in`.
+   * A code-only fill must JOIN an open attempt of this grant, in the same session, that already typed the password, as
+   * the NEXT STEP OF THAT SIGN-IN (a standing rule): the same tab, at the same place, on a document the tab navigated to
+   * from the password's, with no act of the ferret in between ({@link GrantTarget}). A stored code is never typed into a
+   * "confirm with 2FA" form outside a sign-in the grant filled. Otherwise `code-without-sign-in`.
    */
   readonly codeJoinsPassword?: boolean;
+}
+
+/**
+ * WHERE A FILL TYPES, as the daemon saw it: the match key, and for a page the tab and its document. `untouchedSince`
+ * says whether the ferret did nothing to the session's pages since a moment (its own Enter, pressed by the daemon, is
+ * no act of the ferret's). A rule's code step reads all of it; a missing part fails closed.
+ */
+export interface GrantTarget {
+  readonly place?: string | undefined;
+  readonly pageId?: string | undefined;
+  readonly navigationId?: string | undefined;
+  readonly untouchedSince?: (at: number) => boolean;
+}
+
+/** Where a rule typed an attempt's password, and when: its code step must follow it there. */
+interface PasswordWrite {
+  readonly place: string | undefined;
+  readonly pageId: string | undefined;
+  readonly navigationId: string | undefined;
+  readonly at: number;
 }
 
 /** A fill held against the ledger until it is spent or released. */
@@ -51,19 +72,37 @@ export interface GrantReservation {
   /** This fill opens a new attempt, so it spends a use. */
   readonly opens: boolean;
   readonly at: number;
-  /** The daemon's match key for the target this fill types into. */
-  readonly place: string | undefined;
+  /** Where this fill types, as the daemon saw it. */
+  readonly target: GrantTarget;
 }
 
 interface Attempt {
   readonly opened: number;
   readonly roles: Set<LoginFieldRole>;
-  /** Where the attempt began (the daemon's match key for the target): a rule's code step joins only there. */
-  readonly place: string | undefined;
+  /** Where and when the attempt typed its password: a rule's code step joins only right after it, in that tab. */
+  password: PasswordWrite | undefined;
 }
 
 const recent = (times: readonly number[] | undefined, now: number): number[] =>
   (times ?? []).filter(at => at > now - HOUR_MS);
+
+/**
+ * Whether a code step is the next step of the sign-in whose password this rule typed: the same place, the same tab, a
+ * document that tab navigated to since, and no act of the ferret's on the session's pages since the password.
+ */
+function followsPassword(password: PasswordWrite | undefined, target: GrantTarget): boolean {
+  return (
+    password !== undefined &&
+    password.place !== undefined &&
+    target.place === password.place &&
+    password.pageId !== undefined &&
+    target.pageId === password.pageId &&
+    password.navigationId !== undefined &&
+    target.navigationId !== undefined &&
+    target.navigationId !== password.navigationId &&
+    target.untouchedSince?.(password.at) === true
+  );
+}
 
 export class SignInGrantLedger {
   /** Per grant, per session: a standing rule fills for many sessions, and one session's steps never join another's. */
@@ -90,7 +129,7 @@ export class SignInGrantLedger {
     roles: readonly LoginFieldRole[],
     fieldSet: string,
     now: number,
-    place?: string,
+    target: GrantTarget = {},
   ): GrantReservation | GrantMissReason {
     const pending = [...this.#open];
     const attempt = this.#attempts.get(grant.id)?.get(sessionId);
@@ -105,7 +144,7 @@ export class SignInGrantLedger {
       grant.codeJoinsPassword === true &&
       roles.length > 0 &&
       roles.every(role => role === 'totp') &&
-      (!joins || attempt?.roles.has('password') !== true || attempt.place === undefined || attempt.place !== place)
+      !(joins && followsPassword(attempt?.password, target))
     )
       return 'code-without-sign-in';
     if (!joins) {
@@ -125,7 +164,7 @@ export class SignInGrantLedger {
       roles: [...roles],
       fieldSet,
       opens: !joins,
-      place,
+      target,
       at: now,
     };
     this.#open.add(reservation);
@@ -145,9 +184,20 @@ export class SignInGrantLedger {
     const attempts = this.#attempts.get(grant) ?? new Map<string, Attempt>();
     this.#attempts.set(grant, attempts);
     const attempt = attempts.get(reservation.sessionId);
+    const password: PasswordWrite | undefined = reservation.roles.includes('password')
+      ? {
+          place: reservation.target.place,
+          pageId: reservation.target.pageId,
+          navigationId: reservation.target.navigationId,
+          at,
+        }
+      : undefined;
     if (reservation.opens || attempt === undefined)
-      attempts.set(reservation.sessionId, { opened: at, roles: new Set(reservation.roles), place: reservation.place });
-    else for (const role of reservation.roles) attempt.roles.add(role);
+      attempts.set(reservation.sessionId, { opened: at, roles: new Set(reservation.roles), password });
+    else {
+      for (const role of reservation.roles) attempt.roles.add(role);
+      if (password !== undefined) attempt.password = password;
+    }
     if (identity !== undefined) {
       const pins = this.#pins.get(grant) ?? new Map<string, string>();
       if (!pins.has(fieldSet)) pins.set(fieldSet, identity);

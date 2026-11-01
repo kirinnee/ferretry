@@ -109,6 +109,10 @@ interface Options {
   onQueued?: (h: Harness) => void;
   /** The owner's history also holds the code form (it never can today: a code box is no password box). */
   codeHistory?: boolean;
+  /** The ferret acts on its pages while the card is being raised (after the raise's own look). */
+  actDuringRaise?: boolean;
+  /** The daemon's dummy probe finds the password field hiding what is typed, so the raise's lock is the short one. */
+  probes?: boolean;
 }
 
 async function harness(options: Options = {}) {
@@ -123,6 +127,7 @@ async function harness(options: Options = {}) {
   const audits: AuditEntry[] = [];
   const timers: { ms: number; fire: () => void }[] = [];
   let facts: InputTargetFacts = loginPage();
+  let acted: number | undefined;
   let card = 1;
   let id = 1;
   const clock = { now: NOW };
@@ -211,6 +216,10 @@ async function harness(options: Options = {}) {
     ruleAudits,
     timers,
     clock,
+    /** The ferret clicks, types, navigates or runs a script on its pages now. */
+    act: () => {
+      acted = clock.now;
+    },
     setFacts: (next: InputTargetFacts) => {
       facts = next;
     },
@@ -226,10 +235,12 @@ async function harness(options: Options = {}) {
         return options.written ?? 'typed';
       },
       clear: async () => options.clear ?? 'moved',
+      ...(options.probes === true ? { probe: async () => 'hidden' as const } : {}),
     },
     agenda: {
       raise: async (session, raised) => {
         cards.push(raised);
+        if (options.actDuringRaise === true) acted = clock.now;
         quietAtRaise.push(service.quietCard(session, raised.requestId));
         return { ok: true, id: `A${card++}` as AgendaId };
       },
@@ -263,7 +274,11 @@ async function harness(options: Options = {}) {
     hostName: 'kirin-box',
     grants,
     rebuzz: async session => void rebuzzes.push(session),
-    observer: { delivered: async () => undefined, tainted: () => false },
+    // The ferret's last act on its pages, as the login observer would say: no act, or the moment it last acted.
+    observer: {
+      delivered: async () => undefined,
+      tainted: (_session, _kind, since) => acted !== undefined && acted >= since,
+    },
   });
   return h;
 }
@@ -844,5 +859,91 @@ describe('no rule fills while an agent script runs anywhere (secrev-1282a M2)', 
     ended();
     h.clock.now += 1_000;
     should((await raised(h, SIGN_IN, OTHER)).view.state).equal('delivered');
+  });
+});
+
+describe('a rule’s code joins only the next step of its own sign-in (delta F2)', () => {
+  const CODE = totpCode(SEED, SIX, NOW) as string;
+  async function codeRule(h: Harness) {
+    const signIn = await github(h);
+    await plantSeed(h.directory.accounts, 'GITHUB', SEED, 'Authenticator app');
+    return await ruleFor(h, signIn, { totp: true, totpAcknowledged: true });
+  }
+
+  it('should fill the straight flow: the password page, then the code page that tab navigated to', async () => {
+    const h = await harness();
+    await codeRule(h);
+    await raised(h);
+    h.setFacts(codePage);
+    should((await raised(h, CODE_RAISE)).view.state).equal('delivered');
+    should(h.writes).deepEqual([USERNAME, PASSWORD, CODE]);
+  });
+
+  it('should ask for a lone code box in another tab of the same site (a "confirm with 2FA" form)', async () => {
+    const h = await harness();
+    await codeRule(h);
+    await raised(h);
+    h.setFacts({ ...codePage, pageId: 'page-2' });
+    const { request } = await raised(h, { ...CODE_RAISE, target: { kind: 'browser', key: 'other' } });
+    should(h.writes).deepEqual([USERNAME, PASSWORD]);
+    should(request?.preapproval).match({ by: 'rule', reason: 'code-without-sign-in' });
+  });
+
+  it('should ask once the ferret clicked, typed, navigated or ran a script after the password', async () => {
+    const h = await harness();
+    await codeRule(h);
+    await raised(h);
+    h.act();
+    h.setFacts(codePage);
+    const { request } = await raised(h, CODE_RAISE);
+    should(h.writes).deepEqual([USERNAME, PASSWORD]);
+    should(request?.preapproval).match({ by: 'rule', reason: 'code-without-sign-in' });
+  });
+
+  it('should ask when the tab never moved on from the password page (the same document)', async () => {
+    const h = await harness();
+    await codeRule(h);
+    await raised(h);
+    h.setFacts({ ...codePage, navigationId: 'loader-1' });
+    const { request } = await raised(h, CODE_RAISE);
+    should(h.writes).deepEqual([USERNAME, PASSWORD]);
+    should(request?.preapproval).match({ by: 'rule', reason: 'code-without-sign-in' });
+  });
+});
+
+describe('a refusal the ferret can cause shows it nothing a card with no rule would not (delta F3, F4)', () => {
+  it('should refuse before the page is held when a script is running, so the ferret’s reads never meet a hold', async () => {
+    const journal: string[] = [];
+    const h = await harness({ onJournal: type => void journal.push(type) });
+    await ruleFor(h, await github(h));
+    const ended = h.ruleGrants.running();
+    const { view } = await raised(h);
+    ended();
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    // The attempt never reached the write's journal entry: nothing took the page from the ferret.
+    should(journal.some(type => type.endsWith('delivering'))).be.false();
+  });
+
+  it('should keep reading the lock the card was raised with after a late refusal, as with no rule', async () => {
+    const revokeAtDelivering = async (type: string, at: Harness) => {
+      if (!type.endsWith('delivering')) return;
+      const id = at.rules.fillable()[0]?.body.id;
+      if (id !== undefined) await at.rules.revoke({ kind: 'owner', actor: { kind: 'host' } }, id);
+    };
+    // The ferret acts while the card is raised: the write's look works out a longer lock than the raise's.
+    const h = await harness({ probes: true, actDuringRaise: true, onJournal: revokeAtDelivering });
+    await ruleFor(h, await github(h));
+    const { view } = await raised(h);
+    const noRule = await harness({ probes: true, actDuringRaise: true });
+    await github(noRule);
+    const plain = await raised(noRule);
+
+    should(view.state).equal('pending');
+    should(view.lockSeconds).equal(plain.view.lockSeconds);
+    // The request itself keeps the longer lock (a card never shortens): only the ferret's reading is the raise's.
+    const [request] = await h.service.list(HOST);
+    should(request?.lock?.seconds).be.above(view.lockSeconds ?? 0);
   });
 });

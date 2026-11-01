@@ -5,6 +5,7 @@ import {
   FILLS_PER_HOUR_PER_SESSION,
   FILLS_PER_HOUR_PER_SIGN_IN,
   type GrantReservation,
+  type GrantTarget,
   SignInGrantLedger,
 } from '../../../src/lib/sign-in-grants/ledger.ts';
 
@@ -156,7 +157,7 @@ describe('SignInGrantLedger: a standing rule (R3c-4)', () => {
     at: number,
     session = SESSION,
     remaining = Number.POSITIVE_INFINITY,
-    place = 'github.com',
+    over: Partial<GrantTarget> = {},
   ) =>
     ledger.reserve(
       { id: RULE, signIn: SIGN_IN, remaining, codeJoinsPassword: true },
@@ -164,7 +165,14 @@ describe('SignInGrantLedger: a standing rule (R3c-4)', () => {
       roles,
       [...roles].sort().join('+'),
       at,
-      place,
+      // The straight flow: the password page in tab p1, then the code page the tab navigated to, the ferret idle.
+      {
+        place: 'github.com',
+        pageId: 'p1',
+        navigationId: roles.includes('totp') ? 'n2' : 'n1',
+        untouchedSince: () => true,
+        ...over,
+      },
     );
 
   it('should type a code only as a later step of a sign-in the rule typed the password of', () => {
@@ -182,10 +190,43 @@ describe('SignInGrantLedger: a standing rule (R3c-4)', () => {
   it('should not let a code join an attempt whose password went to another place, even one the rule pins', () => {
     const ledger = new SignInGrantLedger();
     ledger.spent(reserved(ruleFill(ledger, ['username', 'password'], NOW)), 'p');
-    should(ruleFill(ledger, ['totp'], NOW + 1_000, SESSION, Number.POSITIVE_INFINITY, 'login.github.com')).equal(
-      'code-without-sign-in',
-    );
+    should(
+      ruleFill(ledger, ['totp'], NOW + 1_000, SESSION, Number.POSITIVE_INFINITY, { place: 'login.github.com' }),
+    ).equal('code-without-sign-in');
     should(reserved(ruleFill(ledger, ['totp'], NOW + 2_000)).opens).be.false();
+  });
+
+  it('should let a code join only as the next step of that sign-in: its tab, a new document, the ferret idle (delta F2)', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(ruleFill(ledger, ['username', 'password'], NOW)), 'p');
+    const asked = (over: Partial<GrantTarget>) =>
+      ruleFill(ledger, ['totp'], NOW + 1_000, SESSION, Number.POSITIVE_INFINITY, over);
+    // A lone code box in another tab of the same site: a "confirm with 2FA" form, not this sign-in.
+    should(asked({ pageId: 'p2' })).equal('code-without-sign-in');
+    // The same document: the tab never moved on from the password page.
+    should(asked({ navigationId: 'n1' })).equal('code-without-sign-in');
+    // The ferret clicked, typed, ran a script or navigated since the password.
+    should(asked({ untouchedSince: () => false })).equal('code-without-sign-in');
+    // Nothing known: refused.
+    should(asked({ untouchedSince: undefined })).equal('code-without-sign-in');
+    should(asked({ pageId: undefined })).equal('code-without-sign-in');
+    should(asked({ navigationId: undefined })).equal('code-without-sign-in');
+    should(reserved(asked({})).opens).be.false();
+  });
+
+  it('should read "since" from the moment the rule reserved its password', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(ruleFill(ledger, ['password'], NOW + 5_000)), 'p');
+    const since: number[] = [];
+    reserved(
+      ruleFill(ledger, ['totp'], NOW + 6_000, SESSION, Number.POSITIVE_INFINITY, {
+        untouchedSince: at => {
+          since.push(at);
+          return true;
+        },
+      }),
+    );
+    should(since).deepEqual([NOW + 5_000]);
   });
 
   it('should not let a code join once the attempt is over, or twice in one attempt', () => {
