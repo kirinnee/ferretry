@@ -454,9 +454,9 @@ export class SharedCatalogService {
     const stored = item.versions.find(candidate => candidate.version === version);
     if (stored === undefined)
       throw new CatalogRefusal('item_unknown', `${item.name} has no version ${String(version)}.`);
-    // A catalog never serves a version published before the item joined it, except the current one: the person
-    // who added it reviewed that one only.
-    if (version !== item.current && Date.parse(stored.publishedAt) < Date.parse(entry.addedAt))
+    // A catalog serves the versions from the one it joined (or was relisted) at onward: the person who added the
+    // item reviewed that version, and nothing older.
+    if (version < (entry.sinceVersion ?? 1))
       throw new CatalogRefusal('item_unknown', `${item.name} has no version ${String(version)} in this catalog.`);
     return await this.#frozen(catalogId, item, stored);
   }

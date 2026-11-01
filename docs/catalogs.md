@@ -284,7 +284,7 @@ between them are byte-identical**. A reader that saw revision 7 refuses a signed
 
 Exactly one catalog's revision rises for a rename, a description, an add (new or existing), a withdrawal or a relist. A new version raises the revision of **every catalog that lists the item live** (one write carries all of them), and leaves a catalog that withdrew the item alone. Making a catalog the default changes no manifest, so no revision rises.
 
-A catalog never serves a version published before the item joined it, except the current one: the person who added an item reviewed that version only. A relist counts as joining again. Only the current version is exported.
+A catalog serves the versions from the one it joined at (or was relisted at) onward: the entry's optional `sinceVersion` (absent means 1, so catalogs made before 3c-2 serve every version) is set to the item's current version when an existing item is added or relisted, and `frozenItem` refuses any older version as `item_unknown`. Only the current version is exported. A 3c-1 daemon refuses a document carrying `sinceVersion` (it fails closed and never writes), so a downgrade after this slice needs the catalogs file restored from before it.
 
 The publisher name the manifest carries is **stored with the catalog** when it is made (the machine's
 name then) and signed from the store at every export, so a change of host name does not change the bytes

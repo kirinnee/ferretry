@@ -353,6 +353,32 @@ describe('what a catalog serves of an item it joined later', () => {
     r.clock.ms += 1000;
     await r.service.addItem(second.id, { itemId: added.itemId, version: 1 });
     await newerVersion(r, first.id, added.itemId);
+    should((await r.service.frozenItem(second.id, added.itemId, 1)).itemVersion).equal(1);
+    should((await r.service.frozenItem(second.id, added.itemId, 2)).itemVersion).equal(2);
+  });
+
+  it('should serve a non-current version published after the item joined', async () => {
+    const { r, first, second, added } = await twoCatalogs();
+    await r.service.addItem(second.id, { itemId: added.itemId, version: 1 });
+    await newerVersion(r, first.id, added.itemId);
+    await newerVersion(r, first.id, added.itemId);
+    should((await r.service.frozenItem(second.id, added.itemId, 2)).itemVersion).equal(2);
+    should((await r.service.frozenItem(second.id, added.itemId, 3)).itemVersion).equal(3);
+  });
+
+  it('should refuse the older version even when a clock correction makes it look newer', async () => {
+    const r = await rig();
+    const first = await r.service.create({ name: 'First' });
+    const second = await r.service.create({ name: 'Second' });
+    r.clock.ms += 5000;
+    const preview = await r.service.previewItem(first.id, { source: { kind: 'skill', skill: 'demo' } });
+    const added = await r.service.addItem(first.id, {
+      source: { kind: 'skill', skill: 'demo' },
+      digest: preview.digest,
+    });
+    await newerVersion(r, first.id, added.itemId);
+    r.clock.ms -= 4000;
+    await r.service.addItem(second.id, { itemId: added.itemId, version: 2 });
     should((await refusal(async () => await r.service.frozenItem(second.id, added.itemId, 1))).refusal).equal(
       'item_unknown',
     );
@@ -383,6 +409,22 @@ describe('what a catalog serves of an item it joined later', () => {
     const r = await rig();
     for (let index = 0; index < CATALOGS_MAX_PER_PUBLISHER; index += 1) await r.service.create({ name: `c${index}` });
     should((await refusal(async () => await r.service.create({ name: 'one more' }))).refusal).equal('catalogs_full');
+  });
+
+  it('should refuse a catalog that serves an item from a version it does not have', async () => {
+    const { r, first } = await twoCatalogs();
+    const doc = r.documents.document;
+    r.documents.document = {
+      ...doc,
+      catalogs: doc.catalogs.map(catalog =>
+        catalog.id === first.id
+          ? { ...catalog, entries: catalog.entries.map(entry => ({ ...entry, sinceVersion: 9 })) }
+          : catalog,
+      ),
+    };
+    const writes = r.documents.writes;
+    should((await refusal(async () => await r.service.create({ name: 'Third' }))).refusal).equal('store_damaged');
+    should(r.documents.writes).equal(writes);
   });
 
   it('should write nothing when the change would break the schema', async () => {

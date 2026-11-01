@@ -91,6 +91,8 @@ export type StoredSharedItem = z.infer<typeof StoredSharedItemSchema>;
 const CatalogEntrySchema = z.strictObject({
   itemId: SharedCatalogItemIdSchema,
   addedAt: InstantSchema,
+  /** The first version this catalog serves; absent means 1 (every version), as for catalogs made before 3c-2. */
+  sinceVersion: z.number().int().min(1).optional(),
   withdrawnAt: InstantSchema.optional(),
 });
 export type CatalogEntry = z.infer<typeof CatalogEntrySchema>;
@@ -158,6 +160,8 @@ function firstProblem(document: {
       if (item === undefined) return `${catalog.name} lists ${entry.itemId}, which is not an item`;
       if (seen.has(entry.itemId)) return `${catalog.name} lists ${entry.itemId} twice`;
       seen.add(entry.itemId);
+      if (entry.sinceVersion !== undefined && entry.sinceVersion > item.versions.length)
+        return `${catalog.name} serves ${entry.itemId} from version ${String(entry.sinceVersion)}, which does not exist`;
       const lists = listedBy.get(entry.itemId) ?? new Set<string>();
       lists.add(catalog.id);
       listedBy.set(entry.itemId, lists);
@@ -277,7 +281,8 @@ export interface NewCatalog {
 
 /**
  * `catalogs_full` is the cap on catalogs this machine keeps (256). `catalog_full` is a different limit: the items
- * one catalog holds. An app naming either must say which, because the remedy differs.
+ * one catalog holds. catalog-members has its own `catalogs_full`, the limit on share codes. An app naming any of
+ * them must say which, because the remedy differs.
  */
 export function withCatalog(document: CatalogsDocument, created: NewCatalog): CatalogsDocument {
   if (document.catalogs.length >= CATALOGS_MAX_PER_PUBLISHER)
@@ -416,13 +421,16 @@ export function withListedItem(
   assertRoom(document, catalog, item);
   if (entry !== undefined) {
     const { withdrawnAt: _forgotten, ...kept } = entry;
-    const listed = { ...kept, addedAt: now };
+    const listed = { ...kept, sinceVersion: item.current };
     return replaceCatalog(
       document,
       bumped({ ...catalog, entries: catalog.entries.map(other => (other === entry ? listed : other)) }, now),
     );
   }
-  const next = bumped({ ...catalog, entries: [...catalog.entries, { itemId, addedAt: now }] }, now);
+  const next = bumped(
+    { ...catalog, entries: [...catalog.entries, { itemId, addedAt: now, sinceVersion: item.current }] },
+    now,
+  );
   return {
     ...replaceCatalog(document, next),
     items: document.items.map(other =>
