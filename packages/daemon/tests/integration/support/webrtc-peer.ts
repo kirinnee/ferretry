@@ -84,12 +84,12 @@ export class PeerWatch {
 
   /** Applies the remote answer; a refusal carries the peer's history, because it says the peer was already closed. */
   answered(sdp: string): void {
-    if (this.#peer.state() === 'closed')
-      throw new OfferorClosedEarly(`the peer closed before the answer — ${this.describe()}`);
     try {
       this.#peer.setRemoteDescription(sdp, 'answer');
     } catch (error) {
-      throw new Error(`${error instanceof Error ? error.message : String(error)} — ${this.describe()}`);
+      const said = `${error instanceof Error ? error.message : String(error)} — ${this.describe()}`;
+      if (said.includes('without ICE transport')) throw new OfferorClosedEarly(said);
+      throw new Error(said);
     }
   }
 
