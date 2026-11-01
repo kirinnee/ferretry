@@ -165,7 +165,8 @@ const HISTORY = [
   }),
   event(19, { type: 'reparented', from: null, to: { id: 'F85' }, reason: 'it is part of the board work' }),
   event(20, { type: 'dropped', reason: 'superseded by &F20' }),
-  { ...event(21, { type: 'migrated', legacyRef: `${LEAD}:F12` }), actor: DAEMON },
+  event(21, { type: 'snoozed', until: INSTANT }),
+  { ...event(22, { type: 'migrated', legacyRef: `${LEAD}:F12` }), actor: DAEMON },
 ];
 
 const CARD: BoardTask = BoardTaskSchema.parse({
