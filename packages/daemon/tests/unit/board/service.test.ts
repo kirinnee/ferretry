@@ -1304,8 +1304,8 @@ describe('refiling a card', () => {
   });
 
   it('should take a named lane, and let the daemon refile too', async () => {
-    // Arrange
-    const { ports, service } = serviceWith([card()]);
+    // Arrange — quick work walks no Plan gate, so the lane named is past none (docs/board.md § Gates ask the owner)
+    const { ports, service } = serviceWith([card({ workflow: 'quick' })]);
 
     // Act
     await service.act('F1', action({ action: 'refile', projectId: OTHER_PROJECT, laneId: 'review' }), daemon);

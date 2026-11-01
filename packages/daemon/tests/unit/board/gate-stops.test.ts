@@ -57,11 +57,16 @@ const cardFor = (audience: CardAudience, laneId: string, overrides: Partial<Boar
     ...overrides,
   });
 
-const serviceOver = (cards: readonly BoardTask[], laneSet: LaneSet = lanes(PROJECT)) => {
+const serviceOver = (
+  cards: readonly BoardTask[],
+  laneSet: LaneSet = lanes(PROJECT),
+  overrides: Parameters<typeof world>[0] = {},
+) => {
   const store = new MemoryBoardStore(cards);
   const focus = new FakeFocus();
   const service = new BoardService(
     world({
+      ...overrides,
       store,
       focus,
       lanes: new FakeLanes(
@@ -318,5 +323,155 @@ describe('the daemon’s moves stop at a gate', () => {
     should(owner.stored().laneId).equal('merged');
     should(refused?.code).equal('owner-gate');
     should(ferret.stored().laneId).equal('implement');
+  });
+});
+
+describe('the security review’s ways past a gate (&F364 PR B)', () => {
+  const refile = (projectId: string, laneId?: string) =>
+    BoardTaskActionRequestSchema.parse({ action: 'refile', projectId, ...(laneId === undefined ? {} : { laneId }) });
+
+  it('refuses the assignee’s refile of a card waiting at Plan to a lane past it, and the two-hop that would follow', async () => {
+    // Arrange — the review's exploit: refile to Merged on another board, then back to Released
+    const world = serviceOver([cardFor('external', 'plan')]);
+
+    // Act
+    const first = await attempt(world.service.act('F1', refile(OTHER_PROJECT, 'merged'), CALLERS.assignee));
+    const sideways = await attempt(world.service.act('F1', refile(OTHER_PROJECT, 'implement'), CALLERS.assignee));
+
+    // Assert
+    should(first?.code).equal('owner-gate');
+    should(sideways?.code).equal('owner-gate');
+    should(world.stored()).match({ projectId: PROJECT, laneId: 'plan' });
+  });
+
+  it('refuses a named lane past a gate of the other board, even for a card past no gate here', async () => {
+    // Arrange — the second hop alone: a card in Merged, refiled by name into Released past Plan
+    const world = serviceOver([cardFor('external', 'merged')]);
+
+    // Act
+    const error = await attempt(world.service.act('F1', refile(OTHER_PROJECT, 'released'), CALLERS.assignee));
+
+    // Assert
+    should(error?.code).equal('owner-gate');
+    should(error?.message).containEql('past Plan/Design');
+    should(world.stored().projectId).equal(PROJECT);
+  });
+
+  it('lets a refile land a card waiting at a gate at that board’s gate, or by its category, and the owner anywhere', async () => {
+    // Arrange
+    const gated = serviceOver([cardFor('external', 'plan')]);
+    const owner = serviceOver([cardFor('external', 'plan')]);
+
+    // Act
+    await gated.service.act('F1', refile(OTHER_PROJECT), CALLERS.assignee);
+    await owner.service.act('F1', refile(OTHER_PROJECT, 'merged'), CALLERS['owner-human']);
+
+    // Assert
+    should(gated.stored()).match({ projectId: OTHER_PROJECT, laneId: 'plan' });
+    should(owner.stored()).match({ projectId: OTHER_PROJECT, laneId: 'merged' });
+  });
+
+  it('refuses a sub-ferret any refile at all', async () => {
+    // Arrange — grandchild was started by child, so it is a sub-ferret
+    const store = new MemoryBoardStore([cardFor('external', 'plan')]);
+    const service = new BoardService(
+      world({
+        store,
+        subFerrets: { leadOf: async id => ({ grandchild: 'child', child: 'lead' })[id], addressOf: async id => id },
+      }),
+    );
+
+    // Act
+    const error = await attempt(service.act('F1', refile(OTHER_PROJECT, 'merged'), CALLERS.assignee));
+
+    // Assert
+    should(error?.code).equal('forbidden');
+  });
+
+  it('refuses a drop and a reopen past the lane it was dropped from, and reopens it there', async () => {
+    // Arrange — the review's exploit: the owner ferret drops a card at Plan, then reopens it in Released
+    const world = serviceOver([cardFor('external', 'plan')]);
+    await world.service.act(
+      'F1',
+      BoardTaskActionRequestSchema.parse({ action: 'drop', reason: 'parked' }),
+      CALLERS.owner,
+    );
+    const reopen = (to: string) =>
+      BoardTaskActionRequestSchema.parse({
+        action: 'reopen',
+        to,
+        reason: 'back on',
+        ask: { text: 'back on', source: 'lead' },
+      });
+
+    // Act
+    const past = await attempt(world.service.act('F1', reopen('released'), CALLERS.owner));
+    await world.service.act('F1', reopen('plan'), CALLERS.owner);
+
+    // Assert
+    should(past?.code).equal('owner-gate');
+    should(past?.message).containEql('where it was dropped');
+    should(world.stored()).match({ laneId: 'plan', dropped: null });
+  });
+
+  it('lets the owner reopen a dropped card anywhere open', async () => {
+    // Arrange
+    const world = serviceOver([cardFor('external', 'plan', { dropped: { reason: 'parked', at: NOW } })]);
+
+    // Act
+    await world.service.act(
+      'F1',
+      BoardTaskActionRequestSchema.parse({
+        action: 'reopen',
+        to: 'released',
+        reason: 'ship it',
+        ask: { text: 'ship it', source: 'owner' },
+      }),
+      CALLERS['owner-human'],
+    );
+
+    // Assert
+    should(world.stored().laneId).equal('released');
+  });
+
+  it('reads a top-level ferret’s own card as the owner’s: it cannot pass its own Plan gate by paraphrasing', async () => {
+    // Arrange — lead has no parent; its card says a session of its own asked, and askedBy says agent
+    const world = serviceOver([
+      cardFor('external', 'plan', {
+        owner: 'lead',
+        assignee: null,
+        createdBy: { kind: 'ferret', sessionId: 'lead' },
+        ask: { text: 'Build X', source: 'session:lead' },
+        askedBy: 'agent',
+      }),
+    ]);
+
+    // Act
+    const error = await attempt(world.service.act('F1', move('implement'), { kind: 'ferret', sessionId: 'lead' }));
+
+    // Assert
+    should(error?.code).equal('owner-gate');
+    should(world.stored().laneId).equal('plan');
+  });
+
+  it('reads a card as the owner’s when the lineage cannot be read', async () => {
+    // Arrange — the session's parent cannot be read: it is never taken for a ferret's own errand
+    const world = serviceOver([cardFor('internal', 'plan', { askedBy: 'agent' })], lanes(PROJECT), {
+      parents: {
+        parentOf: async () => {
+          throw new Error('the session document is unreadable');
+        },
+      },
+    });
+
+    // Act — its owner ferret, whose own standing needs no lineage read
+    const error = await attempt(world.service.act('F1', move('implement'), CALLERS.owner));
+
+    // Assert
+    should(error?.code).equal('owner-gate');
+  });
+
+  it('never lets a card’s workflow change, so no variant can skip a gate', () => {
+    should(BoardTaskActionRequestSchema.safeParse({ action: 'edit', workflow: 'quick' }).success).be.false();
   });
 });

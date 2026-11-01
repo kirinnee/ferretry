@@ -242,8 +242,8 @@ const move = (card: BoardTask, to: string, reason: string | undefined, context: 
   const gated = needsOwner(context.laneSet, card.laneId, to);
   const audience = context.audience ?? 'external';
   const forward = !isBackward(context.laneSet, card.laneId, to);
-  // A move on never passes a gate, the card's own or one on the way; entering one is fine.
-  const passed = forward ? gateOnTheWay(context.laneSet, card, target) : undefined;
+  // Leaving a gate is `needsOwner`'s; a gate on the way is passed too, and entering one is fine.
+  const passed = forward ? gatesBetween(context.laneSet, card, target)[0] : undefined;
   if (((gated.ok && gated.value) || passed !== undefined) && !mayPassGate(context.standing, audience)) {
     requireOwnerForClosed(target, context.standing, card, audience);
     const gate = passed ?? from;
@@ -333,6 +333,18 @@ const reopen = (
         `a reopen goes back to an earlier lane; ${ref} is in ${card.laneId}, so move it on instead`,
       );
     }
+  } else if (
+    action.to !== card.laneId &&
+    !isBackward(context.laneSet, card.laneId, action.to) &&
+    !mayPassGate(context.standing, context.audience ?? 'external')
+  ) {
+    // A dropped card comes back where it was dropped, or earlier: a drop is no way past a gate.
+    const from = requireLane(context.laneSet, card.laneId);
+    throw new BoardError(
+      'owner-gate',
+      `only the owner reopens ${ref} past ${from.name}, where it was dropped; reopen it there or earlier`,
+      ['owner-human'],
+    );
   }
   return reopenTo(card, action.to, action.reason, action.ask, context);
 };
@@ -787,12 +799,17 @@ const refile = (
   // into the other board's closed lane is no closing; the gate is for a card that is not closed yet.
   const source = categoryOf(context.laneSet, card.laneId);
   const alreadyClosed = source.ok && source.value === 'closed';
+  // Its facts land it where work resumes there, and move it on from there only as far as the first gate.
+  const atGate = card.dropped === null && !alreadyClosed && isGate(requireLane(context.laneSet, card.laneId));
   const byFacts =
     action.laneId === undefined && !alreadyClosed && card.dropped === null
       ? factsLandingLane(card, target, context)
       : undefined;
   const lane = byFacts ?? refileLane(card, context.laneSet, target, action.laneId);
   if (!(alreadyClosed && isClosedLane(lane))) requireOwnerForClosed(lane, context.standing, card);
+  if (!alreadyClosed && !mayPassGate(context.standing, context.audience ?? 'external')) {
+    refileGateProblem(card, { from: context.laneSet, target, lane, named: action.laneId !== undefined, atGate });
+  }
   const fromProject: BoardProjectId = card.projectId;
   const refiled: BoardTask = {
     ...withEvent(
@@ -804,6 +821,43 @@ const refile = (
     laneId: lane.id,
   };
   return { task: reconcileFacts(refiled, { ...context, laneSet: target }) ?? refiled };
+};
+
+/**
+ * A refile is no way past a gate (docs/board.md § Gates ask the owner): for anyone who may not pass one, a card
+ * waiting at a gate lands at a gate or earlier, and a lane named for it is the lane of its category there, or one no
+ * gate of that board's variant stands before. Throws `owner-gate` naming the gate.
+ */
+const refileGateProblem = (
+  card: BoardTask,
+  facts: {
+    readonly from: LaneSet;
+    readonly target: LaneSet;
+    readonly lane: Lane;
+    readonly named: boolean;
+    readonly atGate: boolean;
+  },
+): void => {
+  const ref = formatTaskRef(card);
+  const source = requireLane(facts.from, card.laneId);
+  const ahead = LANE_CATEGORIES.indexOf(facts.lane.category) >= LANE_CATEGORIES.indexOf(source.category);
+  if (facts.atGate && !isGate(facts.lane) && ahead) {
+    throw new BoardError(
+      'owner-gate',
+      `${ref} waits in ${source.name} for the owner; only the owner moves it on, to this board or another`,
+      ['owner-human'],
+    );
+  }
+  if (!facts.named || facts.lane.id === refileLane(card, facts.from, facts.target, undefined).id) return;
+  const entry = entryLane(facts.target, card.workflow);
+  const passed = gatesBetween(facts.target, { laneId: entry.id, workflow: card.workflow }, facts.lane)[0];
+  if (passed !== undefined) {
+    throw new BoardError(
+      'owner-gate',
+      `${ref} would land past ${passed.name} on that board, which waits for the owner; refile it without --lane, or to ${passed.name}`,
+      ['owner-human'],
+    );
+  }
 };
 
 const sameParent = (left: TaskRef | null, right: TaskRef | null): boolean =>

@@ -59,8 +59,11 @@ interface GateAgenda {
 export interface GateBoard {
   card(id: BoardTaskId): Promise<GateCard | undefined>;
   cards(): Promise<readonly GateCard[]>;
-  /** Applies one action as `caller`; throws the board's refusal. */
-  act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<void>;
+  /**
+   * Applies one action as `caller`; throws the board's refusal. `expect` is checked in the same write: the card must
+   * still sit in that lane by that entry, or nothing is written.
+   */
+  act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller, expect?: GateExpectation): Promise<void>;
 }
 
 /** Tells a card's ferret the owner's words that moved nothing ("Not yet" with words), through the reopen ladder. */
@@ -104,6 +107,12 @@ export interface GateAnswer {
   readonly permitted?: () => string | undefined;
 }
 
+/** Where an answer expects the card to be when its move is written: the gate's lane, by the entry it asked about. */
+export interface GateExpectation {
+  readonly laneId: string;
+  readonly entry: number;
+}
+
 /** The resolution note an item gets when its card left the gate some other way. */
 export const GATE_MOVED_ON = 'the card moved on';
 
@@ -124,8 +133,16 @@ const errorText = (error: unknown): string => (error instanceof Error ? error.me
 export class GateItems implements CardWriteObserver {
   /** Cards whose gate is being answered right now: their own writes are the answer's, not a card moving on. */
   private readonly answering = new Set<BoardTaskId>();
+  /** One answer per card at a time: the tail of each card's queue of answers. */
+  private readonly answers = new Map<BoardTaskId, Promise<unknown>>();
 
   constructor(private readonly ports: GateItemsDependencies) {}
+
+  /** Whether this open item is a card's gate item. */
+  async isGate(sessionId: string, id: AgendaId): Promise<boolean> {
+    const listed = await this.ports.agenda.list(sessionId);
+    return listed.ok && listed.value.items.some(each => each.id === id && each.gate !== undefined);
+  }
 
   /** A card was written: its gate item follows its lane. Never rejects. */
   async written(id: BoardTaskId): Promise<void> {
@@ -161,6 +178,22 @@ export class GateItems implements CardWriteObserver {
    * refusal leaves the item open and says why. `handled: false` for any item that is not an open gate item.
    */
   async answer(answer: GateAnswer): Promise<GateAnswerOutcome> {
+    const listed = await this.ports.agenda.list(answer.sessionId);
+    const cardId = listed.ok ? listed.value.items.find(each => each.id === answer.id)?.gate?.cardId : undefined;
+    if (cardId === undefined) return { handled: false };
+    // Answers to one card's gate take turns: the second reads the board the first one left.
+    const before = this.answers.get(cardId) ?? Promise.resolve();
+    const turn = before.then(async () => await this.answerAlone(answer));
+    const tail = turn.catch(() => undefined);
+    this.answers.set(cardId, tail);
+    try {
+      return await turn;
+    } finally {
+      if (this.answers.get(cardId) === tail) this.answers.delete(cardId);
+    }
+  }
+
+  private async answerAlone(answer: GateAnswer): Promise<GateAnswerOutcome> {
     const listed = await this.ports.agenda.list(answer.sessionId);
     const item = listed.ok ? listed.value.items.find(each => each.id === answer.id) : undefined;
     const gate = item?.gate;
@@ -257,8 +290,10 @@ export class GateItems implements CardWriteObserver {
       const listed = await this.ports.agenda.list(sessionId).catch(() => undefined);
       if (listed === undefined || !listed.ok) continue;
       for (const item of listed.value.items) {
-        if (item.raisedBy !== 'daemon') continue;
-        if (parseGateReference(item.sourceRef)?.cardId === cardId) gates.push({ sessionId, item });
+        // Only the gate items' own producer: the daemon's `task` source (a gate item also carries its `gate`).
+        if (item.raisedBy !== 'daemon' || item.source !== 'task') continue;
+        if (item.gate !== undefined && parseGateReference(item.sourceRef)?.cardId === cardId)
+          gates.push({ sessionId, item });
         else if (parseGateFollowupReference(item.sourceRef)?.cardId === cardId) followups.push({ sessionId, item });
       }
     }
@@ -280,29 +315,29 @@ export class GateItems implements CardWriteObserver {
     if (laneSet === null) return { code: 'not-moved', message: `${formatTaskRef(task)} has no lanes any more` };
     const target = this.ports.lanes.outcomeLane(laneSet, task.workflow, gate.laneId, decision.option.id);
     if (!target.ok) return { code: 'not-moved', message: `${formatTaskRef(task)} was not moved: ${target.message}` };
+    const expect: GateExpectation = { laneId: gate.laneId, entry: gate.entry };
     if (decision.option.outcome !== 'reopen-with-agenda') {
       return await this.act(
         task.id,
         { action: 'move', to: target.lane.id, reason: gateMoveReason(decision.option) },
         answer,
+        expect,
       );
     }
     const words = decision.words ?? '';
-    const followup = await this.followup(task, gate, words);
-    const reason = followup === undefined ? words : `${words} — talk it over on !${followup.item.id}`;
     const refusal = await this.act(
       task.id,
       {
         action: 'reopen',
         to: target.lane.id,
-        reason: clipAtWord(reason, MAX_BOARD_REASON_LENGTH),
+        reason: clipAtWord(words, MAX_BOARD_REASON_LENGTH),
         ask: { text: words, source: `owner (Inbox, !${answer.id})` },
       },
       answer,
+      expect,
     );
-    if (refusal !== undefined && followup !== undefined) {
-      await this.ports.agenda.resolve(followup.sessionId, followup.item.id, DAEMON, 'the card was not sent back');
-    }
+    // Only a card that really went back gets its conversation: a refused Not good opens none, and uses none up.
+    if (refusal === undefined) await this.followup(task, gate, words);
     return refusal;
   }
 
@@ -366,9 +401,10 @@ export class GateItems implements CardWriteObserver {
     id: BoardTaskId,
     request: BoardTaskActionRequest,
     answer: GateAnswer,
+    expect?: GateExpectation,
   ): Promise<GateRefusal | undefined> {
     try {
-      await this.ports.board.act(id, request, answer.caller);
+      await this.ports.board.act(id, request, answer.caller, expect);
       return undefined;
     } catch (error) {
       return { code: 'not-moved', message: `${formatTaskRef({ id })} was not moved: ${errorText(error)}` };

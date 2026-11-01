@@ -51,6 +51,11 @@ export class AgendaAgentClearer {
 
   private async openIds(sessionId: string): Promise<readonly string[]> {
     const ledger = await this.boards.read(sessionId).catch(() => null);
-    return ledger === null ? [] : agendaSnapshot(ledger).items.map(item => item.id);
+    // A card's gate item is the owner's ask about a card, not a ferret's backlog: clearing never touches one.
+    return ledger === null
+      ? []
+      : agendaSnapshot(ledger)
+          .items.filter(item => item.gate === undefined)
+          .map(item => item.id);
   }
 }

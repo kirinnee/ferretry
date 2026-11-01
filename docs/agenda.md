@@ -92,18 +92,20 @@ predates gates answers it by label, plus:
   refused.
 - **`sourceRef`** `gate:<card>:<lane>:<entry>`; the title is the card's, the ask the lane's ("Try it: <first step of
   How to test>", "OK to build? <summary>"), the premise its summary and the body its How to test, verbatim (never `steps`, which make a choice a mix).
-- **Swipes.** ← the first option that moves the card on (Done), → the reopen-with-agenda option (Not good), ↑ a third. A gate with one
-  option gets a second answer, **Not yet** (→ ; the card stays). The ask lists its options in that order, ← · ↑ · →,
+- **Swipes.** → the first option that moves the card on (Done), ← the reopen-with-agenda option (Not good), ↑ a third (the owner's decision !A205). A gate with one
+  option gets a second answer, **Not yet** (← ; the card stays). The ask lists its options in that order, ← · ↑ · →,
   because a choice card lays them out by it (`gateAskOptions`, `gateAnswers` in `@ferretry/protocol`). ↓ is Skip, and
-  **Not needed** (the button) dismisses it: the card stays where it is.
+  **Not needed** (the button) dismisses it: the owner's choice, the card stays where it is, quietly, and a device needs
+  the `fleet` grant for it as for an answer. A bare done (`resolve` with no answer) is refused.
 - **Answering** is `resolve` with `{kind: 'multiple-choice', choice: <label>}` and the owner's words as `note`; Not good
   needs words (the note, or `{kind: 'other', answer}`). The card moves first; a refusal leaves the item open
   (`400 invalid`, `403 forbidden`, `409 gate_moved_on`, `409 gate_not_moved`).
 - **Who.** The owner at the machine, or a paired device the `fleet` grant lets use the board. A ferret, its lead
   (the sub-ferret rule below does not reach a gate item) and the daemon are refused every verb that would close or
-  reword one. The daemon resolves one quietly when its card moves on.
+  reword one. The daemon resolves one quietly when its card moves on. Clearing the agent ferrets' backlog skips gate
+  items, and a chat message that names one does not park it.
 - **Its follow-up.** Not good opens one `reply` item about the card, `gate-followup:<card>:<entry>`, raised by the
-  daemon on behalf of the card's ferret and starting on the ferret's turn (in discussion); the ferret edits,
+  daemon on behalf of the card's ferret once the card went back, starting on the ferret's turn (in discussion); the ferret edits,
   surfaces and closes it as its own, and the owner's answer reaches it as on its own item.
 - **It buzzes once**, at its raise, and is never part of a stop's push ([notifications.md](notifications.md)).
 

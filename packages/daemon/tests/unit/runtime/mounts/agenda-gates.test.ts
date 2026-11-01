@@ -24,6 +24,12 @@ class FakeGates {
   constructor(private readonly outcome: (service: AgendaService) => Promise<GateAnswerOutcome>) {}
 
   service: AgendaService | undefined;
+  /** Whether the item a dismissal names is a gate item. */
+  gate = false;
+
+  async isGate(): Promise<boolean> {
+    return this.gate;
+  }
 
   async answer(answer: GateAnswer): Promise<GateAnswerOutcome> {
     this.asked.push(answer);
@@ -202,5 +208,43 @@ describe('a gate answer on the agenda route', () => {
 
     // Assert
     should(gates.asked).be.empty();
+  });
+});
+
+describe('Not needed on a gate item over the agenda route', () => {
+  const dismiss = { action: 'dismiss', id: 'A1' };
+
+  it('asks a device the same fleet grant an answer does', async () => {
+    // Arrange
+    const gates = new FakeGates(async () => ({ handled: false }));
+    gates.gate = true;
+
+    // Act
+    const refused = await post(gates, { ...DEVICE, governance: { refusal: 'not-granted' } }, dismiss);
+    const granted = await post(gates, DEVICE, dismiss);
+    const closed = await post(gates, { ...DEVICE, governance: undefined }, dismiss);
+
+    // Assert
+    should(refused).match({
+      status: 403,
+      body: { error: 'this device may not use the agent fleet, so it may not move a card' },
+    });
+    should(granted.status).equal(404);
+    should(closed.status).equal(403);
+  });
+
+  it('asks nothing of an item that is not a gate, nor of a ferret (the agenda refuses it)', async () => {
+    // Arrange
+    const plain = new FakeGates(async () => ({ handled: false }));
+    const gate = new FakeGates(async () => ({ handled: false }));
+    gate.gate = true;
+
+    // Act
+    const device = await post(plain, { ...DEVICE, governance: { refusal: 'not-granted' } }, dismiss);
+    const ferret = await post(gate, { ...FERRET, governance: { refusal: 'not-granted' } }, dismiss);
+
+    // Assert
+    should(device.status).equal(404);
+    should(ferret.status).equal(404);
   });
 });

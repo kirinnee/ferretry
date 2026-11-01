@@ -5,12 +5,13 @@
  */
 import type { BoardProjectId, BoardTaskActionRequest, BoardTaskId, BoardTaskView, LaneSet } from '@ferretry/protocol';
 import {
+  audienceOf,
   type BoardCaller,
   BoardError,
   type BoardService,
-  cardAudience,
   type GateBoard,
   type GateCard,
+  type GateExpectation,
 } from '../../lib/board/index.ts';
 
 /** A board's name, when it has one: the gate item says where the card waits. */
@@ -43,8 +44,13 @@ export class BoardGateCards implements GateBoard {
     return views.map(view => cardOf(view, laneSets.get(view.projectId) ?? null, names.get(view.projectId)));
   }
 
-  async act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<void> {
-    await this.board.act(id, request, caller);
+  async act(
+    id: BoardTaskId,
+    request: BoardTaskActionRequest,
+    caller: BoardCaller,
+    expect?: GateExpectation,
+  ): Promise<void> {
+    await this.board.act(id, request, caller, expect);
   }
 
   private async gateCard(view: BoardTaskView, laneSet: LaneSet | null): Promise<GateCard> {
@@ -56,6 +62,6 @@ export class BoardGateCards implements GateBoard {
 const cardOf = (view: BoardTaskView, laneSet: LaneSet | null, projectName: string | undefined): GateCard => ({
   task: view,
   laneSet,
-  audience: cardAudience(view),
+  audience: audienceOf(view.origin, view.askedBy),
   ...(projectName === undefined ? {} : { projectName }),
 });

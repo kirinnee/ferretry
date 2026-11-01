@@ -116,9 +116,17 @@ export const decideAskedBy = async (
 };
 
 /**
- * Who a card's gates ask: the ONE reading of "a person asked for it" the gates use (docs/board.md § Gates ask the
- * owner). The card's stored `askedBy`, else (a card stored before it) the ask's source ({@link cardAskedBy}). An
- * external card's gate raises an item for the owner; an internal card's gate is its lead's to pass.
+ * Who a card's gates ask: the ONE reading the gates use (docs/board.md § Gates ask the owner), and the CONSERVATIVE
+ * one, because it decides who may pass them. A card is INTERNAL — its owner ferret and leads pass its gates, and the
+ * owner is never asked — only when it is positively a ferret's own errand: made by the daemon, or recorded from a
+ * session a ferret started ({@link cardOrigin} `agent`), AND no person asked for it (`askedBy`). Anything else — an
+ * unknown session, a lineage that could not be read, a top-level ferret's own card — is EXTERNAL: the owner decides.
  */
-export const cardAudience = (card: Pick<BoardTask, 'ask' | 'askedBy'>): CardAudience =>
-  (card.askedBy ?? cardAskedBy(card)) === 'person' ? 'external' : 'internal';
+export const cardAudience = (
+  card: Pick<BoardTask, 'createdBy' | 'ask' | 'askedBy'>,
+  facts: OriginFacts,
+): CardAudience => audienceOf(cardOrigin(card, facts), card.askedBy ?? cardAskedBy(card));
+
+/** {@link cardAudience} from a card's derived origin and who asked: a view that says neither is external. */
+export const audienceOf = (origin: BoardTaskOrigin | undefined, askedBy: BoardTaskAskedBy | undefined): CardAudience =>
+  origin === 'agent' && askedBy !== undefined && askedBy !== 'person' ? 'internal' : 'external';

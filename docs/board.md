@@ -589,17 +589,17 @@ moves FIRST, through `BoardService` as the owner, so authority, history and the 
 board's own; only a move that went through answers the item, and a refused move leaves it open with the reason
 (`409 gate_not_moved`).
 
-| Option outcome          | The card                                                                                                              |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `next`, `lane`, `close` | moves there, reason "<option> (from the Inbox)"; Done tells the ferret in the done ladder's one line                  |
-| `reopen-with-agenda`    | needs the owner's words (`400` without): reopened to the set's Not good lane as the owner's Not good is, the words a  |
-|                         | clarification and sent to the ferret by the reopen ladder, and ONE follow-up conversation (below)                     |
-| "Not yet"               | the extra answer of a gate with one option: the card stays; words, if given, are a clarification and reach the ferret |
-| Not needed (dismiss)    | the card stays where it is; that entry asks nothing again                                                             |
+| Option outcome          | The card                                                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `next`, `lane`, `close` | moves there, reason "<option> (from the Inbox)"; Done tells the ferret in the done ladder's one line                      |
+| `reopen-with-agenda`    | needs the owner's words (`400` without): reopened to the set's Not good lane as the owner's Not good is, the words a      |
+|                         | clarification and sent to the ferret by the reopen ladder, and ONE follow-up conversation (below)                         |
+| "Not yet"               | the extra answer of a gate with one option: the card stays; words, if given, are a clarification and reach the ferret     |
+| Not needed (dismiss)    | the owner's choice: the card stays where it is, quietly; that entry asks nothing again (a device needs the `fleet` grant) |
 
 **The follow-up.** Not good opens one conversation about the card: a `reply` item raised by the daemon on behalf
-of the card's ferret (`sourceRef` `gate-followup:<card>:<entry>`), on the ferret's turn in discussion, named in the
-reopen's reason ("… — talk it over on !A12"). The ferret answers it like its own: `edit` or `surface` hands it to
+of the card's ferret (`sourceRef` `gate-followup:<card>:<entry>`), on the ferret's turn in discussion, raised only once the
+reopen went through (a refused Not good opens none). The ferret answers it like its own: `edit` or `surface` hands it to
 the owner, `done` closes it (a sub-ferret's lead does that, as with every item on a sub-ferret's agenda). The owner's
 answer reaches the ferret as on its own item. It closes by itself when the card next reaches the gate.
 
@@ -611,9 +611,24 @@ its owner ferret's or a lead's move, below). Every other path may bring a card I
 automatic stages, never out of one or past one: a ferret's `fy task move` (refused `owner-gate`, naming the lane),
 a daemon trigger (`work.started`, a PR, a release — it stops in the first gate on its way, and the history says
 "stopped at <lane>, which waits for the owner"), PR facts (they never pull a card back out of a gate for an open PR
-either), `fy signal done` (held, or stopped at the gate) and a refile's facts. One helper decides it,
-`gateOnTheWay` / `gatesBetween` in `card-actions.ts`, from each lane's stage (`laneStage`), so a `verify` lane with
-no `ownerGate` is a gate too. A ferret may still move a card back out of a gate, with a reason.
+either), `fy signal done` (held, or stopped at the gate) and a refile's facts. A refile by anyone else lands a card
+waiting at a gate at a gate (or earlier), and a lane named for it only where no gate of the other board's variant stands
+before it; a dropped card is reopened by anyone else only where it was dropped, or earlier. Leaving a gate is
+`needsOwner`'s and a gate on the way `gatesBetween`'s (`card-actions.ts`), both from each lane's stage
+(`laneStage`), so a `verify` lane with no `ownerGate` is a gate too. A ferret may still move a card back out of a
+gate, with a reason. A card's workflow never changes, so no variant can skip one.
+
+**Lane changes.** A ferret's lane edit or proposal over a live set may not take a gate from the owner
+(`laneGateProblems`, `lane-set-policy.ts`): remove a gate lane, make it automatic, drop its `ownerGate`, move it
+among the lanes a variant walks, let a variant skip it, or send cards into a closed lane or past a gate. It is refused
+`403 owner-gate`, naming the lane. Interim: a ferret's allowed edit still goes live; making every ferret edit a
+proposal the owner accepts is its own follow-up.
+
+**Answers, one at a time.** Answers to one card's gate take turns, and each move is written only if the card still sits
+in that gate by the entry the item asked about; anything else is `409 gate_not_moved` and the item stays open. A
+bare done (`resolve` without an answer) is refused: the owner answers it or says Not needed. Clearing the agent
+ferrets' backlog never touches a gate item, and a chat message naming one never parks it (one parked before is
+brought back on the card's next write).
 
 **A PR opened while the card waits.** The card stays at the gate; its item says so in its context ("A new PR is open
 for this card: <url>", one line per open PR), refreshed in place when the PR opens or closes, so the owner waits or
@@ -629,8 +644,11 @@ holds this, not the app.
 second push. A daemon that raises gate items lists `board.gate-items.1` on `GET /v1/health`, and the app hides its
 own to-test rows only for such a machine.
 
-**Internal cards.** A card a ferret made for its own errand (`askedBy: agent`: the stored answer, else the ask's source —
-one helper, `cardAudience` in `origin.ts`) never raises a gate item, never buzzes and is not in the Inbox.
+**Internal cards.** A card that is positively a ferret's own errand never raises a gate item, never buzzes and is not
+in the Inbox: made by the daemon, or recorded from a session a ferret started (`origin: agent`), AND no person asked
+for it (`askedBy` is not `person`). The reading is the conservative one because it decides who passes a gate
+(`cardAudience` / `audienceOf` in `origin.ts`): an unknown session, a lineage that could not be read, or a top-level
+ferret's own card is EXTERNAL, so a ferret cannot make the owner's work its own by how it writes the ask.
 Its owner ferret, or a lead above it, passes its gate with an ordinary `fy task move`, closing included; its assignee,
 a sub-ferret and any other ferret are still refused. An external card's gate stays the owner's: a ferret is refused
 `owner-gate` and told the owner is asked in the Inbox, so it raises no agenda item of its own for it.
@@ -642,7 +660,9 @@ a sub-ferret and any other ferret are still refused. An external card's gate sta
 | `assignee`, `reader` | refused              | refused              |
 | `daemon`             | PR facts only        | PR facts only        |
 
-**GAPS.** The Inbox's Not good carries words only: the agenda answer has no field for files, so a picture still goes
+**GAPS.** Every guarantee here holds against a ferret on its own session credential. The admin token with no session
+(an older `fy`, `fy --as-owner`) still has the owner's authority and is only RECORDED as `admin-token`
+([The board is opt-in](#the-board-is-opt-in), &F291). The Inbox's Not good carries words only: the agenda answer has no field for files, so a picture still goes
 through the Board's Not good. A closed gate item is remembered only as long as the agenda keeps it
 (`MAX_AGENDA_RESOLUTIONS`): a card left at a gate the owner dismissed long ago may ask again once its record is gone.
 

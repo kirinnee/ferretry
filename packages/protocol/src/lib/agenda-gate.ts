@@ -76,9 +76,9 @@ export const gateNotYetLabel = (gate: Pick<AgendaGate, 'options'>): string | und
 const isForward = (option: AgendaGateOption): boolean => option.outcome !== 'reopen-with-agenda';
 
 /**
- * Which label each swipe gives (the wire contract, the owner's rule for task cards: ← Done, → Not good): ← the first
- * option that moves the card on (next, a lane, close), → the reopen-with-agenda option (else "Not yet"), ↑ a third.
- * Two answers are ← and → only, as every choice card lays two options out.
+ * Which label each swipe gives (the wire contract, the owner's decision !A205: → Done, ← Not good): → the first option
+ * that moves the card on (next, a lane, close), ← the reopen-with-agenda option (else "Not yet"), ↑ a third. Two
+ * answers are ← and → only, as every choice card lays two options out.
  */
 const gateLayout = (gate: Pick<AgendaGate, 'options'>): ReadonlyMap<AgendaDirection, string> => {
   const notYet = gateNotYetLabel(gate);
@@ -86,8 +86,8 @@ const gateLayout = (gate: Pick<AgendaGate, 'options'>): ReadonlyMap<AgendaDirect
   const forward = gate.options.find(isForward)?.label;
   const back = gate.options.find(option => !isForward(option))?.label ?? notYet;
   const rest = labels.filter(label => label !== forward && label !== back);
-  const left = forward ?? rest.shift();
-  const right = back ?? rest.shift();
+  const right = forward ?? rest.shift();
+  const left = back ?? rest.shift();
   const up = rest.shift();
   return new Map(
     (

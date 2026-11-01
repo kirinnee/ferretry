@@ -17,7 +17,7 @@ import {
   type TaskRef,
   variantLanes,
 } from '@ferretry/protocol';
-import { gateOnTheWay, withEvent } from './card-actions.ts';
+import { gatesBetween, withEvent } from './card-actions.ts';
 
 /** What a `done` with no message says on the card. */
 export const DONE_WITHOUT_MESSAGE = 'signalled done';
@@ -79,11 +79,10 @@ export const doneMove = (
 ): DoneMove => {
   const ref = formatTaskRef(card);
   const gated = needsOwner(laneSet, card.laneId, target.id);
-  const gate = gateOnTheWay(laneSet, card, target);
-  if ((gated.ok && gated.value) || gate?.id === card.laneId) {
+  if (gated.ok && gated.value) {
     return { held: `only the owner moves ${ref} on from ${card.laneId}, so it stays there` };
   }
-  const to = gate ?? target;
+  const to = gatesBetween(laneSet, card, target)[0] ?? target;
   if (blockers.length > 0) {
     return { held: `${ref} is blocked by ${blockers.map(formatTaskRef).join(', ')}, so it stays in ${card.laneId}` };
   }

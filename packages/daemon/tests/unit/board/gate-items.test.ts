@@ -13,6 +13,8 @@ import should from 'should';
 import { BoardGateCards } from '../../../src/adapters/board/board-gate-cards.ts';
 import {
   type AgendaActor,
+  AgendaAgentClearer,
+  conversationTurn,
   type AgendaLedger,
   type AgendaLedgerRepository,
   type AgendaMutation,
@@ -121,10 +123,10 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
     board: {
       card: async id => await cards_.card(id),
       cards: async () => await cards_.cards(),
-      act: async (id, request, caller) => {
+      act: async (id, request, caller, expect) => {
         if (faults.refuses?.includes(request.action) === true)
           throw new Error(`the board refused the ${request.action}`);
-        await cards_.act(id, request, caller);
+        await cards_.act(id, request, caller, expect);
       },
     },
     lanes: stageGateLanes,
@@ -169,6 +171,7 @@ const fixture = (cards: readonly BoardTask[], faults: Faults = {}) => {
     );
   return {
     agenda,
+    ledgers,
     board,
     gates: gates as GateItems,
     store,
@@ -249,10 +252,10 @@ describe('the gate policy', () => {
     should(long.body?.endsWith('…')).be.true();
     should(long).not.have.property('premise');
     should(gateRaise(gate, { ...task, howToTest: '' })).not.have.property('body');
-    should(raise.ask.options.map(option => option.label)).eql(['Done', 'Not good']);
+    should(raise.ask.options.map(option => option.label)).eql(['Not good', 'Done']);
     should(raise.answers).eql([
-      { direction: 'left', label: 'Done', does: 'choose' },
-      { direction: 'right', label: 'Not good', does: 'choose' },
+      { direction: 'left', label: 'Not good', does: 'choose' },
+      { direction: 'right', label: 'Done', does: 'choose' },
     ]);
     const plan = gateOf(
       { task: external({ laneId: 'plan' }), laneSet: lanes(PROJECT), audience: 'external' },
@@ -481,7 +484,7 @@ describe('answering a gate item', () => {
       source: `owner (Inbox, !${item.id})`,
     });
     should(world.reopen.notices).have.length(1);
-    should(world.reopen.notices[0]?.reason).startWith('the badge still counts it twice — talk it over on !A2');
+    should(world.reopen.notices[0]?.reason).equal('the badge still counts it twice');
     // … the gate item answered, and one conversation on the ferret's turn, about the card
     const open = world.open();
     should(open).have.length(1);
@@ -825,7 +828,7 @@ describe('when a port fails', () => {
     should(world.warnings[0]).startWith('no follow-up conversation for &F1');
   });
 
-  it('closes the follow-up again when the board refuses the reopen', async () => {
+  it('opens no follow-up when the board refuses the reopen, so a later Not good still has its one', async () => {
     // Arrange
     const world = fixture([external({ laneId: 'tested' })], { refuses: ['reopen'] });
     await world.gates.backfill();
@@ -837,7 +840,7 @@ describe('when a port fails', () => {
     // Assert
     should(outcome).match({ handled: true, refused: { code: 'not-moved' } });
     should(world.open().map(each => each.id)).eql([item.id]);
-    should(world.closed().map(each => each.sourceRef)).eql(['gate-followup:F1:1']);
+    should(world.closed()).be.empty();
   });
 
   it('still closes Not yet when the words cannot be kept or told, and says so', async () => {
@@ -1001,5 +1004,170 @@ describe('a PR open while the card waits at its gate', () => {
     should(outcome).match({ handled: true, mutation: { ok: true } });
     should(world.stored().laneId).equal('closed');
     should(world.open()).be.empty();
+  });
+});
+
+describe('the security review’s ways around a gate item (&F364 PR B)', () => {
+  const atGate = async (laneId = 'tested') => {
+    const world = fixture([external({ laneId })]);
+    await world.gates.backfill();
+    return { world, item: world.open()[0] as AgendaItem };
+  };
+
+  it('never clears a gate item with the agent ferrets’ backlog', async () => {
+    // Arrange
+    const { world, item } = await atGate();
+    const clearer = new AgendaAgentClearer(
+      { agentSessionIds: async () => ['grandchild'] },
+      world.ledgers,
+      world.agenda,
+    );
+
+    // Act
+    const preview = await clearer.preview();
+    const cleared = await clearer.clear(HUMAN);
+
+    // Assert
+    should(preview.cleared).equal(0);
+    should(cleared.cleared).equal(0);
+    should(world.open().map(each => each.id)).eql([item.id]);
+  });
+
+  it('refuses the owner a bare resolve of a gate item, and keeps Not needed theirs', async () => {
+    // Arrange
+    const { world, item } = await atGate();
+
+    // Act
+    const resolved = await world.agenda.resolve('grandchild', item.id, HUMAN, 'looks fine');
+    const dismissed = await world.agenda.dismiss('grandchild', item.id, HUMAN);
+
+    // Assert
+    should(resolved).match({ ok: false, error: { code: 'invalid' } });
+    should(dismissed).match({ ok: true, change: 'dismissed' });
+    should(world.stored().laneId).equal('tested');
+  });
+
+  it('takes two Not goods at once in turn: one reopen, one follow-up, the second told the card moved on', async () => {
+    // Arrange
+    const { world, item } = await atGate();
+
+    // Act
+    const [first, second] = await Promise.all([
+      world.answer(item.id, choose('Not good'), { note: 'the badge is wrong' }),
+      world.answer(item.id, choose('Not good'), { note: 'and the colour' }),
+    ]);
+
+    // Assert
+    should(first).match({ handled: true, mutation: { ok: true } });
+    should(second).match({ handled: false });
+    should(world.reopen.notices).have.length(1);
+    should(world.open().map(each => each.sourceRef)).eql(['gate-followup:F1:1']);
+  });
+
+  it('writes nothing when the card moved between the check and the write', async () => {
+    // Arrange
+    const { world } = await atGate();
+
+    // Act — the answer's write expects the entry that raised the item; the card has since moved on and back
+    await world.move('implement', OWNER, 'one more fix');
+    await world.board.trigger('F1', 'release.running');
+    const error = await world.board
+      .act('F1', BoardTaskActionRequestSchema.parse({ action: 'move', to: 'closed' }), OWNER, {
+        laneId: 'tested',
+        entry: 1,
+      })
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown as Error,
+      );
+
+    // Assert
+    should(error?.message).containEql('has moved on from the gate the answer was about');
+    should(world.stored().laneId).equal('tested');
+  });
+
+  it('keeps a gate item out of a chat message’s reach, and brings back one parked before', async () => {
+    // Arrange
+    const { world, item } = await atGate();
+
+    // Act — the owner names it in chat; and an item parked by an older daemon is refreshed
+    const turn = conversationTurn(`!${item.id} is this the one?`, world.open());
+    const replied = await world.agenda.reply('grandchild', item.id, HUMAN, 'is this the one?');
+    const ledger = world.ledgers.ledgers.get('grandchild') as AgendaLedger;
+    world.ledgers.ledgers.set('grandchild', {
+      ...ledger,
+      entries: ledger.entries.map(entry =>
+        entry.lifecycle === 'active' && entry.item.id === item.id
+          ? { ...entry, item: { ...entry.item, parked: { reason: 'replied' as const, at: NOW } } }
+          : entry,
+      ),
+    });
+    await world.gates.written('F1');
+
+    // Assert
+    should(turn.referenced).be.empty();
+    should(replied).match({ ok: true, change: 'unchanged' });
+    should(world.open()[0]?.parked).be.undefined();
+  });
+
+  it('restates the gate on an open item when its lane is renamed', async () => {
+    // Arrange
+    const { world, item } = await atGate();
+    const gate = item.gate as NonNullable<AgendaItem['gate']>;
+
+    // Act
+    const raised = await world.agenda.raise(
+      'grandchild',
+      { ...gateRaise({ ...gate, laneName: 'Try it' }, world.stored()), source: 'task' },
+      { kind: 'daemon', cause: 'system' },
+    );
+
+    // Assert
+    should(raised).match({ ok: true, change: 'refreshed' });
+    should(world.open()[0]?.gate?.laneName).equal('Try it');
+  });
+
+  it('treats only the gate producer’s own items as gate items', async () => {
+    // Arrange — a daemon item that merely spells a gate reference, with no gate and another source
+    const world = fixture([external({ laneId: 'tested' })]);
+    await world.agenda.raise(
+      'grandchild',
+      {
+        source: 'question',
+        sourceRef: 'gate:F1:tested:1',
+        subject: 'Which?',
+        why: 'w',
+        howToResolve: 'h',
+        kind: 'info',
+      },
+      { kind: 'daemon', cause: 'system' },
+    );
+
+    // Act — the card moves on: a gate item would be resolved, this is not one
+    await world.move('closed');
+    const dismissed = await world.agenda.dismiss('grandchild', 'A1', { kind: 'agent', sessionId: 'child', name: null });
+
+    // Assert
+    should(world.open().map(each => each.id)).eql([]);
+    should(world.closed()[0]).match({ id: 'A1', disposition: 'dismissed' });
+    should(dismissed.ok).be.true();
+  });
+});
+
+describe('telling a gate item apart', () => {
+  it('knows an open gate item from any other item, and from one it cannot find', async () => {
+    // Arrange
+    const world = fixture([external({ laneId: 'tested' })]);
+    await world.gates.backfill();
+    await world.agenda.raise(
+      'grandchild',
+      { source: 'agent-raised', sourceRef: null, subject: 'Note', why: 'w', howToResolve: 'h', kind: 'info' },
+      { kind: 'agent', sessionId: 'grandchild', name: null },
+    );
+
+    // Act + Assert
+    should(await world.gates.isGate('grandchild', 'A1')).be.true();
+    should(await world.gates.isGate('grandchild', 'A2')).be.false();
+    should(await world.gates.isGate('nobody', 'A1')).be.false();
   });
 });

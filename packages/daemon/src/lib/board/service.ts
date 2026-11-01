@@ -48,10 +48,11 @@ import {
   triggerMove,
   withEvent,
 } from './card-actions.ts';
-import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
+import { deriveView, gatherDerivation, neighbourhoodOf, originFacts } from './derive.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
+import { gateEntry } from './gate-policy.ts';
 import { cardAudience, decideAskedBy } from './origin.ts';
 import type {
   ActivityDeriver,
@@ -469,8 +470,16 @@ export class BoardService {
     return outcome;
   }
 
-  /** One action on one card. */
-  async act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<BoardTaskResponse> {
+  /**
+   * One action on one card. `expect` (an answer to a gate item) is checked inside the card's write: the card must
+   * still sit in that lane by that entry, or nothing is written.
+   */
+  async act(
+    id: BoardTaskId,
+    request: BoardTaskActionRequest,
+    caller: BoardCaller,
+    expect?: { readonly laneId: string; readonly entry: number },
+  ): Promise<BoardTaskResponse> {
     // An assign is judged inside the write: a sub-ferret that is the card's assignee may hand it down (`decide`).
     if (!subFerretMay(request) && request.action !== 'assign') {
       await this.refuseSubFerret(caller, subFerretDoing(request));
@@ -481,6 +490,9 @@ export class BoardService {
     const write = async () =>
       await this.ports.store.write(id, async current => {
         const card = this.requireCard(current, id);
+        if (expect !== undefined && (card.laneId !== expect.laneId || gateEntry(card) !== expect.entry)) {
+          throw new BoardError('invalid', `${formatTaskRef(card)} has moved on from the gate the answer was about`);
+        }
         const outcome = await this.decide(card, request, caller);
         return { task: outcome.task === null ? null : requireValidCard(outcome.task), result: { card, outcome } };
       });
@@ -747,7 +759,7 @@ export class BoardService {
       ...viaOf(caller),
       standing,
       ...(handsDown ? { handsDown } : {}),
-      audience: cardAudience(card),
+      audience: cardAudience(card, await originFacts([card], this.ports.parents)),
       laneSet,
       index,
       laneSets: new Map([...laneSets, [card.projectId, laneSet]]),

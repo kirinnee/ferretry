@@ -179,7 +179,7 @@ export const gatherDerivation = async (
  * Which of the sessions the cards were recorded from a ferret started, asked once per session. A session
  * whose lineage cannot be read reads as the owner's, so a card is never hidden on a failed read.
  */
-const originFacts = async (cards: readonly BoardTask[], parents: SessionParents): Promise<OriginFacts> => {
+export const originFacts = async (cards: readonly BoardTask[], parents: SessionParents): Promise<OriginFacts> => {
   const sessions = [...new Set(cards.flatMap(card => askSessionOf(card) ?? []))];
   const parented = await Promise.all(
     sessions.map(async session =>

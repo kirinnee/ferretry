@@ -18,6 +18,7 @@ import { boardCaller } from './board.ts';
 /** The gate items, as the agenda route needs them. */
 export interface AgendaGatePort {
   answer(answer: GateAnswer): Promise<GateAnswerOutcome>;
+  isGate(sessionId: string, id: AgendaId): Promise<boolean>;
 }
 
 const FLEET_USE = { capability: 'fleet', axis: 'use' } as const;
@@ -56,6 +57,20 @@ const refusedDevice = (context: RouteContext): ApiError | undefined => {
     grantRefusalCode(decision.refusal),
   );
 };
+
+/**
+ * The owner's Not needed on a gate item leaves the card where it is, quietly — so only a caller who could answer the
+ * item may say it: a device needs the board's `fleet` grant, as an answer does. Throws the refusal.
+ */
+export async function refuseGateDismissal(
+  gates: AgendaGatePort,
+  context: RouteContext,
+  dismissal: { readonly sessionId: string; readonly id: AgendaId; readonly actor: AgendaActor },
+): Promise<void> {
+  if (dismissal.actor.kind !== 'human' || !(await gates.isGate(dismissal.sessionId, dismissal.id))) return;
+  const refused = refusedDevice(context);
+  if (refused !== undefined) throw refused;
+}
 
 /**
  * Answers a gate item, or `undefined` when the item is not one (the answer is then recorded as any other). Throws

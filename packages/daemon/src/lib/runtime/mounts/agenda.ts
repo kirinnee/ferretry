@@ -27,7 +27,7 @@ import {
   type RaiseAgendaRequest,
 } from '../../agenda/index.ts';
 import { type AgendaConfigPort, answerConfirmation, raiseRequestOf } from './agenda-confirms.ts';
-import { type AgendaGatePort, answerGate } from './agenda-gates.ts';
+import { type AgendaGatePort, answerGate, refuseGateDismissal } from './agenda-gates.ts';
 
 /**
  * The attention board's HTTP surface: what a session is blocked on, and the human's answer to it.
@@ -181,6 +181,10 @@ async function apply(
           actor,
         })
       : undefined;
+  // Not needed on a gate item asks the same grant an answer does.
+  if (request.action === 'dismiss' && gates !== undefined) {
+    await refuseGateDismissal(gates, context, { sessionId, id: request.id, actor });
+  }
   // An answer to an item that confirms a held configuration change acts on the change first.
   const confirmed =
     request.action === 'resolve' && request.response !== undefined && config !== undefined

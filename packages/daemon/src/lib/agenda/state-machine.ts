@@ -353,7 +353,12 @@ export function isWardenEscalationAgenda(entry: AgendaEntry): boolean {
 
 /** A card gate the daemon raised (`AgendaItem.gate`): only the owner answers or closes it, never a ferret or its lead. */
 export function isGateAgenda(entry: Pick<AgendaEntry, 'item'>): boolean {
-  return entry.item.gate !== undefined || parseGateReference(entry.item.sourceRef) !== undefined;
+  return isGateItem(entry.item);
+}
+
+/** The gate items' own producer: the daemon's `task` source, carrying the `gate` it asks about. */
+function isGateItem(item: Pick<AgendaItem, 'gate' | 'source'>): boolean {
+  return item.gate !== undefined && item.source === 'task';
 }
 
 /**
@@ -361,7 +366,11 @@ export function isGateAgenda(entry: Pick<AgendaEntry, 'item'>): boolean {
  * ferret, so the ferret whose board holds it edits, surfaces and closes it as its own.
  */
 export function isGateFollowupAgenda(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
-  return entry.origin.kind === 'daemon' && parseGateFollowupReference(entry.item.sourceRef) !== undefined;
+  return (
+    entry.origin.kind === 'daemon' &&
+    entry.item.source === 'task' &&
+    parseGateFollowupReference(entry.item.sourceRef) !== undefined
+  );
 }
 
 export function canDismissAgenda(actor: AgendaActor, entry: AgendaEntry): boolean {
@@ -736,12 +745,17 @@ function refreshStable(
   ) {
     return unchanged(ledger);
   }
-  if (sameRequest(existing.item, request) && existing.item.sourceSeq === request.sourceSeq) {
+  // A gate item an owner's chat message parked is the owner's again: its card still waits at the gate.
+  const unpark = isGateItem(existing.item) && existing.item.parked?.reason === 'replied';
+  if (sameRequest(existing.item, request) && existing.item.sourceSeq === request.sourceSeq && !unpark) {
     return unchanged(ledger);
   }
 
+  const { parked: _parked, ...kept } = existing.item;
   const item: AgendaItem = {
-    ...existing.item,
+    ...(unpark ? kept : existing.item),
+    // The gate it asks about follows the lane: a renamed lane or edited options are restated too.
+    ...(request.gate === undefined ? {} : { gate: request.gate }),
     subject: request.subject,
     why: request.why,
     context: request.context ?? null,
@@ -803,6 +817,13 @@ function addressById(
     }
   } else if (!canAddressAgenda(command.actor, target)) {
     return failure('forbidden', 'an agent or daemon may resolve only an agenda item it raised');
+  }
+  // The owner closes a gate by answering it (or Not needed): a bare "done" would close it with the card unmoved.
+  if (command.action === 'resolve' && command.actor.kind === 'human' && isGateAgenda(target)) {
+    return failure(
+      'invalid',
+      `answer ${command.id} instead: one of its options (Done / Not good / Not yet), or Not needed`,
+    );
   }
   if (command.action === 'resolve' && command.actor.kind === 'agent' && isQuestionShape(target.item)) {
     if ((command.note ?? '').trim() === '') {
@@ -1004,6 +1025,7 @@ function sameRequest(item: AgendaItem, request: RaiseAgendaRequest): boolean {
     JSON.stringify(item.ask ?? null) === JSON.stringify(request.ask ?? null) &&
     item.notice === request.notice &&
     item.ping === request.ping &&
+    JSON.stringify(item.gate ?? null) === JSON.stringify(request.gate ?? null) &&
     JSON.stringify(cardFieldsOf(item)) === JSON.stringify(cardFieldsOf(request)) &&
     JSON.stringify(agendaBriefOf(item)) === JSON.stringify(agendaBriefOf(request))
   );
@@ -1355,6 +1377,8 @@ function reply(ledger: AgendaLedger, command: ReplyCommand): AgendaMutation {
       : failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   }
   if (target.item.notice === true) return failure('invalid', 'a notice is read, not replied to');
+  // A gate item is never parked by a chat message: nobody but the owner's answer could bring it back.
+  if (isGateAgenda(target)) return unchanged(ledger);
   const words = command.note?.trim() ?? '';
   const note = words === '' ? null : words.slice(0, MAX_AGENDA_DETAIL_LENGTH);
   // PARKED, not closed: the item leaves the owner's queue (and any discussion) and waits for the ferret to
