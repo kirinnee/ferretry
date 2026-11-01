@@ -1839,6 +1839,8 @@ describe('spending a single-use step-up', () => {
           claimed.push(context.claimFreshStepUp?.('add-2fa-key', stage) === true);
           // @ts-expect-error — an act every caller must prove names the one subject its proof is bound to
           claimed.push(context.claimFreshStepUp?.('add-2fa-key') === true);
+          // @ts-expect-error — approving a task plan is such an act too: its proof is bound to the staged selection
+          claimed.push(context.claimFreshStepUp?.('approve-task-plan') === true);
           return jsonResponse({});
         },
       };
@@ -1854,7 +1856,7 @@ describe('spending a single-use step-up', () => {
       );
 
       // Assert — the device's claim names the stage; the short form and the machine's token never reach the witness
-      should(claimed).deepEqual([true, false, false, false]);
+      should(claimed).deepEqual([true, false, false, false, false, false]);
       should(asked).deepEqual([['add-2fa-key', stage]]);
     });
   });

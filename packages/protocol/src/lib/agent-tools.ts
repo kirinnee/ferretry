@@ -78,6 +78,7 @@ import {
   CopySourceSchema,
 } from './secure-copy.ts';
 import { SurfaceKeySchema, SurfaceKindSchema, SurfaceNameSchema } from './surface-names.ts';
+import { type TaskPlanCall, TaskPlanAgentViewSchema, taskPlanLinesOfCopyItems } from './task-plan.ts';
 
 export * from './surface-names.ts';
 
@@ -733,6 +734,17 @@ export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 export type AgentToolName = AgentToolCall['tool'];
 
 /**
+ * `secure.preapprove` read as the `task.plan` it is (task-plan.ts): each planned paste a paste line with one use, the
+ * same expiry. The kept tool's handler translates its body with this and proposes through the one task-plan path, then
+ * answers the old `plan` shape (`copyPlanOf`), so a pane running an older `fy mcp serve` keeps working.
+ */
+export const taskPlanCallOf = (call: Extract<AgentToolCall, { readonly tool: 'secure.preapprove' }>): TaskPlanCall => ({
+  tool: 'task.plan',
+  lines: [...taskPlanLinesOfCopyItems(call.items)],
+  ...(call.expiresInSeconds === undefined ? {} : { expiresInSeconds: call.expiresInSeconds }),
+});
+
+/**
  * The tools that change nothing — they list, read, wait or look — plus the config tools that only read.
  *
  * A call to one of these that the daemon DROPPED mid-request (it was restarting) may be sent again
@@ -858,6 +870,8 @@ export const AgentToolResultSchema = z.strictObject({
   command: CopyCommandReportSchema.optional(),
   /** `secure.preapprove` only: the plan card raised for the owner. */
   plan: CopyPlanSchema.optional(),
+  /** `task.plan` only: the plan card raised for the owner, as the ferret may know it (`taskPlanAgentView`). */
+  taskPlan: TaskPlanAgentViewSchema.optional(),
   /** `account.hint` only: the saved logins for the site, by their non-secret metadata. */
   logins: LoginHintListSchema.optional(),
   /** `account.propose` only: whether the recipe waits on the owner or was applied. */

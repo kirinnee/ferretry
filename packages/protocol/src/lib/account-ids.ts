@@ -46,3 +46,13 @@ export const TwoFactorStageIdSchema = z
   .string()
   .regex(/^st_[0-9a-f]{24}$/u, 'a staged 2FA key is st_ and 24 hex digits');
 export type TwoFactorStageId = z.infer<typeof TwoFactorStageIdSchema>;
+
+/**
+ * A STAGED TASK-PLAN APPROVAL (`tps_` and 24 hex digits): the lines the owner ticked on a task plan, waiting for the
+ * passkey, held in the daemon's memory only (task-plan.ts). A passkey proof for `approve-task-plan` is bound to exactly
+ * one, so it cannot be spent on another selection. Here beside the 2FA stage for the same reason: a step-up names it.
+ */
+export const TaskPlanStageIdSchema = z
+  .string()
+  .regex(/^tps_[0-9a-f]{24}$/u, 'a staged task-plan approval is tps_ and 24 hex digits');
+export type TaskPlanStageId = z.infer<typeof TaskPlanStageIdSchema>;

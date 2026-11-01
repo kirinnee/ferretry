@@ -116,6 +116,7 @@ export * from './stt-cleanup-guard.ts';
 
 export * from './surface.ts';
 export * from './system-callsigns.ts';
+export * from './task-plan.ts';
 export * from './task-title.ts';
 export * from './tasks.ts';
 export * from './tcp-listeners.ts';

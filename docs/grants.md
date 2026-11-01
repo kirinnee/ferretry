@@ -388,9 +388,11 @@ right after an unlock. **A fresh proof is stamped with the act it was proved for
 it asks for the passkey), and a claim for one act takes only a proof stamped for that act, so a leftover proof
 for another act (loosening a configuration file, say) never buys an install. The proof is claimed atomically
 at admission, so one passkey buys one install. At the machine, nothing is asked — **except saving a 2FA seed**
-(act `add-2fa-key`): that one is asked of EVERY caller, the admin token on loopback included, and its proof is
-bound to the one staged save, opens no step-up window, and is never the fresh proof another act takes
-([secrets.md](secrets.md#2fa-keys)).
+(act `add-2fa-key`) **and approving a task plan's sign-in lines** (act `approve-task-plan`): those two are asked of
+EVERY caller, the admin token on loopback included, and each proof is bound to the one staged thing it commits
+(`subject`: the staged save `st_…`, or the staged selection `tps_…`, never the other's), opens no step-up window,
+and is never the fresh proof another act takes ([secrets.md](secrets.md#2fa-keys),
+[secure-copy.md](secure-copy.md#task-plans)).
 
 **The app asks only for the machine on screen.** With several machines paired, every page reads all of
 them in the background, so a locked second machine used to raise its unlock over the first machine's

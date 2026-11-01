@@ -285,6 +285,7 @@ const agendaCases: SchemaCase[] = [
   { name: 'attention item', schema: agenda.AgendaItemSchema, value: agendaItem },
   { name: 'attention input pointer', schema: agenda.AgendaInputRefSchema, value: { requestId: 'a'.repeat(32) } },
   { name: 'attention paste plan pointer', schema: agenda.AgendaCopyPlanRefSchema, value: { planId: 'b'.repeat(32) } },
+  { name: 'attention task plan pointer', schema: agenda.AgendaTaskPlanRefSchema, value: { planId: 'c'.repeat(32) } },
   {
     name: 'attention phone approval pointer',
     schema: agenda.AgendaPhoneApprovalRefSchema,

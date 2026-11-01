@@ -232,6 +232,46 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
 - **The rules file** (`<state>/secure-copy/rules.json`) holds routes and counts, never a value. One that cannot
   be read is NO rules: every paste then asks the owner.
 
+### Task plans
+
+> **Not live yet.** The wire contract is in `packages/protocol/src/lib/task-plan.ts`. No daemon proposes, stages or
+> fills a plan yet, and none reports `task-plan.1`. `POST /v1/step-up/options` refuses `approve-task-plan` with
+> `404 stage_not_found` and mints no challenge, until the plan service binds it.
+
+A task plan widens the paste plan. One card holds up to 10 lines, each with 1–5 uses (1 by default), for 2 hours
+by default (5 minutes to 1 day). A line is one of three kinds:
+
+- a **sign-in** (`kind: sign-in`): Ferretry types an account's username and password on a page, and a code only
+  with its own tick;
+- a **terminal sign-in** (`kind: terminal-sign-in`): the account's password typed into `sudo`, `su` or `doas`.
+  Other programs read their environment and config files, which the ferret controls, so Ferretry can't prove where
+  they send the password. A line for one is `unavailable` (`tool-not-covered`);
+- a **paste** (`kind: paste`): today's planned paste.
+
+The rules the contract fixes:
+
+- **A line names only what the owner saved.** That is a sign-in id (`si_…`), or a host or `tool@host` the owner
+  already saved, as a lookup key. A line never carries an origin, a URL, a program path or a value. Two lines for
+  one sign-in are refused. The daemon resolves each line against Accounts and draws the card from what it found.
+- **The owner only narrows.** They tick lines and pick one of the daemon's candidate accounts (needed when there
+  are two or more). They tick codes only where the ferret asked for them and the account can make them. They can't
+  raise uses, lengthen the plan or add a field (`taskPlanSelection`).
+- **Any ticked sign-in line needs a passkey, at the machine too.** The act is `approve-task-plan`, asked of every
+  caller. Its proof is bound to `taskPlanApprovalSubject(stage, canonical)`:
+  `sha256("ferretry.task-plan.v1\0" + stage + "\0" + sha256(canonical))`. `canonical` is the RFC 8785 JSON of the
+  plan id, its session, its expiry and every ticked line with its pins: the account's immutable key, the login
+  domains (or `tool@host`), the recipe version and the field identities with history. A change to any one of them
+  changes the subject. A plan record with an approved sign-in line and no passkey answer, or a passkey answer from
+  the machine itself, doesn't parse. A selection of paste lines only keeps the paste plan's rule.
+- **The ferret learns nothing about secret fields.** Its view (`taskPlanAgentView`) has each line's state, the
+  picked account's name and uses left. It has no `can`, `history`, flags, reasons or code tick. When a plan doesn't
+  fill a card, the ferret gets one sentence for every reason. The owner's card gets the reason as a fixed sentence
+  (`grantMissLine`).
+- **The old tool keeps working.** `secure.preapprove { items }` reads as a task plan of one-use paste lines
+  (`taskPlanCallOf`). Its answer is projected back to the old plan shape (`copyPlanOf`).
+- **The app ships first.** An input card a plan fills carries a `plan` actor and a `preapproval` note, and an
+  older app's strict parse refuses them. So `task-plan.1` stays unreported until the app draws the plan card.
+
 ## Programs in your own profile
 
 Settings › Secure copy › "Copy rules may target programs in my own profile" (`allowProfileTargets`, owner decision
