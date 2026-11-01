@@ -117,6 +117,15 @@ export interface Mounted {
   readonly unmount: () => Promise<void>;
 }
 
+/**
+ * Every root `mount` made and nobody has unmounted yet. `dom-leak-guard.ts` (a preload, so it cannot
+ * import this module without registering a DOM in every tier) drains it after each test through this
+ * global, which is why a test that forgets `unmount()` leaves nothing for the next file to read.
+ */
+const mountRegistry = globalThis as { __ferretryLiveMounts?: Set<() => Promise<void>> };
+mountRegistry.__ferretryLiveMounts ??= new Set();
+const liveMounts = mountRegistry.__ferretryLiveMounts;
+
 /** Mounts into a fresh container attached to the live document. */
 export const mount = async (element: ReactElement): Promise<Mounted> => {
   const container = document.createElement('div');
@@ -129,18 +138,18 @@ export const mount = async (element: ReactElement): Promise<Mounted> => {
     });
   };
 
+  const unmount = async (): Promise<void> => {
+    if (!liveMounts.delete(unmount)) return;
+    await act(async () => {
+      root.unmount();
+    });
+    container.remove();
+  };
+  liveMounts.add(unmount);
+
   await render(element);
 
-  return {
-    container,
-    render,
-    unmount: async () => {
-      await act(async () => {
-        root.unmount();
-      });
-      container.remove();
-    },
-  };
+  return { container, render, unmount };
 };
 
 /** Runs a callback (a click, a key press) inside `act` and flushes effects. Any

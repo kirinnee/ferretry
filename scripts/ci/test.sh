@@ -94,6 +94,8 @@ if [[ -n ${group} ]]; then
   # config/test-groups.json). The owner's last resort for a group that cannot get under two minutes by
   # faster tests alone: no new job, every test still blocking. See run_processes below for the isolation.
   processes="$(jq -r --arg mode "${mode}" --arg group "${group}" '.[$mode][] | select(.name == $group) | .processes // 1' "${groups}")"
+  # A group that has been cleaned of leaks turns the DOM leak guard from "clean up" into "fail" (packages/pwa/tests/support/dom-leak-guard.ts).
+  [[ "$(jq -r --arg mode "${mode}" --arg group "${group}" '.[$mode][] | select(.name == $group) | .leakGuard // false' "${groups}")" == "true" ]] && export FY_DOM_LEAK_GUARD=enforce
 fi
 
 # The integration tier starts real Chromes, and the first one on a fresh runner is slow — paid once
