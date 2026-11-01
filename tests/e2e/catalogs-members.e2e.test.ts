@@ -24,6 +24,7 @@ import {
   asOwner,
   bootDaemon,
   confirmPairing,
+  currentRoute,
   ensureOperatorPassword,
   launchProductBrowser,
   mintPairingLink,
@@ -522,14 +523,14 @@ async function pairToMemberMachine(world: World, person: Person): Promise<string
 /**
  * Back to "Shared with me" in the same browser, unlocked with the member passkey.
  *
- * A fresh load by default. Given `viaMachine`, it moves inside the open document instead: to that
- * machine's Projects page, then to `/shared`. The install sheet offers the projects this document has already
+ * A fresh `/shared` load by default. Given `viaMachine`, it loads that
+ * machine's Projects page first, then moves to `/shared` inside that document. The install sheet offers the projects this document has already
  * read from the machine, only the machine's own pages read them, and a fresh `/shared` load has read none.
  */
 async function backToShared(person: Person, world: World, publisherId: string, viaMachine?: string): Promise<void> {
   if (viaMachine === undefined) await open(person, `${world.origin.origin}/shared`);
   else {
-    await inApp(person, `/d/${viaMachine}/projects`);
+    await open(person, `${world.origin.origin}/d/${viaMachine}/projects`);
     await waitUntil(
       person.page,
       `(document.body.textContent ?? '').includes('Member project')`,
@@ -538,7 +539,7 @@ async function backToShared(person: Person, world: World, publisherId: string, v
     ).catch(async (error: unknown) => {
       const daemonSays = JSON.stringify(await owner(world.b, 'GET', '/v1/projects', undefined, [200])).slice(0, 400);
       throw new Error(
-        `${(error as Error).message}. The page says: ${String(await textNow(person.page, 'main'))}. The machine lists: ${daemonSays}`,
+        `${(error as Error).message}. Route: ${String(await currentRoute(person.page))}. The page says: ${String(await textNow(person.page, 'body'))}. Rendered: ${(await renderedDataAttributes(person.page as never)).slice(0, 600)}. The machine lists: ${daemonSays}`,
       );
     });
     await inApp(person, '/shared');
