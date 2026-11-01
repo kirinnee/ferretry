@@ -1,7 +1,14 @@
 import { describe, it } from 'bun:test';
 import type { BoardActor, BoardTask } from '@ferretry/protocol';
 import should from 'should';
-import { askSessionOf, BoardIndex, cardOrigin, humanParentOf, type OriginFacts } from '../../../src/lib/board/index.ts';
+import {
+  askSessionOf,
+  BoardIndex,
+  cardAskedBy,
+  cardOrigin,
+  humanParentOf,
+  type OriginFacts,
+} from '../../../src/lib/board/index.ts';
 import { card, MACHINE } from './support.ts';
 
 const LEAD = 'mvuc7tsf-0c3d50df';
@@ -90,5 +97,40 @@ describe('humanParentOf', () => {
     should(humanParentOf(remote, index, originOf)).be.null();
     should(humanParentOf(orphan, index, originOf)).be.null();
     should(humanParentOf(loopA, index, originOf)).be.null();
+  });
+});
+
+describe('cardAskedBy: a person asked', () => {
+  it.each([
+    ['the Board page filed it as the owner', by({ kind: 'owner' }, 'owner (board)')],
+    ['a ferret recorded words relayed from the owner', by(ferret(CHILD), 'owner via lead denisha, turn-001')],
+    ['a ferret recorded an owner reopen', by(ferret(CHILD), 'the owner (fy task reopen)')],
+    ['the daemon started a session the owner briefed', by({ kind: 'daemon', sessionId: LEAD }, 'owner')],
+    [
+      'a lead brief carries the owner as its source',
+      by({ kind: 'owner' }, 'lead mvkm41oz turn-001 brief (owner 2026-10-23)'),
+    ],
+  ])('should read as person when %s', (_case, subject) => {
+    should(cardAskedBy(subject)).equal('person');
+  });
+});
+
+describe('cardAskedBy: an agent made it', () => {
+  it.each([
+    ['a lead followed up a review in its own chat', by(ferret(LEAD), `session:${LEAD}`)],
+    ['a ferret recorded its own chat as the owner-kind caller', by({ kind: 'owner' }, `session:${LEAD}`)],
+    ['a lead started a sub-ferret (fy new)', by({ kind: 'daemon', sessionId: LEAD }, `session:${LEAD}`)],
+    ['the board import filed untriaged asks', by({ kind: 'daemon' }, 'board import')],
+    ['a ferret wrote a brief path as the source', by(ferret(LEAD), '/tmp/briefs/kt-board-v3.md')],
+    ['a ferret this daemon does not know recorded it', by(ferret('mvzzzzzz-00000000'), 'lead message turn-003')],
+    ['the word owner sits inside another word', by(ferret(CHILD), 'co-owners thread')],
+  ])('should read as agent when %s', (_case, subject) => {
+    should(cardAskedBy(subject)).equal('agent');
+  });
+
+  it('should be stricter than origin: a card origin shows can still be an agent card for the inbox', () => {
+    const own = by(ferret(LEAD), `session:${LEAD}`);
+    should(cardOrigin(own, facts)).equal('human');
+    should(cardAskedBy(own)).equal('agent');
   });
 });

@@ -207,6 +207,7 @@ export function ChatTasks({
         callsigns={callsigns}
         chat={chat}
         taskNames={taskNames}
+        projectNames={projectNames}
         answerFor={answerFor}
         density={expanded ? 'page' : 'side'}
         doneFor={doneFor}

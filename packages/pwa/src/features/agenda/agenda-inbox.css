@@ -1332,6 +1332,9 @@
   color: var(--fg);
   font-weight: var(--weight-strong);
 }
+.fy-totest__project {
+  color: var(--fg);
+}
 .fy-totest__how {
   display: flex;
   min-width: 0;

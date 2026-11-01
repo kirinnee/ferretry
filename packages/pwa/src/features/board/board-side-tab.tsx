@@ -47,6 +47,8 @@ export interface BoardSideTabProps {
   readonly callsigns: ReadonlyMap<string, string>;
   /** The task each ferret was given, by session id (the Cards view's card to test names its ferret by it). */
   readonly taskNames?: ReadonlyMap<string, string> | undefined;
+  /** The name of each project by id (the Cards view's card to test names its project by it). */
+  readonly projectNames?: ReadonlyMap<string, string> | undefined;
   readonly now: number;
   readonly view: BoardSideView;
   readonly onView: (view: BoardSideView) => void;
@@ -147,6 +149,7 @@ export function BoardSideTab({
   scope,
   callsigns,
   taskNames,
+  projectNames,
   now,
   view,
   onView,
@@ -247,6 +250,7 @@ export function BoardSideTab({
               now={now}
               onOpenCard={onOpenCard}
               taskNames={taskNames}
+              projectNames={projectNames}
               toTestAnswers={toTestAnswers}
             />
           ) : view === 'kanban' ? (

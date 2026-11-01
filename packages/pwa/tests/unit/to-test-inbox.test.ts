@@ -8,6 +8,7 @@ import {
   type ToTestCard,
   toTestCards,
   toTestKey,
+  withProjectName,
   withTaskName,
 } from '../../src/lib/to-test-inbox.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -50,6 +51,19 @@ describe('toTestCards', () => {
         dropped: { at: '2026-08-01T10:00:00.000Z', reason: 'not needed' },
       }),
     ]);
+    expect(toTestCards(model)).toEqual([]);
+  });
+
+  test('takes only the cards a person asked for: an agent\u2019s own cards stay on the board', async () => {
+    const model = await boardModelOf([
+      card('F1', { laneId: 'tested', askedBy: 'person' }),
+      card('F2', { laneId: 'tested', askedBy: 'agent' }),
+    ]);
+    expect(toTestCards(model).map(row => row.card.task.id)).toEqual(['F1']);
+  });
+
+  test('leaves out a card whose daemon does not say who asked: unknown reads as an agent\u2019s', async () => {
+    const model = await boardModelOf([card('F1', { laneId: 'tested', askedBy: undefined })]);
     expect(toTestCards(model)).toEqual([]);
   });
 
@@ -158,5 +172,21 @@ describe('snoozing a card to test', () => {
         NOW,
       ),
     ).toBeNull();
+  });
+});
+
+describe('the project a card to test belongs to', () => {
+  test('names the project of the card from the names the app holds', async () => {
+    const [row] = toTestCards(await boardModelOf([card('F1', { laneId: 'tested' })]));
+    if (row === undefined) throw new Error('expected a row');
+    expect(row.projectName).toBeNull();
+    expect(withProjectName(row, new Map([[row.group.projectId, 'ferretry']])).projectName).toBe('ferretry');
+  });
+
+  test('keeps the same row when no name is known', async () => {
+    const [row] = toTestCards(await boardModelOf([card('F1', { laneId: 'tested' })]));
+    if (row === undefined) throw new Error('expected a row');
+    expect(withProjectName(row, undefined)).toBe(row);
+    expect(withProjectName(row, new Map())).toBe(row);
   });
 });

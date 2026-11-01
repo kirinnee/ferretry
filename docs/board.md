@@ -394,6 +394,33 @@ The rule cannot tell a top-level ferret's own idea from the owner's words in tha
 human, which errs toward showing the owner a card. Both fields are optional on the wire: a daemon older than the
 split sends neither, and the app then shows every card and no toggle.
 
+### Cards to test: a person asked
+
+The Inbox's To test section, Answer quickly, and the chat task panel's Cards view list only the cards a PERSON asked
+for, so the owner is not flooded with the follow-ups their ferrets file for themselves. That is `askedBy` on a card
+(`person` or `agent`), and the card STORES it: the daemon decides it once, when it creates the card, and never from
+the request (the create body has no such field, so a caller cannot claim it). `decideAskedBy` in `origin.ts` says
+`person` when any of these holds:
+
+1. the owner's own app made it (an owner caller that is not on the admin token, which a ferret can hold too);
+2. the ask's source names the owner (`owner (board)`, "owner via lead jaeda");
+3. the ask's text matches words the OWNER said to the session it came from (`askSessionOf`: the `session:<id>` in
+   the source, else the recording ferret).
+
+Anything else is `agent`, including every card whose session is unknown. The owner's words are the messages the owner
+sent that session's queue (a person's own, never a ferret's or Ferretry's, in any delivery state) and, when no ferret
+started the session, its first turn document. Two texts match when one contains the other after collapsing whitespace
+and ignoring case, and the shorter has at least 24 characters. **A paraphrase does not match**: a ferret that rewrites
+the owner's ask in its own words gets an `agent` card, which is still on the Board.
+
+A card made before the field existed gets it once at boot (`BoardService.backfillAskedBy`), by the same rule except
+that a stored creator of `owner` proves nothing (it reads that way for a ferret on the admin token), so it is the
+source and the owner's messages that decide. The pass writes no history event and does not touch the card's last-touched
+time, is idempotent, and a card it cannot settle is reported and tried again next boot. A view reads the stored value,
+and falls back to the ask's source (`cardAskedBy`) only for a card not yet backfilled. A daemon older than the field
+sends nothing and the app reads that as `agent`. The cards left out are still on the Board, and each card shown names
+its project beside its machine.
+
 ## Authority
 
 Who may write a card follows from the card itself and from the lineage of the session asking; there are no roles to

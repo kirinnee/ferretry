@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { chatCards } from '../../src/lib/board-chat.ts';
 import { cardStack } from '../../src/lib/board-card-stack.ts';
+import { chatCards } from '../../src/lib/board-chat.ts';
 import { boardModelOf, card, laptop } from './board-support.ts';
 
 const SELF = 's1';
@@ -58,6 +58,11 @@ describe('cardStack', () => {
     ]);
     expect(stack.map(entry => entry.rank)).toEqual(['rest']);
     expect(stack[0]?.toTest).toBeNull();
+  });
+
+  test('a card an agent made is not offered for a verdict: it stays in the rest', async () => {
+    const stack = await stackOf([card('F1', { owner: SELF, laneId: 'tested', askedBy: 'agent' })]);
+    expect(stack.map(entry => [entry.rank, entry.toTest])).toEqual([['rest', null]]);
   });
 
   test('a snoozed card to test drops to the rest until its time is up', async () => {
