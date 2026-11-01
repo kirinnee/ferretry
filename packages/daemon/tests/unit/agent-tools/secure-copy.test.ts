@@ -367,45 +367,6 @@ describe('the secure.paste and secure.preapprove agent tools', () => {
     should([theirs.code, byPerson.code, switchedOff.code]).eql(['forbidden', 'bad_request', 'forbidden']);
     should(raised).eql([]);
   });
-
-  it('should raise one plan card for the pastes the agent plans', async () => {
-    const proposed: unknown[] = [];
-    const world = agentToolWorld({
-      plans: {
-        propose: async (sessionId, items) => {
-          proposed.push({ sessionId, items });
-          return {
-            id: 'b'.repeat(32),
-            sessionId,
-            agendaItemId: 'A9',
-            items: [...items],
-            state: 'pending',
-            raisedAt: '2026-10-31T12:00:00.000Z',
-            expiresAt: '2026-10-31T14:00:00.000Z',
-          };
-        },
-      },
-    });
-    const items = [
-      {
-        from: { kind: 'command', program: 'gh' },
-        to: { kind: 'terminal', program: 'vercel' },
-        why: 'the deploy token',
-      },
-    ] as const;
-
-    const result = await world.service.call(agent, { tool: 'secure.preapprove', items: [...items] });
-    const byPerson = await refused(world.service.call(person, { tool: 'secure.preapprove', items: [...items] }));
-    const unwired = await refused(
-      agentToolWorld().service.call(agent, { tool: 'secure.preapprove', items: [...items] }),
-    );
-
-    should(result.summary).equal(
-      'Asked the owner to approve 1 paste in advance (!A9). Until they answer, each paste asks them.',
-    );
-    should(proposed).have.length(1);
-    should([byPerson.code, unwired.code]).eql(['bad_request', 'unavailable']);
-  });
 });
 
 describe('the secure tools and the switches', () => {

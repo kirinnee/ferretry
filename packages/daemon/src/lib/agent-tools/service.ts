@@ -38,6 +38,9 @@ import {
   type SurfaceKind,
   type SurfaceOpener,
   strongestSensitivity,
+  copyPlanOf,
+  taskPlanAgentView,
+  taskPlanCallOf,
 } from '@ferretry/protocol';
 import { AGENT_FILE_LIMITS, AgentFileError, type AgentFiles, extensionOf, sizeWords } from '../agent-files/index.ts';
 import type { AuditSink } from '../audit/types.ts';
@@ -285,6 +288,7 @@ const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
   call.tool === 'input.wait' ||
   call.tool === 'account.hint' ||
   call.tool === 'account.propose' ||
+  call.tool === 'task.plan' ||
   call.tool.startsWith('secure.')
     ? undefined
     : call.tool.startsWith('terminal.')
@@ -336,6 +340,7 @@ const LEAVES_SURFACES: ReadonlySet<string> = new Set<AgentToolCall['tool']>([
   'secure.discard',
   'secure.copy',
   'secure.preapprove',
+  'task.plan',
 ]);
 
 /** The kind of surface a call may change, or nothing for a call that changes none. */
@@ -602,14 +607,19 @@ export class AgentToolService {
         };
       }
       case 'secure.preapprove': {
-        if (caller.kind !== 'agent')
-          throw new AgentToolError('bad_request', 'Only an agent asks for pastes to be approved in advance.');
-        if (this.ports.plans === undefined)
-          throw new AgentToolError('unavailable', 'Secure copy is not available on this daemon.');
-        const plan = await this.ports.plans.propose(sessionId, call.items, call.expiresInSeconds);
+        const plans = this.planPort(caller);
+        const planned = copyPlanOf(await plans.propose(sessionId, taskPlanCallOf(call)));
+        if (planned === undefined) throw new AgentToolError('bad_request', 'A plan lists 1 to 10 pastes.');
         return {
-          summary: `Asked the owner to approve ${plural(plan.items.length, 'paste')} in advance (!${plan.agendaItemId}). Until they answer, each paste asks them.`,
-          plan,
+          summary: `Asked the owner to approve ${plural(planned.items.length, 'paste')} in advance (!${planned.agendaItemId}). Until they answer, each paste asks them.`,
+          plan: planned,
+        };
+      }
+      case 'task.plan': {
+        const plan = await this.planPort(caller).propose(sessionId, call);
+        return {
+          summary: `Asked the owner to approve ${plural(plan.lines.length, 'line')} in advance (!${plan.agendaItemId}). The plan is only recorded for now: Ferretry fills nothing from it yet, so keep raising browser_request_input / terminal_request_input and the owner is asked each time.`,
+          taskPlan: taskPlanAgentView(plan),
         };
       }
       case 'account.hint':
@@ -688,7 +698,8 @@ export class AgentToolService {
           | 'secure.list'
           | 'secure.discard'
           | 'secure.paste'
-          | 'secure.preapprove';
+          | 'secure.preapprove'
+          | 'task.plan';
       }
     >,
     surface: ResolvedSurface,
@@ -1512,6 +1523,14 @@ export class AgentToolService {
     };
   }
 
+  private planPort(caller: AgentToolCaller): AgentPlanPort {
+    if (caller.kind !== 'agent')
+      throw new AgentToolError('bad_request', 'Only an agent asks for sign-ins and pastes to be approved in advance.');
+    if (this.ports.plans === undefined)
+      throw new AgentToolError('unavailable', 'Task plans are not available on this daemon.');
+    return this.ports.plans;
+  }
+
   private inputPort(caller: AgentToolCaller): AgentInputPort {
     if (caller.kind !== 'agent')
       throw new AgentToolError('bad_request', 'Only an agent raises or waits on an input request.');
@@ -1931,6 +1950,9 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return { copy: copyHandle(bareCopyName(call.handle)) };
     case 'secure.preapprove':
       return { items: call.items.length };
+    case 'task.plan':
+      // The count only: a site, a sign-in or a reason is the plan's own record, not the tool audit's.
+      return { lines: call.lines.length };
     case 'browser.dialog':
       return {
         action: call.action,

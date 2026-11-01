@@ -164,9 +164,9 @@ describe('agent tool schemas', () => {
       { tool: 'secure.discard', handle: 'sealed:token' },
       { tool: 'secure.paste', handle: 'sealed:token', to: { kind: 'terminal', name: 'dev' }, prompt: 'the token' },
       {
-        tool: 'secure.preapprove',
-        items: [
-          { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'token' },
+        tool: 'task.plan',
+        lines: [
+          { kind: 'sign-in', site: 'github.com', fields: ['password'], uses: 1, why: 'open the Actions settings' },
         ],
       },
     ];
@@ -180,6 +180,85 @@ describe('agent tool schemas', () => {
       'terminal.wait',
       ...tools.AGENT_TOOL_NAMES.slice(5),
     ]);
+  });
+
+  it('should keep secure.preapprove accepted but unlisted, read as the task.plan it became', () => {
+    const call = {
+      tool: 'secure.preapprove',
+      items: [{ from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'token' }],
+    };
+
+    const parsed = tools.AgentToolCallSchema.parse(call);
+
+    should(tools.ACCEPTED_UNLISTED_TOOLS).deepEqual(['secure.preapprove']);
+    should(tools.AGENT_TOOL_NAMES).not.containEql('secure.preapprove');
+    should(tools.AGENT_TOOL_NAMES).containEql('task.plan');
+    should(parsed.tool).equal('secure.preapprove');
+    if (parsed.tool !== 'secure.preapprove') throw new Error('unreachable');
+    should(tools.taskPlanCallOf(parsed)).eql({
+      tool: 'task.plan',
+      lines: [
+        {
+          kind: 'paste',
+          from: { kind: 'command', program: 'gh' },
+          to: { kind: 'terminal', program: 'vercel' },
+          uses: 1,
+          why: 'token',
+        },
+      ],
+    });
+  });
+
+  it('should read the legacy secure.preapprove body strictly: no uses, no sign-in, no extra key, at most a day', () => {
+    const item = {
+      from: { kind: 'command', program: 'gh' },
+      to: { kind: 'terminal', program: 'vercel' },
+      why: 'token',
+    };
+    const accepts = (body: object) =>
+      tools.AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items: [item], ...body }).success;
+    const accepted = (items: unknown) =>
+      tools.AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items }).success;
+
+    const table: readonly (readonly [string, boolean])[] = [
+      ['plain item', accepted([item])],
+      ['uses on an item', accepted([{ ...item, uses: 5 }])],
+      ['uses beside the items', accepts({ uses: 5 })],
+      ['a sign-in item', accepted([{ kind: 'sign-in', site: 'github.com', fields: ['password'], uses: 1, why: 'x' }])],
+      ['a sign-in item with a place', accepted([{ ...item, kind: 'sign-in', site: 'github.com' }])],
+      ['a terminal sign-in item', accepted([{ kind: 'terminal-sign-in', place: 'sudo@box', why: 'x' }])],
+      ['an extra key on an item', accepted([{ ...item, password: 'hunter2' }])],
+      ['an extra key on the body', accepts({ sessionId: 's2' })],
+      ['299 seconds', accepts({ expiresInSeconds: 299 })],
+      ['a day', accepts({ expiresInSeconds: 86_400 })],
+      ['a day and a second', accepts({ expiresInSeconds: 86_401 })],
+    ];
+
+    should(table).eql([
+      ['plain item', true],
+      ['uses on an item', false],
+      ['uses beside the items', false],
+      ['a sign-in item', false],
+      ['a sign-in item with a place', false],
+      ['a terminal sign-in item', false],
+      ['an extra key on an item', false],
+      ['an extra key on the body', false],
+      ['299 seconds', false],
+      ['a day', true],
+      ['a day and a second', false],
+    ]);
+  });
+
+  it('should refuse a task.plan line that carries a place, a value or a second line for one sign-in', () => {
+    const line = { kind: 'sign-in', site: 'github.com', fields: ['password'], uses: 1, why: 'settings' };
+    const refuses = (body: object) => tools.AgentToolCallSchema.safeParse({ tool: 'task.plan', ...body }).success;
+
+    should(refuses({ lines: [line] })).be.true();
+    should(refuses({ lines: [{ ...line, origin: 'https://github.com' }] })).be.false();
+    should(refuses({ lines: [{ ...line, password: 'hunter2' }] })).be.false();
+    should(refuses({ lines: [line, line] })).be.false();
+    should(refuses({ lines: [] })).be.false();
+    should(refuses({ lines: [line], expiresInSeconds: 299 })).be.false();
   });
 
   it('should paste into a terminal by its name, one page field by ref or selector, or the secret store by name', () => {

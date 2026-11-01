@@ -31,7 +31,7 @@ the page and end with it. The reference grammar is unchanged — see
 `browser.hover` · `browser.drag` · `browser.mouse` · `browser.press` · `browser.scroll` · `browser.select` · `browser.check` ·
 `browser.fill_form` · `browser.highlight` (see [Pointer and keys](#pointer-and-keys)) ·
 `browser.eval(name, function, target?, timeoutMs?)` (owner-gated: [Page scripts](#page-scripts-owner-gated)) ·
-`browser.close(name)` · `browser.ask_owner(name, message?)`.
+`browser.close(name)` · `browser.ask_owner(name, message?)` · `task.plan(lines)` (see [Task plan](#task-plan-ask-once-before-a-task)).
 
 A **target** is exactly one of a `ref`, a `selector`, or — for a click only — a point `x`, `y`; see
 [Refs and targets](#refs-and-targets). `history` is `back`, `forward` or `reload`.
@@ -300,6 +300,52 @@ Chrome prints only when headless; in **Real window** mode it is refused with one
 **Wire shape.** The file actions are NOT in `BrowserActionSchema`, so the toolbar route cannot carry a host path: the
 daemon hands the worker an already-confined absolute path (`BrowserFileAction`, daemon-only), and a download comes back as
 a staged path the daemon alone saves.
+
+## Task plan: ask once before a task
+
+`task.plan(lines)` (MCP `task_plan`) is how a ferret asks the owner, once, to pre-approve the sign-ins and pastes a
+task will need. One call raises ONE card on the owner's agenda, up to 10 lines:
+
+- `{ kind: "sign-in", signIn | site, fields: [username, password, totp], uses, why }`: a sign-in on a page;
+- `{ kind: "terminal-sign-in", signIn | place, uses, why }`: the password typed into `sudo`, `su` or `doas` only;
+- `{ kind: "paste", from, to, uses, why }`: a planned secure-copy paste ([secure-copy.md](secure-copy.md)).
+
+A line names only what the owner already saved (a `si_…` id, a host, or `tool@host`), never an origin, URL, program
+path or value. The answer is `taskPlan`: each line's state, the account picked and the uses left, and nothing about
+which secret fields an account holds. Until the owner answers, each sign-in or paste asks them as it always did.
+
+**Not filling yet (R3a-4, R3a-5).** A plan is only recorded and shown for now: the owner can approve, list and revoke
+it, but no sign-in is filled from it and the app does not show plan cards yet. A ferret keeps raising
+`browser_request_input` / `terminal_request_input` as usual and the owner is asked each time. Once fills arrive, the
+ferret's calls will not change: a covered sign-in will be filled for it, and where no line covers it the owner is
+asked.
+
+The old `secure.preapprove { items }` still works for an older pane: it is read as one-use paste lines through the
+same call, and answers the old `plan` shape. It is no longer listed in MCP.
+
+**The owner answers at the machine with `fy plan`** (`fy copy plan` is the same command), or on the plan's card:
+
+| Command                                                           | Does                                            |
+| ----------------------------------------------------------------- | ----------------------------------------------- |
+| `fy plan ls [--session <id>] [--json]`                            | lists the waiting plans, line by line (1-based) |
+| `fy plan approve <id> [lines…] [--pick 3=GITHUB_WORK] [--totp 1]` | allows those lines; none declines the plan      |
+| `fy plan revoke <id> [lines…]`                                    | ends those lines, or every line                 |
+
+A paste-only selection is approved at once. A selection with a sign-in line is only **staged**: the command asks the
+daemon to show the stage on the plan's card, and waits up to 125 seconds for the owner's passkey in the app. It then
+reads the plan back and prints what is really in force: Approved (also when the owner ticked other lines in the app
+meanwhile), Denied or Timed out. With `--json` the output is one JSON document and the prose goes to stderr. The CLI
+has no commit call: the machine's token cannot make the passkey proof, so no sign-in line is ever approved from the
+terminal alone. Until the daemon reports that the app shows plan cards (`task-plan.1` in its health), a selection with
+a sign-in line is refused up front and nothing is staged; paste lines still work. There is no deep link to the card
+yet: the command names it as `!A<n>` on the Agenda (a GAP until R3a-5).
+`--pick` takes an account handle or a `si_…` id and must be one of the line's candidates, or nothing is staged;
+a line with several candidates needs one. `--totp` ticks a code only where the ferret asked for it and the account
+can make them. A ferret's pane (and any command carrying an agent credential) is refused: these routes are the owner's.
+
+**An honest-client limit.** A plan guards against tool misuse and page-text steering, not against a ferret that goes
+around Ferretry: every ferret can read Ferretry's own state-home files. Every plan card says so. Design and rules:
+[secure-copy.md](secure-copy.md#task-plans).
 
 ## Handing a surface to the owner
 
