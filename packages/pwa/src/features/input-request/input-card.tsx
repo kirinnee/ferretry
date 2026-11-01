@@ -652,7 +652,7 @@ function FieldSummary({
       {fields.map(field => (
         <li className="flex min-w-0 flex-col gap-1" data-input-summary-field={field.key} key={field.key}>
           <span className="text-cell font-medium text-fg">
-            {field.label} <span className="font-normal text-muted">· {SENSITIVITY_WORDS[field.sensitivity]}</span>
+            {field.label} <span className="font-normal text-muted">· {sensitivityWords(field)}</span>
           </span>
           <FieldFlags field={field} request={request} />
         </li>
@@ -664,9 +664,15 @@ function FieldSummary({
 const SENSITIVITY_WORDS = {
   secret: 'secret',
   private: 'private',
-  code: 'one-time code',
+  code: 'one-time code, the ferret can see it',
   plain: 'not secret',
 } as const;
+
+/** The label keeps "the ferret can see it" unless the risk line drawn for the field (on top or beside it) already says it. */
+const sensitivityWords = (field: InputCardField): string =>
+  field.sensitivity === 'code' && field.risk?.reason.includes('the ferret can see it') === true
+    ? 'one-time code'
+    : SENSITIVITY_WORDS[field.sensitivity];
 
 /**
  * The quiet line after a hand-tap: "Always use for <project>". It is the OWNER's tap on this button that writes the
@@ -810,6 +816,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
       offer === primary ? undefined : offer,
     );
 
+  const severalMatched = (request.saved?.offers ?? []).filter(each => each.matched).length > 1;
   const codeButtons = (offer: InputSavedOffer, lead: boolean): ReactNode =>
     (offer.codes ?? []).map((key, index) => {
       const checked = codeCheckedWords(key);
@@ -827,7 +834,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
           type="button"
         >
           <span className="min-w-0 break-words">{codeButtonWords(key)}</span>
-          {lead ? null : (
+          {lead && !severalMatched ? null : (
             <span className="text-meta font-normal opacity-80" data-input-code-account="">
               {username === undefined ? offer.label : `${offer.label} · ${username}`}
             </span>
@@ -925,7 +932,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
               Type a different one
             </button>
           </div>
-          {reasonLine === undefined || primary.codes !== undefined ? null : (
+          {reasonLine === undefined || (primary.codes !== undefined && primary.why === 'only') ? null : (
             <p className="m-0 text-meta text-muted" data-input-why={primary.why}>
               {reasonLine}
             </p>

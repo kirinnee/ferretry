@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import {
   DAEMON_FEATURES,
   PHONE_APPROVAL_TITLE,
@@ -258,6 +258,40 @@ describe('the approve-on-phone host', () => {
     const view = await host({ paths: [], factory: async () => client as never });
 
     expect(view.container.querySelector('[data-phone-approval-number]')).toBeNull();
+  });
+
+  it('drops a number it was showing the moment the next read fails', async () => {
+    let reads = 0;
+    const client = {
+      request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
+        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.phoneApproval]));
+        reads += 1;
+        if (reads > 1) throw new Error('unreachable');
+        return schema.parse({ approvals: [approval()] });
+      },
+    };
+    const polls: Array<() => void> = [];
+    const real = globalThis.setTimeout;
+    const spy = spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+      if (ms === 2_000) {
+        polls.push(fn);
+        return 0 as never;
+      }
+      return real(fn, ms);
+    }) as never);
+    try {
+      const view = await host({ paths: [], factory: async () => client as never });
+      expect(view.container.querySelector('[data-phone-approval-number]')?.textContent).toBe('42');
+
+      for (const poll of polls.splice(0)) poll();
+      for (let tries = 0; tries < 5; tries += 1) await settle();
+
+      expect(reads).toBeGreaterThan(1);
+      expect(view.container.querySelector('[data-phone-approval-number]')).toBeNull();
+      expect(view.container.textContent).not.toContain('42');
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it('drops the last approval’s number the moment the approval it shows changes', async () => {

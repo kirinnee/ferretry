@@ -118,6 +118,15 @@ describe('the card', () => {
     expect(q('[data-input-lock]')).toBeNull();
     expect(q('[data-input-save]')).toBeNull();
   });
+  it('keeps "the ferret can see it" in the code field’s label when an amber flag replaces the neutral line', async () => {
+    const amber = { level: 'amber', reason: 'This page does not look like a sign-in code box.' } as const;
+    const { view } = await show(
+      requestOf('code', { risk: amber, saved: saved({ saves: undefined, offers: [primaryOffer()] }) }),
+    );
+
+    expect(view.container.querySelector('[data-input-summary-field]')?.textContent).toContain('the ferret can see it');
+  });
+
   it('says a plain answer is not secret', async () => {
     const { q } = await show(requestOf('plain'));
 

@@ -596,6 +596,65 @@ describe('a code card with keys Ferretry makes codes from', () => {
   });
 });
 
+describe('a code card with several accounts that sign in here', () => {
+  const two = async (why: 'ferret' | 'only', matchedSecond = true) => {
+    const base = codeCard([{ factor: APP, label: 'Authenticator app' }]);
+    const request: InputRequest = {
+      ...base,
+      saved: saved({
+        match: 'github.com',
+        offers: [
+          offer({
+            id: 'WORK',
+            label: 'GitHub (work)',
+            fills: 'totp',
+            matched: true,
+            primary: true,
+            why,
+            signIn: SIGN_IN,
+            codes: [{ factor: APP, label: 'Authenticator app' }] as never,
+          }),
+          offer({
+            id: 'GITHUB',
+            label: 'GitHub (kirinnee)',
+            fills: 'totp',
+            matched: matchedSecond,
+            signIn: 'si_fedcba9876543210',
+            codes: [{ factor: APP, label: 'Backup app' }] as never,
+          }),
+        ],
+      }),
+    };
+    const view = await mount(
+      <InputCard
+        accounts={accountList([sms(SMS), totp(APP, 'Authenticator app')])}
+        client={fakeClient(() => ({ outcome: 'typed' })).client}
+        fields={fieldsOf(request)}
+        now={NOW}
+        onDone={() => undefined}
+        request={request}
+      />,
+    );
+    mounted.push(view);
+    return view.container;
+  };
+
+  it('should say the ferret chose, and name the account on the lead code button, so a hint cannot pick unseen', async () => {
+    const card = await two('ferret');
+
+    expect(card.querySelector('[data-input-why]')?.textContent).toBe('Ferret chose this');
+    const lead = card.querySelector('[data-variant="primary"]');
+    expect(lead?.querySelector('[data-input-code-account]')?.textContent).toContain('GitHub (work)');
+  });
+
+  it('should not name the account or say "only account" when just one account matched', async () => {
+    const card = await two('only', false);
+
+    expect(card.querySelector('[data-input-why]')).toBeNull();
+    expect(card.querySelector('[data-variant="primary"] [data-input-code-account]')).toBeNull();
+  });
+});
+
 describe('the code card host', () => {
   const served = (
     features: string[] | undefined,
