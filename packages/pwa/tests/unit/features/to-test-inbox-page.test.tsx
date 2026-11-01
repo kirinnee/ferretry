@@ -184,6 +184,15 @@ describe('Inbox — cards waiting for a try', () => {
     const { root } = await open({ page: { from: 'warden' } });
     expect(root.querySelector('[data-to-test-list]')).toBeNull();
   });
+
+  it('finds a card by the name of its project', async () => {
+    const { root } = await open();
+    const find = must(root.querySelector<HTMLInputElement>('[data-agenda-find]'), 'the Find box');
+    await fill(find, 'ferretry');
+    expect(root.querySelectorAll('[data-to-test]')).toHaveLength(2);
+    await fill(find, 'no such project');
+    expect(root.querySelector('[data-to-test]')).toBeNull();
+  });
 });
 
 describe('Inbox — answering a card waiting for a try', () => {
