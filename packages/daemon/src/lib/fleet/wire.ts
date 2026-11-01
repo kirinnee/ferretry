@@ -143,44 +143,44 @@ const historySummary = (previews: readonly SharedHistoryPreview[]): readonly Fle
     links: preview.links,
   }));
 
-type RuntimeFolder = { readonly id: string; readonly home: string };
-
-/** Which runtime a skipped path is in, and the path inside that runtime's folder; neither when it is in no runtime's folder. */
-const skippedEntry = (
-  { path, reason }: { readonly path: string; readonly reason: string },
-  accounts: readonly RuntimeFolder[],
-) => {
-  for (const { id, home } of accounts) {
-    const folder = `${home.replace(/\/+$/u, '')}/`;
-    if (path.startsWith(folder)) return { path, reason, runtime: id, within: path.slice(folder.length) };
+/**
+ * Each runtime's skipped paths from an apply, inside that runtime's own folder and keyed by its id. A path in no
+ * runtime's folder is left out: it names nothing a runtime could say, and the folder's place on disk stays here.
+ */
+export const skippedWithinRuntimes = (
+  skipped: readonly { readonly path: string }[] | undefined,
+  accounts: readonly { readonly id: string; readonly home: string }[],
+): Readonly<Record<string, readonly string[]>> => {
+  const found: Record<string, readonly string[]> = {};
+  for (const { path } of skipped ?? []) {
+    for (const { id, home } of accounts) {
+      const folder = `${home.replace(/\/+$/u, '')}/`;
+      if (!path.startsWith(folder) || path.length === folder.length) continue;
+      found[id] = [...(found[id] ?? []), path.slice(folder.length)];
+      break;
+    }
   }
-  return { path, reason };
+  return found;
 };
 
 /** Residue is optional on the wire, so an apply that left none says nothing rather than empty. */
-const residueOf = (
-  value: {
-    readonly backupResidue?: readonly string[];
-    readonly lockResidue?: string;
-    readonly skipped?: readonly { readonly path: string; readonly reason: string }[];
-  },
-  accounts: readonly RuntimeFolder[],
-) => ({
+const residueOf = (value: {
+  readonly backupResidue?: readonly string[];
+  readonly lockResidue?: string;
+  readonly skipped?: readonly { readonly path: string; readonly reason: string }[];
+}) => ({
   ...(value.backupResidue === undefined ? {} : { backupResidue: [...value.backupResidue] }),
   ...(value.lockResidue === undefined ? {} : { lockResidue: value.lockResidue }),
-  ...(value.skipped === undefined ? {} : { skipped: value.skipped.map(entry => skippedEntry(entry, accounts)) }),
+  ...(value.skipped === undefined ? {} : { skipped: value.skipped.map(({ path, reason }) => ({ path, reason })) }),
 });
 
-export const applyResultSummary = (
-  result: FleetApplyResult,
-  accounts: readonly RuntimeFolder[] = [],
-): FleetWireApplyResult => ({
+export const applyResultSummary = (result: FleetApplyResult): FleetWireApplyResult => ({
   accountCount: result.accountCount,
   operationCount: result.operationCount,
   manifestPath: result.manifestPath,
   prunedWrappers: [...result.prunedWrappers],
   sharedHistory: historySummary(result.sharedHistory),
-  ...residueOf(result, accounts),
+  ...residueOf(result),
 });
 
 const committedSummary = (committed: FleetApplyCommittedState): FleetWireCommittedState => ({
@@ -190,7 +190,7 @@ const committedSummary = (committed: FleetApplyCommittedState): FleetWireCommitt
   manifest: manifestSummary(committed.manifest),
   prunedWrappers: [...committed.prunedWrappers],
   sharedHistory: historySummary(committed.sharedHistory),
-  ...residueOf(committed, committed.manifest.accounts),
+  ...residueOf(committed),
 });
 
 /**

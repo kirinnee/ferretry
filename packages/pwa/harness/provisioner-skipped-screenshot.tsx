@@ -5,21 +5,19 @@
  *
  *   bun harness/provisioner-skipped-screenshot.tsx [out-dir]   # writes provisioner-skipped-{none,few,open}-*.png
  *
- * It renders the REAL `RuntimesTab` against scripted routes and walks the real Add runtime journey, so the
- * line appears from the apply result the daemon would send. Fake fixtures only: the folder path is a made-up
- * one and it must never show up on screen (the harness fails if it does).
+ * It renders the REAL `RuntimesTab` against scripted routes, so the line appears from the runtime list the
+ * daemon serves (the last apply's skips, relative to each runtime's folder). Fake fixtures only: nothing on screen may name a place on disk (the harness fails if it does).
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { chromium, type Page } from 'playwright-core';
+import { chromium } from 'playwright-core';
 
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
 const buildDir = join(harnessDir, 'out');
 const outDir = resolve(process.argv[2] ?? buildDir);
 
-const FOLDER = '/home/harness/.ferretry/fleet/homes/claude-default';
 const ONE = '00000000-0000-4000-8000-0000000000a1';
 
 const fail = (message: string): never => {
@@ -37,7 +35,6 @@ import { createRoot } from 'react-dom/client';
 import { FleetRuntimeCatalogSchema } from '@ferretry/protocol';
 import { RuntimesTab } from '../../src/features/fleet/runtimes/runtimes-tab.tsx';
 import {
-  CHANGE_ID,
   DATA,
   machine,
   READS,
@@ -45,43 +42,25 @@ import {
   runtime,
   STUDIO,
   scripted,
-  stagedFrom,
 } from '../../tests/unit/features/fleet/account-support.ts';
 
 const state = new URLSearchParams(location.search).get('state') ?? 'none';
-const FOLDER = ${JSON.stringify(FOLDER)};
 const ONE = ${JSON.stringify(ONE)};
-const REASON = 'not moving or removing ' + FOLDER + '/skills/review on this platform';
-
 const skipped =
   state === 'none'
-    ? []
+    ? undefined
     : [
-        { path: FOLDER + '/skills/review', reason: REASON, runtime: ONE, within: 'skills/review' },
-        { path: FOLDER + '/commands/ship.md', reason: REASON, runtime: ONE, within: 'commands/ship.md' },
-        { path: FOLDER + '/hooks/pre-commit/format-staged-files-before-every-single-commit.sh', reason: REASON, runtime: ONE, within: 'hooks/pre-commit/format-staged-files-before-every-single-commit.sh' },
+        'skills/review',
+        'commands/ship.md',
+        'hooks/pre-commit/format-staged-files-before-every-single-commit.sh',
       ];
 
-const runtimes = [runtime({ name: 'claude-default', id: ONE }), ...RUNTIMES.runtimes.slice(1)];
+const runtimes = [
+  { ...runtime({ name: 'claude-default', id: ONE }), ...(skipped === undefined ? {} : { skipped }) },
+  ...RUNTIMES.runtimes.slice(1),
+];
 const catalog = FleetRuntimeCatalogSchema.parse({ ...RUNTIMES, runtimes });
-const client = scripted({
-  ...READS({ ...DATA, runtimes: catalog }),
-  'POST /v1/fleet/proposals': call => stagedFrom(call),
-  ['POST /v1/fleet/proposals/' + CHANGE_ID + '/apply']: {
-    outcome: 'applied',
-    apply: {
-      outcome: 'committed',
-      result: {
-        accountCount: 1,
-        operationCount: 2,
-        manifestPath: FOLDER + '/manifest.json',
-        prunedWrappers: [],
-        sharedHistory: [],
-        ...(skipped.length === 0 ? {} : { skipped }),
-      },
-    },
-  },
-});
+const client = scripted(READS({ ...DATA, runtimes: catalog }));
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
@@ -149,15 +128,6 @@ const VIEWPORTS = [
 
 const STATES = ['none', 'few', 'open'] as const;
 
-/** The real journey: Add runtime, pick a login and a profile, apply, back to the list. */
-const addRuntime = async (page: Page): Promise<void> => {
-  await page.locator('[data-add-runtime]').click();
-  await page.locator('[data-add-runtime-credential="claude-personal"] input').click({ force: true });
-  await page.locator('[data-add-runtime-profile="Claude hooks"] input').click({ force: true });
-  await page.locator('[data-change-submit]').evaluate(button => (button as HTMLElement).click());
-  await page.locator('[data-add-runtime-finish="list"]').evaluate(button => (button as HTMLElement).click());
-};
-
 const executablePath =
   Bun.which('google-chrome') ?? Bun.which('chromium') ?? fail('no system Chrome or Chromium found');
 const browser = await chromium.launch({ executablePath, headless: true });
@@ -182,13 +152,14 @@ try {
           const where = `${state} at ${viewport.name}/${scheme}`;
           await page.goto(`${server.url}?theme=studio-${scheme}&state=${state}`);
           await page.locator('[data-runtimes-tab]').waitFor({ state: 'visible' });
-          await addRuntime(page);
           const line = page.locator('[data-runtime-skipped="claude-default"]');
           if (state === 'none') {
-            await page.locator('[data-runtime-row="claude-default"]').waitFor({ state: 'visible' });
+            await page.locator('[data-runtime-card="claude-default"]').waitFor({ state: 'visible' });
             if ((await line.count()) !== 0) fail(`${where}: a skipped line shows although nothing was skipped`);
           } else {
             await line.waitFor({ state: 'visible' });
+            if ((await page.locator('[data-runtime-card="claude-default"] [data-runtime-skipped]').count()) !== 1)
+              fail(`${where}: the line is not inside its runtime's card`);
             if (state === 'open') await line.locator('button').click();
             const shown = (await line.textContent()) ?? '';
             if (!shown.includes('3 items skipped')) fail(`${where}: the line says "${shown}"`);

@@ -14,7 +14,7 @@ export function SkippedLine({ name, items }: { readonly name: string; readonly i
   if (items.length === 0) return null;
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <div className="flex min-w-0 flex-col gap-1" data-runtime-skipped={name}>
+    <div className="relative flex min-w-0 flex-col gap-1" data-runtime-skipped={name}>
       <button
         type="button"
         aria-expanded={open}

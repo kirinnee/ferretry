@@ -24,7 +24,6 @@ import {
   type StageResult,
   stageAccountChange,
 } from './apply-change.ts';
-import { type SkippedEntry, skippedFromOutcome } from './skipped-model.ts';
 
 export interface AccountChanges {
   /** `null` while it is being read. */
@@ -38,8 +37,6 @@ export interface AccountChanges {
   readonly stage: (change: FleetAccountChange) => Promise<StageResult>;
   /** Apply a change {@link stage} returned. */
   readonly applyStaged: (staged: FleetAccountChangeView) => Promise<ChangeResult>;
-  /** What the last change that landed left as it was: the provisioner's skipped entries, empty when none. */
-  readonly skipped: readonly SkippedEntry[];
   /** Forget the last refusal. */
   readonly clear: () => void;
   /** Show a sentence the caller worded (an act's own refusal) where a change's refusal shows. */
@@ -56,13 +53,11 @@ export function useAccountChanges({ connection, createClient }: UseAccountChange
   const [authority, setAuthority] = useState<FleetApplyAuthority | null>(null);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
-  const [skipped, setSkipped] = useState<readonly SkippedEntry[]>([]);
 
   useEffect(() => {
     let live = true;
     setAuthority(null);
     setRefusal(null);
-    setSkipped([]);
     void createClient(connection)
       .then(client => readChangeAuthority(client))
       .catch((): FleetApplyAuthority => ({ kind: 'unreadable' }))
@@ -83,11 +78,6 @@ export function useAccountChanges({ connection, createClient }: UseAccountChange
       try {
         const result = await work(await createClient(connection));
         if (result.kind === 'refused') setRefusal(result.sentence);
-        if (result.kind === 'applied') {
-          // Only an apply that landed says what it skipped, so a sign-out or a rollback leaves the last answer be.
-          const left = skippedFromOutcome(result.outcome);
-          if (left !== null) setSkipped(left);
-        }
         return result;
       } catch (error) {
         // Only a client that could not be made lands here (a change's own failure is already a result),
@@ -106,7 +96,6 @@ export function useAccountChanges({ connection, createClient }: UseAccountChange
     authority,
     busy,
     refusal,
-    skipped,
     apply: change => run(client => applyAccountChange(client, change)),
     stage: change => run(client => stageAccountChange(client, change)),
     applyStaged: staged => run(client => applyStagedChange(client, staged)),

@@ -14,7 +14,12 @@ import {
   FleetWriteOperationSchema,
 } from '@ferretry/protocol';
 import should from 'should';
-import { applyFailureSummary, applyResultSummary, operationSummary } from '../../../src/lib/fleet/wire.ts';
+import {
+  applyFailureSummary,
+  applyResultSummary,
+  operationSummary,
+  skippedWithinRuntimes,
+} from '../../../src/lib/fleet/wire.ts';
 
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
 
@@ -277,64 +282,6 @@ describe('applyResultSummary', () => {
       { path: '/state/fleet/homes/one/skills', reason: 'not moving or removing it on this platform' },
     ]);
   });
-
-  it('should name the runtime a skipped entry belongs to and its path inside that runtime', () => {
-    // Arrange
-    const account = manifest().accounts[0];
-    if (account === undefined) throw new Error('fixture has an account');
-    const home = account.home;
-
-    // Act
-    const actual = applyResultSummary(
-      {
-        accountCount: 1,
-        operationCount: 1,
-        manifestPath: '/state/fleet/manifest.json',
-        prunedWrappers: [],
-        sharedHistory: [],
-        skipped: [
-          { path: `${home}/skills/review`, reason: `not moving or removing ${home}/skills/review on this platform` },
-          { path: '/elsewhere/skills', reason: 'not moving or removing it on this platform' },
-        ],
-      },
-      [account],
-    );
-
-    // Assert — an entry outside every runtime folder is kept as it was, never guessed into one.
-    should(actual.skipped?.[0]).deepEqual({
-      path: `${home}/skills/review`,
-      reason: `not moving or removing ${home}/skills/review on this platform`,
-      runtime: ACCOUNT_ID,
-      within: 'skills/review',
-    });
-    should(actual.skipped?.[1]).deepEqual({
-      path: '/elsewhere/skills',
-      reason: 'not moving or removing it on this platform',
-    });
-    should(FleetApplyResultSchema.safeParse(actual).success).be.true();
-  });
-
-  it('should not read a folder that merely starts with the runtime folder name as inside it', () => {
-    // Arrange
-    const account = manifest().accounts[0];
-    if (account === undefined) throw new Error('fixture has an account');
-
-    // Act
-    const actual = applyResultSummary(
-      {
-        accountCount: 1,
-        operationCount: 1,
-        manifestPath: '/state/fleet/manifest.json',
-        prunedWrappers: [],
-        sharedHistory: [],
-        skipped: [{ path: `${account.home}-two/skills`, reason: 'left as it was' }],
-      },
-      [account],
-    );
-
-    // Assert
-    should(actual.skipped).deepEqual([{ path: `${account.home}-two/skills`, reason: 'left as it was' }]);
-  });
 });
 
 describe('the committed state a history failure reports', () => {
@@ -355,25 +302,6 @@ describe('the committed state a history failure reports', () => {
     should(actual.committed.manifestPath).equal('/state/fleet/manifest.json');
     should(actual.committed.lockResidue).equal('/state/fleet/.fy-fleet-apply.lock');
     should(actual.committed.sharedHistory).have.length(1);
-  });
-
-  it('should name the runtime of a skipped entry when only history failed afterwards', () => {
-    // Arrange
-    const fleet = manifest();
-    const home = fleet.accounts[0]?.home ?? '';
-    const committed: FleetApplyCommittedState = {
-      ...committedOf(fleet),
-      skipped: [{ path: `${home}/commands`, reason: 'left as it was' }],
-    };
-
-    // Act
-    const actual = applyFailureSummary(committedFailure(committed));
-
-    // Assert
-    if (actual.outcome !== 'committed-with-history-failure') throw new Error('expected a committed outcome');
-    should(actual.committed.skipped).deepEqual([
-      { path: `${home}/commands`, reason: 'left as it was', runtime: ACCOUNT_ID, within: 'commands' },
-    ]);
   });
 });
 
@@ -517,5 +445,47 @@ describe('applyFailureSummary', () => {
     // Assert
     should(actual.outcome).equal('committed-with-history-failure');
     should(FleetApplyOutcomeSchema.safeParse(actual).success).be.true();
+  });
+});
+
+describe('skippedWithinRuntimes', () => {
+  const accounts = [
+    { id: ACCOUNT_ID, home: '/state/fleet/homes/claude-kirin' },
+    { id: '00000000-0000-4000-8000-000000000002', home: '/state/fleet/homes/codex/' },
+  ];
+
+  it('should give each runtime its skipped paths relative to its own folder, and keep no folder on disk', () => {
+    // Act
+    const actual = skippedWithinRuntimes(
+      [
+        { path: '/state/fleet/homes/claude-kirin/skills/review' },
+        { path: '/state/fleet/homes/codex/commands/ship.md' },
+        { path: '/state/fleet/homes/claude-kirin/commands' },
+      ],
+      accounts,
+    );
+
+    // Assert — a trailing slash on a home changes nothing.
+    should(actual).deepEqual({
+      [ACCOUNT_ID]: ['skills/review', 'commands'],
+      '00000000-0000-4000-8000-000000000002': ['commands/ship.md'],
+    });
+  });
+
+  it('should leave out a path in no runtime folder, a lookalike folder, and the folder itself', () => {
+    // Act
+    const actual = skippedWithinRuntimes(
+      [
+        { path: '/state/secrets.key' },
+        { path: '/state/fleet/homes/claude-kirin-two/skills' },
+        { path: '/state/fleet/homes/claude-kirin/' },
+        { path: '/state/fleet/homes/claude-kirin' },
+      ],
+      accounts,
+    );
+
+    // Assert
+    should(actual).deepEqual({});
+    should(skippedWithinRuntimes(undefined, accounts)).deepEqual({});
   });
 });

@@ -107,7 +107,7 @@ import {
   type SessionRuntimeRename,
   sessionRunning,
 } from './runtime-sessions.ts';
-import { applyFailureSummary, applyResultSummary, operationSummary } from './wire.ts';
+import { applyFailureSummary, applyResultSummary, operationSummary, skippedWithinRuntimes } from './wire.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -405,6 +405,8 @@ export function machineAuthority(governance: CallerGovernance | undefined): Flee
 
 export class FleetCatalogService {
   readonly #changes: FleetProposalStore<ChangePayload, FleetAccountChange>;
+  /** What the last apply left as it was, by runtime id. Memory only: it ends with the daemon or the next apply. */
+  #skipped: Readonly<Record<string, readonly string[]>> = {};
 
   constructor(private readonly deps: FleetCatalogServiceDeps) {
     this.#changes = new FleetProposalStore<ChangePayload, FleetAccountChange>({
@@ -688,6 +690,7 @@ export class FleetCatalogService {
       tools: { claude: this.deps.locate('claude'), codex: this.deps.locate('codex') },
       runningSessions: await this.#runningSessions(),
       runtimeIds: await this.#runtimeIds(),
+      skipped: this.#skipped,
       settingsBodies: bodies.settings ?? {},
       instructionBodies: bodies.instructions ?? {},
       skillFrontmatter: bodies.skillFrontmatter ?? {},
@@ -973,13 +976,16 @@ export class FleetCatalogService {
     if (payload.kind === 'apply') {
       try {
         const result = await this.deps.provisioner.apply(payload.plan, payload.documents);
+        this.#skipped = skippedWithinRuntimes(result.skipped, payload.plan.manifest.accounts);
         if (record.mutation.kind === 'runtime.rename') await this.#renameSessions(record.mutation);
-        return {
-          outcome: 'applied',
-          apply: { outcome: 'committed', result: applyResultSummary(result, payload.plan.manifest.accounts) },
-        };
+        return { outcome: 'applied', apply: { outcome: 'committed', result: applyResultSummary(result) } };
       } catch (error) {
-        if (error instanceof FleetApplyFailureError) return { outcome: 'applied', apply: applyFailureSummary(error) };
+        if (error instanceof FleetApplyFailureError) {
+          const { failure } = error;
+          if (failure.kind === 'history-failed-after-commit')
+            this.#skipped = skippedWithinRuntimes(failure.committed.skipped, failure.committed.manifest.accounts);
+          return { outcome: 'applied', apply: applyFailureSummary(error) };
+        }
         throw new FleetCatalogRefusal('fleet_change_failed', errorMessage(error));
       }
     }

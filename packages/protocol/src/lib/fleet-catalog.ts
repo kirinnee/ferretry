@@ -565,6 +565,12 @@ export const FleetRuntimeViewSchema = z.strictObject({
   disabled: FleetDisabledSchema.optional(),
   /** Other runtimes on the same login and profile (R4). */
   sameAs: z.array(NonEmptyStringSchema).readonly(),
+  /**
+   * What the last apply on this machine left as it was inside this runtime's folder: each path relative to
+   * that folder, never the folder's own place on disk. Kept in the daemon's memory until the next apply, so
+   * every device sees it. Absent when nothing was skipped.
+   */
+  skipped: z.array(NonEmptyStringSchema).readonly().optional(),
 });
 export type FleetRuntimeView = z.infer<typeof FleetRuntimeViewSchema>;
 

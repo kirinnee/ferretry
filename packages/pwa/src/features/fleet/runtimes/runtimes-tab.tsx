@@ -21,7 +21,7 @@ import { AccountStatus } from '../shell/account-status.tsx';
 import { type AccountChanges, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { DisableSwitch, type DisableSwitchParts } from '../shell/disable-switch.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
-import { groupSkipped, type SkippedItem } from '../shell/skipped-model.ts';
+import { skippedItems } from '../shell/skipped-model.ts';
 import { AddRuntime } from './add-runtime.tsx';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from './machine-data.ts';
 import { RemoveRuntimeDialog, RenameRuntimeDialog, RuntimeActionButtons } from './runtime-actions.tsx';
@@ -98,8 +98,6 @@ interface RuntimePageProps {
   readonly onAct: (act: RuntimeAct) => void;
   readonly changes: AccountChanges;
   readonly reload: () => Promise<unknown>;
-  /** What the last change left as it was in this runtime. */
-  readonly skipped: readonly SkippedItem[];
 }
 
 /** The switch on a runtime: its own, or its login's when that is what holds it off. */
@@ -147,7 +145,6 @@ function RuntimePage({
   onAct,
   changes,
   reload,
-  skipped,
 }: RuntimePageProps) {
   const installed = harnessInstalled(machine, runtime.harness);
   const word = runtimeWord(runtime);
@@ -191,7 +188,7 @@ function RuntimePage({
 
       <RuntimeSwitch runtime={runtime} machineName={machineName} online={online} changes={changes} reload={reload} />
 
-      <SkippedLine name={runtime.name} items={skipped} />
+      <SkippedLine name={runtime.name} items={skippedItems(runtime)} />
 
       {installed ? null : (
         <div role="status" className="kt-panel flex flex-col gap-1 p-panel" data-runtime-note="missing">
@@ -383,7 +380,6 @@ function RuntimeRow({
   onAct,
   changes,
   reload,
-  skipped,
 }: {
   readonly runtime: FleetRuntimeView;
   readonly data: MachineData;
@@ -394,7 +390,6 @@ function RuntimeRow({
   readonly onAct: (act: RuntimeAct) => void;
   readonly changes: AccountChanges;
   readonly reload: () => Promise<unknown>;
-  readonly skipped: readonly SkippedItem[];
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -444,6 +439,7 @@ function RuntimeRow({
             </>
           )}
         </RuntimeSwitch>
+        <SkippedLine name={runtime.name} items={skippedItems(runtime)} />
         <div className="relative flex flex-wrap items-start justify-end gap-2 border-t border-border-soft pt-2">
           <RuntimeActionButtons
             runtime={runtime}
@@ -456,7 +452,6 @@ function RuntimeRow({
       {harnessInstalled(machine, runtime.harness) ? null : (
         <MissingHarness runtime={runtime} machineName={machineName} />
       )}
-      <SkippedLine name={runtime.name} items={skipped} />
     </div>
   );
 }
@@ -586,7 +581,6 @@ export function RuntimesTab({
       />
     );
 
-  const grouped = groupSkipped(changes.skipped, data.runtimes.runtimes);
   const runtime = detail === null ? undefined : data.runtimes.runtimes.find(item => item.name === detail);
   if (runtime !== undefined)
     return (
@@ -603,7 +597,6 @@ export function RuntimesTab({
           onAct={open}
           changes={changes}
           reload={reload}
-          skipped={grouped.byRuntime.get(runtime.name) ?? []}
         />
         {dialog}
       </>
@@ -661,12 +654,10 @@ export function RuntimesTab({
                   onAct={open}
                   changes={changes}
                   reload={reload}
-                  skipped={grouped.byRuntime.get(item.name) ?? []}
                 />
               </li>
             ))}
           </ul>
-          <SkippedLine name="elsewhere" items={grouped.elsewhere} />
           {refusal === null ? null : (
             <p className="m-0 text-meta leading-base text-warn" data-runtime-actions-refused="">
               Rename and Remove are off here: {refusal}

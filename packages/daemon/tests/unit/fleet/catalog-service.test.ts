@@ -614,6 +614,101 @@ describe('applying a change', () => {
     should(applied).have.length(0);
   });
 
+  it('should serve what the last apply left as it was with each runtime, until the next apply replaces it', async () => {
+    // Arrange — the skipped paths are made from the home the plan itself names for the runtime.
+    const { service, state, applied } = world({
+      ids: async () =>
+        ({ version: 1, runtimes: { 'claude-default': { id: '00000000-0000-4000-8000-0000000000c1' } } }) as never,
+    });
+    const homeOf = (): string => {
+      const accounts = applied.at(-1)?.plan.manifest.accounts ?? [];
+      return accounts.find(account => account.wrapper.endsWith('claude-default'))?.home ?? 'no-such-home';
+    };
+    const skippedOf = async () =>
+      FleetRuntimeCatalogSchema.parse(await service.runtimes()).runtimes.map(runtime => [
+        runtime.name,
+        runtime.skipped,
+      ]);
+    state.apply = async () => ({
+      accountCount: 2,
+      operationCount: 9,
+      manifestPath: LAYOUT.manifestPath,
+      prunedWrappers: [],
+      sharedHistory: [],
+      skipped: [
+        { path: `${homeOf()}/skills/review`, reason: 'a link' },
+        { path: '/state/not-a-runtime/elsewhere', reason: 'a link' },
+      ],
+    });
+    const before = await skippedOf();
+
+    // Act
+    await service.apply((await service.propose(ADD_INSTRUCTIONS)).id, governance);
+    const during = await skippedOf();
+    state.apply = async () => ({
+      accountCount: 2,
+      operationCount: 9,
+      manifestPath: LAYOUT.manifestPath,
+      prunedWrappers: [],
+      sharedHistory: [],
+    });
+    await service.apply((await service.propose({ ...ADD_INSTRUCTIONS, name: 'second' })).id, governance);
+    const after = await skippedOf();
+
+    // Assert — only the path inside a runtime's folder is kept, and only relative to it.
+    should(before).deepEqual([
+      ['claude-default', undefined],
+      ['codex-default', undefined],
+    ]);
+    should(during).deepEqual([
+      ['claude-default', ['skills/review']],
+      ['codex-default', undefined],
+    ]);
+    should(after).deepEqual(before);
+  });
+
+  it('should keep the skipped paths of a commit whose history step failed, and leave them alone when an apply rolled back', async () => {
+    // Arrange
+    const { service, state, applied } = world({
+      ids: async () =>
+        ({ version: 1, runtimes: { 'claude-default': { id: '00000000-0000-4000-8000-0000000000c1' } } }) as never,
+    });
+    const skippedOf = async () =>
+      FleetRuntimeCatalogSchema.parse(await service.runtimes()).runtimes.map(runtime => runtime.skipped);
+    state.apply = async () => {
+      const plan = applied.at(-1)?.plan;
+      if (plan === undefined) throw new Error('no plan was applied');
+      const home = plan.manifest.accounts.find(account => account.wrapper.endsWith('claude-default'))?.home ?? '';
+      throw new FleetApplyFailureError({
+        kind: 'history-failed-after-commit',
+        failedHarness: 'codex',
+        reason: 'the pool is not writable',
+        committed: {
+          accountCount: 2,
+          operationCount: 9,
+          manifestPath: LAYOUT.manifestPath,
+          manifest: plan.manifest,
+          prunedWrappers: [],
+          sharedHistory: [],
+          skipped: [{ path: `${home}/hooks/pre`, reason: 'a link' }],
+        },
+      });
+    };
+
+    // Act
+    await service.apply((await service.propose(ADD_INSTRUCTIONS)).id, governance);
+    const committed = await skippedOf();
+    state.apply = async () => {
+      throw new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: 'write /a', reason: 'disk full' });
+    };
+    await service.apply((await service.propose({ ...ADD_INSTRUCTIONS, name: 'second' })).id, governance);
+    const rolledBack = await skippedOf();
+
+    // Assert — a rolled-back apply changed nothing, so what the last one skipped still stands.
+    should(committed).deepEqual([['hooks/pre'], undefined]);
+    should(rolledBack).deepEqual(committed);
+  });
+
   it('should report a failed apply as the outcome it was, and refuse one the provisioner refused outright', async () => {
     // Arrange
     const failed = world();

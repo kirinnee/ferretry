@@ -247,6 +247,11 @@ const cases: readonly SchemaCase[] = [
     value: { ...runtime, disabled: { reason: 'resting it', source: 'runtime' } },
   },
   {
+    name: 'FleetRuntimeViewSchema with items the last apply skipped',
+    schema: catalog.FleetRuntimeViewSchema,
+    value: { ...runtime, skipped: ['skills/review', 'commands/ship.md'] },
+  },
+  {
     name: 'FleetRuntimeCatalogSchema',
     schema: catalog.FleetRuntimeCatalogSchema,
     value: { format: 'version-2', runtimes: [runtime] },
