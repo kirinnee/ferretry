@@ -164,6 +164,11 @@ interface Matched {
   readonly factor?: PhoneApproval['factor'];
   /** The login domains of the sign-in and of every sign-in its `via` chain reaches: where a number may be read. */
   readonly domains: ReadonlySet<string>;
+  /**
+   * The login domains of the PROVIDER sign-ins the chain reaches (never the matched sign-in's own): the only hosts off
+   * Okta's own where Okta's widget may give a number (an organisation's custom Okta domain, secrev-1244 R1).
+   */
+  readonly providerDomains: ReadonlySet<string>;
 }
 
 interface Held {
@@ -177,6 +182,8 @@ interface Held {
   readonly names: readonly string[];
   /** The page's document now, and whether the document the approval was raised on was a provider's challenge. */
   document?: string;
+  /** The document the approval was raised on: after a ferret act, only its number counts (secrev-1244 R2). */
+  readonly raisedDocument?: string;
   readonly raisedOnChallenge: boolean;
   readonly raisedHost?: string;
   /** A terminal's prompt line digest and program at the raise. */
@@ -218,6 +225,8 @@ export function gatedNumber(
     readonly domains: ReadonlySet<string>;
     readonly scripted: boolean;
     readonly now: number;
+    /** Hosts off Okta's own where its widget may give a number: the chain's provider sign-ins' domains. */
+    readonly providerDomains?: ReadonlySet<string>;
     /** The host the approval was raised on: a read anywhere else, even another identity provider's, has no number. */
     readonly pinnedHost?: string;
   },
@@ -230,7 +239,8 @@ export function gatedNumber(
   if (read.missing === 'changed') return { numberMissing: 'changed' };
   const found = read.number;
   if (found === undefined) return { numberMissing: 'none-found' };
-  if (found.frameOrigin !== read.origin || !numberSourceFits(found.from, host)) return { numberMissing: 'origin' };
+  if (found.frameOrigin !== read.origin || !numberSourceFits(found.from, host, context.providerDomains))
+    return { numberMissing: 'origin' };
   // Only the provider whose challenge view this document IS may give its number (secrev-1244 H1).
   if (read.provider === undefined || found.from !== read.provider) return { numberMissing: 'none-found' };
   const parsed = PhoneApprovalNumberSchema.safeParse({
@@ -302,7 +312,12 @@ export class PhoneApprovalService {
         throw new InputRequestError('not_found', `there is no page named ${raise.target.key} in this session`);
       const host = httpsHost(look.read.origin);
       const matched = this.match(host, listing, raise);
-      const gated = gatedNumber(look.read, { domains: matched.domains, scripted: this.scripted(sessionId), now });
+      const gated = gatedNumber(look.read, {
+        domains: matched.domains,
+        providerDomains: matched.providerDomains,
+        scripted: this.scripted(sessionId),
+        now,
+      });
       held = {
         approval: PhoneApprovalSchema.parse({
           ...base,
@@ -316,6 +331,7 @@ export class PhoneApprovalService {
         since,
         names: [look.pageId],
         document: look.read.navigationId,
+        raisedDocument: look.read.navigationId,
         raisedOnChallenge: look.read.provider !== undefined,
         ...(host === undefined ? {} : { raisedHost: host }),
         pushes: 0,
@@ -494,7 +510,7 @@ export class PhoneApprovalService {
    * via Okta, on the Okta page), that one, named "via" its provider. A hint that reaches nothing here is ignored.
    */
   private match(key: string | undefined, listing: SavedListing, raise: PhoneApprovalRaise): Matched {
-    const none: Matched = { domains: new Set() };
+    const none: Matched = { domains: new Set(), providerDomains: new Set() };
     if (key === undefined) return none;
     const hint = raise.secretHint;
     const viaHere = hint === undefined ? undefined : this.viaChainTo(key, hint, listing);
@@ -507,6 +523,10 @@ export class PhoneApprovalService {
     const chain = viaHere?.chain ?? [signIn];
     const domains = new Set(chain.flatMap(each => (each.place.kind === 'site' ? each.place.domains : [])));
     if (signIn.place.kind === 'terminal') domains.clear();
+    // The provider sign-ins only: every sign-in the chain reached through `via`, never the matched one itself.
+    const providerDomains = new Set(
+      chain.slice(1).flatMap(each => (each.place.kind === 'site' ? each.place.domains : [])),
+    );
     const pushes = account.factors.filter(factor => factor.kind === 'push');
     const factor =
       pushes.find(each => raise.factor !== undefined && each.id === raise.factor) ??
@@ -526,6 +546,7 @@ export class PhoneApprovalService {
             },
           }),
       domains,
+      providerDomains,
     };
   }
 
@@ -622,12 +643,19 @@ export class PhoneApprovalService {
     const now = this.deps.clock.now();
     const changed = held.document !== read.navigationId;
     held.document = read.navigationId;
-    const gated = gatedNumber(read, {
-      domains: held.matched.domains,
-      scripted: this.scripted(sessionId),
-      now,
-      ...(held.raisedHost === undefined ? {} : { pinnedHost: held.raisedHost }),
-    });
+    // Another document than the one the owner's sign-in was raised on, after the ferret acted on its pages: the ferret
+    // may have restarted the challenge until its number matched an attacker's push (secrev-1244 R2). No number.
+    const steered =
+      read.navigationId !== held.raisedDocument && this.deps.observer.tainted(sessionId, 'browser', held.since);
+    const gated: ReturnType<typeof gatedNumber> = steered
+      ? { numberMissing: 'steered' }
+      : gatedNumber(read, {
+          domains: held.matched.domains,
+          providerDomains: held.matched.providerDomains,
+          scripted: this.scripted(sessionId),
+          now,
+          ...(held.raisedHost === undefined ? {} : { pinnedHost: held.raisedHost }),
+        });
     // A number belongs to the document it was read in: a new document clears it, and only a number read in the new
     // one shows again. The same number in the same document keeps the instant it was first read.
     const kept = held.approval.number;

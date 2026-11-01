@@ -115,7 +115,7 @@ describe('which identity provider a host is', () => {
     for (const host of lookAlikes) should(identityProviderOf(host)).be.undefined();
   });
 
-  it("should fit a provider's number only to its own hosts, and an Okta number to any", () => {
+  it("should fit a provider's number only to its own hosts, and Okta's off its own only on a named custom domain", () => {
     should(numberSourceFits('microsoft', 'login.live.com')).be.true();
     should(numberSourceFits('microsoft', 'login.microsoftonline.com.evil.example')).be.false();
     should(numberSourceFits('microsoft', 'accounts.google.com')).be.false();
@@ -124,7 +124,11 @@ describe('which identity provider a host is', () => {
     should(numberSourceFits('duo', 'api-example.duosecurity.com')).be.true();
     should(numberSourceFits('duo', 'evil-duosecurity.com')).be.false();
     should(numberSourceFits('duo', 'duosecurity.com')).be.false();
-    should(numberSourceFits('okta', 'login.company.com')).be.true();
+    should(numberSourceFits('okta', 'company.okta.com')).be.true();
+    // A custom Okta domain fits only when the daemon names it (a provider sign-in's domain, secrev-1244 R1).
+    should(numberSourceFits('okta', 'login.company.com')).be.false();
+    should(numberSourceFits('okta', 'login.company.com', new Set(['login.company.com']))).be.true();
+    should(numberSourceFits('okta', 'wiki.company.com', new Set(['login.company.com']))).be.false();
   });
 });
 

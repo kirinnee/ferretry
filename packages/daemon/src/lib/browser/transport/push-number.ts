@@ -56,10 +56,16 @@ export function identityProviderOf(host: string): PushNumberProvider | undefined
 
 /**
  * Whether a number from `from` can have been read on `host`: Microsoft's only on its two sign-in hosts, Google's only on
- * accounts.google.com, Duo's only on a Duo host. Okta's widget also runs on an organisation's own domain
- * (`login.company.com`), so it fits any host: whether the host is one the daemon trusts is its own gate.
+ * accounts.google.com, Duo's only on a Duo host, Okta's on an Okta host. Okta's widget also runs on an organisation's
+ * own domain (`login.company.com`): such a host fits only when the daemon names it in `oktaCustomHosts`, the domains of
+ * a provider sign-in some saved sign-in goes `via` (secrev-1244 R1). Never just any domain of the matched sign-in: one
+ * that serves pages a ferret can write could carry the widget's markup with a number of its choosing.
  */
-export function numberSourceFits(from: PushNumberProvider, host: string): boolean {
+export function numberSourceFits(
+  from: PushNumberProvider,
+  host: string,
+  oktaCustomHosts: ReadonlySet<string> = new Set(),
+): boolean {
   const name = host.toLowerCase();
   switch (from) {
     case 'microsoft':
@@ -69,7 +75,7 @@ export function numberSourceFits(from: PushNumberProvider, host: string): boolea
     case 'duo':
       return under(name, DUO_DOMAIN);
     case 'okta':
-      return true;
+      return identityProviderOf(name) === 'okta' || oktaCustomHosts.has(name);
   }
 }
 

@@ -145,6 +145,13 @@ describe('PhoneApprovalService raise', () => {
     should(gatedNumber(unrecognised, context)).eql({ numberMissing: 'none-found' });
     should(gatedNumber(anotherHost, { ...context, pinnedHost: 'company.okta.com' })).eql({ numberMissing: 'origin' });
     should(gatedNumber(okta('42'), context)).containDeep({ number: { value: '42', from: 'okta' } });
+    // Okta's widget off Okta's own hosts: only on a provider sign-in's custom domain (secrev-1244 R1).
+    const custom = okta('42', 'doc-1', 'https://login.company.com');
+    const onCustom = { ...context, domains: new Set(['login.company.com']) };
+    should(gatedNumber(custom, onCustom)).eql({ numberMissing: 'origin' });
+    should(gatedNumber(custom, { ...onCustom, providerDomains: new Set(['login.company.com']) })).containDeep({
+      number: { value: '42', from: 'okta' },
+    });
   });
 
   it('should name a sign-in it does not know by its host on the card, and never in the push', async () => {
@@ -318,6 +325,69 @@ describe('PhoneApprovalService settling (invariant 10)', () => {
 
     // Assert
     should(run.service.get(OWNER, SESSION, view.id).state).equal('moved-on');
+  });
+
+  it('should show no number from a new document after the ferret acted on its pages (R2)', async () => {
+    // Arrange — the ferret restarts the challenge (a click, a reload) hoping for the number an attacker's push shows.
+    const run = world();
+    const view = await run.raise();
+    run.actNow('browser');
+
+    // Act
+    run.page.current = { pageId: 'page-1', read: okta('17', 'doc-2') };
+    await run.tick();
+
+    // Assert — the card says why, and the phone hears nothing more.
+    const approval = run.service.get(OWNER, SESSION, view.id);
+    should(approval.state).equal('waiting');
+    should(approval.number).be.undefined();
+    should(approval.numberMissing).equal('steered');
+    should(run.pushes).have.length(1);
+  });
+
+  it('should still read the page it was raised on after the ferret acted elsewhere', async () => {
+    // Arrange
+    const run = world();
+    const view = await run.raise();
+    run.actNow('browser');
+
+    // Act — the same document, its number unchanged.
+    await run.tick();
+
+    // Assert
+    should(run.service.get(OWNER, SESSION, view.id).number?.value).equal('42');
+  });
+
+  it('should read Okta’s widget on a custom domain only when the chain reaches it as a provider (R1)', async () => {
+    // Arrange — the Okta account signs in at its custom domain; ClickUp goes via it; a third site of ClickUp's own.
+    const listing = {
+      accounts: LISTING.accounts,
+      signIns: LISTING.signIns.map(each =>
+        each.id === SI_OKTA
+          ? { ...each, place: { kind: 'site', domains: ['login.company.com'], match: [] } }
+          : each.id === SI_CLICKUP
+            ? { ...each, place: { kind: 'site', domains: ['app.clickup.com', 'wiki.clickup.com'], match: [] } }
+            : each,
+      ),
+    } as SavedListing;
+    const raiseOn = async (origin: string, hint?: string) => {
+      const run = world({ listing });
+      run.page.current = { pageId: 'page-1', read: okta('42', 'doc-1', origin) };
+      const view = await run.raise(hint === undefined ? { secretHint: undefined } : { secretHint: hint });
+      return run.service.get(OWNER, SESSION, view.id);
+    };
+
+    // Act
+    const viaProvider = await raiseOn('https://login.company.com', 'CLICKUP');
+    const directly = await raiseOn('https://login.company.com');
+    const ownSite = await raiseOn('https://wiki.clickup.com', 'CLICKUP');
+
+    // Assert — the provider's custom domain reached through the chain reads; the matched sign-in's own domains do not.
+    should(viaProvider).containDeep({ via: { id: 'OKTA' }, number: { value: '42', from: 'okta' } });
+    should(directly.number).be.undefined();
+    should(directly.numberMissing).equal('origin');
+    should(ownSite.number).be.undefined();
+    should(ownSite.numberMissing).equal('origin');
   });
 
   it('should claim nothing when the provider’s challenge gives way on its own host, which may be its denial (L2)', async () => {

@@ -113,7 +113,8 @@ export type PhoneApprovalNumber = z.infer<typeof PhoneApprovalNumberSchema>;
 /**
  * Why the card shows no number: the page had none Ferretry recognises; a ferret scripted the page this session; the
  * page is not a sign-in or identity-provider origin; the pointed element can be typed into; the page changed while it
- * was read; or it is a terminal, which never shows one.
+ * was read; it is a terminal, which never shows one; or the page is a new document since the ferret asked and the
+ * ferret acted on its pages meanwhile (`steered`), so it may have restarted the challenge to fish for a number.
  */
 export const PhoneApprovalNumberMissingSchema = z.enum([
   'none-found',
@@ -122,6 +123,7 @@ export const PhoneApprovalNumberMissingSchema = z.enum([
   'editable',
   'changed',
   'terminal',
+  'steered',
 ]);
 export type PhoneApprovalNumberMissing = z.infer<typeof PhoneApprovalNumberMissingSchema>;
 
@@ -274,6 +276,7 @@ const NO_NUMBER_WORDS: Readonly<Record<PhoneApprovalNumberMissing, string>> = {
   editable: "The number the ferret pointed at can be typed into, so Ferretry won't read it.",
   changed: 'The page changed while Ferretry read it: it will look again.',
   terminal: 'Check the terminal: Ferretry never reads a number from one.',
+  steered: "The ferret acted on the page after asking, so Ferretry won't read a number from the page it reached.",
 };
 
 /**

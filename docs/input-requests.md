@@ -1089,7 +1089,10 @@ queue). The daemon believes it only when all of these hold:
    `accounts.google.com`, `*.okta.com`, `*.oktapreview.com`, `*.okta-emea.com` or `*.duosecurity.com`. This is
    what keeps an adversary-in-the-middle proxy's page off the card: it shows the real number of the attacker's
    sign-in. A provider's number must also be on that provider's own host, so a Microsoft number is believed only on
-   Microsoft's two hosts. And it must be **the host the approval was raised on**: a page that moves to another host,
+   Microsoft's two hosts. Okta's widget gives a number off Okta's own hosts only on an organisation's **custom Okta
+   domain**: a login domain of a provider sign-in that the matched sign-in reaches through its `via` chain. A domain
+   of the matched sign-in itself never qualifies, since a site the ferret can write pages on could carry the widget's
+   markup (secrev-1244 R1). And it must be **the host the approval was raised on**: a page that moves to another host,
    even another tenant on the same identity provider, shows no number (`numberMissing: 'origin'`).
 2. **Not steered.** No page script ran in this session (`browser.eval`). Otherwise the card says
    `numberMissing: 'scripted'`.
@@ -1107,7 +1110,11 @@ says it couldn't read a number and offers View the page. The raise's `element` f
 stay in the protocol for the wire only: no daemon reads the one or produces the other.
 
 **While it waits**, the daemon looks at the page every second. When the document changes, the number is cleared, and
-only a number read in the new document shows. A new number pushes again, under the same tag, at most four pushes per
+only a number read in the new document shows. **After the ferret acts on its pages** (any browser tool that changes a
+page: navigate, click, type, press, a script), a new document's number is never shown: the card says
+`numberMissing: 'steered'`. Only a number from the page the owner's sign-in reached on its own counts, so a ferret
+cannot restart challenges until the card matches an attacker's push (secrev-1244 R2). The page the approval was raised
+on is still read. A new number pushes again, under the same tag, at most four pushes per
 approval. A ferret may have two approvals waiting and raise ten an hour, and one page or terminal holds one at a time.
 
 **A terminal never shows a number.** A ferret can print any text into its own pane, so a terminal card always
