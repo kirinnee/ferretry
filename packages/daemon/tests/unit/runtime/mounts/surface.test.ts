@@ -967,7 +967,7 @@ describe('the mounted daemon surface', () => {
       13 + // standing sign-in rules: the ferrets' suggestions (read and dismiss, memory only), the list, eligibility, a stage, its read, confirm-in-app, a device taking a machine stage, the kept-proof commit and drop, narrow, revoke one and revoke an account's (docs/secrets.md)
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
       7 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
-      12 + // the catalogs this machine publishes: list, the items across them, make, change, delete, preview, add, publish, withdraw, one-tap Add and its Undo, and export (docs/catalogs.md)
+      17 + // the catalogs this machine publishes: list, the items across them, make, change, delete, preview, add, publish, withdraw, one-tap Add and its Undo, export, and the item routes: one item, one version, what changed, and the preview and publish of an update (docs/catalogs.md)
       8 + // the people a catalog is shared with: mint, list and end a share; list, rename, revoke a member, remove a browser or a catalog (docs/catalogs.md)
       3; // the shared draft: the owner's unsent composer, read, edited and streamed live to any of their own devices (&F331)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
@@ -1160,6 +1160,11 @@ describe('the mounted daemon surface', () => {
       // The catalogs this machine publishes (docs/catalogs.md): every one is `sharing`/`use`.
       'GET /v1/catalogs',
       'GET /v1/catalog-items',
+      'GET /v1/catalog-items/:itemId',
+      'GET /v1/catalog-items/:itemId/versions/:version',
+      'GET /v1/catalog-items/:itemId/changes',
+      'POST /v1/catalog-items/:itemId/versions/preview',
+      'POST /v1/catalog-items/:itemId/versions',
       'POST /v1/catalogs',
       'PATCH /v1/catalogs/:id',
       'DELETE /v1/catalogs/:id',
