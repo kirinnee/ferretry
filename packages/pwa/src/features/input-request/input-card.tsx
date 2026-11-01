@@ -925,7 +925,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
               Type a different one
             </button>
           </div>
-          {reasonLine === undefined ? null : (
+          {reasonLine === undefined || primary.codes !== undefined ? null : (
             <p className="m-0 text-meta text-muted" data-input-why={primary.why}>
               {reasonLine}
             </p>

@@ -154,7 +154,7 @@ if (view in APPROVALS) {
   createRoot(root).render(
     shell(
       <div className="kt-card flex flex-col gap-3 rounded-control border border-border bg-surface p-4" data-harness-surface="">
-        <PhoneApprovalCard approval={APPROVALS[view]} onRefuse={async () => undefined} onViewPage={() => undefined} />
+        <PhoneApprovalCard approval={APPROVALS[view]} now={Date.parse('2026-10-31T14:02:30.000Z')} onRefuse={async () => undefined} onViewPage={() => undefined} />
       </div>,
     ),
   );

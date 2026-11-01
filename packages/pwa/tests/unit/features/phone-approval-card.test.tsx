@@ -137,6 +137,29 @@ describe('the approve-on-phone card', () => {
     expect(card.q('[data-phone-approval-no-number]')?.textContent).toContain("Ferretry couldn't read a number");
   });
 
+  it('keeps a fresh number before expiry, and across a re-read of the same approval', async () => {
+    const live = { expiresAt: '2026-10-31T14:04:00.000Z' };
+    const before = Date.parse('2026-10-31T14:03:59.000Z');
+    const view = await mount(
+      <PhoneApprovalCard approval={approval(live)} now={before} onRefuse={async () => undefined} />,
+    );
+    mounted.push(view);
+    const number = () => view.container.querySelector('[data-phone-approval-number]')?.textContent;
+    expect(number()).toBe('42');
+
+    await view.render(
+      <PhoneApprovalCard
+        approval={approval({
+          ...live,
+          number: { value: '42', from: 'okta', direction: 'tap-on-phone', readAt: '2026-10-31T14:03:00.000Z' },
+        })}
+        now={before}
+        onRefuse={async () => undefined}
+      />,
+    );
+    expect(number()).toBe('42');
+  });
+
   it('drops the number once the approval has expired, even before the daemon settles it', async () => {
     const view = await mount(
       <PhoneApprovalCard
