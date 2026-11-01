@@ -3041,7 +3041,6 @@ export function AppShell() {
                         daemon={connection.daemonId}
                         onOpenPalette={openPalette}
                         onOpenSidebar={openSessionsDrawer}
-                        sessionCount={sessions.length}
                         updateReady={updateReady}
                         onApplyUpdate={applyUpdate}
                         active={appBarDestinationForRoute(pageRoute)}

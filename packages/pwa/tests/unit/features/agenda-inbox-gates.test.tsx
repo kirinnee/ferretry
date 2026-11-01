@@ -83,6 +83,8 @@ const buttonNamed = (mounted: Mounted, name: string): HTMLButtonElement =>
   );
 const tool = (mounted: Mounted, name: string): HTMLButtonElement =>
   must(mounted.container.querySelector<HTMLButtonElement>(`.fy-attn-deck__top [data-inbox-tool="${name}"]`), name);
+const openInfo = (mounted: Mounted) =>
+  press(must(mounted.container.querySelector('.fy-attn-deck__top [data-agenda-info-toggle]'), 'the (i)'));
 const flush = async (): Promise<void> => {
   await interact(async () => {
     await Promise.resolve();
@@ -144,7 +146,10 @@ describe('a gate item in the Inbox', () => {
   it('shows "Not needed" once — the button — and no composer under the card', async () => {
     const mounted = await mount(page(fakeInbox(), [gate], { initialOpen: gate.key, renderComposer: composer }));
     const top = must(mounted.container.querySelector('.fy-attn-deck__top'), 'the open card');
-    expect([...top.querySelectorAll('button')].filter(b => /not needed/i.test(b.textContent ?? '')).length).toBe(1);
+    const notNeeded = () => [...top.querySelectorAll('button')].filter(b => /not needed/i.test(b.textContent ?? ''));
+    expect(notNeeded().length).toBe(0);
+    await openInfo(mounted);
+    expect(notNeeded().length).toBe(1);
     expect(mounted.container.querySelector('[data-fake-composer]')).toBeNull();
     expect(mounted.container.querySelector('[data-inbox-gate-why]')).toBeNull();
     await mounted.unmount();
@@ -259,6 +264,7 @@ describe('the card’s plain buttons for the compass moves', () => {
   it('Skip goes to the next card and sends nothing', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [question, gate], { initialOpen: question.key }));
+    await openInfo(mounted);
     await press(tool(mounted, 'skip'));
     expect(pending(fake)).toEqual([]);
     expect(
@@ -270,6 +276,7 @@ describe('the card’s plain buttons for the compass moves', () => {
   it('Not needed dismisses into the undo window, and Undo really brings the card back', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [question], { initialOpen: question.key }));
+    await openInfo(mounted);
     await press(tool(mounted, 'not-needed'));
     expect(fake.deferred.getSnapshot().pending.map(entry => entry.action.kind)).toEqual(['dismiss']);
     await press(must(mounted.container.querySelector('[data-agenda-undo-button]'), 'Undo'));
@@ -284,6 +291,7 @@ describe('the card’s plain buttons for the compass moves', () => {
   it('Not needed is sent once the undo window closes', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [question], { initialOpen: question.key }));
+    await openInfo(mounted);
     await press(tool(mounted, 'not-needed'));
     await interact(() => fake.clock.advance(6_000));
     await flush();
@@ -306,6 +314,7 @@ describe('the card’s plain buttons for the compass moves', () => {
   it('draws no head clock where the machine cannot snooze, but keeps Skip and Not needed', async () => {
     const mounted = await mount(page(fakeInbox(), [question], { initialOpen: question.key }, () => false));
     expect(mounted.container.querySelector('[data-agenda-snooze]')).toBeNull();
+    await openInfo(mounted);
     expect(tool(mounted, 'skip')).toBeDefined();
     expect(tool(mounted, 'not-needed')).toBeDefined();
     await mounted.unmount();

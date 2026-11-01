@@ -107,7 +107,6 @@ const phone = (
       daemon={connection.daemonId}
       onOpenPalette={noop}
       onOpenSidebar={noop}
-      sessionCount={4}
       active="projects"
       tabBarShown
       themeToggle={<ThemeToggle touch />}

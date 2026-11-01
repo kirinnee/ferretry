@@ -484,8 +484,12 @@ describe('AgendaInboxPage on a phone', () => {
     await interact(() => quick(mounted).click());
     expect(mounted.container.querySelector('[data-agenda-inbox]')?.getAttribute('data-agenda-inbox')).toBe('card');
     expect(top(mounted)?.getAttribute('data-agenda-view')).toBe('S1');
+    expect(mounted.container.querySelector('[data-agenda-back]')).toBeNull();
     await interact(() =>
-      must(mounted.container.querySelector<HTMLButtonElement>('[data-agenda-back]'), 'Back').click(),
+      must(
+        mounted.container.querySelector<HTMLButtonElement>('.fy-attn-deck__top [data-agenda-close]'),
+        'Close',
+      ).click(),
     );
     expect(mounted.container.querySelector('[data-agenda-inbox]')?.getAttribute('data-agenda-inbox')).toBe('list');
     await mounted.unmount();

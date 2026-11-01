@@ -1043,7 +1043,7 @@
 .fy-inbox-open[data-inbox-gate] .fy-item-view__body {
   flex: 0 1 auto;
 }
-/* A card to test in the quick-answer run: where it is in the run, then the same row as the list, scrolling on its own. */
+/* A card to test in the quick-answer run: the same row as the list (its head carries the place in the run), scrolling on its own. */
 .fy-inbox-step {
   display: flex;
   box-sizing: border-box;
@@ -1052,20 +1052,6 @@
   flex-direction: column;
   gap: var(--gap-sm);
   overflow-y: auto;
-}
-.fy-inbox-step__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--gap-sm);
-}
-.fy-inbox-step__rank {
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
-.fy-inbox-step__pager {
-  display: flex;
-  align-items: center;
 }
 /* A peek is only an edge (see the deck above): its view is drawn, but nothing of it shows. */
 .fy-attn-deck__peek .fy-inbox-open {
@@ -1273,11 +1259,6 @@
 .fy-totest__reveal[data-side='left'] {
   inset: 0 0 0 auto;
 }
-.fy-totest__reveal[data-side='down'] {
-  inset: 0 0 auto 0;
-  justify-content: center;
-  padding: var(--gap-sm) var(--gap-md);
-}
 .fy-totest[data-swipe-direction='left'] .fy-totest__reveal[data-side='left'] {
   display: flex;
   color: var(--err);
@@ -1286,17 +1267,13 @@
   display: flex;
   color: var(--ok);
 }
-.fy-totest[data-swipe-direction='down'] .fy-totest__reveal[data-side='down'] {
-  display: flex;
-  color: var(--muted);
-}
 .fy-totest__surface {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: var(--gap-sm);
   background: var(--surface);
-  padding: var(--gap-md);
+  padding: var(--gap-sm) var(--gap-md) var(--gap-md);
   user-select: text;
   -webkit-user-select: text;
 }
@@ -1307,10 +1284,16 @@
 .fy-totest__surface[data-dragging] {
   transition: none;
 }
-/* The head does not scroll, so a drag down from it is Skip rather than the page moving. */
-.fy-totest__top,
-.fy-totest__meta {
+/* The head does not scroll, so a drag down from it is the compass rather than the page moving. */
+.fy-totest__top {
   touch-action: none;
+}
+/* The quiet facts and the Skip button, behind the head's ⓘ. */
+.fy-totest__info {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
 }
 /* The head is `CardHead`: the title (one line, a marquee when too long) and the card's controls share the row. */
 .fy-totest__top {
@@ -1499,14 +1482,13 @@
   color: var(--fg);
   font-weight: 600;
 }
-/* The plain buttons for every move the compass makes, under the card: nothing depends on a gesture. */
+/* The plain buttons for the compass's quiet moves, kept under the head's ⓘ so the card body keeps its room. */
 .fy-inbox-tools {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--gap-xs) var(--gap-sm);
-  border-top: var(--stroke) solid var(--divider-color, var(--border));
-  padding: var(--gap-xs) var(--gap-md);
+  padding: var(--gap-xs) 0 var(--gap-sm);
 }
 /* The "Not good" words take the answer row's place and width. */
 .fy-inbox-gate-why {
