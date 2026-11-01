@@ -28,14 +28,18 @@ import {
   type InputSavedOffer,
   type InputShot,
   lockWords,
+  pickOneWords,
 } from '@ferretry/protocol';
 import { Eye, EyeOff, Shield, ShieldAlert, ShieldCheck, ShieldQuestion, Timer } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { cancelInput, deliverInput, type InputClient, readInputShot } from '../../lib/input-api.ts';
+import { cancelInput, deliverInput, type InputClient, putAccountDefault, readInputShot } from '../../lib/input-api.ts';
 import {
+  type AlwaysUse,
+  alwaysUseFor,
   cardOffersSave,
   cardSaveBlock,
   chainWords,
+  choiceReasonWords,
   defaultSubmit,
   expiryWords,
   fieldAttributes,
@@ -49,6 +53,7 @@ import {
   offersPressEnter,
   offerUsername,
   pastedWords,
+  pickOneOffers,
   plainFlagWords,
   revealable,
   saveDraftProblem,
@@ -117,6 +122,7 @@ export function InputCard({
   const [settled, setSettled] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const [always, setAlways] = useState<AlwaysUse | undefined>(undefined);
   const facts = observedWords(request);
   const blocked = sendBlock(request, now);
   const Risk = request.risk === undefined ? null : RISK_ICON[request.risk.level];
@@ -285,17 +291,21 @@ export function InputCard({
             client={client}
             fields={fields}
             onRefresh={onRefresh}
-            onSettled={text => {
+            onSettled={(text, handTapped) => {
               setSettled(text);
+              setAlways(handTapped === undefined ? undefined : alwaysUseFor(request.saved, handTapped));
               onDone();
             }}
             request={request}
           />
         )
       ) : (
-        <p className="m-0 text-ui text-ok" data-input-settled="" role="status">
-          {settled}
-        </p>
+        <>
+          <p className="m-0 text-ui text-ok" data-input-settled="" role="status">
+            {settled}
+          </p>
+          {always === undefined ? null : <AlwaysUseLine always={always} client={client} />}
+        </>
       )}
 
       {problem === null ? null : (
@@ -408,7 +418,8 @@ interface FormProps {
   readonly busy: boolean;
   /** The card's Cancel, drawn in the action row (left of Send). */
   readonly cancel: ReactNode;
-  readonly onSettled: (text: string) => void;
+  /** `handTapped`: the account the owner picked by hand (not the daemon's one-tap), which a default may be made of. */
+  readonly onSettled: (text: string, handTapped?: InputSavedOffer) => void;
   readonly onRefresh: (() => void) | undefined;
 }
 
@@ -612,13 +623,67 @@ const SENSITIVITY_WORDS = {
   plain: 'not secret',
 } as const;
 
+/**
+ * The quiet line after a hand-tap: "Always use for <project>". It is the OWNER's tap on this button that writes the
+ * default (`PUT /v1/accounts/defaults`); the owner's own act, in effect at once (a paired device confirms with its passkey). A failure is said
+ * in words and never changes what was already sent.
+ */
+function AlwaysUseLine({ always, client }: { readonly always: AlwaysUse; readonly client: InputClient }) {
+  const [state, setState] = useState<'idle' | 'writing' | 'saved'>('idle');
+  const [failure, setFailure] = useState<string | null>(null);
+  const write = async (): Promise<void> => {
+    setState('writing');
+    setFailure(null);
+    try {
+      await putAccountDefault(client, always.body);
+      setState('saved');
+    } catch (cause) {
+      setState('idle');
+      setFailure(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+  return (
+    <div className="flex min-w-0 flex-col gap-1" data-input-always="">
+      {state === 'saved' ? (
+        <p className="m-0 text-meta text-ok" data-input-always-saved="" role="status">
+          {always.label} is now the default for {always.project} at {always.key}.
+        </p>
+      ) : (
+        <>
+          <button
+            className="kt-btn min-h-[44px] self-start"
+            data-input-always-button=""
+            disabled={state === 'writing'}
+            onClick={() => void write()}
+            type="button"
+          >
+            Always use for {always.project}
+          </button>
+          <p className="m-0 text-meta text-muted">
+            Makes {always.label} the default for {always.key} in {always.project}.
+          </p>
+        </>
+      )}
+      {failure === null ? null : (
+        <p className="m-0 text-meta text-err" data-input-always-failure="" role="alert">
+          {failure}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onRefresh }: FormProps) {
   const nodes = useRef<Nodes>(new Map());
-  const { primary, others } = splitOffers(request.saved);
+  const { primary, others: rest } = splitOffers(request.saved);
+  const pickOne = pickOneOffers(request.saved);
+  const others = rest.filter(offer => !pickOne.includes(offer));
+  const reasonLine = choiceReasonWords(request.saved, primary);
   const signInLine = signInWords(request.saved);
+  const offering = primary !== undefined || pickOne.length > 0;
   const [values, setValues] = useState<Readonly<Record<string, string>>>({});
   const [revealed, setRevealed] = useState<Readonly<Record<string, boolean>>>({});
-  const [typing, setTyping] = useState(primary === undefined);
+  const [typing, setTyping] = useState(!offering);
   const [submit, setSubmit] = useState(() => defaultSubmit(request));
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -660,7 +725,10 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
     return pending.current;
   };
 
-  const send = async (build: (deliveryId: string) => ReturnType<typeof savedBody>): Promise<void> => {
+  const send = async (
+    build: (deliveryId: string) => ReturnType<typeof savedBody>,
+    handTapped?: InputSavedOffer,
+  ): Promise<void> => {
     if (off) return;
     const built = build(mintId());
     if (!built.ok) {
@@ -676,7 +744,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
       pending.current = null;
       const label = built.body.save?.label ?? '';
       const kept = savedOutcomeWords(result, label);
-      onSettled(`Sent to ${targetRef(request)}.${kept === undefined ? '' : ` ${kept}`}`);
+      onSettled(`Sent to ${targetRef(request)}.${kept === undefined ? '' : ` ${kept}`}`, handTapped);
     } catch (cause) {
       const words = inputFailure(cause, request.target.kind);
       if (words.definitive) pending.current = null;
@@ -688,7 +756,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
   };
 
   const tapOffer = (offer: InputSavedOffer): void =>
-    void send(deliveryId => savedBody(request, offer.id, submit, deliveryId));
+    void send(deliveryId => savedBody(request, offer.id, submit, deliveryId), offer === primary ? undefined : offer);
 
   const sendTyped = (): void =>
     void send(deliveryId =>
@@ -701,7 +769,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
     const username = offerUsername(offer);
     return (
       <button
-        className="kt-btn min-h-[44px] min-w-0 flex-col items-start justify-center text-left"
+        className="kt-btn !h-auto min-h-[44px] min-w-0 flex-col items-start justify-center py-2 text-left"
         data-input-offer={offer.id}
         data-input-offer-matched={offer.matched ? '' : undefined}
         data-variant={primaryTap ? 'primary' : undefined}
@@ -752,13 +820,37 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
         </div>
       ) : null}
 
-      {primary === undefined || typing ? null : <FieldSummary fields={fields} request={request} />}
+      {!offering || typing ? null : <FieldSummary fields={fields} request={request} />}
 
       {primary === undefined || typing ? null : (
-        <div className="flex flex-wrap items-stretch gap-2">
-          {offerButton(primary, true)}
+        <div className="flex min-w-0 flex-col gap-1">
+          <div className="flex flex-wrap items-stretch gap-2">
+            {offerButton(primary, true)}
+            <button
+              className="kt-btn min-h-[44px]"
+              data-input-type-instead=""
+              onClick={() => setTyping(true)}
+              type="button"
+            >
+              Type a different one
+            </button>
+          </div>
+          {reasonLine === undefined ? null : (
+            <p className="m-0 text-meta text-muted" data-input-why={primary.why}>
+              {reasonLine}
+            </p>
+          )}
+        </div>
+      )}
+
+      {pickOne.length === 0 || typing ? null : (
+        <div className="flex min-w-0 flex-col gap-2" data-input-pick-one="">
+          <p className="m-0 text-cell font-medium text-fg" data-input-pick-one-line="">
+            {pickOneWords(pickOne.length)}
+          </p>
+          <div className="flex flex-col items-stretch gap-2">{pickOne.map(offer => offerButton(offer, false))}</div>
           <button
-            className="kt-btn min-h-[44px]"
+            className="kt-btn min-h-[44px] self-start"
             data-input-type-instead=""
             onClick={() => setTyping(true)}
             type="button"

@@ -8,6 +8,7 @@ import {
   type InputCodeKey,
   type InputSaved,
   type InputSavedOffer,
+  InputSavedSchema,
   type InputSensitivity,
   type InputSignIn,
   type InputTargetFacts,
@@ -15,10 +16,10 @@ import {
   LoginMatchSchema,
   matchedSignIns,
   namesSignIn,
-  savedRolesOf,
   type SignInChoiceContext,
-  signInMatches,
   type SignInSummary,
+  savedRolesOf,
+  signInMatches,
   strongestSensitivity,
   suggestedLoginId,
   suggestedLoginLabel,
@@ -318,7 +319,7 @@ export function codeTargetProblem(
 export function codeCardKeys(
   matchKey: string | undefined,
   listing: SavedListing,
-  context: { readonly hint?: string; readonly factor?: TwoFactorId },
+  context: Omit<SignInChoiceContext, 'hint'> & { readonly hint?: string; readonly factor?: TwoFactorId },
 ): { readonly account: AccountSummary; readonly keys: readonly TwoFactorKeySummary[] } | undefined {
   const matched = signInsAt(matchKey, listing);
   const accountOf = (id: AccountId): AccountSummary | undefined => listing.accounts.find(each => each.id === id);
@@ -330,7 +331,8 @@ export function codeCardKeys(
       if (account !== undefined && key !== undefined) return { account, keys: [key] };
     }
   }
-  const choice = chosenSignIn(matchKey, matched, context.hint === undefined ? {} : { hint: context.hint });
+  const { factor: _factor, ...order } = context;
+  const choice = chosenSignIn(matchKey, matched, order);
   const signIn = choice === undefined ? undefined : matched.find(each => each.id === choice.signIn);
   const account = signIn === undefined ? undefined : accountOf(signIn.account);
   return account === undefined ? undefined : { account, keys: account.factors };
@@ -353,8 +355,17 @@ export function savedFor(
     ...(saves === undefined ? {} : { saves }),
     offers,
     ...(signIn === undefined ? {} : { signIn }),
+    ...projectOf(context),
   };
 }
+
+/** The project the session works on, for the card's "Always use for <project>": the daemon's reading, never the ferret's. */
+const projectOf = (context: SavedChoiceContext): Pick<InputSaved, 'project'> => {
+  if (context.project === undefined) return {};
+  // A name that is not one short line would make the whole card unreadable; the card then just has no such link.
+  const shown = InputSavedSchema.shape.project.safeParse({ id: context.project.id, name: context.project.name });
+  return shown.success && shown.data !== undefined ? { project: shown.data } : {};
+};
 
 /**
  * What a card of one or more fields may offer. One field is {@link savedFor}. Several are filled from ONE account, so
@@ -382,5 +393,6 @@ export function savedForFields(
     ...(kept === undefined ? {} : { saves: [...kept.values()].includes('password') ? 'password' : 'username' }),
     offers,
     ...(signIn === undefined ? {} : { signIn }),
+    ...projectOf(context),
   };
 }

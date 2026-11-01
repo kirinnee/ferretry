@@ -110,6 +110,13 @@ export const offer = (overrides: Partial<InputSavedOffer> = {}): InputSavedOffer
   ...overrides,
 });
 
+/** A sign-in id, as a daemon that keeps accounts and sign-ins sends it. */
+const SIGN_IN = 'si_0123456789abcdef';
+
+/** The offer the DAEMON marked as the one-tap choice (`primary`), with why: only an offer like this is a one-tap button. */
+export const primaryOffer = (overrides: Partial<InputSavedOffer> = {}): InputSavedOffer =>
+  offer({ signIn: SIGN_IN, primary: true, why: 'only', ...overrides });
+
 export const saved = (overrides: Partial<InputSaved> = {}): InputSaved => ({
   match: 'sudo@kirin-box',
   suggest: { id: 'SUDO_KIRIN_BOX', label: 'sudo on kirin-box' },

@@ -1182,6 +1182,7 @@ import {
   type SessionSendSubsystem,
   SessionSignalError,
   SessionSignalService,
+  SessionSignInContext,
   type SessionSignalSubsystem,
   SessionStatusTally,
   SessionStopPending,
@@ -1193,6 +1194,7 @@ import {
   type SessionTranscriptTail,
   SharedFleetBacklog,
   SignalRefused,
+  type SignInChoicePort,
   type SkillRuntimeHome,
   SkillsInventoryService,
   type SocketRoute,
@@ -6193,6 +6195,8 @@ function createAgentToolsSubsystem(input: {
   readonly copyPages: AgentCopyPagesPort;
   /** The account directory (never the vault): `account.hint` reads each sign-in's non-secret projection from it. */
   readonly accounts: Pick<AccountDirectory, 'list'>;
+  /** The calling session's project, folder and the owner's defaults, which order `account.hint`'s "default". */
+  readonly signInChoice: SignInChoicePort;
   /** A ferret's recipe proposals, and where its acts are told so a steered sign-in fact is not kept. */
   readonly recipes: Pick<LoginRecipeService, 'propose' | 'scrubbedAccounts'>;
   readonly loginActs: Pick<LoginObserver, 'acted'>;
@@ -6234,6 +6238,7 @@ function createAgentToolsSubsystem(input: {
       plans: input.plans,
       copyPages: input.copyPages,
       accounts: input.accounts,
+      signInChoice: input.signInChoice,
       recipes: input.recipes,
       loginActs: input.loginActs,
       redactor: input.redactor,
@@ -6275,6 +6280,8 @@ function createInputRequestService(input: {
   readonly redact: (text: string) => Promise<string>;
   /** Saved logins: what the card offers, what "Use" types and where "Save as" keeps a value. */
   readonly logins: InputLoginAdapter;
+  /** The session's project, folder and the owner's defaults, which order the saved logins a card offers. */
+  readonly choice: SignInChoicePort;
   /** The agent browser's pages, for a request on a page: looked at, pictured and typed into in each page's own queue. */
   readonly pages: PageInputHost;
   /** Secure copies a paste types from, and the owner's rules that approve pastes in advance. */
@@ -6389,6 +6396,7 @@ function createInputRequestService(input: {
     quarantine: input.quarantine,
     redact: input.redact,
     logins: input.logins,
+    choice: input.choice,
     sealed: input.sealed,
     rules: input.rules,
     hostName: hostname(),
@@ -7493,6 +7501,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     listing: async () => await accountDirectory.list(),
     projects: async () => await new FileProjectCatalog(join(paths.state, 'projects.json')).projects(),
   });
+  // WHO IS ASKING, for the order of a sign-in card and `account_hint`. It needs the session store and the board's
+  // project reader, which are built further down; until they are, only the owner's site lines order a choice.
+  const signInChoiceLate: { current?: SignInChoicePort } = {};
+  const signInChoice: SignInChoicePort = {
+    of: async sessionId =>
+      (await signInChoiceLate.current?.of(sessionId)) ?? { defaults: await accountDefaults.current() },
+  };
   accountDirectory.followDefaultsWith(async changes => await accountDefaults.repoint(changes));
   configFiles.warnWith(async snapshot => await accountDefaults.warnings(await accountDirectory.list(), snapshot));
   // Copying secrets to another machine signs and checks offers with THIS daemon's identity — the key its
@@ -7533,6 +7548,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     // Only the look-alike answer (handles), as a closure: the route table holds nothing that opens a value.
     lookAlike: narrowVault.lookAlike,
     accountDefaults,
+    signInChoice,
     // A staged 2FA seed waits here, sealed, in memory only, for the passkey bound to it (docs/secrets.md, "2FA keys").
     seeds: twoFactorSeeds,
     // TWO places name secrets now: the operator's own recipes, and the fleet accounts a profile
@@ -10466,6 +10482,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ids: { planId: () => crypto.randomUUID().replaceAll('-', '') },
       });
       setInterval(() => copyPlans.sweep(), INPUT_REQUEST_SWEEP_MS).unref();
+      signInChoiceLate.current = new SessionSignInContext({
+        defaults: async () => await accountDefaults.current(),
+        projectOf: async sessionId => await laneSets.projectOf(sessionId),
+        projects: async () => await catalogs.projects(),
+        sessions: new StorageSessionFacts(storage),
+        realpath: async path => await realpath(path).catch(() => undefined),
+        home: userHome,
+      });
       // An agent stuck at a password prompt asks the owner through an agenda card (docs/input-requests.md). The value
       // lives only in this process's memory and in the one tmux write; the journal and the audit log carry names and flags.
       const {
@@ -10485,6 +10509,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // One of the two holders of the LoginVault (docs/secrets.md; the other is the redactor): the input bridge
         // types a saved login into the target the owner tapped "Use" for, and answers only what happened.
         logins: new InputLoginAdapter(loginDirectory, loginVault),
+        choice: signInChoice,
         // The browser is built further down; a request on a page reaches it through this hand-off once it is.
         pages: {
           inputOnPage: async (sessionId, key, work) => {
@@ -12207,6 +12232,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           plans: { propose: async (sessionId, items, expires) => await copyPlans.propose(sessionId, items, expires) },
           copyPages: copyPageRecords,
           accounts: accountDirectory,
+          signInChoice,
           recipes: loginRecipes,
           loginActs: loginObserver,
           files: new AgentFiles({

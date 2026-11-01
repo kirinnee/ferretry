@@ -1,4 +1,5 @@
 import {
+  type AccountList,
   AGENT_TOOL_DEFAULT_READ_LINES,
   AGENT_TOOL_DEFAULT_WAIT_MS,
   type AgendaId,
@@ -7,6 +8,8 @@ import {
   type AgentToolResult,
   type AuditDetail,
   type AuditOutcome,
+  accountHintSummary,
+  accountHintsFor,
   BROWSER_WAIT_DEFAULT_MS,
   BROWSER_WAIT_SLICE_MS,
   type BrowserActionResult,
@@ -24,13 +27,11 @@ import {
   copyHandle,
   INPUT_SINGLE_FIELD_ID,
   type InputAgentView,
+  type LoginRecipeProposed,
+  loginHintSite,
   type PhoneApprovalAgentView,
   PhoneApprovalRaiseSchema,
-  type AccountList,
-  accountHintsFor,
-  accountHintSummary,
-  loginHintSite,
-  type LoginRecipeProposed,
+  type SignInChoiceContext,
   type SurfaceController,
   type SurfaceControlRequest,
   type SurfaceControlView,
@@ -162,6 +163,8 @@ export interface AgentToolPorts {
    * value. Absent: the tool says none are kept.
    */
   readonly accounts?: { list(): Promise<Pick<AccountList, 'accounts' | 'signIns'>> };
+  /** The calling session's project, folder and the owner's defaults, which order `account.hint`'s "default". */
+  readonly signInChoice?: { of(sessionId: string): Promise<Omit<SignInChoiceContext, 'hint'>> };
   /**
    * A ferret's recipe proposals (`account.propose`): filed on the login, checked for values, shown to the owner.
    * Absent: the tool says recipes are not kept here.
@@ -1584,8 +1587,10 @@ export class AgentToolService {
             ),
           }
         : await recipes.scrubbedAccounts(listing);
-    // Asked with no ferret hint: a hint's "default" is only ever the daemon's own choice among the matched sign-ins.
-    return { summary: accountHintSummary(site, accountHintsFor(site, masked)) };
+    // Asked with no ferret hint: a hint's "default" is only ever the daemon's own choice among the matched sign-ins,
+    // ordered by the CALLING session's project and folder (never one the ferret names) and the owner's defaults.
+    const order = await this.ports.signInChoice?.of(caller.sessionId).catch(() => undefined);
+    return { summary: accountHintSummary(site, accountHintsFor(site, masked, order)) };
   }
 
   /**

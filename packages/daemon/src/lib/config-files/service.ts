@@ -45,8 +45,8 @@ import {
   CONFIG_FILE_STARTERS,
   type ConfigEvaluation,
   type ConfigFileText,
-  checkConfigFile,
   type Credential,
+  checkConfigFile,
   configLoosening,
   evaluateConfigFiles,
   loginLoosening,
@@ -135,6 +135,9 @@ export class ConfigFileConflictError extends Error {
 }
 
 /** One load: the evaluation, and the texts it was made from. */
+/** What {@link ConfigFilesService.amendOwn} writes: a text (with the version in effect, when a held edit differs) or an acceptance. */
+export type OwnAmendment = { readonly text: string; readonly inEffect?: string } | { readonly accept: string };
+
 export interface ConfigSnapshot {
   readonly evaluation: ConfigEvaluation;
   /** Every file found, by path, with its etag. */
@@ -424,30 +427,40 @@ export class ConfigFilesService {
    * mentioned it, or put into effect by one that never confirmed it.
    */
   async writeOwn(path: string, text: string, inEffect: string = text): Promise<void> {
-    await this.#serial(async () => {
-      if (inEffect === text) this.acknowledge(path, text);
-      else {
-        const accepted = { ...(await this.deps.accepted.read()) };
-        accepted[path] = { etag: this.deps.digest(inEffect), text: inEffect };
-        await this.deps.accepted.write(accepted);
-      }
-      await this.deps.directory.write(path, text);
-      await this.#load();
-    });
+    await this.#serial(async () => await this.#writeOwn(path, text, inEffect));
   }
 
   /**
-   * The owner's own act changed what is in effect for a file and nothing on disk: record `inEffect` as accepted and
-   * leave the file alone. For a file that is absent (its deletion held) or does not check (the owner is still fixing
-   * it), where an owner act must still take effect but there is no text of it to write.
+   * An owner act that READS the file and WRITES it back, in ONE queued step: `plan` sees the snapshot as it stands
+   * when this step runs (loaded fresh), and what it answers is written before anything queued after it — so an owner
+   * confirming or discarding a held edit meanwhile can neither be overwritten by a change planned from the file as it
+   * was, nor overwrite one. `plan` answering `undefined` writes nothing; a throw leaves the file as it was.
    */
-  async acceptOwn(path: string, inEffect: string): Promise<void> {
+  async amendOwn(path: string, plan: (snapshot: ConfigSnapshot) => OwnAmendment | undefined): Promise<void> {
     await this.#serial(async () => {
+      const amendment = plan(await this.#load());
+      if (amendment === undefined) return;
+      if ('accept' in amendment) await this.#acceptOwn(path, amendment.accept);
+      else await this.#writeOwn(path, amendment.text, amendment.inEffect ?? amendment.text);
+    });
+  }
+
+  async #writeOwn(path: string, text: string, inEffect: string): Promise<void> {
+    if (inEffect === text) this.acknowledge(path, text);
+    else {
       const accepted = { ...(await this.deps.accepted.read()) };
       accepted[path] = { etag: this.deps.digest(inEffect), text: inEffect };
       await this.deps.accepted.write(accepted);
-      await this.#load();
-    });
+    }
+    await this.deps.directory.write(path, text);
+    await this.#load();
+  }
+
+  async #acceptOwn(path: string, inEffect: string): Promise<void> {
+    const accepted = { ...(await this.deps.accepted.read()) };
+    accepted[path] = { etag: this.deps.digest(inEffect), text: inEffect };
+    await this.deps.accepted.write(accepted);
+    await this.#load();
   }
 
   /**

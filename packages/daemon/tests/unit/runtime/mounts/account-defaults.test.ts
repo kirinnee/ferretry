@@ -10,7 +10,7 @@
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { AcceptedConfigFiles, ConfigFileText } from '@ferretry/fleet';
-import { type AccountId, STEP_UP_REQUIRED_CODE } from '@ferretry/protocol';
+import { type AccountId, chosenSignIn, STEP_UP_REQUIRED_CODE } from '@ferretry/protocol';
 import should from 'should';
 import type { AuthenticatedCredential } from '../../../../src/lib/api/authentication.ts';
 import type { CallerGovernance } from '../../../../src/lib/api/capability.ts';
@@ -540,6 +540,38 @@ describe('GET /v1/config/status warns for a line the daemon cannot use', () => {
     should(warnings[0]).containEql('ignored');
   });
 
+  it('should accept a line on a host a site is for, not only one it logs in on (N1)', async () => {
+    const w = await world();
+    const accounts = w.subsystem.accounts as NonNullable<SecretSubsystem['accounts']>;
+    await accounts.putAccount('VERCEL' as AccountId, { label: 'vercel' });
+    await accounts.addSignIn('VERCEL' as AccountId, {
+      place: { kind: 'site', domains: ['github.com'], match: ['vercel.com'] },
+    });
+
+    const answer = await w.drive(HOST, 'PUT', '/v1/accounts/defaults', {
+      scope: 'sites',
+      key: 'vercel.com',
+      account: 'VERCEL',
+    });
+
+    should(answer.status).equal(200);
+    should(await inEffect(w)).deepEqual({ sites: { 'vercel.com': 'VERCEL' } });
+    should(await warningsFor(w)).deepEqual([]);
+  });
+
+  it('should keep both lines when two changes arrive at once, never overwriting one with the other (N2)', async () => {
+    const w = await world();
+    await withAccounts(w);
+
+    const [one, two] = await Promise.all([
+      w.drive(HOST, 'PUT', '/v1/accounts/defaults', SITE_LINE),
+      w.drive(HOST, 'PUT', '/v1/accounts/defaults', { scope: 'sites', key: 'github.com', account: 'GITHUB' }),
+    ]);
+
+    should([one.status, two.status]).deepEqual([200, 200]);
+    should(await inEffect(w)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A', 'github.com': 'GITHUB' } });
+  });
+
   it('should warn about an account with no sign-in on that place', async () => {
     const w = await world();
     await withAccounts(w);
@@ -582,5 +614,43 @@ describe('GET /v1/config/status warns for a line the daemon cannot use', () => {
     await w.config.write(PATH, 'sites:\n  app.clickup.com: NOBODY\n', undefined, false);
 
     should(await warningsFor(w)).deepEqual([]);
+  });
+});
+
+describe('AccountDefaults.current: the lines the card is ordered by', () => {
+  it('should answer the lines the owner confirmed, and nothing a ferret only suggested', async () => {
+    const w = await world();
+    await withAccounts(w);
+    await w.drive(HOST, 'PUT', '/v1/accounts/defaults', SITE_LINE);
+    await w.config.write(PATH, 'sites:\n  app.clickup.com: CLICKUP_A\n  github.com: GITHUB\n', undefined, false);
+
+    should(await w.defaults.current()).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A' } });
+  });
+
+  it('should answer no lines when the file cannot be read, and the card is still drawn with no default', async () => {
+    const w = await world();
+    const unreadable = new AccountDefaults({
+      config: {
+        load: async () => await w.config.load(),
+        amendOwn: async () => undefined,
+        inEffect: async () => {
+          throw new Error('config directory unreadable');
+        },
+      },
+      listing: async () => ({ accounts: [], signIns: [] }),
+      projects: async () => [],
+    });
+
+    const defaults = await unreadable.current();
+
+    should(defaults).deepEqual({});
+    const place = { kind: 'site', domains: ['app.clickup.com'], match: [] } as never;
+    const one = [{ id: 'si_0000000000000001', account: 'CLICKUP_A', place }] as never;
+    const two = [...(one as never[]), { id: 'si_0000000000000002', account: 'CLICKUP_B', place }] as never;
+    should(chosenSignIn('app.clickup.com', one, { defaults })).deepEqual({
+      signIn: 'si_0000000000000001',
+      why: 'only',
+    });
+    should(chosenSignIn('app.clickup.com', two, { defaults })).be.undefined();
   });
 });

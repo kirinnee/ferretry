@@ -20,12 +20,12 @@ import {
   type ConfigFileAddress,
   type ConfigIssue,
   configFilePath,
-  placeKeys,
   type ProjectInfo,
+  placeHosts,
   repointAccountDefaults,
   withAccountDefault,
 } from '@ferretry/protocol';
-import type { ConfigFilesService, ConfigSnapshot } from '../config-files/index.ts';
+import type { ConfigFilesService, ConfigSnapshot, OwnAmendment } from '../config-files/index.ts';
 import type { AccountListing } from './accounts.ts';
 
 const DEFAULTS_FILE: ConfigFileAddress = { kind: 'accountDefaults' };
@@ -51,7 +51,7 @@ export class AccountDefaultNotUsable extends Error {
 }
 
 export interface AccountDefaultsDeps {
-  readonly config: Pick<ConfigFilesService, 'load' | 'writeOwn' | 'acceptOwn'>;
+  readonly config: Pick<ConfigFilesService, 'load' | 'inEffect' | 'amendOwn'>;
   /** The accounts and sign-ins, to refuse a line that could never be used. */
   readonly listing: () => Promise<AccountListing>;
   /** The registered board projects, to say which `projects:` line names none or more than one. */
@@ -80,6 +80,18 @@ export class AccountDefaults {
   }
 
   /**
+   * The lines in effect, for the card's order ({@link chosenSignIn}): what the owner confirmed, never a ferret's
+   * held suggestion. The file that cannot be read is no lines, so a card is never lost to it.
+   */
+  async current(): Promise<AccountDefaultsFile> {
+    try {
+      return (await this.deps.config.inEffect()).evaluation.effective.accountDefaults;
+    } catch {
+      return {};
+    }
+  }
+
+  /**
    * The owner's account act changed handles: the lines follow, in the same act. A file that does not check is not
    * written over, but what is in effect is still corrected, so a stale line never outlives its account.
    */
@@ -95,39 +107,43 @@ export class AccountDefaults {
   }
 
   /**
-   * `edit` applied to the version in effect — ALWAYS, whatever the file on disk says — and, when a ferret's edit is
-   * held, to the held text too. The in-effect record is what the card reads, so it is updated even when there is no
+   * `edit` applied to the version in effect — ALWAYS, whatever the file on disk says — and, when a ferret's edit
+   * is held, to the held text too. The in-effect record is what the card reads, so it is updated even when there is no
    * text to write: a held suggestion that already lacks the line, a held deletion of the file, a file that does not
    * check (then `broken` says whether to refuse or to correct the record only).
+   *
+   * The read and the write are ONE queued step of the configuration service: the owner confirming or discarding a
+   * held edit meanwhile is queued before or after it, never between, so neither is written over by a plan made from
+   * the file as it was.
    */
   private async change(
     edit: (file: AccountDefaultsFile) => AccountDefaultsFile,
     broken: 'refuse' | 'record',
   ): Promise<void> {
-    const { files, evaluation } = await this.deps.config.load();
-    const disk = files.get(DEFAULTS_PATH)?.text;
-    const checked = disk === undefined ? undefined : checkConfigFile(DEFAULTS_PATH, disk);
-    const effective = evaluation.effective.accountDefaults;
-    const next = edit(effective);
-    const accepted = evaluation.accepted[DEFAULTS_PATH]?.text;
-    const inEffect = renderConfigFile(DEFAULTS_PATH, DEFAULTS_FILE, next, accepted) ?? accepted ?? '';
-    const moves = !sameLines(effective, next);
-    if (checked !== undefined && !checked.ok) {
-      if (broken === 'refuse') throw new AccountDefaultsFileBroken(checked.issues);
-      if (moves) await this.deps.config.acceptOwn(DEFAULTS_PATH, inEffect);
-      return;
-    }
-    const held = disk !== undefined && evaluation.pending.some(pending => pending.path === DEFAULTS_PATH);
-    const text = held
-      ? renderConfigFile(
-          DEFAULTS_PATH,
-          DEFAULTS_FILE,
-          edit((checked as { readonly value: AccountDefaultsFile }).value),
-          disk,
-        )
-      : renderConfigFile(DEFAULTS_PATH, DEFAULTS_FILE, next, disk);
-    if (text !== undefined) await this.deps.config.writeOwn(DEFAULTS_PATH, text, held ? inEffect : text);
-    else if (moves) await this.deps.config.acceptOwn(DEFAULTS_PATH, inEffect);
+    await this.deps.config.amendOwn(DEFAULTS_PATH, ({ files, evaluation }): OwnAmendment | undefined => {
+      const disk = files.get(DEFAULTS_PATH)?.text;
+      const checked = disk === undefined ? undefined : checkConfigFile(DEFAULTS_PATH, disk);
+      const effective = evaluation.effective.accountDefaults;
+      const next = edit(effective);
+      const accepted = evaluation.accepted[DEFAULTS_PATH]?.text;
+      const inEffect = renderConfigFile(DEFAULTS_PATH, DEFAULTS_FILE, next, accepted) ?? accepted ?? '';
+      const moves = !sameLines(effective, next);
+      if (checked !== undefined && !checked.ok) {
+        if (broken === 'refuse') throw new AccountDefaultsFileBroken(checked.issues);
+        return moves ? { accept: inEffect } : undefined;
+      }
+      const held = disk !== undefined && evaluation.pending.some(pending => pending.path === DEFAULTS_PATH);
+      const text = held
+        ? renderConfigFile(
+            DEFAULTS_PATH,
+            DEFAULTS_FILE,
+            edit((checked as { readonly value: AccountDefaultsFile }).value),
+            disk,
+          )
+        : renderConfigFile(DEFAULTS_PATH, DEFAULTS_FILE, next, disk);
+      if (text !== undefined) return { text, inEffect: held ? inEffect : text };
+      return moves ? { accept: inEffect } : undefined;
+    });
   }
 
   /**
@@ -173,8 +189,9 @@ export class AccountDefaults {
   }
 }
 
+/** Every key a sign-in NAMES, its `match` hosts too: a line may sit on a host a site is for, not only one it logs in on. */
 const keysOfAccount = (listing: AccountListing, handle: string): ReadonlySet<string> =>
-  new Set(listing.signIns.filter(signIn => signIn.account === handle).flatMap(signIn => placeKeys(signIn.place)));
+  new Set(listing.signIns.filter(signIn => signIn.account === handle).flatMap(signIn => placeHosts(signIn.place)));
 
 /** The accounts that have a sign-in on `key`. */
 function handlesSigningInOn(listing: AccountListing, key: string): ReadonlySet<string> {

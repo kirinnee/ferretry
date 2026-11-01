@@ -18,6 +18,10 @@ import {
   InputRequestListSchema,
   type InputShot,
   InputShotSchema,
+  type PutAccountDefaultRequest,
+  PutAccountDefaultRequestSchema,
+  type PutAccountDefaultResult,
+  PutAccountDefaultResultSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
 
@@ -65,6 +69,22 @@ export async function readInputShot(
     InputShotSchema,
     { method: 'GET' },
   );
+}
+
+/**
+ * The owner's own act, after a hand-tap: make this account the default for a project (`PUT /v1/accounts/defaults`).
+ * A ferret cannot make this call. The line is in effect at once, as the owner's own act (a paired device is
+ * asked for its passkey by the carrier client).
+ */
+export async function putAccountDefault(
+  client: InputClient,
+  body: PutAccountDefaultRequest,
+): Promise<PutAccountDefaultResult> {
+  return await client.request('/v1/accounts/defaults', PutAccountDefaultResultSchema, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(PutAccountDefaultRequestSchema.parse(body)),
+  });
 }
 
 export async function cancelInput(client: InputClient, request: Pick<InputRequest, 'id' | 'sessionId'>): Promise<void> {

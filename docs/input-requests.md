@@ -901,8 +901,8 @@ capability (`use` to list, `configure` to change) and each change a kept `secret
 > `packages/protocol/src/lib/accounts.ts`; the store, the migration at boot and the `/v1/accounts*` routes are in
 > [secrets](secrets.md#accounts-and-sign-ins-the-store). The card's offers, a deliver's `signIn`, the facts, the
 > lock, `account_hint` and `account_propose` read sign-ins ([one tap](#the-next-time-one-tap)). The app reads
-> `primary`/`why` and sends `signIn` only once a daemon reports `accounts.signins.1`, which waits for the Accounts
-> screen (the app ships first). The project, folder and site defaults are `config/account-defaults.yaml` ([config files](config-files.md#default-accounts)); the card's reason line for them comes later. **The daemon does not read the file for the card yet:** the project, folder and site lines take effect when R1-5 lands.
+> `primary`/`why` whenever the daemon sends them (a one-tap is the daemon's `primary` only) and sends `signIn` only once a daemon reports `accounts.signins.1`, which waits for the Accounts
+> screen (the app ships first). The project, folder and site defaults are `config/account-defaults.yaml` ([config files](config-files.md#default-accounts)); the daemon feeds them to the card and to `account_hint`, and the card says which one chose ([which account is first](#which-account-is-first-and-why)).
 
 A saved login is being split in two:
 
@@ -946,11 +946,44 @@ the same place, `via` names another account that signs in on a site and never go
 
 **Which account a card offers first** (`chosenSignIn`) is decided **only among the sign-ins the daemon matched**:
 the ferret's `secretHint` (a handle or a `si_…`), then the session's project default, then (an Unfiled session)
-its folder default, then the site default ([`config/account-defaults.yaml`](config-files.md#default-accounts): only the owner sets a line; the daemon starts feeding these lines to the card with R1-5), then the only matched one.
+its folder default, then the site default ([`config/account-defaults.yaml`](config-files.md#default-accounts): only the owner sets a line; the daemon feeds these lines to the card and to `account_hint`), then the only matched one.
 Two or more matched and nothing chose one: **no one-tap primary**, the owner picks ("Pick one: 2 accounts sign
 in here"). A hint or a default naming an account with no matched sign-in is ignored. None of them types
 anything: **the tap is still the permission.** A line that would choose two matched sign-ins at once chooses
 neither, so the answer never depends on list order.
+
+#### Which account is first, and why
+
+The daemon builds the order from **what it knows about the asking session, never from a field the ferret sends**
+(`SessionSignInContext`, `lib/secrets/sign-in-context.ts`). It is used by BOTH the card's offers (every
+`savedForFields` call: the offers and `InputSaved.suggest`) and BOTH `account_hint` paths (the agent tool and the
+`/v1/accounts/hint` route), so both come from one function (`chosenSignIn`). They do not look at quite the same sign-ins: the card narrows to accounts that hold the field it asks for, while the hint deliberately looks at every matched sign-in, so that "only" does not reveal which accounts have no password. A card can therefore say "Only account here" while the hint shows no default:
+
+- **The project** is the board project of the session, `projectOf(sessionId)`, resolved from the credential-derived
+  actor (`peer:<id>`), never a query or a body field. It is named only when it is a registered project; a name two
+  projects share is matched by id only (`nameIsUnique`).
+- **The folder** is the working directory the daemon recorded for the session (already a real path, resolved when the
+  session was created), and only for a session on the **Unfiled** board. It counts only while it is still its own real
+  path: a folder a ferret has since swapped for a symlink to another folder earns no folder default (a filed session answers to its project). A `~/…` folder line expands against the real home.
+- **Honest limit:** the project is the board's stamp, and an Unfiled ferret can influence it (a `.git` it writes in
+  its folder lets `fy task create` adopt a registered project), so the label is only as trustworthy as that stamp.
+  It still only orders sign-ins the daemon matched, and the owner's tap is still the permission. Closing it is a follow-up.
+- **Anything unreadable is left out**, and the card falls to the next rule. A line that names an account with no
+  sign-in matched here promotes nothing.
+- **A site line also matches a site's `match` hosts** (what the account is for), both when a line is written (a 409
+  `no_sign_in_here` is refused only if the account has no sign-in at the key or its `match` hosts) and in the status
+  warning.
+
+The owner reads it as one quiet line under the one-tap button: **"Ferret chose this"**, **"Default for ferretry"**,
+**"Default for this folder"**, **"Default for app.clickup.com"**, **"Only account here"**; with two or more accounts and
+nothing chosen: **"Pick one: N accounts sign in here"** over one button per account. The offer carries `primary`/`why`
+(and `project`), and the card's `saved.project` names the project the daemon resolved.
+
+**One tap is the daemon's `primary` and nothing else.** The app never takes "the first matched offer": an offer
+without `primary` (an older daemon, or nothing chosen) is a button to pick by hand, and a card with no `primary`
+anywhere keeps the typing field. After the owner **hand-taps** a matched account in a project, a quiet **"Always use
+for <project>"** offers to write `projects.<project>.<place>: <account>` with `PUT /v1/accounts/defaults` (the owner's
+route: a ferret is refused, a paired device asks the passkey, and the line is [in effect at once](secrets.md#accounts-and-sign-ins-the-store) as the owner's own act, not held).
 
 `account_hint` answers one line per sign-in, with the sign-in id to propose against. It never says which
 secret fields an account holds, nor its 2FA parameters, seal names, auto-apply or proposals. It lists an account's

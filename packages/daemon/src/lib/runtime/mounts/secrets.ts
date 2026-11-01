@@ -1,44 +1,32 @@
 import {
+  type AccountHintList,
   type AccountId,
   AccountIdSchema,
   type AccountList,
-  type AccountHintList,
-  accountHintsFor,
   type AccountLookAlike,
   AccountPairRequestSchema,
   AddSignInRequestSchema,
   AddTwoFactorKeyRequestSchema,
+  accountHintsFor,
   ConfirmTwoFactorSeedRequestSchema,
-  PatchTwoFactorKeyRequestSchema,
-  RemovedTwoFactorKeySchema,
-  StageTwoFactorSeedRequestSchema,
-  TWO_FACTOR_ERROR_CODES,
-  type TwoFactorId,
-  TwoFactorIdSchema,
-  TwoFactorSeedConfirmingSchema,
-  TwoFactorSeedSavedSchema,
-  TwoFactorSeedStagedSchema,
-  TwoFactorSeedStageViewSchema,
-  type TwoFactorStageId,
-  TwoFactorStageIdSchema,
-  PutAccountDefaultRequestSchema,
-  type PutAccountDefaultResult,
-  PutAccountRequestSchema,
-  PutSignInRequestSchema,
-  RenameAccountRequestSchema,
-  type SignInId,
-  SignInIdSchema,
   type LoginEntryId,
   LoginEntryIdSchema,
   type LoginEntryList,
   type LoginEntrySummary,
   type LoginHintList,
-  loginHintSite,
-  loginHintsFor,
   LoginRecipeDecisionSchema,
   LoginRecipeProposalIdSchema,
+  loginHintSite,
+  loginHintsFor,
+  PatchTwoFactorKeyRequestSchema,
+  PutAccountDefaultRequestSchema,
+  type PutAccountDefaultResult,
+  PutAccountRequestSchema,
   PutLoginEntryRequestSchema,
   PutSecretRequestSchema,
+  PutSignInRequestSchema,
+  RemovedTwoFactorKeySchema,
+  RenameAccountRequestSchema,
   RenameLoginEntryRequestSchema,
   type SecretCloneRefusal,
   SecretExportRequestSchema,
@@ -52,13 +40,26 @@ import {
   SecretNameSchema,
   type SecretSummary,
   SecretUseRequestSchema,
+  type SignInId,
+  SignInIdSchema,
   STEP_UP_ACTS,
   STEP_UP_REQUIRED_CODE,
+  StageTwoFactorSeedRequestSchema,
   type StepUpRequiredBody,
+  TWO_FACTOR_ERROR_CODES,
+  type TwoFactorId,
+  TwoFactorIdSchema,
+  TwoFactorSeedConfirmingSchema,
+  TwoFactorSeedSavedSchema,
+  TwoFactorSeedStagedSchema,
+  TwoFactorSeedStageViewSchema,
+  type TwoFactorStageId,
+  TwoFactorStageIdSchema,
 } from '@ferretry/protocol';
+import { parseActor } from '../../api/actor.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import type { CapabilityDemand } from '../../api/capability.ts';
-import { isAgentCaller } from '../../api/agent-caller.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -70,6 +71,7 @@ import {
   type AccountDirectory,
   type AccountListing,
   type AccountVault,
+  DEVICE_OWNER,
   type LoginDirectory,
   LoginEntryError,
   type LoginRecipeService,
@@ -82,16 +84,15 @@ import {
   SecretStoreError,
   SecretUseError,
   type SecretUseService,
+  type SeedSaver,
+  type SignInChoicePort,
+  type StageCaller,
   secretListView,
   TwoFactorSeedError,
   TwoFactorSeedProofMissing,
   type TwoFactorSeedStages,
-  DEVICE_OWNER,
-  type SeedSaver,
-  type StageCaller,
   UnknownSecretError,
 } from '../../secrets/index.ts';
-import { parseActor } from '../../api/actor.ts';
 import { heldEditRefusal, spendHeldEditProof } from './config-files.ts';
 
 /**
@@ -435,16 +436,29 @@ async function listAccounts(accounts: AccountDirectory, recipes: LoginRecipeServ
 async function accountHint(
   accounts: AccountDirectory,
   recipes: LoginRecipeService | undefined,
+  choice: SignInChoicePort | undefined,
   context: RouteContext,
 ): Promise<ApiResponse> {
   const site = loginHintSite(context.request.query.get('site')?.[0] ?? '');
   if (site === undefined) throw new ApiError(400, 'name a site: a host like github.com, or a URL', 'invalid_site');
   try {
-    const hints = accountHintsFor(site, await servedAccounts(accounts, recipes));
+    const order = await choice?.of(callingSession(context));
+    const hints = accountHintsFor(site, await servedAccounts(accounts, recipes), order);
     return jsonResponse({ v: 1, site, hints, passkeys: 'off' } satisfies AccountHintList);
   } catch (error) {
     return reraise(error);
   }
+}
+
+/**
+ * The session a request is FROM, read from the credential-derived actor (`peer:<id>`) and only for an agent caller;
+ * never from the query or the body, so a ferret cannot ask for another session's project default. The owner's own
+ * request has none.
+ */
+function callingSession(context: RouteContext): string | undefined {
+  if (!isAgentCaller(context)) return undefined;
+  const { kind, id } = parseActor(context.actor ?? '');
+  return kind === 'peer' && id !== undefined && id !== '' ? id : undefined;
 }
 
 /** A recipe never holds a value: without the checker that proves it, a recipe is not taken at all. */
@@ -460,6 +474,7 @@ function accountRoutes(
   recipes: LoginRecipeService | undefined,
   lookAlike: Pick<AccountVault, 'lookAlike'> | undefined,
   defaults: AccountDefaults | undefined,
+  choice: SignInChoicePort | undefined,
 ): readonly ApiRoute[] {
   if (accounts === undefined) return [];
   /** An owner-only handler: a ferret is refused before the body is read, and a domain refusal is its HTTP answer. */
@@ -496,7 +511,7 @@ function accountRoutes(
       caller: 'any',
       capability: SECRETS_USE,
       noStore: true,
-      handle: async context => await accountHint(accounts, recipes, context),
+      handle: async context => await accountHint(accounts, recipes, choice, context),
     },
     // "THESE LOOK LIKE ONE ACCOUNT" is derived from passwords, so it is the owner's alone even though it only reads:
     // a ferret is refused, and the answer is handles only (never a username, never which field matched).
@@ -1001,6 +1016,8 @@ export interface SecretSubsystem {
   readonly lookAlike?: Pick<AccountVault, 'lookAlike'>;
   /** The default account per place: the owner's one-line write of `config/account-defaults.yaml`. */
   readonly accountDefaults?: AccountDefaults;
+  /** The calling session's project, folder and the defaults, which order `account_hint`'s "default". */
+  readonly signInChoice?: SignInChoicePort;
   /**
    * Staged 2FA seeds, waiting for the passkey bound to each. It holds sealed seeds in memory and never answers one.
    */
@@ -1100,7 +1117,13 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       handle: async context => await exportSecrets(subsystem.exports, context),
     },
     ...loginRoutes(subsystem.logins, subsystem.loginRecipes),
-    ...accountRoutes(subsystem.accounts, subsystem.loginRecipes, subsystem.lookAlike, subsystem.accountDefaults),
+    ...accountRoutes(
+      subsystem.accounts,
+      subsystem.loginRecipes,
+      subsystem.lookAlike,
+      subsystem.accountDefaults,
+      subsystem.signInChoice,
+    ),
     ...factorRoutes(subsystem.accounts, subsystem.seeds),
   ];
 }
