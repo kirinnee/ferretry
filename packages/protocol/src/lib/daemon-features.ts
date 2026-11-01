@@ -95,7 +95,8 @@ export const DAEMON_FEATURES = {
    * the app keeps today's surface: it reads no offer's `primary`/`why` (a daemon may send them before it reports the
    * name, and an older one never does) and sends no sign-in id. A daemon that takes a deliver's `signIn` refuses one
    * that is not of the deliver's account, with nothing typed.
-   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the Accounts screen ships in the app first.
+   * REPORTED SINCE THE APP DRAWS THE SCREEN (Settings › Accounts): a daemon without this name keeps today's saved-logins
+   * surface.
    */
   accountsSignIns: 'accounts.signins.1',
   /**
@@ -103,8 +104,8 @@ export const DAEMON_FEATURES = {
    * `add-2fa-key` passkey bound to its stage, a code card titled from its keys and "Use code from Ferretry" per key
    * (a deliver's `factor`). A daemon without this name may lack these routes or refuse a deliver naming a key, so the
    * app offers neither and keeps today's one-seed surface.
-   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the store and the daemon's side of the cards have landed;
-   * the app's cards and the "Set up automatic codes" panel ship first.
+   * REPORTED SINCE THE APP DRAWS THE KEYS (the code card, the "Set up automatic codes" panel and Settings › Accounts ›
+   * 2FA keys).
    */
   twoFactorKeys: 'accounts.2fa-keys.1',
   /**
@@ -135,10 +136,7 @@ export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURE
  * Names whose app-side half may land first: the app can already gate on them, but no daemon of this build reports
  * them, because the daemon-side half is not built yet. Removing a name from here is how the daemon starts to offer it.
  */
-const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([
-  DAEMON_FEATURES.accountsSignIns,
-  DAEMON_FEATURES.twoFactorKeys,
-]);
+const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([]);
 
 /** The names a daemon of this build reports, in a stable order. */
 export const daemonFeatureList = (): readonly DaemonFeature[] =>

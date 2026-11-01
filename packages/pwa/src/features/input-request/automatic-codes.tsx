@@ -14,9 +14,9 @@
 import { LOGIN_TOTP_WARNING, padInputValue, type TwoFactorStageId } from '@ferretry/protocol';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import {
+  accountWords,
   addKeyActWords,
   type CodesAccount,
-  accountWords,
   DISMISSED_WORDS,
   panelHeading,
   readSeedDraft,
@@ -37,8 +37,13 @@ type Phase =
 
 export interface AutomaticCodesPanelProps {
   readonly client: InputClient;
-  /** The card this is set up from: the daemon refuses the stage unless the account is the one it matched for it. */
-  readonly requestId: string;
+  /**
+   * The card this is set up from: the daemon refuses the stage unless the account is the one it matched for it. Absent
+   * when the owner sets it up from Settings › Accounts, where the account is their own pick and nothing is typed anywhere.
+   */
+  readonly requestId?: string;
+  /** Starts open: the Accounts screen's 2FA keys tab is already the place for it. */
+  readonly defaultOpen?: boolean;
   readonly accounts: readonly CodesAccount[];
   readonly initial: CodesAccount | undefined;
   /** Asks for the passkey bound to this stage; `true` only when it was given. */
@@ -50,13 +55,14 @@ export interface AutomaticCodesPanelProps {
 export function AutomaticCodesPanel({
   client,
   requestId,
+  defaultOpen = false,
   accounts,
   initial,
   addKey,
   onSaved,
 }: AutomaticCodesPanelProps): ReactNode {
   const field = useRef<HTMLInputElement | null>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [accountId, setAccountId] = useState(initial?.id);
   const [text, setText] = useState('');
   const [label, setLabel] = useState('');
@@ -92,7 +98,7 @@ export function AutomaticCodesPanel({
         ...(label.trim() === '' ? {} : { label: label.trim() }),
         totpAcknowledged: true,
         ...stageTicks({ draft, mismatchTick }),
-        request: requestId,
+        ...(requestId === undefined ? {} : { request: requestId }),
       });
       staged = answer.stage;
       clearKey();

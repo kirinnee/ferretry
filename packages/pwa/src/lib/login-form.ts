@@ -17,8 +17,8 @@ import {
   type LoginEntrySummary,
   LoginMatchSchema,
   type LoginMethod,
-  type LoginMethodKind,
   LoginMethodChangeSchema,
+  type LoginMethodKind,
   loginDomainsOf,
   loginMethodOf,
   loginMethodSentence,
@@ -79,7 +79,7 @@ export const signInDraftOf = (
 };
 
 /** The method a draft says. A password carries no name or via; only an SSO carries a name. */
-const methodOfDraft = (draft: SignInDraft): LoginMethod => ({
+export const methodOfDraft = (draft: SignInDraft): LoginMethod => ({
   kind: draft.method,
   ...(draft.method === 'sso' ? { name: draft.ssoName.trim() } : {}),
   ...(draft.method !== 'password' && draft.via !== '' ? { via: draft.via } : {}),
