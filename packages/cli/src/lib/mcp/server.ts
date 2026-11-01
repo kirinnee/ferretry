@@ -10,12 +10,15 @@ import {
   type AgentToolCall,
   AgentToolCallSchema,
   type AgentToolResult,
+  type WorkSearchQueryInput,
+  type WorkSearchResponse,
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { BrowserWait, TerminalWait } from '../agent-tools/client.ts';
 import { renderToolResult } from '../agent-tools/controller.ts';
 import { instructionsReport, renderInstructionsReport } from '../instructions/report.ts';
-import { MCP_CONFIG_TOOLS, MCP_INSTRUCTIONS_TOOL, MCP_LESSON_TOOLS, MCP_TOOLS } from './tools.ts';
+import { hitReference, matchLine, renderNoMatch } from '../work-search/render.ts';
+import { MCP_CONFIG_TOOLS, MCP_INSTRUCTIONS_TOOL, MCP_LESSON_TOOLS, MCP_SEARCH_TOOLS, MCP_TOOLS } from './tools.ts';
 
 /**
  * THE FERRETRY TOOLS AS AN MCP SERVER — JSON-RPC 2.0 over stdio, written out by hand.
@@ -49,6 +52,8 @@ export interface McpToolsPort {
   config(call: AgentConfigToolCall): Promise<AgentConfigToolResult>;
   /** One `lessons.suggest` call, as the agent (docs/learning.md). */
   lessons(call: AgentLessonToolCall): Promise<AgentLessonToolResult>;
+  /** One `search_work` call: cards and agenda items by what they say. */
+  search(query: WorkSearchQueryInput): Promise<WorkSearchResponse>;
 }
 
 export interface McpServerInfo {
@@ -142,6 +147,29 @@ function configContent(result: AgentConfigToolResult) {
 }
 
 /** A lesson suggestion's answer as MCP content: the daemon's own sentence, verbatim. */
+const SearchArgumentsSchema = z
+  .object({
+    query: z.string().trim().min(1).max(200),
+    kind: z.enum(['task', 'agenda']).optional(),
+    open: z.boolean().optional(),
+  })
+  .strict();
+
+/** The hits as the model reads them: one line each — id, kind, standing, title, then the matching line. */
+function renderSearch(query: string, kind: 'task' | 'agenda' | undefined, answer: WorkSearchResponse): string {
+  if (answer.hits.length === 0) return renderNoMatch(query, kind);
+  const lines = answer.hits.map(hit => {
+    const match = matchLine(hit);
+    const owner = hit.kind === 'agenda' ? ` (agenda of ${hit.sessionId})` : '';
+    return `${hitReference(hit)} ${hit.kind} [${hit.standing}]${owner} ${hit.title}${match === '' ? '' : ` — ${match}`}`;
+  });
+  const more =
+    answer.total > answer.hits.length
+      ? [`(${String(answer.hits.length)} of ${String(answer.total)} shown; narrow it with kind or open)`]
+      : [];
+  return [...lines, ...more].join('\n');
+}
+
 function lessonContent(result: AgentLessonToolResult) {
   return { content: [{ type: 'text', text: result.summary }] };
 }
@@ -239,13 +267,17 @@ export class McpServer {
           jsonrpc: '2.0',
           id,
           result: {
-            tools: [...MCP_TOOLS, ...MCP_CONFIG_TOOLS, ...MCP_LESSON_TOOLS, MCP_INSTRUCTIONS_TOOL].map(
-              ({ name, description, inputSchema }) => ({
-                name,
-                description,
-                inputSchema,
-              }),
-            ),
+            tools: [
+              ...MCP_TOOLS,
+              ...MCP_CONFIG_TOOLS,
+              ...MCP_LESSON_TOOLS,
+              ...MCP_SEARCH_TOOLS,
+              MCP_INSTRUCTIONS_TOOL,
+            ].map(({ name, description, inputSchema }) => ({
+              name,
+              description,
+              inputSchema,
+            })),
           },
         };
       case 'tools/call':
@@ -289,6 +321,7 @@ export class McpServer {
     if (configTool !== undefined) return await this.config(id, configTool.configTool, args);
     const lessonTool = MCP_LESSON_TOOLS.find(candidate => candidate.name === parsed.data.name);
     if (lessonTool !== undefined) return await this.lessons(id, lessonTool.lessonTool, args);
+    if (MCP_SEARCH_TOOLS.some(candidate => candidate.name === parsed.data.name)) return await this.search(id, args);
     const tool = MCP_TOOLS.find(candidate => candidate.name === parsed.data.name);
     if (tool === undefined) return failure(id, JSON_RPC_ERRORS.invalidParams, `there is no tool ${parsed.data.name}`);
     try {
@@ -333,6 +366,22 @@ export class McpServer {
     if (!call.success) return { jsonrpc: '2.0', id, result: toolError(refusal(call.error)) };
     try {
       return { jsonrpc: '2.0', id, result: configContent(await this.tools.config(call.data)) };
+    } catch (error) {
+      return { jsonrpc: '2.0', id, result: toolError(error instanceof Error ? error.message : String(error)) };
+    }
+  }
+
+  private async search(id: string | number, args: Record<string, unknown>): Promise<JsonRpcResponse> {
+    const call = SearchArgumentsSchema.safeParse(args);
+    if (!call.success) return { jsonrpc: '2.0', id, result: toolError(refusal(call.error)) };
+    const { query, kind, open } = call.data;
+    try {
+      const answer = await this.tools.search({
+        q: query,
+        ...(kind === undefined ? {} : { kind }),
+        open: open === true,
+      });
+      return { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: renderSearch(query, kind, answer) }] } };
     } catch (error) {
       return { jsonrpc: '2.0', id, result: toolError(error instanceof Error ? error.message : String(error)) };
     }

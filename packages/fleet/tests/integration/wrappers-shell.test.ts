@@ -426,11 +426,12 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // hypermedia's `chart`; the notify rule replaced Attention's 1 KB, Agenda mode adds its own section). The
     // Board section (749, card-writing, How to test and the lane-by-category rule included, in tightened words) was paid for by naming the tools by prefix, moving map, media and chart's full spec
     // behind `fy render guide`, and compressing the lessons rule: 7,246 measured (the lane-by-category rule was paid for by tightening the Hypermedia wording), so keep 150 of headroom.
+    // Board 831 carries the search-first line (cap 840); the total keeps the 8,000 - 150 cap set on main.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(8_000 - 150);
     should(sizes.pack).be.below(1_050);
     should(sizes.tools).be.below(1_300);
-    should(sizes.board).be.below(760);
+    should(sizes.board).be.below(840);
     should(sizes.hypermedia).be.below(1_550);
     should(sizes.lessons).be.below(270);
     should(sizes.settings).be.below(600);

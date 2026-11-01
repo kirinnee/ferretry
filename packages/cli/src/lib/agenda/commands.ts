@@ -173,6 +173,11 @@ function mountVerbs(
       )
       .option('--todo', 'a to-do: the human does something; nothing to choose (steps with no question imply it)')
       .option(
+        '--related <id>',
+        'work this belongs to: a card (F12) links it there; an agenda item (A3) is edited, not duplicated',
+      )
+      .option('--new', 'raise it even if an agenda item on the same thing exists')
+      .option(
         '-o, --option <label>',
         'a choice label, or "Label: why" to add its one-line detail; repeat for each option',
         collect,

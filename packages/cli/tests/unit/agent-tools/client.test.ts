@@ -261,6 +261,25 @@ describe('AgentToolsClient — lessons', () => {
     should(person.sent).be.empty();
   });
 
+  it('should search the shared work as the person, leaving out the filters it was not given', async () => {
+    const empty = { hits: [], total: 0, indexed: { tasks: 0, agenda: 0 } };
+    const person = gateway([empty, empty]);
+    const agent = gateway();
+    const client = new AgentToolsClient({ agent, person }, { ownSessionId: 's2' });
+
+    const bare = await client.search({ q: 'relay', open: false });
+    await client.search({ q: 'a b', kind: 'agenda', open: true });
+
+    should(bare.total).equal(0);
+    should(person.sent.map(sent => sent.path)).deepEqual([
+      '/v1/search?q=relay',
+      '/v1/search?q=a+b&kind=agenda&open=true',
+    ]);
+    should(person.sent[0]?.init?.method).equal('GET');
+    should(headers(person.sent[0])).containEql({ 'x-ferretry-session-id': 's2' });
+    should(agent.sent).be.empty();
+  });
+
   it('should refuse with no capability, naming the way out', async () => {
     const agent = gateway();
     const client = new AgentToolsClient({ agent, person: gateway() }, { capability: '' });

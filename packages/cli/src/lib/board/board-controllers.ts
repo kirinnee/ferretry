@@ -10,6 +10,7 @@ import {
 import { resolveBoardProject } from '../board-lanes/lane-request';
 import { refuse } from '../tasks/errors';
 import type { ITextFileReader } from '../tasks/ports';
+import type { RelatedCheck } from '../work-search/related';
 import { explainingRefusals } from './board-refusal';
 import {
   type BoardVerb,
@@ -100,7 +101,12 @@ export interface BoardViewFlags extends BoardViewOptions, BoardCommonOptions {
   readonly md?: boolean | undefined;
 }
 
-export interface TaskCreateFlags extends BoardCreateOptions, BoardCommonOptions {}
+export interface TaskCreateFlags extends BoardCreateOptions, BoardCommonOptions {
+  /** Create even when the related-work check found a strong match. */
+  readonly new?: boolean | undefined;
+  /** A card to note instead of creating a new one. */
+  readonly related?: string | undefined;
+}
 
 export interface TaskEditFlags extends BoardEditOptions, BoardCommonOptions {}
 
@@ -120,6 +126,8 @@ export interface BoardControllerDependencies {
   readonly binary: string;
   /** `FY_SESSION_ID`: the ferret this process is, when it is one. */
   readonly environmentSessionId: string | undefined;
+  /** Asks the daemon whether a new card duplicates one; absent, creates are never checked. */
+  readonly related?: RelatedCheck | undefined;
 }
 
 /**
@@ -229,6 +237,44 @@ export class BoardController {
     this.deps.output.success(renderActed(verb, response.task, response.laneSet, names));
   }
 
+  /**
+   * The related-work check of a create. `--related <card>` turns the create into a note on that card (true:
+   * nothing is created); a strong duplicate otherwise refuses; `--new` skips the check.
+   */
+  private async noteInsteadOfCreate(
+    title: string,
+    ask: string,
+    as: string | undefined,
+    options: TaskCreateFlags,
+  ): Promise<boolean> {
+    const related = options.related?.trim();
+    if (options.new === true && related !== undefined && related !== '') {
+      refuse('pass --new or --related <id>, not both');
+    }
+    if (related !== undefined && related !== '') {
+      const ref = requireCardRef(related, '--related id');
+      await this.perform(
+        'note',
+        ref,
+        options,
+        buildNoteAction([`Also asked, filed here instead of a new card: ${title} — ${ask}`]),
+      );
+      if (options.json !== true) this.deps.output.success(`Added to ${formatTaskRef(ref)} instead of a new card`);
+      return true;
+    }
+    if (options.new === true || this.deps.related === undefined) return false;
+    const binary = this.deps.binary;
+    await this.deps.related.guard('task', title, ask, {
+      as,
+      json: options.json,
+      choices: [
+        `${binary} task create … --related F12   add this to that card as a note, creating nothing`,
+        `${binary} task create … --new          it really is separate; create it anyway`,
+      ],
+    });
+    return false;
+  }
+
   /** `fy task create`: the card, then one `link` per `--pr` because a create has no field for them. */
   async create(titleWords: readonly string[], options: TaskCreateFlags): Promise<void> {
     const as = this.as(options);
@@ -247,6 +293,7 @@ export class BoardController {
       projectId: options.project === undefined ? undefined : target?.id,
       assignee,
     });
+    if (await this.noteInsteadOfCreate(request.title, request.ask.text, as, options)) return;
     const created = await explainingRefusals({ binary: this.deps.binary, project: target?.name }, async () => {
       return await this.gateway.create(as, request);
     });

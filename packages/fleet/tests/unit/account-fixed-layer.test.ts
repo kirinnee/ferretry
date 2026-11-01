@@ -758,6 +758,7 @@ describe('AGENDA_INSTRUCTION', () => {
 
     // Assert
     should(text).startWith('Agenda mode: ONLY for what the owner alone can give: info, a decision or action.');
+    should(text).containEql('Search first (`zz search`).');
     // The agenda is never a tracker: testing and checking ride the board's Done / Not good, and only a Not good result opens an item.
     should(text).containEql('Never track work ("please test/verify")');
     should(text).containEql('the board covers it (Done/Not good)');
@@ -829,6 +830,7 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).startWith('Board: all work is a card (&F412); agenda items are !A48.');
+    should(text).containEql('Search first (`zz search`); update or link a match instead of adding a duplicate.');
     should(text).not.containEql('#F');
     should(text).containEql('New ask, first:');
     should(text).containEql(
@@ -858,7 +860,7 @@ describe('BOARD_INSTRUCTION', () => {
     // Assert
     should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n${BOARD_INSTRUCTION('fy')}`);
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
-    should(BOARD_INSTRUCTION('fy').length).be.below(760);
+    should(BOARD_INSTRUCTION('fy').length).be.below(840);
   });
 });
 
