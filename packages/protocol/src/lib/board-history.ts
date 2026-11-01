@@ -60,7 +60,11 @@ export function describeBoardEvent(event: BoardTaskEvent, lane: BoardNamer, name
     case 'linked':
       return `linked ${event.field}: ${event.value}`;
     case 'assigned':
-      return `assigned ${event.from === null ? 'nobody' : names(event.from)} → ${event.to === null ? 'nobody' : names(event.to)}`;
+      return `assigned ${event.from === null ? 'nobody' : names(event.from)} → ${event.to === null ? 'nobody' : names(event.to)}${
+        event.handedDown === true && event.actor.sessionId !== undefined
+          ? ` (handed down by ${names(event.actor.sessionId)})`
+          : ''
+      }`;
     case 'depended':
       return `depends on ${formatTaskRef(event.task)} until ${event.until}${event.override === undefined ? '' : ` (owner override: ${event.override.reason})`}`;
     case 'undepended':

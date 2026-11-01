@@ -7,6 +7,7 @@ import {
   effectiveAssignee,
   MAX_LINEAGE_DEPTH,
   mayDo,
+  mayHandDown,
   OPERATION_STANDINGS,
   refusalMessage,
   standingOf,
@@ -162,5 +163,24 @@ describe('the lineage walk', () => {
     // Assert
     should(ancestors.length).equal(MAX_LINEAGE_DEPTH);
     should(calls).equal(MAX_LINEAGE_DEPTH);
+  });
+});
+
+describe('handing a card down', () => {
+  const child: BoardCaller = { kind: 'ferret', sessionId: 'child' };
+
+  it('should admit only an assignee naming one of its own descendants', () => {
+    // Act
+    const results = {
+      descendant: mayHandDown(child, 'assignee', 'grandchild', ['child', 'lead']),
+      sibling: mayHandDown(child, 'assignee', 'sibling', ['lead']),
+      self: mayHandDown(child, 'assignee', 'child', ['lead']),
+      nobody: mayHandDown(child, 'assignee', null, []),
+      reader: mayHandDown(child, 'reader', 'grandchild', ['child']),
+      owner: mayHandDown({ kind: 'owner' }, 'owner-human', 'grandchild', ['child']),
+    };
+
+    // Assert
+    should(results).eql({ descendant: true, sibling: false, self: false, nobody: false, reader: false, owner: false });
   });
 });

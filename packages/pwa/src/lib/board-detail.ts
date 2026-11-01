@@ -194,7 +194,7 @@ const describe = (event: BoardTaskEvent, context: HistoryContext): Pick<HistoryR
         text:
           event.to === null
             ? 'took the assignee off'
-            : `assigned it to ${context.names(event.to)}${event.from === null ? '' : ` (was ${context.names(event.from)})`}`,
+            : `${event.handedDown === true ? 'handed it down to' : 'assigned it to'} ${context.names(event.to)}${event.from === null ? '' : ` (was ${context.names(event.from)})`}`,
         detail: null,
         minor: false,
       };
