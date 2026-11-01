@@ -246,6 +246,8 @@ export function AddToCatalogSheet({
   });
 
   const plan = draft === null ? null : previewPlan(draft, eligible);
+  const readLabel = plan === null ? 'Preview' : previewButtonLabel(plan);
+  const previewLabel = preview !== null ? 'Read again' : busy ? 'Reading…' : readLabel;
   const state = addState(preview, busy);
   const title =
     publish !== undefined ? 'Publish update' : existing !== undefined ? 'Add to another catalog' : 'Add to catalog';
@@ -346,19 +348,26 @@ export function AddToCatalogSheet({
                   {problem}
                 </p>
               )}
-              <Button type="submit" variant="primary" disabled={busy || problem !== null} data-catalog-preview="">
-                {busy && preview === null ? 'Reading…' : plan === null ? 'Preview' : previewButtonLabel(plan)}
+              <Button
+                type="submit"
+                variant={preview === null ? 'primary' : 'ghost'}
+                size={preview === null ? 'md' : 'sm'}
+                disabled={busy || problem !== null}
+                data-catalog-preview=""
+              >
+                {previewLabel}
               </Button>
             </form>
           ) : (
             <Button
               type="button"
-              variant="primary"
+              variant={preview === null ? 'primary' : 'ghost'}
+              size={preview === null ? 'md' : 'sm'}
               disabled={busy}
               onClick={() => void runPreview()}
               data-catalog-preview=""
             >
-              {busy && preview === null ? 'Reading…' : 'Preview'}
+              {preview !== null ? 'Read again' : busy ? 'Reading…' : 'Preview'}
             </Button>
           )}
           {note === null ? null : (

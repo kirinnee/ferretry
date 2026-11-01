@@ -267,6 +267,7 @@ describe('one tap', () => {
     expect(q('[data-catalog-notice]')?.textContent).toBe('It has something to read first.');
     expect(q('[data-catalog-preview-block]')?.textContent).toContain('It carries a script.');
     expect((q('[data-catalog-picker]') as HTMLSelectElement).value).toBe(CATALOG);
+    expect(q('[data-catalog-preview]')?.textContent).toBe('Read again');
     await click(q('[data-catalog-add]'));
     expect(callsTo(fake, `/v1/catalogs/${CATALOG}/items`)[0]?.body).toEqual({ source, digest: preview.digest });
     expect(q('[data-catalog-landed]')?.textContent).toContain('Saved to Team skills');
@@ -468,6 +469,7 @@ describe('Add to another catalog…', () => {
     expect([...picker.options].map(option => option.value)).toEqual([SECOND, '__new']);
     expect(callsTo(fake, `/v1/catalogs/${SECOND}/items/preview`)[0]?.body).toEqual({ itemId: ITEM });
     expect(q('[data-catalog-preview-block]')?.textContent).toContain('version 2');
+    expect(q('[data-catalog-preview]')?.textContent).toBe('Read again');
     await click(q('[data-catalog-add]'));
     expect(callsTo(fake, `/v1/catalogs/${SECOND}/items`)[0]?.body).toEqual({ itemId: ITEM, version: 2 });
     expect(q('[data-catalog-landed]')?.textContent).toContain('Saved to Other');
