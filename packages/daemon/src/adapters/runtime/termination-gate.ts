@@ -25,6 +25,11 @@ export interface SignalTarget {
 export interface TerminationGate {
   /** Marks the daemon serving, and resolves on the first termination signal from then on. */
   untilShutdown(): Promise<void>;
+  /**
+   * Settles once the early release a signal started has finished — at once when none was. The boot's own
+   * unwinding waits on it: it must not exit the process while a release is still running.
+   */
+  released(): Promise<void>;
 }
 
 /** The exit code of a process ended by SIGTERM, as a shell reports it: 128 + 15. */
@@ -36,6 +41,7 @@ class SignalTerminationGate implements TerminationGate {
   #stopping = false;
   readonly #terminated: Promise<void>;
   readonly #resolve: () => void;
+  #release: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly early: () => Promise<void>,
@@ -54,6 +60,10 @@ class SignalTerminationGate implements TerminationGate {
     return this.#terminated;
   }
 
+  released(): Promise<void> {
+    return this.#release;
+  }
+
   #signalled(): void {
     if (this.#serving) {
       this.#resolve();
@@ -61,7 +71,7 @@ class SignalTerminationGate implements TerminationGate {
     }
     if (this.#stopping) return;
     this.#stopping = true;
-    void this.#releaseThenExit();
+    this.#release = this.#releaseThenExit();
   }
 
   /**

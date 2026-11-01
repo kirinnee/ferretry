@@ -14344,6 +14344,10 @@ async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check
     notices.state(error instanceof Error ? (error.stack ?? error.message) : String(error));
     return 1;
   } finally {
+    // A signal that landed during the boot started an early release, which owns the cleanups it took off the
+    // list; a boot that unwinds meanwhile (its tmux client was just stopped under it) would otherwise find the
+    // list empty and exit the process with that release half done, its session workers' tmux clients unended.
+    await gate?.released();
     // Each cleanup runs in its own try/catch so a failing one never masks the exit code.
     for (const cleanup of cleanups) {
       try {
