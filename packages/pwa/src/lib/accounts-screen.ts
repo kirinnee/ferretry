@@ -14,6 +14,7 @@ import {
   type AccountList,
   type AccountSummary,
   accountDefaultLines,
+  type ConfigFileState,
   loginMethodSentence,
   type Place,
   type PushApp,
@@ -118,25 +119,26 @@ export function keyFacts(key: TwoFactorKeySummary): string {
   }
 }
 
-export type KeyState = 'verified' | 'unverified' | 'failed';
+export type KeyState = 'worked' | 'unused' | 'failed';
 
 /**
- * Whether a key Ferretry makes codes from went through, as the daemon saw it. A key only the owner holds is not
- * checked by use, so it has no state at all.
+ * Whether the last code Ferretry made from a key was accepted, as the daemon saw it. It is a USAGE RECORD that a
+ * ferret can steer, not a check that the key belongs to this account, so it is never drawn as a check mark. A key only
+ * the owner holds is not used by Ferretry, so it has no state at all.
  */
 export function keyState(key: TwoFactorKeySummary): KeyState | undefined {
   if (key.kind !== 'totp' || !key.automatic) return undefined;
-  if (key.verified === undefined) return 'unverified';
-  return key.verified.worked ? 'verified' : 'failed';
+  if (key.verified === undefined) return 'unused';
+  return key.verified.worked ? 'worked' : 'failed';
 }
 
 export function keyStateWords(key: TwoFactorKeySummary): string | undefined {
   const state = keyState(key);
   if (state === undefined || key.kind !== 'totp') return undefined;
   const day = key.verified?.at.slice(0, 10);
-  if (state === 'verified') return `Worked on ${day ?? ''}`;
-  if (state === 'failed') return `Did not work on ${day ?? ''}: check the key`;
-  return 'Not tried yet';
+  if (state === 'worked') return `Last code worked on ${day ?? ''}`;
+  if (state === 'failed') return `Last code did not work on ${day ?? ''}`;
+  return 'Not used yet';
 }
 
 /** The whole account's 2FA in one line for its row: "2 keys, Ferretry makes codes for 1". */
@@ -167,10 +169,13 @@ export const placeTitle = (place: Place): string => placeHosts(place).join(', ')
 
 export type DefaultsRead =
   | { readonly kind: 'read'; readonly file: AccountDefaultsFile }
+  /** The file on disk is a change the daemon is holding for the owner's confirmation: it is NOT what is in effect. */
+  | { readonly kind: 'pending' }
   | { readonly kind: 'unreadable'; readonly why: string };
 
 /** The defaults file's text as lines. A file that does not parse is said to be so, never read as "no defaults". */
-export function readDefaultsText(text: string, exists: boolean): DefaultsRead {
+export function readDefaultsText(text: string, exists: boolean, state: ConfigFileState = 'ok'): DefaultsRead {
+  if (state === 'pending') return { kind: 'pending' };
   if (!exists || text.trim() === '') return { kind: 'read', file: {} };
   let document: unknown;
   try {
@@ -208,6 +213,10 @@ export function scopedLinesFor(
 /** What a refusal of the default line becomes, in the daemon's own words where it gave them. */
 export const DEFAULT_ONLY_ORDERS =
   'A default only decides which account a sign-in card lists first. Nothing signs in until you tap it.';
+
+/** Said in place of the lines when the defaults file on disk is a held change, which is not in effect. */
+export const DEFAULTS_PENDING_WORDS =
+  'A change to this file is waiting for your confirmation (Settings › Config files); what is listed here may not be in effect.';
 
 // ── Look-alikes ──────────────────────────────────────────────────────────────────────────────────────────
 

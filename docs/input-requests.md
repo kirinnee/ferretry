@@ -922,7 +922,7 @@ capability (`use` to list, `configure` to change) and each change a kept `secret
 > `packages/protocol/src/lib/accounts.ts`; the store, the migration at boot and the `/v1/accounts*` routes are in
 > [secrets](secrets.md#accounts-and-sign-ins-the-store). The card's offers, a deliver's `signIn`, the facts, the
 > lock, `account_hint` and `account_propose` read sign-ins ([one tap](#the-next-time-one-tap)). The app reads
-> `primary`/`why` whenever the daemon sends them (a one-tap is the daemon's `primary` only) and sends `signIn` only once a daemon reports `accounts.signins.1`, which it now does (the Accounts screen is the app's half). The project, folder and site defaults are `config/account-defaults.yaml` ([config files](config-files.md#default-accounts)); the daemon feeds them to the card and to `account_hint`, and the card says which one chose ([which account is first](#which-account-is-first-and-why)).
+> `primary`/`why` whenever the daemon sends them (a one-tap is the daemon's `primary` only) and sends a deliver's `signIn` whenever the offer it answers carries one (only a daemon that understands sign-ins sends such an offer, so no feature name gates it); the daemon reports `accounts.signins.1` now that the Accounts screen exists, and that name only chooses between that screen and the older saved-logins one. The project, folder and site defaults are `config/account-defaults.yaml` ([config files](config-files.md#default-accounts)); the daemon feeds them to the card and to `account_hint`, and the card says which one chose ([which account is first](#which-account-is-first-and-why)).
 
 A saved login is being split in two:
 

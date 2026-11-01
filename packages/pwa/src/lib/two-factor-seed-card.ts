@@ -15,14 +15,15 @@ export interface SeedCardFacts {
 
 const BULLET = /^\s*[-*]\s+/;
 
-export const seedCardFacts = (context: string | undefined): SeedCardFacts => {
+/** `flagged` is the daemon's structured mismatch flag; the sentence it also writes is only a second way to know. */
+export const seedCardFacts = (context: string | undefined, flagged = false): SeedCardFacts => {
   const all = (context ?? '')
     .split('\n')
     .map(line => line.replace(BULLET, '').trim())
     .filter(line => line !== '');
   return {
     lines: all.filter(line => line !== TWO_FACTOR_SEED_CARD_MISMATCH_LINE),
-    mismatch: all.includes(TWO_FACTOR_SEED_CARD_MISMATCH_LINE),
+    mismatch: flagged || all.includes(TWO_FACTOR_SEED_CARD_MISMATCH_LINE),
   };
 };
 
@@ -38,4 +39,5 @@ export const seedAllowBlocked = (gate: {
 };
 
 export const SEED_DENIED_WORDS = 'Denied. Nothing was saved and the key is gone.';
-export const SEED_GONE_WORDS = 'This save is no longer waiting: it was saved, denied or timed out. Nothing more to do.';
+export const SEED_GONE_WORDS =
+  'This save is no longer waiting: it was saved, denied or timed out. If you still expect it, confirm it from a paired device.';

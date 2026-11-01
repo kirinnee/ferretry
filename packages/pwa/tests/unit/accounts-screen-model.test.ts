@@ -91,13 +91,14 @@ describe('2FA keys as the screen reads them', () => {
     const phone = key('4', {}) as never;
 
     expect([worked, failed, fresh, phone].map(each => keyState(each))).toEqual([
-      'verified',
+      'worked',
       'failed',
-      'unverified',
+      'unused',
       undefined,
     ]);
-    expect(keyStateWords(worked)).toBe('Worked on 2026-10-31');
-    expect(keyStateWords(failed)).toContain('check the key');
+    expect(keyStateWords(worked)).toBe('Last code worked on 2026-10-31');
+    expect(keyStateWords(failed)).toBe('Last code did not work on 2026-10-31');
+    expect(keyStateWords(fresh)).toBe('Not used yet');
     expect(keyStateWords(phone)).toBeUndefined();
   });
 
@@ -175,5 +176,18 @@ describe('the one tap comes only from the daemon’s primary offer', () => {
 
     expect(startingAccount(card([offer({ id: 'ZED', matched: true, primary: true })]), accounts)?.id).toBe('ZED');
     expect(startingAccount(card([offer({ id: 'ALPHA', matched: true, hinted: true })]), accounts)).toBeUndefined();
+  });
+});
+
+describe('what a key says of itself', () => {
+  it('should say where each kind of code goes, with or without the fact', () => {
+    const facts = (over: object) => keyFacts(key('5', over) as never);
+
+    expect(facts({ kind: 'email', endsWith: undefined })).toBe('Code sent by email');
+    expect(facts({ kind: 'email', endsWith: undefined, to: 'me@work.test' })).toBe('Code sent to me@work.test');
+    expect(facts({ kind: 'push', endsWith: undefined })).toBe('You approve it on your phone');
+    expect(facts({ kind: 'push', endsWith: undefined, app: 'duo' })).toContain('Approve in');
+    expect(facts({ kind: 'security-key', endsWith: undefined })).toBe('You tap it yourself');
+    expect(facts({ endsWith: undefined })).toBe('Code sent by text');
   });
 });

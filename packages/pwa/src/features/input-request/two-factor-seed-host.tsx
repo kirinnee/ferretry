@@ -6,7 +6,13 @@
  * read draws nothing, and the card still shows the daemon's words.
  */
 
-import type { AccountList, AgendaItem, TwoFactorSeedStageView, TwoFactorStageId } from '@ferretry/protocol';
+import {
+  type AccountList,
+  type AgendaItem,
+  TWO_FACTOR_ERROR_CODES,
+  type TwoFactorSeedStageView,
+  type TwoFactorStageId,
+} from '@ferretry/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import {
   accountWords,
@@ -37,6 +43,15 @@ const FINISHED: Readonly<Record<Exclude<TwoFactorSeedStageView['state'], 'waitin
   expired: { kind: 'done', ok: false, words: SEED_GONE_WORDS },
 };
 
+const isStageView = (read: unknown): read is TwoFactorSeedStageView =>
+  typeof read === 'object' && read !== null && 'state' in read;
+
+const isStageGone = (failure: unknown): boolean =>
+  typeof failure === 'object' &&
+  failure !== null &&
+  'code' in failure &&
+  failure.code === TWO_FACTOR_ERROR_CODES.stageGone;
+
 export function TwoFactorSeedHost({
   connection,
   item,
@@ -56,6 +71,7 @@ export function TwoFactorSeedHost({
   const [client, setClient] = useState<InputClient | null>(null);
   const [accounts, setAccounts] = useState<AccountList | undefined>(undefined);
   const [phase, setPhase] = useState<SeedCardPhase>({ kind: 'waiting' });
+  const [flagged, setFlagged] = useState(false);
 
   useEffect(() => {
     if (ref === undefined) return undefined;
@@ -67,13 +83,18 @@ export function TwoFactorSeedHost({
         setClient(next);
         const [list, stage] = await Promise.all([
           readAccounts(next).catch(() => undefined),
-          readSeedStage(next, ref.account, ref.stage).catch(() => undefined),
+          readSeedStage(next, ref.account, ref.stage).catch((cause: unknown) => cause),
         ]);
         if (!current) return;
         setAccounts(list);
-        if (stage !== undefined && stage.state !== 'waiting') setPhase(FINISHED[stage.state]);
-        // A stage the daemon no longer knows is gone: saved, denied elsewhere, or timed out.
-        else if (stage === undefined) setPhase(FINISHED.expired);
+        if (!isStageView(stage)) {
+          // A stage the daemon does not know for this caller is gone: saved, denied elsewhere, timed out, or staged
+          // by someone this app cannot see. Any other failed read leaves the card as the daemon worded it.
+          if (isStageGone(stage)) setPhase(FINISHED.expired);
+          return;
+        }
+        setFlagged(stage.mismatch === true);
+        if (stage.state !== 'waiting') setPhase(FINISHED[stage.state]);
       })
       .catch(() => undefined);
     return () => {
@@ -119,12 +140,11 @@ export function TwoFactorSeedHost({
   if (ref === undefined || client === null) return null;
   return (
     <TwoFactorSeedCard
-      facts={seedCardFacts(item.context ?? undefined)}
+      facts={seedCardFacts(item.context ?? undefined, flagged)}
       onAllow={() => void allow()}
       onDeny={() => void deny()}
       phase={phase}
       subject={item.subject ?? `Save automatic codes to ${named}?`}
-      why={item.why ?? undefined}
     />
   );
 }

@@ -49,7 +49,7 @@ const seedItem = {
   subject: 'Save automatic codes to GitHub · kirinnee?',
   why: 'Asked by fy on kirin-box at 10:02 UTC. If you didn’t just ask for this, Deny.',
   context: [
-    '- The key says it is for GitHub · kirinnee.',
+    view.includes('mismatch') ? '- The key says it is for Slack · someone@else.test.' : '- The key says it is for GitHub · kirinnee.',
     ...(view.includes('mismatch') ? ['- It does not look like this account’s key; it was staged with “save it here anyway”.'] : []),
     '- Password and code both come from this machine then: together they are one factor.',
   ].join('\\n'),
@@ -61,8 +61,8 @@ const seedAnswer = (call) =>
 const machine = fakeClient(view === 'fallback' ? () => logins() : seed ? seedAnswer : answer(world));
 
 createRoot(document.getElementById('root')).render(
-  <div className="kt-shell flex min-h-full flex-col items-center bg-bg p-3">
-    <div className="w-full max-w-[640px]" data-harness-surface="">
+  <div className="kt-shell flex min-h-full flex-col items-center bg-bg py-2">
+    <div className="w-full min-w-0 px-panel" style={{ maxWidth: 640 }} data-harness-surface="">
       {seed ? (
         <article className="fy-card" data-harness-card="">
           <TwoFactorSeedHost connection={connection} createClient={async () => machine.client} addKey={async () => true} item={seedItem} />

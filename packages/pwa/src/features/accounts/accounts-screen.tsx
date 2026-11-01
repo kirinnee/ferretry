@@ -41,7 +41,7 @@ export interface AccountsScreenProps {
   readonly list: AccountList;
   /** Handles the daemon thinks are one account; empty when it has no such route. */
   readonly lookAlike: readonly (readonly AccountId[])[];
-  readonly defaults: DefaultsRead | undefined;
+  readonly defaults: DefaultsRead;
   readonly ops: AccountOps;
   readonly busy: boolean;
   readonly error: string | null;

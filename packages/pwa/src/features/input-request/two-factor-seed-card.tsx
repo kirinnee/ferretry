@@ -18,14 +18,13 @@ export type SeedCardPhase =
 
 export interface TwoFactorSeedCardProps {
   readonly subject: string;
-  readonly why: string | undefined;
   readonly facts: SeedCardFacts;
   readonly phase: SeedCardPhase;
   readonly onAllow: () => void;
   readonly onDeny: () => void;
 }
 
-export function TwoFactorSeedCard({ subject, why, facts, phase, onAllow, onDeny }: TwoFactorSeedCardProps): ReactNode {
+export function TwoFactorSeedCard({ subject, facts, phase, onAllow, onDeny }: TwoFactorSeedCardProps): ReactNode {
   const [warningTick, setWarningTick] = useState(false);
   const [mismatchTick, setMismatchTick] = useState(false);
   const busy = phase.kind === 'passkey' || phase.kind === 'saving';
@@ -37,11 +36,6 @@ export function TwoFactorSeedCard({ subject, why, facts, phase, onAllow, onDeny 
       <h3 className="m-0 text-ui font-semibold text-fg" data-seed-subject="">
         {subject}
       </h3>
-      {why === undefined ? null : (
-        <p className="m-0 text-cell text-muted" data-seed-why="">
-          {why}
-        </p>
-      )}
       {facts.lines.length === 0 ? null : (
         <ul className="m-0 flex min-w-0 list-disc flex-col gap-1 pl-5 text-cell text-fg" data-seed-lines="">
           {facts.lines.map(line => (

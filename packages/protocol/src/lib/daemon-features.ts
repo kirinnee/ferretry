@@ -91,12 +91,12 @@ export const DAEMON_FEATURES = {
   workSearch: 'work.search.1',
   /**
    * Accounts and sign-ins (docs/input-requests.md, "Accounts and sign-ins"): `/v1/accounts*`, a card offer's
-   * `signIn`/`primary`/`why`, a deliver's `signIn` and a `si_` `secretHint` that orders the card. Without this name
-   * the app keeps today's surface: it reads no offer's `primary`/`why` (a daemon may send them before it reports the
-   * name, and an older one never does) and sends no sign-in id. A daemon that takes a deliver's `signIn` refuses one
-   * that is not of the deliver's account, with nothing typed.
+   * `signIn`/`primary`/`why`, a deliver's `signIn` and a `si_` `secretHint` that orders the card. The app reads an
+   * offer's `primary`/`why` and sends a deliver's `signIn` whenever the offer carries one, with or without this name
+   * (only a daemon that understands sign-ins sends either); a daemon that takes a deliver's `signIn` refuses one that is
+   * not of the deliver's account, with nothing typed.
    * REPORTED SINCE THE APP DRAWS THE SCREEN (Settings › Accounts): a daemon without this name keeps today's saved-logins
-   * surface.
+   * surface, and that is all the name chooses.
    */
   accountsSignIns: 'accounts.signins.1',
   /**

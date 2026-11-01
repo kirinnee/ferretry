@@ -20,6 +20,7 @@ import { type FormEvent, type ReactNode, useState } from 'react';
 import {
   accountTitle,
   DEFAULT_ONLY_ORDERS,
+  DEFAULTS_PENDING_WORDS,
   type DefaultsRead,
   defaultKeysOf,
   placeTitle,
@@ -43,7 +44,7 @@ export interface SiteDetailProps {
   readonly signIn: SignInSummary;
   readonly account: AccountSummary;
   readonly accounts: readonly AccountSummary[];
-  readonly defaults: DefaultsRead | undefined;
+  readonly defaults: DefaultsRead;
   readonly ops: AccountOps;
   readonly busy: boolean;
   readonly error: string | null;
@@ -359,7 +360,7 @@ function SeenTab({ signIn }: SiteDetailProps): ReactNode {
 
 function DefaultsTab({ signIn, account, accounts, defaults, ops, busy, error }: SiteDetailProps): ReactNode {
   const keys = defaultKeysOf(signIn.place);
-  const file = defaults?.kind === 'read' ? defaults.file : undefined;
+  const file = defaults.kind === 'read' ? defaults.file : undefined;
   const scoped = file === undefined ? [] : scopedLinesFor(file, account.id, keys);
   const label = (id: string): string => accounts.find(each => each.id === id)?.label ?? id;
 
@@ -368,9 +369,9 @@ function DefaultsTab({ signIn, account, accounts, defaults, ops, busy, error }: 
       <p className="m-0 text-cell text-muted" data-accounts-defaults-note="">
         {DEFAULT_ONLY_ORDERS}
       </p>
-      {defaults === undefined ? (
-        <p className="m-0 text-cell text-faint" role="status">
-          Reading the defaults…
+      {defaults.kind === 'pending' ? (
+        <p className="m-0 text-cell text-warn" data-accounts-defaults-pending="" role="status">
+          {DEFAULTS_PENDING_WORDS}
         </p>
       ) : defaults.kind === 'unreadable' ? (
         <p className="m-0 text-cell text-warn" data-accounts-defaults-unreadable="" role="alert">

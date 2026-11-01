@@ -37,7 +37,7 @@ interface Loaded {
   readonly daemonId: DaemonConnection['daemonId'];
   readonly list: AccountList;
   readonly lookAlike: readonly (readonly AccountId[])[];
-  readonly defaults: DefaultsRead | undefined;
+  readonly defaults: DefaultsRead;
 }
 
 const message = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
@@ -52,7 +52,7 @@ async function readAll(client: AccountsClient, daemonId: DaemonConnection['daemo
       () => [],
     ),
     readConfigFile(client, DEFAULTS_FILE).then(
-      (file): DefaultsRead => readDefaultsText(file.text, file.exists),
+      (file): DefaultsRead => readDefaultsText(file.text, file.exists, file.state),
       (): DefaultsRead => ({ kind: 'unreadable', why: 'This daemon would not show account-defaults.yaml' }),
     ),
   ]);

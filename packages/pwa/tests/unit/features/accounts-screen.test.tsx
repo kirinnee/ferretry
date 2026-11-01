@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { DAEMON_FEATURES, LOGIN_TOTP_WARNING, type TwoFactorStageId } from '@ferretry/protocol';
+import { AccountListSchema, DAEMON_FEATURES, LOGIN_TOTP_WARNING, type TwoFactorStageId } from '@ferretry/protocol';
 import { AccountsSurface } from '../../../src/features/accounts/accounts-surface.tsx';
 import { DaemonSettingsFrame } from '../../../src/features/settings/daemon-settings-frame.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { DaemonClientProvider } from '../../../src/lib/store.tsx';
+import { createAppStore, DaemonClientProvider, StoreProvider } from '../../../src/lib/store.tsx';
 import {
   APP,
   answer,
@@ -14,6 +14,7 @@ import {
   SECRET_PASSWORD,
   SI_GITHUB,
   SI_VERCEL,
+  SI_WORK,
   SMS,
   STAGE,
   type World,
@@ -214,7 +215,7 @@ describe('an account’s 2FA keys', () => {
 
     expect(screen.all('[data-accounts-key]').map(each => each.getAttribute('data-accounts-key'))).toEqual([SMS, APP]);
     expect(screen.q(`[data-accounts-key="${SMS}"]`)?.textContent).toContain('••42');
-    expect(screen.q(`[data-accounts-key="${APP}"]`)?.getAttribute('data-accounts-key-state')).toBe('verified');
+    expect(screen.q(`[data-accounts-key="${APP}"]`)?.getAttribute('data-accounts-key-state')).toBe('worked');
     expect(screen.q(`[data-accounts-key="${SMS}"]`)?.hasAttribute('data-accounts-key-state')).toBe(false);
   });
 
@@ -439,5 +440,241 @@ describe('look-alike accounts', () => {
     expect(screen.q('[data-accounts-lookalike]')).toBeNull();
     expect(screen.q('[data-accounts-screen]')).not.toBeNull();
     expect(screen.all('[data-accounts-row]').length).toBeGreaterThan(0);
+  });
+});
+
+describe('the rest of the write flows', () => {
+  const siteOf = async (account: string, id: string, world: World = {}) => {
+    const screen = await open(world);
+    await screen.openAccount(account);
+    await screen.tab('sites');
+    await click(screen.q(`[data-accounts-signin="${id}"] button`));
+    return screen;
+  };
+
+  it('should say there is nothing yet on an account with no keys and no sites, and on an empty list', async () => {
+    const screen = await open();
+    await screen.openAccount('GOOGLE');
+    await screen.tab('keys');
+    expect(screen.q('[data-accounts-keys-empty]')).not.toBeNull();
+    await screen.tab('sites');
+    expect(screen.q('[data-accounts-sites-empty]')).not.toBeNull();
+
+    const empty = await open({
+      accounts: AccountListSchema.parse({ v: 1, health: 'ready', accounts: [], signIns: [] }),
+    });
+    expect(empty.q('[data-accounts-empty]')).not.toBeNull();
+  });
+
+  it('should add an account with its first site, then open it', async () => {
+    const screen = await open();
+
+    await click(screen.q('[data-accounts-add-open]'));
+    await typeInto(screen.q('[data-accounts-new-label]'), 'Slack');
+    await typeInto(screen.q('[data-accounts-new-username]'), 'kirin');
+    await typeInto(screen.q('[data-accounts-new-password]'), SECRET_PASSWORD);
+    await typeInto(screen.q('[data-accounts-new-site]'), 'slack.com');
+    await click(screen.q('[data-accounts-new-save]'));
+    await settle();
+    await settle();
+
+    expect(screen.writes().map(call => `${call.method} ${call.path}`)).toEqual([
+      'PUT /v1/accounts/SLACK',
+      'POST /v1/accounts/SLACK/sign-ins',
+    ]);
+    expect(screen.writes()[1]?.body).toEqual({ place: { kind: 'site', domains: ['slack.com'], match: [] } });
+    expect(screen.text()).not.toContain(SECRET_PASSWORD);
+  });
+
+  it('should add a site to an account with the domains typed and a chosen method', async () => {
+    const screen = await open();
+    await screen.openAccount('GOOGLE');
+    await screen.tab('sites');
+
+    await click(screen.q('[data-accounts-site-add-open]'));
+    await typeInto(screen.q('[data-accounts-domains]'), 'accounts.google.com');
+    await choose(screen.q('[data-accounts-method]'), 'sso');
+    await typeInto(screen.q('[data-accounts-sso]'), 'Okta');
+    await choose(screen.q('[data-accounts-via]'), 'GITHUB');
+    await click(screen.q('[data-accounts-site-add]'));
+    await settle();
+
+    expect(screen.writes()[0]).toMatchObject({ method: 'POST', path: '/v1/accounts/GOOGLE/sign-ins' });
+    expect(screen.writes()[0]?.body).toMatchObject({
+      place: { kind: 'site', domains: ['accounts.google.com'], match: [] },
+      method: { kind: 'sso' },
+    });
+  });
+
+  it('should add email and push keys with only the facts they carry', async () => {
+    const screen = await open();
+    await screen.openAccount('GITHUB');
+    await screen.tab('keys');
+
+    await click(screen.q('[data-accounts-key-add-open]'));
+    await choose(screen.q('[data-accounts-key-kind]'), 'email');
+    await typeInto(screen.q('[data-accounts-key-label]'), 'Inbox');
+    await typeInto(screen.q('[data-accounts-key-fact]'), 'me@work.test');
+    await click(screen.q('[data-accounts-key-add]'));
+    await settle();
+    await click(screen.q('[data-accounts-key-add-open]'));
+    await choose(screen.q('[data-accounts-key-kind]'), 'push');
+    await typeInto(screen.q('[data-accounts-key-label]'), 'Phone approval');
+    await choose(screen.q('[data-accounts-key-app]'), 'duo');
+    await click(screen.q('[data-accounts-key-add]'));
+    await settle();
+
+    expect(screen.writes().map(call => call.body)).toEqual([
+      { kind: 'email', label: 'Inbox', to: 'me@work.test' },
+      { kind: 'push', label: 'Phone approval', app: 'duo' },
+    ]);
+  });
+
+  it('should edit a recipe and send only that', async () => {
+    const screen = await siteOf('GITHUB', SI_GITHUB);
+    await screen.tab('recipe');
+
+    await click(screen.q('[data-accounts-recipe-edit]'));
+    await typeInto(screen.q('[data-accounts-recipe-text]'), 'Open the page and press Sign in.', 'textarea');
+    await click(screen.q('[data-accounts-recipe-save]'));
+    await settle();
+
+    expect(screen.writes()[0]).toMatchObject({ method: 'PUT', path: `/v1/accounts/sign-ins/${SI_GITHUB}` });
+    expect(screen.writes()[0]?.body).toEqual({ recipe: 'Open the page and press Sign in.' });
+  });
+
+  it('should ask twice before a site stops signing in, then go back to the account', async () => {
+    const screen = await siteOf('GITHUB', SI_GITHUB);
+    await screen.tab('method');
+
+    await click(screen.q('[data-accounts-site-remove]'));
+    expect(screen.writes()).toEqual([]);
+    await click(screen.q('[data-accounts-site-confirm-remove]'));
+    await settle();
+
+    expect(screen.writes()[0]).toMatchObject({ method: 'DELETE', path: `/v1/accounts/sign-ins/${SI_GITHUB}` });
+    expect(screen.q('[data-accounts-method]')).toBeNull();
+  });
+
+  it('should say a sign-in nobody has seen yet has not been seen', async () => {
+    const screen = await siteOf('GITHUB_WORK', SI_WORK);
+    await screen.tab('seen');
+
+    expect(screen.q('[data-accounts-seen-empty]')).not.toBeNull();
+  });
+
+  it('should show a held defaults file as waiting, not as what is in effect, and offer no change on top', async () => {
+    const screen = await siteOf('VERCEL', SI_VERCEL, {
+      defaults: 'sites:\n  vercel.com: GOOGLE\n',
+      defaultsState: 'pending',
+    });
+    await screen.tab('defaults');
+
+    expect(screen.q('[data-accounts-defaults-pending]')?.textContent).toContain('waiting for your confirmation');
+    expect(screen.text()).not.toContain('is listed first');
+    expect(screen.q('[data-accounts-default-set]')).toBeNull();
+    expect(screen.q('[data-accounts-default-clear]')).toBeNull();
+  });
+
+  it('should list a project line for this account and remove it with a person write', async () => {
+    const screen = await siteOf('GITHUB', SI_GITHUB, { defaults: 'projects:\n  ferretry:\n    github.com: GITHUB\n' });
+    await screen.tab('defaults');
+
+    expect(screen.q('[data-accounts-default-scoped]')?.textContent).toContain('project ferretry');
+    await click(screen.q('[data-accounts-default-scoped] button'));
+    await settle();
+
+    expect(screen.writes()[0]?.body).toEqual({
+      scope: 'projects',
+      within: 'ferretry',
+      key: 'github.com',
+      account: null,
+    });
+  });
+
+  it('should say so when the list cannot be read again after a key is saved', async () => {
+    let broken = false;
+    const screen = await open(
+      {
+        refuse: call => {
+          if (call.path.endsWith('/commit')) broken = true;
+          return broken && call.method === 'GET' && call.path === '/v1/accounts' ? 'the daemon fell over' : undefined;
+        },
+      },
+      { addKey: async () => true },
+    );
+    await screen.openAccount('GITHUB');
+    await screen.tab('keys');
+
+    await click(screen.q('[data-codes-panel] summary'));
+    await typeInto(screen.q('[data-codes-seed]'), KEY);
+    await click(screen.q('[data-codes-warning-tick]'));
+    await click(screen.q('[data-codes-save]'));
+    for (let tries = 0; tries < 4; tries += 1) await settle();
+
+    expect(screen.text()).toContain('the daemon fell over');
+  });
+
+  it('should hand the add-key passkey to the screen when the browser has one and the machine reports keys', async () => {
+    const paths: string[] = [];
+    const client = {
+      request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
+        paths.push(path);
+        if (path === '/v1/health')
+          return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.accountsSignIns, DAEMON_FEATURES.twoFactorKeys]));
+        if (path === '/v1/accounts') return schema.parse(list());
+        if (path.startsWith('/v1/config/file')) return schema.parse(fileOf('', false));
+        return schema.parse({ v: 1, groups: [] });
+      },
+    };
+    const store = await createAppStore({
+      repository: { load: async () => null, save: async () => undefined },
+      connectClient: async () => ({}) as never,
+      fetcher: async () => Response.json({}),
+    });
+    const view = await mount(
+      <StoreProvider store={store}>
+        <DaemonClientProvider client={async () => client as never}>
+          <DaemonSettingsFrame
+            connection={CONNECTION}
+            name="Workshop"
+            panel="accounts"
+            onOpenPanel={() => undefined}
+            readWardenStatus={async () => Promise.reject(new Error('not here'))}
+            createWardenClient={async () => Promise.reject(new Error('not here'))}
+          />
+        </DaemonClientProvider>
+      </StoreProvider>,
+    );
+    mounted.push(view);
+    for (let tries = 0; tries < 8; tries += 1) await settle();
+    await click(view.container.querySelector('[data-accounts-row="GITHUB"] button'));
+    await click(view.container.querySelector('[data-accounts-tab="keys"]'));
+
+    expect(view.container.querySelector('[data-codes-panel]')).not.toBeNull();
+  });
+});
+
+describe('what the add form and an empty recipe say', () => {
+  it('should say what is wrong with a typed handle and a site, and refuse a handle already saved', async () => {
+    const screen = await open();
+    await click(screen.q('[data-accounts-add-open]'));
+
+    await typeInto(screen.q('[data-accounts-new-handle]'), '9bad');
+    expect(screen.text()).toContain('A handle is capital letters');
+    await typeInto(screen.q('[data-accounts-new-handle]'), 'github');
+    expect(screen.text()).toContain('already saved');
+    await typeInto(screen.q('[data-accounts-new-site]'), 'not a host!');
+    expect(screen.q('[data-accounts-add] [role="alert"]')).not.toBeNull();
+  });
+
+  it('should say there is no recipe yet on a sign-in with none', async () => {
+    const screen = await open();
+    await screen.openAccount('GITHUB_WORK');
+    await screen.tab('sites');
+    await click(screen.q(`[data-accounts-signin="${SI_WORK}"] button`));
+    await screen.tab('recipe');
+
+    expect(screen.q('[data-accounts-recipe-empty]')).not.toBeNull();
   });
 });

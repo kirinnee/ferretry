@@ -203,7 +203,7 @@ function DetailsTab({ account, ops, busy, error, onClosed }: AccountDetailProps)
 
 // ── 2FA keys ──────────────────────────────────────────────────────────────────────────────────────────
 
-const STATE_TONE = { verified: 'text-ok', unverified: 'text-muted', failed: 'text-err' } as const;
+const STATE_TONE = { worked: 'text-muted', unused: 'text-muted', failed: 'text-err' } as const;
 
 function KeysTab({ account, signIns, ops, busy, error, client, addKey, onSaved }: AccountDetailProps): ReactNode {
   const codesAccount: CodesAccount = {
@@ -274,7 +274,7 @@ function KeyRow({
           </p>
           {state === undefined || stateWords === undefined ? null : (
             <p className={`m-0 text-meta ${STATE_TONE[state]}`} data-accounts-key-words="">
-              {state === 'verified' ? 'Verified' : state === 'failed' ? 'Failed' : 'Unverified'} · {stateWords}
+              {stateWords}
             </p>
           )}
         </div>

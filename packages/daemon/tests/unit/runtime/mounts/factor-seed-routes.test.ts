@@ -1,26 +1,26 @@
 import { describe, it } from 'bun:test';
 import {
-  addTwoFactorKeySubject,
   type AccountList,
+  addTwoFactorKeySubject,
   padInputValue,
   STEP_UP_REQUIRED_CODE,
   TotpParametersSchema,
   type TwoFactorSeedStaged,
 } from '@ferretry/protocol';
 import should from 'should';
-import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import type { ClaimFreshWitness, StepUpWitness } from '../../../../src/lib/api/capability.ts';
+import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { type SecretSubsystem, secretRoutes } from '../../../../src/lib/runtime/mounts/secrets.ts';
-import { LoginVault, totpCode, type TwoFactorSeedStagesDeps } from '../../../../src/lib/secrets/index.ts';
+import { LoginVault, type TwoFactorSeedStagesDeps, totpCode } from '../../../../src/lib/secrets/index.ts';
 import { StepUpRegistry } from '../../../../src/lib/step-up/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   agentIn,
-  FERRET_ARRIVAL,
-  ferretOwn,
   CREDENTIALS,
   FakeSecretCipher,
+  FERRET_ARRIVAL,
+  ferretOwn,
   GRANTED,
   human,
   MemoryLoginIndex,
@@ -348,11 +348,16 @@ describe('a staged seed', () => {
     // Act
     const refused = await r.call('POST', '/v1/accounts/GITHUB/factors/seed', stageBody(okta));
     const allowed = await stage(r, 'GITHUB', okta, { mismatchAcknowledged: true });
+    const plain = await stage(r);
+    const flagged = await r.call('GET', `/v1/accounts/GITHUB/factors/seed/${allowed.stage}`);
+    const unflagged = await r.call('GET', `/v1/accounts/GITHUB/factors/seed/${plain.stage}`);
 
     // Assert
     should(refused.status).equal(409);
     should(refused.body).match({ code: 'factor_mismatch', error: /Okta · bob@x\.com.*GitHub · kirinnee/u });
     should(allowed.mismatch).match({ issuer: 'Okta', accountName: 'bob@x.com' });
+    should(flagged.body).match({ mismatch: true });
+    should(unflagged.body).not.have.property('mismatch');
   });
 
   it('should refuse without a passkey anywhere, without the warning tick, and on an account with four seeds', async () => {
@@ -431,7 +436,7 @@ describe('a staged seed', () => {
         stage: staged.stage,
         account: 'GITHUB',
         subject: 'Save automatic codes to GitHub · kirinnee?',
-        why: /^Asked by `fy` on kirin-box at \d\d:\d\d UTC\./u,
+        why: /^Asked by fy on kirin-box at \d\d:\d\d UTC\./u,
       },
     ]);
     should(JSON.stringify(raised)).not.containEql(SEED);

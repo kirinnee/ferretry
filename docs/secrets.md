@@ -425,7 +425,7 @@ pairing code, widening a device or any other act takes. Both directions are test
 
 **From the command line**, `fy account factor add <ACCOUNT> --totp` shows the warning, takes the key at a hidden
 prompt (a base32 key or an `otpauth://totp` link), stages it and puts a card on the agenda — "Save automatic codes to
-GitHub · kirinnee? Asked by `fy` on kirin-box at 14:02 UTC" — then waits. Allow it in the app with your passkey and it
+GitHub · kirinnee? Asked by fy on kirin-box at 14:02 UTC" — then waits. Allow it in the app with your passkey and it
 prints "Saved"; Deny, or two minutes, and nothing is saved. `--session <id>` names the board for the card (the
 current session's by default). The CLI has no way to save a seed itself.
 
@@ -470,8 +470,10 @@ any other (older, silent, or one whose health read failed) keeps the saved-login
   sign-in sit under "No site yet". A damaged store is said to be damaged, never drawn as an empty list.
 - **Account** — _Details_ (name, username, a write-only password: the box is empty every time and the page only says
   one is saved), _2FA keys_ and _Sites_.
-- **2FA keys** — each key by its label and plain facts with a state: _verified_ (a code it made worked), _unverified_ (not
-  yet used) or _failed_ (the last one did not). Adding an SMS, email, push or security key sends no value. Automatic codes
+- **2FA keys** — each key by its label and plain facts with a usage record: _Last code worked on <date>_,
+  _Not used yet_ or _Last code did not work on <date>_ (red, the only one drawn as a warning). It is a record of what the
+  daemon saw, which a ferret can steer, and not a check that the key belongs to the account, so it is never drawn as a
+  check mark and never gates a pre-approval. Adding an SMS, email, push or security key sends no value. Automatic codes
   (a seed) go through the SAME panel the code card uses ([Set up automatic codes](input-requests.md#2fa-seeds-opt-in-per-entry)):
   stage, the two ticks, then the `add-2fa-key` passkey bound to that stage. There is no second path: a seed is never
   sent to `POST …/factors`.

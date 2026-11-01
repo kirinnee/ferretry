@@ -55,10 +55,21 @@ const item = (mismatch = false): ComponentProps<typeof TwoFactorSeedHost>['item'
   ].join('\n'),
 });
 
-const served = (state: 'waiting' | 'saved' | 'dropped' | 'expired' = 'waiting', failCommit?: unknown) => {
+interface Served {
+  readonly state?: 'waiting' | 'saved' | 'dropped' | 'expired';
+  readonly failCommit?: unknown;
+  readonly failDrop?: unknown;
+  readonly failRead?: unknown;
+  readonly flag?: boolean;
+}
+
+const served = ({ state = 'waiting', failCommit, failDrop, failRead, flag = false }: Served = {}) => {
   const machine = fakeClient((call: Call) => {
     if (call.path === '/v1/accounts') return accountList();
-    if (call.method === 'DELETE') return { stage: STAGE, dropped: true };
+    if (call.method === 'DELETE') {
+      if (failDrop !== undefined) throw failDrop;
+      return { stage: STAGE, dropped: true };
+    }
     if (call.path.endsWith('/commit')) {
       if (failCommit !== undefined) throw failCommit;
       return {
@@ -75,25 +86,38 @@ const served = (state: 'waiting' | 'saved' | 'dropped' | 'expired' = 'waiting', 
         mismatch: false,
       };
     }
-    return { stage: STAGE, account: 'GITHUB', label: 'Authenticator app', state, expiresAt: AT };
+    if (failRead !== undefined) throw failRead;
+    return {
+      stage: STAGE,
+      account: 'GITHUB',
+      label: 'Authenticator app',
+      state,
+      expiresAt: AT,
+      ...(flag ? { mismatch: true } : {}),
+    };
   });
   return machine;
 };
 
-const draw = async (over: {
-  readonly mismatch?: boolean;
-  readonly state?: 'waiting' | 'saved' | 'dropped' | 'expired';
-  readonly allowKey?: boolean;
-  readonly failCommit?: unknown;
-}) => {
-  const machine = served(over.state, over.failCommit);
+const draw = async (
+  over: Served & {
+    readonly mismatch?: boolean;
+    readonly allowKey?: boolean;
+    readonly withoutKey?: boolean;
+  },
+) => {
+  const machine = served(over);
   const asked: { stage: TwoFactorStageId; words: string }[] = [];
   const view = await mount(
     <TwoFactorSeedHost
-      addKey={async (stage, words) => {
-        asked.push({ stage, words });
-        return over.allowKey ?? true;
-      }}
+      {...(over.withoutKey === true
+        ? {}
+        : {
+            addKey: async (stage: TwoFactorStageId, words: string) => {
+              asked.push({ stage, words });
+              return over.allowKey ?? true;
+            },
+          })}
       connection={connection}
       createClient={async () => machine.client}
       item={item(over.mismatch)}
@@ -112,7 +136,7 @@ describe('the owner card for a staged 2FA seed', () => {
     const card = await draw({});
 
     expect(card.q('[data-seed-subject]')?.textContent).toBe('Save automatic codes to GitHub · kirinnee?');
-    expect(card.q('[data-seed-why]')?.textContent).toContain('Asked by fy on kirin-box');
+    expect(card.q('[data-seed-why]')).toBeNull();
     expect(card.q('[data-seed-lines]')?.textContent).toContain('together they are one factor');
     expect(card.q('[data-seed-warning]')?.textContent).toBe(LOGIN_TOTP_WARNING);
     expect(card.q('[data-seed-mismatch]')).toBeNull();
@@ -222,11 +246,65 @@ describe('the owner card for a staged 2FA seed', () => {
   });
 });
 
+describe('the seed card’s failure and flag paths', () => {
+  it('should draw the amber box from the daemon’s structured flag even with no mismatch sentence in the words', async () => {
+    const card = await draw({ flag: true });
+
+    expect(card.q('[data-seed-mismatch]')).not.toBeNull();
+    await click(card.q('[data-seed-warning-tick]'));
+    expect((card.q('[data-seed-allow]') as HTMLButtonElement).disabled).toBe(true);
+    await click(card.q('[data-seed-mismatch-tick]'));
+    expect((card.q('[data-seed-allow]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('should not draw the box when only the daemon’s sentence is missing and no flag is set', async () => {
+    const card = await draw({});
+
+    expect(card.q('[data-seed-mismatch]')).toBeNull();
+  });
+
+  it('should send a stage this app cannot see to a paired device, and leave the card up on any other failed read', async () => {
+    const gone = await draw({ failRead: { status: 404, code: TWO_FACTOR_ERROR_CODES.stageGone } });
+    const broken = await draw({ failRead: new Error('offline') });
+
+    expect(gone.q('[data-seed-done]')?.textContent).toContain('confirm it from a paired device');
+    expect(gone.q('[data-seed-allow]')).toBeNull();
+    expect(broken.q('[data-seed-allow]')).not.toBeNull();
+    expect(broken.q('[data-seed-done]')).toBeNull();
+  });
+
+  it('should say a device without passkeys cannot save it, and keep the card', async () => {
+    const card = await draw({ withoutKey: true });
+
+    await click(card.q('[data-seed-warning-tick]'));
+    await click(card.q('[data-seed-allow]'));
+    for (let tries = 0; tries < 3; tries += 1) await settle();
+
+    expect(card.q('[data-seed-failed]')?.textContent).toContain('cannot confirm with a passkey');
+    expect(card.calls.filter(call => call.method !== 'GET')).toEqual([]);
+  });
+
+  it('should say Denied once the stage is dropped, and say why when the drop failed', async () => {
+    const denied = await draw({});
+    const refused = await draw({ failDrop: { status: 404, code: TWO_FACTOR_ERROR_CODES.stageGone } });
+
+    await click(denied.q('[data-seed-deny]'));
+    for (let tries = 0; tries < 3; tries += 1) await settle();
+    await click(refused.q('[data-seed-deny]'));
+    for (let tries = 0; tries < 3; tries += 1) await settle();
+
+    expect(denied.calls.some(call => call.method === 'DELETE')).toBe(true);
+    expect(denied.q('[data-seed-done]')?.textContent).toContain('Denied');
+    expect(refused.q('[data-seed-failed]')?.textContent).toContain('timed out');
+  });
+});
+
 describe('the seed card’s model', () => {
   it('should split the daemon’s bullets and lift the mismatch line out', () => {
     const facts = seedCardFacts(`- one\n- ${TWO_FACTOR_SEED_CARD_MISMATCH_LINE}\n- two`);
     expect(facts).toEqual({ lines: ['one', 'two'], mismatch: true });
     expect(seedCardFacts(undefined)).toEqual({ lines: [], mismatch: false });
+    expect(seedCardFacts('- one', true)).toEqual({ lines: ['one'], mismatch: true });
   });
 
   it('should block until every needed tick is given', () => {

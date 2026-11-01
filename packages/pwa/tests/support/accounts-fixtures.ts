@@ -5,7 +5,7 @@ import type { Call } from './input-fixtures.ts';
 
 const AT = '2026-10-31T10:00:00.000Z';
 export const SI_GITHUB = 'si_0000000000000001';
-const SI_WORK = 'si_0000000000000002';
+export const SI_WORK = 'si_0000000000000002';
 export const SI_VERCEL = 'si_0000000000000003';
 export const SMS = 'tf_000000000001';
 export const APP = 'tf_000000000002';
@@ -115,7 +115,7 @@ export const list = (over: { health?: 'ready' | 'damaged'; diagnosis?: string } 
     ],
   });
 
-export const fileOf = (text: string, exists = true) => ({
+export const fileOf = (text: string, exists = true, state: 'ok' | 'pending' = 'ok') => ({
   path: 'account-defaults.yaml',
   absolutePath: '/home/kirin/.ferretry/config/account-defaults.yaml',
   kind: 'accountDefaults',
@@ -123,7 +123,7 @@ export const fileOf = (text: string, exists = true) => ({
   exists,
   text,
   etag: 'e1',
-  state: 'ok',
+  state,
   issues: [],
 });
 
@@ -131,6 +131,7 @@ export interface World {
   readonly accounts?: AccountList;
   readonly groups?: string[][] | 'missing';
   readonly defaults?: string | 'error';
+  readonly defaultsState?: 'ok' | 'pending';
   readonly refuse?: (call: Call) => string | undefined;
 }
 
@@ -146,7 +147,7 @@ export const answer =
     }
     if (call.path.startsWith('/v1/config/file')) {
       if (world.defaults === 'error') throw new Error('no such route');
-      return fileOf(world.defaults ?? '', world.defaults !== undefined);
+      return fileOf(world.defaults ?? '', world.defaults !== undefined, world.defaultsState);
     }
     if (call.path.endsWith('/commit')) return { account: 'GITHUB', factor: app, mismatch: false };
     if (call.path.endsWith('/factors/seed'))
@@ -163,6 +164,7 @@ export const answer =
     if (call.method === 'DELETE' && call.path.includes('/sign-ins/')) return { id: SI_GITHUB, removed: true };
     if (call.method === 'DELETE') return { id: 'GITHUB', removed: true };
     if (call.path.endsWith('/factors')) return sms;
+    if (call.path.endsWith('/sign-ins')) return list().signIns[0];
     if (call.path.endsWith('/merge') || call.path.endsWith('/apart')) return {};
     if (call.path === '/v1/accounts/defaults') return { scope: 'sites', key: 'x', account: null };
     const found = (world.accounts ?? list()).signIns[0];
