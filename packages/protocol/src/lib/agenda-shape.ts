@@ -141,7 +141,7 @@ export const agendaShapeHelp = (fy: string): string =>
  * prompt that turns Agenda mode on.
  */
 export const AGENDA_SHAPE_LINE =
-  'Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`), free text in the reply; todo=`--step`s; info=Got it; permission=Approve/Deny.';
+  'Kinds: choice=ONE question+2–3 `-o "Label: why"`, `--recommend`; reply=open or several asks (one `-q` each); form=several structured answers (`--field`), text in the reply; todo=`--step`s; info=Got it; permission=Approve/Deny.';
 
 /** What a new raise says about its shape: the fields `agendaShapeProblems` reads. */
 export interface AgendaShapeRaise {

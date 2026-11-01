@@ -782,7 +782,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql(AGENDA_SHAPE_LINE);
     should(text).containEql('choice=ONE question+2–3 `-o "Label: why"`, `--recommend`');
     should(text).containEql('reply=open or several asks (one `-q` each)');
-    should(text).containEql('form=several structured answers (`--field`), free text in the reply');
+    should(text).containEql('form=several structured answers (`--field`), text in the reply');
     should(text).containEql('todo=`--step`s');
     should(text).containEql('info=Got it');
     should(text).containEql('permission=Approve/Deny');
@@ -800,9 +800,9 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).not.containEql('agenda surface');
     // Every item stays current, in the turn the facts changed: edited or closed, never left stale.
     should(text).containEql('KEEP CURRENT this turn');
-    should(text).containEql('`edit` changed');
-    should(text).containEql('`done` settled');
-    should(text).containEql('`ls`=open');
+    should(text).containEql('`edit` if changed');
+    should(text).containEql('`done` if settled');
+    should(text).containEql('`ls` = open');
     should(text).not.containEql('Attention');
     should(text).not.containEql('`fy ');
   });
