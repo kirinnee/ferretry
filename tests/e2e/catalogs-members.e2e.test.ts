@@ -407,6 +407,13 @@ async function open(person: Person, url: string): Promise<void> {
   await person.page.goto(url, { waitUntil: 'load', timeout: 30_000 });
 }
 
+/** Move to `path` inside the open document, as the app's own links do. */
+async function inApp(person: Person, path: string): Promise<void> {
+  await person.page.evaluate(
+    `(() => { history.pushState({}, '', ${JSON.stringify(path)}); window.dispatchEvent(new PopStateEvent('popstate')); })()`,
+  );
+}
+
 /** Set a `<select>` the way a person's choice does, and let the app hear it. */
 async function choose(person: Person, selector: string, value: string): Promise<void> {
   await reach(person, selector, `the ${selector} choice`);
@@ -415,7 +422,12 @@ async function choose(person: Person, selector: string, value: string): Promise<
     `[...document.querySelector(${quoted(selector)}).options].some(o => o.value === ${quoted(value)})`,
     30_000,
     `the choice ${value} in ${selector}`,
-  );
+  ).catch(async (error: unknown) => {
+    const offered = await person.page.evaluate<string>(
+      `JSON.stringify([...document.querySelector(${quoted(selector)}).options].map(o => o.value))`,
+    );
+    throw new Error(`${(error as Error).message}. Offered: ${offered}`);
+  });
   await person.page.evaluate(`(() => {
     const select = document.querySelector(${quoted(selector)});
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, ${quoted(value)});
@@ -510,16 +522,17 @@ async function pairToMemberMachine(world: World, person: Person): Promise<string
 /**
  * Back to "Shared with me" in the same browser, unlocked with the member passkey.
  *
- * A fresh load by default. `inApp` switches page inside the open document instead, the way a person
- * moves on from the machine they just paired: the install sheet offers the projects this document has
- * already read from the machine, and a fresh `/shared` load has read none.
+ * A fresh load by default. Given `viaMachine`, it moves inside the open document instead: to that
+ * machine's home, then to `/shared`. The install sheet offers the projects this document has already
+ * read from the machine, only the machine's home reads them, and a fresh `/shared` load has read none.
  */
-async function backToShared(person: Person, world: World, publisherId: string, inApp = false): Promise<void> {
-  if (inApp) {
-    await person.page.evaluate(
-      `(() => { history.pushState({}, '', '/shared'); window.dispatchEvent(new PopStateEvent('popstate')); })()`,
-    );
-  } else await open(person, `${world.origin.origin}/shared`);
+async function backToShared(person: Person, world: World, publisherId: string, viaMachine?: string): Promise<void> {
+  if (viaMachine === undefined) await open(person, `${world.origin.origin}/shared`);
+  else {
+    await inApp(person, `/d/${viaMachine}`);
+    await reach(person, '[data-home-all-sessions]', "the member machine's home");
+    await inApp(person, '/shared');
+  }
   const seen = await reachAny(
     person,
     ['[data-shared-catalog]', '[data-publisher-unlock]', '[data-shared-offline]'],
@@ -626,8 +639,8 @@ async function joinJourney(world: World): Promise<void> {
 async function installJourney(world: World): Promise<void> {
   const alice = await newPerson(world, 'alice');
   const minted = await joinNewMember(world, alice, 'Alice', [world.teamCatalog]);
-  await pairToMemberMachine(world, alice);
-  await backToShared(alice, world, minted.publisherId, true);
+  const machineId = await pairToMemberMachine(world, alice);
+  await backToShared(alice, world, minted.publisherId, machineId);
   await reviewSkill(world, alice, world.teamCatalog, SKILL_TEAM);
 
   await step(world.journey, 'alice:install-target', async () => {
