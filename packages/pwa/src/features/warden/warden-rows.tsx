@@ -1,5 +1,5 @@
 /**
- * Investigations and Watching, in the same one-line style as Recent actions. Render-only.
+ * Investigations and Watching, in the same one-line style as Recent triggers. Render-only.
  *
  * Wide: one line. On a phone: line 1 is the time and the name, line 2 is the chips (and whatever acts on
  * the row), so a row is two short lines and never a card. The 44px touch floor is the row, not each line.

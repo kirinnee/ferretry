@@ -20,7 +20,7 @@ import { daemonAgendaPath } from '../../lib/pages/routes.ts';
 import { INSIGHTS_COLUMN_CLASS } from '../../shell/insights-frame.tsx';
 import { Badge } from '../../shell/primitives.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
-import { RecentActions } from './warden-action-rows.tsx';
+import { RecentTriggers } from './warden-trigger-rows.tsx';
 import { WardenChipBadge } from './warden-chips.tsx';
 import {
   accountChip,
@@ -146,7 +146,7 @@ export function WardenOverview({
       {statusView !== undefined && (
         <>
           <WardenStatsPanel status={statusView} now={now} />
-          <RecentActions
+          <RecentTriggers
             connection={connection}
             status={statusView}
             sessions={bySession}

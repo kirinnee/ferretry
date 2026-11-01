@@ -178,7 +178,7 @@ const EARLIER_DAYS: readonly WardenDayStats[] = [
   }),
 ].map(withActions);
 
-/** Jev's checks that settled nothing: what Recent actions lists for Jev beside its actions. */
+/** Jev's checks that settled nothing: what Recent triggers lists for Jev beside its actions. */
 const JEV_CHECKS: readonly WardenJevCheck[] = [
   {
     at: at(2),
@@ -475,6 +475,7 @@ const STATUS_WITHOUT_JEV: WardenStatusView = {
       confidence: 0.91,
       agent: 'claude-spare',
       reason: 'The account is rate-limited; the same task will run on the spare one.',
+      fromAgent: 'claude-default',
     },
     {
       at: at(47),
@@ -623,6 +624,7 @@ const STATUS_WITHOUT_JEV: WardenStatusView = {
       detail: 'Moved it to another account because claude-default hit its usage limit.',
       reportPath: 'warden/reports/fleet.md',
       investigator: 'warden-000024',
+      fromAgent: 'claude-default',
       agent: 'claude-spare',
     },
     {
