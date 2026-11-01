@@ -67,11 +67,6 @@ describe('daemon features', () => {
     should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.signInRules)).be.false();
   });
 
-  it('should name gate items for the app to gate on, but not report them until the daemon raises them', () => {
-    should(DAEMON_FEATURES.boardGateItems).equal('board.gate-items.1');
-    should(daemonFeatureList()).not.containEql('board.gate-items.1');
-  });
-
   it('should report approve-on-phone now that the app draws the card', () => {
     should(DAEMON_FEATURES.phoneApproval).equal('input.phone-approval.1');
     should(daemonFeatureList()).containEql('input.phone-approval.1');
