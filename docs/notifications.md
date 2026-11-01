@@ -45,12 +45,27 @@ is, a notice without `--ping`, the owner's own moves — moves the Inbox badge a
 | 3   | A notice with **`--ping`**                                                                 | The notice's summary                                              | Once per notice                         |
 | 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**              | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
 
-An input card always counts as inside the window (row 2), so it pushes once the moment it is raised. An
+An input card always counts as inside the window (row 2), so it pushes once the moment it is raised, unless it is
+**quiet** (below). An
 **approve-on-phone card** ([input requests](input-requests.md#approve-on-your-phone)) is the one card that pushes
 outside these rows: once when it is raised, and once more for each new number the daemon reads off the page (at most
 four in all). It has no `neededBy`, so row 2 never pushes it a second time. A woken item already inside its deadline's window gets the deadline's push (row 2) instead, never both. A snoozed
 or replied item is parked ([agenda.md](agenda.md#parked-items)): it never counts toward a stop or a deadline while
 it sleeps.
+
+### Quiet cards: filled in advance, never buzzed
+
+An input card that is filled the moment it is raised, under a paste rule the owner approved in advance
+([secure copy](secure-copy.md)) or a task plan line ([input requests](input-requests.md#task-plan-fills-a-sign-in-the-owner-approved-in-advance)),
+is raised and closed at once: it was never the owner's to answer, so it must not buzz. While the daemon fills it, the
+card is QUIET (`InputRequestService.quietCard`): `AgendaBuzz` leaves it out of the owner's items, so it makes neither
+its deadline push nor a stop. The card on the wire is unchanged; the agenda history shows it closed ("Filled under
+your task plan (line 2) on github.com.").
+
+When the fill does not happen after all (a check missed, the write typed nothing), the card stops being quiet and the
+daemon adds one line to its context ("A task plan line didn't apply here, so you're asked as usual."). That edit is a
+daemon move, so the board settles at once and the card makes its one push, as any input card does. The line is the
+same whatever went wrong: the reason is on the owner's input card only.
 
 Each push opens the ferret's chat at the item that triggered it (`?attention=<id>`): the first blocking item
 for a stop, else the oldest.
@@ -296,7 +311,7 @@ recorded push errored or reached no device, plus a `notification log` note for s
 | Path                                             | Where                                       | Decision                                                                                                               |
 | ------------------------------------------------ | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | A ferret stops on the owner                      | daemon `AgendaBuzz` → `NotificationService` | **The** push. One per stop, grouped. See above.                                                                        |
-| An item's `neededBy` comes near                  | daemon `AgendaBuzz`                         | **One push** per item.                                                                                                 |
+| An item's `neededBy` comes near                  | daemon `AgendaBuzz`                         | **One push** per item. Never for a quiet input card (filled under a paste rule or a task plan line at its raise).      |
 | A notice with `--ping`                           | `fy notify --ping`                          | **One push** per notice.                                                                                               |
 | A sign-in to approve on the phone                | daemon `PhoneApprovalService`               | **One push** at the raise and one per new number read (at most four), high inside the caps.                            |
 | An item is created, edited, surfaced or answered | daemon                                      | **Never pushed.** Inbox badge only. (The per-turn grouped push, the surfaced push and the more-info push are retired.) |

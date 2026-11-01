@@ -40,6 +40,12 @@ function host(
     hostless?: boolean;
     observation?: BrowserInputObservation;
     refound?: BrowserInputObservation;
+    /** This browser cannot check or empty a field when a grant fill's hold ends. */
+    clearless?: boolean;
+    /** This browser can't arm the pagehide clear (an older worker), or refuses to now. */
+    armless?: boolean;
+    arm?: 'armed' | 'refused';
+    cleared?: 'cleared' | 'moved' | 'unknown' | Error;
   } = {},
 ) {
   const calls: string[] = [];
@@ -78,6 +84,26 @@ function host(
       if (outcome instanceof Error) throw outcome;
       return outcome;
     },
+    ...(options.armless === true
+      ? {}
+      : {
+          inputArm: async (pageId: string, _expected: unknown, fieldIds: readonly string[]) => {
+            calls.push(`arm:${pageId}:${fieldIds.join(',')}`);
+            return options.arm ?? 'armed';
+          },
+        }),
+    ...(options.clearless === true
+      ? {}
+      : {
+          inputClear: async (
+            pageId: string,
+            job: { readonly fields: readonly { readonly backendNodeId: number }[] },
+          ) => {
+            calls.push(`clear:${pageId}:${job.fields.map(field => field.backendNodeId).join(',')}`);
+            if (options.cleared instanceof Error) throw options.cleared;
+            return options.cleared ?? 'moved';
+          },
+        }),
   };
   const pages: PageInputHost = {
     inputOnPage: async (sessionId, key, work) => {
@@ -312,5 +338,71 @@ describe('PageInputTarget.pushNumber', () => {
     should(await unable.pushNumber('s1', 'app')).be.undefined();
     should(await missing.pushNumber('s1', 'app')).be.undefined();
     should(await failing.pushNumber('s1', 'app')).be.undefined();
+  });
+});
+
+describe('PageInputTarget: a grant fill’s clear (R3a-4)', () => {
+  const VALUES = [{ field: 'password', text: 'hunter2-hunter2' }];
+  const JOB = {
+    navigationId: 'loader-1',
+    fields: [{ frameId: 'main', backendNodeId: 9 }],
+  };
+
+  it('should arm the pagehide clear on the password fields first, in the same page turn, and only when asked', async () => {
+    const armed = host();
+    should(await armed.target.type('s1', APP, VALUES, true, FACTS_PAGE, { armClear: true })).equal('typed');
+    should(armed.calls).eql(['page:s1:app', 'arm:page-1:password', 'type:page-1:password:true']);
+    const plain = host();
+    should(await plain.target.type('s1', APP, VALUES, true, FACTS_PAGE)).equal('typed');
+    should(plain.calls).eql(['page:s1:app', 'type:page-1:password:true']);
+  });
+
+  it('should type nothing when the browser refuses the arm, cannot arm (an older worker) or cannot clear', async () => {
+    for (const options of [{ arm: 'refused' as const }, { armless: true }, { clearless: true }]) {
+      const { target, calls } = host(options);
+      should(await target.type('s1', APP, VALUES, true, FACTS_PAGE, { armClear: true })).equal('target_changed');
+      should(calls.some(call => call.startsWith('type:'))).be.false();
+    }
+  });
+
+  it('should ask a grant fill whether it may still go ahead inside the page turn, before arming and before typing', async () => {
+    const first = host();
+    should(
+      await first.target.type('s1', APP, VALUES, true, FACTS_PAGE, { armClear: true, proceed: () => false }),
+    ).equal('target_changed');
+    should(first.calls).eql(['page:s1:app']);
+
+    // Revoked while the arm ran: armed, but not a key typed.
+    let asked = 0;
+    const second = host();
+    should(
+      await second.target.type('s1', APP, VALUES, true, FACTS_PAGE, {
+        armClear: true,
+        proceed: () => {
+          asked += 1;
+          return asked === 1;
+        },
+      }),
+    ).equal('target_changed');
+    should(second.calls).eql(['page:s1:app', 'arm:page-1:password']);
+  });
+
+  it('should check and empty the typed fields in the page’s own queue, and read anything odd as unknown', async () => {
+    const { target, calls } = host({ cleared: 'cleared' });
+    should(await target.clear('s1', APP, JOB)).equal('cleared');
+    should(calls).eql(['page:s1:app', 'clear:page-1:9']);
+    should(await host({ cleared: new Error('worker fell over') }).target.clear('s1', APP, JOB)).equal('unknown');
+    should(await host({ clearless: true }).target.clear('s1', APP, JOB)).equal('unknown');
+    should(await host({ refuse: true }).target.clear('s1', APP, JOB)).equal('unknown');
+  });
+
+  it('should route a page’s clear to the page, and answer unknown for a terminal', async () => {
+    const page = host({ cleared: 'moved' });
+    const router = new InputTargetRouter(
+      { observe: async () => ({ ok: true, facts: FACTS }), type: async () => 'typed' },
+      page.target,
+    );
+    should(await router.clear('s1', APP, JOB)).equal('moved');
+    should(await router.clear('s1', { kind: 'terminal', key: 'dev' }, JOB)).equal('unknown');
   });
 });

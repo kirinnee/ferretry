@@ -73,6 +73,18 @@ export interface BrowserInputDocument {
   readonly host?: string;
 }
 
+/**
+ * A grant fill's check before its page hold ends (`inputClear`): each password field it typed into, by node. NEVER
+ * THE VALUE: a field that is still connected and holds anything is emptied, whatever it holds.
+ */
+export interface BrowserInputClearJob {
+  readonly navigationId: string;
+  readonly fields: readonly { readonly frameId: string; readonly backendNodeId: number }[];
+}
+
+/** `cleared`: a field still held a value and is empty now; `moved`: none holds one; `unknown`: it can't be told. */
+export type BrowserInputClearOutcome = 'cleared' | 'moved' | 'unknown';
+
 /** A provider whose own sign-in page shows a push number (push-number.ts). */
 export type PushNumberProvider = 'okta' | 'microsoft' | 'google' | 'duo';
 
@@ -138,6 +150,18 @@ export interface BrowserInputFieldsPort {
     values: readonly BrowserInputValue[],
     submit: boolean,
   ): Promise<BrowserInputOutcome>;
+  /**
+   * A grant fill, before its write (`armInputFields`): checks the page against `expected` as a write does, then arms a
+   * `pagehide` listener in an isolated world of each named password field's frame that empties every password input
+   * when the page is hidden (the back/forward cache would otherwise keep the value). Its own call, so a browser worker
+   * from before it refuses the method and the daemon types nothing. `armed`, or `refused` with nothing armed.
+   */
+  inputArm?(pageId: string, expected: BrowserInputFacts, fieldIds: readonly string[]): Promise<'armed' | 'refused'>;
+  /**
+   * A grant fill's check before its page hold ends (`clearInputFields`): a typed password field that still holds a
+   * value is emptied. Absent: this browser can't, so a grant fill on a page types nothing.
+   */
+  inputClear?(pageId: string, job: BrowserInputClearJob): Promise<BrowserInputClearOutcome>;
 }
 
 /** The longest side of a field shot, in CSS pixels: enough to see the form, not the whole page. */
@@ -149,7 +173,8 @@ export const BROWSER_INPUT_SHOT_MARGIN = 48;
  * The worker's JSON-line methods behind the port, one per call: `inputDocument` `{ pageId }` answers
  * `{ document: { navigationId } }` (the main frame's loaderId); `inputObserve` `{ pageId, fields }` answers
  * `{ observation }`; `inputRefind` `{ pageId, expected, fields }` answers `{ observation }`; `inputShot`
- * `{ pageId, facts }` answers `{ shot }`; `inputType` `{ pageId, expected, values, submit }` answers `{ outcome }`.
+ * `{ pageId, facts }` answers `{ shot }`; `inputType` `{ pageId, expected, values, submit }` answers `{ outcome }`;
+ * `inputArm` `{ pageId, expected, fieldIds }` answers `{ outcome }`; `inputClear` `{ pageId, job }` answers `{ outcome }`.
  * Each answer is parsed by the daemon before it is believed.
  */
 export const BROWSER_INPUT_WORKER_METHODS = {
@@ -160,5 +185,7 @@ export const BROWSER_INPUT_WORKER_METHODS = {
   type: 'inputType',
   text: 'inputText',
   probe: 'inputProbe',
+  arm: 'inputArm',
+  clear: 'inputClear',
   pushNumber: 'pushNumberRead',
 } as const;

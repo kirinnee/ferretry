@@ -37,7 +37,7 @@ const deadlineDue = (item: AgendaItem, horizon: number): boolean =>
  *  1. the ferret is STOPPED on the owner: idle with an agenda item on the owner's turn — ONE grouped push
  *     per stop;
  *  2. an item's `neededBy` is within the warning window — ONE push per item (an input card always is, so it
- *     pushes the moment it is raised);
+ *     pushes the moment it is raised, unless it is being filled under a task plan or a paste rule: QUIET);
  *  3. a notice with `ping`;
  *  4. a SNOOZED item woke and it blocks the ferret or has a deadline — ONE push per wake (an item already
  *     inside its deadline's window gets the deadline's push instead, never both).
@@ -56,6 +56,11 @@ export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
     private readonly sink: BuzzSink,
     private readonly clock: { now(): string },
     private readonly warnHours: number = DEFAULT_DEADLINE_WARN_HOURS,
+    /**
+     * Whether an input card is being filled under a task-plan line or a pre-approval rule right now
+     * (`InputRequestService.quietCard`): it is raised and closed at once, so it buzzes nothing. Absent: none is.
+     */
+    private readonly quiet: (sessionId: string, requestId: string) => boolean = () => false,
   ) {}
 
   async raised(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
@@ -97,7 +102,10 @@ export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
     try {
       const ledger = (await this.boards.read(sessionId)) ?? emptyAgendaLedger(sessionId, this.clock.now());
       const snapshot = agendaSnapshot(ledger);
-      const owner = ownerTurnItems(snapshot.items);
+      // A card being filled in advance is not the owner's to answer: it neither pushes its deadline nor makes a stop.
+      const owner = ownerTurnItems(snapshot.items).filter(
+        item => item.input === undefined || !this.quiet(sessionId, item.input.requestId),
+      );
       if (owner.length === 0) return;
       const horizon = Date.parse(this.clock.now()) + this.warnHours * 3_600_000;
       for (const item of owner) {

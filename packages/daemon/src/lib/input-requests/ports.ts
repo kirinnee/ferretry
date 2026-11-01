@@ -18,6 +18,7 @@ import type {
   SignInChoiceContext,
   TwoFactorId,
 } from '@ferretry/protocol';
+import type { ClearJob, ClearOutcome } from '../sign-in-grants/clear.ts';
 
 /**
  * THE SEAMS THE INPUT-REQUEST SERVICE STANDS ON (docs/input-requests.md).
@@ -165,6 +166,12 @@ export interface InputTargetPort {
     facts: InputTargetFacts,
     fieldIds: readonly string[],
   ): Promise<'hidden' | 'shown' | 'aborted'>;
+  /**
+   * Before a grant fill's page hold ends (a page target only): empties each typed password field that STILL holds a value
+   * (same document, node still connected, not empty), and says what it found: `cleared`, `moved` (none holds one) or
+   * `unknown`. No value is sent: only which nodes (`sign-in-grants/clear.ts`).
+   */
+  clear?(sessionId: string, target: InputTarget, job: ClearJob): Promise<ClearOutcome>;
 }
 
 /**
@@ -192,6 +199,19 @@ export interface TypeOptions {
    * must still hold the terminal, so the file the log names is the one typed into.
    */
   readonly profileProgram?: ProfileProgram;
+  /**
+   * A grant fill types a password into a page: before the first value goes in, the browser arms (its own `inputArm`
+   * call) a `pagehide` listener in an isolated world of each password field's frame that empties every password input
+   * when the page is hidden (the back/forward cache would otherwise keep the value). Arming fails or is refused (an
+   * older worker): nothing is typed.
+   */
+  readonly armClear?: boolean;
+  /**
+   * A grant fill: whether it may still go ahead, asked synchronously INSIDE the target's own turn (the page's queue, or
+   * just before the terminal's guarded write), right before arming and right before the first key. `false`: nothing is
+   * typed (`target_changed`). A write that waited in the page's queue behind the ferret's acts is asked again there.
+   */
+  readonly proceed?: () => boolean;
 }
 
 /** The card the owner answers. The daemon words the title and ask; the agent's prompt rides as `prompt` only. */
@@ -216,6 +236,11 @@ export interface InputAgendaPort {
   close(sessionId: string, id: AgendaId, note: string): Promise<void>;
   /** The agent's prompt stored on the open card, so a restart can rebuild its request; nothing when there is no such card. */
   promptOf(sessionId: string, id: AgendaId): Promise<string | undefined>;
+  /**
+   * Adds one line of the daemon's own above the card's context (the card as raised, so the agent's prompt stays where a
+   * restart reads it). A daemon edit, so the card buzzes as any raise does once it is the owner's to answer. Total.
+   */
+  note?(sessionId: string, id: AgendaId, card: Pick<InputCard, 'prompt' | 'chain'>, line: string): Promise<void>;
 }
 
 /** Tells the raising agent its request ended, in plain words with no value. Total: never rejects. */

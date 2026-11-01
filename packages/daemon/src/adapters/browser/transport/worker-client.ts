@@ -26,6 +26,8 @@ import {
   type BrowserInputObservation,
   type BrowserInputOutcome,
   type BrowserInputShot,
+  type BrowserInputClearJob,
+  type BrowserInputClearOutcome,
   type BrowserInputValue,
   type BrowserPageActed,
   type BrowserPushNumberRead,
@@ -559,6 +561,37 @@ export class BrowserWorkerClient implements BrowserAutomation {
       return outcome === 'typed' || outcome === 'target_changed' || outcome === 'target_gone' ? outcome : 'uncertain';
     } catch {
       return 'uncertain';
+    }
+  }
+
+  /**
+   * A grant fill arms its `pagehide` clear before the write. A worker from before this call refuses the unknown method,
+   * and that, a failure or any odd answer is `refused`: the daemon then types nothing.
+   */
+  async inputArm(
+    pageId: string,
+    expected: BrowserInputFacts,
+    fieldIds: readonly string[],
+  ): Promise<'armed' | 'refused'> {
+    try {
+      const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.arm, { pageId, expected, fieldIds });
+      return (raw as { outcome?: unknown } | null)?.outcome === 'armed' ? 'armed' : 'refused';
+    } catch {
+      return 'refused';
+    }
+  }
+
+  /**
+   * A grant fill's check before its page hold ends: the job names nodes, never a value. Any failure or odd answer is
+   * `unknown`, which stops the line.
+   */
+  async inputClear(pageId: string, job: BrowserInputClearJob): Promise<BrowserInputClearOutcome> {
+    try {
+      const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.clear, { pageId, job });
+      const outcome = (raw as { outcome?: unknown } | null)?.outcome;
+      return outcome === 'cleared' || outcome === 'moved' ? outcome : 'unknown';
+    } catch {
+      return 'unknown';
     }
   }
 

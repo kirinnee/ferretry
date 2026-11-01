@@ -6,6 +6,7 @@ import {
   type AuditDetail,
   type CopyPlan,
   type CopyPlanItem,
+  type GrantMissReason,
   copyPlanOf,
   type SignInChoiceContext,
   type SignInId,
@@ -149,6 +150,9 @@ export interface ApprovedSignInLine {
   readonly sessionId: string;
   readonly line: number;
   readonly kind: 'sign-in' | 'terminal-sign-in';
+  /** In force, its uses spent, or stopped by the daemon (with why). */
+  readonly state: 'approved' | 'used-up' | 'stopped';
+  readonly because?: GrantMissReason;
   readonly signIn: SignInId;
   readonly fields: readonly string[];
   readonly remaining: number;
@@ -607,13 +611,26 @@ export class TaskPlanService {
 
   /** The ticked sign-in lines in force for a session, with their pins: what a fill is matched against. */
   approvedSignIns(sessionId: string): readonly ApprovedSignInLine[] {
+    return this.signInLines(sessionId).filter(line => line.state === 'approved');
+  }
+
+  /**
+   * Every ticked sign-in line of a session's approved plans that is in force, spent or stopped, with its pins: a fill is
+   * matched against the ones in force, and a line spent or stopped still says why it did not apply.
+   */
+  signInLines(sessionId: string): readonly ApprovedSignInLine[] {
     this.sweep();
     return [...this.#plans.values()].flatMap(plan => {
       if (plan.sessionId !== sessionId || plan.state !== 'approved') return [];
       const pins = this.#pins.get(plan.id);
       return plan.lines.flatMap(line => {
         const pinned = pins?.get(line.line);
-        if (line.kind === 'paste' || line.state !== 'approved' || line.approved === undefined || pinned === undefined)
+        if (
+          line.kind === 'paste' ||
+          (line.state !== 'approved' && line.state !== 'used-up' && line.state !== 'stopped') ||
+          line.approved === undefined ||
+          pinned === undefined
+        )
           return [];
         return [
           {
@@ -621,6 +638,8 @@ export class TaskPlanService {
             sessionId,
             line: line.line,
             kind: line.kind,
+            state: line.state,
+            ...(line.because === undefined ? {} : { because: line.because }),
             signIn: line.approved.signIn,
             fields: line.fields.filter(field => field !== 'totp' || line.approved?.totp === true).sort(),
             remaining: line.approved.remaining,
@@ -629,6 +648,62 @@ export class TaskPlanService {
           },
         ];
       });
+    });
+  }
+
+  /** Whether a ticked sign-in line is still held: its plan approved and the line not ended. */
+  signInLineHeld(planId: string, line: number): boolean {
+    const plan = this.#plans.get(planId);
+    return plan?.state === 'approved' && this.#pins.get(planId)?.has(line) === true;
+  }
+
+  /**
+   * A FILL SPENT ONE USE of a ticked sign-in line (`sign-in-grants`): one fewer left, and when; a line with none left is
+   * `used-up`. Synchronous, in memory. A line that is not in force is left as it is.
+   */
+  lineUsed(planId: string, line: number, at: number): void {
+    const plan = this.#plans.get(planId);
+    const held = plan?.lines[line];
+    if (plan?.state !== 'approved' || held === undefined || held.kind === 'paste' || held.state !== 'approved') return;
+    if (held.approved === undefined) return;
+    try {
+      const remaining = Math.max(0, held.approved.remaining - 1);
+      const used: TaskPlanLine = {
+        ...held,
+        state: remaining === 0 ? 'used-up' : 'approved',
+        approved: { ...held.approved, remaining, lastUsedAt: new Date(at).toISOString() },
+      };
+      this.#plans.set(
+        planId,
+        TaskPlanSchema.parse({ ...plan, lines: plan.lines.map(each => (each.line === line ? used : each)) }),
+      );
+    } catch {
+      this.#lineFailed(plan, line);
+    }
+  }
+
+  /**
+   * THE DAEMON STOPPED A LINE (`sign-in-grants`): the form, the recipe or the place changed since the owner approved
+   * it, or a password was left in a field. Every later fill under it asks; there is no resume, a new plan is a new
+   * passkey. Recorded, never a value.
+   */
+  async lineStopped(planId: string, line: number, because: GrantMissReason): Promise<void> {
+    const plan = this.#plans.get(planId);
+    const held = plan?.lines[line];
+    if (plan?.state !== 'approved' || held === undefined || held.kind === 'paste') return;
+    if (held.state !== 'approved' && held.state !== 'used-up') return;
+    const stopped: TaskPlanLine = { ...held, state: 'stopped', because };
+    const next = TaskPlanSchema.safeParse({
+      ...plan,
+      lines: plan.lines.map(each => (each.line === line ? stopped : each)),
+    });
+    if (!next.success) return this.#lineFailed(plan, line);
+    this.#plans.set(planId, next.data);
+    await this.#record(plan.id, {
+      action: 'task-plan-line-stopped',
+      session: auditText(plan.sessionId),
+      line: line + 1,
+      because,
     });
   }
 
@@ -658,6 +733,15 @@ export class TaskPlanService {
   }
 
   // ── Inside ────────────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * A write back from a fill could not be recorded (the plan record refused it): the line fails CLOSED. Its pins go, so it
+   * is no longer matched and every later fill under it asks; it is recorded. Nothing of the old state stays in force.
+   */
+  #lineFailed(plan: TaskPlan, line: number): void {
+    this.#pins.get(plan.id)?.delete(line);
+    void this.#record(plan.id, { action: 'task-plan-line-failed', session: auditText(plan.sessionId), line: line + 1 });
+  }
 
   /**
    * Holds one proposal's place against the caps until it is kept (it is a pending plan then) or refused (its place

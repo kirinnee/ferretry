@@ -51,8 +51,14 @@ import {
 import { recogniseBrowserChallenge } from '../src/lib/browser/transport/challenge.ts';
 import { type CopyablePage, readCopyElement } from '../src/lib/browser/transport/copy-read.ts';
 import { DownloadStage } from '../src/lib/browser/transport/download-stage.ts';
-import type { BrowserInputFacts, BrowserInputValue } from '../src/lib/browser/transport/input-contracts.ts';
+import type {
+  BrowserInputClearJob,
+  BrowserInputFacts,
+  BrowserInputValue,
+} from '../src/lib/browser/transport/input-contracts.ts';
 import {
+  armInputFields,
+  clearInputFields,
   describeInputDocument,
   probeInputFields,
   readInputText,
@@ -585,10 +591,63 @@ async function inputType(params: Readonly<Record<string, unknown>>): Promise<Rec
     return { outcome: 'target_changed' };
   }
   try {
-    return { outcome: await typeInputFields(inputSubject(page), expected, values, params.submit === true) };
+    return {
+      outcome: await typeInputFields(inputSubject(page), expected, values, params.submit === true),
+    };
   } catch {
     return { outcome: 'uncertain' };
   }
+}
+
+/** A grant fill arms its `pagehide` clear before the write: anything malformed or failing is `refused`, so nothing is typed. */
+async function inputArm(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  try {
+    const page = targetPage(params.pageId);
+    const expected = browserFactsParam(params.expected);
+    if (!Array.isArray(params.fieldIds) || !params.fieldIds.every(id => typeof id === 'string'))
+      return { outcome: 'refused' };
+    return { outcome: await armInputFields(inputSubject(page), expected, params.fieldIds as string[]) };
+  } catch {
+    return { outcome: 'refused' };
+  }
+}
+
+/**
+ * A grant fill's check before its page hold ends. A page that is gone holds nothing (`moved`); anything malformed or
+ * failing is `unknown`, which stops the line. The job names nodes, never a value.
+ */
+async function inputClear(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  let page: Page;
+  try {
+    page = targetPage(params.pageId);
+  } catch {
+    return { outcome: 'moved' };
+  }
+  try {
+    return { outcome: await clearInputFields(inputSubject(page), clearJobParam(params.job)) };
+  } catch {
+    return { outcome: 'unknown' };
+  }
+}
+
+/** A clear job as the daemon sent it, checked field by field: a frame and a node each, and nothing else. */
+function clearJobParam(raw: unknown): BrowserInputClearJob {
+  const job = (raw ?? {}) as Record<string, unknown>;
+  if (typeof job.navigationId !== 'string' || job.navigationId === '' || !Array.isArray(job.fields))
+    throw new Error('a clear job needs a document and fields');
+  const fields = job.fields.map(item => {
+    const field = (item ?? {}) as Record<string, unknown>;
+    if (
+      typeof field.frameId !== 'string' ||
+      typeof field.backendNodeId !== 'number' ||
+      !Number.isInteger(field.backendNodeId) ||
+      field.backendNodeId <= 0
+    )
+      throw new Error('a clear field needs a frame and a node');
+    return { frameId: field.frameId, backendNodeId: field.backendNodeId };
+  });
+  if (fields.length === 0 || fields.length > 8) throw new Error('a clear job names 1 to 8 fields');
+  return { navigationId: job.navigationId, fields };
 }
 
 /** The dummy probe: anything malformed or failing is `aborted`, which only ever makes the lock longer. */
@@ -970,6 +1029,10 @@ async function act(request: Request): Promise<Record<string, unknown>> {
       return await inputType(params);
     case 'inputProbe':
       return await inputProbe(params);
+    case 'inputArm':
+      return await inputArm(params);
+    case 'inputClear':
+      return await inputClear(params);
     case 'pointer': {
       const page = targetPage(params.pageId);
       const outcome = await performPointerAct(page as unknown as PointerPage, pointerActParam(params.act));

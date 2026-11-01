@@ -778,6 +778,8 @@ import {
   CredentialAgentIdentities,
   TaskPlanAgendaAdapter,
   TaskPlanService,
+  PlanSignInGrants,
+  type SignInGrantSource,
   CredentialUsageSource,
   canServeModel,
   chooseRelayCarrierSources,
@@ -6385,6 +6387,8 @@ function createInputRequestService(input: {
   readonly loginFacts: LoginFactSink;
   /** An approve-on-phone card's buzz: at the raise and for each new number, inside the high-priority caps. */
   readonly approvalPush: PhoneApprovalPushPort;
+  /** Sign-ins the owner approved in advance on a task plan: filled only while `task-plan.1` is advertised. */
+  readonly grants?: SignInGrantSource;
 }): {
   readonly service: InputRequestService;
   readonly observer: LoginObserver;
@@ -6491,6 +6495,7 @@ function createInputRequestService(input: {
     choice: input.choice,
     sealed: input.sealed,
     rules: input.rules,
+    ...(input.grants === undefined ? {} : { grants: input.grants }),
     hostName: hostname(),
   });
   // Approve on your phone (docs/input-requests.md): the number is read by the browser from the page only, and the card
@@ -10460,6 +10465,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         notifications,
         clock,
         agendaConfig.deadlineWarnHours,
+        // A card filled under a task plan or a paste rule is raised and closed at once: it buzzes nothing.
+        (sessionId, requestId) => inputRequests?.quietCard(sessionId, requestId) ?? false,
       );
       // Boards that moved before summaries were kept (or while this daemon was down) are caught up once,
       // in the background: a list served before it finishes is only missing an unread mark.
@@ -10646,6 +10653,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         sealed: secureCopies,
         rules: pasteRules,
+        // A ferret's task plan lines, as grants the shared matcher checks (docs/input-requests.md, "Task plan fills"). Plan
+        // fills close the card themselves, so they run only once the daemon advertises `task-plan.1` (the app ships first).
+        grants: new PlanSignInGrants(
+          copyPlans,
+          async id => {
+            const key = AccountKeySchema.safeParse((await accountDirectory.seedTarget(id).catch(() => undefined))?.key);
+            return key.success ? key.data : undefined;
+          },
+          () => daemonFeatureList().includes(DAEMON_FEATURES.taskPlan),
+        ),
         secretStore: secretDirectory,
         loginFacts: accountDirectory,
         approvalPush: {

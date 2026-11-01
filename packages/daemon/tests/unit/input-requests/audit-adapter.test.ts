@@ -40,6 +40,39 @@ describe('InputAuditAdapter', () => {
     });
   });
 
+  it("should record a fill under a task-plan line as the host's, with the plan, the line and the sign-in, never a value", async () => {
+    const record = await written({
+      actor: { kind: 'plan', planId: 'ab'.repeat(16), line: 1 },
+      detail: {
+        targetKind: 'browser',
+        sensitivity: 'secret',
+        submitted: true,
+        signIn: 'si_0123456789abcdef01234567',
+        source: 'saved',
+        entry: 'GITHUB',
+      },
+    });
+
+    should(record).eql({
+      event: 'input.delivered',
+      actor: { kind: 'host' },
+      subject: 's1',
+      outcome: 'succeeded',
+      detail: {
+        targetKind: 'browser',
+        sensitivity: 'secret',
+        submitted: true,
+        signIn: 'si_0123456789abcdef01234567',
+        source: 'saved',
+        entry: 'GITHUB',
+        requestId: 'r'.repeat(32),
+        by: 'plan',
+        plan: 'ab'.repeat(16),
+        line: 1,
+      },
+    });
+  });
+
   it('should record a paired device by its id', async () => {
     const record = await written({ actor: { kind: 'device', deviceId: 'phone-1' } });
 

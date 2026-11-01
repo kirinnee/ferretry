@@ -1,6 +1,14 @@
 import type { BrowserElementTarget, InputShot, InputTarget, InputTargetFacts } from '@ferretry/protocol';
 import type { BrowserInputFieldsPort, BrowserPushNumberRead } from '../browser/transport/input-contracts.ts';
-import type { InputFieldValue, InputTargetField, InputTargetPort, ObserveResult, TypeResult } from './ports.ts';
+import type { ClearJob, ClearOutcome } from '../sign-in-grants/clear.ts';
+import type {
+  InputFieldValue,
+  InputTargetField,
+  InputTargetPort,
+  ObserveResult,
+  TypeOptions,
+  TypeResult,
+} from './ports.ts';
 
 /**
  * The browser as the input bridge needs it: run one look, picture or write on a session's named page, inside
@@ -86,18 +94,49 @@ export class PageInputTarget implements InputTargetPort {
     values: readonly InputFieldValue[],
     submit: boolean,
     expected: InputTargetFacts,
+    options?: TypeOptions,
   ): Promise<TypeResult> {
     if (target.kind !== 'browser' || expected.kind !== 'browser') return 'target_gone';
     let began = false;
     try {
       return await this.host.inputOnPage(sessionId, target.key, async (port, pageId) => {
         if (pageId !== expected.pageId) return 'target_changed';
+        // A grant fill that waited in this queue goes ahead only if its line is still held now.
+        if (options?.proceed?.() === false) return 'target_changed';
+        if (options?.armClear === true) {
+          // A grant fill arms its pagehide clear first, in this same turn of the page's queue. A browser that can't (or a
+          // worker from before the call, which refuses it) types nothing: the clear is part of the fill.
+          const passwords = values
+            .map(value => value.field)
+            .filter(
+              field => expected.fields.find(each => each.fieldId === field)?.field.type?.toLowerCase() === 'password',
+            );
+          if (port.inputArm === undefined || port.inputClear === undefined) return 'target_changed';
+          if ((await port.inputArm(pageId, expected, passwords)) !== 'armed') return 'target_changed';
+          if (options.proceed?.() === false) return 'target_changed';
+        }
         began = true;
         return await port.inputType(pageId, expected, values, submit);
       });
     } catch {
       // A failure before the write began typed nothing; one after it may have typed part of the values.
       return began ? 'uncertain' : 'target_gone';
+    }
+  }
+
+  /**
+   * A grant fill's check when the page hold ends (`sign-in-grants/clear.ts`), in the page's own queue: a field that still
+   * holds what was typed is emptied. A page that is gone, or now another page, holds nothing: `moved`. Anything that
+   * goes wrong is `unknown`, which stops the line.
+   */
+  async clear(sessionId: string, target: InputTarget, job: ClearJob): Promise<ClearOutcome> {
+    if (target.kind !== 'browser') return 'unknown';
+    try {
+      return await this.host.inputOnPage(sessionId, target.key, async (port, pageId) =>
+        port.inputClear === undefined ? ('unknown' as const) : await port.inputClear(pageId, job),
+      );
+    } catch {
+      return 'unknown';
     }
   }
 

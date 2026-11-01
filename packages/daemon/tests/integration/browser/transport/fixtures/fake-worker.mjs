@@ -257,6 +257,28 @@ function inputReply(id, method, params) {
         ? { outcome: 'maybe' }
         : { outcome: params?.values?.length === 1 && params?.submit === true ? 'typed' : 'target_changed' },
     );
+  // A grant fill arms its pagehide clear before the write: the fields to arm ride the wire, the answer is one word.
+  else if (method === 'inputArm')
+    reply(
+      id,
+      true,
+      page === 'garbled'
+        ? { outcome: 'maybe' }
+        : {
+            outcome: params?.fieldIds?.[0] === 'password' && params?.expected?.kind === 'browser' ? 'armed' : 'refused',
+          },
+    );
+  // The check before a grant fill's hold ends: nodes in, one word out, never a value either way.
+  else if (method === 'inputClear')
+    reply(
+      id,
+      true,
+      page === 'garbled'
+        ? { outcome: 'maybe' }
+        : page === 'gone'
+          ? { outcome: 'moved' }
+          : { outcome: params?.job?.fields?.[0]?.backendNodeId === 7 ? 'cleared' : 'unknown' },
+    );
 }
 
 function handle({ id, method, params }) {

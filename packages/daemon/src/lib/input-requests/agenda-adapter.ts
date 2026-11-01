@@ -11,13 +11,26 @@ const PHONE_APPROVAL_ACTOR: AgendaActor = { kind: 'daemon', cause: 'phone-approv
 const PROMPT_MARKER = 'The agent says: ';
 
 /**
+ * A card's context: the daemon's own line first when it has one (why a task plan did not fill it), then the login it
+ * follows, then the agent's prompt, always last, after {@link PROMPT_MARKER}, where a restart reads it back.
+ */
+const contextOf = (card: Pick<InputCard, 'prompt' | 'chain'>, line?: string): string =>
+  [
+    ...(line === undefined ? [] : [line]),
+    ...(card.chain === undefined ? [] : [`This follows ${card.chain} in the same login.`]),
+    `${PROMPT_MARKER}${card.prompt}`,
+  ].join('\n');
+
+/**
  * The input request's card on the owner's agenda. The daemon words the heading and the reason; the
  * agent's own `prompt` rides in the context under "The agent says", never as the reason, so a ferret
  * cannot dress its sentence as the daemon's. The card has no ask and no answers: the input form answers
  * it, and the value is never part of the agenda.
  */
 export class InputAgendaAdapter implements InputAgendaPort {
-  constructor(private readonly agenda: Pick<AgendaService, 'raise' | 'resolve' | 'list'>) {}
+  constructor(
+    private readonly agenda: Pick<AgendaService, 'raise' | 'resolve' | 'list'> & Partial<Pick<AgendaService, 'edit'>>,
+  ) {}
 
   async raise(sessionId: string, card: InputCard): Promise<InputCardResult> {
     const outcome = await this.agenda.raise(
@@ -29,10 +42,7 @@ export class InputAgendaAdapter implements InputAgendaPort {
         title: card.title,
         subject: oneLine(card.ask),
         why: card.ask,
-        context: [
-          ...(card.chain === undefined ? [] : [`This follows ${card.chain} in the same login.`]),
-          `${PROMPT_MARKER}${card.prompt}`,
-        ].join('\n'),
+        context: contextOf(card),
         howToResolve: 'Open the card and type the value in its form. Nothing is sent until you press Send.',
         input: { requestId: card.requestId },
         neededBy: card.expiresAt,
@@ -48,6 +58,12 @@ export class InputAgendaAdapter implements InputAgendaPort {
 
   async close(sessionId: string, id: AgendaId, note: string): Promise<void> {
     await this.agenda.resolve(sessionId, id, INPUT_CARD_ACTOR, note).catch(() => undefined);
+  }
+
+  async note(sessionId: string, id: AgendaId, card: Pick<InputCard, 'prompt' | 'chain'>, line: string): Promise<void> {
+    await this.agenda
+      .edit?.(sessionId, id, { context: contextOf(card, line) }, INPUT_CARD_ACTOR)
+      .catch(() => undefined);
   }
 
   async promptOf(sessionId: string, id: AgendaId): Promise<string | undefined> {

@@ -364,6 +364,8 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     const bytes = new TextEncoder().encode(text);
     const keys = submit ? new Uint8Array([...bytes, CARRIAGE_RETURN]) : bytes;
     const [chunk = []] = hexInputChunks(keys, keys.byteLength);
+    // A grant fill types only while its line is still held: asked after the last look, as the last thing before the write.
+    if (options?.proceed?.() === false) return 'target_changed';
     const condition = [
       `#{==:#{pane_pid},${guard.panePid}}`,
       `#{==:#{pane_current_command},${guard.command}}`,

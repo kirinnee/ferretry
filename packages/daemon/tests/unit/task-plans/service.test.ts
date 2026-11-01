@@ -1096,3 +1096,69 @@ describe('TaskPlanService: the card names no account (secrev-1261 L4)', () => {
     should(card).containEql('the saved account on sudo@kirin-box');
   });
 });
+
+describe('TaskPlanService: what a fill writes back (R3a-4)', () => {
+  async function approved(uses = 2) {
+    const w = world();
+    await w.rules.load();
+    const plan = await w.service.propose(SESSION, { lines: [{ ...WORK_LINE, uses }] });
+    const stage = await staged(w, plan, { lines: [{ line: 0 }] });
+    await w.service.commit(PHONE, SESSION, plan.id, stage.stage, proofFor(w.service.boundSubjectOf(stage.stage)));
+    return { w, plan };
+  }
+
+  it('should spend one use per fill, say when, and mark the line used up at none', async () => {
+    const { w, plan } = await approved(2);
+    w.service.lineUsed(plan.id, 0, Date.parse('2026-11-01T12:05:00.000Z'));
+    should(w.service.get(HOST, SESSION, plan.id).lines[0]).match({
+      state: 'approved',
+      approved: { remaining: 1, lastUsedAt: '2026-11-01T12:05:00.000Z' },
+    });
+    w.service.lineUsed(plan.id, 0, Date.parse('2026-11-01T12:06:00.000Z'));
+    should(w.service.get(HOST, SESSION, plan.id).lines[0]).match({ state: 'used-up', approved: { remaining: 0 } });
+    should(w.service.approvedSignIns(SESSION)).eql([]);
+    should(w.service.signInLines(SESSION)).match([{ line: 0, state: 'used-up', remaining: 0 }]);
+    // A line with nothing left spends nothing more.
+    w.service.lineUsed(plan.id, 0, Date.parse('2026-11-01T12:07:00.000Z'));
+    should(w.service.get(HOST, SESSION, plan.id).lines[0]).match({ approved: { remaining: 0 } });
+  });
+
+  it('should stop a line with its reason, record it, and keep it out of the lines in force for good', async () => {
+    const { w, plan } = await approved(2);
+    await w.service.lineStopped(plan.id, 0, 'form-changed');
+    should(w.service.get(HOST, SESSION, plan.id).lines[0]).match({ state: 'stopped', because: 'form-changed' });
+    should(w.service.approvedSignIns(SESSION)).eql([]);
+    should(w.service.signInLines(SESSION)).match([{ line: 0, state: 'stopped', because: 'form-changed' }]);
+    should(w.service.signInLineHeld(plan.id, 0)).be.true();
+    w.service.lineUsed(plan.id, 0, Date.parse('2026-11-01T12:05:00.000Z'));
+    should(w.service.get(HOST, SESSION, plan.id).lines[0]?.state).equal('stopped');
+    should(
+      w.audits.filter(entry => entry.detail?.action === 'task-plan-line-stopped').map(entry => entry.detail),
+    ).match([{ line: 1, because: 'form-changed' }]);
+  });
+
+  it("should fail closed when a write back can't be recorded: the line is matched no more, and it is recorded", async () => {
+    const used = await approved(2);
+    // An instant no record can hold: the use can't be written, so the line is let go rather than left in force.
+    used.w.service.lineUsed(used.plan.id, 0, Number.NaN);
+    should(used.w.service.signInLineHeld(used.plan.id, 0)).be.false();
+    should(used.w.service.signInLines(SESSION)).eql([]);
+
+    const stopped = await approved(2);
+    // A reason the record refuses: the stop can't be written, so the line is let go all the same.
+    await stopped.w.service.lineStopped(stopped.plan.id, 0, 'not-a-reason' as never);
+    should(stopped.w.service.signInLineHeld(stopped.plan.id, 0)).be.false();
+    should(stopped.w.service.signInLines(SESSION)).eql([]);
+    for (const w of [used.w, stopped.w])
+      should(
+        w.audits.filter(entry => entry.detail?.action === 'task-plan-line-failed').map(entry => entry.detail),
+      ).match([{ line: 1 }]);
+  });
+
+  it('should hold no line once the plan ends', async () => {
+    const { w, plan } = await approved(2);
+    await w.service.revoke(PHONE, SESSION, plan.id);
+    should(w.service.signInLineHeld(plan.id, 0)).be.false();
+    should(w.service.signInLines(SESSION)).eql([]);
+  });
+});

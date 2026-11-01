@@ -91,6 +91,16 @@ describe('browser control policy', () => {
     ).containEql('--headless=new');
   });
 
+  it('should turn the back/forward cache off, in the one --disable-features flag Chrome reads', () => {
+    // Act
+    const agent = chromeLaunchArguments('/chrome', '/profile', PORT, { width: 1280, height: 800 }, 'linux');
+    const features = agent.filter(argument => argument.startsWith('--disable-features='));
+
+    // Assert — a restored page would bring back its whole heap, a password a grant fill typed included.
+    should(features).have.length(1);
+    should(features[0]?.split('=')[1]?.split(',')).containEql('BackForwardCache');
+  });
+
   it('should look for a browser in the per-user, snap and PATH locations a fixed list misses', () => {
     // Act
     const linux = chromeExecutableCandidates('linux', undefined, { path: '/home/u/.nix-profile/bin/:relative/bin' });

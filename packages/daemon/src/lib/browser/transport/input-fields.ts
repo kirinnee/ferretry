@@ -3,6 +3,8 @@ import { recogniseBrowserChallenge } from './challenge.ts';
 import {
   BROWSER_INPUT_SHOT_MARGIN,
   BROWSER_INPUT_SHOT_MAX_SIDE,
+  type BrowserInputClearJob,
+  type BrowserInputClearOutcome,
   type BrowserInputDocument,
   type BrowserInputFacts,
   type BrowserInputFieldPointer,
@@ -835,6 +837,54 @@ export async function typeInputFields(
   }
 }
 
+/**
+ * Empties every password input of the field's document, and the field itself, when the page is hidden: registered in the
+ * TRUSTED world (the page can neither see nor remove it), with that world's own value setter. It holds no value. Once
+ * per document per world.
+ */
+const ARM_PAGEHIDE =
+  'function () { const doc = this.ownerDocument; const view = doc && doc.defaultView; if (!view) return false; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set; if (!set) return false; const node = this; const empty = () => { for (const input of doc.querySelectorAll("input")) if (String(input.type).toLowerCase() === "password") set.call(input, ""); if (node instanceof HTMLInputElement) set.call(node, ""); }; view.addEventListener("pagehide", empty, { capture: true }); return true; }';
+
+/**
+ * A GRANT FILL ARMS ITS `pagehide` CLEAR before its write, as a call of its own (docs/input-requests.md, "Task plan
+ * fills"). The page is checked against `expected` exactly as a write is; then each named field that is a password input
+ * gets the listener from the trusted world. Anything off (another document, a node that changed, a field that is not a
+ * password input, a world that won't hold it) is `refused`, and the daemon then types nothing. No value is involved.
+ */
+export async function armInputFields(
+  subject: InputSubject,
+  expected: BrowserInputFacts,
+  fieldIds: readonly string[],
+): Promise<'armed' | 'refused'> {
+  if (subject.page.isClosed() || fieldIds.length === 0) return 'refused';
+  try {
+    const known = await checkUnchanged(
+      subject,
+      expected,
+      fieldIds.map(field => ({ field, text: '' })),
+    );
+    const worlds = new IsolatedWorlds();
+    for (const field of fieldIds) {
+      const target = known.get(field);
+      if (target === undefined || target.field.field.type?.toLowerCase() !== 'password') return 'refused';
+      const trusted = await worlds.resolve(target.session, target.field.backendNodeId);
+      const armed = objectOf(
+        objectOf(
+          await ask(target.session, 'Runtime.callFunctionOn', {
+            objectId: trusted.objectId,
+            functionDeclaration: ARM_PAGEHIDE,
+            returnByValue: true,
+          }),
+        ).result,
+      ).value;
+      if (armed !== true) return 'refused';
+    }
+    return 'armed';
+  } catch {
+    return 'refused';
+  }
+}
+
 const dimensionsOf = (value: unknown): { readonly width: number; readonly height: number } | undefined => {
   const viewport = objectOf(value);
   const { clientWidth: width, clientHeight: height } = viewport;
@@ -997,5 +1047,57 @@ export async function probeInputFields(
     // A probe that stopped part way still empties what it typed, best effort; the owner's write selects and replaces.
     if (typed !== undefined) await cleared(typed.session, typed.objectId).catch(() => false);
     page.off('request', heard);
+  }
+}
+
+/**
+ * Empties the field when it still holds ANY value: connected, and not empty. Whatever it holds, so a character added
+ * during the hold can't keep the password in it. Run in the trusted world with that world's own value setter, then an
+ * `input` event so a framework's state follows. Answers one word; the value never leaves the page.
+ */
+const CLEAR_IF_HELD =
+  'function () { if (!this.isConnected) return "moved"; if (typeof this.value !== "string" || this.value === "") return "moved"; const proto = this instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; const set = Object.getOwnPropertyDescriptor(proto, "value")?.set; if (!set) return "unknown"; set.call(this, ""); this.dispatchEvent(new Event("input", { bubbles: true })); return this.value === "" ? "cleared" : "unknown"; }';
+
+/** Whether DevTools said the node is no longer in the page at all: the one failure that means "nothing holds it". */
+const nodeGone = (error: unknown): boolean =>
+  error instanceof Error && /no node (with given id )?found/iu.test(error.message);
+
+/**
+ * A GRANT FILL'S CHECK BEFORE ITS PAGE HOLD ENDS (docs/input-requests.md, "Task plan fills"): is a password it typed still
+ * sitting in a field? A closed page, another document, or a node DevTools says is gone holds nothing (`moved`). A field
+ * that still holds a value is emptied (`cleared`). Every other failure on the same document (a frame whose session is
+ * missing, any other DevTools error) is `unknown`, which the daemon reads as a stop. The job names nodes only.
+ */
+export async function clearInputFields(
+  subject: InputSubject,
+  job: BrowserInputClearJob,
+): Promise<BrowserInputClearOutcome> {
+  if (subject.page.isClosed()) return 'moved';
+  try {
+    if ((await navigationIdOf(await subject.cdp.page())) !== job.navigationId) return 'moved';
+    const worlds = new IsolatedWorlds();
+    let cleared = false;
+    for (const field of job.fields) {
+      const session = subject.sessions.get(field.frameId);
+      if (session === undefined) return 'unknown';
+      try {
+        await ask(session, 'DOM.describeNode', { backendNodeId: field.backendNodeId });
+      } catch (error) {
+        if (nodeGone(error)) continue;
+        return 'unknown';
+      }
+      const trusted = await worlds.resolve(session, field.backendNodeId);
+      const answered = await ask(session, 'Runtime.callFunctionOn', {
+        objectId: trusted.objectId,
+        functionDeclaration: CLEAR_IF_HELD,
+        returnByValue: true,
+      });
+      const word = objectOf(answered.result).value;
+      if (answered.exceptionDetails !== undefined || (word !== 'cleared' && word !== 'moved')) return 'unknown';
+      if (word === 'cleared') cleared = true;
+    }
+    return cleared ? 'cleared' : 'moved';
+  } catch {
+    return 'unknown';
   }
 }
