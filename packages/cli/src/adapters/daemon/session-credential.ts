@@ -133,6 +133,11 @@ const SESSION_REVISIT_MS = 30_000;
  * instance at that URL (another pid), gets a fresh decision, so the bearer is picked up after an upgrade
  * without the pane restarting. The same instance still saying no keeps the client it has. A failed read
  * keeps it too: there is no bearer to switch to until a daemon offers one.
+ *
+ * A DECISION THAT FAILED IS NEVER KEPT. A first decision, or a fresh one after a look, that rejects (the
+ * daemon away, the listener check or the `api-token` read throwing) fails the call that asked and is then
+ * forgotten, so the next call decides again from the start rather than repeating the old failure for the
+ * life of the process. Deciding again is the same `decide`: it can reach nothing the first one could not.
  */
 export class RevisitedConnection<C> {
   #held: Promise<DecidedConnection<C>> | undefined;
@@ -147,7 +152,7 @@ export class RevisitedConnection<C> {
 
   async client(): Promise<C> {
     if (this.#held === undefined) {
-      this.#held = this.decide();
+      this.#held = this.#decided();
       this.#checkedAt = this.nowMs();
     }
     const held = await this.#held;
@@ -161,8 +166,17 @@ export class RevisitedConnection<C> {
       return held.client;
     }
     if (!presentsSessionBearer(fresh) && fresh.pid === revisit.pid) return held.client;
-    const next = this.decide();
+    const next = this.#decided();
     this.#held = next;
     return (await next).client;
+  }
+
+  /** A fresh decision, held until it fails: a rejected one is dropped, if still held, so the next call decides again. */
+  #decided(): Promise<DecidedConnection<C>> {
+    const decision: Promise<DecidedConnection<C>> = this.decide().catch((error: unknown) => {
+      if (this.#held === decision) this.#held = undefined;
+      throw error;
+    });
+    return decision;
   }
 }

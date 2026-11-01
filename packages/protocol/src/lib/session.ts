@@ -1423,6 +1423,18 @@ export const RenameSessionRequestSchema = z
   });
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>;
 
+/**
+ * `POST /v1/sessions/:sessionId/revoke-credential` — a person cuts one ferret off at once
+ * (docs/agent-tools.md § "Cutting a ferret off"). No body. The value its pane holds names nobody from
+ * now on; a running pane keeps running, without `fy` or its tools, until its next launch is handed a
+ * fresh one. The answer names the session and its status, never a credential or a hash.
+ */
+export const SessionCredentialRevokedSchema = z.strictObject({
+  sessionId: z.string().min(1),
+  status: SessionStatusSchema,
+});
+export type SessionCredentialRevoked = z.infer<typeof SessionCredentialRevokedSchema>;
+
 /** `PATCH /v1/sessions/:sessionId/hypermedia` — switch whether one ferret is told to use hypermedia. */
 export const SessionHypermediaPatchSchema = z.strictObject({ enabled: z.boolean() });
 export type SessionHypermediaPatch = z.infer<typeof SessionHypermediaPatchSchema>;

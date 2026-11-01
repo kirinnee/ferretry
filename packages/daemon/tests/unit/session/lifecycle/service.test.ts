@@ -32,6 +32,7 @@ import {
   type SessionTaskStore,
   type WorkingDirectoryResolver,
 } from '../../../../src/lib/session/lifecycle/index.ts';
+import { FERRET_IDENTITY_VARIABLES, sessionPaneEnvironment } from '../../../../src/lib/session/lifecycle/policy.ts';
 
 const AGENT = '/opt/fleet/bin/claude-auto-loge';
 const LAUNCHED: SessionLaunchInstructions = {
@@ -1626,6 +1627,83 @@ describe('SessionLifecycleService credential per launch', () => {
       should({ status, ended }).deepEqual({ status, ended: undefined });
       should({ status, after: await live.resolve('first-pane-capability') }).deepEqual({ status, after: undefined });
     }
+  });
+
+  it('should cut a running ferret off at once when its credential is revoked, minting nothing', async () => {
+    // Arrange
+    const built = rotating();
+    built.launcher.livenessFromLaunch = true;
+    await built.subject.create(input());
+    await built.subject.start(ID);
+    should(await built.resolve('first-pane-capability')).equal(ID);
+    const issued = built.credentials.issues;
+
+    // Act
+    const revoked = await built.subject.revokeCredential(ID);
+
+    // Assert — the value the pane holds names nobody, the session runs on, and no new value exists to be read.
+    should(await built.resolve('first-pane-capability')).be.undefined();
+    should(revoked.config.sessionCapabilityHash).be.undefined();
+    should(built.repository.current().config.sessionCapabilityHash).be.undefined();
+    should(built.repository.current().state.status).equal('running');
+    should(built.credentials.issues).equal(issued);
+    should(built.serial.keys.at(-1)).equal(ID);
+  });
+
+  it('should give the next launch after a revocation a fresh credential, and never the revoked one', async () => {
+    // Arrange
+    const built = rotating();
+    await built.subject.create(input());
+    const failing = async () => {
+      throw new Error('the pane died');
+    };
+    await should(built.subject.start(ID, failing)).be.rejectedWith('the pane died');
+    await built.subject.revokeCredential(ID);
+
+    // Act — a revive, as `fy resume` or a restart would.
+    await built.subject.start(ID);
+
+    // Assert
+    should(await built.resolve('second-pane-capability')).equal(ID);
+    should(await built.resolve('first-pane-capability')).be.undefined();
+  });
+
+  it('should refuse to revoke a session that does not exist', async () => {
+    // Arrange
+    const built = rotating();
+
+    // Act / Assert
+    await should(built.subject.revokeCredential(ID)).be.rejectedWith(/session not found/u);
+  });
+
+  it('should give a sub-ferret a credential of its own, never its parent’s', async () => {
+    // Arrange — the parent's pane holds its credential in its own stored environment.
+    const parent = 'ms8-parent01';
+    const built = rotating();
+    built.environment.written.set(parent, { FY_SESSION_BOARD_CAPABILITY: 'parent-capability' });
+    built.launcher.livenessFromLaunch = true;
+
+    // Act
+    await built.subject.create(input({ parent }));
+    const child = await built.subject.start(ID);
+    const pane = sessionPaneEnvironment(parseSessionId(ID), await built.environment.read(parseSessionId(ID)), 'auto');
+
+    // Assert
+    should(child.config.parent).equal(parent);
+    should(child.config.sessionCapabilityHash).equal(credential('first-pane-capability').hash);
+    should(pane).containDeep({ FY_SESSION_TOKEN: 'first-pane-capability', FY_SESSION_ID: ID });
+    should(JSON.stringify(pane)).not.containEql('parent-capability');
+    should(await built.resolve('parent-capability')).not.equal(ID);
+    should(built.environment.written.get(parent)).deepEqual({ FY_SESSION_BOARD_CAPABILITY: 'parent-capability' });
+  });
+
+  it('should drop every name a ferret identifies itself by from a daemon’s own environment', () => {
+    // A daemon started inside a pane would otherwise hand that ferret's credential to every child it starts.
+    should([...FERRET_IDENTITY_VARIABLES].sort()).deepEqual([
+      'FY_SESSION_BOARD_CAPABILITY',
+      'FY_SESSION_ID',
+      'FY_SESSION_TOKEN',
+    ]);
   });
 
   it('should keep the credential of a pane that is still live when a start is retried', async () => {

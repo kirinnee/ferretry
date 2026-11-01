@@ -12,8 +12,8 @@ import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts'
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { SessionForkRefusal, sessionForkRoutes } from '../../../../src/lib/runtime/mounts/session-fork.ts';
-import { request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, human } from './support.ts';
+import { jsonBody, request } from '../../api/support.ts';
+import { agentIn, CREDENTIALS, fromFerret, human } from './support.ts';
 
 /**
  * The fork surface: what a caller may ask for, what each refusal answers, and what comes back.
@@ -305,7 +305,7 @@ describe('the session fork mount', () => {
     should(forker.forks).be.empty();
   });
 
-  it('should refuse anonymously and refuse a warden token, because a fork launches an agent', async () => {
+  it('should refuse anonymously, a warden token and every ferret, because a fork is a session with no parent', async () => {
     // Arrange
     const forker = new FakeSessionFork();
     const subject = dispatcher(forker);
@@ -314,12 +314,15 @@ describe('the session fork mount', () => {
     const anonymous = await subject.dispatch(forkRequest('s1', {}));
     const warden = await subject.dispatch(forkRequest('s1', { authorization: `Bearer ${CREDENTIALS.warden}` }));
     const peer = await subject.dispatch(forkRequest('s1', agentIn('s9')));
+    const own = await subject.dispatch(fromFerret(forkRequest('s1', human)));
+    const owner = await subject.dispatch(forkRequest('s1', human));
 
-    // Assert
+    // Assert — a ferret starts sessions only as its own children, and a fork's target descends from nothing.
     should(anonymous.status).equal(401);
     should(warden.status).equal(403);
-    // A peer holds the admin token, so it reaches the subsystem exactly as the start and migrate allow.
-    should(peer.status).equal(200);
+    should([peer.status, jsonBody(peer).code]).deepEqual([403, 'owner_only']);
+    should([own.status, jsonBody(own).code]).deepEqual([403, 'owner_only']);
+    should(owner.status).equal(200);
     should(forker.forks).have.length(1);
   });
 

@@ -30,8 +30,11 @@ import { learningRoutes } from '../../../../src/lib/runtime/mounts/learning.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
   AT,
+  agentIn,
   CREDENTIALS,
   FakeLearningStore,
+  FERRET_SESSION,
+  fromFerret,
   human,
   LEARNING_CONFIG,
   LESSON_CAPABILITY,
@@ -477,6 +480,29 @@ describe('the learning review mount', () => {
       // Assert
       should(run.status).equal(200);
       should(jsonBody(run)).have.property('runId', 'run-1');
+    });
+
+    it('should refuse a ferret launching miners, which are sessions with no parent, and still give it the manifest', async () => {
+      // Arrange
+      const asked = (spawn: boolean, headers: Readonly<Record<string, string>>) =>
+        request({
+          method: 'POST',
+          path: '/v1/learning/run',
+          headers: { ...headers, 'content-type': 'application/json' },
+          body: JSON.stringify({ spawn }),
+        });
+      const on = dispatcher(new FakeLearningStore());
+
+      // Act
+      const own = await on.dispatch(fromFerret(asked(true, human)));
+      const header = await on.dispatch(asked(true, agentIn(FERRET_SESSION)));
+      const manifest = await on.dispatch(fromFerret(asked(false, human)));
+      const owner = await on.dispatch(asked(true, human));
+
+      // Assert
+      should([own.status, jsonBody(own).code]).deepEqual([403, 'owner_only']);
+      should([header.status, jsonBody(header).code]).deepEqual([403, 'owner_only']);
+      should([manifest.status, owner.status]).deepEqual([200, 200]);
     });
   });
 });

@@ -59,9 +59,10 @@ for a request on this machine's privileged loopback carrier, so it is ungoverned
 Its policy is the route's own `caller` declaration instead, a fixed table rather than an operator's answer:
 
 - a `caller: 'person'` route — pairing, devices, passkeys, the step-up and unlock, grants, the security
-  settings and the tunnel switch among them — refuses it with `403 owner_only` before the handler runs or
+  settings and the tunnel switch among them, and revoking a session's credential — refuses it with `403 owner_only` before the handler runs or
   the body is read, as it refuses the admin token naming a ferret's session and a warden;
-- a `caller: 'any'` route serves it as its own session, never as the owner.
+- a `caller: 'any'` route serves it as its own session, never as the owner, and every session it starts is
+  its own child (`parent_mismatch` for any other parent).
 
 Neither half can widen anything: the `caller` rule is asked after authentication and only ever refuses, and
 every grant question below still applies to every caller it applied to before.

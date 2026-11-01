@@ -1037,6 +1037,8 @@ export class FakeSessionControl implements SessionControlSubsystem {
   readonly requested: Array<readonly [string, boolean]> = [];
   /** The inline attachments each start carried, so a mount that dropped them is visible. */
   readonly attached: Array<StartSessionRequest['initialAttachments']> = [];
+  /** The parent each start carried, after the mount decided it, so lineage taken from a credential is visible. */
+  readonly parents: Array<string | undefined> = [];
   private readonly spent = new Map<string, { readonly id: string; readonly payload: string }>();
   private minted = 0;
 
@@ -1050,6 +1052,7 @@ export class FakeSessionControl implements SessionControlSubsystem {
   async start(request: StartSessionRequest, requestId: string, payload: string): Promise<SessionView> {
     this.starts.push([requestId, request.agent]);
     this.attached.push(request.initialAttachments);
+    this.parents.push(request.parent);
     if (request.teammate !== undefined) this.requested.push([request.teammate, request.teammateFallback === true]);
     const already = this.spent.get(requestId);
     if (already !== undefined) {

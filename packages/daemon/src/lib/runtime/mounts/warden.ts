@@ -258,11 +258,13 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
       legacy: true,
       handle: handleAgenda,
     },
+    // The OWNER's own request: it starts a warden session with no parent, so a ferret (or a warden) asking is
+    // refused before the body is read — no ferret starts a session that is not its own child.
     {
       method: 'POST',
       path: '/v1/warden/investigate',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       capability: { capability: 'warden', axis: 'use' },
       noStore: true,
       handle: async context => await investigate(subsystem, context),

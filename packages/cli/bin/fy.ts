@@ -223,6 +223,11 @@ import { ProtocolTwoFactorSeedGateway } from '../src/lib/secrets/factor-gateway'
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
 import { registerSecurityCommands } from '../src/lib/security/commands';
 import { SecurityController } from '../src/lib/security/controller';
+import {
+  ProtocolSessionCredentialGateway,
+  RevokeCredentialController,
+  registerSessionCredentialCommands,
+} from '../src/lib/session/revoke-credential.ts';
 import { ProtocolSecurityGateway } from '../src/lib/security/gateway';
 import {
   AnswerQuestionController,
@@ -1135,6 +1140,15 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     ),
   ({ program, world, ownSessionId, restartPatience: patience, credentials }) =>
     registerSessionCommands(program, sessionCommands(world, ownSessionId, patience, credentials)),
+  // `fy session revoke-credential`: a person cuts one ferret off (docs/agent-tools.md § "Cutting a ferret off").
+  ({ program, world, client }) => {
+    const presenter = new SessionPresenter(world.io, new SystemClock());
+    registerSessionCredentialCommands(
+      program,
+      new RevokeCredentialController(new ProtocolSessionCredentialGateway(client), presenter, BINARY_NAME),
+      presenter,
+    );
+  },
   ({ program, world, client, ownSessionId }) => {
     const board = new BoardController({
       gateway: new FyBoardGateway(client),

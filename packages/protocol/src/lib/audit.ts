@@ -91,6 +91,7 @@ export const AUDIT_EVENTS = [
   'input.quarantine_revealed',
   'link.opened',
   'session.credential-refused',
+  'session.credential-revoked',
   'phone-approval.raised',
   'phone-approval.refused',
   'phone-approval.settled',

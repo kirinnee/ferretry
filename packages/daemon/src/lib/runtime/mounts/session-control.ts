@@ -11,6 +11,7 @@ import { posix } from 'node:path';
 import { type CapabilityDemand, type CapabilityGuard, grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter, headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
+import { lineageOf } from '../../api/lineage.ts';
 import { errorResponse, jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { Delegation } from '../../board/index.ts';
@@ -294,7 +295,9 @@ async function start(
   // start by the digest of exactly what was sent, so a re-serialization of the parsed value would
   // not necessarily hash to the same thing the client hashed.
   const payload = await bodyText(context.request);
-  const request = parseStart(payload);
+  // A ferret's start is its own child, whatever the body says (`lineageOf`): never a top-level session past the
+  // sub-ferret limits, and never another session's child. The payload stays the bytes sent, for the recovery read.
+  const request = lineageOf(context, parseStart(payload));
   const refused = await launchRefusal(gate, context, request);
   if (refused !== undefined) return refused;
   const id = requestId(context.request);

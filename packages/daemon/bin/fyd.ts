@@ -1337,6 +1337,10 @@ import { NO_PERFORMANCE_PROBE, PerformanceRecorder } from '../src/lib/performanc
 import { teeStackSampler } from '../src/lib/performance/sampler-tee.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
+import {
+  SessionCredentialError,
+  type SessionCredentialSubsystem,
+} from '../src/lib/runtime/mounts/session-credential.ts';
 import { FileCatalogInstallStore } from '../src/adapters/catalog-installs/file-store.ts';
 import { FileProjectSkillFiles } from '../src/adapters/catalog-installs/project-skill-files.ts';
 import { FileRuntimeSkillAssets } from '../src/adapters/catalog-installs/runtime-skill-assets.ts';
@@ -1349,7 +1353,7 @@ import {
 } from '../src/lib/session/conversation-lease.ts';
 import { SessionCredentialRotation } from '../src/lib/session/lifecycle/credential-rotation.ts';
 import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/session/lifecycle/launch-environment.ts';
-import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
+import { FERRET_IDENTITY_VARIABLES, sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
 import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {
@@ -2903,6 +2907,26 @@ function createSessionControlSubsystem(
         );
       }
       return await view(id);
+    },
+  };
+}
+
+/**
+ * Cutting one ferret off (`POST /v1/sessions/:sessionId/revoke-credential`): the lifecycle revokes its credential on
+ * the session's own queue, so the value its pane holds names nobody from the moment this answers.
+ */
+function sessionCredentialRevocation(
+  storage: DaemonStorage,
+  createLifecycle: DaemonWorld['createSessionLifecycle'],
+  launcher: SessionLifecycleLauncher,
+): SessionCredentialSubsystem {
+  return {
+    revoke: async reference => {
+      const id = tryParseSessionId(reference);
+      if (id === undefined || storage.findSession(id) === undefined)
+        throw new SessionCredentialError('not_found', `no session ${reference}`);
+      const record = await createLifecycle(storage, launcher).revokeCredential(id);
+      return { sessionId: record.config.id, status: record.state.status };
     },
   };
 }
@@ -12048,6 +12072,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           worktrees.managedRoot,
         ),
         sessionControl,
+        sessionCredential: sessionCredentialRevocation(storage, createSessionLifecycle, launcher),
         sessionResume: sessionResumeSubsystem,
         sendTracking: sendTracker,
         sendReproof,
@@ -14296,6 +14321,9 @@ if (import.meta.main) {
   // alone: dropped here, before anything is spawned, so an agent — Claude Code runs on Bun too — starts
   // on its own engine's defaults rather than on a daemon's tuning.
   for (const name of Object.keys(process.env)) if (name.startsWith('BUN_JSC_')) delete process.env[name];
+  // Nor a ferret's identity, when this daemon was started from inside one's pane: its tmux server, and every pane
+  // and terminal under it, would inherit that ferret's credential (`FERRET_IDENTITY_VARIABLES`).
+  for (const name of FERRET_IDENTITY_VARIABLES) delete process.env[name];
   const answer = answerArguments(process.argv.slice(2), {
     daemonName: DAEMON_NAME,
     clientName: CLIENT_NAME,
