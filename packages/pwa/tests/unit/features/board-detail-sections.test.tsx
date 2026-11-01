@@ -488,6 +488,28 @@ describe('HistorySection', () => {
     expect(rows[1]?.querySelector('.fy-board-detail__detail')).toBeNull();
   });
 
+  it('says what the admin token may be, as a tooltip on its name and in words a phone shows too', async () => {
+    const task = card('F1', {
+      history: [{ seq: 1, at: at(0), actor: { kind: 'admin-token' }, type: 'created', laneId: 'todo' }],
+    });
+    const root = await show(<HistorySection context={context} now={NOW} task={task} />);
+    const name = must(root.querySelector('.fy-board-timeline__row strong'), 'the actor');
+    expect(name.textContent).toBe('Admin token');
+    expect(name.getAttribute('title')).toBe('the owner at this machine, or a ferret without its own credential');
+    expect(root.querySelector('[data-kind="actor-note"]')?.textContent).toBe(
+      ' (the owner at this machine, or a ferret without its own credential)',
+    );
+  });
+
+  it('gives no other actor a note or a tooltip', async () => {
+    const task = card('F1', {
+      history: [{ seq: 1, at: at(0), actor: { kind: 'owner' }, type: 'created', laneId: 'todo' }],
+    });
+    const root = await show(<HistorySection context={context} now={NOW} task={task} />);
+    expect(root.querySelector('.fy-board-timeline__row strong')?.hasAttribute('title')).toBe(false);
+    expect(root.querySelector('[data-kind="actor-note"]')).toBeNull();
+  });
+
   it('shows small changes inline as muted rows, with nothing that folds', async () => {
     const task = card('F1', {
       history: [

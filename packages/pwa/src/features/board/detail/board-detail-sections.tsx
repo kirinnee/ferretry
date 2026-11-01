@@ -472,7 +472,14 @@ export function HistorySection({
           <Avatar name={entry.actor} />
           <div className="fy-board-timeline__what">
             <p className="fy-board-timeline__line">
-              <strong>{entry.actor}</strong> {entry.text}
+              <strong {...(entry.actorNote === null ? {} : { title: entry.actorNote })}>{entry.actor}</strong>
+              {entry.actorNote === null ? null : (
+                <span className="fy-board-detail__quiet" data-kind="actor-note">
+                  {' '}
+                  ({entry.actorNote})
+                </span>
+              )}{' '}
+              {entry.text}
               <span className="fy-board-detail__quiet"> · {ageLabel(entry.at, now) ?? ''}</span>
             </p>
             {entry.detail === null ? null : <p className="fy-board-detail__detail">{entry.detail}</p>}

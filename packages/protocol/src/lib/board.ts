@@ -150,9 +150,11 @@ export const BoardActorSchema = z.discriminatedUnion('kind', [
 ]);
 export type BoardActor = z.infer<typeof BoardActorSchema>;
 
-/** What every surface says for an `admin-token` board actor: the truth, which is that it could be either. */
-export const ADMIN_TOKEN_ACTOR_WORDS =
-  'the admin token (the owner at this machine, or a ferret without its own credential)';
+/** What an `admin-token` board actor may be: the truth, which is that it could be either. */
+export const ADMIN_TOKEN_ACTOR_NOTE = 'the owner at this machine, or a ferret without its own credential';
+
+/** What every surface says for an `admin-token` board actor in a sentence: the token, and what it may be. */
+export const ADMIN_TOKEN_ACTOR_WORDS = `the admin token (${ADMIN_TOKEN_ACTOR_NOTE})`;
 
 /** Whether a board actor acted with the owner's authority: a paired device, or the host's admin token. */
 export const actsAsOwner = (actor: Pick<BoardActor, 'kind'>): boolean =>

@@ -12,6 +12,7 @@ import {
   type AgendaItem,
   type AgendaRef,
   type AgendaSnapshot,
+  ADMIN_TOKEN_ACTOR_NOTE,
   ADMIN_TOKEN_ACTOR_WORDS,
   type BoardActor,
   type BoardEditableField,
@@ -138,6 +139,8 @@ export interface HistoryRow {
   readonly seq: number;
   readonly at: string;
   readonly actor: string;
+  /** What the actor may be, when its name alone would mislead — the admin token may be a ferret — or null. */
+  readonly actorNote: string | null;
   /** What happened, one line, without the actor. */
   readonly text: string;
   /** The reason or note behind it, when there is one. */
@@ -230,6 +233,7 @@ export const historyRows = (history: readonly BoardTaskEvent[], context: History
       seq: event.seq,
       at: event.at,
       actor: actorName(event.actor, context.names),
+      actorNote: event.actor.kind === 'admin-token' ? ADMIN_TOKEN_ACTOR_NOTE : null,
       type: event.type,
       ...describe(event, context),
     }));

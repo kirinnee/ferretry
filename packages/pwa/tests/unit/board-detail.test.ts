@@ -188,8 +188,14 @@ describe('history', () => {
   });
 
   it('names a move on the admin token as the token, never as you', () => {
-    const rows = historyRows([event(1, 'note', { text: 'hi' }, { kind: 'admin-token' })], context);
-    expect(rows.map(row => row.actor)).toEqual(['Admin token']);
+    const rows = historyRows(
+      [event(2, 'note', { text: 'hi' }, { kind: 'admin-token' }), event(1, 'note', { text: 'yo' })],
+      context,
+    );
+    expect(rows.map(row => [row.actor, row.actorNote])).toEqual([
+      ['Admin token', 'the owner at this machine, or a ferret without its own credential'],
+      ['ferret abc', null],
+    ]);
   });
 
   it('does not reorder the history it is given', () => {
