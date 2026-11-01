@@ -26,6 +26,7 @@ import { cardLettered, letterOf } from '../../lib/agenda-options.ts';
 import { plainLabel } from '../../lib/plain-label.ts';
 import { DoneCloseChip, DoneCloseConfirm, DoneCloseError } from './agenda-done-close.tsx';
 import type { DoneCloseView } from './use-done-close-flow.ts';
+import { useDeckReadsDown } from './deck-down-context.ts';
 import { isDownSwipe } from './use-down-swipe.ts';
 
 const SWIPE_WORD: Readonly<Record<AnswerDirection, string>> = {
@@ -50,6 +51,8 @@ export interface AgendaQuickRepliesProps {
   readonly model: CardModel;
   /** The item's options in ask order: a button's letter is its place here, the same letter the Options section shows. */
   readonly options?: readonly AgendaAskOption[];
+  /** A gate item names its buttons by label, never by letter: its few options are short by contract. */
+  readonly plainLabels?: boolean;
   /** What each swipe sends, by direction. */
   readonly map: SwipeMap;
   readonly busy: boolean;
@@ -160,6 +163,7 @@ const hasReplies = (model: CardModel, requestChanges: RequestChanges | undefined
 export function AgendaQuickReplies({
   model,
   options = [],
+  plainLabels = false,
   map,
   busy,
   error,
@@ -172,6 +176,7 @@ export function AgendaQuickReplies({
 }: AgendaQuickRepliesProps) {
   const gesture = useRef<Drag | null>(null);
   const swallow = useRef(false);
+  const deckReadsDown = useDeckReadsDown();
   const give = (action: InboxAction): void => {
     if (!busy) onAct(action);
   };
@@ -206,7 +211,8 @@ export function AgendaQuickReplies({
     if (!current.moved) return;
     swallow.current = true;
     if (isDownSwipe(current.dx, current.dy, current.width)) {
-      onSkip?.();
+      // On the deck the compass has this pull; the row's other swipes stay its own.
+      if (!deckReadsDown) onSkip?.();
       return;
     }
     const intent = swipeIntent(current.dx, current.dy, current.width, map);
@@ -221,7 +227,7 @@ export function AgendaQuickReplies({
   const replies = repliesOf(model, options, requestChanges);
   const slotted = replies.length > 0 && !model.notice;
   // The row reads the way the options list does: one label that is not a single short word letters every option.
-  const lettered = cardLettered(options);
+  const lettered = !plainLabels && cardLettered(options);
   // "Done · closes &F12" takes the → slot when the card gave fewer than three answers; with three it sits under them.
   const closeInRow = doneClose !== undefined && replies.length < 3;
   if (!hasReplies(model, requestChanges) && doneClose === undefined && error === null && waitingOn === undefined)

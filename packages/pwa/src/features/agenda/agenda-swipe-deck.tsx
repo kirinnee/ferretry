@@ -51,16 +51,19 @@ import {
   swipeThreshold,
 } from '../../lib/agenda-inbox.ts';
 import { usePrefersReducedMotion } from '../../shell/bottom-sheet.tsx';
+import { DeckDownContext } from './deck-down-context.ts';
+import { SwipeCompass } from './swipe-reveal.tsx';
+import { type CompassAvailable, compassReading, type SnoozeLength, snoozeUntil } from './agenda-compass.ts';
 import {
   isLongPress,
   isTouch,
+  type Lock,
   lockOf,
   startsInHead,
   startsInSelection,
   startsInSidewaysScroller,
   startsOnInteractive,
 } from './agenda-swipe-gesture.ts';
-import { SwipeReveal } from './swipe-reveal.tsx';
 
 /** How long a committed card takes to leave. The answer is handed over at once; this is only the look. */
 const FLY_MS = 220;
@@ -182,6 +185,15 @@ export const deckIntent = (
   return swipeIntent(dx, dy, width, targets);
 };
 
+/** What the compass reads as, in the words the card's `data-swipe-answer` keeps. */
+const compassWord = (intent: ReturnType<typeof compassReading>['intent'] | undefined): string => {
+  if (intent === undefined) return 'Skip';
+  if (intent.kind === 'not-needed') return 'Not needed';
+  if (intent.kind === 'snooze') return `Snooze ${intent.length}`;
+  if (intent.kind === 'snooze-pick') return 'Snooze';
+  return 'Skip';
+};
+
 /** The direction an action leaves in: the one of `targets` that sends it (matched by meaning), else none. */
 const directionOf = (targets: SwipeTargets, action: InboxAction): SwipeDirection | null => {
   for (const direction of ['up', 'right', 'left'] as const) {
@@ -248,6 +260,8 @@ interface RawDrag extends Drag {
   readonly width: number;
   /** Whether it began in the card's head: see {@link bodyTargets}. */
   readonly head: boolean;
+  /** Which way the touch locked: a downward drag that began vertically is the compass's. */
+  readonly lock: Lock;
 }
 
 interface Gesture {
@@ -256,8 +270,11 @@ interface Gesture {
   readonly startY: number;
   readonly width: number;
   readonly head: boolean;
+  /** It began inside a region that swipes on its own (`ownGesturesIn`): the deck keeps only a pull down from there. */
+  readonly own: boolean;
   readonly startedAt: number;
   moved: boolean;
+  lock: Lock;
   dx: number;
   dy: number;
 }
@@ -301,6 +318,20 @@ export interface AgendaSwipeDeckProps {
    * starts there is theirs, never also the deck's, so one swipe can never answer or skip twice.
    */
   readonly ownGesturesIn?: string;
+  /**
+   * ↓→ on the compass, and the plain Not needed: the card is dismissed (the host holds it in the undo window). Absent:
+   * the compass has no Not needed.
+   */
+  readonly onDismiss?: (card: InboxCard) => void;
+  /** ↓↓↓ on the compass: snooze the card until this instant. Absent (or `canSnooze` false): the compass has no Snooze. */
+  readonly onSnooze?: (card: InboxCard, until: string) => void;
+  /** Whether the card's machine can snooze (`agenda.snooze.1`); the compass draws Snooze only then. Default: it can. */
+  readonly canSnooze?: (card: InboxCard) => boolean;
+  /**
+   * The host takes an answer over before it is sent (a gate's "Not good" waits for its words): return `true` and the
+   * card springs back, nothing is sent, and the host asks for what is missing.
+   */
+  readonly onHold?: (card: InboxCard, action: InboxAction) => boolean;
   /** Forces reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
 }
@@ -312,6 +343,10 @@ export function AgendaSwipeDeck({
   renderCard,
   onAct,
   onSkip,
+  onDismiss,
+  onSnooze,
+  canSnooze,
+  onHold,
   ownGesturesIn,
   reducedMotion,
 }: AgendaSwipeDeckProps) {
@@ -327,6 +362,10 @@ export function AgendaSwipeDeck({
   const targets: SwipeTargets = top === undefined ? {} : swipeTargets(top.item);
   /** ↓ is Skip, and only where the deck can skip. */
   const canDown = onSkip !== undefined;
+  const available: CompassAvailable = {
+    notNeeded: onDismiss !== undefined,
+    snooze: onSnooze !== undefined && (top === undefined || canSnooze === undefined || canSnooze(top)),
+  };
 
   const topKey = top?.key;
   const room = useDeckRoom(deck, topKey);
@@ -350,6 +389,11 @@ export function AgendaSwipeDeck({
   }, [leaving]);
 
   const answer = (card: InboxCard, action: InboxAction, from: Drag): void => {
+    if (onHold?.(card, action) === true) {
+      gesture.current = null;
+      setDrag(null);
+      return;
+    }
     const direction = directionOf(swipeTargets(card.item), action);
     refocus.current = deck.current?.contains(document.activeElement) === true;
     gesture.current = null;
@@ -368,6 +412,26 @@ export function AgendaSwipeDeck({
     onSkip(card);
   };
 
+  /** Not needed, by the compass or its button: the card goes down and the host dismisses it into the undo window. */
+  const dismiss = (card: InboxCard, from: Drag): void => {
+    if (onDismiss === undefined) return;
+    refocus.current = deck.current?.contains(document.activeElement) === true;
+    gesture.current = null;
+    setDrag(null);
+    if (!reduced) setLeaving({ card, direction: 'down', from });
+    onDismiss(card);
+  };
+
+  /** Snooze, by the compass or its buttons: the card goes down and the host snoozes it. */
+  const snooze = (card: InboxCard, length: SnoozeLength, from: Drag): void => {
+    if (onSnooze === undefined) return;
+    refocus.current = deck.current?.contains(document.activeElement) === true;
+    gesture.current = null;
+    setDrag(null);
+    if (!reduced) setLeaving({ card, direction: 'down', from });
+    onSnooze(card, snoozeUntil(length, Date.now()));
+  };
+
   /** A swipe or arrow toward `direction`: its answer goes; a "Needs changes" has none, so the card springs back. */
   const give = (card: InboxCard, direction: SwipeDirection, from: Drag): void => {
     const target = targets[direction];
@@ -382,13 +446,15 @@ export function AgendaSwipeDeck({
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
     swallowClick.current = false;
+    const own =
+      ownGesturesIn !== undefined && event.target instanceof Element && event.target.closest(ownGesturesIn) !== null;
+    // A button in the head or the answer row still lets a pull down start: the row's other swipes are its own.
     if (
       top === undefined ||
       !isTouch(event) ||
-      startsOnInteractive(event.target) ||
+      (startsOnInteractive(event.target) && !own) ||
       startsInSelection(event.target) ||
-      startsInSidewaysScroller(event.target, event.currentTarget) ||
-      (ownGesturesIn !== undefined && event.target instanceof Element && event.target.closest(ownGesturesIn) !== null)
+      startsInSidewaysScroller(event.target, event.currentTarget)
     )
       return;
     gesture.current = {
@@ -396,9 +462,11 @@ export function AgendaSwipeDeck({
       startX: event.clientX,
       startY: event.clientY,
       width: event.currentTarget.getBoundingClientRect().width,
-      head: startsInHead(event.target),
+      head: own || startsInHead(event.target),
+      own,
       startedAt: event.timeStamp,
       moved: false,
+      lock: 'sideways',
       dx: 0,
       dy: 0,
     };
@@ -417,19 +485,25 @@ export function AgendaSwipeDeck({
         gesture.current = null;
         return;
       }
+      if (current.own && (lock === 'sideways' || current.dy < 0)) {
+        // The head's and the row's own swipes: everything but a pull down is theirs, never also the deck's.
+        gesture.current = null;
+        return;
+      }
       if (lock === 'vertical' && !current.head) {
         // The body scrolls: the browser has this touch now, and it is never a swipe.
         gesture.current = null;
         return;
       }
       current.moved = true;
+      current.lock = lock;
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
       } catch {
         // A pointer the browser already released cannot be captured; the drag still reads.
       }
     }
-    setDrag({ dx: current.dx, dy: current.dy, width: current.width, head: current.head });
+    setDrag({ dx: current.dx, dy: current.dy, width: current.width, head: current.head, lock: current.lock });
   };
 
   const onPointerUp = (event: PointerEvent<HTMLDivElement>): void => {
@@ -440,11 +514,18 @@ export function AgendaSwipeDeck({
     swallowClick.current = true;
     const live = bodyTargets(targets, current.head);
     const downs = canDown && current.head;
-    const intent = deckIntent(current.dx, current.dy, current.width, live, downs);
     const from = dragOffset(current.dx, current.dy, live, downs);
+    if (downs && current.lock === 'vertical' && current.dy > 0) {
+      const { intent } = compassReading(current.dx, current.dy, current.width, available);
+      if (intent.kind === 'skip') skip(top, from);
+      else if (intent.kind === 'not-needed') dismiss(top, from);
+      else if (intent.kind === 'snooze') snooze(top, intent.length, from);
+      else setDrag(null);
+      return;
+    }
+    const intent = swipeIntent(current.dx, current.dy, current.width, live);
     const direction = intent.committed ? intent.direction : null;
-    if (direction === 'down') skip(top, from);
-    else if (direction !== null) give(top, direction, from);
+    if (direction !== null) give(top, direction, from);
     else setDrag(null);
   };
 
@@ -458,13 +539,26 @@ export function AgendaSwipeDeck({
 
   const live = drag === null ? targets : bodyTargets(targets, drag.head);
   const downs = canDown && (drag === null || drag.head);
-  const intent = drag === null ? null : deckIntent(drag.dx, drag.dy, drag.width, live, downs);
+  const compass =
+    drag !== null && downs && drag.lock === 'vertical' && drag.dy > 0
+      ? compassReading(drag.dx, drag.dy, drag.width, available)
+      : null;
+  const intent =
+    drag === null
+      ? null
+      : compass !== null
+        ? {
+            direction: compass.revealed ? ('down' as const) : null,
+            progress: compass.revealed ? 1 : Math.min(1, drag.dy / swipeThreshold(drag.width)),
+            committed: compass.intent.kind !== 'cancel' && compass.intent.kind !== 'snooze-pick',
+          }
+        : swipeIntent(drag.dx, drag.dy, drag.width, live);
   const offset = drag === null ? null : dragOffset(drag.dx, drag.dy, live, downs);
   const aim: SwipeTarget | undefined =
     intent?.direction == null
       ? undefined
       : intent.direction === 'down'
-        ? { label: 'Skip', action: null }
+        ? { label: compassWord(compass?.intent), action: null }
         : live[intent.direction];
   const peeks = cards.slice(1, 1 + PEEKS);
 
@@ -483,7 +577,9 @@ export function AgendaSwipeDeck({
           </div>
         ))
         .reverse()}
-      {top === undefined ? null : <SwipeReveal active={intent?.direction === 'down' ? 'down' : null} />}
+      {top === undefined || !compass?.revealed ? null : (
+        <SwipeCompass notNeeded={available.notNeeded} slot={compass.slot} snooze={available.snooze} />
+      )}
       {top === undefined ? null : (
         <div
           className="fy-attn-deck__top"
@@ -516,18 +612,20 @@ export function AgendaSwipeDeck({
                 }),
           }}
         >
-          <AgendaCardFrame
-            card={top}
-            onArrow={direction => give(top, direction, { dx: 0, dy: 0 })}
-            onDown={canDown ? () => skip(top, { dx: 0, dy: 0 }) : undefined}
-            targets={targets}
-          >
-            {renderCard(
-              top,
-              action => answer(top, action, { dx: 0, dy: 0 }),
-              () => skip(top, { dx: 0, dy: 0 }),
-            )}
-          </AgendaCardFrame>
+          <DeckDownContext.Provider value={canDown}>
+            <AgendaCardFrame
+              card={top}
+              onArrow={direction => give(top, direction, { dx: 0, dy: 0 })}
+              onDown={canDown ? () => skip(top, { dx: 0, dy: 0 }) : undefined}
+              targets={targets}
+            >
+              {renderCard(
+                top,
+                action => answer(top, action, { dx: 0, dy: 0 }),
+                () => skip(top, { dx: 0, dy: 0 }),
+              )}
+            </AgendaCardFrame>
+          </DeckDownContext.Provider>
         </div>
       )}
       {leaving === null ? null : (

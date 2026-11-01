@@ -9,10 +9,13 @@ import { type Marquee, marqueeOf } from '../../lib/title-marquee.ts';
 export function MarqueeTitle({
   title,
   wrap,
+  twoLines = false,
 }: {
   readonly title: string;
   /** Draws the words as something else (a link). A tap then belongs to that, so the title cannot be tapped open. */
   readonly wrap?: (text: string) => ReactNode;
+  /** Lets a long title fold onto a second line instead of scrolling or being cut. */
+  readonly twoLines?: boolean;
 }) {
   const box = useRef<HTMLHeadingElement | null>(null);
   const text = useRef<HTMLSpanElement | null>(null);
@@ -55,6 +58,7 @@ export function MarqueeTitle({
     <h2
       className="fy-item-view__title"
       data-agenda-title=""
+      {...(twoLines ? { 'data-wrap': '' } : {})}
       {...(marquee === null ? {} : { 'data-marquee': '' })}
       {...(expanded ? { 'data-expanded': '' } : {})}
       onClick={wrap !== undefined || (marquee === null && !expanded) ? undefined : () => setExpanded(open => !open)}

@@ -214,8 +214,8 @@ for (const form of ['phone', 'desktop'] as const) {
     // Mid-swipe all three ways: what letting go would do is on the row as data, never drawn over it.
     const client = await context.newCDPSession(list);
     for (const [name, dx, aim, direction] of [
-      ['swipe-left', -150, 'Done', 'left'],
-      ['swipe-right', 150, 'Not good', 'right'],
+      ['swipe-left', -150, 'Not good', 'left'],
+      ['swipe-right', 150, 'Done', 'right'],
       ['swipe-down', 0, 'Skip', 'down'],
     ] as const) {
       await hold(list, client, dx, direction === 'down' ? 150 : 0);
@@ -238,25 +238,25 @@ for (const form of ['phone', 'desktop'] as const) {
       );
     }
 
-    // A swipe past the threshold, left: Done is sent at once to the Done lane.
-    const end = await hold(list, client, -300);
+    // A swipe past the threshold, right: Done is sent at once to the Done lane.
+    const end = await hold(list, client, 300);
     await touch(client, 'touchEnd', end.x, end.y);
     await list.waitForTimeout(250);
     const moves = await list.evaluate(() => (window as unknown as { __moves?: { to: string }[] }).__moves ?? []);
     check(
       moves.length === 1 && moves[0]?.to === 'closed',
-      `${form} ${theme}: a left swipe sent ${JSON.stringify(moves)}`,
+      `${form} ${theme}: a right swipe sent ${JSON.stringify(moves)}`,
     );
 
-    // A swipe past the threshold, right: the reason box opens and nothing is sent yet.
-    const away = await hold(list, client, 300);
+    // A swipe past the threshold, left: the reason box opens and nothing is sent yet.
+    const away = await hold(list, client, -300);
     await touch(client, 'touchEnd', away.x, away.y);
     await list.waitForTimeout(300);
     const dialog = list.locator('[role="dialog"]');
-    check((await dialog.count()) === 1, `${form} ${theme}: a right swipe did not open the reason box`);
+    check((await dialog.count()) === 1, `${form} ${theme}: a left swipe did not open the reason box`);
     check(
       (await list.evaluate(() => (window as unknown as { __moves?: unknown[] }).__moves?.length ?? 0)) === 1,
-      `${form} ${theme}: a right swipe sent a move before the reason`,
+      `${form} ${theme}: a left swipe sent a move before the reason`,
     );
     await shot(list, 'reason', form, theme);
     await context.close();

@@ -156,16 +156,16 @@ describe('Answer quickly — with the cards waiting for a try', () => {
       pointerType: 'touch',
     });
 
-  it('answers by swipe on a phone: left is Done, with the same row as the Inbox list', async () => {
+  it('answers by swipe on a phone: right is Done, with the same row as the Inbox list', async () => {
     const { root, actions } = await open({ agendaCards: [] });
     await interact(() => quick(root).click());
     const row = must(root.querySelector<HTMLElement>('[data-to-test]'), 'the row');
     const grip = must(row.querySelector<HTMLElement>('.fy-totest__meta'), 'grip');
-    await interact(() => grip.dispatchEvent(touch('pointerdown', 400)));
-    await interact(() => grip.dispatchEvent(touch('pointermove', 300)));
-    await interact(() => grip.dispatchEvent(touch('pointermove', 100)));
+    await interact(() => grip.dispatchEvent(touch('pointerdown', 100)));
+    await interact(() => grip.dispatchEvent(touch('pointermove', 200)));
+    await interact(() => grip.dispatchEvent(touch('pointermove', 400)));
     expect(row.getAttribute('data-swipe-answer')).toBe('Done');
-    await interact(() => grip.dispatchEvent(touch('pointerup', 100)));
+    await interact(() => grip.dispatchEvent(touch('pointerup', 400)));
     await interact(() => flush());
     expect(actions.calls).toEqual(['moveTask:["closed"]']);
   });

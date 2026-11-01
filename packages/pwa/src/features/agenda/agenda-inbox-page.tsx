@@ -42,6 +42,7 @@ import { itemHistory } from '../../lib/agenda-history.ts';
 import {
   actionSentence,
   agendaConversationPath,
+  DISMISS_ACTION,
   type FailedAgendaAction,
   type InboxAction,
   type InboxCard,
@@ -79,6 +80,15 @@ import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { daemonAgendaPath, daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
+import {
+  choiceLabel,
+  gateAnswerAction,
+  gateAsksWords,
+  type GateItem,
+  gateVerb,
+  gateWordsFor,
+  isGateItem,
+} from '../../lib/gate-items.ts';
 import { filterToTest, type ToTestCard } from '../../lib/to-test-inbox.ts';
 import { AgendaCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
@@ -90,6 +100,7 @@ import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
 import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
+import { BoardSendBack } from '../board/board-send-back.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
@@ -323,18 +334,29 @@ function OpenItem({
   act,
   skip,
   place,
+  canSnooze,
 }: {
   readonly host: CardHostProps;
   readonly card: InboxCard;
   readonly act: (action: InboxAction) => void;
   readonly skip: () => void;
   readonly place: OpenItemPlace;
+  readonly canSnooze: boolean;
 }) {
   const entries = useItemConversation(card, readConversation);
   const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
   return (
-    <div className="fy-inbox-open" data-inbox-open={card.key} key={card.key}>
-      <InboxWhoLine card={card} onNavigate={onNavigate} />
+    <div
+      className="fy-inbox-open"
+      data-inbox-gate={isGateItem(card.item) ? '' : undefined}
+      data-inbox-open={card.key}
+      key={card.key}
+    >
+      {isGateItem(card.item) ? (
+        <GateMeta card={card} item={card.item} onNavigate={onNavigate} />
+      ) : (
+        <InboxWhoLine card={card} onNavigate={onNavigate} />
+      )}
       <AgendaItemView
         busy={false}
         closeLabel="Back to the Inbox"
@@ -347,7 +369,7 @@ function OpenItem({
         onAct={act}
         onClose={place.onClose}
         onNext={skip}
-        onSnooze={until => act(snoozeAction(until))}
+        {...(canSnooze ? { onSnooze: (until: string) => act(snoozeAction(until)) } : {})}
         position={{ index: place.index, total: place.total }}
         quoteScope={scopeOf(card)}
         {...inputFormFor(inbox, card)}
@@ -357,6 +379,108 @@ function OpenItem({
         swipeable={place.swipeable}
         {...(now === undefined ? {} : { now })}
         {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
+      />
+      <CardTools act={act} skip={skip} />
+    </div>
+  );
+}
+
+/** A gate item's one quiet line: what it is (the lane's verb), the project, the ferret, and the way to its chat. */
+function GateMeta({
+  card,
+  item,
+  onNavigate,
+}: {
+  readonly card: InboxCard;
+  readonly item: GateItem;
+  readonly onNavigate: (to: string) => void;
+}) {
+  const { gate } = item;
+  const dot = (
+    <span aria-hidden="true" className="fy-inbox-who__dot">
+      ·
+    </span>
+  );
+  return (
+    <div className="fy-inbox-who fy-inbox-who--gate" data-inbox-gate={gate.cardId} data-inbox-who="">
+      <span className="fy-inbox-who__main" data-inbox-who-main="">
+        <span className="fy-inbox-gate__stage" data-inbox-gate-stage="">
+          {gateVerb(item)}
+        </span>
+        {gate.projectName === undefined ? null : (
+          <>
+            {dot}
+            <span data-inbox-gate-project="">{gate.projectName}</span>
+          </>
+        )}
+        {dot}
+        <span className="fy-inbox-who__ferret" data-inbox-who-ferret="">
+          {inboxWho(card).ferret}
+        </span>
+      </span>
+      <RouteLink
+        className="fy-inbox-who__chat"
+        data-inbox-open-chat=""
+        onNavigate={onNavigate}
+        to={agendaConversationPath(card.daemonId, card.view.config.id, card.item.id)}
+      >
+        Open chat
+        <ChevronRight aria-hidden="true" size={13} />
+      </RouteLink>
+    </div>
+  );
+}
+
+/** The compass's quiet moves as plain buttons, so nothing depends on a gesture: Skip and Not needed. Snooze is the head's clock. */
+function CardTools({ act, skip }: { readonly act: (action: InboxAction) => void; readonly skip: () => void }) {
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a fieldset would bring its border and min-width into a flex row of buttons
+    <div aria-label="Put this card aside" className="fy-inbox-tools" data-inbox-card-tools="" role="group">
+      <button className="kt-btn kt-btn--sm" data-inbox-tool="skip" onClick={skip} type="button">
+        Skip
+      </button>
+      <button
+        className="kt-btn kt-btn--sm"
+        data-inbox-tool="not-needed"
+        onClick={() => act(DISMISS_ACTION)}
+        type="button"
+      >
+        Not needed
+      </button>
+    </div>
+  );
+}
+
+/** The words "Not good" waits for, asked where the answer row was; the refusal, if any, shows beside its buttons. */
+function GateWhy({
+  card,
+  error,
+  optional,
+  onSend,
+  onCancel,
+}: {
+  readonly card: InboxCard;
+  readonly error: string | null;
+  readonly optional: boolean;
+  readonly onSend: (reason: string) => void;
+  readonly onCancel: () => void;
+}) {
+  return (
+    <div className="fy-inbox-gate-why" data-inbox-gate-why={card.key}>
+      <BoardSendBack
+        busy={false}
+        error={error}
+        files={null}
+        heading={
+          optional
+            ? `Not yet: anything to add about ${card.item.subject ?? card.item.id}?`
+            : `Not good: what went wrong with ${card.item.subject ?? card.item.id}?`
+        }
+        submitLabel={optional ? 'Not yet' : 'Send back'}
+        wordsOptional={optional}
+        placeholder={optional ? 'Optional: what should the ferret know?' : 'What is not good? The ferret reads this.'}
+        onCancel={onCancel}
+        onSubmit={sent => onSend(sent.reason)}
       />
     </div>
   );
@@ -1133,6 +1257,8 @@ export function AgendaInboxPage({
   const [kind, setKind] = useState<ModeFilter>('all');
   const [query, setQuery] = useState('');
   const [withFerretsShown, setWithFerretsShown] = useState(withFerretsOpen);
+  /** A gate answer held for the owner's words: "Not good" is refused without a reason, so it waits for one. */
+  const [gateWhy, setGateWhy] = useState<{ readonly key: string; readonly action: InboxAction } | null>(null);
   const rowRefs = useRef(new Map<string, HTMLAnchorElement>()).current;
   const focusRow = useRef(false);
 
@@ -1430,8 +1556,16 @@ export function AgendaInboxPage({
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open" data-agenda-deck-host="">
             <AgendaSwipeDeck
               cards={deck}
+              canSnooze={card => inbox.canSnooze?.(card.daemonId) ?? true}
               onAct={(card, action) => answerWithDraft(host, card, action)}
+              onDismiss={card => answerCard(host, card, DISMISS_ACTION)}
+              onHold={(card, action) => {
+                if (!gateAsksWords(card.item, action)) return false;
+                setGateWhy({ key: card.key, action });
+                return true;
+              }}
               onSkip={card => setDeckAt(skipSelection(runOrder, card.key))}
+              onSnooze={(card, until) => answerCard(host, card, snoozeAction(until))}
               {...(phone ? { ownGesturesIn: VIEW_GESTURES } : {})}
               {...(reducedMotion === undefined ? {} : { reducedMotion })}
               renderCard={(card, act, skipCard) => {
@@ -1440,6 +1574,7 @@ export function AgendaInboxPage({
                 return (
                   <OpenItem
                     act={act}
+                    canSnooze={inbox.canSnooze?.(card.daemonId) ?? true}
                     card={card}
                     host={host}
                     key={card.key}
@@ -1456,7 +1591,20 @@ export function AgendaInboxPage({
               }}
             />
             <div className="fy-inbox-deck-foot" data-inbox-deck-foot="">
-              {deck[0] === undefined || renderComposer === undefined ? null : (
+              {deck[0] !== undefined && gateWhy?.key === deck[0].key ? (
+                <GateWhy
+                  card={deck[0]}
+                  optional={gateWordsFor(deck[0].item, gateWhy.action) === 'optional'}
+                  error={failureFor(inbox.deferredState.failed, deck[0].key)}
+                  onCancel={() => setGateWhy(null)}
+                  onSend={reason => {
+                    const label = choiceLabel(gateWhy.action);
+                    if (label === null || deck[0] === undefined) return;
+                    answerCard(host, deck[0], gateAnswerAction(label, reason));
+                    setGateWhy(null);
+                  }}
+                />
+              ) : deck[0] === undefined || renderComposer === undefined || isGateItem(deck[0].item) ? null : (
                 // biome-ignore lint/a11y/noStaticElementInteractions: the keydown only routes an unclaimed Esc in the composer back to the Inbox list
                 <div
                   className="fy-inbox-composer"

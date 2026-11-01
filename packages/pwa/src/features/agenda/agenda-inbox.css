@@ -1034,6 +1034,15 @@
   flex: 1 1 auto;
   border-radius: 0 0 var(--radius-panel) var(--radius-panel);
 }
+/* A gate card is as tall as its steps and no taller (never past the deck's room), so the plain buttons sit right under it. */
+.fy-inbox-open[data-inbox-gate] {
+  height: auto;
+  max-height: var(--deck-room, max(20rem, calc(100dvh - 22rem)));
+}
+.fy-inbox-open[data-inbox-gate] > .fy-item-view,
+.fy-inbox-open[data-inbox-gate] .fy-item-view__body {
+  flex: 0 1 auto;
+}
 /* A card to test in the quick-answer run: where it is in the run, then the same row as the list, scrolling on its own. */
 .fy-inbox-step {
   display: flex;
@@ -1227,7 +1236,7 @@
   padding: 0;
   list-style: none;
 }
-/* The row's own ground shows as the surface slides: green for Done (left), red for Not good (right), quiet for Skip (down). */
+/* The row's own ground shows as the surface slides: green for Done (right), red for Not good (left), quiet for Skip (down). */
 .fy-totest {
   position: relative;
   min-width: 0;
@@ -1236,11 +1245,11 @@
   border-radius: var(--radius-control);
   background: var(--surface);
 }
-.fy-totest[data-swipe-direction='left'] {
+.fy-totest[data-swipe-direction='right'] {
   background: var(--ok-bg);
   border-color: var(--ok-border);
 }
-.fy-totest[data-swipe-direction='right'] {
+.fy-totest[data-swipe-direction='left'] {
   background: var(--err-bg);
   border-color: var(--err-border);
 }
@@ -1271,11 +1280,11 @@
 }
 .fy-totest[data-swipe-direction='left'] .fy-totest__reveal[data-side='left'] {
   display: flex;
-  color: var(--ok);
+  color: var(--err);
 }
 .fy-totest[data-swipe-direction='right'] .fy-totest__reveal[data-side='right'] {
   display: flex;
-  color: var(--err);
+  color: var(--ok);
 }
 .fy-totest[data-swipe-direction='down'] .fy-totest__reveal[data-side='down'] {
   display: flex;
@@ -1362,8 +1371,17 @@
 }
 .fy-totest__actions {
   display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-totest__answers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap-sm);
+}
+.fy-totest__quiet {
+  display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: var(--gap-sm);
 }
 .fy-totest__actions .kt-btn {
@@ -1446,4 +1464,60 @@
 .fy-swipe-reveal[data-tone='err'] {
   background: var(--err-bg);
   color: var(--err);
+}
+
+/* The compass: the same ground, with the second layer of the swipe down laid out on it. */
+.fy-swipe-compass {
+  flex-direction: column;
+  justify-content: flex-start;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+.fy-swipe-compass__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--gap-sm);
+}
+.fy-swipe-compass__cell {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: var(--gap-xs) var(--gap-md);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-dot);
+  color: var(--muted);
+}
+.fy-swipe-compass__cell[data-active] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+
+/* A GATE ITEM says what it is under the who-and-what line: the gate it waits at, its project and its lane. */
+.fy-inbox-gate__stage {
+  color: var(--fg);
+  font-weight: 600;
+}
+/* The plain buttons for every move the compass makes, under the card: nothing depends on a gesture. */
+.fy-inbox-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs) var(--gap-sm);
+  border-top: var(--stroke) solid var(--divider-color, var(--border));
+  padding: var(--gap-xs) var(--gap-md);
+}
+/* The "Not good" words take the answer row's place and width. */
+.fy-inbox-gate-why {
+  min-width: 0;
+}
+/* A gate item's one meta line: quiet, the lane's verb a touch stronger. */
+.fy-inbox-who--gate {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-inbox-who--gate .fy-inbox-who__ferret {
+  color: inherit;
+  font-weight: inherit;
 }

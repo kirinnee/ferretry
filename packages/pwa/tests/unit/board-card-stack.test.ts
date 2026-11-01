@@ -4,7 +4,6 @@ import { chatCards } from '../../src/lib/board-chat.ts';
 import { boardModelOf, card, laptop } from './board-support.ts';
 
 const SELF = 's1';
-const ASK = { sessionId: 's1', id: 'A1' };
 
 const NOW = Date.parse('2026-08-02T12:00:00.000Z');
 
@@ -23,20 +22,16 @@ const stackOf = async (extra: readonly ReturnType<typeof card>[], now = NOW) => 
 };
 
 describe('cardStack', () => {
-  test('puts the cards to test first, then the ones waiting on the owner, then the rest', async () => {
+  test('puts the cards to test first, then the plans to approve', async () => {
     const stack = await stackOf([
-      card('F1', { owner: SELF, laneId: 'implement' }),
-      card('F2', { owner: SELF, laneId: 'implement', activity: 'waiting', waitingOnOwner: [ASK], openAsks: [ASK] }),
+      card('F1', { owner: SELF, laneId: 'plan' }),
       card('F3', { owner: SELF, laneId: 'tested' }),
-      card('F4', { owner: SELF, laneId: 'review' }),
       card('F5', { owner: SELF, laneId: 'tested' }),
     ]);
     expect(stack.map(entry => [entry.card.task.id, entry.rank])).toEqual([
       ['F3', 'to-test'],
       ['F5', 'to-test'],
-      ['F2', 'waiting'],
-      ['F1', 'rest'],
-      ['F4', 'rest'],
+      ['F1', 'approve'],
     ]);
   });
 
@@ -47,32 +42,48 @@ describe('cardStack', () => {
     expect(first?.toTest?.howToTest).toBe('1. Open it');
   });
 
-  test('a card waiting on a non-blocking ask is not "waiting on you"', async () => {
-    const stack = await stackOf([card('F1', { owner: SELF, laneId: 'implement', activity: 'waiting' })]);
-    expect(stack.map(entry => entry.rank)).toEqual(['rest']);
+  test('a card to approve has no verdict row', async () => {
+    const [first] = await stackOf([card('F1', { owner: SELF, laneId: 'plan' })]);
+    expect(first?.toTest).toBeNull();
   });
 
-  test('a dropped card in a verify lane is not offered for a verdict', async () => {
+  test('a card that is not in a gate lane is never in the stack', async () => {
     const stack = await stackOf([
-      card('F1', { owner: SELF, laneId: 'tested', dropped: { at: '2026-08-01T10:00:00.000Z', reason: 'no' } }),
+      card('F1', { owner: SELF, laneId: 'todo' }),
+      card('F2', { owner: SELF, laneId: 'implement' }),
+      card('F3', { owner: SELF, laneId: 'implement', activity: 'waiting' }),
+      card('F4', { owner: SELF, laneId: 'review' }),
+      card('F5', { owner: SELF, laneId: 'merged' }),
+      card('F6', { owner: SELF, laneId: 'released' }),
+      card('F7', { owner: SELF, laneId: 'closed' }),
     ]);
-    expect(stack.map(entry => entry.rank)).toEqual(['rest']);
-    expect(stack[0]?.toTest).toBeNull();
+    expect(stack).toEqual([]);
   });
 
-  test('a card an agent made is not offered for a verdict: it stays in the rest', async () => {
-    const stack = await stackOf([card('F1', { owner: SELF, laneId: 'tested', askedBy: 'agent' })]);
-    expect(stack.map(entry => [entry.rank, entry.toTest])).toEqual([['rest', null]]);
+  test('a dropped card in a gate lane is not offered', async () => {
+    const dropped = { at: '2026-08-01T10:00:00.000Z', reason: 'no' };
+    const stack = await stackOf([
+      card('F1', { owner: SELF, laneId: 'tested', dropped }),
+      card('F2', { owner: SELF, laneId: 'plan', dropped }),
+    ]);
+    expect(stack).toEqual([]);
   });
 
-  test('a snoozed card to test drops to the rest until its time is up', async () => {
+  test('a card an agent made is never offered, in a verify lane or a plan gate', async () => {
+    const stack = await stackOf([
+      card('F1', { owner: SELF, laneId: 'tested', askedBy: 'agent' }),
+      card('F2', { owner: SELF, laneId: 'plan', askedBy: 'agent' }),
+    ]);
+    expect(stack).toEqual([]);
+  });
+
+  test('a snoozed card to test leaves the stack until its time is up', async () => {
     const snoozed = card('F1', {
       owner: SELF,
       laneId: 'tested',
       snoozed: { until: '2026-08-02T15:00:00.000Z', laneId: 'tested' },
     });
-    const asleep = await stackOf([snoozed]);
-    expect(asleep.map(entry => [entry.rank, entry.toTest])).toEqual([['rest', null]]);
+    expect(await stackOf([snoozed])).toEqual([]);
     const awake = await stackOf([snoozed], Date.parse('2026-08-02T15:00:00.000Z'));
     expect(awake.map(entry => entry.rank)).toEqual(['to-test']);
   });

@@ -46,6 +46,7 @@ import {
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
+import { toTestBesideGates } from '../lib/gate-items.ts';
 import { nextWake, sessionTaskNames, splitSnoozed, type ToTestCard, withTaskName } from '../lib/to-test-inbox.ts';
 
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
@@ -81,6 +82,8 @@ export interface AgendaInbox {
   readonly deferred: DeferredAgendaActions;
   readonly deferredState: DeferredAgendaState;
   readonly connectionFor: (daemonId: DaemonId) => DaemonConnection | undefined;
+  /** Whether a machine can snooze (`agenda.snooze.1`): false only once its health answered without it. Absent: it can. */
+  readonly canSnooze?: (daemonId: DaemonId) => boolean;
 }
 
 /** One paired machine to count Attention on: its pairing and the name the reader knows it by. */
@@ -185,10 +188,17 @@ export function useAgendaInboxModel(
   const named = useMemo(() => toTestRead.map(row => withTaskName(row, taskNames)), [toTestRead, taskNames]);
   const now = useWakeClock(named, timers ?? browserDeferredTimers);
   const split = useMemo(() => splitSnoozed(named, now), [named, now]);
-  const toTest = useStable(split.awake, toTestKeyOf(split.awake));
-  const toTestSnoozed = useStable(split.snoozed, toTestKeyOf(split.snoozed));
   const latest = useRef(machines);
   latest.current = machines;
+  // Which machines raise gate items: read from the health the app already holds, and re-read when one moves.
+  const readGateFlags = () =>
+    latest.current
+      .map(
+        ({ connection }) =>
+          `${connection.daemonId}=${client.wires.gateItemsOf(connection.daemonId)}/${client.wires.snoozeOf(connection.daemonId)}`,
+      )
+      .join(',');
+  const gateFlags = useSyncExternalStore(client.wires.subscribe, readGateFlags, readGateFlags);
   const connectionFor = useMemo(
     () =>
       (daemonId: DaemonId): DaemonConnection | undefined =>
@@ -280,6 +290,37 @@ export function useAgendaInboxModel(
     [unread, boards, deferredState],
   );
   const cards = useStable(freshCards, cardsKey(freshCards));
+  // A gate item stands in for its card's to-test row, on a machine that raises them. What is still in the undo window
+  // counts too, so an answered gate item does not bring its row back for the few seconds before the card moves.
+  const gateHolders = useMemo(
+    () =>
+      inboxCards(
+        unread,
+        (daemonId, sessionId) => boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
+        new Set<string>(),
+      ).filter(card => card.item.gate !== undefined),
+    [unread, boards],
+  );
+  const offersGates = useCallback(
+    (daemonId: DaemonId): boolean => gateFlags.includes(`${daemonId}=true/`),
+    [gateFlags],
+  );
+  const canSnooze = useCallback(
+    (daemonId: DaemonId): boolean =>
+      !gateFlags.includes(`${daemonId}=`) ||
+      !gateFlags.split(',').some(entry => entry.startsWith(`${daemonId}=`) && entry.endsWith('/false')),
+    [gateFlags],
+  );
+  const awakeRows = useMemo(
+    () => toTestBesideGates(split.awake, gateHolders, offersGates),
+    [split.awake, gateHolders, offersGates],
+  );
+  const snoozedRows = useMemo(
+    () => toTestBesideGates(split.snoozed, gateHolders, offersGates),
+    [split.snoozed, gateHolders, offersGates],
+  );
+  const toTest = useStable(awakeRows, toTestKeyOf(awakeRows));
+  const toTestSnoozed = useStable(snoozedRows, toTestKeyOf(snoozedRows));
   const freshWithFerretCards = useMemo(
     () =>
       withFerretCards(withFerretEntries, (daemonId, sessionId) =>
@@ -354,6 +395,7 @@ export function useAgendaInboxModel(
       deferred,
       deferredState,
       connectionFor,
+      canSnooze,
     }),
     [
       unread,
@@ -369,6 +411,7 @@ export function useAgendaInboxModel(
       deferred,
       deferredState,
       connectionFor,
+      canSnooze,
     ],
   );
 }

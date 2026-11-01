@@ -28,6 +28,7 @@ import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inb
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
 import { plainLabel } from '../../lib/plain-label.ts';
+import { HowToTest } from '../board/detail/board-detail-sections.tsx';
 import { AgendaLinkRow, PointForm } from './agenda-brief.tsx';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
 import { AgendaDelivery } from './agenda-delivery.tsx';
@@ -298,7 +299,9 @@ export function AgendaItemCard({
   const formFields = item.fields ?? [];
   const formPicks = useFormPicks(formKey ?? item.id, formFields);
   const isInput = inputForm !== undefined && item.kind === 'input';
-  const canDismiss = answerable && !isInput && model.dismissInMenu && !model.notice;
+  // A gate item is a card to try or approve: its steps are the card's How to test, and Not needed is a button under it.
+  const gated = item.gate !== undefined;
+  const canDismiss = answerable && !isInput && model.dismissInMenu && !model.notice && !gated;
   const dismiss = (): void => {
     if (!busy) onAct(DISMISS_ACTION);
   };
@@ -309,7 +312,7 @@ export function AgendaItemCard({
   const shape = model.shape;
   const choosing = shape === 'choice' || shape === 'yesno';
   const options = choosing ? itemOptions(item) : [];
-  const lettered = cardLettered(options);
+  const lettered = item.gate === undefined && cardLettered(options);
   const onRow = new Set(model.answers.map(answer => answer.label.trim().toLowerCase()));
   const listed: readonly ListedOption[] = letteredOptions(options, item.optionDetails, model.recommended).map(
     option => {
@@ -327,7 +330,7 @@ export function AgendaItemCard({
     },
   );
   // A list that would only repeat its buttons ("Yes", "No") is not drawn.
-  const showList = listed.some(option => option.meaning !== null || option.pickHere);
+  const showList = !gated && listed.some(option => option.meaning !== null || option.pickHere);
 
   const questions = item.questions ?? [];
   const recommendation = model.recommendation;
@@ -352,6 +355,7 @@ export function AgendaItemCard({
       model={model}
       onAct={onAct}
       options={options}
+      plainLabels={item.gate !== undefined}
       swipeable={swipeable}
       {...(onSkip === undefined ? {} : { onSkip })}
       {...(doneClose === undefined ? {} : { doneClose })}
@@ -376,30 +380,34 @@ export function AgendaItemCard({
       data-agenda-version={shown}
       data-kind={meta.tone}
     >
-      <div className="fy-card__top" data-agenda-card-top="" {...pull}>
-        <span className="fy-card__type" data-agenda-type={meta.kind} data-tone={meta.tone}>
-          {meta.label}
-        </span>
-        <span className="fy-card__tools">
-          {canDismiss ? (
-            <button
-              aria-label="Not needed"
-              className="fy-card__dismiss"
-              data-agenda-dismiss=""
-              disabled={busy}
-              onClick={dismiss}
-              type="button"
-            >
-              Not needed
-            </button>
-          ) : null}
-          {count > 1 ? <VersionPicker item={current} now={now} onShow={setShown} shown={shown} /> : null}
-        </span>
-      </div>
+      {gated && count <= 1 ? null : (
+        <div className="fy-card__top" data-agenda-card-top="" {...pull}>
+          {gated ? null : (
+            <span className="fy-card__type" data-agenda-type={meta.kind} data-tone={meta.tone}>
+              {meta.label}
+            </span>
+          )}
+          <span className="fy-card__tools">
+            {canDismiss ? (
+              <button
+                aria-label="Not needed"
+                className="fy-card__dismiss"
+                data-agenda-dismiss=""
+                disabled={busy}
+                onClick={dismiss}
+                type="button"
+              >
+                Not needed
+              </button>
+            ) : null}
+            {count > 1 ? <VersionPicker item={current} now={now} onShow={setShown} shown={shown} /> : null}
+          </span>
+        </div>
+      )}
       {latest ? <AgendaDelivery busy={busy} ferret={ferret} item={item} onAct={onAct} /> : null}
       {latest ? <AgendaConfigChange item={item} /> : null}
       <TermLayer renderProse={renderProse} terms={terms}>
-        <Situation context={context} premise={premise} renderProse={renderProse} />
+        {gated ? null : <Situation context={context} premise={premise} renderProse={renderProse} />}
         {questionAnswer === null ? null : (
           <div className="fy-card__answered" data-agenda-question-answer="">
             <h5 className="fy-card__label">Answer to your question</h5>
@@ -408,14 +416,21 @@ export function AgendaItemCard({
         )}
         <AgendaNeed
           shape={shape}
+          {...(gated && body !== null ? { heading: 'How to test' } : {})}
+          {...(gated ? { lead: '' } : {})}
           {...(!answerable ? { lead: '' } : shape === 'form' && formKey === undefined ? { lead: FORM_ELSEWHERE } : {})}
         >
-          {askLine === '' || shape === 'answers' || shape === 'input' || shape === 'form' ? null : (
+          {askLine === '' ||
+          (gated && body !== null) ||
+          shape === 'answers' ||
+          shape === 'input' ||
+          shape === 'form' ? null : (
             <div className="fy-card__question" data-agenda-question-line="">
               {renderProse(mark(askLine))}
             </div>
           )}
           {model.notice && body !== null ? <AgendaBody renderProse={renderProse} text={body} /> : null}
+          {gated && body !== null ? <HowToTest renderProse={renderProse} text={body} /> : null}
           {choosing && showList ? (
             <OptionsList
               busy={busy}
@@ -483,7 +498,7 @@ export function AgendaItemCard({
           />
         </Section>
       )}
-      {body === null || model.notice ? null : (
+      {body === null || model.notice || gated ? null : (
         <Section
           name={kind === 'review' ? 'reasoning' : 'more'}
           title={kind === 'review' ? 'Reasoning' : 'More detail'}

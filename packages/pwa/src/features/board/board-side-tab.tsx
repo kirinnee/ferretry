@@ -121,7 +121,7 @@ function Toolbar({
   return (
     <div className="fy-board-side__bar" data-board-side-bar="">
       <ViewToggle onView={onView} view={view} />
-      {chat.splitsAgents ? (
+      {chat.splitsAgents && view !== 'cards' ? (
         <AgentsToggle
           filters={{ ...NO_BOARD_FILTERS, agents: chat.agents }}
           onChange={next => onAgents(next.agents)}

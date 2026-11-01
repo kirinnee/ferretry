@@ -263,11 +263,19 @@ describe('Inbox — snoozing a card waiting for a try', () => {
     expect(root.querySelector('[data-to-test-notice]')?.textContent).toBe('Only the owner can snooze');
   });
 
+  it('draws the buttons Not good (left) then Done (right), the order of the swipes', async () => {
+    const { root } = await open();
+    const names = [...rowOf(root, 'F22').querySelectorAll('.fy-totest__actions button')].map(button =>
+      button.textContent?.trim(),
+    );
+    expect(names.slice(0, 2)).toEqual(['Not good', 'Done']);
+  });
+
   it('leaves the swipes alone: Done, Not good and Skip are still the answers', async () => {
     const { root } = await open();
     const row = rowOf(root, 'F22');
-    expect(row.querySelector('[data-to-test-reveal="left"]')?.textContent).toContain('Done');
-    expect(row.querySelector('[data-to-test-reveal="right"]')?.textContent).toContain('Not good');
+    expect(row.querySelector('[data-to-test-reveal="right"]')?.textContent).toContain('Done');
+    expect(row.querySelector('[data-to-test-reveal="left"]')?.textContent).toContain('Not good');
     expect(row.querySelector('[data-to-test-reveal="down"]')?.textContent).toContain('Skip');
   });
 
@@ -331,32 +339,32 @@ const dragDown = async (row: HTMLElement, dy: number, release: boolean): Promise
 };
 
 describe('Inbox — swiping a card waiting for a try', () => {
-  it('reads a left drag as Done and a right drag as Not good, mid-swipe, and names the answer in the area it uncovers', async () => {
+  it('reads a right drag as Done and a left drag as Not good, mid-swipe, and names the answer in the area it uncovers', async () => {
     const { root } = await open({ phone: true });
     const row = rowOf(root, 'F22');
-    await drag(row, -200, false);
-    expect(row.getAttribute('data-swipe-direction')).toBe('left');
+    await drag(row, 200, false);
+    expect(row.getAttribute('data-swipe-direction')).toBe('right');
     expect(row.getAttribute('data-swipe-answer')).toBe('Done');
-    expect(row.querySelector('[data-to-test-reveal="left"]')?.textContent).toBe('Done');
+    expect(row.querySelector('[data-to-test-reveal="right"]')?.textContent).toBe('Done');
     await interact(() =>
       must(row.querySelector('.fy-totest__meta'), 'grip').dispatchEvent(pointer('pointercancel', 300)),
     );
-    await drag(row, 200, false);
-    expect(row.getAttribute('data-swipe-direction')).toBe('right');
+    await drag(row, -200, false);
+    expect(row.getAttribute('data-swipe-direction')).toBe('left');
     expect(row.getAttribute('data-swipe-answer')).toBe('Not good');
-    expect(row.querySelector('[data-to-test-reveal="right"]')?.textContent).toBe('Not good');
+    expect(row.querySelector('[data-to-test-reveal="left"]')?.textContent).toBe('Not good');
   });
 
-  it('a left swipe past the threshold is Done', async () => {
+  it('a right swipe past the threshold is Done', async () => {
     const { root, actions } = await open({ phone: true });
-    await drag(rowOf(root, 'F22'), -300, true);
+    await drag(rowOf(root, 'F22'), 300, true);
     await interact(() => flush());
     expect(actions.calls).toEqual(['moveTask:["closed"]']);
   });
 
-  it('a right swipe past the threshold opens the reason box instead of moving the card', async () => {
+  it('a left swipe past the threshold opens the reason box instead of moving the card', async () => {
     const { root, actions } = await open({ phone: true });
-    await drag(rowOf(root, 'F22'), 300, true);
+    await drag(rowOf(root, 'F22'), -300, true);
     await interact(() => flush());
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
     expect(actions.calls).toEqual([]);
@@ -429,7 +437,7 @@ describe('Inbox — swiping a card waiting for a try', () => {
     };
     try {
       const { root, actions } = await open({ phone: true });
-      await drag(rowOf(root, 'F22'), -300, true);
+      await drag(rowOf(root, 'F22'), 300, true);
       await interact(() => flush());
       expect(actions.calls).toEqual(['moveTask:["closed"]']);
     } finally {
