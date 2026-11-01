@@ -296,6 +296,16 @@ const agendaCases: SchemaCase[] = [
     schema: agenda.AgendaTwoFactorSeedRefSchema,
     value: { stage: `st_${'a'.repeat(24)}`, account: 'GITHUB' },
   },
+  {
+    name: 'attention standing rule suggestion pointer',
+    schema: agenda.AgendaSignInRuleSuggestionRefSchema,
+    value: { suggestion: `srg_${'a'.repeat(16)}` },
+  },
+  {
+    name: 'attention suspended standing rule pointer',
+    schema: agenda.AgendaSignInRuleSuspendedRefSchema,
+    value: { rule: `sr_${'b'.repeat(24)}` },
+  },
   { name: 'resolved attention', schema: agenda.ResolvedAgendaItemSchema, value: resolvedAgenda },
   {
     name: 'session attention summary',
@@ -951,6 +961,49 @@ describe('attention schemas', () => {
     // Act + Assert
     assertRoundTrips(cases);
     assertCoversEverySchema(agenda, cases);
+  });
+
+  it('should refuse a standing rule pointer that is not exactly its own id', () => {
+    // Arrange — a pointer names its suggestion or rule by id, and nothing else: never an account
+    const suggestion = { suggestion: `srg_${'a'.repeat(16)}` };
+    const suspended = { rule: `sr_${'b'.repeat(24)}` };
+    const cases: SchemaCase[] = [
+      {
+        name: 'suggestion with an extra key',
+        schema: agenda.AgendaSignInRuleSuggestionRefSchema,
+        value: { ...suggestion, account: 'GITHUB' },
+      },
+      {
+        name: 'suggestion id too short',
+        schema: agenda.AgendaSignInRuleSuggestionRefSchema,
+        value: { suggestion: 'srg_x' },
+      },
+      {
+        name: 'suggestion named by a rule id',
+        schema: agenda.AgendaSignInRuleSuggestionRefSchema,
+        value: { suggestion: suspended.rule },
+      },
+      { name: 'empty suggestion pointer', schema: agenda.AgendaSignInRuleSuggestionRefSchema, value: {} },
+      {
+        name: 'suspended with an extra key',
+        schema: agenda.AgendaSignInRuleSuspendedRefSchema,
+        value: { ...suspended, account: 'GITHUB' },
+      },
+      {
+        name: 'suspended named by a stage',
+        schema: agenda.AgendaSignInRuleSuspendedRefSchema,
+        value: { rule: `srs_${'b'.repeat(24)}` },
+      },
+      {
+        name: 'suspended named by a suggestion',
+        schema: agenda.AgendaSignInRuleSuspendedRefSchema,
+        value: { rule: suggestion.suggestion },
+      },
+      { name: 'empty suspended pointer', schema: agenda.AgendaSignInRuleSuspendedRefSchema, value: {} },
+    ];
+
+    // Act + Assert
+    assertRejects(cases);
   });
 
   it('should resolve every ask, response, provenance, and action member', () => {
