@@ -1,17 +1,33 @@
 /**
- * What this machine keeps about the catalogs it publishes (`state/catalogs/catalogs.json`), and the pure
- * rules that change it (docs/catalogs.md § The publisher side).
+ * What this machine keeps about the catalogs it publishes (`state/catalogs/catalogs.json`, schema version 2),
+ * and the pure rules that change it (docs/catalogs.md § The publisher side).
  *
- * The frozen item versions are NOT here: each is a content-addressed blob, written once and never
- * touched. This document lists them — digest, size, when, from where — so a damaged blob is found by
- * hashing it against the line here.
+ * ## One table of items, listed by catalogs
+ *
+ * An item (its name, its versions, which version is current) is kept ONCE, in `items`. A catalog does not
+ * hold items: it holds `entries`, which point at them, in the order its manifest lists them. An item
+ * can therefore be listed by more than one catalog, and a version is one record.
+ *
+ * ## Two digests per version
+ *
+ * The signed item names its catalog (`catalogId` is in its head), so the same content has a different
+ * digest in every catalog that lists it, and the format cannot change without older installers refusing
+ * it. So a version holds:
+ *
+ * - `contentDigest`: the item with its catalog, id and version number normalised away. The frozen file on
+ *   disk is this one copy.
+ * - `bindings[catalogId]`: the digest and size of the item as THAT catalog's manifest lists it. Turning the
+ *   shared copy into a catalog's item is a pure change of three head fields (`freeze.ts`).
  *
  * ## One rule for the revision
  *
  * A catalog's `revision` goes up by exactly one on every change to what its manifest says — an item
- * added, a new version, a withdrawal, a rename, a new description, a new publisher name — and never otherwise. `issuedAt` is
- * the instant of that change. An export signs both, so two exports with nothing between them are the
- * same bytes (Ed25519 is deterministic), and a reader that saw revision 7 refuses a signed 6.
+ * added, a new version of an item it lists live, a withdrawal, a rename, a new description, a new
+ * publisher name — and never otherwise. `issuedAt` is the instant of that change. An export signs both, so
+ * two exports with nothing between them are the same bytes (Ed25519 is deterministic), and a reader that
+ * saw revision 7 refuses a signed 6.
+ *
+ * Every change below returns the whole next document, so one atomic write carries every catalog it bumped.
  */
 import {
   CATALOG_MAX_ITEMS,
@@ -28,34 +44,54 @@ import {
   SharedCatalogItemIdSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import { NORMALISED_CATALOG_ID, NORMALISED_ITEM_ID } from './freeze.ts';
 import { CatalogRefusal } from './refusal.ts';
 
-export const CATALOGS_SCHEMA_VERSION = 1;
+export const CATALOGS_SCHEMA_VERSION = 2;
+
+const BindingSchema = z.strictObject({
+  /** The digest the catalog's signed manifest lists: it covers the item's catalog, id and version number. */
+  digest: CatalogDigestSchema,
+  size: z.number().int().min(1),
+});
+export type CatalogBinding = z.infer<typeof BindingSchema>;
 
 const StoredVersionSchema = z.strictObject({
   version: z.number().int().min(1),
-  /** The digest the signed manifest lists: it covers the item's identity as well as its content. */
-  digest: CatalogDigestSchema,
-  /** The digest of the content alone, which is what a preview binds and what "same as before" compares. */
-  contentDigest: CatalogDigestSchema,
-  size: z.number().int().min(1),
   publishedAt: InstantSchema,
   summary: CatalogSummarySchema,
   source: CatalogSourceReferenceSchema,
+  /** The digest of the shared copy: the item with its catalog, id and version number normalised. */
+  contentDigest: CatalogDigestSchema,
+  /** Bytes of that shared copy. For display only. */
+  size: z.number().int().min(1),
+  fileCount: z.number().int().min(0).optional(),
+  /** Set by a later slice (retiring a version); the schema is ready for it. */
+  retiredAt: InstantSchema.optional(),
+  bindings: z.record(SharedCatalogIdSchema, BindingSchema),
 });
 export type StoredVersion = z.infer<typeof StoredVersionSchema>;
 
-const StoredItemSchema = z.strictObject({
+const StoredSharedItemSchema = z.strictObject({
   itemId: SharedCatalogItemIdSchema,
   kind: z.enum(['skill', 'mcp']),
   name: CatalogItemNameSchema,
   harness: CatalogHarnessSchema.optional(),
   /** The person wrote the summary, so a new version keeps it instead of reading the source's again. */
   ownSummary: z.boolean(),
-  withdrawnAt: InstantSchema.optional(),
+  createdAt: InstantSchema,
+  /** The version every catalog that lists this item live puts in its manifest. */
+  current: z.number().int().min(1),
   versions: z.array(StoredVersionSchema).min(1),
 });
-export type StoredItem = z.infer<typeof StoredItemSchema>;
+export type StoredSharedItem = z.infer<typeof StoredSharedItemSchema>;
+
+const CatalogEntrySchema = z.strictObject({
+  itemId: SharedCatalogItemIdSchema,
+  addedAt: InstantSchema,
+  withdrawnAt: InstantSchema.optional(),
+});
+export type CatalogEntry = z.infer<typeof CatalogEntrySchema>;
 
 const StoredCatalogSchema = z.strictObject({
   id: SharedCatalogIdSchema,
@@ -67,50 +103,124 @@ const StoredCatalogSchema = z.strictObject({
   revision: z.number().int().min(1),
   issuedAt: InstantSchema,
   createdAt: InstantSchema,
-  items: z.array(StoredItemSchema),
+  /** In the order the manifest lists them. */
+  entries: z.array(CatalogEntrySchema),
 });
 export type StoredCatalog = z.infer<typeof StoredCatalogSchema>;
+
+/** Why an id may not be used, when it is the placeholder a shared copy is stored under. */
+export function placeholderProblem(kind: 'catalog' | 'item', id: string): string | undefined {
+  const placeholder = kind === 'catalog' ? NORMALISED_CATALOG_ID : NORMALISED_ITEM_ID;
+  return id === placeholder
+    ? `${id} is the placeholder id a shared copy is stored under, so it cannot be a ${kind} id`
+    : undefined;
+}
+
+/** The first thing wrong with a parsed document, or `undefined`: the rules a shape alone cannot say. */
+function firstProblem(document: {
+  readonly defaultCatalogId?: string | undefined;
+  readonly items: readonly StoredSharedItem[];
+  readonly catalogs: readonly StoredCatalog[];
+}): string | undefined {
+  const catalogIds = new Set<string>();
+  for (const catalog of document.catalogs) {
+    const placeholder = placeholderProblem('catalog', catalog.id);
+    if (placeholder !== undefined) return placeholder;
+    if (catalogIds.has(catalog.id)) return `${catalog.id} is listed twice`;
+    catalogIds.add(catalog.id);
+  }
+  if (document.defaultCatalogId !== undefined && !catalogIds.has(document.defaultCatalogId))
+    return `the default catalog ${document.defaultCatalogId} does not exist`;
+
+  const items = new Map<string, StoredSharedItem>();
+  for (const item of document.items) {
+    const placeholder = placeholderProblem('item', item.itemId);
+    if (placeholder !== undefined) return placeholder;
+    if (items.has(item.itemId)) return `${item.itemId} is listed twice`;
+    items.set(item.itemId, item);
+    if (item.versions.some((version, index) => version.version !== index + 1))
+      return `${item.itemId} does not have versions 1, 2, 3 in order`;
+    const current = item.versions.find(version => version.version === item.current);
+    if (current === undefined) return `${item.itemId} has no version ${String(item.current)}, which is its current one`;
+    if (current.retiredAt !== undefined) return `${item.itemId} has a retired version as its current one`;
+  }
+
+  const listedBy = new Map<string, Set<string>>();
+  for (const catalog of document.catalogs) {
+    const seen = new Set<string>();
+    const names = new Set<string>();
+    let live = 0;
+    let withdrawn = 0;
+    for (const entry of catalog.entries) {
+      const item = items.get(entry.itemId);
+      if (item === undefined) return `${catalog.name} lists ${entry.itemId}, which is not an item`;
+      if (seen.has(entry.itemId)) return `${catalog.name} lists ${entry.itemId} twice`;
+      seen.add(entry.itemId);
+      const lists = listedBy.get(entry.itemId) ?? new Set<string>();
+      lists.add(catalog.id);
+      listedBy.set(entry.itemId, lists);
+      if (entry.withdrawnAt !== undefined) {
+        withdrawn += 1;
+        continue;
+      }
+      live += 1;
+      const key = JSON.stringify([item.kind, item.name]);
+      if (names.has(key)) return `${catalog.name} lists two live ${item.kind} items called ${item.name}`;
+      names.add(key);
+    }
+    if (live > CATALOG_MAX_ITEMS) return `${catalog.name} lists more than ${String(CATALOG_MAX_ITEMS)} live items`;
+    if (withdrawn > CATALOG_MAX_WITHDRAWN)
+      return `${catalog.name} remembers more than ${String(CATALOG_MAX_WITHDRAWN)} withdrawn items`;
+  }
+
+  for (const item of document.items) {
+    const lists = listedBy.get(item.itemId) ?? new Set<string>();
+    for (const version of item.versions) {
+      for (const catalogId of lists)
+        if (version.bindings[catalogId] === undefined)
+          return `${item.itemId} version ${String(version.version)} has no digest for ${catalogId}, which lists it`;
+      for (const catalogId of Object.keys(version.bindings))
+        if (!lists.has(catalogId))
+          return `${item.itemId} version ${String(version.version)} has a digest for ${catalogId}, which does not list it`;
+    }
+  }
+  return undefined;
+}
 
 export const CatalogsDocumentSchema = z
   .strictObject({
     schemaVersion: z.literal(CATALOGS_SCHEMA_VERSION),
+    defaultCatalogId: SharedCatalogIdSchema.optional(),
+    items: z.array(StoredSharedItemSchema),
     catalogs: z.array(StoredCatalogSchema),
   })
   .check(ctx => {
-    const issue = (message: string): void => {
-      ctx.issues.push({ code: 'custom', message, input: ctx.value, path: ['catalogs'] });
-    };
-    const catalogIds = new Set<string>();
-    const itemIds = new Set<string>();
-    for (const catalog of ctx.value.catalogs) {
-      if (catalogIds.has(catalog.id)) {
-        issue(`${catalog.id} is listed twice`);
-        return;
-      }
-      catalogIds.add(catalog.id);
-      for (const item of catalog.items) {
-        if (itemIds.has(item.itemId)) {
-          issue(`${item.itemId} is listed twice`);
-          return;
-        }
-        itemIds.add(item.itemId);
-        if (item.versions.some((version, index) => version.version !== index + 1)) {
-          issue(`${item.itemId} does not have versions 1, 2, 3 in order`);
-          return;
-        }
-      }
-    }
+    const problem = firstProblem(ctx.value);
+    if (problem !== undefined)
+      ctx.issues.push({ code: 'custom', message: problem, input: ctx.value, path: ['catalogs'] });
   });
 export type CatalogsDocument = z.infer<typeof CatalogsDocumentSchema>;
 
-export const EMPTY_CATALOGS_DOCUMENT: CatalogsDocument = { schemaVersion: CATALOGS_SCHEMA_VERSION, catalogs: [] };
+export const EMPTY_CATALOGS_DOCUMENT: CatalogsDocument = {
+  schemaVersion: CATALOGS_SCHEMA_VERSION,
+  items: [],
+  catalogs: [],
+};
 
-/** The latest version of an item. Every item has at least one. */
-export const latestVersion = (item: StoredItem): StoredVersion =>
+/** The newest version of an item. Every item has at least one. */
+export const latestVersion = (item: StoredSharedItem): StoredVersion =>
   item.versions[item.versions.length - 1] as StoredVersion;
 
-export const liveItems = (catalog: StoredCatalog): readonly StoredItem[] =>
-  catalog.items.filter(item => item.withdrawnAt === undefined);
+/** The version a manifest lists: the schema guarantees there is one. */
+export const currentVersion = (item: StoredSharedItem): StoredVersion =>
+  item.versions.find(version => version.version === item.current) as StoredVersion;
+
+/** The digest and size a catalog's manifest lists for this version: the schema guarantees one for every entry. */
+export const bindingOf = (version: StoredVersion, catalogId: string): CatalogBinding =>
+  version.bindings[catalogId] as CatalogBinding;
+
+export const liveEntries = (catalog: StoredCatalog): readonly CatalogEntry[] =>
+  catalog.entries.filter(entry => entry.withdrawnAt === undefined);
 
 /** Looks a catalog up by its id. */
 export function findCatalog(document: CatalogsDocument, id: string): StoredCatalog {
@@ -119,11 +229,20 @@ export function findCatalog(document: CatalogsDocument, id: string): StoredCatal
   return catalog;
 }
 
-export function findItem(catalog: StoredCatalog, itemId: string): StoredItem {
-  const item = catalog.items.find(candidate => candidate.itemId === itemId);
-  if (item === undefined) throw new CatalogRefusal('item_unknown', `${catalog.name} has no item ${itemId}.`);
-  return item;
+/** The catalog's line for an item, or the refusal that it lists none. */
+export function findEntry(catalog: StoredCatalog, itemId: string): CatalogEntry {
+  const entry = catalog.entries.find(candidate => candidate.itemId === itemId);
+  if (entry === undefined) throw new CatalogRefusal('item_unknown', `${catalog.name} has no item ${itemId}.`);
+  return entry;
 }
+
+/** An item of the table. Only called for an id an entry names, so the schema guarantees it is there. */
+export const itemOf = (document: CatalogsDocument, itemId: string): StoredSharedItem =>
+  document.items.find(item => item.itemId === itemId) as StoredSharedItem;
+
+/** Every catalog that has a line for this item, withdrawn or not: each needs a digest for every version. */
+export const catalogsListing = (document: CatalogsDocument, itemId: string): readonly StoredCatalog[] =>
+  document.catalogs.filter(catalog => catalog.entries.some(entry => entry.itemId === itemId));
 
 /** The change a manifest sees: a new revision, made at `now` (never earlier than the one before). */
 function bumped(catalog: StoredCatalog, now: string): StoredCatalog {
@@ -133,11 +252,6 @@ function bumped(catalog: StoredCatalog, now: string): StoredCatalog {
 const replaceCatalog = (document: CatalogsDocument, next: StoredCatalog): CatalogsDocument => ({
   ...document,
   catalogs: document.catalogs.map(catalog => (catalog.id === next.id ? next : catalog)),
-});
-
-const replaceItem = (catalog: StoredCatalog, next: StoredItem): StoredCatalog => ({
-  ...catalog,
-  items: catalog.items.map(item => (item.itemId === next.itemId ? next : item)),
 });
 
 export interface NewCatalog {
@@ -160,14 +274,30 @@ export function withCatalog(document: CatalogsDocument, created: NewCatalog): Ca
     revision: 1,
     issuedAt: created.now,
     createdAt: created.now,
-    items: [],
+    entries: [],
   };
   return { ...document, catalogs: [...document.catalogs, catalog] };
 }
 
+/**
+ * Takes the catalog, its lines and its digests out. The items and their versions STAY in the table: they
+ * are the person's frozen work, and the default catalog is forgotten if this was it.
+ */
 export function withoutCatalog(document: CatalogsDocument, id: string): CatalogsDocument {
   findCatalog(document, id);
-  return { ...document, catalogs: document.catalogs.filter(catalog => catalog.id !== id) };
+  const { defaultCatalogId, ...rest } = document;
+  return {
+    ...rest,
+    ...(defaultCatalogId === undefined || defaultCatalogId === id ? {} : { defaultCatalogId }),
+    items: document.items.map(item => ({
+      ...item,
+      versions: item.versions.map(version => {
+        const { [id]: _removed, ...bindings } = version.bindings;
+        return { ...version, bindings };
+      }),
+    })),
+    catalogs: document.catalogs.filter(catalog => catalog.id !== id),
+  };
 }
 
 export interface CatalogPatch {
@@ -194,28 +324,38 @@ export function withCatalogPatch(
   return replaceCatalog(document, bumped({ ...catalog, name, description, publisherName }, now));
 }
 
-/** Whether a live item of this kind already has this name: the manifest would refuse two. */
-function nameTaken(catalog: StoredCatalog, kind: string, name: string, except?: string): boolean {
-  return liveItems(catalog).some(item => item.kind === kind && item.name === name && item.itemId !== except);
+/** Whether a live item of this kind already has this name in the catalog: the manifest would refuse two. */
+function nameTaken(document: CatalogsDocument, catalog: StoredCatalog, kind: string, name: string): boolean {
+  return liveEntries(catalog).some(entry => {
+    const item = itemOf(document, entry.itemId);
+    return item.kind === kind && item.name === name;
+  });
 }
 
+/** A new item, listed live by one catalog. The item arrives with its digest for that catalog. */
 export function withNewItem(
   document: CatalogsDocument,
   catalogId: string,
-  item: StoredItem,
+  item: StoredSharedItem,
   now: string,
 ): CatalogsDocument {
   const catalog = findCatalog(document, catalogId);
-  if (liveItems(catalog).length >= CATALOG_MAX_ITEMS)
+  if (liveEntries(catalog).length >= CATALOG_MAX_ITEMS)
     throw new CatalogRefusal('catalog_full', `A catalog holds at most ${CATALOG_MAX_ITEMS} items. Withdraw one first.`);
-  if (nameTaken(catalog, item.kind, item.name))
+  if (nameTaken(document, catalog, item.kind, item.name))
     throw new CatalogRefusal(
       'name_taken',
       `${catalog.name} already has a ${item.kind === 'skill' ? 'skill' : 'MCP setup'} called ${item.name}. Publish a new version of it instead, or withdraw it first.`,
     );
-  return replaceCatalog(document, bumped({ ...catalog, items: [...catalog.items, item] }, now));
+  const next = bumped({ ...catalog, entries: [...catalog.entries, { itemId: item.itemId, addedAt: now }] }, now);
+  return replaceCatalog({ ...document, items: [...document.items, item] }, next);
 }
 
+/**
+ * A new version of an item, which becomes its current one. Every catalog that lists the item live puts it in
+ * its manifest from now on, so every one of them rises a revision, in this one change. The version arrives with
+ * its digest for every catalog that has a line for the item.
+ */
 export function withNewVersion(
   document: CatalogsDocument,
   catalogId: string,
@@ -223,14 +363,19 @@ export function withNewVersion(
   version: StoredVersion,
   now: string,
 ): CatalogsDocument {
-  const catalog = findCatalog(document, catalogId);
-  const item = findItem(catalog, itemId);
-  if (item.withdrawnAt !== undefined)
+  const entry = findEntry(findCatalog(document, catalogId), itemId);
+  const item = itemOf(document, itemId);
+  if (entry.withdrawnAt !== undefined)
     throw new CatalogRefusal('item_withdrawn', `${item.name} was withdrawn, so it takes no new version.`);
-  return replaceCatalog(
-    document,
-    bumped(replaceItem(catalog, { ...item, versions: [...item.versions, version] }), now),
-  );
+  return {
+    ...document,
+    items: document.items.map(other =>
+      other.itemId === itemId ? { ...item, current: version.version, versions: [...item.versions, version] } : other,
+    ),
+    catalogs: document.catalogs.map(catalog =>
+      liveEntries(catalog).some(live => live.itemId === itemId) ? bumped(catalog, now) : catalog,
+    ),
+  };
 }
 
 export function withWithdrawn(
@@ -240,16 +385,23 @@ export function withWithdrawn(
   now: string,
 ): CatalogsDocument {
   const catalog = findCatalog(document, catalogId);
-  const item = findItem(catalog, itemId);
-  if (item.withdrawnAt !== undefined) throw new CatalogRefusal('item_withdrawn', `${item.name} was already withdrawn.`);
-  if (catalog.items.filter(other => other.withdrawnAt !== undefined).length >= CATALOG_MAX_WITHDRAWN)
+  const entry = findEntry(catalog, itemId);
+  const item = itemOf(document, itemId);
+  if (entry.withdrawnAt !== undefined)
+    throw new CatalogRefusal('item_withdrawn', `${item.name} was already withdrawn.`);
+  if (catalog.entries.filter(other => other.withdrawnAt !== undefined).length >= CATALOG_MAX_WITHDRAWN)
     throw new CatalogRefusal('catalog_full', `A catalog remembers at most ${CATALOG_MAX_WITHDRAWN} withdrawn items.`);
   const next = bumped(catalog, now);
-  return replaceCatalog(document, replaceItem(next, { ...item, withdrawnAt: next.issuedAt }));
+  return replaceCatalog(document, {
+    ...next,
+    entries: next.entries.map(other => (other.itemId === itemId ? { ...other, withdrawnAt: next.issuedAt } : other)),
+  });
 }
 
 /** Why a stored document cannot be used, in one line, or `null` when it parses. */
-export function documentProblem(parsed: ReturnType<typeof CatalogsDocumentSchema.safeParse>): string | null {
+export function documentProblem(
+  parsed: { readonly success: true } | { readonly success: false; readonly error: z.ZodError },
+): string | null {
   if (parsed.success) return null;
   const first = parsed.error.issues[0];
   const where = first === undefined || first.path.length === 0 ? '' : ` (at ${first.path.join('.')})`;

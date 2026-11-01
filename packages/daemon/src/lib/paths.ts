@@ -78,6 +78,8 @@ export interface FoundationPaths {
    */
   readonly catalogs: string;
   readonly catalogsDocument: string;
+  /** The version 1 document as it was when the upgrade to version 2 ran: how an older daemon is gone back to. */
+  readonly catalogsBackupV1: string;
   readonly catalogBlobs: string;
   /**
    * The people this machine shares catalogs with and the codes that let them in (docs/catalogs.md § Members).
@@ -140,6 +142,7 @@ export function createFoundationPaths(home: StateHome): FoundationPaths {
     securityAudit: join(state, 'security-audit.jsonl'),
     catalogs: join(state, 'catalogs'),
     catalogsDocument: join(state, 'catalogs', 'catalogs.json'),
+    catalogsBackupV1: join(state, 'catalogs', 'catalogs.v1.json'),
     catalogBlobs: join(state, 'catalogs', 'blobs'),
     catalogMembers: join(state, 'catalogs', 'members.json'),
     catalogShares: join(state, 'catalogs', 'shares.json'),

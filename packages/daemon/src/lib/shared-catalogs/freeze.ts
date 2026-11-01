@@ -3,11 +3,15 @@
  *
  * ## Two digests
  *
- * - `digest` is the item's digest as the signed manifest lists it. It covers the item's identity (its id
- *   and version number), because that is what a reader verifies.
- * - `contentDigest` is the same item with its identity normalised, so the SAME content hashes the same
- *   whichever item or version it becomes. A preview answers it, an add sends it back, and "this is the
- *   same as version 2" compares it. Because the summary is part of the item, it is part of what is bound.
+ * - `digest` is the item's digest as ONE catalog's signed manifest lists it. It covers the item's identity
+ *   (its catalog, its id and its version number), because that is what a reader verifies.
+ * - `contentDigest` is the same item with that identity normalised (`sharedCopy`), so the SAME content
+ *   hashes the same whichever catalog, item or version it becomes. A preview answers it, an add sends it
+ *   back, "this is the same as version 2" compares it, and the one frozen copy on disk is stored by it.
+ *   Because the summary is part of the item, it is part of what is bound.
+ *
+ * A catalog's item is the shared copy with its three identity fields put back (`itemForCatalog`), and its
+ * digest is checked against the one the document lists for that catalog every time it is read.
  */
 import {
   CATALOG_SKILL_ENTRY_FILE,
@@ -26,9 +30,12 @@ import {
   revealHidden,
   SHARED_CATALOG_ITEM_FORMAT,
 } from '@ferretry/protocol';
-import { catalogItemDigest, type RelayCrypto } from '@ferretry/relay';
+import { catalogItemCanonical, type RelayCrypto } from '@ferretry/relay';
 import { skillFrontMatter } from '../skills/front-matter.ts';
 import { CatalogRefusal } from './refusal.ts';
+
+/** An id no catalog has: a version's shared copy is written under it so the catalog does not matter. */
+export const NORMALISED_CATALOG_ID = `cat_${'A'.repeat(22)}`;
 
 /** An id no item has: a version's content is hashed under it so the identity does not matter. */
 export const NORMALISED_ITEM_ID = `itm_${'A'.repeat(22)}`;
@@ -79,20 +86,70 @@ export function freezeItem(input: FreezeInput): SharedCatalogItem {
 
 const bodyOf = (body: FrozenBody): unknown => (body.kind === 'skill' ? body.skill : body.mcp);
 
+/**
+ * The catalog-independent copy of an item: its catalog, id and version number replaced by the fixed
+ * placeholders. This is what is kept on disk, once per version, and what `contentDigest` is the digest of.
+ */
+export const sharedCopy = (item: SharedCatalogItem): SharedCatalogItem => ({
+  ...item,
+  catalogId: NORMALISED_CATALOG_ID,
+  itemId: NORMALISED_ITEM_ID,
+  itemVersion: 1,
+});
+
+export interface CatalogIdentity {
+  readonly catalogId: string;
+  readonly itemId: string;
+  readonly itemVersion: number;
+}
+
+/** A shared copy made into the item one catalog's manifest lists: the three head fields, nothing else. */
+export const itemForCatalog = (shared: SharedCatalogItem, identity: CatalogIdentity): SharedCatalogItem => ({
+  ...shared,
+  catalogId: identity.catalogId,
+  itemId: identity.itemId,
+  itemVersion: identity.itemVersion,
+});
+
 export interface Fingerprint {
+  /** The item as given, as its catalog's manifest would list it. */
   readonly digest: CatalogDigest;
+  /** The shared copy: the same content whichever catalog, item or version it becomes. */
   readonly contentDigest: CatalogDigest;
+  /** Bytes of the item as given. */
   readonly size: number;
 }
 
 /** Both digests of an item. A document with no canonical spelling is refused rather than guessed at. */
 export async function fingerprint(crypto: RelayCrypto, item: SharedCatalogItem): Promise<Fingerprint> {
-  const real = await catalogItemDigest(crypto, item);
-  const normalised = await catalogItemDigest(crypto, { ...item, itemId: NORMALISED_ITEM_ID, itemVersion: 1 });
-  if (real === null || normalised === null)
-    throw new CatalogRefusal('source_refused', `${item.name} has no one canonical spelling, so it cannot be shared.`);
-  return { digest: real.digest, contentDigest: normalised.digest, size: real.size };
+  const real = await canonicalOrRefuse(crypto, item);
+  const shared = await canonicalOrRefuse(crypto, sharedCopy(item));
+  return { digest: real.digest, contentDigest: shared.digest, size: real.size };
 }
+
+export interface CanonicalCopy {
+  readonly digest: CatalogDigest;
+  readonly size: number;
+  /** The canonical text: what is written to disk and what the digest covers. */
+  readonly text: string;
+}
+
+/** An item's canonical text with its digest and size, or `undefined` when it has no one spelling. */
+export async function canonicalCopy(crypto: RelayCrypto, item: SharedCatalogItem): Promise<CanonicalCopy | undefined> {
+  return (await catalogItemCanonical(crypto, item)) ?? undefined;
+}
+
+/** `canonicalCopy`, or the refusal that this item has no one canonical spelling and so cannot be shared. */
+export async function canonicalOrRefuse(crypto: RelayCrypto, item: SharedCatalogItem): Promise<CanonicalCopy> {
+  const copy = await canonicalCopy(crypto, item);
+  if (copy === undefined)
+    throw new CatalogRefusal('source_refused', `${item.name} has no one canonical spelling, so it cannot be shared.`);
+  return copy;
+}
+
+/** How many files a skill holds, for "4 files": an MCP setup holds none. */
+export const fileCountOf = (item: SharedCatalogItem): number | undefined =>
+  item.kind === 'skill' ? item.skill.files.length : undefined;
 
 export interface ItemReading {
   readonly review: readonly CatalogReviewEntry[];
