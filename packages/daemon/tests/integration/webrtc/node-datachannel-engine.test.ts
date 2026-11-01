@@ -24,6 +24,7 @@ import {
   WebRtcOfferRefused,
 } from '../../../src/lib/webrtc/index.ts';
 import { waitFor } from '../support/wait-for.ts';
+import { PeerWatch } from '../support/webrtc-peer.ts';
 
 /** A data channel that records what it was sent and lets a case decide what comes back. */
 class FakeChannel implements EngineDataChannel {
@@ -474,19 +475,16 @@ async function loopbackOffer(): Promise<{
 }> {
   const module = await loadNodeDataChannel();
   const peer = new module.PeerConnection('engine-test-browser', { iceServers: [], bindAddress: '127.0.0.1' });
-  const gathered = new Promise<void>(resolve =>
-    peer.onGatheringStateChange(state => state === 'complete' && resolve()),
-  );
+  const watch = new PeerWatch('engine-test-browser', peer);
   const channel = peer.createDataChannel('fy-session');
-  const opened = new Promise<void>(resolve => channel.onOpen(() => resolve()));
-  await gathered;
+  await watch.gathered();
   const offer = peer.localDescription();
   if (offer === null) throw new Error('the browser peer produced no offer');
   return {
     sdp: offer.sdp,
     accept: async answer => {
       peer.setRemoteDescription(answer, 'answer');
-      await opened;
+      await watch.opened(channel, 'fy-session');
     },
     close: () => peer.close(),
   };

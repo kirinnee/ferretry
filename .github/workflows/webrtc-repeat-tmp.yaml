@@ -1,0 +1,79 @@
+name: WebRTC repeat (TEMPORARY)
+
+# TEMPORARY, for &B126 only: runs the two real-WebRTC integration files over and over, idle and under CPU
+# load, on both runner kinds, to catch the recurring 120 s timeout with the explanation the tests now print.
+# Removed before the pull request merges.
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/webrtc-repeat-tmp.yaml'
+      - 'packages/daemon/tests/integration/support/webrtc-peer.ts'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: webrtc-repeat-tmp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repeat:
+    name: repeat (${{ matrix.name }})
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: namespace-idle
+            load: 0
+            runner: '["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]'
+          - name: namespace-loaded
+            load: 4
+            runner: '["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]'
+          - name: github-idle
+            load: 0
+            runner: '"ubuntu-latest"'
+          - name: github-loaded
+            load: 4
+            runner: '"ubuntu-latest"'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Mount the Nix store cache
+        if: runner.environment == 'self-hosted'
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
+      - uses: ./.github/actions/install-nix
+      - name: Install workspace dependencies
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/setup.sh
+      - name: Run the WebRTC files 20 times
+        env:
+          LOAD: ${{ matrix.load }}
+        run: |
+          set +e
+          export FY_MODEL_CATALOG=off FY_LOCAL_MODELS=off FY_RELAY_DIRECTORY_ORIGIN=off FY_UPDATE_CHECK=off
+          nproc
+          if [ "${LOAD}" -gt 0 ]; then
+            for _ in $(seq "${LOAD}"); do (while :; do :; done) & done
+          fi
+          failed=0
+          for i in $(seq 1 20); do
+            ./scripts/ci/in-devshell.sh ./scripts/test/swept.sh bun test --config=bunfig.int.toml --timeout 120000 \
+              packages/daemon/tests/integration/webrtc/ >"run-$i.log" 2>&1
+            status=$?
+            if [ "${status}" -ne 0 ]; then
+              failed=$((failed + 1))
+              echo "::group::iteration $i FAILED (exit ${status})"
+              cat "run-$i.log"
+              echo "::endgroup::"
+            else
+              grep -E "^ ?[0-9]+ (pass|fail)" "run-$i.log" | tr '\n' ' '
+              echo "iteration $i ok"
+            fi
+          done
+          kill "$(jobs -p)" 2>/dev/null
+          echo "failed iterations: ${failed} / 20"
+          [ "${failed}" -eq 0 ]
