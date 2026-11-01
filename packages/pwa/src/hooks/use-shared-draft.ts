@@ -159,6 +159,11 @@ export interface UseSharedDraftInput {
   readonly ids?: SharedDraftIdSource;
   /** Where words waiting to be restored are kept across reloads; the browser's by default. */
   readonly restoreStore?: Pick<DaemonDraftStore, 'load' | 'save' | 'clear'>;
+  /**
+   * Whether the machine takes the files still uploading in presence (`DAEMON_FEATURES.sharedDraftUploading`).
+   * An older one closes the stream on the field, so without it nothing is said until a file lands.
+   */
+  readonly reportUploads?: boolean;
 }
 
 export interface SharedDraft {
@@ -216,6 +221,7 @@ export function useSharedDraft({
   timers = browserTimers,
   ids = randomId,
   restoreStore = documentRestoreStore,
+  reportUploads = true,
 }: UseSharedDraftInput): SharedDraft {
   const storeOpener = useDaemonStreamOpener();
   const scopeKey = daemonSessionKey(scope);
@@ -572,10 +578,11 @@ export function useSharedDraft({
   const reportUploading = useCallback(
     (names: readonly string[]): void => {
       const before = presence.current.uploading;
-      if (!enabled || (before.length === names.length && before.every((name, index) => name === names[index]))) return;
+      if (!enabled || !reportUploads) return;
+      if (before.length === names.length && before.every((name, index) => name === names[index])) return;
       tell({ uploading: [...names] });
     },
-    [enabled, tell],
+    [enabled, reportUploads, tell],
   );
 
   const restoreConflict = useCallback((): void => {

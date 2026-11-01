@@ -209,6 +209,8 @@ const mountDevices = (
     readonly open?: DaemonStreamOpener | null;
     /** Each device's own browser storage for words waiting to be restored; fresh ones unless given. */
     readonly restore?: Readonly<Record<string, DaemonDraftStore>>;
+    /** Whether the machine takes uploads in presence; an older one does not. */
+    readonly reportUploads?: boolean;
   } = {},
 ) => {
   const timers = new ManualTimers();
@@ -231,6 +233,7 @@ const mountDevices = (
         scope,
         text: draft,
         setText: setDraft,
+        ...(options.reportUploads === undefined ? {} : { reportUploads: options.reportUploads }),
         onRemote: op => {
           remote[name] = [...(remote[name] ?? []), op];
         },
@@ -580,6 +583,29 @@ describe('useSharedDraft', () => {
     run(() => devices.timers.advance(350));
     await settle();
     expect(devices.hooks.laptop?.uploads).toEqual([]);
+    devices.unmount();
+  });
+
+  test('an older machine is never told what is uploading, so its stream stays up and the file still arrives', async () => {
+    // Arrange — a daemon from before `shared-draft.uploading.1`.
+    const daemonSide = new FakeDaemon();
+    const devices = mountDevices(daemonSide, { phone: '', laptop: '' }, { reportUploads: false });
+    await settle();
+    const shot = { kind: 'attachment' as const, id: 'att_1', name: 'shot.png', mime: 'image/png', bytes: 4 };
+
+    // Act — the phone uploads a file, then it lands and joins the draft.
+    run(() => devices.hooks.phone?.reportUploading(['shot.png']));
+    run(() => devices.timers.advance(350));
+    await settle();
+    run(() => devices.hooks.phone?.reportUploading([]));
+    run(() => devices.hooks.phone?.changeItems({ add: [shot] }));
+    await settle();
+
+    // Assert — no presence frame named it, the stream never dropped, and the laptop has the file.
+    const phoneStream = daemonSide.streams[0] as FakeStream;
+    expect(phoneStream.sent.some(frame => frame.kind === 'presence' && 'uploading' in frame)).toBe(false);
+    expect(daemonSide.streams).toHaveLength(2);
+    expect(devices.hooks.laptop?.items).toEqual([shot]);
     devices.unmount();
   });
 

@@ -125,6 +125,7 @@ createRoot(root).render(
       daemon={machine}
       draftStore={drafts}
       openDraftStream={open as never}
+      sharedUploads
       sessionId="s1"
     />
   </main>,
