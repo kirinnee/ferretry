@@ -191,17 +191,14 @@ export function useAgendaInboxModel(
   const latest = useRef(machines);
   latest.current = machines;
   // Which machines raise gate items: read from the health the app already holds, and re-read when one moves.
-  const gateFlags = useSyncExternalStore(
-    client.wires.subscribe,
-    () =>
-      latest.current
-        .map(
-          ({ connection }) =>
-            `${connection.daemonId}=${client.wires.gateItemsOf(connection.daemonId)}/${client.wires.snoozeOf(connection.daemonId)}`,
-        )
-        .join(','),
-    () => '',
-  );
+  const readGateFlags = () =>
+    latest.current
+      .map(
+        ({ connection }) =>
+          `${connection.daemonId}=${client.wires.gateItemsOf(connection.daemonId)}/${client.wires.snoozeOf(connection.daemonId)}`,
+      )
+      .join(',');
+  const gateFlags = useSyncExternalStore(client.wires.subscribe, readGateFlags, readGateFlags);
   const connectionFor = useMemo(
     () =>
       (daemonId: DaemonId): DaemonConnection | undefined =>
