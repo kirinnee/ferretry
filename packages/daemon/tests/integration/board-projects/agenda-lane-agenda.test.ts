@@ -33,6 +33,36 @@ describe('the lane agenda adapter', () => {
     should(actor).eql({ kind: 'daemon', cause: 'system' });
   });
 
+  it('should withdraw a card by its reference, as the daemon, saying why, and throw when the agenda refuses', async () => {
+    // Arrange
+    const resolved: unknown[] = [];
+    const answers = [{ ok: true }, { ok: false, error: { message: 'no such card' } }];
+    const raiser = {
+      resolveSource: (...args: unknown[]) => {
+        resolved.push(args);
+        return Promise.resolve(answers.shift());
+      },
+    } as unknown as AgendaRaiser;
+    const agenda = new AgendaLaneAgenda(raiser);
+
+    // Act
+    await agenda.withdraw('session-1', 'lanes:x:2', 'A newer proposal replaced this one.');
+    const refused = await agenda.withdraw('session-1', 'lanes:x:3', 'gone').then(
+      () => 'withdrawn',
+      (error: Error) => error.message,
+    );
+
+    // Assert
+    should(resolved[0]).eql([
+      'session-1',
+      'task',
+      'lanes:x:2',
+      { kind: 'daemon', cause: 'system' },
+      'A newer proposal replaced this one.',
+    ]);
+    should(refused).match(/could not be withdrawn: no such card/u);
+  });
+
   it('should throw with the agenda’s reason when it refuses', async () => {
     const raiser = {
       raise: () => Promise.resolve({ ok: false, error: { message: 'agenda is full' } }),

@@ -21,6 +21,7 @@ import {
   type LaneTrigger,
   type LaneVariants,
   laneEditProblems,
+  closedLaneProblems,
   laneLayoutProblems,
   MAX_BOARD_LANES,
   MAX_LANE_ID_LENGTH,
@@ -191,7 +192,7 @@ export const setWorkflowLane = (draft: LaneDraft, workflow: TaskWorkflow, id: st
 
 /**
  * Everything wrong with a draft, live: each lane's name and duration, the layout rules the protocol owns
- * (`laneLayoutProblems`), and the lanes removed with no place for their cards (`laneEditProblems`).
+ * (`laneLayoutProblems`, `closedLaneProblems`), and the lanes removed with no place for their cards (`laneEditProblems`).
  */
 export const draftProblems = (current: Pick<LaneSet, 'lanes'>, draft: LaneDraft): readonly DraftProblem[] => {
   const problems: DraftProblem[] = [];
@@ -210,7 +211,7 @@ export const draftProblems = (current: Pick<LaneSet, 'lanes'>, draft: LaneDraft)
   if (draft.lanes.length > MAX_BOARD_LANES) {
     problems.push({ laneId: null, message: `A board has at most ${String(MAX_BOARD_LANES)} lanes.` });
   }
-  for (const [, message] of laneLayoutProblems(draft)) {
+  for (const [, message] of [...laneLayoutProblems(draft), ...closedLaneProblems(draft)]) {
     problems.push({ laneId: null, message: `${message.charAt(0).toUpperCase()}${message.slice(1)}.` });
   }
   for (const removed of laneEditProblems(current, { layout: draft, relocate: draft.relocate })) {

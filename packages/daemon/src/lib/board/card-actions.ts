@@ -128,7 +128,7 @@ type NewEvent = BoardTaskEvent extends infer E
 export const withEvent = (
   card: BoardTask,
   event: NewEvent,
-  context: Pick<CardContext, 'now' | 'actor'>,
+  context: Pick<CardContext, 'now' | 'actor' | 'actorVia'>,
 ): BoardTask => ({
   ...card,
   history: [

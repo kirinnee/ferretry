@@ -7,7 +7,10 @@ import {
   laneUse,
 } from '@ferretry/protocol';
 
-/** The lanes in order: each one's id (to name it in `--rename`, `--remove` and `task move`) and when a card belongs there. */
+/**
+ * The lanes in order: each one's id (to name it in `--rename`, `--remove` and `task move`) and when a card belongs
+ * there. A ferret's change waiting for the owner is one line after them: those lanes are NOT the board's yet.
+ */
 export function renderLaneSet(laneSet: LaneSet, projectName: string): string {
   const state =
     laneSet.confirmedBy === null
@@ -19,8 +22,19 @@ export function renderLaneSet(laneSet: LaneSet, projectName: string): string {
     const gate = lane.ownerGate === true ? ', owner-gated' : '';
     return `  ${lane.id}\t${lane.name}\t(${lane.category}${gate})\tuse when: ${laneUse(lane)}`;
   });
-  return [`${projectName} lanes, version ${String(laneSet.version)} — ${state}`, ...rows].join('\n');
+  return [`${projectName} lanes, version ${String(laneSet.version)} — ${state}`, ...rows, ...pendingLine(laneSet)].join(
+    '\n',
+  );
 }
+
+/** The one line a waiting proposal gets: who proposed it, its lanes, and that the owner decides. */
+const pendingLine = (laneSet: LaneSet): readonly string[] =>
+  laneSet.pending === undefined
+    ? []
+    : [
+        `Proposed by ${laneSet.pending.proposedBy}, waiting for the owner (version ${String(laneSet.pending.version)}): ` +
+          `${laneSet.pending.lanes.map(lane => lane.name).join(' → ')}. The lanes above stay until the owner accepts.`,
+      ];
 
 /** One board: its lanes, or the fact that it has none and the way to get some. */
 export function renderBoardLanes(project: BoardProject, binary: string): string {
@@ -32,9 +46,15 @@ export function renderBoardLanes(project: BoardProject, binary: string): string 
 /** What a change did, and whether the owner was asked. */
 export function renderLaneChange(change: LaneSetChangeResponse, projectName: string): string {
   const note: Record<LaneSetChangeResponse['agenda'], string> = {
-    raised: 'The owner has one Accept / Edit choice on the agenda.',
+    raised:
+      change.laneSet.pending === undefined
+        ? 'The owner has one Accept / Edit choice on the agenda.'
+        : 'Nothing on the board changed: your lanes wait for the owner, who has one Accept / Edit choice on the agenda.',
     'not-needed': 'No question for the owner is needed.',
-    failed: 'The lanes are live, but the agenda choice could not be raised — tell the owner yourself.',
+    failed:
+      change.laneSet.pending === undefined
+        ? 'The lanes are live, but the agenda choice could not be raised — tell the owner yourself.'
+        : 'Your lanes wait for the owner, but the agenda choice could not be raised — tell the owner yourself.',
   };
   return `${renderLaneSet(change.laneSet, projectName)}\n${note[change.agenda]}`;
 }

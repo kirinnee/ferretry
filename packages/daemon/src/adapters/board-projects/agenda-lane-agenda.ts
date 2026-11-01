@@ -6,12 +6,19 @@ import {
 import type { AgendaMutation } from '../../lib/agenda/state-machine.ts';
 import type { RaiseAgendaRequest } from '../../lib/agenda/state-machine.ts';
 
-/** The one operation of the agenda service this adapter needs. */
+/** The two operations of the agenda service this adapter needs. */
 export interface AgendaRaiser {
   raise(
     sessionId: string,
     request: RaiseAgendaRequest,
     actor: { readonly kind: 'daemon'; readonly cause: 'system' },
+  ): Promise<AgendaMutation>;
+  resolveSource(
+    sessionId: string,
+    source: 'task',
+    sourceRef: string,
+    actor: { readonly kind: 'daemon'; readonly cause: 'system' },
+    note?: string | null,
   ): Promise<AgendaMutation>;
 }
 
@@ -34,10 +41,23 @@ export class AgendaLaneAgenda implements LaneProposalAgenda {
         ask: card.ask,
         answers: card.answers,
         why: card.why,
+        ...(card.recommendation === undefined ? {} : { recommendation: card.recommendation }),
         howToResolve: card.howToResolve,
       },
       { kind: 'daemon', cause: 'system' },
     );
     if (!mutation.ok) throw new Error(`the lane proposal could not be raised: ${mutation.error.message}`);
+  }
+
+  /** Closes the card for a proposal that is gone, with the owner-facing reason. A card already closed stays closed. */
+  async withdraw(sessionId: string, reference: string, note: string): Promise<void> {
+    const mutation = await this.attention.resolveSource(
+      sessionId,
+      'task',
+      reference,
+      { kind: 'daemon', cause: 'system' },
+      note,
+    );
+    if (!mutation.ok) throw new Error(`the lane proposal card could not be withdrawn: ${mutation.error.message}`);
   }
 }

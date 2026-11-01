@@ -461,6 +461,120 @@ describe('an unconfirmed set', () => {
   });
 });
 
+describe('a ferret’s change waiting for the owner', () => {
+  const waiting = (): LaneSet => {
+    const live = laneSetFor();
+    return {
+      ...live,
+      pending: {
+        version: live.version + 1,
+        baseVersion: live.version,
+        proposedBy: 'mvuc7tsf-0c3d50df',
+        lanes: live.lanes.map(lane => (lane.id === 'implement' ? { ...lane, name: 'Build' } : lane)),
+        variants: live.variants,
+        doneLane: live.doneLane,
+        notGoodLane: live.notGoodLane,
+        relocate: {},
+      },
+    };
+  };
+
+  it('says who proposed it, that the board keeps its lanes, and accepts the proposal by its own version', async () => {
+    // Arrange
+    const actions = recorder();
+    const view = await show(editor(waiting(), actions));
+
+    // Act
+    const banner = must(view.container.querySelector('[data-lane-banner="pending"]'), 'the banner');
+    await click(must(banner.querySelector('button'), 'Accept'));
+
+    // Assert
+    expect(banner.textContent).toContain('Proposed by Denisha, waiting for you');
+    expect(banner.textContent).toContain('Build');
+    expect(banner.textContent).toContain('the board keeps the lanes below until you accept');
+    expect(view.container.querySelector('[data-lane-banner="unconfirmed"]')).toBeNull();
+    expect(actions.calls).toEqual([{ accept: 2, projectId: PROJECT }]);
+  });
+
+  /** The proposal drops the verify lane (a gate) and sends its cards to the closed lane. */
+  const risky = (): LaneSet => {
+    const live = laneSetFor();
+    const verify = must(
+      live.lanes.find(lane => lane.category === 'verify'),
+      'a verify lane',
+    );
+    const closed = must(
+      live.lanes.find(lane => lane.category === 'closed'),
+      'a closed lane',
+    );
+    const base = waiting();
+    return {
+      ...base,
+      pending: {
+        ...(base.pending as NonNullable<LaneSet['pending']>),
+        lanes: live.lanes.filter(lane => lane.id !== verify.id),
+        variants: {},
+        relocate: { [verify.id]: closed.id },
+      },
+    };
+  };
+
+  it('says what accepting would do in the agenda card’s words, and asks again before it does it', async () => {
+    // Arrange
+    const actions = recorder();
+    const set = risky();
+    const verify = must(
+      laneSetFor().lanes.find(lane => lane.category === 'verify'),
+      'a verify lane',
+    );
+    const view = await show(editor(set, actions));
+    const banner = must(view.container.querySelector('[data-lane-banner="pending"]'), 'the banner');
+
+    // Act: the first tap only asks.
+    await click(buttonSaying(view, 'Accept'));
+
+    // Assert
+    const warnings = must(banner.querySelector('[data-lane-warnings]'), 'the warnings');
+    expect(warnings.textContent).toContain(
+      `Accepting it removes ${verify.name}, which waits for the owner, and sends its cards into the closed lane, which closes them`,
+    );
+    expect(actions.calls).toEqual([]);
+    expect(must(banner.querySelector('[data-lane-confirm]'), 'the confirm').textContent).toContain(
+      'cards move and may close',
+    );
+
+    // Act: the second tap accepts.
+    await click(buttonSaying(view, 'Accept these changes'));
+
+    // Assert
+    expect(actions.calls).toEqual([{ accept: 2, projectId: PROJECT }]);
+  });
+
+  it('lets the owner back out of the second tap', async () => {
+    const actions = recorder();
+    const view = await show(editor(risky(), actions));
+
+    await click(buttonSaying(view, 'Accept'));
+    await click(buttonSaying(view, 'Cancel'));
+
+    expect(view.container.querySelector('[data-lane-confirm]')).toBeNull();
+    expect(buttonSaying(view, 'Accept').textContent).toBe('Accept');
+    expect(actions.calls).toEqual([]);
+  });
+
+  it('lists no warnings for a change that only renames', async () => {
+    const view = await show(editor(waiting()));
+
+    expect(view.container.querySelector('[data-lane-warnings]')).toBeNull();
+  });
+
+  it('shows no banner when nothing waits', async () => {
+    const view = await show(editor(laneSetFor()));
+
+    expect(view.container.querySelector('[data-lane-banner="pending"]')).toBeNull();
+  });
+});
+
 describe('a refused write', () => {
   it('says what happened and offers Reload when the lanes moved on', async () => {
     // Arrange

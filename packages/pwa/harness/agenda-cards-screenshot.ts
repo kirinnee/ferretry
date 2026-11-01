@@ -3,6 +3,7 @@
  * and a 1440px desktop, light and dark:
  *
  *   task / choice / yesno / permission / review / info / reply   <state>-<phone|desktop>.png
+ *   lane-change / -grouped / -hidden                             a ferret's lane proposal; the last has no Accept
  *   swipe-up                                                     the to-do dragged up toward its Skip
  *
  *   bun scripts/build-fy-render-libs.ts           # once: the Mermaid sandbox some cards render
@@ -38,7 +39,7 @@ const html = (theme: string) => `<!doctype html>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <link rel="stylesheet" href="/app.css" />
   </head>
-  <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/attention-cards-page.js"></script></body>
+  <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/agenda-cards-page.js"></script></body>
 </html>`;
 
 mkdirSync(outDir, { recursive: true });
@@ -101,7 +102,18 @@ const shot = async (page: Page, scheme: string, name: string): Promise<void> => 
   process.stdout.write(`📸 ${path}\n`);
 };
 
-const KINDS = ['task', 'choice', 'yesno', 'permission', 'review', 'info', 'reply'] as const;
+const KINDS = [
+  'task',
+  'choice',
+  'yesno',
+  'permission',
+  'review',
+  'info',
+  'reply',
+  'lane-change',
+  'lane-change-grouped',
+  'lane-change-hidden',
+] as const;
 // The Discuss states: the in-discussion card, and the replies notice counting down and held for a turn.
 const DISCUSS_VIEWS = ['in-discussion', 'replies-countdown', 'replies-held'] as const;
 
@@ -118,6 +130,16 @@ try {
         for (const kind of [...KINDS, ...DISCUSS_VIEWS]) {
           const page = await open(context, theme, kind);
           await shot(page, scheme, `${kind}-${label}`);
+          if (kind.startsWith('lane-change')) {
+            // Its answers sit below a long list of warnings: scrolled to them, they are Edit and Later, never Accept.
+            await page.evaluate(() => {
+              for (const node of document.querySelectorAll<HTMLElement>('*')) {
+                if (node.scrollHeight > node.clientHeight) node.scrollTop = node.scrollHeight;
+              }
+            });
+            await page.waitForTimeout(100);
+            await shot(page, scheme, `${kind}-end-${label}`);
+          }
           await page.close();
         }
         // Dragged down from the title (a link would start a native drag), held short of the threshold: the stamp says Discuss.

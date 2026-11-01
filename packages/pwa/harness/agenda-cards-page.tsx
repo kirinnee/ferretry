@@ -145,7 +145,109 @@ const IN_DISCUSSION = item('A2', 9, {
   history: [{ at: ago(4), kind: 'discuss', note: 'Why not just keep the board in memory?' }],
 } as Partial<AgendaItem>);
 
+/**
+ * A ferret's lane proposal, as the daemon's `laneChangeCard` words it (docs/board.md § A ferret's lane change
+ * waits for the owner): one line, then one bullet per thing to decide, Edit ← recommended and Accept → plain. One
+ * rewires Plan/Design's "OK to build" to close the card; one removes thirteen gates the same way, told as ONE bullet;
+ * and one whose bullets do not all fit offers no Accept: Later ← and Edit →, accepted in the lane editor.
+ */
+const LANE_CHANGE = item('A9', 4, {
+  source: 'task',
+  sourceRef: 'lanes:11111111-1111-4111-8111-111111111111:4',
+  raisedBy: 'daemon',
+  title: 'Lanes for Relay',
+  subject: 'Lanes for Relay: Todo → Plan/Design → Merged → In progress → Released · to test → Closed',
+  why: 'ottilie proposes new lanes for Relay. The board keeps its lanes until you accept. Accepting it:\n\n- changes where "OK to build" on Plan/Design sends cards: In progress → the closed lane, which closes them',
+  recommendation: {
+    decision: 'Edit',
+    why: 'It changes what only you decide: read it in the lane editor before you accept.',
+  },
+  howToResolve:
+    'Choose Accept to switch the board to these lanes; any cards they move, move then. Choose Edit to change them in the Board lane editor; the board keeps its lanes until you save.',
+  kind: 'choice',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Edit', description: 'Change them in the Board lane editor (Board, then this project, then Lanes)' },
+      { label: 'Accept', description: 'Switch the board to these lanes' },
+    ],
+  },
+  answers: [
+    {
+      direction: 'left',
+      does: 'choose',
+      label: 'Edit',
+      description: 'Change them in the Board lane editor (Board, then this project, then Lanes)',
+    },
+    { direction: 'right', does: 'choose', label: 'Accept', description: 'Switch the board to these lanes' },
+  ],
+} as Partial<AgendaItem>);
+
+const LANE_CHANGE_GROUPED = item('A11', 4, {
+  source: 'task',
+  sourceRef: 'lanes:11111111-1111-4111-8111-111111111111:4',
+  raisedBy: 'daemon',
+  title: 'Lanes for Relay',
+  subject: 'Lanes for Relay: Todo → Closed',
+  why: 'ottilie proposes new lanes for Relay. The board keeps its lanes until you accept. Accepting it:\n\n- removes 13 lanes that wait for the owner (Owner review stage 00 … Owner review stage 12), and sends their cards into the closed lane, which closes them',
+  recommendation: {
+    decision: 'Edit',
+    why: 'It changes what only you decide: read it in the lane editor before you accept.',
+  },
+  howToResolve:
+    'Choose Accept to switch the board to these lanes; any cards they move, move then. Choose Edit to change them in the Board lane editor; the board keeps its lanes until you save.',
+  kind: 'choice',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Edit', description: 'Change them in the Board lane editor (Board, then this project, then Lanes)' },
+      { label: 'Accept', description: 'Switch the board to these lanes' },
+    ],
+  },
+  answers: [
+    {
+      direction: 'left',
+      does: 'choose',
+      label: 'Edit',
+      description: 'Change them in the Board lane editor (Board, then this project, then Lanes)',
+    },
+    { direction: 'right', does: 'choose', label: 'Accept', description: 'Switch the board to these lanes' },
+  ],
+} as Partial<AgendaItem>);
+
+const LANE_CHANGE_HIDDEN = item('A10', 4, {
+  source: 'task',
+  sourceRef: 'lanes:11111111-1111-4111-8111-111111111111:4',
+  raisedBy: 'daemon',
+  title: 'Lanes for Relay',
+  subject:
+    'Lanes for Relay: Todo → Owner review stage number 00 of the many → Owner review stage number 01 of the many → Owner review stage number 02 of the many → Owner review stage number 03 of the many → Owner review stage number 04 of the many →…',
+  why: 'ottilie proposes new lanes for Relay. The board keeps its lanes until you accept. Accepting it:\n\n- makes Owner review stage number 00 of the many automatic: it would stop waiting for the owner\n- lets quick, design-first, research-first and investigate work skip Owner review stage number 00 of the many\n- makes Owner review stage number 01 of the many automatic: it would stop waiting for the owner\n- lets quick, design-first, research-first and investigate work skip Owner review stage number 01 of the many\n- makes Owner review stage number 02 of the many automatic: it would stop waiting for the owner\n- lets quick, design-first, research-first and investigate work skip Owner review stage number 02 of the many\n- makes Owner review stage number 03 of the many automatic: it would stop waiting for the owner\n- lets quick, design-first, research-first and investigate work skip Owner review stage number 03 of the many\n- makes Owner review stage number 04 of the many automatic: it would stop waiting for the owner\n- lets quick, design-first, research-first and investigate work skip Owner review stage number 04 of the many\n- makes Owner review stage number 05 of the many automatic: it would stop waiting for the owner\n- lets quick, design-first, research-first and investigate work skip Owner review stage number 05 of the many\n- makes Owner review stage number 06 of the many automatic: it would stop waiting for the owner\n- lets quick, design-first, research-first and investigate work skip Owner review stage number 06 of the many\n- makes Owner review stage number 07 of the many automatic: it would stop waiting for the owner\n- lets quick, design-first, research-first and investigate work skip Owner review stage number 07 of the many\n- makes Owner review stage number 08 of the many automatic: it would stop waiting for the owner\n- lets quick, design-first, research-first and investigate work skip Owner review stage number 08 of the many\n- and 10 more, all in the Board lane editor',
+  howToResolve:
+    'It does more than a card can show, so it is accepted in the Board lane editor, where every part of it is listed. Choose Edit to go there; the board keeps its lanes until you accept.',
+  kind: 'choice',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Later', description: 'Leave it waiting; the board keeps its lanes' },
+      { label: 'Edit', description: 'Change them in the Board lane editor (Board, then this project, then Lanes)' },
+    ],
+  },
+  answers: [
+    { direction: 'left', does: 'choose', label: 'Later', description: 'Leave it waiting; the board keeps its lanes' },
+    {
+      direction: 'right',
+      does: 'choose',
+      label: 'Edit',
+      description: 'Change them in the Board lane editor (Board, then this project, then Lanes)',
+    },
+  ],
+} as Partial<AgendaItem>);
+
 const FIXTURES: Readonly<Record<string, AgendaItem>> = {
+  'lane-change': LANE_CHANGE,
+  'lane-change-grouped': LANE_CHANGE_GROUPED,
+  'lane-change-hidden': LANE_CHANGE_HIDDEN,
   task: TASK,
   choice: CHOICE,
   yesno: YESNO,

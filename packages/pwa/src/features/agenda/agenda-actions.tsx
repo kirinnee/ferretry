@@ -161,6 +161,7 @@ function AnswerButton({
   swipeHints,
   arrows,
   recommended,
+  primary,
   onAnswer,
 }: {
   readonly answer: AgendaCardAnswer;
@@ -168,6 +169,8 @@ function AnswerButton({
   readonly swipeHints: boolean;
   readonly arrows: boolean;
   readonly recommended: boolean;
+  /** The highlighted answer: the recommended one when the card recommends one of its answers, else → (yes). */
+  readonly primary: boolean;
   readonly onAnswer: (answer: AgendaCardAnswer) => void;
 }) {
   const hintId = useId();
@@ -179,7 +182,7 @@ function AnswerButton({
       data-agenda-answer={answer.direction}
       data-agenda-option={answer.label}
       data-recommended={recommended || undefined}
-      data-variant={answer.direction === 'right' ? 'primary' : undefined}
+      data-variant={primary ? 'primary' : undefined}
       disabled={busy}
       onClick={() => onAnswer(answer)}
       title={answer.description}
@@ -310,6 +313,11 @@ export function AgendaActions({
               busy={busy}
               key={answer.direction}
               onAnswer={onAnswer}
+              primary={
+                answers.some(each => sameLabel(each.label, recommended))
+                  ? sameLabel(answer.label, recommended)
+                  : answer.direction === 'right'
+              }
               recommended={sameLabel(answer.label, recommended)}
               swipeHints={swipeHints}
             />

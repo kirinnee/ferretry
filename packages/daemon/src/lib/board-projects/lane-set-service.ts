@@ -18,22 +18,24 @@ import {
   LaneSetSchema,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
-import { laneProposalCard } from './lane-proposal-card.ts';
+import { laneChangeCard, laneProposalCard } from './lane-proposal-card.ts';
 import {
-  actorName,
   addQuickToTestLane,
-  confirmLaneSet,
-  editLaneSet,
+  decideLaneChange,
+  describeRelocationProblem,
   type LaneActor,
+  type LaneSetDecision,
   type LaneSetProblem,
   mergeReleaseLanes,
-  proposeLaneSet,
   RELEASED_TO_TEST_NAME,
+  relocationProblems,
   stageLanes,
   unfiledLaneSet,
 } from './lane-set-policy.ts';
-import type { CardRelocator, LaneProposalAgenda, LaneSetSource, LaneSetStore } from './ports.ts';
+import type { CardRelocator, LaneProposalAgenda, LaneSetSource, LaneSetStore, RelocationAuthority } from './ports.ts';
 import type { ProjectRegistry, SessionProjects } from './session-projects.ts';
+import { ancestorsOf } from '../board/lineage.ts';
+import type { SessionParents } from '../board/ports.ts';
 
 export const UNFILED_PROJECT_NAME = 'Unfiled';
 
@@ -66,6 +68,8 @@ export class LaneSetService implements LaneSetSource {
     private readonly sessions: Pick<SessionProjects, 'projectOf'>,
     private readonly agenda: LaneProposalAgenda,
     private readonly relocator: CardRelocator,
+    /** Who started whom, so a lead may replace its own ferret's waiting proposal. Absent, only that ferret may. */
+    private readonly parents?: SessionParents,
   ) {}
 
   projectOf(sessionId: string): Promise<BoardProjectId> {
@@ -103,7 +107,11 @@ export class LaneSetService implements LaneSetSource {
     return (await this.projects()).find(board => board.id === projectId);
   }
 
-  /** Applies a propose, edit or confirm. A ferret's unconfirmed result puts one choice on its agenda. */
+  /**
+   * Applies a propose, edit or confirm (`decideLaneChange`). A ferret's change to a project that has lanes waits
+   * for the owner and moves nothing; any ferret result the owner has not confirmed puts one choice on its agenda.
+   * Cards move only once a change is live, as whoever made it live: the owner's, or the checked daemon's.
+   */
   async apply(
     projectId: BoardProjectId,
     request: LaneSetActionRequest,
@@ -111,22 +119,30 @@ export class LaneSetService implements LaneSetSource {
   ): Promise<BoardResult<LaneSetChange, LaneSetFailure>> {
     const board = await this.project(projectId);
     if (board === undefined) return boardErr({ code: 'not-found', projectId });
-    const decided = await this.store.transact<BoardResult<LaneSet, LaneSetProblem>>(projectId, current => {
-      const result = decide(projectId, current ?? defaultLaneSet(projectId), request, actor);
-      return result.ok ? { next: result.value, result } : { result };
+    const leads = await this.leadsProposer(projectId, actor);
+    // A ferret's change never relocates: it waits, or it is a first proposal with no cards to move.
+    const decided = await this.store.transact<
+      BoardResult<{ readonly decision: LaneSetDecision; readonly before: LaneSet | null }, LaneSetProblem>
+    >(projectId, current => {
+      const before = current ?? defaultLaneSet(projectId);
+      const result = decideLaneChange(projectId, before, request, actor, leads);
+      return result.ok ? { next: result.value.next, result: boardOk({ decision: result.value, before }) } : { result };
     });
     if (!decided.ok) return decided;
-    const laneSet = decided.value;
-    if (request.action === 'edit') {
-      const moves = relocations(request);
-      if (Object.keys(moves).length > 0) await this.relocator.relocate(projectId, moves);
+    const { decision, before } = decided.value;
+    const laneSet = decision.next;
+    await this.withdrawGone(projectId, before?.pending, laneSet, request.action === 'confirm');
+    if (Object.keys(decision.relocate).length > 0) {
+      await this.relocator.relocate(projectId, decision.relocate, authorityOf(actor));
     }
-    if (laneSet.confirmedBy !== null || actor.kind !== 'ferret') return boardOk({ laneSet, agenda: 'not-needed' });
+    if (actor.kind !== 'ferret') return boardOk({ laneSet, agenda: 'not-needed' });
+    const pending = decision.change === 'pending' ? laneSet.pending : undefined;
+    if (pending === undefined && laneSet.confirmedBy !== null) return boardOk({ laneSet, agenda: 'not-needed' });
     try {
       await this.agenda.raise(
         actor.sessionId,
-        laneProposalReference(projectId, laneSet.version),
-        laneProposalCard(board.name, laneSet),
+        laneProposalReference(projectId, pending?.version ?? laneSet.version),
+        pending === undefined ? laneProposalCard(board.name, laneSet) : laneChangeCard(board.name, laneSet, pending),
       );
       return boardOk({ laneSet, agenda: 'raised' });
     } catch {
@@ -150,14 +166,24 @@ export class LaneSetService implements LaneSetSource {
         const plan = stored === null ? null : mergeReleaseLanes(stored);
         if (plan === null) continue;
         const moves = { [plan.from]: plan.into };
-        await this.relocator.relocate(projectId, moves, RELEASE_MERGE_REASON);
-        const version = await this.store.transact<number | null>(projectId, current => {
-          const again = current === null ? null : mergeReleaseLanes(current);
-          return again === null ? { result: null } : { next: again.next, result: again.next.version };
-        });
-        if (version === null) continue;
-        await this.relocator.relocate(projectId, moves, RELEASE_MERGE_REASON);
-        outcomes.push({ projectId, merged: true, version });
+        // The daemon moves these cards, so the move is checked as any of its relocations is.
+        const refused = relocationProblems(stored ?? plan.next, plan.next, moves)[0];
+        if (refused !== undefined) throw new Error(describeRelocationProblem(refused));
+        const daemon: RelocationAuthority = { kind: 'daemon', before: stored ?? plan.next };
+        await this.relocator.relocate(projectId, moves, daemon, RELEASE_MERGE_REASON);
+        const merged = await this.store.transact<{ readonly before: LaneSet; readonly next: LaneSet } | null>(
+          projectId,
+          current => {
+            const again = current === null ? null : mergeReleaseLanes(current);
+            return again === null || current === null
+              ? { result: null }
+              : { next: again.next, result: { before: current, next: again.next } };
+          },
+        );
+        if (merged === null) continue;
+        await this.withdrawGone(projectId, merged.before.pending, merged.next);
+        await this.relocator.relocate(projectId, moves, daemon, RELEASE_MERGE_REASON);
+        outcomes.push({ projectId, merged: true, version: merged.next.version });
       } catch (error) {
         outcomes.push({ projectId, merged: false, problem: error instanceof Error ? error.message : String(error) });
       }
@@ -176,11 +202,16 @@ export class LaneSetService implements LaneSetSource {
     const outcomes: QuickToTestOutcome[] = [];
     for (const projectId of ids) {
       try {
-        const version = await this.store.transact<number | null>(projectId, current => {
-          const next = current === null ? null : addQuickToTestLane(current);
-          return next === null ? { result: null } : { next, result: next.version };
-        });
-        if (version !== null) outcomes.push({ projectId, added: true, version });
+        const added = await this.store.transact<{ readonly before: LaneSet; readonly next: LaneSet } | null>(
+          projectId,
+          current => {
+            const next = current === null ? null : addQuickToTestLane(current);
+            return next === null || current === null ? { result: null } : { next, result: { before: current, next } };
+          },
+        );
+        if (added === null) continue;
+        await this.withdrawGone(projectId, added.before.pending, added.next);
+        outcomes.push({ projectId, added: true, version: added.next.version });
       } catch (error) {
         outcomes.push({ projectId, added: false, problem: error instanceof Error ? error.message : String(error) });
       }
@@ -215,44 +246,75 @@ export class LaneSetService implements LaneSetSource {
     return outcomes;
   }
 
-  /** The owner's Accept on a proposal card. A card for a version that has moved on confirms nothing. */
+  /**
+   * The owner's Accept on a proposal card: it confirms the live set of that version, or makes the waiting proposal
+   * of that version live and moves its cards as the owner's. A card for a version that has moved on confirms
+   * nothing. Only ever called for the owner's own answer (`LaneProposalAcceptance`).
+   */
   async acceptProposal(projectId: BoardProjectId, version: number): Promise<boolean> {
-    return await this.store.transact(projectId, current => {
-      const confirmed = confirmLaneSet(current ?? defaultLaneSet(projectId), version);
-      return confirmed.ok ? { next: confirmed.value, result: true } : { result: false };
+    const accepted = await this.store.transact<LaneSetDecision | null>(projectId, current => {
+      const decided = decideLaneChange(
+        projectId,
+        current ?? defaultLaneSet(projectId),
+        { action: 'confirm', version },
+        OWNER,
+      );
+      return decided.ok ? { next: decided.value.next, result: decided.value } : { result: null };
     });
+    if (accepted === null) return false;
+    // Answered on the agenda: the card is closed already, so there is nothing to withdraw.
+    if (Object.keys(accepted.relocate).length > 0) await this.relocator.relocate(projectId, accepted.relocate, OWNER);
+    return true;
+  }
+
+  /**
+   * Whether a ferret leads the session that proposed the waiting proposal it would replace (`docs/board.md` § A
+   * ferret's lane change waits for the owner). Read before the change, so a proposal replaced in between by
+   * somebody else is judged as not this ferret's to replace.
+   */
+  private async leadsProposer(projectId: BoardProjectId, actor: LaneActor): Promise<(session: string) => boolean> {
+    const proposer = actor.kind === 'ferret' ? (await this.store.read(projectId))?.pending?.proposerSession : undefined;
+    if (proposer === undefined || this.parents === undefined) return () => false;
+    const above = await ancestorsOf(proposer, this.parents);
+    return session => session === proposer && actor.kind === 'ferret' && above.includes(actor.sessionId);
+  }
+
+  /**
+   * Closes the agenda card of a waiting proposal that is gone — replaced, accepted in the editor, or dropped by a
+   * change to the lanes — saying why, so the owner never answers a card that would do nothing. Total: a card that
+   * cannot be closed stays open, and its Accept still confirms nothing.
+   */
+  private async withdrawGone(
+    projectId: BoardProjectId,
+    was: LaneSet['pending'],
+    now: LaneSet,
+    confirmed = false,
+  ): Promise<void> {
+    if (was?.proposerSession === undefined || now.pending?.version === was.version) return;
+    const why =
+      now.pending !== undefined
+        ? LANE_CARD_WITHDRAWN.replaced
+        : confirmed && now.version === was.version
+          ? LANE_CARD_WITHDRAWN.accepted
+          : LANE_CARD_WITHDRAWN.dropped;
+    await this.agenda
+      .withdraw(was.proposerSession, laneProposalReference(projectId, was.version), why)
+      .catch(() => undefined);
   }
 }
 
+const OWNER = { kind: 'owner' } as const satisfies LaneActor & RelocationAuthority;
+
+const authorityOf = (actor: LaneActor): RelocationAuthority =>
+  actor.kind === 'owner' ? (actor.via === undefined ? OWNER : { kind: 'owner', via: actor.via }) : { kind: 'daemon' };
+
+/** What a withdrawn proposal card says: why the proposal it named is gone. */
+export const LANE_CARD_WITHDRAWN = {
+  replaced: 'A newer proposal replaced this one; its own card is on the agenda.',
+  accepted: 'Accepted in the Board lane editor.',
+  dropped:
+    'The lanes changed since this was proposed (the owner edited them, or Ferretry updated them when it started), so this proposal is gone.',
+} as const;
+
 const defaultLaneSet = (projectId: BoardProjectId): LaneSet | null =>
   projectId === UNFILED_PROJECT_ID ? unfiledLaneSet() : null;
-
-const decide = (
-  projectId: BoardProjectId,
-  stored: LaneSet | null,
-  request: LaneSetActionRequest,
-  actor: LaneActor,
-): BoardResult<LaneSet, LaneSetProblem> => {
-  switch (request.action) {
-    case 'propose':
-      return proposeLaneSet(
-        projectId,
-        stored,
-        request.template,
-        request.renames,
-        actorName(actor),
-        actor.kind !== 'owner',
-      );
-    case 'edit':
-      return editLaneSet(stored, request, actor);
-    case 'confirm':
-      return actor.kind === 'owner'
-        ? confirmLaneSet(stored, request.version, actor.via)
-        : boardErr({ code: 'owner-only' });
-  }
-};
-
-const relocations = (request: Extract<LaneSetActionRequest, { action: 'edit' }>): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(request.relocate).filter((entry): entry is [string, string] => entry[1] !== undefined),
-  );

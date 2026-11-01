@@ -23,6 +23,12 @@ import {
   LaneSchema,
   type LaneSet,
   LaneSetSchema,
+  closedLaneProblems,
+  gateOptions,
+  laneChangeLines,
+  laneGateProblems,
+  type PendingLaneSet,
+  PendingLaneSetSchema,
   LaneStageSchema,
   LaneTemplateNameSchema,
   LaneTriggerSchema,
@@ -83,6 +89,15 @@ const CLASSIC: LaneSet = {
   notGoodLane: 'implement',
 };
 
+/** A ferret's change to FERRETRY, waiting for the owner: Released · to test goes, its cards to Merged. */
+const WAITING: PendingLaneSet = {
+  version: 2,
+  baseVersion: 1,
+  proposedBy: 'session-2',
+  ...LANE_TEMPLATES.pr,
+  relocate: { released: 'merged' },
+};
+
 const lane = (id: string, category: Lane['category'], extra: Partial<Lane> = {}): Lane => ({
   id,
   name: id,
@@ -106,6 +121,8 @@ const VALID: readonly SchemaCase[] = [
   { name: 'layout', schema: LaneLayoutSchema, value: layout(SOUND) },
   { name: 'lane set', schema: LaneSetSchema, value: FERRETRY },
   { name: 'confirmed lane set', schema: LaneSetSchema, value: { ...FERRETRY, confirmedBy: 'owner', version: 3 } },
+  { name: 'waiting proposal', schema: PendingLaneSetSchema, value: WAITING },
+  { name: 'lane set with a waiting proposal', schema: LaneSetSchema, value: { ...FERRETRY, pending: WAITING } },
   { name: 'template name', schema: LaneTemplateNameSchema, value: 'ops' },
   { name: 'renames', schema: LaneRenamesSchema, value: { plan: 'Investigate' } },
   { name: 'until', schema: DependencyUntilSchema, value: 'released' },
@@ -132,6 +149,18 @@ const INVALID: readonly SchemaCase[] = [
   { name: 'empty variant', schema: LaneVariantsSchema, value: { quick: [] } },
   { name: 'proposed by nobody', schema: LaneSetSchema, value: { ...FERRETRY, proposedBy: '' } },
   { name: 'confirmed by a ferret', schema: LaneSetSchema, value: { ...FERRETRY, confirmedBy: 'session-1' } },
+  { name: 'proposal numbered at its base', schema: PendingLaneSetSchema, value: { ...WAITING, version: 1 } },
+  {
+    name: 'proposal with an unsound layout',
+    schema: PendingLaneSetSchema,
+    value: { ...WAITING, lanes: SOUND.slice(0, 2) },
+  },
+  { name: 'proposal with no targets', schema: PendingLaneSetSchema, value: { ...WAITING, doneLane: undefined } },
+  {
+    name: 'proposal numbered at or below the live set',
+    schema: LaneSetSchema,
+    value: { ...FERRETRY, version: 2, pending: WAITING },
+  },
   { name: 'no lanes', schema: LaneLayoutSchema, value: layout([]) },
   { name: 'unknown template', schema: LaneTemplateNameSchema, value: 'kanban' },
   { name: 'rename to blank', schema: LaneRenamesSchema, value: { plan: '' } },
@@ -191,6 +220,234 @@ const INVALID: readonly SchemaCase[] = [
     value: { kind: 'auto', triggers: ['pr.merged', 'pr.merged'] },
   },
 ];
+
+/**
+ * What a waiting proposal would do that is the owner's to decide, over FERRETRY (pr-release-verify): Todo, Plan/Design*,
+ * In progress, Merged, Released · to test*, Closed (* a gate). The review's probes P2–P4 are cases here.
+ */
+describe('laneGateProblems', () => {
+  const lanes = FERRETRY.lanes;
+  const variants = FERRETRY.variants;
+  const without = (id: string) => ({
+    lanes: lanes.filter(each => each.id !== id),
+    variants: Object.fromEntries(
+      Object.entries(variants).map(([workflow, ids]) => [workflow, (ids ?? []).filter(each => each !== id)]),
+    ),
+  });
+  const whys = (problems: readonly { readonly why: string }[]): string[] => problems.map(problem => problem.why);
+  const plain = (problems: readonly { readonly laneId: string; readonly why: string }[]) =>
+    problems.map(({ laneId, why }) => ({ laneId, why }));
+
+  it('should find nothing in a change that only renames', () => {
+    const renamed = { lanes: lanes.map(each => ({ ...each, name: `${each.name}!` })), variants };
+
+    should(laneGateProblems(FERRETRY, renamed)).deepEqual([]);
+  });
+
+  it('should say where a removed gate’s cards go, naming the closed lane by its category (probe P3)', () => {
+    // Arrange: Closed renamed "Review" in the same proposal, so its name would hide that the cards close.
+    const next = without('released');
+    const disguised = {
+      ...next,
+      lanes: next.lanes.map(each => (each.id === 'closed' ? { ...each, name: 'Review' } : each)),
+    };
+
+    // Act + Assert
+    should(plain(laneGateProblems(FERRETRY, disguised, { released: 'closed' }))).deepEqual([
+      {
+        laneId: 'closed',
+        why: 'removes Released · to test, which waits for the owner, and sends its cards into the closed lane, which closes them',
+      },
+    ]);
+  });
+
+  it('should say where a removed lane’s cards go: a plain move, a new lane, or past a gate', () => {
+    // Arrange
+    const newLane: Lane = { id: 'later', name: 'Later', category: 'active' };
+    const intoNew = {
+      ...without('merged'),
+      lanes: [...without('merged').lanes.slice(0, 3), newLane, ...without('merged').lanes.slice(3)],
+    };
+
+    // Act + Assert
+    should(whys(laneGateProblems(FERRETRY, without('merged'), { merged: 'implement' }))).deepEqual([
+      'removes Merged, and moves its cards to In progress',
+    ]);
+    should(
+      whys(
+        laneGateProblems(FERRETRY, { ...intoNew, doneLane: 'closed', notGoodLane: 'implement' }, { merged: 'later' }),
+      ),
+    ).deepEqual(['removes Merged, and sends its cards into Later, a lane that is new']);
+    should(plain(laneGateProblems(FERRETRY, without('todo'), { todo: 'implement' }))).deepEqual([
+      {
+        laneId: 'plan',
+        why: 'removes Todo, and sends its cards to In progress, past Plan/Design, which waits for the owner',
+      },
+    ]);
+    should(whys(laneGateProblems(FERRETRY, without('merged')))).deepEqual(['removes Merged']);
+  });
+
+  it('should find a workflow that would skip a gate (probe P2)', () => {
+    const skipping = {
+      lanes,
+      variants: { ...variants, 'design-first': ['todo', 'implement', 'merged', 'released', 'closed'] },
+    };
+
+    should(whys(laneGateProblems(FERRETRY, skipping))).deepEqual(['lets design-first work skip Plan/Design']);
+  });
+
+  it('should find a lane made the closed lane, and the gate it was made automatic (probe P4)', () => {
+    // Arrange: Released · to test becomes the closed lane and Closed an ordinary shipped lane, nothing removed.
+    const swapped = {
+      lanes: lanes.map(each => {
+        if (each.id === 'released')
+          return { ...each, category: 'closed' as const, emphasis: 'info' as const, stage: undefined };
+        return each.id === 'closed' ? { id: 'closed', name: 'Archive', category: 'shipped' as const } : each;
+      }),
+      variants,
+    };
+
+    // Act + Assert
+    should(whys(laneGateProblems(FERRETRY, swapped))).deepEqual([
+      'makes Released · to test the closed lane, which closes the cards in it',
+      'makes Released · to test automatic: it would stop waiting for the owner',
+      'makes Closed an open lane, which reopens the cards in it',
+    ]);
+  });
+
+  it('should find a gate whose answers are rewired, or whose owner gate is dropped', () => {
+    // Arrange
+    const rewired = {
+      lanes: lanes.map(each =>
+        each.id === 'plan'
+          ? {
+              ...each,
+              stage: {
+                kind: 'gate' as const,
+                options: [{ id: 'ok', label: 'OK to build', outcome: { kind: 'close' as const } }],
+              },
+            }
+          : each,
+      ),
+      variants,
+    };
+    const ungated = {
+      lanes: lanes.map(each => (each.id === 'released' ? { ...each, ownerGate: false } : each)),
+      variants,
+    };
+
+    // Act + Assert
+    should(whys(laneGateProblems(FERRETRY, rewired))).deepEqual([
+      'changes where "OK to build" on Plan/Design sends cards: In progress → the closed lane, which closes them',
+    ]);
+    should(whys(laneGateProblems(FERRETRY, ungated))).deepEqual(['drops the owner gate of Released · to test']);
+  });
+
+  it('should find a gate moved among the lanes a workflow walks', () => {
+    const order = ['todo', 'implement', 'plan', 'merged', 'released', 'closed'];
+    const moved = {
+      lanes: order.map(id => lanes.find(each => each.id === id) as Lane),
+      variants,
+      doneLane: 'closed',
+      notGoodLane: 'implement',
+    };
+
+    // One line for the workflows it moves in; and "OK to build", which goes on to the next lane, now skips building.
+    should(whys(laneGateProblems(FERRETRY, moved))).deepEqual([
+      'changes where "OK to build" on Plan/Design sends cards: In progress → Merged',
+      'moves Plan/Design among the lanes design-first and research-first work walks',
+    ]);
+  });
+
+  it('should say when a reorder sends a gate’s answer straight to the closed lane (review probe P8)', () => {
+    // Arrange: Closed moved right after Plan/Design, every workflow following that order.
+    const order = ['todo', 'plan', 'closed', 'implement', 'merged', 'released'];
+    const reordered = {
+      lanes: order.map(id => lanes.find(each => each.id === id) as Lane),
+      variants: Object.fromEntries(
+        Object.entries(variants).map(([workflow, ids]) => [workflow, order.filter(id => (ids ?? []).includes(id))]),
+      ),
+      doneLane: 'closed',
+      notGoodLane: 'implement',
+    };
+
+    // Act
+    const said = whys(laneGateProblems(FERRETRY, reordered));
+
+    // Assert: the owner's next "OK to build" would close the card; and no such layout is accepted any more.
+    should(said).containEql(
+      'changes where "OK to build" on Plan/Design sends cards: In progress → the closed lane, which closes them',
+    );
+    should(closedLaneProblems(reordered)).deepEqual([
+      ['lanes', 'the closed lane is the last lane: nothing comes after done'],
+    ]);
+    should(LaneLayoutSchema.safeParse(reordered).success).be.false();
+    should(PendingLaneSetSchema.safeParse({ ...WAITING, ...reordered, relocate: {} }).success).be.false();
+    should(closedLaneProblems(FERRETRY)).deepEqual([]);
+  });
+
+  it('should say an answer a gate gains or loses', () => {
+    const plan = lanes.find(each => each.id === 'plan') as Lane;
+    const withStop = {
+      lanes: lanes.map(each =>
+        each.id === 'plan'
+          ? {
+              ...each,
+              stage: {
+                kind: 'gate' as const,
+                options: [{ id: 'stop', label: 'Stop', outcome: { kind: 'close' as const } }],
+              },
+            }
+          : each,
+      ),
+      variants,
+      doneLane: 'closed',
+      notGoodLane: 'implement',
+    };
+
+    should(whys(laneGateProblems(FERRETRY, withStop))).deepEqual([
+      `removes the answer "${gateOptions(plan)[0]?.label ?? ''}" from Plan/Design`,
+      'adds the answer "Stop" to Plan/Design, which sends cards to the closed lane, which closes them',
+    ]);
+  });
+});
+
+/** What the owner reads: like removals told once, everything else line by line (laneChangeLines). */
+describe('laneChangeLines', () => {
+  const gate = (index: number): Lane => ({
+    id: `g${String(index)}`,
+    name: `Owner review ${String(index)}`,
+    category: 'active',
+    ownerGate: true,
+  });
+  const todo: Lane = { id: 'todo', name: 'Todo', category: 'backlog' };
+  const doing: Lane = { id: 'doing', name: 'Doing', category: 'active' };
+  const closed: Lane = { id: 'closed', name: 'Closed', category: 'closed', ownerGate: true };
+
+  it('should tell lanes removed the same way once, naming the first and last of many', () => {
+    // Arrange: five gates removed with their cards closed, and one plain lane removed apart.
+    const gates = [0, 1, 2, 3, 4].map(gate);
+    const live = { lanes: [todo, ...gates, doing, closed], variants: {} };
+    const next = { lanes: [todo, closed], variants: {} };
+    const relocate = { ...Object.fromEntries(gates.map(each => [each.id, 'closed'])), doing: 'todo' };
+
+    // Act + Assert
+    should(laneChangeLines(live, next, relocate)).deepEqual([
+      'removes 5 lanes that wait for the owner (Owner review 0 … Owner review 4), and sends their cards into the closed lane, which closes them',
+      'removes Doing, and moves its cards to Todo',
+    ]);
+  });
+
+  it('should name every lane of a short run, and leave lanes removed with nowhere said alone', () => {
+    const gates = [0, 1].map(gate);
+    const live = { lanes: [todo, ...gates, closed], variants: {} };
+
+    should(laneChangeLines(live, { lanes: [todo, closed], variants: {} })).deepEqual([
+      'removes 2 lanes that wait for the owner (Owner review 0, Owner review 1)',
+    ]);
+    should(laneChangeLines(FERRETRY, FERRETRY)).deepEqual([]);
+  });
+});
 
 describe('board lane schemas', () => {
   it('should round-trip every valid shape and refuse the rest', () => {
