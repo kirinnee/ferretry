@@ -388,7 +388,14 @@ release. It is also a **bearer class** of its own, `session`, beside the admin a
   the stored hash, after the stop is durable, so nothing that later writes the session's status back can
   revive the value its pane held; a deleted session's documents go with it. Every pane launch — the first
   and every revive — rotates it, and only a launch gives a stopped session a credential again. A daemon
-  restart keeps the hashes of sessions still running, because their panes survive it.
+  restart keeps the hashes of sessions still running, because their panes survive it. A person can also
+  revoke a **running** ferret's credential at once — [Cutting a ferret off](#cutting-a-ferret-off).
+- **A child never inherits it.** Every session, a sub-ferret included, is minted its own credential, and a
+  pane is handed only its own (`FY_SESSION_TOKEN` is derived from the session's own stored value at each
+  launch). The daemon drops `FY_SESSION_TOKEN`, `FY_SESSION_BOARD_CAPABILITY` and `FY_SESSION_ID` from its
+  own environment at boot, and unsets them from its tmux server's global environment (a server outlives the
+  daemon that started it), so a daemon started from inside a ferret's pane cannot pass that ferret's
+  credential to the tmux server, its panes or its terminals.
 - **From this machine only.** A session-shaped bearer is looked up only when the request arrived on the
   privileged loopback carrier; from the tunnel, a LAN bind or any other remote carrier it is a stranger's,
   answered without a lookup. A dead credential gets a stranger's very words (`401 unauthorized`, and the
@@ -418,18 +425,29 @@ its own).
   list and its look-alike check, pairing and devices, passkeys,
   the step-up and the unlock, grants, the security settings and the tunnel switch, confirming a held
   config change, updating the daemon or the agent CLIs, the browser proxy test, catalog shares, members,
-  installs and publishing, Pack mode's clean-up, applying a lesson, the old-board import, the owner's
-  "Send now" for held agenda answers, and "Clear all from agent ferrets". Also everything that changes how
-  ferrets run or are watched: **applying** a fleet change (`POST /v1/fleet/proposals/:id/apply` — a ferret may
+  installs and publishing, Pack mode's clean-up, applying a lesson, revoking a session's credential, forking a
+  conversation, adopting an earlier Claude Code or Codex conversation, asking the Warden to investigate, the
+  old-board import, the owner's "Send now" for held agenda answers, and "Clear all from agent ferrets". Also
+  everything that changes how ferrets run or are watched: **applying** a fleet change (`POST /v1/fleet/proposals/:id/apply` — a ferret may
   still propose one), harness and MCP sign-ins, a session's MCP login, installing machine tools, the
   warden's settings and "leave it alone", resource limits, the lessons settings, a session's Pack switch and a
   board's switch; answering a harness's own prompts (`permission`, `dialog`, `answer`, console keys, `attach`) and typing the owner's own composer draft into a pane;
   the agent browser's sign-in window, whose status is a credential; and the security log and grant history.
   A person's own agent-tool routes (`/v1/sessions/:id/surfaces/*`) are person routes too: an agent uses
   `POST /v1/agent/tools`.
-- **A ferret starts sub-ferrets only as itself.** On its own credential, `POST /v1/pack/new` takes the parent
-  from the credential: a body `parent` naming another session is `403 parent_mismatch`, and an absent one is
-  filled in, so the Pack switch and the sub-ferret limits always apply to it.
+- **Every session a ferret starts is its own child.** On its own credential, `POST /v1/sessions` (`fy start`,
+  interactive included) and `POST /v1/pack/new` (`fy new`) take the parent from the credential: a body `parent`
+  naming another session is `403 parent_mismatch`, and an absent one is filled in. So a ferret can never start a
+  top-level session, and its sub-ferret limits and depth (and, for `fy new`, the Pack switch) always apply to
+  what it starts ([pack-mode.md](pack-mode.md#limits)). A ferret may not give its start the Warden's own label
+  (`fleet-warden`, `403 owner_only`): that label exempts a tree from the limits, the resource caps and
+  supervision, and only the daemon's Warden spawner sets it; even then the limits are skipped only for a session
+  that DESCENDS from a warden, never for a label a start gave itself. The routes that can only make a parent-less
+  session are a person's for that reason: a fork (its target descends from nothing), adopting a conversation, a
+  Warden investigation, a learning scan, `fy learning run --spawn` and a Warden run with `spawn` (a ferret may
+  still read the run's manifest and ask for a sweep that only looks). A ferret may hand over only its OWN session
+  (a handover starts a new top-level session in the source's place). **Honest limit:** the admin token with a
+  session header (an older `fy`, a pane with no credential) still starts with the body's parent, as before.
 - **`any` routes take a session credential as that session, always.** Its actor is `peer:<its session>`
   — never the owner, on the board and the agenda too — whatever any header says. That covers everything a
   ferret's `fy` and MCP tools need: `fy send` and `fy notify`, its board card and notes, its own agenda
@@ -449,10 +467,36 @@ its own).
   always did, instead of refusing the board. **Declared gap:** the agenda still records such a call's
   answers and closes as the owner's ("done by you") — [agenda.md](agenda.md).
 
+### Cutting a ferret off
+
+`fy session revoke-credential <session>` (`POST /v1/sessions/:sessionId/revoke-credential`, a **person** route)
+revokes one session's credential at once. Its stored hash is erased on the session's own queue, so the value
+its pane holds names nobody from that moment: where its `fy`, its MCP server and its agent tools present their
+own credential (`fys_…`), they are refused as an unknown one (`401`; `fy` reports it and does not fall back to
+the admin token while the daemon offers `session.credential.1`). Nothing new is minted, and the old plaintext
+leaves the session's stored environment.
+
+- **The pane keeps running.** This is the intended act: the ferret is cut off from Ferretry, not killed.
+- **It sticks until a person resumes it.** The session is marked `credentialRevoked`, and every launch passes
+  through the one credential rotation, which refuses a marked session: no Warden auto-revive (even after the
+  ferret ends its own harness), no peer's `fy resume`, no `/v1/restarts`, no migration, no revive on a send hands
+  it a credential again. The Warden skips it, and a resume by anyone but a person is refused before anything is
+  touched. A **person's** resume (`fy resume <session>`, or Resume in the app) clears the mark, and that launch is
+  handed a fresh credential. A person's restart or migration of a marked session is refused too: resume it
+  first.
+- **Recorded** in the security log as `session.credential-revoked`, named by the session, never by a value.
+- **Honest limits:** it reaches only what presents the session's own credential. A pane still on the admin
+  token plus a session header — an older `fy` or MCP server from before RF-3, until the pane restarts — is not
+  cut off by this, and nor is a ferret that reads `~/.ferretry/api-token` (or runs `fy --as-owner`): to this
+  daemon that is the owner at the machine, the same limit as every person route, closed only by walling the
+  state home off from ferrets. To stop those too, `fy stop` it.
+
 **A ferret's `fy` and MCP server present it.** With a `fys_` value in `FY_SESSION_TOKEN` (or the older
 name) and no `FY_TOKEN`, they send `Authorization: Bearer fys_…` to a daemon that lists `session.credential.1`
 and never open `api-token`; every refusal is the answer, and only a `401` from a daemon that no longer lists
-the feature falls back, once. An older daemon gets the admin token plus `x-ferretry-session-id`, as before, and
+the feature falls back, once. A long-lived `fy mcp serve` whose decision FAILED (the daemon away, the
+listener check or the `api-token` read throwing) forgets it and decides again on the next call, rather than
+failing until the pane restarts. An older daemon gets the admin token plus `x-ferretry-session-id`, as before, and
 `fy --as-owner` is a person's way back to the admin token inside a pane — not a permission, since anything
 that can read `api-token` can pass it. The whole order and its limits:
 [secrets.md](secrets.md#what-a-ferrets-fy-presents). An older `fy` keeps working with the header.

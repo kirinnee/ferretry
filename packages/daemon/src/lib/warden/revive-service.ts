@@ -218,6 +218,8 @@ export class WardenReviveService {
     for (const view of input.fleet) {
       if (view.state.status !== 'failed') continue;
       if (view.config.label?.trim() === WARDEN_LABEL || view.config.wardenLineage === true) continue;
+      // A person cut it off: only a person brings it back. Its own crash must not undo the revoke.
+      if (view.config.credentialRevoked === true) continue;
       const finished = instantMs(view.state.finishedAt);
       if (finished === undefined || input.nowMs - finished > horizon) continue;
       const verdict = classifyEnd(view.state.status, await this.ports.events.read(view.config.id));

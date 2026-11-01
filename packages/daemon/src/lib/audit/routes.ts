@@ -649,6 +649,13 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     detail: { action: 'control' },
   },
   { method: 'POST', path: '/v1/sessions', event: 'session.opened', detail: { action: 'start' } },
+  // A person cutting a ferret off: named by the session, never by the credential it held.
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/revoke-credential',
+    event: 'session.credential-revoked',
+    subject: 'sessionId',
+  },
   // A sub-ferret start goes through the same start (docs/pack-mode.md); its own action keeps it apart from
   // a plain start, so the two never fold into one record.
   { method: 'POST', path: '/v1/pack/new', event: 'session.opened', detail: { action: 'sub-ferret' } },

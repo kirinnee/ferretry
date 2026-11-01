@@ -14,6 +14,7 @@ import {
   type WardenVerdictsView,
 } from '@ferretry/protocol';
 import { type WardenRequestFailure, WardenRequestError } from '../../warden/sweep.ts';
+import { isAgentCaller, OWNER_ONLY_CODE } from '../../api/agent-caller.ts';
 import { parseBody, parseOptionalBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, queryValue } from '../../api/http.ts';
@@ -149,6 +150,10 @@ function refuse(error: unknown): never {
  */
 async function run(subsystem: WardenSubsystem, context: RouteContext): Promise<ApiResponse> {
   const request = await parseOptionalBody(context.request, WardenRunRequestSchema);
+  // A sweep that may SPAWN investigators starts warden sessions with no parent, so only a person asks for one; a
+  // ferret may still ask for a sweep that only looks. No ferret starts a session that is not its own child.
+  if (request.spawn === true && isAgentCaller(context))
+    throw new ApiError(403, 'a ferret cannot start Warden investigators; ask the owner', OWNER_ONLY_CODE);
   return jsonResponse(await subsystem.run(request.spawn).catch(refuse));
 }
 
@@ -258,11 +263,13 @@ export function wardenRoutes(subsystem: WardenSubsystem): readonly ApiRoute[] {
       legacy: true,
       handle: handleAgenda,
     },
+    // The OWNER's own request: it starts a warden session with no parent, so a ferret (or a warden) asking is
+    // refused before the body is read — no ferret starts a session that is not its own child.
     {
       method: 'POST',
       path: '/v1/warden/investigate',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       capability: { capability: 'warden', axis: 'use' },
       noStore: true,
       handle: async context => await investigate(subsystem, context),

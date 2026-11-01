@@ -424,6 +424,11 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     },
   },
   sessionControl: new FakeSessionControl(),
+  sessionCredential: {
+    revoke: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionResume: new FakeSessionResume(),
   sessionSend: new FakeSessionSend(),
   sendTracking: { arm: () => () => {} },
@@ -881,7 +886,7 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      108 + // the session table and everything that is not the account model (three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
+      109 + // the session table and everything that is not the account model (one of them cutting a ferret off: its credential revoked; three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; three the session's durable message queue: its read, an edit and a take-back of a message still waiting; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       5 + // the project boards: the board query, one card, a new card, an action on a card (board-design.md §2), and a ferret's skip (§3.4)
       2 + // the work search over cards and agenda items, and the related check before filing (docs/work-search.md)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
@@ -1169,6 +1174,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions',
       'POST /v1/sessions/:sessionId/stop',
       'GET /v1/sessions/by-request/:requestId',
+      'POST /v1/sessions/:sessionId/revoke-credential',
       'POST /v1/sessions/:sessionId/resume',
       'GET /v1/sessions/:sessionId/relaunch-settings',
       'POST /v1/sessions/:sessionId/conversion-preview',

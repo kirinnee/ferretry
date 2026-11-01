@@ -1,4 +1,4 @@
-import { type ApiActor, isHumanAdminActor } from './actor.ts';
+import { type ApiActor, isHumanAdminActor, parseActor } from './actor.ts';
 import type { AuthenticatedCredential } from './authentication.ts';
 import type { RouteContext } from './route.ts';
 
@@ -36,6 +36,17 @@ export function callerIsAgent(credential: AuthenticatedCredential | undefined, a
 
 /** {@link callerIsAgent} of a handler's own context. */
 export const isAgentCaller = (context: RouteContext): boolean => callerIsAgent(context.credential, context.actor);
+
+/**
+ * The session an AGENT caller is acting as: its own credential's, or — for the honest-client admin token with a
+ * session header — the `peer:` it named. `undefined` for a person, and for a warden, which acts as no ferret.
+ */
+export function agentSessionOf(context: RouteContext): string | undefined {
+  if (context.credential?.tokenClass === 'session') return context.credential.sessionId;
+  if (!isAgentCaller(context)) return undefined;
+  const actor = parseActor(context.actor ?? '');
+  return actor.kind === 'peer' && actor.id !== '' ? actor.id : undefined;
+}
 
 /** The code a person-only act refuses an agent with, at the boundary and in a handler alike. */
 export const OWNER_ONLY_CODE = 'owner_only';

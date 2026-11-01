@@ -81,6 +81,10 @@ The wire contract is `packages/protocol/src/lib/conversation-import.ts`; the dae
 
 ## What adoption does
 
+Adopting is a **person's** act (`caller: 'person'`): an adopted conversation is a new top-level ferret, and a
+ferret starts sessions only as its own children, so a ferret's own credential is refused `403 owner_only`. A
+ferret may still list and preview ([agent-tools.md](agent-tools.md#who-a-ferret-may-be-every-route-says)).
+
 1. Re-discovers the conversation by its CLI id (a client never names a path).
 2. Refuses it if a session already keeps it (`already_adopted`), or if the runtime drives the other CLI
    (`harness_mismatch`).

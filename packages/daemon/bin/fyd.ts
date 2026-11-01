@@ -1337,6 +1337,10 @@ import { NO_PERFORMANCE_PROBE, PerformanceRecorder } from '../src/lib/performanc
 import { teeStackSampler } from '../src/lib/performance/sampler-tee.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
+import {
+  SessionCredentialError,
+  type SessionCredentialSubsystem,
+} from '../src/lib/runtime/mounts/session-credential.ts';
 import { FileCatalogInstallStore } from '../src/adapters/catalog-installs/file-store.ts';
 import { FileProjectSkillFiles } from '../src/adapters/catalog-installs/project-skill-files.ts';
 import { FileRuntimeSkillAssets } from '../src/adapters/catalog-installs/runtime-skill-assets.ts';
@@ -1349,7 +1353,9 @@ import {
 } from '../src/lib/session/conversation-lease.ts';
 import { SessionCredentialRotation } from '../src/lib/session/lifecycle/credential-rotation.ts';
 import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/session/lifecycle/launch-environment.ts';
-import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
+import { dropFerretIdentity, sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
+import { forgetFerretIdentity } from '../src/adapters/tmux/forget-ferret-identity.ts';
+import { cutOffResume } from '../src/lib/session/resume/cut-off.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
 import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {
@@ -1508,6 +1514,11 @@ export interface DaemonWorld {
      * A world field so a test can boot without touching a real directory; absent means nothing is swept.
      */
     readonly sweepPairingRedirects?: (stateHome: string) => Promise<number>;
+    /**
+     * Clears every ferret's credential and id from the tmux server's global environment (`forgetFerretIdentity`),
+     * so a server an earlier daemon started inside a ferret's pane hands no terminal that ferret's credential.
+     */
+    readonly forgetFerretIdentity?: () => Promise<void>;
     /**
      * Removes saved-login ciphertext no committed index points at (what a change left when the daemon stopped
      * between staging and commit). ONLY ever called by `start` once `storage.open()` holds the state home's
@@ -2648,7 +2659,10 @@ function createSessionControlSubsystem(
       // PACK MODE'S LIMITS, before anything is claimed or written: a parent already running as many
       // sub-ferrets as it may, or one too deep to start its own, is refused here whichever command
       // asked (docs/pack-mode.md). A warden's own spawns are the Warden's to bound, not this.
-      if (request.parent !== undefined && !stamped.provenance.wardenLineage) {
+      // Skipped only for a session that DESCENDS from a warden (`parent_stamp`, `ancestor_walk`): a label the
+      // request gave itself (`self_label`) under a parent is no warden's spawn, and the limits apply to it.
+      const wardenDescent = stamped.provenance.wardenLineage && stamped.provenance.lineageSource !== 'self_label';
+      if (request.parent !== undefined && !wardenDescent) {
         const refusal = await pack.admit(request.parent);
         if (refusal !== undefined)
           throw new SessionControlError(
@@ -2903,6 +2917,39 @@ function createSessionControlSubsystem(
         );
       }
       return await view(id);
+    },
+  };
+}
+
+/** Whether a person cut this session off (`credentialRevoked` on its configuration), and no person has resumed it since. */
+async function credentialCutOff(storage: DaemonStorage, id: SessionId): Promise<boolean> {
+  return jsonObject(await storage.readConfig(id))?.credentialRevoked === true;
+}
+
+/** A person resumed a cut-off session: the mark goes, so the launch the resume makes rotates a credential. */
+async function restoreCredential(storage: DaemonStorage, id: SessionId): Promise<void> {
+  await storage.updateConfig(id, current => {
+    const { credentialRevoked: _restored, ...rest } = jsonObject(current) ?? {};
+    return rest;
+  });
+}
+
+/**
+ * Cutting one ferret off (`POST /v1/sessions/:sessionId/revoke-credential`): the lifecycle revokes its credential on
+ * the session's own queue, so the value its pane holds names nobody from the moment this answers.
+ */
+function sessionCredentialRevocation(
+  storage: DaemonStorage,
+  createLifecycle: DaemonWorld['createSessionLifecycle'],
+  launcher: SessionLifecycleLauncher,
+): SessionCredentialSubsystem {
+  return {
+    revoke: async reference => {
+      const id = tryParseSessionId(reference);
+      if (id === undefined || storage.findSession(id) === undefined)
+        throw new SessionCredentialError('not_found', `no session ${reference}`);
+      const record = await createLifecycle(storage, launcher).revokeCredential(id);
+      return { sessionId: record.config.id, status: record.state.status };
     },
   };
 }
@@ -3165,6 +3212,15 @@ function createSessionResumeSubsystem(
       if (id === undefined)
         throw new SessionResumeError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
       if (storage.findSession(id) === undefined) throw new SessionResumeError('not_found', `no session ${reference}`);
+      // A session a person cut off comes back only when a PERSON resumes it (`cutOffResume`); the rotation would
+      // refuse anyone else's relaunch anyway, but here nothing is touched first.
+      const cutOff = cutOffResume(await credentialCutOff(storage, id), actor);
+      if (cutOff === 'refuse')
+        throw new SessionResumeError(
+          'refused',
+          `a person revoked ${reference}'s credential; only a person can resume it (${CLIENT_NAME} resume ${reference})`,
+        );
+      if (cutOff === 'restore') await restoreCredential(storage, id);
       await service
         .resume({
           id,
@@ -4782,6 +4838,8 @@ async function wardenFleetSession(
        * field on the session config document would be the second shape this deliberately avoids.
        */
       ...(view.config.provenance === undefined ? {} : { wardenLineage: view.config.provenance.wardenLineage }),
+      // A person cut it off: the Warden never brings it back (`fy session revoke-credential`).
+      ...(view.config.credentialRevoked === true ? { credentialRevoked: true } : {}),
       agent: view.config.agent,
       ...(view.config.model === undefined ? {} : { model: view.config.model }),
       // The start's own resolution, carried beside the configured value rather than folded into it —
@@ -8043,6 +8101,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             return rest;
           });
         },
+        cutOff: async id => {
+          await storage.updateConfig(id, current => {
+            const { sessionCapabilityHash: _revoked, ...rest } = jsonObject(current) ?? {};
+            return { ...rest, credentialRevoked: true };
+          });
+        },
+        isCutOff: async id => await credentialCutOff(storage, id),
+        restore: async id => await restoreCredential(storage, id),
       },
     });
   // What a pane is LAUNCHED with: the stored environment over the per-ferret switches its record implies
@@ -8785,6 +8851,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         stackSamplerEnabled(process.env[STACK_SAMPLER_VARIABLE]) ? await JscStackSampler.start() : undefined,
       ioPressure,
       sweepPairingRedirects: stateHome => sweepPairingRedirects(stateHome, Date.now()),
+      forgetFerretIdentity: async () => {
+        await forgetFerretIdentity(new BunTmuxProcess(tmuxExecutable, tmuxSocket));
+      },
       // Migrates a saved-login index to accounts (once; the sealed document is never written), then sweeps. The
       // migration is one kept record, in counts only: never a name, never a value.
       sweepSavedLogins: async () => {
@@ -12048,6 +12117,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           worktrees.managedRoot,
         ),
         sessionControl,
+        sessionCredential: sessionCredentialRevocation(storage, createSessionLifecycle, launcher),
         sessionResume: sessionResumeSubsystem,
         sendTracking: sendTracker,
         sendReproof,
@@ -12953,6 +13023,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   world.notices.step('state home opened', opened.paths.home);
   // A page left by a `fy pair --open` that was killed holds a dead code; the daemon owns the home now, so it clears it.
   await world.boot.sweepPairingRedirects?.(opened.paths.home);
+  // Before any session or terminal is launched: a long-lived tmux server may still hold a ferret's credential.
+  await world.boot.forgetFerretIdentity?.();
   // Saved-login ciphertext a stopped change left behind, swept only NOW: this process holds the state home's
   // lock, so no other daemon can be mid-change on these files. Masked until swept; a damaged index sweeps nothing.
   loginSweep = stopping
@@ -14296,6 +14368,9 @@ if (import.meta.main) {
   // alone: dropped here, before anything is spawned, so an agent — Claude Code runs on Bun too — starts
   // on its own engine's defaults rather than on a daemon's tuning.
   for (const name of Object.keys(process.env)) if (name.startsWith('BUN_JSC_')) delete process.env[name];
+  // Nor a ferret's identity, when this daemon was started from inside one's pane: its tmux server, and every pane
+  // and terminal under it, would inherit that ferret's credential (`FERRET_IDENTITY_VARIABLES`).
+  dropFerretIdentity(process.env);
   const answer = answerArguments(process.argv.slice(2), {
     daemonName: DAEMON_NAME,
     clientName: CLIENT_NAME,

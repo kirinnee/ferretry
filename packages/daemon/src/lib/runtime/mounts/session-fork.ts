@@ -171,6 +171,10 @@ async function fork(subsystem: SessionForkSubsystem, context: RouteContext): Pro
  *
  * `noStore` because the answer names a session that did not exist a moment ago, together with the
  * decision that built it; a cached one would describe a different fork entirely.
+ *
+ * A PERSON'S ACT (`caller: 'person'`). A fork's target descends from NOTHING — it is a new top-level session
+ * by design — so a ferret that could fork would start a parent-less session past its sub-ferret limits and
+ * depth. A ferret starts sessions only as its own children (`POST /v1/sessions`, `POST /v1/pack/new`).
  */
 export function sessionForkRoutes(subsystem: SessionForkSubsystem): readonly ApiRoute[] {
   return [
@@ -178,7 +182,7 @@ export function sessionForkRoutes(subsystem: SessionForkSubsystem): readonly Api
       method: 'POST',
       path: '/v1/sessions/:sessionId/fork',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       noStore: true,
       handle: async context => await fork(subsystem, context),
     },

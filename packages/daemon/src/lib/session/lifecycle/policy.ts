@@ -179,6 +179,26 @@ export function sessionPaneEnvironment(
   };
 }
 
+/**
+ * A ferret's identity in an environment: its credential under both names, and its id.
+ *
+ * A DAEMON NEVER CARRIES ONE, because everything it starts inherits its environment — the tmux server, and
+ * through it every pane and terminal. A daemon started from inside a ferret's pane (`fy daemon restart`
+ * typed there, a development run) would otherwise hand THAT ferret's credential to every child that is not
+ * handed its own: a sub-ferret, a terminal, a session from before the credential existed. A child never
+ * inherits its parent's credential; it holds its own (`sessionPaneEnvironment`) or none.
+ */
+export const FERRET_IDENTITY_VARIABLES = [
+  SESSION_TOKEN_VARIABLE,
+  SESSION_BOARD_CAPABILITY_VARIABLE,
+  SESSION_ID_VARIABLE,
+] as const;
+
+/** Removes every ferret identity variable from `environment` in place: the daemon's own, at boot. */
+export function dropFerretIdentity(environment: Record<string, string | undefined>): void {
+  for (const name of FERRET_IDENTITY_VARIABLES) delete environment[name];
+}
+
 /** The session's own files a pane is handed by name; see `SessionPaths.media` and `SessionPaths.questionAsked`. */
 export interface SessionPaneFiles {
   readonly media: string;

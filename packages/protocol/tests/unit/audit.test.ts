@@ -43,10 +43,11 @@ describe('audit schemas', () => {
 
     // Act / Assert
     for (const event of future) should(audit.AuditEventSchema.parse(event)).equal(event);
-    should(audit.AUDIT_EVENTS).have.length(52);
+    should(audit.AUDIT_EVENTS).have.length(53);
     should(audit.AuditEventSchema.parse('security.changed')).equal('security.changed');
     should(audit.AuditEventSchema.parse('device.key-rotated')).equal('device.key-rotated');
     should(audit.AuditEventSchema.parse('session.credential-refused')).equal('session.credential-refused');
+    should(audit.AuditEventSchema.parse('session.credential-revoked')).equal('session.credential-revoked');
     for (const event of ['phone-approval.raised', 'phone-approval.refused', 'phone-approval.settled'])
       should(audit.AuditEventSchema.parse(event)).equal(event);
   });

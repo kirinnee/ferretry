@@ -103,6 +103,7 @@ import { type SessionAttachSubsystem, sessionAttachRoutes } from './session-atta
 import { type SessionAttachmentSubsystem, sessionAttachmentRoutes } from './session-attachments.ts';
 import { type SessionConsoleSubsystem, sessionConsoleRoutes } from './session-console-input.ts';
 import { knownLaunchRoots, type SessionControlSubsystem, sessionControlRoutes } from './session-control.ts';
+import { type SessionCredentialSubsystem, sessionCredentialRoutes } from './session-credential.ts';
 import { type SessionDialogSubsystem, sessionDialogRoutes } from './session-dialog.ts';
 import { type SessionMediaRoot, sessionFilesystemRoutes } from './session-filesystem.ts';
 import { type SessionForkSubsystem, sessionForkRoutes } from './session-fork.ts';
@@ -280,6 +281,8 @@ export interface MountedSubsystems {
   readonly worktrees: WorktreeSubsystem;
   /** The session write: starting one agent and stopping it. */
   readonly sessionControl: SessionControlSubsystem;
+  /** Cutting one ferret off: its credential revoked at once, a person's act (docs/agent-tools.md). */
+  readonly sessionCredential: SessionCredentialSubsystem;
   /** Talking to a session that is already running: handing it a later turn, and stopping the turn it
    *  is on. The verb the client has always posted and the daemon has never answered — and the one a
    *  declared wait on a peer needs, because the reply that ends such a wait IS a send. */
@@ -615,6 +618,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
           guard: subsystems.grants,
           knownRoots: knownLaunchRoots(subsystems.catalogs, subsystems.worktrees),
         }),
+        // Beside the stop it is the gentler counterpart of: a one-segment pattern under `/v1/sessions/:sessionId`
+        // with its own final literal, so it neither shadows nor is shadowed by the deeper per-session routes.
+        ...sessionCredentialRoutes(subsystems.sessionCredential),
         // The revive registers with the rest of the write surface, above every per-session subsystem, so
         // its one-segment pattern sits beside the stop it is the counterpart of rather than below the
         // deeper patterns. Neither can shadow the other: they differ in their final literal segment.

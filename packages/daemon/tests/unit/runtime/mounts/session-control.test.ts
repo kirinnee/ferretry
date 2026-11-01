@@ -10,7 +10,15 @@ import {
   sessionControlRoutes,
 } from '../../../../src/lib/runtime/mounts/session-control.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, fakePayloadDigest, FakeSessionControl, human } from './support.ts';
+import {
+  agentIn,
+  CREDENTIALS,
+  FERRET_SESSION,
+  fakePayloadDigest,
+  FakeSessionControl,
+  fromFerret,
+  human,
+} from './support.ts';
 
 /**
  * The session write surface: what a start refuses, what it passes through, and what a stop answers.
@@ -385,5 +393,97 @@ describe('the session control mount', () => {
     // Assert
     should(traversal.status).equal(400);
     should((JSON.parse(traversal.body) as { code: string }).code).equal('invalid_request_id');
+  });
+});
+
+describe("a start on a ferret's own credential", () => {
+  it('should make every session a ferret starts its own child, filling in a parent the body leaves out', async () => {
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = dispatcher(control);
+
+    // Act — a parent-less start would be a top-level session past the sub-ferret limits and depth.
+    const orphan = await subject.dispatch(fromFerret(startRequest(startBody())));
+    const interactive = await subject.dispatch(
+      fromFerret(
+        startRequest(startBody({ mode: 'interactive', prompt: undefined }), { [FY_REQUEST_ID_HEADER]: 'req-i' }),
+      ),
+    );
+    const itself = await subject.dispatch(
+      fromFerret(startRequest(startBody({ parent: FERRET_SESSION }), { [FY_REQUEST_ID_HEADER]: 'req-2' })),
+    );
+
+    // Assert
+    should([orphan.status, interactive.status, itself.status]).deepEqual([201, 201, 201]);
+    should(control.parents).deepEqual([FERRET_SESSION, FERRET_SESSION, FERRET_SESSION]);
+  });
+
+  it('should refuse a ferret naming another session as the parent (parent_mismatch), starting nothing', async () => {
+    // Arrange
+    const control = new FakeSessionControl();
+
+    // Act
+    const answer = await dispatcher(control).dispatch(fromFerret(startRequest(startBody({ parent: 'someone-else' }))));
+
+    // Assert — that session would gain lineage over the child and be charged its limits.
+    should([answer.status, jsonBody(answer).code]).deepEqual([403, 'parent_mismatch']);
+    should(control.starts).be.empty();
+  });
+
+  it('should refuse a ferret giving its start the Warden’s own label, which would exempt it from every limit', async () => {
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = dispatcher(control);
+
+    // Act
+    const own = await subject.dispatch(fromFerret(startRequest(startBody({ label: ' fleet-warden ' }))));
+    const header = await subject.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions',
+        headers: { ...agentIn(FERRET_SESSION), [FY_REQUEST_ID_HEADER]: 'req-h' },
+        body: startBody({ label: 'fleet-warden' }),
+      }),
+    );
+    const other = await subject.dispatch(
+      fromFerret(startRequest(startBody({ label: 'reviewer' }), { [FY_REQUEST_ID_HEADER]: 'req-o' })),
+    );
+
+    // Assert
+    should([own.status, jsonBody(own).code]).deepEqual([403, 'owner_only']);
+    should([header.status, jsonBody(header).code]).deepEqual([403, 'owner_only']);
+    should(other.status).equal(201);
+    should(control.starts).have.length(1);
+  });
+
+  it('should leave the owner free to start a top-level session or one for any parent', async () => {
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = dispatcher(control);
+
+    // Act
+    await subject.dispatch(startRequest(startBody()));
+    await subject.dispatch(startRequest(startBody({ parent: 'someone-else' }), { [FY_REQUEST_ID_HEADER]: 'req-2' }));
+
+    // Assert
+    should(control.parents).deepEqual([undefined, 'someone-else']);
+  });
+
+  it('should keep the honest-client admin token plus session header on the body parent, as before', async () => {
+    // Arrange — an older fy, or a pane with no credential of its own: the daemon has only the header's word.
+    const control = new FakeSessionControl();
+
+    // Act
+    await dispatcher(control).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions',
+        headers: { ...agentIn(FERRET_SESSION), [FY_REQUEST_ID_HEADER]: REQUEST_ID },
+        body: startBody(),
+      }),
+    );
+
+    // Assert
+    should(control.parents).deepEqual([undefined]);
   });
 });

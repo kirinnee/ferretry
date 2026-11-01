@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { callerIsAgent } from '../../../src/lib/api/agent-caller.ts';
+import { agentSessionOf, callerIsAgent } from '../../../src/lib/api/agent-caller.ts';
 import type { AuthenticatedCredential } from '../../../src/lib/api/authentication.ts';
+import type { RouteContext } from '../../../src/lib/api/route.ts';
 
 /**
  * The ONE answer to "is this caller a ferret or a person?" — the boundary refuses an agent on a person
@@ -32,4 +33,25 @@ describe('callerIsAgent', () => {
       should(callerIsAgent(credential, actor)).equal(agent);
     });
   }
+});
+
+describe('agentSessionOf', () => {
+  const context = (credential: AuthenticatedCredential | undefined, actor: string | undefined): RouteContext =>
+    ({ credential, actor }) as unknown as RouteContext;
+  const ADMIN: AuthenticatedCredential = { kind: 'authenticated', tokenClass: 'admin' };
+
+  it('should name a ferret’s own credential’s session, whatever its actor says', () => {
+    should(agentSessionOf(context({ kind: 'authenticated', tokenClass: 'session', sessionId: 's1' }, 'peer:s9'))).equal(
+      's1',
+    );
+  });
+
+  it('should name the peer the admin token’s session header named', () => {
+    should(agentSessionOf(context(ADMIN, 'peer:s9'))).equal('s9');
+  });
+
+  it('should name nobody for a person, or for a warden, which acts as no ferret', () => {
+    should(agentSessionOf(context(ADMIN, 'admin-cli'))).be.undefined();
+    should(agentSessionOf(context({ kind: 'authenticated', tokenClass: 'warden' }, 'warden:w1'))).be.undefined();
+  });
 });

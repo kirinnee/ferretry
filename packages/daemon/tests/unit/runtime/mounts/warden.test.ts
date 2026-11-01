@@ -14,7 +14,7 @@ import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { WardenError, wardenRoutes } from '../../../../src/lib/runtime/mounts/warden.ts';
 import { WardenRequestError } from '../../../../src/lib/warden/sweep.ts';
 import { request } from '../../api/support.ts';
-import { CREDENTIALS, FakeWarden, GRANTED, human } from './support.ts';
+import { agentIn, CREDENTIALS, FakeWarden, FERRET_SESSION, fromFerret, GRANTED, human } from './support.ts';
 
 /**
  * Fleet supervision, over the real dispatcher and the real credentials.
@@ -147,6 +147,25 @@ describe('running a sweep on request', () => {
 
     // Assert
     should(subsystem.runs).deepEqual([true]);
+  });
+
+  it('should refuse a ferret forcing investigators, which are warden sessions with no parent, and still let it look', async () => {
+    // Arrange
+    const subsystem = new FakeWarden();
+    const on = dispatcher(subsystem);
+
+    // Act
+    const own = await on.dispatch(fromFerret(send('POST', '/v1/warden/run', JSON.stringify({ spawn: true }))));
+    const header = await on.dispatch(
+      send('POST', '/v1/warden/run', JSON.stringify({ spawn: true }), agentIn(FERRET_SESSION)),
+    );
+    const look = await on.dispatch(fromFerret(send('POST', '/v1/warden/run', JSON.stringify({ spawn: false }))));
+
+    // Assert
+    should([own.status, JSON.parse(own.body).code]).deepEqual([403, 'owner_only']);
+    should([header.status, JSON.parse(header.body).code]).deepEqual([403, 'owner_only']);
+    should(look.status).equal(200);
+    should(subsystem.runs).deepEqual([false]);
   });
 
   it('should refuse a warden-scoped caller, which must not be able to force its own re-spawn', async () => {

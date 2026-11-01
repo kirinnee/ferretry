@@ -514,6 +514,12 @@ export const SessionConfigSchema = z.object({
   label: z.string().optional(),
   parent: z.string().optional(),
   /**
+   * A person revoked this session's credential (`fy session revoke-credential`, docs/agent-tools.md): no launch
+   * hands it one again — no Warden revive, peer resume, restart or migration — until a person resumes it. Absent
+   * on every session that was never cut off.
+   */
+  credentialRevoked: z.literal(true).optional(),
+  /**
    * The board this session works on (`board-design.md` §2.2): resolved once at start — inherited from the
    * parent, else the project its cwd is in, else `unfiled` — and kept. Absent for a session started before
    * boards existed.
@@ -1422,6 +1428,18 @@ export const RenameSessionRequestSchema = z
     }
   });
 export type RenameSessionRequest = z.infer<typeof RenameSessionRequestSchema>;
+
+/**
+ * `POST /v1/sessions/:sessionId/revoke-credential` — a person cuts one ferret off at once
+ * (docs/agent-tools.md § "Cutting a ferret off"). No body. The value its pane holds names nobody from
+ * now on; a running pane keeps running, without `fy` or its tools, until its next launch is handed a
+ * fresh one. The answer names the session and its status, never a credential or a hash.
+ */
+export const SessionCredentialRevokedSchema = z.strictObject({
+  sessionId: z.string().min(1),
+  status: SessionStatusSchema,
+});
+export type SessionCredentialRevoked = z.infer<typeof SessionCredentialRevokedSchema>;
 
 /** `PATCH /v1/sessions/:sessionId/hypermedia` — switch whether one ferret is told to use hypermedia. */
 export const SessionHypermediaPatchSchema = z.strictObject({ enabled: z.boolean() });

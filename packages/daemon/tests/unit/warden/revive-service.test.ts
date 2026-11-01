@@ -34,6 +34,7 @@ const view = (
     parent?: string;
     label?: string;
     wardenLineage?: boolean;
+    credentialRevoked?: boolean;
   } = {},
 ): WardenSessionView =>
   ({
@@ -43,6 +44,7 @@ const view = (
       ...(overrides.parent === undefined ? {} : { parent: overrides.parent }),
       ...(overrides.label === undefined ? {} : { label: overrides.label }),
       ...(overrides.wardenLineage === undefined ? {} : { wardenLineage: overrides.wardenLineage }),
+      ...(overrides.credentialRevoked === undefined ? {} : { credentialRevoked: overrides.credentialRevoked }),
     },
     state: {
       status: overrides.status ?? 'failed',
@@ -220,6 +222,18 @@ describe('auto-revive of a session that died', () => {
     should(h.resumed).deepEqual([]);
     should(result.actions).deepEqual([]);
     should(h.persisted).have.length(1);
+  });
+
+  it('should never revive a ferret a person cut off, even after it crashed itself', async () => {
+    // Arrange — revoked, then it ended its own harness abnormally: exactly what a revive would otherwise undo.
+    const h = harness({ c: [gone()], a: [gone()] });
+    const fleet = [view('c', { credentialRevoked: true }), view('a')];
+
+    // Act
+    await run(h, fleet);
+
+    // Assert — only the one nobody cut off comes back.
+    should(h.resumed.map(entry => entry.id)).deepEqual(['a']);
   });
 
   it('should journal a stopped session once, and never revive it', async () => {

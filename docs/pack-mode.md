@@ -188,9 +188,11 @@ call and no extra request:
 ## `fy new`
 
 `POST /v1/pack/new` — `operator`. `fy new` without `--continue` (with it, it still continues an existing
-conversation). Inside a ferret's pane, `FY_SESSION_ID` names the asking ferret, which becomes the parent —
-and when the agent's shell dropped it (a subshell, a sandbox), the CLI reads the pane's tmux session's own
-copy (`tmux show-environment FY_SESSION_ID`), so the parent is recorded either way.
+conversation). Inside a ferret's pane the asking ferret becomes the parent. On its own credential (what its
+`fy` presents) the **daemon** reads the parent from the credential — a `--parent` naming another session is
+`403 parent_mismatch` — so nothing the agent's shell does can change it. With an older `fy` on the admin token,
+`FY_SESSION_ID` names it, and when the shell dropped that (a subshell, a sandbox) the CLI reads the pane's tmux
+session's own copy (`tmux show-environment FY_SESSION_ID`), so the parent is recorded either way.
 
 **Where it runs.** A sub-ferret runs in its **parent's folder** — the parent session's recorded working
 folder, so it lands in the parent's project group — never where the agent's shell happens to be (often its
@@ -272,6 +274,16 @@ refusal (a failure of the command itself is 1).
 
 Enforced by the daemon on **every** start that names a parent — `fy new` and a plain `fy start` inside a pane
 alike — before anything is claimed or written. A warden's own spawns are the Warden's to bound.
+
+**The lineage is the credential's.** A start on a ferret's own credential is ALWAYS that ferret's child —
+`fy start` (interactive too) and `fy new` alike: a parent left out is filled in, and one naming another session
+is `403 parent_mismatch`. So the limits are always charged to the ferret that asked, and a ferret cannot step
+out of them by starting a top-level session, nor by giving its start the Warden's label (`403`; the limits are
+skipped only for a session that descends from a real warden). The starts that could only make one — a fork,
+adopting a conversation, a Warden investigation or a run with `spawn`, a learning scan, `fy learning run
+--spawn` — are a person's, and a ferret may hand over only its own session
+([agent-tools.md](agent-tools.md#who-a-ferret-may-be-every-route-says)). A sub-ferret never inherits its
+parent's credential: it is minted its own.
 
 | Limit                                           | `pack.yaml`                  | Default |
 | ----------------------------------------------- | ---------------------------- | ------- |

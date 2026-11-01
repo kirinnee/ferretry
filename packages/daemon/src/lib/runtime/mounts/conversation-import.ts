@@ -75,11 +75,13 @@ export function conversationImportRoutes(subsystem: ConversationImportSubsystem)
         return jsonResponse(ConversationPreviewSchema.parse(preview));
       },
     },
+    // A PERSON'S ACT: an adopted conversation is a new top-level ferret, and it is the owner's own earlier work. A
+    // ferret starts sessions only as its own children, so it may list and preview here but never adopt.
     {
       method: 'POST',
       path: '/v1/imports/conversations/adopt',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => {

@@ -20,7 +20,7 @@ import {
   type StepUpRequiredBody,
 } from '@ferretry/protocol';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
-import { isAgentCaller } from '../../api/agent-caller.ts';
+import { isAgentCaller, OWNER_ONLY_CODE } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
@@ -535,12 +535,14 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       minimum: 'operator',
       caller: 'any',
       noStore: true,
-      handle: async context =>
-        jsonResponse(
-          await subsystem.transaction(
-            async () => await subsystem.run((await parseBody(context.request, LearningRunRequestSchema)).spawn),
-          ),
-        ),
+      handle: async context => {
+        const { spawn } = await parseBody(context.request, LearningRunRequestSchema);
+        // A run that LAUNCHES miners starts sessions with no parent, so only a person asks for one; a ferret may
+        // still ask for the run's manifest. No ferret starts a session that is not its own child.
+        if (spawn && isAgentCaller(context))
+          throw new ApiError(403, 'a ferret cannot launch learning miners; ask the owner', OWNER_ONLY_CODE);
+        return jsonResponse(await subsystem.transaction(async () => await subsystem.run(spawn)));
+      },
     },
     {
       method: 'PATCH',
@@ -618,11 +620,13 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       noStore: true,
       handle: async () => await scanView(subsystem),
     },
+    // A PERSON'S ACT: a scan launches one miner session per batch, each with no parent, on the agent and model the
+    // body names. No ferret starts a session that is not its own child; it may still read the estimate.
     {
       method: 'POST',
       path: '/v1/learning/scan',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       noStore: true,
       handle: async context => {
         const request = await parseBody(context.request, LearningScanRequestSchema);

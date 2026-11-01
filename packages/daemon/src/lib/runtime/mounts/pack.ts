@@ -20,6 +20,7 @@ import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
+import { lineageOf } from '../../api/lineage.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { CleanUpService, GuideFileService } from '../../pack/cleanup/index.ts';
@@ -114,25 +115,6 @@ async function newChild(subsystem: PackSubsystem, context: RouteContext): Promis
     );
   const outcome = await subsystem.service.newChild(request);
   return jsonResponse(PackNewOutcomeSchema.parse(outcome), outcome.outcome === 'started' ? 201 : 200);
-}
-
-/**
- * A sub-ferret's parent, for a caller on its OWN session credential: the credential's session, always. A body
- * `parent` naming another session is refused (that session would gain lineage over the child and be charged its
- * limits), and an absent one is filled in, so a ferret can never start a parent-less child past the Pack switch
- * and the sub-ferret limits. Any other caller is unchanged: the owner may start a child for any session, and the
- * admin token naming a ferret's session stays honest-client until `fy` presents the credential (RF-3/RF-4).
- */
-function lineageOf<T extends { readonly parent?: string }>(context: RouteContext, request: T): T {
-  const credential = context.credential;
-  if (credential?.tokenClass !== 'session') return request;
-  if (request.parent !== undefined && request.parent !== credential.sessionId)
-    throw new ApiError(
-      403,
-      'a ferret starts sub-ferrets only as itself; leave the parent out, the daemon reads it from your credential',
-      'parent_mismatch',
-    );
-  return { ...request, parent: credential.sessionId };
 }
 
 async function result(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {

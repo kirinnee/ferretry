@@ -295,6 +295,23 @@ export interface SessionCapabilityHashStore {
   record(id: SessionId, hash: string): Promise<void>;
   /** Drops the stored hash, so no presented credential names this session until a launch records a new one. */
   erase(id: SessionId): Promise<void>;
+  /**
+   * A PERSON CUT THIS SESSION OFF (`fy session revoke-credential`): drops the hash AND marks the session
+   * `credentialRevoked`, in one write, so no launch rotates it a credential again until a person resumes it.
+   */
+  cutOff?(id: SessionId): Promise<void>;
+  /** Whether the session carries that mark. */
+  isCutOff?(id: SessionId): Promise<boolean>;
+  /** Clears the mark: a person resumed the session, so its next launch is handed a credential again. */
+  restore?(id: SessionId): Promise<void>;
+}
+
+/** A launch of a session a person cut off, refused until a person resumes it. */
+export class SessionCredentialRevokedError extends Error {
+  constructor(readonly sessionId: string) {
+    super(`a person revoked ${sessionId}'s credential; only a person resuming it gives it one again`);
+    this.name = 'SessionCredentialRevokedError';
+  }
 }
 
 /**
@@ -312,6 +329,14 @@ export interface SessionCredentialRotator {
    * gives it one again. Absent on a rotator with nothing to revoke.
    */
   revoke?(id: SessionId): Promise<void>;
+  /**
+   * Cuts a session off for a PERSON: its hash is dropped and the session is marked, so every later rotation —
+   * a Warden revive, a peer's resume, a restart or migration — is refused ({@link SessionCredentialRevokedError})
+   * until a person resumes it. Absent on a rotator with nothing to revoke.
+   */
+  cutOff?(id: SessionId): Promise<void>;
+  /** A person's resume of a cut-off session: the mark goes, so the launch it makes rotates a credential again. */
+  restore?(id: SessionId): Promise<void>;
 }
 
 /** Mints session ids server-side. */

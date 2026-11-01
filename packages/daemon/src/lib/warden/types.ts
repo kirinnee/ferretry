@@ -80,6 +80,8 @@ export interface WardenSessionConfig {
    * it.
    */
   readonly wardenLineage?: boolean;
+  /** A person cut this session off (`fy session revoke-credential`): the Warden never revives it. */
+  readonly credentialRevoked?: boolean;
   readonly agent?: string;
   readonly model?: string;
   /**

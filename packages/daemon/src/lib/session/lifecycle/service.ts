@@ -262,6 +262,33 @@ export class SessionLifecycleService {
   }
 
   /**
+   * Cuts a ferret off from Ferretry AT ONCE, without stopping it (`fy session revoke-credential`,
+   * docs/agent-tools.md § "Cutting a ferret off").
+   *
+   * The hash goes, so the value its pane holds names nobody from this moment: its `fy`, its MCP server and its
+   * agent tools are refused as an unknown credential, and a running pane keeps running without them. Nothing
+   * new is minted. AND IT STICKS: the session is marked cut off, so no launch hands it a credential again — not
+   * a Warden revive after it crashes itself, not a peer's resume, a restart or a migration — until a PERSON
+   * resumes it ({@link SessionCredentialRotator.cutOff}).
+   *
+   * ON THE SESSION'S OWN QUEUE, so a start or a stop of the same session is never interleaved with it, and a
+   * whole-record write from either can never put the erased hash back.
+   */
+  async revokeCredential(id: string): Promise<SessionLifecycleRecord> {
+    const parsed = lifecycleSessionId(id);
+    const rotation = this.ports.rotation;
+    if (rotation?.cutOff === undefined)
+      throw new Error('this daemon issues no session credentials, so there is none to revoke');
+    return await this.ports.serial.run(parsed, async () => {
+      // The hash goes BEFORE the record is read, so a record this schema cannot read still loses its credential.
+      await rotation.cutOff?.(parsed);
+      const current = await this.require(parsed);
+      const { sessionCapabilityHash: _revoked, ...config } = current.config;
+      return { ...current, config };
+    });
+  }
+
+  /**
    * Waits, boundedly, for a launch this process has in flight, before the stop takes the session's queue.
    *
    * That launch HOLDS the queue until it settles, so queueing behind one that hangs — a relaunch waiting
