@@ -122,10 +122,11 @@ describe('the composition root makes every connection', () => {
 
 // secrev-1301 / lizzette (a), on since !A226: the terminal gate is the protocol's compile-time list, read nowhere else.
 describe('terminal standing rules are switched by the build alone', () => {
-  it('should read sign-in-rules-terminal.1 only through daemonFeatureList, for the rule service and the fills', async () => {
+  it('should read sign-in-rules-terminal.1 only through daemonFeatureList, for the rule service, the suggestions and the fills', async () => {
     const fyd = await Bun.file(new URL('../../../bin/fyd.ts', import.meta.url)).text();
     const reads = fyd.split('\n').filter(line => line.includes('signInRulesTerminal'));
     should(reads.map(line => line.trim())).eql([
+      'terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),',
       'terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),',
       'terminal: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),',
     ]);

@@ -14,6 +14,8 @@ import {
   type SignInRuleStageId,
   SignInRuleStageIdSchema,
   SignInRuleStageViewSchema,
+  SignInRuleSuggestionIdSchema,
+  SignInRuleSuggestionListSchema,
   SignInRuleViewSchema,
   STEP_UP_ACTS,
   STEP_UP_REQUIRED_CODE,
@@ -27,6 +29,7 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { PasteRuleCaller } from '../../secure-copy/rules.ts';
 import { SignInRuleError, SignInRuleProofMissing, type SignInRuleService } from '../../sign-in-rules/service.ts';
+import type { SignInRuleSuggestions } from '../../sign-in-rules/suggestions.ts';
 import { ownerActorOf } from './input-requests.ts';
 import { refusedAccountNames, refusedPageInput } from './secret-write-grant.ts';
 
@@ -126,8 +129,9 @@ const proofDemand = (): ApiResponse =>
     403,
   );
 
-export function signInRuleRoutes(rules: SignInRuleService): readonly ApiRoute[] {
+export function signInRuleRoutes(rules: SignInRuleService, suggestions: SignInRuleSuggestions): readonly ApiRoute[] {
   return [
+    ...suggestionRoutes(suggestions),
     {
       method: 'GET',
       path: '/v1/sign-in-rules',
@@ -274,6 +278,34 @@ export function signInRuleRoutes(rules: SignInRuleService): readonly ApiRoute[] 
         const account = accountOf(context);
         const { revoked } = await rules.revokeAccount(caller, account).catch(answered);
         return jsonResponse({ account, revoked });
+      },
+    },
+  ];
+}
+
+/** The ferret suggestions waiting on the owner: read them for the sheet, or dismiss one. Neither makes or widens a rule. */
+function suggestionRoutes(suggestions: SignInRuleSuggestions): readonly ApiRoute[] {
+  return [
+    {
+      method: 'GET',
+      path: '/v1/sign-in-rules/suggestions',
+      ...USE,
+      handle: async context => {
+        const names = refusedAccountNames(context, 'read the standing rules ferrets suggested');
+        if (names !== undefined) return names;
+        return jsonResponse(SignInRuleSuggestionListSchema.parse(owned(() => suggestions.list(owner(context)))));
+      },
+    },
+    {
+      method: 'DELETE',
+      path: '/v1/sign-in-rules/suggestions/:sid',
+      ...USE,
+      handle: async context => {
+        const caller = owner(context);
+        const parsed = SignInRuleSuggestionIdSchema.safeParse(context.params.get('sid') ?? '');
+        if (!parsed.success) throw new ApiError(400, 'the suggestion in the path is not usable', 'bad_request');
+        const dismissed = await suggestions.dismiss(caller, parsed.data);
+        return jsonResponse({ id: parsed.data, dismissed });
       },
     },
   ];

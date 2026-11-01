@@ -729,8 +729,23 @@ Every route is `caller: 'person'` ([grants.md](grants.md)).
 | `POST /v1/sign-in-rules/:id/narrow`                   | drop the code, end earlier, lower the cap                         | `secrets.use`                       |
 | `DELETE /v1/sign-in-rules/:id`                        | revoke one rule                                                   | `secrets.use`                       |
 | `POST /v1/accounts/:id/sign-in-rules/revoke`          | revoke every rule of an account                                   | `secrets.use`                       |
+| `GET /v1/sign-in-rules/suggestions`                   | the rules ferrets suggested, still waiting (memory only)          | `secrets.use`                       |
+| `DELETE /v1/sign-in-rules/suggestions/:sid`           | turn a suggestion down; its card closes                           | `secrets.use`                       |
 
 Each change is a kept `security.changed` record ([audit.md](audit.md)). None holds a username or a value.
+
+A ferret's suggestion of a rule (`account_propose` with `preapprove`) raises a card and a line in memory and nothing
+else: [agent tools › Suggesting a standing rule](agent-tools.md#suggesting-a-standing-rule).
+
+### The owner's command: `fy rules`
+
+`fy rules ls|add|resume|renew|narrow|rm` is the owner's, and refused inside a ferret's pane. `add`, `resume` and `renew`
+only **stage** (and `confirm-in-app`): the command prints the `<app>/#rules/<stage>` link (`--open` opens it in this
+machine's browser), then polls the stage for up to 125 seconds and prints Approved, Denied or Timed out. **The command has
+no way to commit**: the passkey is the app's. `--totp` needs `--i-understand-one-factor`. A terminal rule prints the red
+root warning and the residual sentence from the daemon's structured `root` flag, and exists only while the daemon
+reports `sign-in-rules-terminal.1`. `narrow` and `rm` need no passkey. A paste rule is not one of these:
+`fy copy rules`.
 
 ## The Accounts screen
 

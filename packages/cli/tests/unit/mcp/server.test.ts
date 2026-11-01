@@ -406,8 +406,11 @@ describe('McpServer — the tools', () => {
     // task_plan (sign-ins and pastes in one plan) took it to 32,011, so browser_network, terminal_wait,
     // browser_open, browser_emulate and four older phrases gave up repeated words (31,945).
     // Margin for the plan work after it (R3a): a dozen older descriptions gave up repeated words (31,749).
+    // account_propose gained preapprove (suggest a standing rule, R3c-5): net-zero, older words trimmed (31,715).
+    // The list never grows past main's measured size (31,749) — a new tool's words are paid for by trimming old ones.
     // Owner-gated groups are listed only while they are on.
     should(bytes).be.below(32_000);
+    should(bytes).be.belowOrEqual(31_749);
     should(longest).be.belowOrEqual(300);
   });
 
@@ -453,7 +456,7 @@ describe('McpServer — the tools', () => {
     should(tooLong).match({ result: { isError: true, content: [{ text: /^timeoutMs: /u }] } });
   });
 
-  it('should map account_propose to the wire call, and name the sign-in, the recipe and why as required', async () => {
+  it('should map account_propose to the wire call, and name the sign-in and why as required, the recipe optional', async () => {
     // Arrange
     const { calls, request } = harness(async () => ({ summary: 'Proposed; the owner decides.' }));
     const tool = MCP_TOOLS.find(({ name }) => name === 'account_propose');
@@ -478,8 +481,31 @@ describe('McpServer — the tools', () => {
       },
     ]);
     should(tool?.tool).equal('account.propose');
-    should(tool?.inputSchema).containEql({ required: ['signIn', 'recipe', 'why'] });
+    should(tool?.inputSchema).containEql({ required: ['signIn', 'why'] });
     should(tool?.description.length).belowOrEqual(300);
+  });
+
+  it('should pass preapprove on as a boolean, with no recipe, and say the owner decides', async () => {
+    // Arrange
+    const { calls, request } = harness(async () => ({ summary: 'Suggested; the owner decides.' }));
+    const tool = MCP_TOOLS.find(({ name }) => name === 'account_propose');
+
+    // Act
+    await request(
+      'tools/call',
+      toolCall('account_propose', {
+        signIn: 'si_3f2a000000000001',
+        preapprove: true,
+        why: 'I sign in here every day.',
+      }),
+    );
+
+    // Assert
+    should(calls).deepEqual([
+      { tool: 'account.propose', signIn: 'si_3f2a000000000001', preapprove: true, why: 'I sign in here every day.' },
+    ]);
+    should(JSON.stringify(tool?.inputSchema)).containEql('"preapprove":{"type":"boolean"');
+    should(tool?.description).containEql('The owner decides');
   });
 
   it('should offer code for one-time codes on both input tools, and keep private for echoing values', () => {

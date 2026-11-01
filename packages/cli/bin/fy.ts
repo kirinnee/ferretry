@@ -219,6 +219,9 @@ import { RenderController } from '../src/lib/render/controller';
 import { RENDER_GUIDE_SECTION } from '../src/lib/render/guide-text';
 import { registerRestartCommands } from '../src/lib/restart/commands';
 import { RestartController } from '../src/lib/restart/controller';
+import { registerRulesCommands } from '../src/lib/rules/commands';
+import { RulesController } from '../src/lib/rules/controller';
+import { ProtocolRulesGateway } from '../src/lib/rules/gateway';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
 import { AccountController } from '../src/lib/secrets/account-controller';
@@ -1079,6 +1082,21 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         agentCredential: paneCredentialValue(world.environment),
         sleep: async ms => await Bun.sleep(ms),
         nowMs: () => Date.now(),
+        ...planApp(world.environment.FY_APP_URL),
+        openLink: async url => openInBrowser(url),
+      }),
+    ),
+  ({ program, world, client, ownSessionId }) =>
+    registerRulesCommands(
+      program,
+      new RulesController({
+        gateway: new ProtocolRulesGateway(client),
+        out: world.io,
+        ownSessionId,
+        agentCredential: paneCredentialValue(world.environment),
+        sleep: async ms => await Bun.sleep(ms),
+        nowMs: () => Date.now(),
+        red: text => chalk.red(text),
         ...planApp(world.environment.FY_APP_URL),
         openLink: async url => openInBrowser(url),
       }),

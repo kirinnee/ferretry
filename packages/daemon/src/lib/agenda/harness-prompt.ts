@@ -265,6 +265,7 @@ export function isHarnessPromptItem(item: AgendaItem | ResolvedAgendaItem): bool
     item.phoneApproval !== undefined ||
     item.twoFactorSeed !== undefined ||
     item.taskPlan !== undefined ||
+    item.signInRuleSuggestion !== undefined ||
     agendaCardKind(item) === 'task';
   return !marked && !isDaemonSourceRef(item.sourceRef);
 }

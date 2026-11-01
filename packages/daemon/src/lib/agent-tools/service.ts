@@ -1,4 +1,5 @@
 import {
+  type AccountId,
   type AccountList,
   AGENT_TOOL_DEFAULT_READ_LINES,
   AGENT_TOOL_DEFAULT_WAIT_MS,
@@ -33,6 +34,7 @@ import {
   type PhoneApprovalAgentView,
   PhoneApprovalRaiseSchema,
   type SignInChoiceContext,
+  type SignInId,
   type SurfaceController,
   type SurfaceControlRequest,
   type SurfaceControlView,
@@ -61,6 +63,7 @@ import { LoginEntryError } from '../secrets/accounts.ts';
 import { type RecipeProposalTarget, RecipeValueError } from '../secrets/login-recipes.ts';
 import type { TextRedactor } from '../secrets/redaction.ts';
 import { SecureCopyError } from '../secure-copy/errors.ts';
+import { SignInRuleSuggestionError } from '../sign-in-rules/suggestions.ts';
 import type { SurfaceControl } from './control.ts';
 import {
   auditHost,
@@ -187,6 +190,16 @@ export interface AgentToolPorts {
     scriptedOn(host: string | undefined): void;
     /** A script is about to run: no standing rule fills anywhere until the returned function says it ended. */
     running?(): () => void;
+  };
+  /**
+   * A ferret's SUGGESTION of a standing rule (`account.propose` with `preapprove`): one card on the owner's agenda and
+   * nothing else. Absent: the tool says suggestions are not kept here.
+   */
+  readonly ruleSuggestions?: {
+    suggest(
+      sessionId: string,
+      ask: { readonly signIn?: SignInId | undefined; readonly login?: AccountId | undefined; readonly why: string },
+    ): Promise<{ readonly signIn: string; readonly host: string; readonly agenda: string }>;
   };
   readonly recipes?: {
     /** Files a proposal on ONE sign-in: `{ login }` is resolved to the account's only sign-in first. */
@@ -1666,38 +1679,73 @@ export class AgentToolService {
     facts: CallFacts,
   ): Promise<AgentToolResult> {
     const recipes = this.ports.recipes;
-    if (recipes === undefined) throw new AgentToolError('unavailable', 'This daemon keeps no login recipes.');
-    // Suggesting a standing rule (R3c) has no handler yet: refuse it whole rather than file the recipe and drop it.
-    if (call.preapprove === true || call.recipe === undefined)
-      throw new AgentToolError(
-        'unavailable',
-        'This daemon takes no standing-rule suggestions yet; send a recipe only.',
-      );
+    if (call.recipe !== undefined && recipes === undefined)
+      throw new AgentToolError('unavailable', 'This daemon keeps no login recipes.');
+    if (call.preapprove === true && this.ports.ruleSuggestions === undefined)
+      throw new AgentToolError('unavailable', 'This daemon keeps no standing-rule suggestions.');
     const target: RecipeProposalTarget =
       call.signIn === undefined ? { login: call.login as string } : { signIn: call.signIn };
-    let proposed: LoginRecipeProposed & { readonly signIn: string };
-    try {
-      proposed = await recipes.propose(caller.sessionId, target, call.recipe, call.why);
-    } catch (error) {
-      if (error instanceof LoginEntryError || error instanceof RecipeValueError)
-        throw new AgentToolError(
-          error instanceof LoginEntryError && (error.refusal === 'unknown_login' || error.refusal === 'unknown_sign_in')
-            ? 'not_found'
-            : 'bad_request',
-          error.message,
-        );
-      throw new AgentToolError('unavailable', 'The recipe could not be filed right now; try again later.');
-    }
-    const { signIn, ...recipe } = proposed;
-    facts.detail = { ...facts.detail, signIn };
-    const where = `${proposed.login} [${signIn}]`;
-    return {
-      summary:
+    let filed: string | undefined;
+    let recipeSignIn: string | undefined;
+    let recipeResult: Pick<AgentToolResult, 'recipe'> = {};
+    if (call.recipe !== undefined && recipes !== undefined) {
+      let proposed: LoginRecipeProposed & { readonly signIn: string };
+      try {
+        proposed = await recipes.propose(caller.sessionId, target, call.recipe, call.why);
+      } catch (error) {
+        if (error instanceof LoginEntryError || error instanceof RecipeValueError)
+          throw new AgentToolError(
+            error instanceof LoginEntryError &&
+              (error.refusal === 'unknown_login' || error.refusal === 'unknown_sign_in')
+              ? 'not_found'
+              : 'bad_request',
+            error.message,
+          );
+        throw new AgentToolError('unavailable', 'The recipe could not be filed right now; try again later.');
+      }
+      const { signIn, ...recipe } = proposed;
+      recipeSignIn = signIn;
+      facts.detail = { ...facts.detail, signIn };
+      const where = `${proposed.login} [${signIn}]`;
+      filed =
         proposed.state === 'applied'
           ? `The recipe of ${where} was updated (the owner allows that for this sign-in).`
-          : `Proposed a recipe for ${where}${proposed.agendaItemId === undefined ? '' : ` (!${proposed.agendaItemId})`}; the owner approves or declines it. You do not need to wait.`,
-      recipe,
-    };
+          : `Proposed a recipe for ${where}${proposed.agendaItemId === undefined ? '' : ` (!${proposed.agendaItemId})`}; the owner approves or declines it. You do not need to wait.`;
+      recipeResult = { recipe };
+    }
+    if (call.preapprove !== true) return { summary: filed ?? '', ...recipeResult };
+    const suggested = await this.suggestRule(caller.sessionId, call, recipeSignIn === undefined);
+    if (suggested.signIn !== undefined) facts.detail = { ...facts.detail, signIn: suggested.signIn };
+    return { summary: [filed, suggested.words].filter(word => word !== undefined).join(' '), ...recipeResult };
+  }
+
+  /**
+   * The owner is asked to consider a standing rule: a card, nothing more. The words say only what the ferret did, never
+   * whether a rule exists or why one could not be made. When a recipe was filed in the same call, a refusal here is said
+   * in the summary rather than thrown, so the filed recipe is not reported as failed.
+   */
+  private async suggestRule(
+    sessionId: string,
+    call: Extract<AgentToolCall, { readonly tool: 'account.propose' }>,
+    only: boolean,
+  ): Promise<{ readonly words: string; readonly signIn?: string }> {
+    const port = this.ports.ruleSuggestions;
+    if (port === undefined) return { words: '' };
+    try {
+      const made = await port.suggest(sessionId, { signIn: call.signIn, login: call.login, why: call.why });
+      return {
+        signIn: made.signIn,
+        words: `Suggested a standing rule for ${made.host} (!${made.agenda}); the owner decides, and you will not hear back. Do not ask again.`,
+      };
+    } catch (error) {
+      if (!(error instanceof SignInRuleSuggestionError)) {
+        if (only)
+          throw new AgentToolError('unavailable', 'The suggestion could not be raised right now; try again later.');
+        return { words: 'The suggestion could not be raised right now.' };
+      }
+      if (only) throw new AgentToolError(error.code, error.message);
+      return { words: `No rule was suggested: ${error.message}` };
+    }
   }
 
   private async listPages(caller: AgentToolCaller, tabs = false): Promise<AgentToolResult> {
