@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
   applyTextOp,
-  type SharedDraftSent,
-  SHARED_DRAFT_STREAM_RESYNC_CLOSE,
   normalizeTextOp,
+  SHARED_DRAFT_STREAM_RESYNC_CLOSE,
   type SharedDraftClientFrame,
   SharedDraftClientFrameSchema,
+  type SharedDraftSent,
   type SharedDraftServerFrame,
   type TextOp,
   transformTextOps,
@@ -910,8 +910,9 @@ describe('the send mark (rose N1, N3) and kept copies (N2)', () => {
     daemonA.text = 'words for A';
     daemonA.history.push({ op: ['words for A'] });
     const daemonB = new FakeDaemon();
-    daemonB.text = 'words for B';
-    daemonB.history.push({ op: ['words for B'] });
+    // A different length from A's, so a mark carried over from A could not even be applied here.
+    daemonB.text = 'words for session B';
+    daemonB.history.push({ op: ['words for session B'] });
     const open: DaemonStreamOpener = async (target, request) =>
       await (request.path.includes('/sess%20A/') ? daemonA : daemonB).open(target, request);
     const timers = new ManualTimers();
@@ -940,15 +941,18 @@ describe('the send mark (rose N1, N3) and kept copies (N2)', () => {
       mark = seen.hook?.markSend();
     });
 
-    // Act — B: type, and hear another device's edit.
-    run(() => seen.switchTo?.('sess one'));
+    // Act — B, with its own words in the box as the composer shows them: type, and hear another device's edit.
+    run(() => {
+      seen.switchTo?.('sess one');
+      seen.type?.('words for session B');
+    });
     await settle();
-    run(() => seen.type?.('words for B, and mine'));
+    run(() => seen.type?.('words for session B, and mine'));
     await settle();
     run(() =>
       daemonB.streams[0]?.deliver({
         kind: 'edit',
-        applied: { generation: G, epoch: 0, rev: 9, text: ['> ', 21], add: [], remove: [] },
+        applied: { generation: G, epoch: 0, rev: 9, text: ['> ', 29], add: [], remove: [] },
         epoch: 0,
         rev: 9,
       }),
@@ -961,7 +965,7 @@ describe('the send mark (rose N1, N3) and kept copies (N2)', () => {
 
     // Assert
     expect(finished).toBeNull();
-    expect(seen.text).toBe('> words for B, and mine');
+    expect(seen.text).toBe('> words for session B, and mine');
     run(() => root.unmount());
   });
 
@@ -1174,6 +1178,16 @@ describe('the send mark (rose N1, N3) and kept copies (N2)', () => {
 
     // Assert — both still offered.
     expect(third.hooks.phone?.conflict).toBe(`${'a'.repeat(9_000)}\n${'b'.repeat(8_000)}`);
+
+    // And Restore puts back only what fits in one draft; the rest stays offered, across another reload.
+    run(() => third.hooks.phone?.restoreConflict());
+    await settle();
+    expect(third.texts.phone).toBe(`server\n${'a'.repeat(9_000)}`);
+    expect(third.hooks.phone?.conflict).toBe('b'.repeat(8_000));
     third.unmount();
+    const fourth = mountDevices(daemonSide, { phone: `server\n${'a'.repeat(9_000)}` }, { restore: storage });
+    await settle();
+    expect(fourth.hooks.phone?.conflict).toBe('b'.repeat(8_000));
+    fourth.unmount();
   });
 });

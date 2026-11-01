@@ -15,20 +15,19 @@
 import {
   applyTextOp,
   diffToTextOp,
-  textOpBaseLength,
   SHARED_DRAFT_STREAM_RESYNC_CLOSE,
   type SharedDraftClientFrame,
   type SharedDraftSent,
-  transformTextOps,
   type SharedDraftServerFrame,
   type TextOp,
+  textOpBaseLength,
+  transformTextOps,
 } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
+import { type DaemonDraftStore, documentRestoreStore, MAX_DRAFT_LEN } from '../lib/drafts.ts';
 import type { DaemonStreamOpener } from '../lib/event-transport.ts';
-import { type DaemonDraftStore, documentRestoreStore } from '../lib/drafts.ts';
-import { useDaemonStreamOpener } from '../lib/store.tsx';
 import { openSharedDraftStream, type SharedDraftStreamLink } from '../lib/shared-draft-stream.ts';
 import {
   applyDisconnect,
@@ -40,6 +39,7 @@ import {
   type SharedDraftStep,
   type SharedDraftSyncState,
 } from '../lib/shared-draft-sync.ts';
+import { useDaemonStreamOpener } from '../lib/store.tsx';
 
 /** How long a device's "typing" lasts after its last report, before the hint lets it go. */
 const SHARED_DRAFT_TYPING_SHOWN_MS = 5_000;
@@ -98,6 +98,21 @@ const keepRestore = (
   return next;
 };
 const joinRestore = (copies: readonly string[]): string | null => (copies.length === 0 ? null : copies.join('\n'));
+/** Puts back the copies that fit in one draft beside `text`; the rest stay offered, never dropped. */
+const restoreCopies = (
+  text: string,
+  copies: readonly string[],
+): { readonly text: string; readonly kept: readonly string[] } => {
+  let box = text;
+  const kept: string[] = [];
+  for (const copy of copies) {
+    // Added to what is there, never in place of it: what is there is somebody's too.
+    const next = box.trim() === '' ? copy : `${box}\n${copy}`;
+    if (next.length <= MAX_DRAFT_LEN) box = next;
+    else kept.push(copy);
+  }
+  return { text: box, kept };
+};
 
 /** Timers and the clock, injected so a test drives them. */
 export interface SharedDraftTimers {
@@ -201,6 +216,12 @@ export function useSharedDraft({
   callbacks.current = { setText, onRemote };
   const [peers, setPeers] = useState<ReadonlyMap<string, SharedDraftPeer>>(new Map());
   const [conflict, setConflict] = useState<string | null>(null);
+  /** The copies behind `conflict`, as offered: what Restore puts back. */
+  const offered = useRef<readonly string[]>([]);
+  const offer = useCallback((copies: readonly string[]): void => {
+    offered.current = copies;
+    setConflict(joinRestore(copies));
+  }, []);
   const [live, setLive] = useState(false);
   /** Bumped by the timer that lets a stale "typing" go, so the hint re-renders without it. */
   const [, setTick] = useState(0);
@@ -244,7 +265,7 @@ export function useSharedDraft({
       if (step.conflict !== undefined) {
         // Kept apart from the draft BEFORE the draft is replaced, and added to anything already waiting —
         // a second conflict never costs the words of the first.
-        setConflict(joinRestore(keepRestore(restoreNow.current, scopeObjectNow.current, step.conflict)));
+        offer(keepRestore(restoreNow.current, scopeObjectNow.current, step.conflict));
       }
       if (step.state.text !== textNow.current) {
         textNow.current = step.state.text;
@@ -256,7 +277,7 @@ export function useSharedDraft({
       if (step.state.inflight === undefined && step.state.buffer === undefined)
         for (const listener of [...settled.current]) listener();
     },
-    [carry],
+    [carry, offer],
   );
 
   // The stream: opened per session, reopened whenever it ends, until this composer goes.
@@ -268,7 +289,7 @@ export function useSharedDraft({
     marked.current = null;
     for (const listener of [...settled.current]) listener();
     // Words still waiting from an earlier visit, a reload, or another session's switch come back with it.
-    setConflict(joinRestore(loadRestore(restoreNow.current, scope)));
+    offer(loadRestore(restoreNow.current, scope));
     let stopped = false;
     let attempt = 0;
     let cancelRetry: (() => void) | undefined;
@@ -364,7 +385,7 @@ export function useSharedDraft({
     };
     // `scope` is memoised by the composer, and `timers` and `ids` are fixed for its life, so this runs
     // once per session the composer shows.
-  }, [daemon, enabled, ids, opener, run, scope, timers]);
+  }, [daemon, enabled, ids, offer, opener, run, scope, timers]);
 
   // The person's own changes, however they were made, become edits.
   const typingReported = useRef(0);
@@ -478,18 +499,20 @@ export function useSharedDraft({
   );
 
   const restoreConflict = useCallback((): void => {
-    const words = conflict;
-    if (words === null) return;
-    clearRestore(restoreNow.current, scopeObjectNow.current);
-    setConflict(null);
-    const current = textNow.current;
-    // Added to what is there, never in place of it: what is there is somebody's too.
-    callbacks.current.setText(current.trim() === '' ? words : `${current}\n${words}`);
-  }, [conflict]);
+    if (offered.current.length === 0) return;
+    const store = restoreNow.current;
+    const scope = scopeObjectNow.current;
+    // Only what fits in one draft goes back: the daemon refuses more, and the rest would be lost on reload.
+    const { text: restored, kept } = restoreCopies(textNow.current, offered.current);
+    clearRestore(store, scope);
+    for (const [index, copy] of kept.entries()) store.save(restoreScope(scope, index), copy);
+    offer(kept);
+    if (restored !== textNow.current) callbacks.current.setText(restored);
+  }, [offer]);
   const dismissConflict = useCallback((): void => {
     clearRestore(restoreNow.current, scopeObjectNow.current);
-    setConflict(null);
-  }, []);
+    offer([]);
+  }, [offer]);
 
   // Read fresh each render: the tick above re-renders once a report has gone stale.
   const now = timers.now();
