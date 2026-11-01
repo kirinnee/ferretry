@@ -394,6 +394,19 @@ The rule cannot tell a top-level ferret's own idea from the owner's words in tha
 human, which errs toward showing the owner a card. Both fields are optional on the wire: a daemon older than the
 split sends neither, and the app then shows every card and no toggle.
 
+### Cards to test: a person asked
+
+The Inbox's To test section, Answer quickly, and the chat task panel's Cards view list only the cards a PERSON asked
+for, so the owner is not flooded with the follow-ups their ferrets file for themselves. That is `askedBy` on a card
+view (`cardAskedBy` in `origin.ts`, derived at read time and never stored): `person` when the ask's source names the
+owner (the Board page's `owner (board)`, "owner via lead jaeda", a session the owner briefed), else `agent`. It is
+stricter than `origin`: rule 3 above (a ferret recording its own owner-started chat) does not count, so a lead's review
+follow-ups and `session:<lead>` cards stay out. The creator is no help here (`createdBy` reads `owner` for a ferret
+that used the admin token, which cannot be told from the owner at the machine), so the source is what decides. A
+card stored before the field is classed the same way, with no backfill; a daemon older than the field sends nothing
+and the app reads that as `agent`. The cards left out are still on the Board, and each card shown names its project
+beside its machine.
+
 ## Authority
 
 Who may write a card follows from the card itself and from the lineage of the session asking; there are no roles to

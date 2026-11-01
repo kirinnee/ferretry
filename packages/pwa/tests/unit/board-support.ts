@@ -134,6 +134,7 @@ export const card = (id: string, extra: Record<string, unknown> = {}): BoardTask
     blockedBy: [],
     blocks: [],
     shippedIn: null,
+    askedBy: 'person',
     ...extra,
   });
 

@@ -27,13 +27,19 @@ import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/
 import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
-import { toTestCards, withTaskName } from '../src/lib/to-test-inbox.ts';
+import { toTestCards, withProjectName, withTaskName } from '../src/lib/to-test-inbox.ts';
 import { AppTabBar } from '../src/shell/app-bar.tsx';
 import { PageScrollRegion } from '../src/shell/page-scroll-region.tsx';
 import { PullToPaletteRegion } from '../src/shell/pull-to-palette-region.tsx';
 import { healthOf } from '../tests/support/health.ts';
 import { sessionView } from '../tests/support/sessions.ts';
-import { card as boardCard, laptop as boardLaptop, boardModelOf } from '../tests/unit/board-support.ts';
+import {
+  card as boardCard,
+  laptop as boardLaptop,
+  boardModelOf,
+  OTHER_PROJECT,
+  PROJECT,
+} from '../tests/unit/board-support.ts';
 
 const NOW = Date.parse('2026-10-29T09:00:00.000Z');
 const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();
@@ -334,6 +340,10 @@ const CLEAR_PORT: ClearPort = {
 /** Cards waiting for the owner's try, from a real board model; nothing is sent, a move is only noted on the window. */
 const TO_TEST_VIEW = ['to-test', 'quick-to-test'].includes(new URLSearchParams(location.search).get('view') ?? '');
 const LEAD_TASKS = new Map([['mvuc7tsf-0c3d50df', 'Credentials Build Lead']]);
+const PROJECT_NAMES = new Map([
+  [PROJECT, 'ferretry'],
+  [OTHER_PROJECT, 'diene'],
+]);
 const TO_TEST = TO_TEST_VIEW
   ? toTestCards(
       await boardModelOf([
@@ -348,12 +358,21 @@ const TO_TEST = TO_TEST_VIEW
         boardCard('F58', {
           laneId: 'tested',
           owner: 'mvuc7tsf-0c3d50df',
+          projectId: OTHER_PROJECT,
           title: 'Faster board loading',
           shippedIn: { version: '5.3.2', tag: 'v5.3.2', at: ago(60 * 26) },
           howToTest: '1. Open the Board on a phone.\n2. It should draw in under a second.',
         }),
+        // A ferret's own sub-work: it stays on the board and never reaches the owner's To test list.
+        boardCard('F59', {
+          laneId: 'tested',
+          askedBy: 'agent',
+          title: 'Review: faster board loading',
+          shippedIn: { version: '5.3.2', tag: 'v5.3.2', at: ago(60 * 25) },
+          howToTest: '1. Read the diff.',
+        }),
       ]),
-    ).map(row => withTaskName(row, LEAD_TASKS))
+    ).map(row => withProjectName(withTaskName(row, LEAD_TASKS), PROJECT_NAMES))
   : [];
 /** One card the owner parked ("?snoozed=1"): it is out of To test and listed under Snoozed with when it wakes. */
 const TO_TEST_SNOOZED =

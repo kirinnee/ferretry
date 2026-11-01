@@ -18,7 +18,7 @@
  * The rule cannot tell a top-level ferret's own idea from the owner's words in that ferret's chat; both read
  * as human, which errs toward showing the owner a card.
  */
-import type { BoardTask, BoardTaskId, BoardTaskOrigin, TaskRef } from '@ferretry/protocol';
+import type { BoardTask, BoardTaskAskedBy, BoardTaskId, BoardTaskOrigin, TaskRef } from '@ferretry/protocol';
 import type { BoardIndex } from './graph.ts';
 
 /** An ask source that names the owner, in any of the ways ferrets write it down. */
@@ -68,3 +68,13 @@ export const humanParentOf = (
   }
   return null;
 };
+
+/**
+ * Whether a PERSON asked for this card, for the surfaces that wait on the owner (the Inbox's cards to test): the
+ * stricter sibling of {@link cardOrigin}. A card is a person's only when its ask's source names the owner (the
+ * Board page's `owner (board)`, "owner via lead jaeda", a session the owner briefed). A top-level ferret's own
+ * follow-up (`session:<lead>`, a review finding) reads as `agent` here although `cardOrigin` shows it; it stays
+ * on the Board. Read from the card alone, so a card stored before this existed is classed the same way.
+ */
+export const cardAskedBy = (card: Pick<BoardTask, 'ask'>): BoardTaskAskedBy =>
+  NAMES_OWNER.test(card.ask.source) ? 'person' : 'agent';

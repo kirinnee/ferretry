@@ -529,6 +529,10 @@ export type BoardTaskActivity = z.infer<typeof BoardTaskActivitySchema>;
 export const BoardTaskOriginSchema = z.enum(['human', 'agent']);
 export type BoardTaskOrigin = z.infer<typeof BoardTaskOriginSchema>;
 
+/** Who asked for the work, for the surfaces that wait on the owner: a `person`, or an `agent` on its own errand. */
+export const BoardTaskAskedBySchema = z.enum(['person', 'agent']);
+export type BoardTaskAskedBy = z.infer<typeof BoardTaskAskedBySchema>;
+
 const categoryCounts = z.strictObject({
   backlog: NonNegativeIntegerSchema,
   active: NonNegativeIntegerSchema,
@@ -582,6 +586,11 @@ const BoardTaskViewShape = {
    * reader takes as "show it".
    */
   origin: BoardTaskOriginSchema.optional(),
+  /**
+   * Whether a person asked for the card (its ask's source names the owner), stricter than `origin`: the Inbox's
+   * cards to test are only a person's. Absent from a daemon older than the field, which a reader takes as `agent`.
+   */
+  askedBy: BoardTaskAskedBySchema.optional(),
   /** The nearest ANCESTOR card (never the card itself) whose origin is `human`; `null` when there is none. */
   humanParent: TaskRefSchema.nullable().optional(),
 };

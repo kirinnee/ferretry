@@ -10,12 +10,12 @@
  */
 
 import { type ReactElement, useState } from 'react';
-import { StackPager } from '../agenda/stack-pager.tsx';
-import { ToTestList, type ToTestAnswers } from '../agenda/to-test-rows.tsx';
-import { type StackRank, cardStack } from '../../lib/board-card-stack.ts';
+import { cardStack, type StackRank } from '../../lib/board-card-stack.ts';
 import type { ChatCards } from '../../lib/board-chat.ts';
 import type { BoardCardOf } from '../../lib/board-view.ts';
-import { withTaskName } from '../../lib/to-test-inbox.ts';
+import { withProjectName, withTaskName } from '../../lib/to-test-inbox.ts';
+import { StackPager } from '../agenda/stack-pager.tsx';
+import { type ToTestAnswers, ToTestList } from '../agenda/to-test-rows.tsx';
 
 const RANK_WORDS: Readonly<Record<StackRank, string>> = {
   'to-test': 'To test',
@@ -34,6 +34,7 @@ export function BoardCardsView({
   now,
   onOpenCard,
   taskNames,
+  projectNames,
   toTestAnswers,
 }: {
   readonly cards: ChatCards;
@@ -41,6 +42,7 @@ export function BoardCardsView({
   readonly now: number;
   readonly onOpenCard: (card: BoardCardOf) => void;
   readonly taskNames: ReadonlyMap<string, string> | undefined;
+  readonly projectNames: ReadonlyMap<string, string> | undefined;
   readonly toTestAnswers: ToTestAnswers | undefined;
 }): ReactElement | null {
   const stack = cardStack(cards, now);
@@ -73,7 +75,7 @@ export function BoardCardsView({
           now={now}
           onNavigate={() => onOpenCard(entry.card)}
           onSkip={index < stack.length - 1 ? () => go(index + 1) : undefined}
-          rows={[withTaskName(entry.toTest, taskNames)]}
+          rows={[withProjectName(withTaskName(entry.toTest, taskNames), projectNames)]}
         />
       ) : (
         draw(entry.card)

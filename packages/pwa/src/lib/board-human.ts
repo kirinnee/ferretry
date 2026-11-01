@@ -7,7 +7,8 @@
  *
  * THE DAEMON OWNS THE FACT: it sends `origin` and `humanParent` on a card, both optional on the wire. A
  * daemon that sends neither is an older one, and the app does not guess: it shows every card and hides the
- * toggle ({@link splitAvailable}). Nothing else in the app reads those two fields.
+ * toggle ({@link splitAvailable}). Nothing else in the app reads those two fields, nor `askedBy`, the stricter
+ * "a person asked" the cards to test are limited to ({@link askedByPerson}); there, silence reads as no.
  */
 
 import type { TaskRef } from '@ferretry/protocol';
@@ -24,6 +25,9 @@ export const taskOrigin = (task: object): TaskOrigin | null => {
 };
 
 export const isAgentTask = (task: object): boolean => taskOrigin(task) === 'agent';
+
+/** Whether the daemon says a person asked for this card; a daemon that says nothing reads as "no". */
+export const askedByPerson = (task: object): boolean => declared(task, 'askedBy') === 'person';
 
 /** Whether the daemons behind these cards say who asked for a card: without it there is nothing to split. */
 export const splitAvailable = (tasks: readonly object[]): boolean => tasks.some(task => taskOrigin(task) !== null);

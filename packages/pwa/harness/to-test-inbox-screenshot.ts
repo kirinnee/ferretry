@@ -191,6 +191,14 @@ for (const form of ['phone', 'desktop'] as const) {
     );
     check((await list.locator('[data-to-test]').count()) === 2, `${form} ${theme}: not both to-test rows are listed`);
     check(
+      (await list.locator('[data-to-test-project]').allTextContents()).join('|') === 'ferretry|diene',
+      `${form} ${theme}: the rows do not name their project (ferretry, diene)`,
+    );
+    check(
+      (await list.getByText('Review: faster board loading').count()) === 0,
+      `${form} ${theme}: an agent-asked card reached the owner's To test list`,
+    );
+    check(
       (await list.locator('[data-agenda-section="to-test"] [data-to-test]').count()) === 2,
       `${form} ${theme}: the to-test rows are not in their own To test section`,
     );

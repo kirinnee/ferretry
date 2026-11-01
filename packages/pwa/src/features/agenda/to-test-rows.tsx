@@ -306,7 +306,15 @@ function ToTestRow({
               {row.taskName}
             </span>
           )}
-          <span>{row.card.machine}</span>
+          {row.projectName === null ? null : (
+            <>
+              <span className="fy-totest__project" data-to-test-project="">
+                {row.projectName}
+              </span>
+              <span aria-hidden="true">·</span>
+            </>
+          )}
+          <span data-to-test-machine="">{row.card.machine}</span>
           {release === null ? null : (
             <>
               <span aria-hidden="true">·</span>

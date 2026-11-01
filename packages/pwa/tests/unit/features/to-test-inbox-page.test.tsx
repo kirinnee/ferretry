@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import type { ToTestHost } from '../../../src/features/agenda/to-test-rows.tsx';
-import { splitSnoozed, toTestCards, withTaskName } from '../../../src/lib/to-test-inbox.ts';
+import { splitSnoozed, toTestCards, withProjectName, withTaskName } from '../../../src/lib/to-test-inbox.ts';
 import { agendaItem, choices, fakeInbox, InboxHarness, inboxCard } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
-import { boardModelOf, card, flush, laptop } from '../board-support.ts';
+import { boardModelOf, card, flush, laptop, PROJECT } from '../board-support.ts';
 import { fakeActions, fill, refusal, submit } from './board-detail-support.tsx';
 
 const NOW = Date.parse('2026-08-02T12:00:00.000Z');
@@ -18,6 +18,7 @@ afterEach(async () => {
 const shipped = { version: '1.2.0', tag: 'v1.2.0', at: '2026-08-01T09:00:00.000Z' };
 
 const LEAD_TASKS = new Map([['mvuc7tsf-0c3d50df', 'Credentials Build Lead']]);
+const PROJECT_NAMES = new Map([[PROJECT, 'ferretry']]);
 
 const rowsOf = () =>
   boardModelOf([
@@ -34,9 +35,10 @@ const rowsOf = () =>
       owner: 'mvudnuly-ec442385',
     }),
     card('F24', { laneId: 'implement', title: 'Still building' }),
+    card('F26', { laneId: 'tested', title: 'Ferret follow-up', askedBy: 'agent' }),
   ])
     .then(toTestCards)
-    .then(rows => rows.map(row => withTaskName(row, LEAD_TASKS)));
+    .then(rows => rows.map(row => withProjectName(withTaskName(row, LEAD_TASKS), PROJECT_NAMES)));
 
 const PARKED_UNTIL = '2026-08-02T16:00:00.000Z';
 
@@ -129,6 +131,19 @@ describe('Inbox — cards waiting for a try', () => {
     expect(row.querySelector('[data-to-test-how]')?.textContent).toContain('Open the Board');
     expect(root.querySelector('[data-to-test-list]')?.children).toHaveLength(2);
     expect(root.textContent).not.toContain('Still building');
+  });
+
+  it('names the project of each card beside its machine', async () => {
+    const { root } = await open();
+    const meta = rowOf(root, 'F22').querySelector('.fy-totest__meta');
+    expect(meta?.querySelector('[data-to-test-project]')?.textContent).toBe('ferretry');
+    expect(meta?.querySelector('[data-to-test-machine]')?.textContent).toBe('laptop');
+    expect(meta?.textContent).toContain('ferretry');
+  });
+
+  it('leaves out a card an agent made, though it waits in the same lane', async () => {
+    const { root } = await open();
+    expect(root.textContent).not.toContain('Ferret follow-up');
   });
 
   it('names the ferret by the task it was given on each card, never by its callsign', async () => {

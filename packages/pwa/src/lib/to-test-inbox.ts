@@ -9,10 +9,11 @@
 
 import type { ReleasedIn, SessionView } from '@ferretry/protocol';
 import { sessionTask } from '../shell/session-title.ts';
-import { displayCallsign } from './callsign.ts';
 import { doneLaneOf, notGoodLaneOf } from './board-done.ts';
+import { askedByPerson } from './board-human.ts';
 import type { BoardModel } from './board-model.ts';
 import type { BoardCardOf, BoardGroupOf } from './board-view.ts';
+import { displayCallsign } from './callsign.ts';
 
 export interface ToTestCard {
   /** The board card's own key: stable across reads, unique across machines. */
@@ -26,6 +27,8 @@ export interface ToTestCard {
   readonly howToTest: string;
   /** The task the ferret that worked on it was given ("Credentials Build Lead"), never its callsign; `null` when unknown. */
   readonly taskName: string | null;
+  /** The name of the project (the board) the card is on; `null` until the app knows it. */
+  readonly projectName: string | null;
   /** When it started waiting for the owner: its release, else when it was last touched. */
   readonly since: string | null;
   /** The owner's snooze on it, while it is still in the lane it was snoozed in; `null` when never snoozed or moved on. */
@@ -69,9 +72,9 @@ export const nextWake = (rows: readonly ToTestCard[], now: number): number | nul
   return wakes.length === 0 ? null : Math.min(...wakes);
 };
 
-/** One card as a card to test: `null` when it is dropped or its project's lanes do not name where Done and Not good go. */
+/** One card as a card to test: `null` when it is dropped, a person did not ask for it, or its project's lanes do not name where Done and Not good go. */
 export const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | null => {
-  if (card.task.dropped !== null) return null;
+  if (card.task.dropped !== null || !askedByPerson(card.task)) return null;
   const doneLaneId = doneLaneOf(group.laneSet);
   const notGoodLaneId = notGoodLaneOf(group.laneSet);
   if (doneLaneId === null || notGoodLaneId === null) return null;
@@ -83,6 +86,7 @@ export const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | n
     notGoodLaneId,
     howToTest: card.task.howToTest,
     taskName: null,
+    projectName: null,
     since: sinceOf(card),
     snoozedUntil: snoozedUntilOf(card),
   };
@@ -108,8 +112,8 @@ export const withTaskName = (row: ToTestCard, names: ReadonlyMap<string, string>
 };
 
 /**
- * Every card in a verify lane that the owner can answer: not dropped, and in a project whose lanes name both where
- * Done and where Not good go. Newest release first; a card with no release after those that have one.
+ * Every card in a verify lane that the owner can answer: a person asked for it, it is not dropped, and its project's
+ * lanes name both where Done and where Not good go. Newest release first; a card with no release after those that have one.
  */
 export const toTestCards = (model: BoardModel): readonly ToTestCard[] =>
   model.groups
@@ -139,6 +143,13 @@ export const filterToTest = (rows: readonly ToTestCard[], filter: ToTestFilter):
   return rows.filter(
     row =>
       (filter.machine === null || row.card.daemonId === filter.machine) &&
-      (needle === '' || `${row.card.task.title} ${row.card.task.id}`.toLowerCase().includes(needle)),
+      (needle === '' ||
+        `${row.card.task.title} ${row.card.task.id} ${row.projectName ?? ''}`.toLowerCase().includes(needle)),
   );
+};
+
+/** The card with the name of its project; the same card when the name is unknown. */
+export const withProjectName = (row: ToTestCard, names: ReadonlyMap<string, string> | undefined): ToTestCard => {
+  const projectName = names?.get(row.group.projectId) ?? null;
+  return projectName === null || projectName === row.projectName ? row : { ...row, projectName };
 };
