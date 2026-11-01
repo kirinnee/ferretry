@@ -419,7 +419,7 @@ its own).
   ferrets run or are watched: **applying** a fleet change (`POST /v1/fleet/proposals/:id/apply` — a ferret may
   still propose one), harness and MCP sign-ins, a session's MCP login, installing machine tools, the
   warden's settings and "leave it alone", resource limits, the lessons settings, a session's Pack switch and a
-  board's switch; answering a harness's own prompts (`permission`, `dialog`, `answer`, console keys, `attach`);
+  board's switch; answering a harness's own prompts (`permission`, `dialog`, `answer`, console keys, `attach`) and typing the owner's own composer draft into a pane;
   the agent browser's sign-in window, whose status is a credential; and the security log and grant history.
   A person's own agent-tool routes (`/v1/sessions/:id/surfaces/*`) are person routes too: an agent uses
   `POST /v1/agent/tools`.

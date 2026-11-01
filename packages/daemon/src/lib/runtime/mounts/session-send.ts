@@ -431,7 +431,7 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       method: 'POST',
       path: '/v1/sessions/:sessionId/composer',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {

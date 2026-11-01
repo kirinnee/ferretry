@@ -210,7 +210,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/sessions/:sessionId/sends/:sendId/retry operator any',
   'POST /v1/sessions/:sessionId/sends/:sendId/cancel operator any',
   'POST /v1/sessions/:sessionId/sends/:sendId/enter operator any',
-  'POST /v1/sessions/:sessionId/composer operator any',
+  'POST /v1/sessions/:sessionId/composer operator person',
   'POST /v1/sessions/:sessionId/answer operator person',
   'POST /v1/sessions/:sessionId/attachments operator any',
   'GET /v1/sessions/:sessionId/attachments/:attachmentId operator any',

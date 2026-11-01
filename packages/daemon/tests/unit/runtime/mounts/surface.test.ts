@@ -1769,18 +1769,28 @@ describe('who may call each route', () => {
       ...new Bun.Glob('src/lib/runtime/mounts/*.ts').scanSync(DAEMON_ROOT),
       ...new Bun.Glob('src/lib/api/routes/*.ts').scanSync(DAEMON_ROOT),
     ];
-    const literals = new Set<string>();
-    for (const source of sources)
-      for (const found of (await Bun.file(`${DAEMON_ROOT}/${source}`).text()).matchAll(/path: '(\/[^']+)'/gu))
-        if (found[1] !== undefined) literals.add(found[1]);
-    const contracted = new Set([...ROUTE_CALLERS, ...OTHER_TABLE_CALLERS].map(line => line.split(' ')[1] ?? ''));
+    // A method beside its path is compared as the pair, so a new verb on a path the contract already lists
+    // cannot slip through; a path written apart from its method is compared as a path.
+    const routes = new Set<string>();
+    const paths = new Set<string>();
+    for (const source of sources) {
+      const text = await Bun.file(`${DAEMON_ROOT}/${source}`).text();
+      for (const found of text.matchAll(/method: '([A-Z]+)',\s*path: '(\/[^']+)'/gu))
+        if (found[1] !== undefined && found[2] !== undefined) routes.add(`${found[1]} ${found[2]}`);
+      for (const found of text.matchAll(/path: '(\/[^']+)'/gu)) if (found[1] !== undefined) paths.add(found[1]);
+    }
+    const contracted = [...ROUTE_CALLERS, ...OTHER_TABLE_CALLERS].map(line => line.split(' ').slice(0, 2).join(' '));
+    const contractedPaths = new Set(contracted.map(route => route.split(' ')[1] ?? ''));
+    const member = (route: string): boolean => route.includes(' /v1/shared/') || route.startsWith('/v1/shared/');
 
     // Act
-    const missing = [...literals].filter(path => !contracted.has(path) && !path.startsWith('/v1/shared/'));
+    const missingRoutes = [...routes].filter(route => !contracted.includes(route) && !member(route));
+    const missingPaths = [...paths].filter(path => !contractedPaths.has(path) && !member(path));
 
     // Assert
-    should(literals.size).be.above(200);
-    should(missing).deepEqual([]);
+    should(routes.size).be.above(300);
+    should(missingRoutes).deepEqual([]);
+    should(missingPaths).deepEqual([]);
   });
 
   it('should refuse every caller that is a ferret on every person route, before any handler reads the body', async () => {

@@ -22,7 +22,7 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { SessionSendError, sessionSendRoutes } from '../../../../src/lib/runtime/mounts/session-send.ts';
 import { request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, FakeSessionSend, GRANTED, human } from './support.ts';
+import { agentIn, CREDENTIALS, FakeSessionSend, fromFerret, GRANTED, human } from './support.ts';
 
 /**
  * The surface a running session is spoken to through.
@@ -583,6 +583,30 @@ describe('the person’s own draft in the composer', () => {
     ]);
   });
 
+  it('should refuse a ferret the owner’s draft, on its own credential or the admin token, before reading it', async () => {
+    // Arrange — typing the owner's draft into a pane is the owner's act, like the console's input.
+    const sessions = new FakeSessionSend();
+    const asked = (headers: Readonly<Record<string, string>>) => ({
+      ...request({ method: 'POST', path: '/v1/sessions/s1/composer', headers, loopback: true }),
+      text: async (): Promise<string> => {
+        throw new Error('the draft was read');
+      },
+    });
+
+    // Act
+    const answers = [
+      await governed(sessions).dispatch(asked(agentIn('s2'))),
+      await governed(sessions).dispatch(fromFerret(asked(human))),
+    ];
+
+    // Assert
+    should(answers.map(answer => [answer.status, JSON.parse(answer.body).code])).deepEqual([
+      [403, 'owner_only'],
+      [403, 'owner_only'],
+    ]);
+    should(sessions.drafts).be.empty();
+  });
+
   it('should be a governed terminal key, refused to a caller with no credential', async () => {
     // Arrange
     const sessions = new FakeSessionSend();
@@ -594,7 +618,7 @@ describe('the person’s own draft in the composer', () => {
     );
 
     // Assert
-    should(route).match({ minimum: 'operator', capability: { capability: 'terminal', axis: 'use' } });
+    should(route).match({ minimum: 'operator', caller: 'person', capability: { capability: 'terminal', axis: 'use' } });
     should(anonymous.status).equal(401);
     should(sessions.drafts).be.empty();
   });
