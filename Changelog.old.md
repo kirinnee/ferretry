@@ -1,3 +1,9 @@
+## [4.191.1](https://github.com/kirinnee/ferretry/compare/v4.191.0...v4.191.1) (2026-11-01)
+
+### Fixes
+
+* **input:** read look-alike spellings, narrow the echo-off code exception, cap high pushes per ferret ([#1218](https://github.com/kirinnee/ferretry/issues/1218)) ([a443142](https://github.com/kirinnee/ferretry/commit/a4431420a8ca7d12ac8589f2d5b1127242b7d23b))
+
 ## [4.191.0](https://github.com/kirinnee/ferretry/compare/v4.190.0...v4.191.0) (2026-11-01)
 
 ### Features

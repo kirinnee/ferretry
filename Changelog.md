@@ -1,3 +1,15 @@
+## [4.192.0](https://github.com/kirinnee/ferretry/compare/v4.191.1...v4.192.0) (2026-11-01)
+
+### Features
+
+* **daemon:** accounts store, boot migration and routes (R1-2) ([#1225](https://github.com/kirinnee/ferretry/issues/1225)) ([afe346f](https://github.com/kirinnee/ferretry/commit/afe346f0fc6797170e4b61facad5bc810d09f16c))
+* **pwa:** answer quickly includes the cards waiting for a try ([#1226](https://github.com/kirinnee/ferretry/issues/1226)) ([9345d42](https://github.com/kirinnee/ferretry/commit/9345d423669f7399fecf257aed546a5a3147b5b3))
+* **pwa:** share catalogs with people, join and browse (phase 2c) ([#1209](https://github.com/kirinnee/ferretry/issues/1209)) ([8f573d3](https://github.com/kirinnee/ferretry/commit/8f573d32490bc031725938f14f482c27504602cd))
+
+### Fixes
+
+* **input:** prove every reader of a secret card's terminal, and trust a store path only from a root folder ([#1223](https://github.com/kirinnee/ferretry/issues/1223)) ([27beef4](https://github.com/kirinnee/ferretry/commit/27beef4147c80d70f8345a84a6cd31d6ba91f8cc))
+
 ## [4.191.1](https://github.com/kirinnee/ferretry/compare/v4.191.0...v4.191.1) (2026-11-01)
 
 ### Fixes
