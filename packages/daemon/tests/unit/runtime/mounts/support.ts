@@ -36,6 +36,7 @@ import {
   TERMINAL_MAX_PER_SESSION,
   type TerminalListView,
   type TerminalView,
+  TotpParametersSchema,
   type WardenAgendaView,
   type WardenConfigView,
   type WardenInvestigateRequest,
@@ -45,7 +46,6 @@ import {
   type WardenRunView,
   type WardenStatusView,
   type WardenVerdictsView,
-  TotpParametersSchema,
 } from '@ferretry/protocol';
 import type { DaemonIdentity } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
@@ -133,15 +133,14 @@ import type { SttEnhancementSubsystem } from '../../../../src/lib/runtime/mounts
 import { TerminalMountError, type TerminalSubsystem } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import type { WardenError, WardenSubsystem } from '../../../../src/lib/runtime/mounts/warden.ts';
 import {
+  AccountDefaults,
   configuredReferences,
   LoginDirectory,
-  LoginRecipeService,
   type LoginIndexDocument,
   type LoginIndexStore,
-  AccountDefaults,
+  LoginRecipeService,
   LoginVault,
   narrowAccountVault,
-  type StoredLoginIndex,
   type SecretChildOutcome,
   type SecretChildRunner,
   type SecretChildSpec,
@@ -153,9 +152,10 @@ import {
   SecretStoreError,
   SecretUseService,
   SecretVault,
+  type SecretVaultDocument,
+  type StoredLoginIndex,
   TwoFactorSeedStages,
   type TwoFactorSeedStagesDeps,
-  type SecretVaultDocument,
 } from '../../../../src/lib/secrets/index.ts';
 import { SessionAttachService } from '../../../../src/lib/session/attach/index.ts';
 import { SessionConsoleService } from '../../../../src/lib/session/console/index.ts';
@@ -2080,10 +2080,10 @@ const UNREACHED_CONFIG_FILES = {
   load: async () => {
     throw new Error('this fixture has no configuration files');
   },
-  writeOwn: async () => {
+  inEffect: async () => {
     throw new Error('this fixture has no configuration files');
   },
-  acceptOwn: async () => {
+  amendOwn: async () => {
     throw new Error('this fixture has no configuration files');
   },
 } as unknown as ConstructorParameters<typeof AccountDefaults>[0]['config'];

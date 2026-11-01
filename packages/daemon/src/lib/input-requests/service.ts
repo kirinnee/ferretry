@@ -10,8 +10,8 @@ import {
   INPUT_JOURNAL_EVENT_TYPES,
   INPUT_MAX_CHECK_FAILURES,
   INPUT_MAX_PENDING_PER_SESSION,
-  INPUT_MAX_REBINDS,
   INPUT_MAX_RAISES_PER_HOUR,
+  INPUT_MAX_REBINDS,
   INPUT_PROMPT_MAX_LENGTH,
   INPUT_QUARANTINE_EVENT_TYPES,
   INPUT_QUARANTINE_SECONDS,
@@ -35,15 +35,16 @@ import {
   type InputShot,
   type InputTarget,
   type InputTargetFacts,
-  type PushSubject,
-  type LoginObserved,
   inputRaiseFields,
   inputValueProblem,
   LOGIN_PASSWORD_MIN_LENGTH,
   LOGIN_USERNAME_MAX_LENGTH,
   type LoginEntryId,
+  type LoginObserved,
   MAX_AGENDA_TITLE_LENGTH,
+  type PushSubject,
   placeKeys,
+  type SignInChoiceContext,
   type SignInId,
   savedRolesOf,
   strongestSensitivity,
@@ -55,28 +56,6 @@ import { LoginEntryError, type LoginFieldValues } from '../secrets/accounts.ts';
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
-import type {
-  InputAgendaPort,
-  InputAgentNotifier,
-  InputAudit,
-  InputCaller,
-  InputClock,
-  InputFieldValue,
-  InputIds,
-  InputJournal,
-  InputLoginPort,
-  ProfileProgram,
-  InputPasteRules,
-  InputSealedPort,
-  InputSessionDirectory,
-  InputTargetField,
-  InputTargetPort,
-  InputTimers,
-  ObserveResult,
-  TypeResult,
-} from './ports.ts';
-import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
-import { bindingOf, mayRebind } from './rebind.ts';
 import {
   heldFromView,
   lockFor,
@@ -88,6 +67,29 @@ import {
   spellsPassword,
 } from './lock.ts';
 import type { LoginObserver } from './login-observer.ts';
+import type {
+  InputAgendaPort,
+  InputAgentNotifier,
+  InputAudit,
+  InputCaller,
+  InputChoicePort,
+  InputClock,
+  InputFieldValue,
+  InputIds,
+  InputJournal,
+  InputLoginPort,
+  InputPasteRules,
+  InputSealedPort,
+  InputSessionDirectory,
+  InputTargetField,
+  InputTargetPort,
+  InputTimers,
+  ObserveResult,
+  ProfileProgram,
+  TypeResult,
+} from './ports.ts';
+import type { QuarantineHold, QuarantineRegistry } from './quarantine.ts';
+import { bindingOf, mayRebind } from './rebind.ts';
 import {
   codeCardKeys,
   codeTargetProblem,
@@ -224,6 +226,8 @@ export interface InputRequestServiceDependencies {
   readonly redact: (text: string) => Promise<string>;
   /** Saved logins: offered on the card, typed by name, and kept by "Save as". Absent: none are offered. */
   readonly logins?: InputLoginPort;
+  /** The session's project, folder and the owner's defaults, which order the saved logins a card offers. Absent: none. */
+  readonly choice?: InputChoicePort;
   /** This machine's host name, for a terminal target's key (`sudo@<host>`). */
   readonly hostName?: string;
   /** Secure copies a paste types from (docs/secure-copy.md). Absent: a paste is refused. */
@@ -359,7 +363,7 @@ export class InputRequestService {
     const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
     const title =
       copy === undefined
-        ? ((await this.codeTitle(fields, matchKey, raise.secretHint, raise.factor)) ?? titleOf(fields))
+        ? ((await this.codeTitle(sessionId, fields, matchKey, raise.secretHint, raise.factor)) ?? titleOf(fields))
         : PASTE_TITLE;
     this.raising.set(requestId, { sessionId, subject: sensitivity === 'code' ? 'one-time-code' : 'other' });
     const card = await this.deps.agenda
@@ -524,6 +528,11 @@ export class InputRequestService {
     return { ...withSaved, observed: await this.project(request.sessionId, facts, held.names) };
   }
 
+  /** The session's project, folder and defaults; none when nothing is wired or the daemon cannot read them. */
+  private async choiceOf(sessionId: string): Promise<Omit<SignInChoiceContext, 'hint'>> {
+    return (await this.deps.choice?.of(sessionId).catch(() => undefined)) ?? {};
+  }
+
   /**
    * What the owner's card may offer from the saved accounts: the sign-ins matched to the target, the one first that the
    * ferret's hint or a default chose among THOSE, then what may be picked by hand. A store that cannot be read offers
@@ -534,6 +543,7 @@ export class InputRequestService {
     if (logins === undefined || held.request.state !== 'pending') return undefined;
     const listing = await logins.listing().catch((): SavedListing => NO_ACCOUNTS);
     return savedForFields(held.request.fields, held.matchKey, listing, {
+      ...(await this.choiceOf(held.request.sessionId)),
       hint: held.hint,
       codesHere: codesHere(held.request.observed, held.request.fields),
     });
@@ -547,6 +557,7 @@ export class InputRequestService {
    * whether Ferretry holds its seed, so the title never says one exists.
    */
   private async codeTitle(
+    sessionId: string,
     fields: readonly InputRequestField[],
     matchKey: string | undefined,
     hint: string | undefined,
@@ -556,6 +567,7 @@ export class InputRequestService {
     const listing = await this.deps.logins?.listing().catch(() => undefined);
     if (listing === undefined) return undefined;
     const about = codeCardKeys(matchKey, listing, {
+      ...(await this.choiceOf(sessionId)),
       ...(hint === undefined ? {} : { hint }),
       ...(factor === undefined ? {} : { factor }),
     });
@@ -1485,6 +1497,7 @@ export class InputRequestService {
     // At least one: an `entry` with every field typed was already refused (`typedValues`).
     const filled = held.request.fields.filter(field => !typed.has(field.id));
     const offer = savedForFields(filled, held.matchKey, listing, {
+      ...(await this.choiceOf(held.request.sessionId)),
       hint: held.hint,
       codesHere: codesHere(held.request.observed, filled),
     }).offers.find(each => each.id === entry);

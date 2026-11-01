@@ -2,15 +2,15 @@ import { z } from 'zod';
 import { SignInIdSchema, TwoFactorIdSchema } from './account-ids.ts';
 import { InstantSchema } from './common.ts';
 import {
-  LoginObservedSchema,
   LOGIN_OBSERVED_MAX,
   LOGIN_RECIPE_PROPOSALS_MAX,
+  LoginObservedSchema,
   LoginRecipeAuthorSchema,
   LoginRecipeProposalSchema,
   LoginRecipeSchema,
+  observedWords,
   RECIPE_FENCE_CLOSE,
   RECIPE_FENCE_OPEN,
-  observedWords,
   recipeReferences,
 } from './login-recipes.ts';
 import { MIN_SECRET_VALUE_LENGTH, SecretNameSchema, SecretStoreHealthSchema } from './secrets.ts';
@@ -434,6 +434,12 @@ export const InputSavedSchema = z.strictObject({
     .refine(offers => offers.filter(offer => offer.primary === true).length <= 1, 'at most one offer is the primary'),
   /** The matched entry signs in through a provider: what the card says about it. */
   signIn: InputSignInSchema.optional(),
+  /**
+   * The board project the DAEMON resolved for the asking session (never the ferret's word): what a quiet "Always use for
+   * <project>" after a hand-tap writes as a project default. Absent: the session has no project (Unfiled), or the daemon
+   * could not tell.
+   */
+  project: z.strictObject({ id: z.string().min(1).max(200), name: oneLine(SIGN_IN_PROJECT_MAX_LENGTH) }).optional(),
 });
 export type InputSaved = z.infer<typeof InputSavedSchema>;
 

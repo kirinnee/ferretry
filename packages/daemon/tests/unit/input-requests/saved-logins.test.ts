@@ -11,7 +11,7 @@ import should from 'should';
 import { EphemeralValues } from '../../../src/lib/input-requests/ephemeral-values.ts';
 import { InputLoginAdapter } from '../../../src/lib/input-requests/login-adapter.ts';
 import { type LoginDelivery, LoginObserver } from '../../../src/lib/input-requests/login-observer.ts';
-import type { InputCaller, InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
+import type { InputCaller, InputChoicePort, InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
 import { LoginDirectory, LoginEntryError, LoginVault, totpCode } from '../../../src/lib/secrets/index.ts';
@@ -66,6 +66,8 @@ function harness(
     none?: true;
     /** Where landed deliveries are told, for a saved login's facts. */
     observer?: (directory: LoginDirectory) => Pick<LoginObserver, 'delivered' | 'tainted'>;
+    /** The session's project, folder and the owner's defaults, as the daemon reads them. */
+    choice?: InputChoicePort;
   } = {},
 ) {
   const writes: string[] = [];
@@ -130,6 +132,7 @@ function harness(
     quarantine: new QuarantineRegistry(clock),
     redact: async text => values.scrubAll(text),
     ...(options.none === true ? {} : { logins: options.logins?.(spied) ?? spied }),
+    ...(options.choice === undefined ? {} : { choice: options.choice }),
     ...(options.observer === undefined ? {} : { observer: options.observer(directory) }),
     hostName: 'Kirin-Box.local',
   });
@@ -562,6 +565,95 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     should(h.writes).deepEqual([]);
     await h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'SUDO_ADMIN'), HOST);
     should(h.writes).deepEqual(['admin-UNIQUE-pw']);
+  });
+
+  it('should make the owner’s site default the primary, and say so (R1-5)', async () => {
+    const h = harness({ choice: { of: async () => ({ defaults: { sites: { 'sudo@kirin-box': 'SUDO_ADMIN' } } }) } });
+    await savedOnce(h);
+    await h.directory.put(
+      'SUDO_ADMIN',
+      PutLoginEntryRequestSchema.parse({ label: 'admin', match: ['sudo@kirin-box'], password: 'admin-UNIQUE-pw' }),
+    );
+    const { request } = await raised(h);
+
+    should(request.saved?.offers.map(offer => [offer.id, offer.primary === true, offer.why])).deepEqual([
+      ['SUDO_ADMIN', true, 'site'],
+      ['SUDO_KIRIN_BOX', false, undefined],
+    ]);
+    should(h.writes).deepEqual([]);
+  });
+
+  it('should let the session’s project default win over the site default, naming the project', async () => {
+    const asked: string[] = [];
+    const h = harness({
+      choice: {
+        of: async sessionId => {
+          asked.push(sessionId);
+          return {
+            project: { id: 'p1', name: 'ferretry', nameIsUnique: true },
+            defaults: {
+              sites: { 'sudo@kirin-box': 'SUDO_KIRIN_BOX' },
+              projects: { ferretry: { 'sudo@kirin-box': 'SUDO_ADMIN' } },
+            },
+          };
+        },
+      },
+    });
+    await savedOnce(h);
+    await h.directory.put(
+      'SUDO_ADMIN',
+      PutLoginEntryRequestSchema.parse({ label: 'admin', match: ['sudo@kirin-box'], password: 'admin-UNIQUE-pw' }),
+    );
+    const { request } = await raised(h);
+
+    should(request.saved?.offers.find(offer => offer.primary === true)).containEql({
+      id: 'SUDO_ADMIN',
+      why: 'project',
+    });
+    should(request.saved?.offers.find(offer => offer.primary === true)?.project).equal('ferretry');
+    should(new Set(asked)).deepEqual(new Set([SESSION]));
+  });
+
+  it('should set nothing when a default names an account that does not sign in here (invariant 11)', async () => {
+    const h = harness({
+      choice: {
+        of: async () => ({
+          project: { id: 'p1', name: 'ferretry', nameIsUnique: true },
+          defaults: {
+            sites: { 'sudo@kirin-box': 'ELSEWHERE' },
+            projects: { ferretry: { 'sudo@kirin-box': 'ELSEWHERE' } },
+          },
+        }),
+      },
+    });
+    await savedOnce(h);
+    await h.directory.put(
+      'SUDO_ADMIN',
+      PutLoginEntryRequestSchema.parse({ label: 'admin', match: ['sudo@kirin-box'], password: 'admin-UNIQUE-pw' }),
+    );
+    await h.directory.put(
+      'ELSEWHERE',
+      PutLoginEntryRequestSchema.parse({ label: 'elsewhere', match: ['sudo@other-box'], password: 'else-UNIQUE-pw' }),
+    );
+    const { request } = await raised(h);
+
+    should(request.saved?.offers.filter(offer => offer.primary === true || offer.why !== undefined)).deepEqual([]);
+  });
+
+  it('should still draw the card when the choice cannot be read', async () => {
+    const h = harness({
+      choice: {
+        of: async () => {
+          throw new Error('no store');
+        },
+      },
+    });
+    await savedOnce(h);
+    const { request } = await raised(h);
+
+    should(request.saved?.offers.map(offer => [offer.id, offer.primary === true, offer.why])).deepEqual([
+      ['SUDO_KIRIN_BOX', true, 'only'],
+    ]);
   });
 
   it('should offer no primary when two accounts sign in at this terminal and nothing chose one (invariant 11)', async () => {

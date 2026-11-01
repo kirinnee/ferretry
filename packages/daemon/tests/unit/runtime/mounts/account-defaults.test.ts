@@ -540,6 +540,38 @@ describe('GET /v1/config/status warns for a line the daemon cannot use', () => {
     should(warnings[0]).containEql('ignored');
   });
 
+  it('should accept a line on a host a site is for, not only one it logs in on (N1)', async () => {
+    const w = await world();
+    const accounts = w.subsystem.accounts as NonNullable<SecretSubsystem['accounts']>;
+    await accounts.putAccount('VERCEL' as AccountId, { label: 'vercel' });
+    await accounts.addSignIn('VERCEL' as AccountId, {
+      place: { kind: 'site', domains: ['github.com'], match: ['vercel.com'] },
+    });
+
+    const answer = await w.drive(HOST, 'PUT', '/v1/accounts/defaults', {
+      scope: 'sites',
+      key: 'vercel.com',
+      account: 'VERCEL',
+    });
+
+    should(answer.status).equal(200);
+    should(await inEffect(w)).deepEqual({ sites: { 'vercel.com': 'VERCEL' } });
+    should(await warningsFor(w)).deepEqual([]);
+  });
+
+  it('should keep both lines when two changes arrive at once, never overwriting one with the other (N2)', async () => {
+    const w = await world();
+    await withAccounts(w);
+
+    const [one, two] = await Promise.all([
+      w.drive(HOST, 'PUT', '/v1/accounts/defaults', SITE_LINE),
+      w.drive(HOST, 'PUT', '/v1/accounts/defaults', { scope: 'sites', key: 'github.com', account: 'GITHUB' }),
+    ]);
+
+    should([one.status, two.status]).deepEqual([200, 200]);
+    should(await inEffect(w)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A', 'github.com': 'GITHUB' } });
+  });
+
   it('should warn about an account with no sign-in on that place', async () => {
     const w = await world();
     await withAccounts(w);

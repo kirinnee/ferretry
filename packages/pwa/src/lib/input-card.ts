@@ -26,7 +26,10 @@ import {
   LOGIN_PASSWORD_MIN_LENGTH,
   LoginEntryIdSchema,
   loginMethodSentence,
+  PlaceKeySchema,
+  type PutAccountDefaultRequest,
   padInputValue,
+  signInChoiceWords,
 } from '@ferretry/protocol';
 import { grantRefusalNotice } from './grants.ts';
 
@@ -84,20 +87,76 @@ export const targetRef = (request: InputRequest): string =>
     : `%${request.target.kind}:${request.target.key}`;
 
 export interface SplitOffers {
-  /** The one-tap choice: the first offer the DAEMON matched to this target. Never a hinted one by itself. */
+  /** The one-tap choice: the offer the DAEMON marked `primary`. Never "the first matched one", never a hinted one. */
   readonly primary: InputSavedOffer | undefined;
   /** Every other offer, in the daemon's order, selectable by hand. */
   readonly others: readonly InputSavedOffer[];
 }
 
 /**
- * Only an offer the daemon marked `matched` may be the one-tap primary. `hinted` (the ferret named it) is a tag,
- * never a promotion: a hinted offer that is not matched stays among the others.
+ * Only the offer the daemon marked `primary` (and `matched`) is the one-tap choice (docs/input-requests.md). The
+ * daemon alone knows the owner's defaults and the ferret's hint, so a card from an older daemon, which sends no
+ * `primary`, has no one-tap: the owner picks. `hinted` (the ferret named it) is a tag, never a promotion.
  */
 export const splitOffers = (saved: InputSaved | undefined): SplitOffers => {
   const offers = saved?.offers ?? [];
-  const primary = offers.find(offer => offer.matched);
+  const primary = offers.find(offer => offer.primary === true && offer.matched);
   return { primary, others: offers.filter(offer => offer !== primary) };
+};
+
+/** The few words under the one-tap button: why the daemon put this account first ("Default for ferretry"). */
+export const choiceReasonWords = (
+  saved: InputSaved | undefined,
+  primary: InputSavedOffer | undefined,
+): string | undefined => {
+  if (primary?.why === undefined) return undefined;
+  if (primary.why === 'site' && saved?.match === undefined) return 'Default for this site';
+  return signInChoiceWords(
+    { why: primary.why, ...(primary.project === undefined ? {} : { project: primary.project }) },
+    saved?.match ?? '',
+  );
+};
+
+/**
+ * The matched accounts the owner must choose between: two or more sign in here and the daemon chose none (no
+ * `primary`). Empty when one is chosen, when only one matches, or when the daemon sent no `signIn` on its offers
+ * (an older daemon, whose card keeps the typed field and the list as they were).
+ */
+export const pickOneOffers = (saved: InputSaved | undefined): readonly InputSavedOffer[] => {
+  const offers = saved?.offers ?? [];
+  if (offers.some(offer => offer.primary === true)) return [];
+  const matched = offers.filter(offer => offer.matched && offer.signIn !== undefined);
+  return matched.length >= 2 ? matched : [];
+};
+
+/** What a quiet "Always use for <project>" would write after a hand-tap on `offer`, or `undefined` when it is not offered. */
+export interface AlwaysUse {
+  readonly project: string;
+  /** The tapped account's label and the place the default is for, to say what the button would do. */
+  readonly label: string;
+  readonly key: string;
+  readonly body: PutAccountDefaultRequest;
+}
+
+/**
+ * "Always use for <project>" is offered after the owner hand-tapped a MATCHED account that is not already the
+ * project's default, on a card whose project the DAEMON resolved (`saved.project`, never the ferret's word) and
+ * whose key is a place. The line goes through the owner route, where it is held for the owner's confirmation.
+ * Nothing here chooses an account for anyone: the tap on this button is the permission.
+ */
+export const alwaysUseFor = (saved: InputSaved | undefined, tapped: InputSavedOffer): AlwaysUse | undefined => {
+  const project = saved?.project;
+  if (project === undefined || saved?.match === undefined) return undefined;
+  if (!tapped.matched || tapped.signIn === undefined) return undefined;
+  if (tapped.primary === true && tapped.why === 'project') return undefined;
+  const key = PlaceKeySchema.safeParse(saved.match);
+  if (!key.success) return undefined;
+  return {
+    project: project.name,
+    label: tapped.label,
+    key: key.data,
+    body: { scope: 'projects', within: project.id, key: key.data, account: tapped.id },
+  };
 };
 
 /** The one line on a card whose saved login signs in through a provider, or `undefined` for a password. */

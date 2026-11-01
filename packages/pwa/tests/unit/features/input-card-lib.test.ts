@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import { INPUT_ERROR_CODES, unpadInputValue } from '@ferretry/protocol';
 import {
+  alwaysUseFor,
   CAPTCHA_WARNING,
   chainWords,
+  choiceReasonWords,
   defaultSubmit,
   expiryWords,
   fieldProblem,
@@ -13,6 +15,7 @@ import {
   observedWords,
   offersPressEnter,
   PLAIN_NOTICE,
+  pickOneOffers,
   plainFlagWords,
   REOBSERVING,
   SAVE_TOO_SHORT,
@@ -37,6 +40,7 @@ import {
   field as cardField,
   NOW,
   offer,
+  primaryOffer,
   request,
   requestOf,
   saved,
@@ -107,15 +111,15 @@ describe('the card words', () => {
 });
 
 describe('offers ordering', () => {
-  it('makes the first MATCHED offer the primary and leaves the daemon order for the rest', () => {
+  it('makes the offer the DAEMON marked primary the primary and leaves the daemon order for the rest', () => {
     const first = offer({ id: 'A_ONE', label: 'one', matched: false });
     const second = offer({ id: 'B_TWO', label: 'two', matched: true });
-    const third = offer({ id: 'C_THREE', label: 'three', matched: true });
+    const third = primaryOffer({ id: 'C_THREE', label: 'three' });
 
     const { primary, others } = splitOffers(saved({ offers: [first, second, third] }));
 
-    expect(primary?.id).toBe('B_TWO');
-    expect(others.map(entry => entry.id)).toEqual(['A_ONE', 'C_THREE']);
+    expect(primary?.id).toBe('C_THREE');
+    expect(others.map(entry => entry.id)).toEqual(['A_ONE', 'B_TWO']);
   });
 
   it('never promotes a hinted offer that the daemon did not match', () => {
@@ -603,5 +607,49 @@ describe('signInWords', () => {
     expect(signInWords(saved({ signIn: { id: 'ACME', label: 'Acme', method: { kind: 'sso', name: 'Okta' } } }))).toBe(
       'Sign in with Okta (SSO)',
     );
+  });
+});
+
+describe("the one-tap choice is the daemon's", () => {
+  it('never falls back to the first matched offer', () => {
+    expect(splitOffers(saved({ offers: [offer({ matched: true })] })).primary).toBeUndefined();
+  });
+});
+
+describe('the reason, Pick one and Always use words', () => {
+  it("says why in the daemon's words", () => {
+    const at = saved({ match: 'app.clickup.com' });
+    expect(choiceReasonWords(at, primaryOffer({ why: 'ferret' }))).toBe('Ferret chose this');
+    expect(choiceReasonWords(at, primaryOffer({ why: 'project', project: 'ferretry' }))).toBe('Default for ferretry');
+    expect(choiceReasonWords(at, primaryOffer({ why: 'folder' }))).toBe('Default for this folder');
+    expect(choiceReasonWords(at, primaryOffer({ why: 'site' }))).toBe('Default for app.clickup.com');
+    expect(choiceReasonWords(at, primaryOffer({ why: 'only' }))).toBe('Only account here');
+    expect(choiceReasonWords(at, undefined)).toBeUndefined();
+  });
+
+  it('asks the owner to pick only when two or more signed-in accounts match and none is primary', () => {
+    const a = offer({ id: 'A_ONE', signIn: 'si_0123456789abcdef' });
+    const b = offer({ id: 'B_TWO', signIn: 'si_fedcba9876543210' });
+    expect(pickOneOffers(saved({ offers: [a, b] })).map(each => each.id)).toEqual(['A_ONE', 'B_TWO']);
+    expect(pickOneOffers(saved({ offers: [a] }))).toEqual([]);
+    expect(pickOneOffers(saved({ offers: [primaryOffer({ id: 'A_ONE' }), b] }))).toEqual([]);
+    expect(pickOneOffers(saved({ offers: [offer({ id: 'A_ONE' }), offer({ id: 'B_TWO' })] }))).toEqual([]);
+  });
+
+  it("offers Always use only for a hand-tapped matched account, in the daemon's project, at a place key", () => {
+    const project = { id: 'p_ferretry', name: 'ferretry' };
+    const at = saved({ match: 'app.clickup.com', project });
+    const tapped = offer({ id: 'HOME', label: 'Home', signIn: 'si_fedcba9876543210' });
+    expect(alwaysUseFor(at, tapped)?.body).toEqual({
+      scope: 'projects',
+      within: 'p_ferretry',
+      key: 'app.clickup.com',
+      account: 'HOME',
+    });
+    expect(alwaysUseFor(saved({ match: 'app.clickup.com' }), tapped)).toBeUndefined();
+    expect(alwaysUseFor(at, { ...tapped, matched: false })).toBeUndefined();
+    expect(alwaysUseFor(at, offer({ id: 'HOME' }))).toBeUndefined();
+    expect(alwaysUseFor(at, primaryOffer({ why: 'project', project: 'ferretry' }))).toBeUndefined();
+    expect(alwaysUseFor(saved({ match: 'NOT A KEY', project }), tapped)).toBeUndefined();
   });
 });

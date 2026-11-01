@@ -13,8 +13,8 @@ import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { type SecretSubsystem, secretRoutes } from '../../../../src/lib/runtime/mounts/secrets.ts';
-import { jsonBody, request } from '../../api/support.ts';
 import { SecretStoreError } from '../../../../src/lib/secrets/index.ts';
+import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, GRANTED, human, MemoryLoginIndex, plantSeed, secretSubsystem } from './support.ts';
 
 /**
@@ -302,5 +302,66 @@ describe('the account routes, the rest of their answers', () => {
   it('should serve no look-alike route where the daemon holds no look-alike answer', () => {
     const { lookAlike: _none, ...bare } = secretSubsystem();
     should(secretRoutes(bare).some(route => route.path === '/v1/accounts/look-alike')).be.false();
+  });
+});
+
+describe('GET /v1/accounts/hint orders its "default" by the calling session (R1-5)', () => {
+  async function twoOnGithub() {
+    const w = await world();
+    await w.ok('PUT', '/v1/accounts/GITHUB_WORK', { label: 'Work', username: 'work', password: PASSWORD });
+    await w.ok('POST', '/v1/accounts/GITHUB_WORK/sign-ins', {
+      place: { kind: 'site', domains: ['github.com'], match: [] },
+    });
+    const asked: (string | undefined)[] = [];
+    const subsystem: SecretSubsystem = {
+      ...w.subsystem,
+      signInChoice: {
+        of: async sessionId => {
+          asked.push(sessionId);
+          return {
+            project: { id: 'p1', name: 'ferretry', nameIsUnique: true },
+            defaults: { projects: { ferretry: { 'github.com': 'GITHUB_WORK' } } },
+          };
+        },
+      },
+    };
+    return { subsystem, asked };
+  }
+  const defaultOf = async (response: ReturnType<typeof dispatchAs>) => {
+    const parsed = AccountHintListSchema.parse(await jsonBody(await response));
+    return parsed.hints.filter(hint => hint.default !== undefined).map(hint => [hint.account, hint.default]);
+  };
+
+  it('should name the project default for a ferret, and ask for the session its credential names', async () => {
+    const { subsystem, asked } = await twoOnGithub();
+
+    const picked = await defaultOf(
+      dispatchAs(agentIn('ferret-1'), subsystem, 'GET', '/v1/accounts/hint?site=github.com'),
+    );
+
+    should(picked).deepEqual([[picked[0]?.[0], { by: 'project', project: 'ferretry' }]]);
+    should(JSON.stringify(picked)).containEql('GITHUB_WORK');
+    should(asked).deepEqual(['ferret-1']);
+  });
+
+  it('should ignore a session, project or folder the ferret puts in the query', async () => {
+    const { subsystem, asked } = await twoOnGithub();
+
+    await dispatchAs(
+      agentIn('ferret-1'),
+      subsystem,
+      'GET',
+      '/v1/accounts/hint?site=github.com&session=ferret-2&project=other&folder=/etc',
+    );
+
+    should(asked).deepEqual(['ferret-1']);
+  });
+
+  it('should ask for no session when the owner asks, not even from a session header', async () => {
+    const { subsystem, asked } = await twoOnGithub();
+
+    await dispatch(subsystem, 'GET', '/v1/accounts/hint?site=github.com');
+
+    should(asked).deepEqual([undefined]);
   });
 });

@@ -4,7 +4,8 @@
  *
  *   bun harness/input-card-screenshot.tsx [out-dir] [states]   # writes input-card-*.png, input-p2-*.png, saved-logins-*.png
  *
- * `states` is a comma list (first,next,google,chain,codeterm,signin,unverified,logins) when only some are wanted.
+ * `states` is a comma list (first,next,google,chain,codeterm,signin,unverified,logins, and the account-choice cards
+ * `choice-<ferret|project|folder|site|only|pick>-<terminal|browser>` and `always-<terminal|browser>`) when only some are wanted.
  *
  * Fake fixtures only (`tests/support/input-fixtures.ts`): no real account, no real daemon, and the typed value
  * is a made-up phrase. Two card states are captured. "first" is the first time a password is asked for: a
@@ -48,7 +49,15 @@ const view = new URLSearchParams(location.search).get('view');
 const refuse = async () => {
   throw new Error('the harness has no daemon');
 };
-const client = { request: refuse } as never;
+// Only the two calls the account-choice shots make: a delivery and the owner's default write.
+const client = {
+  request: async (path, schema, init) => {
+    if (path.endsWith('/deliver'))
+      return schema.parse({ id: 'ab'.repeat(16), deliveryId: JSON.parse(init.body).deliveryId, state: 'delivered', submitted: true });
+    if (path === '/v1/accounts/defaults') return schema.parse({ defaults: {} });
+    return await refuse();
+  },
+} as never;
 const quiet = async () => true;
 
 const first = withSaved(
@@ -168,9 +177,61 @@ const unverified = fakeRequest({
     canonical: true,
   },
 });
-const request = { first, next, google, chain, codeterm, signin, unverified }[view] ?? first;
+// WHICH ACCOUNT IS FIRST, AND WHY: the one-tap card with the reason under it in each state, and "Pick one".
+const ACCOUNT_CHOICE = /^(?:choice-(ferret|project|folder|site|only|pick)|always)-(terminal|browser)$/.exec(view ?? '');
+const choiceKind = ACCOUNT_CHOICE?.[2];
+const choiceWhy = ACCOUNT_CHOICE?.[1] ?? 'pick';
+const choiceAt = choiceKind === 'browser' ? 'app.clickup.com' : 'sudo@kirin-box';
+const choiceAccounts =
+  choiceKind === 'browser'
+    ? [
+        offer({ id: 'CLICKUP_WORK', label: 'ClickUp (work)', username: 'kirin@acme.test', signIn: 'si_0123456789abcdef' }),
+        offer({ id: 'CLICKUP_HOME', label: 'ClickUp (home)', username: 'kirin@home.test', signIn: 'si_fedcba9876543210' }),
+      ]
+    : [
+        offer({ id: 'SUDO_KIRIN', label: 'sudo as kirin', username: 'kirin', signIn: 'si_0123456789abcdef' }),
+        offer({ id: 'SUDO_ROOT', label: 'sudo as root', username: 'root', signIn: 'si_fedcba9876543210' }),
+      ];
+const choiceOffers =
+  choiceWhy === 'pick'
+    ? choiceAccounts
+    : [
+        {
+          ...choiceAccounts[0],
+          primary: true,
+          why: choiceWhy,
+          ...(choiceWhy === 'project' ? { project: 'ferretry' } : {}),
+        },
+        choiceAccounts[1],
+      ];
+const choiceSaved = saved({ match: choiceAt, project: { id: 'p_ferretry', name: 'ferretry' }, offers: choiceOffers });
+const choiceTerminal = withSaved(choiceSaved);
+const choiceBrowser = fakeRequest({
+  target: { kind: 'browser', key: 'app' },
+  prompt: 'Sign in to ClickUp',
+  sensitivity: 'secret',
+  fields: [
+    field('secret', {
+      id: 'password',
+      label: 'Password',
+      risk: { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' },
+    }),
+  ],
+  risk: { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' },
+  observed: page(
+    [browserField('password', { frameOrigin: 'https://app.clickup.com', field: { tag: 'input', type: 'password' } })],
+    'https://app.clickup.com',
+  ),
+  saved: choiceSaved,
+});
+const choiceRequest = choiceKind === 'browser' ? choiceBrowser : choiceTerminal;
+const request = ACCOUNT_CHOICE !== null ? choiceRequest : ({ first, next, google, chain, codeterm, signin, unverified }[view] ?? first);
 const subject =
-  view === 'google' || view === 'chain'
+  ACCOUNT_CHOICE !== null
+    ? choiceKind === 'browser'
+      ? 'Sign in to ClickUp'
+      : 'Type it into sudo'
+    : view === 'google' || view === 'chain'
     ? 'Sign in to Google'
     : view === 'signin'
       ? 'Sign in to Vercel'
@@ -267,9 +328,23 @@ run('./node_modules/.bin/tailwindcss', [
 ]);
 
 const wanted = process.argv[3]?.split(',');
-const STATES = (['first', 'next', 'google', 'chain', 'codeterm', 'signin', 'unverified', 'logins'] as const).filter(
-  state => wanted === undefined || wanted.includes(state),
-);
+const CHOICE_STATES = ['terminal', 'browser'].flatMap(kind => [
+  ...['ferret', 'project', 'folder', 'site', 'only', 'pick'].map(why => `choice-${why}-${kind}`),
+  `always-${kind}`,
+]);
+const STATES = (
+  [
+    'first',
+    'next',
+    'google',
+    'chain',
+    'codeterm',
+    'signin',
+    'unverified',
+    'logins',
+    ...CHOICE_STATES,
+  ] as readonly string[]
+).filter(state => wanted === undefined || wanted.includes(state));
 
 const server = Bun.serve({
   hostname: '127.0.0.1',
@@ -288,6 +363,9 @@ const server = Bun.serve({
     return new Response(file);
   },
 });
+
+const choiceAccountsFor = (state: string): readonly string[] =>
+  state.endsWith('browser') ? ['CLICKUP_WORK', 'CLICKUP_HOME'] : ['SUDO_KIRIN', 'SUDO_ROOT'];
 
 const VIEWPORTS = [
   { name: 'phone', width: 390, height: 844, shot: 1_320, touch: true },
@@ -326,6 +404,12 @@ try {
             await page.locator('[data-input-field="email"] [data-input-value]').fill('kirin@example.test');
           // A made-up code, typed so the shot shows it is visible as it is typed.
           if (state === 'chain' || state === 'codeterm') await page.locator('[data-input-value]').fill('481516');
+          // After a hand-tap on the second account: the quiet "Always use for ferretry" under the sent line.
+          if (state.startsWith('always-')) {
+            const second = choiceAccountsFor(state)[1];
+            await page.locator(`[data-input-offer="${second}"]`).click();
+            await page.locator('[data-input-always-button]').waitFor({ state: 'visible' });
+          }
           if (state === 'logins') {
             await page.locator('[aria-label="Edit Vercel"]').evaluate(el => (el as HTMLElement).click());
             await page

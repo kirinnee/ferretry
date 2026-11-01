@@ -142,9 +142,10 @@ folders:
     github.com: GITHUB_WORK
 ```
 
-**Not read by the card yet.** This file is stored, checked, kept true across account acts and warned about, but the
-daemon does not yet feed it to the card or to `account_hint`: the project, folder and site lines take effect when the
-credential phase R1-5 wires them in. Until then a line changes nothing a card offers.
+The daemon feeds this file to the card and to `account_hint` ([which account is first](input-requests.md#which-account-is-first-and-why)):
+the project is the asking session's board project and the folder its recorded working directory (Unfiled only), both
+read by the daemon and never given by a ferret. A site line also accepts a place named by an account's `match` hosts.
+Changing a line is one queued read-modify-write step, so two changes made at once cannot lose one.
 
 The card chooses by the ferret's own hint, then the project line, then the folder line, then the site line, then
 the only sign-in matched ([input-requests.md](input-requests.md#the-next-time-one-tap)). A default only ever

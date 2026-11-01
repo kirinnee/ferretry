@@ -12,6 +12,7 @@ import {
   field,
   NOW,
   offer,
+  primaryOffer,
   request,
   requestOf,
   saved,
@@ -143,7 +144,7 @@ describe('the card', () => {
 });
 
 describe('next time: a saved login', () => {
-  const matched = offer({ username: 'kirin' });
+  const matched = primaryOffer({ username: 'kirin' });
 
   it('puts one tap first, and a tap sends the handle and no value', async () => {
     const { q, calls } = await show(withSaved(saved({ offers: [matched] })));
@@ -422,7 +423,11 @@ describe('where the value may live', () => {
 describe('while Ferretry looks at the target again', () => {
   it('disables Use and Send and says so', async () => {
     const view = await show(
-      withSaved(saved({ offers: [offer()] }), { observed: undefined, risk: undefined, observedDigest: undefined }),
+      withSaved(saved({ offers: [primaryOffer()] }), {
+        observed: undefined,
+        risk: undefined,
+        observedDigest: undefined,
+      }),
     );
 
     expect(view.q('[data-input-facts]')?.textContent).toContain(REOBSERVING);
@@ -502,7 +507,7 @@ describe('the action row and the embedded card', () => {
   });
 
   it('keeps Cancel request in the action row on a one-tap card, with no Send until typing', async () => {
-    const { q } = await show(withSaved(saved({ offers: [offer()] })));
+    const { q } = await show(withSaved(saved({ offers: [primaryOffer()] })));
     const row = must(q('[data-input-actions]'), 'the action row');
 
     expect([...row.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Cancel request']);
@@ -701,7 +706,7 @@ describe('a card of several fields', () => {
 
   it('is one tap for a saved login, which sends the handle and fills every field', async () => {
     const view = await show(
-      googleLogin({ saved: saved({ offers: [offer({ id: 'GOOGLE_KIRIN', label: 'Google' })] }) }),
+      googleLogin({ saved: saved({ offers: [primaryOffer({ id: 'GOOGLE_KIRIN', label: 'Google' })] }) }),
     );
 
     expect(inside(view, 'email')).toBeNull();
@@ -885,7 +890,7 @@ describe('the card, review regressions', () => {
       level: 'amber',
       reason: 'This is not a password field, so the value will show on the page.',
     } as const;
-    const card = withSaved(saved({ offers: [offer({ username: 'kirin' })] }), {
+    const card = withSaved(saved({ offers: [primaryOffer({ username: 'kirin' })] }), {
       target: { kind: 'browser', key: 'app' },
       sensitivity: 'secret',
       fields: [

@@ -15,6 +15,7 @@ import type {
   InputTargetFacts,
   LoginEntryId,
   LoginFieldRole,
+  SignInChoiceContext,
   TwoFactorId,
 } from '@ferretry/protocol';
 
@@ -300,6 +301,15 @@ export interface InputLoginPort {
     match: string | undefined,
     fields: { readonly username?: string; readonly password?: string },
   ): Promise<void>;
+}
+
+/**
+ * WHO IS ASKING, for the order of a sign-in card: the calling session's board project and folder and the defaults the
+ * owner set. Answered from what the daemon knows of the session, never from the raise; nothing in it makes a sign-in a
+ * match, it only orders the ones the daemon matched.
+ */
+export interface InputChoicePort {
+  of(sessionId: string): Promise<Omit<SignInChoiceContext, 'hint'>>;
 }
 
 export interface InputClock {
