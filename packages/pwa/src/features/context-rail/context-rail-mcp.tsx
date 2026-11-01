@@ -10,13 +10,9 @@
 
 import type { McpInventory } from '@ferretry/protocol';
 import { Plus } from 'lucide-react';
-import {
-  CatalogRowTools,
-  type CatalogRowsHost,
-  AddCatalogEntry,
-  useCatalogInstalls,
-} from '../catalogs/catalog-row-tools.tsx';
-import { sortedMcpServers } from '../mcp/mcp-model.ts';
+import { CatalogItemRow } from '../catalogs/catalog-item-row.tsx';
+import { AddCatalogEntry, type CatalogRowsHost, useCatalogRows } from '../catalogs/catalog-row-tools.tsx';
+import { MCP_SCOPE_LABEL, MCP_SCOPE_TITLE, MCP_TRANSPORT_LABEL, sortedMcpServers } from '../mcp/mcp-model.ts';
 import { type McpActionsHost, McpServerRow, useMcpServerActions } from '../mcp/mcp-server-row.tsx';
 import {
   CONTEXT_RAIL_SEARCH_LABEL,
@@ -45,7 +41,7 @@ export interface ContextMcpPanelProps {
   readonly machineName: string;
   /** Opens Actions › Add MCP server… — the same form, from the list it adds to. */
   readonly onAdd?: () => void;
-  /** Lets rows offer "Add to catalog…", say where an installed server came from, and install from a file. */
+  /** Lets rows offer Share and Add, say where an installed server came from, and install from a file. */
   readonly catalogs?: CatalogRowsHost;
   readonly query: string;
   readonly onQueryChange: (query: string) => void;
@@ -75,7 +71,7 @@ export function ContextMcpPanel({
     reload,
   );
 
-  const installed = useCatalogInstalls(catalogs);
+  const rows = useCatalogRows(catalogs);
 
   if (load.kind === 'failed')
     return (
@@ -132,15 +128,34 @@ export function ContextMcpPanel({
         <ul className="m-0 flex list-none flex-col p-0" data-context-list="mcp">
           {visible.map(server => (
             <li key={server.id} className="border-b border-border-soft" data-context-mcp={server.name}>
-              <McpServerRow server={server} actions={actions} nowMs={nowMs} online={signIn !== undefined} />
-              {catalogs === undefined ? null : (
-                <CatalogRowTools
+              {catalogs === undefined ? (
+                <McpServerRow server={server} actions={actions} nowMs={nowMs} online={signIn !== undefined} />
+              ) : (
+                <CatalogItemRow
                   host={catalogs}
+                  read={rows}
                   kind="mcp"
-                  name={server.name}
+                  itemName={server.name}
+                  label={server.name}
                   source={{ kind: 'mcp', mcp: server.id }}
-                  read={installed}
-                />
+                  scope={{
+                    label: MCP_SCOPE_LABEL[server.scope],
+                    title: MCP_SCOPE_TITLE[server.scope],
+                    tone: server.scope === 'project' || server.scope === 'local' ? 'accent' : 'muted',
+                  }}
+                  description={MCP_TRANSPORT_LABEL[server.transport]}
+                  dimmed={server.shadowedBy !== undefined}
+                >
+                  <div className="px-xs">
+                    <McpServerRow
+                      server={server}
+                      actions={actions}
+                      nowMs={nowMs}
+                      online={signIn !== undefined}
+                      compact
+                    />
+                  </div>
+                </CatalogItemRow>
               )}
             </li>
           ))}

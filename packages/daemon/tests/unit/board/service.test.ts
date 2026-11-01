@@ -32,6 +32,7 @@ import {
   FakeDone,
   FakeFocus,
   FakeLanes,
+  FakeParents,
   FakeReopen,
   FakeSessions,
   lanes,
@@ -1184,6 +1185,92 @@ describe('handing a card to a sub-ferret', () => {
     // Assert
     should(handed).match({ id: 'F1', assignee: 'child' });
     should(ports.warnings.some(warning => warning.includes('could not focus child'))).be.true();
+  });
+});
+
+describe('an assignee handing its card down', () => {
+  const parents = new FakeParents({ grandchild: 'child', sibling: 'lead', kid: 'stranger', child: 'lead' });
+  const assigned = () => serviceWith([card({ assignee: 'child' })], { parents });
+  const handed = (to: string | null) => action({ action: 'assign', assignee: to });
+
+  it('should let the assignee assign it to its own sub-ferret and record it as handed down', async () => {
+    // Arrange
+    const { ports, service } = assigned();
+
+    // Act
+    await service.act('F1', handed('grandchild'), child);
+
+    // Assert
+    should(stored(ports)).match({ owner: 'lead', assignee: 'grandchild' });
+    should(lastEvent(ports)).match({
+      type: 'assigned',
+      from: 'child',
+      to: 'grandchild',
+      handedDown: true,
+      actor: { kind: 'ferret', sessionId: 'child' },
+    });
+  });
+
+  it('should refuse a sibling, an ancestor, nobody and itself, naming the one write an assignee has', async () => {
+    // Arrange
+    const { ports, service } = assigned();
+
+    // Act
+    const refusals = [
+      await refusal(service.act('F1', handed('sibling'), child)),
+      await refusal(service.act('F1', handed('lead'), child)),
+      await refusal(service.act('F1', handed('worker'), child)),
+      await refusal(service.act('F1', handed(null), child)),
+      await refusal(service.act('F1', handed('child'), child)),
+    ];
+
+    // Assert
+    should(refusals.map(error => error.code)).eql(['forbidden', 'forbidden', 'forbidden', 'forbidden', 'forbidden']);
+    should(refusals[0]?.message).containEql('its assignee may only hand it down to one of its own sub-ferrets');
+    should(stored(ports).assignee).equal('child');
+  });
+
+  it('should refuse a ferret that is not the assignee, even for its own sub-ferret', async () => {
+    // Arrange
+    const { ports, service } = assigned();
+
+    // Act
+    const error = await refusal(service.act('F1', handed('kid'), stranger));
+
+    // Assert
+    should(error.code).equal('forbidden');
+    should(error.message).not.containEql('hand it down');
+    should(stored(ports).assignee).equal('child');
+  });
+
+  it('should keep the owner side reassigning without marking it handed down', async () => {
+    // Arrange
+    const { ports, service } = assigned();
+
+    // Act
+    await service.act('F1', handed('grandchild'), lead);
+
+    // Assert
+    should(lastEvent(ports)).not.have.property('handedDown');
+  });
+
+  it('should hand an existing card down on `fy new --card`, then refuse a sibling and a non-assignee', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ owner: 'owner-lead', assignee: 'lead' })], {
+      parents: new FakeParents({ child: 'lead', sibling: 'other' }),
+    });
+
+    // Act
+    const sibling = await refusal(service.handOver('F1', 'lead', 'sibling'));
+    const outsider = await refusal(service.requireHandOver('F1', 'stranger'));
+    await should(service.requireHandOver('F1', 'lead')).be.fulfilled();
+    const handedDown = await service.handOver('F1', 'lead', 'child');
+
+    // Assert
+    should(sibling.code).equal('forbidden');
+    should(outsider.code).equal('forbidden');
+    should(handedDown).match({ assignee: 'child', owner: 'owner-lead' });
+    should(lastEvent(ports)).match({ type: 'assigned', from: 'lead', to: 'child', handedDown: true });
   });
 });
 

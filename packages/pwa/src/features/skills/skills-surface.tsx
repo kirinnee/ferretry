@@ -24,11 +24,12 @@
  *     that label, and the chip keeps it on hover as a `title`.
  */
 
-import { Eye, Loader2, MessageSquarePlus, RefreshCw, Search, Sparkles } from 'lucide-react';
+import { Loader2, RefreshCw, Search, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
 
 import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from '../../lib/daemon-scope.ts';
-import { Button } from '../../shell/primitives.tsx';
+import { CatalogItemRow } from '../catalogs/catalog-item-row.tsx';
+import { type CatalogRowsHost, useCatalogRows } from '../catalogs/catalog-row-tools.tsx';
 import type { SkillsCatalogLoader } from './skills-api.ts';
 import {
   groupSkills,
@@ -51,10 +52,13 @@ export interface SkillsCatalogListProps {
   readonly query: string;
   /** Draft-only boundary. There is intentionally no submit callback. */
   readonly onInsert: (invocation: string) => void;
+  /** Lets rows offer Share and Add and show their version. Without it the rows are plain. */
+  readonly catalogs?: CatalogRowsHost;
 }
 
 /** The grouped rows, hostless so the harness and tests render exactly this. */
-export function SkillsCatalogList({ catalog, query, onInsert }: SkillsCatalogListProps) {
+export function SkillsCatalogList({ catalog, query, onInsert, catalogs }: SkillsCatalogListProps) {
+  const rows = useCatalogRows(catalogs);
   const detailsPrefix = useId();
   const [expanded, setExpanded] = useState<string | null>(null);
   const groups = groupSkills(catalog.skills, query);
@@ -90,56 +94,27 @@ export function SkillsCatalogList({ catalog, query, onInsert }: SkillsCatalogLis
                 const detailId = `${detailsPrefix}-${group.scope}-${skill.name}`;
                 const detailOpen = expanded === key;
                 return (
-                  <li key={skill.name}>
-                    <article className="flex min-w-0 flex-col gap-2 px-3 py-2" data-skill={skill.name}>
-                      <span className="flex min-w-0 items-center justify-between gap-2">
-                        <code className="min-w-0 truncate font-mono text-cell font-semibold text-accent">
-                          {invocation}
-                        </code>
-                        <span className="flex shrink-0 items-center gap-2 text-meta text-muted">
-                          <span
-                            className="rounded border border-border-soft bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] leading-none text-muted"
-                            title={origin}
-                          >
-                            {skill.origin}
-                          </span>
-                        </span>
-                      </span>
-                      <span className="text-cell leading-base text-muted">{skill.description}</span>
-                      {/* TWO ACTIONS, ONE OF THEM PRIMARY. Using a skill is what
-                          a reader came here to do, so it is the filled control;
-                          reading its detail is the cautious second look and
-                          keeps the resting outline. Both are the shared `Button`
-                          so they inherit this build's control height — floored
-                          to the touch target on a phone — and its always-on
-                          focus outline. */}
-                      <span className="flex flex-wrap items-center gap-2">
-                        <Button
-                          aria-label={`Use ${invocation} in chat`}
-                          onClick={() => insertSkillIntoDraft(onInsert, catalog.harness, skill.name)}
-                          size="sm"
-                          type="button"
-                          variant="primary"
-                        >
-                          <MessageSquarePlus size={14} aria-hidden="true" />
-                          Use in chat
-                        </Button>
-                        <Button
-                          aria-controls={detailId}
-                          aria-expanded={detailOpen}
-                          aria-label={`${detailOpen ? 'Hide' : 'View'} full detail for ${invocation}`}
-                          onClick={() => setExpanded(current => (current === key ? null : key))}
-                          size="sm"
-                          type="button"
-                        >
-                          <Eye size={14} aria-hidden="true" />
-                          {detailOpen ? 'Hide detail' : 'View full detail'}
-                        </Button>
-                      </span>
+                  <li key={skill.name} data-skill={skill.name}>
+                    <CatalogItemRow
+                      {...(catalogs === undefined ? {} : { host: catalogs, read: rows })}
+                      kind="skill"
+                      itemName={skill.name}
+                      label={invocation}
+                      source={{ kind: 'skill', skill: skill.name }}
+                      scope={{
+                        label: skillScopeLabel(skill.scope),
+                        title: origin,
+                        tone: skill.scope === 'project' ? 'accent' : 'muted',
+                      }}
+                      description={skill.description}
+                      onUse={() => insertSkillIntoDraft(onInsert, catalog.harness, skill.name)}
+                      onOpen={() => setExpanded(current => (current === key ? null : key))}
+                      openLabel={detailOpen ? 'Hide detail' : 'Show detail'}
+                    >
                       {detailOpen ? (
                         <section
                           aria-label={`Full detail for ${invocation}`}
-                          className="rounded-control border border-border-soft bg-surface-2 p-3 text-ui"
+                          className="mx-xs mb-xs rounded-control border border-border-soft bg-surface-2 p-3 text-ui"
                           data-skill-detail={skill.name}
                           id={detailId}
                         >
@@ -156,7 +131,7 @@ export function SkillsCatalogList({ catalog, query, onInsert }: SkillsCatalogLis
                           </dl>
                         </section>
                       ) : null}
-                    </article>
+                    </CatalogItemRow>
                   </li>
                 );
               })}
@@ -187,13 +162,15 @@ export interface SkillsSurfaceProps {
   // biome-ignore lint/suspicious/noConfusingVoidType: a host that returns nothing must still satisfy this prop
   readonly onInsert: (invocation: string) => string | void;
   readonly loadCatalog: SkillsCatalogLoader;
+  /** Lets rows offer Share and Add and show their version. */
+  readonly catalogs?: CatalogRowsHost;
 }
 
 interface SkillsSurfaceBodyProps extends SkillsSurfaceProps {
   readonly onRefresh: () => void;
 }
 
-function SkillsSurfaceBody({ scope, onInsert, loadCatalog, onRefresh }: SkillsSurfaceBodyProps) {
+function SkillsSurfaceBody({ scope, onInsert, loadCatalog, catalogs, onRefresh }: SkillsSurfaceBodyProps) {
   const searchId = useId();
   const [state, setState] = useState<LoadState>('loading');
   const [catalog, setCatalog] = useState<SkillsCatalog | null>(null);
@@ -309,7 +286,12 @@ function SkillsSurfaceBody({ scope, onInsert, loadCatalog, onRefresh }: SkillsSu
           </div>
         )}
         {state === 'ready' && catalog !== null && (
-          <SkillsCatalogList catalog={catalog} query={query} onInsert={insert} />
+          <SkillsCatalogList
+            catalog={catalog}
+            query={query}
+            onInsert={insert}
+            {...(catalogs === undefined ? {} : { catalogs })}
+          />
         )}
       </div>
 
@@ -330,7 +312,7 @@ function SkillsSurfaceBody({ scope, onInsert, loadCatalog, onRefresh }: SkillsSu
  * gained, lost or renamed skills, so resetting the search and the last-inserted
  * announcement with it is the honest behaviour as well as the simpler one.
  */
-export function SkillsSurface({ scope, onInsert, loadCatalog }: SkillsSurfaceProps) {
+export function SkillsSurface({ scope, onInsert, loadCatalog, catalogs }: SkillsSurfaceProps) {
   const [reload, setReload] = useState(0);
   return (
     <SkillsSurfaceBody
@@ -338,6 +320,7 @@ export function SkillsSurface({ scope, onInsert, loadCatalog }: SkillsSurfacePro
       scope={scope}
       onInsert={onInsert}
       loadCatalog={loadCatalog}
+      {...(catalogs === undefined ? {} : { catalogs })}
       onRefresh={() => setReload(value => value + 1)}
     />
   );

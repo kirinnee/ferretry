@@ -46,6 +46,7 @@
         "harness/sharing-capability-screenshot.tsx",
         "harness/catalogs-screenshot.tsx",
         "harness/catalogs-share-screenshot.tsx",
+        "harness/catalogs-rows-screenshot.tsx",
         "harness/shared-screenshot.tsx",
         "harness/sharing-screenshot.tsx",
         "harness/screenshot.ts",

@@ -71,6 +71,8 @@ export interface CardContext {
   /** Recorded beside the actor, never inside it (`BoardActorVia`); absent for anyone but the admin token. */
   readonly actorVia?: BoardActorVia;
   readonly standing: BoardStanding;
+  /** True when the caller is the card's assignee and the new assignee is its own descendant (`mayHandDown`). */
+  readonly handsDown?: boolean;
   /** The lanes of the card's own board. */
   readonly laneSet: LaneSet;
   readonly index: BoardIndex;
@@ -130,6 +132,16 @@ export const requireStanding = (
   if (!mayDo(operation, standing)) {
     throw new BoardError('forbidden', refusalMessage(operation, card), OPERATION_STANDINGS[operation]);
   }
+};
+
+/** The refusal for a reassign: an assignee is told the one reassign it has, handing the card down. */
+const requireAssign = (standing: BoardStanding, card: Pick<BoardTask, 'id' | 'owner' | 'assignee'>): void => {
+  if (mayDo('assign', standing)) return;
+  const message =
+    standing === 'assignee'
+      ? `${refusalMessage('assign', card)}; its assignee may only hand it down to one of its own sub-ferrets`
+      : refusalMessage('assign', card);
+  throw new BoardError('forbidden', message, OPERATION_STANDINGS.assign);
 };
 
 const laneNames = (laneSet: LaneSet): string => laneSet.lanes.map(lane => lane.id).join(', ');
@@ -845,11 +857,20 @@ export const applyAction = (
     case 'trigger':
       return report(card, action, context);
     case 'assign':
-      requireStanding('assign', context.standing, card);
+      if (context.handsDown !== true) requireAssign(context.standing, card);
       if (action.assignee === card.assignee) throw new BoardError('invalid', `${ref} is already assigned that way`);
       return {
         task: {
-          ...withEvent(card, { type: 'assigned', from: card.assignee, to: action.assignee }, context),
+          ...withEvent(
+            card,
+            {
+              type: 'assigned',
+              from: card.assignee,
+              to: action.assignee,
+              ...(context.handsDown === true ? { handedDown: true as const } : {}),
+            },
+            context,
+          ),
           assignee: action.assignee,
         },
       };

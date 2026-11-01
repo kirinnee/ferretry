@@ -16,6 +16,9 @@
  *
  * Re-plan means retitle, rewrite the brief, reassign, drop, reorder and re-parent (which also needs `adopt` on
  * the new parent: a card never moves onto a tree its caller cannot write).
+ *
+ * One exception inside re-plan: the card's ASSIGNEE may hand it down to a descendant of its own ({@link mayHandDown}),
+ * so a lead given a card can start a sub-ferret on it without making a duplicate. Never sideways or upward.
  */
 import { type BoardTask, formatTaskRef } from '@ferretry/protocol';
 
@@ -118,6 +121,22 @@ export const standingOf = (
 /** Whether a standing admits an operation. */
 export const mayDo = (operation: BoardOperation, standing: BoardStanding): boolean =>
   OPERATION_STANDINGS[operation].includes(standing);
+
+/**
+ * Whether an assignee may assign the card to `assignee`: only its own descendant. `assigneeAncestors` is the
+ * target's lineage read from the daemon's session registry, never from the request.
+ */
+export const mayHandDown = (
+  caller: BoardCaller,
+  standing: BoardStanding,
+  assignee: string | null,
+  assigneeAncestors: readonly string[],
+): boolean =>
+  standing === 'assignee' &&
+  caller.kind === 'ferret' &&
+  assignee !== null &&
+  assignee !== caller.sessionId &&
+  assigneeAncestors.includes(caller.sessionId);
 
 const STANDING_WORDS: Readonly<Record<BoardStanding, string>> = {
   'owner-human': 'the owner',
