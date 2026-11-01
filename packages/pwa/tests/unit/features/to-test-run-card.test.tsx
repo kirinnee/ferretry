@@ -79,6 +79,21 @@ describe('the quick-answer run — the card to test', () => {
     expect(skipped).toEqual(['next']);
   });
 
+  it('does not skip when the touch was held first: that is the reader selecting text', async () => {
+    const skipped: string[] = [];
+    const root = await mountStep(rowOf('Try the board', null), () => skipped.push('next'));
+    const title = must(root.querySelector<HTMLElement>('[data-to-test-title]'), 'title link');
+    const at = (event: PointerEvent, timeStamp: number): PointerEvent => {
+      Object.defineProperty(event, 'timeStamp', { value: timeStamp });
+      return event;
+    };
+    await interact(() => title.dispatchEvent(at(pointer('pointerdown', 300), 1000)));
+    await interact(() => title.dispatchEvent(at(pointer('pointermove', 340), 1600)));
+    await interact(() => title.dispatchEvent(at(pointer('pointermove', 600), 1700)));
+    await interact(() => title.dispatchEvent(at(pointer('pointerup', 600), 1700)));
+    expect(skipped).toEqual([]);
+  });
+
   it('does not skip on a swipe down that starts in the steps: that is the card scrolling', async () => {
     const skipped: string[] = [];
     const root = await mountStep(rowOf('Try the board', null), () => skipped.push('next'));

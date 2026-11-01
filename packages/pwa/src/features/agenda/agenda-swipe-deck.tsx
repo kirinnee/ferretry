@@ -55,10 +55,12 @@ import { DeckDownContext } from './deck-down-context.ts';
 import { SwipeCompass } from './swipe-reveal.tsx';
 import { type CompassAvailable, compassReading, type SnoozeLength, snoozeUntil } from './agenda-compass.ts';
 import {
+  isLongPress,
   isTouch,
   type Lock,
   lockOf,
   startsInHead,
+  startsInSelection,
   startsInSidewaysScroller,
   startsOnInteractive,
 } from './agenda-swipe-gesture.ts';
@@ -270,6 +272,7 @@ interface Gesture {
   readonly head: boolean;
   /** It began inside a region that swipes on its own (`ownGesturesIn`): the deck keeps only a pull down from there. */
   readonly own: boolean;
+  readonly startedAt: number;
   moved: boolean;
   lock: Lock;
   dx: number;
@@ -450,6 +453,7 @@ export function AgendaSwipeDeck({
       top === undefined ||
       !isTouch(event) ||
       (startsOnInteractive(event.target) && !own) ||
+      startsInSelection(event.target) ||
       startsInSidewaysScroller(event.target, event.currentTarget)
     )
       return;
@@ -460,6 +464,7 @@ export function AgendaSwipeDeck({
       width: event.currentTarget.getBoundingClientRect().width,
       head: own || startsInHead(event.target),
       own,
+      startedAt: event.timeStamp,
       moved: false,
       lock: 'sideways',
       dx: 0,
@@ -475,6 +480,11 @@ export function AgendaSwipeDeck({
     if (!current.moved) {
       const lock = lockOf(current.dx, current.dy);
       if (lock === null) return;
+      if (isLongPress(event.timeStamp - current.startedAt)) {
+        // Held before it moved: the reader is selecting text, and the browser has this touch.
+        gesture.current = null;
+        return;
+      }
       if (current.own && (lock === 'sideways' || current.dy < 0)) {
         // The head's and the row's own swipes: everything but a pull down is theirs, never also the deck's.
         gesture.current = null;

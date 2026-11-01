@@ -28,7 +28,14 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { type BoardAnswers, useBoardAnswers } from '../board/board-answers.tsx';
 import type { SendBackPorts } from '../board/board-send-back.tsx';
 import { cardProse, HowToTest } from '../board/detail/board-detail-sections.tsx';
-import { isTouch, lockOf, startsInSidewaysScroller, startsOnInteractive } from './agenda-swipe-gesture.ts';
+import {
+  isLongPress,
+  isTouch,
+  lockOf,
+  startsInSelection,
+  startsInSidewaysScroller,
+  startsOnInteractive,
+} from './agenda-swipe-gesture.ts';
 import { CardHead } from './card-head.tsx';
 import { MarqueeTitle } from './marquee-title.tsx';
 
@@ -140,6 +147,7 @@ const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void
     readonly startY: number;
     readonly width: number;
     readonly head: boolean;
+    readonly startedAt: number;
     axis: 'sideways' | 'vertical' | null;
     dx: number;
     dy: number;
@@ -153,6 +161,7 @@ const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void
       disabled ||
       !isTouch(event) ||
       (startsOnInteractive(event.target) && !startsOnTitle(event.target)) ||
+      startsInSelection(event.target) ||
       startsInSidewaysScroller(event.target, event.currentTarget)
     )
       return;
@@ -162,6 +171,7 @@ const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void
       startY: event.clientY,
       width: event.currentTarget.getBoundingClientRect().width,
       head: startsInRowHead(event.target),
+      startedAt: event.timeStamp,
       axis: null,
       dx: 0,
       dy: 0,
@@ -175,6 +185,10 @@ const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void
     if (current.axis === null) {
       const lock = lockOf(dx, dy);
       if (lock === null) return;
+      if (isLongPress(event.timeStamp - current.startedAt)) {
+        gesture.current = null;
+        return;
+      }
       // Down belongs to the head; everywhere else a vertical drag is the page scrolling, and up is nothing.
       if (lock === 'vertical' && !(current.head && dy > 0)) {
         gesture.current = null;

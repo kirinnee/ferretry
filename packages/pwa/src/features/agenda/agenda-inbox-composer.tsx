@@ -17,8 +17,8 @@ import type { AgendaId, SessionView } from '@ferretry/protocol';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer, type ComposerProps } from '../../components/composer.tsx';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
-import { useFormChanges } from '../../lib/agenda-form-state.ts';
 import { withFormSend } from '../../lib/agenda-form-send.ts';
+import { useFormChanges } from '../../lib/agenda-form-state.ts';
 import { withReferencePrefix } from '../../lib/answer-chip.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonUsageStore } from '../../lib/usage-store.ts';
@@ -49,6 +49,8 @@ export interface AgendaInboxComposerProps {
   readonly formKey?: string | undefined;
   readonly autocompleteFetcher?: ComposerProps['autocompleteFetcher'];
   readonly enterKeyPreference?: ComposerProps['enterKeyPreference'];
+  /** This device's dictation settings, the chat composer's own: present, the box carries the same mic. */
+  readonly dictationSettings?: ComposerProps['dictationSettings'];
   readonly phoneEnterKeyPreference?: ComposerProps['phoneEnterKeyPreference'];
 }
 
@@ -64,6 +66,7 @@ export function AgendaInboxComposer({
   formKey,
   autocompleteFetcher,
   enterKeyPreference = null,
+  dictationSettings,
   phoneEnterKeyPreference = null,
 }: AgendaInboxComposerProps) {
   const quota = useOptionalSessionQuota(usage, connection, view);
@@ -99,6 +102,7 @@ export function AgendaInboxComposer({
       compact={compact}
       daemon={connection}
       disabled={disabled}
+      {...(dictationSettings === undefined ? {} : { dictationSettings })}
       enterKeyPreference={enterKeyPreference}
       phoneEnterKeyPreference={phoneEnterKeyPreference}
       placeholder={forForm ? `Anything else for ${ferretName(view)}?` : `Reply to ${ferretName(view)}…`}
