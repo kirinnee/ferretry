@@ -577,7 +577,7 @@ describe('useSharedDraft', () => {
 
     // Finished: the placeholder goes, once the presence gap has passed.
     run(() => devices.hooks.phone?.reportUploading([]));
-    run(() => devices.timers.advance(250));
+    run(() => devices.timers.advance(350));
     await settle();
     expect(devices.hooks.laptop?.uploads).toEqual([]);
     devices.unmount();
@@ -590,13 +590,13 @@ describe('useSharedDraft', () => {
     const devices = mountDevices(daemonSide, { phone: '', laptop: '' });
     await settle();
 
-    // Act — three files start and finish inside a quarter of a second.
+    // Act — three files start and finish inside a third of a second.
     for (const names of [['a.png'], ['a.png', 'b.png'], ['b.png'], []])
       run(() => devices.hooks.phone?.reportUploading(names));
     await settle();
     const phoneStream = daemonSide.streams[0] as FakeStream;
     const sentNow = phoneStream.sent.filter(frame => frame.kind === 'presence').length;
-    run(() => devices.timers.advance(250));
+    run(() => devices.timers.advance(350));
     await settle();
 
     // Assert — one report then, one after the gap with how things stand: nothing uploading.
