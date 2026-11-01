@@ -88,3 +88,13 @@ describe('browser.eval taints the hosts it ran on, for the standing rules', () =
     should(w.tainted).deepEqual([]);
   });
 });
+
+describe('browser.eval: an address the script left that does not parse', () => {
+  it('should taint every rule when where the page ended cannot be read as an address', async () => {
+    const w = world();
+    await w.service.call(agent, { tool: 'browser.open', name: 'app', url: 'https://github.com/login' });
+    w.browser.actedUrl = 'not a url';
+    await w.service.call(agent, EVAL);
+    should(w.tainted).deepEqual(['github.com', undefined]);
+  });
+});

@@ -75,3 +75,15 @@ describe('PlanSignInGrants', () => {
     should(grants.ledger.pinned('rule:standing-1').get('password')).equal('identity-of-rule:standing-1');
   });
 });
+
+describe('PlanSignInGrants: what a plan line has nothing more to say about (R3c-4)', () => {
+  it('should pass the re-check and the last check, read no project and no machine-wide taint', async () => {
+    const grants = source([line({})]);
+    const [grant] = grants.of(SESSION);
+    if (grant === undefined) throw new Error('no grant');
+    should(await grants.verify(grant)).deepEqual({ ok: true });
+    should(grants.holds(grant, { roles: ['password'] })).be.true();
+    should(await grants.projectOf(SESSION)).be.undefined();
+    should(grants.scriptedOrigins().hosts.size).equal(0);
+  });
+});

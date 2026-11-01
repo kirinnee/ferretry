@@ -363,3 +363,111 @@ describe('RuleSignInGrants: uses, stops and the stamped project', () => {
     should(await stampedProjectOf({ read: async () => Promise.reject(new Error('down')) }, SESSION)).be.undefined();
   });
 });
+
+describe('RuleSignInGrants: every answer of the rule service, refused as it should be', () => {
+  /** A rule source over a fake rule service: what a fill sees of each answer it can give. */
+  function faked(check: () => Promise<string>, extra: { warn?: (message: string) => void } = {}) {
+    const ledger = new SignInGrantLedger();
+    const rules = {
+      fillable: () => [],
+      verified: () => true,
+      fillCheck: check,
+      used: async () => undefined,
+      suspend: async () => undefined,
+      scriptedOn: async () => {
+        throw new Error('the rules file cannot be written');
+      },
+      scriptedEverywhere: async () => {
+        throw new Error('the rules file cannot be written');
+      },
+    } as never;
+    return new RuleSignInGrants({
+      rules,
+      ledger,
+      keys: async account => (account === 'GITHUB_WORK' ? (KEY as AccountKey) : Promise.reject(new Error('down'))),
+      advertised: () => true,
+      stampedProject: async () => undefined,
+      clock: { now: () => NOW },
+      ...extra,
+    });
+  }
+  const grant = {
+    id: 'rule:sr_000000000000000000000001:1',
+    source: 'rule',
+    rule: { id: 'sr_000000000000000000000001', revision: 1 },
+  } as never;
+
+  it('should map every re-check answer to a refusal, and only `ok` to a fill', async () => {
+    const answers: [string, unknown][] = [
+      ['ok', { ok: true }],
+      ['unknown', { ok: false }],
+      ['gone', { ok: false, reason: 'expired' }],
+      ['suspended', { ok: false, reason: 'suspended' }],
+      ['store-write-failed', { ok: false, reason: 'suspended' }],
+      ['passkey-removed', { ok: false, reason: 'proof-invalid' }],
+      ['form-changed', { ok: false, reason: 'form-changed' }],
+    ];
+    for (const [answer, verdict] of answers) should(await faked(async () => answer).verify(grant)).deepEqual(verdict);
+    // A re-check that throws can't say yes; nor can a grant that names no rule.
+    should(await faked(async () => Promise.reject(new Error('down'))).verify(grant)).deepEqual({ ok: false });
+    should(await faked(async () => 'ok').verify({ id: 'rule:x:1', source: 'rule' } as never)).deepEqual({
+      ok: false,
+    });
+  });
+
+  it('should hold nothing for a grant that names no rule, and refuse no stop or use it cannot place', async () => {
+    const source = faked(async () => 'ok');
+    const nameless = { id: 'rule:x:1', source: 'rule' } as never;
+    should(source.holds(nameless, LOGIN)).be.false();
+    source.used(nameless, NOW, SESSION);
+    await source.stopped(nameless, 'form-changed');
+    should(source.of(SESSION)).deepEqual([]);
+  });
+
+  it('should say so when a page script’s taint could not be saved, and still refuse in memory', async () => {
+    const warnings: string[] = [];
+    const source = faked(async () => 'ok', { warn: message => void warnings.push(message) });
+    source.scriptedOn('github.com');
+    source.scriptedOn(undefined);
+    await settled();
+    should(warnings).have.length(2);
+    should(source.scriptedOrigins().hosts.get('github.com')).equal(NOW);
+    should(source.scriptedOrigins().everywhere).equal(NOW);
+  });
+
+  it('should read an account’s key, or nothing when the store cannot say', async () => {
+    const source = faked(async () => 'ok');
+    should(await source.keyOf('GITHUB_WORK' as never)).equal(KEY);
+    should(await source.keyOf('OTHER' as never)).be.undefined();
+  });
+});
+
+describe('RuleSignInGrants: two uses in flight, and a rule past its end', () => {
+  it('should count two uses spent before either is written, and forget them once both are', async () => {
+    const w = await world();
+    await approved(w, { signIn: GITHUB, fields: ['username', 'password'], uses: 3 });
+    const { source } = grants(w);
+    const [grant] = source.of(SESSION);
+    if (grant === undefined) throw new Error('no grant');
+    let release: () => void = () => undefined;
+    w.store.beforeWrite = async () => await new Promise<void>(resolve => (release = resolve));
+    source.used(grant, NOW, SESSION);
+    source.used(grant, NOW, OTHER);
+    should(source.of(SESSION)[0]?.remaining).equal(1);
+    w.store.beforeWrite = undefined;
+    release();
+    await settled();
+    should(w.store.document?.rules[0]?.usage.count).equal(2);
+    should(source.of(SESSION)[0]?.remaining).equal(1);
+  });
+
+  it('should hold nothing for a rule past its end, though the grant was read while it was in force', async () => {
+    const w = await world();
+    await approved(w);
+    const { source } = grants(w);
+    const [grant] = source.of(SESSION);
+    if (grant === undefined) throw new Error('no grant');
+    should(source.holds(grant, LOGIN)).be.true();
+    should(source.holds(grant, { ...LOGIN, now: NOW + 31 * 86_400_000 })).be.false();
+  });
+});
