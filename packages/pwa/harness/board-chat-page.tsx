@@ -4,7 +4,7 @@
  *
  * `?state=card|none` picks a session with or without a focus card, `?view=cards|kanban|list` the Tasks view (Kanban when
  * not given), `?totest=1` adds two cards waiting for a try (the moves the page is asked for are kept in `window.__moves`), `?cards=few`
- * the six-card fixture (the default is 70 cards), `?agents=1` turns "Show agent tasks" on, `?expanded=1` opens the
+ * the six-card fixture (the default is 70 cards), `?agents=1` turns "Internal" on, `?expanded=1` opens the
  * Tasks tab over the whole chat area (the desktop Info panel steps out of the way). `?origin=0` serves cards
  * the way an older daemon does, with no `origin`.
  */

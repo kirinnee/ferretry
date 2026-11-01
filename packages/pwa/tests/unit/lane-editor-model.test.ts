@@ -1,26 +1,44 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  EXTERNAL_LANE_TRIGGERS,
+  gateOptions,
   LANE_CATEGORIES,
   LANE_TEMPLATES,
   type Lane,
   LaneSetActionRequestSchema,
   LaneTriggerSchema,
   MAX_BOARD_LANES,
+  MAX_GATE_LABEL_LENGTH,
+  MAX_GATE_OPTIONS,
+  PLAN_GATE,
+  VERIFY_GATE,
 } from '@ferretry/protocol';
 import {
+  addGateOption,
   addLane,
+  canSwitchStage,
   deleteLane,
   draftChanged,
   draftFromLaneSet,
   draftProblems,
   draftToEdit,
   freshLaneId,
+  isReportedTrigger,
+  laneStageKind,
   laneWriteMessage,
   type LaneDraft,
   moveLane,
+  OUTCOME_LABELS,
+  outcomeFromValue,
+  outcomeValue,
+  removeGateOption,
   renameLane,
+  reopenTaken,
+  setGateOptionLabel,
+  setGateOptionOutcome,
   setLaneCategory,
   setLaneOwnerGate,
+  setLaneStageKind,
   setLaneStaleAfter,
   setLaneTriggers,
   setWorkflowLane,
@@ -98,15 +116,11 @@ describe('renaming and fields', () => {
     expect(draft.lanes.find(lane => lane.id === 'merged')?.emphasis).toBeUndefined();
   });
 
-  it('drops a stored stage when the fields it is read from change, so the saved lane is never refused for it', () => {
+  it('drops a stored stage when the owner gate it mirrors is changed by hand, so the saved lane is never refused for it', () => {
     const staged = draftFromLaneSet({ ...current, lanes: LANE_TEMPLATES['pr-release-verify'].lanes });
-    const lane = (draft: LaneDraft, id: string) => draft.lanes.find(entry => entry.id === id) as Lane;
     const ungated = setLaneOwnerGate(staged, 'plan', false);
-    expect(lane(ungated, 'plan').stage).toBeUndefined();
+    expect(ungated.lanes.find(entry => entry.id === 'plan')?.stage).toBeUndefined();
     expect(LaneSetActionRequestSchema.safeParse(draftToEdit(current, ungated)).success).toBe(true);
-    expect(lane(setLaneTriggers(staged, 'merged', ['ci.green']), 'merged').stage).toBeUndefined();
-    expect(lane(setLaneCategory(staged, 'merged', 'review'), 'merged').stage).toBeUndefined();
-    expect(lane(setLaneTriggers(staged, 'plan', []), 'plan').stage).toEqual(lane(staged, 'plan').stage);
   });
 
   it('counts a change undone as no change, whatever order the fields were put back in', () => {
@@ -298,5 +312,213 @@ describe('the words the editor uses', () => {
     expect(Object.keys(CATEGORY_LABELS).sort()).toEqual([...LANE_CATEGORIES].sort());
     expect(CATEGORY_LABELS.verify).toBe('To test (verify)');
     expect(CATEGORY_LABELS.review).toBe('In review');
+  });
+});
+
+const fromTemplate = (name: keyof typeof LANE_TEMPLATES): LaneDraft =>
+  draftFromLaneSet({ ...current, lanes: LANE_TEMPLATES[name].lanes, variants: LANE_TEMPLATES[name].variants });
+const laneOf = (draft: LaneDraft, id: string): Lane => {
+  const found = draft.lanes.find(entry => entry.id === id);
+  if (found === undefined) throw new Error(`no lane ${id}`);
+  return found;
+};
+const accepted = (draft: LaneDraft): boolean =>
+  LaneSetActionRequestSchema.safeParse(draftToEdit(current, draft)).success;
+
+describe('a lane’s stage', () => {
+  it('reads the stage a lane stores, else the one its fields describe', () => {
+    const template = fromTemplate('pr-release-verify');
+    expect(laneStageKind(laneOf(template, 'plan'))).toBe('gate');
+    expect(laneStageKind(laneOf(template, 'implement'))).toBe('auto');
+    expect(laneStageKind(laneOf(start(), 'tested'))).toBe('gate');
+    expect(laneStageKind(laneOf(start(), 'todo'))).toBe('auto');
+  });
+
+  it('gives a closed lane no stage switch: only the owner closes', () => {
+    expect(canSwitchStage(laneOf(start(), 'closed'))).toBe(false);
+    expect(canSwitchStage(laneOf(start(), 'implement'))).toBe(true);
+    expect(setLaneStageKind(start(), 'closed', 'gate')).toEqual(start());
+    expect(setLaneStageKind(start(), 'ghost', 'gate')).toEqual(start());
+  });
+
+  it('switches a non-verify lane to a plan gate and owner-gates it; back to automatic clears the gate', () => {
+    const gated = setLaneStageKind(start(), 'implement', 'gate');
+    expect(laneOf(gated, 'implement').stage).toEqual(PLAN_GATE);
+    expect(laneOf(gated, 'implement').ownerGate).toBe(true);
+    expect(accepted(gated)).toBe(true);
+    const back = setLaneStageKind(gated, 'implement', 'auto');
+    expect(laneOf(back, 'implement').stage).toEqual({ kind: 'auto', triggers: ['work.started'] });
+    expect(laneOf(back, 'implement').ownerGate).toBeUndefined();
+    expect(accepted(back)).toBe(true);
+  });
+
+  it('switches a verify lane to the verify gate without forcing the owner gate, and back', () => {
+    const template = fromTemplate('quick');
+    const auto = setLaneStageKind(template, 'to-test', 'auto');
+    expect(laneOf(auto, 'to-test').stage).toEqual({
+      kind: 'auto',
+      triggers: ['pr.merged', 'release.published', 'signal.done'],
+    });
+    expect(laneOf(auto, 'to-test').ownerGate).toBeUndefined();
+    expect(accepted(auto)).toBe(true);
+    const gate = setLaneStageKind(auto, 'to-test', 'gate');
+    expect(laneOf(gate, 'to-test').stage).toEqual(VERIFY_GATE);
+    expect(accepted(gate)).toBe(true);
+  });
+
+  it('does nothing when the lane already is that stage', () => {
+    expect(setLaneStageKind(fromTemplate('pr-release-verify'), 'plan', 'gate')).toEqual(
+      fromTemplate('pr-release-verify'),
+    );
+    expect(setLaneStageKind(start(), 'todo', 'auto')).toEqual(start());
+  });
+
+  it('lets the lane’s emphasis follow its new stage', () => {
+    const template = fromTemplate('pr-release-verify');
+    expect(laneOf(setLaneStageKind(template, 'plan', 'auto'), 'plan').emphasis).toBeUndefined();
+  });
+
+  it('keeps an automatic stage’s triggers the lane’s own, and a gate’s entry triggers apart from its options', () => {
+    const template = fromTemplate('pr-release-verify');
+    const retimed = setLaneTriggers(template, 'implement', ['pr.opened']);
+    expect(laneOf(retimed, 'implement').stage).toEqual({ kind: 'auto', triggers: ['pr.opened'] });
+    expect(laneOf(retimed, 'implement').enterOn).toEqual(['pr.opened']);
+    expect(accepted(retimed)).toBe(true);
+    const emptied = setLaneTriggers(template, 'implement', []);
+    expect(laneOf(emptied, 'implement').stage).toEqual({ kind: 'auto', triggers: [] });
+    expect(laneOf(emptied, 'implement').enterOn).toBeUndefined();
+    expect(accepted(emptied)).toBe(true);
+    const gateEntry = setLaneTriggers(template, 'plan', ['ci.green']);
+    expect(laneOf(gateEntry, 'plan').stage).toEqual(laneOf(template, 'plan').stage);
+    expect(accepted(gateEntry)).toBe(true);
+  });
+
+  it('keeps the options through a category change, and refuses a gate on the closed lane', () => {
+    const template = fromTemplate('pr-release-verify');
+    const verify = setLaneCategory(setLaneStageKind(template, 'plan', 'gate'), 'plan', 'verify');
+    expect(laneOf(verify, 'plan').stage).toEqual(PLAN_GATE);
+    const active = setLaneCategory(template, 'released', 'active');
+    expect(laneOf(active, 'released').stage).toEqual(VERIFY_GATE);
+    expect(laneOf(active, 'released').ownerGate).toBe(true);
+    expect(accepted(active)).toBe(true);
+    const shipped = setLaneCategory(template, 'merged', 'review');
+    expect(laneOf(shipped, 'merged').stage).toEqual(laneOf(template, 'merged').stage);
+    const closing = setLaneCategory(template, 'plan', 'closed');
+    expect(laneOf(closing, 'plan').stage).toBeUndefined();
+  });
+});
+
+describe('a gate’s options', () => {
+  const plan = (): LaneDraft => fromTemplate('pr-release-verify');
+  const options = (draft: LaneDraft, id = 'plan') => gateOptions(laneOf(draft, id));
+
+  it('adds options up to the most a gate may have, each with an id no option has', () => {
+    let draft = plan();
+    draft = addGateOption(draft, 'plan');
+    draft = addGateOption(draft, 'plan');
+    expect(options(draft).map(option => option.id)).toEqual(['ok', 'option', 'option-2']);
+    expect(options(draft)).toHaveLength(MAX_GATE_OPTIONS);
+    expect(addGateOption(draft, 'plan')).toEqual(draft);
+    expect(options(draft)[1]).toEqual({ id: 'option', label: 'Option', outcome: { kind: 'next' } });
+    expect(accepted(draft)).toBe(true);
+  });
+
+  it('removes an option but never the last one', () => {
+    const two = addGateOption(plan(), 'plan');
+    const one = removeGateOption(two, 'plan', 'option');
+    expect(options(one).map(option => option.id)).toEqual(['ok']);
+    expect(removeGateOption(one, 'plan', 'ok')).toEqual(one);
+  });
+
+  it('relabels an option without changing its id', () => {
+    const draft = setGateOptionLabel(plan(), 'plan', 'ok', 'Go build');
+    expect(options(draft)[0]).toEqual({ id: 'ok', label: 'Go build', outcome: { kind: 'next' } });
+    expect(
+      draftToEdit(current, setGateOptionLabel(plan(), 'plan', 'ok', '  Go  ')).layout.lanes.find(l => l.id === 'plan')
+        ?.stage,
+    ).toEqual({ kind: 'gate', options: [{ id: 'ok', label: 'Go', outcome: { kind: 'next' } }] });
+  });
+
+  it('points an option at the next lane, a named lane, a reopen or a close', () => {
+    let draft = plan();
+    draft = setGateOptionOutcome(draft, 'plan', 'ok', { kind: 'lane', laneId: 'implement' });
+    expect(options(draft)[0]?.outcome).toEqual({ kind: 'lane', laneId: 'implement' });
+    draft = setGateOptionOutcome(draft, 'plan', 'ok', { kind: 'close' });
+    expect(options(draft)[0]?.outcome).toEqual({ kind: 'close' });
+    draft = setGateOptionOutcome(draft, 'plan', 'ok', { kind: 'reopen-with-agenda' });
+    expect(options(draft)[0]?.outcome).toEqual({ kind: 'reopen-with-agenda' });
+    expect(accepted(draft)).toBe(true);
+  });
+
+  it('allows one reopen with a conversation, and a lane that is not its own', () => {
+    const two = setGateOptionOutcome(addGateOption(plan(), 'plan'), 'plan', 'ok', { kind: 'reopen-with-agenda' });
+    expect(reopenTaken(laneOf(two, 'plan'), 'option')).toBe(true);
+    expect(reopenTaken(laneOf(two, 'plan'), 'ok')).toBe(false);
+    expect(setGateOptionOutcome(two, 'plan', 'option', { kind: 'reopen-with-agenda' })).toEqual(two);
+    expect(setGateOptionOutcome(plan(), 'plan', 'ok', { kind: 'lane', laneId: 'plan' })).toEqual(plan());
+  });
+
+  it('edits the derived gate of a lane that stores none, and leaves an automatic lane alone', () => {
+    const classic = addGateOption(start(), 'tested');
+    expect(options(classic, 'tested').map(option => option.id)).toEqual(['done', 'not-good', 'option']);
+    expect(accepted(classic)).toBe(true);
+    expect(addGateOption(start(), 'implement')).toEqual(start());
+    expect(setGateOptionLabel(start(), 'implement', 'ok', 'x')).toEqual(start());
+  });
+
+  it('sends a deleted lane’s gate options to where its cards go, or on when that is the gate’s own lane', () => {
+    const named = setGateOptionOutcome(plan(), 'plan', 'ok', { kind: 'lane', laneId: 'implement' });
+    const moved = must(deleteLane(named, 'implement', 'merged'));
+    expect(options(moved)[0]?.outcome).toEqual({ kind: 'lane', laneId: 'merged' });
+    const own = must(deleteLane(named, 'implement', 'plan'));
+    expect(options(own)[0]?.outcome).toEqual({ kind: 'next' });
+  });
+
+  it('leaves a gate’s other options alone when a lane they do not name is deleted', () => {
+    const named = setGateOptionOutcome(addGateOption(plan(), 'plan'), 'plan', 'ok', {
+      kind: 'lane',
+      laneId: 'implement',
+    });
+    const moved = must(deleteLane(named, 'implement', 'merged'));
+    expect(options(moved).map(option => option.outcome)).toEqual([
+      { kind: 'lane', laneId: 'merged' },
+      { kind: 'next' },
+    ]);
+  });
+
+  it('names a blank or over-long option label against its lane', () => {
+    const blank = setGateOptionLabel(plan(), 'plan', 'ok', '   ');
+    expect(draftProblems(current, blank)).toContainEqual({ laneId: 'plan', message: 'An option needs a label.' });
+    const long = setGateOptionLabel(plan(), 'plan', 'ok', 'x'.repeat(MAX_GATE_LABEL_LENGTH + 1));
+    expect(draftProblems(current, long)).toContainEqual({
+      laneId: 'plan',
+      message: `An option label is one line of at most ${String(MAX_GATE_LABEL_LENGTH)} characters.`,
+    });
+    expect(draftProblems(current, plan()).filter(problem => problem.laneId === 'plan')).toEqual([]);
+  });
+});
+
+describe('the words for a gate', () => {
+  it('round-trips each outcome through the value a picker holds', () => {
+    for (const outcome of [
+      { kind: 'next' },
+      { kind: 'lane', laneId: 'merged' },
+      { kind: 'reopen-with-agenda' },
+      { kind: 'close' },
+    ] as const) {
+      expect(outcomeFromValue(outcomeValue(outcome))).toEqual(outcome);
+    }
+    expect(outcomeFromValue('nonsense')).toBeNull();
+    expect(outcomeFromValue('lane:')).toBeNull();
+  });
+
+  it('says every outcome in plain words, and marks only the reported triggers', () => {
+    expect(OUTCOME_LABELS).toEqual({
+      next: 'Next lane',
+      lane: 'A specific lane',
+      'reopen-with-agenda': 'Not good (reopen and talk)',
+      close: 'Close',
+    });
+    expect(LaneTriggerSchema.options.filter(isReportedTrigger).sort()).toEqual([...EXTERNAL_LANE_TRIGGERS].sort());
   });
 });

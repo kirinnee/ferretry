@@ -23,7 +23,15 @@
  */
 
 import { formatTaskRef, type LaneCategory } from '@ferretry/protocol';
-import { Check, ChevronLeft, EllipsisVertical, MessageSquarePlus, RotateCcw, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  ChevronLeft,
+  EllipsisVertical,
+  MessageSquarePlus,
+  RotateCcw,
+} from 'lucide-react';
 import { type CSSProperties, type KeyboardEvent, useId, useState } from 'react';
 import {
   ANSWER_AT_REST,
@@ -236,8 +244,25 @@ export function ToTestActions({
   const settling = answer.pressed !== null;
   return (
     <div className="fy-board-card__verdict" data-touch={touch ? '' : undefined}>
+      {reworkLaneId === null ? null : (
+        <button
+          aria-busy={answer.pressed === 'not-good'}
+          aria-label={touch ? `Not good: send back ${card.task.title}` : undefined}
+          className="fy-board-verdict"
+          data-pending={answer.pressed === 'not-good' ? '' : undefined}
+          data-verdict="not-good"
+          disabled={settling}
+          onClick={() => moves.onMove(card, reworkLaneId, 'not-good')}
+          title="Not good → back for rework, with what is wrong"
+          type="button"
+        >
+          <AnswerIcon icon={ArrowLeft} pending={answer.pressed === 'not-good'} size={size} />
+          Not good
+        </button>
+      )}
       {done?.done.kind === 'done' ? (
         <BoardDoneAction
+          arrow
           disabled={settling}
           done={done.done}
           onPress={done.press}
@@ -257,24 +282,8 @@ export function ToTestActions({
           title={doneTitle({ kind: 'done', laneId: closeLaneId }, card.task.title)}
           type="button"
         >
-          <AnswerIcon icon={Check} pending={answer.pressed === 'works'} size={size} />
           Done
-        </button>
-      )}
-      {reworkLaneId === null ? null : (
-        <button
-          aria-busy={answer.pressed === 'not-good'}
-          aria-label={touch ? `Not good: send back ${card.task.title}` : undefined}
-          className="fy-board-verdict"
-          data-pending={answer.pressed === 'not-good' ? '' : undefined}
-          data-verdict="not-good"
-          disabled={settling}
-          onClick={() => moves.onMove(card, reworkLaneId, 'not-good')}
-          title="Not good → back for rework, with what is wrong"
-          type="button"
-        >
-          <AnswerIcon icon={X} pending={answer.pressed === 'not-good'} size={size} />
-          Not good
+          <AnswerIcon icon={ArrowRight} pending={answer.pressed === 'works'} size={size} />
         </button>
       )}
     </div>

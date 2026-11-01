@@ -223,6 +223,24 @@ describe('BoardCard', () => {
     expect(log).toEqual(['move:closed', 'move:implement']);
   });
 
+  it('puts Not good ← on the left and Done → on the right, whichever Done control the card wears', async () => {
+    const order = (root: HTMLElement): string[] =>
+      [...root.querySelectorAll<HTMLElement>('.fy-board-card__verdict > button')].map(b => b.textContent?.trim() ?? '');
+    const plain = await draw({ category: 'verify', moves: moves() });
+    expect(order(plain)).toEqual(['Not good', 'Done']);
+    expect(plain.querySelector('[data-verdict="not-good"] svg')?.classList.contains('lucide-arrow-left')).toBe(true);
+    expect(plain.querySelector('[data-verdict="works"] svg')?.classList.contains('lucide-arrow-right')).toBe(true);
+    await release();
+    const done = { done: { kind: 'done', laneId: 'closed' } as const, press: () => undefined, atRelease: false };
+    const shared = await draw({ category: 'verify', done, moves: moves() });
+    const buttons = [...shared.querySelectorAll<HTMLElement>('.fy-board-card__verdict > button')];
+    expect(buttons.map(b => b.textContent?.trim())).toEqual(['Not good', 'Done']);
+    expect(buttons[0]?.dataset.verdict).toBe('not-good');
+    expect(buttons[1]?.classList.contains('fy-board-done')).toBe(true);
+    expect(buttons[1]?.querySelector('svg')?.classList.contains('lucide-arrow-right')).toBe(true);
+    expect(buttons[1]?.querySelector('svg')?.nextElementSibling).toBeNull();
+  });
+
   it('leaves out a verdict button whose lane the project does not have, and all of them off the verify lane', async () => {
     const onlyClose = await draw({ category: 'verify', moves: moves([], { reworkLaneId: null }) });
     expect(onlyClose.querySelector('[data-verdict="not-good"]')).toBeNull();

@@ -7,9 +7,9 @@ import {
   humanScope,
   isAgentTask,
   splitAvailable,
-  taskOrigin,
+  taskAsker,
 } from '../../src/lib/board-human.ts';
-import { card, originCard } from './board-support.ts';
+import { card, originCard, unasked } from './board-support.ts';
 
 const entry = (daemonId: string, task: ReturnType<typeof card>): HumanCard & { readonly task: typeof task } => ({
   daemonId,
@@ -18,17 +18,28 @@ const entry = (daemonId: string, task: ReturnType<typeof card>): HumanCard & { r
 
 describe('who asked for a card', () => {
   it('reads only what the daemon declared', () => {
-    expect(taskOrigin(originCard('F1', 'human'))).toBe('human');
-    expect(taskOrigin(originCard('F2', 'agent'))).toBe('agent');
-    expect(taskOrigin(card('F3'))).toBeNull();
-    expect(taskOrigin({ origin: 'robot' })).toBeNull();
+    expect(taskAsker(originCard('F1', 'human'))).toBe('person');
+    expect(taskAsker(originCard('F2', 'agent'))).toBe('agent');
+    expect(taskAsker(unasked([card('F3')])[0] ?? {})).toBeNull();
+    expect(taskAsker({ origin: 'robot' })).toBeNull();
+    expect(taskAsker({ askedBy: 'robot' })).toBeNull();
     expect(isAgentTask(originCard('F2', 'agent'))).toBe(true);
     expect(isAgentTask(card('F3'))).toBe(false);
   });
 
+  it('reads askedBy first and falls back to origin for a daemon that sends only that', () => {
+    expect(taskAsker({ askedBy: 'agent' })).toBe('agent');
+    expect(taskAsker({ askedBy: 'person', origin: 'agent' })).toBe('person');
+    expect(taskAsker({ origin: 'agent' })).toBe('agent');
+    expect(taskAsker({ origin: 'human' })).toBe('person');
+    expect(isAgentTask({ askedBy: 'agent' })).toBe(true);
+    expect(isAgentTask({ origin: 'agent' })).toBe(true);
+  });
+
   it('offers the split only when some card says who asked', () => {
-    expect(splitAvailable([card('F1'), card('F2')])).toBe(false);
+    expect(splitAvailable(unasked([card('F1'), card('F2')]))).toBe(false);
     expect(splitAvailable([card('F1'), originCard('F2', 'agent')])).toBe(true);
+    expect(splitAvailable([{ origin: 'agent' }])).toBe(true);
     expect(splitAvailable([])).toBe(false);
   });
 });

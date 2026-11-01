@@ -28,6 +28,25 @@ export const snoozeChoices = (now: number): readonly SnoozeChoice[] => [
   { id: 'tomorrow', label: 'Tomorrow 9:00', until: new Date(tomorrowMorning(now)).toISOString() },
 ];
 
+/** One entry of the list every snooze surface offers: a ready time, or Custom… (`until` is null: the owner types it). */
+export interface SnoozePick {
+  readonly id: SnoozeChoice['id'] | 'custom';
+  readonly label: string;
+  readonly until: string | null;
+}
+
+/**
+ * THE ONE LIST of snooze choices: the three ready times, then "Custom…". The card-head clock menu and the
+ * swipe-down compass both draw exactly this, so the owner sees one set of choices everywhere.
+ */
+export const snoozePicks = (now: number): readonly SnoozePick[] => [
+  ...snoozeChoices(now),
+  { id: 'custom', label: 'Custom…', until: null },
+];
+
+/** The ids of {@link snoozePicks}, in order, which do not depend on the time. */
+export const SNOOZE_PICK_IDS: readonly SnoozePick['id'][] = snoozePicks(0).map(pick => pick.id);
+
 const two = (value: number): string => String(value).padStart(2, '0');
 
 /** A local instant as a `datetime-local` input reads it: `2026-10-30T15:00`. */

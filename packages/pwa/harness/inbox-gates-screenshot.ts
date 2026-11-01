@@ -170,7 +170,7 @@ const compassSteps = async (page: Page, client: CDPSession, name: string, form: 
   );
   for (const [step, dy, slot] of [
     ['down', threshold + 24, 'down'],
-    ['down-down-down', threshold + 2 * ROW + 24, 'down-down-4h'],
+    ['down-down-down', threshold + 2 * ROW + 24, 'down-down-tomorrow'],
   ] as const) {
     await hold(page, client, 0, dy);
     check(
@@ -179,8 +179,8 @@ const compassSteps = async (page: Page, client: CDPSession, name: string, form: 
     );
     if (step === 'down-down-down')
       check(
-        (await reveal.locator('[data-compass-length]').count()) === 3,
-        `${name} ${form} ${theme}: the three snooze lengths are not showing at ↓↓↓`,
+        (await reveal.locator('[data-compass-length]').count()) === 4,
+        `${name} ${form} ${theme}: the four snooze choices are not showing at ↓↓↓`,
       );
     await shot(page, `${name}-compass-${step}`, form, theme);
     await touch(client, 'touchCancel');

@@ -38,7 +38,7 @@ export interface BoardFiltersProps {
   readonly archive?: boolean;
   /** A ferret that is the page's own default scope: it is not an advanced filter, so it is not counted. */
   readonly quietFerret?: string | null;
-  /** Whether the daemons tell human cards from agent cards: the "Show agent tasks" toggle is offered only then. */
+  /** Whether the daemons tell human cards from agent cards: the "Internal" filter is offered only then. */
   readonly splitsAgents?: boolean;
 }
 
@@ -46,20 +46,19 @@ export interface BoardFiltersProps {
 const cleared = (filters: BoardFilters): BoardFilters => ({ ...NO_BOARD_FILTERS, agents: filters.agents });
 
 /**
- * "Show agent tasks": cards ferrets made for other ferrets, off by default. It is on whenever a ferret or an
- * activity is chosen (those show agent cards by themselves), so it is drawn pressed and locked then.
+ * "Internal": cards ferrets made for other ferrets (asked by an agent, not a person), off by default. It is on
+ * whenever a ferret or an activity is chosen (those show internal cards by themselves), so it is drawn pressed
+ * and locked then. The filter's field and URL parameter stay `agents`, so a saved link keeps working.
  */
-export function AgentsToggle({
-  filters,
-  onChange,
-  short = false,
-}: Pick<BoardFiltersProps, 'filters' | 'onChange'> & { readonly short?: boolean }) {
+export function InternalToggle({ filters, onChange }: Pick<BoardFiltersProps, 'filters' | 'onChange'>) {
   const forced = !filters.agents && (filters.ferret !== null || filters.activity !== null);
   return (
     <label
       className="fy-board-filters__agents"
       data-forced={forced ? '' : undefined}
-      title={forced ? 'Agent tasks show while a ferret or an activity is chosen' : undefined}
+      title={
+        forced ? 'Internal cards show while a ferret or an activity is chosen' : 'Cards ferrets made for other ferrets'
+      }
     >
       <input
         checked={filters.agents || forced}
@@ -69,7 +68,7 @@ export function AgentsToggle({
         type="checkbox"
       />
       <Bot aria-hidden="true" size={12} />
-      {short ? 'Agent tasks' : 'Show agent tasks'}
+      Internal
     </label>
   );
 }
@@ -344,7 +343,7 @@ export function BoardFilterBar({
           Filters
           {count > 0 ? <span className="fy-board-filters__n">{count}</span> : null}
         </button>
-        {splitsAgents ? <AgentsToggle filters={filters} onChange={onChange} /> : null}
+        {splitsAgents ? <InternalToggle filters={filters} onChange={onChange} /> : null}
         {count > 0 ? (
           <button className="fy-board-filters__clear" onClick={() => onChange(cleared(filters))} type="button">
             <X aria-hidden="true" size={11} />
@@ -362,7 +361,8 @@ export function BoardFilterBar({
 }
 
 /**
- * The phone's filters: a button that opens a bottom sheet holding every field, so the page keeps its height.
+ * The phone's filters: a button that opens a bottom sheet holding every field, "Internal" included (a touch-sized
+ * toggle would add a row to the header), so the page keeps its height.
  * Fields apply as they are picked (the URL is the state); "Done" only closes the sheet.
  */
 export function BoardFilterSheet({
@@ -391,7 +391,6 @@ export function BoardFilterSheet({
           <span className="fy-board-filters__label">Filters</span>
           {count > 0 ? <span className="fy-board-filters__n">{count}</span> : null}
         </button>
-        {splitsAgents ? <AgentsToggle filters={filters} onChange={onChange} short /> : null}
         {count > 0 ? (
           <button className="fy-board-filters__clear" onClick={() => onChange(cleared(filters))} type="button">
             <X aria-hidden="true" size={12} />
@@ -411,6 +410,7 @@ export function BoardFilterSheet({
           Filters
         </h2>
         <div className="fy-board-filter-sheet__fields">
+          {splitsAgents ? <InternalToggle filters={filters} onChange={onChange} /> : null}
           <BoardFilterFields archive={archive} choices={choices} filters={filters} onChange={onChange} />
         </div>
         <div className="fy-board-filter-sheet__actions">

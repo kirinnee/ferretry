@@ -9,7 +9,7 @@
 
 import type { BoardTaskView } from '@ferretry/protocol';
 import type { BoardModel } from './board-model.ts';
-import { taskOrigin } from './board-human.ts';
+import { taskAsker } from './board-human.ts';
 import { isMine } from './board-model.ts';
 import { cardPlaces } from './board-view.ts';
 import type { DaemonId } from './daemon-connection.ts';
@@ -46,12 +46,12 @@ const legacyIdOf = (task: BoardTaskView, sessionId: string): string | null => {
 };
 
 /**
- * Whether the ask came from an agent. The daemon says so (`origin`, the same fact the Tasks panel splits on);
+ * Whether the ask came from an agent. The daemon says so (the same fact the Tasks panel splits on);
  * a daemon that says nothing is an older one, where "the owner raised it or waits on it" is the best proof left.
  */
 const askedByAgent = (task: BoardTaskView): boolean => {
-  const origin = taskOrigin(task);
-  return origin === null ? !isMine(task) : origin === 'agent';
+  const asker = taskAsker(task);
+  return asker === null ? !isMine(task) : asker === 'agent';
 };
 
 const cardsOf = (model: BoardModel, daemonId: DaemonId, sessionId: string, keep: (task: BoardTaskView) => boolean) => {

@@ -268,7 +268,7 @@ describe('TableView', () => {
     view = await mount(table(model, { env: envOf(model, { doneFor, movesFor }) }));
     const root = view.container;
     const verdicts = [...root.querySelectorAll('[data-task="F1"] .fy-board-card__verdict > *')];
-    expect(verdicts.map(node => node.textContent)).toEqual(['Done', 'Not good']);
+    expect(verdicts.map(node => node.textContent)).toEqual(['Not good', 'Done']);
     expect(root.querySelectorAll('[data-task="F2"] .fy-board-card__verdict').length).toBe(0);
     await interact(() =>
       must(root.querySelector<HTMLButtonElement>('[data-task="F1"] [data-verdict="not-good"]'), 'Not good').click(),

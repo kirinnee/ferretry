@@ -49,7 +49,7 @@ export interface ChatWho {
   readonly focus: TaskRef | null;
   /** Its sub-ferrets, any depth (`descendantSessionIds`). */
   readonly relatives: ReadonlySet<string>;
-  /** "Show agent tasks": cards ferrets made for other ferrets are drawn. Off, only the owner's own cards are. */
+  /** "Internal": cards ferrets made for other ferrets are drawn. Off, only the owner's own cards are. */
   readonly agents: boolean;
 }
 
@@ -75,7 +75,7 @@ export interface ChatCards {
   readonly under: ReadonlySet<string>;
   /** Every card drawn, once. */
   readonly total: number;
-  /** How many of this ferret's cards "Show agent tasks" is keeping out of sight. */
+  /** How many of this ferret's cards "Internal" is keeping out of sight. */
   readonly hiddenAgents: number;
 }
 
@@ -248,7 +248,7 @@ export interface BoardChat {
   readonly cards: ChatCards;
   readonly status: BoardLoadStatus;
   readonly refresh: () => void;
-  /** "Show agent tasks" is on. */
+  /** "Internal" is on. */
   readonly agents: boolean;
   /** The daemons say who asked for a card: the toggle is offered only then. */
   readonly splitsAgents: boolean;

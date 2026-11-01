@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { type BoardProject, boardErr, boardOk, LANE_TEMPLATES, type LaneSet } from '@ferretry/protocol';
+import { type BoardProject, boardErr, boardOk, LANE_TEMPLATES, type Lane, type LaneSet } from '@ferretry/protocol';
 import type { ReactElement } from 'react';
 
 import { LaneEditor, LaneEditorPage } from '../../../src/features/projects/lane-editor.tsx';
@@ -96,6 +96,23 @@ const buttonSaying = (view: Mounted, text: string): HTMLButtonElement =>
     `the “${text}” button`,
   );
 
+const stageButton = (view: Mounted, laneName: string, kind: 'gate' | 'auto'): HTMLInputElement =>
+  must(
+    byLabel(view, `Stage of ${laneName}`).querySelector<HTMLInputElement>(`[data-stage="${kind}"]`),
+    `the ${kind} stage of ${laneName}`,
+  );
+
+const gatePanel = (view: Mounted, laneId: string): HTMLElement =>
+  must(view.container.querySelector<HTMLElement>(`[data-lane-gate="${laneId}"]`), `the gate of ${laneId}`);
+
+const savedLane = (actions: Recorded, id: string) => {
+  const call = actions.calls[0] as { save: { layout: { lanes: Lane[] } } };
+  return must(
+    call.save.layout.lanes.find(lane => lane.id === id),
+    `the saved ${id} lane`,
+  );
+};
+
 const problems = (view: Mounted): string => view.container.querySelector('[data-lane-problems]')?.textContent ?? '';
 
 describe('the template picker', () => {
@@ -182,7 +199,7 @@ describe('editing the lanes', () => {
     await click(must(trigger, 'the PR opens trigger'));
     const already = [...triggers.querySelectorAll('button')].find(node => node.textContent === 'work starts');
     await click(must(already, 'the work starts trigger'));
-    await click(must(row.querySelector('input[type="checkbox"]'), 'the owner gate'));
+    await click(stageButton(view, 'Implement', 'gate'));
     await type(byLabel(view, 'Stale after for Implement'), '6h');
     await click(buttonSaying(view, 'Save lanes'));
 
@@ -190,7 +207,14 @@ describe('editing the lanes', () => {
     const call = actions.calls[0] as {
       save: {
         layout: {
-          lanes: { id: string; category: string; enterOn?: string[]; ownerGate?: boolean; staleAfter?: string }[];
+          lanes: {
+            id: string;
+            category: string;
+            enterOn?: string[];
+            ownerGate?: boolean;
+            staleAfter?: string;
+            stage?: { kind: string };
+          }[];
         };
       };
     };
@@ -201,6 +225,7 @@ describe('editing the lanes', () => {
     expect(saved.category).toBe('review');
     expect(saved.enterOn).toEqual(['pr.opened']);
     expect(saved.ownerGate).toBe(true);
+    expect(saved.stage?.kind).toBe('gate');
     expect(saved.staleAfter).toBe('6h');
   });
 
@@ -223,10 +248,6 @@ describe('editing the lanes', () => {
     const options = [...byLabel(view, 'Category of Implement').querySelectorAll('option')].map(
       node => node.textContent,
     );
-    const gate = must(
-      [...view.container.querySelectorAll('label')].find(node => node.textContent === 'Only you move it on'),
-      'the gate label',
-    );
     const closedGate = must(
       view.container.querySelector('[data-lane-row="closed"] label[title]'),
       'the closed lane gate label',
@@ -234,7 +255,7 @@ describe('editing the lanes', () => {
 
     // Assert
     expect(options).toEqual(['Backlog', 'Active', 'In review', 'Shipped', 'To test (verify)', 'Closed']);
-    expect(gate.title).toBe('The owner must move cards out of this lane.');
+    expect(view.container.querySelector('[data-lane-row="implement"] input[type="checkbox"]')).toBeNull();
     expect(closedGate.getAttribute('title')).toBe('The owner must move cards into this lane.');
     expect(view.container.textContent).toContain('Stale after');
   });
@@ -312,8 +333,10 @@ describe('editing the lanes', () => {
 
     // Assert
     expect(skipped.getAttribute('aria-pressed')).toBe('false');
-    expect(skipped.className).toContain('line-through');
+    expect(skipped.className).not.toContain('line-through');
     expect(walked.className).not.toContain('line-through');
+    expect(skipped.querySelector('svg')).toBeNull();
+    expect(walked.querySelector('svg')).not.toBeNull();
     expect(byLabel(view, 'design-first walks Plan/Design').getAttribute('aria-pressed')).toBe('true');
   });
 
@@ -332,6 +355,213 @@ describe('editing the lanes', () => {
     expect(byLabel(view, 'quick walks Review/CI').getAttribute('aria-pressed')).toBe('false');
     const call = actions.calls[0] as { save: { layout: { variants: Record<string, string[]> } } };
     expect(call.save.layout.variants.quick).not.toContain('review');
+  });
+});
+
+describe('the stage of a lane', () => {
+  it('shows each lane as a gate or automatic, and none for the closed lane', async () => {
+    // Act
+    const view = await show(editor(laneSetFor()));
+
+    // Assert
+    const pressed = (name: string, kind: 'gate' | 'auto') => stageButton(view, name, kind).checked;
+    expect(pressed('Plan/Design', 'gate')).toBe(true);
+    expect(pressed('To test', 'gate')).toBe(true);
+    expect(pressed('Implement', 'auto')).toBe(true);
+    expect(pressed('Implement', 'gate')).toBe(false);
+    expect(stageButton(view, 'Implement', 'gate').closest('label')?.textContent).toBe('Gate');
+    expect(stageButton(view, 'Implement', 'auto').closest('label')?.textContent).toBe('Automatic');
+    expect(view.container.querySelector('[aria-label="Stage of Closed"]')).toBeNull();
+    expect(view.container.querySelector('[data-lane-row="closed"] input[type="checkbox"]')).not.toBeNull();
+  });
+
+  it('lists a gate’s options with their outcomes, and no gate panel for an automatic lane', async () => {
+    // Act
+    const view = await show(editor(laneSetFor()));
+
+    // Assert
+    const tested = gatePanel(view, 'tested');
+    const labels = [...tested.querySelectorAll<HTMLInputElement>('input')].map(input => input.value);
+    const outcomes = [...tested.querySelectorAll<HTMLSelectElement>('select')].map(select => select.value);
+    expect(labels).toEqual(['Done', 'Not good']);
+    expect(outcomes).toEqual(['close', 'reopen']);
+    expect(view.container.querySelector('[data-lane-gate="implement"]')).toBeNull();
+  });
+
+  it('turns an automatic lane into a gate and back, owner-gating it and then freeing it', async () => {
+    // Arrange
+    const actions = recorder();
+    const view = await show(editor(laneSetFor(), actions));
+
+    // Act
+    await click(stageButton(view, 'Implement', 'gate'));
+
+    // Assert
+    expect(gatePanel(view, 'implement').querySelector('input')?.value).toBe('OK to build');
+
+    // Act
+    await click(stageButton(view, 'Implement', 'auto'));
+
+    // Assert
+    expect(view.container.querySelector('[data-lane-gate="implement"]')).toBeNull();
+    await click(
+      buttonSaying(view, 'Save lanes').disabled
+        ? stageButton(view, 'Implement', 'auto')
+        : buttonSaying(view, 'Save lanes'),
+    );
+    const saved = savedLane(actions, 'implement');
+    expect(saved.stage).toEqual({ kind: 'auto', triggers: ['work.started'] });
+    expect(saved.ownerGate).toBeUndefined();
+  });
+
+  it('adds, relabels, retargets and removes options, and saves them as the gate', async () => {
+    // Arrange
+    const actions = recorder();
+    const view = await show(editor(laneSetFor(), actions));
+    const add = () =>
+      must(
+        [...gatePanel(view, 'implement').querySelectorAll('button')].find(node =>
+          node.textContent?.includes('Add option'),
+        ),
+        'the Add option button',
+      );
+
+    // Act
+    await click(stageButton(view, 'Implement', 'gate'));
+    await click(add());
+    await type(byLabel(view, 'Label of option 2 of Implement'), 'Try again');
+    await choose(byLabel(view, 'Outcome of option 2 of Implement'), 'lane:todo');
+    await click(buttonSaying(view, 'Save lanes'));
+
+    // Assert
+    expect(savedLane(actions, 'implement').stage).toEqual({
+      kind: 'gate',
+      options: [
+        { id: 'ok', label: 'OK to build', outcome: { kind: 'next' } },
+        { id: 'option', label: 'Try again', outcome: { kind: 'lane', laneId: 'todo' } },
+      ],
+    });
+
+    // Act: the third option is the last, and one can be removed again.
+    await click(add());
+    expect(add().disabled).toBe(true);
+    await click(byLabel(view, 'Remove option 3 of Implement'));
+    expect(add().disabled).toBe(false);
+    expect(gatePanel(view, 'implement').querySelectorAll('li')).toHaveLength(2);
+  });
+
+  it('keeps the last option, and offers Not good (reopen and talk) to one option only', async () => {
+    // Arrange
+    const view = await show(editor(laneSetFor()));
+
+    // Assert: To test already reopens on its second option, so its first cannot.
+    expect(byLabel(view, 'Remove option 1 of Plan/Design').hasAttribute('disabled')).toBe(true);
+    const reopen = (label: string) =>
+      must(byLabel(view, label).querySelector<HTMLOptionElement>('option[value="reopen"]'), 'the reopen choice');
+    await click(stageButton(view, 'Implement', 'gate'));
+    await click(
+      must(
+        [...gatePanel(view, 'implement').querySelectorAll('button')].find(node =>
+          node.textContent?.includes('Add option'),
+        ),
+        'the Add option button',
+      ),
+    );
+    expect(reopen('Outcome of option 2 of Implement').disabled).toBe(false);
+    expect(reopen('Outcome of option 1 of To test').disabled).toBe(true);
+    expect(reopen('Outcome of option 2 of To test').disabled).toBe(false);
+    await choose(byLabel(view, 'Outcome of option 2 of Implement'), 'reopen');
+    expect(reopen('Outcome of option 1 of Implement').disabled).toBe(true);
+  });
+
+  it('offers the next lane, any other lane, Not good and Close, and never the gate’s own lane', async () => {
+    // Act
+    const view = await show(editor(laneSetFor()));
+
+    // Assert
+    const choices = [...byLabel(view, 'Outcome of option 1 of Plan/Design').querySelectorAll('option')].map(node => [
+      node.value,
+      node.textContent,
+    ]);
+    expect(choices[0]).toEqual(['next', 'Next lane']);
+    expect(choices.at(-2)).toEqual(['reopen', 'Not good (reopen and talk)']);
+    expect(choices.at(-1)).toEqual(['close', 'Close']);
+    expect(choices.map(([value]) => value)).toContain('lane:implement');
+    expect(choices.map(([value]) => value)).not.toContain('lane:plan');
+    expect(choices.find(([value]) => value === 'lane:implement')?.[1]).toBe('Go to Implement');
+  });
+
+  it('names a blank option label and blocks saving until it is fixed', async () => {
+    // Arrange
+    const view = await show(editor(laneSetFor()));
+
+    // Act
+    await type(byLabel(view, 'Label of option 1 of To test'), '  ');
+
+    // Assert
+    expect(problems(view)).toContain('An option needs a label.');
+    expect(byLabel(view, 'Label of option 1 of To test').getAttribute('aria-invalid')).toBe('true');
+    expect(buttonSaying(view, 'Save lanes').disabled).toBe(true);
+  });
+
+  it('draws trigger chips for a lane and marks the reported ones', async () => {
+    // Act
+    const view = await show(editor(laneSetFor()));
+
+    // Assert
+    const chips = [
+      ...must(view.container.querySelector('[data-lane-triggers="implement"]'), 'triggers').querySelectorAll('button'),
+    ];
+    expect(chips).toHaveLength(10);
+    const reported = chips.filter(chip => chip.textContent?.includes('reported with fy task trigger'));
+    expect(reported.map(chip => chip.textContent?.split(' · ')[0])).toEqual([
+      'a reviewer approves the PR',
+      'a deploy is reported done',
+    ]);
+  });
+
+  it('draws unselected trigger chips as plain outlines and selected ones tinted with a tick', async () => {
+    const view = await show(editor(laneSetFor()));
+    const chips = [
+      ...must(view.container.querySelector('[data-lane-triggers="implement"]'), 'triggers').querySelectorAll('button'),
+    ];
+    const on = chips.filter(chip => chip.getAttribute('aria-pressed') === 'true');
+    const off = chips.filter(chip => chip.getAttribute('aria-pressed') === 'false');
+    expect(on.length).toBeGreaterThan(0);
+    expect(off.length).toBeGreaterThan(0);
+    for (const chip of on) expect(chip.querySelector('svg')).not.toBeNull();
+    for (const chip of off) expect(chip.querySelector('svg')).toBeNull();
+    expect(view.container.innerHTML).not.toContain('line-through');
+  });
+
+  it('keeps each gate option, its answer and its outcome, in one group with the remove control', async () => {
+    const view = await show(editor(laneSetFor()));
+    const group = must(view.container.querySelector('[data-lane-gate="tested"] [data-gate-option]'), 'an option');
+    expect(group.querySelector('input[aria-label^="Label of option 1"]')).not.toBeNull();
+    expect(group.querySelector('select[aria-label^="Outcome of option 1"]')).not.toBeNull();
+    expect(group.querySelector('button[aria-label^="Remove option 1"]')).not.toBeNull();
+    expect(group.textContent).toContain('→');
+  });
+
+  it('keeps an automatic lane’s stage in step with the triggers chosen', async () => {
+    // Arrange
+    const actions = recorder();
+    const view = await show(editor(laneSetFor(), actions));
+    await click(stageButton(view, 'Implement', 'gate'));
+    await click(stageButton(view, 'Implement', 'auto'));
+
+    // Act
+    const triggers = must(view.container.querySelector('[data-lane-triggers="implement"]'), 'triggers');
+    await click(
+      must(
+        [...triggers.querySelectorAll('button')].find(node => node.textContent === 'a PR opens'),
+        'a PR opens',
+      ),
+    );
+    await click(buttonSaying(view, 'Save lanes'));
+
+    // Assert
+    expect(savedLane(actions, 'implement').stage).toEqual({ kind: 'auto', triggers: ['work.started', 'pr.opened'] });
   });
 });
 
