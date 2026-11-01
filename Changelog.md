@@ -1,3 +1,10 @@
+## [4.198.0](https://github.com/kirinnee/ferretry/compare/v4.197.0...v4.198.0) (2026-11-01)
+
+### Features
+
+* **accounts:** default account per place in config/account-defaults.yaml (R1-4) ([#1240](https://github.com/kirinnee/ferretry/issues/1240)) ([072f74d](https://github.com/kirinnee/ferretry/commit/072f74db1c1124a611f0ed5245895bb2549e1fb5))
+* **daemon:** code cards labelled by 2FA key and daemon-made TOTP per key (R2-3) ([#1241](https://github.com/kirinnee/ferretry/issues/1241)) ([9a96f3b](https://github.com/kirinnee/ferretry/commit/9a96f3b0059dd3edbc734fbdb42c57c3025eacfb))
+
 ## [4.197.0](https://github.com/kirinnee/ferretry/compare/v4.196.0...v4.197.0) (2026-11-01)
 
 ### Features

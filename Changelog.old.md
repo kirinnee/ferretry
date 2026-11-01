@@ -1,3 +1,10 @@
+## [4.197.0](https://github.com/kirinnee/ferretry/compare/v4.196.0...v4.197.0) (2026-11-01)
+
+### Features
+
+* **daemon:** 2FA keys in the store and the passkey-bound seed save (R2-2) ([#1236](https://github.com/kirinnee/ferretry/issues/1236)) ([79a578c](https://github.com/kirinnee/ferretry/commit/79a578c75284599ecd4272ec22590d59d33798e7))
+* **daemon:** add the ferret session credential bearer class (RF-1) ([#1207](https://github.com/kirinnee/ferretry/issues/1207)) ([87c75cd](https://github.com/kirinnee/ferretry/commit/87c75cd105ca6029e2f79a841539c0eca5fdc41e))
+
 ## [4.196.0](https://github.com/kirinnee/ferretry/compare/v4.195.0...v4.196.0) (2026-11-01)
 
 ### Features
