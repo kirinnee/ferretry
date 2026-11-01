@@ -230,11 +230,11 @@
 /* Tight hit areas for the row's own controls (‹ › ⓘ ✕): it is height, not width, that a thumb needs. The global
    coarse-pointer floor is (0,1,1); `:root` here wins it. */
 :root .fy-item-view__step--tight {
-  min-width: 28px;
+  min-width: 26px;
 }
 :root .fy-item-view__info-toggle,
 :root .fy-item-view__close {
-  min-width: 36px;
+  min-width: 32px;
 }
 .fy-item-view__desc {
   margin: 0;

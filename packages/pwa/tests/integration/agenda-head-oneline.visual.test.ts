@@ -182,6 +182,16 @@ describe('the open item’s head', () => {
             expect(state.overflowing, 'the title really is longer than its box').toBe(true);
             expect(state.marquee, 'it is marked as scrolling').toBe(true);
             expect(state.running, 'and it scrolls').toBe(1);
+            const room = await tab.evaluate(() => {
+              const title = document.querySelector('[data-agenda-title]') as HTMLElement;
+              const context = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D;
+              const style = getComputedStyle(title);
+              context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+              return { box: title.clientWidth, twentyLetters: context.measureText('Which day works best').width };
+            });
+            expect(room.box, 'the title shows at least 20 characters before it scrolls').toBeGreaterThanOrEqual(
+              room.twentyLetters,
+            );
             await shot(tab, name, `${family}-${scheme}`, 'long-title');
           } finally {
             await close();
