@@ -321,3 +321,41 @@ describe('a hard link in a session folder', () => {
     should(person.status).eql(200);
   });
 });
+
+describe('an agent with no session of its own', () => {
+  it('should refuse it every route with not_own_session and pin nothing, should the boundary ever let it by', async () => {
+    // Arrange: a warden acts as no ferret. The routes' `operator` minimum already turns its token away at the
+    // boundary, so the handlers are called directly — this is the fail-closed branch behind that wall.
+    const pinner = new FakeRootPinner({ tree: treeOf(['a.ts', textFile('body\n')]) });
+    const routes = sessionFilesystemRoutes(
+      new SessionFilesystem(pinner, new FakeSessionGit()),
+      sessionDirectory(SESSIONS),
+      id => `${HOME}/state/sessions/${id}/media`,
+      homes,
+    );
+    const context = {
+      request: request({ query: [['path', 'a.ts']] }),
+      params: new Map([['sessionId', FERRET_SESSION]]),
+      credential: { kind: 'authenticated', tokenClass: 'warden' } as const,
+      actor: 'warden:w1',
+    };
+
+    // Act
+    const refusals = await Promise.all(
+      routes.map(
+        async route =>
+          await route.handle(context).then(
+            () => undefined,
+            (error: unknown) => error as { status?: number; code?: string },
+          ),
+      ),
+    );
+
+    // Assert
+    for (const refusal of refusals) {
+      should(refusal?.status).eql(403);
+      should(refusal?.code).eql('not_own_session');
+    }
+    should(pinner.pinnedCwds).eql([]);
+  });
+});
