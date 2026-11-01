@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AccountIdSchema, TwoFactorStageIdSchema } from './account-ids.ts';
 import { TaskRefSchema } from './board-refs.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 
@@ -811,6 +812,18 @@ export const AgendaPhoneApprovalRefSchema = z.strictObject({
 export type AgendaPhoneApprovalRef = z.infer<typeof AgendaPhoneApprovalRefSchema>;
 
 /**
+ * A 2FA seed staged at the machine and waiting for the owner's passkey (docs/secrets.md, "2FA keys"): the card's
+ * Allow runs the `add-2fa-key` ceremony bound to `stage` and saves it to `account`, and Deny drops it. The generic
+ * agenda answer saves nothing, so an app from before these cards shows the daemon's words and cannot save. Only the
+ * daemon raises one.
+ */
+export const AgendaTwoFactorSeedRefSchema = z.strictObject({
+  stage: TwoFactorStageIdSchema,
+  account: AccountIdSchema,
+});
+export type AgendaTwoFactorSeedRef = z.infer<typeof AgendaTwoFactorSeedRefSchema>;
+
+/**
  * What an `input` card may not be, and must be: it carries its request, and no ask, answers, steps or
  * confirmation of its own (the form answers it), and it is never a notice. Anything but an `input` card
  * carries no request.
@@ -906,6 +919,8 @@ const AgendaItemBaseShape = {
   copyPlan: AgendaCopyPlanRefSchema.optional(),
   /** The approve-on-phone card an `info` item presents; only an `info` item carries one. */
   phoneApproval: AgendaPhoneApprovalRefSchema.optional(),
+  /** The staged 2FA seed a card asks the owner to save with a passkey; answered by that ceremony, never the generic answer. */
+  twoFactorSeed: AgendaTwoFactorSeedRefSchema.optional(),
 };
 
 export const AgendaItemSchema = z

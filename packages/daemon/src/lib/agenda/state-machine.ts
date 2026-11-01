@@ -7,6 +7,7 @@ import {
   type AgendaClearableField,
   type AgendaConfirms,
   type AgendaCopyPlanRef,
+  type AgendaTwoFactorSeedRef,
   type AgendaDisposition,
   type AgendaErrorCode,
   type AgendaHistoryEntry,
@@ -128,6 +129,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly input?: AgendaInputRef;
   /** The paste plan a card presents (`AgendaCopyPlanRef`); only the daemon raises one. */
   readonly copyPlan?: AgendaCopyPlanRef;
+  /** The staged 2FA seed a card asks the owner to save with a passkey (`AgendaTwoFactorSeedRef`); only the daemon raises one. */
+  readonly twoFactorSeed?: AgendaTwoFactorSeedRef;
   /** The owner's one tap may close `task` too (`DAEMON_FEATURES.agendaOfferClose`); needs a card. */
   readonly offerClose?: true;
 }
@@ -655,6 +658,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.task === undefined ? {} : { task: request.task }),
       ...(request.input === undefined ? {} : { input: request.input }),
       ...(request.copyPlan === undefined ? {} : { copyPlan: request.copyPlan }),
+      ...(request.twoFactorSeed === undefined ? {} : { twoFactorSeed: request.twoFactorSeed }),
       ...(request.offerClose === true ? { offerClose: true as const } : {}),
     },
     actor,
@@ -766,6 +770,13 @@ function addressById(
       return failure(
         'use_input_form',
         `${command.id} is a paste plan: answer it on its card, or with fy copy plan approve`,
+      );
+    }
+    // A staged 2FA seed is saved only by the passkey ceremony its card runs: an agenda answer would save nothing.
+    if (target.item.twoFactorSeed !== undefined) {
+      return failure(
+        'use_input_form',
+        `${command.id} saves a 2FA key: allow it on its card in the app, with your passkey`,
       );
     }
     // An answer to a confirmation is the owner's decision about a configuration change: never a ferret's.

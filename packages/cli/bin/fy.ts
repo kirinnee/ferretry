@@ -203,6 +203,8 @@ import { registerSecretCommands } from '../src/lib/secrets/commands';
 import { SecretController } from '../src/lib/secrets/controller';
 import { LoginEntryController } from '../src/lib/secrets/entry-controller';
 import { ProtocolLoginEntryGateway } from '../src/lib/secrets/entry-gateway';
+import { TwoFactorSeedController } from '../src/lib/secrets/factor-controller';
+import { ProtocolTwoFactorSeedGateway } from '../src/lib/secrets/factor-gateway';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
 import { registerSecurityCommands } from '../src/lib/security/commands';
 import { SecurityController } from '../src/lib/security/controller';
@@ -954,7 +956,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       ownSessionId,
     }),
   ({ program, world, client }) => registerAnalyticsCommands(program, new AnalyticsController(client, world.io)),
-  ({ program, world, client }) =>
+  ({ program, world, client, ownSessionId }) =>
     registerSecretCommands(
       program,
       new SecretController(
@@ -972,6 +974,15 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
           source === '-'
             ? await Bun.stdin.text()
             : await Bun.file(isAbsolute(source) ? source : join(world.cwd, source)).text(),
+      }),
+      new TwoFactorSeedController({
+        gateway: new ProtocolTwoFactorSeedGateway(client),
+        out: world.io,
+        prompt: world.prompt,
+        interactive: world.interactive,
+        ownSessionId,
+        sleep: async ms => await Bun.sleep(ms),
+        nowMs: () => Date.now(),
       }),
     ),
   ({ program, world, client }) =>

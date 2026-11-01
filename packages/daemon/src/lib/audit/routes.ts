@@ -455,6 +455,66 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'id',
     detail: { action: 'account-apart' },
   },
+  // 2FA keys (docs/secrets.md, "2FA keys"): by account and key id only, never a value. A seed's save is recorded with
+  // the proof it took (always a passkey bound to that save) and the new key's id.
+  {
+    method: 'POST',
+    path: '/v1/accounts/:id/factors',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'factor-added' },
+    responseFields: { factor: ['id'] },
+  },
+  {
+    method: 'PATCH',
+    path: '/v1/accounts/:id/factors/:factor',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'factor-relabelled' },
+    responseFields: { factor: ['id'] },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/accounts/:id/factors/:factor',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'factor-removed' },
+    responseFields: { factor: ['factor'] },
+  },
+  {
+    method: 'POST',
+    path: '/v1/accounts/:id/factors/seed',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'factor-seed-staged' },
+    responseFields: { stage: ['stage'] },
+    refusalCode: true,
+  },
+  {
+    method: 'POST',
+    path: '/v1/accounts/:id/factors/seed/:stage/commit',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'factor-added', proof: 'passkey' },
+    responseFields: { factor: ['factor', 'id'] },
+    refusalCode: true,
+  },
+  {
+    method: 'POST',
+    path: '/v1/accounts/:id/factors/seed/:stage/confirm-in-app',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'factor-seed-confirm-in-app' },
+    responseFields: { stage: ['stage'] },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/accounts/:id/factors/seed/:stage',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'factor-seed-dropped' },
+    responseFields: { stage: ['stage'] },
+  },
   // Copying secrets to another machine: both ends name the SAME import id as the subject, so the source's
   // record and the target's can be matched up by eye. Names only — the bundle is never read here.
   {

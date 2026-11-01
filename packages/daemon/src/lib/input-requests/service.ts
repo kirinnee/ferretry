@@ -621,6 +621,16 @@ export class InputRequestService {
     return await attempt;
   }
 
+  /**
+   * An OPEN card's target key as the DAEMON saw it (never the agent's word), for a 2FA seed set up from that card:
+   * it saves only to an account that signs in there (docs/secrets.md, "2FA keys"). `undefined`: no such open card.
+   */
+  cardTarget(requestId: string): { readonly matchKey?: string } | undefined {
+    const held = this.held.get(requestId);
+    if (held === undefined || isFinal(held.request)) return undefined;
+    return held.matchKey === undefined ? {} : { matchKey: held.matchKey };
+  }
+
   /** Where a request's value goes, for a route that gates by destination: names only, never a value. */
   targetOf(sessionId: string, requestId: string): InputRequest['target'] | undefined {
     const held = this.held.get(requestId);

@@ -15,7 +15,7 @@ import type { InputCaller, InputLoginPort } from '../../../src/lib/input-request
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
 import { LoginDirectory, LoginEntryError, LoginVault, totpCode } from '../../../src/lib/secrets/index.ts';
-import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments } from '../runtime/mounts/support.ts';
+import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments, plantSeed } from '../runtime/mounts/support.ts';
 
 /**
  * P3, SAVED LOGINS through the REAL input service and the REAL saved-login store (fake cipher, memory files):
@@ -582,10 +582,8 @@ describe('the next time: the card offers the saved login, and the owner taps Use
 
   it('should never offer a 2FA code by hand from an account that does not sign in here', async () => {
     const h = harness();
-    await h.directory.put(
-      'GITHUB',
-      PutLoginEntryRequestSchema.parse({ label: 'GitHub', totp: { seed: SEED }, totpAcknowledged: true }),
-    );
+    await h.directory.put('GITHUB', PutLoginEntryRequestSchema.parse({ label: 'GitHub' }));
+    await plantSeed(h.directory.accounts, 'GITHUB', SEED);
     const { request } = await raised(h, { ...RAISE, sensitivity: 'private' });
     should(request.saved?.offers).deepEqual([]);
   });
@@ -601,15 +599,8 @@ describe('the next time: the card offers the saved login, and the owner taps Use
 
   it('should make the 2FA code inside the daemon and type it, with the seed and the code in no other sink', async () => {
     const h = harness();
-    await h.directory.put(
-      'GITHUB',
-      PutLoginEntryRequestSchema.parse({
-        label: 'GitHub',
-        match: ['sudo@kirin-box'],
-        totp: { seed: SEED },
-        totpAcknowledged: true,
-      }),
-    );
+    await h.directory.put('GITHUB', PutLoginEntryRequestSchema.parse({ label: 'GitHub', match: ['sudo@kirin-box'] }));
+    await plantSeed(h.directory.accounts, 'GITHUB', SEED);
     const { request } = await raised(h, { ...RAISE, sensitivity: 'private' });
     should(request.saved?.offers.map(offer => offer.fills)).deepEqual(['totp']);
     await h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'GITHUB'), HOST);
@@ -624,15 +615,8 @@ describe('the next time: the card offers the saved login, and the owner taps Use
   it('should never RETURN a code it made for a `code` card: in no result, route or sink, and masked from text reads', async () => {
     // Arrange — the approved pick: a daemon-made TOTP code is typed only into the observed field, never returned.
     const h = harness({ facts: otpFacts() });
-    await h.directory.put(
-      'GITHUB',
-      PutLoginEntryRequestSchema.parse({
-        label: 'GitHub',
-        match: ['ssh@bastion'],
-        totp: { seed: SEED },
-        totpAcknowledged: true,
-      }),
-    );
+    await h.directory.put('GITHUB', PutLoginEntryRequestSchema.parse({ label: 'GitHub', match: ['ssh@bastion'] }));
+    await plantSeed(h.directory.accounts, 'GITHUB', SEED);
     const { request, view } = await raised(h, { ...RAISE, prompt: 'GitHub wants the 2FA code', sensitivity: 'code' });
     should(request.saved?.offers.map(offer => offer.fills)).deepEqual(['totp']);
 

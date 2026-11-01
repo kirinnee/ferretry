@@ -13,7 +13,7 @@ import {
   SecretVault,
   totpCode,
 } from '../../../src/lib/secrets/index.ts';
-import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments } from '../runtime/mounts/support.ts';
+import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments, plantSeed } from '../runtime/mounts/support.ts';
 
 const CLOCK = { now: () => '2026-10-31T09:00:00.000Z' };
 const PASSWORD = 'hunter2-UNIQUE-pw';
@@ -82,10 +82,16 @@ describe('the saved-login directory', () => {
 
   it('should add and remove a 2FA seed with its parameters, never listing the seed', async () => {
     const w = world();
-    const added = await w.directory.put(
-      'GITHUB',
-      change({ label: 'GitHub', totp: { seed: SEED, parameters: { digits: 8 } }, totpAcknowledged: true }),
-    );
+    // The old body cannot save a seed (it has no passkey); one saved the passkey way is listed and removed here.
+    await w.directory.put('GITHUB', change({ label: 'GitHub' }));
+    const refused = await w.directory
+      .put('GITHUB', change({ totp: { seed: SEED, parameters: { digits: 8 } }, totpAcknowledged: true }))
+      .catch(error => error);
+    should(refused.refusal).equal('add_2fa_key_needs_passkey');
+    await plantSeed(w.directory.accounts, 'GITHUB', SEED, undefined, { digits: 8 });
+    const added = (await w.directory.list()).find(entry => entry.id === 'GITHUB') as NonNullable<
+      Awaited<ReturnType<typeof w.directory.list>>[number]
+    >;
     should(added.fields.totp).be.true();
     should(added.totp).deepEqual({ algorithm: 'SHA1', digits: 8, period: 30 });
     should(JSON.stringify(await w.directory.list())).not.containEql(SEED);
@@ -157,10 +163,9 @@ describe('the saved-login vault', () => {
         label: 'GitHub',
         username: 'kirinnee',
         password: PASSWORD,
-        totp: { seed: SEED },
-        totpAcknowledged: true,
       }),
     );
+    await plantSeed(w.directory.accounts, 'GITHUB', SEED);
     await w.directory.put('BARE', change({ label: 'bare' }));
     const at = 1_761_900_000_000;
 
@@ -182,10 +187,9 @@ describe('the saved-login vault', () => {
         label: 'GitHub',
         username: 'kirinnee',
         password: PASSWORD,
-        totp: { seed: SEED },
-        totpAcknowledged: true,
       }),
     );
+    await plantSeed(w.directory.accounts, 'GITHUB', SEED);
     const values = await w.vault.values();
     should([...values.keys()].sort()).deepEqual(['login:GITHUB:password', 'login:GITHUB:totp']);
     should([...values.values()]).not.containEql('kirinnee');
@@ -244,7 +248,8 @@ describe('the saved-login vault when what it reads is wrong', () => {
 
   it('should refuse to make a code from a sealed seed that is not base32', async () => {
     const w = world();
-    await w.directory.put('BAD', { label: 'bad', totp: { seed: '0189-not-base32' } } as PutLoginEntry);
+    await w.directory.put('BAD', { label: 'bad' } as PutLoginEntry);
+    await plantSeed(w.directory.accounts, 'BAD', '0189-not-base32');
     should((await w.vault.fill('BAD', 'totp', 0).catch(error => error)).refusal).equal('no_such_field');
   });
 });

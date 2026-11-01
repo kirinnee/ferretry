@@ -12,6 +12,7 @@ import {
   TwoFactorStageIdSchema,
   type TwoFactorStageId,
 } from './account-ids.ts';
+import { AgendaIdSchema } from './agenda.ts';
 import { InstantSchema } from './common.ts';
 import {
   LOGIN_LABEL_MAX_LENGTH,
@@ -733,7 +734,165 @@ export const AccountLookAlikeSchema = z.strictObject({
 });
 export type AccountLookAlike = z.infer<typeof AccountLookAlikeSchema>;
 
-// ── `config/account-defaults.yaml` ───────────────────────────────────────────────────────────────
+// ── 2FA keys (`/v1/accounts/:id/factors*`, owner only) ────────────────────────────────────────
+
+/**
+ * `POST /v1/accounts/:id/factors`: a 2FA key with NO value — an SMS number's last digits, where an email code goes, a
+ * push app, a security key, or a TOTP authenticator only the owner holds. A seed is never added here: it is staged and
+ * saved with a passkey bound to that one save ({@link StageTwoFactorSeedRequestSchema}), so this body has no field
+ * that could carry one.
+ */
+export const AddTwoFactorKeyRequestSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    label: TwoFactorLabelSchema,
+    kind: z.literal('totp'),
+    issuer: totpShape.issuer,
+    accountName: totpShape.accountName,
+  }),
+  z.strictObject({ label: TwoFactorLabelSchema, ...smsShape }),
+  z.strictObject({ label: TwoFactorLabelSchema, ...emailShape }),
+  z.strictObject({ label: TwoFactorLabelSchema, ...pushShape }),
+  z.strictObject({ label: TwoFactorLabelSchema, ...securityKeyShape }),
+]);
+export type AddTwoFactorKeyRequest = z.infer<typeof AddTwoFactorKeyRequestSchema>;
+
+/**
+ * `PATCH /v1/accounts/:id/factors/:tf`: a new label, or the plain facts of its kind (`null` removes one). Never its
+ * kind, never its seed: a key that should make codes is staged afresh.
+ */
+export const PatchTwoFactorKeyRequestSchema = z.strictObject({
+  label: TwoFactorLabelSchema.optional(),
+  endsWith: smsShape.endsWith.unwrap().nullable().optional(),
+  to: emailShape.to.unwrap().nullable().optional(),
+  app: PushAppSchema.nullable().optional(),
+});
+export type PatchTwoFactorKeyRequest = z.infer<typeof PatchTwoFactorKeyRequestSchema>;
+
+/** `DELETE /v1/accounts/:id/factors/:tf`: never needs a passkey (it narrows), and its seed is swept with it. */
+export const RemovedTwoFactorKeySchema = z.strictObject({
+  account: AccountIdSchema,
+  factor: TwoFactorIdSchema,
+  removed: z.literal(true),
+});
+export type RemovedTwoFactorKey = z.infer<typeof RemovedTwoFactorKeySchema>;
+
+/** How long a staged seed waits for its passkey: one passkey challenge's life (`PASSKEY_CHALLENGE_TTL_SECONDS`). */
+export const TWO_FACTOR_STAGE_TTL_SECONDS = 120;
+/** Most seeds one daemon holds staged at once, so nobody can fill its memory by staging. */
+export const MAX_LIVE_TWO_FACTOR_STAGES = 4;
+
+/**
+ * `POST /v1/accounts/:id/factors/seed`: STAGE a TOTP seed, step one of two. `padded` is the pasted base32 key or
+ * `otpauth://totp/…` link, padded as every card value is (`padInputValue`), so its length says nothing. The daemon
+ * parses it again (`parseTotpInput`), seals it into MEMORY only, and answers what it read — never the seed. Nothing is
+ * saved until the commit, which takes a passkey proved for this one stage.
+ *
+ * `totpAcknowledged` is the warning tick ({@link LOGIN_TOTP_WARNING}); `mismatchAcknowledged` the second tick, "save it
+ * here anyway", without which a key that says it is for another account is refused. `request` is the input card the
+ * owner set this up from: the stage is refused unless `:id` is the account the daemon matched for that card.
+ */
+export const StageTwoFactorSeedRequestSchema = z.strictObject({
+  padded: z.string().min(1).max(4_096),
+  label: TwoFactorLabelSchema.optional(),
+  totpAcknowledged: z.literal(true),
+  mismatchAcknowledged: z.boolean().optional(),
+  request: z
+    .string()
+    .regex(/^[0-9a-f]{32}$/u)
+    .optional(),
+});
+export type StageTwoFactorSeedRequest = z.infer<typeof StageTwoFactorSeedRequestSchema>;
+
+/** What a pasted key says it is for, where it differs from the account (the amber box), with its words. */
+export const TwoFactorMismatchSchema = z.strictObject({
+  issuer: totpShape.issuer,
+  accountName: totpShape.accountName,
+  words: z.string().min(1).max(512),
+});
+export type TwoFactorMismatchView = z.infer<typeof TwoFactorMismatchSchema>;
+
+/** The stage's answer: what the daemon read of the key, never the key. */
+export const TwoFactorSeedStagedSchema = z.strictObject({
+  stage: TwoFactorStageIdSchema,
+  account: AccountIdSchema,
+  label: TwoFactorLabelSchema,
+  expiresAt: InstantSchema,
+  parsed: z.strictObject({
+    params: TotpParametersSchema,
+    issuer: totpShape.issuer,
+    accountName: totpShape.accountName,
+  }),
+  mismatch: TwoFactorMismatchSchema.optional(),
+});
+export type TwoFactorSeedStaged = z.infer<typeof TwoFactorSeedStagedSchema>;
+
+/**
+ * `GET /v1/accounts/:id/factors/seed/:stage`: where one staged save stands, for `fy` waiting on the owner's passkey.
+ * `waiting` until it is saved (with the new key's id), dropped (Deny, or `DELETE`) or expired. Never the seed.
+ */
+export const TwoFactorSeedStageViewSchema = z.strictObject({
+  stage: TwoFactorStageIdSchema,
+  account: AccountIdSchema,
+  label: TwoFactorLabelSchema,
+  state: z.enum(['waiting', 'saved', 'dropped', 'expired']),
+  expiresAt: InstantSchema,
+  factor: TwoFactorIdSchema.optional(),
+  agendaItemId: AgendaIdSchema.optional(),
+});
+export type TwoFactorSeedStageView = z.infer<typeof TwoFactorSeedStageViewSchema>;
+
+/**
+ * `POST /v1/accounts/:id/factors/seed/:stage/commit`: the save. Takes a FRESH `add-2fa-key` passkey proof bound to
+ * THIS stage (`addTwoFactorKeySubject`), from every caller, the machine itself included; nothing else stands in for one.
+ */
+export const TwoFactorSeedSavedSchema = z.strictObject({
+  account: AccountIdSchema,
+  factor: TwoFactorKeySummarySchema,
+});
+export type TwoFactorSeedSaved = z.infer<typeof TwoFactorSeedSavedSchema>;
+
+/**
+ * `POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app`: a save staged at the machine (`fy account factor add
+ * --totp`), put on the owner's agenda so they confirm it with a passkey in the app. `session` is the board the card
+ * goes on. The card's words are the daemon's: which account, who asked, where and when.
+ */
+export const ConfirmTwoFactorSeedRequestSchema = z.strictObject({
+  session: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u, 'an agenda session id'),
+});
+export type ConfirmTwoFactorSeedRequest = z.infer<typeof ConfirmTwoFactorSeedRequestSchema>;
+
+export const TwoFactorSeedConfirmingSchema = z.strictObject({
+  stage: TwoFactorStageIdSchema,
+  session: ConfirmTwoFactorSeedRequestSchema.shape.session,
+  agendaItemId: AgendaIdSchema,
+});
+export type TwoFactorSeedConfirming = z.infer<typeof TwoFactorSeedConfirmingSchema>;
+
+/** The refusals a 2FA key route answers with, each a different next step for the person. */
+export const TWO_FACTOR_ERROR_CODES = {
+  /** The old seed path (`PUT /v1/secrets/logins/:id` with `totp`): it has no passkey, so it is closed. */
+  needsPasskey: 'add_2fa_key_needs_passkey',
+  /** No device has a passkey yet, so no seed can be saved. */
+  passkeyRequired: 'passkey_required',
+  /** The card the stage names was matched to another account (or is closed). */
+  notThisCardsAccount: 'not_this_cards_account',
+  /** The key says it is for another account, and "save it here anyway" was not ticked. */
+  mismatch: 'factor_mismatch',
+  /** The pasted text is not a key this daemon can make codes from. */
+  notAKey: 'not_a_2fa_key',
+  /** No such stage, or it expired, was saved or was dropped. */
+  stageGone: 'stage_not_found',
+  /** Too many seeds staged at once on this daemon. */
+  tooManyStages: 'too_many_stages',
+  /** No such 2FA key on this account. */
+  unknownFactor: 'unknown_2fa_key',
+} as const;
+
+/** Where to add a 2FA seed now that the old path is closed: the sentence the 403 says. */
+export const ADD_TWO_FACTOR_KEY_WHERE =
+  'saving a 2FA seed needs a passkey now: add it from Settings › Accounts in the app, or run `fy account factor add <account> --totp` and confirm it there';
+
+// ── `config/account-defaults.yaml`───────────────────────────────────────────────────────────────
 
 const DefaultsMapSchema = z
   .record(PlaceKeySchema, AccountIdSchema)

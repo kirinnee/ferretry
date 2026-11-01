@@ -1,7 +1,7 @@
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, describe, it } from 'bun:test';
-import { PutLoginEntryRequestSchema } from '@ferretry/protocol';
+import { PutLoginEntryRequestSchema, TotpParametersSchema } from '@ferretry/protocol';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import {
@@ -70,10 +70,12 @@ describe('saved logins at rest', () => {
         match: ['github.com'],
         username: 'kirinnee',
         password: PASSWORD,
-        totp: { seed: SEED },
-        totpAcknowledged: true,
       }),
     );
+    // A seed is saved only by the passkey-bound commit, which ends in `addSeed`.
+    await directory.accounts.addSeed((await directory.accounts.seedTarget('GITHUB_KIRINNEE')).key, SEED, {
+      params: TotpParametersSchema.parse({}),
+    });
     const indexPath = join(paths.state, LOGIN_INDEX_DOCUMENT);
     const sealedPath = join(paths.state, LOGIN_SECRETS_DOCUMENT);
 

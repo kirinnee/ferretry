@@ -15,7 +15,7 @@ import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { type SecretSubsystem, secretRoutes } from '../../../../src/lib/runtime/mounts/secrets.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { SecretStoreError } from '../../../../src/lib/secrets/index.ts';
-import { agentIn, CREDENTIALS, GRANTED, human, MemoryLoginIndex, secretSubsystem } from './support.ts';
+import { agentIn, CREDENTIALS, GRANTED, human, MemoryLoginIndex, plantSeed, secretSubsystem } from './support.ts';
 
 /**
  * `/v1/accounts*` and the saved-login routes over the account store (r1-plan §1.5, §5 invariants 1, 19, 21; lead
@@ -64,12 +64,10 @@ async function world() {
   const answers: unknown[] = [];
   answers.push(await ok('PUT', '/v1/accounts/GITHUB', { label: 'GitHub', username: 'kirin', password: PASSWORD }));
   answers.push(
-    await ok(
-      'PUT',
-      '/v1/secrets/logins/GITHUB',
-      PutLoginEntryRequestSchema.parse({ totp: { seed: SEED }, totpAcknowledged: true, match: ['github.com'] }),
-    ),
+    await ok('PUT', '/v1/secrets/logins/GITHUB', PutLoginEntryRequestSchema.parse({ match: ['github.com'] })),
   );
+  // A seed is saved only through the passkey-bound commit now; the fixture plants it the way that commit does.
+  await plantSeed(subsystem.accounts as NonNullable<SecretSubsystem['accounts']>, 'GITHUB', SEED);
   answers.push(
     await ok('POST', '/v1/accounts/GITHUB/sign-ins', {
       place: { kind: 'terminal', tool: 'ssh', host: 'kirin-box', dest: 'build.example.com' },

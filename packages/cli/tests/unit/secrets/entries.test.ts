@@ -356,56 +356,17 @@ describe('fy secret entry edit', () => {
     should(gateway.puts).have.length(0);
   });
 
-  it('should print the warning, require a typed yes, then send the seed with the acknowledgement', async () => {
+  it('should refuse --totp before asking or sending anything, and say where a seed is saved now', async () => {
     // Arrange
-    const { controller, gateway, prompt, messages } = rig(new FakeGateway(), new FakePrompt([SEED], ['yes']));
+    const { controller, gateway, prompt } = rig(new FakeGateway(), new FakePrompt([SEED], ['yes']));
 
     // Act
-    await controller.edit('SUDO_KIRIN_BOX', { totp: true });
+    const message = await fails(() => controller.edit('SUDO_KIRIN_BOX', { totp: true, iUnderstandTotp: true }));
 
-    // Assert
-    should(messages[0]).containEql(LOGIN_TOTP_WARNING);
-    should(prompt.asked).have.length(1);
-    should(gateway.puts[0]?.body).deepEqual({ totp: { seed: SEED }, totpAcknowledged: true });
-  });
-
-  it('should keep no seed when the owner does not type yes, and ask for no seed', async () => {
-    // Arrange
-    const { controller, gateway, prompt } = rig(new FakeGateway(), new FakePrompt([SEED], ['no']));
-
-    // Act
-    const message = await fails(() => controller.edit('SUDO_KIRIN_BOX', { totp: true }));
-
-    // Assert
-    should(message).containEql('nothing was changed');
+    // Assert — the old path has no passkey, and the daemon refuses it (403) anyway
+    should(message).containEql('account factor add SUDO_KIRIN_BOX --totp');
+    should(message).containEql('Nothing was changed');
     should(prompt.hidden).have.length(0);
-    should(gateway.puts).have.length(0);
-  });
-
-  it('should skip the typed yes with --i-understand-totp, but still show the warning', async () => {
-    // Arrange
-    const { controller, gateway, prompt, messages } = rig(new FakeGateway(), new FakePrompt([SEED]));
-
-    // Act
-    await controller.edit('SUDO_KIRIN_BOX', { totp: true, iUnderstandTotp: true });
-
-    // Assert
-    should(prompt.asked).have.length(0);
-    should(messages[0]).containEql(LOGIN_TOTP_WARNING);
-    should(gateway.puts[0]?.body.totpAcknowledged).equal(true);
-  });
-
-  it('should refuse a bad seed without repeating it', async () => {
-    // Arrange
-    const bad = 'not-a-seed-UNIQUE!';
-    const { controller, gateway } = rig(new FakeGateway(), new FakePrompt([bad]));
-
-    // Act
-    const message = await fails(() => controller.edit('SUDO_KIRIN_BOX', { totp: true }));
-
-    // Assert
-    should(message).containEql('base32');
-    should(message).not.containEql(bad);
     should(gateway.puts).have.length(0);
   });
 
@@ -633,23 +594,12 @@ describe('a typed value never leaves except in the put body', () => {
   it('should keep the password and the seed out of every output, error and gateway call but the PUT', async () => {
     // Arrange
     const gateway = new FakeGateway({ v: 1, health: 'ready', entries: [summary()] });
-    const prompt = new FakePrompt([PASSWORD, SEED], ['yes']);
+    const prompt = new FakePrompt([PASSWORD]);
     const { controller, messages } = rig(gateway, prompt);
     const root = new Command().name('fy').exitOverride();
     root.configureOutput({ writeOut: () => {}, writeErr: () => {} });
     registerLoginEntryCommands(root.command('secret'), controller);
-    const argv = [
-      'node',
-      'fy',
-      'secret',
-      'entry',
-      'edit',
-      'SUDO_KIRIN_BOX',
-      '--password',
-      '--totp',
-      '--label',
-      'new label',
-    ];
+    const argv = ['node', 'fy', 'secret', 'entry', 'edit', 'SUDO_KIRIN_BOX', '--password', '--label', 'new label'];
 
     // Act
     await root.parseAsync(argv);
@@ -662,7 +612,6 @@ describe('a typed value never leaves except in the put body', () => {
     should(JSON.stringify([gateway.renames, gateway.removed])).not.containEql(PASSWORD);
     should(gateway.puts).have.length(1);
     should(JSON.stringify(gateway.puts[0]?.body)).containEql(PASSWORD);
-    should(JSON.stringify(gateway.puts[0]?.body)).containEql(SEED);
   });
 });
 

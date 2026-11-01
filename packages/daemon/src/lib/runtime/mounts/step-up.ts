@@ -32,6 +32,8 @@ import {
   type StepUpRefusal,
   StepUpOptionsRequestSchema,
   stepUpRefusalCode,
+  TWO_FACTOR_ERROR_CODES,
+  type TwoFactorStageId,
 } from '@ferretry/protocol';
 import {
   type ApiResponse,
@@ -86,7 +88,15 @@ const caller = ({ request, credential, actor }: RouteContext): StepUpCaller => (
 const answer = <T>(outcome: StepUpOutcome<T>, parse: (value: T) => unknown, status = 200): ApiResponse =>
   outcome.ok ? jsonResponse(parse(outcome.value), status) : refusal(outcome.refusal);
 
-export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
+/**
+ * What the step-up options need of the staged 2FA seeds: what a proof for one is bound to, or nothing when it is not
+ * waiting. Absent: this daemon stages none, so it issues no challenge for `add-2fa-key`.
+ */
+export interface StagedSeedBinding {
+  boundSubjectOf(stage: TwoFactorStageId): string | undefined;
+}
+
+export function stepUpRoutes(service: StepUpService, seeds?: StagedSeedBinding): readonly ApiRoute[] {
   return [
     {
       method: 'GET',
@@ -131,10 +141,20 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
       noStore: true,
       handle: async context => {
         const body = await parseBody(context.request, StepUpOptionsRequestSchema);
-        // Saving a 2FA seed binds its proof to the staged save, and this daemon stages none yet: an unbound proof
-        // stamped for the act is never minted, so the save, when it lands, can only take one bound to its own stage.
-        if (body.act === STEP_UP_ACTS.addTwoFactorKey)
-          return errorResponse(400, 'this machine does not save 2FA keys yet; update it first', 'bad_request');
+        // Saving a 2FA seed binds its challenge, and so its proof, to the ONE staged save it names (its account and stage):
+        // no proof stamped for the act is ever minted unbound, and only that stage's commit can spend it.
+        if (body.act === STEP_UP_ACTS.addTwoFactorKey) {
+          const bound = body.subject === undefined ? undefined : seeds?.boundSubjectOf(body.subject);
+          if (bound === undefined)
+            return errorResponse(
+              404,
+              'that 2FA key is not waiting to be saved: it was saved, dropped or timed out; stage it again',
+              TWO_FACTOR_ERROR_CODES.stageGone,
+            );
+          return answer(await service.stepUpOptions(caller(context), body.origin, body.act, bound), value =>
+            StepUpOptionsSchema.parse(value),
+          );
+        }
         return answer(await service.stepUpOptions(caller(context), body.origin, body.act), value =>
           StepUpOptionsSchema.parse(value),
         );

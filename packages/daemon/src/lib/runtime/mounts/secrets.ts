@@ -7,6 +7,20 @@ import {
   type AccountLookAlike,
   AccountPairRequestSchema,
   AddSignInRequestSchema,
+  AddTwoFactorKeyRequestSchema,
+  ConfirmTwoFactorSeedRequestSchema,
+  PatchTwoFactorKeyRequestSchema,
+  RemovedTwoFactorKeySchema,
+  StageTwoFactorSeedRequestSchema,
+  TWO_FACTOR_ERROR_CODES,
+  type TwoFactorId,
+  TwoFactorIdSchema,
+  TwoFactorSeedConfirmingSchema,
+  TwoFactorSeedSavedSchema,
+  TwoFactorSeedStagedSchema,
+  TwoFactorSeedStageViewSchema,
+  type TwoFactorStageId,
+  TwoFactorStageIdSchema,
   PutAccountRequestSchema,
   PutSignInRequestSchema,
   RenameAccountRequestSchema,
@@ -64,8 +78,14 @@ import {
   SecretUseError,
   type SecretUseService,
   secretListView,
+  TwoFactorSeedError,
+  TwoFactorSeedProofMissing,
+  type TwoFactorSeedStages,
+  DEVICE_OWNER,
+  type StageCaller,
   UnknownSecretError,
 } from '../../secrets/index.ts';
+import { parseActor } from '../../api/actor.ts';
 
 /**
  * The secret store's HTTP surface.
@@ -138,6 +158,8 @@ const LOGIN_STATUS: Readonly<Record<LoginEntryError['refusal'], number>> = {
   account_has_2fa_keys: 409,
   no_sign_in: 409,
   merge_refused: 409,
+  unknown_2fa_key: 404,
+  add_2fa_key_needs_passkey: 403,
 };
 
 /** Re-raises a domain failure as its HTTP answer, and anything else as itself so a genuine bug is
@@ -591,6 +613,208 @@ function accountRoutes(
   ];
 }
 
+// ── 2FA keys (docs/secrets.md, "2FA keys") ───────────────────────────────────────────────────────
+
+/** The 2FA key id in the path. */
+function pathFactorId(context: RouteContext): TwoFactorId {
+  const parsed = TwoFactorIdSchema.safeParse(decodeParameter(context.params.get('factor') ?? '') ?? '');
+  if (!parsed.success) throw new ApiError(400, 'the 2FA key in the path is not usable', 'invalid_factor');
+  return parsed.data;
+}
+
+/** The staged seed in the path. One this daemon could never have minted is simply not waiting. */
+function pathStageId(context: RouteContext): TwoFactorStageId {
+  const parsed = TwoFactorStageIdSchema.safeParse(decodeParameter(context.params.get('stage') ?? '') ?? '');
+  if (!parsed.success)
+    throw new ApiError(404, 'that 2FA key is not waiting to be saved', TWO_FACTOR_ERROR_CODES.stageGone);
+  return parsed.data;
+}
+
+/** Who is asking about a stage, from the boundary: a paired device by its id, anything else by its actor. */
+function stageCaller(context: RouteContext): StageCaller {
+  const device = context.request.device;
+  return device === undefined
+    ? { key: context.actor ?? 'unknown', device: false }
+    : { key: `${DEVICE_OWNER}${device.deviceId}`, device: true };
+}
+
+/** Who asked for a save, in the card's words: the owner's shell, the app at the machine, or a paired device. */
+function askedByWords(context: RouteContext): string {
+  const { kind } = parseActor(context.actor ?? '');
+  if (kind === 'admin-cli') return '`fy`';
+  if (kind === 'device') return 'a paired device';
+  return 'the app on this machine';
+}
+
+/**
+ * The commit's refusal without a proof: the ordinary step-up demand, naming `add-2fa-key`, so the app runs the
+ * ceremony for this stage and sends the commit again. The machine's own token gets it too: it proves nothing.
+ */
+const seedProofDemand = (): ApiResponse =>
+  jsonResponse(
+    {
+      error: 'saving a 2FA seed needs a passkey confirmation for this one save, from a paired device',
+      code: STEP_UP_REQUIRED_CODE,
+      demand: { ...SECRETS_CONFIGURE, act: STEP_UP_ACTS.addTwoFactorKey },
+    } satisfies StepUpRequiredBody,
+    403,
+  );
+
+/**
+ * The 2FA key routes of the account store. Every one is the OWNER's (a ferret is refused before the body is read).
+ * Adding a key with no value, relabelling and removing never ask for a passkey; saving a SEED is staged here and
+ * committed only with a fresh `add-2fa-key` proof bound to that stage — asked of every caller, the machine included:
+ * the commit never reads `governance`, an unlock or `stepUpOnActions`.
+ */
+function factorRoutes(
+  accounts: AccountDirectory | undefined,
+  seeds: TwoFactorSeedStages | undefined,
+): readonly ApiRoute[] {
+  if (accounts === undefined) return [];
+  const configure = { minimum: 'operator', capability: SECRETS_CONFIGURE, noStore: true } as const;
+  const owned =
+    (act: string, run: (context: RouteContext) => Promise<unknown>, status = 200) =>
+    async (context: RouteContext): Promise<ApiResponse> => {
+      ownerOnly(context, act);
+      try {
+        return jsonResponse(await run(context), status);
+      } catch (error) {
+        if (error instanceof TwoFactorSeedError) throw new ApiError(error.status, error.message, error.code);
+        if (error instanceof LoginEntryError && error.refusal === 'unknown_2fa_key')
+          throw new ApiError(404, error.message, TWO_FACTOR_ERROR_CODES.unknownFactor);
+        return reraise(error);
+      }
+    };
+  const seedRoutes: readonly ApiRoute[] =
+    seeds === undefined
+      ? []
+      : [
+          {
+            method: 'POST',
+            path: '/v1/accounts/:id/factors/seed',
+            ...configure,
+            handle: owned(
+              'stage a 2FA seed',
+              async context => {
+                const id = pathAccountId(context);
+                return TwoFactorSeedStagedSchema.parse(
+                  await seeds.stage(
+                    id,
+                    await parseBody(context.request, StageTwoFactorSeedRequestSchema),
+                    stageCaller(context),
+                  ),
+                );
+              },
+              201,
+            ),
+          },
+          {
+            method: 'GET',
+            path: '/v1/accounts/:id/factors/seed/:stage',
+            ...configure,
+            handle: owned('read a staged 2FA seed', async context =>
+              TwoFactorSeedStageViewSchema.parse(
+                await seeds.view(pathAccountId(context), pathStageId(context), stageCaller(context)),
+              ),
+            ),
+          },
+          {
+            method: 'POST',
+            path: '/v1/accounts/:id/factors/seed/:stage/commit',
+            ...configure,
+            handle: async context => {
+              ownerOnly(context, 'save a 2FA seed');
+              const id = pathAccountId(context);
+              const stage = pathStageId(context);
+              try {
+                // EVERY CALLER proves it: no `governance` read here, so the machine's token skips nothing.
+                const saved = await seeds.commit(
+                  id,
+                  stage,
+                  subject => context.claimFreshStepUp?.(STEP_UP_ACTS.addTwoFactorKey, subject) === true,
+                );
+                return jsonResponse(TwoFactorSeedSavedSchema.parse(saved));
+              } catch (error) {
+                if (error instanceof TwoFactorSeedProofMissing) return seedProofDemand();
+                if (error instanceof TwoFactorSeedError) throw new ApiError(error.status, error.message, error.code);
+                return reraise(error);
+              }
+            },
+          },
+          {
+            method: 'POST',
+            path: '/v1/accounts/:id/factors/seed/:stage/confirm-in-app',
+            ...configure,
+            handle: owned(
+              'ask the owner to save a 2FA seed',
+              async context => {
+                const id = pathAccountId(context);
+                const stage = pathStageId(context);
+                const { session } = await parseBody(context.request, ConfirmTwoFactorSeedRequestSchema);
+                const { agendaItemId } = await seeds.confirmInApp(
+                  id,
+                  stage,
+                  session,
+                  askedByWords(context),
+                  stageCaller(context),
+                );
+                return TwoFactorSeedConfirmingSchema.parse({ stage, session, agendaItemId });
+              },
+              201,
+            ),
+          },
+          {
+            method: 'DELETE',
+            path: '/v1/accounts/:id/factors/seed/:stage',
+            ...configure,
+            handle: owned('drop a staged 2FA seed', async context => {
+              const stage = pathStageId(context);
+              await seeds.drop(pathAccountId(context), stage, stageCaller(context));
+              return { stage, dropped: true };
+            }),
+          },
+        ];
+  return [
+    ...seedRoutes,
+    {
+      method: 'POST',
+      path: '/v1/accounts/:id/factors',
+      ...configure,
+      handle: owned(
+        'add a 2FA key',
+        async context => {
+          const id = pathAccountId(context);
+          return await accounts.addFactor(id, await parseBody(context.request, AddTwoFactorKeyRequestSchema));
+        },
+        201,
+      ),
+    },
+    {
+      method: 'PATCH',
+      path: '/v1/accounts/:id/factors/:factor',
+      ...configure,
+      handle: owned('change a 2FA key', async context => {
+        const id = pathAccountId(context);
+        const factor = pathFactorId(context);
+        return await accounts.patchFactor(id, factor, await parseBody(context.request, PatchTwoFactorKeyRequestSchema));
+      }),
+    },
+    {
+      // NEVER a passkey: removing a key only narrows what this machine can do. Its seed is swept with it.
+      method: 'DELETE',
+      path: '/v1/accounts/:id/factors/:factor',
+      ...configure,
+      handle: owned('remove a 2FA key', async context => {
+        const id = pathAccountId(context);
+        const factor = pathFactorId(context);
+        if (!(await accounts.removeFactor(id, factor)))
+          throw new ApiError(404, `${id} has no 2FA key ${factor}`, TWO_FACTOR_ERROR_CODES.unknownFactor);
+        return RemovedTwoFactorKeySchema.parse({ account: id, factor, removed: true });
+      }),
+    },
+  ];
+}
+
 /** The name in the path, decoded and validated as a name this store could ever have held. */
 function pathSecretName(context: RouteContext): SecretName {
   const decoded = decodeParameter(context.params.get('name') ?? '');
@@ -709,6 +933,10 @@ export interface SecretSubsystem {
   readonly accounts?: AccountDirectory;
   /** The vault's one look-alike answer (handles only): the only part of it a route holds. */
   readonly lookAlike?: Pick<AccountVault, 'lookAlike'>;
+  /**
+   * Staged 2FA seeds, waiting for the passkey bound to each. It holds sealed seeds in memory and never answers one.
+   */
+  readonly seeds?: TwoFactorSeedStages;
   /** Login recipes: the value check on every recipe text, and the owner's answer to a proposal. */
   readonly loginRecipes?: LoginRecipeService;
   /** Where configuration names secrets, so an unresolvable reference is visible before it fails. */
@@ -798,5 +1026,6 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
     },
     ...loginRoutes(subsystem.logins, subsystem.loginRecipes),
     ...accountRoutes(subsystem.accounts, subsystem.loginRecipes, subsystem.lookAlike),
+    ...factorRoutes(subsystem.accounts, subsystem.seeds),
   ];
 }

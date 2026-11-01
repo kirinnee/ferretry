@@ -71,6 +71,11 @@ export class StatePasskeyStore implements PasskeyStore {
     return (await this.read()).find(passkey => passkey.credentialId === credentialId)?.deviceId;
   }
 
+  /** Whether ANY paired device holds a passkey: none means no 2FA seed can be saved (docs/secrets.md). */
+  async any(): Promise<boolean> {
+    return (await this.read()).length > 0;
+  }
+
   /**
    * A credential belongs to one device. Adding one another device already holds is refused rather than
    * re-pointed: re-pointing would hand that device's passkey to whoever registered the same id.

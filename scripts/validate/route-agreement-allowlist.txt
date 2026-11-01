@@ -127,3 +127,8 @@ unreached DELETE /v1/accounts/:id # TEMPORARY (&F291 R1-2): the account store's 
 unreached POST /v1/accounts/:id/sign-ins # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
 unreached POST /v1/accounts/:id/merge # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
 unreached POST /v1/accounts/:id/apart # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
+unreached POST /v1/accounts/:id/factors # TEMPORARY (&F291 R2-2): the 2FA key routes; Settings › Accounts and the code card (R2-5, R2-6) dial them in the PRs after this one, which remove this line
+unreached PATCH /v1/accounts/:id/factors/:factor # TEMPORARY (&F291 R2-2): the 2FA key routes; Settings › Accounts and the code card (R2-5, R2-6) dial them in the PRs after this one, which remove this line
+unreached DELETE /v1/accounts/:id/factors/:factor # TEMPORARY (&F291 R2-2): the 2FA key routes; Settings › Accounts and the code card (R2-5, R2-6) dial them in the PRs after this one, which remove this line
+unreached POST /v1/accounts/:id/factors/seed/:stage/commit # TEMPORARY (&F291 R2-2): the 2FA key routes; Settings › Accounts and the code card (R2-5, R2-6) dial them in the PRs after this one, which remove this line
+unreached DELETE /v1/accounts/:id/factors/seed/:stage # TEMPORARY (&F291 R2-2): the 2FA key routes; Settings › Accounts and the code card (R2-5, R2-6) dial them in the PRs after this one, which remove this line

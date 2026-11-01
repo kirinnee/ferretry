@@ -363,7 +363,10 @@ pairing code, widening a device, agent control, a daemon update and an install e
 right after an unlock. **A fresh proof is stamped with the act it was proved for** (the app names the act when
 it asks for the passkey), and a claim for one act takes only a proof stamped for that act, so a leftover proof
 for another act (loosening a configuration file, say) never buys an install. The proof is claimed atomically
-at admission, so one passkey buys one install. At the machine, nothing is asked.
+at admission, so one passkey buys one install. At the machine, nothing is asked — **except saving a 2FA seed**
+(act `add-2fa-key`): that one is asked of EVERY caller, the admin token on loopback included, and its proof is
+bound to the one staged save, opens no step-up window, and is never the fresh proof another act takes
+([secrets.md](secrets.md#2fa-keys)).
 
 **The app asks only for the machine on screen.** With several machines paired, every page reads all of
 them in the background, so a locked second machine used to raise its unlock over the first machine's

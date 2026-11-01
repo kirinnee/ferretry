@@ -914,9 +914,10 @@ secret fields an account holds, nor its 2FA parameters, seal names, auto-apply o
 
 #### 2FA keys
 
-> **Protocol only**, like the rest of this section: the shapes are in `accounts.ts` and `two-factor.ts`; the
-> store, the routes and the cards land later. No daemon reports `accounts.2fa-keys.1` yet. Until it does, a
-> deliver that names a key (`factor`) is refused, and so is a step-up for `add-2fa-key`.
+> The shapes are in `accounts.ts` and `two-factor.ts`. The store and its routes — adding, relabelling and removing
+> a key, and saving a seed with a passkey bound to that save — are built ([secrets: 2FA keys](secrets.md#2fa-keys));
+> the cards are not yet. No daemon reports `accounts.2fa-keys.1` yet. Until it does, a deliver that names a key
+> (`factor`) is refused.
 
 **An account is a username, a password and a list of 2FA keys** (`factors`, at most 8). Each key has an id
 (`tf_` and 12 hex digits, never shown to people), a kind, a label **the owner wrote** ("Okta Verify on Pixel",

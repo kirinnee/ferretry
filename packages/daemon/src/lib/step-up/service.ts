@@ -13,7 +13,10 @@ import {
   PushNotificationPayloadSchema,
   SECURITY_SETTING_BOUNDS,
   type SecuritySettings,
+  type EveryCallerStepUpAct,
+  type MachineSkippableStepUpAct,
   type StepUpAct,
+  stepUpSkippableAtMachine,
   type StepUpAssertion,
   type StepUpGranted,
   type StepUpOptions,
@@ -264,8 +267,17 @@ export class StepUpService {
   }
 
   /** Takes the fresh proof for an act, atomically: of concurrent acts on one proof, one gets `true`. */
-  claimFresh(subject: StepUpSubject, act?: StepUpAct): boolean {
-    return this.deps.registry.claimFresh(subject, this.deps.clock.nowMs(), act);
+  claimFresh(subject: StepUpSubject, act?: MachineSkippableStepUpAct): boolean;
+  /**
+   * An act every caller must prove takes only a proof proved for it AND bound to `bound` (the staged save it is for):
+   * there is no way to ask for one without naming what it is bound to.
+   */
+  claimFresh(subject: StepUpSubject, act: EveryCallerStepUpAct, bound: string): boolean;
+  claimFresh(subject: StepUpSubject, act?: StepUpAct, bound?: string): boolean {
+    const now = this.deps.clock.nowMs();
+    if (act !== undefined && !stepUpSkippableAtMachine(act))
+      return bound !== undefined && this.deps.registry.claimFresh(subject, now, act, bound);
+    return this.deps.registry.claimFresh(subject, now, act as MachineSkippableStepUpAct | undefined);
   }
 
   /** Spends the fresh proof an act that adds access was admitted on. */
@@ -409,8 +421,31 @@ export class StepUpService {
     return { ok: true, value: passkeyView(stored) };
   }
 
-  async stepUpOptions(caller: StepUpCaller, origin: string, act?: StepUpAct): Promise<StepUpOutcome<StepUpOptions>> {
-    return await this.#assertionOptions(caller, origin, 'step-up', act);
+  async stepUpOptions(
+    caller: StepUpCaller,
+    origin: string,
+    act?: MachineSkippableStepUpAct,
+  ): Promise<StepUpOutcome<StepUpOptions>>;
+  /**
+   * Options for an act every caller must prove: the challenge, and so the proof it buys, is bound to `bound` (the one
+   * staged save it is for, `addTwoFactorKeySubject`), and the proof is spent only on that.
+   */
+  async stepUpOptions(
+    caller: StepUpCaller,
+    origin: string,
+    act: EveryCallerStepUpAct,
+    bound: string,
+  ): Promise<StepUpOutcome<StepUpOptions>>;
+  async stepUpOptions(
+    caller: StepUpCaller,
+    origin: string,
+    act?: StepUpAct,
+    bound?: string,
+  ): Promise<StepUpOutcome<StepUpOptions>> {
+    // Never a challenge for such an act without what it is bound to, nor a binding on any other act.
+    if ((act !== undefined && !stepUpSkippableAtMachine(act)) !== (bound !== undefined && bound !== ''))
+      return refuse('not-verified');
+    return await this.#assertionOptions(caller, origin, 'step-up', act, bound);
   }
 
   /** Options for a confirmation on opening: the same ceremony, its own challenge. */
@@ -446,6 +481,7 @@ export class StepUpService {
     origin: string,
     purpose: 'step-up' | 'unlock',
     act?: StepUpAct,
+    bound?: string,
   ): Promise<StepUpOutcome<StepUpOptions>> {
     const device = caller.device;
     if (device === undefined) return refuse('not-a-device');
@@ -456,7 +492,7 @@ export class StepUpService {
     if (usable.length === 0) return refuse('no-passkey');
     const now = this.deps.clock.nowMs();
     const challenge = this.deps.random.bytes(CHALLENGE_BYTES);
-    this.deps.challenges.issue(device, purpose, challenge, now, undefined, act);
+    this.deps.challenges.issue(device, purpose, challenge, now, undefined, act, bound);
     return {
       ok: true,
       value: {
@@ -486,7 +522,15 @@ export class StepUpService {
     const now = this.deps.clock.nowMs();
     const done = await this.#ceremony(caller, device, 'step-up', assertion, now);
     if (!done.ok) return done;
-    const expiresAt = instant(this.deps.registry.grant(device, now, true, done.act));
+    // A proof for an act every caller must prove opens no step-up window and is not the fresh proof an act-less check
+    // reads: it is kept bound to the one save its challenge named, and only that save can spend it.
+    const act = done.act;
+    if (act !== undefined && !stepUpSkippableAtMachine(act)) {
+      if (done.bound === undefined) return refuse('not-verified');
+      const until = instant(this.deps.registry.grantBound(device, now, act, done.bound));
+      return { ok: true, value: done.rotated ? { expiresAt: until, keyRotated: true } : { expiresAt: until } };
+    }
+    const expiresAt = instant(this.deps.registry.grant(device, now, true, act));
     return { ok: true, value: done.rotated ? { expiresAt, keyRotated: true } : { expiresAt } };
   }
 
@@ -508,7 +552,7 @@ export class StepUpService {
     assertion: StepUpAssertion,
     now: number,
   ): Promise<
-    | { readonly ok: true; readonly rotated: boolean; readonly act?: StepUpAct }
+    | { readonly ok: true; readonly rotated: boolean; readonly act?: StepUpAct; readonly bound?: string }
     | { readonly ok: false; readonly refusal: StepUpRefusal }
   > {
     const rotateBy = this.rotateBy(device.deviceId);
@@ -529,7 +573,10 @@ export class StepUpService {
     }
     const verified = await this.#verify(device, purpose, assertion, now);
     if (!verified.ok) return verified;
-    const stamp = verified.act === undefined ? {} : { act: verified.act };
+    const stamp = {
+      ...(verified.act === undefined ? {} : { act: verified.act }),
+      ...(verified.bound === undefined ? {} : { bound: verified.bound }),
+    };
     if (rotation === undefined || this.deps.rotation === undefined || transcriptHash === undefined)
       return { ok: true, rotated: false, ...stamp };
     // The device was revoked between the assertion and the swap: nothing to step up any more.
@@ -550,13 +597,18 @@ export class StepUpService {
     assertion: StepUpAssertion,
     now: number,
   ): Promise<
-    { readonly ok: true; readonly act?: StepUpAct } | { readonly ok: false; readonly refusal: StepUpRefusal }
+    | { readonly ok: true; readonly act?: StepUpAct; readonly bound?: string }
+    | { readonly ok: false; readonly refusal: StepUpRefusal }
   > {
     const issued = this.deps.challenges.takeWithAct(device, purpose, now);
     if (issued === undefined) return refuse('not-verified');
     const passkeys = await this.deps.store.list(device.deviceId);
     if (!(await this.#verifyAssertion(device, passkeys, assertion, issued.bytes, now))) return refuse('not-verified');
-    return issued.act === undefined ? { ok: true } : { ok: true, act: issued.act };
+    return {
+      ok: true,
+      ...(issued.act === undefined ? {} : { act: issued.act }),
+      ...(issued.bound === undefined ? {} : { bound: issued.bound }),
+    };
   }
 
   /**

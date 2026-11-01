@@ -8,7 +8,7 @@ import {
   narrowAccountVault,
   totpCode,
 } from '../../../src/lib/secrets/index.ts';
-import { FakeSecretCipher, MemoryLoginIndex } from '../runtime/mounts/support.ts';
+import { FakeSecretCipher, MemoryLoginIndex, plantSeed } from '../runtime/mounts/support.ts';
 import { CLOCK, CountingSealed, daemonOver, SEED } from './accounts-fixtures.ts';
 
 /**
@@ -172,8 +172,8 @@ describe('merging two accounts', () => {
     await w.directory.putAccount('KEEP', { label: 'GitHub', username: 'kirin', password: 'same-UNIQUE-pw-1' });
     await w.directory.putAccount('FROM', { label: 'gh', username: 'kirin', password: fromPassword });
     const logins = new LoginDirectory(w.index, w.sealed, new FakeSecretCipher(), CLOCK);
-    // FROM's seed, through the older route (the only way to save one before 2FA keys have routes of their own).
-    await logins.put('FROM', PutLoginEntryRequestSchema.parse({ totp: { seed: SEED }, totpAcknowledged: true }));
+    // FROM's seed, saved the way the passkey-bound commit saves one.
+    await plantSeed(logins.accounts, 'FROM', SEED);
     await w.directory.addSignIn('KEEP', { place: site('github.com') });
     const moved = await w.directory.addSignIn('FROM', {
       place: terminal('gh', 'kirin-box'),
@@ -264,10 +264,7 @@ describe('merging two accounts', () => {
 
     const seeds = await pair();
     const logins = new LoginDirectory(seeds.index, seeds.sealed, new FakeSecretCipher(), CLOCK);
-    await logins.put(
-      'KEEP',
-      PutLoginEntryRequestSchema.parse({ totp: { seed: 'GEZDGNBVGY3TQOJQ' }, totpAcknowledged: true }),
-    );
+    await plantSeed(logins.accounts, 'KEEP', 'GEZDGNBVGY3TQOJQ');
     should(await refusal(seeds.directory.merge('KEEP', 'FROM'))).equal('merge_refused');
     should(await refusal(seeds.directory.merge('KEEP', 'KEEP'))).equal('merge_refused');
   });
