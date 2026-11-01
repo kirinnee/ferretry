@@ -1,3 +1,13 @@
+## [4.212.0](https://github.com/kirinnee/ferretry/compare/v4.211.0...v4.212.0) (2026-11-01)
+
+### Features
+
+* **protocol:** standing sign-in rule wire contract and the approve-sign-in-rule act (R3c-1) ([#1271](https://github.com/kirinnee/ferretry/issues/1271)) ([7e1bb43](https://github.com/kirinnee/ferretry/commit/7e1bb431defe13d2d65a3cce03e6dcde13412678))
+
+### Fixes
+
+* **fleet:** route the conversation lease store through checked folder handles (&B122) ([#1270](https://github.com/kirinnee/ferretry/issues/1270)) ([fa2092e](https://github.com/kirinnee/ferretry/commit/fa2092e70587a2145b7b4ac70072b200ab5341d2))
+
 ## [4.211.0](https://github.com/kirinnee/ferretry/compare/v4.210.1...v4.211.0) (2026-11-01)
 
 ### Features
