@@ -299,6 +299,12 @@ function handle({ id, method, params }) {
     pushNumberReply(id, params);
     return;
   }
+  // A script reports the origin of the world it ran in, chosen by its source: a page that moved, one too long to trust, none.
+  if (method === 'evaluate' && (params?.source === '() => moved' || params?.source === '() => long')) {
+    const scriptOrigin = params.source === '() => moved' ? 'https://gitlab.com' : `https://${'a'.repeat(3_000)}.test`;
+    reply(id, true, { ...snapshot(method, params), scriptOrigin });
+    return;
+  }
   // A request's own argument selects the reply behaviour, so one fixture covers every path.
   switch (params?.url ?? params?.target?.selector ?? params?.selector ?? method) {
     case 'never-replies':

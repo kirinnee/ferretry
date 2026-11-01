@@ -235,6 +235,23 @@ describe('browser worker client — requests', () => {
     should(shot.screenshotFormat).equal('png');
   });
 
+  it('should carry the origin of the world a script ran in, and none an older worker or an over-long one names', async () => {
+    // Arrange
+    const client = await connect();
+
+    // Act
+    const moved = await client.evaluate('p1', { source: '() => moved' });
+    const long = await client.evaluate('p1', { source: '() => long' });
+    const older = await client.evaluate('p1', { source: '() => 1' });
+
+    // Assert — the standing rules taint by the origin the script really ran in (secrev-1282a M2); unknown taints all.
+    should(moved.scriptOrigin).equal('https://gitlab.com');
+    should(moved.text).equal('page text');
+    should(long).not.have.property('scriptOrigin');
+    should(older).not.have.property('scriptOrigin');
+    should(reportedParams(older.url)).deepEqual({ pageId: 'p1', source: '() => 1' });
+  });
+
   it('should grant the worker only the allowlisted environment, plus a forced loopback proxy bypass', async () => {
     // Arrange
     const client = await connect({

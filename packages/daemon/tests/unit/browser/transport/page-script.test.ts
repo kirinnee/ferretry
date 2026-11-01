@@ -255,7 +255,16 @@ describe('runPageScript', () => {
 });
 
 /** Runs a script expression here, as the isolated world would run it. */
-const runHere = (expression: string): Promise<unknown> => new Function(`return ${expression};`)() as Promise<unknown>;
+/** Evaluates the expression here, in a world whose `location` is `origin`: what the script answered, and the origin read. */
+const evaluateHere = async (
+  expression: string,
+  origin = 'https://example.test',
+): Promise<{ readonly origin: unknown; readonly text: unknown }> =>
+  (await (new Function('location', `return ${expression};`)({ origin }) as Promise<unknown>)) as {
+    readonly origin: unknown;
+    readonly text: unknown;
+  };
+const runHere = async (expression: string): Promise<unknown> => (await evaluateHere(expression)).text;
 
 describe('pageScriptExpression', () => {
   it('should call the function with no element when none was named, and turn what it returns into text', async () => {
@@ -280,5 +289,38 @@ describe('pageScriptExpression', () => {
     // Assert
     should((notAFunction as Error).message).startWith('the script is not a function');
     should(commented).equal('7');
+  });
+});
+
+describe('runPageScript: the origin of the world the script ran in (secrev-1282a M2)', () => {
+  it('should answer the origin of the world it ran in beside the text, as the evaluation sees it', async () => {
+    should(await evaluateHere(pageScriptExpression('() => 1', undefined), 'https://gitlab.com')).deepEqual({
+      origin: 'https://gitlab.com',
+      text: '1',
+    });
+  });
+
+  it('should read the world’s own origin first, in the same evaluation, before the agent’s code is even built', () => {
+    const expression = pageScriptExpression('() => document.title', undefined);
+    const read = expression.indexOf('const origin = location.origin;');
+    should(read).be.above(-1);
+    should(read).be.below(expression.indexOf('() => document.title'));
+    should(expression.indexOf('await fn(')).be.above(read);
+  });
+
+  it('should answer the origin the evaluation reported beside the text', async () => {
+    const cdp = new FakeCdp();
+    cdp.answer = { result: { value: { origin: 'https://gitlab.com', text: '"Welcome"' } } };
+    const ran = await runPageScript(asPage(page()), cdp, { source: '() => document.title' }, () => 'm');
+    should(ran).deepEqual({ text: '"Welcome"', origin: 'https://gitlab.com' });
+  });
+
+  it('should answer no origin for an opaque one, one too long to trust, or none at all', async () => {
+    for (const origin of ['null', `https://${'a'.repeat(3_000)}.test`, null, 7]) {
+      const cdp = new FakeCdp();
+      cdp.answer = { result: { value: { origin, text: '1' } } };
+      const ran = await runPageScript(asPage(page()), cdp, { source: '() => 1' }, () => 'm');
+      should(ran).deepEqual({ text: '1' });
+    }
   });
 });

@@ -156,6 +156,7 @@ describe('SignInGrantLedger: a standing rule (R3c-4)', () => {
     at: number,
     session = SESSION,
     remaining = Number.POSITIVE_INFINITY,
+    place = 'github.com',
   ) =>
     ledger.reserve(
       { id: RULE, signIn: SIGN_IN, remaining, codeJoinsPassword: true },
@@ -163,6 +164,7 @@ describe('SignInGrantLedger: a standing rule (R3c-4)', () => {
       roles,
       [...roles].sort().join('+'),
       at,
+      place,
     );
 
   it('should type a code only as a later step of a sign-in the rule typed the password of', () => {
@@ -175,6 +177,15 @@ describe('SignInGrantLedger: a standing rule (R3c-4)', () => {
     ledger.spent(reserved(ruleFill(ledger, ['password'], NOW + 2_000)), 'p');
     const code = reserved(ruleFill(ledger, ['totp'], NOW + 3_000));
     should(code.opens).be.false();
+  });
+
+  it('should not let a code join an attempt whose password went to another place, even one the rule pins', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(ruleFill(ledger, ['username', 'password'], NOW)), 'p');
+    should(ruleFill(ledger, ['totp'], NOW + 1_000, SESSION, Number.POSITIVE_INFINITY, 'login.github.com')).equal(
+      'code-without-sign-in',
+    );
+    should(reserved(ruleFill(ledger, ['totp'], NOW + 2_000)).opens).be.false();
   });
 
   it('should not let a code join once the attempt is over, or twice in one attempt', () => {

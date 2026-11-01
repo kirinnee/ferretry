@@ -21,6 +21,8 @@ import { type ActableCdp, type ActablePage, browserElementOf } from './page-acts
 
 /** The most a script's answer may hand back; the daemon clips again to its own wire bound. */
 export const PAGE_SCRIPT_MAX_RESULT_CHARS = 200_000;
+/** The longest origin a script's answer may report; a longer one is dropped (it reads as unreadable), never cut. */
+export const PAGE_SCRIPT_ORIGIN_MAX_CHARS = 2_048;
 /** The name the isolated world carries in DevTools. */
 export const PAGE_SCRIPT_WORLD = 'ferretry-agent-script';
 
@@ -34,9 +36,15 @@ export interface PageScript {
   readonly timeoutMs?: number;
 }
 
-/** What a script handed back, as text. */
+/** What a script handed back, as text, and the origin of the world it ran in. */
 export interface PageScriptResult {
   readonly text: string;
+  /**
+   * The origin of the document the script's world belongs to, read inside the same evaluation BEFORE the agent's code
+   * runs (secrev-1282a M2): the one origin that code could reach, whatever the page did between the daemon's look and
+   * the world being made. Absent when it could not be read (an opaque `null` origin reads as absent too).
+   */
+  readonly origin?: string;
 }
 
 /** Just enough of a DOM element for the mark: the functions below run in the page, not here. */
@@ -60,22 +68,27 @@ export type MarkMint = () => string;
 /**
  * The expression the isolated world evaluates. The agent's source is spliced in as the expression it
  * already is — it can only ever be the agent's own code, in the agent's own world. The mark is
- * spliced in as a JSON string, so no mark can break out of its quotes.
+ * spliced in as a JSON string, so no mark can break out of its quotes. Its FIRST step reads the world's
+ * own origin, in the same evaluation, before the agent's code is even built: the answer carries both.
  */
 export function pageScriptExpression(source: string, mark: string | undefined): string {
   const element = mark === undefined ? 'undefined' : `document.querySelector(${JSON.stringify(`[${MARK}="${mark}"]`)})`;
   return `(async () => {
+  const origin = location.origin;
   const fn = (${source}
 );
   if (typeof fn !== 'function') throw new TypeError('the script is not a function: write () => … or (element) => …');
   const value = await fn(${element});
-  if (value === undefined) return 'undefined';
-  try {
-    const json = JSON.stringify(value);
-    return json === undefined ? String(value) : json;
-  } catch {
-    return String(value);
-  }
+  const text = (() => {
+    if (value === undefined) return 'undefined';
+    try {
+      const json = JSON.stringify(value);
+      return json === undefined ? String(value) : json;
+    } catch {
+      return String(value);
+    }
+  })();
+  return { origin: typeof origin === 'string' ? origin : null, text };
 })()`;
 }
 
@@ -138,7 +151,19 @@ export async function runPageScript(
     )) as { result?: { value?: unknown }; exceptionDetails?: unknown };
     if (answer.exceptionDetails !== undefined) throw new Error(thrown(answer.exceptionDetails));
     const value = answer.result?.value;
-    return { text: (typeof value === 'string' ? value : String(value)).slice(0, PAGE_SCRIPT_MAX_RESULT_CHARS) };
+    const reported =
+      value !== null && typeof value === 'object' ? (value as { origin?: unknown; text?: unknown }) : undefined;
+    const said = reported === undefined ? value : reported.text;
+    const origin =
+      typeof reported?.origin === 'string' &&
+      reported.origin !== 'null' &&
+      reported.origin.length <= PAGE_SCRIPT_ORIGIN_MAX_CHARS
+        ? reported.origin
+        : undefined;
+    return {
+      text: (typeof said === 'string' ? said : String(said)).slice(0, PAGE_SCRIPT_MAX_RESULT_CHARS),
+      ...(origin === undefined ? {} : { origin }),
+    };
   } finally {
     if (element !== undefined) await element.evaluate(takeMark, MARK).catch(() => undefined);
   }

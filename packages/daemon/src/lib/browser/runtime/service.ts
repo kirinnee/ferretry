@@ -145,6 +145,8 @@ export interface BrowserScriptResult {
   readonly status: BrowserActionResult['status'];
   readonly result: BrowserPageActed;
   readonly text: string;
+  /** The origin of the world the script actually ran in, read before the agent's code ran; absent when unknown. */
+  readonly scriptOrigin?: string;
 }
 
 /** How a named page is opened. */
@@ -474,10 +476,15 @@ export class BrowserSessionService implements BrowserSubsystem {
     const page = this.requirePage(run, sessionId, key);
     return await this.exclusive(page.id, async () => {
       await guard?.(this.guardPage(run, page.id));
-      const { text, ...result } = await run.driver.evaluate(page.id, script);
+      const { text, scriptOrigin, ...result } = await run.driver.evaluate(page.id, script);
       run.snapshot = pageOf(result);
       this.touch(run);
-      return { status: this.project(run, sessionId), result, text };
+      return {
+        status: this.project(run, sessionId),
+        result,
+        text,
+        ...(scriptOrigin === undefined ? {} : { scriptOrigin }),
+      };
     });
   }
 

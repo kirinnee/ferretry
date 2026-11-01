@@ -627,10 +627,11 @@ Two more limits are declared:
 - **A crash before an owed write lands.** A suspension or a use that only memory holds is lost if the daemon crashes
   before any write succeeds. The rule's drift, its proof and its expiry are found again at load; a suspension caused
   by an event (a page script, a page that did not move on, a failed write) is not.
-- **Timing.** An account change that suspends a rule takes one rules-file write and an audit record longer than one
-  that does not. A ferret that can cause such a change (an auto-applied recipe, a new form recorded after its own fill)
-  could time it to learn that a rule existed. The probe costs it the rule, which is then suspended until the owner
-  approves it again. This is accepted.
+- **Timing.** A raise a rule was tried on answers later than one no rule is about, even when the rule misses without
+  being suspended (out of scope, say): the accounts are read, the miss is audited and the card is made to buzz. A
+  ferret that measures its raises could so learn that some rule is about a sign-in, without spending it. Likewise an
+  account change that suspends a rule takes one rules-file write and an audit record longer than one that does not.
+  What a ferret reads (its view, its words, its agenda card) stays byte-identical either way. This is accepted.
 
 ### Routes
 

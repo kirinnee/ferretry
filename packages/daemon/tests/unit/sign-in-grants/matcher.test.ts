@@ -597,7 +597,7 @@ describe('matchSignInGrant: a standing rule’s own checks (R3c-4)', () => {
     should(reasonOf(grant(), sighting({ facts: renamed }), new Map())).equal('filled');
   });
 
-  it('17: a username-only or code-only step outside the history asks, and is no suspension', () => {
+  it('17: a username-only step outside the history asks, and is no suspension; a lone code box may only join', () => {
     const userOnly = page({}, [pageField('user')]);
     should(
       reasonOf(
@@ -614,8 +614,54 @@ describe('matchSignInGrant: a standing rule’s own checks (R3c-4)', () => {
       ...withCode,
       accountPins: { id: 'GITHUB' as AccountId, username: 'kirinnee', factors: factorFingerprint(factors) },
     };
+    // One code box outside the history: a match the ledger lets through ONLY as a join to this rule's password attempt,
+    // and one that pins nothing.
+    const codeSeen = sighting({ facts: codePage, fields: CODE_FIELDS }, { accounts: [account({ factors })] });
+    should(matchSignInGrant(codeRule, codeSeen, new Map())).match({ ok: true, fills: ['totp'], joinOnly: true });
+    // A code form pinned earlier does not turn a join into a changed form: the join neither reads nor writes a pin.
+    should(matchSignInGrant(codeRule, codeSeen, new Map([['totp', '0000000000000000']]))).match({ ok: true });
+    // A code box beside another field is no lone code step: it asks.
+    const codeAndUser = page({}, [
+      pageField('user'),
+      pageField('otp', {}, { type: 'text', autocomplete: 'one-time-code' }),
+    ]);
     should(
-      reasonOf(codeRule, sighting({ facts: codePage, fields: CODE_FIELDS }, { accounts: [account({ factors })] })),
+      reasonOf(
+        codeRule,
+        sighting(
+          {
+            facts: codeAndUser,
+            fields: [{ id: 'user', label: 'Username', sensitivity: 'plain' }, ...CODE_FIELDS],
+          },
+          { accounts: [account({ factors })] },
+        ),
+      ),
     ).equal('no-history');
+    // Without the rule's code tick it never gets that far, and a page script on the place still comes first.
+    should(reasonOf({ ...codeRule, fields: new Set(['username', 'password']) }, codeSeen)).equal('code-not-ticked');
+    should(reasonOf(codeRule, { ...codeSeen, scriptedOrigins: { hosts: new Map([['github.com', NOW - 1]]) } })).equal(
+      'scripted-origin',
+    );
+  });
+
+  it('17: a code form IN the history is an ordinary fill, pinned as usual', () => {
+    const factors = [key('tf_00000000000b', AT)];
+    const codeRule = ruleGrant({
+      fields: new Set(['username', 'password', 'totp']),
+      factor: 'tf_00000000000b' as SignInGrant['factor'],
+      accountPins: { id: 'GITHUB' as AccountId, username: 'kirinnee', factors: factorFingerprint(factors) },
+      pins: {
+        placeKeys: ['github.com'],
+        recipeVersion: undefined,
+        identities: [identityOf(codePage, 'github.com') as string],
+      },
+    });
+    const match = matchSignInGrant(
+      codeRule,
+      sighting({ facts: codePage, fields: CODE_FIELDS }, { accounts: [account({ factors })] }),
+      new Map(),
+    );
+    should(match).match({ ok: true, fills: ['totp'] });
+    should(match.ok && match.joinOnly).not.be.ok();
   });
 });

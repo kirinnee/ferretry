@@ -183,7 +183,11 @@ export interface AgentToolPorts {
    * login domain suspends it (docs/input-requests.md, "Standing rule fills"). `undefined`: the host couldn't be read, so
    * it may have been any.
    */
-  readonly scriptedOrigins?: { scriptedOn(host: string | undefined): void };
+  readonly scriptedOrigins?: {
+    scriptedOn(host: string | undefined): void;
+    /** A script is about to run: no standing rule fills anywhere until the returned function says it ended. */
+    running?(): () => void;
+  };
   readonly recipes?: {
     /** Files a proposal on ONE sign-in: `{ login }` is resolved to the account's only sign-in first. */
     propose(
@@ -1034,6 +1038,7 @@ export class AgentToolService {
     const guard = this.browserGuard(caller, surface, call.tool);
     const scripts = this.ports.scriptedOrigins;
     let ran = false;
+    let finished: (() => void) | undefined;
     let answer: Awaited<ReturnType<AgentToolPorts['browser']['scriptOnPage']>>;
     try {
       answer = await this.ports.browser.scriptOnPage(
@@ -1046,19 +1051,25 @@ export class AgentToolService {
         },
         async page => {
           await guard?.(page);
-          // The LAST thing before the script runs, inside the page's queue: the host it is about to run on is tainted
-          // for the standing rules first, so no fill anywhere can land after the script and before the taint.
+          // The LAST thing before the script runs, inside the page's queue. While it runs, no standing rule fills
+          // anywhere (the page may still move before its world is made, so the origin it really runs in is known only
+          // after: secrev-1282a M2), and the host it is about to run on is tainted for the rules at once.
+          finished = scripts?.running?.();
           scripts?.scriptedOn(await page.host?.().catch(() => undefined));
           ran = true;
         },
       );
+      // The origin of the world the script ACTUALLY ran in, read before its code ran (unknown: it may have been any
+      // host), and where it left the page: each is tainted too, before the rules may fill again.
+      scripts?.scriptedOn(hostOf(answer.scriptOrigin));
+      scripts?.scriptedOn(hostOf(answer.result.url));
     } catch (error) {
-      // The script may have run and moved the page, and where it ended can't be read: it may have been any host.
+      // The script may have run and moved the page, and where it ran or ended can't be read: it may have been any host.
       if (ran) scripts?.scriptedOn(undefined);
       throw error;
+    } finally {
+      finished?.();
     }
-    // Where the script left the page (it may have navigated): that host is tainted too.
-    scripts?.scriptedOn(hostOf(answer.result.url));
     facts.detail = { resultLength: answer.text.length };
     const dialog = pendingDialogOf(answer.result);
     const read = await this.scrubbed({ url: answer.result.url, text: answer.text, ...dialogOf(dialog) });

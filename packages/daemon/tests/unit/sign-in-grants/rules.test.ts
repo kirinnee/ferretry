@@ -471,3 +471,46 @@ describe('RuleSignInGrants: two uses in flight, and a rule past its end', () => 
     should(source.holds(grant, { ...LOGIN, now: NOW + 31 * 86_400_000 })).be.false();
   });
 });
+
+describe('RuleSignInGrants: no fill anywhere while an agent script runs (secrev-1282a M2)', () => {
+  it('should refuse every rule while any script runs, and hold again once each one has ended', async () => {
+    const w = await world();
+    await approved(w);
+    const { source } = grants(w);
+    const [grant] = source.of(SESSION);
+    if (grant === undefined) throw new Error('no grant');
+    const one = source.running();
+    const two = source.running();
+    should(source.holds(grant, LOGIN)).be.false();
+    one();
+    one();
+    should(source.holds(grant, LOGIN)).be.false();
+    two();
+    should(source.holds(grant, LOGIN)).be.true();
+  });
+});
+
+describe('SignInRuleService.fillCheck: a check that cannot be made drops the older answer (secrev-1282a M1)', () => {
+  it('should leave the rule unverified after an unreadable registry, until a sweep settles it', async () => {
+    const w = await world();
+    const { view } = await approved(w);
+    const rule = view.id as SignInRuleId;
+    should(w.service.verified(rule, 1)).be.true();
+    w.proofs.broken = true;
+    should(await w.service.fillCheck(rule, 1)).equal('unknown');
+    should(w.service.verified(rule, 1)).be.false();
+    should(w.store.document?.rules[0]?.suspended).be.undefined();
+    w.proofs.broken = false;
+    await w.service.sweepRules();
+    should(w.service.verified(rule, 1)).be.true();
+  });
+
+  it('should leave the rule unverified after unreadable accounts too', async () => {
+    const w = await world();
+    const { view } = await approved(w);
+    const rule = view.id as SignInRuleId;
+    w.state.listingBroken = true;
+    should(await w.service.fillCheck(rule, 1)).equal('unknown');
+    should(w.service.verified(rule, 1)).be.false();
+  });
+});

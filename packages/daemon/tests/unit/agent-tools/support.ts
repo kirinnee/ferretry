@@ -170,6 +170,8 @@ class FakeBrowserPages implements Pick<
   readText: string | undefined;
   /** Where every act reports the page to be, when a case wants an address other than the page's own. */
   actedUrl: string | undefined;
+  /** The origin of the world a script runs in, as the worker reports it; `undefined`: an older worker reports none. */
+  scriptOrigin: string | undefined = 'https://github.com';
   /** Whether every act reports that it put text in a password field. */
   passwordField = false;
   /** The document every page shows, as an act's in-queue guard reads it: a navigation changes it. */
@@ -354,7 +356,12 @@ class FakeBrowserPages implements Pick<
       ...(this.pendingDialog === undefined ? {} : { dialog: this.pendingDialog }),
       actedPageId: page.id,
     };
-    return { status, result, text: this.scriptAnswer };
+    return {
+      status,
+      result,
+      text: this.scriptAnswer,
+      ...(this.scriptOrigin === undefined ? {} : { scriptOrigin: this.scriptOrigin }),
+    };
   }
 
   async closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void> {

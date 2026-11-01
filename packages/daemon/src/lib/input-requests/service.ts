@@ -171,6 +171,12 @@ const MAX_STEP = 16;
 
 interface Held {
   request: InputRequest;
+  /**
+   * What the FERRET reads while a grant fills its card on its own (secrev-1282b F1): the request as it stood when the
+   * attempt began. A fill passes through states a card no grant was about never shows (`delivering`, a longer lock)
+   * and may still be refused at its last check, so until the request really ends the ferret reads the card as it was.
+   */
+  agentSees?: InputRequest;
   /** Every name the terminal was seen under (its key and its id), so a quarantine on any of them seals it. */
   names: readonly string[];
   checkFailures: number;
@@ -679,10 +685,13 @@ export class InputRequestService {
         submit: raise.submit !== 'agent',
       };
       let written = false;
-      let identity = match.identity;
+      // The form a fill pins for its field set; a rule's join-only code step pins nothing.
+      let identity: string | undefined = match.joinOnly === true ? undefined : match.identity;
       const settle = (): void => {
         if (grants.ledger.spent(reservation, identity)) grants.used(grant, this.deps.clock.now(), sessionId);
       };
+      // The ferret reads the card as it stood until the request really ends (a fill, or the card back for the owner).
+      held.agentSees = held.request;
       try {
         await this.attempt(
           held,
@@ -703,7 +712,7 @@ export class InputRequestService {
               if (now === undefined) throw new GrantMissed('expired');
               const again = await this.matchAgain(held, seen, now, grants);
               if (!again.ok) throw new GrantMissed(again.reason);
-              identity = again.identity;
+              identity = again.joinOnly === true ? undefined : again.identity;
             },
             held: () => {
               // Synchronous, with nothing awaited before the write: a revoke, an expiry, a stop or a suspension, a
@@ -718,13 +727,17 @@ export class InputRequestService {
               );
             },
             typed: (job, holdMs, names) => this.clearBeforeHoldEnds(held, grant, grants, job, holdMs, names),
+            uncertain: async () => await grants.stopped(grant, 'did-not-move-on').catch(() => undefined),
           },
         );
         settle();
       } catch (error) {
         if (written) settle();
         else grants.ledger.release(reservation);
+        delete held.agentSees;
         await this.grantMissed(held, grant, error instanceof GrantMissed ? error.reason : undefined);
+      } finally {
+        delete held.agentSees;
       }
     } catch {
       // A fill that could not be tried leaves the owner's card as it is.
@@ -787,6 +800,7 @@ export class InputRequestService {
         match.fills,
         match.fieldSet,
         seen.now,
+        seen.matchKey,
       );
       if (typeof reservation !== 'string') return { ok: true, grant, match, reservation, project: seen.project };
       misses.push({ grant, reason: reservation });
@@ -1817,6 +1831,17 @@ export class InputRequestService {
       if (outcome === 'uncertain') {
         await this.settle(hold);
         hold = undefined;
+        // A grant fill's password may have landed (secrev-1282b F2): it gets the same clear, and the clear's own hold for
+        // the full window, as a typed one, and the grant stops (`did-not-move-on`): the sign-in did not go as approved.
+        if (grant !== undefined) {
+          if (clear !== undefined)
+            grant.typed(
+              clear,
+              (held.request.lock?.seconds ?? INPUT_QUARANTINE_SECONDS) * 1000,
+              holdNames(request, held.names),
+            );
+          await grant.uncertain();
+        }
         await stored(true);
         await this.finish(held, 'refused', 'interrupted', undefined, {
           closeCard: true,
@@ -2357,6 +2382,8 @@ export class InputRequestService {
       signIn?: SignInId;
     },
   ): Promise<void> {
+    // The request ends here: the ferret reads it as it is from now on.
+    delete held.agentSees;
     const at = instant(this.deps.clock.now());
     const source =
       options.sealed === true
@@ -2439,7 +2466,9 @@ export class InputRequestService {
     return undefined;
   }
 
-  private view({ request, names }: Held): InputAgentView {
+  private view(held: Held): InputAgentView {
+    const { names } = held;
+    const request = held.agentSees ?? held.request;
     const quarantined = this.quarantined(request.sessionId, names);
     const facts =
       request.observed?.kind === 'terminal' && quarantined ? maskedFacts(request.observed) : request.observed;
@@ -3055,6 +3084,8 @@ interface GrantWrite {
   recheck(seen: Extract<ObserveResult, { readonly ok: true }>): Promise<void>;
   /** Whether the grant is still held, asked synchronously as the last thing before the write. */
   held(): boolean;
-  /** A page password was typed: what to check and empty before the hold (`holdMs`, on `names`) ends. */
+  /** A page password was typed, or may have been: what to check and empty before the hold (`holdMs`, on `names`) ends. */
   typed(job: ClearJob, holdMs: number, names: readonly string[]): void;
+  /** The write may have typed something and could not say: the grant stops. */
+  uncertain(): Promise<void>;
 }

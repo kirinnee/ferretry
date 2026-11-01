@@ -32,9 +32,9 @@ export interface LedgerGrant {
   /** `Infinity` for a standing rule with no cap. */
   readonly remaining: number;
   /**
-   * A code-only fill must JOIN an open attempt of this grant that already typed the password (a standing rule): a stored
-   * code is never typed into a "confirm with 2FA" form outside a sign-in the grant filled. Otherwise
-   * `code-without-sign-in`.
+   * A code-only fill must JOIN an open attempt of this grant, in the same session, that already typed the password AT THE
+   * SAME PLACE (a standing rule): a stored code is never typed into a "confirm with 2FA" form outside a sign-in the
+   * grant filled. Otherwise `code-without-sign-in`.
    */
   readonly codeJoinsPassword?: boolean;
 }
@@ -51,11 +51,15 @@ export interface GrantReservation {
   /** This fill opens a new attempt, so it spends a use. */
   readonly opens: boolean;
   readonly at: number;
+  /** The daemon's match key for the target this fill types into. */
+  readonly place: string | undefined;
 }
 
 interface Attempt {
   readonly opened: number;
   readonly roles: Set<LoginFieldRole>;
+  /** Where the attempt began (the daemon's match key for the target): a rule's code step joins only there. */
+  readonly place: string | undefined;
 }
 
 const recent = (times: readonly number[] | undefined, now: number): number[] =>
@@ -86,6 +90,7 @@ export class SignInGrantLedger {
     roles: readonly LoginFieldRole[],
     fieldSet: string,
     now: number,
+    place?: string,
   ): GrantReservation | GrantMissReason {
     const pending = [...this.#open];
     const attempt = this.#attempts.get(grant.id)?.get(sessionId);
@@ -100,7 +105,7 @@ export class SignInGrantLedger {
       grant.codeJoinsPassword === true &&
       roles.length > 0 &&
       roles.every(role => role === 'totp') &&
-      (!joins || attempt?.roles.has('password') !== true)
+      (!joins || attempt?.roles.has('password') !== true || attempt.place === undefined || attempt.place !== place)
     )
       return 'code-without-sign-in';
     if (!joins) {
@@ -120,6 +125,7 @@ export class SignInGrantLedger {
       roles: [...roles],
       fieldSet,
       opens: !joins,
+      place,
       at: now,
     };
     this.#open.add(reservation);
@@ -140,7 +146,7 @@ export class SignInGrantLedger {
     this.#attempts.set(grant, attempts);
     const attempt = attempts.get(reservation.sessionId);
     if (reservation.opens || attempt === undefined)
-      attempts.set(reservation.sessionId, { opened: at, roles: new Set(reservation.roles) });
+      attempts.set(reservation.sessionId, { opened: at, roles: new Set(reservation.roles), place: reservation.place });
     else for (const role of reservation.roles) attempt.roles.add(role);
     if (identity !== undefined) {
       const pins = this.#pins.get(grant) ?? new Map<string, string>();

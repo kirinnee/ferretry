@@ -6419,7 +6419,7 @@ function createAgentToolsSubsystem(input: {
   readonly recipes: Pick<LoginRecipeService, 'propose' | 'scrubbedAccounts'>;
   readonly loginActs: Pick<LoginObserver, 'acted'>;
   /** Told where every page script runs, machine-wide: a standing rule pinned to that host stops filling. */
-  readonly scriptedOrigins?: { scriptedOn(host: string | undefined): void };
+  readonly scriptedOrigins?: { scriptedOn(host: string | undefined): void; running?(): () => void };
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(

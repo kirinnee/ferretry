@@ -156,6 +156,11 @@ export type GrantMatch =
       /** The form's identity, and the field set it is pinned for (`username+password`, `totp`, …). */
       readonly identity: string;
       readonly fieldSet: string;
+      /**
+       * A standing rule's code-only step on a form outside the owner's history: it fills ONLY as a join to this rule's
+       * open password attempt (the ledger decides, `codeJoinsPassword`), and it never pins the form.
+       */
+      readonly joinOnly?: true;
     }
   | { readonly ok: false; readonly reason: GrantMissReason };
 
@@ -338,14 +343,29 @@ export function matchSignInGrant(
   // 17 / 13t. The form is one the sign-in has history with, and the one first filled for this field set. A plan line
   //    with no history pins the first password form it fills; a rule NEVER pins a new form: every field set it fills
   //    must be a form the owner's own taps have history with. A password form outside that is a changed form (it
-  //    suspends); a username-only or code-only step outside it only asks.
+  //    suspends); a username-only step outside it only asks. ONE exception: a code-only step (exactly one code box)
+  //    outside the history may fill as a JOIN to this same rule's open password attempt, in this session at this same
+  //    place, within the join window (the ledger's `codeJoinsPassword`): the history counts only password boxes, so a
+  //    code page could never be in it. It never pins the code form and never starts an attempt.
   const identity = identityOf(facts, seen.matchKey);
   if (identity === undefined) return miss('form-changed');
   const fieldSet = fieldSetOf(roles);
   if (rule) {
     const known = grant.pins.identities;
     if (known === undefined || known.length === 0) return miss('no-history');
-    if (!known.includes(identity)) return miss(roles.includes('password') ? 'form-changed' : 'no-history');
+    if (!known.includes(identity)) {
+      if (roles.length === 1 && roles[0] === 'totp' && seen.fields.length === 1)
+        return {
+          ok: true,
+          account: account.id,
+          fills: roles,
+          ...(factor === undefined ? {} : { factor }),
+          identity,
+          fieldSet,
+          joinOnly: true,
+        };
+      return miss(roles.includes('password') ? 'form-changed' : 'no-history');
+    }
   } else if (
     roles.includes('password') &&
     grant.pins.identities !== undefined &&

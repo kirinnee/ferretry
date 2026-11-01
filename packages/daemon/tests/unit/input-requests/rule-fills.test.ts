@@ -107,6 +107,8 @@ interface Options {
   onJournal?: (type: string, h: Harness) => void | Promise<void>;
   /** Runs inside the target's turn, before it asks whether the fill may still go ahead. */
   onQueued?: (h: Harness) => void;
+  /** The owner's history also holds the code form (it never can today: a code box is no password box). */
+  codeHistory?: boolean;
 }
 
 async function harness(options: Options = {}) {
@@ -130,8 +132,12 @@ async function harness(options: Options = {}) {
   const cipher = new FakeSecretCipher();
   const directory = new LoginDirectory(index, sealed, cipher, { now: () => new Date(NOW).toISOString() });
   const logins = new InputLoginAdapter(directory, new LoginVault(index, sealed, cipher));
-  // The owner's own taps left history at github.com for the login form and the code form (the observer is a fake here).
-  const history = [identityOf(loginPage(), 'github.com'), identityOf(codePage, 'github.com')] as string[];
+  // The owner's own taps left history at github.com for the login form (the observer is a fake here). Never the code
+  // form: the history counts only forms whose secret went into a password box.
+  const history = [
+    identityOf(loginPage(), 'github.com'),
+    ...(options.codeHistory === true ? [identityOf(codePage, 'github.com')] : []),
+  ] as string[];
   const store = new MemoryRuleStore();
   const proofs = new FakeProofs();
   const ruleAudits: unknown[] = [];
@@ -189,6 +195,7 @@ async function harness(options: Options = {}) {
     },
     rules,
     ruleGrants,
+    ledger,
     store,
     proofs,
     directory,
@@ -264,14 +271,14 @@ async function harness(options: Options = {}) {
 type Harness = Awaited<ReturnType<typeof harness>>;
 
 /** GitHub · kirinnee, a password sign-in at github.com, with a saved password. */
-async function github(h: Harness): Promise<SignInId> {
+async function github(h: Harness, domains: readonly string[] = ['github.com']): Promise<SignInId> {
   await h.directory.put(
     'GITHUB',
     PutLoginEntryRequestSchema.parse({
       label: 'GitHub',
       username: USERNAME,
       password: PASSWORD,
-      match: ['github.com'],
+      match: [...domains],
     }),
   );
   const signIn = (await h.directory.accounts.list()).signIns.find(each => each.account === 'GITHUB');
@@ -599,35 +606,120 @@ describe('a revoke, a narrowing or a script during a fill stops the write (invar
   });
 });
 
-describe('a code only with its tick, from the pinned key, as a step of the rule’s own sign-in (invariants 15, 23)', () => {
-  it('should fill the password page and then the code page on one use, typing the pinned key’s code', async () => {
-    const h = await harness();
-    const signIn = await github(h);
+describe('a code only with its tick, from the pinned key, as a join to the rule’s own password attempt (invariants 15, 23)', () => {
+  const CODE = totpCode(SEED, SIX, NOW) as string;
+  /** A rule with the code ticked for GitHub, whose account holds a seed Ferretry makes codes from. */
+  async function codeRule(h: Harness, domains?: readonly string[], over: Partial<SignInRuleDraft> = {}) {
+    const signIn = await github(h, domains);
     await plantSeed(h.directory.accounts, 'GITHUB', SEED, 'Authenticator app');
-    await ruleFor(h, signIn, { totp: true, totpAcknowledged: true, uses: 1 });
+    return await ruleFor(h, signIn, { totp: true, totpAcknowledged: true, ...over });
+  }
+
+  it('should fill the password page and then the code page on one use, typing the pinned key’s code', async () => {
+    // The code form is in no history (a code box never is): it fills only as a join, and pins nothing.
+    const h = await harness();
+    const rule = await codeRule(h, undefined, { uses: 1 });
     await raised(h);
     h.setFacts(codePage);
     const { view } = await raised(h, CODE_RAISE);
     await settled();
-    const code = totpCode(SEED, SIX, NOW) as string;
     should(view.state).equal('delivered');
-    should(h.writes).deepEqual([USERNAME, PASSWORD, code]);
+    should(h.writes).deepEqual([USERNAME, PASSWORD, CODE]);
     should(ruleOnDisk(h)?.usage.count).equal(1);
+    should(h.ledger.pinned(`rule:${rule}:1`).has('totp')).be.false();
     should(JSON.stringify([view, h.audits, h.cards, h.notes, h.closes, h.tells, h.store.document])).not.containEql(
-      code,
+      CODE,
     );
   });
 
-  it('should never type a stored code into a code form outside a sign-in the rule filled', async () => {
+  it('should ask for a code page with no open attempt of the rule (a "confirm with 2FA" form)', async () => {
     const h = await harness();
-    const signIn = await github(h);
-    await plantSeed(h.directory.accounts, 'GITHUB', SEED, 'Authenticator app');
-    await ruleFor(h, signIn, { totp: true, totpAcknowledged: true });
+    await codeRule(h);
     h.setFacts(codePage);
     const { view, request } = await raised(h, CODE_RAISE);
     should(h.writes).deepEqual([]);
     should(view.state).equal('pending');
     should(request?.preapproval).match({ by: 'rule', reason: 'code-without-sign-in' });
+    should(ruleOnDisk(h)?.suspended).be.undefined();
+  });
+
+  it('should ask for the code in another session than the one whose password the rule typed', async () => {
+    const h = await harness();
+    await codeRule(h);
+    await raised(h, SIGN_IN, SESSION);
+    h.setFacts(codePage);
+    const { request } = await raised(h, CODE_RAISE, OTHER);
+    should(h.writes).deepEqual([USERNAME, PASSWORD]);
+    should(request?.preapproval).match({ by: 'rule', reason: 'code-without-sign-in' });
+  });
+
+  it('should ask for the code at another place than the password, even a login domain the rule pins', async () => {
+    const h = await harness();
+    await codeRule(h, ['github.com', 'login.github.com']);
+    await raised(h);
+    h.setFacts(
+      loginPage({ origin: 'https://login.github.com', navigationId: 'loader-2' }, [
+        field('otp', { frameOrigin: 'https://login.github.com' }, { type: 'text', autocomplete: 'one-time-code' }),
+      ]),
+    );
+    const { request } = await raised(h, CODE_RAISE);
+    should(h.writes).deepEqual([USERNAME, PASSWORD]);
+    should(request?.preapproval).match({ by: 'rule', reason: 'code-without-sign-in' });
+  });
+
+  it('should ask for a page with a second code box', async () => {
+    const h = await harness();
+    await codeRule(h);
+    await raised(h);
+    h.setFacts(
+      loginPage({ navigationId: 'loader-2' }, [
+        field('otp', {}, { type: 'text', autocomplete: 'one-time-code' }),
+        field('otp2', { backendNodeId: 14 }, { type: 'text', autocomplete: 'one-time-code' }),
+      ]),
+    );
+    const { request } = await raised(h, {
+      ...CODE_RAISE,
+      fields: [
+        { id: 'otp', sensitivity: 'code', element: { kind: 'ref', ref: 'e3' } },
+        { id: 'otp2', sensitivity: 'code', element: { kind: 'ref', ref: 'e4' } },
+      ],
+    });
+    should(h.writes).deepEqual([USERNAME, PASSWORD]);
+    should(request?.preapproval).match({ by: 'rule', reason: 'field-not-covered' });
+  });
+
+  it('should ask for the code under a rule without the code tick', async () => {
+    const h = await harness();
+    const signIn = await github(h);
+    await plantSeed(h.directory.accounts, 'GITHUB', SEED, 'Authenticator app');
+    await ruleFor(h, signIn);
+    await raised(h);
+    h.setFacts(codePage);
+    const { request } = await raised(h, CODE_RAISE);
+    should(h.writes).deepEqual([USERNAME, PASSWORD]);
+    should(request?.preapproval).match({ by: 'rule', reason: 'code-not-ticked' });
+  });
+
+  it('should suspend, and type no code, after a page script on the place between the password and the code', async () => {
+    const h = await harness();
+    await codeRule(h);
+    await raised(h);
+    h.ruleGrants.scriptedOn('github.com');
+    h.setFacts(codePage);
+    const { view } = await raised(h, CODE_RAISE);
+    await settled();
+    should(h.writes).deepEqual([USERNAME, PASSWORD]);
+    should(view.state).equal('pending');
+    should(ruleOnDisk(h)?.suspended?.because).equal('scripted-origin');
+  });
+
+  it('should fill a code form that IS in the history as an ordinary step after the rule’s password', async () => {
+    const h = await harness({ codeHistory: true });
+    await codeRule(h);
+    await raised(h);
+    h.setFacts(codePage);
+    should((await raised(h, CODE_RAISE)).view.state).equal('delivered');
+    should(h.writes).deepEqual([USERNAME, PASSWORD, CODE]);
   });
 });
 
@@ -651,4 +743,106 @@ describe('hold, clear and arm apply to rule fills (invariant 26)', () => {
       should(ruleOnDisk(h)?.suspended?.because).equal('did-not-move-on');
       should(h.service.pageHeld(SESSION, ['app']) !== undefined).equal(clear === 'unknown');
     });
+});
+
+describe('the ferret reads no state a card with no rule never shows, even mid-fill (secrev-1282b F1)', () => {
+  /** What the ferret reads of a card no rule was ever about: raised, then nobody answered it. */
+  async function noRuleView() {
+    const h = await harness();
+    await github(h);
+    const { view } = await raised(h);
+    return JSON.stringify(await h.service.agentView(SESSION, view.id, 0));
+  }
+
+  it('should read the card as pending, word for word, while a rule fill is refused at its last step', async () => {
+    let during: string | undefined;
+    const h = await harness({
+      onJournal: async (type, at) => {
+        if (!type.endsWith('delivering')) return;
+        // A concurrent input_wait at the last step before the write, then the owner revokes the rule.
+        during = JSON.stringify(await at.service.agentView(SESSION, 'A1' as AgendaId, 0));
+        const id = at.rules.fillable()[0]?.body.id;
+        if (id !== undefined) await at.rules.revoke({ kind: 'owner', actor: { kind: 'host' } }, id);
+      },
+    });
+    await ruleFor(h, await github(h));
+    const { view } = await raised(h);
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    const expected = await noRuleView();
+    should(during).equal(expected);
+    should(JSON.stringify(await h.service.agentView(SESSION, view.id, 0))).equal(expected);
+  });
+
+  it('should read the card as pending while the rule’s proof is being checked again, and after it fails', async () => {
+    const h = await harness();
+    await ruleFor(h, await github(h));
+    let open: () => void = () => undefined;
+    const checking = new Promise<void>(resolve => (open = resolve));
+    let reached: () => void = () => undefined;
+    const atCheck = new Promise<void>(resolve => (reached = resolve));
+    const verify = h.proofs.verify.bind(h.proofs);
+    h.proofs.verify = async (proof, challenge) => {
+      reached();
+      await checking;
+      return await verify(proof, challenge);
+    };
+
+    const raising = raised(h);
+    await atCheck;
+    const during = JSON.stringify(await h.service.agentView(SESSION, 'A1' as AgendaId, 0));
+    h.proofs.held.clear();
+    open();
+    const { view } = await raising;
+
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(during).equal(await noRuleView());
+  });
+
+  it('should show the filled card once the fill really ended, to a ferret that was already waiting', async () => {
+    let waiting: Promise<unknown> | undefined;
+    const h = await harness({
+      onJournal: async (type, at) => {
+        if (type.endsWith('delivering')) waiting = at.service.agentView(SESSION, 'A1' as AgendaId, 60_000);
+      },
+    });
+    await ruleFor(h, await github(h));
+    await raised(h);
+    should(await waiting).match({ state: 'delivered', note: 'Filled under a rule the owner approved in advance.' });
+  });
+});
+
+describe('a write that could not say whether it typed is cleared, held and suspends (secrev-1282b F2)', () => {
+  it('should keep the page held past the write’s own hold, run the clear and suspend the rule', async () => {
+    const h = await harness({ written: 'uncertain', clear: 'moved' });
+    await ruleFor(h, await github(h));
+    const { view } = await raised(h);
+    await settled();
+    should(view.state).equal('refused');
+    should(ruleOnDisk(h)?.suspended?.because).equal('did-not-move-on');
+    // The clear is scheduled, and until it answers the page stays held, however long past the write's own hold.
+    should(h.timers).have.length(1);
+    h.clock.now += 600_000;
+    should(h.service.pageHeld(SESSION, ['app'])).not.be.undefined();
+    for (const timer of h.timers) timer.fire();
+    await settled();
+    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+  });
+});
+
+describe('no rule fills while an agent script runs anywhere (secrev-1282a M2)', () => {
+  it('should type nothing while another session’s script is still running, and fill once it ended', async () => {
+    const h = await harness();
+    await ruleFor(h, await github(h));
+    // Another session's browser_eval is in flight, on a page whose origin is not known yet.
+    const ended = h.ruleGrants.running();
+    const { view } = await raised(h);
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(ruleOnDisk(h)?.suspended).be.undefined();
+    ended();
+    h.clock.now += 1_000;
+    should((await raised(h, SIGN_IN, OTHER)).view.state).equal('delivered');
+  });
 });

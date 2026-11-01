@@ -79,6 +79,8 @@ export class RuleSignInGrants implements SignInGrantSource {
   /** Where a page script ran, by host, and when one ran where its origin couldn't be read: machine-wide, in RAM. */
   readonly #scripted = new Map<string, number>();
   #scriptedEverywhere: number | undefined;
+  /** Agent scripts running now, anywhere on the machine: no rule fills while any is (secrev-1282a M2). */
+  #running = 0;
 
   constructor(private readonly ports: RuleGrantPorts) {}
 
@@ -162,7 +164,7 @@ export class RuleSignInGrants implements SignInGrantSource {
    * THE LAST CHECK BEFORE TYPING, synchronous: the rule at this very revision is still in the service's memory, its
    * proof and facts checked out at the last look (`verified`), it is in force (or its spent use is still open for a later
    * step), it still covers every role being typed (a narrowing that dropped the code stops a code), its scope covers
-   * the session, and no page script ran on its places since it was approved.
+   * the session, no page script ran on its places since it was approved, and no agent script is running anywhere now.
    */
   holds(grant: SignInGrant, at: GrantFillAt): boolean {
     const rule = grant.rule;
@@ -171,6 +173,7 @@ export class RuleSignInGrants implements SignInGrantSource {
       .fillable()
       .find(each => each.body.id === rule.id && each.body.revision === rule.revision);
     if (record === undefined || record.suspended !== undefined) return false;
+    if (this.#running > 0) return false;
     if (!this.ports.rules.verified(rule.id, rule.revision)) return false;
     const effective = signInRuleEffective(record, at.now);
     const left = (effective.remaining ?? Number.POSITIVE_INFINITY) - (this.#inflight.get(grant.id) ?? 0);
@@ -194,6 +197,21 @@ export class RuleSignInGrants implements SignInGrantSource {
     return {
       hosts: this.#scripted,
       ...(this.#scriptedEverywhere === undefined ? {} : { everywhere: this.#scriptedEverywhere }),
+    };
+  }
+
+  /**
+   * AN AGENT SCRIPT IS ABOUT TO RUN (any session's `browser.eval`): until the returned function is called, no rule fills
+   * anywhere. The page may move between the daemon's look and the script's world being made, so the origin the script
+   * really runs in is known only once it answered; this closes that window. Memory only: a restart ends every script.
+   */
+  running(): () => void {
+    this.#running += 1;
+    let done = false;
+    return () => {
+      if (done) return;
+      done = true;
+      this.#running -= 1;
     };
   }
 
