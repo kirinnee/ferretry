@@ -8,6 +8,7 @@ export function StackPager({
   noun = 'item',
   onPrevious,
   onNext,
+  compact = false,
 }: {
   readonly index: number;
   readonly total: number;
@@ -15,24 +16,31 @@ export function StackPager({
   readonly noun?: string;
   readonly onPrevious: (() => void) | undefined;
   readonly onNext: (() => void) | undefined;
+  /** "3/8" with tight hit areas, for a row that has no room to spare. */
+  readonly compact?: boolean;
 }): ReactElement {
+  const step = compact ? 'fy-item-view__step fy-item-view__step--tight' : 'fy-item-view__step';
   return (
     <>
       <button
         aria-label={`Previous ${noun}`}
-        className="fy-item-view__step"
+        className={step}
         disabled={onPrevious === undefined}
         onClick={onPrevious}
         type="button"
       >
         <ChevronLeft aria-hidden="true" size={18} />
       </button>
-      <span className="fy-item-view__where" data-agenda-where="">
-        {index + 1} of {total}
+      <span
+        className="fy-item-view__where"
+        data-agenda-where=""
+        {...(compact ? { 'aria-label': `${index + 1} of ${total}` } : {})}
+      >
+        {compact ? `${index + 1}/${total}` : `${index + 1} of ${total}`}
       </span>
       <button
         aria-label={`Next ${noun}`}
-        className="fy-item-view__step"
+        className={step}
         disabled={onNext === undefined}
         onClick={onNext}
         type="button"

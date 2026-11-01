@@ -54,16 +54,17 @@
   overflow-x: auto;
 }
 
-/* The head: the title and its one line, the pager floating right of the title. It STICKS to the top of the scroller,
-   on the view's own ground, and takes the body's top padding for its own so the card scrolls up under it, not past
-   it. A short fade under it softens the edge the card slides beneath (invisible while the head rests in place). */
+/* The head: ONE row — the title (one line; it scrolls when too long), then the status dot, ‹ n of N ›, the clock, ⓘ and
+   ✕. The item's ask is behind ⓘ, in a panel under the row. It STICKS to the top of the scroller, on the view's own
+   ground, and takes the body's top padding for its own so the card scrolls up under it, not past it. A short fade
+   under it softens the edge the card slides beneath (invisible while the head rests in place). */
 .fy-item-view__head {
   position: sticky;
   top: 0;
   z-index: 2;
   display: flow-root;
   margin-inline: calc(-1 * var(--fy-view-gutter));
-  padding: var(--gap-md) var(--fy-view-gutter) var(--gap-xs);
+  padding: var(--gap-xs) var(--fy-view-gutter);
   background: var(--bg);
 }
 .fy-item-view__head::after,
@@ -102,12 +103,17 @@
   bottom: 100%;
   background: linear-gradient(to top, var(--bg), transparent);
 }
+.fy-item-view__bar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--gap-sm);
+}
 .fy-item-view__pager {
   display: flex;
-  float: right;
+  flex: none;
   align-items: center;
   gap: 0;
-  margin: -6px 0 0 var(--gap-sm);
 }
 .fy-item-view__status {
   display: inline-flex;
@@ -154,15 +160,84 @@
   opacity: 0.35;
   cursor: default;
 }
+/* ONE line, however long: a title too wide for its box scrolls to its end and back (`MarqueeTitle` measures it and sets
+   --fy-marquee-distance / --fy-marquee-seconds). Where motion is reduced it stays still and ends in an ellipsis, and a
+   tap shows the whole title. */
 .fy-item-view__title {
+  min-width: 0;
+  flex: 1 1 0;
   margin: 0;
-  font-size: var(--text-lg, 18px);
+  overflow: hidden;
+  font-size: var(--text-md, 16px);
   font-weight: var(--weight-strong);
   line-height: var(--leading-tight, 1.25);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-item-view__title[data-marquee] {
+  cursor: pointer;
+}
+.fy-item-view__title[data-expanded] {
+  overflow: visible;
+  white-space: normal;
   overflow-wrap: anywhere;
+  align-self: flex-start;
+  padding-block: 8px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-item-view__title[data-marquee]:not([data-expanded]) {
+    text-overflow: clip;
+  }
+  .fy-item-view__title[data-marquee]:not([data-expanded]) .fy-item-view__title-text {
+    display: inline-block;
+    animation: fy-title-marquee var(--fy-marquee-seconds, 12s) ease-in-out infinite alternate;
+  }
+  .fy-item-view__title[data-marquee]:not([data-expanded]):hover .fy-item-view__title-text {
+    animation-play-state: paused;
+  }
+}
+@keyframes fy-title-marquee {
+  0%,
+  12% {
+    transform: translateX(0);
+  }
+  88%,
+  100% {
+    transform: translateX(calc(-1 * var(--fy-marquee-distance, 0px)));
+  }
+}
+/* The panel behind ⓘ: the item's ask, under the row, inside the sticky head. */
+.fy-item-view__info {
+  padding: 0 0 var(--gap-xs);
+}
+.fy-item-view__info[hidden] {
+  display: none;
+}
+.fy-item-view__info-toggle[aria-expanded='true'] {
+  background: var(--accent-soft);
+}
+/* Snooze lives in the panel, not the row: the title keeps the row. */
+.fy-item-view__snooze {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  margin-top: var(--gap-xs);
+}
+.fy-item-view__snooze-label {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+/* Tight hit areas for the row's own controls (‹ › ⓘ ✕): it is height, not width, that a thumb needs. The global
+   coarse-pointer floor is (0,1,1); `:root` here wins it. */
+:root .fy-item-view__step--tight {
+  min-width: 26px;
+}
+:root .fy-item-view__info-toggle,
+:root .fy-item-view__close {
+  min-width: 32px;
 }
 .fy-item-view__desc {
-  margin: 2px 0 0;
+  margin: 0;
   color: var(--muted);
   overflow-wrap: anywhere;
 }
@@ -182,6 +257,14 @@
   border-radius: var(--radius-panel);
   padding: 14px;
   background: var(--surface);
+}
+/* Inside the open item the card IS the column: the host (the chat's layer, the Inbox's panel) owns the one border, and
+   the view's gutter the one inset, so a form's fields and the tinted blocks use the full width. */
+.fy-item-view .fy-card {
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
 }
 .fy-card :is(p, ul, ol, dl) {
   margin: 0;
@@ -669,12 +752,21 @@
   list-style: none;
 }
 
-/* A phone's head: the pager is its own short row on the right, so the title gets the whole width under it. */
+/* A phone: a 16px gutter at least, so a card's content (a form's fields above all) is not pinched. */
 @container (max-width: 639px) {
-  .fy-item-view__pager {
-    float: none;
-    justify-content: flex-end;
-    margin: -6px 0 2px;
+  .fy-item-view__column {
+    --fy-view-gutter: max(16px, var(--chat-input-gutter-x, var(--chat-gutter-x, 12px)));
+  }
+  /* The row's controls shrink, so the title keeps most of it. */
+  .fy-item-view__bar {
+    gap: var(--gap-xs);
+  }
+  .fy-item-view__status {
+    padding-inline: 2px;
+  }
+  .fy-item-view__where {
+    padding-inline: 0;
+    font-size: var(--text-xs);
   }
 }
 

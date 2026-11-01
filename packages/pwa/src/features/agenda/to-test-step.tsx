@@ -27,7 +27,7 @@ export function ToTestStep({
       <div className="fy-inbox-step__bar">
         <span className="fy-inbox-step__rank">Ready to test</span>
         <div className="fy-inbox-step__pager">
-          <StackPager index={index} noun="card" onNext={onNext} onPrevious={onPrevious} total={total} />
+          <StackPager compact index={index} noun="card" onNext={onNext} onPrevious={onPrevious} total={total} />
         </div>
       </div>
       <ToTestList answers={answers} now={now} onNavigate={onNavigate} rows={[row]} />

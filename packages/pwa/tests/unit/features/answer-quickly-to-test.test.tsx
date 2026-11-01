@@ -86,10 +86,10 @@ describe('Answer quickly — with the cards waiting for a try', () => {
     const { root } = await open();
     await interact(() => quick(root).click());
     expect(step(root)).toBeNull();
-    expect(where(root)).toBe('1 of 3');
+    expect(where(root)).toBe('1/3');
     await interact(() => must(root.querySelector<HTMLElement>('[aria-label^="Next"]'), 'Next').click());
     const second = must(step(root), 'the first card to test');
-    expect(where(root)).toBe('2 of 3');
+    expect(where(root)).toBe('2/3');
     expect(second.textContent).toContain('Try the board');
     expect(second.textContent).toContain('Shipped in v1.2.0');
     expect(second.textContent).toContain('How to test');
@@ -100,7 +100,7 @@ describe('Answer quickly — with the cards waiting for a try', () => {
     const { root } = await open({ agendaCards: [] });
     await interact(() => quick(root).click());
     expect(step(root)?.textContent).toContain('Try the board');
-    expect(where(root)).toBe('1 of 2');
+    expect(where(root)).toBe('1/2');
   });
 
   it('steps back to the agenda item and forward to the next card to test', async () => {
@@ -109,12 +109,12 @@ describe('Answer quickly — with the cards waiting for a try', () => {
     await interact(() => next(root).click());
     await interact(() => next(root).click());
     expect(step(root)?.textContent).toContain('Second try');
-    expect(where(root)).toBe('3 of 3');
+    expect(where(root)).toBe('3/3');
     await interact(() => previous(root).click());
     expect(step(root)?.textContent).toContain('Try the board');
     await interact(() => previous(root).click());
     expect(step(root)).toBeNull();
-    expect(where(root)).toBe('1 of 3');
+    expect(where(root)).toBe('1/3');
   });
 
   it('ends the run after the last card to test, offering the skipped ones', async () => {
