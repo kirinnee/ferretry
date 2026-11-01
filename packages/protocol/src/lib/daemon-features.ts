@@ -42,6 +42,12 @@ export const DAEMON_FEATURES = {
   /** The board's per-project lane sets: `GET /v1/board/projects` and `GET|POST /v1/board/projects/:projectId/lanes`. */
   boardLanes: 'board.lanes.1',
   /**
+   * Whether a project uses the board (`GET|PUT /v1/board/projects/:projectId/switch`, docs/board.md § The board is
+   * opt-in). A daemon without this name answers 404: the app offers the 'Use the board' switch only where the
+   * machine reports it, and otherwise says the machine needs an update.
+   */
+  boardSwitch: 'board.switch.1',
+  /**
    * The agenda's parked items (docs/agenda.md § Parked items): `snooze` and `unsnooze` requests, and `now` on
    * `edit` and `surface`. A daemon without this name refuses them as an unknown action: the app offers the
    * clock only where the machine reports it, and otherwise says the machine needs an update.

@@ -88,6 +88,14 @@ describe('the board gateway', () => {
     should(headersOf(calls[0]?.init)).have.property('x-ferretry-session-id', 'session-7');
   });
 
+  it("should read a project's board switch by its id", async () => {
+    const state = { projectId: 'unfiled', on: false, setBy: 'default', setAt: null };
+    const { client: fake, calls } = client(state);
+
+    should(await new FyBoardGateway(fake).switchOf('unfiled' as never)).eql(state);
+    should(calls[0]).eql({ path: '/v1/board/projects/unfiled/switch', init: undefined });
+  });
+
   it('should list sessions as an id and a callsign', async () => {
     const { client: fake } = client(null, [
       { config: { id: 'session-7', teammate: 'denisha' } },

@@ -523,7 +523,7 @@ describe('the sub-ferret limits in a runtime wrapper', () => {
     // Assert
     should(script).containEql('if [ "${FY_SUB_FERRET:-0}" = 1 ]; then _fy_sections=');
     should(script).containEql('Sub-ferret: you were started by a lead ferret.');
-    should(script).containEql('Board: all work is a card');
+    should(script).containEql('Board: opt-in; most work needs no card.');
     should(script).containEql('; else _fy_sections=');
   });
 

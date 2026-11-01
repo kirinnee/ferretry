@@ -1,5 +1,5 @@
 import { type ProjectInfo, ProjectInfoSchema, type SessionView, type StartSessionRequest } from '@ferretry/protocol';
-import { ArrowLeft, Bot, FolderTree, LayoutList } from 'lucide-react';
+import { ArrowLeft, Bot, FolderTree, KanbanSquare, LayoutList } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useProjectsSlice } from '../../hooks/use-projects.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -7,6 +7,7 @@ import { daemonProjectLanesPath, daemonProjectsPath, daemonSessionPath } from '.
 import { useRouter } from '../../lib/router.tsx';
 import { useAppStore } from '../../lib/store.tsx';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
+import { ProjectBoardSwitch } from './project-board-switch.tsx';
 import { activeProjectSessions, projectSessions } from './project-detail-model.ts';
 import { ProjectFiles } from './project-files.tsx';
 import { ProjectLaunch } from './project-launch.tsx';
@@ -95,10 +96,17 @@ function ProjectDetailView({
       </div>
 
       <div className="grid gap-panel lg:grid-cols-[minmax(16rem,0.72fr)_minmax(0,1.5fr)]">
-        <Section icon={<LayoutList className="text-muted" size={16} aria-hidden="true" />} title="Provenance">
-          <ProjectProvenance project={project} />
-          {project.lastActivity && <p className="m-0 text-meta text-muted">Project activity: {project.lastActivity}</p>}
-        </Section>
+        <div className="grid content-start gap-panel">
+          <Section icon={<LayoutList className="text-muted" size={16} aria-hidden="true" />} title="Provenance">
+            <ProjectProvenance project={project} />
+            {project.lastActivity && (
+              <p className="m-0 text-meta text-muted">Project activity: {project.lastActivity}</p>
+            )}
+          </Section>
+          <Section icon={<KanbanSquare className="text-muted" size={16} aria-hidden="true" />} title="Board">
+            <ProjectBoardSwitch connection={connection} projectId={project.id} />
+          </Section>
+        </div>
         <div className="grid gap-panel">
           <Section
             icon={<Bot className="text-muted" size={16} aria-hidden="true" />}

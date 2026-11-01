@@ -32,4 +32,15 @@ describe('the lane gateway', () => {
     should(calls[0]?.init?.method).equal('POST');
     should(JSON.parse(String(calls[0]?.init?.body))).eql({ action: 'propose', template: 'pr', renames: {} });
   });
+
+  it("should read the board switch, and put the owner's switch as JSON", async () => {
+    const state = { projectId: FERRETRY_ID, on: true, setBy: 'owner', setAt: '2026-11-01T12:00:00.000Z' };
+    const { client: fake, calls } = client(state);
+    const gateway = new FyLaneGateway(fake);
+    should(await gateway.switchOf(FERRETRY_ID as never)).eql(state);
+    await gateway.setSwitch(FERRETRY_ID as never, true);
+    should(calls[0]).eql({ path: `/v1/board/projects/${FERRETRY_ID}/switch`, init: undefined });
+    should(calls[1]?.init?.method).equal('PUT');
+    should(JSON.parse(String(calls[1]?.init?.body))).eql({ on: true });
+  });
 });

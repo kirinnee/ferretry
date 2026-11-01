@@ -253,6 +253,7 @@ import {
   FileCgroupApplyStatusStore,
   FileCgroupConfigStore,
   FileDaemonConfig,
+  FileBoardSwitchStore,
   FileLaneSetStore,
   FileLegacyWireUseStore,
   FileLoginIndexStore,
@@ -728,6 +729,7 @@ import {
   BACKGROUND_DELAY_VARIABLE,
   BackgroundLane,
   type BootNoticePort,
+  BoardSwitchService,
   BootProgress,
   type BootRefusal,
   BrowserCopyPages,
@@ -2072,6 +2074,8 @@ interface BoardWorld {
   readonly focus: StorageSessionFocus;
   /** The one `ProjectAdoption`: a ferret's first card, and the Unfiled board's refile, register through it. */
   readonly adoption: ProjectAdoption;
+  /** Whether each project uses the board (docs/board.md § The board is opt-in). */
+  readonly switches: BoardSwitchService;
 }
 
 /**
@@ -2091,7 +2095,7 @@ function createBoardWorld(
   clock: SystemClock,
   machineId: () => string | undefined,
   /** Which board a session works on, each board's lanes and its name (U3's `LaneSetService`). */
-  lanes: Pick<LaneSetService, 'projectOf' | 'laneSet' | 'project' | 'apply'>,
+  lanes: Pick<LaneSetService, 'projectOf' | 'laneSet' | 'project' | 'projects' | 'apply'>,
   sends: Pick<SessionSendService, 'send'>,
   /** The same send path as the owner's front: what the owner did to a card (done, reopen) is stamped as theirs. */
   ownerSends: Pick<SessionSendService, 'send'>,
@@ -2153,9 +2157,20 @@ function createBoardWorld(
     adoption,
     subFerrets: new StorageSubFerretDirectory(storage),
   });
+  // Whether each project uses the board: one document beside the lane sets. Its one-time pass reads every card
+  // and every board, so it switches on exactly the boards the owner worked on lately.
+  const switches = new BoardSwitchService(
+    new FileBoardSwitchStore(join(paths.home, 'board', 'switch.json')),
+    {
+      cards: async () => (await store.read()).cards,
+      projects: async () => (await lanes.projects()).map(project => project.id),
+    },
+    { now: () => clock.now() },
+  );
   const cards = new SessionCards({
     board,
     lanes,
+    switches,
     proposer,
     adoption,
     // The name the board list shows: a registered project's, `Unfiled`, or the id of one no longer listed.
@@ -2164,7 +2179,7 @@ function createBoardWorld(
     diagnostics,
     bin,
   });
-  return { store, board, cards, focus, adoption };
+  return { store, board, cards, focus, adoption, switches };
 }
 
 /**
@@ -10101,8 +10116,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // card stuck since before projects registered themselves moves without waiting for the watcher. Each step is
       // idempotent, so every boot runs them, once the boot has settled and before the import below.
       unrefTimer(1000, () => {
-        void laneSets
-          .mergeReleaseLanes()
+        void boardWorld.switches
+          .migrate()
+          .then(migration => {
+            if (migration !== null)
+              process.stderr.write(
+                `board switch: on for ${migration.on.join(', ') || 'no board'}; off for ${migration.off.join(', ') || 'no board'}\n`,
+              );
+          })
+          .catch(() => undefined)
+          .then(async () => await laneSets.mergeReleaseLanes())
           .then(outcomes => {
             for (const outcome of outcomes) {
               process.stderr.write(
@@ -10572,6 +10595,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // A sub-ferret's card is made for it and its lead moves it: it has no card to be nudged about.
           readable: async sessionId =>
             (await nudgeSessions.subject(sessionId)) !== undefined && !(await isSubFerret(boardSubFerrets, sessionId)),
+          // The board is opt-in: a ferret on a board that is off is never told to make a card.
+          boardOn: async sessionId => await boardWorld.switches.isOn(await laneSets.projectOf(sessionId)),
           tail: async (sessionId, limit) => {
             const subject = await nudgeSessions.subject(sessionId);
             return subject === undefined
@@ -11831,6 +11856,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         catalogs,
         boardProjects: laneSets,
+        boardSwitches: boardWorld.switches,
         // The evidence is read through the SAME collaborators the rest of the daemon serves from —
         // the session directory, the terminal runtime and the project catalog — so a refusal to
         // remove a checkout because a session or a shell is still in it cites the very records the

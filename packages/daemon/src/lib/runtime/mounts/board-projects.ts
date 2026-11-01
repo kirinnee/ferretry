@@ -4,19 +4,21 @@ import {
   BoardProjectIdSchema,
   type BoardProjectsResponse,
   type BoardResult,
+  type BoardSwitch,
+  BoardSwitchRequestSchema,
   type LaneSetActionRequest,
   LaneSetActionRequestSchema,
   type LaneSetChangeResponse,
 } from '@ferretry/protocol';
-import { parseActor } from '../../api/actor.ts';
 import type { ApiActor } from '../../api/actor.ts';
+import { parseActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import { BoardSwitchUnavailableError, LaneSetUnavailableError } from '../../board-projects/errors.ts';
 import { describeLaneSetFailure, type LaneActor, type LaneSetFailure } from '../../board-projects/index.ts';
-import { LaneSetUnavailableError } from '../../board-projects/errors.ts';
 import { sessionSubFerretDirectory, subFerretRefusal } from '../../sub-ferret/index.ts';
 import type { SessionDirectorySubsystem } from './sessions.ts';
 
@@ -30,6 +32,12 @@ export interface BoardProjectsSubsystem {
     request: LaneSetActionRequest,
     actor: LaneActor,
   ): Promise<BoardResult<LaneSetChangeResponse, LaneSetFailure>>;
+}
+
+/** Whether each board is used (`docs/board.md` § The board is opt-in): read by anybody, switched by the owner. */
+export interface BoardSwitchSubsystem {
+  read(projectId: BoardProjectId): Promise<BoardSwitch>;
+  set(projectId: BoardProjectId, on: boolean): Promise<BoardSwitch>;
 }
 
 const FAILURE_STATUS: Readonly<Record<LaneSetFailure['code'], number>> = {
@@ -93,23 +101,51 @@ async function change(
   throw new ApiError(FAILURE_STATUS[result.error.code], describeLaneSetFailure(result.error), result.error.code);
 }
 
+async function readSwitch(
+  boards: BoardProjectsSubsystem,
+  switches: BoardSwitchSubsystem,
+  context: RouteContext,
+): Promise<ApiResponse> {
+  const id = projectId(context);
+  if ((await boards.project(id)) === undefined) throw new ApiError(404, `no board for project ${id}`, 'not-found');
+  return jsonResponse(await switches.read(id));
+}
+
+/** The words a ferret is refused with: the owner decides whether a project uses the board. */
+export const BOARD_SWITCH_OWNER_ONLY =
+  'Only the owner switches a board on or off. Ask them first, as one agenda yes/no: "Track this on the board?"';
+
+async function setSwitch(
+  boards: BoardProjectsSubsystem,
+  switches: BoardSwitchSubsystem,
+  context: RouteContext,
+): Promise<ApiResponse> {
+  const id = projectId(context);
+  const request = await parseBody(context.request, BoardSwitchRequestSchema);
+  if (ferretSession(context.actor) !== undefined) throw new ApiError(403, BOARD_SWITCH_OWNER_ONLY, 'owner-only');
+  if ((await boards.project(id)) === undefined) throw new ApiError(404, `no board for project ${id}`, 'not-found');
+  return jsonResponse(await switches.set(id, request.on));
+}
+
 /** A damaged lane document is state this daemon holds and will not serve: 503, never the caller's fault. */
 async function guarded(work: () => Promise<ApiResponse>): Promise<ApiResponse> {
   try {
     return await work();
   } catch (error) {
-    if (error instanceof LaneSetUnavailableError) throw new ApiError(503, error.message, error.code);
+    if (error instanceof LaneSetUnavailableError || error instanceof BoardSwitchUnavailableError)
+      throw new ApiError(503, error.message, error.code);
     throw error;
   }
 }
 
 /**
- * The board's project list and each project's lanes. Project paths are private daemon state, so these
+ * The board's project list, each project's lanes and whether it uses the board. Project paths are private daemon state, so these
  * are admin-scoped like the project catalog, and no-store because a lane change must show at once.
  */
 export function boardProjectRoutes(
   boards: BoardProjectsSubsystem,
   sessions: SessionDirectorySubsystem,
+  switches: BoardSwitchSubsystem,
 ): readonly ApiRoute[] {
   return [
     {
@@ -133,6 +169,21 @@ export function boardProjectRoutes(
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context => await guarded(() => change(boards, sessions, context)),
+    },
+    {
+      method: 'GET',
+      path: '/v1/board/projects/:projectId/switch',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => await guarded(() => readSwitch(boards, switches, context)),
+    },
+    {
+      method: 'PUT',
+      path: '/v1/board/projects/:projectId/switch',
+      minimum: 'operator',
+      capability: { capability: 'fleet', axis: 'configure' },
+      noStore: true,
+      handle: async context => await guarded(() => setSwitch(boards, switches, context)),
     },
   ];
 }

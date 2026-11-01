@@ -12,6 +12,10 @@
  *   assigned to the child, and so is the lead's own open card with the same title, so a delegation never
  *   leaves a twin. The card's id is reserved BEFORE the start, because the child's brief names it.
  *
+ * **Only where the board is on** (`board-switch.ts`): the board is opt-in. On a board that is off a start makes
+ * no card, and a `fy new` makes one only when the lead holds a card to put it under (the brief names one, or
+ * the lead's focus) or hands one over (`--card`): a lead may always give its sub-ferrets cards.
+ *
  * The card is written after the session's record and before its agent launches, so the agent's first turn
  * already has its focus card, and a start refused earlier leaves no card behind. **A board failure never
  * fails a start**: the session starts, and what could not be done is said (`notes`) instead.
@@ -34,11 +38,12 @@ import {
   taskTitleFor,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
+import type { BoardSwitchReader } from '../board-projects/board-switch.ts';
 import { effectiveAssignee } from './authority.ts';
+import { BoardError } from './errors.ts';
 import { cardCategory } from './graph.ts';
 import type { BoardDiagnostics, LaneProposer, LaneSetSource, ProjectAdopter, SessionFocus } from './ports.ts';
 import type { BoardService, SignalDoneOutcome } from './service.ts';
-import { BoardError } from './errors.ts';
 import { clip } from './signal-done.ts';
 
 /** The longest ask a card keeps; a longer brief is cut, and the brief field says so. */
@@ -61,6 +66,8 @@ export interface SessionCardsPorts {
     'reserve' | 'spawn' | 'signalDone' | 'snapshot' | 'requireHandOver' | 'handOver' | 'trigger'
   >;
   readonly lanes: LaneSetSource;
+  /** Whether a board is on: a start on a board that is off makes no card of its own. */
+  readonly switches: BoardSwitchReader;
   readonly proposer: LaneProposer;
   /** Registers the repository of a session on the Unfiled board, so its card goes on that project's board. */
   readonly adoption?: ProjectAdopter;
@@ -212,6 +219,15 @@ export class SessionCards {
         };
       }
       const { parent, from } = await this.parentFor(lead, request.brief);
+      const leadBoard = projectId ?? (await this.ports.lanes.projectOf(lead));
+      if (parent === null && !(await this.ports.switches.isOn(leadBoard))) {
+        const name = project ?? (await this.ports.projects.nameOf(leadBoard));
+        return {
+          notes: [
+            `No card was made for the sub-ferret: the ${name} board is off and you hold no card for this work. \`${this.ports.bin} new --card <id>\` hands it one.`,
+          ],
+        };
+      }
       const id = await this.ports.board.reserve('feature');
       const notes =
         parent === null
@@ -300,6 +316,12 @@ export class SessionCards {
       const from = delegation?.lead ?? start.parent;
       const brief = delegation?.brief ?? start.brief;
       if (delegation?.existing === true) return await this.handOver(delegation, start.sessionId);
+      // A start with no delegation makes its own card only where the board is on.
+      if (
+        delegation === undefined &&
+        !(await this.ports.switches.isOn(await this.ports.lanes.projectOf(start.sessionId)))
+      )
+        return { notes: [] };
       const placed = await this.place(start.sessionId, owner);
       const id = delegation?.id ?? (await this.ports.board.reserve('feature'));
       const card = await this.ports.board.spawn(

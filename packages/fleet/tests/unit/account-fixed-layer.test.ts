@@ -825,35 +825,41 @@ describe('AGENDA_INSTRUCTION', () => {
 });
 
 describe('BOARD_INSTRUCTION', () => {
+  it('should make the board opt-in: a card only when asked, handed one or switched on, else ask first', () => {
+    // Act
+    const text = BOARD_INSTRUCTION('zz');
+
+    // Assert
+    should(text).startWith('Board: opt-in; most work needs no card.');
+    should(text).containEql(
+      'Make one only if the owner asked, your lead gave one, or `zz board status` says on; else ask: `zz agenda add -k yesno` "Track this on the board?".',
+    );
+    should(text).not.containEql('all work is a card');
+    should(text).not.containEql('make one)');
+  });
+
   it('should teach every card rule of the design, with the real verbs and the binary name given', () => {
     // Act
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
-    should(text).startWith('Board: all work is a card (&F412); agenda items are !A48.');
+    should(text).containEql('A card (&F412; agenda !A48):');
     should(text).containEql('Search first (`zz search`); update or link a match instead of adding a duplicate.');
     should(text).not.containEql('#F');
-    should(text).containEql('New ask, first:');
     should(text).containEql(
-      '`zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`',
+      'Make: `zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`',
     );
-    should(text).containEql('(zz new/start make one)');
     should(text).containEql(
-      'Before To test: `zz task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`',
+      'before To test `zz task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`',
     );
-    should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
-    should(text).containEql(
-      'Lane by the work (`zz board lanes show`): plan → plan lane (owner OKs leaving), build → active:',
-    );
-    should(text).containEql('Blocked is no lane:');
+    should(text).containEql('lane by the work (`zz board lanes show`): `zz task move <id> <lane> --reason "<why>"`');
+    should(text).containEql('Blocked:');
     should(text).containEql('`zz agenda add --task <id>` (owner)');
     should(text).containEql('`zz task depend` (card)');
-    should(text).containEql('`zz task block` (else)');
-    should(text).containEql('`zz task drop --reason`');
-    should(text).containEql('`zz task focus <id>`');
+    should(text).containEql('`zz task block`');
     should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');
     should(text).containEql("Owner's bug:");
-    should(text).containEql('Starts, PRs, merges, releases, `zz signal done` self-move; owner closes.');
+    should(text).containEql('PRs, merges, `zz signal done` self-move; owner closes.');
     should(text).not.containEql('`fy ');
   });
 
@@ -1076,10 +1082,10 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     // Assert
     should(text.split('\n')).have.length(2);
     should(text).containEql('`zz send <lead-callsign> "<message>"`');
-    should(text).containEql('`zz task link <id> --pr <url>` (or `--branch`)');
+    should(text).containEql('If you have a card: link your PR `zz task link <id> --pr <url>` (or `--branch`)');
     should(text).containEql('`zz task note`');
     should(text).containEql('Your final report says how the owner tests it.');
-    should(text).containEql('Your card moves itself: start, PR, merge, `zz signal done`.');
+    should(text).containEql("it moves itself (start, PR, merge, `zz signal done`). No card? Don't make one.");
     should(text).not.containEql('agenda add');
     should(text).not.containEql('task move');
   });

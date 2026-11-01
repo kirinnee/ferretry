@@ -5,12 +5,14 @@ import { BoardError } from './errors.ts';
 /**
  * THE BACKSTOP UNDER THE BOARD RULE (`board-design.md` §3.4, "Turn-end check").
  *
- * Every ferret is told to have a card before its first edit for a new ask (the fixed layer's `Board:`
- * section). A prose rule is not reliable, so when a turn ends the daemon reads it: if the turn did
+ * A ferret on a board that is ON is told to have a card before its first edit for a new ask (the fixed
+ * layer's `Board:` section). A prose rule is not reliable, so when a turn ends the daemon reads it: if the turn did
  * MUTATING work — an edit tool, a git commit or push, a `fy new`, a `gh pr create` — while the session had
  * no focus card in an open lane, the ferret gets ONE queued message telling it to make one, or to record
  * why not with `fy task skip "<why>"`.
  *
+ * - **Only where the board is on** (`board-switch.ts`). The board is opt-in, so a ferret on a board that is
+ *   off has nothing to be told: most work needs no card.
  * - **Evidence, not inference.** Only the turn's own tool calls count. A read-only turn (questions,
  *   research, a plan) never triggers it, however long.
  * - **At most once an hour per session.** The send id carries the hour, so a turn end observed twice (a
@@ -115,6 +117,8 @@ export const isOpenCard = (response: BoardTaskResponse): boolean => {
 export interface BoardTurnCheckPorts {
   /** Whether the session has a transcript to read (an agent runtime this daemon can read). */
   readonly readable: (sessionId: string) => Promise<boolean>;
+  /** Whether the session's board is on; a board that is off is never checked. */
+  readonly boardOn: (sessionId: string) => Promise<boolean>;
   /** The newest transcript events, oldest first. */
   readonly tail: (sessionId: string, limit: number) => Promise<readonly TranscriptEvent[]>;
   /** The session's focus card and standing skip (`config.focusTask`, `config.boardSkip`). */
@@ -151,6 +155,7 @@ export class BoardTurnCheck {
     if (!(await this.ports.readable(sessionId))) return false;
     const seen = mutatingWork(await this.ports.tail(sessionId, BOARD_CHECK_TAIL), this.binary);
     if (seen.length === 0) return false;
+    if (!(await this.ports.boardOn(sessionId))) return false;
     if ((await this.ports.focus.skipOf(sessionId)) !== null) return false;
     if (await this.hasOpenCard(sessionId)) return false;
     await this.ports.send(sessionId, boardCheckSendId(sessionId, now), boardCheckMessage(this.binary));

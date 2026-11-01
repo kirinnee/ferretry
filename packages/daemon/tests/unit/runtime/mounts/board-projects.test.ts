@@ -3,6 +3,8 @@ import {
   type BoardProject,
   type BoardProjectId,
   BoardProjectsResponseSchema,
+  type BoardSwitch,
+  BoardSwitchSchema,
   boardErr,
   boardOk,
   LANE_TEMPLATES,
@@ -13,9 +15,14 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
+import { BoardSwitchUnavailableError, LaneSetUnavailableError } from '../../../../src/lib/board-projects/errors.ts';
 import type { LaneActor, LaneSetFailure } from '../../../../src/lib/board-projects/index.ts';
-import { type BoardProjectsSubsystem, boardProjectRoutes } from '../../../../src/lib/runtime/mounts/board-projects.ts';
-import { LaneSetUnavailableError } from '../../../../src/lib/board-projects/errors.ts';
+import {
+  BOARD_SWITCH_OWNER_ONLY,
+  type BoardProjectsSubsystem,
+  type BoardSwitchSubsystem,
+  boardProjectRoutes,
+} from '../../../../src/lib/runtime/mounts/board-projects.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, grantSubsystem, human, sessionDirectory, sessionView } from './support.ts';
 
@@ -51,7 +58,26 @@ function boards(overrides: Partial<BoardProjectsSubsystem> = {}): BoardProjectsS
   };
 }
 
-async function dispatcher(subsystem: BoardProjectsSubsystem): Promise<ApiDispatcher> {
+/** A switch that remembers what it was set to; every board starts off. */
+function switches(): BoardSwitchSubsystem & { readonly set_: Array<[BoardProjectId, boolean]> } {
+  const state = new Map<BoardProjectId, BoardSwitch>();
+  const set_: Array<[BoardProjectId, boolean]> = [];
+  return {
+    set_,
+    read: async projectId => state.get(projectId) ?? { projectId, on: false, setBy: 'default', setAt: null },
+    set: async (projectId, on) => {
+      set_.push([projectId, on]);
+      const value: BoardSwitch = { projectId, on, setBy: 'owner', setAt: '2026-11-01T12:00:00.000Z' };
+      state.set(projectId, value);
+      return value;
+    },
+  };
+}
+
+async function dispatcher(
+  subsystem: BoardProjectsSubsystem,
+  switch_: BoardSwitchSubsystem = switches(),
+): Promise<ApiDispatcher> {
   const grants = grantSubsystem();
   await grants.refresh();
   const sessions = sessionDirectory([
@@ -59,7 +85,7 @@ async function dispatcher(subsystem: BoardProjectsSubsystem): Promise<ApiDispatc
     sessionView('ms8-plain001', {}),
     sessionView('ms8-sub00001', { parent: 'ms8-abcd1234' }),
   ]);
-  return new ApiDispatcher(new ApiRouter(boardProjectRoutes(subsystem, sessions)), CREDENTIALS, grants);
+  return new ApiDispatcher(new ApiRouter(boardProjectRoutes(subsystem, sessions, switch_)), CREDENTIALS, grants);
 }
 
 const post = (projectId: string, body: unknown, headers: Readonly<Record<string, string>> = human) =>
@@ -72,6 +98,77 @@ const post = (projectId: string, body: unknown, headers: Readonly<Record<string,
   });
 
 const PROPOSE = { action: 'propose', template: 'quick' };
+
+describe('the board switch', () => {
+  const put = (projectId: string, body: unknown, headers: Readonly<Record<string, string>> = human) =>
+    request({
+      method: 'PUT',
+      path: `/v1/board/projects/${projectId}/switch`,
+      headers,
+      loopback: true,
+      body: JSON.stringify(body),
+    });
+  const get = (projectId: string, headers: Readonly<Record<string, string>> = human) =>
+    request({ path: `/v1/board/projects/${projectId}/switch`, headers, loopback: true });
+
+  it("should read a board's switch, off until the owner throws it", async () => {
+    const state = switches();
+    const surface = await dispatcher(boards(), state);
+
+    const before = await surface.dispatch(get(FERRETRY_ID));
+    const thrown = await surface.dispatch(put(FERRETRY_ID, { on: true }));
+    const after = await surface.dispatch(get(FERRETRY_ID, agentIn('ms8-abcd1234')));
+
+    should(before.status).equal(200);
+    should(before.headers.get('cache-control')).equal('no-store');
+    should(BoardSwitchSchema.parse(jsonBody(before))).deepEqual({
+      projectId: FERRETRY_ID,
+      on: false,
+      setBy: 'default',
+      setAt: null,
+    });
+    should(thrown.status).equal(200);
+    should(BoardSwitchSchema.parse(jsonBody(after))).match({ on: true, setBy: 'owner' });
+    should(state.set_).deepEqual([[FERRETRY_ID, true]]);
+  });
+
+  it('should refuse a ferret, however it asks: the owner decides', async () => {
+    const state = switches();
+    const response = await (
+      await dispatcher(boards(), state)
+    ).dispatch(put(FERRETRY_ID, { on: true }, agentIn('ms8-abcd1234')));
+
+    should(response.status).equal(403);
+    should(jsonBody(response)).containEql({ code: 'owner-only', error: BOARD_SWITCH_OWNER_ONLY });
+    should(state.set_).deepEqual([]);
+  });
+
+  it('should answer 404 for a board it does not list, and 400 for a body that is not a switch', async () => {
+    const surface = await dispatcher(boards());
+    const other = '44444444-4444-4444-8444-444444444444';
+
+    const read = await surface.dispatch(get(other));
+    const set = await surface.dispatch(put(other, { on: false }));
+    const bad = await surface.dispatch(put(FERRETRY_ID, { on: 'yes' }));
+
+    should([read.status, set.status, bad.status]).deepEqual([404, 404, 400]);
+  });
+
+  it('should answer 503 when the switch document is damaged', async () => {
+    const damaged: BoardSwitchSubsystem = {
+      read: async () => {
+        throw new BoardSwitchUnavailableError('/state/board/switch.json: not JSON');
+      },
+      set: async () => {
+        throw new Error('unreachable');
+      },
+    };
+    const response = await (await dispatcher(boards(), damaged)).dispatch(get(FERRETRY_ID));
+
+    should(response.status).equal(503);
+    should(JSON.stringify(jsonBody(response))).not.containEql('/state');
+  });
+});
 
 describe('the board projects mount', () => {
   it('should list the boards without naming a current one for the owner', async () => {

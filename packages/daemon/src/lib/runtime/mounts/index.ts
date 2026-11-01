@@ -50,7 +50,7 @@ import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analyt
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
 import { type BoardSubsystem, boardRoutes } from './board.ts';
 import { type WorkSearchSubsystem, workSearchRoutes } from './work-search.ts';
-import { type BoardProjectsSubsystem, boardProjectRoutes } from './board-projects.ts';
+import { type BoardProjectsSubsystem, type BoardSwitchSubsystem, boardProjectRoutes } from './board-projects.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
 import { type BrowserProxySubsystem, browserProxyRoutes } from './browser-proxy.ts';
 import { carrierRoutes } from './carriers.ts';
@@ -265,6 +265,8 @@ export interface MountedSubsystems {
   /** Daemon-local project and per-session skill catalogs. */
   readonly catalogs: CatalogSubsystem;
   readonly boardProjects: BoardProjectsSubsystem;
+  /** Whether each project uses the board (`docs/board.md` § The board is opt-in). */
+  readonly boardSwitches: BoardSwitchSubsystem;
   /** The checkouts this daemon made: the durable registry, the live Git refresh over it, forking a
    *  new one and destroying one. It is mounted with the catalogs because it is the same subject seen
    *  from the other end — a managed worktree is joined to its Project by the repository identity the
@@ -590,7 +592,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // deeper per-session routes that follow.
         ...sessionRoutes(subsystems.sessions),
         ...catalogRoutes(subsystems.catalogs, subsystems.sessions),
-        ...boardProjectRoutes(subsystems.boardProjects, subsystems.sessions),
+        ...boardProjectRoutes(subsystems.boardProjects, subsystems.sessions, subsystems.boardSwitches),
         // The worktree surface registers beside the catalogs for the reason its subsystem field states.
         // Every path is under `/v1/worktrees`, which no other subsystem uses, so it can neither shadow
         // nor be shadowed — and its own two deeper literals are registered before the collection they

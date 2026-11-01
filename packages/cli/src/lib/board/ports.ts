@@ -1,9 +1,11 @@
 import type {
+  BoardProjectId,
   BoardProjectsResponse,
   BoardQueryInput,
   BoardResponse,
   BoardSkipRequest,
   BoardSkipResponse,
+  BoardSwitch,
   BoardTaskActionRequestInput,
   BoardTaskCreateRequestInput,
   BoardTaskResponse,
@@ -30,6 +32,8 @@ export interface IBoardGateway {
   /** `current` is the project of `as`, so the caller's session rides along. */
   projects(as: string | undefined): Promise<BoardProjectsResponse>;
   sessions(): Promise<readonly SessionDirectoryEntry[]>;
+  /** Whether the project uses the board (docs/board.md § The board is opt-in). */
+  switchOf(projectId: BoardProjectId): Promise<BoardSwitch>;
 }
 
 /** `ConsoleIo` satisfies this structurally; the notice goes to stderr so stdout stays the answer. */
