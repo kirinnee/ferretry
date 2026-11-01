@@ -652,6 +652,14 @@ agenda items in a sub-ferret's session with `-s <session>`, proven by lineage.
   - **A same-user process that can write in the state home** could move a file out of it (a rename leaves
     one name, outside). Such a process can read the file itself anyway: the guard matters once the state
     home is walled off from ferrets, and until then is one fewer way out, not a sandbox.
+- **Files: the gitignore verdict against a rename round trip is best-effort.** Git judges a NAME, so after it
+  answers the read walks the name again and refuses if any folder on it is not the object it opened. A folder
+  moved away and straight back is the same object; only its change time moved, and only if the clock ticked
+  in between — Linux stamps from a 1–10 ms coarse clock unless the filesystem has fine-grained timestamps, so a
+  round trip inside one tick is invisible. What it can launder is only that Git verdict: the bytes, the
+  containment walk, the state-home fence, the hard-link refusal and the denylist are all decided on the object
+  served. And whoever can rename in the worktree can already move an ignored file to a name Git does not
+  ignore — the ignore gate keeps a tree's own secrets out of the viewer, never out of reach of its writer.
 - **The state home fence is the daemon's, not the disk's.** It governs what Ferretry reads, copies and starts for
   a ferret ([The state home](#the-state-home)); a ferret's own shell, running as the same user, can still open
   `~/.ferretry` directly. A session folder that a ferret swaps for a link into the home after its start is

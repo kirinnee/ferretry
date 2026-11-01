@@ -1,5 +1,5 @@
 import { afterAll, describe, it } from 'bun:test';
-import { mkdir, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, stat, symlink, truncate, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
 import { BunGitRunner } from '../../../../src/adapters/git/index.ts';
@@ -467,14 +467,26 @@ const suite = (label: string, pinner: SessionRootPinner) =>
         const { root } = await fixture();
         const original = path.join(root, 'src');
         const parked = path.join(root, 'parked');
+        const changeTime = async (): Promise<bigint> => (await stat(original, { bigint: true })).ctimeNs;
 
         // Act
         const error = await refusalFrom(
           async () =>
             await filesystem.list(root, 'src', {
               afterValidation: async () => {
-                await rename(original, parked);
-                await rename(parked, original);
+                // Nothing has touched src since the walk pinned it, so this is the ctime the walk recorded.
+                const pinned = await changeTime();
+                // A kernel stamping from the coarse clock leaves ctime where it was for a round trip inside
+                // one tick, and that round trip is invisible — the detection is best-effort (see
+                // ComponentIdentity). Repeat it until the clock has ticked, so this asserts the refusal of a
+                // swap the kernel DID record, on every kernel and every run.
+                for (let attempt = 0; attempt < 1000; attempt++) {
+                  await rename(original, parked);
+                  await rename(parked, original);
+                  if ((await changeTime()) !== pinned) return;
+                  await Bun.sleep(1);
+                }
+                throw new Error('a rename round trip never moved the ctime');
               },
             }),
         );
