@@ -75,6 +75,7 @@ const open = async (
     readonly refuse?: string;
     readonly chat?: BoardChat;
     readonly expanded?: boolean;
+    readonly taskNames?: ReadonlyMap<string, string>;
   } = {},
 ) => {
   const acts: { id: string; request: unknown }[] = [];
@@ -106,6 +107,7 @@ const open = async (
       : { expanded: extra.expanded, onExpand: () => void expands.push(extra.expanded === true) }),
     scope: daemonSessionScope(laptop, SELF),
     callsigns: new Map(),
+    ...(extra.taskNames === undefined ? {} : { taskNames: extra.taskNames }),
     phone: false,
     now: NOW,
     onNavigate: to => void navigated.push(to),
@@ -590,6 +592,18 @@ describe('ChatTasks — the Cards view', () => {
     expect(root.querySelector('[data-board-cards] [data-task="F40"]')).not.toBeNull();
   });
 
+  it('names the ferret by its task on the card to test, never by its callsign', async () => {
+    const { root } = await open({ taskNames: new Map([[SELF, 'Credentials Build Lead']]) });
+    expect(root.querySelector('[data-board-cards] [data-to-test-ferret]')?.textContent).toBe('Credentials Build Lead');
+  });
+
+  it('has a Skip button on a card to test that steps to the next card', async () => {
+    const { root, acts } = await open({ extraCards: [waiting] });
+    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-skip]'), 'Skip').click());
+    expect(where(root)).toBe('2 of 6');
+    expect(acts).toEqual([]);
+  });
+
   it('opens the card’s drawer from the title of a card to test', async () => {
     const { root } = await open();
     await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-title]'), 'title').click());
@@ -636,18 +650,30 @@ const swipe = async (root: HTMLElement, dx: number): Promise<void> => {
 describe('ChatTasks — swiping a card to test, at once', () => {
   beforeEach(() => boardSideView.set('cards'));
 
-  it('a right swipe is Done, with no tap on a button first', async () => {
+  it('a left swipe is Done, with no tap on a button first', async () => {
     const { root, acts } = await open();
-    await swipe(root, 300);
+    await swipe(root, -300);
     await interact(() => flush());
     expect(acts).toEqual([{ id: 'F22', request: { action: 'move', to: 'closed' } }]);
   });
 
-  it('a left swipe opens the Board’s reason box and moves nothing yet', async () => {
+  it('a right swipe opens the Board’s reason box and moves nothing yet', async () => {
     const { root, acts } = await open();
-    await swipe(root, -300);
+    await swipe(root, 300);
     await interact(() => flush());
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(acts).toEqual([]);
+  });
+
+  it('a swipe down is Skip: the next card, and nothing moves', async () => {
+    const { root, acts } = await open({ extraCards: [waiting] });
+    const grip = must(root.querySelector<HTMLElement>('[data-board-cards] .fy-totest__meta'), 'a place to grab');
+    await interact(() => grip.dispatchEvent(pointer('pointerdown', 100)));
+    await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 400 })));
+    await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 600 })));
+    await interact(() => grip.dispatchEvent(pointer('pointerup', 100, { clientY: 600 })));
+    await interact(() => flush());
+    expect(where(root)).toBe('2 of 6');
     expect(acts).toEqual([]);
   });
 

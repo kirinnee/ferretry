@@ -2,8 +2,8 @@
  * SAVED LOGINS, AS A PROJECTION OF ACCOUNTS (docs/secrets.md, "Accounts and sign-ins"; the wire is
  * `packages/protocol/src/lib/login-entries.ts`).
  *
- * The store is accounts and sign-ins now (`accounts.ts`). What an older app, an older `fy` and today's input bridge
- * read and write is still a SAVED LOGIN, so this file keeps that surface for one release, over the new store:
+ * The store is accounts and sign-ins now (`accounts.ts`). What an older app and an older `fy` still
+ * read and write is a SAVED LOGIN, so this file keeps that surface for one release, over the new store:
  *
  * - READ: one {@link LoginEntrySummary} per account. `match` is every place it signs in, `domains` its websites' login
  *   domains, and the method, recipe and auto-apply are its PRIMARY sign-in's (its website, else its first terminal).
@@ -25,11 +25,9 @@ import {
   LOGIN_OBSERVED_MAX,
   LOGIN_RECIPE_PROPOSALS_MAX,
   LoginDomainSchema,
-  type LoginObservation,
   LoginObservedSchema,
   type LoginRecipeProposal,
   LoginRecipeProposalSchema,
-  foldObservation,
   LoginMethodSchema,
   PASSWORD_METHOD,
   type Place,
@@ -53,7 +51,6 @@ import {
   AccountDirectory,
   accountSummary,
   AccountVault,
-  cardOn,
   decideOn,
   type LoginFieldValues,
   LoginEntryError,
@@ -61,7 +58,6 @@ import {
   type LoginSweep,
   methodRecord,
   primaryFirst,
-  proposeOn,
   signInsOf,
   signInSummary,
   withRecipe,
@@ -162,9 +158,9 @@ function savedLoginShapeOf(place: Place | undefined): { match: readonly string[]
 }
 
 /**
- * The saved-login surface over the account store: what the input bridge, `account.hint` and the
- * `/v1/secrets/logins*` routes use for one release. It holds the {@link AccountDirectory} it was built over, so the
- * two always share ONE store lock.
+ * The saved-login surface over the account store: what the `/v1/secrets/logins*` routes use for one release, and
+ * "Save as" on a card. The input bridge's matching, facts and `account.hint` read sign-ins from {@link accounts}. It
+ * holds the {@link AccountDirectory} it was built over, so the two always share ONE store lock.
  */
 export class LoginDirectory {
   readonly accounts: AccountDirectory;
@@ -338,64 +334,12 @@ export class LoginDirectory {
     };
   }
 
-  /**
-   * What the input service SAW while typing this account: filed on its sign-in whose keys contain the place it was
-   * seen at. None (the owner picked this account by hand on another page) keeps nothing: a fact is never misfiled.
-   */
-  async observe(id: LoginEntryId, seen: LoginObservation): Promise<void> {
-    await this.accounts.transact(draft => {
-      const account = Object.hasOwn(draft.accounts, id) ? draft.accounts[id] : undefined;
-      if (account === undefined) return;
-      const found = signInsOf(draft.signIns, account.key).find(([, signIn]) =>
-        placeKeys(signIn.place).includes(seen.at),
-      );
-      if (found === undefined) return;
-      const [signInId, signIn] = found;
-      draft.signIns[signInId] = { ...signIn, observed: [...foldObservation(signIn.observed ?? [], seen, draft.at)] };
-    });
-  }
-
-  /**
-   * A ferret's recipe proposal by account (`login.propose`, `account.propose { login }`): filed on the account's ONLY
-   * sign-in. An account that signs in nowhere, or at several places, is refused: name the sign-in.
-   */
-  async propose(
-    id: LoginEntryId,
-    proposal: LoginRecipeProposal,
-  ): Promise<{ readonly applied: boolean; readonly dropped: readonly LoginRecipeProposal[] }> {
-    return await this.accounts.transact(draft => {
-      const [signInId, signIn] = this.onlySignIn(draft, id);
-      return proposeOn(draft, signInId, signIn, proposal);
-    });
-  }
-
-  private onlySignIn(draft: AccountDraft, id: LoginEntryId): readonly [SignInId, SignInRecord] {
-    const account = this.accounts.accountIn(draft, id);
-    const own = primaryFirst(signInsOf(draft.signIns, account.key));
-    const [only] = own;
-    if (only === undefined)
-      throw new LoginEntryError('no_sign_in', `${account.label} signs in nowhere yet, so it has no recipe`);
-    if (own.length > 1)
-      throw new LoginEntryError(
-        'account_has_sign_ins',
-        `name the sign-in: ${account.label} signs in at ${String(own.length)} places (${own.map(([signInId]) => signInId).join(', ')})`,
-      );
-    return only;
-  }
-
   /** The account's sign-in that holds a proposal: proposal ids are unique, so it is one or none. */
   private holding(draft: AccountDraft, id: LoginEntryId, proposalId: string) {
     const account = this.accounts.accountIn(draft, id);
     return signInsOf(draft.signIns, account.key).find(
       ([, signIn]) => signIn.proposals?.some(proposal => proposal.id === proposalId) === true,
     );
-  }
-
-  async proposalCard(id: LoginEntryId, proposalId: string, agendaItemId: string): Promise<void> {
-    await this.accounts.transact(draft => {
-      const found = Object.hasOwn(draft.accounts, id) ? this.holding(draft, id, proposalId) : undefined;
-      if (found !== undefined) cardOn(draft, found[0], proposalId, agendaItemId);
-    });
   }
 
   /** The owner's answer to a proposal, found by its id on whichever of the account's sign-ins holds it. */

@@ -45,7 +45,7 @@ import {
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
-import type { ToTestCard } from '../lib/to-test-inbox.ts';
+import { sessionTaskNames, type ToTestCard, withTaskName } from '../lib/to-test-inbox.ts';
 
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
 export interface AgendaInboxMachine {
@@ -156,9 +156,15 @@ export function useAgendaInboxModel(
   timers?: DeferredTimers,
   toTestRead: readonly ToTestCard[] = NO_TO_TEST,
 ): AgendaInbox {
+  const taskNames = useMemo(() => sessionTaskNames(machines.flatMap(machine => machine.sessions ?? [])), [machines]);
+  const named = useMemo(() => toTestRead.map(row => withTaskName(row, taskNames)), [toTestRead, taskNames]);
   const toTest = useStable(
-    toTestRead,
-    toTestRead.map(row => `${row.key}\u0000${row.card.task.laneId}\u0000${row.card.task.lastTouchedAt}`).join('\u0001'),
+    named,
+    named
+      .map(
+        row => `${row.key}\u0000${row.card.task.laneId}\u0000${row.card.task.lastTouchedAt}\u0000${row.taskName ?? ''}`,
+      )
+      .join('\u0001'),
   );
   const latest = useRef(machines);
   latest.current = machines;

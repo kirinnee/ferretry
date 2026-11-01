@@ -254,10 +254,16 @@ describe('a person’s tool routes', () => {
     const filed: unknown[] = [];
     const { world, dispatch } = served({
       recipes: {
-        scrubbed: async entries => entries,
+        scrubbedAccounts: async listing => listing,
         propose: async (...parameters) => {
           filed.push(parameters);
-          return { id: 'rp_0000000000000001', login: 'VERCEL', state: 'pending', agendaItemId: 'A4' };
+          return {
+            id: 'rp_0000000000000001',
+            login: 'VERCEL',
+            signIn: 'si_00000000000000c1',
+            state: 'pending',
+            agendaItemId: 'A4',
+          };
         },
       },
     });
@@ -265,8 +271,8 @@ describe('a person’s tool routes', () => {
       agentCall({ tool: 'login.propose', login: 'VERCEL', recipe: 'Open vercel.com', why: 'first sign-in' }),
     );
     should(answered.status).equal(200);
-    should(filed).deepEqual([['s1', 'VERCEL', 'Open vercel.com', 'first sign-in']]);
-    should(world.audit.entries.at(-1)?.detail).match({ tool: 'account.propose' });
+    should(filed).deepEqual([['s1', { login: 'VERCEL' }, 'Open vercel.com', 'first sign-in']]);
+    should(world.audit.entries.at(-1)?.detail).match({ tool: 'account.propose', signIn: 'si_00000000000000c1' });
   });
 
   it('should refuse a session id that cannot be one', async () => {

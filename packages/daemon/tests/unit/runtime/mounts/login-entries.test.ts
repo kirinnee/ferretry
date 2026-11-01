@@ -307,6 +307,7 @@ describe('the login recipe routes', () => {
     const logins = base.logins as NonNullable<SecretSubsystem['logins']>;
     const loginRecipes = new LoginRecipeService({
       logins,
+      accounts: logins.accounts,
       values: { redact: async text => text.replaceAll(PASSWORD, '[redacted]') },
       agenda: { raise: async () => ({ ok: true, id: 'A1' }), close: async () => undefined },
       audit: { record: async () => undefined },
@@ -343,7 +344,7 @@ describe('the login recipe routes', () => {
 
   it('should let the owner approve a proposal, and never a ferret', async () => {
     const { subsystem, loginRecipes } = await recipeWorld();
-    await loginRecipes.propose('ferret-1', 'VERCEL', 'Continue with Google', 'it moved');
+    await loginRecipes.propose('ferret-1', { login: 'VERCEL' }, 'Continue with Google', 'it moved');
     const path = '/v1/secrets/logins/VERCEL/recipe/proposals/rp_0000000000000001';
     const byFerret = await dispatchAs(agentIn('ferret-1'), subsystem, 'POST', path, { decision: 'approve' });
     should(byFerret.status).equal(403);
@@ -365,6 +366,7 @@ describe('a recipe is masked whenever a route serves it', () => {
     const logins = base.logins as NonNullable<SecretSubsystem['logins']>;
     const loginRecipes = new LoginRecipeService({
       logins,
+      accounts: logins.accounts,
       values: {
         redact: async text => [...kept].reduce((masked, value) => masked.replaceAll(value, '[redacted]'), text),
       },

@@ -1,51 +1,69 @@
 import { describe, it } from 'bun:test';
-import type { LoginEntrySummary } from '@ferretry/protocol';
+import type { AccountList } from '@ferretry/protocol';
 import should from 'should';
 import type { AgentToolError } from '../../../src/lib/index.ts';
 import { agent, agentToolWorld, otherAgent } from './support.ts';
 
-/** `login_hint`: what a ferret may know about signing in to a site, by the non-secret metadata of saved logins. */
+/** `account_hint`: what a ferret may know about signing in to a site, one line per sign-in, by non-secret metadata. */
 
 const AT = '2026-10-31T09:00:00.000Z';
-const ENTRIES: readonly LoginEntrySummary[] = [
-  {
-    id: 'GOOGLE_KIRIN',
-    label: 'Google (kirin@)',
-    match: ['accounts.google.com'],
-    method: { kind: 'password' },
-    domains: ['accounts.google.com'],
-    username: 'kirin@example.com',
-    fields: { password: true, totp: true },
-    totp: { algorithm: 'SHA1', digits: 6, period: 30 },
-    createdAt: AT,
-    updatedAt: AT,
-  },
-  {
-    id: 'VERCEL',
-    label: 'Vercel',
-    match: ['vercel.com'],
-    method: { kind: 'google', via: 'GOOGLE_KIRIN' },
-    domains: ['vercel.com'],
-    fields: { password: false, totp: false },
-    createdAt: AT,
-    updatedAt: AT,
-  },
-];
+const SI_GOOGLE = 'si_00000000000000b1';
+const SI_VERCEL = 'si_00000000000000b2';
+const LISTING: Pick<AccountList, 'accounts' | 'signIns'> = {
+  accounts: [
+    {
+      id: 'GOOGLE_KIRIN',
+      label: 'Google (kirin@)',
+      username: 'kirin@example.com',
+      fields: { password: true, totp: true },
+      totp: { algorithm: 'SHA1', digits: 6, period: 30 },
+      factors: [],
+      signIns: [SI_GOOGLE],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: 'VERCEL',
+      label: 'Vercel',
+      fields: { password: false, totp: false },
+      factors: [],
+      signIns: [SI_VERCEL],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+  ],
+  signIns: [
+    {
+      id: SI_GOOGLE,
+      account: 'GOOGLE_KIRIN',
+      place: { kind: 'site', domains: ['accounts.google.com'], match: ['accounts.google.com'] },
+      method: { kind: 'password' },
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: SI_VERCEL,
+      account: 'VERCEL',
+      place: { kind: 'site', domains: ['vercel.com'], match: ['vercel.com'] },
+      method: { kind: 'google', via: 'GOOGLE_KIRIN' },
+      via: { account: { id: 'GOOGLE_KIRIN', label: 'Google (kirin@)' }, signIn: SI_GOOGLE },
+      createdAt: AT,
+      updatedAt: AT,
+    },
+  ],
+};
 
-const listing = (entries: readonly LoginEntrySummary[] = ENTRIES) => ({ list: async () => entries });
+const listing = (list: Pick<AccountList, 'accounts' | 'signIns'> = LISTING) => ({ list: async () => list });
 
 describe('account.hint', () => {
-  it('should name the site login, how it signs in and the provider login, by metadata only', async () => {
-    const world = agentToolWorld({ logins: listing() });
+  it('should name the site sign-in, how it signs in and the provider one, by metadata only', async () => {
+    const world = agentToolWorld({ accounts: listing() });
 
     const result = await world.service.call(agent, { tool: 'account.hint', site: 'https://vercel.com/login' });
 
-    should(result.logins?.site).equal('vercel.com');
-    should(result.logins?.passkeys).equal('off');
-    should(result.logins?.hints.map(hint => [hint.id, hint.role])).deepEqual([
-      ['VERCEL', 'site'],
-      ['GOOGLE_KIRIN', 'provider'],
-    ]);
+    should(result.summary).startWith('Accounts for vercel.com:');
+    should(result.summary.indexOf(`[${SI_VERCEL}]`)).be.lessThan(result.summary.indexOf(`[${SI_GOOGLE}]`));
+    should(result.summary).containEql('(GOOGLE_KIRIN, provider)');
     should(result.summary).containEql("Sign in with Google via 'Google (kirin@)'");
     should(result.summary).containEql('passkeys are off');
     const text = JSON.stringify(result);
@@ -53,17 +71,17 @@ describe('account.hint', () => {
   });
 
   it('should read the site from where the agent’s page IS, not from the agent', async () => {
-    const world = agentToolWorld({ logins: listing() });
+    const world = agentToolWorld({ accounts: listing() });
     await world.service.call(agent, { tool: 'browser.open', name: 'app', url: 'https://accounts.google.com/signin' });
 
     const result = await world.service.call(agent, { tool: 'account.hint', name: 'app' });
 
-    should(result.logins?.site).equal('accounts.google.com');
-    should(result.logins?.hints.map(hint => hint.id)).deepEqual(['GOOGLE_KIRIN']);
+    should(result.summary).startWith('Accounts for accounts.google.com:');
+    should(result.summary).containEql(`[${SI_GOOGLE}]`).and.not.containEql(`[${SI_VERCEL}]`);
   });
 
   it('should refuse another session’s page', async () => {
-    const world = agentToolWorld({ logins: listing() });
+    const world = agentToolWorld({ accounts: listing() });
     await world.service.call(otherAgent, { tool: 'browser.open', name: 'app', url: 'https://vercel.com/' });
 
     const error = (await world.service
@@ -74,12 +92,12 @@ describe('account.hint', () => {
   });
 
   it('should say when nothing is saved, and when this daemon keeps no accounts', async () => {
-    const none = await agentToolWorld({ logins: listing([]) }).service.call(agent, {
+    const none = await agentToolWorld({ accounts: listing({ accounts: [], signIns: [] }) }).service.call(agent, {
       tool: 'account.hint',
       site: 'github.com',
     });
-    should(none.logins?.hints).deepEqual([]);
     should(none.summary).containEql('No account for github.com');
+    should(none.summary).not.containEql('account_propose');
 
     const error = (await agentToolWorld()
       .service.call(agent, { tool: 'account.hint', site: 'github.com' })
@@ -88,7 +106,7 @@ describe('account.hint', () => {
   });
 
   it('should refuse a site that is not one, and a page that is not on a site yet', async () => {
-    const world = agentToolWorld({ logins: listing() });
+    const world = agentToolWorld({ accounts: listing() });
     await world.service.call(agent, { tool: 'browser.open', name: 'app' });
     // A page that has not navigated anywhere yet, as the real browser reports it.
     const status = world.browser.status.bind(world.browser);
@@ -112,7 +130,7 @@ describe('account.hint', () => {
 
   it('should say the saved logins cannot be read, never that there are none', async () => {
     const world = agentToolWorld({
-      logins: {
+      accounts: {
         list: async () => {
           throw new Error('the vault key is gone');
         },
@@ -128,14 +146,14 @@ describe('account.hint', () => {
   });
 
   it('should name the page in the audit when the hint was for a page', async () => {
-    const world = agentToolWorld({ logins: listing() });
+    const world = agentToolWorld({ accounts: listing() });
     await world.service.call(agent, { tool: 'browser.open', name: 'app', url: 'https://vercel.com/' });
     await world.service.call(agent, { tool: 'account.hint', name: 'app' });
     should(world.audit.entries.at(-1)?.detail).match({ tool: 'account.hint', from: 'page', surface: '%browser:app' });
   });
 
   it('should be audited by how it was asked, never by what it answered', async () => {
-    const world = agentToolWorld({ logins: listing() });
+    const world = agentToolWorld({ accounts: listing() });
     await world.service.call(agent, { tool: 'account.hint', site: 'vercel.com' });
     const record = world.audit.entries.at(-1);
     should(record?.detail).match({ tool: 'account.hint', from: 'site' });

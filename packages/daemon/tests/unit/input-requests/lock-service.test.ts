@@ -1,7 +1,19 @@
 import { describe, it } from 'bun:test';
-import { type InputRaise, type InputTargetFacts, type LoginEntrySummary, padInputValue } from '@ferretry/protocol';
+import {
+  type AccountList,
+  type AccountSummary,
+  type InputRaise,
+  type InputTargetFacts,
+  type LoginObserved,
+  padInputValue,
+  PutLoginEntryRequestSchema,
+  type SignInSummary,
+} from '@ferretry/protocol';
 import should from 'should';
+import { InputLoginAdapter } from '../../../src/lib/input-requests/login-adapter.ts';
 import { identityOf } from '../../../src/lib/input-requests/login-observer.ts';
+import { LoginDirectory, LoginVault } from '../../../src/lib/secrets/index.ts';
+import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments } from '../runtime/mounts/support.ts';
 import type { InputCaller as ServiceCaller } from '../../../src/lib/input-requests/ports.ts';
 import { FACTS, inputRequestService, RAISE, SESSION } from './support.ts';
 
@@ -37,27 +49,42 @@ const PAGE_RAISE: InputRaise = {
 } as InputRaise;
 
 const flag = { value: true, observedAt: '2026-10-30T09:00:00.000Z', count: 2 };
-const provenEntry = (): LoginEntrySummary => ({
-  id: 'EXAMPLE',
-  label: 'Example',
-  match: [],
+/** What the daemon saw at PAGE's password field, said all three ways (`value` false: the other way). */
+const proof = (value = true): LoginObserved => ({
+  at: 'accounts.example.test',
+  surface: 'page',
+  identity: identityOf(PAGE, 'accounts.example.test') as string,
+  since: '2026-10-30T09:00:00.000Z',
+  masked: { ...flag, value },
+  noEchoAfterSubmit: flag,
+  navigatedAway: flag,
+});
+const account = (id: string): AccountSummary => ({
+  id,
+  label: id.toLowerCase(),
   fields: { password: true, totp: false },
-  observed: [
-    {
-      at: 'accounts.example.test',
-      surface: 'page',
-      identity: identityOf(PAGE, 'accounts.example.test') as string,
-      since: '2026-10-30T09:00:00.000Z',
-      masked: flag,
-      noEchoAfterSubmit: flag,
-      navigatedAway: flag,
-    },
-  ],
+  factors: [],
+  signIns: [],
   createdAt: 'a',
   updatedAt: 'a',
 });
-const logins = (entries: () => readonly LoginEntrySummary[]) => ({
-  entries: async () => entries(),
+/** A sign-in of `owner` on `host` (a site whose login domain it is), keeping `observed`. */
+const signInAt = (id: string, owner: string, host: string, observed: readonly LoginObserved[]): SignInSummary => ({
+  id,
+  account: owner,
+  place: { kind: 'site', domains: [host], match: [host] },
+  method: { kind: 'password' },
+  ...(observed.length === 0 ? {} : { observed }),
+  createdAt: 'a',
+  updatedAt: 'a',
+});
+type Listing = Pick<AccountList, 'accounts' | 'signIns'>;
+const proven = (): Listing => ({
+  accounts: [account('EXAMPLE')],
+  signIns: [signInAt('si_00000000000000e1', 'EXAMPLE', 'accounts.example.test', [proof()])],
+});
+const logins = (listing: () => Listing) => ({
+  listing: async () => listing(),
   fill: async () => '',
   save: async () => undefined,
 });
@@ -160,7 +187,7 @@ describe('the lock a card shows, and the hold that runs it', () => {
     const w = inputRequestService({
       steered: () => false,
       facts: PAGE,
-      logins: logins(() => [provenEntry()]),
+      logins: logins(proven),
       probe: async () => {
         probed = true;
         return 'hidden';
@@ -172,11 +199,11 @@ describe('the lock a card shows, and the hold that runs it', () => {
   });
 
   it('should never shorten at the write a lock the card showed long', async () => {
-    let entries: readonly LoginEntrySummary[] = [];
-    const w = inputRequestService({ steered: () => false, facts: PAGE, logins: logins(() => entries) });
+    let listing: Listing = { accounts: [], signIns: [] };
+    const w = inputRequestService({ steered: () => false, facts: PAGE, logins: logins(() => listing) });
     const { request } = await raised(w, PAGE_RAISE);
     should(request.lock?.seconds).equal(120);
-    entries = [provenEntry()];
+    listing = proven();
     await deliver(w, request);
     should(w.quarantine.until(SESSION, ['~page:app'])).equal(NOW + 120_000);
   });
@@ -246,12 +273,92 @@ describe('the lock a card shows, and the hold that runs it', () => {
       steered: () => false,
       facts: PAGE,
       logins: {
-        entries: async () => await Promise.reject(new Error('damaged')),
+        listing: async () => await Promise.reject(new Error('damaged')),
         fill: async () => '',
         save: async () => undefined,
       },
     });
     const { request } = await raised(w, PAGE_RAISE);
     should(request.lock?.seconds).equal(120);
+  });
+});
+
+describe('the facts the lock reads: every sign-in matched to the target, together', () => {
+  const lockWith = async (listing: Listing) =>
+    (
+      await raised(
+        inputRequestService({ steered: () => false, facts: PAGE, logins: logins(() => listing) }),
+        PAGE_RAISE,
+      )
+    ).request.lock;
+
+  it("should read the union of every matched sign-in's facts, whichever account proved the field", async () => {
+    const two: Listing = {
+      accounts: [account('EXAMPLE'), account('EXAMPLE_WORK')],
+      signIns: [
+        signInAt('si_00000000000000e1', 'EXAMPLE', 'accounts.example.test', []),
+        signInAt('si_00000000000000e2', 'EXAMPLE_WORK', 'accounts.example.test', [proof()]),
+      ],
+    };
+    should(await lockWith(two)).deepEqual({ seconds: 10, reason: 'proven-field' });
+  });
+
+  it('should read them together the other way too: one matched sign-in saying "no" keeps the lock long', async () => {
+    const split: Listing = {
+      accounts: [account('EXAMPLE'), account('EXAMPLE_WORK')],
+      signIns: [
+        signInAt('si_00000000000000e1', 'EXAMPLE', 'accounts.example.test', [proof()]),
+        signInAt('si_00000000000000e2', 'EXAMPLE_WORK', 'accounts.example.test', [proof(false)]),
+      ],
+    };
+    should(await lockWith(split)).deepEqual({ seconds: 120, reason: 'not-proven' });
+  });
+
+  it('should never read the facts of a sign-in matched somewhere else', async () => {
+    const elsewhere: Listing = {
+      accounts: [account('EXAMPLE')],
+      signIns: [signInAt('si_00000000000000e1', 'EXAMPLE', 'accounts.other.test', [proof()])],
+    };
+    should(await lockWith(elsewhere)).deepEqual({ seconds: 120, reason: 'not-proven' });
+  });
+
+  it("should keep a site's proof however many facts the account's other sign-ins hold (the real store)", async () => {
+    const index = new MemoryLoginIndex();
+    const sealed = new MemorySecretDocuments();
+    const cipher = new FakeSecretCipher();
+    const directory = new LoginDirectory(index, sealed, cipher, { now: () => '2026-10-30T09:00:00.000Z' });
+    await directory.put(
+      'EXAMPLE',
+      PutLoginEntryRequestSchema.parse({
+        label: 'Example',
+        password: 'hunter2-UNIQUE-pw',
+        match: ['accounts.example.test', 'ssh@build.example.test'],
+      }),
+    );
+    const { signIns } = await directory.accounts.list();
+    const site = signIns.find(signIn => signIn.place.kind === 'site')?.id as string;
+    const ssh = signIns.find(signIn => signIn.place.kind === 'terminal')?.id as string;
+    await directory.accounts.observeSignIn(site, {
+      at: 'accounts.example.test',
+      surface: 'page',
+      identity: identityOf(PAGE, 'accounts.example.test') as string,
+      masked: true,
+      noEchoAfterSubmit: true,
+      navigatedAway: true,
+    });
+    // The account's ssh sign-in fills its own facts to the limit: sixteen fields it saw there.
+    for (let n = 0; n < 16; n += 1)
+      await directory.accounts.observeSignIn(ssh, {
+        at: 'ssh@build.example.test',
+        surface: 'terminal',
+        identity: n.toString(16).padStart(16, '0'),
+        masked: true,
+      });
+    const w = inputRequestService({
+      steered: () => false,
+      facts: PAGE,
+      logins: new InputLoginAdapter(directory, new LoginVault(index, sealed, cipher)),
+    });
+    should((await raised(w, PAGE_RAISE)).request.lock).deepEqual({ seconds: 10, reason: 'proven-field' });
   });
 });

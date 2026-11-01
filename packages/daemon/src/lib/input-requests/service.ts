@@ -34,13 +34,14 @@ import {
   type InputTarget,
   type InputTargetFacts,
   type PushSubject,
-  loginDomainsOf,
   type LoginObserved,
   inputRaiseFields,
   inputValueProblem,
   LOGIN_PASSWORD_MIN_LENGTH,
   LOGIN_USERNAME_MAX_LENGTH,
   type LoginEntryId,
+  placeKeys,
+  type SignInId,
   savedRolesOf,
   strongestSensitivity,
   unpadInputValue,
@@ -82,7 +83,7 @@ import {
   spellsPassword,
 } from './lock.ts';
 import type { LoginObserver } from './login-observer.ts';
-import { savedForFields, targetMatchKey } from './saved-logins.ts';
+import { type SavedListing, savedForFields, signInOfAt, signInsAt, targetMatchKey } from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
 
 /**
@@ -157,8 +158,11 @@ interface Held {
   readonly raisedOn?: string;
   /** The target's key for saved logins (`sudo@kirin-box`), from what the DAEMON saw; never from the agent. */
   matchKey?: string;
-  /** The saved login the ferret said it expects: shown to the owner as a hint, never made the one-tap choice. */
-  readonly hint?: LoginEntryId;
+  /**
+   * The account (or `si_…`) the ferret said it expects. It can only order the sign-ins the daemon matched here
+   * (`chosenSignIn`): one it names is the primary, "Ferret chose this"; one matched nowhere here is only tagged.
+   */
+  readonly hint?: string;
   /** Every `deliveryId` seen and what came of it, so a retry gets the first outcome and never types twice. */
   readonly deliveries: Map<string, Promise<InputDeliverResult>>;
   readonly waiters: Set<() => void>;
@@ -212,6 +216,15 @@ export interface InputRequestServiceDependencies {
 }
 
 const instant = (ms: number): string => new Date(ms).toISOString();
+
+/** The target key a card offers saved accounts for, set from the latest sighting, or cleared when it names none. */
+function rekey(held: Held, matchKey: string | undefined): void {
+  if (matchKey === undefined) delete held.matchKey;
+  else held.matchKey = matchKey;
+}
+
+/** What a card offers from a store that cannot be read: nothing, and the owner can still type. */
+const NO_ACCOUNTS: SavedListing = { accounts: [], signIns: [] };
 
 const isFinal = (request: InputRequest): boolean => FINAL.has(request.state);
 
@@ -300,7 +313,7 @@ export class InputRequestService {
     // The dummy probe runs after the picture, so the picture shows the page as it was.
     // A card of plain values and one-time codes is kept from nobody (lock.ts, heldFromView): no facts, probe or lock.
     const kept = heldFromView(fields) && target.kind !== 'secret';
-    const observedFacts = kept ? await this.observedFacts() : [];
+    const observedFacts = kept ? await this.observedFacts(seen.facts) : [];
     // At the raise only a page script the ferret ever ran counts: acts before the card are the ferret's own business.
     const context = {
       observed: observedFacts,
@@ -480,14 +493,15 @@ export class InputRequestService {
   }
 
   /**
-   * What the owner's card may offer from the saved logins. A store that cannot be read offers nothing
-   * rather than failing the card: the owner can still type the value.
+   * What the owner's card may offer from the saved accounts: the sign-ins matched to the target, the one first that the
+   * ferret's hint or a default chose among THOSE, then what may be picked by hand. A store that cannot be read offers
+   * nothing rather than failing the card: the owner can still type the value.
    */
   private async savedView(held: Held): Promise<InputRequest['saved']> {
     const { logins } = this.deps;
     if (logins === undefined || held.request.state !== 'pending') return undefined;
-    const entries = await logins.entries().catch(() => []);
-    return savedForFields(held.request.fields, held.matchKey, entries, held.hint);
+    const listing = await logins.listing().catch((): SavedListing => NO_ACCOUNTS);
+    return savedForFields(held.request.fields, held.matchKey, listing, { hint: held.hint });
   }
 
   /** The last word before a request leaves the service: a hold taken while it was being redacted still seals it. */
@@ -852,8 +866,8 @@ export class InputRequestService {
     }
     held.names = [target.key, ...(seen.names ?? [])];
     held.binding = bindingOf(seen.facts);
-    const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
-    if (matchKey !== undefined) held.matchKey = matchKey;
+    // Always the key of what was seen NOW: a prompt that left line mode (or a page that names no key) keeps no one-tap.
+    rekey(held, targetMatchKey(seen.facts, this.deps.hostName ?? ''));
     const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
     held.request = {
       ...request,
@@ -957,6 +971,9 @@ export class InputRequestService {
       // The owner's card is older than the request (it was redrawn since): nothing is wrong with the target, so
       // nothing is counted; the card reads the request again and the owner checks it before sending.
       if (body.observedDigest !== request.observedDigest) throw targetRebound(request.target.kind);
+      // A saved account is typed only as the card offers it NOW, and the tapped sign-in must be its offer's: the rules of
+      // the card are the daemon's, not only the app's list. Checked before anything is opened or typed.
+      if (body.entry !== undefined) await this.guardOffered(held, body.entry, body.signIn, typed);
       const submitted = body.submit && request.submit !== 'agent';
       const looked = await this.deps.target.observe(request.sessionId, request.target, request.fields.map(pointerOf));
       const seen =
@@ -982,7 +999,7 @@ export class InputRequestService {
       if (heldFromView(fields) && request.target.kind !== 'secret') {
         // At the write, any act of the ferret on a page since the card was raised voids a page's proof as well.
         const now = lockFor(seen.facts, fields, {
-          observed: await this.observedFacts(),
+          observed: await this.observedFacts(seen.facts),
           probed: held.probed === true,
           submitted,
           steered: this.tainted(request.sessionId, Date.parse(request.raisedAt)),
@@ -1061,6 +1078,7 @@ export class InputRequestService {
         submitted,
         deliveredAt,
         body.entry ?? (saved?.ok === true ? body.save?.entry : undefined),
+        body.signIn,
       );
       await this.finish(held, 'delivered', undefined, by, {
         closeCard: true,
@@ -1126,7 +1144,9 @@ export class InputRequestService {
   /**
    * Hands a landed delivery to the login observer: the facts the card was drawn from, the fields, the values that
    * were not plain (for the observer's own yes-or-no echo look; they are already held in the redaction window) and
-   * the saved login typed or kept, with its sign-in hosts. Total.
+   * the account typed or kept and the SIGN-IN its facts go to: the one the owner tapped (already checked to be the
+   * account's), else the account's sign-in the daemon matched to this target, else none (picked by hand elsewhere: no
+   * fact is kept). Total.
    */
   private async observeLogin(
     held: Held,
@@ -1135,20 +1155,28 @@ export class InputRequestService {
     submitted: boolean,
     deliveredAt: number,
     login: LoginEntryId | undefined,
+    tapped: SignInId | undefined,
   ): Promise<void> {
     const observer = this.deps.observer;
     const { request } = held;
     if (observer === undefined || request.target.kind === 'secret' || request.source !== undefined) return;
     try {
-      const entry =
-        login === undefined ? undefined : (await this.deps.logins?.entries())?.find(each => each.id === login);
+      const listing = login === undefined ? undefined : await this.deps.logins?.listing();
+      const account = listing?.accounts.find(each => each.id === login);
+      const signIn =
+        listing === undefined || account === undefined
+          ? undefined
+          : tapped === undefined
+            ? signInOfAt(account.id, held.matchKey, listing)
+            : listing.signIns.find(each => each.id === tapped && each.account === account.id);
       const secrets = request.fields
         .map((field, index) => (field.sensitivity === 'plain' ? undefined : values[index]?.text))
         .filter((text): text is string => text !== undefined);
       await observer.delivered({
         sessionId: request.sessionId,
-        ...(entry === undefined ? {} : { login: entry.id }),
-        domains: entry === undefined ? [] : loginDomainsOf(entry),
+        ...(account === undefined ? {} : { login: account.id }),
+        ...(signIn === undefined ? {} : { signIn: signIn.id }),
+        domains: signIn?.place.kind === 'site' ? placeKeys(signIn.place) : [],
         target: request.target,
         facts,
         fields: request.fields,
@@ -1172,10 +1200,49 @@ export class InputRequestService {
     return this.deps.observer?.tainted(sessionId, 'browser', since) ?? true;
   }
 
-  /** Every saved login's observed facts, for the lock; none when the store cannot be read (the lock stays long). */
-  private async observedFacts(): Promise<readonly LoginObserved[]> {
-    const entries = await this.deps.logins?.entries().catch(() => []);
-    return (entries ?? []).flatMap(entry => entry.observed ?? []);
+  /**
+   * The facts the lock may read for this target: the UNION of every sign-in the daemon matched to it, of any account
+   * (each keeps its own, so two accounts on one host are two sets read together). None when the store cannot be read
+   * or nothing matches (the lock stays long).
+   */
+  private async observedFacts(facts: InputTargetFacts): Promise<readonly LoginObserved[]> {
+    const listing = await this.deps.logins?.listing().catch(() => undefined);
+    if (listing === undefined) return [];
+    return signInsAt(targetMatchKey(facts, this.deps.hostName ?? ''), listing).flatMap(signIn => signIn.observed ?? []);
+  }
+
+  /**
+   * A deliver that types from a saved account types only what the card would offer NOW, drawn by the same
+   * `savedForFields` over the fields the owner did not type: never a 2FA code from an account that does not sign in here,
+   * nothing by hand on a page a sign-in reaches through a provider, never a provider where it is not matched. A
+   * `signIn` must be one of `entry`'s account (the same refusal whether it is another account's or none at all), and
+   * the one the daemon matched here for that offer: the one tap is that sign-in's, and the facts of the write go to it.
+   */
+  private async guardOffered(
+    held: Held,
+    entry: LoginEntryId,
+    signIn: SignInId | undefined,
+    typed: ReadonlyMap<string, string>,
+  ): Promise<void> {
+    const listing = await this.deps.logins?.listing().catch(() => undefined);
+    if (listing === undefined)
+      throw new InputRequestError('unavailable', 'Ferretry could not read the saved accounts, so nothing was typed');
+    if (!listing.accounts.some(account => account.id === entry))
+      throw new InputRequestError('not_found', `there is no saved login ${entry}; nothing was typed`);
+    if (signIn !== undefined && listing.signIns.find(each => each.id === signIn)?.account !== entry)
+      throw new InputRequestError('bad_request', `that sign-in is not one of ${entry}; nothing was typed`);
+    // At least one: an `entry` with every field typed was already refused (`typedValues`).
+    const filled = held.request.fields.filter(field => !typed.has(field.id));
+    const offer = savedForFields(filled, held.matchKey, listing, { hint: held.hint }).offers.find(
+      each => each.id === entry,
+    );
+    if (offer === undefined)
+      throw new InputRequestError('bad_request', `${entry} is not offered for this target; nothing was typed`);
+    if (signIn !== undefined && offer.signIn !== signIn)
+      throw new InputRequestError(
+        'bad_request',
+        `that sign-in of ${entry} is not the one that signs in here; nothing was typed`,
+      );
   }
 
   /** The value a saved login types for one field. Refuses with the entry's name, never its value. */
@@ -1372,8 +1439,8 @@ export class InputRequestService {
     const { request } = held;
     held.rebinds += 1;
     held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
-    const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
-    if (matchKey !== undefined) held.matchKey = matchKey;
+    // Always the key of what was seen NOW: a prompt that left line mode (or a page that names no key) keeps no one-tap.
+    rekey(held, targetMatchKey(seen.facts, this.deps.hostName ?? ''));
     // A card redrawn onto another document than the one it was raised on says so, above any other flag but red.
     const moved =
       seen.facts.kind === 'browser' && held.raisedOn !== undefined && seen.facts.navigationId !== held.raisedOn;
@@ -1395,7 +1462,7 @@ export class InputRequestService {
       request.lock === undefined
         ? undefined
         : lockFor(seen.facts, request.fields, {
-            observed: await this.observedFacts(),
+            observed: await this.observedFacts(seen.facts),
             probed: false,
             submitted: request.submit !== 'agent',
             steered: this.tainted(request.sessionId, Date.parse(request.raisedAt)),

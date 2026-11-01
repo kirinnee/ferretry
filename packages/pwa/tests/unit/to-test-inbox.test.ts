@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { releaseWords, toTestCards, toTestKey } from '../../src/lib/to-test-inbox.ts';
+import {
+  releaseWords,
+  sessionTaskNames,
+  type ToTestCard,
+  toTestCards,
+  toTestKey,
+  withTaskName,
+} from '../../src/lib/to-test-inbox.ts';
+import { sessionView } from '../support/sessions.ts';
 import { boardModelOf, card } from './board-support.ts';
 
 const shipped = (version: string, at: string) => ({ version, tag: `v${version}`, at });
@@ -54,5 +62,43 @@ describe('releaseWords', () => {
 
   test('says nothing for a card that has not shipped', () => {
     expect(releaseWords(null)).toBeNull();
+  });
+});
+
+describe('the ferret’s task name on a card to test', () => {
+  const named = (id: string, name: string, teammate?: string) =>
+    sessionView(id, { config: { name, ...(teammate === undefined ? {} : { teammate }) } });
+
+  test('names a session by the task it was given, never by its callsign', () => {
+    const names = sessionTaskNames([named('s1', 'Credentials Build Lead', 'zoe')]);
+    expect(names.get('s1')).toBe('Credentials Build Lead');
+    expect([...names.values()]).not.toContain('zoe');
+  });
+
+  test('leaves out a session with no task: the placeholder and the callsign are no task', () => {
+    const names = sessionTaskNames([named('s1', 'interactive', 'zoe'), named('s2', 'zoe', 'zoe')]);
+    expect(names.size).toBe(0);
+  });
+
+  test('takes the task name of the assignee, else of the owner', async () => {
+    const [assigned, owned] = toTestCards(
+      await boardModelOf([
+        card('F1', { laneId: 'tested', owner: 'owner-s', assignee: 'worker-s' }),
+        card('F2', { laneId: 'tested', owner: 'owner-s', assignee: null }),
+      ]),
+    ).toSorted((a, b) => a.card.task.id.localeCompare(b.card.task.id));
+    const names = new Map([
+      ['owner-s', 'Lead task'],
+      ['worker-s', 'Worker task'],
+    ]);
+    expect(withTaskName(assigned as ToTestCard, names).taskName).toBe('Worker task');
+    expect(withTaskName(owned as ToTestCard, names).taskName).toBe('Lead task');
+  });
+
+  test('has no task name when the session is not known, and a card starts with none', async () => {
+    const [row] = toTestCards(await boardModelOf([card('F1', { laneId: 'tested' })]));
+    expect((row as ToTestCard).taskName).toBeNull();
+    expect(withTaskName(row as ToTestCard, new Map()).taskName).toBeNull();
+    expect(withTaskName(row as ToTestCard, undefined)).toBe(row as ToTestCard);
   });
 });

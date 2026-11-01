@@ -406,7 +406,7 @@ seconds (`lockSeconds`). It is decided only from what the daemon observed (`pack
 | Reason            | Lock  | When                                                                                                                                                                                                                                                                                                                                                                  |
 | ----------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `hidden-terminal` | 10 s  | A LOCAL password prompt: echo off AND line (canonical) mode, the PROVED program is sudo, sudoedit, su, doas or passwd, and EVERY process of the foreground group runs setuid root (effective uid 0, real uid not), which a script or binary the ferret wrote cannot. ssh, docker, psql, every readline or raw-mode program and every unverified card are never short. |
-| `proven-field`    | 10 s  | A submitted value into exactly the page fields below, AND a saved login's facts for that very field identity say masked, no echo after submit and moved on, with no record saying otherwise.                                                                                                                                                                          |
+| `proven-field`    | 10 s  | A submitted value into exactly the page fields below, AND the facts of the sign-ins matched to this page (every account's, read together) for that very field identity say masked, no echo after submit and moved on, with no record saying otherwise.                                                                                                                |
 | `probed-field`    | 10 s  | One password field as below, and the daemon's **dummy probe** at raise came back clean.                                                                                                                                                                                                                                                                               |
 | `code`            | 120 s | A `private` value: it shows as it is typed. (A one-time `code` field gets no lock at all; the reason's name is older than the sensitivity.)                                                                                                                                                                                                                           |
 | `not-proven`      | 120 s | Anything else, every probe that did not run cleanly, an unreadable login store, a ferret that could have steered the page.                                                                                                                                                                                                                                            |
@@ -639,21 +639,30 @@ is for (`match`, the site the work is on):
   parent domain. A **terminal** card still matches by `match` (`sudo@kirin-box`).
 - **Older entries** (saved before methods) read as `password`, with their web `match` hosts as their login
   domains, and are not rewritten until edited.
-- When the entry a page is for signs in through a provider, the owner's card says so ("Sign in with Google via
-  'Google (kirin@…)'", `InputSaved.signIn`), and the provider's login is **not** offered as the one tap there:
-  it is typed only on the provider's own domain.
+- When a sign-in a page is for goes through a provider, the owner's card says so ("Sign in with Google via
+  'Google (kirin@…)'", `InputSaved.signIn`), and **no** saved password is offered there but one the daemon matched
+  on that page: not the provider's (it is typed only on the provider's own domain), and nothing by hand either. That
+  holds when a migration dropped the `via` link and left only the method, so the provider is never one tap away on
+  the site that signs in through it. A provider (an account some sign-in goes `via`) is never offered by hand
+  anywhere it is not matched.
 
 ### The ferret's hint: `account_hint`
 
 `account_hint` and `account_propose` were `login_hint` and `login_propose`; the daemon still accepts the old tool names, read as the new ones through the same checks.
 
 Before a sign-in, a ferret calls **`account_hint`** (a page by name, so the daemon reads the host from where the page
-**is**, or a site) and gets each entry for that site and the provider entries they go via: **handle, label,
-method, login domains and the plain username**, and its [recipe and observed facts](#login-recipes-how-it-signs-in-and-what-the-daemon-saw). Never a password, a seed, a code, nor even which secret fields
-exist (`LoginHintSchema` has no field for one). Every hint ends "passkeys are off". The owner sees the same words
-with `fy account hint <site>`; the route is `GET /v1/secrets/logins/hint?site=` (`secrets` use). It is
-not more than a ferret could list before (`GET /v1/secrets/logins` was already readable with the admin token);
-it is a narrower view, offered at the moment it helps.
+**is**, or a site) and gets **one line per sign-in** for that site, then the provider sign-ins they lead to
+(`accountHintsFor`): the **sign-in id** (`si_…`, what `account_propose` names), the account's **handle, label and
+plain username**, the place, the method and the provider it goes via, the account's 2FA keys by kind and label, its
+[recipe and observed facts](#login-recipes-how-it-signs-in-and-what-the-daemon-saw), and why it would be first on
+this session's card ("Only account here", a default) — decided by the same `chosenSignIn` as the card, over every
+matched sign-in, so it never says which accounts lack a password. Never a password, a seed, a code, which secret
+fields exist, the 2FA parameters, seal names, auto-apply or proposals (`AccountHintSchema` has no field for one).
+Every answer ends "passkeys are off". The tool answers the lines as its summary; the structured hint is
+`GET /v1/accounts/hint?site=` (`secrets` use), and an `fy` from before sign-ins, which reads a result strictly, is
+given no field it does not know. The owner sees saved-login words with `fy account hint <site>`
+(`GET /v1/secrets/logins/hint`, one release). It is not more than a ferret could list before (`GET /v1/secrets/logins`
+was already readable with the admin token); it is a narrower view, offered at the moment it helps.
 
 ### Login recipes: how it signs in, and what the daemon saw
 
@@ -682,7 +691,11 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   app shows "Written by a ferret, not reviewed", and shows every recipe as plain text, never rendered Markdown, so a
   recipe loads no image and shows no link unlike its target.
 - **The facts** (`observed`) are recorded ONLY by the daemon, from its own looks at a real target while it typed a
-  saved login (one tap, or a "Save as"), never from an agent's words, per place (a web host or a terminal's key):
+  saved account (one tap, or a "Save as"), never from an agent's words, on the **sign-in** it was typed at — the one
+  the owner tapped (`signIn`), else the account's sign-in matched to the target — and only at one of that sign-in's
+  own places (a web host or a terminal's key). An account picked by hand where it has no sign-in keeps none. Two
+  accounts on one host keep their own; the lock reads them together. No route takes a fact: the observer's
+  `LoginFactSink.observeSignIn` is the one writer.
   - `masked`: every secret field was a password input, or the terminal had echo off and a recognised program read it.
   - `noEchoAfterSubmit`: 1.5 s and again 5 s after the submit the daemon read what a ferret's read of the target could
     show, and the value was in neither (both looks must be able to tell; one that cannot leaves no fact). For a page: the main frame's visible text, its accessibility snapshot (what
@@ -690,7 +703,7 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
     whole answers "cannot tell", never "not there". For a terminal: the screen and 50 rows above it. The value never
     leaves the daemon for this; the look answers yes or no, and what it read is dropped.
   - `navigatedAway`: the page showed a new document within 10 s of the submit.
-  - `secondFactor`: `code` (a one-time code card was typed on the same login soon after), `push` (the page waited on
+  - `secondFactor`: `code` (a one-time code card was typed on the same account soon after), `push` (the page waited on
     the sign-in hosts, then left them with no code typed), or `none` (it left at once). Watched for 3 minutes.
   - Each fact keeps when it was last seen and how often in a row; one seen the other way starts again at 1. Each
     place keeps the field's **identity** (a digest of its origin, frame, tag, type, name, id and autocomplete; or the
@@ -706,15 +719,24 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   card and the owner's change and approval answers are masked like any read. The facts of the write itself come from
   the card's own observation.
 - **The ferret reads both** in `account_hint`, and the agent instruction says to read it before a sign-in.
-- **The ferret proposes, the owner decides.** After a sign-in a ferret may call `account_propose` (`login`, the whole
-  new `recipe`, `why`). The proposal waits on the entry (three at most; a fourth pushes out the oldest and closes its
-  card) and on an agenda card that shows the changed lines and "The ferret says: …". **The card approves nothing**:
-  the owner approves or declines in Settings › Accounts › the account › Recipe, or with
+- **The ferret proposes, the owner decides.** After a sign-in a ferret may call `account_propose` (`signIn`, the
+  whole new `recipe`, `why`). It is keyed by the **sign-in**: the older `{ login }` (and `login.propose`) is
+  accepted by the same one schema and resolved to that account's **only** sign-in before any check runs; an account
+  that signs in at several places is refused ("name the sign-in: … signs in at 2 places (si*…, si*…)"), and one that
+  signs in nowhere too. The audit names the sign-in it resolved to. The proposal waits on that sign-in (three at most;
+  a fourth pushes out the oldest and closes its card) and on an agenda card, "Recipe change for 'GitHub (kirinnee)'
+  on github.com", that shows the changed lines and "The ferret says: …". **The card approves nothing**: the owner
+  approves or declines in Settings › Accounts › the account › the place › Recipe, or with
   `fy account recipe approve|decline <id> <proposal>`, through the owner-only
-  `POST /v1/secrets/logins/:id/recipe/proposals/:proposalId` (`secrets` configure, a kept `secrets.changed` record).
+  `POST /v1/accounts/sign-ins/:si/recipe/proposals/:proposalId` (or `/v1/secrets/logins/:id/…`, which finds the
+  proposal on whichever of the account's sign-ins holds it; `secrets` configure, a kept `secrets.changed` record).
   An approval is refused (`stale_proposal`) when the recipe changed after the proposal was made, because the owner
-  was shown a diff from the older text. Only an owner who turns **auto-apply** on for that ONE login lets a proposal
-  apply at once; that is audited (`login-recipe-auto`) and marked as the ferret's.
+  was shown a diff from the older text. Only an owner who turns **auto-apply** on for that ONE sign-in lets a
+  proposal apply at once; that is audited (`login-recipe-auto`, with the sign-in) and marked as the ferret's.
+  **Every applied change** (an owner edit, an approval, an auto-apply, a clear) bumps that sign-in's
+  `recipeVersion`; the same text written again, or clearing no recipe, does not. The counter is kept while there is
+  no recipe (nothing shows it then), so a recipe set after a clear never reuses a version: (sign-in, version) names
+  one text, ever.
 - **Page text never writes a recipe.** The daemon never reads a recipe off a page, and nothing a page says becomes a
   fact. A recipe changes only by the owner's edit, the owner's approval, or the owner's per-login auto-apply.
 - **GAPs and limits.**
@@ -736,7 +758,10 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
 
 The owner types the value on the card and ticks **Save as**. The daemon suggests a handle and a label from
 the target's key (`sudo@kirin-box` → `SUDO_KIRIN_BOX`, "sudo on kirin-box"; a web host `github.com` →
-`GITHUB_COM`); both are editable, and an existing entry can be chosen instead ("Save to … new or existing").
+`GITHUB_COM`); both are editable, and an existing entry can be chosen instead ("Save to … new or existing"). When an
+account already signs in here, the suggestion is that account, chosen as the card's primary is (`chosenSignIn`,
+without the ferret's hint); when two or more do and nothing chooses one, nothing is suggested, so a typed password is
+never saved over "the first" of them.
 
 - **The save is checked before anything is typed.** A one-time code is never saved (add the 2FA seed in
   Settings instead), and a password shorter than `LOGIN_PASSWORD_MIN_LENGTH` (8, a masking limit, not a
@@ -770,21 +795,37 @@ the target's key (`sudo@kirin-box` → `SUDO_KIRIN_BOX`, "sudo on kirin-box"; a 
 
 When a ferret raises a request, the daemon works out the target's **key** from what **it** observed:
 `program@host` for a terminal (the foreground program and this machine's short name, or the destination
-for `ssh`, `scp` and `sftp`), or the web host for a page. A saved login whose `match` contains that key
-**exactly** is **matched**, and the card offers it as the primary action, **"Use saved <label>"**, next to
-"Type a different one".
+for `ssh`, `scp` and `sftp`), or the web host for a page. A **sign-in** whose place has that key **exactly**
+(`signInMatches`: a site's login domains, a terminal's `tool@host`) is **matched**, and its account is offered with
+the sign-in's id (`offer.signIn`). The card's primary action, **"Use saved <label>"**, is the one sign-in
+`chosenSignIn` picks among the matched ones (`offer.primary`, with `offer.why`: `ferret`, `project`, `folder`,
+`site` or `only`); see [Accounts and sign-ins](#accounts-and-sign-ins-data-model). Two or more matched and nothing
+chose one: no offer is the primary. Offers come primary first, then the other matched ones by label, then the
+accounts that may be picked by hand.
 
 - **The tap is the permission.** Nothing is typed until the owner taps. Every rule of a delivery applies
   unchanged: owner only (twice), the `deliveryId`, the target re-observed and compared, the tmux guard, one
   hex write, the quarantine, the risk flag. The value is opened **inside the daemon**, after every check that
   can refuse without typing, and goes only into that write.
-- **A saved value never passes through the app.** The card sends the entry's handle; the daemon resolves it.
+- **A saved value never passes through the app.** The card sends the entry's handle (and the offer's `signIn`);
+  the daemon resolves it. **The card's rules are the daemon's, not only the app's list**: at Send it draws the offers
+  again (`savedForFields`, over the fields the owner did not type) and refuses (`bad_request`), before anything is
+  opened or typed, an account that is not offered there now (a provider on a page that signs in through it, a 2FA
+  code from an account that does not sign in here), and a `signIn` that is not that offer's matched sign-in: one of
+  another account (the same answer whether it is another account's or none), one of this account at another place,
+  or any with an account picked by hand. The value always comes from the account; the sign-in says where the facts
+  of the write go.
 - **Which field it fills** follows the request: the password for a `secret`, the 2FA code for a `code`
   (or `private`) request, the username for a `plain` one. An entry that does not hold that field is not offered.
-- **A mismatch is never the primary.** A look-alike program, another host or another site is not matched;
-  every entry that holds the field stays **selectable by hand**, because the owner may know better.
-- **The ferret may hint** (`secretHint` / `secret_hint`): the card marks that entry as "the ferret suggested
-  this", but a hint never makes an entry matched, and the agent's answer is the same whether the entry exists.
+- **A mismatch is never the primary.** A look-alike program, another host or another site is not matched. An
+  account that holds the field stays **selectable by hand** ("Use another account…"), because the owner may know
+  better — except a one-time code (a code belongs to the sign-in it is for), any account on a page whose sign-in
+  goes through a provider, and a provider account anywhere it is not matched ([above](#how-it-signs-in-and-where)).
+  A hand pick keeps no facts.
+- **The ferret may hint** (`secretHint` / `secret_hint`, a handle or a `si_…`): a hint naming a matched sign-in
+  makes it the primary ("Ferret chose this", `why: ferret`); one naming anything else is only tagged "the ferret
+  suggested this", never promoted, and the agent's answer is the same whether the account exists. Nothing a hint or
+  a default does types anything: the owner's tap is the permission.
 - **The agent learns `source: saved`** from the delivery and nothing else: not the handle, not the label, not the
   value. What it may know beforehand is the [hint](#the-ferrets-hint-account_hint): metadata, never a value.
 
@@ -812,10 +853,12 @@ capability (`use` to list, `configure` to change) and each change a kept `secret
 
 ### Accounts and sign-ins (data model)
 
-> **The store has landed; the card has not.** The shapes are in `packages/protocol/src/lib/accounts.ts`; the store,
-> the migration at boot and the `/v1/accounts*` routes are in [secrets](secrets.md#accounts-and-sign-ins-the-store).
-> The card still offers saved logins, read through a projection of the accounts, and no daemon reports the
-> `accounts.signins.1` feature until it is sign-in aware.
+> **The store and the daemon's side of the card have landed; the app's has not.** The shapes are in
+> `packages/protocol/src/lib/accounts.ts`; the store, the migration at boot and the `/v1/accounts*` routes are in
+> [secrets](secrets.md#accounts-and-sign-ins-the-store). The card's offers, a deliver's `signIn`, the facts, the
+> lock, `account_hint` and `account_propose` read sign-ins ([one tap](#the-next-time-one-tap)). The app reads
+> `primary`/`why` and sends `signIn` only once a daemon reports `accounts.signins.1`, which waits for the Accounts
+> screen (the app ships first). Project and folder defaults are not read yet (`config/account-defaults.yaml`).
 
 A saved login is being split in two:
 
@@ -865,7 +908,7 @@ in here"). A hint or a default naming an account with no matched sign-in is igno
 anything: **the tap is still the permission.** A line that would choose two matched sign-ins at once chooses
 neither, so the answer never depends on list order.
 
-`account_hint` will answer one line per sign-in, with the sign-in id to propose against. It never says which
+`account_hint` answers one line per sign-in, with the sign-in id to propose against. It never says which
 secret fields an account holds, nor its 2FA parameters, seal names, auto-apply or proposals. It lists an account's
 2FA keys by kind and label only.
 

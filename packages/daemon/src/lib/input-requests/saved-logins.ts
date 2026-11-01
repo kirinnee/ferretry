@@ -1,33 +1,39 @@
 import {
+  type AccountId,
+  type AccountList,
+  type AccountSummary,
+  chosenSignIn,
   fillRoleFor,
   type InputSaved,
   type InputSavedOffer,
   type InputSensitivity,
   type InputSignIn,
   type InputTargetFacts,
-  type LoginEntrySummary,
   type LoginFieldRole,
   LoginMatchSchema,
-  loginDomainsOf,
-  loginMethodOf,
+  matchedSignIns,
+  namesSignIn,
   savedRolesOf,
+  type SignInChoiceContext,
+  signInMatches,
+  type SignInSummary,
   strongestSensitivity,
   suggestedLoginId,
   suggestedLoginLabel,
 } from '@ferretry/protocol';
 
 /**
- * WHICH SAVED LOGIN IS FOR THIS TARGET — decided by the daemon from what IT observed, never by the agent.
+ * WHICH SIGN-IN IS FOR THIS TARGET — decided by the daemon from what IT observed, never by the agent.
  *
  * A terminal's key is `program@host`: the PROVED foreground program's name (no key when it is unproved) and this
  * machine's short host name (`sudo@kirin-box`). For `ssh`, `scp` and `sftp` the host is the destination on the command line when one
  * can be read (`ssh@build.example.com`), because the password is the remote one. A page's key is its
  * origin's host (`github.com`). Matching is EXACT: a look-alike host or another program is not a match, so
- * it is never the one-tap choice — though the owner can still pick any entry by hand.
+ * it is never the one-tap choice — though the owner can still pick an account by hand where that is safe.
  *
- * A TERMINAL key is matched against what an entry is for (`match`). A PAGE's host is matched against where the
- * entry SIGNS IN (its login domains: `accounts.google.com` for a Google login), so the provider's page is where
- * the provider's password is the one-tap choice, and the site that sends the ferret there is not.
+ * A key is matched against a SIGN-IN's place (accounts.ts `signInMatches`): a terminal by its `tool@host`, a page by
+ * where the sign-in SIGNS IN (its login domains: `accounts.google.com` for a Google account), so the provider's page is
+ * where the provider's password is matched, and the site that sends the ferret there is not.
  */
 
 const REMOTE_PROGRAMS = new Set(['ssh', 'scp', 'sftp']);
@@ -93,130 +99,205 @@ export function savedFieldFor(sensitivity: InputSensitivity): Exclude<LoginField
   return sensitivity === 'secret' ? 'password' : 'username';
 }
 
-/** Whether an entry is for this target's key: a terminal by `match`, a page by its login domains. Exact. */
-export function entryIsFor(entry: LoginEntrySummary, matchKey: string | undefined): boolean {
-  if (matchKey === undefined) return false;
-  return matchKey.includes('@') ? entry.match.includes(matchKey) : loginDomainsOf(entry).includes(matchKey);
+/** The accounts and sign-ins a card is drawn from: the store's listing, by handle. */
+export type SavedListing = Pick<AccountList, 'accounts' | 'signIns'>;
+
+/**
+ * The sign-ins the daemon matched to this target's key: EXACT, a page by where a sign-in signs in (its login domains),
+ * a terminal by its `tool@host` key. One account has at most one here: (account, place) is unique in the store.
+ */
+export function signInsAt(matchKey: string | undefined, listing: SavedListing): readonly SignInSummary[] {
+  return matchedSignIns(matchKey, listing.signIns);
+}
+
+/** The account's sign-in the daemon matched to this key, if it has one. */
+export function signInOfAt(
+  account: AccountId,
+  matchKey: string | undefined,
+  listing: SavedListing,
+): SignInSummary | undefined {
+  return signInsAt(matchKey, listing).find(signIn => signIn.account === account);
 }
 
 /**
- * How the entry this target is for signs in, when it is NOT a password: the owner's card says "Sign in with Google
- * via …". An entry is for it by its login domains or by what it is for, so a site that only sends the ferret to a
+ * How a sign-in this target is for signs in, when it is NOT a password: the owner's card says "Sign in with Google via
+ * …". A sign-in is for it by its login domains or by what its site is for, so a site that only sends the ferret to a
  * provider still says so.
  */
-export function signInFor(
-  matchKey: string | undefined,
-  entries: readonly LoginEntrySummary[],
-): InputSignIn | undefined {
+export function signInFor(matchKey: string | undefined, listing: SavedListing): InputSignIn | undefined {
   if (matchKey === undefined) return undefined;
-  const entry = entries.find(
+  const signIn = listing.signIns.find(
     candidate =>
-      loginMethodOf(candidate).kind !== 'password' &&
-      (entryIsFor(candidate, matchKey) || candidate.match.includes(matchKey)),
+      candidate.method.kind !== 'password' &&
+      (signInMatches(candidate.place, matchKey) ||
+        (candidate.place.kind === 'site' && candidate.place.match.includes(matchKey))),
   );
-  if (entry === undefined) return undefined;
-  const method = loginMethodOf(entry);
-  const via = method.via === undefined ? undefined : entries.find(candidate => candidate.id === method.via);
+  const account = signIn === undefined ? undefined : listing.accounts.find(each => each.id === signIn.account);
+  if (signIn === undefined || account === undefined) return undefined;
   return {
-    id: entry.id,
-    label: entry.label,
-    method,
-    ...(via === undefined ? {} : { via: { id: via.id, label: via.label } }),
+    id: account.id,
+    label: account.label,
+    method: signIn.method,
+    ...(signIn.via === undefined ? {} : { via: { id: signIn.via.account.id, label: signIn.via.account.label } }),
   };
 }
 
-/**
- * A site that signs in THROUGH a provider never has the provider's login typed into its own page: the provider's
- * password belongs on the provider's domain, where it is matched. So its card leaves that entry out (unless the
- * daemon matched it here too, which only an owner's own login domains can do).
- */
-function withoutProvider(offers: readonly InputSavedOffer[], signIn: InputSignIn | undefined): InputSavedOffer[] {
-  const provider = signIn?.via?.id;
-  return offers.filter(offer => offer.id !== provider || offer.matched);
+function holds(account: AccountSummary, role: LoginFieldRole): boolean {
+  return role === 'username' ? account.username !== undefined : account.fields[role];
 }
 
-function holds(entry: LoginEntrySummary, role: LoginFieldRole): boolean {
-  return role === 'username' ? entry.username !== undefined : entry.fields[role];
+/** The account a ferret's `secretHint` names: an account handle, or the account of the `si_…` it names. */
+function hintedAccount(hint: string | undefined, listing: SavedListing): AccountId | undefined {
+  if (hint === undefined) return undefined;
+  return namesSignIn(hint) ? listing.signIns.find(signIn => signIn.id === hint)?.account : hint;
 }
 
 /**
- * What the owner's card may offer: every entry that HOLDS the field this request needs, matched first,
- * then the one the ferret hinted, then by label. Only `matched` is ever the one-tap choice; a hint never
- * makes an entry matched. `suggest` is the entry "Save as" would update (the first matched one) or create.
+ * Whether an account may be offered BY HAND ("Use another account…") on this card: a value the daemon did not match to
+ * this target, typed only because the owner picked it. Never:
+ * - a one-time code: a code belongs to the sign-in it was made for;
+ * - on a target a sign-in reaches THROUGH A PROVIDER ("Sign in with Google"): no saved password belongs on that site's
+ *   own page, so nothing but what the daemon matched there is offered — whether or not the link to the provider's
+ *   account survived (a migration that dropped a `via` leaves the provider unnamed, never one tap away);
+ * - a provider: an account a sign-in goes via. Its password belongs on its own login domains, where it is matched.
  */
+function handPickable(
+  account: AccountSummary,
+  roles: readonly LoginFieldRole[],
+  throughProvider: boolean,
+  providers: ReadonlySet<AccountId>,
+): boolean {
+  return !roles.includes('totp') && !throughProvider && !providers.has(account.id);
+}
+
+/**
+ * WHAT THE OWNER'S CARD MAY OFFER, for a card whose fields need `roles`, filled from ONE account that holds them all:
+ *
+ * 1. the sign-ins the daemon MATCHED to the key (exact), of accounts that hold every field;
+ * 2. the primary: {@link chosenSignIn} among those ONLY — the ferret's hint, a default, or the only one. Two or more
+ *    matched and nothing chose one: no primary, and the owner picks. A hint or a default naming an account with no
+ *    sign-in matched here is never promoted (a hinted one is still tagged);
+ * 3. then, by hand, the other accounts that hold the fields ({@link handPickable}), hinted first, then by label.
+ *
+ * Nothing here types anything: the owner's tap is the permission.
+ */
+function offered(
+  roles: readonly LoginFieldRole[],
+  fills: LoginFieldRole,
+  matchKey: string | undefined,
+  listing: SavedListing,
+  context: SignInChoiceContext,
+): { readonly offers: readonly InputSavedOffer[]; readonly signIn: InputSignIn | undefined } {
+  const holders = listing.accounts.filter(account => roles.every(role => holds(account, role)));
+  const byId = new Map(holders.map(account => [account.id, account]));
+  const matched = signInsAt(matchKey, listing).filter(signIn => byId.has(signIn.account));
+  const choice = chosenSignIn(matchKey, matched, context);
+  const hinted = hintedAccount(context.hint, listing);
+  const signIn = signInFor(matchKey, listing);
+  const providers = new Set(listing.signIns.flatMap(each => (each.via === undefined ? [] : [each.via.account.id])));
+  const base = (account: AccountSummary) => ({
+    id: account.id,
+    label: account.label,
+    ...(account.username === undefined ? {} : { username: account.username }),
+    fills,
+  });
+  const atKey: InputSavedOffer[] = matched
+    .map(each => {
+      const account = byId.get(each.account) as AccountSummary;
+      const primary = choice?.signIn === each.id;
+      return {
+        ...base(account),
+        matched: true,
+        signIn: each.id,
+        ...(hinted === account.id ? { hinted: true } : {}),
+        ...(primary && choice !== undefined
+          ? {
+              primary: true as const,
+              why: choice.why,
+              ...(choice.project === undefined ? {} : { project: choice.project }),
+            }
+          : {}),
+      };
+    })
+    .sort(
+      (left, right) =>
+        Number(right.primary === true) - Number(left.primary === true) || left.label.localeCompare(right.label),
+    );
+  const here = new Set(matched.map(each => each.account));
+  const byHand: InputSavedOffer[] = holders
+    .filter(account => !here.has(account.id) && handPickable(account, roles, signIn !== undefined, providers))
+    .map(account => ({ ...base(account), matched: false, ...(hinted === account.id ? { hinted: true } : {}) }))
+    .sort(
+      (left, right) =>
+        Number(right.hinted === true) - Number(left.hinted === true) || left.label.localeCompare(right.label),
+    );
+  return { offers: [...atKey, ...byHand], signIn };
+}
+
+/**
+ * The account "Save as" would update: the one {@link chosenSignIn} picks among EVERY sign-in matched here (whatever
+ * fields it holds; the ferret's hint is not asked), or a new one named from the key when none signs in here. Two or
+ * more sign in here and nothing chose one: none is suggested, so a typed password never lands on "the first" of them.
+ */
+function suggestFor(
+  matchKey: string | undefined,
+  listing: SavedListing,
+  context: SignInChoiceContext,
+): InputSaved['suggest'] {
+  if (matchKey === undefined) return undefined;
+  const atKey = signInsAt(matchKey, listing);
+  if (atKey.length === 0) return { id: suggestedLoginId(matchKey), label: suggestedLoginLabel(matchKey) };
+  const choice = chosenSignIn(matchKey, atKey, { ...context, hint: undefined });
+  const signIn = choice === undefined ? undefined : atKey.find(each => each.id === choice.signIn);
+  const account = signIn === undefined ? undefined : listing.accounts.find(each => each.id === signIn.account);
+  return account === undefined ? undefined : { id: account.id, label: account.label };
+}
+
+/** What a card of one field may offer, and what "Save as" would keep. */
 export function savedFor(
   sensitivity: InputSensitivity,
   matchKey: string | undefined,
-  entries: readonly LoginEntrySummary[],
-  hint: string | undefined,
+  listing: SavedListing,
+  context: SignInChoiceContext = {},
 ): InputSaved {
   const role = fillRoleFor(sensitivity);
-  const offers: InputSavedOffer[] = entries
-    .filter(entry => holds(entry, role))
-    .map(entry => ({
-      id: entry.id,
-      label: entry.label,
-      ...(entry.username === undefined ? {} : { username: entry.username }),
-      fills: role,
-      matched: entryIsFor(entry, matchKey),
-      ...(hint === entry.id ? { hinted: true } : {}),
-    }))
-    .sort(
-      (left, right) =>
-        Number(right.matched) - Number(left.matched) ||
-        Number(right.hinted === true) - Number(left.hinted === true) ||
-        left.label.localeCompare(right.label),
-    );
+  const { offers, signIn } = offered([role], role, matchKey, listing, context);
   const saves = savedFieldFor(sensitivity);
-  const existing = entries.find(entry => entryIsFor(entry, matchKey));
-  const suggest =
-    existing !== undefined
-      ? { id: existing.id, label: existing.label }
-      : matchKey !== undefined
-        ? { id: suggestedLoginId(matchKey), label: suggestedLoginLabel(matchKey) }
-        : undefined;
-  const signIn = signInFor(matchKey, entries);
+  const suggest = saves === undefined ? undefined : suggestFor(matchKey, listing, context);
   return {
     ...(matchKey === undefined ? {} : { match: matchKey }),
-    ...(suggest === undefined || saves === undefined ? {} : { suggest }),
+    ...(suggest === undefined ? {} : { suggest }),
     ...(saves === undefined ? {} : { saves }),
-    offers: withoutProvider(offers, signIn),
+    offers,
     ...(signIn === undefined ? {} : { signIn }),
   };
 }
 
 /**
- * What a card of one or more fields may offer. One field is {@link savedFor}. Several are filled from ONE
- * entry, so only an entry that holds every field's value is offered (a login with a username and a password
- * for "Email" + "Password"). "Save as" keeps the card's username and password together in one entry
- * ({@link savedRolesOf}); it is suggested only for a card that can be kept that way, and `saves` names the
- * password when there is one, else the username.
+ * What a card of one or more fields may offer. One field is {@link savedFor}. Several are filled from ONE account, so
+ * only an account that holds every field's value is offered (a login with a username and a password for "Email" +
+ * "Password"). "Save as" keeps the card's username and password together in one account ({@link savedRolesOf}); it is
+ * suggested only for a card that can be kept that way, and `saves` names the password when there is one, else the
+ * username.
  */
 export function savedForFields(
   fields: readonly { readonly id: string; readonly sensitivity: InputSensitivity }[],
   matchKey: string | undefined,
-  entries: readonly LoginEntrySummary[],
-  hint: string | undefined,
+  listing: SavedListing,
+  context: SignInChoiceContext = {},
 ): InputSaved {
   const [only] = fields;
-  if (fields.length === 1 && only !== undefined) return savedFor(only.sensitivity, matchKey, entries, hint);
+  if (fields.length === 1 && only !== undefined) return savedFor(only.sensitivity, matchKey, listing, context);
   const roles = fields.map(field => fillRoleFor(field.sensitivity));
-  const complete = entries.filter(entry => roles.every(role => holds(entry, role)));
-  const {
-    suggest: _suggest,
-    saves: _saves,
-    ...offered
-  } = savedFor(strongestSensitivity(fields), matchKey, complete, hint);
-  const signIn = signInFor(matchKey, entries);
-  const withSignIn =
-    signIn === undefined ? offered : { ...offered, offers: withoutProvider(offered.offers, signIn), signIn };
+  const fills = fillRoleFor(strongestSensitivity(fields));
+  const { offers, signIn } = offered(roles, fills, matchKey, listing, context);
   const kept = savedRolesOf(fields);
-  if (kept === undefined) return withSignIn;
-  // The entry Save as would update is one this target already matches, not only one that can fill the card.
-  const { suggest } = savedFor('secret', matchKey, entries, hint);
+  const suggest = kept === undefined ? undefined : suggestFor(matchKey, listing, context);
   return {
-    ...withSignIn,
+    ...(matchKey === undefined ? {} : { match: matchKey }),
     ...(suggest === undefined ? {} : { suggest }),
-    saves: [...kept.values()].includes('password') ? 'password' : 'username',
+    ...(kept === undefined ? {} : { saves: [...kept.values()].includes('password') ? 'password' : 'username' }),
+    offers,
+    ...(signIn === undefined ? {} : { signIn }),
   };
 }

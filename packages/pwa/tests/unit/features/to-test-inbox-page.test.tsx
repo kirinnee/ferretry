@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/features/agenda/agenda-inbox-page.tsx';
 import type { ToTestHost } from '../../../src/features/agenda/to-test-rows.tsx';
-import { toTestCards } from '../../../src/lib/to-test-inbox.ts';
+import { toTestCards, withTaskName } from '../../../src/lib/to-test-inbox.ts';
 import { agendaItem, choices, fakeInbox, InboxHarness, inboxCard } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { boardModelOf, card, flush, laptop } from '../board-support.ts';
@@ -17,19 +17,26 @@ afterEach(async () => {
 
 const shipped = { version: '1.2.0', tag: 'v1.2.0', at: '2026-08-01T09:00:00.000Z' };
 
-const rowsOf = async () =>
-  toTestCards(
-    await boardModelOf([
-      card('F22', {
-        laneId: 'tested',
-        title: 'Try the board',
-        shippedIn: shipped,
-        howToTest: '1. Open the Board\n2. Press Done',
-      }),
-      card('F23', { laneId: 'tested', title: 'Second try', shippedIn: { ...shipped, version: '1.1.0' } }),
-      card('F24', { laneId: 'implement', title: 'Still building' }),
-    ]),
-  );
+const LEAD_TASKS = new Map([['mvuc7tsf-0c3d50df', 'Credentials Build Lead']]);
+
+const rowsOf = () =>
+  boardModelOf([
+    card('F22', {
+      laneId: 'tested',
+      title: 'Try the board',
+      shippedIn: shipped,
+      howToTest: '1. Open the Board\n2. Press Done',
+    }),
+    card('F23', {
+      laneId: 'tested',
+      title: 'Second try',
+      shippedIn: { ...shipped, version: '1.1.0' },
+      owner: 'mvudnuly-ec442385',
+    }),
+    card('F24', { laneId: 'implement', title: 'Still building' }),
+  ])
+    .then(toTestCards)
+    .then(rows => rows.map(row => withTaskName(row, LEAD_TASKS)));
 
 const owner = inboxCard(agendaItem('A3', { subject: 'Rebase onto main?', ask: choices('Rebase now', 'Wait') }));
 
@@ -106,6 +113,18 @@ describe('Inbox — cards waiting for a try', () => {
     expect(row.querySelector('[data-to-test-how]')?.textContent).toContain('Open the Board');
     expect(root.querySelector('[data-to-test-list]')?.children).toHaveLength(2);
     expect(root.textContent).not.toContain('Still building');
+  });
+
+  it('names the ferret by the task it was given on each card, never by its callsign', async () => {
+    const { root } = await open();
+    const ferret = rowOf(root, 'F22').querySelector('[data-to-test-ferret]');
+    expect(ferret?.textContent).toBe('Credentials Build Lead');
+    expect(rowOf(root, 'F22').querySelector('.fy-totest__meta')?.textContent).toContain('Credentials Build Lead');
+  });
+
+  it('says nothing about the ferret when its task is unknown', async () => {
+    const { root } = await open();
+    expect(rowOf(root, 'F23').querySelector('[data-to-test-ferret]')).toBeNull();
   });
 
   it('shows no How to test box for a card that has no steps', async () => {
@@ -187,36 +206,73 @@ const drag = async (row: HTMLElement, dx: number, release: boolean): Promise<voi
   if (release) await interact(() => grip.dispatchEvent(pointer('pointerup', 100 + dx)));
 };
 
+const dragDown = async (row: HTMLElement, dy: number, release: boolean): Promise<void> => {
+  const grip = must(row.querySelector<HTMLElement>('.fy-totest__meta'), 'a place to grab');
+  await interact(() => grip.dispatchEvent(pointer('pointerdown', 100)));
+  await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 300 + dy / 2 })));
+  await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 300 + dy })));
+  if (release) await interact(() => grip.dispatchEvent(pointer('pointerup', 100, { clientY: 300 + dy })));
+};
+
 describe('Inbox — swiping a card waiting for a try', () => {
-  it('reads a right drag as Done and a left drag as Not good, mid-swipe, and names the answer in the area it uncovers', async () => {
+  it('reads a left drag as Done and a right drag as Not good, mid-swipe, and names the answer in the area it uncovers', async () => {
     const { root } = await open({ phone: true });
     const row = rowOf(root, 'F22');
-    await drag(row, 200, false);
-    expect(row.getAttribute('data-swipe-direction')).toBe('right');
+    await drag(row, -200, false);
+    expect(row.getAttribute('data-swipe-direction')).toBe('left');
     expect(row.getAttribute('data-swipe-answer')).toBe('Done');
-    expect(row.querySelector('[data-to-test-reveal="right"]')?.textContent).toBe('Done');
+    expect(row.querySelector('[data-to-test-reveal="left"]')?.textContent).toBe('Done');
     await interact(() =>
       must(row.querySelector('.fy-totest__meta'), 'grip').dispatchEvent(pointer('pointercancel', 300)),
     );
-    await drag(row, -200, false);
-    expect(row.getAttribute('data-swipe-direction')).toBe('left');
+    await drag(row, 200, false);
+    expect(row.getAttribute('data-swipe-direction')).toBe('right');
     expect(row.getAttribute('data-swipe-answer')).toBe('Not good');
-    expect(row.querySelector('[data-to-test-reveal="left"]')?.textContent).toBe('Not good');
+    expect(row.querySelector('[data-to-test-reveal="right"]')?.textContent).toBe('Not good');
   });
 
-  it('a right swipe past the threshold is Done', async () => {
+  it('a left swipe past the threshold is Done', async () => {
     const { root, actions } = await open({ phone: true });
-    await drag(rowOf(root, 'F22'), 300, true);
+    await drag(rowOf(root, 'F22'), -300, true);
     await interact(() => flush());
     expect(actions.calls).toEqual(['moveTask:["closed"]']);
   });
 
-  it('a left swipe past the threshold opens the reason box instead of moving the card', async () => {
+  it('a right swipe past the threshold opens the reason box instead of moving the card', async () => {
     const { root, actions } = await open({ phone: true });
-    await drag(rowOf(root, 'F22'), -300, true);
+    await drag(rowOf(root, 'F22'), 300, true);
     await interact(() => flush());
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
     expect(actions.calls).toEqual([]);
+  });
+
+  it('a downward drag from the head reads as Skip mid-swipe and moves nothing when let go', async () => {
+    const { root, actions } = await open({ phone: true });
+    const row = rowOf(root, 'F22');
+    await dragDown(row, 200, false);
+    expect(row.getAttribute('data-swipe-direction')).toBe('down');
+    expect(row.getAttribute('data-swipe-answer')).toBe('Skip');
+    expect(row.querySelector('[data-to-test-reveal="down"]')?.textContent).toBe('Skip');
+    await dragDown(row, 200, true);
+    await interact(() => flush());
+    expect(actions.calls).toEqual([]);
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(row.getAttribute('data-swipe-direction')).toBeNull();
+  });
+
+  it('a downward swipe in the list brings the next card into view', async () => {
+    const { root } = await open({ phone: true });
+    const scrolled: string[] = [];
+    const original = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this.getAttribute('data-to-test') ?? '');
+    };
+    try {
+      await dragDown(rowOf(root, 'F22'), 300, true);
+      expect(scrolled).toEqual([rowOf(root, 'F23').getAttribute('data-to-test') ?? 'missing']);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original;
+    }
   });
 
   it('a short swipe does nothing', async () => {
@@ -236,15 +292,16 @@ describe('Inbox — swiping a card waiting for a try', () => {
     expect(actions.calls).toEqual([]);
   });
 
-  it('lets a mostly vertical drag scroll the page instead of answering', async () => {
+  it('lets a mostly vertical drag that starts in the steps scroll the page instead of answering or skipping', async () => {
     const { root, actions } = await open({ phone: true });
-    const grip = must(rowOf(root, 'F22').querySelector<HTMLElement>('.fy-totest__meta'), 'grip');
+    const grip = must(rowOf(root, 'F22').querySelector<HTMLElement>('.fy-totest__how-title'), 'the steps');
     await interact(() => grip.dispatchEvent(pointer('pointerdown', 100)));
     await interact(() => grip.dispatchEvent(pointer('pointermove', 110, { clientY: 420 })));
     await interact(() => grip.dispatchEvent(pointer('pointermove', 400, { clientY: 430 })));
     await interact(() => grip.dispatchEvent(pointer('pointerup', 400, { clientY: 430 })));
     await interact(() => flush());
     expect(rowOf(root, 'F22').getAttribute('data-swipe-direction')).toBeNull();
+    expect(rowOf(root, 'F22').getAttribute('style') ?? '').not.toContain('translate');
     expect(actions.calls).toEqual([]);
     expect(document.body.querySelector('[role="dialog"]')).toBeNull();
   });
@@ -256,7 +313,7 @@ describe('Inbox — swiping a card waiting for a try', () => {
     };
     try {
       const { root, actions } = await open({ phone: true });
-      await drag(rowOf(root, 'F22'), 300, true);
+      await drag(rowOf(root, 'F22'), -300, true);
       await interact(() => flush());
       expect(actions.calls).toEqual(['moveTask:["closed"]']);
     } finally {

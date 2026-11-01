@@ -1105,15 +1105,24 @@ export function accountHintSummary(site: string, hints: readonly AccountHint[]):
 
 /**
  * A ferret's recipe proposal, keyed by the SIGN-IN it is for. It changes nothing until the owner approves it, unless
- * the owner turned auto-apply on for that one sign-in. The older `{ login }` spelling resolves to an account's only
- * sign-in (the daemon's job); this is the canonical call every check runs on.
+ * the owner turned auto-apply on for that one sign-in. THE ONE SCHEMA of the tool (agent-tools.ts uses this arm): the
+ * older `{ login }` spelling (an account handle, and `login.propose`) is accepted here, and the daemon resolves it to
+ * that account's ONLY sign-in, refusing one that signs in at several places, before any check runs on the canonical
+ * `{ signIn }` call. Exactly one of the two names it.
  */
-export const AccountProposeCallSchema = z.strictObject({
-  tool: z.literal('account.propose'),
-  signIn: SignInIdSchema,
-  recipe: LoginRecipeSchema,
-  why: LoginRecipeProposeRequestSchema.shape.why,
-});
+export const AccountProposeCallSchema = z
+  .strictObject({
+    tool: z.literal('account.propose'),
+    signIn: SignInIdSchema.optional(),
+    /** Older clients: the account's handle. Resolves to its only sign-in. */
+    login: AccountIdSchema.optional(),
+    recipe: LoginRecipeSchema,
+    why: LoginRecipeProposeRequestSchema.shape.why,
+  })
+  .refine(call => (call.signIn === undefined) !== (call.login === undefined), {
+    message: 'name the sign-in (signIn), as account_hint lists it',
+    path: ['signIn'],
+  });
 export type AccountProposeCall = z.infer<typeof AccountProposeCallSchema>;
 
 // ── Migration: a version 1 index (saved logins) → version 2 (accounts and sign-ins) ─────────────────

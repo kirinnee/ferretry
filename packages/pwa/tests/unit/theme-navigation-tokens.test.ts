@@ -20,6 +20,11 @@ import { THEME_FAMILIES } from '../../src/lib/theme-preferences.ts';
 
 const css = readFileSync(join(import.meta.dir, '../../src/styles/themes.css'), 'utf8');
 
+const inboxCss = readFileSync(join(import.meta.dir, '../../src/features/agenda/agenda-inbox.css'), 'utf8');
+
+/** The token the Inbox's "How to test" block paints behind its steps (`.fy-totest__how`), read from the real CSS. */
+const HOW_GROUND = /\.fy-totest__how\s*\{[^}]*?background:\s*var\(--([\w-]+)\)/.exec(inboxCss)?.[1] ?? null;
+
 const THEMES = THEME_FAMILIES.flatMap(family => [`${family.id}-light`, `${family.id}-dark`]);
 
 /** The tokens the navigation/setup redesign codes against. Names are a contract. */
@@ -252,6 +257,19 @@ const failuresFor = (theme: string): string[] => {
     const measured = ratio(t.colour(pair.fg, ground), ground);
     const minimum = pair.kind === 'text' ? textMinimum(theme) : 3;
     check(measured >= minimum, `--${pair.fg} on ${pair.on} is ${measured.toFixed(2)}:1, needs ${minimum}:1`);
+  }
+
+  // The Inbox's How to test block: its title, step text and step numbers must read on whatever it is painted with.
+  if (HOW_GROUND === null) failures.push(`${theme}: .fy-totest__how paints no background token`);
+  else {
+    const how = t.colour(HOW_GROUND, t.colour('surface'));
+    for (const fg of ['fg', 'muted', 'accent-strong']) {
+      const measured = ratio(t.colour(fg, how), how);
+      check(
+        measured >= textMinimum(theme),
+        `How to test: --${fg} on --${HOW_GROUND} is ${measured.toFixed(2)}:1, needs ${textMinimum(theme)}:1`,
+      );
+    }
   }
 
   const surface = t.colour('surface');

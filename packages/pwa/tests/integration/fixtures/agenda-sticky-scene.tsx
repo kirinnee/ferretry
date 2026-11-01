@@ -31,9 +31,9 @@ const points = (prefix: string, count: number): string =>
   ).join('\n');
 
 const long = {
-  premise: points('Premise', 8),
-  context: points('Context', 8),
-  body: `${points('Detail', 10)}\n\nA closing paragraph that says what happens after the pick, and what does not.`,
+  premise: points('Premise', 10),
+  context: points('Context', 10),
+  body: `${points('Detail', 12)}\n\nA closing paragraph that says what happens after the pick, and what does not.`,
   why: 'The board keeps every finished item.',
   waitingSince: '2026-08-01T11:00:00.000Z',
 };

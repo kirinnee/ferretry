@@ -42,6 +42,7 @@ import {
   refineBrowserScreenshot,
   refineBrowserTarget,
 } from './browser-target.ts';
+import { AccountProposeCallSchema } from './accounts.ts';
 import { InstantSchema } from './common.ts';
 import {
   INPUT_FIELD_LABEL_MAX_LENGTH,
@@ -54,7 +55,7 @@ import {
   InputSubmitModeSchema,
 } from './input-request.ts';
 import { LoginEntryIdSchema, LoginHintListSchema } from './login-entries.ts';
-import { LoginRecipeProposedSchema, LoginRecipeProposeRequestSchema, LoginRecipeSchema } from './login-recipes.ts';
+import { LoginRecipeProposedSchema } from './login-recipes.ts';
 import { SecretNameSchema } from './secrets.ts';
 import {
   COPY_MAX_LIFETIME_SECONDS,
@@ -329,15 +330,11 @@ const AgentToolCallBodySchema = z.discriminatedUnion('tool', [
     })
     .refine(call => (call.name === undefined) !== (call.site === undefined), 'name a page or a site, not both'),
   /**
-   * A ferret proposes the recipe of one saved login after signing in (login-recipes.ts): the whole new Markdown and
-   * why. It is the ferret's words; it waits on the owner unless the owner allowed auto-apply for that login.
+   * A ferret proposes the recipe of one sign-in after signing in (login-recipes.ts): the whole new Markdown and why.
+   * It is the ferret's words; it waits on the owner unless the owner allowed auto-apply for that sign-in. ONE schema
+   * (accounts.ts): `{ signIn }`, or the older `{ login }` the daemon resolves to that account's only sign-in.
    */
-  z.strictObject({
-    tool: z.literal('account.propose'),
-    login: LoginEntryIdSchema,
-    recipe: LoginRecipeSchema,
-    why: LoginRecipeProposeRequestSchema.shape.why,
-  }),
+  AccountProposeCallSchema,
   z.strictObject({
     tool: z.literal('terminal.ask_owner'),
     name: SurfaceKeySchema,

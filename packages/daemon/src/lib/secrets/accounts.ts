@@ -420,15 +420,25 @@ const factsAt = (signIn: Pick<SignInRecord, 'observed'>, place: Place): SignInRe
   return kept.length === 0 ? undefined : kept;
 };
 
-/** A sign-in with a recipe change applied: the owner's edit makes it theirs, and every change bumps its version. */
+/**
+ * A sign-in with a recipe change applied: the owner's edit makes it theirs, and EVERY change bumps its version, a clear
+ * included. The counter is kept while there is no recipe (no reader shows it then), so a recipe set after a clear never
+ * gets a version an earlier recipe had: (sign-in, version) names one text, ever.
+ */
 export function withRecipe(signIn: SignInRecord, recipe: string | null | undefined, at: string): SignInRecord {
   if (recipe === undefined) return signIn;
   const { recipe: _old, recipeBy: _by, recipeVersion, ...rest } = signIn;
-  // The same text written again is the owner's now, but it is not a change: its version stays.
-  if (recipe === signIn.recipe) return { ...rest, recipe, ...(recipeVersion === undefined ? {} : { recipeVersion }) };
+  // The same text written again is the owner's now, but it is not a change: its version stays. Nor is clearing none.
+  if (recipe === signIn.recipe || (recipe === null && signIn.recipe === undefined))
+    return {
+      ...rest,
+      ...(recipe === null ? {} : { recipe }),
+      ...(recipeVersion === undefined ? {} : { recipeVersion }),
+    };
+  const next = (recipeVersion ?? 0) + 1;
   return recipe === null
-    ? { ...rest, updatedAt: at }
-    : { ...rest, recipe, recipeVersion: (recipeVersion ?? 0) + 1, updatedAt: at };
+    ? { ...rest, recipeVersion: next, updatedAt: at }
+    : { ...rest, recipe, recipeVersion: next, updatedAt: at };
 }
 
 /**

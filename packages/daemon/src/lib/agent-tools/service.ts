@@ -24,10 +24,10 @@ import {
   copyHandle,
   INPUT_SINGLE_FIELD_ID,
   type InputAgentView,
-  type LoginEntrySummary,
+  type AccountList,
+  accountHintsFor,
+  accountHintSummary,
   loginHintSite,
-  loginHintsFor,
-  loginHintSummary,
   type LoginRecipeProposed,
   type SurfaceController,
   type SurfaceControlRequest,
@@ -52,7 +52,7 @@ import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import { InputRequestError } from '../input-requests/errors.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
 import { LoginEntryError } from '../secrets/accounts.ts';
-import { RecipeValueError } from '../secrets/login-recipes.ts';
+import { type RecipeProposalTarget, RecipeValueError } from '../secrets/login-recipes.ts';
 import type { TextRedactor } from '../secrets/redaction.ts';
 import { SecureCopyError } from '../secure-copy/errors.ts';
 import type { SurfaceControl } from './control.ts';
@@ -152,10 +152,11 @@ export interface AgentToolPorts {
   /** What secure copy knows about pages: not pictured while showing a copied document, and what the agent read. */
   readonly copyPages?: AgentCopyPagesPort;
   /**
-   * The saved logins' NON-SECRET listing, for `account.hint`: labels, methods, domains, usernames. The directory a
-   * route holds, never the vault: nothing here can open a value. Absent: the tool says none are kept.
+   * The accounts' and sign-ins' listing, for `account.hint` (which serves only their NON-SECRET projection: labels,
+   * places, methods, usernames, recipes, facts). The directory a route holds, never the vault: nothing here can open a
+   * value. Absent: the tool says none are kept.
    */
-  readonly logins?: { list(): Promise<readonly LoginEntrySummary[]> };
+  readonly accounts?: { list(): Promise<Pick<AccountList, 'accounts' | 'signIns'>> };
   /**
    * A ferret's recipe proposals (`account.propose`): filed on the login, checked for values, shown to the owner.
    * Absent: the tool says recipes are not kept here.
@@ -166,9 +167,17 @@ export interface AgentToolPorts {
    */
   readonly loginActs?: { acted(sessionId: string, kind: SurfaceKind, script: boolean): void };
   readonly recipes?: {
-    propose(sessionId: string, login: string, recipe: string, why: string): Promise<LoginRecipeProposed>;
-    /** The entries with every recipe and proposal masked now, or their texts dropped where nothing can mask them. */
-    scrubbed(entries: readonly LoginEntrySummary[]): Promise<readonly LoginEntrySummary[]>;
+    /** Files a proposal on ONE sign-in: `{ login }` is resolved to the account's only sign-in first. */
+    propose(
+      sessionId: string,
+      target: RecipeProposalTarget,
+      recipe: string,
+      why: string,
+    ): Promise<LoginRecipeProposed & { readonly signIn: string }>;
+    /** The listing with every recipe and proposal masked now, or their texts dropped where nothing can mask them. */
+    scrubbedAccounts(
+      listing: Pick<AccountList, 'accounts' | 'signIns'>,
+    ): Promise<Pick<AccountList, 'accounts' | 'signIns'>>;
   };
 }
 
@@ -581,7 +590,7 @@ export class AgentToolService {
       case 'account.hint':
         return await this.loginHint(caller, call, facts);
       case 'account.propose':
-        return await this.loginPropose(caller, call);
+        return await this.loginPropose(caller, call, facts);
       case 'input.wait': {
         const input = this.inputPort(caller);
         const view = await input.agentView(sessionId, call.id, call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
@@ -1464,16 +1473,19 @@ export class AgentToolService {
   }
 
   /**
-   * The saved logins for a site, by non-secret metadata only (`LoginHintSchema`). For a page, the site is where the
-   * page IS as the browser reports it, not what the agent says; the page must be one the agent may use.
+   * The sign-ins for a site, one line each, by non-secret metadata only (`AccountHintSchema`): who, which sign-in (its
+   * `si_…`, what `account_propose` names), how, where, why it is first and what was seen. For a page, the site is
+   * where the page IS as the browser reports it, not what the agent says; the page must be one the agent may use.
+   * The answer is the summary only: the structured hint is `GET /v1/accounts/hint`'s, and an `fy` from before
+   * sign-ins reads a result strictly, so it is given no field it does not know.
    */
   private async loginHint(
     caller: AgentToolCaller,
     call: Extract<AgentToolCall, { readonly tool: 'account.hint' }>,
     facts: CallFacts,
   ): Promise<AgentToolResult> {
-    const logins = this.ports.logins;
-    if (logins === undefined) throw new AgentToolError('unavailable', 'This daemon keeps no saved logins.');
+    const accounts = this.ports.accounts;
+    if (accounts === undefined) throw new AgentToolError('unavailable', 'This daemon keeps no saved logins.');
     let where = call.site;
     if (call.name !== undefined) {
       const pages = (await this.ports.browser.status(caller.sessionId)).pages;
@@ -1490,7 +1502,7 @@ export class AgentToolService {
           ? 'Name a site as a host like github.com, or a URL.'
           : 'That page is not on a site yet; navigate it first, or name the site.',
       );
-    const entries = await logins.list().catch(() => {
+    const listing = await accounts.list().catch(() => {
       throw new AgentToolError(
         'unavailable',
         'The saved logins cannot be read right now; ask the owner to check Settings.',
@@ -1501,39 +1513,53 @@ export class AgentToolService {
     const recipes = this.ports.recipes;
     const masked =
       recipes === undefined
-        ? entries.map(({ recipe: _recipe, recipeBy: _by, proposals: _proposals, ...entry }) => entry)
-        : await recipes.scrubbed(entries);
-    const hints = loginHintsFor(site, masked);
-    return { summary: loginHintSummary(site, hints), logins: { v: 1, site, hints, passkeys: 'off' } };
+        ? {
+            accounts: listing.accounts,
+            signIns: listing.signIns.map(
+              ({ recipe: _recipe, recipeBy: _by, recipeVersion: _version, proposals: _proposals, ...signIn }) => signIn,
+            ),
+          }
+        : await recipes.scrubbedAccounts(listing);
+    // Asked with no ferret hint: a hint's "default" is only ever the daemon's own choice among the matched sign-ins.
+    return { summary: accountHintSummary(site, accountHintsFor(site, masked)) };
   }
 
   /**
-   * A ferret's suggested recipe for one saved login (`account.propose`). It changes nothing the owner has not
-   * allowed: it waits on a card, unless the owner turned auto-apply on for that login.
+   * A ferret's suggested recipe for one SIGN-IN (`account.propose`). The older `{ login }` is resolved to that
+   * account's only sign-in first, so every check runs on the canonical sign-in, and the audit record names it. It changes
+   * nothing the owner has not allowed: it waits on a card, unless the owner turned auto-apply on for that sign-in.
    */
   private async loginPropose(
     caller: AgentToolCaller,
     call: Extract<AgentToolCall, { readonly tool: 'account.propose' }>,
+    facts: CallFacts,
   ): Promise<AgentToolResult> {
     const recipes = this.ports.recipes;
     if (recipes === undefined) throw new AgentToolError('unavailable', 'This daemon keeps no login recipes.');
-    let proposed: LoginRecipeProposed;
+    const target: RecipeProposalTarget =
+      call.signIn === undefined ? { login: call.login as string } : { signIn: call.signIn };
+    let proposed: LoginRecipeProposed & { readonly signIn: string };
     try {
-      proposed = await recipes.propose(caller.sessionId, call.login, call.recipe, call.why);
+      proposed = await recipes.propose(caller.sessionId, target, call.recipe, call.why);
     } catch (error) {
       if (error instanceof LoginEntryError || error instanceof RecipeValueError)
         throw new AgentToolError(
-          error instanceof LoginEntryError && error.refusal === 'unknown_login' ? 'not_found' : 'bad_request',
+          error instanceof LoginEntryError && (error.refusal === 'unknown_login' || error.refusal === 'unknown_sign_in')
+            ? 'not_found'
+            : 'bad_request',
           error.message,
         );
       throw new AgentToolError('unavailable', 'The recipe could not be filed right now; try again later.');
     }
+    const { signIn, ...recipe } = proposed;
+    facts.detail = { ...facts.detail, signIn };
+    const where = `${proposed.login} [${signIn}]`;
     return {
       summary:
         proposed.state === 'applied'
-          ? `The recipe of ${call.login} was updated (the owner allows that for this login).`
-          : `Proposed a recipe for ${call.login}${proposed.agendaItemId === undefined ? '' : ` (!${proposed.agendaItemId})`}; the owner approves or declines it. You do not need to wait.`,
-      recipe: proposed,
+          ? `The recipe of ${where} was updated (the owner allows that for this sign-in).`
+          : `Proposed a recipe for ${where}${proposed.agendaItemId === undefined ? '' : ` (!${proposed.agendaItemId})`}; the owner approves or declines it. You do not need to wait.`,
+      recipe,
     };
   }
 
@@ -1811,8 +1837,9 @@ function callFacts(call: AgentToolCall): AuditDetail {
     case 'account.hint':
       return { from: call.name === undefined ? 'site' : 'page' };
     case 'account.propose':
-      // The login's handle only; the recipe is the ferret's text and stays out of the record.
-      return { login: call.login };
+      // The sign-in (or the older account handle) only; the recipe is the ferret's text and stays out of the record.
+      // A resolved handle's sign-in is added once it is known (loginPropose).
+      return call.signIn === undefined ? { login: call.login ?? '' } : { signIn: call.signIn };
     case 'secure.copy':
       // The copy's name and where it came from; never a command's arguments, which may hold anything.
       return {

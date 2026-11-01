@@ -214,21 +214,21 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'account_hint',
     tool: 'account.hint',
     description:
-      "Before a sign-in: the owner's accounts for a page or site (label, method, login domain, username, recipe). Never a value.",
+      "Before a sign-in: the owner's sign-ins for a page or site (id, account, method, username, recipe). Never a value.",
     inputSchema: object({ name: NAME, site: { type: 'string', description: 'Or a host or URL.' } }),
   },
   {
     name: 'account_propose',
     tool: 'account.propose',
     description:
-      "After a sign-in, propose the account's recipe: the steps (Markdown, no values; [[ID]] names another account). The owner approves it.",
+      "After a sign-in, propose that sign-in's recipe: the steps (Markdown, no values; [[ID]] names another account). The owner approves it.",
     inputSchema: object(
       {
-        login: { type: 'string', description: 'Its handle, like GOOGLE_KIRIN.' },
+        signIn: { type: 'string', description: 'Its id from account_hint, like si_3f2a….' },
         recipe: { type: 'string', maxLength: LOGIN_RECIPE_MAX_LENGTH, description: 'The whole new recipe.' },
         why: { type: 'string', maxLength: LOGIN_PROPOSAL_WHY_MAX_LENGTH, description: 'One line: what changed.' },
       },
-      ['login', 'recipe', 'why'],
+      ['signIn', 'recipe', 'why'],
     ),
   },
   {

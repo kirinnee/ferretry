@@ -186,7 +186,7 @@ describe('two cards saving through the input bridge at once', () => {
     await w.cipher.open(1);
     await Promise.all([one, two]);
 
-    should((await bridge.entries()).map(entry => entry.id)).deepEqual(['SUDO_A', 'SUDO_B']);
+    should((await bridge.listing()).accounts.map(account => account.id)).deepEqual(['SUDO_A', 'SUDO_B']);
     should(await w.masked(FIRST)).be.true();
     should(await w.masked(SECOND)).be.true();
   });

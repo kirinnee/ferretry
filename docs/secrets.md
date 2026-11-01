@@ -68,8 +68,9 @@ only two things hold the `AccountVault` that opens it: the redactor (saved value
 "Use" for and answers only what happened. Two narrow parts of it are handed out, and neither answers a value: the
 directory holds its **seal port** (a merge moves a sealed value to the kept account inside the vault, and asks
 whether two values are the same), and the look-alike route holds its **look-alike answer** (handles only). Both are fresh closures (`narrowAccountVault`), never the vault itself, so nothing that holds one can reach a value. `use`
-cannot spend an account and `${secret:…}` cannot name one. The agent tool `account_hint` (`login_hint` still works) (and `GET /v1/secrets/logins/hint`) is
-handed the same `LoginDirectory`: it answers labels, sign-in methods, login domains and usernames, never a value.
+cannot spend an account and `${secret:…}` cannot name one. The agent tool `account_hint` (`login_hint` still works) is
+handed the account directory (and `GET /v1/accounts/hint` and `GET /v1/secrets/logins/hint` the same store): it
+answers sign-in ids, labels, methods, places and usernames, never a value nor which fields exist.
 
 ## Redaction
 
@@ -289,10 +290,13 @@ account (label, username, password, its one seed, rename, delete) always works. 
 signs in (`match`, `domains`, `method`, `recipe`, `autoApplyRecipe`) maps 1:1 onto the account's one sign-in,
 and for an account that signs in at several places it is `409 account_has_sign_ins`: an older app's or CLI's body
 cannot say which sign-in it means, and guessing would be a lossy write. A fact the daemon sees is filed on the
-sign-in at the place it was seen; one at no place of the account is not kept.
+sign-in it was typed at (`AccountDirectory.observeSignIn`, the input service's only writer), and only at one of
+that sign-in's own places; anything else is not kept.
 
-**Not advertised yet.** The daemon does not report `accounts.signins.1`: the card still offers saved logins
-through the projection, and an app keeps today's surface. It is reported once the card is sign-in aware.
+**Not advertised yet.** The card is sign-in aware on the daemon's side ([one tap](input-requests.md#the-next-time-one-tap)):
+its offers name the sign-in, and a deliver's `signIn` must be one of the account's. The daemon still does not
+report `accounts.signins.1`, because the app ships first: until the Accounts screen lands, an app keeps today's
+surface.
 
 ## Damaged is not empty
 

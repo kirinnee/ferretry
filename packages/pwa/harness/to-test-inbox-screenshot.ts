@@ -85,7 +85,7 @@ const PHONE = {
 const DESKTOP = { viewport: { width: 1_440, height: 900 }, hasTouch: true } as const;
 const NOW = new Date('2026-10-29T09:00:00.000Z');
 const LOCALE = { timezoneId: 'UTC', locale: 'en-US' } as const;
-const THEMES = ['studio-light', 'studio-dark'] as const;
+const THEMES = (process.env.FY_SHOT_THEMES ?? 'studio-light,studio-dark').split(',');
 type Form = 'phone' | 'desktop';
 
 const violations: string[] = [];
@@ -147,18 +147,18 @@ const touch = (
 
 const rowOf = (page: Page) => page.locator('[data-to-test]').first();
 
-/** A finger on the row's meta line, dragged by `dx`; the caller lets go or cancels. */
-const hold = async (page: Page, client: CDPSession, dx: number): Promise<{ x: number; y: number }> => {
+/** A finger on the row's meta line, dragged by `dx`, `dy`; the caller lets go or cancels. */
+const hold = async (page: Page, client: CDPSession, dx: number, dy = 0): Promise<{ x: number; y: number }> => {
   await rowOf(page).scrollIntoViewIfNeeded();
   const grip = await rowOf(page).locator('.fy-totest__meta').boundingBox();
   if (grip === null) return fail('to-test: the row has no place to grab');
   const x = grip.x + 20;
   const y = grip.y + grip.height / 2;
   await touch(client, 'touchStart', x, y);
-  await touch(client, 'touchMove', x + Math.sign(dx) * 14, y);
-  for (let step = 1; step <= 6; step += 1) await touch(client, 'touchMove', x + (dx * step) / 6, y);
+  await touch(client, 'touchMove', x + Math.sign(dx) * 14, y + Math.sign(dy) * 14);
+  for (let step = 1; step <= 6; step += 1) await touch(client, 'touchMove', x + (dx * step) / 6, y + (dy * step) / 6);
   await page.waitForTimeout(120);
-  return { x: x + dx, y };
+  return { x: x + dx, y: y + dy };
 };
 
 for (const form of ['phone', 'desktop'] as const) {
@@ -168,6 +168,11 @@ for (const form of ['phone', 'desktop'] as const) {
       ...LOCALE,
       colorScheme: theme.endsWith('-dark') ? 'dark' : 'light',
     });
+    // The desktop shell publishes the stored theme, so the pack under test is stored too.
+    await context.addInitScript(
+      ([family, mode]) => localStorage.setItem('fy-theme-v1', JSON.stringify({ family, mode, textScale: 'default' })),
+      [theme.slice(0, theme.lastIndexOf('-')), theme.slice(theme.lastIndexOf('-') + 1)] as const,
+    );
 
     // The list: the to-test item sits among the agenda items under Needs you.
     const list = await open(context, theme);
@@ -198,13 +203,14 @@ for (const form of ['phone', 'desktop'] as const) {
     await list.locator('[data-agenda-section="to-test"]').evaluate(el => el.scrollIntoView({ block: 'start' }));
     await shot(list, 'list', form, theme);
 
-    // Mid-swipe both ways: what letting go would do is on the row as data, never drawn over it.
+    // Mid-swipe all three ways: what letting go would do is on the row as data, never drawn over it.
     const client = await context.newCDPSession(list);
     for (const [name, dx, aim, direction] of [
-      ['swipe-right', 150, 'Done', 'right'],
-      ['swipe-left', -150, 'Not good', 'left'],
+      ['swipe-left', -150, 'Done', 'left'],
+      ['swipe-right', 150, 'Not good', 'right'],
+      ['swipe-down', 0, 'Skip', 'down'],
     ] as const) {
-      await hold(list, client, dx);
+      await hold(list, client, dx, direction === 'down' ? 150 : 0);
       check(
         (await row.getAttribute('data-swipe-direction')) === direction &&
           (await row.getAttribute('data-swipe-answer')) === aim,
@@ -224,25 +230,25 @@ for (const form of ['phone', 'desktop'] as const) {
       );
     }
 
-    // A swipe past the threshold, right: Done is sent at once to the Done lane.
-    const end = await hold(list, client, 300);
+    // A swipe past the threshold, left: Done is sent at once to the Done lane.
+    const end = await hold(list, client, -300);
     await touch(client, 'touchEnd', end.x, end.y);
     await list.waitForTimeout(250);
     const moves = await list.evaluate(() => (window as unknown as { __moves?: { to: string }[] }).__moves ?? []);
     check(
       moves.length === 1 && moves[0]?.to === 'closed',
-      `${form} ${theme}: a right swipe sent ${JSON.stringify(moves)}`,
+      `${form} ${theme}: a left swipe sent ${JSON.stringify(moves)}`,
     );
 
-    // A swipe past the threshold, left: the reason box opens and nothing is sent yet.
-    const away = await hold(list, client, -300);
+    // A swipe past the threshold, right: the reason box opens and nothing is sent yet.
+    const away = await hold(list, client, 300);
     await touch(client, 'touchEnd', away.x, away.y);
     await list.waitForTimeout(300);
     const dialog = list.locator('[role="dialog"]');
-    check((await dialog.count()) === 1, `${form} ${theme}: a left swipe did not open the reason box`);
+    check((await dialog.count()) === 1, `${form} ${theme}: a right swipe did not open the reason box`);
     check(
       (await list.evaluate(() => (window as unknown as { __moves?: unknown[] }).__moves?.length ?? 0)) === 1,
-      `${form} ${theme}: a left swipe sent a move before the reason`,
+      `${form} ${theme}: a right swipe sent a move before the reason`,
     );
     await shot(list, 'reason', form, theme);
     await context.close();
