@@ -22,6 +22,7 @@ import {
   type Lane,
   type LaneLayoutValue,
   type LaneRenames,
+  type BoardActorVia,
   type LaneSet,
   type LaneTemplateError,
   type LaneTemplateName,
@@ -34,7 +35,8 @@ import {
 
 /** Who is changing the lanes. */
 export type LaneActor =
-  | { readonly kind: 'owner' }
+  /** `via: 'admin-token'`: the owner's authority on the host's token, recorded as the token (`confirmedVia`). */
+  | { readonly kind: 'owner'; readonly via?: BoardActorVia }
   | { readonly kind: 'ferret'; readonly name: string; readonly sessionId: string };
 
 export type LaneSetProblem =
@@ -88,16 +90,22 @@ export const editLaneSet = (
     projectId: current.projectId,
     version: current.version + 1,
     confirmedBy: actor.kind === 'owner' ? 'owner' : null,
+    ...(actor.kind === 'owner' && actor.via !== undefined ? { confirmedVia: actor.via } : {}),
     proposedBy: actor.kind === 'owner' ? current.proposedBy : actor.name,
     ...edit.layout,
     ...targets,
   });
 };
 
-export const confirmLaneSet = (current: LaneSet | null, version: number): BoardResult<LaneSet, LaneSetProblem> => {
+export const confirmLaneSet = (
+  current: LaneSet | null,
+  version: number,
+  via?: BoardActorVia,
+): BoardResult<LaneSet, LaneSetProblem> => {
   if (current === null) return boardErr({ code: 'no-lane-set' });
   if (version !== current.version) return boardErr({ code: 'version-conflict', current: current.version });
-  return boardOk({ ...current, confirmedBy: 'owner' });
+  const { confirmedVia: _earlier, ...rest } = current;
+  return boardOk({ ...rest, confirmedBy: 'owner', ...(via === undefined ? {} : { confirmedVia: via }) });
 };
 
 /** What a card-creating command says when a project has no lanes: the exact command to run next. */

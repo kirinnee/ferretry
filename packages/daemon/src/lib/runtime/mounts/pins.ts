@@ -1,5 +1,7 @@
 import { PinActionRequestSchema } from '@ferretry/protocol';
 import { parseActor, type ApiActor } from '../../api/actor.ts';
+import { callerIsAgent } from '../../api/agent-caller.ts';
+import type { AuthenticatedCredential } from '../../api/authentication.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { decodeParameter, type ApiResponse } from '../../api/http.ts';
@@ -39,9 +41,14 @@ const PIN_ERROR_STATUS: Readonly<Record<PinErrorCode, number>> = {
  * sending a different body — the domain's own "an agent may only pin to its own session" check has
  * something trustworthy to compare against.
  */
-export function pinActor(actor: ApiActor | undefined): PinActor {
-  const { kind, id } = parseActor(actor ?? '');
-  return kind === 'peer' ? { sessionId: id } : {};
+export function pinActor(credential: AuthenticatedCredential | undefined, actor: ApiActor | undefined): PinActor {
+  // WHO is an agent is the one class predicate's answer; WHICH session is the actor's, which for a ferret's own
+  // credential is the credential's session. An agent with no session to name is refused, never taken for a person.
+  if (!callerIsAgent(credential, actor)) return {};
+  const { id } = parseActor(actor ?? '');
+  if (id === undefined || id.trim() === '')
+    throw new ApiError(403, 'an agent pins only from its own session', 'forbidden');
+  return { sessionId: id };
 }
 
 /** The path's session id, decoded. `decodeParameter` refuses a traversal or a separator, so a
@@ -70,7 +77,7 @@ async function list(pins: PinService, context: RouteContext): Promise<ApiRespons
 async function apply(pins: PinService, context: RouteContext): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const request = await parseBody(context.request, PinActionRequestSchema);
-  const actor = pinActor(context.actor);
+  const actor = pinActor(context.credential, context.actor);
   try {
     if (request.action === 'add') return jsonResponse(await pins.add(sessionId, request, actor));
     if (request.action === 'edit') return jsonResponse(await pins.edit(sessionId, request.id, request.text, actor));

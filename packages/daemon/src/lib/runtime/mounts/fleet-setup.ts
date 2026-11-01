@@ -64,7 +64,7 @@ export function fleetSetupRoutes(subsystem: FleetSetupSubsystem): readonly ApiRo
       method: 'POST',
       path: '/v1/fleet/machine/tools/install',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => {

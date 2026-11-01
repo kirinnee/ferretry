@@ -42,6 +42,7 @@ import {
   MachineIdSchema,
   type TaskRef,
   TaskRefSchema,
+  BoardActorViaSchema,
 } from './board-refs.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { type TaskKind, TaskKindSchema, TaskMessageSchema, TaskTitleSchema, TaskWorkflowSchema } from './tasks.ts';
@@ -137,28 +138,15 @@ export const formatAgendaRef = (ref: AgendaRef): string => `${AGENDA_REF_SIGIL}$
  * Who did something to a card. A ferret is always a session; the owner may have acted from one (a chat)
  * or from nowhere in particular (the Board page); the daemon names the session it acted for, if any.
  *
- * `admin-token` is the host's admin token with no ferret's own credential behind it. The daemon cannot
- * tell the owner at the machine from a ferret that called `fy` without its session, so it records which
- * one it KNOWS — the token — and never `owner` ({@link ADMIN_TOKEN_ACTOR_WORDS}). `owner` is a paired
- * device: a person's app.
+ * The union is CLOSED and each member strict, so it never grows: an older reader would refuse a whole board
+ * over one member it does not know. What the daemon knows beyond it travels beside it ({@link BoardActorVia}).
  */
 export const BoardActorSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('ferret'), sessionId: SessionIdSchema }),
   z.strictObject({ kind: z.literal('owner'), sessionId: SessionIdSchema.optional() }),
-  z.strictObject({ kind: z.literal('admin-token'), sessionId: SessionIdSchema.optional() }),
   z.strictObject({ kind: z.literal('daemon'), sessionId: SessionIdSchema.optional() }),
 ]);
 export type BoardActor = z.infer<typeof BoardActorSchema>;
-
-/** What an `admin-token` board actor may be: the truth, which is that it could be either. */
-export const ADMIN_TOKEN_ACTOR_NOTE = 'the owner at this machine, or a ferret without its own credential';
-
-/** What every surface says for an `admin-token` board actor in a sentence: the token, and what it may be. */
-export const ADMIN_TOKEN_ACTOR_WORDS = `the admin token (${ADMIN_TOKEN_ACTOR_NOTE})`;
-
-/** Whether a board actor acted with the owner's authority: a paired device, or the host's admin token. */
-export const actsAsOwner = (actor: Pick<BoardActor, 'kind'>): boolean =>
-  actor.kind === 'owner' || actor.kind === 'admin-token';
 
 // ---------------------------------------------------------------------------------------------------
 // Card parts
@@ -170,6 +158,8 @@ export const BoardClarificationSchema = z.object({
   source: z.string().min(1).max(MAX_BOARD_SOURCE_LENGTH),
   at: InstantSchema,
   by: BoardActorSchema,
+  /** {@link BoardActorVia}: absent unless the owner actor was the admin token. */
+  byVia: BoardActorViaSchema.optional(),
 });
 export type BoardClarification = z.infer<typeof BoardClarificationSchema>;
 
@@ -311,6 +301,8 @@ const EventBase = {
   seq: PositiveIntegerSchema,
   at: InstantSchema,
   actor: BoardActorSchema,
+  /** {@link BoardActorVia}: absent unless the owner actor was the admin token. */
+  actorVia: BoardActorViaSchema.optional(),
 };
 
 /**
@@ -467,6 +459,8 @@ const BoardTaskShape = {
   order: NonNegativeIntegerSchema.nullable(),
   createdAt: InstantSchema,
   createdBy: BoardActorSchema,
+  /** {@link BoardActorVia}: absent unless the card was opened on the admin token. */
+  createdByVia: BoardActorViaSchema.optional(),
   history: z.array(BoardTaskEventSchema).min(1),
   legacyRef: LegacyTaskRefSchema.optional(),
 };

@@ -14,7 +14,7 @@
  * Every helper here is total: it returns a {@link BoardResult} and never throws.
  */
 import { z } from 'zod';
-import { BoardProjectIdSchema, type BoardResult, boardErr, boardOk } from './board-refs.ts';
+import { BoardActorViaSchema, BoardProjectIdSchema, type BoardResult, boardErr, boardOk } from './board-refs.ts';
 import { PositiveIntegerSchema } from './common.ts';
 import { type TaskWorkflow, TaskWorkflowSchema } from './tasks.ts';
 
@@ -309,6 +309,8 @@ export const LaneSetSchema = z.preprocess(
       projectId: BoardProjectIdSchema,
       version: PositiveIntegerSchema,
       confirmedBy: z.literal('owner').nullable(),
+      /** `BoardActorVia`: present when the owner's confirmation came on the admin token, never on a person's app. */
+      confirmedVia: BoardActorViaSchema.optional(),
       proposedBy: z.string().min(1),
       ...LaneLayoutShape,
       ...LaneTargetsShape,

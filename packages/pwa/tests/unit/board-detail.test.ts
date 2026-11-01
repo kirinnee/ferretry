@@ -189,7 +189,7 @@ describe('history', () => {
 
   it('names a move on the admin token as the token, never as you', () => {
     const rows = historyRows(
-      [event(2, 'note', { text: 'hi' }, { kind: 'admin-token' }), event(1, 'note', { text: 'yo' })],
+      [event(2, 'note', { text: 'hi', actorVia: 'admin-token' }, { kind: 'owner' }), event(1, 'note', { text: 'yo' })],
       context,
     );
     expect(rows.map(row => [row.actor, row.actorNote])).toEqual([
@@ -516,7 +516,7 @@ describe('askOrigin', () => {
 
   it('says the admin token for what it is when it opened the card: the owner, or a ferret', () => {
     const origin = askOrigin(
-      { ...base, createdBy: { kind: 'admin-token' }, ask: { text: 't', source: 'cli' } },
+      { ...base, createdBy: { kind: 'owner' }, createdByVia: 'admin-token', ask: { text: 't', source: 'cli' } },
       names,
       null,
     );

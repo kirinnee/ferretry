@@ -389,8 +389,13 @@ release. It is also a **bearer class** of its own, `session`, beside the admin a
   privileged loopback carrier; from the tunnel, a LAN bind or any other remote carrier it is a stranger's,
   answered without a lookup. A dead credential gets a stranger's very words (`401 unauthorized`, and the
   same `426` on the deleted pre-key `POST /v1/pair`).
-- **Advertised.** `GET /v1/health` lists `session.credential.1`. A client that sees it presents this
-  credential and never falls back to the admin token, whatever the answer.
+- **Advertised where it can work.** `GET /v1/health` lists `session.credential.1` only to a request that
+  arrived on this machine's privileged loopback carrier — the one place a session bearer is ever looked up. A
+  client that sees it presents this credential and never falls back to the admin token, whatever the answer;
+  one that does not (a wildcard, LAN or tailscale bind) keeps the admin token, so its ferrets keep `fy send`.
+- **Every agent route takes it as a bearer.** `POST /v1/agent/tools`, `/v1/agent/config` and
+  `/v1/agent/lessons` read `Authorization: Bearer fys_…` or the older `x-fy-session-capability`, and refuse a
+  request that carries two different values (`401`).
 
 ### Who a ferret may be: every route says
 
@@ -410,8 +415,17 @@ its own).
   the step-up and the unlock, grants, the security settings and the tunnel switch, confirming a held
   config change, updating the daemon or the agent CLIs, the browser proxy test, catalog shares, members,
   installs and publishing, Pack mode's clean-up, applying a lesson, the old-board import, the owner's
-  "Send now" for held agenda answers, and "Clear all from agent ferrets". A person's own agent-tool
-  routes (`/v1/sessions/:id/surfaces/*`) are person routes too: an agent uses `POST /v1/agent/tools`.
+  "Send now" for held agenda answers, and "Clear all from agent ferrets". Also everything that changes how
+  ferrets run or are watched: **applying** a fleet change (`POST /v1/fleet/proposals/:id/apply` — a ferret may
+  still propose one), harness and MCP sign-ins, a session's MCP login, installing machine tools, the
+  warden's settings and "leave it alone", resource limits, the lessons settings, a session's Pack switch and a
+  board's switch; answering a harness's own prompts (`permission`, `dialog`, `answer`, console keys, `attach`);
+  the agent browser's sign-in window, whose status is a credential; and the security log and grant history.
+  A person's own agent-tool routes (`/v1/sessions/:id/surfaces/*`) are person routes too: an agent uses
+  `POST /v1/agent/tools`.
+- **A ferret starts sub-ferrets only as itself.** On its own credential, `POST /v1/pack/new` takes the parent
+  from the credential: a body `parent` naming another session is `403 parent_mismatch`, and an absent one is
+  filled in, so the Pack switch and the sub-ferret limits always apply to it.
 - **`any` routes take a session credential as that session, always.** Its actor is `peer:<its session>`
   — never the owner, on the board and the agenda too — whatever any header says. That covers everything a
   ferret's `fy` and MCP tools need: `fy send` and `fy notify`, its board card and notes, its own agenda
@@ -423,9 +437,13 @@ its own).
 - **Grants never govern a session credential.** It is on this host, so it is ungoverned like `fy` at the
   machine; its policy is the `caller` table, not `decideCapability` ([grants.md](grants.md)).
 - **The admin token with no session is recorded as `admin-token`.** Without a credential of its own, a
-  call on the admin token cannot be told from the owner at the machine. The board records it as
-  `admin-token` — "the admin token (the owner at this machine, or a ferret without its own credential)" —
-  and never as `owner`; only a paired device's act is the owner's. It keeps the owner's authority.
+  call on the admin token cannot be told from the owner at the machine. The board and the lane sets record
+  it as `admin-token` — "the admin token (the owner at this machine, or a ferret without its own
+  credential)" — and never plainly as the owner; only a paired device's act is the owner's. It keeps the
+  owner's authority. The label travels BESIDE the actor (`actorVia`, `createdByVia`, `byVia`, `confirmedVia`),
+  never as a new actor kind, so an older app, CLI or a downgraded daemon drops it and reads the owner, as it
+  always did, instead of refusing the board. **Declared gap:** the agenda still records such a call's
+  answers and closes as the owner's ("done by you") — [agenda.md](agenda.md).
 
 **What this release does NOT change yet.** `fy` and the MCP server still present the admin token plus
 `x-ferretry-session-id`; presenting the session credential instead is the next change (RF-3). Until then a

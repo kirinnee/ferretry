@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { type SessionLaunchInstructions, SessionStatusSchema } from '@ferretry/protocol';
 import should from 'should';
 import { CredentialAgentIdentities } from '../../../../src/lib/agent-tools/policy.ts';
+import { isTerminalStatus, WARDEN_TERMINAL_STATUSES } from '../../../../src/lib/warden/types.ts';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import type {
   SessionEffectAdmission,
@@ -1590,6 +1591,41 @@ describe('SessionLifecycleService credential per launch', () => {
     should(await built.resolve('first-pane-capability')).be.undefined();
     // After the stop is durable: a crash in between leaves a stopped session, which the lookup refuses.
     should(built.order.lastIndexOf('erase')).be.above(built.order.lastIndexOf('hash'));
+  });
+
+  it('should bring no ended session back on the value its old pane held, whatever status it ended in', async () => {
+    // Arrange — a resolver that consults only ACTIVE sessions, as production's does.
+    for (const status of WARDEN_TERMINAL_STATUSES) {
+      const built = rotating();
+      built.launcher.livenessFromLaunch = true;
+      await built.subject.create(input());
+      await built.subject.start(ID);
+      const live = new CredentialAgentIdentities(
+        {
+          snapshot: async () => {
+            const record = built.repository.current();
+            const hash = record.config.sessionCapabilityHash;
+            return hash === undefined
+              ? []
+              : [{ id: ID, name: null, active: !isTerminalStatus(record.state.status), sessionCapabilityHash: hash }];
+          },
+        },
+        capability => credential(capability).hash,
+        (left, right) => left === right,
+      );
+      const current = built.repository.current();
+      built.repository.documents.set(ID, JSON.stringify({ ...current, state: { ...current.state, status } }));
+      built.launcher.livenessFromLaunch = false;
+      built.launcher.live = false;
+
+      // Act — the ended session is started again, through the one path that revives a pane here.
+      const ended = await live.resolve('first-pane-capability');
+      await built.subject.start(ID).catch(() => undefined);
+
+      // Assert — the old value names nobody, before or after; only a fresh launch's value can.
+      should({ status, ended }).deepEqual({ status, ended: undefined });
+      should({ status, after: await live.resolve('first-pane-capability') }).deepEqual({ status, after: undefined });
+    }
   });
 
   it('should keep the credential of a pane that is still live when a start is retried', async () => {

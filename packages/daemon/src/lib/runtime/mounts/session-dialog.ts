@@ -72,7 +72,7 @@ export function sessionDialogRoutes(
       method: 'POST',
       path: '/v1/sessions/:sessionId/dialog',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await answer(dialog, sessions, context),

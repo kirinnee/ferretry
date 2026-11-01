@@ -21,8 +21,14 @@ function dispatcher(subsystem: DaemonHealthSubsystem): ApiDispatcher {
   return new ApiDispatcher(new ApiRouter(daemonHealthRoutes(subsystem)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
-async function ask(subsystem: DaemonHealthSubsystem, headers: Record<string, string> = { ...human }) {
-  return await dispatcher(subsystem).dispatch(request({ path: '/v1/health', headers }));
+async function ask(
+  subsystem: DaemonHealthSubsystem,
+  headers: Record<string, string> = { ...human },
+  privilegedLoopback = true,
+) {
+  return await dispatcher(subsystem).dispatch(
+    request({ path: '/v1/health', headers, loopback: privilegedLoopback, privilegedLoopback }),
+  );
 }
 
 describe('the daemon health mount', () => {
@@ -256,12 +262,23 @@ describe('the daemon health mount and the session-worker pool', () => {
     should(view.features).deepEqual([...daemonFeatureList()]);
   });
 
-  it('should report the ferret session credential, which every `caller: any` route now takes', async () => {
+  it('should report the ferret session credential where a session bearer can resolve: this machine’s own carrier', async () => {
     // Arrange / Act
     const view = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem())).body));
 
     // Assert
     should(view.features).containEql(DAEMON_FEATURES.sessionCredential);
+  });
+
+  it('should not report it anywhere a bearer is never looked up, so a client there keeps the admin token', async () => {
+    // Arrange / Act — a wildcard, LAN or tailscale bind: the request did not arrive on the privileged loopback.
+    const view = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem(), { ...human }, false)).body));
+
+    // Assert — every other feature is still reported.
+    should(view.features).not.containEql(DAEMON_FEATURES.sessionCredential);
+    should(view.features).deepEqual(
+      daemonFeatureList().filter(feature => feature !== DAEMON_FEATURES.sessionCredential),
+    );
   });
 
   it('should report the agenda wire, so a newer app knows to dial the agenda routes', async () => {

@@ -1,4 +1,5 @@
 import {
+  ADMIN_TOKEN_ACTOR_WORDS,
   type BoardProject,
   type BoardSwitch,
   type LaneSet,
@@ -9,7 +10,11 @@ import {
 /** The lanes in order: each one's id (to name it in `--rename`, `--remove` and `task move`) and when a card belongs there. */
 export function renderLaneSet(laneSet: LaneSet, projectName: string): string {
   const state =
-    laneSet.confirmedBy === null ? `proposed by ${laneSet.proposedBy}, not yet confirmed` : 'confirmed by the owner';
+    laneSet.confirmedBy === null
+      ? `proposed by ${laneSet.proposedBy}, not yet confirmed`
+      : laneSet.confirmedVia === 'admin-token'
+        ? `confirmed by ${ADMIN_TOKEN_ACTOR_WORDS}`
+        : 'confirmed by the owner';
   const rows = laneSet.lanes.map(lane => {
     const gate = lane.ownerGate === true ? ', owner-gated' : '';
     return `  ${lane.id}\t${lane.name}\t(${lane.category}${gate})\tuse when: ${laneUse(lane)}`;

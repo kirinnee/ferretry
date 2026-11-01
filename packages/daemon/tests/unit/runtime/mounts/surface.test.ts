@@ -29,7 +29,7 @@ import { MemoryTranscript } from '../../../support/transcript-images.ts';
 import { agentToolWorld, PREFIXED_S1 } from '../../agent-tools/support.ts';
 import { fixedClock, request } from '../../api/support.ts';
 import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
-import { ROUTE_CALLERS } from './route-callers.ts';
+import { OTHER_TABLE_CALLERS, ROUTE_CALLERS } from './route-callers.ts';
 import { inputRequestService } from '../../input-requests/support.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
@@ -66,6 +66,9 @@ import {
   sessionDirectory,
   sessionView,
 } from './support.ts';
+
+/** The daemon package, which the route-caller completeness check reads its route tables from. */
+const DAEMON_ROOT = new URL('../../../../', import.meta.url).pathname.replace(/\/$/u, '');
 
 /**
  * The complete surface the daemon process serves.
@@ -1755,6 +1758,29 @@ describe('who may call each route', () => {
 
     // Assert — the table is `route-callers.ts`; a route added, removed or reclassified changes that file.
     should(declared).deepEqual([...ROUTE_CALLERS]);
+  });
+
+  it('should leave no route out of the contract, an optional subsystem’s included', async () => {
+    // Arrange — every `path: '…'` literal a route table in the daemon declares. A route behind an optional
+    // subsystem the world above forgot to supply would be missing from the mounted table, and so from the
+    // contract; this finds it from the source instead. The member table (`/v1/shared/*`) has its own key-based
+    // authority and no `caller`.
+    const sources = [
+      ...new Bun.Glob('src/lib/runtime/mounts/*.ts').scanSync(DAEMON_ROOT),
+      ...new Bun.Glob('src/lib/api/routes/*.ts').scanSync(DAEMON_ROOT),
+    ];
+    const literals = new Set<string>();
+    for (const source of sources)
+      for (const found of (await Bun.file(`${DAEMON_ROOT}/${source}`).text()).matchAll(/path: '(\/[^']+)'/gu))
+        if (found[1] !== undefined) literals.add(found[1]);
+    const contracted = new Set([...ROUTE_CALLERS, ...OTHER_TABLE_CALLERS].map(line => line.split(' ')[1] ?? ''));
+
+    // Act
+    const missing = [...literals].filter(path => !contracted.has(path) && !path.startsWith('/v1/shared/'));
+
+    // Assert
+    should(literals.size).be.above(200);
+    should(missing).deepEqual([]);
   });
 
   it('should refuse every caller that is a ferret on every person route, before any handler reads the body', async () => {

@@ -32,7 +32,8 @@ import { jsonBody, request } from '../../api/support.ts';
 const DIRECTORY = '/home/operator/.fy/config';
 const WARDEN_OFF = 'layers:\n  llm: false\n';
 const WARDEN_ON = 'layers:\n  llm: true\n';
-const SESSION_CAPABILITY = 'fy_cap_session_one';
+/** In the shape every launch now mints, so the same value is a valid `Authorization` bearer too. */
+const SESSION_CAPABILITY = `fys_${'c'.repeat(43)}`;
 
 const digest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
@@ -729,6 +730,26 @@ describe('the configuration files mount', () => {
       should(unknown.status).equal(403);
       should(unknown.body.code).equal('forbidden');
       should(unknown.body.error).match(/session credential/u);
+    });
+
+    it('should take the credential as an Authorization bearer too, and refuse two that differ', async () => {
+      // Arrange
+      const subject = world();
+      subject.off.delete('settings');
+      const asBearer = (extra: Readonly<Record<string, string>> = {}): Call => ({
+        method: 'POST',
+        path: '/v1/agent/config',
+        body: { tool: 'config.read' },
+        headers: { authorization: `Bearer ${SESSION_CAPABILITY}`, ...extra },
+      });
+
+      // Act
+      const read = await call(subject, undefined, asBearer());
+      const two = await call(subject, undefined, asBearer({ [AGENT_SESSION_CAPABILITY_HEADER]: 'fy_cap_other' }));
+
+      // Assert
+      should(read.status).equal(200);
+      should([two.status, two.body.code]).deepEqual([401, 'unauthorized']);
     });
 
     it('should refuse every tool while "Ferretry settings" is off', async () => {

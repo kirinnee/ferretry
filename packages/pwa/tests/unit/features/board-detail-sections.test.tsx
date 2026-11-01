@@ -171,7 +171,13 @@ describe('AskSection', () => {
           by: { kind: 'ferret', sessionId: LEAD },
         },
         // The admin token with no ferret's credential: it may be you or a ferret, so it is said as the token.
-        { text: 'Also tablets', source: 'cli', at: '2026-08-01T09:30:00.000Z', by: { kind: 'admin-token' } },
+        {
+          text: 'Also tablets',
+          source: 'cli',
+          at: '2026-08-01T09:30:00.000Z',
+          by: { kind: 'owner' },
+          byVia: 'admin-token',
+        },
       ],
     });
     const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
@@ -490,7 +496,9 @@ describe('HistorySection', () => {
 
   it('says what the admin token may be, as a tooltip on its name and in words a phone shows too', async () => {
     const task = card('F1', {
-      history: [{ seq: 1, at: at(0), actor: { kind: 'admin-token' }, type: 'created', laneId: 'todo' }],
+      history: [
+        { seq: 1, at: at(0), actor: { kind: 'owner' }, actorVia: 'admin-token', type: 'created', laneId: 'todo' },
+      ],
     });
     const root = await show(<HistorySection context={context} now={NOW} task={task} />);
     const name = must(root.querySelector('.fy-board-timeline__row strong'), 'the actor');

@@ -25,13 +25,23 @@ const post = (body: unknown, headers: Readonly<Record<string, string>> = human) 
 });
 
 describe('pinActor', () => {
-  it('should treat only an in-pane peer as an agent', () => {
+  const admin = { kind: 'authenticated', tokenClass: 'admin' } as const;
+  const warden = { kind: 'authenticated', tokenClass: 'warden' } as const;
+  const own = { kind: 'authenticated', tokenClass: 'session', sessionId: 's1' } as const;
+
+  it('should decide agent or person by the one class predicate, and take the session from the actor', () => {
     // Arrange / Act / Assert — the session id is server-derived, so a body cannot forge it.
-    should(pinActor('peer:s1')).deepEqual({ sessionId: 's1' });
-    should(pinActor('admin-cli')).deepEqual({});
-    should(pinActor('admin-ui')).deepEqual({});
-    should(pinActor('warden:s1')).deepEqual({});
-    should(pinActor(undefined)).deepEqual({});
+    should(pinActor(admin, 'peer:s1')).deepEqual({ sessionId: 's1' });
+    should(pinActor(own, 'peer:s1')).deepEqual({ sessionId: 's1' });
+    should(pinActor(warden, 'warden:s1')).deepEqual({ sessionId: 's1' });
+    should(pinActor(admin, 'admin-cli')).deepEqual({});
+    should(pinActor(admin, 'admin-ui')).deepEqual({});
+    should(pinActor(undefined, undefined)).deepEqual({});
+  });
+
+  it('should refuse an agent with no session to name rather than take it for a person', () => {
+    // Assert — a bare warden is an agent; it must never edit the owner's pins as "human".
+    should(() => pinActor(warden, 'warden')).throw(/an agent pins only from its own session/u);
   });
 });
 

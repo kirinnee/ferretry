@@ -161,7 +161,7 @@ export function fleetCatalogRoutes(subsystem: FleetCatalogSubsystem): readonly A
       method: 'POST',
       path: '/v1/fleet/proposals/:proposalId/apply',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => {

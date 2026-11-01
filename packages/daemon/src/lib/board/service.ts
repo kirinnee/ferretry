@@ -13,6 +13,7 @@
 import {
   ADMIN_TOKEN_ACTOR_WORDS,
   type BoardActor,
+  type BoardActorVia,
   type BoardProjectId,
   type BoardQuery,
   type BoardReopenAttachments,
@@ -113,12 +114,15 @@ export interface SignalDoneOutcome {
 export const DEPENDENCY_SECTION = 'board:dependencies';
 
 /** The line a reopened card's ferret is told (§2.9): a plain sentence, with no tag around it. */
-export const reopenMessage = (task: Pick<BoardTask, 'id'>, by: BoardActor, reason: string): string =>
-  `${formatTaskRef(task)} was reopened by ${reopenerWords(by)}: ${reason}`;
+export const reopenMessage = (
+  task: Pick<BoardTask, 'id'>,
+  by: BoardActor,
+  reason: string,
+  byVia?: BoardActorVia,
+): string => `${formatTaskRef(task)} was reopened by ${reopenerWords(by, byVia)}: ${reason}`;
 
-const reopenerWords = (by: BoardActor): string => {
-  if (by.kind === 'owner') return 'the owner';
-  if (by.kind === 'admin-token') return ADMIN_TOKEN_ACTOR_WORDS;
+const reopenerWords = (by: BoardActor, byVia: BoardActorVia | undefined): string => {
+  if (by.kind === 'owner') return byVia === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : 'the owner';
   return by.sessionId ?? `the ${by.kind}`;
 };
 
@@ -137,9 +141,16 @@ export const doneMessage = (
     : `${who} marked these cards done: ${named.join(', ')}.`;
 };
 
+/**
+ * How a caller that acts as the owner is recorded beside its actor: `admin-token` for the host's token with no
+ * ferret's credential, so no surface shows it as the owner (`BoardActorVia`). Nothing for anyone else.
+ */
+const viaOf = (caller: BoardCaller): { readonly actorVia?: BoardActorVia } =>
+  caller.kind === 'owner' && caller.via === 'admin-token' ? { actorVia: 'admin-token' } : {};
+
 /** The board actor a caller is recorded as. */
 export const actorOf = (caller: BoardCaller): BoardActor => {
-  if (caller.kind === 'owner') return caller.via === 'admin-token' ? { kind: 'admin-token' } : { kind: 'owner' };
+  if (caller.kind === 'owner') return { kind: 'owner' };
   if (caller.kind === 'ferret') return { kind: 'ferret', sessionId: caller.sessionId };
   return caller.sessionId === undefined ? { kind: 'daemon' } : { kind: 'daemon', sessionId: caller.sessionId };
 };
@@ -555,6 +566,7 @@ export class BoardService {
         machineId: facts.machineId,
         now: this.ports.clock.now(),
         actor: actorOf(facts.caller),
+        ...viaOf(facts.caller),
         standing: facts.caller.kind === 'owner' ? 'owner-human' : 'owner',
         owner: facts.owner,
         projectId: facts.projectId,
@@ -642,6 +654,7 @@ export class BoardService {
       now: this.ports.clock.now(),
       runningVersion: this.ports.runningVersion?.() ?? null,
       actor: actorOf(caller),
+      ...viaOf(caller),
       standing: await this.standing(caller, card),
       laneSet,
       index,
@@ -768,7 +781,12 @@ export class BoardService {
     if (reopened === undefined) return;
     if (caller.kind === 'ferret' && caller.sessionId === effectiveAssignee(task)) return;
     await this.ports.reopen
-      .reopened({ task, ...reopened, by: actorOf(caller) })
+      .reopened({
+        task,
+        ...reopened,
+        by: actorOf(caller),
+        ...(viaOf(caller).actorVia === undefined ? {} : { byVia: 'admin-token' as const }),
+      })
       .catch((error: unknown) => this.warn(`could not deliver the reopen of ${formatTaskRef(task)}`, error));
   }
 

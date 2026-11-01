@@ -160,6 +160,14 @@ describe('fy board lanes edit', () => {
 });
 
 describe('rendering lanes', () => {
+  it('should say a set confirmed on the admin token was confirmed by the token, not the owner', () => {
+    const text = renderLaneSet(laneSet({ confirmedBy: 'owner', confirmedVia: 'admin-token' }), 'Ferretry');
+    should(text).match(
+      /confirmed by the admin token \(the owner at this machine, or a ferret without its own credential\)/u,
+    );
+    should(text).not.match(/confirmed by the owner/u);
+  });
+
   it('should mark a confirmed set and an owner-gated lane', () => {
     const text = renderLaneSet(laneSet({ confirmedBy: 'owner' }), 'Ferretry');
     should(text)

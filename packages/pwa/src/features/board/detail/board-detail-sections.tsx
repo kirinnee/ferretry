@@ -145,11 +145,11 @@ export function AskSection({
             <li key={`${clarification.at}:${clarification.text}`}>
               <span className="fy-board-detail__quiet">
                 Clarified by{' '}
-                {clarification.by.kind === 'owner'
-                  ? 'you'
-                  : clarification.by.kind === 'admin-token'
+                {clarification.by.kind !== 'owner'
+                  ? 'a ferret'
+                  : clarification.byVia === 'admin-token'
                     ? 'the admin token'
-                    : 'a ferret'}
+                    : 'you'}
                 {clarification.by.kind === 'ferret' ? ` (${names(clarification.by.sessionId)})` : ''}:{' '}
               </span>
               {clarification.text}

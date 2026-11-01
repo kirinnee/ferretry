@@ -264,9 +264,17 @@ fy agenda add "Allow the Jev price correction?" --title "Jev price correction" \
 
 The rule is the config files' own (`heldEditRefusal`, shared with `POST /v1/config/confirm`), and the state
 machine refuses any non-owner answer to such an item a second time. A ferret may still close its own card
-unanswered (`fy agenda dismiss`). As for every admin-token caller, telling the owner's shell from a ferret's
+unanswered (`fy agenda dismiss`). A ferret on its own session credential is always itself here, whatever
+header it sends. As for every admin-token caller WITHOUT one, telling the owner's shell from a ferret's
 rests on the session header the CLI sends ([grants.md](grants.md)): an honest-client boundary, not a
 cryptographic one — the same boundary `fy config confirm` has.
+
+**Declared gap: the agenda does not yet say "admin token".** The board and the lane sets record a call on the
+admin token with no session credential as `admin-token` ([agent-tools.md](agent-tools.md#who-a-ferret-may-be-every-route-says)).
+The agenda still records that caller as the person, so an item a ferret closed with `fy` and no session reads
+"done by you". Its authority is right (the token is the owner's at the machine); only the label is not. It
+closes when `fy` presents each ferret's own credential (RF-3), or with an `admin-token` label beside the
+agenda's own `resolvedBy`.
 
 ## Verbs
 

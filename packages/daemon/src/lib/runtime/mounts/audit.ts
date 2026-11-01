@@ -41,7 +41,7 @@ export function auditRoutes(subsystem: AuditSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/audit',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       capability: { capability: 'pairing', axis: 'configure' },
       noStore: true,
       handle: async context => {

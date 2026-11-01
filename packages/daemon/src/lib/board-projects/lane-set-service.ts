@@ -205,7 +205,9 @@ const decide = (
     case 'edit':
       return editLaneSet(stored, request, actor);
     case 'confirm':
-      return actor.kind === 'owner' ? confirmLaneSet(stored, request.version) : boardErr({ code: 'owner-only' });
+      return actor.kind === 'owner'
+        ? confirmLaneSet(stored, request.version, actor.via)
+        : boardErr({ code: 'owner-only' });
   }
 };
 

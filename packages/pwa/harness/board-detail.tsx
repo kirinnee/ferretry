@@ -190,7 +190,14 @@ const REVIEW_CARD = card('F2', {
       trigger: 'pr.opened',
     },
     // The host's admin token with no ferret's credential: recorded as the token, never as the owner.
-    { seq: 11, at: ago(30), actor: { kind: 'admin-token' }, type: 'note', text: 'Checked the drawer on the phone.' },
+    {
+      seq: 11,
+      at: ago(30),
+      actor: owner,
+      actorVia: 'admin-token',
+      type: 'note',
+      text: 'Checked the drawer on the phone.',
+    },
   ],
 });
 

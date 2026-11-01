@@ -93,3 +93,23 @@ export const BoardSkipSchema = z.strictObject({
   at: z.iso.datetime({ offset: true }),
 });
 export type BoardSkip = z.infer<typeof BoardSkipSchema>;
+
+/**
+ * How an `owner` actor acted, when it was not the owner's own app: `admin-token` is the host's admin token with
+ * no ferret's own credential behind it. The daemon cannot tell the owner at the machine from a ferret that called
+ * `fy` without its session, so it says which one it KNOWS — the token ({@link ADMIN_TOKEN_ACTOR_WORDS}) — and a
+ * surface never shows it as the owner. Only a paired device's act is plainly `owner`.
+ *
+ * IT IS A SIBLING FIELD ON PURPOSE — `actorVia` on an event, `createdByVia` on a card, `byVia` on a clarification,
+ * `confirmedVia` on a lane set — never a member of the board actor union: those parents are plain objects, so an older app, CLI or a downgraded
+ * daemon drops the field it does not know and reads the act as the owner's, as it always did, instead of
+ * refusing the board.
+ */
+export const BoardActorViaSchema = z.literal('admin-token');
+export type BoardActorVia = z.infer<typeof BoardActorViaSchema>;
+
+/** What an `admin-token` board actor may be: the truth, which is that it could be either. */
+export const ADMIN_TOKEN_ACTOR_NOTE = 'the owner at this machine, or a ferret without its own credential';
+
+/** What every surface says for an `admin-token` board actor in a sentence: the token, and what it may be. */
+export const ADMIN_TOKEN_ACTOR_WORDS = `the admin token (${ADMIN_TOKEN_ACTOR_NOTE})`;

@@ -97,7 +97,7 @@ export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {
       // has no business learning which phones an operator has paired. It is not capability-gated for
       // the same reason the grant read is not — the caller who was refused is the one asking.
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       noStore: true,
       handle: async () => jsonResponse(await subsystem.history(GRANT_AUDIT_MAX_ENTRIES).catch(refuse)),
     },

@@ -60,7 +60,7 @@ import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { ConfigFileConflictError, ConfigFileInvalidError, type ConfigFilesService } from '../../config-files/index.ts';
 import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
-import { AGENT_SESSION_CAPABILITY_HEADER } from './agent-tools.ts';
+import { presentedSessionCapability, TWO_SESSION_CREDENTIALS } from './agent-tools.ts';
 
 /** The configuration files as these routes need them, and the loop the composition root arms. */
 export interface ConfigFilesSubsystem {
@@ -275,7 +275,10 @@ async function agentTool(subsystem: ConfigFilesSubsystem, call: AgentConfigToolC
 }
 
 async function agentCall(subsystem: ConfigFilesSubsystem, context: RouteContext): Promise<ApiResponse> {
-  const capability = headerValue(context.request, AGENT_SESSION_CAPABILITY_HEADER)?.trim() ?? '';
+  // A `fys_` bearer or the older header, exactly as the agent tools take it.
+  const presented = presentedSessionCapability(context.request);
+  if (presented.kind === 'two-different') throw new ApiError(401, TWO_SESSION_CREDENTIALS, 'unauthorized');
+  const capability = presented.kind === 'one' ? presented.capability : '';
   const identity = capability === '' ? undefined : await subsystem.identities.resolve(capability);
   if (identity === undefined) {
     const missing = capability === '';

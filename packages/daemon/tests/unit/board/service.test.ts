@@ -311,9 +311,9 @@ describe('moving a card', () => {
     // Act
     await service.act('F1', action({ action: 'move', to: 'implement' }), { kind: 'owner', via: 'admin-token' });
 
-    // Assert — … and is recorded as what the daemon actually knows.
+    // Assert — … and is recorded as what the daemon actually knows, beside an actor every reader can parse.
     should(stored(ports).laneId).equal('implement');
-    should(lastEvent(ports)?.actor).eql({ kind: 'admin-token' });
+    should(lastEvent(ports)).match({ actor: { kind: 'owner' }, actorVia: 'admin-token' });
   });
 
   it('should let only the owner close a card on a board that has a verify lane', async () => {
@@ -1591,14 +1591,16 @@ describe('the reopen message and actors', () => {
     { by: { kind: 'owner' as const }, expected: '&F412 was reopened by the owner: not good' },
     { by: { kind: 'ferret' as const, sessionId: 'lead' }, expected: '&F412 was reopened by lead: not good' },
     { by: { kind: 'daemon' as const }, expected: '&F412 was reopened by the daemon: not good' },
-    {
-      by: { kind: 'admin-token' as const },
-      expected:
-        '&F412 was reopened by the admin token (the owner at this machine, or a ferret without its own credential): not good',
-    },
   ])('should say who reopened it', ({ by, expected }) => {
     // Assert
     should(reopenMessage({ id: 'F412' }, by, 'not good')).equal(expected);
+  });
+
+  it('should say the admin token for an owner actor that acted on it, never the owner', () => {
+    // Assert
+    should(reopenMessage({ id: 'F412' }, { kind: 'owner' }, 'not good', 'admin-token')).equal(
+      '&F412 was reopened by the admin token (the owner at this machine, or a ferret without its own credential): not good',
+    );
   });
 
   it('should record each caller as its actor', () => {

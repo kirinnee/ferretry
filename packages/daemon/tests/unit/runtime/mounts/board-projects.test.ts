@@ -24,7 +24,17 @@ import {
   boardProjectRoutes,
 } from '../../../../src/lib/runtime/mounts/board-projects.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, grantSubsystem, human, sessionDirectory, sessionView } from './support.ts';
+import { handleDirectly } from './second-line.ts';
+import {
+  agentIn,
+  CREDENTIALS,
+  FERRET_SESSION,
+  fromFerret,
+  grantSubsystem,
+  human,
+  sessionDirectory,
+  sessionView,
+} from './support.ts';
 
 const FERRETRY_ID = '11111111-1111-4111-8111-111111111111';
 
@@ -137,9 +147,27 @@ describe('the board switch', () => {
     const response = await (
       await dispatcher(boards(), state)
     ).dispatch(put(FERRETRY_ID, { on: true }, agentIn('ms8-abcd1234')));
+    const own = await (await dispatcher(boards(), state)).dispatch(fromFerret(put(FERRETRY_ID, { on: true })));
 
-    should(response.status).equal(403);
-    should(jsonBody(response)).containEql({ code: 'owner-only', error: BOARD_SWITCH_OWNER_ONLY });
+    // The boundary refuses both: the switch is `caller: 'person'`.
+    should([response.status, jsonBody(response).code]).deepEqual([403, 'owner_only']);
+    should([own.status, jsonBody(own).code]).deepEqual([403, 'owner_only']);
+    should(state.set_).deepEqual([]);
+  });
+
+  it('should still refuse a ferret in the handler if the boundary ever let one through', async () => {
+    const state = switches();
+    const sessions = sessionDirectory([]);
+
+    const answer = await handleDirectly(
+      boardProjectRoutes(boards(), sessions, state),
+      'PUT',
+      `/v1/board/projects/${FERRETRY_ID}/switch`,
+      undefined,
+      { on: true },
+    );
+
+    should([answer.status, answer.code, answer.message]).deepEqual([403, 'owner-only', BOARD_SWITCH_OWNER_ONLY]);
     should(state.set_).deepEqual([]);
   });
 
@@ -228,9 +256,45 @@ describe('the board projects mount', () => {
 
     should(response.status).equal(200);
     should(jsonBody(response)).deepEqual(CHANGE);
+    // The admin token with no ferret's credential: the owner's authority, recorded as the token.
     should(subsystem.applied).deepEqual([
-      { projectId: FERRETRY_ID, request: { ...PROPOSE, renames: {} }, actor: { kind: 'owner' } },
+      { projectId: FERRETRY_ID, request: { ...PROPOSE, renames: {} }, actor: { kind: 'owner', via: 'admin-token' } },
     ]);
+  });
+
+  it('should apply a paired device’s change as the owner, plainly', async () => {
+    const subsystem = boards();
+
+    const answer = await handleDirectly(
+      boardProjectRoutes(subsystem, sessionDirectory([]), switches()),
+      'POST',
+      `/v1/board/projects/${FERRETRY_ID}/lanes`,
+      { credential: { kind: 'authenticated', tokenClass: 'device', deviceId: 'device-1' }, actor: 'device:device-1' },
+      PROPOSE,
+    );
+
+    should(answer.status).equal(200);
+    should(subsystem.applied.map(applied => applied.actor)).deepEqual([{ kind: 'owner' }]);
+  });
+
+  it('should take a ferret’s own credential as that ferret, and refuse an agent with no session to name', async () => {
+    const subsystem = boards();
+    const sessions = sessionDirectory([]);
+
+    const own = await (await dispatcher(subsystem)).dispatch(fromFerret(post(FERRETRY_ID, PROPOSE)));
+    const bare = await handleDirectly(
+      boardProjectRoutes(subsystem, sessions, switches()),
+      'POST',
+      `/v1/board/projects/${FERRETRY_ID}/lanes`,
+      { credential: { kind: 'authenticated', tokenClass: 'warden' }, actor: 'warden' },
+      PROPOSE,
+    );
+
+    should(own.status).equal(200);
+    should(subsystem.applied.map(applied => applied.actor)).deepEqual([
+      { kind: 'ferret', name: FERRET_SESSION, sessionId: FERRET_SESSION },
+    ]);
+    should([bare.status, bare.code]).deepEqual([403, 'forbidden']);
   });
 
   it('should apply a ferret change as that ferret, named by its label, its teammate name or its id', async () => {

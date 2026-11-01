@@ -28,7 +28,6 @@ import {
   BoardStateFilterSchema,
   type BoardTaskId,
   type BoardTaskView,
-  actsAsOwner,
   boardErr,
   boardOk,
   compareProtocolVersions,
@@ -277,7 +276,7 @@ export const showsAgents = (filters: Pick<BoardFilters, 'agents' | 'ferret' | 'a
 
 /** Whether the owner has a stake in the card: they raised it, or it waits on their answer. */
 export const isMine = (task: Pick<BoardTaskView, 'createdBy' | 'waitingOnOwner'>): boolean =>
-  actsAsOwner(task.createdBy) || task.waitingOnOwner.length > 0;
+  task.createdBy.kind === 'owner' || task.waitingOnOwner.length > 0;
 
 const categoryIn = (laneSet: LaneSet | null, task: BoardTaskView): LaneCategory | null =>
   laneSet?.lanes.find(lane => lane.id === task.laneId)?.category ?? null;

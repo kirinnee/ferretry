@@ -118,7 +118,7 @@ export function sessionMcpRoutes(subsystem: SessionMcpSubsystem): readonly ApiRo
       method: 'POST',
       path: '/v1/sessions/:sessionId/mcp/login',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       capability: FLEET_CONFIGURE,
       noStore: true,
       handle: async context => {

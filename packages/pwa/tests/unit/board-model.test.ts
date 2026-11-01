@@ -113,8 +113,8 @@ describe('mergeBoard', () => {
       'F3',
     ]);
     expect(isMine(card('F2'))).toBe(false);
-    // A card opened on the admin token keeps the owner's stake: the token may well be the owner's own fy.
-    expect(isMine({ ...card('F5'), createdBy: { kind: 'admin-token' } })).toBe(true);
+    // A card opened on the admin token is an owner card underneath (`createdByVia` only labels it): still mine.
+    expect(isMine({ ...card('F5'), createdBy: { kind: 'owner' } })).toBe(true);
   });
 
   it('hides agent cards unless asked, or unless a ferret or an activity is chosen', () => {

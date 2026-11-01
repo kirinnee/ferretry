@@ -11,6 +11,7 @@
 import type {
   AgendaRef,
   BoardActor,
+  BoardActorVia,
   BoardAttachment,
   BoardChangedEvent,
   BoardProjectId,
@@ -157,6 +158,8 @@ export interface ReopenNotice {
   readonly to: string;
   readonly reason: string;
   readonly by: BoardActor;
+  /** `admin-token` when the owner actor was the host's token with no ferret's credential (`BoardActorVia`). */
+  readonly byVia?: BoardActorVia;
   /** The files the owner sent with it, still in `from`'s session; the delivery carries them to whoever is told. */
   readonly attachments?: BoardReopenAttachments;
 }

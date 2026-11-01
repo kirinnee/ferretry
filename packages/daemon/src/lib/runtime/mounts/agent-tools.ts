@@ -122,25 +122,40 @@ function sessionOf(context: RouteContext): string {
   return id;
 }
 
+/**
+ * The session credential a request presents to an agent route (`/v1/agent/tools`, `/config`, `/lessons`): a
+ * `fys_` bearer, the older `x-fy-session-capability` header, or both when they agree. Only a session-shaped bearer
+ * is one — these routes have always ignored any other `Authorization` value — and two that differ are neither.
+ */
+export type PresentedSessionCapability =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'two-different' }
+  | { readonly kind: 'one'; readonly capability: string };
+
+export function presentedSessionCapability(request: RouteContext['request']): PresentedSessionCapability {
+  const bearer = bearerToken(headerValue(request, 'authorization'));
+  const presented = isSessionCredential(bearer) ? bearer : undefined;
+  const header = headerValue(request, AGENT_SESSION_CAPABILITY_HEADER)?.trim() ?? '';
+  if (presented !== undefined && header !== '' && !secretsMatch(presented, header)) return { kind: 'two-different' };
+  const capability = presented ?? header;
+  return capability === '' ? { kind: 'none' } : { kind: 'one', capability };
+}
+
+/** The refusal for {@link PresentedSessionCapability} `two-different`, in one sentence every agent route shares. */
+export const TWO_SESSION_CREDENTIALS = `this request carries two different session credentials, as a bearer and in ${AGENT_SESSION_CAPABILITY_HEADER}; send one`;
+
 /** The agent behind a request, from its session credential and from nothing else. Refusals are audited. */
 async function agentOf(
   service: AgentToolService,
   identities: AgentIdentityResolver,
   context: RouteContext,
 ): Promise<AgentToolCaller> {
-  // Only a session-shaped bearer is one: this route has always ignored any other `Authorization` value.
-  const bearer = bearerToken(headerValue(context.request, 'authorization'));
-  const presented = isSessionCredential(bearer) ? bearer : undefined;
-  const header = headerValue(context.request, AGENT_SESSION_CAPABILITY_HEADER)?.trim() ?? '';
-  if (presented !== undefined && header !== '' && !secretsMatch(presented, header)) {
+  const presented = presentedSessionCapability(context.request);
+  if (presented.kind === 'two-different') {
     await service.refusedCaller('two different session credentials');
-    throw new ApiError(
-      401,
-      `this request carries two different session credentials, as a bearer and in ${AGENT_SESSION_CAPABILITY_HEADER}; send one`,
-      'unauthorized',
-    );
+    throw new ApiError(401, TWO_SESSION_CREDENTIALS, 'unauthorized');
   }
-  const capability = presented ?? header;
+  const capability = presented.kind === 'one' ? presented.capability : '';
   if (capability === '') {
     await service.refusedCaller('no session credential');
     throw new ApiError(

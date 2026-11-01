@@ -24,7 +24,7 @@ import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter, headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
+import { decodeParameter, type ApiRequest, type ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
@@ -38,7 +38,7 @@ import {
   type Proposal,
   type Tombstone,
 } from '../../learning/index.ts';
-import { AGENT_SESSION_CAPABILITY_HEADER } from './agent-tools.ts';
+import { presentedSessionCapability, TWO_SESSION_CREDENTIALS } from './agent-tools.ts';
 
 /**
  * The learning subsystem's REVIEW surface: what evidence the daemon holds, which rules that evidence
@@ -370,7 +370,10 @@ function refuseLessons<T>(work: () => T): T {
  * call can name neither.
  */
 async function agentSuggest(subsystem: LearningSubsystem, context: RouteContext): Promise<ApiResponse> {
-  const capability = headerValue(context.request, AGENT_SESSION_CAPABILITY_HEADER)?.trim() ?? '';
+  // A `fys_` bearer or the older header, exactly as the agent tools take it.
+  const presented = presentedSessionCapability(context.request);
+  if (presented.kind === 'two-different') throw new ApiError(401, TWO_SESSION_CREDENTIALS, 'unauthorized');
+  const capability = presented.kind === 'one' ? presented.capability : '';
   const identity = capability === '' ? undefined : await subsystem.identities.resolve(capability);
   if (identity === undefined) {
     const missing = capability === '';
@@ -543,7 +546,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'PATCH',
       path: '/v1/learning/config',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context =>

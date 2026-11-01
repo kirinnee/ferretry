@@ -2036,6 +2036,23 @@ describe('a ferret session credential at the boundary', () => {
     ]);
   });
 
+  it('should never serve a person route through the public shortcut, even one that needs no credential', async () => {
+    // Arrange — a route that says both `none` and `person`: the shortcut would answer it without asking who.
+    const { dispatcher } = served({ ...echo('/v1/open', 'none'), caller: 'person' });
+
+    // Act
+    const ferret = await dispatcher.dispatch(asSession('/v1/open', S1));
+    const stranger = await dispatcher.dispatch(request({ path: '/v1/open', loopback: true }));
+    const owner = await dispatcher.dispatch(
+      request({ path: '/v1/open', loopback: true, headers: { authorization: 'Bearer admin-secret' } }),
+    );
+
+    // Assert
+    should([ferret.status, jsonBody(ferret).code]).deepEqual([403, 'owner_only']);
+    should(stranger.status).equal(401);
+    should(owner.status).equal(200);
+  });
+
   it('should refuse the admin token naming a ferret’s session on a person route, and serve it bare', async () => {
     // The honest-client fallback for a pane without its own credential: one predicate, the same refusal.
     // Arrange

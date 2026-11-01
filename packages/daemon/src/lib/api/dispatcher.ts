@@ -419,9 +419,11 @@ function claimFreshStepUp(device: RouteContext['request']['device'], stepUps: St
 
 /**
  * Whether a route is served before authentication is attempted — the public shortcut. One that declares
- * a warden remedy is not: it asks for a check the shortcut would skip past.
+ * a warden remedy is not: it asks for a check the shortcut would skip past. Nor is a `person` route: the
+ * shortcut never asks who is calling, so it would serve a ferret the very route that refuses one.
  */
-const servedPublicly = (route: ScopedRoute): boolean => route.minimum === 'none' && route.wardenRemedy === undefined;
+const servedPublicly = (route: ScopedRoute): boolean =>
+  route.minimum === 'none' && route.wardenRemedy === undefined && route.caller === 'any';
 
 /**
  * The asynchronous half of authentication: what the session directory says about a session-shaped bearer.

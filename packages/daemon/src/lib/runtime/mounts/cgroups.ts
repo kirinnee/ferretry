@@ -82,7 +82,7 @@ export function cgroupRoutes(subsystem: CgroupSubsystem): readonly ApiRoute[] {
       method: 'PATCH',
       path: '/v1/cgroups/config',
       minimum: 'operator',
-      caller: 'any',
+      caller: 'person',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context => await patchConfig(subsystem, context),

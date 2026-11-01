@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { z } from 'zod';
 import { AgendaActionRequestSchema, AgendaItemSchema, agendaOfferCloseProblems } from '../../src/lib/agenda.ts';
 import * as boardModule from '../../src/lib/board.ts';
 import {
@@ -56,6 +57,7 @@ import {
   taskIdPrefix,
 } from '../../src/lib/board.ts';
 import { LANE_TEMPLATES, type LaneSet, LaneSetSchema } from '../../src/lib/board-lanes.ts';
+import { BoardActorViaSchema } from '../../src/lib/board-refs.ts';
 import { DAEMON_FEATURES, daemonFeatureList } from '../../src/lib/daemon-features.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
@@ -824,5 +826,60 @@ describe('agenda seam', () => {
   it('should gate an offer to close on a daemon feature', () => {
     should(DAEMON_FEATURES.agendaOfferClose).equal('agenda.offer-close.1');
     should(daemonFeatureList()).containEql('agenda.offer-close.1');
+  });
+});
+
+describe('the admin-token label, read by an older reader', () => {
+  /** The actor union as every build before the label read it: closed, strict, three members. */
+  const OLDER_ACTOR = z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('ferret'), sessionId: z.string().min(1) }),
+    z.strictObject({ kind: z.literal('owner'), sessionId: z.string().min(1).optional() }),
+    z.strictObject({ kind: z.literal('daemon'), sessionId: z.string().min(1).optional() }),
+  ]);
+  /** An older note event, card and clarification: plain objects around that actor, with no label field. */
+  const OLDER_NOTE = z.object({
+    seq: z.number(),
+    at: z.string(),
+    actor: OLDER_ACTOR,
+    type: z.literal('note'),
+    text: z.string(),
+  });
+  const OLDER_CARD_HEAD = z.object({ id: z.string(), createdBy: OLDER_ACTOR });
+  const OLDER_CLARIFICATION = z.object({ text: z.string(), source: z.string(), at: z.string(), by: OLDER_ACTOR });
+
+  it('should write the label beside an actor an older reader parses, so it reads the act as the owner’s', () => {
+    // Arrange — what an updated daemon writes for a call on the admin token with no ferret's credential.
+    const note = BoardTaskEventSchema.parse({
+      ...event(2, { type: 'note', text: 'checked' }),
+      actor: OWNER,
+      actorVia: 'admin-token',
+    });
+    const card = BoardTaskSchema.parse({ ...CARD, createdBy: OWNER, createdByVia: 'admin-token' });
+    const clarification = BoardClarificationSchema.parse({
+      text: 'and tablets',
+      source: 'cli',
+      at: INSTANT,
+      by: OWNER,
+      byVia: 'admin-token',
+    });
+
+    // Act — an older app, CLI or a downgraded daemon reading the same documents.
+    const olderNote = OLDER_NOTE.parse(note);
+    const olderCard = OLDER_CARD_HEAD.parse(card);
+    const olderClarification = OLDER_CLARIFICATION.parse(clarification);
+
+    // Assert — nothing is refused, the unknown label is dropped, and the actor is the owner it always was.
+    should(note).match({ actor: OWNER, actorVia: 'admin-token' });
+    should(olderNote).not.have.property('actorVia');
+    should(olderNote.actor).deepEqual(OWNER);
+    should(olderCard).deepEqual({ id: CARD.id, createdBy: OWNER });
+    should(olderClarification).not.have.property('byVia');
+  });
+
+  it('should keep the actor union closed: a label is never a new actor kind', () => {
+    // Assert — the very thing an older reader would refuse a whole board over.
+    should(BoardActorSchema.safeParse({ kind: 'admin-token' }).success).be.false();
+    should(BoardActorViaSchema.safeParse('admin-token').success).be.true();
+    should(BoardActorViaSchema.safeParse('owner').success).be.false();
   });
 });

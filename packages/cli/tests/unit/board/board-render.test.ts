@@ -459,7 +459,7 @@ describe('renderCard', () => {
         event({ seq: 3, type: 'note', text: 'started', actor: { kind: 'owner' } }),
         event({ seq: 4, type: 'note', text: 'from chat', actor: { kind: 'owner', sessionId: KIRIN } }),
         event({ seq: 5, type: 'blocked', reason: 'vendor', actor: { kind: 'daemon' } }),
-        event({ seq: 6, type: 'note', text: 'checked', actor: { kind: 'admin-token' } }),
+        event({ seq: 6, type: 'note', text: 'checked', actor: { kind: 'owner' }, actorVia: 'admin-token' }),
       ],
     });
 

@@ -1023,6 +1023,32 @@ describe('the lessons mount', () => {
       should(subject.store.observations.map(entry => entry.sessionId)).deepEqual([LESSON_SESSION]);
     });
 
+    it('should take the credential as an Authorization bearer too, as the agent tools do', async () => {
+      // Arrange — a credential in the shape every launch now mints, resolving to the same session.
+      const bearer = `fys_${'l'.repeat(43)}`;
+      const subject = lessons([], []);
+      subject.world.sessions.sessions = [lessonFacts({ sessionId: LESSON_SESSION })];
+      const subsystem = {
+        ...subject.subsystem,
+        identities: {
+          resolve: async (capability: string) => (capability === bearer ? { sessionId: LESSON_SESSION } : undefined),
+        },
+      };
+
+      // Act
+      const filed = await drive(subsystem, file({ authorization: `Bearer ${bearer}` }), AGENT);
+      const two = await drive(
+        subsystem,
+        file({ authorization: `Bearer ${bearer}`, [AGENT_SESSION_CAPABILITY_HEADER]: LESSON_CAPABILITY }),
+        AGENT,
+      );
+
+      // Assert
+      should(filed.status).equal(200);
+      should(subject.store.observations.map(entry => entry.sessionId)).deepEqual([LESSON_SESSION]);
+      should([two.status, two.body.code]).deepEqual([401, 'unauthorized']);
+    });
+
     it('should answer 404 when the credential names a session the daemon no longer holds', async () => {
       // Arrange / Act
       const answer = await drive(
