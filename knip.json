@@ -48,6 +48,7 @@
         "harness/catalogs-share-screenshot.tsx",
         "harness/shared-screenshot.tsx",
         "harness/screenshot.ts",
+        "harness/cred-cards-screenshot.tsx",
         "harness/agenda-question-answer-screenshot.tsx",
         "harness/work-search-screenshot.tsx",
         "harness/agenda-cards-screenshot.ts",
