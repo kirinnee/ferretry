@@ -82,8 +82,8 @@ export const SIGN_IN_RULE_MAX_SECONDS = SIGN_IN_RULE_MAX_DAYS * DAY_SECONDS;
 /** The shortest a rule may last. */
 export const SIGN_IN_RULE_MIN_SECONDS = 3_600;
 /**
- * How far ahead of this machine's clock a rule may say it was created: clock skew between the stage and the parse.
- * Further ahead would let a rule reach past 90 days from now, the bound a rolled-back file relies on.
+ * How far ahead of the clock a rule may say it was created ({@link signInRuleClockProblems}): skew between the stage
+ * and the check. Further ahead would let a rule reach past 90 days from now, the bound a rolled-back file relies on.
  */
 export const SIGN_IN_RULE_CLOCK_SKEW_SECONDS = 300;
 /** The optional use cap's ceiling. Absent: no count (the expiry, the hourly rate and the log still bound it). */
@@ -163,14 +163,11 @@ interface SignInRuleBodyFacts {
 }
 
 /**
- * What a rule body may not be: the one check behind the schema, the canonical bytes and the tests. `now` is this
- * machine's clock: a body created further ahead of it than {@link SIGN_IN_RULE_CLOCK_SKEW_SECONDS} is refused, so the
- * schema reads the clock. A stored rule only grows older, so it keeps parsing; a clock set back further than the skew
- * fails closed (the document reads as no rules) until the clock is right again.
+ * What a rule body may not be: the one check behind the schema, the canonical bytes and the tests. Clock-free: it reads
+ * the body alone. Whether the body is from the future is {@link signInRuleClockProblems}, which takes the clock.
  */
-export const signInRuleBodyProblems = (body: SignInRuleBodyFacts, now: number = Date.now()): readonly string[] => {
+export const signInRuleBodyProblems = (body: SignInRuleBodyFacts): readonly string[] => {
   const lifetime = (Date.parse(body.expiresAt) - Date.parse(body.createdAt)) / 1_000;
-  const ahead = (Date.parse(body.createdAt) - now) / 1_000;
   const totp = body.fields.includes('totp');
   return [
     ...(unique(body.fields) ? [] : ['a rule names each field once']),
@@ -186,10 +183,20 @@ export const signInRuleBodyProblems = (body: SignInRuleBodyFacts, now: number = 
     ...(Number.isFinite(lifetime) && lifetime <= SIGN_IN_RULE_MAX_SECONDS
       ? []
       : [`a rule lasts at most ${String(SIGN_IN_RULE_MAX_DAYS)} days`]),
-    ...(Number.isFinite(ahead) && ahead <= SIGN_IN_RULE_CLOCK_SKEW_SECONDS
-      ? []
-      : ['a rule is never created in the future']),
   ];
+};
+
+/**
+ * What a rule body may not be AT `now`: created further ahead of the clock than {@link SIGN_IN_RULE_CLOCK_SKEW_SECONDS},
+ * which would let it reach past 90 days from now. Pure: the caller hands in its clock. The daemon refuses such a body
+ * when it stages and commits a rule, and suspends one it loads (R3c-3); the schema never reads a clock, so a stored
+ * document parses the same way at any time.
+ */
+export const signInRuleClockProblems = (body: { readonly createdAt: string }, now: number): readonly string[] => {
+  const ahead = (Date.parse(body.createdAt) - now) / 1_000;
+  return Number.isFinite(ahead) && ahead <= SIGN_IN_RULE_CLOCK_SKEW_SECONDS
+    ? []
+    : ['a rule is never created in the future'];
 };
 
 /**

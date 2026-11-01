@@ -1340,8 +1340,9 @@ ships, a placement without a tap happens only under a task plan line, as above. 
 - **Pinned facts are signed.** The account's key, handle and username, the login domains, the recipe version, the
   field identities the owner's own taps have history with (required: a rule never pins a new form) and a fingerprint
   of the account's 2FA keys (`factorFingerprint`: ids, kinds and whether Ferretry makes the codes, never `verified`).
-  Lifetime is between one hour and 90 days, inside the signed body; a body created more than 5 minutes ahead of the
-  clock is refused, and a rule is in force only between its signed start and end. A staged rule names its account and
+  Lifetime is between one hour and 90 days, inside the signed body. The schema never reads a clock; the daemon will check (R3c-3)
+  `signInRuleClockProblems(body, now)` (a body created more than 5 minutes ahead is refused) as it stages, commits
+  and loads a rule, and a rule is in force only between its signed start and end. A staged rule names its account and
   place as fields, so the passkey dialog never learns which sign-in it is from (clippable) summary words alone.
 - **The rest only narrows.** The record's unsigned overlay (suspension, narrowing, usage) is refused if it would widen
   the body, and a document that does not parse strictly means no rule at all.

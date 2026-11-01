@@ -868,24 +868,37 @@ describe('standing sign-in rules: review fixes (secrev-1271)', () => {
   });
 
   // L4: a rule is never in force outside its signed window, so it never reaches past 90 days from now.
-  it('should refuse a rule created in the future, beyond a small clock skew', () => {
-    // Arrange
-    const at = (seconds: number): string => new Date(Date.now() + seconds * 1_000).toISOString();
-    const startingIn = (seconds: number): SignInRuleBody =>
-      body({ createdAt: at(seconds), expiresAt: at(seconds + 30 * 86_400) });
+  it('should refuse a rule created in the future, beyond a small clock skew, at the clock it is handed', () => {
+    // Arrange — every time is fixed: the check takes its clock, and nothing here reads the machine's
+    const created = Date.parse(CREATED);
+    const SKEW = rules.SIGN_IN_RULE_CLOCK_SKEW_SECONDS * 1_000;
 
     // Act / Assert
     should(rules.SIGN_IN_RULE_CLOCK_SKEW_SECONDS).equal(300);
-    should(SignInRuleBodySchema.safeParse(startingIn(-60)).success).be.true();
-    should(SignInRuleBodySchema.safeParse(startingIn(60)).success).be.true();
-    should(SignInRuleBodySchema.safeParse(startingIn(rules.SIGN_IN_RULE_CLOCK_SKEW_SECONDS + 60)).success).be.false();
-    should(SignInRuleBodySchema.safeParse(startingIn(86_400)).success).be.false();
-    should(canonicalSignInRule(startingIn(86_400)).ok).be.false();
-    should(SignInRuleRecordSchema.safeParse(record({ body: startingIn(86_400) })).success).be.false();
-    // The check reads the clock it is given, so the same body is judged the same way at the same moment.
-    const later = Date.parse(CREATED) - 3_600_000;
-    should(rules.signInRuleBodyProblems(body(), later)).containEql('a rule is never created in the future');
-    should(rules.signInRuleBodyProblems(body(), Date.parse(CREATED))).deepEqual([]);
+    should(rules.signInRuleClockProblems(body(), created + HOUR)).deepEqual([]);
+    should(rules.signInRuleClockProblems(body(), created)).deepEqual([]);
+    should(rules.signInRuleClockProblems(body(), created - SKEW)).deepEqual([]);
+    should(rules.signInRuleClockProblems(body(), created - SKEW - 1_000)).deepEqual([
+      'a rule is never created in the future',
+    ]);
+    should(rules.signInRuleClockProblems(body(), created - 86_400_000)).deepEqual([
+      'a rule is never created in the future',
+    ]);
+    should(rules.signInRuleClockProblems({ createdAt: 'not a time' }, created)).deepEqual([
+      'a rule is never created in the future',
+    ]);
+  });
+
+  it('should keep the body schema clock-free, so a stored document parses the same way at any time', () => {
+    // Arrange — a body created a year after these fixtures, which the clock check refuses
+    const ahead = body({ createdAt: '2027-11-01T14:00:00.000Z', expiresAt: '2027-12-01T14:00:00.000Z' });
+
+    // Act / Assert — the schema, the canonical bytes and the record never consult a clock; the daemon's check does
+    should(SignInRuleBodySchema.safeParse(ahead).success).be.true();
+    should(canonicalSignInRule(ahead).ok).be.true();
+    should(SignInRuleRecordSchema.safeParse(record({ body: ahead })).success).be.true();
+    should(rules.signInRuleBodyProblems(ahead)).deepEqual([]);
+    should(rules.signInRuleClockProblems(ahead, Date.parse(CREATED))).not.be.empty();
   });
 
   it('should read a rule as not in force before its own start', () => {
