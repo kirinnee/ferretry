@@ -59,6 +59,12 @@ export interface AuditedRouteRule {
    */
   readonly responseFields?: Readonly<Record<string, readonly string[]>>;
   /**
+   * A success is recorded only when this top-level field of the JSON answer holds this word: one-tap Add answers
+   * `review` or `already` with a 2xx and changed nothing, so there is nothing to record. A refusal or an error is
+   * always recorded.
+   */
+  readonly recordOnlyWhen?: { readonly field: string; readonly equals: string };
+  /**
    * A top-level field of a successful JSON response holding a configuration file PATH, copied into `detail.kind`
    * as the file's KIND only (`warden`, `login`, `accountDefaults` …) — never the path or the name in it, which a
    * person chose. A path that is not one the daemon classifies adds nothing.
@@ -593,6 +599,28 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   },
   {
     method: 'POST',
+    path: '/v1/catalog-items/quick-add',
+    event: 'catalog.changed',
+    detail: { action: 'publish' },
+    recordOnlyWhen: { field: 'outcome', equals: 'added' },
+    responseFields: {
+      catalogId: ['catalog', 'catalogId'],
+      itemId: ['itemId'],
+      itemVersion: ['itemVersion'],
+      digest: ['digest'],
+      revision: ['catalog', 'revision'],
+      created: ['catalog', 'created'],
+    },
+  },
+  {
+    method: 'POST',
+    path: '/v1/catalog-items/quick-add/undo',
+    event: 'catalog.changed',
+    detail: { action: 'undo' },
+    responseFields: { catalogId: ['catalogId'], itemId: ['itemId'], revision: ['revision'], mode: ['mode'] },
+  },
+  {
+    method: 'POST',
     path: '/v1/catalogs/:id/export',
     event: 'catalog.exported',
     subject: 'id',
@@ -819,12 +847,28 @@ function audited(subsystem: AuditedRoutesSubsystem, route: ApiRoute, rule: Audit
         // A record that throws would turn a request that already WORKED into a 500 from here, and the
         // person would retry something that happened. `AuditLog` already reports its own failures; this
         // catches what is left — a device-name lookup, a sink that is not an `AuditLog`.
-        await record(subsystem, context, rule, { status, body, subject, subjectName, code }).catch((error: unknown) =>
-          subsystem.failures.auditWriteFailed(describeFailure(rule, error)),
-        );
+        if (!changedNothing(rule, status, body))
+          await record(subsystem, context, rule, { status, body, subject, subjectName, code }).catch((error: unknown) =>
+            subsystem.failures.auditWriteFailed(describeFailure(rule, error)),
+          );
       }
     },
   };
+}
+
+/** A 2xx answer a rule says changed nothing (`recordOnlyWhen`): not an act, so not recorded. */
+function changedNothing(rule: AuditedRouteRule, status: number | undefined, body: string | undefined): boolean {
+  if (rule.recordOnlyWhen === undefined || auditOutcomeOf(status) !== 'succeeded') return false;
+  try {
+    const parsed: unknown = JSON.parse(body ?? '');
+    const found =
+      typeof parsed === 'object' && parsed !== null
+        ? (parsed as Record<string, unknown>)[rule.recordOnlyWhen.field]
+        : undefined;
+    return found !== rule.recordOnlyWhen.equals;
+  } catch {
+    return true;
+  }
 }
 
 interface Answer {
@@ -969,9 +1013,13 @@ function fieldsIn(
 ): AuditDetail | undefined {
   try {
     const parsed: unknown = JSON.parse(body ?? '');
-    const detail: Record<string, string | number> = {};
+    const detail: Record<string, string | number | boolean> = {};
     for (const [key, path] of Object.entries(fields)) {
       const found = valuesAt(parsed, path);
+      if (found.length === 1 && typeof found[0] === 'boolean') {
+        detail[key] = found[0];
+        continue;
+      }
       const texts = found.filter((entry): entry is string => typeof entry === 'string' && IDENTIFIER.test(entry));
       const numbers = found.filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry));
       if (numbers.length === 1 && found.length === 1) detail[key] = numbers[0] as number;

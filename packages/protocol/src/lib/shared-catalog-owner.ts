@@ -331,3 +331,95 @@ export const ExportCatalogRequestSchema = z.strictObject({
   itemIds: z.array(SharedCatalogItemIdSchema).min(1).max(200).optional(),
 });
 export type ExportCatalogRequest = z.infer<typeof ExportCatalogRequestSchema>;
+
+// ── One-tap Add, and Undo ────────────────────────────────────────────────────────────────────────
+
+/** How long the daemon keeps the Undo of a one-tap Add, in seconds. The app's own toast is shorter. */
+export const QUICK_ADD_UNDO_SECONDS = 60;
+
+/** `POST /v1/catalog-items/quick-add`. */
+export const QUICK_ADD_PATH = `${CATALOG_ITEMS_PATH}/quick-add`;
+
+/** `POST /v1/catalog-items/quick-add/undo`. */
+export const QUICK_ADD_UNDO_PATH = `${QUICK_ADD_PATH}/undo`;
+
+/**
+ * What the frozen candidate of a one-tap Add shows, before it is listed anywhere: the preview of an item with no
+ * catalog of its own yet. `digest` is the content digest, the same value the catalog's own preview answers.
+ */
+export const SharedItemPreviewSchema = CatalogItemPreviewSchema.omit({ catalogId: true });
+export type SharedItemPreview = z.infer<typeof SharedItemPreviewSchema>;
+
+/**
+ * `POST /v1/catalog-items/quick-add`: a source this machine has not shared yet, or an item it already keeps. There is
+ * NO field for "this is clean": the daemon reads the source once, decides for itself and answers `review` when
+ * anything wants a person's eyes.
+ */
+export const QuickAddRequestSchema = z.union([
+  z.strictObject({ source: CatalogItemSourceSchema }),
+  z.strictObject({ itemId: SharedCatalogItemIdSchema }),
+]);
+export type QuickAddRequest = z.infer<typeof QuickAddRequestSchema>;
+
+/** The token of an Undo: 128 random bits, valid for {@link QUICK_ADD_UNDO_SECONDS} and good once. */
+export const QuickAddUndoTokenSchema = z.string().regex(/^cqu_[A-Za-z0-9_-]{22}$/u);
+export type QuickAddUndoToken = z.infer<typeof QuickAddUndoTokenSchema>;
+
+/**
+ * What a one-tap Add did. `added` (201) wrote the default catalog; `already` (200) found it listed there; `review`
+ * (200) wrote NOTHING: a warning, a file left out, a missing summary, or an existing version with warnings means a
+ * person reads it first, and `preview` is what they read (absent only when the one reason is `needs-summary`).
+ */
+export const QuickAddAnswerSchema = z.discriminatedUnion('outcome', [
+  z.strictObject({
+    outcome: z.literal('added'),
+    catalog: z.strictObject({
+      catalogId: SharedCatalogIdSchema,
+      name: CatalogLabelSchema,
+      revision: z.number().int().min(1),
+      /** True when this tap made the default catalog. */
+      created: z.boolean(),
+    }),
+    itemId: SharedCatalogItemIdSchema,
+    itemVersion: z.number().int().min(1),
+    /** The digest the default catalog's signed manifest lists. */
+    digest: CatalogDigestSchema,
+    newItem: z.boolean(),
+    /** The source has changed since the version added was frozen; nothing new was published. */
+    sourceChanged: z.boolean(),
+    undo: z.strictObject({ token: QuickAddUndoTokenSchema, expiresAt: InstantSchema }),
+  }),
+  z.strictObject({
+    outcome: z.literal('already'),
+    catalogId: SharedCatalogIdSchema,
+    itemId: SharedCatalogItemIdSchema,
+    itemVersion: z.number().int().min(1),
+  }),
+  z.strictObject({
+    outcome: z.literal('review'),
+    reasons: z
+      .array(z.enum(['warnings', 'problems', 'needs-summary']))
+      .min(1)
+      .readonly(),
+    preview: SharedItemPreviewSchema.optional(),
+  }),
+]);
+export type QuickAddAnswer = z.infer<typeof QuickAddAnswerSchema>;
+
+/** `POST /v1/catalog-items/quick-add/undo`. */
+export const QuickAddUndoRequestSchema = z.strictObject({ token: QuickAddUndoTokenSchema });
+export type QuickAddUndoRequest = z.infer<typeof QuickAddUndoRequestSchema>;
+
+/**
+ * What Undo did: `retracted` took the item out as if it had never been listed (nobody had been shown that revision);
+ * `withdrawn` is the ordinary withdrawal, kept as a record, because a member may already have read it.
+ */
+export const QuickAddUndoneSchema = z.strictObject({
+  catalogId: SharedCatalogIdSchema,
+  itemId: SharedCatalogItemIdSchema,
+  mode: z.enum(['retracted', 'withdrawn']),
+  revision: z.number().int().min(1),
+  /** The item itself was dropped from the store too: this tap had made it and no catalog lists it any more. */
+  itemRemoved: z.boolean(),
+});
+export type QuickAddUndone = z.infer<typeof QuickAddUndoneSchema>;

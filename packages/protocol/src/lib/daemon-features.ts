@@ -157,6 +157,12 @@ export const DAEMON_FEATURES = {
    * without this name answers 404 or refuses the strict body: the app offers these only where the machine reports it.
    */
   catalogItems: 'catalogs.items.1',
+  /**
+   * One-tap Add into the default catalog, and its Undo (docs/catalogs.md § One-tap Add):
+   * `POST /v1/catalog-items/quick-add` and `…/quick-add/undo`. A daemon without this name answers 404: the app offers
+   * the one-tap button only where the machine reports it, and opens the review sheet otherwise.
+   */
+  catalogQuickAdd: 'catalogs.quick-add.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

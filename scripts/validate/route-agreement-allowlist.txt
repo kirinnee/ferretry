@@ -130,3 +130,5 @@ unreached DELETE /v1/sign-in-rules/stages/:stage # TEMPORARY (&F291 R3c-3): Deny
 unreached POST /v1/sign-in-rules/:id/narrow # TEMPORARY (&F291 R3c-3): `fy rules narrow` (R3c-5) and the narrow sheet (R3c-6)
 unreached DELETE /v1/sign-in-rules/:id # TEMPORARY (&F291 R3c-3): `fy rules rm` (R3c-5) and a Settings row's Revoke (R3c-6)
 unreached POST /v1/accounts/:id/sign-in-rules/revoke # TEMPORARY (&F291 R3c-3): `fy rules rm --account` (R3c-5) and the site panel (R3c-6)
+unreached POST /v1/catalog-items/quick-add # CORRECT: the one-tap Add is a daemon-first slice (catalogs 3c-3); the app's Add button dials it in the next slice
+unreached POST /v1/catalog-items/quick-add/undo # CORRECT: the one-tap Add's Undo is a daemon-first slice (catalogs 3c-3); the app's Undo toast dials it in the next slice

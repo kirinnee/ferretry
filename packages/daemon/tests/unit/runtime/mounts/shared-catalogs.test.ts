@@ -14,6 +14,7 @@ import { agentIn, CREDENTIALS, fromFerret, GRANTED, human } from './support.ts';
 const CAT = `cat_${'A'.repeat(22)}`;
 const ITEM = `itm_${'B'.repeat(22)}`;
 const DIGEST = `sha256:${'c'.repeat(64)}`;
+const UNDO = `cqu_${'u'.repeat(22)}`;
 
 type Calls = string[];
 
@@ -37,6 +38,8 @@ function stubbed(failWith?: CatalogRefusalCode) {
     publishVersion: act('publishVersion'),
     withdraw: act('withdraw'),
     exportCatalog: act('exportCatalog'),
+    quickAdd: act('quickAdd'),
+    undoQuickAdd: act('undoQuickAdd'),
   } as unknown as SharedCatalogSubsystem['catalogs'];
   const dispatch = new ApiDispatcher(new ApiRouter(sharedCatalogRoutes({ catalogs })), CREDENTIALS, GRANTED);
   return { calls, dispatch };
@@ -68,10 +71,13 @@ const WRITES: readonly (readonly [string, string, unknown])[] = [
   ['POST', `/v1/catalogs/${CAT}/items/${ITEM}/versions`, { digest: DIGEST }],
   ['DELETE', `/v1/catalogs/${CAT}/items/${ITEM}`, undefined],
   ['POST', `/v1/catalogs/${CAT}/export`, {}],
+  ['POST', '/v1/catalog-items/quick-add', { source: { kind: 'skill', skill: 'demo' } }],
+  ['POST', '/v1/catalog-items/quick-add', { itemId: ITEM }],
+  ['POST', '/v1/catalog-items/quick-add/undo', { token: UNDO }],
 ];
 
 describe('the shared catalogs routes', () => {
-  it('should serve ten routes, all behind sharing/use', () => {
+  it('should serve twelve routes, all behind sharing/use', () => {
     const routes = sharedCatalogRoutes(stubbed().dispatch as never as SharedCatalogSubsystem);
     should(routes.map(route => `${route.method} ${route.path}`)).deepEqual([
       'GET /v1/catalogs',
@@ -83,6 +89,8 @@ describe('the shared catalogs routes', () => {
       'POST /v1/catalogs/:id/items',
       'POST /v1/catalogs/:id/items/:itemId/versions',
       'DELETE /v1/catalogs/:id/items/:itemId',
+      'POST /v1/catalog-items/quick-add',
+      'POST /v1/catalog-items/quick-add/undo',
       'POST /v1/catalogs/:id/export',
     ]);
     for (const route of routes) should(route.capability).deepEqual({ capability: 'sharing', axis: 'use' });
@@ -93,7 +101,7 @@ describe('the shared catalogs routes', () => {
     const statuses: number[] = [];
     for (const [method, path, body] of WRITES)
       statuses.push((await dispatch.dispatch(call(method, path, body))).status);
-    should(statuses).deepEqual([201, 200, 200, 201, 200, 201, 201, 200, 200]);
+    should(statuses).deepEqual([201, 200, 200, 201, 200, 201, 201, 200, 200, 200, 200, 200]);
     const listed = await dispatch.dispatch(call('GET', '/v1/catalogs'));
     should(listed.status).equal(200);
     const previewed = await dispatch.dispatch(
@@ -103,7 +111,45 @@ describe('the shared catalogs routes', () => {
     should(
       (await dispatch.dispatch(call('GET', '/v1/catalog-items', undefined, human, [['sourceState', '1']]))).status,
     ).equal(200);
-    should(calls).have.length(12);
+    should(calls).have.length(15);
+  });
+
+  it('should answer 201 for a quick add that added, 200 for one that did not, and tie Undo to the caller', async () => {
+    const answers: unknown[] = [{ outcome: 'added' }, { outcome: 'already' }, { outcome: 'review' }];
+    const seen: string[] = [];
+    const catalogs = {
+      quickAdd: async (caller: string) => {
+        seen.push(caller);
+        return answers.shift();
+      },
+      undoQuickAdd: async (caller: string, token: string) => {
+        seen.push(`${caller} ${token}`);
+        return { ok: true };
+      },
+    } as unknown as SharedCatalogSubsystem['catalogs'];
+    const dispatch = new ApiDispatcher(new ApiRouter(sharedCatalogRoutes({ catalogs })), CREDENTIALS, GRANTED);
+    const body = { source: { kind: 'skill', skill: 'demo' } };
+
+    const statuses = [
+      (await dispatch.dispatch(call('POST', '/v1/catalog-items/quick-add', body))).status,
+      (await dispatch.dispatch(call('POST', '/v1/catalog-items/quick-add', body))).status,
+      (await dispatch.dispatch(call('POST', '/v1/catalog-items/quick-add', body))).status,
+    ];
+    await dispatch.dispatch(call('POST', '/v1/catalog-items/quick-add/undo', { token: UNDO }));
+
+    should(statuses).deepEqual([201, 200, 200]);
+    should(seen).deepEqual(['host', 'host', 'host', `host ${UNDO}`]);
+  });
+
+  it('should refuse a bad Undo token and a quick add that claims to be clean, with nothing called', async () => {
+    const { dispatch, calls } = stubbed();
+    const bad = await dispatch.dispatch(call('POST', '/v1/catalog-items/quick-add/undo', { token: 'nope' }));
+    const claimed = await dispatch.dispatch(
+      call('POST', '/v1/catalog-items/quick-add', { source: { kind: 'skill', skill: 'demo' }, clean: true }),
+    );
+    should(bad.status).be.within(400, 422);
+    should(claimed.status).be.within(400, 422);
+    should(calls).deepEqual([]);
   });
 
   it('should check the sources only when the list is asked with sourceState=1', async () => {
@@ -202,6 +248,7 @@ describe('the shared catalogs routes', () => {
       store_damaged: 500,
       export_failed: 500,
       export_too_big: 413,
+      undo_expired: 410,
     };
     for (const [code, status] of Object.entries(expected)) {
       const { dispatch } = stubbed(code as CatalogRefusalCode);

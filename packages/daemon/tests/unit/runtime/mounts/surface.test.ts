@@ -949,7 +949,7 @@ describe('the mounted daemon surface', () => {
       11 + // standing sign-in rules: the list, eligibility, a stage, its read, confirm-in-app, a device taking a machine stage, the kept-proof commit and drop, narrow, revoke one and revoke an account's (docs/secrets.md)
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
       7 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
-      10 + // the catalogs this machine publishes: list, the items across them, make, change, delete, preview, add, publish, withdraw and export (docs/catalogs.md)
+      12 + // the catalogs this machine publishes: list, the items across them, make, change, delete, preview, add, publish, withdraw, one-tap Add and its Undo, and export (docs/catalogs.md)
       8 + // the people a catalog is shared with: mint, list and end a share; list, rename, revoke a member, remove a browser or a catalog (docs/catalogs.md)
       2; // the shared draft: the owner's unsent composer, read and edited from any of their own devices (&F331)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
@@ -1149,6 +1149,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/catalogs/:id/items',
       'POST /v1/catalogs/:id/items/:itemId/versions',
       'DELETE /v1/catalogs/:id/items/:itemId',
+      'POST /v1/catalog-items/quick-add',
+      'POST /v1/catalog-items/quick-add/undo',
       'POST /v1/catalogs/:id/export',
       'POST /v1/catalog-shares',
       'GET /v1/catalog-shares',
