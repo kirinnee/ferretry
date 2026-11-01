@@ -1,4 +1,5 @@
 import { afterAll, describe, it } from 'bun:test';
+import { WorkingDirectory } from '@ferretry/fleet/adapters';
 import { unlinkSync } from 'node:fs';
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -47,6 +48,24 @@ async function refusalOf(act: () => Promise<unknown>): Promise<unknown> {
 }
 
 describe('the pinner that installs the held directory, when the kernel disagrees mid-request', () => {
+  it('should refuse to install once the working directory it shares could not be restored', async () => {
+    // Arrange — the process's working directory, shared with the provisioner's destination side, after a restore that
+    // failed there (the fall back to `/` is a no-op here, so this test process does not move).
+    const root = await fixture('fault-shared-broken');
+    const directory = new WorkingDirectory(reason => {
+      throw new Error(`stopped: ${reason}`);
+    });
+    directory.restore(fd => (fd === -7 ? -1 : 0), -7);
+    const pinner = new PosixSessionRootPinner(loadDirectorySyscalls, NODE_PIN_FILE_CALLS, directory);
+
+    // Act
+    const error = await refusalOf(async () => await pinner.pin(root));
+
+    // Assert — refused before anything is installed, saying why.
+    should((error as FsError).code).equal('denied');
+    should((error as Error).message).match(/the working directory could not be restored/u);
+  });
+
   it('should give the working directory back when a bracket cannot prove it holds the directory it installed', async () => {
     // Arrange: a pin made honestly, then a runtime whose `.` starts naming some other directory.
     const root = await fixture('fault-prove');

@@ -771,7 +771,7 @@ export interface GuardFolderOptions {
 }
 
 const isOneEntry = (name: string): boolean =>
-  name !== '' && name !== '.' && name !== '..' && !name.includes('/') && !name.includes(sep);
+  name !== '' && name !== '.' && name !== '..' && !name.includes('/') && !name.includes(sep) && !name.includes('\0');
 
 const codeOf = (error: unknown): string | undefined => (error as { readonly code?: string } | undefined)?.code;
 

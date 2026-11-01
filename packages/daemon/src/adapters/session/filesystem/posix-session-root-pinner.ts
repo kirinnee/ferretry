@@ -31,6 +31,7 @@ import {
   type WorkBudget,
 } from '../../../lib/session/filesystem/index.ts';
 import type { PinnedWorkingDirectory } from '../../../lib/worktrees/ports.ts';
+import { PROCESS_WORKING_DIRECTORY, type WorkingDirectory } from '@ferretry/fleet/adapters';
 import { type DirectorySyscalls, loadDirectorySyscalls } from './directory-syscalls.ts';
 import {
   canonicalRel,
@@ -139,9 +140,14 @@ type Proof = 'open' | 'describe';
 class InstalledDirectory {
   private home: number | undefined;
 
+  /**
+   * `shared`: the process's working directory, as this pinner and the provisioner's destination side share it — a
+   * restore either of them could not make is the whole process's, and refuses both from then on.
+   */
   constructor(
     private readonly syscalls: DirectorySyscalls,
     readonly fs: PinFileCalls,
+    private readonly shared: WorkingDirectory = PROCESS_WORKING_DIRECTORY,
   ) {}
 
   /**
@@ -154,11 +160,15 @@ class InstalledDirectory {
    * descriptor's device and inode cannot change, so asking again would be a call that proves nothing.
    */
   install(fd: number, proof: Proof = 'open', identity?: BigIntStats): () => void {
+    // Refused before the home is captured: after a failed restore, `.` is no longer the runtime's own.
+    const broken = this.shared.broken;
+    if (broken !== undefined) throw new FsError('denied', `the session folder cannot be reached: ${broken}`);
     this.home ??= this.fs.open('.', constants.O_RDONLY | constants.O_DIRECTORY);
     const home = this.home;
     if (this.syscalls.fchdir(fd) !== 0) throw new FsError('denied', 'the session folder could not be held open');
+    // Back to the runtime's own, or to `/` (the process stops if even that fails) and every later install refused.
     const release = (): void => {
-      this.syscalls.fchdir(home);
+      this.shared.restore(this.syscalls.fchdir, home);
     };
     try {
       this.prove(fd, proof, identity);
@@ -631,6 +641,7 @@ export class PosixSessionRootPinner implements SessionRootPinner {
   constructor(
     private readonly load: () => DirectorySyscalls = loadDirectorySyscalls,
     private readonly fs: PinFileCalls = NODE_PIN_FILE_CALLS,
+    private readonly workingDirectory: WorkingDirectory = PROCESS_WORKING_DIRECTORY,
   ) {}
 
   async pin(cwd: string): Promise<PinnedRoot> {
@@ -654,7 +665,7 @@ export class PosixSessionRootPinner implements SessionRootPinner {
   private installer(): InstalledDirectory {
     if (this.directory === undefined) {
       try {
-        this.directory = new InstalledDirectory(this.load(), this.fs);
+        this.directory = new InstalledDirectory(this.load(), this.fs, this.workingDirectory);
       } catch {
         throw unsupportedPlatform(process.platform);
       }

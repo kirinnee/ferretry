@@ -643,10 +643,16 @@ descriptor — on Linux by `/proc/self/fd/N/<leaf>`, on macOS by descriptor call
 runtime no `openat`, so each step is one bracket (`packages/fleet/src/adapters/descriptor-calls.ts`, the
 mechanism the session-file viewer already proves on macOS): `fchdir` the held folder, prove `lstat('.')` is that
 folder's device and inode (bigint, on every step), make ONE synchronous call on a relative name, and `fchdir` back in
-a synchronous try/finally — nothing awaits in between, so nothing else can run in the window. If the working directory
-cannot be restored, every later step refuses and the step that failed reports it. The one step across two folders (a
-publish's hard link) is `linkat` on both descriptors. So macOS behaves like Linux — at a host runtime's own folder
-(`~/.claude`) and below every runtime's — and a flip of a folder after it was opened reaches nothing else.
+a synchronous try/finally — nothing in this thread awaits in between, so no other JavaScript runs in the window. Bun's
+I/O threads can still be finishing an asynchronous file call started earlier, and a RELATIVE path there would resolve
+in the held folder; none of this daemon's asynchronous file calls takes one — an audit, not an enforced rule. If the
+working directory cannot be restored, the process falls back to `/` (and stops if even that fails), the step that
+failed reports it, and every later folder step refuses — the provisioner's and the session-file viewer's, which share
+one working directory. The one step across two folders (a publish's hard link) is `linkat` on both descriptors, each
+proven still to be the folder it was opened on. So every macOS step that moves, writes or reads content does what
+Linux does — at a host runtime's own folder (`~/.claude`) and below every runtime's — and a flip of a folder after it
+was opened reaches nothing else. The read-only checks still go by path after a re-proof (a seal's fingerprint, whether
+a displaced tree is exactly this apply's, the names shown in a report): a swap can only make them fail closed.
 
 **If those C calls cannot be loaded**, or a Linux host has no `/proc` (where every apply is refused instead), steps
 fall back to re-proving the folder by path, which a swap timed between the proof and the step could still redirect.

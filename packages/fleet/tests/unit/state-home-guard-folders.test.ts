@@ -188,6 +188,15 @@ describe('openFolderOutsideStateHomes — the edges of opening and making', () =
     should(await rule(openFolderBelow(folder, 'stale', homes, disk))).equal('changed');
   });
 
+  it('should throw for a name holding a NUL, which a C call would cut short', async () => {
+    // Arrange
+    const { disk, homes } = await world('calls');
+    const folder = await opened(openFolderOutsideStateHomes(SKILLS, homes, disk));
+
+    // Act + Assert
+    await should(folder.describe('stale\0../../state')).be.rejectedWith(TypeError);
+  });
+
   it('should throw for a child named by a path rather than one entry', async () => {
     // Arrange
     const { disk, homes } = await world();

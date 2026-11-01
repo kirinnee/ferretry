@@ -22,3 +22,4 @@ export * from './process-token-refresh.ts';
 export * from './rollout-rate-limits.ts';
 export * from './system-clock.ts';
 export * from './user-home.ts';
+export * from './working-directory.ts';

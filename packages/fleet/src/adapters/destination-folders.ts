@@ -140,19 +140,13 @@ export class DestinationFolders {
   }
 
   /**
-   * Each runtime's folder as the disk has it NOW: the real path of its nearest existing folder plus the rest. Never
-   * cached, and never the configured string where it cannot be resolved — a folder made since (or a link put where it
-   * was missing) is judged where it really is.
+   * Each runtime's folder that is there NOW, by its real path. Never cached, and never the configured string — a folder
+   * made since (or a link put where one was missing) is judged where it really is. A runtime's folder that does not
+   * resolve holds nothing open, so no folder is in it or is it, and it is left out.
    */
   private async resolvedTops(): Promise<readonly string[]> {
-    const resolve = async (top: string): Promise<string> => {
-      const resolved = path.resolve(top);
-      const parent = path.dirname(resolved);
-      const real = await realpath(resolved).catch(() => undefined);
-      if (real !== undefined || parent === resolved) return real ?? resolved;
-      return path.join(await resolve(parent), path.basename(resolved));
-    };
-    return await Promise.all(this.tops.map(resolve));
+    const real = await Promise.all(this.tops.map(async top => await realpath(top).catch(() => undefined)));
+    return real.filter(top => top !== undefined);
   }
 
   /** Throws {@link ConfinedDestinationError} for `target`, a name in `folder`, when moving it aside is refused here. */

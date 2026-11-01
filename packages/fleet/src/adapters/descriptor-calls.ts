@@ -16,6 +16,7 @@ import {
 import type { DescriptorCalls, FileIdentity, GuardDirectoryHandle } from '../lib/state-home-guard.ts';
 import type { DirectorySyscalls } from './directory-syscalls.ts';
 import type { LinkSyscall } from './link-syscall.ts';
+import { PROCESS_WORKING_DIRECTORY, type WorkingDirectory } from './working-directory.ts';
 
 /**
  * FOLDER STEPS RELATIVE TO A DESCRIPTOR, WHERE THERE IS NO DESCRIPTOR PATH (macOS).
@@ -32,31 +33,36 @@ import type { LinkSyscall } from './link-syscall.ts';
  *      `symlink`, `unlink`, `rmdir`);
  *   4. `fchdir` back to the runtime's own working directory, held as a descriptor, in a synchronous try/finally.
  *
- * Nothing between 1 and 4 awaits or makes an asynchronous call, so nothing else in this single-threaded runtime can
- * run inside the window. If step 4 fails, the runtime is standing in the wrong folder: every later bracket refuses,
- * and the step that failed to restore reports it, rather than anything going on there.
+ * Nothing between 1 and 4 awaits or makes an asynchronous call, so no other JavaScript runs inside the window. Bun's I/O
+ * threads can still be finishing an asynchronous file call started earlier, and a RELATIVE path there would resolve in
+ * the installed folder: none of this daemon's asynchronous file calls takes one — an audit, not an enforced rule. If
+ * step 4 fails, the process falls back to `/` (or stops, `./working-directory.ts`), the step that failed reports it,
+ * and every later bracket — this one's and the session-file pinner's — refuses.
  *
  * The one step across TWO folders — a hard link from one into the other — is `linkat` on both descriptors, which
  * needs no bracket. Integers and strings only, as `directory-syscalls.ts` holds itself to: no struct is decoded.
  */
 export class DescriptorBracket {
   private home: number | undefined;
-  private broken: string | undefined;
 
+  /** `directory`: the process's working directory, as this bracket and the session-file pinner share it. */
   constructor(
     private readonly syscalls: DirectorySyscalls,
     private readonly links: LinkSyscall,
+    private readonly directory: WorkingDirectory = PROCESS_WORKING_DIRECTORY,
   ) {}
 
   /** Runs `act` — synchronous, on relative names — with `fd` installed and proven to be `identity`. */
   run<T>(fd: number, identity: FileIdentity, act: () => T): T {
-    if (this.broken !== undefined) throw new Error(`refusing to reach a folder through its descriptor: ${this.broken}`);
+    const broken = this.directory.broken;
+    if (broken !== undefined) throw new Error(`refusing to reach a folder through its descriptor: ${broken}`);
     this.home ??= openSync('.', constants.O_RDONLY | constants.O_DIRECTORY);
     const home = this.home;
     if (this.syscalls.fchdir(fd) !== 0) {
       throw Object.assign(new Error('the folder could not be installed as the working directory'), { code: 'EBADF' });
     }
     let outcome: { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: unknown };
+    let restored = false;
     try {
       const here = lstatSync('.', { bigint: true });
       if (here.dev !== identity.device || here.ino !== identity.inode) {
@@ -68,17 +74,35 @@ export class DescriptorBracket {
     } catch (error) {
       outcome = { ok: false, error };
     } finally {
-      // Restored before anything else can run. A runtime left in the folder is refused for the rest of its run.
-      if (this.syscalls.fchdir(home) !== 0) this.broken = 'the working directory could not be restored after a step';
+      // Restored before anything else can run — or `/` instead, and every later bracket refused (`WorkingDirectory`).
+      restored = this.directory.restore(this.syscalls.fchdir, home);
     }
-    if (this.broken !== undefined) throw new Error(`refusing to go on: ${this.broken}`);
+    if (!restored) throw new Error(`refusing to go on: ${this.directory.broken as string}`);
     if (!outcome.ok) throw outcome.error;
     return outcome.value;
   }
 
-  linkat(fromFd: number, fromName: string, toFd: number, toName: string): void {
-    this.links.linkat(fromFd, fromName, toFd, toName);
+  /**
+   * Links across two held folders, each proven first to still be the folder its handle was opened on — a descriptor
+   * number closed and reused by another folder would otherwise link somewhere else.
+   */
+  linkat(from: HeldFolder, fromName: string, to: HeldFolder, toName: string): void {
+    for (const held of [from, to]) {
+      const now = fstatSync(held.fd, { bigint: true });
+      if (now.dev !== held.identity.device || now.ino !== held.identity.inode) {
+        throw Object.assign(new Error('refusing to link: a held folder is no longer the one it was opened on'), {
+          code: 'EBADF',
+        });
+      }
+    }
+    this.links.linkat(from.fd, fromName, to.fd, toName);
   }
+}
+
+/** A folder held open by descriptor, and what it was when it was opened. */
+interface HeldFolder {
+  readonly fd: number;
+  readonly identity: FileIdentity;
 }
 
 const isMissing = (error: unknown): boolean => {
@@ -90,8 +114,8 @@ const READ_FILE = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLO
 const NEW_FILE =
   constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
-/** Which descriptor each handle holds, for the step that needs two of them. */
-const descriptors = new WeakMap<GuardDirectoryHandle, number>();
+/** Which folder each handle holds, for the step that needs two of them. */
+const descriptors = new WeakMap<GuardDirectoryHandle, HeldFolder>();
 
 /**
  * A folder handle on the open descriptor `fd`, whose every step goes through `bracket`. Takes ownership of `fd`.
@@ -135,8 +159,11 @@ export function descriptorHandle(
     rename: async (from, to) => await step(() => renameSync(from, to)),
     symlink: async (target, leaf) => await step(() => symlinkSync(target, leaf)),
     link: async (fromLeaf, into, toLeaf) => {
-      // A folder not held by a descriptor here has none to link into: the kernel answers `EBADF`.
-      bracket.linkat(fd, fromLeaf, descriptors.get(into) ?? -1, toLeaf);
+      // A folder not held by a descriptor here has none to link into: refused as the kernel would (`EBADF`).
+      const target = descriptors.get(into);
+      if (target === undefined)
+        throw Object.assign(new Error('refusing to link: that folder is not held'), { code: 'EBADF' });
+      bracket.linkat({ fd, identity }, fromLeaf, target, toLeaf);
     },
     openFile: async (leaf, how, mode) => await step(() => openSync(leaf, how === 'read' ? READ_FILE : NEW_FILE, mode)),
   };
@@ -147,6 +174,6 @@ export function descriptorHandle(
     chmod: async mode => fchmodSync(fd, mode),
     close: async () => closeSync(fd),
   };
-  descriptors.set(handle, fd);
+  descriptors.set(handle, { fd, identity });
   return handle;
 }
