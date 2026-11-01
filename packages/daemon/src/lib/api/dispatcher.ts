@@ -1,13 +1,12 @@
 import {
   FY_VERSION_HEADER,
   OLDER_APP_SENTENCE,
+  UNLOCK_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
   type StepUpAct,
   type StepUpRequiredBody,
   stepUpSkippableAtMachine,
-  UNLOCK_REQUIRED_CODE,
 } from '@ferretry/protocol';
-import type { LegacyWireUseRecorder } from '../legacy-wire/ports.ts';
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
 import {
   type ApiCredentials,
@@ -28,7 +27,7 @@ import {
   NO_STEP_UP_WITNESS,
   type StepUpWitness,
 } from './capability.ts';
-import { compressed, type ResponseCompressor } from './compression.ts';
+import type { LegacyWireUseRecorder } from '../legacy-wire/ports.ts';
 import { ApiError } from './error.ts';
 import {
   type ApiRequest,
@@ -38,6 +37,7 @@ import {
   headerValue,
   type RouteParameters,
 } from './http.ts';
+import { compressed, type ResponseCompressor } from './compression.ts';
 import { errorResponse, jsonResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
 import type {
   ApiRoute,
