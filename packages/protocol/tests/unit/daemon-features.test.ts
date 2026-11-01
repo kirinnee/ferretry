@@ -60,6 +60,13 @@ describe('daemon features', () => {
     should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.taskPlan)).be.true();
   });
 
+  it('should name standing sign-in rules for the app to gate on, but not report them until the app draws the sheet', () => {
+    // A rule fill closes an input card with a `sign-in-rule` actor an older app's strict parse refuses: the app ships first.
+    should(DAEMON_FEATURES.signInRules).equal('sign-in-rules.1');
+    should(daemonFeatureList()).not.containEql('sign-in-rules.1');
+    should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.signInRules)).be.false();
+  });
+
   it('should report approve-on-phone now that the app draws the card', () => {
     should(DAEMON_FEATURES.phoneApproval).equal('input.phone-approval.1');
     should(daemonFeatureList()).containEql('input.phone-approval.1');

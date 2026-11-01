@@ -1631,6 +1631,12 @@ export class AgentToolService {
   ): Promise<AgentToolResult> {
     const recipes = this.ports.recipes;
     if (recipes === undefined) throw new AgentToolError('unavailable', 'This daemon keeps no login recipes.');
+    // Suggesting a standing rule (R3c) has no handler yet: refuse it whole rather than file the recipe and drop it.
+    if (call.preapprove === true || call.recipe === undefined)
+      throw new AgentToolError(
+        'unavailable',
+        'This daemon takes no standing-rule suggestions yet; send a recipe only.',
+      );
     const target: RecipeProposalTarget =
       call.signIn === undefined ? { login: call.login as string } : { signIn: call.signIn };
     let proposed: LoginRecipeProposed & { readonly signIn: string };

@@ -109,6 +109,17 @@ const stepUpCases: SchemaCase[] = [
   },
   { name: 'window request', schema: stepUp.PasskeyWindowRequestSchema, value: { deviceId: DEVICE_ID } },
   {
+    name: 'stored proof',
+    schema: stepUp.StoredStepUpProofSchema,
+    value: {
+      deviceId: DEVICE_ID,
+      credentialId: CREDENTIAL,
+      clientDataJSON: 'e30',
+      authenticatorData: 'AAAA',
+      signature: 'MEUC',
+    },
+  },
+  {
     name: 'window opened',
     schema: stepUp.PasskeyWindowOpenedSchema,
     value: { deviceId: DEVICE_ID, deviceName: 'Pixel 8', closesAt: LATER_INSTANT },
@@ -240,11 +251,12 @@ describe('the passkey step-up wire', () => {
 
     // Act / Assert — the act every caller is asked, the machine included, and the stage its proof is bound to
     should(stepUp.STEP_UP_ACTS.addTwoFactorKey).equal('add-2fa-key');
-    should(stepUp.STEP_UP_ACTS_EVERY_CALLER).deepEqual(['add-2fa-key', 'approve-task-plan']);
+    should(stepUp.STEP_UP_ACTS_EVERY_CALLER).deepEqual(['add-2fa-key', 'approve-task-plan', 'approve-sign-in-rule']);
     // Every other act is one the machine itself is never asked to prove; these, every caller is.
     should(stepUp.StepUpActSchema.options.filter(act => !stepUp.stepUpSkippableAtMachine(act))).deepEqual([
       'add-2fa-key',
       'approve-task-plan',
+      'approve-sign-in-rule',
     ]);
     should(
       stepUp.StepUpOptionsRequestSchema.safeParse({ origin: ORIGIN, act: 'add-2fa-key', subject: stage }).success,
@@ -319,6 +331,117 @@ describe('the passkey step-up wire', () => {
     ]);
     // Each bound act names the one kind of stage it is bound to.
     should(Object.keys(stepUp.STEP_UP_SUBJECTS).sort()).deepEqual([...stepUp.STEP_UP_ACTS_EVERY_CALLER].sort());
+  });
+
+  it('should bind an approve-sign-in-rule step-up to one staged rule, and to no other kind of stage', () => {
+    // Arrange
+    const ruleStage = `srs_${'c'.repeat(24)}`;
+    const planStage = `tps_${'b'.repeat(24)}`;
+    const seedStage = `st_${'a'.repeat(24)}`;
+
+    // Act / Assert — asked of every caller, the machine included, and bound to exactly an srs_ stage
+    should(stepUp.STEP_UP_ACTS.approveSignInRule).equal('approve-sign-in-rule');
+    should(stepUp.stepUpSkippableAtMachine('approve-sign-in-rule')).be.false();
+    should(
+      stepUp.StepUpOptionsRequestSchema.safeParse({ origin: ORIGIN, act: 'approve-sign-in-rule', subject: ruleStage })
+        .success,
+    ).be.true();
+    assertRejects([
+      {
+        name: 'approving a rule with no stage',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-sign-in-rule' },
+      },
+      {
+        name: "a plan's stage on a rule approval",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-sign-in-rule', subject: planStage },
+      },
+      {
+        name: "a 2FA seed's stage on a rule approval",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-sign-in-rule', subject: seedStage },
+      },
+      {
+        name: "a rule's stage on a plan approval",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-task-plan', subject: ruleStage },
+      },
+      {
+        name: "a rule's stage on a 2FA save",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'add-2fa-key', subject: ruleStage },
+      },
+      {
+        name: "a rule's stage on an act the machine may skip",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'loosen-config', subject: ruleStage },
+      },
+      {
+        name: "a rule's stage with no act",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, subject: ruleStage },
+      },
+      {
+        name: 'a rule stage that is not one',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-sign-in-rule', subject: `srs_${'c'.repeat(23)}` },
+      },
+      {
+        name: 'a rule id where its stage belongs',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-sign-in-rule', subject: `sr_${'c'.repeat(24)}` },
+      },
+    ]);
+  });
+
+  it('should keep the proof of a standing rule only, and only for an act every caller is asked', () => {
+    // Act / Assert — the daemon derives these acts' challenges and stores their assertions; no other act is kept
+    should(stepUp.STEP_UP_ACTS_STORED_PROOF).deepEqual(['approve-sign-in-rule']);
+    should(stepUp.StepUpActSchema.options.filter(stepUp.stepUpKeepsProof)).deepEqual(['approve-sign-in-rule']);
+    for (const act of stepUp.STEP_UP_ACTS_STORED_PROOF) should(stepUp.stepUpSkippableAtMachine(act)).be.false();
+    assertRejects([
+      {
+        name: 'a stored proof from something that is not a paired device',
+        schema: stepUp.StoredStepUpProofSchema,
+        value: {
+          deviceId: 'host',
+          credentialId: CREDENTIAL,
+          clientDataJSON: 'e30',
+          authenticatorData: 'AAAA',
+          signature: 'MEUC',
+        },
+      },
+      {
+        name: 'a stored proof carrying a key rotation',
+        schema: stepUp.StoredStepUpProofSchema,
+        value: {
+          deviceId: DEVICE_ID,
+          credentialId: CREDENTIAL,
+          clientDataJSON: 'e30',
+          authenticatorData: 'AAAA',
+          signature: 'MEUC',
+          rotation,
+        },
+      },
+    ]);
+  });
+
+  it('should let a stored proof be claimed only for a stored-proof act and its own subject (type test)', () => {
+    // Arrange — a claim that hands back nothing: only its TYPE is under test
+    const claim: stepUp.ClaimStoredProof = () => undefined;
+    const ruleStage = `srs_${'c'.repeat(24)}`;
+
+    // Act / Assert
+    should(claim('approve-sign-in-rule', ruleStage)).be.undefined();
+    // @ts-expect-error — a task plan's proof is never stored, so it can't be claimed as one
+    should(claim('approve-task-plan', `tps_${'b'.repeat(24)}`)).be.undefined();
+    // @ts-expect-error — nor a 2FA seed's
+    should(claim('add-2fa-key', `st_${'a'.repeat(24)}`)).be.undefined();
+    // @ts-expect-error — nor an ordinary act's
+    should(claim('catalog-install', ruleStage)).be.undefined();
+    // @ts-expect-error — a stored proof is always claimed for its one subject
+    should(claim('approve-sign-in-rule')).be.undefined();
   });
 
   it('should refuse a step-up options request naming an act that does not exist', () => {

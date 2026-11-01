@@ -74,6 +74,28 @@ describe('what the daemon saw', () => {
     expect(moved[0]?.masked).toBeUndefined();
   });
 
+  it("should count the owner's own taps apart, and start again when one did not go through", () => {
+    // Arrange — a plan or rule fill writes no `tapped`, so it keeps the count as it was
+    const base = { at: 'github.com', surface: 'page', identity: '0123456789abcdef' } as const;
+
+    // Act
+    const once = foldObservation([], { ...base, navigatedAway: true, tapped: true }, AT);
+    const filled = foldObservation(once, { ...base, navigatedAway: true }, AT);
+    const twice = foldObservation(filled, { ...base, navigatedAway: true, tapped: true }, '2026-10-31T10:00:00.000Z');
+    const stayed = foldObservation(twice, { ...base, navigatedAway: false, tapped: false }, AT);
+
+    // Assert
+    expect(once[0]?.tapped).toEqual({ value: true, observedAt: AT, count: 1 });
+    expect(filled[0]?.tapped).toEqual({ value: true, observedAt: AT, count: 1 });
+    expect(filled[0]?.navigatedAway?.count).toBe(2);
+    expect(twice[0]?.tapped).toEqual({ value: true, observedAt: '2026-10-31T10:00:00.000Z', count: 2 });
+    expect(stayed[0]?.tapped).toEqual({ value: false, observedAt: AT, count: 1 });
+    expect(LoginObservedSchema.safeParse(twice[0]).success).toBe(true);
+    expect(
+      LoginObservedSchema.safeParse({ ...twice[0], tapped: { value: 'yes', observedAt: AT, count: 1 } }).success,
+    ).toBe(false);
+  });
+
   it('should say it in a few words', () => {
     const [seen] = foldObservation(
       [],

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TaskPlanStageIdSchema, TwoFactorStageIdSchema } from './account-ids.ts';
+import { SignInRuleStageIdSchema, TaskPlanStageIdSchema, TwoFactorStageIdSchema } from './account-ids.ts';
 import { ApiErrorResponseSchema, InstantSchema } from './common.ts';
 import { CapabilityAxisSchema, DaemonCapabilitySchema } from './grants.ts';
 import { PairedDeviceIdSchema } from './pairing.ts';
@@ -77,16 +77,22 @@ export const StepUpActSchema = z.enum([
   'add-2fa-key',
   'allow-profile-targets',
   'approve-task-plan',
+  'approve-sign-in-rule',
 ]);
 export type StepUpAct = z.infer<typeof StepUpActSchema>;
 
 /**
  * THE ACTS ASKED OF EVERY CALLER, the machine itself included: no "governed" or loopback check may skip them, a
  * window grant, an unlock or `stepUpOnActions` never stands in for one, and each proof is bound to ONE thing
- * (`subject`: the staged 2FA seed, or the staged task-plan selection) so it cannot be spent on another. The daemon's
- * claim takes that subject as a required argument for these acts, so a route cannot ask for one the short way.
+ * (`subject`: the staged 2FA seed, the staged task-plan selection, or the staged standing rule) so it cannot be spent
+ * on another. The daemon's claim takes that subject as a required argument for these acts, so a route cannot ask for
+ * one the short way.
  */
-export const STEP_UP_ACTS_EVERY_CALLER = ['add-2fa-key', 'approve-task-plan'] as const satisfies readonly StepUpAct[];
+export const STEP_UP_ACTS_EVERY_CALLER = [
+  'add-2fa-key',
+  'approve-task-plan',
+  'approve-sign-in-rule',
+] as const satisfies readonly StepUpAct[];
 export type EveryCallerStepUpAct = (typeof STEP_UP_ACTS_EVERY_CALLER)[number];
 /** An act the machine itself (its admin token, on loopback) is never asked to prove. */
 export type MachineSkippableStepUpAct = Exclude<StepUpAct, EveryCallerStepUpAct>;
@@ -97,13 +103,32 @@ export const stepUpSkippableAtMachine = (act: StepUpAct): act is MachineSkippabl
 
 /**
  * The kind of staged thing each every-caller act is bound to: a 2FA seed's stage for `add-2fa-key`, a task-plan
- * selection's stage for `approve-task-plan`. A proof asked with the other act's stage is refused before any challenge
- * is minted, so one ceremony can never be dressed up as the other.
+ * selection's stage for `approve-task-plan`, a standing rule's stage for `approve-sign-in-rule`. A proof asked with
+ * another act's stage is refused before any challenge is minted, so one ceremony can never be dressed up as another.
  */
 export const STEP_UP_SUBJECTS = {
   'add-2fa-key': TwoFactorStageIdSchema,
   'approve-task-plan': TaskPlanStageIdSchema,
+  'approve-sign-in-rule': SignInRuleStageIdSchema,
 } as const satisfies Record<EveryCallerStepUpAct, z.ZodType<string>>;
+/** The stage id an every-caller act's proof is bound to. */
+export type StepUpSubjectOf<Act extends EveryCallerStepUpAct> = z.infer<(typeof STEP_UP_SUBJECTS)[Act]>;
+
+/**
+ * THE ACTS WHOSE PROOF IS KEPT (docs/design/zero-trust.md, "Stored passkey proofs"): the daemon derives the challenge
+ * from what is being approved (never at random), and keeps the assertion itself so it can check it again later,
+ * offline, against the passkey registry. Today only a standing sign-in rule, whose record carries the owner's
+ * assertion for as long as it lasts. Every one is also asked of every caller.
+ *
+ * A stored proof is claimed only through {@link ClaimStoredProof}, and an ordinary fresh claim never takes one (nor the
+ * reverse), so the evidence kept for a rule can't be spent as a step-up and a step-up can't be stored as a rule.
+ */
+export const STEP_UP_ACTS_STORED_PROOF = ['approve-sign-in-rule'] as const satisfies readonly EveryCallerStepUpAct[];
+export type StoredProofStepUpAct = (typeof STEP_UP_ACTS_STORED_PROOF)[number];
+
+/** Whether the daemon keeps `act`'s assertion and derives its challenge ({@link STEP_UP_ACTS_STORED_PROOF}). */
+export const stepUpKeepsProof = (act: StepUpAct): act is StoredProofStepUpAct =>
+  (STEP_UP_ACTS_STORED_PROOF as readonly StepUpAct[]).includes(act);
 
 /**
  * Options for a step-up. `act` is the one act the person is about to confirm: the daemon stamps the
@@ -111,13 +136,13 @@ export const STEP_UP_SUBJECTS = {
  * for it. Absent, the proof is unstamped and no such act takes it.
  *
  * `subject` is the one thing a {@link STEP_UP_ACTS_EVERY_CALLER} act is for (the staged seed, `st_…`; the staged task-plan
- * selection, `tps_…`): the daemon binds the challenge, and so the proof, to it, and the commit takes only a proof for
- * that act AND that subject. Sent exactly with such an act, of that act's own kind ({@link STEP_UP_SUBJECTS}), and never
- * with another.
+ * selection, `tps_…`; the staged standing rule, `srs_…`): the daemon binds the challenge, and so the proof, to it, and
+ * the commit takes only a proof for that act AND that subject. Sent exactly with such an act, of that act's own kind
+ * ({@link STEP_UP_SUBJECTS}), and never with another.
  */
 export const StepUpOptionsRequestSchema = PasskeyOptionsRequestSchema.extend({
   act: StepUpActSchema.optional(),
-  subject: z.union([TwoFactorStageIdSchema, TaskPlanStageIdSchema]).optional(),
+  subject: z.union([TwoFactorStageIdSchema, TaskPlanStageIdSchema, SignInRuleStageIdSchema]).optional(),
 }).refine(
   request =>
     request.act === undefined || stepUpSkippableAtMachine(request.act)
@@ -161,6 +186,32 @@ export const StepUpAssertionSchema = z.strictObject({
   rotation: DeviceKeyRotationSchema.optional(),
 });
 export type StepUpAssertion = z.infer<typeof StepUpAssertionSchema>;
+
+/**
+ * A STORED PROOF: what the daemon keeps of a verified ceremony for a {@link STEP_UP_ACTS_STORED_PROOF} act, so the
+ * assertion can be checked again offline — the device that proved it and the assertion's bytes exactly as the
+ * authenticator signed them. Never a rotation (that is spent by the live ceremony) and never anything the browser
+ * could present again as a step-up: the challenge inside `clientDataJSON` is derived from what was approved, and a
+ * fresh claim never takes it.
+ */
+export const StoredStepUpProofSchema = z.strictObject({
+  deviceId: PairedDeviceIdSchema,
+  credentialId: Base64UrlSchema(1_366),
+  clientDataJSON: Base64UrlSchema(5_462),
+  authenticatorData: Base64UrlSchema(5_462),
+  signature: Base64UrlSchema(1_366),
+});
+export type StoredStepUpProof = z.infer<typeof StoredStepUpProofSchema>;
+
+/**
+ * The route context's claim of a stored proof: the evidence of ONE verified ceremony for `act` bound to exactly
+ * `subject`, once, while it is fresh — or `undefined`. It takes only a {@link StoredProofStepUpAct}, and always its
+ * subject, so a route can neither claim a stored proof the short way nor store an ordinary step-up's.
+ */
+export type ClaimStoredProof = <Act extends StoredProofStepUpAct>(
+  act: Act,
+  subject: StepUpSubjectOf<Act>,
+) => StoredStepUpProof | undefined;
 
 /**
  * Options for a new passkey, and — when this device already holds one — the assertion that must come
@@ -358,6 +409,13 @@ export const STEP_UP_ACTS = {
    * asks.
    */
   approveTaskPlan: 'approve-task-plan',
+  /**
+   * Creating, widening, resuming or renewing a STANDING SIGN-IN RULE (sign-in-rules.ts): Ferretry then fills one
+   * sign-in for any ferret, with no tap, for up to 90 days. Asked of EVERY caller, the machine included, bound to the
+   * one staged rule body (`signInRuleSubject`), and the assertion is KEPT with the rule
+   * ({@link STEP_UP_ACTS_STORED_PROOF}) so the daemon checks it again before every fill. Narrowing and revoking never ask.
+   */
+  approveSignInRule: 'approve-sign-in-rule',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**

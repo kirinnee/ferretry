@@ -136,6 +136,15 @@ export const GRANT_MISS_REASONS = [
   'not-proved',
   'not-system',
   'did-not-move-on',
+  // A standing sign-in rule only (sign-in-rules.ts).
+  'suspended',
+  'out-of-scope',
+  'account-changed',
+  'factor-changed',
+  'proof-invalid',
+  'no-history',
+  'code-without-sign-in',
+  'scripted-origin',
   // At propose time only: the line is `unavailable`.
   'not-in-accounts',
   'via-provider',
@@ -151,12 +160,19 @@ export const TASK_PLAN_UNAVAILABLE_REASONS = [
   'tool-not-covered',
 ] as const satisfies readonly GrantMissReason[];
 
-/** The misses that STOP a line: every later fill under it asks. There is no resume; a new plan is a new passkey. */
+/**
+ * The misses that STOP a line (or SUSPEND a standing rule): every later fill under it asks. There is no resume; a new
+ * plan, or a rule approved again, is a new passkey. The last four come only from a rule's own checks.
+ */
 export const GRANT_STOPPING_REASONS = [
   'place-changed',
   'recipe-changed',
   'form-changed',
   'did-not-move-on',
+  'account-changed',
+  'factor-changed',
+  'proof-invalid',
+  'scripted-origin',
 ] as const satisfies readonly GrantMissReason[];
 
 /**
@@ -188,6 +204,14 @@ const GRANT_MISS_WORDS = {
   'not-proved': "Ferretry couldn't prove which program is asking",
   'not-system': 'the program asking is not sudo, su or doas running as root',
   'did-not-move-on': "the page didn't move on, so Ferretry emptied the password field",
+  suspended: 'it was suspended earlier',
+  'out-of-scope': "it doesn't cover this ferret's session or project",
+  'account-changed': "the account's name or username changed since you approved it",
+  'factor-changed': "the account's 2FA keys changed since you approved it",
+  'proof-invalid': 'your passkey approval of it no longer checks out',
+  'no-history': "you haven't signed in to this form yourself from the app yet",
+  'code-without-sign-in': 'the card asks for a code outside a sign-in the rule filled',
+  'scripted-origin': 'a ferret ran a page script on this site',
   'not-in-accounts': "it isn't in Accounts: add it in Settings › Accounts, or you'll be asked",
   'via-provider': 'it signs in through another account: the ferret should plan that sign-in',
   'tool-not-covered': "Ferretry can't prove where this program sends the password",
@@ -202,6 +226,57 @@ export const grantMissLine = (line: number, reason: GrantMissReason): string | u
   const words = grantMissWords(reason);
   return words === undefined ? undefined : `Task plan line ${String(line + 1)} didn't apply: ${words}.`;
 };
+
+/** Where a standing rule's words differ from a plan line's for the same reason. */
+const RULE_MISS_WORDS = {
+  expired: 'the rule had expired',
+  stopped: 'it was suspended earlier',
+  'other-session': "it doesn't cover this ferret's session or project",
+} as const satisfies Partial<Record<GrantMissReason, string>>;
+
+/** The owner's sentence for why a standing rule did not apply, or `undefined` for `not-here`. */
+export const ruleMissWords = (reason: GrantMissReason): string | undefined =>
+  (RULE_MISS_WORDS as Partial<Record<GrantMissReason, string>>)[reason] ?? grantMissWords(reason);
+
+/** Whether a miss leaves a standing rule suspended: a stopping reason, one already suspended, or the sign-in gone. */
+export const ruleMissSuspends = (reason: GrantMissReason): boolean =>
+  reason === 'suspended' ||
+  reason === 'sign-in-gone' ||
+  (GRANT_STOPPING_REASONS as readonly GrantMissReason[]).includes(reason);
+
+/** A pre-approval note as {@link grantMissLineFor} reads it: whose it was, and whether and why it did not apply. */
+export type GrantMissNote =
+  | {
+      readonly by: 'plan';
+      readonly line: number;
+      readonly outcome: 'filled' | 'did-not-apply';
+      readonly reason?: GrantMissReason | undefined;
+    }
+  | {
+      readonly by: 'rule';
+      readonly outcome: 'filled' | 'did-not-apply';
+      readonly reason?: GrantMissReason | undefined;
+    };
+
+/**
+ * THE OWNER'S LINE for a pre-approval that did not apply, by its source: "Task plan line 2 didn't apply: …" for a
+ * plan, "Your standing rule for this sign-in didn't apply: … The rule is suspended until you approve it again." for a
+ * rule. `undefined` for a fill, a note with no reason, or `not-here`. Never for the ferret: it is told nothing about a
+ * rule at all.
+ */
+export function grantMissLineFor(note: GrantMissNote): string | undefined {
+  if (note.outcome !== 'did-not-apply' || note.reason === undefined) return undefined;
+  if (note.by === 'plan') return grantMissLine(note.line, note.reason);
+  const words = ruleMissWords(note.reason);
+  if (words === undefined) return undefined;
+  const after =
+    note.reason === 'sign-in-gone'
+      ? ' The rule is suspended.'
+      : ruleMissSuspends(note.reason)
+        ? ' The rule is suspended until you approve it again.'
+        : '';
+  return `Your standing rule for this sign-in didn't apply: ${words}.${after}`;
+}
 
 /** What the FERRET is told when a plan did not fill a card: the same sentence for every reason. */
 export const TASK_PLAN_MISS_AGENT_NOTE = "Your task plan didn't cover this, so the owner was asked.";

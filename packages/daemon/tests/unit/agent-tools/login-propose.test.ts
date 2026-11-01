@@ -136,6 +136,37 @@ describe('account.propose', () => {
     should(broken.code).equal('unavailable');
     should(broken.message).not.containEql('disk full');
   });
+
+  it('should refuse a standing-rule suggestion whole until the daemon takes them, filing no recipe either', async () => {
+    // Arrange — a recipe store that records every proposal it is handed
+    const filed: string[] = [];
+    const world = agentToolWorld({
+      recipes: {
+        scrubbedAccounts: async listing => listing,
+        propose: async (_session, _target, recipe) => {
+          filed.push(recipe);
+          return await Promise.reject(new Error('never reached'));
+        },
+      },
+    });
+    const refused = async (call: unknown): Promise<AgentToolError> =>
+      (await world.service.call(agent, call as never).catch((caught: unknown) => caught)) as AgentToolError;
+
+    // Act
+    const alone = await refused({ tool: 'account.propose', signIn: SI_VERCEL, preapprove: true, why: 'y' });
+    const beside = await refused({
+      tool: 'account.propose',
+      signIn: SI_VERCEL,
+      preapprove: true,
+      recipe: 'x',
+      why: 'y',
+    });
+
+    // Assert — fails closed: no card, no recipe filed, and the ferret is told to send a recipe only
+    should([alone.code, beside.code]).deepEqual(['unavailable', 'unavailable']);
+    should(alone.message).containEql('standing-rule');
+    should(filed).deepEqual([]);
+  });
 });
 
 describe('a ferret driving a surface', () => {

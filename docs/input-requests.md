@@ -706,6 +706,11 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   - `navigatedAway`: the page showed a new document within 10 s of the submit.
   - `secondFactor`: `code` (a one-time code card was typed on the same account soon after), `push` (the page waited on
     the sign-in hosts, then left them with no code typed), or `none` (it left at once). Watched for 3 minutes.
+  - `tapped` (in the wire contract; written from R3c-3): the fill was the OWNER's own tap from a paired device that
+    went through (a page that moved on unsteered; a proved sudo, su or doas typed hidden). Who filled a card maps to
+    the observer through one exhaustive table (`observerByOf`: `device`, `host`, `plan` or `rule`, with no default),
+    and only `device` writes this fact, so plan fills, rule fills and the admin token never count toward a standing
+    rule's history.
   - Each fact keeps when it was last seen and how often in a row; one seen the other way starts again at 1. Each
     place keeps the field's **identity** (a digest of its origin, frame, tag, type, name, id and autocomplete; or the
     program for a terminal): when a later delivery finds another identity there, the old facts are dropped.
@@ -1084,8 +1089,8 @@ part is the username. If either differs, the owner sees: "This key says it is fo
 saving it to GitHub · kirinnee." The daemon refuses the save unless the owner ticked "save it here anyway".
 
 **The passkey is asked every time, even at the machine.** `add-2fa-key` is a step-up act that **every**
-caller must prove, the admin token on loopback included (the other is `approve-task-plan`,
-[secure-copy.md](secure-copy.md#task-plans)). Its proof is bound to the one staged save:
+caller must prove, the admin token on loopback included (the others are `approve-task-plan`,
+[secure-copy.md](secure-copy.md#task-plans), and `approve-sign-in-rule` for a standing sign-in rule). Its proof is bound to the one staged save:
 `StepUpOptionsRequest.subject` is the stage (`st_…`), and the challenge carries
 `addTwoFactorKeySubject(accountKey, stage)`. A proof for one save can never commit another.
 
@@ -1317,11 +1322,38 @@ or nothing is typed:
   line and `because`. A stopped line is recorded as `task-plan-line-stopped`; a write back the plan record refuses
   fails closed (the line is matched no more) and is recorded as `task-plan-line-failed`.
 
-### Later, and off by default: standing permission
+### Coming, and off by default: standing sign-in rules
 
-A **standing** permission (R3c) reuses the same matcher, ledger, clear and reasons: an explicit owner opt-in, per
-sign-in, **off by default**, revocable, and audited on every use. Until then a placement without a tap happens only
-under a task plan line, as above.
+A **standing rule** (R3c) is one owner-signed permission for Ferretry to fill ONE page sign-in, for any ferret unless
+the owner narrows its scope, for at most 90 days. It reuses the same matcher, ledger, clear and reasons. Until it
+ships, a placement without a tap happens only under a task plan line, as above. Today only its wire contract exists
+(`packages/protocol/src/lib/sign-in-rules.ts`), and the daemon does not report `sign-in-rules.1`:
+
+- **Pages only.** The signed body's `surface` is `page` and its pins are web hosts; a sudo, su or doas password stays
+  covered per task by a plan line.
+- **The passkey is bound to the bytes, every time.** Creating, widening, resuming or renewing a rule is the
+  `approve-sign-in-rule` act, asked of every caller, the admin token on loopback included. Its challenge is DERIVED:
+  `signInRuleChallenge(nonce, signInRuleSubject(stage, canonicalSignInRule(body)))`, where the canonical bytes are RFC
+  8785 JSON of the whole body (sets sorted) and each step has its own domain string, apart from a task plan's and a 2FA
+  seed's. The daemon keeps the assertion with the rule (a stored proof) so it can check it again offline. Until the
+  rule service lands, `POST /v1/step-up/options` answers this act `404 stage_not_found` and mints no challenge.
+- **Pinned facts are signed.** The account's key, handle and username, the login domains, the recipe version, the
+  field identities the owner's own taps have history with (required: a rule never pins a new form) and a fingerprint
+  of the account's 2FA keys (`factorFingerprint`: ids, kinds and whether Ferretry makes the codes, never `verified`).
+  Lifetime is between one hour and 90 days, inside the signed body.
+- **The rest only narrows.** The record's unsigned overlay (suspension, narrowing, usage) is refused if it would widen
+  the body, and a document that does not parse strictly means no rule at all.
+- **The owner's line for a miss** comes from `grantMissLineFor`: "Your standing rule for this sign-in didn't apply:
+  … The rule is suspended until you approve it again." for a miss that changes what was approved. The new reasons are
+  `suspended`, `out-of-scope`, `account-changed`, `factor-changed`, `proof-invalid`, `no-history`,
+  `code-without-sign-in` and `scripted-origin`; the four drift reasons also stop a plan line. A fill would be audited
+  as `input.delivered` with `by: 'rule'`, `signInRule` and `revision`, and the card's actor is `sign-in-rule`.
+- **A ferret can only suggest one.** `account.propose` takes `preapprove: true` (then `recipe` is optional), which will
+  raise a card that opens the owner's sheet with nothing ticked. Until that handler lands, the daemon refuses such a
+  call whole (`unavailable`) and files no recipe from it.
+- Every rule surface carries `SIGN_IN_RULE_HONEST_LIMIT`: "This stops a ferret putting the password anywhere else, or
+  granting itself a rule, through Ferretry. It can't stop a ferret that reads Ferretry's own files, and any ferret may
+  use this sign-in while the rule lasts."
 
 ## Who reads the terminal
 

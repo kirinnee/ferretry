@@ -56,3 +56,34 @@ export const TaskPlanStageIdSchema = z
   .string()
   .regex(/^tps_[0-9a-f]{24}$/u, 'a staged task-plan approval is tps_ and 24 hex digits');
 export type TaskPlanStageId = z.infer<typeof TaskPlanStageIdSchema>;
+
+/**
+ * A STANDING SIGN-IN RULE (`sr_` and 24 hex digits, sign-in-rules.ts): the owner's passkey-signed permission to fill one
+ * sign-in for any ferret, until it expires. Kept on disk. Its id survives a resume, renew or widen (`revision` + 1).
+ */
+export const SignInRuleIdSchema = z
+  .string()
+  .regex(/^sr_[0-9a-f]{24}$/u, 'a standing sign-in rule is sr_ and 24 hex digits');
+export type SignInRuleId = z.infer<typeof SignInRuleIdSchema>;
+
+/**
+ * A STAGED STANDING RULE (`srs_` and 24 hex digits): one rule body waiting for its passkey, held in the daemon's memory
+ * only. A passkey proof for `approve-sign-in-rule` is bound to exactly one (`signInRuleSubject`), so it cannot be spent
+ * on another body. Here beside the other stages for the same reason: a step-up names it.
+ */
+export const SignInRuleStageIdSchema = z
+  .string()
+  .regex(/^srs_[0-9a-f]{24}$/u, 'a staged standing rule is srs_ and 24 hex digits');
+export type SignInRuleStageId = z.infer<typeof SignInRuleStageIdSchema>;
+
+/**
+ * A FERRET'S SUGGESTION of a standing rule (`srg_` and 16 hex digits): an agenda card that opens the owner's create
+ * sheet with nothing ticked. It holds no stage, no proof and no fields, so it can never become a rule by itself.
+ */
+export const SignInRuleSuggestionIdSchema = z
+  .string()
+  .regex(/^srg_[0-9a-f]{16}$/u, 'a standing rule suggestion is srg_ and 16 hex digits');
+export type SignInRuleSuggestionId = z.infer<typeof SignInRuleSuggestionIdSchema>;
+
+/** A standing rule's revision: 1 when created, one more on each resume, renew or widen. Part of the signed bytes. */
+export const SignInRuleRevisionSchema = z.number().int().min(1).max(1_000_000);

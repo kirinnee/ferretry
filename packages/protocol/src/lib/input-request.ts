@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SignInIdSchema, TwoFactorIdSchema } from './account-ids.ts';
+import { SignInIdSchema, SignInRuleIdSchema, SignInRuleRevisionSchema, TwoFactorIdSchema } from './account-ids.ts';
 import { AgendaIdSchema } from './agenda.ts';
 import { BrowserChallengeProviderSchema, BrowserRefSchema } from './browser-target.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
@@ -457,8 +457,39 @@ export const InputActorSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('rule'), ruleId: z.string().regex(/^[0-9a-f]{32}$/u) }),
   /** A sign-in the owner approved IN ADVANCE on a task plan: the daemon filled it under this plan line (task-plan.ts). */
   z.strictObject({ kind: z.literal('plan'), planId: CopyPlanIdSchema, line: TaskPlanLineNumberSchema }),
+  /**
+   * A sign-in the owner approved IN ADVANCE with a standing rule: the daemon filled it under this rule, at this revision
+   * (sign-in-rules.ts). Not `rule`: that is a paste rule, with its own 32-hex id.
+   */
+  z.strictObject({ kind: z.literal('sign-in-rule'), rule: SignInRuleIdSchema, revision: SignInRuleRevisionSchema }),
 ]);
 export type InputActor = z.infer<typeof InputActorSchema>;
+
+/**
+ * WHO FILLED A SIGN-IN, as the login observer records it: the owner's tap from a paired `device`, the machine's admin
+ * token (`host`: the owner at the machine, or a ferret that read the token), a task `plan` line, or a `rule` (a paste
+ * rule or a standing sign-in rule). Only a `device` tap counts toward a standing rule's history ({@link ownerTapped}).
+ */
+export const LOGIN_OBSERVER_BYS = ['device', 'host', 'plan', 'rule'] as const;
+export type LoginObserverBy = (typeof LOGIN_OBSERVER_BYS)[number];
+
+/**
+ * Every actor's observer word. Keyed by EVERY actor kind, so a new kind fails typecheck here until it is mapped,
+ * instead of falling through to an owner's tap (which would let fills qualify themselves for a standing rule).
+ */
+export const INPUT_ACTOR_OBSERVER_BY = {
+  host: 'host',
+  device: 'device',
+  rule: 'rule',
+  plan: 'plan',
+  'sign-in-rule': 'rule',
+} as const satisfies { readonly [Kind in InputActor['kind']]: LoginObserverBy };
+
+/** The observer word for whoever filled a card: total, with no default. */
+export const observerByOf = (actor: InputActor): LoginObserverBy => INPUT_ACTOR_OBSERVER_BY[actor.kind];
+
+/** Whether a fill was the owner's own tap from a paired device: the only fill a standing rule's history counts. */
+export const ownerTapped = (by: LoginObserverBy): boolean => by === 'device';
 
 export const InputOutcomeSchema = z.strictObject({
   at: InstantSchema,
@@ -517,6 +548,37 @@ export function worstRisk(risks: readonly (InputRisk | undefined)[]): InputRisk 
   );
 }
 
+const PreapprovalOutcomeShape = {
+  outcome: z.enum(['filled', 'did-not-apply']),
+  reason: GrantMissReasonSchema.optional(),
+};
+
+/**
+ * A PRE-APPROVAL tried on a card, by its source: a task plan's line (`by: 'plan'`) or a standing sign-in rule at one
+ * revision (`by: 'rule'`). Only one that did not apply says why. A source this build does not know is refused, never
+ * read as another.
+ */
+export const InputPreapprovalSchema = z
+  .discriminatedUnion('by', [
+    z.strictObject({
+      by: z.literal('plan'),
+      plan: CopyPlanIdSchema,
+      line: TaskPlanLineNumberSchema,
+      ...PreapprovalOutcomeShape,
+    }),
+    z.strictObject({
+      by: z.literal('rule'),
+      rule: SignInRuleIdSchema,
+      revision: SignInRuleRevisionSchema,
+      ...PreapprovalOutcomeShape,
+    }),
+  ])
+  .refine(note => note.outcome === 'did-not-apply' || note.reason === undefined, {
+    path: ['reason'],
+    message: 'only a pre-approval that did not apply says why',
+  });
+export type InputPreapproval = z.infer<typeof InputPreapprovalSchema>;
+
 /**
  * THE REQUEST, as the owner's card reads it. `observed` is absent while the daemon is re-observing after
  * a restart: Send stays disabled until it is back.
@@ -555,23 +617,12 @@ export const InputRequestSchema = z.strictObject({
   state: InputRequestStateSchema,
   outcome: InputOutcomeSchema.optional(),
   /**
-   * The task plan line that filled this card, or that was tried and did not apply (task-plan.ts). The owner's view
-   * only: the card draws one line from `grantMissLine(line, reason)`, and none for `not-here`. The ferret is told one
-   * sentence for every reason, so a reason never says which secret fields an account holds.
+   * The task plan line or standing rule that filled this card, or that was tried and did not apply (task-plan.ts,
+   * sign-in-rules.ts). The owner's view only: the card draws one line from `grantMissLineFor(preapproval)`, and none
+   * for `not-here`. The ferret is told one sentence for every plan reason and nothing at all about a rule, so a reason
+   * never says which secret fields an account holds, or which sign-ins have rules.
    */
-  preapproval: z
-    .strictObject({
-      by: z.literal('plan'),
-      plan: CopyPlanIdSchema,
-      line: TaskPlanLineNumberSchema,
-      outcome: z.enum(['filled', 'did-not-apply']),
-      reason: GrantMissReasonSchema.optional(),
-    })
-    .refine(note => note.outcome === 'did-not-apply' || note.reason === undefined, {
-      path: ['reason'],
-      message: 'only a line that did not apply says why',
-    })
-    .optional(),
+  preapproval: InputPreapprovalSchema.optional(),
 });
 export type InputRequest = z.infer<typeof InputRequestSchema>;
 
@@ -878,47 +929,61 @@ export type InputAuditEvent = z.infer<typeof InputAuditEventSchema>;
  * The details an input audit record carries: names and flags, never the value, its length (for a
  * `secret`), the prompt text or a URL path. `consumer` is a program name or an origin's host.
  */
-export const InputAuditDetailSchema = z.strictObject({
-  targetKind: InputTargetKindSchema,
-  /** A paste: the secure copy pasted, by name. */
-  copy: CopyNameSchema.optional(),
-  /** A paste the owner approved in advance: the rule it was delivered under. */
-  rule: z
-    .string()
-    .regex(/^[0-9a-f]{32}$/u)
-    .optional(),
-  /** A sign-in the owner approved in advance on a task plan: the plan, its line and the sign-in it filled. */
-  plan: CopyPlanIdSchema.optional(),
-  line: TaskPlanLineNumberSchema.optional(),
-  signIn: SignInIdSchema.optional(),
-  /** A task plan line was tried on this card and did not apply, and why: the card was raised as usual. */
-  preapproval: z.literal('did-not-apply').optional(),
-  because: GrantMissReasonSchema.optional(),
-  consumer: boundedLine(160).optional(),
-  /**
-   * The store file of a program proved only through the owner's own profile, when that is what read the terminal:
-   * a paste a rule made into it is logged with the very file, since any process running as the owner could swap it.
-   */
-  profileProgram: z
-    .string()
-    .max(512)
-    .regex(/^\/nix\/store\/[^\p{Cc}\p{Cf}]+$/u)
-    .optional(),
-  sensitivity: InputSensitivitySchema,
-  /** The terminal a quarantine was about: its name, never what was typed there. */
-  surface: SurfaceKeySchema.optional(),
-  recognised: z.boolean().optional(),
-  source: z.enum(['typed', 'saved', 'sealed']).optional(),
-  /** The saved login typed from, or saved to: a handle, never what it holds. */
-  entry: LoginEntryIdSchema.optional(),
-  /** The 2FA key a code Ferretry made came from: its id, never the code or the seed. */
-  factor: TwoFactorIdSchema.optional(),
-  /** The typed value was kept in `entry`. */
-  saved: z.boolean().optional(),
-  submitted: z.boolean().optional(),
-  carrier: z.enum(['loopback', 'direct', 'relay']).optional(),
-  reason: InputReasonSchema.optional(),
-});
+export const InputAuditDetailSchema = z
+  .strictObject({
+    targetKind: InputTargetKindSchema,
+    /** A paste: the secure copy pasted, by name. */
+    copy: CopyNameSchema.optional(),
+    /** A paste the owner approved in advance: the rule it was delivered under. */
+    rule: z
+      .string()
+      .regex(/^[0-9a-f]{32}$/u)
+      .optional(),
+    /** A sign-in the owner approved in advance on a task plan: the plan, its line and the sign-in it filled. */
+    plan: CopyPlanIdSchema.optional(),
+    line: TaskPlanLineNumberSchema.optional(),
+    signIn: SignInIdSchema.optional(),
+    /**
+     * A sign-in filled under the owner's STANDING rule: `by: 'rule'`, the rule and its revision, beside `signIn`. Not
+     * `rule`, which names a paste rule.
+     */
+    by: z.literal('rule').optional(),
+    signInRule: SignInRuleIdSchema.optional(),
+    revision: SignInRuleRevisionSchema.optional(),
+    /** A task plan line or standing rule was tried on this card and did not apply, and why: the card was raised as usual. */
+    preapproval: z.literal('did-not-apply').optional(),
+    because: GrantMissReasonSchema.optional(),
+    consumer: boundedLine(160).optional(),
+    /**
+     * The store file of a program proved only through the owner's own profile, when that is what read the terminal:
+     * a paste a rule made into it is logged with the very file, since any process running as the owner could swap it.
+     */
+    profileProgram: z
+      .string()
+      .max(512)
+      .regex(/^\/nix\/store\/[^\p{Cc}\p{Cf}]+$/u)
+      .optional(),
+    sensitivity: InputSensitivitySchema,
+    /** The terminal a quarantine was about: its name, never what was typed there. */
+    surface: SurfaceKeySchema.optional(),
+    recognised: z.boolean().optional(),
+    source: z.enum(['typed', 'saved', 'sealed']).optional(),
+    /** The saved login typed from, or saved to: a handle, never what it holds. */
+    entry: LoginEntryIdSchema.optional(),
+    /** The 2FA key a code Ferretry made came from: its id, never the code or the seed. */
+    factor: TwoFactorIdSchema.optional(),
+    /** The typed value was kept in `entry`. */
+    saved: z.boolean().optional(),
+    submitted: z.boolean().optional(),
+    carrier: z.enum(['loopback', 'direct', 'relay']).optional(),
+    reason: InputReasonSchema.optional(),
+  })
+  .refine(
+    detail =>
+      (detail.by === undefined) === (detail.signInRule === undefined) &&
+      (detail.signInRule === undefined) === (detail.revision === undefined),
+    { path: ['signInRule'], message: 'a standing rule is recorded as by rule, with its id and revision together' },
+  );
 export type InputAuditDetail = z.infer<typeof InputAuditDetailSchema>;
 
 const encoder = new TextEncoder();
