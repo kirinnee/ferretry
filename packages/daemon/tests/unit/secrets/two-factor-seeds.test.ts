@@ -135,3 +135,140 @@ describe('a staged seed whose account went away', () => {
     should([...(await w.stages.values()).values()]).deepEqual([]);
   });
 });
+
+describe('use it now: a seed saved from an input card types its first code into that card', () => {
+  const REQUEST = 'a'.repeat(32);
+  const DEVICE: StageCaller = { key: 'device:phone', device: true };
+  function card(typed = true) {
+    const used: unknown[] = [];
+    const stages = new TwoFactorSeedStages({
+      accounts: {
+        seedTarget: async () => ({ key: `L${'0'.repeat(24)}`, label: 'GitHub', places: [], labels: [], seeds: 0 }),
+        accountsAt: async () => ['GITHUB'],
+        addSeed: async () => ({
+          account: 'GITHUB',
+          factor: twoFactorKeySummaryOf({
+            id: 'tf_0123456789ab',
+            kind: 'totp',
+            label: 'Authenticator app',
+            seal: `L${'0'.repeat(24)}_TOTP_00000000`,
+            params: TotpParametersSchema.parse({}),
+            addedAt: '2026-01-01T00:00:00.000Z',
+            addedBy: 'owner',
+          }),
+        }),
+      },
+      cipher: new FakeSecretCipher(),
+      clock: { nowMs: () => 0 },
+      anyPasskey: async () => true,
+      hostName: 'kirin-box',
+      cards: {
+        cardTarget: () => ({ matchKey: 'github.com', observedDigest: 'd'.repeat(64) }),
+        useNow: async (request, use) => {
+          used.push({ request, ...use });
+          return typed;
+        },
+      },
+    });
+    return { stages, used };
+  }
+  const staged = (submit?: boolean) => ({
+    padded: padInputValue(SEED),
+    totpAcknowledged: true as const,
+    request: REQUEST,
+    ...(submit === undefined ? {} : { submit }),
+  });
+
+  it('should type the new key’s code into the card a paired device set it up from, as that device', async () => {
+    const w = card();
+    const { stage } = await w.stages.stage('GITHUB', staged(false), DEVICE);
+    const saved = await w.stages.commit('GITHUB', stage, () => true, { kind: 'device', deviceId: 'phone' });
+    should(saved.typed).be.true();
+    should(w.used).deepEqual([
+      {
+        request: REQUEST,
+        account: 'GITHUB',
+        factor: 'tf_0123456789ab',
+        observedDigest: 'd'.repeat(64),
+        submit: false,
+        actor: { kind: 'device', deviceId: 'phone' },
+      },
+    ]);
+  });
+
+  it('should say when the card took no code', async () => {
+    const w = card(false);
+    const { stage } = await w.stages.stage('GITHUB', staged(), DEVICE);
+    should(
+      (await w.stages.commit('GITHUB', stage, () => true, { kind: 'device', deviceId: 'phone' })).typed,
+    ).be.false();
+  });
+
+  it('should say nothing was typed when the commit names no saver, or no card can take a code', async () => {
+    const w = card();
+    const { stage } = await w.stages.stage('GITHUB', staged(), DEVICE);
+    should((await w.stages.commit('GITHUB', stage, () => true)).typed).be.false();
+    should(w.used).deepEqual([]);
+  });
+
+  it('should type nothing for a save staged from the machine or a ferret’s token, whose card says nothing of typing', async () => {
+    const w = card();
+    const { stage } = await w.stages.stage('GITHUB', staged(), OWNER);
+    const saved = await w.stages.commit('GITHUB', stage, () => true, { kind: 'host' });
+    should(saved).not.have.property('typed');
+    should(w.used).deepEqual([]);
+  });
+
+  it('should type nothing without the passkey proof: the stage keeps waiting', async () => {
+    const w = card();
+    const { stage } = await w.stages.stage('GITHUB', staged(), DEVICE);
+    const refused = await w.stages
+      .commit('GITHUB', stage, () => false, { kind: 'device', deviceId: 'phone' })
+      .catch((error: Error) => error.name);
+    should(refused).equal('TwoFactorSeedProofMissing');
+    should(w.used).deepEqual([]);
+  });
+});
+
+describe('use it now needs the card as the owner saw it at the stage', () => {
+  it('should type nothing when the card had no digest yet (the daemon was looking at it again)', async () => {
+    const used: unknown[] = [];
+    const stages = new TwoFactorSeedStages({
+      accounts: {
+        seedTarget: async () => ({ key: `L${'0'.repeat(24)}`, label: 'GitHub', places: [], labels: [], seeds: 0 }),
+        accountsAt: async () => ['GITHUB'],
+        addSeed: async () => ({
+          account: 'GITHUB',
+          factor: twoFactorKeySummaryOf({
+            id: 'tf_0123456789ab',
+            kind: 'totp',
+            label: 'Authenticator app',
+            seal: `L${'0'.repeat(24)}_TOTP_00000000`,
+            params: TotpParametersSchema.parse({}),
+            addedAt: '2026-01-01T00:00:00.000Z',
+            addedBy: 'owner',
+          }),
+        }),
+      },
+      cipher: new FakeSecretCipher(),
+      clock: { nowMs: () => 0 },
+      anyPasskey: async () => true,
+      hostName: 'kirin-box',
+      cards: {
+        cardTarget: () => ({ matchKey: 'github.com' }),
+        useNow: async (...args) => {
+          used.push(args);
+          return true;
+        },
+      },
+    });
+    const { stage } = await stages.stage(
+      'GITHUB',
+      { padded: padInputValue(SEED), totpAcknowledged: true, request: 'a'.repeat(32) },
+      { key: 'device:phone', device: true },
+    );
+    const saved = await stages.commit('GITHUB', stage, () => true, { kind: 'device', deviceId: 'phone' });
+    should(saved.typed).be.false();
+    should(used).deepEqual([]);
+  });
+});

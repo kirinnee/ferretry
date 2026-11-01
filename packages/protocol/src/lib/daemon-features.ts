@@ -101,9 +101,10 @@ export const DAEMON_FEATURES = {
   /**
    * 2FA keys (docs/input-requests.md, "Accounts and sign-ins"): an account's `factors` routes, saving a seed with an
    * `add-2fa-key` passkey bound to its stage, a code card titled from its keys and "Use code from Ferretry" per key
-   * (a deliver's `factor`). A daemon without this name has none of these routes and refuses a deliver naming a key,
-   * so the app offers neither and keeps today's one-seed surface.
-   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the store and the cards land in later changes.
+   * (a deliver's `factor`). A daemon without this name may lack these routes or refuse a deliver naming a key, so the
+   * app offers neither and keeps today's one-seed surface.
+   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the store and the daemon's side of the cards have landed;
+   * the app's cards and the "Set up automatic codes" panel ship first.
    */
   twoFactorKeys: 'accounts.2fa-keys.1',
   /**

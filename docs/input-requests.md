@@ -142,9 +142,9 @@ one-time.
   other field still blocks them all. The card stays open (the owner
   can dismiss it), and an owner's Send after the ferret typed is checked against the target like any other.
 - **A code the DAEMON made** from a saved 2FA seed: no tool, result or route **returns** it, and it is typed only into
-  the observed field of that sign-in. Its text is also masked from text reads for the redaction window, as defence in
-  depth; that covers text only, so the ferret may still see it on screen (a screenshot, a scripted read). The owner
-  allowed that: TOTP codes are fine to see (design §11.1).
+  the observed field of that sign-in ([Codes Ferretry makes](#codes-ferretry-makes)). Its text is also masked from
+  text reads for the redaction window, as defence in depth; that covers text only, so the ferret may still see it on
+  screen (a screenshot, a scripted read). The owner allowed that: TOTP codes are fine to see (design §11.1).
 - **A `code` aimed at a password is a secret.** The daemon handles a code field as `secret` when any of these
   holds (the ferret's words may only ever raise a code, never lower one):
   - the page field is `type=password`, or its name, id or autocomplete says pass, pwd or PIN (any type);
@@ -172,7 +172,8 @@ one-time.
   Then the field is hidden on the card, fully locked, masked, blocks the ferret's typing, and is `secret` in the
   journal and audit. The card says "Treated as a secret: this is a password field." This is decided at raise and
   checked again at a redraw, a restart and the write (never undone); a saved login still fills the role the owner
-  picked.
+  picked, **except a code the daemon makes**: a code field found going into a password at the write gets no code
+  Ferretry made (the Send is refused, nothing typed, and the card asks for a secret from then on).
 
 - **Never saved**: "Save as" keeps no code; the seed is added in Settings.
 - **Never probed**: a card with a code is not dummy-probed, as before.
@@ -829,6 +830,49 @@ accounts that may be picked by hand.
 - **The agent learns `source: saved`** from the delivery and nothing else: not the handle, not the label, not the
   value. What it may know beforehand is the [hint](#the-ferrets-hint-account_hint): metadata, never a value.
 
+### Codes Ferretry makes
+
+A code card is titled by the owner's 2FA key and offers **"Use code from Ferretry"** once per key whose seed this
+machine holds. The tap is the permission, as for a password; what follows is where the daemon may type the code.
+
+- **The title** is `factorAskWords` over the keys of the account the daemon matched ("Code sent to ••42 (SMS)", "Code
+  from Authenticator app", "One-time code: SMS ••42 or Authenticator app"), cut to 60 characters. The account is the
+  one `chosenSignIn` picks among the sign-ins matched here, whatever fields they hold, so the title is the same
+  whether a seed is held. A raise's `factor` names one of that account's keys; one of any other account, or no key
+  at all, is ignored and the title is as if none was named. Two matched accounts and nothing to choose: "Needs a
+  code". The ferret's words are never in the title (only the owner's labels and plain facts).
+- **The buttons** are `offer.codes` on the MATCHED offer that fills the code: each key with a seed, by id and label,
+  one that worked first, then one never tried, then one that did not (`checked`), newest first. The app shows
+  `LOGIN_ONE_FACTOR_WARNING` under every one: "Password and code both come from this machine: together they are
+  one factor."
+- **Where it may go** (`codeTargetProblem`), decided from what the daemon saw, at the card and again at the write:
+  a page on https, a field the browser reported visible and uncovered, in the page's own frame; a terminal's one
+  prompt, whose `tool@host` key (a proved program in line mode) the sign-in matched. Matching is exact, so a
+  look-alike origin, a subdomain, another port, another program or another ssh host offers nothing. Anything else
+  and the card **offers no code at all** (the owner types it), and a deliver for one is refused.
+- **The deliver** names the account (`entry`), its sign-in and the key (`factor`, absent: the first button). The
+  daemon refuses it with `bad_request` and nothing opened or typed when: the key is not one of that offer's
+  buttons (another account's, one with no seed, no key at all), the account is not offered there (**never a hand
+  pick**: "Use another account…" never makes a code), the card has no code field, the target may not take one (the
+  list above), or the code field now looks like a password (R0b's upgrade wins).
+- **Never returned.** The code is made inside the vault (`fill(account, 'totp', now, { factor })`) and handed only to
+  the write. `input.delivered` records `source: saved`, the account and the key's id (`factor`); no result, wait,
+  journal event, agenda item, push or log line has a field that could hold the code.
+- **Checked by use.** After a submitted code Ferretry made, the observer looks on its own (`LoginObserver.codeTyped`):
+  a page that loads a new document within 10 s, or a terminal whose cursor line at 10 s is not the same prompt
+  again, went through; a page that stayed, or the same prompt again, did not. Either is kept on the key
+  (`verified`, "working" / "didn't work"); it orders the buttons and grants nothing. Nothing is kept when the
+  daemon cannot tell, or when the ferret acted on that kind of surface after the write (or ever ran a page script).
+- **Didn't go through: the card opens again.** The same request goes back to `pending` on a NEW card that starts
+  "The saved key's code didn't go through: type the code.", with the same title. The ferret is told the new card's
+  id, and `input_wait` on the old id still answers. Only for a card that is all codes, while nothing else waits on
+  that target and the target is still there; otherwise the ferret is told to read the target and raise again.
+- **Use it now.** A seed saved with a passkey from an open code card (the stage's `request`, from a paired device)
+  types the new key's first code into that card at once, through the same deliver and every check above, as that
+  device, against the card as it was when the seed was staged (a card redrawn since types nothing, as a tap on it
+  would not); `TwoFactorSeedSaved.typed` says whether it was typed. A save staged from the machine or a ferret's token
+  (`fy account factor add --totp`, confirmed on an agenda card that says nothing about typing) never types anything.
+
 ### 2FA seeds (opt-in, per entry)
 
 An entry may keep a TOTP seed (RFC 6238; SHA-1, 6 digits and 30 seconds unless the setup page says otherwise).
@@ -915,9 +959,9 @@ secret fields an account holds, nor its 2FA parameters, seal names, auto-apply o
 #### 2FA keys
 
 > The shapes are in `accounts.ts` and `two-factor.ts`. The store and its routes — adding, relabelling and removing
-> a key, and saving a seed with a passkey bound to that save — are built ([secrets: 2FA keys](secrets.md#2fa-keys));
-> the cards are not yet. No daemon reports `accounts.2fa-keys.1` yet. Until it does, a deliver that names a key
-> (`factor`) is refused.
+> a key, and saving a seed with a passkey bound to that save — are built ([secrets: 2FA keys](secrets.md#2fa-keys)),
+> and so is the daemon's side of the code cards ([Codes Ferretry makes](#codes-ferretry-makes)); the app's cards are
+> not yet. No daemon reports `accounts.2fa-keys.1` yet, so the app sends no `factor`.
 
 **An account is a username, a password and a list of 2FA keys** (`factors`, at most 8). Each key has an id
 (`tf_` and 12 hex digits, never shown to people), a kind, a label **the owner wrote** ("Okta Verify on Pixel",
@@ -967,7 +1011,7 @@ into a guessed key. This is folded into the `v: 2` index directly; there is no `
 **A code card's title** comes from the keys (`factorAskWords`), in the owner's words: "Code sent to ••42 (SMS)",
 "Code from Authenticator app", "One-time code: SMS ••42 or Authenticator app", or, with no key known, "One-time
 code for GitHub · kirinnee". A raise may name the key with `factor`. Like `secretHint`, it is a hint: it is used
-only if it is a key of the matched account, and otherwise ignored.
+only if it is a key of the matched account, and otherwise ignored ([Codes Ferretry makes](#codes-ferretry-makes)).
 
 **Saving a seed** takes one field: a base32 key (spaces fine) or an `otpauth://totp/…` link. `parseTotpInput` is
 the one parser, run by the app for instant feedback and again by the daemon, which has the final say. It refuses

@@ -15,6 +15,7 @@ import type {
   InputTargetFacts,
   LoginEntryId,
   LoginFieldRole,
+  TwoFactorId,
 } from '@ferretry/protocol';
 
 /**
@@ -278,8 +279,16 @@ export interface InputLoginPort {
    * the facts the daemon saw; never a value). Rejects when the store cannot tell.
    */
   listing(): Promise<Pick<AccountList, 'accounts' | 'signIns'>>;
-  /** The value an entry's field types: the username, the password, or the 2FA code for `nowMs`. Rejects for a missing one. */
-  fill(id: LoginEntryId, role: LoginFieldRole, nowMs: number): Promise<string>;
+  /**
+   * The value an entry's field types: the username, the password, or the 2FA code for `nowMs` from the key `factor`
+   * names (which must be the entry's and hold a seed), else from its first key in offer order. Rejects for a missing one.
+   */
+  fill(
+    id: LoginEntryId,
+    role: LoginFieldRole,
+    nowMs: number,
+    options?: { readonly factor?: TwoFactorId },
+  ): Promise<string>;
   /**
    * Keeps typed values in an entry in ONE change: a new entry labelled `label` matching `match`, or the
    * existing one (its label kept, `match` added). The username and password of one card go together. The

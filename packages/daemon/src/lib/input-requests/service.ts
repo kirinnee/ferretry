@@ -1,7 +1,9 @@
 import {
+  type AccountId,
   type AgendaId,
   type CopyMeta,
   copyHandle,
+  factorAskWords,
   fillRoleFor,
   INPUT_DEFAULT_EXPIRY_SECONDS,
   INPUT_ERROR_CODES,
@@ -40,10 +42,12 @@ import {
   LOGIN_PASSWORD_MIN_LENGTH,
   LOGIN_USERNAME_MAX_LENGTH,
   type LoginEntryId,
+  MAX_AGENDA_TITLE_LENGTH,
   placeKeys,
   type SignInId,
   savedRolesOf,
   strongestSensitivity,
+  type TwoFactorId,
   unpadInputValue,
   worstRisk,
 } from '@ferretry/protocol';
@@ -84,7 +88,15 @@ import {
   spellsPassword,
 } from './lock.ts';
 import type { LoginObserver } from './login-observer.ts';
-import { type SavedListing, savedForFields, signInOfAt, signInsAt, targetMatchKey } from './saved-logins.ts';
+import {
+  codeCardKeys,
+  codeTargetProblem,
+  type SavedListing,
+  savedForFields,
+  signInOfAt,
+  signInsAt,
+  targetMatchKey,
+} from './saved-logins.ts';
 import { SessionLock } from './session-lock.ts';
 
 /**
@@ -156,7 +168,14 @@ interface Held {
   /** Which target the card is for (`rebind.ts`): a sighting with this binding may redraw the card. Absent: none may. */
   binding?: string;
   /** The document a page's card was raised on: a card redrawn onto another one says so. */
-  readonly raisedOn?: string;
+  raisedOn?: string;
+  /** The card's title as raised, so a card opened again for a code that did not go through reads the same. */
+  readonly title?: string;
+  /**
+   * The cards this request was shown on before its current one: a code Ferretry made that did not go through opens the
+   * request again on a new card ({@link InputRequestService.reopen}), and the ferret may still wait on the old id.
+   */
+  readonly formerCards: AgendaId[];
   /** The target's key for saved logins (`sudo@kirin-box`), from what the DAEMON saw; never from the agent. */
   matchKey?: string;
   /**
@@ -213,9 +232,10 @@ export interface InputRequestServiceDependencies {
   readonly rules?: InputPasteRules;
   /**
    * Told about every value typed into a terminal or a page, once it landed: the facts a saved login keeps
-   * (docs/input-requests.md, "Login recipes") come only from here. Absent: no facts are kept.
+   * (docs/input-requests.md, "Login recipes") come only from here, and so does whether a code Ferretry made went
+   * through (`codeTyped`). Absent: no facts are kept.
    */
-  readonly observer?: Pick<LoginObserver, 'delivered' | 'tainted'>;
+  readonly observer?: Pick<LoginObserver, 'delivered' | 'tainted'> & Partial<Pick<LoginObserver, 'codeTyped'>>;
 }
 
 const instant = (ms: number): string => new Date(ms).toISOString();
@@ -336,11 +356,16 @@ export class InputRequestService {
         : false;
     const lock = kept ? lockFor(seen.facts, fields, { ...context, probed }) : undefined;
     const step = raise.chain === undefined ? undefined : this.stepAfter(sessionId, raise.chain);
+    const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
+    const title =
+      copy === undefined
+        ? ((await this.codeTitle(fields, matchKey, raise.secretHint, raise.factor)) ?? titleOf(fields))
+        : PASTE_TITLE;
     this.raising.set(requestId, { sessionId, subject: sensitivity === 'code' ? 'one-time-code' : 'other' });
     const card = await this.deps.agenda
       .raise(sessionId, {
         requestId,
-        title: copy === undefined ? titleOf(fields) : PASTE_TITLE,
+        title,
         ask: copy === undefined ? askOf(shown, fields) : pasteAskOf(copy, shown),
         prompt: raise.prompt,
         blocking: raise.blocking ?? sensitivity === 'secret',
@@ -376,13 +401,14 @@ export class InputRequestService {
       await this.deps.agenda.close(sessionId, card.id, 'Input request could not be recorded.');
       throw new InputRequestError('unavailable', 'Ferretry could not record the request, so it did not ask the owner');
     }
-    const matchKey = targetMatchKey(seen.facts, this.deps.hostName ?? '');
     const held: Held = {
       request,
       names: [target.key, ...(seen.names ?? [])],
       checkFailures: 0,
       rebinds: 0,
       binding: bindingOf(seen.facts),
+      title,
+      formerCards: [],
       ...(seen.facts.kind === 'browser' ? { raisedOn: seen.facts.navigationId } : {}),
       ...(matchKey === undefined ? {} : { matchKey }),
       ...(raise.secretHint === undefined ? {} : { hint: raise.secretHint }),
@@ -507,7 +533,33 @@ export class InputRequestService {
     const { logins } = this.deps;
     if (logins === undefined || held.request.state !== 'pending') return undefined;
     const listing = await logins.listing().catch((): SavedListing => NO_ACCOUNTS);
-    return savedForFields(held.request.fields, held.matchKey, listing, { hint: held.hint });
+    return savedForFields(held.request.fields, held.matchKey, listing, {
+      hint: held.hint,
+      codesHere: codesHere(held.request.observed, held.request.fields),
+    });
+  }
+
+  /**
+   * A code card's title from the 2FA keys of the account the daemon matched here ("Code sent to ••42 (SMS)"), in the
+   * OWNER's words: the ferret's `factor` only picks one of that account's keys, and anything else it names is ignored.
+   * `undefined` (the plain "Needs a code") for a card whose most careful field is not a code, a target no sign-in
+   * matches, a store that cannot be read, or two accounts and nothing to choose between them. A key reads the same
+   * whether Ferretry holds its seed, so the title never says one exists.
+   */
+  private async codeTitle(
+    fields: readonly InputRequestField[],
+    matchKey: string | undefined,
+    hint: string | undefined,
+    factor: TwoFactorId | undefined,
+  ): Promise<string | undefined> {
+    if (strongestSensitivity(fields) !== 'code' || matchKey === undefined) return undefined;
+    const listing = await this.deps.logins?.listing().catch(() => undefined);
+    if (listing === undefined) return undefined;
+    const about = codeCardKeys(matchKey, listing, {
+      ...(hint === undefined ? {} : { hint }),
+      ...(factor === undefined ? {} : { factor }),
+    });
+    return about === undefined ? undefined : clipped(factorAskWords(about.keys, about.account));
   }
 
   /** The last word before a request leaves the service: a hold taken while it was being redacted still seals it. */
@@ -625,10 +677,163 @@ export class InputRequestService {
    * An OPEN card's target key as the DAEMON saw it (never the agent's word), for a 2FA seed set up from that card:
    * it saves only to an account that signs in there (docs/secrets.md, "2FA keys"). `undefined`: no such open card.
    */
-  cardTarget(requestId: string): { readonly matchKey?: string } | undefined {
+  cardTarget(requestId: string): { readonly matchKey?: string; readonly observedDigest?: string } | undefined {
     const held = this.held.get(requestId);
     if (held === undefined || isFinal(held.request)) return undefined;
-    return held.matchKey === undefined ? {} : { matchKey: held.matchKey };
+    const { observedDigest } = held.request;
+    return {
+      ...(held.matchKey === undefined ? {} : { matchKey: held.matchKey }),
+      ...(observedDigest === undefined ? {} : { observedDigest }),
+    };
+  }
+
+  /**
+   * "USE IT NOW": the owner just saved a 2FA seed with a passkey from this OPEN code card, so the daemon makes the key's
+   * first code and types it into the card, as a "Use code from Ferretry" tap would — through {@link deliver}, so every
+   * check of that tap holds (the matched account's key, the exact place, the field, the upgrade to a secret). Only a card
+   * that is all one-time codes. Whether it was typed; never the code. Total.
+   */
+  async useNow(
+    requestId: string,
+    use: {
+      readonly account: AccountId;
+      readonly factor: TwoFactorId;
+      /** The card as the owner saw it when they set the key up: a card redrawn since is refused, nothing typed. */
+      readonly observedDigest: string;
+      readonly submit?: boolean;
+      readonly actor: Extract<InputActor, { readonly kind: 'host' | 'device' }>;
+    },
+  ): Promise<boolean> {
+    const held = this.held.get(requestId);
+    if (held === undefined || held.request.state !== 'pending') return false;
+    if (!held.request.fields.every(field => fillRoleFor(field.sensitivity) === 'totp')) return false;
+    const caller: InputCaller = {
+      kind: 'owner',
+      actor: use.actor,
+      carrier: use.actor.kind === 'device' ? 'direct' : 'loopback',
+    };
+    const body: InputDeliverBody = {
+      deliveryId: crypto.randomUUID(),
+      observedDigest: use.observedDigest,
+      entry: use.account,
+      factor: use.factor,
+      submit: use.submit ?? held.request.submit === 'owner-default',
+    };
+    return await this.deliver(held.request.sessionId, requestId, body, caller).then(
+      result => result.state === 'delivered',
+      () => false,
+    );
+  }
+
+  /**
+   * CHECKED BY USE: the observer watches whether a submitted code Ferretry made went through, and keeps that on the key
+   * (it orders the buttons; it grants nothing). One that did not opens the request again for a typed code. Total.
+   */
+  private async checkCode(
+    held: Held,
+    typed: {
+      readonly account: AccountId;
+      readonly factor: TwoFactorId;
+      readonly facts: InputTargetFacts;
+      readonly deliveredAt: number;
+    },
+  ): Promise<void> {
+    const check = this.deps.observer?.codeTyped;
+    if (check === undefined) return;
+    const { request } = held;
+    try {
+      const worked = await check.call(this.deps.observer, {
+        sessionId: request.sessionId,
+        account: typed.account,
+        factor: typed.factor,
+        target: request.target,
+        facts: typed.facts,
+        surfaces: [...held.names],
+        deliveredAt: typed.deliveredAt,
+      });
+      if (worked === false) await this.reopen(held);
+    } catch {
+      // A check not made is a check not made: the code was typed either way.
+    }
+  }
+
+  /**
+   * A CODE FERRETRY MADE DID NOT GO THROUGH (the page stayed, the same prompt came back): the request is OPEN again, on
+   * a new card that says so, for the owner to type the code. Only a card of one-time codes, only while nothing else
+   * waits on that target and the target is still there; otherwise the ferret is told and nothing is raised.
+   */
+  private async reopen(held: Held): Promise<void> {
+    const { sessionId } = held.request;
+    await this.lock.run(sessionId, async () => {
+      const { request } = held;
+      if (request.state !== 'delivered' || (await this.deps.sessions.ended(sessionId))) return;
+      const before = request.agendaItemId;
+      const tell = async (message: string): Promise<void> => await this.deps.notifier.tell(sessionId, before, message);
+      const where = `%${request.target.kind}:${request.target.key}`;
+      const cannot = `${before}: the code Ferretry made did not go through on ${where}. Read it, and if it still asks for a code, raise a fresh ${request.target.kind}_request_input.`;
+      const busy = [...this.held.values()].some(
+        other =>
+          other !== held &&
+          other.request.sessionId === sessionId &&
+          !isFinal(other.request) &&
+          other.request.target.kind === request.target.kind &&
+          other.request.target.key === request.target.key,
+      );
+      if (busy || !request.fields.every(field => fillRoleFor(field.sensitivity) === 'totp')) return await tell(cannot);
+      const seen = await this.deps.target.observe(sessionId, request.target, request.fields.map(pointerOf));
+      if (!seen.ok) return await tell(cannot);
+      const now = this.deps.clock.now();
+      const expiresAt = instant(now + INPUT_DEFAULT_EXPIRY_SECONDS * 1000);
+      const names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
+      const fields = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
+      const shown = await this.project(sessionId, seen.facts, names);
+      const shot =
+        seen.facts.kind === 'browser'
+          ? await this.deps.target.shoot?.(sessionId, request.target, seen.facts).catch(() => undefined)
+          : undefined;
+      this.raising.set(request.id, { sessionId, subject: 'one-time-code' });
+      const card = await this.deps.agenda
+        .raise(sessionId, {
+          requestId: request.id,
+          title: held.title ?? titleOf(fields),
+          ask: `${CODE_DID_NOT_GO_THROUGH} ${askOf(shown, fields)}`,
+          prompt: request.prompt,
+          blocking: true,
+          expiresAt,
+          ...(request.chain === undefined ? {} : { chain: request.chain }),
+        })
+        .finally(() => this.raising.delete(request.id));
+      if (!card.ok) return await tell(cannot);
+      const { outcome: _outcome, ...rest } = request;
+      held.formerCards.push(before);
+      held.names = names;
+      held.checkFailures = 0;
+      held.rebinds = 0;
+      held.binding = bindingOf(seen.facts);
+      held.probed = false;
+      rekey(held, targetMatchKey(seen.facts, this.deps.hostName ?? ''));
+      if (seen.facts.kind === 'browser') held.raisedOn = seen.facts.navigationId;
+      if (shot === undefined) delete held.shot;
+      else held.shot = shot;
+      held.request = {
+        ...rest,
+        agendaItemId: card.id,
+        state: 'pending',
+        raisedAt: instant(now),
+        expiresAt,
+        fields,
+        sensitivity: strongestSensitivity(fields),
+        observed: shown,
+        risk: worstRisk(fields.map(field => field.risk)),
+        observedDigest: digestFacts(seen.facts),
+        ...(shot === undefined ? {} : { pictured: true as const }),
+      };
+      await this.journalQuietly(held.request, 'requested');
+      await this.record(held.request, 'input.requested', { kind: 'daemon' }, this.auditOf(held.request));
+      await tell(
+        `${before}: the code Ferretry made did not go through on ${where}, so the owner is asked to type it on ${card.id}. Wait on ${card.id}.`,
+      );
+    });
   }
 
   /** Where a request's value goes, for a route that gates by destination: names only, never a value. */
@@ -654,7 +859,8 @@ export class InputRequestService {
   /** The owner dismissed the card without answering: the request ends, and the card is already closed. */
   async cardDismissed(sessionId: string, id: AgendaId): Promise<void> {
     const held = this.byCard(sessionId, id);
-    if (held === undefined || held.request.state !== 'pending') return;
+    // Only the card the request is on now: a card it was on before is closed already, and says nothing of this one.
+    if (held === undefined || held.request.state !== 'pending' || held.request.agendaItemId !== id) return;
     await this.finish(held, 'cancelled', 'owner_declined', undefined, { closeCard: false, tellAgent: true });
   }
 
@@ -859,6 +1065,7 @@ export class InputRequestService {
       names: [target.key],
       checkFailures: 0,
       rebinds: 0,
+      formerCards: [],
       deliveries: new Map(),
       waiters: new Set(),
       upgraded: new Set(),
@@ -917,6 +1124,7 @@ export class InputRequestService {
       names: [request.target.key],
       checkFailures: 0,
       rebinds: 0,
+      formerCards: [],
       deliveries: new Map(),
       waiters: new Set(),
       upgraded: new Set(),
@@ -987,13 +1195,27 @@ export class InputRequestService {
       // The owner's card is older than the request (it was redrawn since): nothing is wrong with the target, so
       // nothing is counted; the card reads the request again and the owner checks it before sending.
       if (body.observedDigest !== request.observedDigest) throw targetRebound(request.target.kind);
+      // The fields a saved account fills with a one-time code the DAEMON makes from one of its 2FA keys.
+      const codeFields =
+        body.entry === undefined
+          ? []
+          : request.fields.filter(field => !typed.has(field.id) && fillRoleFor(field.sensitivity) === 'totp');
+      if (body.factor !== undefined && codeFields.length === 0)
+        throw new InputRequestError(
+          'bad_request',
+          'this card has no code field for a 2FA key to fill: type the value instead. Nothing was typed',
+        );
       // A saved account is typed only as the card offers it NOW, and the tapped sign-in must be its offer's: the rules of
       // the card are the daemon's, not only the app's list. Checked before anything is opened or typed.
-      if (body.entry !== undefined) await this.guardOffered(held, body.entry, body.signIn, typed);
+      const factor =
+        body.entry === undefined
+          ? undefined
+          : await this.guardOffered(held, body.entry, body.signIn, typed, codeFields.length > 0, body.factor);
       const submitted = body.submit && request.submit !== 'agent';
       const looked = await this.deps.target.observe(request.sessionId, request.target, request.fields.map(pointerOf));
       const seen =
         looked.ok && digestFacts(looked.facts) === request.observedDigest ? looked : await this.lookAgain(held, looked);
+      if (codeFields.length > 0) this.guardCodeTarget(held, seen, codeFields);
       // A secure copy is opened HERE, like a saved value: after every check that can refuse without typing, and only to be typed.
       if (pasted !== undefined)
         typed.set((request.fields[0] as InputRequestField).id, await this.openCopy(held, pasted));
@@ -1001,7 +1223,7 @@ export class InputRequestService {
       // typing, and only to be typed: it is in no request, event, audit entry, result or error.
       const values: InputFieldValue[] = [];
       for (const field of request.fields) {
-        const text = typed.get(field.id) ?? (await this.fill(field, body.entry as LoginEntryId));
+        const text = typed.get(field.id) ?? (await this.fill(field, body.entry as LoginEntryId, factor));
         values.push({ field: field.id, text });
       }
       held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
@@ -1097,6 +1319,7 @@ export class InputRequestService {
         body.entry ?? (saved?.ok === true ? body.save?.entry : undefined),
         body.signIn,
       );
+      const made = codeFields.length > 0 && factor !== undefined ? factor : undefined;
       await this.finish(held, 'delivered', undefined, by, {
         closeCard: true,
         tellAgent: true,
@@ -1104,7 +1327,16 @@ export class InputRequestService {
         ...(pasted === undefined ? {} : { sealed: true }),
         ...(body.entry === undefined ? {} : { entry: body.entry }),
         ...(saved === undefined ? {} : { saved: saved.ok }),
+        ...(made === undefined ? {} : { factor: made }),
       });
+      // Not awaited either: whether a code Ferretry made went through is seen after the submit, by the observer.
+      if (made !== undefined && submitted)
+        void this.checkCode(held, {
+          account: body.entry as AccountId,
+          factor: made,
+          facts: seen.facts,
+          deliveredAt,
+        });
       return {
         id: request.id,
         deliveryId: body.deliveryId,
@@ -1240,7 +1472,9 @@ export class InputRequestService {
     entry: LoginEntryId,
     signIn: SignInId | undefined,
     typed: ReadonlyMap<string, string>,
-  ): Promise<void> {
+    makesCode: boolean,
+    factor: TwoFactorId | undefined,
+  ): Promise<TwoFactorId | undefined> {
     const listing = await this.deps.logins?.listing().catch(() => undefined);
     if (listing === undefined)
       throw new InputRequestError('unavailable', 'Ferretry could not read the saved accounts, so nothing was typed');
@@ -1250,9 +1484,10 @@ export class InputRequestService {
       throw new InputRequestError('bad_request', `that sign-in is not one of ${entry}; nothing was typed`);
     // At least one: an `entry` with every field typed was already refused (`typedValues`).
     const filled = held.request.fields.filter(field => !typed.has(field.id));
-    const offer = savedForFields(filled, held.matchKey, listing, { hint: held.hint }).offers.find(
-      each => each.id === entry,
-    );
+    const offer = savedForFields(filled, held.matchKey, listing, {
+      hint: held.hint,
+      codesHere: codesHere(held.request.observed, filled),
+    }).offers.find(each => each.id === entry);
     if (offer === undefined)
       throw new InputRequestError('bad_request', `${entry} is not offered for this target; nothing was typed`);
     if (signIn !== undefined && offer.signIn !== signIn)
@@ -1260,6 +1495,39 @@ export class InputRequestService {
         'bad_request',
         `that sign-in of ${entry} is not the one that signs in here; nothing was typed`,
       );
+    if (!makesCode) return undefined;
+    // The key a code is made from is one of THIS offer's buttons: the matched account's, holding a seed. Absent, the
+    // first button, which is the key the vault would choose: named here so the code and its check are about one key.
+    const keys = offer.codes ?? [];
+    if (factor !== undefined && !keys.some(key => key.factor === factor))
+      throw new InputRequestError(
+        'bad_request',
+        `that 2FA key is not one ${entry} makes codes from for this target; nothing was typed`,
+      );
+    return factor ?? keys[0]?.factor;
+  }
+
+  /**
+   * At the write: a code the DAEMON makes never goes into a field that now looks like a password (R0b's upgrade wins:
+   * that field is a secret from now on, and a code is not what it asks for). Refused before anything is opened, with
+   * nothing typed. Where it may go ({@link codeTargetProblem}) was checked by {@link guardOffered} on the card's facts,
+   * and `seen` is those very facts (the digest compare, or a look again that found them), so it holds here too; only
+   * whether a code program reads the prompt is seen afresh, and that is what this checks.
+   */
+  private guardCodeTarget(
+    held: Held,
+    seen: Extract<ObserveResult, { readonly ok: true }>,
+    codeFields: readonly InputRequestField[],
+  ): void {
+    const { request } = held;
+    const now = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
+    if (codeFields.some(field => now.find(each => each.id === field.id)?.sensitivity === 'secret')) {
+      held.request = { ...held.request, fields: now, sensitivity: strongestSensitivity(now) };
+      throw new InputRequestError(
+        'bad_request',
+        'that field now looks like a password field, and Ferretry never types a code it made into one: type the value yourself. Nothing was typed',
+      );
+    }
   }
 
   /** The value a saved login types for one field. Refuses with the entry's name, never its value. */
@@ -1285,10 +1553,11 @@ export class InputRequestService {
     return value;
   }
 
-  private async fill(field: InputRequestField, entry: LoginEntryId): Promise<string> {
+  private async fill(field: InputRequestField, entry: LoginEntryId, factor: TwoFactorId | undefined): Promise<string> {
     const logins = this.deps.logins as InputLoginPort;
+    const role = fillRoleFor(field.sensitivity);
     const value = await logins
-      .fill(entry, fillRoleFor(field.sensitivity), this.deps.clock.now())
+      .fill(entry, role, this.deps.clock.now(), role === 'totp' && factor !== undefined ? { factor } : {})
       .catch((error: unknown) => {
         throw error instanceof LoginEntryError
           ? new InputRequestError(
@@ -1526,6 +1795,8 @@ export class InputRequestService {
       sealed?: boolean;
       /** It ended because the target kept changing under the card, not because it became another target. */
       unsettled?: boolean;
+      /** The 2FA key a code the daemon made and typed came from. */
+      factor?: TwoFactorId;
     },
   ): Promise<void> {
     const at = instant(this.deps.clock.now());
@@ -1572,6 +1843,7 @@ export class InputRequestService {
             source,
             submitted: options.submitted ?? false,
             ...(options.entry === undefined ? {} : { entry: options.entry }),
+            ...(options.factor === undefined ? {} : { factor: options.factor }),
             ...(options.saved === undefined ? {} : { saved: options.saved }),
             ...(held.pastedInto === undefined ? {} : { profileProgram: held.pastedInto.path }),
           }
@@ -1596,6 +1868,10 @@ export class InputRequestService {
   private byCard(sessionId: string, id: AgendaId): Held | undefined {
     for (const held of this.held.values()) {
       if (held.request.sessionId === sessionId && held.request.agendaItemId === id) return held;
+    }
+    // A request opened again on a new card is still the one its first card asked about.
+    for (const held of this.held.values()) {
+      if (held.request.sessionId === sessionId && held.formerCards.includes(id)) return held;
     }
     return undefined;
   }
@@ -1970,6 +2246,24 @@ function pageRiskOf(
   if (found.field.type?.toLowerCase() !== 'password')
     return { level: 'amber', reason: 'This is not a password field, so the value will show on the page.' };
   return { level: 'green', reason: 'A password field on a secure page, as the browser reported it.' };
+}
+
+/** What a card opened again says first: the code Ferretry made from a saved key did not go through. */
+const CODE_DID_NOT_GO_THROUGH = "The saved key's code didn't go through: type the code.";
+
+/** A title cut to what an agenda card holds, on a word where it can be. */
+function clipped(title: string): string {
+  if (title.length <= MAX_AGENDA_TITLE_LENGTH) return title;
+  return `${title.slice(0, MAX_AGENDA_TITLE_LENGTH - 1).trimEnd()}…`;
+}
+
+/**
+ * Whether the daemon may type a code it made into a card's code fields, from what IT saw ({@link codeTargetProblem}):
+ * the card offers "Use code from Ferretry" only then. A card with no code field offers none.
+ */
+function codesHere(facts: InputTargetFacts | undefined, fields: readonly InputRequestField[]): boolean {
+  const ids = fields.filter(field => fillRoleFor(field.sensitivity) === 'totp').map(field => field.id);
+  return ids.length > 0 && codeTargetProblem(facts, ids) === undefined;
 }
 
 function titleOf(fields: readonly InputRequestField[]): string {

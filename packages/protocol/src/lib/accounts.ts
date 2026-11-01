@@ -31,11 +31,13 @@ import {
   LoginMethodSchema,
   loginMethodSentence,
   MAX_LOGIN_ENTRIES,
+  MAX_SEEDS_PER_ACCOUNT,
   oneLine,
   SIGN_IN_PROJECT_MAX_LENGTH,
   type SignInChoiceReason,
   type TotpParameters,
   TotpParametersSchema,
+  TWO_FACTOR_LABEL_MAX_LENGTH,
   webHostsOf,
 } from './login-entries.ts';
 import {
@@ -187,10 +189,9 @@ export const isCodeFactor = (kind: TwoFactorKind): boolean => (CODE_FACTOR_KINDS
 
 /** Most 2FA keys one account has. */
 export const MAX_FACTORS_PER_ACCOUNT = 8;
-/** Most of them that hold a seed: a re-enrolled second authenticator, a backup app. */
-export const MAX_SEEDS_PER_ACCOUNT = 4;
-/** The longest label the owner gives a key ("Okta Verify on Pixel", "Phone ••42"). */
-export const TWO_FACTOR_LABEL_MAX_LENGTH = 60;
+// Most seeds one account keeps, and the longest key label: owned by login-entries.ts, where a code card's offers name
+// a key by its label, and re-exported here beside the rest of the 2FA key model.
+export { MAX_SEEDS_PER_ACCOUNT, TWO_FACTOR_LABEL_MAX_LENGTH };
 
 /** The app a push goes to, when the owner said. */
 export const PUSH_APPS = ['okta-verify', 'microsoft-authenticator', 'google', 'duo', 'other'] as const;
@@ -791,16 +792,26 @@ export const MAX_LIVE_TWO_FACTOR_STAGES = 4;
  * here anyway", without which a key that says it is for another account is refused. `request` is the input card the
  * owner set this up from: the stage is refused unless `:id` is the account the daemon matched for that card.
  */
-export const StageTwoFactorSeedRequestSchema = z.strictObject({
-  padded: z.string().min(1).max(4_096),
-  label: TwoFactorLabelSchema.optional(),
-  totpAcknowledged: z.literal(true),
-  mismatchAcknowledged: z.boolean().optional(),
-  request: z
-    .string()
-    .regex(/^[0-9a-f]{32}$/u)
-    .optional(),
-});
+export const StageTwoFactorSeedRequestSchema = z
+  .strictObject({
+    padded: z.string().min(1).max(4_096),
+    label: TwoFactorLabelSchema.optional(),
+    totpAcknowledged: z.literal(true),
+    mismatchAcknowledged: z.boolean().optional(),
+    request: z
+      .string()
+      .regex(/^[0-9a-f]{32}$/u)
+      .optional(),
+    /**
+     * With `request`: press Enter after the daemon types the first code into that card ("use it now"), as the card's own
+     * Send would. Absent: what the card defaults to.
+     */
+    submit: z.boolean().optional(),
+  })
+  .refine(body => body.submit === undefined || body.request !== undefined, {
+    path: ['submit'],
+    message: 'submit is for the card a seed is set up from: send it with request',
+  });
 export type StageTwoFactorSeedRequest = z.infer<typeof StageTwoFactorSeedRequestSchema>;
 
 /** What a pasted key says it is for, where it differs from the account (the amber box), with its words. */
@@ -850,6 +861,11 @@ export const TwoFactorSeedSavedSchema = z.strictObject({
   factor: TwoFactorKeySummarySchema,
   /** Whether the key said it was for another account and was saved here anyway ("save it here anyway"). */
   mismatch: z.boolean(),
+  /**
+   * Set up from an input card (`request` on the stage): whether the daemon then typed the key's first code into that
+   * card ("use it now"), under every check a "Use code from Ferretry" tap gets. Never the code.
+   */
+  typed: z.boolean().optional(),
 });
 export type TwoFactorSeedSaved = z.infer<typeof TwoFactorSeedSavedSchema>;
 

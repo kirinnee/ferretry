@@ -92,7 +92,7 @@ describe('the input request routes', () => {
     should(response.body).not.containEql(VALUE);
   });
 
-  it('should refuse a deliver naming a 2FA key, and type nothing, until this daemon makes codes per key', async () => {
+  it('should refuse a deliver naming a 2FA key the card has no code field for, and type nothing', async () => {
     const { dispatch, writes, requestId, digest } = await served();
     const body = {
       deliveryId: crypto.randomUUID(),

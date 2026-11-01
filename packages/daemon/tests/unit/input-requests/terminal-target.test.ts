@@ -888,3 +888,30 @@ describe('a program proved only through the owner profile', () => {
     should(await port.type('s1', dev, SECRET, true, result.facts, { profileProgram: GH })).equal('typed');
   });
 });
+
+describe('the prompt line, for a code Ferretry typed: did the same prompt come back?', () => {
+  it('should read the line at the cursor, with control characters dropped', async () => {
+    const w = world();
+    w.capture = ok('Verification code:\u0007   \nnext\n');
+    should(await target(w).promptLine('s1', 'dev', ['dev', 't-dev'])).equal('Verification code:   ');
+    should(w.calls.at(-1)).containDeep(['capture-pane', '-p', '-N', '-S', '7', '-E', '7']);
+  });
+
+  it('should answer nothing for another terminal under the name, one it cannot find, describe or capture', async () => {
+    const other = world();
+    should(await target(other).promptLine('s1', 'dev', ['dev', 't-old'])).be.undefined();
+    should(other.calls).deepEqual([]);
+    const gone = world();
+    gone.located = false;
+    should(await target(gone).promptLine('s1', 'dev', ['dev', 't-dev'])).be.undefined();
+    const undescribed = world();
+    undescribed.display = failed;
+    should(await target(undescribed).promptLine('s1', 'dev', ['dev', 't-dev'])).be.undefined();
+    const odd = world();
+    odd.display = ok(`${odd.proof}\t/dev/pts/9\t-1\tsudo\n`);
+    should(await target(odd).promptLine('s1', 'dev', ['dev', 't-dev'])).be.undefined();
+    const failing = world();
+    failing.capture = failed;
+    should(await target(failing).promptLine('s1', 'dev', ['dev', 't-dev'])).be.undefined();
+  });
+});

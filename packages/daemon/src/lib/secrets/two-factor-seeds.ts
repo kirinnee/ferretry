@@ -25,6 +25,7 @@ import {
   type AgendaId,
   factorMismatch,
   factorMismatchWords,
+  type InputActor,
   MAX_LIVE_TWO_FACTOR_STAGES,
   MAX_SEEDS_PER_ACCOUNT,
   parseTotpInput,
@@ -95,9 +96,42 @@ export interface TwoFactorSeedAgendaPort {
   close(sessionId: string, id: AgendaId, note: string): Promise<void>;
 }
 
-/** An input card the owner set a seed up from: whether it is still open, and where the daemon saw its target. */
+/** Who saved a seed, as an input card's deliver names the owner: the machine, or a paired device. */
+export type SeedSaver = Extract<InputActor, { readonly kind: 'host' | 'device' }>;
+
+/**
+ * An input card the owner set a seed up from: whether it is still open, where the daemon saw its target, and the digest
+ * of the facts the card shows now (`observedDigest`, absent while the daemon looks again).
+ */
 export interface TwoFactorSeedCardPort {
-  cardTarget(requestId: string): { readonly matchKey?: string } | undefined;
+  cardTarget(requestId: string): { readonly matchKey?: string; readonly observedDigest?: string } | undefined;
+  /**
+   * "Use it now": types the new key's first code into that card under every check a "Use code from Ferretry" tap gets
+   * (`InputRequestService.useNow`), against `observedDigest`: the card as the owner saw it when they staged the seed, so
+   * a card redrawn since types nothing, as a tap on a stale card would. Whether it was typed; never the code. Absent:
+   * never typed.
+   */
+  useNow?(
+    requestId: string,
+    use: {
+      readonly account: AccountId;
+      readonly factor: TwoFactorId;
+      readonly observedDigest: string;
+      readonly submit?: boolean;
+      readonly actor: SeedSaver;
+    },
+  ): Promise<boolean>;
+}
+
+/**
+ * The card port as the daemon wires it: the input service is built after the seed stages, so both calls are handed on
+ * to whatever `current()` returns then. Before it exists: no card is open, and nothing is typed.
+ */
+export function lateSeedCards(current: () => TwoFactorSeedCardPort | undefined): TwoFactorSeedCardPort {
+  return {
+    cardTarget: requestId => current()?.cardTarget(requestId),
+    useNow: async (requestId, use) => (await current()?.useNow?.(requestId, use)) ?? false,
+  };
 }
 
 export interface TwoFactorSeedStagesDeps {
@@ -137,6 +171,12 @@ interface Stage {
   committing?: boolean;
   factor?: TwoFactorId;
   card?: { readonly sessionId: string; readonly id: AgendaId };
+  /**
+   * The input card a PAIRED DEVICE set this seed up from, to type the first code into once saved ("use it now"). Never
+   * for a stage made from the machine or a ferret's token: their save is confirmed on an agenda card that says nothing
+   * about typing, so the owner's passkey there is no tap on a code card.
+   */
+  readonly useOn?: { readonly request: string; readonly observedDigest?: string; readonly submit?: boolean };
 }
 
 interface Sealed {
@@ -235,6 +275,9 @@ export class TwoFactorSeedStages implements RedactionValueSource {
       expiresAtMs: now + STAGE_TTL_MS,
       sealed,
       state: 'waiting',
+      ...(request.request === undefined || !caller.device
+        ? {}
+        : { useOn: this.#useOn(request.request, request.submit) }),
     };
     this.#stages.set(id, stage);
     return {
@@ -279,12 +322,14 @@ export class TwoFactorSeedStages implements RedactionValueSource {
   /**
    * SAVES a waiting stage. `claim` is the route's claim on a fresh `add-2fa-key` proof bound to the subject it is
    * handed; without one this throws {@link TwoFactorSeedProofMissing} and the stage keeps waiting. The proof is spent
-   * by the claim whatever follows, as every act's is.
+   * by the claim whatever follows, as every act's is. A stage a paired device set up from an input card then types the
+   * new key's first code into that card (`typed`), as `saver`.
    */
   async commit(
     accountId: AccountId,
     stage: TwoFactorStageId,
     claim: (subject: string) => boolean,
+    saver?: SeedSaver,
   ): Promise<TwoFactorSeedSaved> {
     this.#sweep(this.deps.clock.nowMs());
     const held = await this.#own(accountId, stage, { finished: false });
@@ -317,7 +362,22 @@ export class TwoFactorSeedStages implements RedactionValueSource {
     }
     held.factor = saved.factor.id;
     await this.#finish(held, 'saved');
-    return { ...saved, mismatch: held.mismatch };
+    const use = held.useOn;
+    if (use === undefined) return { ...saved, mismatch: held.mismatch };
+    const digest = use.observedDigest;
+    const typed =
+      saver === undefined || digest === undefined || this.deps.cards?.useNow === undefined
+        ? false
+        : await this.deps.cards
+            .useNow(use.request, {
+              account: saved.account,
+              factor: saved.factor.id,
+              observedDigest: digest,
+              ...(use.submit === undefined ? {} : { submit: use.submit }),
+              actor: saver,
+            })
+            .catch(() => false);
+    return { ...saved, mismatch: held.mismatch, typed };
   }
 
   /** Drops a waiting stage (Deny, or `DELETE`): the seed is let go and nothing is saved. Never needs a passkey. */
@@ -374,6 +434,16 @@ export class TwoFactorSeedStages implements RedactionValueSource {
     if (Object.keys(entries).length === 0) return new Map();
     const opened = await this.deps.cipher.openAll(entries);
     return new Map([...opened].map(([name, value]) => [`login:${name}`, value]));
+  }
+
+  /** The card a device staged from, as the owner sees it NOW: "use it now" types only into that very card. */
+  #useOn(requestId: string, submit: boolean | undefined): NonNullable<Stage['useOn']> {
+    const digest = this.deps.cards?.cardTarget(requestId)?.observedDigest;
+    return {
+      request: requestId,
+      ...(digest === undefined ? {} : { observedDigest: digest }),
+      ...(submit === undefined ? {} : { submit }),
+    };
   }
 
   async #assertCardAccount(requestId: string, accountId: AccountId): Promise<void> {

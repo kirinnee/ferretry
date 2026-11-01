@@ -932,6 +932,7 @@ import {
   type TwoFactorSeedAgendaPort,
   type TwoFactorSeedCardPort,
   TwoFactorSeedStages,
+  lateSeedCards,
   LoginVault,
   type LogLevel,
   type LoopBlockedClockPort,
@@ -7467,7 +7468,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     clock: { nowMs: () => Date.now() },
     anyPasskey: async () => await seedPasskeys.any(),
     hostName: hostname(),
-    cards: { cardTarget: requestId => seedCards?.cardTarget(requestId) },
+    cards: lateSeedCards(() => seedCards),
     agenda: {
       raise: async (sessionId, card) => {
         if (seedAgenda === undefined) throw new Error('the agenda is not running yet');
