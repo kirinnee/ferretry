@@ -4,7 +4,8 @@
  * - `board-u15-*.png`: its "Proposed by <ferret>, not confirmed" banner;
  * - `lane-proposal-pending-*.png`: a ferret's change waiting for the owner, with what accepting it would do;
  * - `lane-proposal-confirm-*.png`: the second tap that Accept asks for, since the change moves cards;
- * - `lane-proposal-accepted-*.png`: the same page once the owner accepted it.
+ * - `lane-proposal-accepted-*.png`: the same page once the owner accepted it;
+ * - `lane-proposal-rewired-*.png`: a change that would make Plan/Design's "OK to build" close the card (probe P8).
  *
  *   bun harness/lane-editor-screenshot.ts [outDir]    # default /tmp/claude-1000
  *
@@ -91,14 +92,20 @@ const settle = async (page: Page, view: string): Promise<void> => {
   if (wide > 0) fail(`${view} scrolls sideways by ${wide}px`);
 };
 
-const open = async (context: BrowserContext, theme: string, fixture: 'unconfirmed' | 'pending'): Promise<Page> => {
+const open = async (
+  context: BrowserContext,
+  theme: string,
+  fixture: 'unconfirmed' | 'pending' | 'rewired',
+): Promise<Page> => {
   const page = await context.newPage();
   await page.route('**/*', route =>
     route.request().url().startsWith(server.url.origin) ? route.continue() : route.abort(),
   );
   await page.goto(`${server.url}?theme=${theme}&fixture=${fixture}`);
   await page.locator('[data-fixture]').waitFor({ state: 'visible' });
-  await page.locator(`[data-lane-banner="${fixture}"]`).waitFor({ state: 'visible' });
+  await page
+    .locator(`[data-lane-banner="${fixture === 'unconfirmed' ? 'unconfirmed' : 'pending'}"]`)
+    .waitFor({ state: 'visible' });
   await settle(page, fixture);
   return page;
 };
@@ -135,6 +142,10 @@ try {
         await settle(waiting, 'accepted');
         await shot(waiting, `lane-proposal-accepted-${scheme}-${label}`);
         await waiting.close();
+        const rewired = await open(context, theme, 'rewired');
+        await rewired.locator('[data-lane-warnings]').waitFor({ state: 'visible' });
+        await shot(rewired, `lane-proposal-rewired-${scheme}-${label}`);
+        await rewired.close();
       }
     } finally {
       await phone.close();

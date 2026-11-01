@@ -3,6 +3,7 @@
  * this). `?fixture=` picks the set it serves:
  *
  * - `unconfirmed` (the default): a lane set a ferret proposed that the owner has not confirmed, so the banner shows.
+ * - `rewired`: a waiting change that rewires Plan/Design's "OK to build" to close the card (review probe P8).
  * - `pending`: the owner's confirmed lanes with a ferret's change WAITING for them — Plan/Design made automatic and
  *   Released · to test removed with its cards sent to Closed — so the waiting banner shows its warnings. Its Accept
  *   answers with the proposal live, as the daemon would.
@@ -52,8 +53,90 @@ const accepted: LaneSet = {
   notGoodLane,
 };
 
+/** P8: Plan/Design's "OK to build" rewired to close the card, and Merged moved ahead of In progress. */
+const rewired: LaneSet = {
+  ...live,
+  pending: {
+    version: 4,
+    baseVersion: 3,
+    proposedBy: 'mvuc7tsf-0c3d50df',
+    proposerSession: 'mvuc7tsf-0c3d50df',
+    lanes: [
+      {
+        id: 'todo',
+        name: 'Todo',
+        category: 'backlog',
+        staleAfter: '3d',
+        emphasis: 'progress',
+        stage: { kind: 'auto', triggers: [] },
+      },
+      {
+        id: 'plan',
+        name: 'Plan/Design',
+        category: 'active',
+        enterOn: ['work.started'],
+        ownerGate: true,
+        staleAfter: '2h',
+        emphasis: 'action',
+        stage: { kind: 'gate', options: [{ id: 'ok', label: 'OK to build', outcome: { kind: 'close' } }] },
+      },
+      {
+        id: 'merged',
+        name: 'Merged',
+        category: 'shipped',
+        enterOn: ['pr.merged'],
+        staleAfter: '3d',
+        emphasis: 'info',
+        stage: { kind: 'auto', triggers: ['pr.merged'] },
+      },
+      {
+        id: 'implement',
+        name: 'In progress',
+        category: 'active',
+        enterOn: ['work.started', 'pr.opened', 'pr.ready'],
+        staleAfter: '4h',
+        emphasis: 'progress',
+        stage: { kind: 'auto', triggers: ['work.started', 'pr.opened', 'pr.ready'] },
+      },
+      {
+        id: 'released',
+        name: 'Released · to test',
+        category: 'verify',
+        enterOn: ['release.published'],
+        ownerGate: true,
+        emphasis: 'action',
+        stage: {
+          kind: 'gate',
+          options: [
+            { id: 'done', label: 'Done', outcome: { kind: 'close' } },
+            { id: 'not-good', label: 'Not good', outcome: { kind: 'reopen-with-agenda' } },
+          ],
+        },
+      },
+      {
+        id: 'closed',
+        name: 'Closed',
+        category: 'closed',
+        ownerGate: true,
+        emphasis: 'info',
+        stage: { kind: 'auto', triggers: [] },
+      },
+    ],
+    variants: {
+      quick: ['todo', 'merged', 'implement', 'released', 'closed'],
+      'design-first': ['todo', 'plan', 'merged', 'implement', 'released', 'closed'],
+      'research-first': ['todo', 'plan', 'merged', 'implement', 'released', 'closed'],
+      investigate: ['todo', 'merged', 'implement', 'released', 'closed'],
+    },
+    doneLane: 'closed',
+    notGoodLane: 'implement',
+    relocate: {},
+  } as PendingLaneSet,
+};
+
 const fixture = new URLSearchParams(window.location.search).get('fixture') ?? 'unconfirmed';
-const served = fixture === 'pending' ? waiting : proposed;
+const SERVED: Readonly<Record<string, LaneSet>> = { pending: waiting, rewired };
+const served = SERVED[fixture] ?? proposed;
 
 const store = {
   board: new DaemonBoardStore(

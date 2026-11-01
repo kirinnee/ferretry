@@ -75,7 +75,8 @@ export const laneChangeCard = (projectName: string, live: LaneSet, pending: Pend
   const opening = `${proposer} proposes new lanes for ${clipAtWord(projectName, MAX_PROPOSER_NAME)}. The board keeps its lanes until you accept.`;
   const { why, hidden } = withWarnings(opening, warnings);
   const later = { label: LANE_CHANGE_LATER, description: 'Leave it waiting; the board keeps its lanes' };
-  const [first, second] = hidden ? [edit, later] : [accept, edit];
+  // The highlighted answer is the second one: with no Accept, that is Edit, which leads to the lane editor.
+  const [first, second] = hidden ? [later, edit] : [accept, edit];
   return {
     subject: clipAtWord(`Lanes for ${projectName}: ${path}`, MAX_AGENDA_SUBJECT_LENGTH),
     title: clipAtWord(`Lanes for ${projectName}`, 60),
@@ -87,7 +88,7 @@ export const laneChangeCard = (projectName: string, live: LaneSet, pending: Pend
     ],
     why,
     howToResolve: hidden
-      ? 'This change does more than a card can show, so it is accepted in the Board lane editor, where every part of it is listed. Choose Edit to go there; the board keeps its lanes until you accept.'
+      ? 'It does more than a card can show, so it is accepted in the Board lane editor, where every part of it is listed. Choose Edit to go there; the board keeps its lanes until you accept.'
       : 'Choose Accept to switch the board to these lanes; any cards they move, move then. Choose Edit to change them in the Board lane editor; the board keeps its lanes until you save.',
   };
 };
@@ -107,7 +108,7 @@ const withWarnings = (
   const say = (shown: readonly string[]): string => {
     const hidden = warnings.length - shown.length;
     const more = hidden === 0 ? '' : `; and ${String(hidden)} more, all in the Board lane editor`;
-    return `${opening} This change ${shown.join('; ')}${more}.`;
+    return `${opening} Accepting it ${shown.join('; ')}${more}.`;
   };
   // One warning always fits: a lane's name is at most 40 characters, so a warning is a few hundred at most.
   let shown = [...warnings];

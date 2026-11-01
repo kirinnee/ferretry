@@ -416,7 +416,7 @@ function LaneSetEditor({
             {warnings.length > 0 && (
               <ul className="m-0 grid list-disc gap-xs pl-panel text-meta text-warn" data-lane-warnings="">
                 {warnings.map(warning => (
-                  <li key={warning}>This change {warning}</li>
+                  <li key={warning}>Accepting it {warning}</li>
                 ))}
               </ul>
             )}

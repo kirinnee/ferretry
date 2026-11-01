@@ -536,7 +536,7 @@ describe('a ferret’s change waiting for the owner', () => {
     // Assert
     const warnings = must(banner.querySelector('[data-lane-warnings]'), 'the warnings');
     expect(warnings.textContent).toContain(
-      `This change removes ${verify.name}, which waits for the owner, and sends its cards into the closed lane, which closes them`,
+      `Accepting it removes ${verify.name}, which waits for the owner, and sends its cards into the closed lane, which closes them`,
     );
     expect(actions.calls).toEqual([]);
     expect(must(banner.querySelector('[data-lane-confirm]'), 'the confirm').textContent).toContain(

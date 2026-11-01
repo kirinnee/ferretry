@@ -145,7 +145,70 @@ const IN_DISCUSSION = item('A2', 9, {
   history: [{ at: ago(4), kind: 'discuss', note: 'Why not just keep the board in memory?' }],
 } as Partial<AgendaItem>);
 
+/**
+ * A ferret's lane proposal, as the daemon's `laneChangeCard` words it (docs/board.md § A ferret's lane change
+ * waits for the owner): one that rewires Plan/Design's "OK to build" to close the card, and one whose warnings do
+ * not all fit, which offers no Accept: it is accepted in the lane editor.
+ */
+const LANE_CHANGE = item('A9', 4, {
+  source: 'task',
+  sourceRef: 'lanes:11111111-1111-4111-8111-111111111111:4',
+  raisedBy: 'daemon',
+  title: 'Lanes for Relay',
+  subject: 'Lanes for Relay: Todo → Plan/Design → Merged → In progress → Released · to test → Closed',
+  why: 'ottilie proposes new lanes for Relay. The board keeps its lanes until you accept. Accepting it changes where "OK to build" on Plan/Design sends cards: In progress → the closed lane, which closes them.',
+  howToResolve:
+    'Choose Accept to switch the board to these lanes; any cards they move, move then. Choose Edit to change them in the Board lane editor; the board keeps its lanes until you save.',
+  kind: 'choice',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Accept', description: 'Switch the board to these lanes' },
+      { label: 'Edit', description: 'Change them in the Board lane editor (Board, then this project, then Lanes)' },
+    ],
+  },
+  answers: [
+    { direction: 'right', does: 'choose', label: 'Accept', description: 'Switch the board to these lanes' },
+    {
+      direction: 'left',
+      does: 'choose',
+      label: 'Edit',
+      description: 'Change them in the Board lane editor (Board, then this project, then Lanes)',
+    },
+  ],
+} as Partial<AgendaItem>);
+
+const LANE_CHANGE_HIDDEN = item('A10', 4, {
+  source: 'task',
+  sourceRef: 'lanes:11111111-1111-4111-8111-111111111111:4',
+  raisedBy: 'daemon',
+  title: 'Lanes for The project with the longest name a registry…',
+  subject: 'Lanes for The project with the longest name a registry would ever hold: Todo → Closed',
+  why: 'ottilie proposes new lanes for The project with the longest name a registry would ever hold. The board keeps its lanes until you accept. Accepting it removes Owner review stage number 00 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; removes Owner review stage number 01 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; removes Owner review stage number 02 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; removes Owner review stage number 03 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; removes Owner review stage number 04 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; removes Owner review stage number 05 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; removes Owner review stage number 06 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; removes Owner review stage number 07 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; removes Owner review stage number 08 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; removes Owner review stage number 09 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; removes Owner review stage number 10 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; removes Owner review stage number 11 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; removes Owner review stage number 12 of the many, which waits for the owner, and sends its cards into the closed lane, which closes them; and 1 more, all in the Board lane editor.',
+  howToResolve:
+    'It does more than a card can show, so it is accepted in the Board lane editor, where every part of it is listed. Choose Edit to go there; the board keeps its lanes until you accept.',
+  kind: 'choice',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Later', description: 'Leave it waiting; the board keeps its lanes' },
+      { label: 'Edit', description: 'Change them in the Board lane editor (Board, then this project, then Lanes)' },
+    ],
+  },
+  answers: [
+    { direction: 'right', does: 'choose', label: 'Later', description: 'Leave it waiting; the board keeps its lanes' },
+    {
+      direction: 'left',
+      does: 'choose',
+      label: 'Edit',
+      description: 'Change them in the Board lane editor (Board, then this project, then Lanes)',
+    },
+  ],
+} as Partial<AgendaItem>);
+
 const FIXTURES: Readonly<Record<string, AgendaItem>> = {
+  'lane-change': LANE_CHANGE,
+  'lane-change-hidden': LANE_CHANGE_HIDDEN,
   task: TASK,
   choice: CHOICE,
   yesno: YESNO,

@@ -90,7 +90,7 @@ describe('laneChangeCard', () => {
     should(card.subject).equal('Lanes for Ferretry: Todo → Plan/Design → In progress → Merged → Closed');
     should(card.why).containEql('koen proposes new lanes for Ferretry');
     should(card.why).containEql('keeps its lanes until you accept');
-    should(card.why).containEql('This change makes Plan/Design automatic: it would stop waiting for the owner');
+    should(card.why).containEql('Accepting it makes Plan/Design automatic: it would stop waiting for the owner');
     should(card.why).containEql(
       'removes Released · to test, which waits for the owner, and sends its cards into the closed lane, which closes them',
     );
@@ -135,11 +135,11 @@ describe('laneChangeCard', () => {
     should(card.ask).deepEqual({
       kind: 'multiple-choice',
       options: [
+        { label: LANE_CHANGE_LATER, description: 'Leave it waiting; the board keeps its lanes' },
         {
           label: LANE_PROPOSAL_ANSWERS.edit,
           description: 'Change them in the Board lane editor (Board, then this project, then Lanes)',
         },
-        { label: LANE_CHANGE_LATER, description: 'Leave it waiting; the board keeps its lanes' },
       ],
     });
     should(card.answers.map(answer => answer.label)).not.containEql(LANE_PROPOSAL_ANSWERS.accept);
@@ -149,7 +149,7 @@ describe('laneChangeCard', () => {
   it('should cap a long proposer name so it never crowds out the warnings', () => {
     const card = laneChangeCard('Ferretry', live, { ...risky, proposedBy: 'x'.repeat(500) });
 
-    should(card.why).containEql('This change makes Plan/Design automatic');
+    should(card.why).containEql('Accepting it makes Plan/Design automatic');
     should(card.why.startsWith('x'.repeat(61))).be.false();
   });
 
@@ -162,7 +162,7 @@ describe('laneChangeCard', () => {
     };
 
     should(laneGateProblems(live, renamed, renamed.relocate)).deepEqual([]);
-    should(laneChangeCard('Ferretry', live, renamed).why).not.containEql('This change');
+    should(laneChangeCard('Ferretry', live, renamed).why).not.containEql('Accepting it');
   });
 });
 
