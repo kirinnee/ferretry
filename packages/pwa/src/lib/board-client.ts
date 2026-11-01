@@ -13,6 +13,7 @@
 import {
   type BoardErrorCode,
   BoardErrorCodeSchema,
+  BoardIdsResponseSchema,
   type BoardProject,
   type BoardProjectId,
   BoardProjectsResponseSchema,
@@ -75,6 +76,8 @@ export interface BoardPort {
   board(daemon: DaemonConnection, query: BoardServerQuery, cursor?: string, limit?: number): Promise<BoardResponse>;
   /** One card in full, or `null` when the daemon has no such card. */
   task(daemon: DaemonConnection, id: BoardTaskId): Promise<BoardTaskResponse | null>;
+  /** Every card id on the machine, or `null` when the daemon does not serve them (an older one). */
+  ids(daemon: DaemonConnection): Promise<readonly BoardTaskId[] | null>;
   /** The projects with their lane sets, or `null` when the daemon does not serve them. */
   projects(daemon: DaemonConnection): Promise<readonly BoardProject[] | null>;
   /** The daemon's own version, or `null` when it cannot be read. */
@@ -146,6 +149,21 @@ export const fetchBoardTask = async (
   if (response.status === 404) return null;
   if (!response.ok) throw await failure(response);
   return BoardTaskResponseSchema.parse(await response.json());
+};
+
+/**
+ * `GET /v1/board/ids`: every card id on the machine, whatever its project or state. A daemon from before that
+ * route answers `404` (or `405`), which is "not served" rather than a failure: references then prove against
+ * the project slice alone.
+ */
+export const fetchBoardIds = async (
+  daemon: DaemonConnection,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<readonly BoardTaskId[] | null> => {
+  const response = await send(daemon, '/v1/board/ids', { method: 'GET' }, fetcher);
+  if (response.status === 404 || response.status === 405) return null;
+  if (!response.ok) throw await failure(response);
+  return BoardIdsResponseSchema.parse(await response.json()).ids;
 };
 
 /**
@@ -290,6 +308,7 @@ export const postLaneSetAction = async (
 export const daemonBoardPort = (fetcher: DaemonFetch = browserFetch): BoardPort => ({
   board: (daemon, query, cursor, limit) => fetchBoardPage(daemon, query, cursor, fetcher, limit),
   task: (daemon, id) => fetchBoardTask(daemon, id, fetcher),
+  ids: daemon => fetchBoardIds(daemon, fetcher),
   projects: daemon => fetchBoardProjects(daemon, fetcher),
   version: daemon => fetchDaemonVersion(daemon, fetcher),
   act: (daemon, id, request) => postBoardAction(daemon, id, request, fetcher),

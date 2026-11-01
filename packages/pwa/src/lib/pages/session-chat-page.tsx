@@ -104,6 +104,7 @@ import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts
 import { conversationFromTranscript } from '../../hooks/use-dictation.ts';
 import { useFinePointer } from '../../hooks/use-fine-pointer.ts';
 import { useLiveActivity } from '../../hooks/use-live-counter.ts';
+import { useMachineTaskIds } from '../../hooks/use-machine-task-ids.ts';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { Button } from '../../shell/primitives.tsx';
@@ -557,6 +558,8 @@ export function SessionChatPage({
       : projectTasks.state === 'ready'
         ? projectTasks.cards
         : undefined;
+  // The proof is wider than the menu: any card on this machine opens, whatever its project (reference-standard §6).
+  const machineTaskIds = useMachineTaskIds(board, connection);
   const { wait: waitForProjectTasks } = projectTasks;
   const { waitForTasks: waitForFerretTasks } = search;
   const waitForReferenceTasks = useCallback((): Promise<void> | undefined => {
@@ -697,6 +700,7 @@ export function SessionChatPage({
         ...(session.config.cwd === undefined ? {} : { cwd: session.config.cwd }),
         ...(daemonSessions === undefined ? {} : { sessions: daemonSessions }),
         ...(composerCatalogs.tasks === undefined ? {} : { tasks: composerCatalogs.tasks }),
+        ...(machineTaskIds === undefined ? {} : { taskIds: machineTaskIds }),
         ...(agendaProof === undefined ? {} : { agendaIds: agendaProof }),
         ...(composerCatalogs.skills?.skills === undefined
           ? {}
@@ -720,6 +724,7 @@ export function SessionChatPage({
       session.config.cwd,
       fleetIdentity,
       composerCatalogs.tasks,
+      machineTaskIds,
       composerCatalogs.skills,
       onNavigate,
       hasBoard,

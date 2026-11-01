@@ -1,5 +1,6 @@
 import {
   type BoardErrorCode,
+  type BoardIdsResponse,
   BoardImportRequestSchema,
   type BoardImportSummary,
   type BoardQuery,
@@ -32,6 +33,8 @@ import { parseLegacyRef } from '../../board-import/index.ts';
  */
 export interface BoardSubsystem {
   board(query: BoardQuery): Promise<BoardResponse>;
+  /** Every card id on this machine, whatever its project or state. */
+  ids(): Promise<BoardIdsResponse>;
   task(id: BoardTaskId): Promise<BoardTaskResponse>;
   /** The card an old task became, by `<session>:<old id>`; `not-found` when none did. */
   taskByLegacyRef(legacyRef: string): Promise<BoardTaskResponse>;
@@ -160,6 +163,16 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
       noStore: true,
       compress: true,
       handle: async context => await answer(async () => await board.board(boardQueryOf(context))),
+    },
+    {
+      method: 'GET',
+      path: '/v1/board/ids',
+      minimum: 'operator',
+      caller: 'any',
+      capability: fleet,
+      noStore: true,
+      compress: true,
+      handle: async () => await answer(async () => await board.ids()),
     },
     {
       method: 'POST',

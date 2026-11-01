@@ -232,6 +232,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'GET /v1/tasks operator any',
   'GET /v1/sessions/:sessionId/tasks operator any',
   'GET /v1/board operator any',
+  'GET /v1/board/ids operator any',
   'POST /v1/board/tasks operator any',
   'POST /v1/board/skip operator any',
   'GET /v1/board/tasks operator any',

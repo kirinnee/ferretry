@@ -54,6 +54,10 @@ const recording = (overrides: Partial<ServiceWorld> = {}) => {
       calls.push({ route: 'board', value: query });
       return await base.board(query);
     },
+    ids: async () => {
+      calls.push({ route: 'ids', value: null });
+      return await service.ids();
+    },
     task: async id => {
       calls.push({ route: 'task', value: id });
       return await service.task(id);
@@ -505,6 +509,34 @@ describe('the board mount', () => {
     const response = await (
       await dispatcher(board, { use: false, configure: false })
     ).dispatch(request({ path: '/v1/board', device: phone }));
+
+    // Assert
+    should(response.status).equal(403);
+    should(calls).eql([]);
+  });
+
+  it('should list every card id on the machine, and only the ids', async () => {
+    // Arrange
+    const { calls, board } = recording();
+
+    // Act
+    const response = await (await dispatcher(board)).dispatch(request({ path: '/v1/board/ids', headers: human }));
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.headers.get('cache-control')).equal('no-store');
+    should(calls.map(call => call.route)).eql(['ids']);
+    should(jsonBody(response)).eql({ ids: ['F1'] });
+  });
+
+  it('should keep the id list from a remote device when the fleet grant is off', async () => {
+    // Arrange
+    const { calls, board } = recording();
+
+    // Act
+    const response = await (
+      await dispatcher(board, { use: false, configure: false })
+    ).dispatch(request({ path: '/v1/board/ids', device: phone }));
 
     // Assert
     should(response.status).equal(403);

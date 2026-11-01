@@ -721,6 +721,13 @@ export type BoardResponse = z.infer<typeof BoardResponseSchema>;
 export const BoardTaskResponseSchema = z.object({ task: BoardTaskViewSchema, laneSet: LaneSetSchema.nullable() });
 export type BoardTaskResponse = z.infer<typeof BoardTaskResponseSchema>;
 
+/**
+ * Every card id this machine holds, whatever its project, lane, state or assignee, and nothing else about
+ * it: what `&F12` is proved against, so a reference to a card on another project still opens its card.
+ */
+export const BoardIdsResponseSchema = z.strictObject({ ids: z.array(BoardTaskIdSchema) });
+export type BoardIdsResponse = z.infer<typeof BoardIdsResponseSchema>;
+
 // ---------------------------------------------------------------------------------------------------
 // Mutations
 // ---------------------------------------------------------------------------------------------------

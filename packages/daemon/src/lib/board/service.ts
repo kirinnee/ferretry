@@ -14,6 +14,7 @@ import {
   ADMIN_TOKEN_ACTOR_WORDS,
   type BoardActor,
   type BoardActorVia,
+  type BoardIdsResponse,
   type BoardProjectId,
   type BoardQuery,
   type BoardReopenAttachments,
@@ -305,6 +306,12 @@ export class BoardService {
       }
     }
     return stored;
+  }
+
+  /** Every readable card id on this machine, closed and dropped included: one store read, nothing derived. */
+  async ids(): Promise<BoardIdsResponse> {
+    const { cards } = await this.ports.store.read();
+    return { ids: cards.map(card => card.id) };
   }
 
   /** One card, in full, with its board's lanes. */

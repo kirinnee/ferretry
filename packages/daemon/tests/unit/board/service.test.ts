@@ -12,11 +12,11 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import {
-  actorOf,
   AgendaCardLinks,
+  actorOf,
   type BoardCaller,
-  BoardIndex,
   BoardError,
+  BoardIndex,
   BoardService,
   BoardUnavailableError,
   DEPENDENCY_SECTION,
@@ -2063,5 +2063,23 @@ describe('lanes follow PR facts at the write', () => {
 
     // Assert
     should(stored(ports).laneId).equal('tested');
+  });
+});
+
+describe('listing the card ids', () => {
+  it('should list every card of every project and state, and nothing but its id', async () => {
+    // Arrange
+    const store = new MemoryBoardStore([
+      card({ id: 'F1' }),
+      card({ id: 'F2', projectId: 'other-project' }),
+      card({ id: 'F3', dropped: { reason: 'superseded', at: NOW } }),
+    ]);
+    const { service } = serviceWith([], { store });
+
+    // Act
+    const listed = await service.ids();
+
+    // Assert
+    should(listed).eql({ ids: ['F1', 'F2', 'F3'] });
   });
 });

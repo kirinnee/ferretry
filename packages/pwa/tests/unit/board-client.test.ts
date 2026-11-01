@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   BOARD_MAX_PAGES,
   daemonBoardPort,
+  fetchBoardIds,
   fetchBoardPage,
   fetchBoardProjects,
   fetchBoardTask,
@@ -49,6 +50,30 @@ describe('fetchBoardPage', () => {
 
   it('refuses an answer that is not a board', async () => {
     await expect(fetchBoardPage(laptop, query, undefined, async () => json({ cards: 1 }))).rejects.toThrow();
+  });
+});
+
+describe('fetchBoardIds', () => {
+  it('reads every card id of the machine in one request', async () => {
+    let url = '';
+    const ids = await fetchBoardIds(laptop, async asked => {
+      url = String(asked);
+      return json({ ids: ['F1', 'B2'] });
+    });
+    expect(url).toBe('https://laptop.example.test/v1/board/ids');
+    expect(ids).toEqual(['F1', 'B2']);
+  });
+
+  it('reads a daemon from before the route (404, 405) as not serving it, and a real failure as one', async () => {
+    expect(await fetchBoardIds(laptop, async () => json({}, 404))).toBeNull();
+    expect(await fetchBoardIds(laptop, async () => json({}, 405))).toBeNull();
+    await expect(fetchBoardIds(laptop, async () => json({ error: 'down' }, 503))).rejects.toMatchObject({
+      status: 503,
+    });
+  });
+
+  it('refuses an answer that carries more than ids', async () => {
+    await expect(fetchBoardIds(laptop, async () => json({ ids: ['F1'], cards: [] }))).rejects.toThrow();
   });
 });
 
@@ -269,6 +294,7 @@ describe('daemonBoardPort', () => {
       const path = new URL(String(asked)).pathname;
       if (path === '/v1/board') return json(boardAnswer([]));
       if (path === '/v1/health') return json(healthOf('1.0.0'));
+      if (path === '/v1/board/ids') return json({ ids: ['F1'] });
       if (path === '/v1/board/projects')
         return json({ projects: [{ id: PROJECT, name: 'p', path: null, laneSet: null }], current: null });
       if (path.startsWith('/v1/board/tasks/')) return json({ task: card('F1'), laneSet: null });
@@ -276,11 +302,12 @@ describe('daemonBoardPort', () => {
     });
     await port.board(laptop, query);
     await port.task(laptop, 'F1');
+    expect(await port.ids(laptop)).toEqual(['F1']);
     await port.projects(laptop);
     expect(await port.version(laptop)).toBe('1.0.0');
     await port.act(laptop, 'F1', { action: 'note', text: 'x' });
     await port.lanes(laptop, PROJECT, { action: 'confirm', version: 1 });
-    expect(urls).toHaveLength(6);
+    expect(urls).toHaveLength(7);
   });
 });
 

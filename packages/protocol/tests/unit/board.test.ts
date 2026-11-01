@@ -16,6 +16,7 @@ import {
   BoardDropSchema,
   BoardEditableFieldSchema,
   BoardErrorCodeSchema,
+  BoardIdsResponseSchema,
   BoardLinkFieldSchema,
   BoardPrStateFilterSchema,
   BoardQuarantinedCardSchema,
@@ -314,6 +315,7 @@ const VALID: readonly SchemaCase[] = [
   { name: 'all projects', schema: BoardResponseSchema, value: { ...BOARD, projectId: null, laneSet: null } },
   { name: 'unconfigured board', schema: BoardResponseSchema, value: { ...BOARD, laneSet: null } },
   { name: 'card response', schema: BoardTaskResponseSchema, value: { task: VIEW, laneSet: LANES } },
+  { name: 'machine card ids', schema: BoardIdsResponseSchema, value: { ids: [CARD.id] } },
   {
     name: 'create',
     schema: BoardTaskCreateRequestSchema,
@@ -514,6 +516,7 @@ const INVALID: readonly SchemaCase[] = [
     value: { kind: 'bug', title: 'X', ask: CARD.ask, createdBy: OWNER },
   },
   { name: 'create without ask', schema: BoardTaskCreateRequestSchema, value: { kind: 'bug', title: 'X' } },
+  { name: 'card ids with a stray field', schema: BoardIdsResponseSchema, value: { ids: [], titles: [] } },
   { name: 'unknown action', schema: BoardTaskActionRequestSchema, value: { action: 'status', status: 'done' } },
   { name: 'unknown lanes action', schema: LaneSetActionRequestSchema, value: { action: 'delete' } },
   { name: 'unknown error', schema: BoardErrorCodeSchema, value: 'ambiguous' },
