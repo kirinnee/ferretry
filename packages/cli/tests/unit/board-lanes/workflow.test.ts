@@ -144,6 +144,32 @@ describe('rendering a workflow', () => {
     should(text.split('\n')[1]).match(/not started yet/u);
   });
 
+  it('should say where each kind of option sends the card', () => {
+    // Arrange
+    const current = laneSet();
+    const edit = buildWorkflowEditRequest(current, {
+      lane: 'implement',
+      gate: ['Close it=close', 'Rework=reopen', 'Park=lane:todo'],
+    });
+    if (edit.action !== 'edit') throw new Error('expected an edit');
+
+    // Act
+    const text = renderWorkflow(project({ laneSet: { ...current, lanes: edit.layout.lanes } }), 'fy');
+
+    // Assert
+    should(text)
+      .match(/Close it → Merged \(closed\)/u)
+      .and.match(/Rework → In progress, with the owner's words/u)
+      .and.match(/Park → Todo/u);
+  });
+
+  it('should name a lane by its id when the option points at one the set does not have', () => {
+    const current = laneSet();
+    const edit = buildWorkflowEditRequest(current, { lane: 'implement', gate: ['Away=lane:gone'] });
+    if (edit.action !== 'edit') throw new Error('expected an edit');
+    should(renderWorkflow(project({ laneSet: { ...current, lanes: edit.layout.lanes } }), 'fy')).match(/Away → gone/u);
+  });
+
   it('should say how to propose lanes when a project has none', () => {
     should(renderWorkflow(project({ laneSet: null }), 'fy')).match(/no lanes yet.*fy board lanes propose/u);
   });
