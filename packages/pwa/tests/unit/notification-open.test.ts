@@ -281,6 +281,13 @@ describe('notificationWindow', () => {
     // With no app window at all, the landing page is still better than a second window.
     expect(notificationWindow([landing], ORIGIN)).toBe(landing);
   });
+
+  it.each(['/join', '/shared'])('counts %s as an app page, as public/_redirects serves it', path => {
+    const landing = { url: `${ORIGIN}/`, focused: true, visibilityState: 'visible' };
+    const page = { url: `${ORIGIN}${path}`, focused: false, visibilityState: 'hidden' };
+
+    expect(notificationWindow([landing, page], ORIGIN)).toBe(page);
+  });
 });
 
 describe('NotificationOpenInbox', () => {

@@ -184,6 +184,8 @@ const isAppPage = (pathname: string): boolean =>
   pathname.startsWith('/app/') ||
   pathname.startsWith('/d/') ||
   pathname === '/setup' ||
+  pathname === '/join' ||
+  pathname === '/shared' ||
   pathname === '/pair' ||
   pathname.startsWith('/pair/');
 
