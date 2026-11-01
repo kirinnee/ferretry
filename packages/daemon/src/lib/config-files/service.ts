@@ -437,6 +437,20 @@ export class ConfigFilesService {
   }
 
   /**
+   * The owner's own act changed what is in effect for a file and nothing on disk: record `inEffect` as accepted and
+   * leave the file alone. For a file that is absent (its deletion held) or does not check (the owner is still fixing
+   * it), where an owner act must still take effect but there is no text of it to write.
+   */
+  async acceptOwn(path: string, inEffect: string): Promise<void> {
+    await this.#serial(async () => {
+      const accepted = { ...(await this.deps.accepted.read()) };
+      accepted[path] = { etag: this.deps.digest(inEffect), text: inEffect };
+      await this.deps.accepted.write(accepted);
+      await this.#load();
+    });
+  }
+
+  /**
    * An editor's write: refused unless it checks, refused if the file moved since `ifMatch`, and — when
    * it loosens — in effect now only if `mayLoosen`, otherwise written and held for confirmation.
    */

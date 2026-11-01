@@ -139,6 +139,7 @@ describe('every account write is the owner’s', () => {
     const before = JSON.stringify(w.index.document);
     const routes: [string, string][] = [
       ['PUT', '/v1/accounts/GITHUB'],
+      ['PUT', '/v1/accounts/defaults'],
       ['POST', '/v1/accounts/GITHUB/rename'],
       ['DELETE', '/v1/accounts/GITHUB'],
       ['POST', '/v1/accounts/GITHUB/sign-ins'],

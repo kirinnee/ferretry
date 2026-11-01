@@ -84,7 +84,7 @@ interface World {
   readonly subsystem: SecretSubsystem;
   readonly defaults: AccountDefaults;
   readonly projects: { id: string; name: string }[];
-  drive(caller: Caller, method: string, path: string, body?: unknown): Promise<Answer>;
+  drive(caller: Caller, method: string, path: string, body?: unknown, using?: SecretSubsystem): Promise<Answer>;
 }
 
 interface Answer {
@@ -92,6 +92,8 @@ interface Answer {
   readonly code?: string;
   readonly body?: Record<string, unknown>;
   readonly spent: number;
+  /** Whether the request body was read: a refusal that comes first leaves it unread. */
+  readonly consumed: boolean;
 }
 
 async function world(): Promise<World> {
@@ -104,20 +106,28 @@ async function world(): Promise<World> {
     now: () => new Date('2026-10-16T09:00:00.000Z'),
   });
   const projects: { id: string; name: string }[] = [];
+  const base = secretSubsystem();
   const defaults = new AccountDefaults({
     config,
+    listing: async () => await (base.accounts as NonNullable<SecretSubsystem['accounts']>).list(),
     projects: async () =>
       projects.map(p => ({ ...p, path: '/srv', source: 'existing-folder', createdAt: '' })) as never,
   });
-  const base = secretSubsystem();
   const subsystem: SecretSubsystem = { ...base, accountDefaults: defaults };
   const accounts = subsystem.accounts as NonNullable<SecretSubsystem['accounts']>;
   accounts.followDefaultsWith(async changes => await defaults.repoint(changes));
   config.warnWith(async snapshot => await defaults.warnings(await accounts.list(), snapshot));
-  const drive = async (caller: Caller, method: string, path: string, body?: unknown): Promise<Answer> => {
-    const found = new ApiRouter(secretRoutes(subsystem)).lookup(method, path);
+  const drive = async (
+    caller: Caller,
+    method: string,
+    path: string,
+    body?: unknown,
+    using: SecretSubsystem = subsystem,
+  ): Promise<Answer> => {
+    const found = new ApiRouter(secretRoutes(using)).lookup(method, path);
     if (found.kind !== 'matched') throw new Error(`no route ${method} ${path}`);
     let spent = 0;
+    const reads = { limits: [], consumed: false, discarded: false };
     const governance: CallerGovernance = {
       governed: caller.kind === 'device',
       decide: () => ({ allowed: true, refusal: 'granted' }),
@@ -128,7 +138,7 @@ async function world(): Promise<World> {
         path,
         headers: { 'content-type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        reads: { limits: [], consumed: false, discarded: false },
+        reads,
       }),
       params: found.params,
       actor: ACTOR[caller.kind],
@@ -150,7 +160,7 @@ async function world(): Promise<World> {
       response = await found.route.handle(context);
     } catch (error) {
       if (!(error instanceof ApiError)) throw error;
-      return { status: error.status, code: error.code, spent };
+      return { status: error.status, code: error.code, spent, consumed: reads.consumed };
     }
     const parsed = jsonBody(response) as Record<string, unknown>;
     return {
@@ -158,6 +168,7 @@ async function world(): Promise<World> {
       body: parsed,
       ...(typeof parsed.code === 'string' ? { code: parsed.code } : {}),
       spent,
+      consumed: reads.consumed,
     };
   };
   return { directory, config, subsystem, defaults, projects, drive };
@@ -223,6 +234,7 @@ describe('PUT /v1/accounts/defaults', () => {
 
     should(answer.status).equal(403);
     should(answer.code).equal('forbidden');
+    should(answer.consumed).be.false();
     should(text(w)).be.undefined();
   });
 
@@ -256,6 +268,7 @@ describe('PUT /v1/accounts/defaults', () => {
 
   it('should not write over a defaults file that does not check', async () => {
     const w = await world();
+    await withAccounts(w);
     w.directory.texts.set(PATH, 'sites: [this is not a map\n');
 
     const answer = await w.drive(HOST, 'PUT', '/v1/accounts/defaults', SITE_LINE);
@@ -263,6 +276,42 @@ describe('PUT /v1/accounts/defaults', () => {
     should(answer.status).equal(409);
     should(answer.code).equal('defaults_file_invalid');
     should(text(w)).equal('sites: [this is not a map\n');
+  });
+
+  it('should refuse a line for an account with no sign-in on that place, and one that does not exist', async () => {
+    const w = await world();
+    await withAccounts(w);
+
+    for (const account of ['GITHUB', 'NOBODY']) {
+      const answer = await w.drive(HOST, 'PUT', '/v1/accounts/defaults', { ...SITE_LINE, account });
+      should(answer.status).equal(409);
+      should(answer.code).equal('no_sign_in_here');
+    }
+    should(text(w)).be.undefined();
+  });
+
+  it('should always allow clearing a line, even one that names an account that is gone', async () => {
+    const w = await world();
+    await w.config.writeOwn(PATH, 'sites:\n  app.clickup.com: GONE\n');
+
+    const answer = await w.drive(HOST, 'PUT', '/v1/accounts/defaults', { ...SITE_LINE, account: null });
+
+    should(answer.status).equal(200);
+    should(answer.body).deepEqual({ defaults: {} });
+    should(await inEffect(w)).deepEqual({});
+  });
+
+  it('should answer what is actually in effect after the write, when a ferret holds the same line', async () => {
+    const w = await world();
+    await withAccounts(w);
+    await w.config.write(PATH, 'sites:\n  app.clickup.com: CLICKUP_B\n', undefined, false);
+    should(await inEffect(w)).deepEqual({});
+
+    const answer = await w.drive(HOST, 'PUT', '/v1/accounts/defaults', { ...SITE_LINE, account: 'CLICKUP_B' });
+
+    should(answer.body).deepEqual({ defaults: await inEffect(w) });
+    should(await inEffect(w)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_B' } });
+    should((await w.config.load()).evaluation.pending).deepEqual([]);
   });
 
   it('should leave a ferret’s other held lines held, and confirm only the owner’s one line', async () => {
@@ -284,6 +333,32 @@ describe('PUT /v1/accounts/defaults', () => {
       'changes which account a card offers first for github.com in every session on this machine',
     ]);
     should(text(w)).containEql('github.com: GITHUB');
+  });
+});
+
+describe('the route table', () => {
+  it('should not mount the defaults route when there are no defaults, so the handle route takes the path', async () => {
+    const w = await world();
+    const using: SecretSubsystem = { ...w.subsystem, accountDefaults: undefined };
+
+    const found = new ApiRouter(secretRoutes(using)).lookup('PUT', '/v1/accounts/defaults');
+
+    should(found.kind).equal('matched');
+    should(found.kind === 'matched' && found.route.path).equal('/v1/accounts/:id');
+  });
+
+  it('should let an error that is not the file’s or the sign-in’s propagate', async () => {
+    const w = await world();
+    const using: SecretSubsystem = {
+      ...w.subsystem,
+      accountDefaults: {
+        set: async () => {
+          throw new Error('the disk is gone');
+        },
+      } as unknown as AccountDefaults,
+    };
+
+    await w.drive(HOST, 'PUT', '/v1/accounts/defaults', SITE_LINE, using).should.be.rejectedWith('the disk is gone');
   });
 });
 
@@ -325,6 +400,46 @@ describe('the defaults follow the owner’s account acts', () => {
     await accountsOf(w).putAccount('CLICKUP_A' as AccountId, { label: 'A again' });
     should(await inEffect(w)).deepEqual({});
     should(text(w)).not.containEql('CLICKUP_A');
+  });
+
+  const lineOfA = 'sites:\n  app.clickup.com: CLICKUP_A\n';
+  const reuse = async (w: World) => {
+    await accountsOf(w).removeAccount('CLICKUP_A' as AccountId);
+    should(await inEffect(w)).deepEqual({});
+    await accountsOf(w).putAccount('CLICKUP_A' as AccountId, { label: 'A again' });
+    await accountsOf(w).addSignIn('CLICKUP_A' as AccountId, {
+      place: { kind: 'site', domains: ['app.clickup.com'], match: [] },
+    });
+    should(await inEffect(w)).deepEqual({});
+  };
+
+  it('should not let a reused handle inherit when a ferret’s held suggestion lacks the line', async () => {
+    const w = await world();
+    await seed(w, lineOfA);
+    await w.config.write(PATH, 'sites:\n  github.com: GITHUB\n', undefined, false);
+    should((await w.config.load()).evaluation.pending.map(p => p.path)).deepEqual([PATH]);
+
+    await reuse(w);
+
+    should((await w.config.load()).evaluation.pending.map(p => p.path)).deepEqual([PATH]);
+  });
+
+  it('should not let a reused handle inherit when the file’s deletion is held', async () => {
+    const w = await world();
+    await seed(w, lineOfA);
+    w.directory.texts.delete(PATH);
+
+    await reuse(w);
+  });
+
+  it('should not let a reused handle inherit when the file does not check', async () => {
+    const w = await world();
+    await seed(w, lineOfA);
+    w.directory.texts.set(PATH, 'sites: [broken\n');
+
+    await reuse(w);
+
+    should(text(w)).equal('sites: [broken\n');
   });
 
   it('should strip a stale line that names a handle the moment an account is created with it', async () => {
@@ -371,6 +486,7 @@ describe('the defaults follow the owner’s account acts', () => {
 
     should((await accountsOf(w).list()).accounts.map(a => a.id)).containEql('CLICKUP_WORK');
     should(text(w)).equal('sites: [broken\n');
+    should(await inEffect(w)).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_WORK' } });
   });
 });
 

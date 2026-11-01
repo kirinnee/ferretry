@@ -39,8 +39,21 @@ export class AccountDefaultsFileBroken extends Error {
   }
 }
 
+/** The line cannot be written: the account does not exist, or has no sign-in on that key. */
+export class AccountDefaultNotUsable extends Error {
+  constructor(
+    readonly account: string,
+    readonly key: string,
+  ) {
+    super(`${account} has no sign-in on ${key}, so it cannot be its default; add that sign-in first`);
+    this.name = 'AccountDefaultNotUsable';
+  }
+}
+
 export interface AccountDefaultsDeps {
-  readonly config: Pick<ConfigFilesService, 'inEffect' | 'load' | 'writeOwn'>;
+  readonly config: Pick<ConfigFilesService, 'load' | 'writeOwn' | 'acceptOwn'>;
+  /** The accounts and sign-ins, to refuse a line that could never be used. */
+  readonly listing: () => Promise<AccountListing>;
   /** The registered board projects, to say which `projects:` line names none or more than one. */
   readonly projects?: () => Promise<readonly ProjectInfo[]>;
 }
@@ -48,40 +61,63 @@ export interface AccountDefaultsDeps {
 export class AccountDefaults {
   constructor(private readonly deps: AccountDefaultsDeps) {}
 
-  /** The owner sets the line at `at` to `account`, or removes it with `null`. Answers the lines in effect after. */
+  /**
+   * The owner sets the line at `at` to `account`, or removes it with `null` (always allowed). Refuses a line that
+   * could never be used — an account that does not exist or has no sign-in on that key — and a file that does not
+   * check. Answers the lines in effect AFTER the write, as the daemon now reads them, not as the edit meant them.
+   */
   async set(
     at: Pick<AccountDefaultLine, 'scope' | 'within' | 'key'>,
     account: AccountId | null,
   ): Promise<AccountDefaultsFile> {
-    return await this.change(file => withAccountDefault(file, at, account));
+    if (account !== null && !handlesSigningInOn(await this.deps.listing(), at.key).has(account))
+      throw new AccountDefaultNotUsable(account, at.key);
+    await this.change(file => withAccountDefault(file, at, account), 'refuse');
+    return (await this.deps.config.load()).evaluation.effective.accountDefaults;
   }
 
-  /** The owner's account act changed handles: the lines follow, in the same act. */
+  /**
+   * The owner's account act changed handles: the lines follow, in the same act. A file that does not check is not
+   * written over, but what is in effect is still corrected, so a stale line never outlives its account.
+   */
   async repoint(changes: readonly AccountDefaultsRepoint[]): Promise<void> {
-    await this.change(file => repointAccountDefaults(file, changes));
+    await this.change(file => repointAccountDefaults(file, changes), 'record');
   }
 
-  /** `edit` applied to the version in effect and, when a ferret's edit is held, to the held text too. */
-  private async change(edit: (file: AccountDefaultsFile) => AccountDefaultsFile): Promise<AccountDefaultsFile> {
+  /**
+   * `edit` applied to the version in effect — ALWAYS, whatever the file on disk says — and, when a ferret's edit is
+   * held, to the held text too. The in-effect record is what the card reads, so it is updated even when there is no
+   * text to write: a held suggestion that already lacks the line, a held deletion of the file, a file that does not
+   * check (then `broken` says whether to refuse or to correct the record only).
+   */
+  private async change(
+    edit: (file: AccountDefaultsFile) => AccountDefaultsFile,
+    broken: 'refuse' | 'record',
+  ): Promise<void> {
     const { files, evaluation } = await this.deps.config.load();
     const disk = files.get(DEFAULTS_PATH)?.text;
-    if (disk !== undefined) {
-      const checked = checkConfigFile(DEFAULTS_PATH, disk);
-      if (!checked.ok) throw new AccountDefaultsFileBroken(checked.issues);
-    }
+    const checked = disk === undefined ? undefined : checkConfigFile(DEFAULTS_PATH, disk);
     const effective = evaluation.effective.accountDefaults;
-    const held = disk !== undefined && evaluation.pending.some(pending => pending.path === DEFAULTS_PATH);
-    if (!held) {
-      const text = renderConfigFile(DEFAULTS_PATH, DEFAULTS_FILE, edit(effective), disk);
-      if (text !== undefined) await this.deps.config.writeOwn(DEFAULTS_PATH, text);
-      return edit(effective);
-    }
-    const heldFile = (checkConfigFile(DEFAULTS_PATH, disk) as { readonly value: AccountDefaultsFile }).value;
+    const next = edit(effective);
     const accepted = evaluation.accepted[DEFAULTS_PATH]?.text;
-    const text = renderConfigFile(DEFAULTS_PATH, DEFAULTS_FILE, edit(heldFile), disk);
-    const inEffect = renderConfigFile(DEFAULTS_PATH, DEFAULTS_FILE, edit(effective), accepted) ?? accepted ?? '';
-    if (text !== undefined) await this.deps.config.writeOwn(DEFAULTS_PATH, text, inEffect);
-    return edit(effective);
+    const inEffect = renderConfigFile(DEFAULTS_PATH, DEFAULTS_FILE, next, accepted) ?? accepted ?? '';
+    const moves = !sameLines(effective, next);
+    if (checked !== undefined && !checked.ok) {
+      if (broken === 'refuse') throw new AccountDefaultsFileBroken(checked.issues);
+      if (moves) await this.deps.config.acceptOwn(DEFAULTS_PATH, inEffect);
+      return;
+    }
+    const held = disk !== undefined && evaluation.pending.some(pending => pending.path === DEFAULTS_PATH);
+    const text = held
+      ? renderConfigFile(
+          DEFAULTS_PATH,
+          DEFAULTS_FILE,
+          edit((checked as { readonly value: AccountDefaultsFile }).value),
+          disk,
+        )
+      : renderConfigFile(DEFAULTS_PATH, DEFAULTS_FILE, next, disk);
+    if (text !== undefined) await this.deps.config.writeOwn(DEFAULTS_PATH, text, held ? inEffect : text);
+    else if (moves) await this.deps.config.acceptOwn(DEFAULTS_PATH, inEffect);
   }
 
   /**
@@ -95,8 +131,7 @@ export class AccountDefaults {
     if (lines.length === 0) return [];
     const projects = lines.some(line => line.scope === 'projects') ? await this.deps.projects?.() : undefined;
     const handles = new Set(listing.accounts.map(account => account.id));
-    const keysOf = (handle: string): ReadonlySet<string> =>
-      new Set(listing.signIns.filter(signIn => signIn.account === handle).flatMap(signIn => placeKeys(signIn.place)));
+    const keysOf = (handle: string): ReadonlySet<string> => keysOfAccount(listing, handle);
     const pending = read.evaluation.pending.some(item => item.path === DEFAULTS_PATH);
     const located = pending ? undefined : readConfigText(read.files.get(DEFAULTS_PATH)?.text ?? '');
     const issues: ConfigIssue[] = [];
@@ -115,6 +150,23 @@ export class AccountDefaults {
     }
     return issues;
   }
+}
+
+const keysOfAccount = (listing: AccountListing, handle: string): ReadonlySet<string> =>
+  new Set(listing.signIns.filter(signIn => signIn.account === handle).flatMap(signIn => placeKeys(signIn.place)));
+
+/** The accounts that have a sign-in on `key`. */
+function handlesSigningInOn(listing: AccountListing, key: string): ReadonlySet<string> {
+  return new Set(listing.accounts.map(account => account.id).filter(handle => keysOfAccount(listing, handle).has(key)));
+}
+
+/** Whether two files hold the same lines, whatever order they are written in. */
+function sameLines(left: AccountDefaultsFile, right: AccountDefaultsFile): boolean {
+  const words = (file: AccountDefaultsFile) =>
+    accountDefaultLines(file)
+      .map(line => [line.scope, line.within ?? '', line.key, line.account].join('\u0000'))
+      .sort();
+  return JSON.stringify(words(left)) === JSON.stringify(words(right));
 }
 
 function problemWith(

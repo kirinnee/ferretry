@@ -142,25 +142,35 @@ folders:
     github.com: GITHUB_WORK
 ```
 
+**Not read by the card yet.** This file is stored, checked, kept true across account acts and warned about, but the
+daemon does not yet feed it to the card or to `account_hint`: the project, folder and site lines take effect when the
+credential phase R1-5 wires them in. Until then a line changes nothing a card offers.
+
 The card chooses by the ferret's own hint, then the project line, then the folder line, then the site line, then
 the only sign-in matched ([input-requests.md](input-requests.md#the-next-time-one-tap)). A default only ever
 chooses among the sign-ins the daemon already matched; it never adds one.
 
-**Every change is the owner's.** Adding, changing or removing a line is a loosening in the sense of rule 2 — it
+**Every change is the owner's.** (Honest-client until the ferret wall RF-2/RF-5: a ferret that calls the admin-token
+routes without its session id is treated as the owner at the machine, and could also write `state/config-accepted.json`
+directly. The held rule is a wall for the `config.write` door and the owner's route for a paired device.) Adding, changing or removing a line is a loosening in the sense of rule 2 — it
 changes which account the owner is offered first, in the owner's name — so a ferret's `config.write` to this file
 is only ever a **held suggestion** ("changes which account a card offers first for `<key>` in <scope>"), and the
 version in effect stays as the owner last confirmed it. The owner sets one line with `PUT /v1/accounts/defaults`
 (`{ scope, within?, key, account }`; `account: null` clears it): at the machine it is direct, from a paired device
 it asks the passkey step-up that confirming a held edit asks. That one write goes through the comment-keeping
 editor, is in effect at once, and **does not confirm anything else** — a ferret's other held lines stay held. A
-defaults file that does not check is never written over; fix it first (`409 defaults_file_invalid`).
+defaults file that does not check is never written over; fix it first (`409 defaults_file_invalid`). A line for an
+account that does not exist, or has no sign-in on that key, is refused (`409 no_sign_in_here`); clearing a line is
+always allowed. The answer is the lines actually in effect after the write.
 
 **Lines follow the accounts.** An account's rename rewrites its lines to the new handle, its delete removes them,
 and a merge points the merged account's lines at the one that kept the sign-ins (the kept account's own line for
 the same place wins) — all in the owner's same act. A handle that is created, or renamed to, also has any line
 already naming it dropped first, so **a new account never inherits a default left behind for an old account of
-the same handle**. If a rewrite fails, the account act stands; the line left over names a handle that is not an
-account (or one with no sign-in there), so it is **ignored**, never read as a default.
+the same handle** (the account's immutable key, not its handle, says whether it is the same account). Whatever the
+file on disk says — a ferret's held suggestion that lacks the line, a held deletion of the file, even a file that does
+not check — the version in effect is corrected in the same act, so a deleted account's line never stays in effect; a
+file that does not check is left as it is for the owner to fix.
 
 **What the daemon cannot see is a warning, not an error.** `fy config check` fails only the shape (an unknown map, a
 bad host, a lower-case handle, a relative folder). The daemon adds warnings to `GET /v1/config/status` for a line

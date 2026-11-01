@@ -64,6 +64,7 @@ import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
+  AccountDefaultNotUsable,
   type AccountDefaults,
   AccountDefaultsFileBroken,
   type AccountDirectory,
@@ -582,6 +583,7 @@ function accountRoutes(
               } catch (error) {
                 if (error instanceof AccountDefaultsFileBroken)
                   throw new ApiError(409, error.message, 'defaults_file_invalid');
+                if (error instanceof AccountDefaultNotUsable) throw new ApiError(409, error.message, 'no_sign_in_here');
                 return reraise(error);
               }
             },

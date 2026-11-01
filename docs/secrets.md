@@ -279,7 +279,7 @@ its body is read, exactly as for the vault (honest-client until a ferret has its
 **handles only**, never a value, and every change to it is held for the owner when anyone else makes it
 ([Default accounts](config-files.md#default-accounts)). `PUT /v1/accounts/defaults { scope, within?, key, account }`
 is the owner's own write of one line (`account: null` clears it): a ferret is refused before its body is read, a
-paired device needs the passkey step-up for loosening a configuration file, and the line is in effect at once. The
+paired device needs the passkey step-up for loosening a configuration file, and the line is in effect at once (it is refused with `409 no_sign_in_here` for an account with no sign-in on that key). The card does not read the file until R1-5. The
 account acts keep the lines true in the same act: a rename moves them, a delete drops them, a merge points them at the
 account that kept the sign-ins, and a handle that is created (or renamed to) never inherits a line left for an old
 account of the same name. If that rewrite fails the account act stands and the leftover line, which names no account,

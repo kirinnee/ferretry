@@ -567,7 +567,11 @@ export class AccountDirectory {
     repoints: readonly AccountDefaultsRepoint[],
   ): Promise<void> {
     if (this.repointDefaults === undefined) return;
-    const fresh = Object.keys(after).filter(handle => !Object.hasOwn(before, handle));
+    // New to the store, or the same handle on a different account: the immutable key says it is not the account the
+    // handle used to mean (a delete and a create under one lock, or any path that frees and retakes a handle).
+    const fresh = Object.keys(after).filter(
+      handle => !Object.hasOwn(before, handle) || before[handle]?.key !== after[handle]?.key,
+    );
     const changes: AccountDefaultsRepoint[] = [
       ...fresh.map(handle => ({ kind: 'fresh' as const, handle })),
       ...repoints,

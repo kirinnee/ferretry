@@ -7451,6 +7451,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // Projects are read from the catalog file when a status asks, never at start.
   const accountDefaults = new AccountDefaults({
     config: configFiles,
+    listing: async () => await accountDirectory.list(),
     projects: async () => await new FileProjectCatalog(join(paths.state, 'projects.json')).projects(),
   });
   accountDirectory.followDefaultsWith(async changes => await accountDefaults.repoint(changes));
