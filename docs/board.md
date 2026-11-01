@@ -31,8 +31,9 @@ ferret launched with older words is told the new ones on the owner's next messag
 ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)). Exactly this, with the binary's
 name for `fy`:
 
-````text
-Board: all work is a card (&F412); agenda items are !A48. Search first (`fy search`); update or link a match instead of adding a duplicate. New ask, first: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>` (fy new/start make one). Before To test: `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`. Lane by the work (`fy board lanes show`): plan → plan lane (owner OKs leaving), build → active: `fy task move <id> <lane> --reason "<why>"`. Blocked is no lane: `fy agenda add --task <id>` (owner), `fy task depend` (card), `fy task block` (else). `fy task drop --reason`, `fy task focus <id>`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. Starts, PRs, merges, releases, `fy signal done` self-move; owner closes.```
+```text
+Board: all work is a card (&F412); agenda items are !A48. Search first (`fy search`); update or link a match instead of adding a duplicate. New ask, first: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>` (fy new/start make one). Before To test: `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`. Lane by the work (`fy board lanes show`): plan → plan lane (owner OKs leaving), build → active: `fy task move <id> <lane> --reason "<why>"`. Blocked is no lane: `fy agenda add --task <id>` (owner), `fy task depend` (card), `fy task block` (else). `fy task drop --reason`, `fy task focus <id>`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. Starts, PRs, merges, releases, `fy signal done` self-move; owner closes.
+```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
 ([reference-standard.md](reference-standard.md)). The card-writing part is the owner's (2026-10-31): a title of at
@@ -66,7 +67,7 @@ carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` laun
 ```text
 Sub-ferret: you were started by a lead ferret. Report to it with `fy send <lead-callsign> "<message>"`; you cannot raise agenda items, notify the owner or move cards.
 Link your PR to your card: `fy task link <id> --pr <url>` (or `--branch`); add progress with `fy task note`. Your card moves itself: start, PR, merge, `fy signal done`. Your final report says how the owner tests it.
-````
+```
 
 Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen — go to its **lead** instead
 (`nudgeTarget`, `packages/daemon/src/lib/sub-ferret/index.ts`).
