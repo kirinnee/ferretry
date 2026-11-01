@@ -74,8 +74,6 @@ export const isLongPress = (elapsedMs: number): boolean => elapsedMs >= LONG_PRE
 /** Whether a touch went down on text the reader already has selected: the drag moves the selection's handles, never the card. */
 export const startsInSelection = (
   target: EventTarget | null,
-  selection: Pick<Selection, 'isCollapsed' | 'containsNode'> | null = typeof window === 'undefined'
-    ? null
-    : window.getSelection(),
+  selection: Pick<Selection, 'isCollapsed' | 'containsNode'> | null = window.getSelection(),
 ): boolean =>
   target instanceof Node && selection !== null && !selection.isCollapsed && selection.containsNode(target, true);
