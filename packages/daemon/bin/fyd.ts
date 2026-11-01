@@ -6477,7 +6477,7 @@ function createInputRequestService(input: {
     logins: input.logins,
     facts: input.loginFacts,
     hostName: hostname(),
-    // Offered only once the app that draws the card reports it (DAEMON_FEATURES.phoneApproval is not yet reported).
+    // Offered only while the daemon reports it: the app draws the card, so DAEMON_FEATURES.phoneApproval is reported.
     enabled: () => daemonFeatureList().includes(DAEMON_FEATURES.phoneApproval),
   });
   return { service, observer, approvals };

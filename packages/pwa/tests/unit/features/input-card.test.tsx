@@ -104,7 +104,7 @@ describe('the card', () => {
   });
 
   it('shows a one-time code as it is typed, says the ferret can see it, flags it neutral and offers no Save', async () => {
-    const { q } = await show(requestOf('code', { saved: saved({ saves: undefined }) }));
+    const { q, view } = await show(requestOf('code', { saved: saved({ saves: undefined }) }));
     const field = must(q<HTMLInputElement>('[data-input-value]'), 'the field');
 
     expect(field.type).toBe('text');
@@ -114,9 +114,19 @@ describe('the card', () => {
     expect(q('[data-input-reveal]')).toBeNull();
     expect(q('[data-input-risk]')?.getAttribute('data-input-risk')).toBe('neutral');
     expect(q('[data-input-risk]')?.textContent).toContain('One-time code: the ferret can see it.');
+    expect(view.container.textContent?.match(/the ferret can see it/giu)).toHaveLength(1);
     expect(q('[data-input-lock]')).toBeNull();
     expect(q('[data-input-save]')).toBeNull();
   });
+  it('keeps "the ferret can see it" in the code field’s label when an amber flag replaces the neutral line', async () => {
+    const amber = { level: 'amber', reason: 'This page does not look like a sign-in code box.' } as const;
+    const { view } = await show(
+      requestOf('code', { risk: amber, saved: saved({ saves: undefined, offers: [primaryOffer()] }) }),
+    );
+
+    expect(view.container.querySelector('[data-input-summary-field]')?.textContent).toContain('the ferret can see it');
+  });
+
   it('says a plain answer is not secret', async () => {
     const { q } = await show(requestOf('plain'));
 

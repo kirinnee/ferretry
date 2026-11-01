@@ -2387,6 +2387,22 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
     should(renamed.request.sensitivity).equal('secret');
   });
 
+  it('should move the whole card to secret when a redraw upgrades its code field, never leave sensitivity at code', async () => {
+    // Arrange — a hidden-typing code prompt kept as a code by a proved code program; the redraw no longer proves it.
+    const HIDDEN = { ...OTP, echo: 'off' } as InputTargetFacts;
+    const { w, service, id, digest } = await raised({ facts: HIDDEN, codeProgram: true }, CODE);
+    w.codeProgram = false;
+    w.facts = { ...HIDDEN, cursorRow: 4 } as InputTargetFacts;
+
+    // Act
+    await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
+    const [card] = await service.list(HOST);
+
+    // Assert — the fields and the card agree, so nothing keyed on the card's sensitivity treats a secret as a code.
+    should(card?.fields[0]?.sensitivity).equal('secret');
+    should(card?.sensitivity).equal('secret');
+  });
+
   it('should check again when a restarted daemon finds the terminal now asking for a password, never back', async () => {
     // Arrange — raised at an OTP prompt; the daemon restarts and the pane now shows a sudo prompt.
     const first = await raised({ facts: OTP }, CODE);

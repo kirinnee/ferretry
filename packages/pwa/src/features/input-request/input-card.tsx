@@ -23,15 +23,20 @@
  */
 
 import {
+  type AccountList,
   INPUT_LOCK_WORDS,
   type InputRequest,
   type InputSavedOffer,
   type InputShot,
   lockWords,
   pickOneWords,
+  strongestSensitivity,
+  type TwoFactorId,
+  type TwoFactorStageId,
 } from '@ferretry/protocol';
 import { Eye, EyeOff, Shield, ShieldAlert, ShieldCheck, ShieldQuestion, Timer } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { codesAccounts, startingAccount } from '../../lib/automatic-codes.ts';
 import { cancelInput, deliverInput, type InputClient, putAccountDefault, readInputShot } from '../../lib/input-api.ts';
 import {
   type AlwaysUse,
@@ -40,6 +45,9 @@ import {
   cardSaveBlock,
   chainWords,
   choiceReasonWords,
+  codeButtonWords,
+  codeCheckedWords,
+  codeTitleWords,
   defaultSubmit,
   expiryWords,
   fieldAttributes,
@@ -51,6 +59,7 @@ import {
   normalizeHandle,
   observedWords,
   offersPressEnter,
+  oneFactorLine,
   offerUsername,
   pastedWords,
   pickOneOffers,
@@ -74,6 +83,7 @@ import {
   updatedEntry,
 } from '../../lib/input-card.ts';
 import { pasteRoute } from '../../lib/secure-copy.ts';
+import { AutomaticCodesPanel } from './automatic-codes.tsx';
 
 export interface InputCardProps {
   readonly request: InputRequest;
@@ -92,6 +102,13 @@ export interface InputCardProps {
    * badge and the frame: the card then draws no panel and no heading of its own, only the target and the clock.
    */
   readonly embedded?: boolean;
+  /**
+   * The owner's accounts, read only from a daemon that reports 2FA keys. With them a code card is titled from the
+   * account's keys and offers "Set up automatic codes"; without them it is the plain card it always was.
+   */
+  readonly accounts?: AccountList;
+  /** Asks for the passkey that saves a staged key (bound to that stage); absent: the setup panel is not offered. */
+  readonly addKey?: (stage: TwoFactorStageId, words: string) => Promise<boolean>;
 }
 
 const RISK_ICON = { green: ShieldCheck, neutral: Shield, amber: ShieldQuestion, red: ShieldAlert } as const;
@@ -116,6 +133,8 @@ export function InputCard({
   onDone,
   onRefresh,
   embedded = false,
+  accounts,
+  addKey,
 }: InputCardProps) {
   const headingId = useId();
   const now = useNow(fixedNow);
@@ -125,6 +144,24 @@ export function InputCard({
   const [always, setAlways] = useState<AlwaysUse | undefined>(undefined);
   const facts = observedWords(request);
   const blocked = sendBlock(request, now);
+  // The FIELDS decide, never the card's own word: a field the daemon upgraded to a secret gets no code title and no panel.
+  const asksCode = strongestSensitivity(request.fields) === 'code';
+  const codeAccounts = asksCode && accounts !== undefined ? codesAccounts(request.saved, accounts) : [];
+  const startAt = startingAccount(request.saved, codeAccounts);
+  const codeFor = accounts?.accounts.find(each => each.id === startAt?.id);
+  const title =
+    asksCode && codeFor !== undefined ? codeTitleWords(request, agentName, codeFor) : titleWords(request, agentName);
+  const setup =
+    addKey !== undefined && codeAccounts.length > 0 && request.state === 'pending' ? (
+      <AutomaticCodesPanel
+        accounts={codeAccounts}
+        addKey={addKey}
+        client={client}
+        initial={startAt}
+        onSaved={() => onRefresh?.()}
+        requestId={request.id}
+      />
+    ) : null;
   const Risk = request.risk === undefined ? null : RISK_ICON[request.risk.level];
 
   const cancel = async (): Promise<void> => {
@@ -175,7 +212,7 @@ export function InputCard({
 
   return (
     <section
-      {...(embedded ? { 'aria-label': titleWords(request, agentName) } : { 'aria-labelledby': headingId })}
+      {...(embedded ? { 'aria-label': title } : { 'aria-labelledby': headingId })}
       className={`fy-input-card flex min-w-0 flex-col gap-3${embedded ? '' : ' kt-panel p-panel'}`}
       data-input-embedded={embedded ? '' : undefined}
       data-input-request={request.id}
@@ -184,6 +221,11 @@ export function InputCard({
       {embedded ? (
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           {chain}
+          {title === titleWords(request, agentName) ? null : (
+            <span className="text-ui font-medium text-fg" data-input-title="">
+              {title}
+            </span>
+          )}
           {target}
           {expiry}
         </div>
@@ -191,7 +233,7 @@ export function InputCard({
         <>
           <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <h3 className="m-0 min-w-0 text-row font-semibold text-fg" data-input-title="" id={headingId}>
-              {titleWords(request, agentName)}
+              {title}
             </h3>
             {expiry}
           </header>
@@ -290,6 +332,7 @@ export function InputCard({
             cancel={cancelButton}
             client={client}
             fields={fields}
+            extra={setup}
             onRefresh={onRefresh}
             onSettled={(text, handTapped) => {
               setSettled(text);
@@ -421,6 +464,8 @@ interface FormProps {
   /** `handTapped`: the account the owner picked by hand (not the daemon's one-tap), which a default may be made of. */
   readonly onSettled: (text: string, handTapped?: InputSavedOffer) => void;
   readonly onRefresh: (() => void) | undefined;
+  /** The "Set up automatic codes" panel, under the offers. */
+  readonly extra: ReactNode;
 }
 
 type Nodes = Map<string, HTMLInputElement>;
@@ -607,7 +652,7 @@ function FieldSummary({
       {fields.map(field => (
         <li className="flex min-w-0 flex-col gap-1" data-input-summary-field={field.key} key={field.key}>
           <span className="text-cell font-medium text-fg">
-            {field.label} <span className="font-normal text-muted">· {SENSITIVITY_WORDS[field.sensitivity]}</span>
+            {field.label} <span className="font-normal text-muted">· {sensitivityWords(field)}</span>
           </span>
           <FieldFlags field={field} request={request} />
         </li>
@@ -622,6 +667,12 @@ const SENSITIVITY_WORDS = {
   code: 'one-time code, the ferret can see it',
   plain: 'not secret',
 } as const;
+
+/** The label keeps "the ferret can see it" unless the risk line drawn for the field (on top or beside it) already says it. */
+const sensitivityWords = (field: InputCardField): string =>
+  field.sensitivity === 'code' && field.risk?.reason.includes('the ferret can see it') === true
+    ? 'one-time code'
+    : SENSITIVITY_WORDS[field.sensitivity];
 
 /**
  * The quiet line after a hand-tap: "Always use for <project>". It is the OWNER's tap on this button that writes the
@@ -673,7 +724,7 @@ function AlwaysUseLine({ always, client }: { readonly always: AlwaysUse; readonl
   );
 }
 
-function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onRefresh }: FormProps) {
+function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, onRefresh, extra }: FormProps) {
   const nodes = useRef<Nodes>(new Map());
   const { primary, others: rest } = splitOffers(request.saved);
   const pickOne = pickOneOffers(request.saved);
@@ -755,8 +806,54 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
     }
   };
 
-  const tapOffer = (offer: InputSavedOffer): void =>
-    void send(deliveryId => savedBody(request, offer.id, submit, deliveryId), offer === primary ? undefined : offer);
+  const tapOffer = (offer: InputSavedOffer, factor?: TwoFactorId): void =>
+    void send(
+      deliveryId =>
+        savedBody(request, offer.id, submit, deliveryId, {
+          ...(offer.signIn === undefined ? {} : { signIn: offer.signIn }),
+          ...(factor === undefined ? {} : { factor }),
+        }),
+      offer === primary ? undefined : offer,
+    );
+
+  const severalMatched = (request.saved?.offers ?? []).filter(each => each.matched).length > 1;
+  const codeButtons = (offer: InputSavedOffer, lead: boolean): ReactNode =>
+    (offer.codes ?? []).map((key, index) => {
+      const checked = codeCheckedWords(key);
+      const username = offerUsername(offer);
+      return (
+        <button
+          className="kt-btn !h-auto min-h-[44px] min-w-0 flex-col items-start justify-center py-2 text-left"
+          data-input-code-key={key.factor}
+          data-input-offer={offer.id}
+          data-input-offer-matched=""
+          data-variant={lead && index === 0 ? 'primary' : undefined}
+          disabled={off}
+          key={key.factor}
+          onClick={() => tapOffer(offer, key.factor)}
+          type="button"
+        >
+          <span className="min-w-0 break-words">{codeButtonWords(key)}</span>
+          {lead && !severalMatched ? null : (
+            <span className="text-meta font-normal opacity-80" data-input-code-account="">
+              {username === undefined ? offer.label : `${offer.label} · ${username}`}
+            </span>
+          )}
+          {checked === undefined ? null : (
+            <span
+              className={`text-meta font-normal ${key.checked === 'failed' ? 'text-warn' : 'opacity-80'}`}
+              data-input-code-checked={key.checked}
+            >
+              {checked}
+            </span>
+          )}
+        </button>
+      );
+    });
+  const oneFactor = oneFactorLine(
+    primary?.codes === undefined ? pickOne.find(offer => offer.codes !== undefined) : primary,
+  );
+  const othersOneFactor = oneFactorLine(others.find(offer => offer.codes !== undefined));
 
   const sendTyped = (): void =>
     void send(deliveryId =>
@@ -825,7 +922,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
       {primary === undefined || typing ? null : (
         <div className="flex min-w-0 flex-col gap-1">
           <div className="flex flex-wrap items-stretch gap-2">
-            {offerButton(primary, true)}
+            {primary.codes === undefined ? offerButton(primary, true) : codeButtons(primary, true)}
             <button
               className="kt-btn min-h-[44px]"
               data-input-type-instead=""
@@ -835,7 +932,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
               Type a different one
             </button>
           </div>
-          {reasonLine === undefined ? null : (
+          {reasonLine === undefined || (primary.codes !== undefined && primary.why === 'only') ? null : (
             <p className="m-0 text-meta text-muted" data-input-why={primary.why}>
               {reasonLine}
             </p>
@@ -848,7 +945,9 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
           <p className="m-0 text-cell font-medium text-fg" data-input-pick-one-line="">
             {pickOneWords(pickOne.length)}
           </p>
-          <div className="flex flex-col items-stretch gap-2">{pickOne.map(offer => offerButton(offer, false))}</div>
+          <div className="flex flex-col items-stretch gap-2">
+            {pickOne.map(offer => (offer.codes === undefined ? offerButton(offer, false) : codeButtons(offer, false)))}
+          </div>
           <button
             className="kt-btn min-h-[44px] self-start"
             data-input-type-instead=""
@@ -858,6 +957,12 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
             Type a different one
           </button>
         </div>
+      )}
+
+      {oneFactor === undefined || typing ? null : (
+        <p className="m-0 text-meta text-muted" data-input-one-factor="">
+          {oneFactor}
+        </p>
       )}
 
       {typing && saving ? (
@@ -919,9 +1024,18 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
       {others.length === 0 ? null : (
         <details className="min-w-0" data-input-others="">
           <summary className="cursor-pointer text-cell text-muted">Choose another account</summary>
-          <div className="mt-2 flex flex-col items-stretch gap-2">{others.map(offer => offerButton(offer, false))}</div>
+          <div className="mt-2 flex flex-col items-stretch gap-2">
+            {others.map(offer => (offer.codes === undefined ? offerButton(offer, false) : codeButtons(offer, false)))}
+            {othersOneFactor === undefined ? null : (
+              <p className="m-0 text-meta text-muted" data-input-one-factor="">
+                {othersOneFactor}
+              </p>
+            )}
+          </div>
         </details>
       )}
+
+      {extra}
 
       {offersPressEnter(request) ? (
         <label className="flex items-center gap-2 text-cell text-fg">

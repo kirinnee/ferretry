@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { createAppStore, StoreProvider, useStepUpRequest } from '../../src/lib/store.tsx';
+import { createAppStore, StoreProvider, useAddKeyStepUp, useStepUpRequest } from '../../src/lib/store.tsx';
 import { mount } from '../support/dom.ts';
 
 const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'alpha-token' });
@@ -23,6 +23,44 @@ function Probe({ onAsk }: { readonly onAsk: (ask: Ask) => void }) {
   onAsk(useStepUpRequest());
   return null;
 }
+
+type AddKey = ReturnType<typeof useAddKeyStepUp>;
+
+function AddKeyProbe({ onAsk }: { readonly onAsk: (ask: AddKey) => void }) {
+  onAsk(useAddKeyStepUp());
+  return null;
+}
+
+describe('useAddKeyStepUp', () => {
+  it('is no prompt at all outside the app’s store', async () => {
+    let ask: AddKey = () => Promise.resolve(true);
+    const view = await mount(<AddKeyProbe onAsk={value => (ask = value)} />);
+
+    expect(ask).toBeUndefined();
+    await view.unmount();
+  });
+
+  it('asks the app’s one prompt, with the words the daemon’s own account list made', async () => {
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => ({}) as unknown as FyApiClient,
+      fetcher: async () => Response.json({}),
+    });
+    let ask: AddKey;
+    const view = await mount(
+      <StoreProvider store={store}>
+        <AddKeyProbe onAsk={value => (ask = value)} />
+      </StoreProvider>,
+    );
+
+    const answer = ask?.(alpha, `st_${'a'.repeat(24)}` as never, 'save automatic codes to GitHub · kirinnee');
+
+    expect(store.stepUp.snapshot()?.acts).toEqual(['save automatic codes to GitHub · kirinnee']);
+    store.stepUp.dismiss();
+    expect(await answer).toBe(false);
+    await view.unmount();
+  });
+});
 
 describe('useStepUpRequest', () => {
   it('asks the app’s one step-up prompt, so a screen never owns a second prompt', async () => {

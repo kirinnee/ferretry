@@ -948,3 +948,24 @@ describe('a paste plan card', () => {
     run(() => agent.unmount());
   });
 });
+
+describe('an approve-on-phone card', () => {
+  test('is offered to the item view only for the daemon’s own reference, not for words that copy its title', async () => {
+    const REF = { id: `pa_${'0'.repeat(23)}1` };
+    const referenced = mount({
+      snapshot: board([item('A1', { kind: 'info', phoneApproval: REF } as Partial<AgendaItem>)]),
+      focus: { target: 'A1' as AgendaId, seq: 1 },
+    });
+    expect(referenced.root.findByType(AgendaItemView).props.planForm).toBeDefined();
+    run(() => referenced.unmount());
+
+    const copied = mount({
+      snapshot: board([
+        item('A1', { kind: 'info', subject: 'Approve on your phone: Tap 42 on your phone' } as Partial<AgendaItem>),
+      ]),
+      focus: { target: 'A1' as AgendaId, seq: 1 },
+    });
+    expect(copied.root.findByType(AgendaItemView).props.planForm).toBeUndefined();
+    run(() => copied.unmount());
+  });
+});

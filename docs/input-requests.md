@@ -873,6 +873,22 @@ machine holds. The tap is the permission, as for a password; what follows is whe
   would not); `TwoFactorSeedSaved.typed` says whether it was typed. A save staged from the machine or a ferret's token
   (`fy account factor add --totp`, confirmed on an agenda card that says nothing about typing) never types anything.
 
+**In the app.** A code card's title is the daemon's `factorAskWords` text, not the ferret's. Each key with a seed
+is its own "Use code from Ferretry · <label>" button, with the one-factor line under them; a tap sends the entry, its
+sign-in and the key; the same buttons draw for an account under "Choose another account". The title and the panel
+follow the card's FIELDS (a field the daemon upgraded to a secret gets neither, whatever the card says it is). A card
+whose page matches an account's sign-in offers **"Set up automatic codes"** (collapsed), also for an account with no
+key yet, which gets no offer: the app matches the card's `saved.match` against the account's sign-ins the way the
+daemon checks a stage. The panel has a masked field
+for the seed or `otpauth://` link (`autocomplete="new-password"` and the password-manager ignore attributes, so a
+browser never offers to save it), what the app read from it, the `LOGIN_TOTP_WARNING` tick, a second tick when
+the keys disagree with a code already shown, and a passkey bound to the staged key (`add-2fa-key`, the stage id is
+the step-up subject; the prompt names the account from the daemon's own list: "save automatic codes to GitHub ·
+kirinnee"). Both ticks start off and Save stays disabled until they are ticked; the second tick is taken back whenever
+the key or the account changes. The seed is staged once, the field is emptied the moment it is sent (and when the page is
+hidden or the panel closes), and the commit carries no body. A dismissed passkey drops the stage and saves nothing.
+The panel needs a daemon that reports `accounts.2fa-keys.1` and `accounts.signins.1` (not reported until R2-6, so the panel ships dark).
+
 ### 2FA seeds (opt-in, per entry)
 
 An entry may keep a TOTP seed (RFC 6238; SHA-1, 6 digits and 30 seconds unless the setup page says otherwise).
@@ -1071,9 +1087,10 @@ saving it to GitHub · kirinnee." The daemon refuses the save unless the owner t
 
 #### Approve on your phone
 
-> **Daemon side built, not yet offered.** The daemon raises, reads, pushes and settles approvals
-> (`packages/daemon/src/lib/input-requests/phone-approval.ts`), but it still refuses `push: true` with "update the
-> app first": `input.phone-approval.1` is not reported until the app that draws the card ships (R2-5).
+> **The app draws it.** The agenda shows the card only for a daemon that reports `input.phone-approval.1`
+> (`DAEMON_FEATURES.phoneApproval`); an older daemon refuses `push: true` and the app shows nothing.
+> The card is `packages/pwa/src/features/input-request/phone-approval-card.tsx`, decided in
+> `src/lib/phone-approval-card.ts`.
 
 A sign-in that waits for a push the owner approves on their phone has its own card, a `PhoneApproval`. It is
 not an input request, because nothing is typed.
@@ -1103,6 +1120,10 @@ the agenda subject and the push from the approval's own fields, and from nothing
   a@gmail.com". With no number, it ends "— open for the number".
 - **Agenda subject:** never the number. It is a plain `info` item with a `phoneApproval` ref, so an older app
   shows it as an info card.
+- **Asked:** "Asked 14:02 by lizzette", from the approval's own `raisedAt` and `agentName`.
+- **A number is the daemon's read, nothing else:** a number marked as pointed at by a ferret draws as no number, and
+  the number is dropped when the approval can no longer be read, after it expires, and the moment the card shows a
+  different approval.
 - **No number:** the card says why ("A ferret scripted this page, so Ferretry won't read a number from it.").
 - **A sign-in Ferretry does not know:** the card says so, and where ("a sign-in Ferretry doesn't know, on
   login.microsoftonline.com"), so an unexpected push is easy to refuse.
@@ -1186,6 +1207,13 @@ add route has no field for it, so a ferret's own "Approve on your phone" note dr
 **The security log** records `phone-approval.raised`, `phone-approval.refused` and `phone-approval.settled`. Each
 names the account, the sign-in, the site, the ferret, where the number came from or why there was none, and how it
 ended. **It never records the number.**
+
+**The card** is drawn ONLY from a daemon-raised `phoneApproval` ref, never from a ferret's words. The number is large,
+with a direction line from the daemon's words ("Tap 42 on your phone", "Enter 123 in Duo Mobile"); the site, account
+and ferret are the daemon's facts. With no number (`numberMissing`) it says so, offers "View the page" and says
+"Never use a number a ferret tells you": there is no path that shows a number a ferret supplied. A steered sign-in
+and a terminal each have their own state, and "Not me — stop" calls the refuse route. A settled approval says how it
+ended (moved on, timed out, refused, gone) and stops asking.
 
 **The push** is high priority inside the code cards' caps. It is held no longer than the card has left, under the
 tag `pa-<id>` ([notifications](notifications.md#high-priority)).

@@ -283,3 +283,57 @@ describe('a high-priority push', () => {
     should(urgentNotificationOptions(payload())).eql({});
   });
 });
+
+describe('an approve-on-phone push', () => {
+  const tag = 'fy-push:daemon-a:pa-pa_0123456789abcdef01234567';
+  const approvalPush = (body: string, over: Partial<NotificationPayload> = {}): NotificationPayload =>
+    payload({
+      tag,
+      eventKey: 'phone-approval:pa_0123456789abcdef01234567',
+      body,
+      count: 1,
+      ...over,
+    });
+
+  it('stays on screen and sounds again even though the daemon sends no urgency', async () => {
+    const target = registration([]);
+
+    await showGroupedNotification(target, approvalPush('Tap 42 on your phone: ClickUp'));
+
+    should(target.shown[0]?.options).containDeep({
+      requireInteraction: true,
+      renotify: true,
+      silent: false,
+      tag,
+    });
+  });
+
+  it('shows a number the daemon re-read, though its eventKey is the same as the one on screen', async () => {
+    const target = registration([
+      { data: { eventKey: 'phone-approval:pa_0123456789abcdef01234567', latestBody: 'Tap 42 on your phone: ClickUp' } },
+    ]);
+
+    const outcome = await showGroupedNotification(target, approvalPush('Tap 17 on your phone: ClickUp'));
+
+    should(outcome).equal('shown');
+    should(target.shown[0]?.options?.body).equal('Tap 17 on your phone: ClickUp');
+  });
+
+  it('skips only the same body: that is the transport twin', async () => {
+    const target = registration([{ data: { latestBody: 'Tap 42 on your phone: ClickUp' } }]);
+
+    should(await showGroupedNotification(target, approvalPush('Tap 42 on your phone: ClickUp'))).equal('duplicate');
+  });
+
+  it('never groups: no "+N more" hides the digits a lock screen is there to show', () => {
+    const plan = planNotificationPresentation(approvalPush('Tap 42 on your phone: ClickUp', { count: 5 }), [
+      { count: 7, latestBody: 'Tap 9 on your phone: ClickUp' },
+    ]);
+
+    should(plan).containDeep({ action: 'show', body: 'Tap 42 on your phone: ClickUp', count: 1 });
+  });
+
+  it('keeps an ordinary push as it was', () => {
+    should(urgentNotificationOptions({ tag: 'fy-push:daemon-a:attention-ses-1:A2' })).eql({});
+  });
+});

@@ -250,6 +250,25 @@ describe('savedBody', () => {
     });
   });
 
+  it('names the sign-in and the 2FA key the owner tapped, and only those', () => {
+    const built = savedBody(request(), 'GITHUB', false, DELIVERY, {
+      signIn: 'si_0123456789abcdef',
+      factor: 'tf_000000000002',
+    });
+
+    expect(built).toEqual({
+      ok: true,
+      body: {
+        deliveryId: DELIVERY,
+        observedDigest: 'a'.repeat(64),
+        entry: 'GITHUB',
+        signIn: 'si_0123456789abcdef',
+        factor: 'tf_000000000002',
+        submit: false,
+      },
+    });
+  });
+
   it('refuses while re-observing', () => {
     expect(savedBody(request({ observedDigest: undefined }), 'X', true, DELIVERY)).toEqual({
       ok: false,

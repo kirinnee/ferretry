@@ -92,3 +92,48 @@ describe('a paste plan card in the Inbox', () => {
     expect((await draw(true, false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
   });
 });
+
+describe('an approve-on-phone card in the Inbox', () => {
+  const REF = { id: `pa_${'0'.repeat(23)}1` };
+  const info = (ref: boolean) =>
+    inboxCard(
+      agendaItem('A9', {
+        kind: 'info',
+        ask: undefined,
+        raisedBy: 'agent',
+        subject: 'Approve on your phone: Tap 42 on your phone',
+        ...(ref ? { phoneApproval: REF } : {}),
+      } as never),
+    );
+
+  const draw = async (ref: boolean, connected = true) => {
+    const fake = fakeInbox();
+    const view = await mount(
+      <InboxHarness
+        cards={[info(ref)]}
+        fake={fake}
+        render={inbox => (
+          <AgendaNeedsYou
+            clock={fake.clock.now}
+            daemonId={WORKSHOP.daemonId}
+            inbox={{ ...inbox, connectionFor: id => (connected && id === WORKSHOP.daemonId ? WORKSHOP : undefined) }}
+            now={NOW}
+            onNavigate={() => undefined}
+          />
+        )}
+      />,
+    );
+    mounted.push(view);
+    await settle();
+    return view;
+  };
+
+  it('is drawn only from the daemon’s own reference, never from a ferret’s words copying its title', async () => {
+    const copied = await draw(false);
+    expect(copied.container.querySelector('[data-agenda-plan-form]')).toBeNull();
+    expect(copied.container.querySelector('[data-phone-approval]')).toBeNull();
+
+    expect((await draw(true)).container.querySelector('[data-agenda-plan-form]')).not.toBeNull();
+    expect((await draw(true, false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+  });
+});

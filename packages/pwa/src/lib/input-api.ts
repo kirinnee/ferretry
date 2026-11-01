@@ -8,6 +8,9 @@
  */
 
 import {
+  type AccountId,
+  type AccountList,
+  AccountListSchema,
   type IFyApiClient,
   type InputDeliverBody,
   InputDeliverBodySchema,
@@ -22,6 +25,16 @@ import {
   PutAccountDefaultRequestSchema,
   type PutAccountDefaultResult,
   PutAccountDefaultResultSchema,
+  type PhoneApproval,
+  type PhoneApprovalList,
+  PhoneApprovalListSchema,
+  type StageTwoFactorSeedRequest,
+  StageTwoFactorSeedRequestSchema,
+  type TwoFactorSeedSaved,
+  TwoFactorSeedSavedSchema,
+  type TwoFactorSeedStaged,
+  TwoFactorSeedStagedSchema,
+  type TwoFactorStageId,
 } from '@ferretry/protocol';
 import { z } from 'zod';
 
@@ -94,3 +107,58 @@ export async function cancelInput(client: InputClient, request: Pick<InputReques
     body: '{}',
   });
 }
+
+/** The approve-on-phone cards still waiting (owner only). Nothing is cached: the daemon is the only source of a number. */
+export async function listPhoneApprovals(client: InputClient): Promise<PhoneApprovalList> {
+  return await client.request('/v1/phone-approvals', PhoneApprovalListSchema, { method: 'GET' });
+}
+
+/** "Not me — stop": the only answer a card gives. There is no route that says the owner approved. */
+export async function refusePhoneApproval(
+  client: InputClient,
+  approval: Pick<PhoneApproval, 'id' | 'sessionId'>,
+): Promise<void> {
+  await client.request(
+    `/v1/sessions/${encodeURIComponent(approval.sessionId)}/phone-approvals/${encodeURIComponent(approval.id)}/refuse`,
+    z.unknown(),
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' },
+  );
+}
+
+/** `GET /v1/accounts`: the owner's accounts, for the places a pasted 2FA key is checked against. */
+export async function readAccounts(client: InputClient): Promise<AccountList> {
+  return await client.request('/v1/accounts', AccountListSchema, { method: 'GET' });
+}
+
+const seedPath = (account: AccountId): string => `/v1/accounts/${encodeURIComponent(account)}/factors/seed`;
+
+/** Step one: the daemon reads the pasted key again and holds it in memory only. Nothing is saved yet. */
+export async function stageSeed(
+  client: InputClient,
+  account: AccountId,
+  body: StageTwoFactorSeedRequest,
+): Promise<TwoFactorSeedStaged> {
+  return await client.request(seedPath(account), TwoFactorSeedStagedSchema, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(StageTwoFactorSeedRequestSchema.parse(body)),
+  });
+}
+
+/** Step two: no body. The passkey proof for this one stage is what the daemon checks. */
+export async function commitSeed(
+  client: InputClient,
+  account: AccountId,
+  stage: TwoFactorStageId,
+): Promise<TwoFactorSeedSaved> {
+  return await client.request(`${seedPath(account)}/${encodeURIComponent(stage)}/commit`, TwoFactorSeedSavedSchema, {
+    method: 'POST',
+  });
+}
+
+/** Forget a staged key (the passkey was dismissed): never needs a passkey, because it narrows. */
+export async function dropSeed(client: InputClient, account: AccountId, stage: TwoFactorStageId): Promise<void> {
+  await client.request(`${seedPath(account)}/${encodeURIComponent(stage)}`, DroppedSchema, { method: 'DELETE' });
+}
+
+const DroppedSchema = z.object({ stage: z.string(), dropped: z.literal(true) });
