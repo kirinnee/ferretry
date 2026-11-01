@@ -1,3 +1,9 @@
+## [4.203.0](https://github.com/kirinnee/ferretry/compare/v4.202.1...v4.203.0) (2026-11-01)
+
+### Features
+
+* **daemon:** take a ferret's sub-ferret lineage from its credential, and let a person revoke one (RF-4) ([#1248](https://github.com/kirinnee/ferretry/issues/1248)) ([bcfd16d](https://github.com/kirinnee/ferretry/commit/bcfd16d41d47e4bc44cd7f3bf347ec599af5298d))
+
 ## [4.202.1](https://github.com/kirinnee/ferretry/compare/v4.202.0...v4.202.1) (2026-11-01)
 
 ### Fixes
