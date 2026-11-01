@@ -42,9 +42,24 @@ describe('cardStack', () => {
     expect(first?.toTest?.howToTest).toBe('1. Open it');
   });
 
-  test('a card to approve has no verdict row', async () => {
-    const [first] = await stackOf([card('F1', { owner: SELF, laneId: 'plan' })]);
-    expect(first?.toTest).toBeNull();
+  test('a plan to approve is a row too: Approve moves it on, Send back to the lane before, the brief is the plan', async () => {
+    const [first] = await stackOf([card('F1', { owner: SELF, laneId: 'plan', brief: 'Build it in two steps.' })]);
+    expect(first?.toTest?.stage).toBe('approve');
+    expect(first?.toTest?.howToTest).toBe('Build it in two steps.');
+    expect(first?.toTest?.doneLaneId).toBe('implement');
+    expect(first?.toTest?.notGoodLaneId).toBe('todo');
+  });
+
+  test('a snoozed plan leaves the stack until its time is up', async () => {
+    const snoozed = card('F1', {
+      owner: SELF,
+      laneId: 'plan',
+      snoozed: { until: '2026-08-02T15:00:00.000Z', laneId: 'plan' },
+    });
+    expect(await stackOf([snoozed])).toEqual([]);
+    expect((await stackOf([snoozed], Date.parse('2026-08-02T15:00:00.000Z'))).map(entry => entry.rank)).toEqual([
+      'approve',
+    ]);
   });
 
   test('a card that is not in a gate lane is never in the stack', async () => {

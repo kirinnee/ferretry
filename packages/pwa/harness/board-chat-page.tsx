@@ -89,6 +89,8 @@ const OPEN = [
     laneId: 'plan',
     owner: LEAD,
     summary: 'Cards, lanes and a page to move them on.',
+    brief:
+      '1. Cards and lanes live in one board per project.\n2. A gate lane stops a card until the owner answers.\n3. The task panel shows only the cards waiting on you.',
     lastTouchedAt: ago(3),
   }),
   card('C20', {

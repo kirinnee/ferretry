@@ -538,8 +538,8 @@ describe('ChatTasks — the Cards view', () => {
     expect(root.querySelectorAll('[data-board-cards] [data-task], [data-board-cards] [data-to-test]')).toHaveLength(1);
     expect(root.querySelector('[data-board-cards-rank]')).toBeNull();
     await interact(() => step(root, 'Next card').click());
-    expect(where(root)).toBe('2 of 3');
-    expect(root.querySelector('[data-board-cards-rank]')?.textContent).toBe('To approve');
+    expect(where(root)).toBe('2/3');
+    expect(root.querySelector('[data-board-cards] [data-to-test-reveal="right"]')?.textContent).toBe('Approve');
   });
 
   it('holds only the cards waiting on the owner: nothing in progress, in review or merged', async () => {
@@ -571,10 +571,10 @@ describe('ChatTasks — the Cards view', () => {
     const { root } = await open({ extraCards: [waiting] });
     expect(step(root, 'Previous card').disabled).toBe(true);
     for (let at = 1; at < 3; at += 1) await interact(() => step(root, 'Next card').click());
-    expect(where(root)).toBe('3 of 3');
+    expect(where(root)).toBe('3/3');
     expect(step(root, 'Next card').disabled).toBe(true);
     await interact(() => step(root, 'Previous card').click());
-    expect(where(root)).toBe('2 of 3');
+    expect(where(root)).toBe('2/3');
   });
 
   it('lays the buttons out as the Inbox gate card does: Not good left, Done right, Skip behind (i)', async () => {
@@ -623,11 +623,37 @@ describe('ChatTasks — the Cards view', () => {
     expect(root.querySelector('[data-to-test-how]')?.textContent).toContain('Press it');
   });
 
-  it('draws a card that is not to test as the ordinary card, with no swipe row', async () => {
+  it('draws a plan to approve on the same shell: Send back left, Approve right, its brief as the plan', async () => {
     const { root } = await open({ extraCards: [waiting] });
     await interact(() => step(root, 'Next card').click());
-    expect(root.querySelector('[data-board-cards] [data-to-test]')).toBeNull();
-    expect(root.querySelector('[data-board-cards] [data-task]')).not.toBeNull();
+    const answers = must(root.querySelector('[data-board-cards] .fy-totest__answers'), 'the answer row');
+    expect([...answers.querySelectorAll('button')].map(button => button.textContent?.trim())).toEqual([
+      'Send back',
+      'Approve',
+    ]);
+    expect(root.querySelector('[data-board-cards] [data-task]')).toBeNull();
+  });
+
+  it('approves a plan with the button: the card moves to the lane after the gate', async () => {
+    const { root, acts } = await open({ extraCards: [waiting] });
+    await interact(() => step(root, 'Next card').click());
+    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-done]'), 'Approve').click());
+    await interact(() => flush());
+    expect(acts).toEqual([{ id: 'F18', request: { action: 'move', to: 'implement' } }]);
+  });
+
+  it('sends a plan back with the owner’s words through the Board’s reason box, in the plan’s own words', async () => {
+    const { root, acts } = await open({ extraCards: [waiting] });
+    await interact(() => step(root, 'Next card').click());
+    await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-not-good]'), 'Send back').click());
+    const dialog = must(document.body.querySelector('[role="dialog"]'), 'the reason box');
+    expect(dialog.textContent).toContain('Send Board system back to Todo');
+    const form = dialog.closest('form') ?? dialog;
+    await fill(must(form.querySelector('textarea, input'), 'the reason field') as HTMLTextAreaElement, 'Split it');
+    await submit(form as HTMLElement);
+    await interact(() => flush());
+    expect(acts).toHaveLength(1);
+    expect(JSON.stringify(acts[0]?.request)).toContain('Split it');
   });
 
   it('names the ferret by its task on the card to test, never by its callsign', async () => {
@@ -640,7 +666,7 @@ describe('ChatTasks — the Cards view', () => {
     const { root, acts } = await open({ extraCards: [waiting] });
     await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
     await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-skip]'), 'Skip').click());
-    expect(where(root)).toBe('2 of 3');
+    expect(where(root)).toBe('2/3');
     expect(acts).toEqual([]);
   });
 
@@ -721,7 +747,7 @@ describe('ChatTasks — swiping a card to test, at once', () => {
     await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 430 })));
     await interact(() => grip.dispatchEvent(pointer('pointerup', 100, { clientY: 430 })));
     await interact(() => flush());
-    expect(where(root)).toBe('2 of 3');
+    expect(where(root)).toBe('2/3');
     expect(acts).toEqual([]);
   });
 

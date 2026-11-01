@@ -1,6 +1,6 @@
 /**
  * Screenshots and checks for the chat task panel's Cards view: it opens on the Cards (the card waiting for a try first),
- * that card held mid-swipe RIGHT (Done) and LEFT (Not good) with the answer named in the area it uncovers, the next card
+ * that card held mid-swipe RIGHT (Done) and LEFT (Not good) with the answer named in the area it uncovers, the plan to approve (Approve / Send back on the same row), the next card
  * (waiting on the owner), and the three tabs (Cards, Kanban, List). Phone 390 and desktop 1440, Studio light and dark.
  *
  *   bun harness/task-panel-cards-screenshot.ts [outDir] [series]   # writes <outDir>/<series>-<name>-<phone|desktop>-<theme>.png
@@ -156,7 +156,7 @@ const rowOf = (page: Page) => page.locator('[data-board-cards] [data-to-test]').
 /** A finger on the row's meta line, dragged by `dx`, `dy`; the caller lets go or cancels. */
 const hold = async (page: Page, client: CDPSession, dx: number, dy = 0): Promise<{ x: number; y: number }> => {
   await rowOf(page).scrollIntoViewIfNeeded();
-  const grip = await rowOf(page).locator('.fy-totest__meta').boundingBox();
+  const grip = await rowOf(page).locator('.fy-meta-line, .fy-item-view__head').first().boundingBox();
   if (grip === null) return fail('the card to test has no place to grab');
   const x = grip.x + 20;
   const y = grip.y + grip.height / 2;
@@ -188,12 +188,12 @@ for (const form of ['phone', 'desktop'] as const) {
     const row = rowOf(page);
     check((await pressed(page)) === 'cards', `${form} ${theme}: the panel did not open on the Cards`);
     check(
-      ((await page.locator('[data-board-cards-rank]').textContent()) ?? '') === 'To test',
+      (await row.locator('[data-to-test-how]').getAttribute('aria-label'))?.startsWith('How to test') === true,
       `${form} ${theme}: the card to test is not first`,
     );
     check(
-      (await page.locator('.fy-item-view__where').textContent())?.includes(' of ') === true,
-      `${form} ${theme}: no "n of N" in the pager`,
+      ((await page.locator('[data-board-cards]').textContent()) ?? '').includes('1/4'),
+      `${form} ${theme}: no "n/N" in the pager`,
     );
     check(
       ((await row.locator('[data-to-test-how]').textContent()) ?? '').includes('Scan the code'),
@@ -210,9 +210,8 @@ for (const form of ['phone', 'desktop'] as const) {
     for (const [name, dx, aim, direction] of [
       ['swipe-left', -150, 'Not good', 'left'],
       ['swipe-right', 150, 'Done', 'right'],
-      ['swipe-down', 0, 'Skip', 'down'],
     ] as const) {
-      await hold(page, client, dx, direction === 'down' ? 150 : 0);
+      await hold(page, client, dx);
       check(
         (await row.getAttribute('data-swipe-direction')) === direction &&
           (await row.getAttribute('data-swipe-answer')) === aim,
@@ -251,20 +250,57 @@ for (const form of ['phone', 'desktop'] as const) {
     await shot(page, 'reason', form, theme);
     await page.keyboard.press('Escape');
 
-    // Step on to the next card: the ordinary card, no swipe row.
+    // Step on to the cards to approve: a plan is the same swipe row, Approve to the right, Send back to the left.
     await page.locator('[data-board-cards] button[aria-label="Next card"]').click();
     await page.locator('[data-board-cards] button[aria-label="Next card"]').click();
     await page.waitForTimeout(150);
     check(
-      (await page.locator('[data-board-cards-rank]').textContent()) === 'To approve',
+      (await row.locator('[data-to-test-how]').getAttribute('aria-label'))?.startsWith('The plan') === true,
       `${form} ${theme}: the third card is not the one to approve`,
     );
-    // Only cards waiting on the owner are in the stack: the 2 to test and the 2 to approve, never the 60+ other cards.
     check(
-      ((await page.locator('[data-board-cards]').textContent()) ?? '').includes('3 of 4'),
+      ((await page.locator('[data-board-cards]').textContent()) ?? '').includes('3/4'),
       `${form} ${theme}: the stack holds other than the 4 cards waiting on the owner`,
     );
-    await shot(page, 'cards-waiting', form, theme);
+    check((await row.count()) === 1, `${form} ${theme}: the plan to approve is not a swipe row`);
+    await shot(page, 'plan', form, theme);
+    for (const [name, dx, aim, direction] of [
+      ['plan-swipe-left', -150, 'Send back', 'left'],
+      ['plan-swipe-right', 150, 'Approve', 'right'],
+    ] as const) {
+      await hold(page, client, dx);
+      check(
+        (await row.getAttribute('data-swipe-direction')) === direction &&
+          (await row.getAttribute('data-swipe-answer')) === aim,
+        `${form} ${theme} ${name}: the drag does not read as ${aim}`,
+      );
+      await shot(page, name, form, theme);
+      await touch(client, 'touchCancel');
+      await page.waitForTimeout(150);
+    }
+    const info = row.locator('[data-agenda-info-toggle]').first();
+    if ((await info.count()) > 0) {
+      await info.click();
+      await page.waitForTimeout(150);
+      await shot(page, 'plan-info', form, theme);
+    }
+    const sendBack = await hold(page, client, -300);
+    await touch(client, 'touchEnd', sendBack.x, sendBack.y);
+    await page.waitForTimeout(300);
+    check(
+      (await page.locator('[role="dialog"]').count()) === 1,
+      `${form} ${theme}: a left swipe on the plan did not open the reason box`,
+    );
+    await shot(page, 'plan-reason', form, theme);
+    await page.keyboard.press('Escape');
+    const approve = await hold(page, client, 300);
+    await touch(client, 'touchEnd', approve.x, approve.y);
+    await page.waitForTimeout(300);
+    const planMoves = await page.evaluate(() => (window as unknown as { __moves: { to: string }[] }).__moves);
+    check(
+      planMoves.length === 2 && planMoves[1]?.to === 'implement',
+      `${form} ${theme}: a right swipe on the plan sent ${JSON.stringify(planMoves)}`,
+    );
 
     // The tabs: Kanban and List are still there and switch the view.
     await page.locator('button[data-view="kanban"]').click();
