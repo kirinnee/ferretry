@@ -3,7 +3,7 @@
  * project, its folder when it works on the Unfiled board, and the defaults the owner set.
  *
  * Every part comes from what the DAEMON knows about the session — its stamped board and its recorded working
- * directory — never from anything the ferret says, so a ferret cannot ask for another project's default. A caller with
+ * directory — never from a field the ferret sends, so a ferret cannot ask for another project's default. A caller with
  * no session (the owner's shell) has no project and no folder, only the site lines. A part that cannot be read is
  * left out: the card then falls to the next rule and is never lost to it. Nothing here chooses or types anything;
  * the answer only orders buttons among the sign-ins the daemon matched.
@@ -63,7 +63,12 @@ export class SessionSignInContext implements SignInChoicePort {
     };
   }
 
-  /** The real folder the session was started in, and the real home a `~` line expands against; nothing if either fails. */
+  /**
+   * The folder the session was started in, and the real home a `~` line expands against; nothing if either fails.
+   * The recorded folder is already a real path (resolved when the session was created), so it must still BE its own
+   * real path now: a folder a ferret has since swapped for a symlink to another folder resolves elsewhere and
+   * earns no folder default, instead of borrowing that other folder's line.
+   */
   private async folderOf(sessionId: string): Promise<Pick<SessionChoiceContext, 'folder' | 'home'>> {
     const facts = await this.deps.sessions.read(sessionId).catch(() => null);
     if (facts === null) return {};
@@ -71,6 +76,6 @@ export class SessionSignInContext implements SignInChoicePort {
       this.deps.realpath(facts.cwd).catch(() => undefined),
       this.deps.realpath(this.deps.home).catch(() => undefined),
     ]);
-    return folder === undefined ? {} : { folder, home: home ?? this.deps.home };
+    return folder === undefined || folder !== facts.cwd ? {} : { folder, home: home ?? this.deps.home };
   }
 }

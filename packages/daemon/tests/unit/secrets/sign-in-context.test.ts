@@ -1,6 +1,6 @@
 /**
  * WHO IS ASKING, for the order of a sign-in card (R1-5, secrev-1240 M2): the project comes from the daemon's own
- * reading of the session, the folder is the real path of its recorded working directory and only on the Unfiled
+ * reading of the session, the folder is its recorded working directory (kept only while it is still its own real path) and only on the Unfiled
  * board, and a part that cannot be read is left out instead of failing the card.
  */
 import { describe, it } from 'bun:test';
@@ -81,13 +81,16 @@ describe('the session behind a sign-in card', () => {
     should(await subject.of('s1')).not.have.property('folder');
   });
 
-  it('should give an Unfiled session the REAL path of its recorded folder and of the home', async () => {
-    const { subject } = context({
-      cwd: '/work/link',
-      real: { '/work/link': '/srv/real/app', '/home/me': '/data/home/me' },
-    });
+  it('should give an Unfiled session its recorded folder, and the REAL path of the home', async () => {
+    const { subject } = context({ cwd: '/srv/real/app', real: { '/home/me': '/data/home/me' } });
 
     should(await subject.of('s1')).deepEqual({ defaults: DEFAULTS, folder: '/srv/real/app', home: '/data/home/me' });
+  });
+
+  it('should give no folder default when the recorded folder now resolves elsewhere (a ferret swapped it for a symlink)', async () => {
+    const { subject } = context({ cwd: '/tmp/wt', real: { '/tmp/wt': '/home/me/scratch' } });
+
+    should(await subject.of('s1')).deepEqual({ defaults: DEFAULTS });
   });
 
   it('should leave the folder out when it cannot be resolved, and when the session is unknown', async () => {

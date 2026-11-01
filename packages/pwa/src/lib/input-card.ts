@@ -141,7 +141,7 @@ export interface AlwaysUse {
 /**
  * "Always use for <project>" is offered after the owner hand-tapped a MATCHED account that is not already the
  * project's default, on a card whose project the DAEMON resolved (`saved.project`, never the ferret's word) and
- * whose key is a place. The line goes through the owner route, where it is held for the owner's confirmation.
+ * whose key is a place. The line goes through the owner route, where it is in effect at once as the owner's own act.
  * Nothing here chooses an account for anyone: the tap on this button is the permission.
  */
 export const alwaysUseFor = (saved: InputSaved | undefined, tapped: InputSavedOffer): AlwaysUse | undefined => {

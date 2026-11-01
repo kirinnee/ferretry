@@ -73,7 +73,7 @@ export async function readInputShot(
 
 /**
  * The owner's own act, after a hand-tap: make this account the default for a project (`PUT /v1/accounts/defaults`).
- * A ferret cannot make this call, and the daemon holds the change for the owner's confirmation (a paired device is
+ * A ferret cannot make this call. The line is in effect at once, as the owner's own act (a paired device is
  * asked for its passkey by the carrier client).
  */
 export async function putAccountDefault(

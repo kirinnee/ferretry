@@ -625,7 +625,7 @@ const SENSITIVITY_WORDS = {
 
 /**
  * The quiet line after a hand-tap: "Always use for <project>". It is the OWNER's tap on this button that writes the
- * default (`PUT /v1/accounts/defaults`); the daemon holds the change for the owner's confirmation. A failure is said
+ * default (`PUT /v1/accounts/defaults`); the owner's own act, in effect at once (a paired device confirms with its passkey). A failure is said
  * in words and never changes what was already sent.
  */
 function AlwaysUseLine({ always, client }: { readonly always: AlwaysUse; readonly client: InputClient }) {

@@ -954,16 +954,20 @@ neither, so the answer never depends on list order.
 
 #### Which account is first, and why
 
-The daemon builds the order from **what it knows about the asking session, never from what the ferret says**
+The daemon builds the order from **what it knows about the asking session, never from a field the ferret sends**
 (`SessionSignInContext`, `lib/secrets/sign-in-context.ts`). It is used by BOTH the card's offers (every
 `savedForFields` call: the offers and `InputSaved.suggest`) and BOTH `account_hint` paths (the agent tool and the
-`/v1/accounts/hint` route), so a card and a hint never disagree:
+`/v1/accounts/hint` route), so both come from one function (`chosenSignIn`). They do not look at quite the same sign-ins: the card narrows to accounts that hold the field it asks for, while the hint deliberately looks at every matched sign-in, so that "only" does not reveal which accounts have no password. A card can therefore say "Only account here" while the hint shows no default:
 
 - **The project** is the board project of the session, `projectOf(sessionId)`, resolved from the credential-derived
   actor (`peer:<id>`), never a query or a body field. It is named only when it is a registered project; a name two
   projects share is matched by id only (`nameIsUnique`).
-- **The folder** is the realpath of the working directory the daemon recorded for the session, and only for a session
-  on the **Unfiled** board (a filed session answers to its project). A `~/…` folder line expands against the real home.
+- **The folder** is the working directory the daemon recorded for the session (already a real path, resolved when the
+  session was created), and only for a session on the **Unfiled** board. It counts only while it is still its own real
+  path: a folder a ferret has since swapped for a symlink to another folder earns no folder default (a filed session answers to its project). A `~/…` folder line expands against the real home.
+- **Honest limit:** the project is the board's stamp, and an Unfiled ferret can influence it (a `.git` it writes in
+  its folder lets `fy task create` adopt a registered project), so the label is only as trustworthy as that stamp.
+  It still only orders sign-ins the daemon matched, and the owner's tap is still the permission. Closing it is a follow-up.
 - **Anything unreadable is left out**, and the card falls to the next rule. A line that names an account with no
   sign-in matched here promotes nothing.
 - **A site line also matches a site's `match` hosts** (what the account is for), both when a line is written (a 409
@@ -979,7 +983,7 @@ nothing chosen: **"Pick one: N accounts sign in here"** over one button per acco
 without `primary` (an older daemon, or nothing chosen) is a button to pick by hand, and a card with no `primary`
 anywhere keeps the typing field. After the owner **hand-taps** a matched account in a project, a quiet **"Always use
 for <project>"** offers to write `projects.<project>.<place>: <account>` with `PUT /v1/accounts/defaults` (the owner's
-route: a ferret is refused, a paired device asks the passkey, and the line is [held for the owner](config-files.md#default-accounts)).
+route: a ferret is refused, a paired device asks the passkey, and the line is [in effect at once](secrets.md#accounts-and-sign-ins-the-store) as the owner's own act, not held).
 
 `account_hint` answers one line per sign-in, with the sign-in id to propose against. It never says which
 secret fields an account holds, nor its 2FA parameters, seal names, auto-apply or proposals. It lists an account's

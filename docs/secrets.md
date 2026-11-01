@@ -342,7 +342,12 @@ paired device needs the passkey step-up for loosening a configuration file, and 
 account acts keep the lines true in the same act: a rename moves them, a delete drops them, a merge points them at the
 account that kept the sign-ins, and a handle that is created (or renamed to) never inherits a line left for an old
 account of the same name. If that rewrite fails the account act stands and the leftover line, which names no account,
-is ignored with a warning on `GET /v1/config/status`. _RF-2: this route becomes `caller: 'person'`._
+is ignored with a warning on `GET /v1/config/status`.
+
+**Honest limit of the project default.** The project that picks a default is the board's stamp on the session. An
+Unfiled ferret can influence that stamp (a `.git` written in its own folder lets `fy task create` adopt a registered
+project), so "Default for <project>" is only as trustworthy as the board stamp. It can only reorder sign-ins the daemon
+matched, and the owner's tap is still the permission. Closing the adoption path is a follow-up. _RF-2: this route becomes `caller: 'person'`._
 
 **"These look like one account" is offered, never automatic, and never stored.** It is computed on demand inside
 the vault: same username (trimmed, case-folded) and same password, compared in constant time. The answer is
