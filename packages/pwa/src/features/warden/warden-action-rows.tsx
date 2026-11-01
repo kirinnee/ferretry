@@ -73,7 +73,11 @@ function Detail({ row }: { readonly row: WardenActionRow }) {
       <div className="flex flex-wrap items-center gap-x-sm gap-y-xs">
         <span className="text-faint">{row.verb}</span>
         {row.anomaly !== undefined && <WardenChipBadge chip={row.anomaly} />}
-        {row.failoverTo !== undefined && <span>Moved to {row.failoverTo}</span>}
+        {row.failoverTo !== undefined && (
+          <span>
+            Moved {row.failoverFrom === undefined ? '' : `from ${row.failoverFrom} `}to {row.failoverTo}
+          </span>
+        )}
         {row.investigator !== undefined && <span>Investigated by {row.investigator}</span>}
         {row.cost !== undefined && <span>Cost {row.cost}</span>}
       </div>

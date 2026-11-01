@@ -482,16 +482,17 @@ letting go does:
 
 A swipe down is therefore never destructive without Undo. The choices are a pure state machine
 (`agenda-compass.ts`: a drag path in, an intent out), so the thresholds are tested without a pointer. Nothing depends on the
-gesture: under every open card are plain buttons — **Skip**, **Not needed** and **Snooze 1 h · 4 h · 1 day** — and the arrow
-keys are unchanged. Snooze is offered only where the machine advertises it (`agenda.snooze.1`), in the compass and as buttons
-alike. The touch rules stay: a drag never starts on a control, and the direction locks on its first move.
+gesture: under every open card are plain buttons — **Skip** and **Not needed** — and the head's clock (`CardHead`: 1 h / 4 h /
+tomorrow / custom) snoozes; the arrow keys are unchanged. Snooze is offered only where the machine advertises it
+(`agenda.snooze.1`), in the compass and in the clock alike. The touch rules stay: a drag never starts on a control, and the direction locks on its first move.
 
 ### Gate items
 
 A **gate item** is a board card waiting on the owner at a gate, raised as an ordinary Inbox item (`item.gate`: the card, its lane and what each option does):
-the owner meets one stream, not a question list and a separate to-test list. It looks
-like any item and says, under the who-and-what line, **what it is** — "Try it" (a card in a verify lane) or "OK to build?"
-(a plan awaiting approval) — the project and the lane. Its body is the card's _How to test_ (Markdown, as written), and its
+the owner meets one stream, not a question list and a separate to-test list. It is
+the card's ONE head row (the title, ‹ n/N ›, ⓘ, the snooze clock, ✕ — `CardHead`) under ONE quiet meta line: **what it is** — "Try it"
+(a card in a verify lane) or "OK to build?" (a plan awaiting approval) — the project, the ferret and "Open chat ›". It repeats
+nothing: no summary line, no chip, no restated ask. Its body is the card's _How to test_ as numbered tick-steps, and its
 options are the gate's own, laid out as every choice is: the first ←, the second ↑, the third →.
 
 - **←** is the forward option (Done, OK, Yes), the same as the side panel's Cards view; **→** is **Not good**, which reopens the card with an agenda item; **↓** is Skip.

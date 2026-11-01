@@ -39,6 +39,7 @@ import {
   wardenConfigFromFile,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import { BUDGET_PERIODS } from '../account/budget.ts';
 import {
   type Advanced,
   AdvancedSchema,
@@ -46,7 +47,6 @@ import {
   type ComponentOf,
   type Credential,
   CredentialSchema,
-  type Runtime,
   HooksComponentSchema,
   InstructionsComponentSchema,
   type LayerReferenceText,
@@ -55,11 +55,11 @@ import {
   type Machine,
   McpComponentSchema,
   ModelSetComponentSchema,
+  type Runtime,
   RuntimeSchema,
   SettingsComponentSchema,
   SkillsComponentSchema,
 } from '../account/schema.ts';
-import { BUDGET_PERIODS } from '../account/budget.ts';
 import { type ModelCatalogFile, ModelCatalogFileSchema } from '../models/schema.ts';
 import { type ProviderPresetFile, ProviderPresetFileSchema } from '../presets/schema.ts';
 
@@ -306,6 +306,47 @@ function wardenLoosening(before: WardenConfig, after: WardenConfig): readonly st
     ...raised(before.maxAssignedWardens, after.maxAssignedWardens, 'the number of wardens that may run at once'),
     ...lowered(before.intervalMinutes, after.intervalMinutes, 'the minutes between Warden sweeps'),
     ...lowered(before.minSpawnGapMinutes, after.minSpawnGapMinutes, 'the minutes between two Warden investigations'),
+    ...autoMigrateLoosening(before, after),
+  ];
+}
+
+/** Moving a ferret acts only while the Warden is on AND moving is: the same reading as a layer's. */
+const movesOn = (config: WardenConfig): boolean => config.enabled && config.autoMigrate.enabled;
+
+const AUTO_MIGRATE_TRIGGER_WORDS: Readonly<Record<WardenConfig['autoMigrate']['when'][number], string>> = {
+  rate_limited: 'whose login hit a usage limit',
+  budget_exceeded: 'whose login passed its hard spend budget',
+};
+
+/**
+ * Moving a ferret to another login destroys its pane and starts it again elsewhere, so everything that lets
+ * the Warden do that in more cases waits for the owner: switching it on, letting it stop background jobs, a
+ * new trigger, a login it may move onto, more moves an hour. A login named where any ready one was allowed is
+ * held too — a named login may be another provider's, which "any ready login" never reaches.
+ */
+function autoMigrateLoosening(before: WardenConfig, after: WardenConfig): readonly string[] {
+  const was = before.autoMigrate;
+  const now = after.autoMigrate;
+  const named = now.targets.filter(target => !was.targets.includes(target));
+  return [
+    ...switchedOn(
+      movesOn(before),
+      movesOn(after),
+      'the Warden may now move a ferret that hit a limit to another login on its own',
+    ),
+    ...switchedOn(
+      movesOn(before) && was.forceStopBackground,
+      movesOn(after) && now.forceStopBackground,
+      "the Warden may now stop a ferret's own background jobs to move it",
+    ),
+    ...now.when
+      .filter(trigger => !was.when.includes(trigger))
+      .map(trigger => `the Warden now also moves a ferret ${AUTO_MIGRATE_TRIGGER_WORDS[trigger]}`),
+    ...named.map(target => `the Warden may now move ferrets onto ${target}`),
+    ...(was.targets.length > 0 && now.targets.length === 0
+      ? ['the Warden may now move ferrets onto any ready login of the same harness and provider']
+      : []),
+    ...raised(was.maxMovesPerHour, now.maxMovesPerHour, 'the moves one ferret may get in an hour'),
   ];
 }
 

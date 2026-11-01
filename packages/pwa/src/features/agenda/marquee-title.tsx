@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Marquee, marqueeOf } from '../../lib/title-marquee.ts';
 
 /**
@@ -6,7 +6,17 @@ import { type Marquee, marqueeOf } from '../../lib/title-marquee.ts';
  * (`fy-item-view__title[data-marquee]`). Under `prefers-reduced-motion` it does not move: it ends in an ellipsis, and a
  * tap shows the whole title (and a second tap folds it again).
  */
-export function MarqueeTitle({ title, wrap = false }: { readonly title: string; readonly wrap?: boolean }) {
+export function MarqueeTitle({
+  title,
+  wrap,
+  twoLines = false,
+}: {
+  readonly title: string;
+  /** Draws the words as something else (a link). A tap then belongs to that, so the title cannot be tapped open. */
+  readonly wrap?: (text: string) => ReactNode;
+  /** Lets a long title fold onto a second line instead of scrolling or being cut. */
+  readonly twoLines?: boolean;
+}) {
   const box = useRef<HTMLHeadingElement | null>(null);
   const text = useRef<HTMLSpanElement | null>(null);
   const [marquee, setMarquee] = useState<Marquee | null>(null);
@@ -19,7 +29,7 @@ export function MarqueeTitle({ title, wrap = false }: { readonly title: string; 
     if (outer === null || inner === null) return undefined;
     const measure = (): void => {
       // An expanded title wraps, so its width says nothing about the one-line row: keep what was measured.
-      if (wrap || outer.dataset.expanded !== undefined) return;
+      if (outer.dataset.expanded !== undefined) return;
       const next = marqueeOf(inner.getBoundingClientRect().width, outer.clientWidth);
       setMarquee(previous =>
         previous?.distance === next?.distance && previous?.seconds === next?.seconds ? previous : next,
@@ -30,7 +40,7 @@ export function MarqueeTitle({ title, wrap = false }: { readonly title: string; 
     const watch = new ResizeObserver(measure);
     watch.observe(outer);
     return () => watch.disconnect();
-  }, [title, wrap]);
+  }, [title]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new title starts folded
   useEffect(() => setExpanded(false), [title]);
@@ -48,15 +58,15 @@ export function MarqueeTitle({ title, wrap = false }: { readonly title: string; 
     <h2
       className="fy-item-view__title"
       data-agenda-title=""
-      {...(wrap ? { 'data-wrap': '' } : {})}
+      {...(twoLines ? { 'data-wrap': '' } : {})}
       {...(marquee === null ? {} : { 'data-marquee': '' })}
       {...(expanded ? { 'data-expanded': '' } : {})}
-      onClick={marquee === null && !expanded ? undefined : () => setExpanded(open => !open)}
+      onClick={wrap !== undefined || (marquee === null && !expanded) ? undefined : () => setExpanded(open => !open)}
       ref={box}
       style={style}
     >
       <span className="fy-item-view__title-text" ref={text}>
-        {title}
+        {wrap === undefined ? title : wrap(title)}
       </span>
     </h2>
   );

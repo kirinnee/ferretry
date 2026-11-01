@@ -133,8 +133,10 @@ reason names the limit and the reset, never the running amount, so a fleet is re
 standing changes.
 
 The hard-limit notice names, for each ferret it stopped, the command that moves it:
-`fy migrate <id> -a <runtime>` with a runtime of the same kind on a login within its budget. Ferretry never
-moves a ferret itself. A ferret stopped for its budget is not a crash: the Warden does not revive it and
+`fy migrate <id> -a <runtime>` with a runtime of the same kind on a login within its budget. Ferretry does
+not move a ferret itself unless the owner switched `autoMigrate` on for `budget_exceeded` in `warden.yaml`
+([config-files.md](config-files.md#moving-a-ferret-that-hit-a-limit)): then, before stopping a ferret, the
+Warden moves it to another ready login, and the notice names it under "Moved to another login by the Warden". A ferret stopped for its budget is not a crash: the Warden does not revive it and
 auto-resume after a restart skips it.
 
 The budget check runs on its **own timer**, not the Warden sweep, so it holds with the Warden switched off, and

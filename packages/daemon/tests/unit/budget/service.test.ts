@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import type { BudgetHold } from '@ferretry/fleet';
 import should from 'should';
 import type { MeteredSession } from '../../../src/lib/budget/meter.ts';
 import { SpendMeter } from '../../../src/lib/budget/meter.ts';
@@ -9,7 +10,6 @@ import {
   BudgetService,
   type BudgetSession,
 } from '../../../src/lib/budget/service.ts';
-import type { BudgetHold } from '@ferretry/fleet';
 import type { TranscriptBatch, TranscriptEvent, TranscriptWindow } from '../../../src/lib/transcript/types.ts';
 
 /** A transcript whose usage records are set by the test: each request costs `output` micro-dollars. */
@@ -56,6 +56,9 @@ interface World {
   publishFails?: boolean;
   /** A told record that can be neither read nor written. */
   toldBroken?: boolean;
+  /** Sessions the Warden moves to another login instead of their being stopped. Absent: no mover is wired. */
+  movable?: Set<string>;
+  relocated?: string[];
 }
 
 const LIFTOFF_SESSION: MeteredSession = { id: 's1', harness: 'claude', agent: 'claude-liftoff', moves: [] };
@@ -87,6 +90,16 @@ function serviceOver(
       },
       liveSessions: async agents => world.live.filter(session => agents.has(session.agent)),
       recentSession: async () => ({ id: 's0', name: 'old', agent: 'claude-liftoff' }),
+      ...(world.movable === undefined
+        ? {}
+        : {
+            relocate: async (session: BudgetSession) => {
+              if (!world.movable?.has(session.id)) return false;
+              world.relocated?.push(session.id);
+              world.live = world.live.filter(entry => entry.id !== session.id);
+              return true;
+            },
+          }),
       stop: async session => {
         if (world.failing.has(session.id)) throw new Error('pane refused to die');
         world.stopped.push(session.id);
@@ -184,6 +197,17 @@ describe('BudgetService', () => {
     await service.tick();
     should(world.stopped).eql(['s1', 's2', 's4']);
     should(world.notices).have.length(1);
+  });
+
+  it('should let the Warden move a ferret past the hard limit instead of stopping it, and say so', async () => {
+    const world = { ...freshWorld(), movable: new Set(['s1']), relocated: [] as string[] };
+    const ledger = new Ledger();
+    ledger.spend('2026-10-30T09:00:00Z', 61);
+    await serviceOver(world, ledger).tick();
+    should(world.relocated).eql(['s1']);
+    should(world.stopped).eql(['s2']);
+    should(world.notices[0]?.relocated?.map(session => session.name)).eql(['hadi']);
+    should(world.notices[0]?.stopped.map(session => session.name)).eql(['marin']);
   });
 
   it('should not tell the owner twice across a restart, and tell them again in the next period', async () => {
@@ -350,6 +374,13 @@ describe('budgetNoticeRequest', () => {
     should(request.context).match(/resets Sat 00:00 \(America\/Los_Angeles\)/u);
     should(request.subject.length).be.belowOrEqual(120);
     should(request.title?.length ?? 0).be.belowOrEqual(40);
+  });
+
+  it('should name the ferrets the Warden moved, and not tell the owner to move them again', () => {
+    const request = budgetNoticeRequest({ ...notice, stopped: [], relocated: [notice.anchor] }, 'fy', 'box', 'now');
+    should(request.why).match(/Moved to another login by the Warden: :hadi\./u);
+    should(request.why).not.match(/No ferret was running/u);
+    should(request.howToResolve).not.match(/fy migrate s1/u);
   });
 
   it('should say so when nothing ran, and name the ferrets it could not stop', () => {

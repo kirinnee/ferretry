@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import type { WardenConfig, WardenConfigView } from '@ferretry/protocol';
 import {
+  autoMigrateSummary,
   hasWardenFormErrors,
   movedAccount,
+  toggledMoveTarget,
   WARDEN_EFFORTS,
   WARDEN_FORM_LIMITS,
   wardenConfigPatchFrom,
@@ -307,5 +309,74 @@ describe('wardenEfforts', () => {
     expect(wardenEfforts(runtime(), 'glm-5.3').efforts).toEqual(WARDEN_EFFORTS);
     expect(wardenEfforts(runtime(catalog), 'custom-model').efforts).toEqual(WARDEN_EFFORTS);
     expect(wardenEfforts(undefined, undefined)).toEqual({ efforts: WARDEN_EFFORTS, modelName: 'This model' });
+  });
+});
+
+describe('moving a ferret that hit a limit', () => {
+  const moving = (changes: Partial<WardenConfig['autoMigrate']> = {}): WardenConfig =>
+    wardenConfig({ autoMigrate: { ...wardenConfig().autoMigrate, enabled: true, ...changes } });
+
+  it('should say nothing about it while it is off, or while nothing can trigger it', () => {
+    // Act
+    const off = autoMigrateSummary(wardenConfig());
+    const triggerless = autoMigrateSummary(moving({ when: [] }));
+
+    // Assert
+    expect(off).toBe('');
+    expect(triggerless).toBe('');
+  });
+
+  it('should end the summary with when, where, how often and what happens to background jobs', () => {
+    // Act
+    const asked = wardenSummary(moving(), true);
+    const forced = autoMigrateSummary(
+      moving({ forceStopBackground: true, targets: ['claude-b', 'glm-a'], maxMovesPerHour: 2 }),
+    );
+
+    // Assert
+    expect(asked).toContain('No AI runs and nothing is spent.');
+    expect(asked).toEndWith(
+      ' When its login hits a usage limit or its login passes its hard spend budget, a ferret is moved to another ready login of the same kind and provider — same chat, same card — at most once an hour. Its background jobs are never stopped by the Warden: it asks the ferret and waits 10 min, then tells you.',
+    );
+    expect(forced).toContain('the first ready one of claude-b → glm-a');
+    expect(forced).toContain('at most 2 times an hour');
+    expect(forced).toContain('The Warden stops its own background jobs first if it must.');
+    expect(autoMigrateSummary(moving({ maxMovesPerHour: 9, waitMinutes: 0 }))).toContain('(fix) times an hour');
+    expect(autoMigrateSummary(moving({ waitMinutes: 0 }))).toContain('waits (fix), then tells you');
+  });
+
+  it('should check its numbers whenever it is on, even with both layers off, and the wait only while it waits', () => {
+    // Act
+    const bad = wardenFormErrors(moving({ waitMinutes: 0, maxMovesPerHour: 7 }));
+    const forced = wardenFormErrors(moving({ waitMinutes: 0, forceStopBackground: true }));
+    const off = wardenFormErrors(wardenConfig({ autoMigrate: { ...wardenConfig().autoMigrate, waitMinutes: 0 } }));
+
+    // Assert
+    expect(bad).toEqual({ moveWaitMinutes: '1 to 60 minutes.', movesPerHour: '1 to 6.' });
+    expect(forced).toEqual({});
+    expect(off).toEqual({});
+  });
+
+  it('should tick a login on at the end of the list, and off from anywhere in it', () => {
+    // Arrange
+    const config = moving({ targets: ['a', 'b'] });
+
+    // Act
+    const added = toggledMoveTarget(config, 'c', true);
+    const removed = toggledMoveTarget(config, 'a', false);
+    const again = toggledMoveTarget(config, 'a', true);
+
+    // Assert
+    expect(added.autoMigrate.targets).toEqual(['a', 'b', 'c']);
+    expect(removed.autoMigrate.targets).toEqual(['b']);
+    expect(again.autoMigrate.targets).toEqual(['b', 'a']);
+  });
+
+  it('should send only the changed keys of autoMigrate in a save', () => {
+    // Act
+    const patch = wardenConfigPatchFrom(moving(), moving({ forceStopBackground: true }));
+
+    // Assert
+    expect(patch).toEqual({ autoMigrate: { forceStopBackground: true } });
   });
 });

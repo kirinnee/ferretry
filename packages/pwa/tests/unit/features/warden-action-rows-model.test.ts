@@ -249,6 +249,17 @@ describe('row chips and labels', () => {
     });
     expect(row?.anomaly).toEqual({ label: 'frozen', tone: 'err' });
   });
+
+  it('should carry the login an automatic move left, beside the one it went to', () => {
+    // Arrange
+    const action = wardenAction({ at: at(1), action: 'failover', agent: 'claude-b', fromAgent: 'claude-a' });
+
+    // Act
+    const [row] = rowsOf(action);
+
+    // Assert
+    expect(row).toMatchObject({ failoverTo: 'claude-b', failoverFrom: 'claude-a' });
+  });
 });
 
 describe('filterActionRows', () => {

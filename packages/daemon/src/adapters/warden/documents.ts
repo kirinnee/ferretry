@@ -3,6 +3,7 @@ import { type ConfigEvaluation, checkConfigFile, renderConfigFile } from '@ferre
 import { type ConfigFileAddress, configFilePath, mergeWardenConfig, type WardenConfigPatch } from '@ferretry/protocol';
 import type { ConfigFilesService } from '../../lib/config-files/index.ts';
 import type {
+  AutoMigrateMemory,
   WardenConfig,
   WardenConfigStore,
   WardenReportFileSystem,
@@ -122,4 +123,26 @@ function heldWardenConfig(
   if (disk === undefined || !evaluation.pending.some(pending => pending.path === path)) return undefined;
   const checked = checkConfigFile(path, disk);
   return checked.ok ? { config: checked.value as WardenConfig, text: disk } : undefined;
+}
+
+export const WARDEN_AUTO_MIGRATE_FILENAME = 'auto-migrate.json';
+
+/**
+ * The Warden's move ledger (`warden/auto-migrate.ts`), in its own document beside the sweep state: the mover reads
+ * and writes it only under its one lock, and a sweep's state write can never carry a stale copy of it back.
+ */
+export class FileAutoMigrateLedger {
+  private readonly document: WardenDocument;
+
+  constructor(files: WardenReportFileSystem, wardenRoot: string) {
+    this.document = new WardenDocument(files, join(wardenRoot, WARDEN_AUTO_MIGRATE_FILENAME));
+  }
+
+  async read(): Promise<unknown> {
+    return await this.document.read();
+  }
+
+  async write(memory: AutoMigrateMemory): Promise<void> {
+    await this.document.write(memory);
+  }
 }

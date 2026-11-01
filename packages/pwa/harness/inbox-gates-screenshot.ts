@@ -228,8 +228,9 @@ for (const form of ['phone', 'desktop'] as const) {
       `${form} ${theme}: the gate item lacks its How to test steps`,
     );
     check(
-      (await gate.locator('.fy-attn-deck__top [data-inbox-card-tools] [data-inbox-snooze]').count()) === 3,
-      `${form} ${theme}: the card lacks its 1 h / 4 h / 1 day snooze buttons`,
+      (await gate.locator('.fy-attn-deck__top .fy-item-view__bar [data-agenda-snooze]').count()) === 1 &&
+        (await gate.locator('.fy-attn-deck__top [data-inbox-card-tools] [data-inbox-snooze]').count()) === 0,
+      `${form} ${theme}: the head has no snooze clock, or the card still has its own snooze buttons`,
     );
     check(
       (await gate.locator('.fy-attn-deck__top .fy-card__type').count()) === 0,

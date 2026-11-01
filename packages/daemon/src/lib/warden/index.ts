@@ -1,5 +1,7 @@
 export * from './action-tally.ts';
 export * from './agenda.ts';
+export * from './auto-migrate.ts';
+export * from './auto-migrate-service.ts';
 export * from './backoff.ts';
 export * from './bless.ts';
 export * from './concurrency.ts';
@@ -18,6 +20,7 @@ export * from './liveness-monitor.ts';
 export * from './logins.ts';
 export * from './marker.ts';
 export * from './orphans.ts';
+export * from './owner-hold.ts';
 export * from './owner-routes.ts';
 export * from './pane-processes.ts';
 export * from './paths.ts';

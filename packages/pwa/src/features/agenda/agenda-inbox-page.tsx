@@ -103,7 +103,6 @@ import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { BoardSendBack } from '../board/board-send-back.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
-import { SNOOZE_LENGTHS, snoozeUntil } from './agenda-compass.ts';
 import { AgendaItemView } from './agenda-item-view.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
@@ -365,7 +364,7 @@ function OpenItem({
         onAct={act}
         onClose={place.onClose}
         onNext={skip}
-        onSnooze={until => act(snoozeAction(until))}
+        {...(canSnooze ? { onSnooze: (until: string) => act(snoozeAction(until)) } : {})}
         position={{ index: place.index, total: place.total }}
         quoteScope={scopeOf(card)}
         {...inputFormFor(inbox, card)}
@@ -376,7 +375,7 @@ function OpenItem({
         {...(now === undefined ? {} : { now })}
         {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
       />
-      <CardTools act={act} canSnooze={canSnooze} skip={skip} />
+      <CardTools act={act} skip={skip} />
     </div>
   );
 }
@@ -427,16 +426,8 @@ function GateMeta({
   );
 }
 
-/** The compass's three moves as plain buttons, so nothing depends on a gesture: Skip, Not needed, Snooze 1 h / 4 h / 1 day. */
-function CardTools({
-  act,
-  skip,
-  canSnooze,
-}: {
-  readonly act: (action: InboxAction) => void;
-  readonly skip: () => void;
-  readonly canSnooze: boolean;
-}) {
+/** The compass's quiet moves as plain buttons, so nothing depends on a gesture: Skip and Not needed. Snooze is the head's clock. */
+function CardTools({ act, skip }: { readonly act: (action: InboxAction) => void; readonly skip: () => void }) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: a fieldset would bring its border and min-width into a flex row of buttons
     <div aria-label="Put this card aside" className="fy-inbox-tools" data-inbox-card-tools="" role="group">
@@ -451,23 +442,6 @@ function CardTools({
       >
         Not needed
       </button>
-      {canSnooze ? (
-        <span className="fy-inbox-tools__snooze" data-inbox-tool="snooze">
-          <span className="fy-inbox-tools__label">Snooze</span>
-          {SNOOZE_LENGTHS.map(length => (
-            <button
-              aria-label={`Snooze for ${length.label}`}
-              className="kt-btn kt-btn--sm"
-              data-inbox-snooze={length.id}
-              key={length.id}
-              onClick={() => act(snoozeAction(snoozeUntil(length.id, Date.now())))}
-              type="button"
-            >
-              {length.label}
-            </button>
-          ))}
-        </span>
-      ) : null}
     </div>
   );
 }

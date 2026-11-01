@@ -28,8 +28,9 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { type BoardAnswers, useBoardAnswers } from '../board/board-answers.tsx';
 import type { SendBackPorts } from '../board/board-send-back.tsx';
 import { cardProse, HowToTest } from '../board/detail/board-detail-sections.tsx';
-import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { isTouch, lockOf, startsInSidewaysScroller, startsOnInteractive } from './agenda-swipe-gesture.ts';
+import { CardHead } from './card-head.tsx';
+import { MarqueeTitle } from './marquee-title.tsx';
 
 /** What the rows need to move a card: the Board's own verbs, bound to the paired machines. */
 export interface ToTestHost {
@@ -289,17 +290,31 @@ function ToTestRow({
               : `translate3d(${swipe.offsetX}px, ${swipe.offsetY}px, 0)`,
         }}
       >
-        <div className="fy-totest__top">
-          <RouteLink
-            className="fy-totest__title"
-            data-to-test-title=""
-            onNavigate={onNavigate}
-            to={daemonBoardCardPath(row.card.daemonId, row.card.task.id)}
-          >
-            {title}
-          </RouteLink>
-          <span className="fy-totest__age">{ageWords(row.since, now)}</span>
-        </div>
+        <CardHead
+          className="fy-totest__top"
+          meta={<span className="fy-totest__age">{ageWords(row.since, now)}</span>}
+          snooze={{
+            onSnooze: until => snooze(row, until),
+            label: `Snooze: ${title}`,
+            disabled: busy,
+            ...(now === undefined ? {} : { now }),
+          }}
+          title={
+            <MarqueeTitle
+              title={title}
+              wrap={text => (
+                <RouteLink
+                  className="fy-totest__title"
+                  data-to-test-title=""
+                  onNavigate={onNavigate}
+                  to={daemonBoardCardPath(row.card.daemonId, row.card.task.id)}
+                >
+                  {text}
+                </RouteLink>
+              )}
+            />
+          }
+        />
         <p className="fy-totest__meta">
           {row.taskName === null || sameWords(row.taskName, title) ? null : (
             <span className="fy-totest__ferret" data-to-test-ferret="">
@@ -336,13 +351,6 @@ function ToTestRow({
           </p>
         )}
         <div className="fy-totest__actions">
-          <AgendaSnoozeMenu
-            disabled={busy}
-            label={`Snooze: ${title}`}
-            now={now}
-            onSnooze={until => snooze(row, until)}
-            triggerClass="kt-btn fy-totest__snooze"
-          />
           <button
             aria-label={`Done: ${title}`}
             className="kt-btn"

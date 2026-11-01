@@ -410,6 +410,16 @@ export class PhoneApprovalService {
     return [...new Set([...this.held.values()].map(held => held.approval.sessionId))];
   }
 
+  /**
+   * Whether this session has an approval still waiting on the owner's phone — what keeps the Warden from moving the
+   * ferret and throwing the sign-in away. A yes or no, nothing about it: it needs no owner.
+   */
+  hasOpen(sessionId: string): boolean {
+    for (const { approval } of this.held.values())
+      if (approval.sessionId === sessionId && !isFinal(approval)) return true;
+    return false;
+  }
+
   /** The approvals still waiting, for one session or all, oldest first. Owner only. */
   list(caller: InputCaller, sessionId?: string): readonly PhoneApproval[] {
     requireOwner(caller);

@@ -282,28 +282,21 @@ describe('the card’s plain buttons for the compass moves', () => {
     await mounted.unmount();
   });
 
-  it('Snooze offers 1 h, 4 h and 1 day, and each snoozes until that long from now', async () => {
-    for (const [id, hours] of [
-      ['1h', 1],
-      ['4h', 4],
-      ['1d', 24],
-    ] as const) {
-      const fake = fakeInbox();
-      const mounted = await mount(page(fake, [question], { initialOpen: question.key }));
-      const before = Date.now();
-      await press(must(mounted.container.querySelector(`[data-inbox-snooze="${id}"]`), `snooze ${id}`));
-      const action = fake.deferred.getSnapshot().pending[0]?.action;
-      expect(action?.kind).toBe('snooze');
-      const until = Date.parse((action as { until: string }).until);
-      expect(until).toBeGreaterThanOrEqual(before + hours * 3_600_000);
-      expect(until).toBeLessThan(before + hours * 3_600_000 + 5_000);
-      await mounted.unmount();
-    }
+  it('Snooze is the head clock: its first choice snoozes for an hour from now, and no separate Snooze buttons are drawn', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [question], { initialOpen: question.key }));
+    expect(mounted.container.querySelector('[data-inbox-snooze]')).toBeNull();
+    await press(must(mounted.container.querySelector('.fy-item-view__bar [data-agenda-snooze]'), 'the head clock'));
+    await press(must(mounted.container.querySelector('[role="menuitem"]'), 'the first snooze choice'));
+    const action = fake.deferred.getSnapshot().pending[0]?.action;
+    expect(action?.kind).toBe('snooze');
+    expect(Date.parse((action as { until: string }).until)).toBe(NOW + 3_600_000);
+    await mounted.unmount();
   });
 
-  it('offers no Snooze where the machine cannot snooze, but keeps Skip and Not needed', async () => {
+  it('draws no head clock where the machine cannot snooze, but keeps Skip and Not needed', async () => {
     const mounted = await mount(page(fakeInbox(), [question], { initialOpen: question.key }, () => false));
-    expect(mounted.container.querySelector('[data-inbox-snooze]')).toBeNull();
+    expect(mounted.container.querySelector('[data-agenda-snooze]')).toBeNull();
     expect(tool(mounted, 'skip')).toBeDefined();
     expect(tool(mounted, 'not-needed')).toBeDefined();
     await mounted.unmount();

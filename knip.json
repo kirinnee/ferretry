@@ -222,6 +222,7 @@
         "tests/integration/fixtures/agenda-head-scene.tsx",
         "tests/integration/fixtures/agenda-table-scene.tsx",
         "tests/integration/fixtures/agenda-clip-scene.tsx",
+        "tests/integration/fixtures/snooze-head-scene.tsx",
         "tests/integration/fixtures/jump-latest-scene.tsx",
         "tests/integration/fixtures/browser-pane-jumpy-scene.tsx",
         "tests/integration/fixtures/ledger-actions-scene.tsx",

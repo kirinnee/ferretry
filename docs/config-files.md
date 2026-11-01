@@ -476,6 +476,55 @@ of closing. No Jev, no investigation, nothing spent. It is `mayActAlone.closeLef
 with it off the Warden lists the recommendation once under Recent actions instead. Every close is listed
 there too, and journalled as `fleet.warden_leftover_closed`.
 
+### Moving a ferret that hit a limit
+
+**Off by default.** With `autoMigrate.enabled`, a ferret whose login runs out is moved to another login — the
+same session, the same chat, the same card and lineage; only the login changes. It is the migration `fy migrate`
+makes, through the same safety check, never with a smaller context window, and the turn the ferret is handed
+opens with why, drawn as Ferretry · Warden. A rule: no Jev, no investigation, nothing spent.
+
+```yaml
+autoMigrate:
+  enabled: true
+  when: [rate_limited, budget_exceeded] # a usage limit; the login's hard spend budget
+  targets: [] # empty: any ready login of the same harness and provider; or runtimes, in order
+  forceStopBackground: false
+  waitMinutes: 10 # how long the ferret has to stop its own background jobs
+  maxMovesPerHour: 1 # 1 to 6, per ferret
+```
+
+- **When.** `rate_limited`: the sweep finds the ferret waiting on a usage limit. `budget_exceeded`: the budget
+  check ([budgets.md](budgets.md)) offers the ferret to the Warden before it would stop it.
+- **Where.** Only a login of the same harness that `fy recommend` calls ready: an agent runtime, its CLI
+  installed, signed in, not switched off, not holding spend, not out of quota — and never the login that ran out,
+  or another runtime on it. `targets: []` stays within the provider (a catalog's provider, the harness's own for
+  a native login; a hand-made environment login is its own provider) and takes the one with most headroom. A
+  named list is tried in order and is the only way a move crosses to another provider. When nothing qualifies
+  the owner is told once, in one line naming every login tried and why it was refused.
+- **Never** while the ferret has an input card open, a sign-in waiting on your phone, a plan card waiting for you,
+  holds a secure copy, handed a terminal or browser to the owner, or waits on a permission prompt or a dialog; never a Warden or anything a Warden started; never more than
+  `maxMovesPerHour` times an hour.
+- **Background jobs.** Off (`forceStopBackground: false`): the ferret is asked, with `fy migrate`'s own message,
+  to stop the jobs in the way, and given `waitMinutes`; still running after that, the owner is told and the
+  ferret stays. A budget stop does not wait. On: the Warden stops only the jobs the ferret started from its own
+  tool shell, under its own tmux pane — children first, SIGTERM then SIGKILL. Each one is followed by its pid and
+  start time wherever it goes (a child its dying shell left behind included), and signalled only while it is
+  still the same process, so a reused pid is never hit; init, the daemon and its parent are never signalled. Any
+  job that survives keeps the ferret where it is. **The move is never forced**: after the jobs are stopped the
+  migration's safety check reads the pane afresh, and anything else in the way — work it cannot see, a blocker
+  that is not one of the ferret's jobs — still keeps the ferret where it is. The ferret is told the stopped jobs'
+  commands; your notice and Recent actions name only their pids and programs, since a command line can carry a
+  credential. **A command you run yourself in the ferret's pane with the harness's `!` shell escape looks exactly
+  like one of the ferret's jobs, and is stopped too.**
+- **Held for the owner:** switching it on, switching `forceStopBackground` on, adding a trigger or a target
+  (including a named target where any login was allowed, or going back from a list to any login), and raising
+  `maxMovesPerHour`.
+
+Every move, hold and failure is a `failover` under Recent actions by `auto`, with the login it left and the one
+it went to, and is counted in Insights › Warden. The moves are kept in the Warden's own `auto-migrate.json`, which the sweep and the budget stop
+share under one lock, so the hourly limit counts every move however the two meet. The ferret's own log gets `warden.auto_migrated`,
+`warden.auto_migrate_asked` or `warden.auto_migrate_stopped_jobs`.
+
 ### Auto-revive
 
 **A ferret that died abnormally is started again by rule.** No Jev, no investigation, nothing spent. A ferret is

@@ -14,8 +14,8 @@ import { sessionView } from '../../support/sessions.ts';
 import {
   agendaItem,
   wardenAction,
-  wardenAnomaly,
   wardenAgenda,
+  wardenAnomaly,
   wardenConfig,
   wardenFailover,
   wardenInvestigation,
@@ -559,6 +559,36 @@ describe('WardenOverview stats', () => {
       expect(tileText(view.container, 'moved')).toContain('(recent)');
       expect(tileText(view.container, 'moved')).toContain('1');
       expect(view.container.querySelector('[data-analytics-chart]')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('should say which login an automatic move left and which it went to', async () => {
+    // Arrange
+    const moved = wardenStatus({
+      actions: [
+        wardenAction({
+          sessionId: 'sess-a',
+          at: '2026-07-31T11:00:00.000Z',
+          action: 'failover',
+          by: 'warden',
+          actor: 'auto',
+          agent: 'claude-b',
+          fromAgent: 'claude-a',
+          detail: 'Moved it from claude-a to claude-b because claude-a hit its usage limit.',
+        }),
+      ],
+    });
+    const view = await render({ status: ready(moved) });
+    try {
+      // Act
+      const row = must(view.container.querySelector<HTMLElement>('[data-warden-action]'), 'row');
+      await interact(() => must(row.querySelector<HTMLButtonElement>('button[aria-expanded]'), 'toggle').click());
+      const text = view.container.textContent ?? '';
+
+      // Assert
+      expect(text).toContain('Moved from claude-a to claude-b');
     } finally {
       await view.unmount();
     }

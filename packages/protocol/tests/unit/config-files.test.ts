@@ -223,6 +223,51 @@ describe('warden.yaml', () => {
     should(actual.investigation).deepEqual({ effort: 'high' });
   });
 
+  it('should leave moving a ferret that hit a limit off, with no force-stop, when the file says nothing', () => {
+    // Act
+    const actual = config.wardenConfigFromFile(config.WardenFileSchema.parse({}));
+
+    // Assert
+    should(actual.autoMigrate).deepEqual({
+      enabled: false,
+      when: ['rate_limited', 'budget_exceeded'],
+      targets: [],
+      forceStopBackground: false,
+      waitMinutes: 10,
+      maxMovesPerHour: 1,
+    });
+  });
+
+  it('should merge a partial autoMigrate section into its defaults, a list replacing the default list', () => {
+    // Arrange
+    const input = config.WardenFileSchema.parse({ autoMigrate: { enabled: true, when: ['budget_exceeded'] } });
+
+    // Act
+    const actual = config.wardenConfigFromFile(input);
+
+    // Assert
+    should(actual.autoMigrate).deepEqual({
+      ...config.DEFAULT_WARDEN_CONFIG.autoMigrate,
+      enabled: true,
+      when: ['budget_exceeded'],
+    });
+  });
+
+  it.each([
+    ['an unknown trigger', { when: ['idle'] }],
+    ['a wait under a minute', { waitMinutes: 0 }],
+    ['a wait over an hour', { waitMinutes: 61 }],
+    ['more than six moves an hour', { maxMovesPerHour: 7 }],
+    ['a blank target', { targets: [' '] }],
+    ['an unknown key', { force: true }],
+  ])('should reject %s in the autoMigrate section', (_name, autoMigrate) => {
+    // Act
+    const parsed = config.WardenFileSchema.safeParse({ autoMigrate });
+
+    // Assert
+    should(parsed.success).be.false();
+  });
+
   it('should merge a partial revive section into its defaults, key by key', () => {
     // Arrange
     const input = config.WardenFileSchema.parse({ revive: { enabled: false, waveSize: 2 } });

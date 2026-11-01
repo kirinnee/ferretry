@@ -83,6 +83,8 @@ export interface WardenSessionConfig {
   /** A person cut this session off (`fy session revoke-credential`): the Warden never revives it. */
   readonly credentialRevoked?: boolean;
   readonly agent?: string;
+  /** The harness the session runs, as its configuration records it: what a move must stay on. */
+  readonly harness?: 'claude' | 'codex';
   readonly model?: string;
   /**
    * The model a start RESOLVED when the account pinned none.
