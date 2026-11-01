@@ -24,7 +24,7 @@ import {
   WebRtcOfferRefused,
 } from '../../../src/lib/webrtc/index.ts';
 import { waitFor } from '../support/wait-for.ts';
-import { PeerWatch } from '../support/webrtc-peer.ts';
+import { PeerWatch, withFreshOfferor } from '../support/webrtc-peer.ts';
 
 /** A data channel that records what it was sent and lets a case decide what comes back. */
 class FakeChannel implements EngineDataChannel {
@@ -490,6 +490,25 @@ async function loopbackOffer(): Promise<{
   };
 }
 
+/** A browser stand-in answered by `subject` and connected to it, tried afresh if the stand-in closed early. */
+async function answerLoopback(subject: NodeDataChannelEngine): Promise<{
+  readonly browser: Awaited<ReturnType<typeof loopbackOffer>>;
+  readonly answered: Awaited<ReturnType<NodeDataChannelEngine['answer']>>;
+}> {
+  return withFreshOfferor(async () => {
+    const browser = await loopbackOffer();
+    const answered = await subject.answer(browser.sdp, []);
+    try {
+      await browser.accept(answered.sdp);
+    } catch (error) {
+      answered.peer.close();
+      browser.close();
+      throw error;
+    }
+    return { browser, answered };
+  });
+}
+
 async function until(what: string, condition: () => boolean): Promise<void> {
   await waitFor(condition, what);
 }
@@ -509,20 +528,16 @@ describe('the node-datachannel engine’s lifetime', () => {
         },
       }),
     });
-    const browser = await loopbackOffer();
 
     // Act
-    const answered = await subject.answer(browser.sdp, []);
-    await browser.accept(answered.sdp);
+    const { browser, answered } = await answerLoopback(subject);
     subject.release();
     const whileOpen = [...cleanups];
     answered.peer.close();
     answered.peer.close();
     browser.close();
     subject.release();
-    const again = await loopbackOffer();
-    const reanswered = await subject.answer(again.sdp, []);
-    await again.accept(reanswered.sdp);
+    const { browser: again, answered: reanswered } = await answerLoopback(subject);
     reanswered.peer.close();
     again.close();
     subject.release();
@@ -537,9 +552,7 @@ describe('the node-datachannel engine’s lifetime', () => {
     async () => {
       // Arrange
       const subject = new NodeDataChannelEngine();
-      const browser = await loopbackOffer();
-      const answered = await subject.answer(browser.sdp, []);
-      await browser.accept(answered.sdp);
+      const { browser, answered } = await answerLoopback(subject);
       const started = libraryThreads();
       answered.peer.close();
       browser.close();

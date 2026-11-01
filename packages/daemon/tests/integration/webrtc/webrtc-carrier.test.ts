@@ -48,7 +48,7 @@ import { LiveDeviceConnections } from '../../../src/lib/pairing/index.ts';
 import { DirectSession } from '../../../src/lib/relay/direct-carrier.ts';
 import { WebRtcCarrier } from '../../../src/lib/webrtc/index.ts';
 import { waitFor } from '../support/wait-for.ts';
-import { PeerWatch } from '../support/webrtc-peer.ts';
+import { PeerWatch, withFreshOfferor } from '../support/webrtc-peer.ts';
 
 const crypto_ = new WebCryptoRelayCrypto();
 const DEVICE_ID = `fy_device_id_${'w'.repeat(22)}`;
@@ -136,6 +136,10 @@ interface Client {
 
 /** The browser: offers non-trickle, signals through the carrier, and waits for its channel to open. */
 async function connect(carrier: WebRtcCarrier): Promise<Client> {
+  return withFreshOfferor(() => connectOnce(carrier));
+}
+
+async function connectOnce(carrier: WebRtcCarrier): Promise<Client> {
   const peer = new PeerConnection('browser-under-test', { iceServers: [], bindAddress: '127.0.0.1' });
   cleanups.push(() => peer.close());
   const watch = new PeerWatch('browser-under-test', peer);

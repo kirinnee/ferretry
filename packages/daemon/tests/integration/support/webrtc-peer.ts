@@ -22,6 +22,31 @@ import { waitFor } from './wait-for.ts';
  */
 const PEER_SETTLE_MS = 20_000;
 
+/** How many fresh browser stand-ins a test may try before it calls the failure real. */
+const OFFEROR_ATTEMPTS = 4;
+
+/**
+ * The test's own libdatachannel offerer had closed before it saw the answer.
+ *
+ * Non-trickle loopback signalling lets the daemon-side answerer start its connectivity checks the moment it
+ * answers; on a loaded runner they reach the offerer before it has applied that answer, and (measured in CI,
+ * about 1 run in 20) the offerer is already `closed` when the answer arrives, so applying it throws "Got a
+ * remote candidate without ICE transport". A real browser holds its offer open until the answer comes, and
+ * the daemon is the answerer, so this is a property of the stand-in, not of the product.
+ */
+class OfferorClosedEarly extends Error {}
+
+/** Runs `attempt` with a fresh browser stand-in each time the previous one closed before the answer. */
+export async function withFreshOfferor<T>(attempt: () => Promise<T>): Promise<T> {
+  for (let tries = 1; ; tries += 1) {
+    try {
+      return await attempt();
+    } catch (error) {
+      if (!(error instanceof OfferorClosedEarly) || tries >= OFFEROR_ATTEMPTS) throw error;
+    }
+  }
+}
+
 /** The states a peer reported, in order, with the milliseconds since it was watched. */
 export class PeerWatch {
   readonly #peer: PeerConnection;
@@ -59,6 +84,8 @@ export class PeerWatch {
 
   /** Applies the remote answer; a refusal carries the peer's history, because it says the peer was already closed. */
   answered(sdp: string): void {
+    if (this.#peer.state() === 'closed')
+      throw new OfferorClosedEarly(`the peer closed before the answer — ${this.describe()}`);
     try {
       this.#peer.setRemoteDescription(sdp, 'answer');
     } catch (error) {
@@ -87,7 +114,7 @@ export class PeerWatch {
       await waitFor(
         () => {
           const state = this.#peer.state();
-          if (state === 'failed') throw new Error('the peer connection failed');
+          if (state === 'failed' || state === 'closed') throw new Error(`the peer connection ${state}`);
           return condition();
         },
         `${this.#name} ${what}`,
