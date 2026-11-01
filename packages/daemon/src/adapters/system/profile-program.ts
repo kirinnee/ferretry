@@ -102,13 +102,16 @@ export async function profileCouldStandFor(
   disk: ReplaceableDisk = { lstat, readlink },
   folders: readonly string[] = ROOT_PROGRAM_FOLDERS,
 ): Promise<boolean> {
-  if (chain === undefined || !NAME.test(program) || GETPASS_PROGRAMS.has(program) || CODE_PROGRAMS.has(program))
+  // Judged in lower case as well: a rule for `Sudo` or `SSH` is a rule for sudo or ssh, whatever the owner typed.
+  const lower = program.toLowerCase();
+  if (chain === undefined || !NAME.test(program) || GETPASS_PROGRAMS.has(lower) || CODE_PROGRAMS.has(lower))
     return false;
-  for (const folder of folders) {
-    const entry = `${folder}/${program}`;
-    if ((await disk.lstat(entry).catch(() => undefined)) === undefined) continue;
-    if (!(await replaceableBy(account, entry, disk, folders))) return false;
-  }
+  for (const name of new Set([program, lower]))
+    for (const folder of folders) {
+      const entry = `${folder}/${name}`;
+      if ((await disk.lstat(entry).catch(() => undefined)) === undefined) continue;
+      if (!(await replaceableBy(account, entry, disk, folders))) return false;
+    }
   return true;
 }
 

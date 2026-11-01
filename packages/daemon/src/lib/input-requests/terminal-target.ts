@@ -337,7 +337,11 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     // reader the ferret started) is no change to the facts, so the program is proved again here.
     if (options?.codeProgram === true && fresh.codeProgram !== true) return 'target_changed';
     // A rule that pasted on the strength of a program from the owner's profile types only while that program holds it.
-    if (options?.profileProgram !== undefined && fresh.profileProgram?.name !== options.profileProgram)
+    const profile = options?.profileProgram;
+    if (
+      profile !== undefined &&
+      (fresh.profileProgram?.name !== profile.name || fresh.profileProgram.path !== profile.path)
+    )
       return 'target_changed';
     const { guard } = fresh;
     if (!PINNABLE_COMMAND.test(guard.command)) return 'target_changed';

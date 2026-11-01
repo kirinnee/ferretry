@@ -575,7 +575,19 @@ describe('PasteRuleService: the owner settings (profile targets)', () => {
     const { service } = rules();
     await service.load();
     await service.changeSettings(OWNER, { allowProfileTargets: true });
-    for (const program of ['sudo', 'su', 'doas', 'passwd', 'sudoedit', 'ssh', 'scp', 'vault']) {
+    for (const program of [
+      'sudo',
+      'su',
+      'doas',
+      'passwd',
+      'sudoedit',
+      'ssh',
+      'scp',
+      'vault',
+      'Sudo',
+      'SSH',
+      'PassWd',
+    ]) {
       await service.create(OWNER, { from: GH, to: { kind: 'terminal', program } });
       should(service.reserve('s1', GH_COPY, IN_PROFILE, program)).be.undefined();
     }

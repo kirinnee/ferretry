@@ -1029,7 +1029,7 @@ export class InputRequestService {
         .type(request.sessionId, request.target, values, submitted, seen.facts, {
           // A code left visible on the strength of a proven code program is typed only while one still holds it.
           codeProgram: seen.codeProgram === true && fields.some(field => field.sensitivity === 'code'),
-          ...(by.kind === 'rule' && held.pastedInto !== undefined ? { profileProgram: held.pastedInto.name } : {}),
+          ...(by.kind === 'rule' && held.pastedInto !== undefined ? { profileProgram: held.pastedInto } : {}),
         })
         .catch((): TypeResult => 'uncertain');
       wrote?.(outcome);

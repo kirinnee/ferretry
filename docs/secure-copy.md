@@ -253,8 +253,9 @@ Settings › Secure copy › "Copy rules may target programs in my own profile" 
   `/nix/var/nix/profiles/per-user/<you>`, the store), and the walk must end at the very store file every process
   reading the terminal runs. Everything else still holds: every process of the foreground group proved, line mode,
   no process of another session holding the terminal. A program in `~/bin`, any other path, or a store path your
-  profile does not name is never matched. The write itself checks again that the same profile program still holds
-  the terminal, or nothing is typed.
+  profile does not name is never matched. The write itself checks again that the same profile program, by name and
+  by store file, still holds the terminal, or nothing is typed. Names are judged in any case: a rule for `Sudo` is
+  a rule for sudo.
 - **What it never allows:** a program proved through your profile earns no green card, no short lock and no one-tap
   saved login; it only lets a rule you wrote match. The proof is the daemon's own and is never sent to the app.
 - **Who may turn it on:** the owner only. A ferret is refused before its request is read
@@ -266,7 +267,9 @@ Settings › Secure copy › "Copy rules may target programs in my own profile" 
 - **What you see:** while the setting is on or off, every terminal rule a program from your profile could satisfy
   is marked "your profile — a ferret could swap this program" (Settings, and `fy copy rules ls`), with "asks you"
   while the setting is off. The settings and these marks come from `GET /v1/copy-rules/settings`, a route of its own;
-  an app or CLI talking to an older daemon shows neither, and the rules list itself is unchanged.
+  an app or CLI talking to an older daemon (a 404) shows neither, and the rules list itself is unchanged. Any other
+  failure to read it is said ("could not check which rules a program in your own profile could satisfy"), never a
+  silently missing setting.
 - **What is logged:** a paste under a rule into such a program is audited as every rule paste is (`by: rule`, the
   rule), with the store file it pasted into (`profileProgram`); never the value. Turning the setting on or off is
   kept as `security.changed` (`copy-rule-settings`).

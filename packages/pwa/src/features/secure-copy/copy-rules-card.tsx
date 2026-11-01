@@ -34,6 +34,8 @@ export interface CopyRulesCardProps {
   /** The rules whose terminal program this daemon finds only in the owner's own profile. */
   readonly profileRules?: readonly string[];
   readonly onSettings?: (settings: PasteRuleSettings) => Write;
+  /** Why the setting and the badges could not be read: said in their place, never left blank. */
+  readonly settingsError?: string;
 }
 
 /** What a rule into a program from the owner's profile is labelled with (docs/secure-copy.md). */
@@ -363,6 +365,7 @@ export function CopyRulesCard({
   settings,
   profileRules = [],
   onSettings,
+  settingsError,
 }: CopyRulesCardProps) {
   const [adding, setAdding] = useState(false);
   return (
@@ -395,6 +398,12 @@ export function CopyRulesCard({
             />
           ))}
         </ul>
+      )}
+      {settingsError !== undefined && (
+        <p role="alert" className="m-0 text-ui text-warn" data-copy-settings-error="">
+          Ferretry could not check which rules a program in your own profile could satisfy, so no rule is marked:{' '}
+          {settingsError}
+        </p>
       )}
       {settings !== undefined && onSettings !== undefined && (
         <ProfileTargetsSetting settings={settings} busy={busy} onSettings={onSettings} />

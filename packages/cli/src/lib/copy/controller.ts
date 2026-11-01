@@ -12,6 +12,7 @@ import {
   RUNS_WHAT_IT_READS_WARNING,
   runsWhatItReads,
 } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { showUntrusted } from '../input/render.ts';
 import type { CopyPorts } from './ports.ts';
 
@@ -152,15 +153,28 @@ export class CopyController {
 
   async rules(options: CopyCommandOptions): Promise<void> {
     this.#refuseFerret();
-    const [list, view] = await Promise.all([
-      this.ports.gateway.rules(),
-      this.ports.gateway.ruleSettings().catch(() => undefined),
-    ]);
+    const [list, view] = await Promise.all([this.ports.gateway.rules(), this.#ruleSettings()]);
     this.ports.out.success(
       options.json === true
         ? JSON.stringify(view === undefined ? list : { ...list, ...view }, null, 2)
         : renderRules(list, view),
     );
+  }
+
+  /**
+   * The settings and the profile marks, or `undefined` from a daemon too old to have them (a 404 only). Any other
+   * failure is said on stderr, so the listing never silently drops every mark.
+   */
+  async #ruleSettings(): Promise<PasteRuleSettingsView | undefined> {
+    try {
+      return await this.ports.gateway.ruleSettings();
+    } catch (cause) {
+      if (!(cause instanceof FyHttpError && cause.status === 404))
+        this.ports.out.diagnostic(
+          `warning: could not check which rules a program in your own profile could satisfy, so none is marked: ${cause instanceof Error ? cause.message : String(cause)}`,
+        );
+      return undefined;
+    }
   }
 
   async addRule(options: CopyRuleOptions): Promise<void> {

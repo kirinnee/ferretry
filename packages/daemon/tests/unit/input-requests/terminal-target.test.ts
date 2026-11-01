@@ -876,11 +876,15 @@ describe('a program proved only through the owner profile', () => {
     if (!result.ok) throw new Error('not seen');
 
     w.profiled = {};
-    const gone = await port.type('s1', dev, SECRET, true, result.facts, { profileProgram: 'gh' });
+    const gone = await port.type('s1', dev, SECRET, true, result.facts, { profileProgram: GH });
     should(gone).equal('target_changed');
+    // The same name, but another store file: the pid exec'd in place into another gh (V2).
+    const other = { name: 'gh', path: '/nix/store/zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-gh/bin/gh' };
+    w.profiled = { 4300: other, 4301: other };
+    should(await port.type('s1', dev, SECRET, true, result.facts, { profileProgram: GH })).equal('target_changed');
     should(w.typed).be.empty();
 
     w.profiled = { 4300: GH, 4301: GH };
-    should(await port.type('s1', dev, SECRET, true, result.facts, { profileProgram: 'gh' })).equal('typed');
+    should(await port.type('s1', dev, SECRET, true, result.facts, { profileProgram: GH })).equal('typed');
   });
 });

@@ -303,7 +303,9 @@ function fromMatches(rule: PasteRule, from: CopyOrigin): boolean {
  * root-controlled folder holds: a rule for a system program is never met by the profile.)
  */
 const profileMayStandFor = (settings: PasteRuleSettings, program: string): boolean =>
-  settings.allowProfileTargets && !GETPASS_PROGRAMS.has(program) && !CODE_PROGRAMS.has(program);
+  settings.allowProfileTargets &&
+  !GETPASS_PROGRAMS.has(program.toLowerCase()) &&
+  !CODE_PROGRAMS.has(program.toLowerCase());
 
 function toMatches(rule: PasteRule, facts: InputTargetFacts, settings: PasteRuleSettings, profile?: string): boolean {
   switch (rule.to.kind) {

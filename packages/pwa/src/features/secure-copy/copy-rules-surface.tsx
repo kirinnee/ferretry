@@ -18,6 +18,7 @@ import {
   changeCopySettings,
   type CopyClient,
   listRules,
+  type CopySettingsRead,
   readCopySettings,
   removeRule,
 } from '../../lib/secure-copy.ts';
@@ -30,14 +31,21 @@ interface Loaded {
   readonly rules: readonly PasteRule[];
   /** Absent from a daemon too old to have the setting: no switch and no badge are shown. */
   readonly settings?: PasteRuleSettingsView;
+  /** Why the setting and the badges could not be read, when that was not "an older daemon". */
+  readonly settingsError?: string;
 }
 
 /** What the screen holds from one read of the rules and one of the settings. */
 const loadedFrom = (
   daemonId: DaemonConnection['daemonId'],
   list: PasteRuleList,
-  settings: PasteRuleSettingsView | undefined,
-): Loaded => ({ daemonId, rules: list.rules, ...(settings === undefined ? {} : { settings }) });
+  settings: CopySettingsRead,
+): Loaded => ({
+  daemonId,
+  rules: list.rules,
+  ...(settings.kind === 'view' ? { settings: settings.view } : {}),
+  ...(settings.kind === 'failed' ? { settingsError: settings.reason } : {}),
+});
 
 /** Both reads, side by side. */
 const readAll = async (client: CopyClient) => await Promise.all([listRules(client), readCopySettings(client)] as const);
@@ -131,6 +139,7 @@ export function CopyRulesSurface({
       {...(loaded.settings === undefined
         ? {}
         : { settings: loaded.settings.settings, profileRules: loaded.settings.profileRules })}
+      {...(loaded.settingsError === undefined ? {} : { settingsError: loaded.settingsError })}
       busy={busy}
       error={error}
       onAdd={add}

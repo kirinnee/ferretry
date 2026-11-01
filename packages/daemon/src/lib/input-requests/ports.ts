@@ -185,8 +185,11 @@ export interface TerminalInputTargetPort {
 export interface TypeOptions {
   /** A code program (`ObserveResult.codeProgram`) must still hold the terminal, or nothing is typed. */
   readonly codeProgram?: boolean;
-  /** A rule pasted into this profile program (`ObserveResult.profileProgram`): it must still hold the terminal. */
-  readonly profileProgram?: string;
+  /**
+   * A rule pasted into this profile program (`ObserveResult.profileProgram`): the same name AND the same store file
+   * must still hold the terminal, so the file the log names is the one typed into.
+   */
+  readonly profileProgram?: ProfileProgram;
 }
 
 /** The card the owner answers. The daemon words the title and ask; the agent's prompt rides as `prompt` only. */

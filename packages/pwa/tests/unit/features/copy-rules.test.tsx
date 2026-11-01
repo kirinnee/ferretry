@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { PasteRule, PasteRuleCreate } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { CopyRulesCard } from '../../../src/features/secure-copy/copy-rules-card.tsx';
 import { CopyRulesSurface } from '../../../src/features/secure-copy/copy-rules-surface.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
@@ -270,15 +271,30 @@ describe('the pre-approval rules surface', () => {
     expect((q('[data-copy-profile-targets]') as HTMLInputElement | null)?.checked).toBe(true);
   });
 
-  it('shows no setting and no badge for a daemon too old to have them, and still lists its rules', async () => {
+  it('shows no setting and no badge for a daemon too old to have them (a 404), and still lists its rules', async () => {
     const { q } = await surface(call => {
-      if (call.path === '/v1/copy-rules/settings') throw new Error('404 not found');
+      if (call.path === '/v1/copy-rules/settings') throw new FyHttpError('not found', 404, 'not_found');
       return { rules: [RULE] };
     });
 
     expect(q(`[data-copy-rule="${RULE.id}"]`)).not.toBeNull();
     expect(q('[data-copy-profile-targets]')).toBeNull();
     expect(q('[data-copy-rule-profile]')).toBeNull();
+    expect(q('[data-copy-settings-error]')).toBeNull();
+  });
+
+  it('says so when the setting cannot be read for any other reason, never hiding it quietly', async () => {
+    for (const failure of [new FyHttpError('the daemon fell over', 500, 'internal'), new Error('relay down')]) {
+      const { q } = await surface(call => {
+        if (call.path === '/v1/copy-rules/settings') throw failure;
+        return { rules: [RULE] };
+      });
+
+      expect(q(`[data-copy-rule="${RULE.id}"]`)).not.toBeNull();
+      expect(q('[data-copy-settings-error]')?.textContent).toContain(
+        `could not check which rules a program in your own profile could satisfy, so no rule is marked: ${failure.message}`,
+      );
+    }
   });
 
   it('says a failed read is a failed read, never "no rules"', async () => {

@@ -145,6 +145,10 @@ describe('the owner profile chain', () => {
     should(await could('gh', { ...PROFILE, '/usr/bin/gh': { uid: ME } })).be.true();
     for (const program of ['sudo', 'su', 'doas', 'passwd', 'sudoedit', 'ssh', 'scp', 'aws', 'g h'])
       should(await could(program)).be.false();
+    // Any case: a rule for `Sudo` or `SSH` is a rule for sudo or ssh (V1), and `GH` is the root's `gh`.
+    for (const program of ['Sudo', 'SUDO', 'SSH', 'Vault']) should(await could(program)).be.false();
+    should(await could('GH', { ...PROFILE, '/usr/bin/gh': {} })).be.false();
+    should(await could('GH')).be.true();
     should(await profileCouldStandFor('gh', undefined, ME, disk(PROFILE), ['/usr/bin'])).be.false();
     should(await profileCouldStandFor('env', profileChainOf(homedir(), userInfo().username), ME)).be.false();
   });

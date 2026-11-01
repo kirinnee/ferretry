@@ -122,7 +122,7 @@ async function world(
         ...(options.profile === undefined ? {} : { profileProgram: options.profile }),
       }),
       type: async (_session, _target, values, _submit, _expected, typeOptions) => {
-        if (typeOptions?.profileProgram !== undefined) typedUnder.push(typeOptions.profileProgram);
+        if (typeOptions?.profileProgram !== undefined) typedUnder.push(typeOptions.profileProgram.path);
         writes.push(...values.map(value => value.text));
         return typed.result;
       },
@@ -413,7 +413,7 @@ describe('a paste the owner approved in advance', () => {
       should(view.state).equal('delivered');
       should(w.writes).eql([TOKEN]);
       // The write itself is told to type only while that profile program still holds the terminal.
-      should(w.typedUnder).eql(['vercel']);
+      should(w.typedUnder).eql([STORE_PATH]);
       should(w.audits.at(-1)).match({
         event: 'input.delivered',
         actor: { kind: 'rule', ruleId: rule.id },
