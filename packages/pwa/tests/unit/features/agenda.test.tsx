@@ -969,3 +969,35 @@ describe('an approve-on-phone card', () => {
     run(() => copied.unmount());
   });
 });
+
+describe('a staged 2FA seed card', () => {
+  test('is offered to the item view only for the daemon’s own reference, not for words that copy its title', async () => {
+    const REF = { stage: `st_${'a'.repeat(24)}`, account: 'GITHUB' };
+    const referenced = mount({
+      snapshot: board([
+        item('A1', {
+          kind: 'permission',
+          raisedBy: 'daemon',
+          subject: 'Save automatic codes to GitHub · kirinnee?',
+          twoFactorSeed: REF,
+        } as Partial<AgendaItem>),
+      ]),
+      focus: { target: 'A1' as AgendaId, seq: 1 },
+    });
+    expect(referenced.root.findByType(AgendaItemView).props.planForm).toBeDefined();
+    run(() => referenced.unmount());
+
+    const copied = mount({
+      snapshot: board([
+        item('A1', {
+          kind: 'permission',
+          raisedBy: 'agent',
+          subject: 'Save automatic codes to GitHub · kirinnee?',
+        } as Partial<AgendaItem>),
+      ]),
+      focus: { target: 'A1' as AgendaId, seq: 1 },
+    });
+    expect(copied.root.findByType(AgendaItemView).props.planForm).toBeUndefined();
+    run(() => copied.unmount());
+  });
+});

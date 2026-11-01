@@ -29,9 +29,9 @@ import { CircleAlert } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import type { InboxAction } from '../../lib/agenda-answers.ts';
+import { cardModel } from '../../lib/agenda-card-model.ts';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
-import { cardModel } from '../../lib/agenda-card-model.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import { actionSentence, snoozeAction, UNSNOOZE_ACTION } from '../../lib/agenda-inbox.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
@@ -45,8 +45,9 @@ import { composerQuoteTarget } from '../../lib/quote.ts';
 import { useOptionalRouter } from '../../lib/router.tsx';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
-import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
+import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
+import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
 import { agendaReference } from './agenda-board.tsx';
 import { AgendaDeliveryContext, agendaHeading, deliveringIds } from './agenda-delivery.tsx';
@@ -406,6 +407,9 @@ export const useAgenda = ({
                   />
                 ),
               }
+            : {})}
+          {...(cardItem.twoFactorSeed !== undefined
+            ? { planForm: <TwoFactorSeedHost connection={connection} item={cardItem} /> }
             : {})}
           {...(cardItem.kind === 'input'
             ? {

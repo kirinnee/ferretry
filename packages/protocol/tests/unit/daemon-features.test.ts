@@ -48,9 +48,9 @@ describe('daemon features', () => {
     should(daemonFeatureList()).containEql('work.search.1');
   });
 
-  it('should name 2FA keys for the app to gate on, but not report them until the daemon half lands', () => {
+  it('should report 2FA keys now that the app draws them', () => {
     should(DAEMON_FEATURES.twoFactorKeys).equal('accounts.2fa-keys.1');
-    should(daemonFeatureList()).not.containEql('accounts.2fa-keys.1');
+    should(daemonFeatureList()).containEql('accounts.2fa-keys.1');
   });
 
   it('should report approve-on-phone now that the app draws the card', () => {
@@ -58,10 +58,10 @@ describe('daemon features', () => {
     should(daemonFeatureList()).containEql('input.phone-approval.1');
   });
 
-  it('should name accounts and sign-ins for the app to gate on, but not report it until the store lands', () => {
+  it('should report accounts and sign-ins now that the app draws the Accounts screen', () => {
     should(DAEMON_FEATURES.accountsSignIns).equal('accounts.signins.1');
-    should(daemonFeatureList()).not.containEql('accounts.signins.1');
-    should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.accountsSignIns)).be.false();
+    should(daemonFeatureList()).containEql('accounts.signins.1');
+    should(hasFeature({ features: daemonFeatureList() }, DAEMON_FEATURES.accountsSignIns)).be.true();
   });
 
   it('should report the ferret session credential now that every route says whether a ferret may call it', () => {

@@ -1,4 +1,4 @@
-import { type Place, placeHosts, type TwoFactorKeySummary, isCodeFactor } from './accounts.ts';
+import { isCodeFactor, type Place, placeHosts, type TwoFactorKeySummary } from './accounts.ts';
 import { type TotpParameters, TotpParametersSchema, TotpSeedSchema } from './login-entries.ts';
 
 /**
@@ -275,6 +275,10 @@ export function factorMismatchWords(
   const says = [parsed.issuer, parsed.accountName].filter(part => part !== undefined).join(' · ');
   return `This key says it is for ${says}, but you're saving it to ${accountWords(account)}.`;
 }
+
+/** The line a staged seed's agenda card carries when it was staged with "save it here anyway": the app draws the amber box from it. */
+export const TWO_FACTOR_SEED_CARD_MISMATCH_LINE =
+  'It does not look like this account’s key; it was staged with “save it here anyway”.';
 
 // ── A code card's title ──────────────────────────────────────────────────────────────────────────
 

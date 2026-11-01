@@ -1,10 +1,15 @@
 import { interact, must } from './dom.ts';
 
 /** Types into a controlled React input the way a keyboard does: through the native setter, then `input`. */
-export const typeInto = async (element: Element | null, value: string): Promise<void> => {
+export const typeInto = async (
+  element: Element | null,
+  value: string,
+  kind: 'input' | 'textarea' = 'input',
+): Promise<void> => {
   const input = must(element, 'an input') as HTMLInputElement;
+  const proto = kind === 'textarea' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   await interact(() => {
-    const setter = must(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set, 'a value setter');
+    const setter = must(Object.getOwnPropertyDescriptor(proto, 'value')?.set, 'a value setter');
     setter.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });

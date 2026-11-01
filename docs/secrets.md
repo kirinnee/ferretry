@@ -368,10 +368,10 @@ cannot say which sign-in it means, and guessing would be a lossy write. A fact t
 sign-in it was typed at (`AccountDirectory.observeSignIn`, the input service's only writer), and only at one of
 that sign-in's own places; anything else is not kept.
 
-**Not advertised yet.** The card is sign-in aware on the daemon's side ([one tap](input-requests.md#the-next-time-one-tap)):
-its offers name the sign-in, and a deliver's `signIn` must be one of the account's. The daemon still does not
-report `accounts.signins.1`, because the app ships first: until the Accounts screen lands, an app keeps today's
-surface.
+**Advertised.** The card is sign-in aware on the daemon's side ([one tap](input-requests.md#the-next-time-one-tap)):
+its offers name the sign-in, and a deliver's `signIn` must be one of the account's. The daemon reports
+`accounts.signins.1` and `accounts.2fa-keys.1` now that the app draws the [Accounts screen](#the-accounts-screen); an
+older daemon, which reports neither, keeps today's saved-logins surface.
 
 ### 2FA keys
 
@@ -425,7 +425,7 @@ pairing code, widening a device or any other act takes. Both directions are test
 
 **From the command line**, `fy account factor add <ACCOUNT> --totp` shows the warning, takes the key at a hidden
 prompt (a base32 key or an `otpauth://totp` link), stages it and puts a card on the agenda — "Save automatic codes to
-GitHub · kirinnee? Asked by `fy` on kirin-box at 14:02 UTC" — then waits. Allow it in the app with your passkey and it
+GitHub · kirinnee? Asked by fy on kirin-box at 14:02 UTC" — then waits. Allow it in the app with your passkey and it
 prints "Saved"; Deny, or two minutes, and nothing is saved. `--session <id>` names the board for the card (the
 current session's by default). The CLI has no way to save a seed itself.
 
@@ -436,9 +436,16 @@ is a person route; a ferret's call is refused by the daemon and `fy` reports tha
 `403 add_2fa_key_needs_passkey` with where to go instead; `totp: null` (remove the seed) still works there.
 
 The card is answered by its Allow (the passkey ceremony, then the commit) or Deny (drop the stage). An agenda answer
-saves nothing, so an app from before these cards shows the daemon's words and cannot save. **The app's half — the
-"Set up automatic codes" panel and the Allow on this card — ships in the next release (R2-5); until then a seed
-cannot be saved at all**, and the ones already saved keep working.
+saves nothing, so an app from before these cards shows the daemon's words and cannot save.
+
+**The app draws this card itself** (`TwoFactorSeedHost`, in the Inbox and the agenda panel, wherever an item carries the
+daemon's `twoFactorSeed` reference; a ferret's words that merely copy the title draw nothing). Every sentence is the
+daemon's (subject, why, context); the app adds the one-factor warning with its tick, an amber box and a second tick when
+the stage was staged with "save it here anyway" (the daemon marks that with `TWO_FACTOR_SEED_CARD_MISMATCH_LINE`, one
+shared constant), **Allow** and **Deny**. Allow is the same shared flow as the "Set up automatic codes" panel: the
+`add-2fa-key` passkey bound to THAT stage (`useAddKeyStepUp`), then the commit with no body. A dismissed passkey leaves
+the stage waiting (it expires in two minutes), so the owner can try again or Deny; Deny drops the stage with no passkey. The
+card reads only where the stage stands (`GET …/seed/:stage`) and the account's name; it never holds the key.
 
 | Route (owner only, `secrets`/`configure`)                  | Does                                                                                | Passkey                    |
 | ---------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------- |
@@ -451,6 +458,37 @@ cannot be saved at all**, and the ones already saved keep working.
 
 Each is a kept `secrets.changed` record by account and key id (`factor-added`, `factor-relabelled`,
 `factor-removed`, `factor-seed-staged`, …); a seed's save records `proof: passkey`. None records a value.
+
+## The Accounts screen
+
+Settings › Accounts is gated on the daemon's health: a machine that reports `accounts.signins.1` gets the screen below,
+any other (older, silent, or one whose health read failed) keeps the saved-logins surface above, unchanged. It reports
+`accounts.2fa-keys.1` separately: without it the 2FA keys tab is not offered and no seed can be saved from here.
+
+- **List** — accounts grouped by the site they sign in at (the first host a place names; `ssh@host` for a terminal),
+  each row naming the account, which fields EXIST ("password ✓", never a value) and its 2FA keys. Accounts with no
+  sign-in sit under "No site yet". A damaged store is said to be damaged, never drawn as an empty list.
+- **Account** — _Details_ (name, username, a write-only password: the box is empty every time and the page only says
+  one is saved), _2FA keys_ and _Sites_.
+- **2FA keys** — each key by its label and plain facts with a usage record: _Last code worked on <date>_,
+  _Not used yet_ or _Last code did not work on <date>_ (red, the only one drawn as a warning). It is a record of what the
+  daemon saw, which a ferret can steer, and not a check that the key belongs to the account, so it is never drawn as a
+  check mark and never gates a pre-approval. Adding an SMS, email, push or security key sends no value. Automatic codes
+  (a seed) go through the SAME panel the code card uses ([Set up automatic codes](input-requests.md#2fa-seeds-opt-in-per-entry)):
+  stage, the two ticks, then the `add-2fa-key` passkey bound to that stage. There is no second path: a seed is never
+  sent to `POST …/factors`.
+- **Site (a sign-in)** — _Method_, _Recipe_ (plain text, never Markdown; a ferret's recipe is labelled as unreviewed, and
+  its proposals are shown as a diff to approve or decline), _What Ferretry saw_ (facts, never values) and _Defaults_.
+- **Defaults** — a default only decides which account a card lists first; the tap is still the permission. It is
+  `config/account-defaults.yaml`, set per host with `PUT /v1/accounts/defaults`. A default may be set on any host the
+  sign-in NAMES, a site's `match` hosts included (the daemon checks `placeHosts`, and so does the screen). A file that
+  does not parse is shown as unreadable, never as "no defaults".
+- **Look-alikes** — when `GET /v1/accounts/look-alike` (owner only, handles only) reports accounts that share a username
+  and password, a banner offers _Merge_ (pick the one to keep; the others' sites and keys move onto it) or _Keep apart_.
+  A daemon without the route simply shows no banner.
+
+Every write is a person route (`secrets` configure, operator minimum) so a ferret cannot make it; no response and no
+screen holds a password, a seed or a code. The one-tap on a card comes only from the daemon's `primary` offer.
 
 ## Damaged is not empty
 

@@ -7,17 +7,17 @@ import {
   namesSignIn,
   type SignInId,
   SignInIdSchema,
-  TwoFactorIdSchema,
   type TwoFactorId,
-  TwoFactorStageIdSchema,
+  TwoFactorIdSchema,
   type TwoFactorStageId,
+  TwoFactorStageIdSchema,
 } from './account-ids.ts';
 import { AgendaIdSchema } from './agenda.ts';
 import { InstantSchema } from './common.ts';
 import {
+  LOGIN_HINT_PASSKEYS_OFF,
   LOGIN_LABEL_MAX_LENGTH,
   LOGIN_MATCH_MAX,
-  LOGIN_HINT_PASSKEYS_OFF,
   LOGIN_USERNAME_MAX_LENGTH,
   type LoginDomain,
   LoginDomainSchema,
@@ -26,9 +26,9 @@ import {
   type LoginMethod,
   LoginMethodChangeSchema,
   LoginMethodKindSchema,
-  loginMethodIssues,
-  LoginPasswordSchema,
   LoginMethodSchema,
+  LoginPasswordSchema,
+  loginMethodIssues,
   loginMethodSentence,
   MAX_LOGIN_ENTRIES,
   MAX_SEEDS_PER_ACCOUNT,
@@ -75,8 +75,8 @@ import { SecretStoreHealthSchema } from './secrets.ts';
  * `login-entries.ts` and `login-recipes.ts` and imported here, never copied.
  */
 
-export { AccountIdSchema, AccountKeySchema, SignInIdSchema, TwoFactorIdSchema, TwoFactorStageIdSchema, namesSignIn };
 export type { AccountId, AccountKey, SignInId, TwoFactorId, TwoFactorStageId };
+export { AccountIdSchema, AccountKeySchema, namesSignIn, SignInIdSchema, TwoFactorIdSchema, TwoFactorStageIdSchema };
 
 /** Most accounts one daemon keeps (today's most saved logins). */
 export const MAX_ACCOUNTS = MAX_LOGIN_ENTRIES;
@@ -849,6 +849,11 @@ export const TwoFactorSeedStageViewSchema = z.strictObject({
   expiresAt: InstantSchema,
   factor: TwoFactorIdSchema.optional(),
   agendaItemId: AgendaIdSchema.optional(),
+  /**
+   * Whether the key was staged with "save it here anyway": the card asks the owner for a second tick. Always sent;
+   * a daemon from before it existed omits it, and the card then goes by the sentence the card's context carries.
+   */
+  mismatch: z.boolean().optional(),
 });
 export type TwoFactorSeedStageView = z.infer<typeof TwoFactorSeedStageViewSchema>;
 

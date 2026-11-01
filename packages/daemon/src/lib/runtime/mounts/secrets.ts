@@ -721,7 +721,7 @@ function seedSaver(context: RouteContext): SeedSaver {
 /** Who asked for a save, in the card's words: the owner's shell, the app at the machine, or a paired device. */
 function askedByWords(context: RouteContext): string {
   const { kind } = parseActor(context.actor ?? '');
-  if (kind === 'admin-cli') return '`fy`';
+  if (kind === 'admin-cli') return 'fy';
   if (kind === 'device') return 'a paired device';
   return 'the app on this machine';
 }

@@ -8,17 +8,18 @@
  * shipped daemon configuration surface.
  */
 
+import { DAEMON_FEATURES, type TwoFactorStageId } from '@ferretry/protocol';
 import type { ConnectionChoice } from '@ferretry/relay';
 import {
   ChevronLeft,
   ChevronRight,
   CircleArrowUp,
   CircleDollarSign,
+  ClipboardPaste,
   FileCode2,
   Fingerprint,
   Gauge,
   GraduationCap,
-  ClipboardPaste,
   KeyRound,
   Library,
   Lock,
@@ -31,8 +32,8 @@ import {
   Smartphone,
   SquareTerminal,
   Stethoscope,
-  Zap,
   UserRound,
+  Zap,
 } from 'lucide-react';
 import { type ComponentType, createContext, type ReactNode, useContext, useMemo } from 'react';
 import { useCarrierRtt } from '../../hooks/use-carrier-rtt.ts';
@@ -40,11 +41,14 @@ import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { useDaemonClient } from '../../lib/store.tsx';
+import { machineOffers } from '../../lib/daemon-health.ts';
+import { useAddKeyStepUp, useDaemonClient } from '../../lib/store.tsx';
+import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { Button } from '../../shell/primitives.tsx';
+import { AccountsSurface } from '../accounts/accounts-surface.tsx';
 import { ActiveCarrierCard, type CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
-import { CatalogsSurface } from '../catalogs/catalogs-surface.tsx';
 import type { CatalogClientFactory } from '../catalogs/catalogs-api.ts';
+import { CatalogsSurface } from '../catalogs/catalogs-surface.tsx';
 import { LoginsSurface } from '../secrets/logins-surface.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { CopyRulesSurface } from '../secure-copy/copy-rules-surface.tsx';
@@ -195,7 +199,23 @@ function SecretsPanel({ connection }: DaemonSettingsTabProps) {
 function AccountsPanel({ connection }: DaemonSettingsTabProps) {
   const { createSecretClient } = useFrameLive();
   const routed = useDaemonClient();
-  return <LoginsSurface connection={connection} createClient={createSecretClient ?? routed} />;
+  const health = useDaemonHealth(connection);
+  const requireAddKey = useAddKeyStepUp();
+  const createClient = createSecretClient ?? routed;
+  // A machine that does not say it has accounts keeps today's saved-logins surface, whatever the reason it is silent.
+  if (!machineOffers(health, DAEMON_FEATURES.accountsSignIns))
+    return <LoginsSurface connection={connection} createClient={createClient} />;
+  const withKeys = machineOffers(health, DAEMON_FEATURES.twoFactorKeys);
+  return (
+    <AccountsSurface
+      connection={connection}
+      createClient={createClient}
+      withKeys={withKeys}
+      {...(withKeys && requireAddKey !== undefined
+        ? { addKey: (stage: TwoFactorStageId, words: string) => requireAddKey(connection, stage, words) }
+        : {})}
+    />
+  );
 }
 
 function SecureCopyPanel({ connection }: DaemonSettingsTabProps) {
