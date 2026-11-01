@@ -142,6 +142,19 @@ describe('startsInSelection', () => {
     expect(startsInSelection(text, null)).toBe(false);
     expect(startsInSelection(null, selecting(false, true))).toBe(false);
   });
+
+  it('reads the live window selection when none is handed in', () => {
+    const text = el('<p>words</p>');
+    document.body.append(text);
+    window.getSelection()?.removeAllRanges();
+    expect(startsInSelection(text)).toBe(false);
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    window.getSelection()?.addRange(range);
+    expect(startsInSelection(text.firstChild)).toBe(true);
+    window.getSelection()?.removeAllRanges();
+    text.remove();
+  });
 });
 
 describe('the Inbox card’s text', () => {
