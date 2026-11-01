@@ -1,3 +1,13 @@
+## [4.204.0](https://github.com/kirinnee/ferretry/compare/v4.203.0...v4.204.0) (2026-11-01)
+
+### Features
+
+* **pwa:** code cards, automatic-codes setup panel and approve-on-phone card (R2-5) ([#1249](https://github.com/kirinnee/ferretry/issues/1249)) ([2dc2d0a](https://github.com/kirinnee/ferretry/commit/2dc2d0a89ea84c4baf63a1eafd5589a520b2c962))
+
+### Fixes
+
+* **daemon:** require the audit log on the agenda confirm and record the file kind ([#1250](https://github.com/kirinnee/ferretry/issues/1250)) ([3c621ca](https://github.com/kirinnee/ferretry/commit/3c621caa4ec07156f9193d2a9edafb779e0033e3))
+
 ## [4.203.0](https://github.com/kirinnee/ferretry/compare/v4.202.1...v4.203.0) (2026-11-01)
 
 ### Features
