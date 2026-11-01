@@ -1,3 +1,9 @@
+## [4.215.0](https://github.com/kirinnee/ferretry/compare/v4.214.0...v4.215.0) (2026-11-01)
+
+### Features
+
+* **warden:** move a ferret that hit a limit to another login (autoMigrate) ([#1277](https://github.com/kirinnee/ferretry/issues/1277)) ([a6347e6](https://github.com/kirinnee/ferretry/commit/a6347e60c47e122d56372fe03638e5911719070f))
+
 ## [4.214.0](https://github.com/kirinnee/ferretry/compare/v4.213.1...v4.214.0) (2026-11-01)
 
 ### Features

@@ -6,6 +6,7 @@ import { BOARD_EVENT_TYPES, TaskRefSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
   BOARD_CHECKED_EVENT,
+  BOARD_GATE_NUDGED_EVENT,
   JournalBoardChanges,
   JournalBoardChecks,
   StorageSessionFocus,
@@ -225,6 +226,21 @@ describe('the board session adapters', () => {
 
     // Assert
     should(journal.map(entry => entry.data)).eql([{ seen: ['Edit', 'git push'] }]);
+  });
+
+  it('should journal a gate nudge on the nudged session with the items and cards it named, and ignore a session it does not hold', async () => {
+    // Arrange
+    const storage = await openStorage();
+    const id = await session(storage, 'lead');
+    const checks = new JournalBoardChecks(storage);
+
+    // Act
+    await checks.recordGate('lead', ['A44'], ['F412']);
+    await checks.recordGate('ghost', ['A1'], ['F1']);
+    const journal = (await storage.replay(id)).events.filter(entry => entry.type === BOARD_GATE_NUDGED_EVENT);
+
+    // Assert
+    should(journal.map(entry => entry.data)).eql([{ items: ['A44'], cards: ['F412'] }]);
   });
 });
 

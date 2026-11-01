@@ -9,6 +9,8 @@ import {
   resolveBoardProject,
 } from './lane-request';
 import type { ILaneGateway, ILaneOutput } from './ports';
+import { buildWorkflowEditRequest, type WorkflowEditOptions } from './workflow-request';
+import { renderWorkflow } from './workflow-render';
 
 const asJson = (value: unknown): string => JSON.stringify(value, null, 2);
 
@@ -64,6 +66,25 @@ export class LaneController {
       );
     }
     const change = await this.gateway.change(board.id, buildEditRequest(laneSet, options));
+    this.output.success(target.json ? asJson(change) : renderLaneChange(change, board.name));
+  }
+
+  /** `fy board workflow show`: each lane as a gate the owner answers or an automatic step. */
+  async workflow(target: LaneTarget): Promise<void> {
+    const project = await this.gateway.project((await this.target(target.project)).id);
+    this.output.success(target.json ? asJson(project) : renderWorkflow(project, this.binary));
+  }
+
+  /** `fy board workflow edit`: make one lane a gate or an automatic step, through the lanes edit route. */
+  async editWorkflow(target: LaneTarget, options: WorkflowEditOptions): Promise<void> {
+    const board = await this.target(target.project);
+    const { laneSet } = await this.gateway.project(board.id);
+    if (laneSet === null) {
+      refuse(
+        `${board.name} has no lanes to edit; propose them first: ${this.binary} board lanes propose --template <template> --project ${board.name}`,
+      );
+    }
+    const change = await this.gateway.change(board.id, buildWorkflowEditRequest(laneSet, options));
     this.output.success(target.json ? asJson(change) : renderLaneChange(change, board.name));
   }
 }
