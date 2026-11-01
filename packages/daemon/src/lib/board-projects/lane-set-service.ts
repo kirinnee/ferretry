@@ -15,6 +15,7 @@ import {
   type LaneSetActionRequest,
   type LaneSetChangeResponse,
   laneProposalReference,
+  LaneSetSchema,
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
 import { laneProposalCard } from './lane-proposal-card.ts';
@@ -190,8 +191,9 @@ export class LaneSetService implements LaneSetSource {
   /**
    * The boot migration that writes the stage of every lane stored without one ({@link stageLanes}): the
    * stage its compatibility fields already describe, so no card moves and nothing behaves differently. A
-   * damaged set is refused by the store, reported, and the rest go on. Idempotent (a staged set does not
-   * match) and total. The owner is asked nothing.
+   * damaged set is refused by the store, reported, and the rest go on; a staged set the next read would refuse
+   * is never written, since the store does not check what it writes and the board would read as damaged from
+   * then on. Idempotent (a staged set does not match) and total. The owner is asked nothing.
    */
   async stageLanes(): Promise<readonly StageLanesOutcome[]> {
     const ids = [UNFILED_PROJECT_ID, ...(await this.registry.projects()).map(project => project.id)];
@@ -200,6 +202,9 @@ export class LaneSetService implements LaneSetSource {
       try {
         const version = await this.store.transact<number | null>(projectId, current => {
           const next = current === null ? null : stageLanes(current);
+          if (next !== null && !LaneSetSchema.safeParse(next).success) {
+            throw new Error('staging its lanes would leave them unreadable, so they are left as they are');
+          }
           return next === null ? { result: null } : { next, result: next.version };
         });
         if (version !== null) outcomes.push({ projectId, staged: true, version });

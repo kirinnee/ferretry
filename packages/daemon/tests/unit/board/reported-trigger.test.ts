@@ -8,7 +8,7 @@ import {
   LaneSetSchema,
 } from '@ferretry/protocol';
 import should from 'should';
-import { type BoardCaller, BoardError, BoardService } from '../../../src/lib/board/index.ts';
+import { type BoardCaller, BoardError, BoardService, gateOnTheWay } from '../../../src/lib/board/index.ts';
 import { DIRECTORY } from '../sub-ferret/support.ts';
 import { card, FakeLanes, MemoryBoardStore, PROJECT, type ServiceWorld, templateLanes, world } from './support.ts';
 
@@ -341,6 +341,37 @@ describe('a reported trigger', () => {
     // Assert
     should(error.code).equal('invalid');
     should(error.message).equal('&F1 is dropped; reopen it before you report an event on it');
+  });
+});
+
+describe('the gate on the way', () => {
+  const target = (id: string) => LABELLING.lanes.find(entry => entry.id === id) as Lane;
+  const on = (laneId: string, to: string, laneSet = LABELLING) =>
+    gateOnTheWay(laneSet, { laneId, workflow: 'design-first' }, target(to))?.id;
+
+  it('should name the card’s own gate first, then the first gate its variant walks before the target', () => {
+    should(on('send', 'deployed')).equal('send');
+    should(on('prepare', 'deployed')).equal('send');
+    should(on('todo', 'closed')).equal('send');
+  });
+
+  it('should pass none when the target is the next gate, an earlier lane, or the gate is skipped', () => {
+    should(on('prepare', 'send')).be.undefined();
+    should(on('waiting', 'confirm')).be.undefined();
+    should(on('deployed', 'prepare')).be.undefined();
+    should(on('prepare', 'deployed', SKIPS_SEND)).be.undefined();
+  });
+
+  it('should read every lane as walked when the variant names a lane the set lacks', () => {
+    // Arrange
+    const broken = { ...SKIPS_SEND, variants: { 'design-first': ['todo', 'gone'] } } as LaneSet;
+
+    // Act + Assert
+    should(on('prepare', 'deployed', broken)).equal('send');
+  });
+
+  it('should refuse a card in a lane the set lacks', () => {
+    should(() => on('gone', 'deployed')).throw(BoardError);
   });
 });
 

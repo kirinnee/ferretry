@@ -434,6 +434,30 @@ describe('LaneSetService writes out every lane’s stage at boot', () => {
     should((await service.laneSet(UNFILED_PROJECT_ID))?.lanes.every(lane => lane.stage !== undefined)).be.true();
   });
 
+  it('should never write a staged set the next read would refuse', async () => {
+    // Arrange: a stored set no reader accepts (a lane entered on no trigger at all), which only a fake store holds.
+    const { store, service } = world();
+    const broken = oldQuickLanes(DOCS_ID);
+    const unreadable = {
+      ...broken,
+      lanes: broken.lanes.map(lane => (lane.id === 'doing' ? { ...lane, enterOn: [] } : lane)),
+    } as LaneSet;
+    store.sets.set(DOCS_ID, unreadable);
+
+    // Act
+    const outcomes = await service.stageLanes();
+
+    // Assert
+    should(outcomes).deepEqual([
+      {
+        projectId: DOCS_ID,
+        staged: false,
+        problem: 'staging its lanes would leave them unreadable, so they are left as they are',
+      },
+    ]);
+    should(store.sets.get(DOCS_ID)).equal(unreadable);
+  });
+
   it('should report a project whose set it could not read and go on with the rest', async () => {
     // Arrange
     const { store, service } = world();

@@ -315,11 +315,17 @@ export const triggerMove = (
 
 /**
  * The first gate a move from the card's lane to `target` would pass: the card's own lane, else a lane of its
- * variant strictly between the two. Entering a gate is not passing it, so `target` itself never counts.
+ * variant strictly between the two (`laneStage`, so a stored or a derived gate). Entering a gate is not passing
+ * it, so `target` itself never counts, nor does a gate the card's variant skips. `undefined` when it passes
+ * none, a backward target included. Throws `unknown-lane` for a card in a lane the set lacks.
  */
-const gateOnTheWay = (laneSet: LaneSet, card: BoardTask, target: Lane): Lane | undefined => {
+export const gateOnTheWay = (
+  laneSet: LaneSet,
+  card: Pick<BoardTask, 'laneId' | 'workflow'>,
+  target: Lane,
+): Lane | undefined => {
   const at = (id: string): number => laneSet.lanes.findIndex(lane => lane.id === id);
-  // The variant resolves: the lane the trigger names was found in it.
+  // A variant naming a lane the set lacks cannot say what is walked, so every lane is.
   const walked = variantLanes(laneSet, card.workflow);
   const between = (walked.ok ? walked.value : laneSet.lanes).filter(
     lane => at(lane.id) > at(card.laneId) && at(lane.id) < at(target.id),
