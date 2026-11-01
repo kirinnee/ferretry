@@ -57,6 +57,15 @@ export class PeerWatch {
     return `${this.#name} — ${now}; reported: ${this.#log.join(', ') || 'nothing'}`;
   }
 
+  /** Applies the remote answer; a refusal carries the peer's history, because it says the peer was already closed. */
+  answered(sdp: string): void {
+    try {
+      this.#peer.setRemoteDescription(sdp, 'answer');
+    } catch (error) {
+      throw new Error(`${error instanceof Error ? error.message : String(error)} — ${this.describe()}`);
+    }
+  }
+
   /** Resolves once the peer has finished gathering; fails with the peer's history when it never does. */
   async gathered(): Promise<void> {
     await this.#until(() => this.#gathered || this.#peer.gatheringState() === 'complete', 'to finish gathering');

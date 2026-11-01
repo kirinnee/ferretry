@@ -146,7 +146,7 @@ async function connect(carrier: WebRtcCarrier): Promise<Client> {
   if (offer === null) throw new Error('the browser peer produced no offer');
   const answered = await carrier.offer(offer.sdp, { deviceId: DEVICE_ID, appSession: APP_SESSION });
   if (answered.kind !== 'answered') throw new Error(answered.reason);
-  peer.setRemoteDescription(answered.sdp, 'answer');
+  watch.answered(answered.sdp);
   await watch.opened(channel, WEBRTC_SESSION_CHANNEL_LABEL);
   return client;
 }

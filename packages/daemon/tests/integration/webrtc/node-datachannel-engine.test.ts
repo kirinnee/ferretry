@@ -483,7 +483,7 @@ async function loopbackOffer(): Promise<{
   return {
     sdp: offer.sdp,
     accept: async answer => {
-      peer.setRemoteDescription(answer, 'answer');
+      watch.answered(answer);
       await watch.opened(channel, 'fy-session');
     },
     close: () => peer.close(),
