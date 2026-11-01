@@ -183,6 +183,7 @@ describe('shared draft schemas', () => {
   const snapshot = {
     v: 1,
     sessionId: 's-1',
+    generation: 'gen-1',
     epoch: 0,
     rev: 3,
     text: 'hello',
@@ -198,12 +199,20 @@ describe('shared draft schemas', () => {
     {
       name: 'edit',
       schema: draft.SharedDraftEditSchema,
-      value: { epoch: 0, base: 3, text: [5, '!'], add: [attachment], remove: ['loc-1'], sent: true },
+      value: {
+        generation: 'gen-1',
+        epoch: 0,
+        base: 3,
+        text: [5, '!'],
+        add: [attachment],
+        remove: ['loc-1'],
+        sent: true,
+      },
     },
     {
       name: 'edit result',
       schema: draft.SharedDraftEditResultSchema,
-      value: { applied: { epoch: 0, rev: 4, text: [5, '!'], add: [], remove: [] }, snapshot },
+      value: { applied: { generation: 'gen-1', epoch: 0, rev: 4, text: [5, '!'], add: [], remove: [] }, snapshot },
     },
   ];
 
@@ -212,7 +221,11 @@ describe('shared draft schemas', () => {
     assertCoversEverySchema(draft, cases);
   });
 
-  it('refuses a zero step, an empty insert, an oversized draft and an unknown field', () => {
+  it('accepts an edit that inserts exactly one whole draft', () => {
+    should(draft.TextOpSchema.safeParse(['x'.repeat(SHARED_DRAFT_MAX_CHARS)]).success).be.true();
+  });
+
+  it('refuses a zero step, an empty insert, an oversized draft, a missing generation and an unknown field', () => {
     assertRejects([
       { name: 'zero', schema: draft.TextOpSchema, value: [0] },
       { name: 'empty insert', schema: draft.TextOpSchema, value: [''] },
@@ -222,8 +235,23 @@ describe('shared draft schemas', () => {
         schema: draft.SharedDraftSnapshotSchema,
         value: { ...snapshot, text: 'x'.repeat(SHARED_DRAFT_MAX_CHARS + 1) },
       },
-      { name: 'extra', schema: draft.SharedDraftEditSchema, value: { epoch: 0, base: 0, by: 'agent' } },
-      { name: 'sent false', schema: draft.SharedDraftEditSchema, value: { epoch: 0, base: 0, sent: false } },
+      {
+        name: 'extra',
+        schema: draft.SharedDraftEditSchema,
+        value: { generation: 'g', epoch: 0, base: 0, by: 'agent' },
+      },
+      {
+        name: 'sent false',
+        schema: draft.SharedDraftEditSchema,
+        value: { generation: 'g', epoch: 0, base: 0, sent: false },
+      },
+      { name: 'no generation', schema: draft.SharedDraftEditSchema, value: { epoch: 0, base: 0 } },
+      { name: 'empty generation', schema: draft.SharedDraftSnapshotSchema, value: { ...snapshot, generation: '' } },
+      {
+        name: 'inserts more than a draft holds, spread over many steps',
+        schema: draft.TextOpSchema,
+        value: Array.from({ length: 3 }, () => 'x'.repeat(SHARED_DRAFT_MAX_CHARS / 2)),
+      },
       { name: 'bad latitude', schema: draft.SharedDraftLocationSchema, value: { ...location, latitude: 91 } },
     ]);
   });

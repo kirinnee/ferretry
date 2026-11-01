@@ -11945,6 +11945,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               return { cancel: () => clearTimeout(timer) };
             },
           },
+          // A generation must never repeat across restarts, so it is random rather than counted.
+          { next: () => crypto.randomUUID() },
         ),
         sessions: withRevive(
           withContext(

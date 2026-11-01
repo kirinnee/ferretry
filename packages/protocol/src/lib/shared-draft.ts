@@ -33,6 +33,7 @@ export const SHARED_DRAFT_HISTORY_LIMIT = 200;
 /** Ids and labels an item carries are shown to a person, so they are bounded like any other label. */
 const SHARED_DRAFT_ID_MAX = 128;
 const SHARED_DRAFT_LABEL_MAX = 255;
+const SHARED_DRAFT_GENERATION_MAX = 64;
 
 // ── Text operations ──────────────────────────────────────────────────────────────────────────────
 
@@ -56,7 +57,20 @@ const TextOpComponentSchema = z.union([
   z.string().min(1).max(SHARED_DRAFT_MAX_CHARS),
 ]);
 
-export const TextOpSchema = z.array(TextOpComponentSchema).max(SHARED_DRAFT_MAX_OP_COMPONENTS).readonly();
+/**
+ * Every insert together is held to the size of a whole draft, so one request cannot make the daemon
+ * build a string many times longer than any draft before the length check refuses it.
+ */
+export const TextOpSchema = z
+  .array(TextOpComponentSchema)
+  .max(SHARED_DRAFT_MAX_OP_COMPONENTS)
+  .readonly()
+  .refine(
+    op =>
+      op.reduce<number>((total, component) => total + (typeof component === 'string' ? component.length : 0), 0) <=
+      SHARED_DRAFT_MAX_CHARS,
+    `an edit inserts at most ${SHARED_DRAFT_MAX_CHARS} characters`,
+  );
 
 const isRetain = (component: TextOpComponent | undefined): component is number =>
   typeof component === 'number' && component > 0;
@@ -245,6 +259,8 @@ export const composeTextOps = (first: TextOp, second: TextOp): TextOp => {
  *
  * `a` WINS A TIE: where both insert at the same place, `a`'s text comes first. The daemon passes the
  * edit it already sequenced as `a`, so the order a person sees is the order the daemon received them.
+ * A CLIENT MUST DO THE SAME: `transformTextOps(sequencedByDaemon, myPending)`, the daemon's edit
+ * first. Passing them the other way round breaks every tie the other way, and the devices diverge.
  */
 export const transformTextOps = (a: TextOp, b: TextOp): readonly [TextOp, TextOp] => {
   if (textOpBaseLength(a) !== textOpBaseLength(b))
@@ -365,9 +381,18 @@ export type SharedDraftItem = z.infer<typeof SharedDraftItemSchema>;
 
 // ── The draft and an edit to it ──────────────────────────────────────────────────────────────────
 
+/**
+ * Which life of the daemon's in-memory draft revisions belong to. A fresh one is minted every time a
+ * draft is loaded into memory, so after a restart — which may have lost the last second of edits — a
+ * device still holding a revision number from before is refused rather than merged: the same number
+ * may now name different text.
+ */
+const SharedDraftGenerationSchema = z.string().min(1).max(SHARED_DRAFT_GENERATION_MAX);
+
 export const SharedDraftSnapshotSchema = z.strictObject({
   v: z.literal(SHARED_DRAFT_SCHEMA_VERSION),
   sessionId: z.string().min(1),
+  generation: SharedDraftGenerationSchema,
   /**
    * Bumped each time a send empties the draft. An edit from an older epoch was typed into a message
    * that has already gone, so it is refused rather than folded into the next one.
@@ -389,6 +414,7 @@ export type SharedDraftSnapshot = z.infer<typeof SharedDraftSnapshotSchema>;
  * is still there, because the send's deletes were transformed past it like any other edit.
  */
 export const SharedDraftEditSchema = z.strictObject({
+  generation: SharedDraftGenerationSchema,
   epoch: NonNegativeIntegerSchema,
   base: NonNegativeIntegerSchema,
   text: TextOpSchema.optional(),
@@ -401,9 +427,13 @@ export type SharedDraftEdit = z.infer<typeof SharedDraftEditSchema>;
 /**
  * The daemon's answer to an edit: the edit AS SEQUENCED — transformed past everything that landed
  * after its base, so any device at revision `rev - 1` of `epoch` can apply it — and the draft after it.
+ *
+ * Items are applied `remove` FIRST, then `add`: an id in both is a replacement, and every device
+ * has to agree on that order to end up with the same chips.
  */
 export const SharedDraftEditResultSchema = z.strictObject({
   applied: z.strictObject({
+    generation: SharedDraftGenerationSchema,
     epoch: NonNegativeIntegerSchema,
     rev: NonNegativeIntegerSchema,
     text: TextOpSchema,
@@ -416,7 +446,10 @@ export type SharedDraftEditResult = z.infer<typeof SharedDraftEditResultSchema>;
 
 /** Why an edit was refused, as the code an `ApiError` carries. */
 export const SHARED_DRAFT_ERROR_CODES = {
-  /** The edit's base is older than the history the daemon keeps, or names an epoch already sent. */
+  /**
+   * The edit's base is older than the history the daemon keeps, names an epoch already sent, or comes
+   * from a generation before the daemon last loaded the draft.
+   */
   stale: 'shared_draft_stale',
   /** The edit would leave more than {@link SHARED_DRAFT_MAX_CHARS} characters. */
   tooLong: 'shared_draft_too_long',
@@ -424,6 +457,6 @@ export const SHARED_DRAFT_ERROR_CODES = {
   tooManyItems: 'shared_draft_too_many_items',
   /** The edit's text does not fit the draft it claims to be based on. */
   invalid: 'shared_draft_invalid',
-  /** Only the owner's own devices and own shell may read or edit a draft — never an agent. */
+  /** Only the owner's own paired devices and own shell may read or edit a draft — never an agent. */
   ownerOnly: 'shared_draft_owner_only',
 } as const;

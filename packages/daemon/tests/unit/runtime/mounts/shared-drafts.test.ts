@@ -3,7 +3,7 @@ import { SHARED_DRAFT_MAX_CHARS } from '@ferretry/protocol';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
-import { assertDraftOwner, sharedDraftRoutes } from '../../../../src/lib/runtime/index.ts';
+import { assertDraftOwner, SHARED_DRAFT_MAX_BODY_BYTES, sharedDraftRoutes } from '../../../../src/lib/runtime/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { AT, agentIn, CREDENTIALS, human, sharedDraftService } from './support.ts';
 
@@ -25,17 +25,21 @@ function fixture() {
   };
 }
 
-const edit = (body: unknown, headers: Readonly<Record<string, string>> = human) => ({
+/** An edit in the generation every draft in this fixture is loaded in. */
+const edit = (body: Readonly<Record<string, unknown>>, headers: Readonly<Record<string, string>> = human) => ({
   method: 'POST',
   path: PATH,
   headers,
-  body: JSON.stringify(body),
+  body: JSON.stringify({ generation: 'gen-1', ...body }),
 });
+
+/** The admin token with no client header: what a bare request with a found token looks like. */
+const bareAdmin = { authorization: `Bearer ${CREDENTIALS.admin}` } as const;
 
 describe('assertDraftOwner', () => {
   it("should admit only the owner's shell, the owner's app and the owner's paired devices", () => {
-    for (const actor of ['admin-cli', 'admin-ui', 'device:d1']) should(() => assertDraftOwner(actor)).not.throw();
-    for (const actor of ['peer:s1', 'warden:s1', 'warden', 'device-like:x', '', undefined])
+    for (const actor of ['admin-cli', 'device:d1']) should(() => assertDraftOwner(actor)).not.throw();
+    for (const actor of ['admin-ui', 'peer:s1', 'warden:s1', 'warden', 'device-like:x', '', undefined])
       should(() => assertDraftOwner(actor)).throw({ status: 403, code: 'shared_draft_owner_only' });
   });
 });
@@ -53,6 +57,7 @@ describe('shared draft routes', () => {
     should(jsonBody(response)).deepEqual({
       v: 1,
       sessionId: 's1',
+      generation: 'gen-1',
       epoch: 0,
       rev: 0,
       text: '',
@@ -72,7 +77,7 @@ describe('shared draft routes', () => {
     // Assert
     should(response.status).equal(200);
     should(jsonBody(response)).match({
-      applied: { epoch: 0, rev: 1, text: ['hi'], add: [], remove: [] },
+      applied: { generation: 'gen-1', epoch: 0, rev: 1, text: ['hi'], add: [], remove: [] },
       snapshot: { rev: 1, text: 'hi' },
     });
   });
@@ -119,6 +124,54 @@ describe('shared draft routes', () => {
     should(missing.status).equal(404);
     should(traversal.status).equal(400);
     should(jsonBody(traversal)).have.property('code', 'invalid_session_id');
+  });
+
+  it('should refuse a bare admin-token request that names no client', async () => {
+    // Arrange
+    const { dispatch } = fixture();
+
+    // Act
+    const response = await dispatch({ path: PATH, headers: bareAdmin });
+
+    // Assert
+    should(response.status).equal(403);
+    should(jsonBody(response)).have.property('code', 'shared_draft_owner_only');
+  });
+
+  it('should refuse an agent BEFORE reading its body: malformed or oversized, the answer is the same 403', async () => {
+    // Arrange
+    const { dispatch } = fixture();
+
+    // Act
+    const malformed = await dispatch({ method: 'POST', path: PATH, headers: agentIn('s1'), body: '{not json' });
+    const oversized = await dispatch({
+      method: 'POST',
+      path: PATH,
+      headers: agentIn('s1'),
+      body: 'x'.repeat(SHARED_DRAFT_MAX_BODY_BYTES + 1),
+    });
+
+    // Assert
+    for (const response of [malformed, oversized]) {
+      should(response.status).equal(403);
+      should(jsonBody(response)).have.property('code', 'shared_draft_owner_only');
+    }
+  });
+
+  it("should hold the owner's edit to a draft-sized body", async () => {
+    // Arrange
+    const { dispatch } = fixture();
+
+    // Act
+    const response = await dispatch({
+      method: 'POST',
+      path: PATH,
+      headers: human,
+      body: JSON.stringify({ generation: 'gen-1', epoch: 0, base: 0, text: ['x'.repeat(SHARED_DRAFT_MAX_BODY_BYTES)] }),
+    });
+
+    // Assert
+    should(response.status).equal(413);
   });
 
   it('should refuse a malformed edit at the boundary', async () => {

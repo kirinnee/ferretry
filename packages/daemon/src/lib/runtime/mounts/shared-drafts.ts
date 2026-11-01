@@ -14,14 +14,25 @@ import { SharedDraftError, type SharedDraftErrorCode, type SharedDraftService } 
  * callers, and the dispatcher refuses a member session before any main-table route is looked up. That
  * leaves an AGENT using the admin bearer from inside its own pane, which the boundary attributes as
  * `peer:<its session>` — and a draft is exactly what an agent must not read before it is sent. So the
- * actor is checked here too: the owner's own shell (`admin-cli`), the owner's app (`admin-ui`) or one
- * of the owner's paired devices (`device:<id>`), and nobody else. Like `isHumanAdminActor`, this
- * is a boundary for honest clients sharing one machine, not a cryptographic one.
+ * actor is checked here too: the owner's own shell (`admin-cli`) or one of the owner's paired devices
+ * (`device:<id>`), and nobody else. `admin-ui` is deliberately NOT admitted: every browser is a paired
+ * device now, so that actor only ever means an admin token sent with no client header at all — a bare
+ * request, which is what an agent that found the token would send. Like `isHumanAdminActor`, this is a
+ * boundary for honest clients sharing one machine, not a cryptographic one.
+ *
+ * The gate runs BEFORE the body is read, so a refused caller learns nothing — not even whether its edit
+ * would have parsed.
  *
  * `noStore` because a draft is live and private: no cache should ever hold one.
  */
 
-const OWNER_ACTOR_KINDS: ReadonlySet<string> = new Set(['admin-cli', 'admin-ui', 'device']);
+const OWNER_ACTOR_KINDS: ReadonlySet<string> = new Set(['admin-cli', 'device']);
+
+/**
+ * An edit is at most one draft's worth of escaped text plus twenty items, far under this. A text route
+ * must not inherit the attachment-sized default ceiling (`api/body.ts`).
+ */
+export const SHARED_DRAFT_MAX_BODY_BYTES = 128 * 1024;
 
 const ERROR_STATUS: Readonly<Record<SharedDraftErrorCode, readonly [number, string]>> = {
   'not-found': [404, 'not-found'],
@@ -64,7 +75,7 @@ async function read(drafts: SharedDraftService, context: RouteContext): Promise<
 async function edit(drafts: SharedDraftService, context: RouteContext): Promise<ApiResponse> {
   assertDraftOwner(context.actor);
   const sessionId = pathSessionId(context);
-  const request = await parseBody(context.request, SharedDraftEditSchema);
+  const request = await parseBody(context.request, SharedDraftEditSchema, { maxBytes: SHARED_DRAFT_MAX_BODY_BYTES });
   return jsonResponse(await drafts.edit(sessionId, request).catch(reraise));
 }
 

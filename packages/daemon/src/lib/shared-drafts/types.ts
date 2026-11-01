@@ -30,3 +30,8 @@ export class SharedDraftError extends Error {
     this.name = 'SharedDraftError';
   }
 }
+
+/** Mints the id a draft's generation carries: unique per load, so no two lives of a draft share one. */
+export interface SharedDraftGenerationSource {
+  next(): string;
+}

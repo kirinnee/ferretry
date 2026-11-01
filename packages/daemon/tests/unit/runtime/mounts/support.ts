@@ -271,6 +271,7 @@ export function sharedDraftService(known: readonly string[], instant: string = A
     { load: async () => undefined, save: async () => undefined },
     { now: () => instant },
     { after: () => ({ cancel: () => undefined }) },
+    { next: () => 'gen-1' },
   );
 }
 

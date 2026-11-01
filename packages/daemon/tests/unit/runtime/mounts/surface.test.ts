@@ -27,7 +27,7 @@ import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts'
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
 import { MemoryTranscript } from '../../../support/transcript-images.ts';
 import { agentToolWorld, PREFIXED_S1 } from '../../agent-tools/support.ts';
-import { fixedClock, request } from '../../api/support.ts';
+import { fixedClock, jsonBody, request } from '../../api/support.ts';
 import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
 import {
   type PhoneApprovalDependencies,
@@ -38,6 +38,7 @@ import { inputRequestService } from '../../input-requests/support.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
 import {
   agendaService,
+  agentIn,
   analyticsSubsystem,
   attachSubsystem,
   boardSubsystem,
@@ -379,7 +380,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     enrolledDevices: async () => 0,
   },
   pins: pinService([]),
-  sharedDrafts: sharedDraftService([]),
+  sharedDrafts: sharedDraftService(['s1']),
   sessions: sessionDirectory([sessionView('s1')]),
   sessionAddresses: {
     has: id => id === 's1',
@@ -1407,6 +1408,30 @@ describe('the mounted daemon surface', () => {
     // Assert — the fleet list and the board list: names, states, work text and launch-instruction hashes.
     should(compressed).eql(['/v1/board', '/v1/sessions']);
     should(routes.filter(route => route.method !== 'GET' && route.compress === true)).eql([]);
+  });
+
+  it("should keep the owner's draft from an agent through the whole mounted table, and serve it to their device", async () => {
+    // Arrange — the real table: session addressing, agent control and the audit wrappers all in front.
+    const mounted = subsystems();
+    await mounted.grants.refresh();
+    const dispatcher = createMountedDispatcher(base, mounted);
+    const device = { deviceId: `fy_device_id_${'d'.repeat(22)}`, appSession: 'app-one' } as const;
+    const edit = JSON.stringify({ generation: 'gen-1', epoch: 0, base: 0, text: ['unsent words'] });
+
+    // Act
+    const written = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/sessions/s1/shared-draft', device, body: edit }),
+    );
+    const byDevice = await dispatcher.dispatch(request({ path: '/v1/sessions/Aniya/shared-draft', device }));
+    const byAgent = await dispatcher.dispatch(
+      request({ path: '/v1/sessions/s1/shared-draft', headers: agentIn('s1') }),
+    );
+
+    // Assert
+    should(written.status).equal(200);
+    should(jsonBody(byDevice)).match({ text: 'unsent words' });
+    should(byAgent.status).equal(403);
+    should(JSON.stringify(jsonBody(byAgent))).not.containEql('unsent');
   });
 
   it('should dispatch a base feed and a subsystem route through the same dispatcher', async () => {

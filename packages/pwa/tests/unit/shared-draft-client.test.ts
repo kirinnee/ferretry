@@ -9,6 +9,7 @@ const scope = daemonSessionScope(daemon, 'sess one');
 const snapshot = {
   v: 1 as const,
   sessionId: 'sess one',
+  generation: 'gen-1',
   epoch: 0,
   rev: 1,
   text: 'hi',
@@ -30,20 +31,25 @@ describe('shared draft client', () => {
 
   test('posts an edit as JSON and returns the edit as the daemon sequenced it', async () => {
     let sent: RequestInit | undefined;
-    const result = await editSharedDraft(daemon, scope, { epoch: 0, base: 1, text: [2, '!'] }, async (_input, init) => {
-      sent = init;
-      return Response.json({
-        applied: { epoch: 0, rev: 2, text: [2, '!'], add: [], remove: [] },
-        snapshot: { ...snapshot, rev: 2, text: 'hi!' },
-      });
-    });
+    const result = await editSharedDraft(
+      daemon,
+      scope,
+      { generation: 'gen-1', epoch: 0, base: 1, text: [2, '!'] },
+      async (_input, init) => {
+        sent = init;
+        return Response.json({
+          applied: { generation: 'gen-1', epoch: 0, rev: 2, text: [2, '!'], add: [], remove: [] },
+          snapshot: { ...snapshot, rev: 2, text: 'hi!' },
+        });
+      },
+    );
     expect(sent?.method).toBe('POST');
-    expect(JSON.parse(String(sent?.body))).toEqual({ epoch: 0, base: 1, text: [2, '!'] });
+    expect(JSON.parse(String(sent?.body))).toEqual({ generation: 'gen-1', epoch: 0, base: 1, text: [2, '!'] });
     expect(result.snapshot.text).toBe('hi!');
   });
 
   test('keeps the daemon’s own refusal code, so the composer can tell stale from too long', async () => {
-    const refused = editSharedDraft(daemon, scope, { epoch: 0, base: 0 }, async () =>
+    const refused = editSharedDraft(daemon, scope, { generation: 'gen-1', epoch: 0, base: 0 }, async () =>
       Response.json({ error: 'read the draft again', code: 'shared_draft_stale' }, { status: 409 }),
     );
     await expect(refused).rejects.toMatchObject({ status: 409, code: 'shared_draft_stale' });
@@ -56,7 +62,9 @@ describe('shared draft client', () => {
     await expect(foreign).rejects.toBeInstanceOf(DaemonResponseError);
     const shapeless = fetchSharedDraft(daemon, scope, async () => Response.json({ text: 'hi' }));
     await expect(shapeless).rejects.toMatchObject({ status: 502 });
-    const noDraft = editSharedDraft(daemon, scope, { epoch: 0, base: 0 }, async () => Response.json({}));
+    const noDraft = editSharedDraft(daemon, scope, { generation: 'gen-1', epoch: 0, base: 0 }, async () =>
+      Response.json({}),
+    );
     await expect(noDraft).rejects.toMatchObject({ status: 502 });
     const other = daemonConnection({ daemonId: 'other', baseUrl: 'https://o.example.test', deviceId: 'd' });
     await expect(fetchSharedDraft(other, scope, async () => Response.json(snapshot))).rejects.toThrow(
