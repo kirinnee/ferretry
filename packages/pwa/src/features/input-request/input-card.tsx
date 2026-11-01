@@ -769,7 +769,7 @@ function InputForm({ request, fields, client, blocked, busy, cancel, onSettled, 
     const username = offerUsername(offer);
     return (
       <button
-        className="kt-btn min-h-[44px] min-w-0 flex-col items-start justify-center text-left"
+        className="kt-btn !h-auto min-h-[44px] min-w-0 flex-col items-start justify-center py-2 text-left"
         data-input-offer={offer.id}
         data-input-offer-matched={offer.matched ? '' : undefined}
         data-variant={primaryTap ? 'primary' : undefined}
