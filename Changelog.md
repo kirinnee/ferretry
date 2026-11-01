@@ -1,3 +1,13 @@
+## [4.195.0](https://github.com/kirinnee/ferretry/compare/v4.194.0...v4.195.0) (2026-11-01)
+
+### Features
+
+* **daemon:** the input card bridge over sign-ins (R1-3) ([#1234](https://github.com/kirinnee/ferretry/issues/1234)) ([2967cd1](https://github.com/kirinnee/ferretry/commit/2967cd178976fe857403c4c8e98149bf7752c168))
+
+### Fixes
+
+* **pwa:** match the run pager's 2/2 in the swipe-down Skip test ([#1238](https://github.com/kirinnee/ferretry/issues/1238)) ([c0fb908](https://github.com/kirinnee/ferretry/commit/c0fb9089972d582a30889c3452cb772e3b49ca5e))
+
 ## [4.194.0](https://github.com/kirinnee/ferretry/compare/v4.193.0...v4.194.0) (2026-11-01)
 
 ### Features
