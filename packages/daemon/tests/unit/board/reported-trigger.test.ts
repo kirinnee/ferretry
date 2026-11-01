@@ -96,6 +96,12 @@ const DEPLOY_CLOSES: LaneSet = LaneSetSchema.parse({
   variants: {},
 });
 
+/** The same flow with a ferret's own Check in place of the owner's Send for review? gate. */
+const CHECKED: LaneSet = LaneSetSchema.parse({
+  ...LABELLING,
+  lanes: LABELLING.lanes.map(entry => (entry.id === 'send' ? lane('check', 'review') : entry)),
+});
+
 /** The same flow, where the deploy itself would close the card. */
 const CLOSES_ON_DEPLOY: LaneSet = LaneSetSchema.parse({
   ...LABELLING,
@@ -223,18 +229,48 @@ describe('a reported trigger', () => {
     should(there.ports.store.writes).eql([]);
   });
 
-  it('should move a blocked card anyway and say what it was blocked by, as a fact does', async () => {
-    // Arrange
-    const { ports, service } = serviceWith([
-      card({ laneId: 'waiting', dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] }),
-      card({ id: 'F2' }),
-    ]);
+  it('should not move a blocked card on for a ferret: a dependency holds a report as it holds a move', async () => {
+    for (const caller of [lead, child]) {
+      // Arrange
+      const { ports, service } = serviceWith(
+        [
+          card({
+            laneId: 'waiting',
+            owner: 'lead',
+            assignee: 'child',
+            dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }],
+          }),
+          card({ id: 'F2' }),
+        ],
+        LABELLING,
+        { subFerrets: DIRECTORY },
+      );
+
+      // Act
+      const error = await refusal(service.act('F1', report('deploy.done'), caller));
+
+      // Assert
+      should(error.code).equal('blocked-by');
+      should(error.message).equal(
+        '&F1 is blocked by &F2: a report does not move it on to deployed until they ship (only the owner may override a dependency)',
+      );
+      should(ports.store.writes).eql([]);
+    }
+  });
+
+  it('should move a blocked card within its category, and on for the owner, saying what blocked it', async () => {
+    // Arrange: Check and Waiting are both review lanes, so a move between them is sideways.
+    const blocked = { owner: 'lead', dependsOn: [{ task: { id: 'F2' }, until: 'shipped' as const }] };
+    const sideways = serviceWith([card({ ...blocked, laneId: 'check' }), card({ id: 'F2' })], CHECKED);
+    const owned = serviceWith([card({ ...blocked, laneId: 'waiting' }), card({ id: 'F2' })]);
 
     // Act
-    await service.act('F1', report('deploy.done'), lead);
+    await sideways.service.act('F1', report('pr.review_approved'), lead);
+    await owned.service.act('F1', report('deploy.done'), owner);
 
     // Assert
-    should(lastEvent(ports)).match({ to: 'deployed', reason: 'deploy.done while blocked by &F2' });
+    should(lastEvent(sideways.ports)).match({ to: 'waiting', reason: 'pr.review_approved while blocked by &F2' });
+    should(lastEvent(owned.ports)).match({ to: 'deployed', reason: 'deploy.done while blocked by &F2' });
   });
 
   it('should leave a gate the owner has not answered to the owner', async () => {
@@ -438,6 +474,40 @@ describe('a sub-ferret reporting a trigger', () => {
     should(lastEvent(ports)).match({ reportedBy: { kind: 'ferret', sessionId: 'child' } });
   });
 
+  it('should be refused on a card it owns but is not doing, and told whom to tell', async () => {
+    // Arrange: child owns F1, which another ferret is doing.
+    const { ports, service } = serviceWith(
+      [card({ laneId: 'waiting', owner: 'child', assignee: 'stranger' })],
+      LABELLING,
+      {
+        subFerrets: DIRECTORY,
+      },
+    );
+
+    // Act
+    const error = await refusal(service.act('F1', report('deploy.done'), child));
+
+    // Assert
+    should(error.code).equal('forbidden');
+    should(error.message).equal(
+      'Sub-ferrets don\'t report events on a card they are not doing; tell your lead: fy send lizzette "…"',
+    );
+    should(ports.store.writes).eql([]);
+  });
+
+  it('should leave a lead free to report on any card its standing reaches', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ laneId: 'waiting', owner: 'lead', assignee: 'child' })], LABELLING, {
+      subFerrets: DIRECTORY,
+    });
+
+    // Act
+    await service.act('F1', report('deploy.done'), lead);
+
+    // Assert
+    should(stored(ports).laneId).equal('deployed');
+  });
+
   it('should be refused on a card it has no standing on', async () => {
     // Arrange
     const { service } = serviceWith([card({ laneId: 'waiting', owner: 'lead', assignee: 'child' })], LABELLING, {
@@ -449,5 +519,39 @@ describe('a sub-ferret reporting a trigger', () => {
 
     // Assert
     should(error.code).equal('forbidden');
+  });
+});
+
+describe('a move and a report agree on the owner’s gates', () => {
+  /** A hand-made set whose verify lane is not owner-gated, with a lane after it a ferret could reach. */
+  const UNGATED_VERIFY: LaneSet = LaneSetSchema.parse({
+    projectId: PROJECT,
+    version: 1,
+    confirmedBy: 'owner',
+    proposedBy: 'lead',
+    lanes: [
+      lane('todo', 'backlog'),
+      lane('doing', 'active', { enterOn: ['work.started'] }),
+      lane('check', 'verify', { enterOn: ['pr.merged'] }),
+      lane('live', 'shipped', { enterOn: ['deploy.done'] }),
+      lane('closed', 'closed', { ownerGate: true }),
+    ],
+    variants: {},
+  });
+
+  it('should keep a ferret’s move and its report out of a verify lane alike, and let the owner move it', async () => {
+    // Arrange
+    const moving = serviceWith([card({ laneId: 'check', owner: 'lead' })], UNGATED_VERIFY);
+    const reporting = serviceWith([card({ laneId: 'check', owner: 'lead' })], UNGATED_VERIFY);
+    const owning = serviceWith([card({ laneId: 'check', owner: 'lead' })], UNGATED_VERIFY);
+
+    // Act
+    const moved = await refusal(moving.service.act('F1', action({ action: 'move', to: 'live' }), lead));
+    const reported = await refusal(reporting.service.act('F1', report('deploy.done'), lead));
+    await owning.service.act('F1', action({ action: 'move', to: 'live' }), owner);
+
+    // Assert
+    should([moved.code, reported.code]).eql(['owner-gate', 'owner-gate']);
+    should(stored(owning.ports).laneId).equal('live');
   });
 });

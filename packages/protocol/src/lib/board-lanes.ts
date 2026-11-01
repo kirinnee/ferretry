@@ -795,8 +795,9 @@ export const laneForTrigger = (
 };
 
 /**
- * Whether only the owner may make this move: into an owner-gated `closed` lane, or forward out of an
- * owner-gated lane of any other category. A backward move never needs the owner's gate (it needs a reason).
+ * Whether only the owner may make this move: into an owner-gated `closed` lane, or forward out of a gate
+ * ({@link laneStage}: a `verify` lane is one whether or not it is owner-gated) or any other owner-gated lane.
+ * A backward move never needs the owner's gate (it needs a reason).
  */
 export const needsOwner = (laneSet: Lanes, from: string, to: string): BoardResult<boolean, LaneLookupError> => {
   const origin = laneOf(laneSet, from);
@@ -805,7 +806,8 @@ export const needsOwner = (laneSet: Lanes, from: string, to: string): BoardResul
   if (!target.ok) return target;
   if (target.value.category === 'closed' && target.value.ownerGate === true) return boardOk(true);
   const backward = laneSet.lanes.indexOf(target.value) < laneSet.lanes.indexOf(origin.value);
-  return boardOk(!backward && origin.value.id !== target.value.id && origin.value.ownerGate === true);
+  const gated = origin.value.ownerGate === true || laneStage(origin.value).kind === 'gate';
+  return boardOk(!backward && origin.value.id !== target.value.id && gated);
 };
 
 export type GateOutcomeError =

@@ -97,8 +97,8 @@ describe('the lane-set store', () => {
       });
 
       // Assert
-      should(version).equal(4);
-      should(await store.read(PROJECT)).eql({ ...proposal(4) });
+      should(version).equal(3);
+      should(await store.read(PROJECT)).eql(proposal(3));
       const onDisk = JSON.parse(await readFile(join(directory, `${PROJECT}.json`), 'utf8')) as LaneSet;
       should(onDisk.lanes.map(lane => lane.stage?.kind)).eql(['auto', 'gate', 'auto', 'auto']);
     });

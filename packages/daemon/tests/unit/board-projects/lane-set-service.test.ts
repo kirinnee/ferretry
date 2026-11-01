@@ -409,8 +409,8 @@ describe('LaneSetService writes out every lane’s stage at boot', () => {
 
     // Assert
     should(outcomes).deepEqual([
-      { projectId: UNFILED_PROJECT_ID, staged: true, version: 3 },
-      { projectId: FERRETRY_ID, staged: true, version: 6 },
+      { projectId: UNFILED_PROJECT_ID, staged: true, version: 2 },
+      { projectId: FERRETRY_ID, staged: true, version: 5 },
     ]);
     should(store.sets.get(FERRETRY_ID)?.lanes.every(lane => lane.stage !== undefined)).be.true();
     should(store.sets.get(FERRETRY_ID)?.confirmedBy).equal('owner');
@@ -476,7 +476,22 @@ describe('LaneSetService writes out every lane’s stage at boot', () => {
     should(outcomes).deepEqual([
       { projectId: UNFILED_PROJECT_ID, staged: false, problem: 'disk gone' },
       { projectId: FERRETRY_ID, staged: false, problem: 'refusing to use a damaged lane set' },
-      { projectId: DOCS_ID, staged: true, version: 2 },
+      { projectId: DOCS_ID, staged: true, version: 1 },
     ]);
+  });
+
+  it('should leave a pending proposal acceptable: Accept on its card still confirms the staged set', async () => {
+    // Arrange: a ferret's proposal from before stages, its agenda card waiting on the owner.
+    const { store, service } = world();
+    store.sets.set(DOCS_ID, { ...oldQuickLanes(DOCS_ID), version: 4, confirmedBy: null, proposedBy: 'koen' });
+    await service.stageLanes();
+
+    // Act
+    const accepted = await service.acceptProposal(DOCS_ID, 4);
+
+    // Assert
+    should(accepted).be.true();
+    should(store.sets.get(DOCS_ID)).match({ version: 4, confirmedBy: 'owner' });
+    should(store.sets.get(DOCS_ID)?.lanes.every(lane => lane.stage !== undefined)).be.true();
   });
 });

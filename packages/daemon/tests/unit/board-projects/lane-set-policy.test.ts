@@ -437,14 +437,14 @@ describe('stageLanes', () => {
     ),
   ];
 
-  it('should write out on every lane the stage it already reads, and change nothing else', () => {
+  it('should write out on every lane the stage it already reads, and change nothing else, its version included', () => {
     for (const [, stored] of storedShapes()) {
       // Act
       const next = stageLanes(confirmed(stored));
 
       // Assert
       should(next?.lanes.map(lane => lane.stage)).deepEqual(stored.lanes.map(lane => laneStage(lane)));
-      should(next === null ? null : unstaged(next)).deepEqual({ ...confirmed(stored), version: 7 });
+      should(next === null ? null : unstaged(next)).deepEqual(confirmed(stored));
       should(next?.confirmedBy).equal('owner');
       should(LaneSetSchema.safeParse(next).success).be.true();
     }

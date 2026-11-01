@@ -17,6 +17,7 @@ import {
   laneLayoutProblems,
   laneStage,
   laneUse,
+  needsOwner,
   PLAN_GATE,
   VERIFY_GATE,
 } from '../../src/lib/board-lanes.ts';
@@ -347,5 +348,49 @@ describe('the templates’ stages', () => {
     should(gates('ops')).deepEqual(['verify']);
     should(gates('writing')).deepEqual([]);
     should(gates('quick')).deepEqual(['to-test']);
+  });
+});
+
+describe('the owner’s gate, read from the stage', () => {
+  /** A hand-made set whose verify lane is not owner-gated: it is still the owner's by its category. */
+  const UNGATED_VERIFY: LaneSet = {
+    projectId: PROJECT,
+    version: 1,
+    confirmedBy: 'owner',
+    proposedBy: 'session-1',
+    lanes: [
+      lane('todo', 'backlog'),
+      lane('doing', 'active', { enterOn: ['work.started'] }),
+      lane('check', 'verify'),
+      lane('after', 'shipped'),
+      lane('closed', 'closed', { ownerGate: true }),
+    ],
+    variants: {},
+    doneLane: 'closed',
+    notGoodLane: 'doing',
+  };
+  const gated = (laneSet: LaneSet, from: string, to: string) => {
+    const result = needsOwner(laneSet, from, to);
+    return result.ok ? result.value : result.error;
+  };
+
+  it('should keep a move forward out of any verify lane for the owner, owner-gated or not', () => {
+    should(gated(UNGATED_VERIFY, 'check', 'after')).be.true();
+    should(gated(UNGATED_VERIFY, 'check', 'doing')).be.false();
+    should(gated(UNGATED_VERIFY, 'doing', 'check')).be.false();
+  });
+
+  it('should keep a stored gate for the owner, and an owner-gated lane however it is staged', () => {
+    // Arrange
+    const staged: LaneSet = {
+      ...UNGATED_VERIFY,
+      lanes: UNGATED_VERIFY.lanes.map(entry => ({ ...entry, stage: laneStage(entry) })),
+    };
+
+    // Act + Assert
+    should(gated(staged, 'check', 'after')).be.true();
+    should(gated(staged, 'doing', 'after')).be.false();
+    should(gated(FERRETRY, 'plan', 'implement')).be.true();
+    should(gated(FERRETRY, 'implement', 'merged')).be.false();
   });
 });

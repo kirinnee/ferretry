@@ -248,11 +248,12 @@ export const addQuickToTestLane = (current: LaneSet): LaneSet | null => {
 /**
  * Writes every lane's stage into a set stored before stages: each lane without one gets {@link laneStage}'s,
  * the stage its `enterOn` and `ownerGate` already describe, so nothing a reader decides changes and no card
- * moves. A lane that has a stage keeps it. The version rises and the confirmation stands, so the owner is
- * asked nothing. `null` when every lane has a stage already, so it is idempotent.
+ * moves. A lane that has a stage keeps it. The VERSION STAYS: the set means what it meant, so an edit made
+ * against it still applies, and the Accept on a pending proposal's card still confirms it. The confirmation
+ * stands and the owner is asked nothing. `null` when every lane has a stage already, so it is idempotent.
  */
 export const stageLanes = (current: LaneSet): LaneSet | null => {
   if (current.lanes.every(lane => lane.stage !== undefined)) return null;
   const lanes = current.lanes.map(lane => (lane.stage === undefined ? { ...lane, stage: laneStage(lane) } : lane));
-  return { ...current, version: current.version + 1, lanes };
+  return { ...current, lanes };
 };

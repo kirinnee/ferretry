@@ -338,8 +338,8 @@ export const gateOnTheWay = (
  * a deploy finished, a reviewer approved — so the card moves the way that trigger moves it. The move is the
  * daemon's, through {@link triggerMove}, so it is recorded `auto` with the trigger and `reportedBy` names
  * the caller. Never backward and never into an owner-gated closed lane; the report of a non-owner never closes a
- * card at all (a fact may close a set with no verify lane; a caller's word may not), and never passes a gate the
- * owner has not answered: neither the card's own lane nor one its variant walks on the way
+ * card at all (a fact may close a set with no verify lane; a caller's word may not), never moves a blocked card on
+ * to a later category (as a move does not), and never passes a gate the owner has not answered: neither the card's own lane nor one its variant walks on the way
  * ({@link gateOnTheWay}). Already there, or past it, is no change.
  */
 const report = (
@@ -380,6 +380,17 @@ const report = (
         ? `${ref} waits in ${from.name} for the owner; a report does not pass that gate, the owner's answer does`
         : `${ref} would pass ${gate.name}, which waits for the owner; a report does not pass that gate, the owner's answer does`,
       ['owner-human'],
+    );
+  }
+  // A dependency holds a caller's word as it holds a move: only a fact, or the owner, moves a blocked card on.
+  const blockers =
+    context.standing !== 'owner-human' && rank(context.laneSet, target.id) > rank(context.laneSet, card.laneId)
+      ? blockedBy(card, context.index, context.laneSets)
+      : [];
+  if (blockers.length > 0) {
+    throw new BoardError(
+      'blocked-by',
+      `${ref} is blocked by ${blockers.map(formatTaskRef).join(', ')}: a report does not move it on to ${target.name} until they ship (only the owner may override a dependency)`,
     );
   }
   const { actorVia: _via, ...rest } = context;

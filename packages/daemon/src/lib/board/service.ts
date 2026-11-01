@@ -175,8 +175,8 @@ const requireValidCard = (task: BoardTask): BoardTask => {
 
 /**
  * What a sub-ferret may still write: a note on its own card, a PR or branch link, so the PR's facts move the
- * card on their own, and an external trigger it saw happen (a deploy), so the card moves as a fact would move
- * it. Authority still decides WHICH card; everything else is its lead's to do.
+ * card on their own, and an external trigger it saw happen (a deploy) on the card it is doing, so the card
+ * moves as a fact would move it. Authority still decides WHICH card; everything else is its lead's to do.
  */
 const subFerretMay = (request: BoardTaskActionRequest): boolean =>
   request.action === 'note' ||
@@ -635,6 +635,10 @@ export class BoardService {
   }
 
   private async decide(card: BoardTask, request: BoardTaskActionRequest, caller: BoardCaller): Promise<CardOutcome> {
+    // A sub-ferret reports what it saw on the card it is doing, not on others its standing reaches.
+    if (request.action === 'trigger' && caller.kind === 'ferret' && caller.sessionId !== effectiveAssignee(card)) {
+      await this.refuseSubFerret(caller, 'report events on a card they are not doing');
+    }
     const context = await this.context(card, caller);
     const target =
       request.action === 'refile' && request.projectId !== card.projectId

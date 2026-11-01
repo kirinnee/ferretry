@@ -328,8 +328,10 @@ either spelling round-trips. A gate is owner-gated: a lane that leaves `ownerGat
 the owner's by its category, so its `ownerGate` is left as it is). An automatic stage enters on its triggers: a lane
 that leaves `enterOn` out gets them. A field that disagrees is refused: a gate on the closed lane, a gate with
 `ownerGate: false`, an automatic stage whose triggers are not its `enterOn`, an automatic lane that is owner-gated. So
-an app that predates stages reads every lane right, and every helper that reads the mirror (`needsOwner`,
-`laneForTrigger`, `laneUse`) answers as it did. An app that predates stages drops the field when it saves a set,
+an app that predates stages reads every lane right, and the helpers that read the mirror (`laneForTrigger`,
+`laneUse`) answer as they did. `needsOwner` reads the stage as well as `ownerGate`: a move forward out of any gate
+is the owner's, so a ferret's move out of a `verify` lane is refused `owner-gate` even where the lane is not
+owner-gated (before stages it went through), and a move and a report agree on every gate. An app that predates stages drops the field when it saves a set,
 and the lanes then read their derived stages again: only options the owner had changed are lost. The lane editor
 drops a lane's stored stage when its category or its gate changes, or the triggers of an automatic one, so a saved
 lane is never refused for a stage its fields no longer describe.
@@ -363,23 +365,30 @@ report one, and so may a sub-ferret on the card it is doing, since it is the one
 `403 forbidden`. The move is the daemon's, through the same `triggerMove` every fact uses: into the first lane of
 the card's variant that enters on the trigger, recorded `auto` with the trigger and with `reportedBy` naming who
 reported it (and `reportedVia: "admin-token"` beside it, as `actorVia` is beside an actor). It never goes back: a
-card already there or past it is unchanged, and the answer is the card as it is. Like a fact, it moves a blocked card
-and says what blocked it. It is `400 invalid` for a dropped card or a board with no lane for the event. It is
+card already there or past it is unchanged, and the answer is the card as it is. A dependency holds it as it holds a
+move: a blocked card is not moved on to a later category (`409 blocked-by`, naming the blockers); sideways it moves,
+and says what blocked it, and the owner's report moves it on as a fact would. A sub-ferret reports only on the card it
+is doing (its assignee, else its owner): on any other card its standing reaches it is told to tell its lead. In the
+card's history the move reads as by whoever reported it, never as Ferretry's own ("denisha · reported deploy.done →
+moved In progress → Deployed"; the admin token is said for what it is), in the app and in `fy task show` alike
+(`boardEventActor`). It is `400 invalid` for a dropped card or a board with no lane for the event. It is
 `403 owner-gate` for a move into an owner-gated closed lane, whoever reports it, and, unless the owner is the one
 reporting, for a move into any closed lane (a fact may close a set with no verify lane, a caller's word may not) or
 past a gate the owner has not answered: the card's own lane, or one its variant walks between that lane and the
 target. Entering a gate is not passing it.
 
 So a report never takes a card anywhere the owner decides. A report after the owner's Not good may move the card on
-again, and that is accepted: with every gate and every closed lane out of its reach, it only reaches a lane its lead
-could `fy task move` it to anyway, and the history says who reported what.
+again, and that is accepted: with every gate, every closed lane and every unshipped dependency out of its reach, it
+only reaches a lane its lead could `fy task move` it to anyway, and the history says who reported what.
 
 **Every lane's stage is written out at boot.** Every template lane states its stage. A set stored before stages has
 none, so at every boot, after the two migrations above, the daemon gives each lane without one the stage it already
 reads as (`stageLanes`): nothing a reader decides changes and no card moves, a lane that has a stage keeps it, the
-version rises, the confirmation stands and the owner is asked nothing. A damaged set is refused by the store, as
-on any read, reported, and the other projects go on. It is idempotent: a set whose every lane has a stage does not
-match.
+confirmation stands and the owner is asked nothing. The VERSION STAYS, unlike the migrations above, because the set
+means what it meant: an edit made against it still applies, and the Accept on a pending proposal's card still
+confirms it. A damaged set is refused by the store, as on any read, reported, and the other projects go on, and a
+staged set the next read would refuse is never written. It is idempotent: a set whose every lane has a stage does
+not match.
 
 ## Cards and their fields
 
@@ -715,8 +724,10 @@ wherever it appears ([reference-standard.md](reference-standard.md)).
   stage yet, nor `fy` report a trigger.
 - **`pr.review_approved` is reported, not watched.** The watcher asks GitHub for a PR's state, checks and merge,
   not its review decision, so for now an approval is reported (`{ "action": "trigger" }`).
-- **An app that predates the two new triggers cannot read a lane that uses one.** Its trigger list is closed, so a
-  lane set naming `deploy.done` or `pr.review_approved` fails to parse there. No template uses them.
+- **A daemon or an app that predates the two new triggers cannot read a lane that uses one.** Its trigger list is
+  closed, so a lane set naming `deploy.done` or `pr.review_approved` fails to parse there: an older daemon reads
+  that lane file as damaged, and a cached older app cannot load the board. No template uses them; add one to a lane
+  only once every machine and app runs this release.
 
 - **References in a card's text are not links yet.** The card detail sits outside any session, and the reference
   surface is assembled per session (`components/reference-surface.tsx`), so `&F412`, `!A48` and `@file` in a
