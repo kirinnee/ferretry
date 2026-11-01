@@ -31,7 +31,7 @@ const NEW_ETAG = 'f'.repeat(64);
 const COMMAND: SessionMcpServer = { transport: 'command', command: 'npx', args: ['acme'], env: {} };
 const URL_SERVER: SessionMcpServer = { transport: 'url', url: 'https://mcp.example.com', oauth: true };
 const GOVERNANCE = { governed: false } as unknown as CallerGovernance;
-const STEP_UP: FreshStepUpContext = { presentation: undefined, spend: () => undefined };
+const STEP_UP: FreshStepUpContext = { presentation: undefined, spend: () => undefined, agent: false };
 
 class FakeFiles implements McpProjectFiles {
   readonly reads: string[] = [];

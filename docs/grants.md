@@ -38,10 +38,12 @@ browser is bounded and deliberate, not that the host is defended against somebod
 
 The answer has two cases:
 
-| caller                                   | governed?            |
-| ---------------------------------------- | -------------------- |
-| `fy` on the host (admin token, loopback) | no, always           |
-| anything else, a browser on the host too | yes, unconditionally |
+| caller                                                 | governed?            | person routes?                   |
+| ------------------------------------------------------ | -------------------- | -------------------------------- |
+| `fy` on the host (admin token, loopback)               | no, always           | yes                              |
+| a ferret session (its own `fys_` credential, on host)  | no — not a grant one | never: `403 owner_only`          |
+| the admin token naming a ferret's session (older `fy`) | no, always           | never: `403 owner_only`          |
+| anything else, a browser on the host too               | yes, unconditionally | yes, a paired device is a person |
 
 `GrantsView` carries `governed` (do the limits apply to me), `hostLocal` (did this request arrive on the
 machine) and `steppedUp` (does this device hold a passkey step-up right now). Today `hostLocal` is exactly
@@ -52,8 +54,17 @@ from the other would have to be rewritten the day a third caller class appears.
 
 A ferret pane's `FY_SESSION_TOKEN` (`Authorization: Bearer fys_…`) is a bearer class of its own, `session`
 ([agent-tools.md](agent-tools.md#the-ferret-session-credential)). It is not a grant holder: grants stay
-about remote devices, and a session credential never goes through `decideCapability`. Today the
-authorization boundary refuses it on every route it authenticates, so it reaches only the agent tools.
+about remote devices, and a session credential never goes through `decideCapability` — it is looked up only
+for a request on this machine's privileged loopback carrier, so it is ungoverned like `fy` at the machine.
+Its policy is the route's own `caller` declaration instead, a fixed table rather than an operator's answer:
+
+- a `caller: 'person'` route — pairing, devices, passkeys, the step-up and unlock, grants, the security
+  settings and the tunnel switch among them — refuses it with `403 owner_only` before the handler runs or
+  the body is read, as it refuses the admin token naming a ferret's session and a warden;
+- a `caller: 'any'` route serves it as its own session, never as the owner.
+
+Neither half can widen anything: the `caller` rule is asked after authentication and only ever refuses, and
+every grant question below still applies to every caller it applied to before.
 
 ## "Loopback" means how the request arrived
 

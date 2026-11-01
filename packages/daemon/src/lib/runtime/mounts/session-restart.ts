@@ -38,6 +38,7 @@ export function sessionRestartRoutes(subsystem: SessionRestartSubsystem): readon
       method: 'POST',
       path: '/v1/restarts',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => {
         const request = await parseBody(context.request, RestartRequestSchema);
@@ -49,6 +50,7 @@ export function sessionRestartRoutes(subsystem: SessionRestartSubsystem): readon
       method: 'GET',
       path: '/v1/restarts',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async () => jsonResponse(await subsystem.status()),
     },
@@ -56,6 +58,7 @@ export function sessionRestartRoutes(subsystem: SessionRestartSubsystem): readon
       method: 'DELETE',
       path: '/v1/restarts',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async () => jsonResponse(await subsystem.cancel()),
     },

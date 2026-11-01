@@ -93,6 +93,7 @@ export function nameRoutes(subsystem: NameSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/names',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await suggest(subsystem, context),
     },

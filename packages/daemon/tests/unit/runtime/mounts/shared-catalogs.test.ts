@@ -8,7 +8,8 @@ import {
 } from '../../../../src/lib/runtime/mounts/shared-catalogs.ts';
 import { CatalogRefusal, type CatalogRefusalCode } from '../../../../src/lib/shared-catalogs/refusal.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, GRANTED, human } from './support.ts';
+import { handleDirectly } from './second-line.ts';
+import { agentIn, CREDENTIALS, fromFerret, GRANTED, human } from './support.ts';
 
 const CAT = `cat_${'A'.repeat(22)}`;
 const ITEM = `itm_${'B'.repeat(22)}`;
@@ -110,21 +111,25 @@ describe('the shared catalogs routes', () => {
     ]);
   });
 
-  it('should let a ferret list and preview, and refuse every other call with 403 forbidden', async () => {
+  it('should let a ferret list and preview, and refuse every other call with 403 owner_only', async () => {
     const { dispatch, calls } = stubbed();
     const ferret = agentIn('session-1');
     for (const [method, path, body] of WRITES) {
-      const refused = await dispatch.dispatch(call(method, path, body, ferret));
-      should(refused.status).equal(403);
-      should(jsonBody(refused)).containEql({ code: 'forbidden' });
+      // On the admin token naming its session (an older fy), and on its own session credential.
+      for (const asked of [call(method, path, body, ferret), fromFerret(call(method, path, body))]) {
+        const refused = await dispatch.dispatch(asked);
+        should(refused.status).equal(403);
+        should(jsonBody(refused)).containEql({ code: 'owner_only' });
+      }
     }
     should(calls).deepEqual([]);
     should((await dispatch.dispatch(call('GET', '/v1/catalogs', undefined, ferret))).status).equal(200);
+    should((await dispatch.dispatch(fromFerret(call('GET', '/v1/catalogs')))).status).equal(200);
     const preview = await dispatch.dispatch(
       call('POST', `/v1/catalogs/${CAT}/items/preview`, { itemId: ITEM }, ferret),
     );
     should(preview.status).equal(200);
-    should(calls).have.length(2);
+    should(calls).have.length(3);
   });
 
   it('should let a failure that is not a refusal through', async () => {
@@ -179,5 +184,21 @@ describe('the shared catalogs routes', () => {
       should(response.status).equal(status);
       should(jsonBody(response)).containEql({ code });
     }
+  });
+});
+
+describe('the handlers’ own second line', () => {
+  it('should still refuse a ferret’s own credential every write if the boundary ever let one through', async () => {
+    // Arrange
+    const catalogs = {} as SharedCatalogSubsystem['catalogs'];
+
+    // Act
+    const answer = await handleDirectly(sharedCatalogRoutes({ catalogs }), 'POST', '/v1/catalogs', undefined, {
+      name: 'x',
+    });
+
+    // Assert
+    should([answer.status, answer.code]).deepEqual([403, 'forbidden']);
+    should(answer.message).match(/a ferret cannot make a catalog/u);
   });
 });

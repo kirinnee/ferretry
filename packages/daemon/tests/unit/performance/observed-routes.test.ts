@@ -35,7 +35,7 @@ function clockOf(...readings: number[]) {
 }
 
 function routeOf(handle: ApiRoute['handle'], method = 'get', path = '/v1/sessions/:id'): ApiRoute {
-  return { method, path, minimum: 'operator', handle };
+  return { method, path, minimum: 'operator', caller: 'any', handle };
 }
 
 const respond = (status: number, body: string): ApiResponse => ({ status, headers: new Map(), body });

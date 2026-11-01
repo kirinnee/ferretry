@@ -127,6 +127,7 @@ export function directCarrierSocketRoute(deps: DirectCarrierDependencies): Socke
     // session that this socket carries. An upgrade with no credential is exactly what a rendezvous
     // accepts too, and for the same reason.
     minimum: 'none',
+    caller: 'any',
     accept: async ({ request, params }) => {
       // A session cannot open a session. The tunnel dispatches a stream's path through this same
       // socket table, and a nested direct session would be a carrier inside a carrier with nobody's

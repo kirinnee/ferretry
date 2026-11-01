@@ -178,6 +178,7 @@ export function sessionForkRoutes(subsystem: SessionForkSubsystem): readonly Api
       method: 'POST',
       path: '/v1/sessions/:sessionId/fork',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await fork(subsystem, context),
     },

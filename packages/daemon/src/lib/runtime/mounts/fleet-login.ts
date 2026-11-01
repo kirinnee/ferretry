@@ -95,6 +95,7 @@ export function harnessLoginRoutes(subsystem: HarnessLoginSubsystem): readonly A
       method: 'POST',
       path: '/v1/fleet/login',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context =>
@@ -106,6 +107,7 @@ export function harnessLoginRoutes(subsystem: HarnessLoginSubsystem): readonly A
       method: 'GET',
       path: '/v1/fleet/login/:flowId',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context => await respondWith(HarnessLoginFlowSchema, () => subsystem.status(flowId(context))),
@@ -123,6 +125,7 @@ export function harnessLoginRoutes(subsystem: HarnessLoginSubsystem): readonly A
       method: 'POST',
       path: '/v1/fleet/login/:flowId',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context =>
@@ -134,6 +137,7 @@ export function harnessLoginRoutes(subsystem: HarnessLoginSubsystem): readonly A
       method: 'DELETE',
       path: '/v1/fleet/login/:flowId',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context => await respondWith(HarnessLoginFlowSchema, () => subsystem.cancel(flowId(context))),

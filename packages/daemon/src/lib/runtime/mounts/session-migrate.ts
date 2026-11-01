@@ -309,6 +309,7 @@ export function sessionMigrateRoutes(
       method: 'GET',
       path: '/v1/sessions/:sessionId/relaunch-settings',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => jsonResponse(await subsystem.relaunchSettings(pathSessionId(context)).catch(refuse)),
     },
@@ -318,6 +319,7 @@ export function sessionMigrateRoutes(
       method: 'POST',
       path: '/v1/sessions/:sessionId/conversion-preview',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => {
         const request = await parseBody(context.request, ConversionPreviewRequestSchema);
@@ -335,6 +337,7 @@ export function sessionMigrateRoutes(
       method: 'POST',
       path: '/v1/sessions/:sessionId/migrate',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await migrate(subsystem, guard, context),
     },
@@ -344,6 +347,7 @@ export function sessionMigrateRoutes(
       method: 'POST',
       path: '/v1/sessions/:sessionId/migrate/ask-to-stop-jobs',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => {
         await parseOptionalBody(context.request, AskToStopJobsRequestSchema);

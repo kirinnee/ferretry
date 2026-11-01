@@ -72,6 +72,7 @@ export function sessionPermissionRoutes(
       method: 'POST',
       path: '/v1/sessions/:sessionId/permission',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await answer(permission, sessions, context),

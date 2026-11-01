@@ -20,7 +20,7 @@ import {
   type StepUpRequiredBody,
 } from '@ferretry/protocol';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
-import { isHumanAdminActor } from '../../api/actor.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
@@ -364,10 +364,6 @@ function refuseLessons<T>(work: () => T): T {
   }
 }
 
-/** An agent: a caller that identified itself (`peer:`, a warden) rather than a person or the host. */
-const isAgentCaller = (context: RouteContext): boolean =>
-  context.credential !== undefined && context.credential.tokenClass !== 'device' && !isHumanAdminActor(context.actor);
-
 /**
  * `POST /v1/agent/lessons` — a ferret files a lesson. Authenticated by the session credential ALONE:
  * the session is the credential's, and the evidence is read from that session by the daemon, so the
@@ -494,6 +490,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'GET',
       path: '/v1/learning/status',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async () => await status(subsystem),
     },
@@ -501,6 +498,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'GET',
       path: '/v1/learning/config',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async () => jsonResponse(subsystem.config()),
     },
@@ -508,6 +506,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'GET',
       path: '/v1/learning/proposals',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await listProposals(subsystem, context),
     },
@@ -515,6 +514,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'POST',
       path: '/v1/learning/proposals/:id',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await act(subsystem, context),
     },
@@ -522,6 +522,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'GET',
       path: '/v1/learning/proposals/:id/patch',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await patch(subsystem, context),
     },
@@ -529,6 +530,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'POST',
       path: '/v1/learning/run',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context =>
         jsonResponse(
@@ -541,6 +543,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'PATCH',
       path: '/v1/learning/config',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context =>
@@ -550,6 +553,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'GET',
       path: '/v1/learning/proposals/:id/apply-preview',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await applyPreview(subsystem, context),
     },
@@ -557,6 +561,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'POST',
       path: '/v1/learning/proposals/:id/apply',
       minimum: 'operator',
+      caller: 'person',
       // Reached as `fleet.use`; the handler then asks for the TARGET's own grant on `configure`.
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
@@ -566,6 +571,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'GET',
       path: '/v1/learning/sessions',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async () => jsonResponse(await subsystem.lessons.sessionLearning()),
     },
@@ -573,6 +579,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'PATCH',
       path: '/v1/sessions/:sessionId/learning',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await setPassive(subsystem, context),
     },
@@ -580,6 +587,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'POST',
       path: '/v1/learning/scan/estimate',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context =>
         jsonResponse(
@@ -592,6 +600,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'POST',
       path: '/v1/learning/scan/cancel',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async () =>
         jsonResponse(
@@ -602,6 +611,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'GET',
       path: '/v1/learning/scan',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async () => await scanView(subsystem),
     },
@@ -609,6 +619,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'POST',
       path: '/v1/learning/scan',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => {
         const request = await parseBody(context.request, LearningScanRequestSchema);
@@ -622,6 +633,7 @@ export function learningRoutes(subsystem: LearningSubsystem): readonly ApiRoute[
       method: 'POST',
       path: '/v1/agent/lessons',
       minimum: 'none',
+      caller: 'any',
       privilegedOnly: true,
       noStore: true,
       handle: async context => await agentSuggest(subsystem, context),

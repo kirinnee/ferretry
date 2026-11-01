@@ -24,6 +24,7 @@ const route: SocketRoute = {
   method: 'GET',
   path: '/v1/rendezvous/:daemonId/client',
   minimum: 'none',
+  caller: 'any',
   accept: async ({ request: arrival }) => {
     accepted.push(`${arrival.path} loopback=${String(arrival.loopback)}`);
     return async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined });

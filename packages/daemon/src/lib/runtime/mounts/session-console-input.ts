@@ -68,6 +68,7 @@ export function sessionConsoleRoutes(
       method: 'POST',
       path: '/v1/sessions/:sessionId/console/input',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await input(pane, sessions, context),

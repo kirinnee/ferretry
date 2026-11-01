@@ -146,6 +146,7 @@ function claimPasskey(context: RouteContext, scope: CatalogInstallScope): ApiRes
 const freshStepUpOf = (context: RouteContext): FreshStepUpContext => ({
   presentation: context.presentation,
   spend: () => context.spendFreshStepUp?.(),
+  agent: isAgentCaller(context),
 });
 
 function installId(context: RouteContext): string {
@@ -190,6 +191,7 @@ export function catalogInstallRoutes(subsystem: CatalogInstallSubsystem): readon
       method: 'POST',
       path: '/v1/catalog-installs/project/preview',
       minimum: 'operator',
+      caller: 'any',
       capability: FILESYSTEM_USE,
       noStore: true,
       handle: previewHandler('project', subsystem),
@@ -198,6 +200,7 @@ export function catalogInstallRoutes(subsystem: CatalogInstallSubsystem): readon
       method: 'POST',
       path: '/v1/catalog-installs/runtime/preview',
       minimum: 'operator',
+      caller: 'any',
       capability: FLEET_USE,
       noStore: true,
       handle: previewHandler('runtime', subsystem),
@@ -206,6 +209,7 @@ export function catalogInstallRoutes(subsystem: CatalogInstallSubsystem): readon
       method: 'POST',
       path: '/v1/catalog-installs/project',
       minimum: 'operator',
+      caller: 'person',
       capability: FILESYSTEM_CONFIGURE,
       noStore: true,
       handle: applyHandler('project', subsystem),
@@ -214,6 +218,7 @@ export function catalogInstallRoutes(subsystem: CatalogInstallSubsystem): readon
       method: 'POST',
       path: '/v1/catalog-installs/runtime',
       minimum: 'operator',
+      caller: 'person',
       capability: FLEET_CONFIGURE,
       noStore: true,
       handle: applyHandler('runtime', subsystem),
@@ -222,6 +227,7 @@ export function catalogInstallRoutes(subsystem: CatalogInstallSubsystem): readon
       method: 'GET',
       path: '/v1/catalog-installs',
       minimum: 'operator',
+      caller: 'any',
       capability: FLEET_USE,
       noStore: true,
       handle: async () => await answer(() => subsystem.list()),
@@ -230,6 +236,7 @@ export function catalogInstallRoutes(subsystem: CatalogInstallSubsystem): readon
       method: 'DELETE',
       path: '/v1/catalog-installs/project/:installId',
       minimum: 'operator',
+      caller: 'person',
       capability: FILESYSTEM_CONFIGURE,
       noStore: true,
       handle: removeHandler('project', subsystem),
@@ -238,6 +245,7 @@ export function catalogInstallRoutes(subsystem: CatalogInstallSubsystem): readon
       method: 'DELETE',
       path: '/v1/catalog-installs/runtime/:installId',
       minimum: 'operator',
+      caller: 'person',
       capability: FLEET_CONFIGURE,
       noStore: true,
       handle: removeHandler('runtime', subsystem),

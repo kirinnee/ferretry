@@ -125,7 +125,7 @@ interface Caller {
   /** What the grants answer for every demand; `granted` unless the case says otherwise. */
   readonly refusal?: GrantRefusal;
   readonly fresh?: boolean;
-  readonly kind: 'host' | 'device' | 'agent';
+  readonly kind: 'host' | 'device' | 'agent' | 'ferret';
 }
 
 interface Call {
@@ -149,13 +149,21 @@ const HOST: Caller = { kind: 'host', governed: false };
 const DEVICE: Caller = { kind: 'device', governed: true };
 const FRESH_DEVICE: Caller = { kind: 'device', governed: true, fresh: true };
 const AGENT: Caller = { kind: 'agent', governed: false };
+/** A ferret on its OWN session credential: ungoverned (it is on this host), and an agent by its class alone. */
+const FERRET: Caller = { kind: 'ferret', governed: false };
 
 const CREDENTIAL: Record<Caller['kind'], AuthenticatedCredential> = {
   host: { kind: 'authenticated', tokenClass: 'admin' },
   device: { kind: 'authenticated', tokenClass: 'device', deviceId: 'd1' },
   agent: { kind: 'authenticated', tokenClass: 'admin' },
+  ferret: { kind: 'authenticated', tokenClass: 'session', sessionId: 's1' },
 };
-const ACTOR: Record<Caller['kind'], string> = { host: 'admin-cli', device: 'device:d1', agent: 'peer:s1' };
+const ACTOR: Record<Caller['kind'], string> = {
+  host: 'admin-cli',
+  device: 'device:d1',
+  agent: 'peer:s1',
+  ferret: 'peer:s1',
+};
 
 function routeFor(subsystem: ConfigFilesSubsystem, method: string, path: string): ApiRoute {
   const found = configFilesRoutes(subsystem).find(route => route.method === method && route.path === path);
@@ -502,6 +510,19 @@ describe('the configuration files mount', () => {
       should(await wardenInEffect(subject)).be.false();
     });
 
+    it('should hold a loosening a ferret makes on its own session credential, as any agent', async () => {
+      // Arrange — the class decides: no session header is involved at all.
+      const subject = world({ 'warden.yaml': WARDEN_OFF });
+      subject.off.delete('settings');
+
+      // Act
+      const answer = await call(subject, FERRET, put('warden.yaml', WARDEN_ON));
+
+      // Assert
+      should(answer.body.outcome).equal('pending');
+      should(await wardenInEffect(subject)).be.false();
+    });
+
     it('should hold an agent loosening even on the host loopback with a fresh proof', async () => {
       // Arrange
       const subject = world({ 'warden.yaml': WARDEN_OFF });
@@ -655,15 +676,20 @@ describe('the configuration files mount', () => {
       const pending = await held(subject);
       subject.off.delete('settings');
 
-      // Act
-      const answer = await call(subject, AGENT, confirm('warden.yaml', pending.etag));
+      // Act — on the admin token naming its session, and on its own session credential.
+      const answers = [
+        await call(subject, AGENT, confirm('warden.yaml', pending.etag)),
+        await call(subject, FERRET, confirm('warden.yaml', pending.etag)),
+      ];
 
-      // Assert
-      should(answer.status).equal(403);
-      should(answer.body).deepEqual({
-        error: 'an agent cannot confirm a configuration change; the owner confirms it',
-        code: 'forbidden',
-      });
+      // Assert — the handler's own second line (the boundary refuses it first: confirm is `caller: 'person'`).
+      for (const answer of answers) {
+        should(answer.status).equal(403);
+        should(answer.body).deepEqual({
+          error: 'an agent cannot confirm a configuration change; the owner confirms it',
+          code: 'forbidden',
+        });
+      }
       should(await wardenInEffect(subject)).be.false();
     });
 

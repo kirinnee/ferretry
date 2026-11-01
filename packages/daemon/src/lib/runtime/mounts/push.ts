@@ -133,6 +133,7 @@ export function pushRoutes(subsystem: PushSubscriptionSubsystem, guard: Capabili
       method: 'GET',
       path: '/v1/push/vapid',
       minimum: 'operator',
+      caller: 'any',
       handle: async () => jsonResponse(VapidPublicKeyResponseSchema.parse({ publicKey: await subsystem.publicKey() })),
     },
     {
@@ -140,6 +141,7 @@ export function pushRoutes(subsystem: PushSubscriptionSubsystem, guard: Capabili
       method: 'GET',
       path: '/v1/push/subscriptions',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       handle: async context => {
         try {
@@ -158,6 +160,7 @@ export function pushRoutes(subsystem: PushSubscriptionSubsystem, guard: Capabili
       method: 'POST',
       path: '/v1/push/subscriptions',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       handle: async ({ request, actor, presentation }) => {
         const deviceId = callerDeviceId(actor);
@@ -187,6 +190,7 @@ export function pushRoutes(subsystem: PushSubscriptionSubsystem, guard: Capabili
       method: 'DELETE',
       path: '/v1/push/subscriptions/:pushId',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       handle: async context => {
         const pushId = PushDeviceViewSchema.shape.id.safeParse(decodeParameter(context.params.get('pushId') ?? ''));

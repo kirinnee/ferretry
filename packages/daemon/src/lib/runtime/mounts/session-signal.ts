@@ -22,12 +22,10 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
  *     `lib/warden/detect.ts` reasons about `state.waiting`, its peer and its backstop, and no code
  *     path could put one there. The detector was watching a field that was always absent.
  *
- * WHY `admin` SCOPE. The natural reading is that a session should sign its own signals, and the
- * daemon does mint a per-session credential — but that credential authorizes the TASK-BOARD domain
- * today, and nothing on this side of the daemon can yet turn it into "the caller IS session X". A
- * session-scoped token that this route trusted to name its own subject would let any holder complete
- * or park any other session. Until a unit lands that identity, `admin` is the honest answer: the
- * fleet wrappers already hold the admin token, which is how `kteam signal done` works today.
+ * WHO SIGNALS. A ferret's own session credential is accepted here (`caller: 'any'`) and its actor is
+ * `peer:<that session>`, so a signal is attributed to the session that sent it; the admin token, which
+ * the fleet wrappers also hold, still works as before. The target is the path's session, as for every
+ * caller.
  *
  * WHY THE ANSWER IS A SESSION VIEW. The wire shape the client parses is `SessionView`, the same one
  * the stop and the revive answer with, and it carries everything a signal changes: the status, the
@@ -118,6 +116,7 @@ export function sessionSignalRoutes(subsystem: SessionSignalSubsystem): readonly
       method: 'POST',
       path: '/v1/sessions/:sessionId/signal',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await signal(subsystem, context),
     },

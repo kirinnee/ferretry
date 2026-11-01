@@ -54,6 +54,7 @@ const echo = (path: string, minimum: CredentialMinimum, method = 'GET', privileg
   method,
   path,
   minimum,
+  caller: 'any',
   ...(privilegedOnly === true ? { privilegedOnly: true } : {}),
   handle: async context => jsonResponse({ actor: context.actor ?? null, params: [...context.params] }),
 });
@@ -473,6 +474,7 @@ describe('ApiDispatcher error handling', () => {
     method: 'GET',
     path: '/boom',
     minimum,
+    caller: 'any',
     handle: async () => {
       throw error;
     },
@@ -508,6 +510,7 @@ describe('ApiDispatcher error handling', () => {
       method: 'GET',
       path: '/late',
       minimum: 'none',
+      caller: 'any',
       noStore: true,
       handle: async () => ({ ...jsonResponse({ shown: 'first' }), late: () => jsonResponse({ shown: 'last' }) }),
     };
@@ -525,6 +528,7 @@ describe('ApiDispatcher error handling', () => {
       method: 'GET',
       path: '/late',
       minimum: 'none',
+      caller: 'any',
       handle: async () => ({
         ...jsonResponse({ shown: 'first' }),
         late: () => jsonResponse({ shown: `spelling ${++spelled}` }),
@@ -543,6 +547,7 @@ describe('ApiDispatcher error handling', () => {
       method: 'GET',
       path: '/late',
       minimum: 'none',
+      caller: 'any',
       handle: async () => ({
         ...jsonResponse({ shown: 'first' }),
         late: () => {
@@ -601,6 +606,7 @@ describe('the operator grant layer', () => {
     method: 'GET',
     path: '/v1/fleet/plan',
     minimum: 'operator',
+    caller: 'any',
     capability: { capability: 'fleet', axis: 'use' },
     handle: async () => jsonResponse({ plan: [] }),
   });
@@ -681,6 +687,7 @@ describe('the operator grant layer', () => {
       method: 'GET',
       path: '/v1/sessions',
       minimum: 'operator',
+      caller: 'any',
       handle: async () => jsonResponse([]),
     };
     const dispatcher = new ApiDispatcher(new ApiRouter([ungoverned]), credentials, guard(false));
@@ -821,6 +828,7 @@ describe('the operator grant layer', () => {
       method: 'GET',
       path,
       minimum: 'operator',
+      caller: 'any',
       capability: { capability, axis },
       handle: async () => jsonResponse({}),
     });
@@ -898,6 +906,7 @@ describe('the warden remedy axis', () => {
     method: 'POST',
     path: '/v1/sessions/:id/stop',
     minimum,
+    caller: 'any',
     wardenRemedy: 'kill',
     handle: async context =>
       jsonResponse({
@@ -1152,6 +1161,7 @@ describe('the warden remedy axis', () => {
       method: 'POST',
       path: '/v1/sessions/:id/stop',
       minimum: 'authenticated',
+      caller: 'any',
       handle: async () => jsonResponse({ stopped: true }),
     };
     const dispatcher = new ApiDispatcher(new ApiRouter([ordinary]), credentials, NO_GOVERNED_ROUTES_GUARD, allowing());
@@ -1341,6 +1351,7 @@ describe('the warden remedy axis', () => {
       method: 'POST',
       path: '/v1/sessions/:id/stop',
       minimum: 'authenticated',
+      caller: 'any',
       handle: async () => jsonResponse({}),
     };
     const carrying = { [WARDEN_CAPABILITY_HEADER]: 'cap-7' };
@@ -1409,6 +1420,7 @@ describe('the warden remedy axis', () => {
       method: 'POST',
       path: '/v1/sessions/:id/stop',
       minimum: 'authenticated',
+      caller: 'any',
       wardenRemedy: 'kill',
       accept: async () => async () => ({ open: async () => {}, fromClient: () => {}, close: () => {} }),
     };
@@ -1463,6 +1475,7 @@ describe('presence on opening', () => {
     method: 'GET',
     path,
     minimum: 'operator',
+    caller: 'any',
     ...(unlockExempt === true ? { unlockExempt: true } : {}),
     handle: async () => jsonResponse({ served: path }),
   });
@@ -1593,6 +1606,7 @@ describe('spending a single-use step-up', () => {
     method: 'GET',
     path: '/v1/fleet/plan',
     minimum: 'operator',
+    caller: 'any',
     capability: { capability: 'fleet', axis: 'use' },
     handle: async () => jsonResponse({ plan: [] }),
   });
@@ -1679,6 +1693,7 @@ describe('spending a single-use step-up', () => {
       method: 'POST',
       path: '/v1/claims',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'use' },
       handle: async context => {
         claimed.push(context.claimFreshStepUp?.(act) === true);
@@ -1770,6 +1785,7 @@ describe('spending a single-use step-up', () => {
         method: 'POST',
         path: '/v1/claims',
         minimum: 'operator',
+        caller: 'any',
         capability: { capability: 'fleet', axis: 'use' },
         handle: async context => {
           claimed.push(context.claimFreshStepUp?.('add-2fa-key', stage) === true);
@@ -1920,6 +1936,7 @@ describe('a ferret session credential at the boundary', () => {
     method: 'GET',
     path,
     minimum,
+    caller: 'any',
     handle: async () => {
       throw new Error(`a session credential reached ${path}`);
     },
@@ -1936,23 +1953,45 @@ describe('a ferret session credential at the boundary', () => {
   }
 
   /** As a pane presents it: from this machine, over the privileged loopback carrier. */
-  const asSession = (path: string, credential: string, headers: Readonly<Record<string, string>> = {}) =>
+  const asSession = (
+    path: string,
+    credential: string,
+    headers: Readonly<Record<string, string>> = {},
+    method = 'GET',
+  ) =>
     request({
+      method,
       path,
       loopback: true,
       privilegedLoopback: true,
       headers: { authorization: `Bearer ${credential}`, ...headers },
     });
 
-  it('should refuse a session credential on every route it authenticates, as if it were anonymous', async () => {
-    // Until the route table says per route who may call it, the one route a session credential reaches is
-    // the public agent-tools route, which reads it itself. Every minimum is covered, so "operator" — which
-    // the admin token and a device meet — cannot be met by one by accident.
+  /** A person-only route: a ferret must be refused before it runs, and before anything reads the body. */
+  const personOnly = (path: string, minimum: CredentialMinimum, method = 'GET'): ApiRoute => ({
+    method,
+    path,
+    minimum,
+    caller: 'person',
+    handle: async () => {
+      throw new Error(`a session credential reached ${path}`);
+    },
+  });
+
+  /** A request whose body throws if anything reads it. */
+  const unread = (asked: ReturnType<typeof request>) => ({
+    ...asked,
+    text: async (): Promise<string> => {
+      throw new Error(`${asked.method} ${asked.path} read its body`);
+    },
+  });
+
+  it('should serve a session credential on every `any` route as its own session, whatever the minimum', async () => {
     // Arrange
     const { dispatcher, asked, refusals } = served(
-      unreachable('/v1/authenticated', 'authenticated'),
-      unreachable('/v1/operator', 'operator'),
-      unreachable('/v1/admin', 'admin-token'),
+      echo('/v1/authenticated', 'authenticated'),
+      echo('/v1/operator', 'operator'),
+      echo('/v1/admin', 'admin-token'),
     );
 
     // Act
@@ -1962,31 +2001,81 @@ describe('a ferret session credential at the boundary', () => {
       ),
     );
 
-    // Assert — the credential WAS recognised (one lookup each), and refused all the same, unaudited.
-    should(responses.map(response => [response.status, jsonBody(response).code])).deepEqual([
-      [401, 'unauthorized'],
-      [401, 'unauthorized'],
-      [401, 'unauthorized'],
-    ]);
+    // Assert — the actor is the session the CREDENTIAL names, never the owner; `admin-token` stays the host's.
+    should(responses.map(response => [response.status, jsonBody(response).actor ?? jsonBody(response).code])).deepEqual(
+      [
+        [200, 'peer:s-1'],
+        [200, 'peer:s-1'],
+        [403, 'forbidden'],
+      ],
+    );
     should(asked).deepEqual([S1, S1, S1]);
     should(refusals).deepEqual([]);
+  });
+
+  it('should refuse a session credential on every `person` route with owner_only, before the body is read', async () => {
+    // Arrange — every minimum, so the caller rule answers first whatever the credential class would meet.
+    const { dispatcher } = served(
+      personOnly('/v1/authenticated', 'authenticated', 'POST'),
+      personOnly('/v1/operator', 'operator', 'POST'),
+      personOnly('/v1/admin', 'admin-token', 'POST'),
+    );
+
+    // Act
+    const responses = await Promise.all(
+      ['/v1/authenticated', '/v1/operator', '/v1/admin'].map(
+        async path => await dispatcher.dispatch(unread(asSession(path, S1, {}, 'POST'))),
+      ),
+    );
+
+    // Assert
+    should(responses.map(response => [response.status, jsonBody(response).code])).deepEqual([
+      [403, 'owner_only'],
+      [403, 'owner_only'],
+      [403, 'owner_only'],
+    ]);
+  });
+
+  it('should refuse the admin token naming a ferret’s session on a person route, and serve it bare', async () => {
+    // The honest-client fallback for a pane without its own credential: one predicate, the same refusal.
+    // Arrange
+    const { dispatcher } = served(personOnly('/v1/grants', 'operator', 'PATCH'), echo('/v1/owner', 'operator'));
+
+    // Act
+    const ferret = await dispatcher.dispatch(
+      unread(
+        request({
+          method: 'PATCH',
+          path: '/v1/grants',
+          loopback: true,
+          headers: { authorization: 'Bearer admin-secret', [SESSION_ID_HEADER]: 's-1' },
+        }),
+      ),
+    );
+    const owner = await dispatcher.dispatch(
+      request({ path: '/v1/owner', loopback: true, headers: { authorization: 'Bearer admin-secret' } }),
+    );
+
+    // Assert
+    should([ferret.status, jsonBody(ferret).code]).deepEqual([403, 'owner_only']);
+    should(owner.status).equal(200);
   });
 
   it('should not let a session header relabel a session credential, and audit the attempt', async () => {
     // The credential names its session. A header naming another one is a forged attribution: refused as
     // `session_mismatch`, and the audit log is told which session the CREDENTIAL named.
     // Arrange
-    const { dispatcher, refusals } = served(unreachable('/v1/sessions', 'operator'));
+    const { dispatcher, refusals } = served(echo('/v1/sessions', 'operator'));
 
     // Act
     const relabelled = await dispatcher.dispatch(asSession('/v1/sessions', S1, { [SESSION_ID_HEADER]: 's-2' }));
     const agreeing = await dispatcher.dispatch(asSession('/v1/sessions', S1, { [SESSION_ID_HEADER]: 's-1' }));
 
-    // Assert — agreeing earns nothing either: it is still a session credential on a route that takes none.
+    // Assert — agreeing is simply the session it already was.
     should(relabelled.status).equal(401);
     should(jsonBody(relabelled).code).equal('session_mismatch');
-    should(agreeing.status).equal(401);
-    should(jsonBody(agreeing).code).equal('unauthorized');
+    should(agreeing.status).equal(200);
+    should(jsonBody(agreeing).actor).equal('peer:s-1');
     should(refusals).deepEqual([{ reason: 'session_mismatch', sessionId: 's-1', route: 'GET /v1/sessions' }]);
   });
 
@@ -2014,31 +2103,50 @@ describe('a ferret session credential at the boundary', () => {
 
   it('should not let a warden capability or a client header make a session credential anything else', async () => {
     // Arrange
-    const { dispatcher } = served(unreachable('/v1/sessions', 'authenticated'));
+    const { dispatcher } = served(echo('/v1/sessions', 'authenticated'));
 
     // Act
     const response = await dispatcher.dispatch(
       asSession('/v1/sessions', S1, { [WARDEN_CAPABILITY_HEADER]: 'cap-7', [CLIENT_HEADER]: 'cli' }),
     );
 
-    // Assert
-    should(response.status).equal(401);
-    should(jsonBody(response).code).equal('unauthorized');
+    // Assert — not a warden, and not the owner's CLI either.
+    should(response.status).equal(200);
+    should(jsonBody(response).actor).equal('peer:s-1');
   });
 
-  it('should answer a live and a dead session credential in the same words, so neither is an oracle', async () => {
+  it('should answer a dead session credential in a stranger’s very words, so it is no oracle', async () => {
     // Arrange
     const { dispatcher } = served(unreachable('/v1/sessions', 'authenticated'));
 
     // Act
-    const live = await dispatcher.dispatch(asSession('/v1/sessions', S1));
     const dead = await dispatcher.dispatch(asSession('/v1/sessions', STOPPED));
     const stranger = await dispatcher.dispatch(request({ path: '/v1/sessions', privilegedLoopback: true }));
 
     // Assert
-    should(live.status).equal(dead.status);
+    should(dead.status).equal(stranger.status);
+    should(jsonBody(dead)).deepEqual(jsonBody(stranger));
+  });
+
+  it('should answer the deleted pre-key pairing path the same to a live and a dead credential', async () => {
+    // Arrange — `POST /v1/pair` is no route at all; an old app is told to update, whoever else asks.
+    const { dispatcher } = served(echo('/v1/sessions', 'operator'));
+    const pair = (credential: string) =>
+      request({
+        method: 'POST',
+        path: '/v1/pair',
+        loopback: true,
+        privilegedLoopback: true,
+        headers: { authorization: `Bearer ${credential}` },
+      });
+
+    // Act
+    const live = await dispatcher.dispatch(pair(S1));
+    const dead = await dispatcher.dispatch(pair(STOPPED));
+
+    // Assert
+    should([live.status, jsonBody(live).code]).deepEqual([426, 'app_outdated']);
     should(jsonBody(live)).deepEqual(jsonBody(dead));
-    should(jsonBody(live)).deepEqual(jsonBody(stranger));
   });
 
   it('should never look a session credential up when it arrived from anywhere but this machine', async () => {
@@ -2081,18 +2189,16 @@ describe('a ferret session credential at the boundary', () => {
     should(refusals).deepEqual([]);
   });
 
-  it('should not name a route back to a session credential, known or unknown', async () => {
+  it('should name an unknown route back only to a live credential, exactly as to any other caller', async () => {
     // Arrange
     const { dispatcher } = served(unreachable('/v1/sessions', 'authenticated'));
 
     // Act
-    const unknown = await dispatcher.dispatch(asSession('/v1/nowhere', S1));
-    const wrongVerb = await dispatcher.dispatch(
-      request({ method: 'DELETE', path: '/v1/sessions', headers: { authorization: `Bearer ${S1}` } }),
-    );
+    const live = await dispatcher.dispatch(asSession('/v1/nowhere', S1));
+    const dead = await dispatcher.dispatch(asSession('/v1/nowhere', STOPPED));
 
-    // Assert — 401 rather than 404 or 405, exactly as for a stranger.
-    should([unknown.status, wrongVerb.status]).deepEqual([401, 401]);
+    // Assert — a live credential is authenticated, so a 404 tells it nothing; a dead one learns nothing.
+    should([live.status, dead.status]).deepEqual([404, 401]);
   });
 
   it('should leave a public route to read its own credential, so the directory is asked once, there', async () => {
@@ -2124,15 +2230,18 @@ describe('a ferret session credential at the boundary', () => {
     should(asked).deepEqual([]);
   });
 
-  it('should refuse a session credential on the socket table too, and audit a relabel there', async () => {
+  it('should take a session credential on the socket table too, as itself, and audit a relabel there', async () => {
     // Arrange
     const directory = sessionsDirectory();
+    const actors: (string | undefined)[] = [];
     const upgrade: SocketRoute = {
       method: 'GET',
       path: '/v1/sessions/:id/stream',
       minimum: 'authenticated',
-      accept: async () => {
-        throw new Error('a session credential reached a socket');
+      caller: 'any',
+      accept: async context => {
+        actors.push(context.actor);
+        return async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined });
       },
     };
     const sockets = new ApiSocketDispatcher(
@@ -2146,7 +2255,8 @@ describe('a ferret session credential at the boundary', () => {
     const relabelled = await sockets.upgrade(asSession('/v1/sessions/x/stream', S1, { [SESSION_ID_HEADER]: 's-2' }));
 
     // Assert
-    should(plain.outcome === 'refused' && plain.response.status).equal(401);
+    should(plain.outcome).equal('accepted');
+    should(actors).deepEqual(['peer:s-1']);
     should(relabelled.outcome === 'refused' && jsonBody(relabelled.response).code).equal('session_mismatch');
     should(directory.refusals).have.length(1);
   });

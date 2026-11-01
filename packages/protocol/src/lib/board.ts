@@ -136,13 +136,27 @@ export const formatAgendaRef = (ref: AgendaRef): string => `${AGENDA_REF_SIGIL}$
 /**
  * Who did something to a card. A ferret is always a session; the owner may have acted from one (a chat)
  * or from nowhere in particular (the Board page); the daemon names the session it acted for, if any.
+ *
+ * `admin-token` is the host's admin token with no ferret's own credential behind it. The daemon cannot
+ * tell the owner at the machine from a ferret that called `fy` without its session, so it records which
+ * one it KNOWS — the token — and never `owner` ({@link ADMIN_TOKEN_ACTOR_WORDS}). `owner` is a paired
+ * device: a person's app.
  */
 export const BoardActorSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('ferret'), sessionId: SessionIdSchema }),
   z.strictObject({ kind: z.literal('owner'), sessionId: SessionIdSchema.optional() }),
+  z.strictObject({ kind: z.literal('admin-token'), sessionId: SessionIdSchema.optional() }),
   z.strictObject({ kind: z.literal('daemon'), sessionId: SessionIdSchema.optional() }),
 ]);
 export type BoardActor = z.infer<typeof BoardActorSchema>;
+
+/** What every surface says for an `admin-token` board actor: the truth, which is that it could be either. */
+export const ADMIN_TOKEN_ACTOR_WORDS =
+  'the admin token (the owner at this machine, or a ferret without its own credential)';
+
+/** Whether a board actor acted with the owner's authority: a paired device, or the host's admin token. */
+export const actsAsOwner = (actor: Pick<BoardActor, 'kind'>): boolean =>
+  actor.kind === 'owner' || actor.kind === 'admin-token';
 
 // ---------------------------------------------------------------------------------------------------
 // Card parts

@@ -293,6 +293,8 @@ export interface SessionCredentialIssuer {
  */
 export interface SessionCapabilityHashStore {
   record(id: SessionId, hash: string): Promise<void>;
+  /** Drops the stored hash, so no presented credential names this session until a launch records a new one. */
+  erase(id: SessionId): Promise<void>;
 }
 
 /**
@@ -304,6 +306,12 @@ export interface SessionCapabilityHashStore {
  */
 export interface SessionCredentialRotator {
   rotate(id: SessionId): Promise<string>;
+  /**
+   * Revokes a STOPPED session's credential: its hash is dropped, so the value its pane held authenticates
+   * nothing, even if something later wrote the session's status back. Only the next launch's rotation
+   * gives it one again. Absent on a rotator with nothing to revoke.
+   */
+  revoke?(id: SessionId): Promise<void>;
 }
 
 /** Mints session ids server-side. */

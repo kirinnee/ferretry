@@ -86,6 +86,7 @@ export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {
       // Any authenticated caller, including a warden: a subject of the decision must be able to read
       // the decision. It discloses no secret — booleans and reasons.
       minimum: 'authenticated',
+      caller: 'any',
       noStore: true,
       handle: async context => jsonResponse(subsystem.view(presentationOf(context))),
     },
@@ -96,6 +97,7 @@ export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {
       // has no business learning which phones an operator has paired. It is not capability-gated for
       // the same reason the grant read is not — the caller who was refused is the one asking.
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async () => jsonResponse(await subsystem.history(GRANT_AUDIT_MAX_ENTRIES).catch(refuse)),
     },
@@ -103,6 +105,7 @@ export function grantRoutes(subsystem: GrantSubsystem): readonly ApiRoute[] {
       method: 'PATCH',
       path: '/v1/grants',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       handle: async context => {
         const view = await subsystem

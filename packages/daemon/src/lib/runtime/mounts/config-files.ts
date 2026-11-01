@@ -51,7 +51,7 @@ import {
 } from '@ferretry/protocol';
 import { controlRefusal } from '../../agent-tools/policy.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
-import { isHumanAdminActor } from '../../api/actor.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
@@ -76,10 +76,6 @@ export interface ConfigFilesSubsystem {
 const MAX_PUT_BODY_BYTES = CONFIG_FILE_MAX_BYTES * 2;
 
 const USE = { capability: 'fleet', axis: 'use' } as const;
-
-/** An agent: a caller that identified itself (`peer:`, a warden) rather than a person or the host. */
-const isAgentCaller = (context: RouteContext): boolean =>
-  context.credential !== undefined && context.credential.tokenClass !== 'device' && !isHumanAdminActor(context.actor);
 
 function addressOf(path: string): ConfigFileAddress {
   // Already checked by `ConfigFilePathSchema`; a path that does not classify never reaches here.
@@ -301,6 +297,7 @@ export function configFilesRoutes(subsystem: ConfigFilesSubsystem): readonly Api
       method: 'GET',
       path: '/v1/config/status',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async () => jsonResponse(await subsystem.service.status()),
@@ -309,6 +306,7 @@ export function configFilesRoutes(subsystem: ConfigFilesSubsystem): readonly Api
       method: 'GET',
       path: '/v1/config/file',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async context => {
@@ -320,6 +318,7 @@ export function configFilesRoutes(subsystem: ConfigFilesSubsystem): readonly Api
       method: 'PUT',
       path: '/v1/config/file',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async context => await put(subsystem, context),
@@ -328,6 +327,7 @@ export function configFilesRoutes(subsystem: ConfigFilesSubsystem): readonly Api
       method: 'POST',
       path: '/v1/config/confirm',
       minimum: 'operator',
+      caller: 'person',
       capability: USE,
       noStore: true,
       handle: async context => await confirm(subsystem, context),
@@ -336,6 +336,7 @@ export function configFilesRoutes(subsystem: ConfigFilesSubsystem): readonly Api
       method: 'POST',
       path: '/v1/agent/config',
       minimum: 'none',
+      caller: 'any',
       privilegedOnly: true,
       noStore: true,
       handle: async context => await agentCall(subsystem, context),

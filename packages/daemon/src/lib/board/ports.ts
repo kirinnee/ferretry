@@ -180,6 +180,8 @@ export interface ReopenNotifier {
 /** A card the owner marked done: the card as it is after the move. */
 export interface DoneNotice {
   readonly task: BoardTask;
+  /** Who closed it: the owner's app (a paired device), or the host's admin token, which may be a ferret. */
+  readonly by: 'owner' | 'admin-token';
 }
 
 /**

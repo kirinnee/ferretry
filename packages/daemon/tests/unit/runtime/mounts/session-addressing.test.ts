@@ -41,6 +41,7 @@ const echo = (path: string): ApiRoute => ({
   method: 'POST',
   path,
   minimum: 'operator',
+  caller: 'any',
   handle: async (context: RouteContext) => jsonResponse({ sessionId: context.params.get('sessionId') ?? null }),
 });
 
@@ -129,6 +130,7 @@ describe('addressing a session by its agent name', () => {
       method: 'GET',
       path: '/v1/sessions/:sessionId/terminals/:terminalId/stream',
       minimum: 'operator',
+      caller: 'any',
       accept: async context => {
         seen.push(context.params.get('sessionId'));
         return async () => ({ onMessage: () => undefined, onClose: () => undefined }) as never;

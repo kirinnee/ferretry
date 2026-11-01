@@ -34,6 +34,11 @@ const PAIRED_DEVICE: Caller = {
   actor: 'device:d1',
 };
 const FERRET: Caller = { credential: { kind: 'authenticated', tokenClass: 'admin' }, actor: 'peer:s1' };
+/** A ferret on its OWN session credential: the handler's second line keys on the class, not on a header. */
+const FERRET_OWN: Caller = {
+  credential: { kind: 'authenticated', tokenClass: 'session', sessionId: 's1' },
+  actor: 'peer:s1',
+};
 const WARDEN: Caller = { credential: { kind: 'authenticated', tokenClass: 'warden' }, actor: 'warden:w1' };
 
 interface Answer {
@@ -83,6 +88,7 @@ async function valueSeenBy(subsystem: SecretSubsystem, runner: EchoSecretChildRu
 describe('who may write the secret store', () => {
   for (const [who, caller] of [
     ['a ferret', FERRET],
+    ['a ferret on its own credential', FERRET_OWN],
     ['a warden', WARDEN],
   ] as const) {
     describe(`${who}`, () => {

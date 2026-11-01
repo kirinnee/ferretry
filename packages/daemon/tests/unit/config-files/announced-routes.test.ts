@@ -9,6 +9,7 @@ const answering = (method: ApiRoute['method'], path: string, status: number): Ap
   method,
   path,
   minimum: 'operator',
+  caller: 'any',
   handle: async () => jsonResponse({ ok: status < 300 }, status),
 });
 

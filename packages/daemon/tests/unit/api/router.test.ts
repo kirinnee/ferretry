@@ -6,6 +6,7 @@ const route = (method: string, path: string): ApiRoute => ({
   method,
   path,
   minimum: 'operator',
+  caller: 'any',
   handle: async () => jsonResponse({ path }),
 });
 

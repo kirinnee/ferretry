@@ -30,6 +30,7 @@ export function systemOpenRoutes(subsystem: SystemOpenSubsystem): readonly ApiRo
       method: 'POST',
       path: '/v1/system/open-url',
       minimum: 'operator',
+      caller: 'any',
       privilegedOnly: true,
       noStore: true,
       handle: async context => {

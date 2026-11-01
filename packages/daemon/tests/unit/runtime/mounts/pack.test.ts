@@ -24,7 +24,7 @@ import { type PackSubsystem, packRoutes } from '../../../../src/lib/runtime/moun
 import { SessionPackError } from '../../../../src/lib/session/pack/service.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { packConfig } from '../../pack/support.ts';
-import { agentIn, CREDENTIALS, GRANTED, human, sessionView } from './support.ts';
+import { agentIn, CREDENTIALS, fromFerret, GRANTED, human, sessionView } from './support.ts';
 
 /** The Pack mode routes, over the real dispatcher: what each status and body is made of. */
 
@@ -263,21 +263,27 @@ describe('the routing prompt clean-up routes', () => {
   it("should refuse a ferret's own credential every act that spends a model run or rewrites the prompt", async () => {
     // Arrange
     const subsystem = new FakePack();
-    const agent = (path: string, body: unknown) =>
-      dispatcher(subsystem).dispatch(
-        request({ method: 'POST', path, headers: agentIn('s1'), body: JSON.stringify(body) }),
-      );
+    // On the admin token naming its session (an older fy) and on its own session credential.
+    const asked = (path: string, body: unknown) =>
+      request({ method: 'POST', path, headers: agentIn('s1'), body: JSON.stringify(body) });
+    const agent = async (path: string, body: unknown) => [
+      await dispatcher(subsystem).dispatch(asked(path, body)),
+      await dispatcher(subsystem).dispatch(fromFerret(asked(path, body))),
+    ];
 
     // Act
-    const answers = await Promise.all([
-      agent('/v1/pack/routing/clean-up', {}),
-      agent('/v1/pack/routing/accept', { prompt: 'Opus.', suggested: SUGGESTED }),
-      agent('/v1/pack/routing/undo', {}),
-    ]);
+    const answers = (
+      await Promise.all([
+        agent('/v1/pack/routing/clean-up', {}),
+        agent('/v1/pack/routing/accept', { prompt: 'Opus.', suggested: SUGGESTED }),
+        agent('/v1/pack/routing/undo', {}),
+      ])
+    ).flat();
 
     // Assert
-    should(answers.map(answer => answer.status)).deepEqual([403, 403, 403]);
-    should(jsonBody(answers[0] as (typeof answers)[number]).code).equal('forbidden');
+    should(answers.map(answer => [answer.status, jsonBody(answer).code])).deepEqual(
+      Array.from({ length: 6 }, () => [403, 'owner_only']),
+    );
     should(subsystem.cleanUps).be.empty();
     should(subsystem.accepted).be.empty();
     should(subsystem.undone).equal(0);

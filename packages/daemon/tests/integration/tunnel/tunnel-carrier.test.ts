@@ -81,6 +81,7 @@ function recordingRoute(minimum: SocketRoute['minimum'], arrivals: ApiRequest[])
     method: 'GET',
     path: '/v1/rendezvous/:daemonId/client',
     minimum,
+    caller: 'any',
     accept: async ({ request }) => {
       arrivals.push(request);
       return async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined });

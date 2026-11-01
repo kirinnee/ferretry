@@ -3,7 +3,7 @@ import { ApiError } from '../api/error.ts';
 import { decodeParameter } from '../api/http.ts';
 import type { ApiRoute, RouteContext } from '../api/route.ts';
 import type { SocketAttachment, SocketRoute } from '../api/socket.ts';
-import { auditActorOf, auditOutcomeOf } from './policy.ts';
+import { agentAuditDetail, auditActorOf, auditOutcomeOf } from './policy.ts';
 import type { AuditFailureReporter, AuditSink } from './types.ts';
 
 /**
@@ -837,6 +837,7 @@ async function record(
       : undefined;
   const detail: AuditDetail = {
     ...rule.detail,
+    ...agentAuditDetail(credential),
     ...settings,
     ...fields,
     ...(answer.subjectName === undefined ? {} : { deviceName: answer.subjectName }),
@@ -1020,7 +1021,9 @@ function auditedSocket(subsystem: AuditedRoutesSubsystem, route: SocketRoute, ru
           actor: auditActorOf(credential, actorName),
           ...(subject === '' ? {} : { subject }),
           outcome,
-          ...(detail === undefined ? {} : { detail }),
+          ...(detail === undefined && credential?.tokenClass !== 'session'
+            ? {}
+            : { detail: { ...detail, ...agentAuditDetail(credential) } }),
         });
       };
       const said = (event: AuditEvent, outcome: AuditOutcome, detail?: AuditDetail): Promise<void> =>

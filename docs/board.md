@@ -50,10 +50,13 @@ the machine this was built on that switched on Ferretry alone. The boot log says
 boards it switched on and off (`board switch: on for …; off for …`); the owner flips any of them afterwards. A board
 registered later starts off.
 
-**GAP: a ferret without `FY_SESSION_ID` is the owner.** A ferret that runs `fy` with no session id (an older
-harness, a tool outside Ferretry) is recorded as actor `owner`, so it passes every owner-only board gate — the
-switch included — and its creates and moves read as the owner's in a card's history. That is why the migration
-counts only Not good. The real fix is per-session credentials (RF-2, &F291).
+**GAP: a ferret without its own credential has the owner's authority.** A call on the admin token with no session
+(an older `fy` or harness without `FY_SESSION_ID`, a tool outside Ferretry) cannot be told from the owner at the
+machine, so it passes every owner-only board gate — the switch included. It is no longer RECORDED as the owner: a
+card's history says `admin-token` — "the admin token (the owner at this machine, or a ferret without its own
+credential)" — and only a paired device's act reads as `owner`. A ferret on its own session credential is always
+itself (`ferret`), never the owner. That is why the migration counts only Not good. Closing the gap for good is
+`fy` presenting the session credential in every pane (RF-3, &F291).
 
 ## Boards, cards and lanes at a glance
 
@@ -399,6 +402,7 @@ grant. This replaced the old `task-boards` access list. The code is `packages/da
 | Standing      | Who                                                        | May                                                        |
 | ------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
 | `owner-human` | the owner: loopback, or a device the `fleet` grant let in  | everything, including owner gates and dependency overrides |
+|               | (on the admin token it is recorded as `admin-token`)       |                                                            |
 | `owner`       | the card's owner ferret                                    | the assignee's writes, plus re-plan                        |
 | `ancestor`    | a ferret above the owner in the `parent` chain of sessions | the same as the owner                                      |
 | `assignee`    | the ferret doing it                                        | move, note, link, block, edit files, clarify, reopen       |

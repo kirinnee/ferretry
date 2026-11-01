@@ -325,6 +325,7 @@ function loginRoutes(logins: LoginDirectory | undefined, recipes: LoginRecipeSer
       method: 'GET',
       path: '/v1/secrets/logins',
       minimum: 'operator',
+      caller: 'person',
       capability: SECRETS_USE,
       noStore: true,
       handle: async () => await listLogins(logins, recipes),
@@ -333,6 +334,7 @@ function loginRoutes(logins: LoginDirectory | undefined, recipes: LoginRecipeSer
       method: 'GET',
       path: '/v1/secrets/logins/hint',
       minimum: 'operator',
+      caller: 'any',
       capability: SECRETS_USE,
       noStore: true,
       handle: async context => await loginHint(logins, recipes, context),
@@ -341,6 +343,7 @@ function loginRoutes(logins: LoginDirectory | undefined, recipes: LoginRecipeSer
       method: 'PUT',
       path: '/v1/secrets/logins/:id',
       minimum: 'operator',
+      caller: 'person',
       capability: SECRETS_CONFIGURE,
       noStore: true,
       handle: async context => await putLogin(logins, recipes, context),
@@ -352,6 +355,7 @@ function loginRoutes(logins: LoginDirectory | undefined, recipes: LoginRecipeSer
             method: 'POST',
             path: '/v1/secrets/logins/:id/recipe/proposals/:proposalId',
             minimum: 'operator',
+            caller: 'person',
             capability: SECRETS_CONFIGURE,
             noStore: true,
             handle: async (context: RouteContext) => await decideRecipe(recipes, context),
@@ -361,6 +365,7 @@ function loginRoutes(logins: LoginDirectory | undefined, recipes: LoginRecipeSer
       method: 'POST',
       path: '/v1/secrets/logins/:id/rename',
       minimum: 'operator',
+      caller: 'person',
       capability: SECRETS_CONFIGURE,
       noStore: true,
       handle: async context => await renameLogin(logins, context),
@@ -369,6 +374,7 @@ function loginRoutes(logins: LoginDirectory | undefined, recipes: LoginRecipeSer
       method: 'DELETE',
       path: '/v1/secrets/logins/:id',
       minimum: 'operator',
+      caller: 'person',
       capability: SECRETS_CONFIGURE,
       noStore: true,
       handle: async context => await removeLogin(logins, context),
@@ -467,12 +473,13 @@ function accountRoutes(
         return reraise(error);
       }
     };
-  const configure = { minimum: 'operator', capability: SECRETS_CONFIGURE, noStore: true } as const;
+  const configure = { minimum: 'operator', caller: 'person', capability: SECRETS_CONFIGURE, noStore: true } as const;
   return [
     {
       method: 'GET',
       path: '/v1/accounts',
       minimum: 'operator',
+      caller: 'person',
       capability: SECRETS_USE,
       noStore: true,
       // The OWNER's view: which fields each account holds, which 2FA keys Ferretry makes codes for and whether they
@@ -486,6 +493,7 @@ function accountRoutes(
       method: 'GET',
       path: '/v1/accounts/hint',
       minimum: 'operator',
+      caller: 'any',
       capability: SECRETS_USE,
       noStore: true,
       handle: async context => await accountHint(accounts, recipes, context),
@@ -499,6 +507,7 @@ function accountRoutes(
             method: 'GET',
             path: '/v1/accounts/look-alike',
             minimum: 'operator',
+            caller: 'person',
             capability: SECRETS_CONFIGURE,
             noStore: true,
             handle: async (context: RouteContext) => {
@@ -673,7 +682,14 @@ function pathStageId(context: RouteContext): TwoFactorStageId {
   return parsed.data;
 }
 
-/** Who is asking about a stage, from the boundary: a paired device by its id, anything else by its actor. */
+/**
+ * Who is asking about a stage, from the boundary: a paired device by its id, anything else by its actor.
+ *
+ * NO FERRET IS EVER ONE OF THEM. Every stage route is `caller: 'person'`, so a ferret's own session
+ * credential — and the admin token naming a ferret's session — is refused at the boundary, and again by
+ * `ownerOnly` above, before a stage is keyed at all: a ferret cannot use up or drop a stage the owner made.
+ * What is left is the admin token with no session, which this daemon cannot tell from the owner's own `fy`.
+ */
 function stageCaller(context: RouteContext): StageCaller {
   const device = context.request.device;
   return device === undefined
@@ -720,7 +736,7 @@ function factorRoutes(
   seeds: TwoFactorSeedStages | undefined,
 ): readonly ApiRoute[] {
   if (accounts === undefined) return [];
-  const configure = { minimum: 'operator', capability: SECRETS_CONFIGURE, noStore: true } as const;
+  const configure = { minimum: 'operator', caller: 'person', capability: SECRETS_CONFIGURE, noStore: true } as const;
   const owned =
     (act: string, run: (context: RouteContext) => Promise<unknown>, status = 200) =>
     async (context: RouteContext): Promise<ApiResponse> => {
@@ -1021,6 +1037,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/secrets',
       minimum: 'operator',
+      caller: 'any',
       capability: SECRETS_USE,
       noStore: true,
       handle: async () => await list(subsystem.directory, subsystem.references),
@@ -1029,6 +1046,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/secrets/use',
       minimum: 'operator',
+      caller: 'any',
       capability: SECRETS_USE,
       noStore: true,
       handle: async context => await use(subsystem.uses, context),
@@ -1037,6 +1055,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/secrets',
       minimum: 'operator',
+      caller: 'person',
       capability: SECRETS_CONFIGURE,
       noStore: true,
       handle: async context => await put(subsystem.directory, context),
@@ -1045,6 +1064,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       method: 'DELETE',
       path: '/v1/secrets/:name',
       minimum: 'operator',
+      caller: 'person',
       capability: SECRETS_CONFIGURE,
       noStore: true,
       handle: async context => await remove(subsystem.directory, context),
@@ -1056,6 +1076,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/secrets/imports',
       minimum: 'operator',
+      caller: 'person',
       capability: SECRETS_CONFIGURE,
       noStore: true,
       handle: async context => await openImport(subsystem.imports, context),
@@ -1064,6 +1085,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/secrets/imports/:importId',
       minimum: 'operator',
+      caller: 'person',
       capability: SECRETS_CONFIGURE,
       noStore: true,
       handle: async context => await completeImport(subsystem.imports, context),
@@ -1072,6 +1094,7 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/secrets/exports/:importId',
       minimum: 'operator',
+      caller: 'person',
       capability: SECRETS_CONFIGURE,
       noStore: true,
       handle: async context => await exportSecrets(subsystem.exports, context),

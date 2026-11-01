@@ -129,6 +129,7 @@ export function healthRoutes(
       method: 'GET',
       path: '/healthz',
       minimum: 'none',
+      caller: 'any',
       noStore: true,
       handle: async () => livenessResponse(clock, startedAtMs, liveness),
     },

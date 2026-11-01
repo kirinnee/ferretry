@@ -24,18 +24,30 @@ import type { AuditEntry, PairedDeviceNotice } from './types.ts';
  * THE ADMIN TOKEN IS `host`. Reading it requires this machine's disk, so whoever holds it is, for the
  * log's purposes, at the machine. An absent credential is a public route's caller, which is somebody
  * who has not proved anything yet.
+ *
+ * A FERRET'S OWN SESSION CREDENTIAL IS `host` TOO — it is on this machine — and the record says which
+ * ferret in its detail ({@link agentAuditDetail}), exactly as the agent tools have always recorded one.
  */
 export function auditActorOf(
   credential: AuthenticatedCredential | undefined,
   deviceName: string | undefined,
 ): AuditActor {
   if (credential === undefined) return { kind: 'anonymous' };
+  if (credential.tokenClass === 'session') return { kind: 'host' };
   if (credential.tokenClass !== 'device') return { kind: credential.tokenClass === 'admin' ? 'host' : 'warden' };
   return {
     kind: 'device',
     deviceId: credential.deviceId,
     ...(deviceName === undefined ? {} : { deviceName }),
   };
+}
+
+/**
+ * The detail that names the ferret behind a record its own session credential caused: `by: 'agent'`, as
+ * the agent tools write, and the session — never the credential. Nothing for any other caller.
+ */
+export function agentAuditDetail(credential: AuthenticatedCredential | undefined): AuditDetail {
+  return credential?.tokenClass === 'session' ? { by: 'agent', session: credential.sessionId } : {};
 }
 
 /**

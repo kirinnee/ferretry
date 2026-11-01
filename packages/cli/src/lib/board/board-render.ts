@@ -1,4 +1,5 @@
 import {
+  ADMIN_TOKEN_ACTOR_WORDS,
   type AgendaRef,
   type BoardCounts,
   type BoardProject,
@@ -192,7 +193,7 @@ export function renderBoardMarkdown(
 const actorLabel = (actor: BoardTaskEvent['actor'], names: SessionNames): string => {
   if (actor.kind === 'ferret') return names(actor.sessionId);
   const via = actor.sessionId === undefined ? '' : ` via ${names(actor.sessionId)}`;
-  return `${actor.kind}${via}`;
+  return `${actor.kind === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : actor.kind}${via}`;
 };
 
 /** One history line's wording, as the protocol spells it for every surface. */

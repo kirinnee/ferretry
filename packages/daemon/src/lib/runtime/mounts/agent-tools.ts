@@ -8,7 +8,7 @@ import {
 } from '@ferretry/protocol';
 import { AgentToolError, type AgentToolService } from '../../agent-tools/service.ts';
 import type { AgentIdentityResolver, AgentToolCaller } from '../../agent-tools/types.ts';
-import { isHumanAdminActor } from '../../api/actor.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import {
   bearerToken,
   isSessionCredential,
@@ -57,7 +57,7 @@ import { decideTerminalOpener } from '../../terminal/ownership.ts';
  *
  * An agent runs as the same user as this daemon and can read the admin token from the state home.
  * Such an agent can call a person's route without identifying itself. That is the shared-token
- * boundary every peer route already states (`isHumanAdminActor`): for honest clients, not a sandbox.
+ * boundary every peer route already states (`callerIsAgent`): for honest clients, not a sandbox.
  */
 
 /**
@@ -178,8 +178,7 @@ async function agentOf(
  */
 function personOf(context: RouteContext): AgentToolCaller & { readonly kind: 'person' } {
   const credential = context.credential;
-  const human = credential?.tokenClass === 'device' || isHumanAdminActor(context.actor);
-  if (!human)
+  if (isAgentCaller(context))
     throw new ApiError(
       403,
       'an agent drives terminals and browsers with its own session credential (POST /v1/agent/tools), not by naming a session',
@@ -289,6 +288,7 @@ export function agentToolRoutes(service: AgentToolService, identities: AgentIden
       method: 'POST',
       path: '/v1/agent/tools',
       minimum: 'none',
+      caller: 'any',
       privilegedOnly: true,
       noStore: true,
       handle: async context => await agentCall(service, identities, context),
@@ -297,6 +297,7 @@ export function agentToolRoutes(service: AgentToolService, identities: AgentIden
       method: 'POST',
       path: '/v1/sessions/:sessionId/surfaces/terminals/tools',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await personCall(service, 'terminal', context),
@@ -305,6 +306,7 @@ export function agentToolRoutes(service: AgentToolService, identities: AgentIden
       method: 'POST',
       path: '/v1/sessions/:sessionId/surfaces/terminals/control',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await control(service, 'terminal', context),
@@ -313,6 +315,7 @@ export function agentToolRoutes(service: AgentToolService, identities: AgentIden
       method: 'GET',
       path: '/v1/sessions/:sessionId/surfaces/terminals/control',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => jsonResponse(await service.controlView(sessionOf(context), 'terminal')),
@@ -321,6 +324,7 @@ export function agentToolRoutes(service: AgentToolService, identities: AgentIden
       method: 'POST',
       path: '/v1/sessions/:sessionId/surfaces/browser/tools',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async context => await personCall(service, 'browser', context),
@@ -329,6 +333,7 @@ export function agentToolRoutes(service: AgentToolService, identities: AgentIden
       method: 'POST',
       path: '/v1/sessions/:sessionId/surfaces/browser/control',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async context => await control(service, 'browser', context),
@@ -337,6 +342,7 @@ export function agentToolRoutes(service: AgentToolService, identities: AgentIden
       method: 'GET',
       path: '/v1/sessions/:sessionId/surfaces/browser/control',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async context => jsonResponse(await service.controlView(sessionOf(context), 'browser')),

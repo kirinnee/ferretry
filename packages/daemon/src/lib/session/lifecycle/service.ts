@@ -251,8 +251,13 @@ export class SessionLifecycleService {
         throw error;
       }
       const stopped = await this.persist(transitionSessionRecord(current, 'stopped', this.ports.clock.now(), reason));
+      // A stopped session's credential dies with its pane: the hash goes AFTER the stop is durable, so a
+      // crash in between leaves a stopped session the lookup already refuses (it is not active), and the
+      // next launch rotates a fresh one either way.
+      await this.ports.rotation?.revoke?.(parsed);
       await this.releaseLeases(parsed);
-      return stopped;
+      const { sessionCapabilityHash: _revoked, ...config } = stopped.config;
+      return { ...stopped, config };
     });
   }
 

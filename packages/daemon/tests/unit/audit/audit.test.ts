@@ -17,6 +17,7 @@ import {
   type AuditReading,
   type AuditRotation,
   type AuditStore,
+  agentAuditDetail,
   auditActorOf,
   auditedRoutes,
   auditedSocketRoutes,
@@ -118,6 +119,17 @@ describe('audit policy', () => {
       kind: 'device',
       deviceId: DEVICE_ID,
     });
+  });
+
+  it('should log a ferret’s own credential as this host, and name the ferret in the detail', () => {
+    // Arrange
+    const own = { kind: 'authenticated', tokenClass: 'session', sessionId: 's1' } as const;
+
+    // Act / Assert — on this machine, like the agent tools' records; never a warden, never the token itself.
+    should(auditActorOf(own, undefined)).deepEqual({ kind: 'host' });
+    should(agentAuditDetail(own)).deepEqual({ by: 'agent', session: 's1' });
+    should(agentAuditDetail({ kind: 'authenticated', tokenClass: 'admin' })).deepEqual({});
+    should(agentAuditDetail(undefined)).deepEqual({});
   });
 
   it('should read a refusal as refused and a fault as failed', () => {
@@ -594,9 +606,10 @@ function decorated(handlers: Partial<Record<string, ApiRoute['handle']>>) {
       method: rule.method,
       path: rule.path,
       minimum: 'operator' as const,
+      caller: 'any' as const,
       handle: handlers[`${rule.method} ${rule.path}`] ?? ok,
     })),
-    { method: 'GET', path: '/v1/unaudited', minimum: 'operator', handle: ok },
+    { method: 'GET', path: '/v1/unaudited', minimum: 'operator', caller: 'any', handle: ok },
   ];
   const routes = auditedRoutes(
     { log, deviceName: async id => names.get(id), failures: { auditWriteFailed: message => failures.push(message) } },
@@ -928,11 +941,18 @@ describe('auditedRoutes', () => {
     // Arrange: a sink that is not an AuditLog, and a device-name lookup that throws.
     const failures: string[] = [];
     const base: ApiRoute[] = [
-      { method: 'PATCH', path: '/v1/grants', minimum: 'operator', handle: async () => jsonResponse({ ok: true }) },
+      {
+        method: 'PATCH',
+        path: '/v1/grants',
+        minimum: 'operator',
+        caller: 'any',
+        handle: async () => jsonResponse({ ok: true }),
+      },
       {
         method: 'DELETE',
         path: '/v1/pair/devices/:deviceId',
         minimum: 'operator',
+        caller: 'any' as const,
         handle: async () => jsonResponse({ ok: true }),
       },
     ];
@@ -1548,9 +1568,15 @@ function socketTable(accept: SocketRoute['accept']) {
   const { journal, log, failures } = auditLog();
   const received: SocketFrame[] = [];
   const routes = AUDITED_SOCKET_ROUTES.map(
-    (rule): SocketRoute => ({ method: 'GET', path: rule.path, minimum: 'operator', accept }),
+    (rule): SocketRoute => ({ method: 'GET', path: rule.path, minimum: 'operator', caller: 'any', accept }),
   );
-  const fleetFeed: SocketRoute = { method: 'GET', path: '/v1/fleet/events', minimum: 'operator', accept };
+  const fleetFeed: SocketRoute = {
+    method: 'GET',
+    path: '/v1/fleet/events',
+    minimum: 'operator',
+    caller: 'any',
+    accept,
+  };
   const wrapped = auditedSocketRoutes(
     {
       log,
@@ -1654,7 +1680,15 @@ describe('auditedSocketRoutes', () => {
         deviceName: async () => undefined,
         failures: { auditWriteFailed: message => failures.push(message) },
       },
-      [{ method: 'GET', path: AUDITED_SOCKET_ROUTES[0]?.path ?? '', minimum: 'operator', accept: async () => attach }],
+      [
+        {
+          method: 'GET',
+          path: AUDITED_SOCKET_ROUTES[0]?.path ?? '',
+          minimum: 'operator',
+          caller: 'any',
+          accept: async () => attach,
+        },
+      ],
     );
 
     // Act

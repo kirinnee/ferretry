@@ -1470,6 +1470,13 @@ class RepositoryHashStore implements SessionCapabilityHashStore {
       JSON.stringify({ ...current, config: { ...current.config, sessionCapabilityHash: hash } }),
     );
   }
+
+  async erase(id: SessionId): Promise<void> {
+    this.order.push('erase');
+    const current = this.repository.current(id);
+    const { sessionCapabilityHash: _revoked, ...config } = current.config;
+    this.repository.documents.set(id, JSON.stringify({ ...current, config }));
+  }
 }
 
 describe('SessionLifecycleService credential per launch', () => {
@@ -1492,6 +1499,9 @@ describe('SessionLifecycleService credential per launch', () => {
       hashes: {
         record: async (id, hash) => {
           await hashes?.record(id, hash);
+        },
+        erase: async id => {
+          await hashes?.erase(id);
         },
       },
     });
@@ -1560,6 +1570,26 @@ describe('SessionLifecycleService credential per launch', () => {
     should(await built.resolve('first-pane-capability')).be.undefined();
     should(built.launcher.launches()).equal(2);
     should(built.credentials.issues).equal(3);
+  });
+
+  it('should erase a stopped session’s credential, so its pane’s value authenticates nothing again', async () => {
+    // Arrange — this resolver counts every stored hash as live, so only the ERASURE can revoke it here.
+    const built = rotating();
+    built.launcher.livenessFromLaunch = true;
+    await built.subject.create(input());
+    await built.subject.start(ID);
+    should(await built.resolve('first-pane-capability')).equal(ID);
+
+    // Act
+    const stopped = await built.subject.stop(ID);
+
+    // Assert
+    should(stopped.state.status).equal('stopped');
+    should(stopped.config.sessionCapabilityHash).be.undefined();
+    should(built.repository.current().config.sessionCapabilityHash).be.undefined();
+    should(await built.resolve('first-pane-capability')).be.undefined();
+    // After the stop is durable: a crash in between leaves a stopped session, which the lookup refuses.
+    should(built.order.lastIndexOf('erase')).be.above(built.order.lastIndexOf('hash'));
   });
 
   it('should keep the credential of a pane that is still live when a start is retried', async () => {

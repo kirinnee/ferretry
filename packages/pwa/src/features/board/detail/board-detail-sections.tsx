@@ -144,7 +144,12 @@ export function AskSection({
           {task.clarifications.map(clarification => (
             <li key={`${clarification.at}:${clarification.text}`}>
               <span className="fy-board-detail__quiet">
-                Clarified by {clarification.by.kind === 'owner' ? 'you' : 'a ferret'}
+                Clarified by{' '}
+                {clarification.by.kind === 'owner'
+                  ? 'you'
+                  : clarification.by.kind === 'admin-token'
+                    ? 'the admin token'
+                    : 'a ferret'}
                 {clarification.by.kind === 'ferret' ? ` (${names(clarification.by.sessionId)})` : ''}:{' '}
               </span>
               {clarification.text}

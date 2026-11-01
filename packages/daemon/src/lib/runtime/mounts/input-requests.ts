@@ -7,7 +7,7 @@ import {
   type InputRequestList,
   type InputShot,
 } from '@ferretry/protocol';
-import { isHumanAdminActor } from '../../api/actor.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';
@@ -27,7 +27,7 @@ import { refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret
  * a value an agent tried to send is never parsed. The service refuses again unless the caller is a
  * person at the machine or a paired device. As everywhere else this is the honest-client boundary: an
  * agent that reads the admin token from the state home can call these as the host, which is the same
- * limit every other peer route declares (`isHumanAdminActor`).
+ * limit every other peer route declares (`callerIsAgent`, `api/agent-caller.ts`).
  *
  * ## NO ROUTE RETURNS A VALUE
  *
@@ -54,7 +54,7 @@ export function answered(error: unknown): never {
 /** The owner a route was called by: the person at the machine or a paired device. Refuses an agent before any body is read. */
 export function ownerActorOf(context: RouteContext): Extract<InputActor, { readonly kind: 'host' | 'device' }> {
   const credential = context.credential;
-  if (credential?.tokenClass !== 'device' && !isHumanAdminActor(context.actor))
+  if (isAgentCaller(context))
     throw new ApiError(403, 'only the owner answers an input request; an agent cannot', 'forbidden');
   return credential?.tokenClass === 'device' ? { kind: 'device', deviceId: credential.deviceId } : { kind: 'host' };
 }
@@ -112,6 +112,7 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
       method: 'GET',
       path: '/v1/input-requests',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await list(service, context, true),
@@ -120,6 +121,7 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
       method: 'GET',
       path: '/v1/sessions/:sessionId/input-requests',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => await list(service, context, false),
@@ -130,6 +132,7 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
       method: 'GET',
       path: '/v1/sessions/:sessionId/input-requests/:requestId/shot',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async context => {
@@ -148,6 +151,7 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
       method: 'POST',
       path: '/v1/sessions/:sessionId/input-requests/:requestId/deliver',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
@@ -171,6 +175,7 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
       method: 'GET',
       path: '/v1/sessions/:sessionId/input-quarantines',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: context => {
@@ -184,6 +189,7 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
       method: 'POST',
       path: '/v1/sessions/:sessionId/input-quarantines/:key/end',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
@@ -197,6 +203,7 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
       method: 'POST',
       path: '/v1/sessions/:sessionId/input-requests/:requestId/cancel',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {

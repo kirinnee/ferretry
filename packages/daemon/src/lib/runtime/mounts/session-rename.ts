@@ -59,6 +59,7 @@ export function sessionRenameRoutes(subsystem: SessionRenameSubsystem): readonly
       method: 'POST',
       path: '/v1/sessions/:sessionId/rename',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await rename(subsystem, context),
     },

@@ -23,6 +23,12 @@ describe('resolveApiActor', () => {
     ['an unknown client is the UI, not an invented kind', { tokenClass: 'admin', client: 'curl' }, 'admin-ui'],
     ['a paired device is its registry identity', { tokenClass: 'device', deviceId: 'device-1' }, 'device:device-1'],
     ['a blank device identity fails closed to the generic device', { tokenClass: 'device' }, 'device'],
+    ['a ferret’s own credential is that ferret', { tokenClass: 'session', sessionId: 's-4' }, 'peer:s-4'],
+    [
+      'a ferret’s own credential is never the owner’s CLI, whatever the client says',
+      { tokenClass: 'session', sessionId: 's-4', client: 'cli' },
+      'peer:s-4',
+    ],
   ];
 
   for (const [name, input, expected] of cases) {

@@ -29,6 +29,7 @@ const route = (path: string, capability?: 'terminal' | 'browser' | 'filesystem' 
   method: 'GET',
   path,
   minimum: 'operator',
+  caller: 'any',
   ...(capability === undefined ? {} : { capability: { capability, axis: 'use' } }),
   handle: async () =>
     new Response(JSON.stringify({ ok: true }), { headers: { 'content-type': 'application/json' } }) as never,
@@ -88,6 +89,7 @@ describe('"What agents may control" on the ordinary surface routes', () => {
         method: 'GET',
         path: '/stream',
         minimum: 'operator',
+        caller: 'any',
         capability: { capability: 'browser', axis: 'use' },
         accept: async () => {
           accepted.push('browser');
@@ -98,6 +100,7 @@ describe('"What agents may control" on the ordinary surface routes', () => {
         method: 'GET',
         path: '/events',
         minimum: 'operator',
+        caller: 'any',
         accept: async () => {
           accepted.push('events');
           return async () => ({ open: async () => undefined, fromClient: () => undefined, close: () => undefined });

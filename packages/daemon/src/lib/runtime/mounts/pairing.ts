@@ -197,6 +197,7 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
       method: 'POST',
       path: '/v1/pair/code',
       minimum: 'operator',
+      caller: 'person',
       capability: PAIRING_DEMAND,
       noStore: true,
       handle: async context => {
@@ -229,6 +230,7 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
       method: 'GET',
       path: '/v1/pair/code/:pairingId',
       minimum: 'operator',
+      caller: 'person',
       capability: PAIRING_DEMAND,
       noStore: true,
       handle: async ({ params }) => {
@@ -250,6 +252,7 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
       method: 'DELETE',
       path: '/v1/pair/code/:pairingId',
       minimum: 'operator',
+      caller: 'person',
       capability: PAIRING_DEMAND,
       noStore: true,
       handle: async ({ params }) => {
@@ -265,6 +268,7 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
       method: 'GET',
       path: '/v1/pair/devices',
       minimum: 'operator',
+      caller: 'person',
       capability: PAIRING_DEMAND,
       noStore: true,
       handle: async context => jsonResponse(await devicesView(subsystem, grants, context)),
@@ -281,6 +285,7 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
       method: 'DELETE',
       path: '/v1/pair/devices/:deviceId',
       minimum: 'operator',
+      caller: 'person',
       capability: PAIRING_DEMAND,
       noStore: true,
       handle: async context => {
@@ -304,6 +309,7 @@ export function pairingRoutes(subsystem: PairingSubsystem, grants: DeviceGrantSu
       method: 'PATCH',
       path: '/v1/pair/devices/:deviceId/grants',
       minimum: 'operator',
+      caller: 'person',
       capability: PAIRING_DEMAND,
       noStore: true,
       handle: async context => {

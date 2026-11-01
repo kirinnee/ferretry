@@ -132,6 +132,7 @@ export function secureCopyRoutes(
       method: 'GET',
       path: '/v1/sessions/:sessionId/copies',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
@@ -143,6 +144,7 @@ export function secureCopyRoutes(
       method: 'GET',
       path: '/v1/copy-rules',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
@@ -155,6 +157,7 @@ export function secureCopyRoutes(
       method: 'GET',
       path: '/v1/copy-rules/settings',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
@@ -170,6 +173,7 @@ export function secureCopyRoutes(
       method: 'PUT',
       path: '/v1/copy-rules/settings',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
@@ -185,6 +189,7 @@ export function secureCopyRoutes(
       method: 'POST',
       path: '/v1/copy-rules',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'configure' },
       noStore: true,
       handle: async context => {
@@ -206,6 +211,7 @@ export function secureCopyRoutes(
       method: 'DELETE',
       path: '/v1/copy-rules/:ruleId',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
@@ -218,6 +224,7 @@ export function secureCopyRoutes(
       method: 'GET',
       path: '/v1/copy-plans',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
@@ -229,6 +236,7 @@ export function secureCopyRoutes(
       method: 'POST',
       path: '/v1/sessions/:sessionId/copy-plans/:planId/approve',
       minimum: 'operator',
+      caller: 'person',
       capability: { capability: 'terminal', axis: 'configure' },
       noStore: true,
       handle: async context => {

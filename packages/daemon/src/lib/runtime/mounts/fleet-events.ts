@@ -122,6 +122,7 @@ export function fleetEventSocketRoutes(
       method: 'GET',
       path: '/v1/events',
       minimum: 'operator',
+      caller: 'any',
       accept: async context => {
         if (isConfigTopic(context)) return async downstream => configChanges.handler(downstream);
         const requested = await scope(context, sessions);

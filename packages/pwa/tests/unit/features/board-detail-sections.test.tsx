@@ -170,11 +170,17 @@ describe('AskSection', () => {
           at: '2026-08-01T09:20:00.000Z',
           by: { kind: 'ferret', sessionId: LEAD },
         },
+        // The admin token with no ferret's credential: it may be you or a ferret, so it is said as the token.
+        { text: 'Also tablets', source: 'cli', at: '2026-08-01T09:30:00.000Z', by: { kind: 'admin-token' } },
       ],
     });
     const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
     const lines = [...root.querySelectorAll('li')].map(item => item.textContent);
-    expect(lines).toEqual(['Clarified by you: Only on phones', 'Clarified by a ferret (Denisha): Behind a flag']);
+    expect(lines).toEqual([
+      'Clarified by you: Only on phones',
+      'Clarified by a ferret (Denisha): Behind a flag',
+      'Clarified by the admin token: Also tablets',
+    ]);
   });
 });
 

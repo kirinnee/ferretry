@@ -32,7 +32,8 @@ import { type SurfaceOpener, SurfaceOpenerSchema } from '@ferretry/protocol';
 /** The authenticated credential, reduced to what ownership depends on. */
 export type TerminalOpenerCredential =
   | { readonly tokenClass: 'admin' | 'warden' }
-  | { readonly tokenClass: 'device'; readonly deviceId: string };
+  | { readonly tokenClass: 'device'; readonly deviceId: string }
+  | { readonly tokenClass: 'session'; readonly sessionId: string };
 
 export type TerminalOpenerDecision =
   /** Record this opener against the new terminal. */
@@ -69,6 +70,13 @@ export function decideTerminalOpener(
     const parsed = SurfaceOpenerSchema.safeParse({ by: 'human', deviceId: credential.deviceId });
     // A device id this daemon cannot represent on the wire is not a reason to
     // refuse the shell — but it is a reason not to print an unrenderable owner.
+    return parsed.success ? { outcome: 'attributed', openedBy: parsed.data } : { outcome: 'unattributed' };
+  }
+  if (credential.tokenClass === 'session') {
+    // A ferret's own credential names the agent: it may name itself, or nothing, and never another.
+    if (declared !== '' && declared !== credential.sessionId)
+      return { outcome: 'refused', reason: 'a ferret may open a terminal only as itself' };
+    const parsed = SurfaceOpenerSchema.safeParse({ by: 'agent', sessionId: credential.sessionId });
     return parsed.success ? { outcome: 'attributed', openedBy: parsed.data } : { outcome: 'unattributed' };
   }
   if (declared === '') return { outcome: 'attributed', openedBy: { by: 'local' } };

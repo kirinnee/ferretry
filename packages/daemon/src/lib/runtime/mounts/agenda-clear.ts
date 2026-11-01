@@ -18,6 +18,7 @@ export function agendaClearRoutes(clearer: AgendaAgentClearer): readonly ApiRout
       method: 'POST',
       path: '/v1/agenda/clear-agents',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       handle: async context => {
         const actor = agendaActor(context.actor);

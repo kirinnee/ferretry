@@ -5,7 +5,7 @@ import {
   STEP_UP_REQUIRED_CODE,
   type StepUpRequiredBody,
 } from '@ferretry/protocol';
-import { isHumanAdminActor } from '../../api/actor.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import type { ApiResponse } from '../../api/http.ts';
@@ -30,10 +30,6 @@ import { DaemonUpdateRefusal, type DaemonUpdateSubsystem } from '../../update/in
 
 const USE = { capability: 'fleet', axis: 'use' } as const;
 const CONFIGURE = { capability: 'fleet', axis: 'configure' } as const;
-
-/** An agent: a caller that identified itself (`peer:`, a warden) rather than a person or the host. */
-const isAgentCaller = (context: RouteContext): boolean =>
-  context.credential !== undefined && context.credential.tokenClass !== 'device' && !isHumanAdminActor(context.actor);
 
 /**
  * The refusal for a governed caller with no fresh passkey proof, or `undefined` when it may go on. Shared
@@ -91,6 +87,7 @@ export function daemonUpdateRoutes(subsystem: DaemonUpdateSubsystem): readonly A
       method: 'GET',
       path: '/v1/daemon/update',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async () => jsonResponse(await subsystem.view()),
@@ -99,6 +96,7 @@ export function daemonUpdateRoutes(subsystem: DaemonUpdateSubsystem): readonly A
       method: 'POST',
       path: '/v1/daemon/update',
       minimum: 'operator',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => await start(subsystem, context),
@@ -107,6 +105,7 @@ export function daemonUpdateRoutes(subsystem: DaemonUpdateSubsystem): readonly A
       method: 'PATCH',
       path: '/v1/daemon/update/settings',
       minimum: 'operator',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => await settings(subsystem, context),

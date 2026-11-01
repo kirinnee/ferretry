@@ -55,6 +55,7 @@ export function fleetSetupRoutes(subsystem: FleetSetupSubsystem): readonly ApiRo
       method: 'GET',
       path: '/v1/fleet/setup/scan',
       minimum: 'operator',
+      caller: 'any',
       capability: CONFIGURE,
       noStore: true,
       handle: async () => await answer(FleetSetupScanSchema, () => subsystem.scan()),
@@ -63,6 +64,7 @@ export function fleetSetupRoutes(subsystem: FleetSetupSubsystem): readonly ApiRo
       method: 'POST',
       path: '/v1/fleet/machine/tools/install',
       minimum: 'operator',
+      caller: 'any',
       capability: CONFIGURE,
       noStore: true,
       handle: async context => {
@@ -74,6 +76,7 @@ export function fleetSetupRoutes(subsystem: FleetSetupSubsystem): readonly ApiRo
       method: 'GET',
       path: '/v1/fleet/export',
       minimum: 'operator',
+      caller: 'any',
       capability: CONFIGURE,
       noStore: true,
       handle: async () => await answer(FleetCloneBundleSchema, () => subsystem.exportBundle()),

@@ -12,6 +12,7 @@ import {
   type AgendaItem,
   type AgendaRef,
   type AgendaSnapshot,
+  ADMIN_TOKEN_ACTOR_WORDS,
   type BoardActor,
   type BoardEditableField,
   type BoardTaskEvent,
@@ -128,6 +129,7 @@ export interface HistoryContext {
 
 const actorName = (actor: BoardActor, names: FerretNames): string => {
   if (actor.kind === 'owner') return 'You';
+  if (actor.kind === 'admin-token') return 'Admin token';
   if (actor.kind === 'daemon') return 'Ferretry';
   return names(actor.sessionId);
 };
@@ -459,12 +461,20 @@ export const askOrigin = (
   const sessionId = source.startsWith(SESSION_SOURCE) ? source.slice(SESSION_SOURCE.length) : null;
   const author = task.createdBy;
   return {
-    who: author.kind === 'owner' ? 'you' : author.kind === 'ferret' ? names(author.sessionId) : 'the daemon',
+    who: askAuthor(author, names),
     sessionId,
     chat: sessionId === null ? null : `${names(sessionId)}'s chat`,
     via: sessionId === null && !/^owner/iu.test(source) ? source : null,
     age,
   };
+};
+
+/** Who opened a card, as its byline says it. The admin token is said for what it is: it may be either. */
+const askAuthor = (author: BoardActor, names: FerretNames): string => {
+  if (author.kind === 'owner') return 'you';
+  if (author.kind === 'ferret') return names(author.sessionId);
+  if (author.kind === 'admin-token') return ADMIN_TOKEN_ACTOR_WORDS;
+  return 'the daemon';
 };
 
 const RAW_PREFIX = /^\s*\([^()\n]{1,60}\)\s*/u;

@@ -7,8 +7,10 @@ import type { ApiRoute, RouteContext } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { CopyPlanService, EphemeralValues, PasteRuleService, SecureCopyService } from '../../../../src/lib/index.ts';
 import { secureCopyRoutes } from '../../../../src/lib/runtime/mounts/secure-copy.ts';
+import type { ApiRequest } from '../../../../src/lib/api/http.ts';
 import { bodyReads, jsonBody, request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, GRANTED, human, withoutGrant, withoutSecretsConfigure } from './support.ts';
+import { handleDirectly } from './second-line.ts';
+import { agentIn, CREDENTIALS, fromFerret, GRANTED, human, withoutGrant, withoutSecretsConfigure } from './support.ts';
 
 /** The owner's secure-copy routes through the real router and authorization boundary, with the real services. */
 
@@ -79,33 +81,45 @@ const post = (path: string, body: unknown, headers: Readonly<Record<string, stri
   });
 
 describe('the secure copy routes', () => {
-  it('should refuse an agent on every route, before reading a body', async () => {
-    const { dispatch, stored, plan } = await served();
-    const reads = bodyReads();
-    const agent = agentIn(SESSION);
+  // On the admin token naming its session (an older fy), and on its OWN session credential.
+  for (const [who, own] of [
+    ['an agent', false],
+    ['a ferret on its own session credential', true],
+  ] as const)
+    it(`should refuse ${who} on every route, before reading a body`, async () => {
+      const { dispatch, stored, plan } = await served();
+      const reads = bodyReads();
+      const agent = own ? human : agentIn(SESSION);
+      const as = <T extends ApiRequest>(asked: T): T => (own ? fromFerret(asked) : asked);
 
-    const answers = await Promise.all([
-      dispatch.dispatch(post('/v1/copy-rules', RULE, agent, reads)),
-      dispatch.dispatch(post(`/v1/sessions/${SESSION}/copy-plans/${plan.id}/approve`, { items: [0] }, agent, reads)),
-      dispatch.dispatch(request({ method: 'GET', path: '/v1/copy-rules', headers: agent })),
-      dispatch.dispatch(request({ method: 'GET', path: '/v1/copy-plans', headers: agent })),
-      dispatch.dispatch(request({ method: 'GET', path: `/v1/sessions/${SESSION}/copies`, headers: agent })),
-      dispatch.dispatch(request({ method: 'DELETE', path: `/v1/copy-rules/${'1'.padStart(32, '0')}`, headers: agent })),
-      dispatch.dispatch(
-        request({
-          method: 'PUT',
-          path: '/v1/copy-rules/settings',
-          headers: { ...agent, 'content-type': 'application/json' },
-          body: JSON.stringify({ allowProfileTargets: true }),
-          reads,
-        }),
-      ),
-    ]);
+      const answers = await Promise.all([
+        dispatch.dispatch(as(post('/v1/copy-rules', RULE, agent, reads))),
+        dispatch.dispatch(
+          as(post(`/v1/sessions/${SESSION}/copy-plans/${plan.id}/approve`, { items: [0] }, agent, reads)),
+        ),
+        dispatch.dispatch(as(request({ method: 'GET', path: '/v1/copy-rules', headers: agent }))),
+        dispatch.dispatch(as(request({ method: 'GET', path: '/v1/copy-plans', headers: agent }))),
+        dispatch.dispatch(as(request({ method: 'GET', path: `/v1/sessions/${SESSION}/copies`, headers: agent }))),
+        dispatch.dispatch(
+          as(request({ method: 'DELETE', path: `/v1/copy-rules/${'1'.padStart(32, '0')}`, headers: agent })),
+        ),
+        dispatch.dispatch(
+          as(
+            request({
+              method: 'PUT',
+              path: '/v1/copy-rules/settings',
+              headers: { ...agent, 'content-type': 'application/json' },
+              body: JSON.stringify({ allowProfileTargets: true }),
+              reads,
+            }),
+          ),
+        ),
+      ]);
 
-    should(answers.map(answer => answer.status)).eql([403, 403, 403, 403, 403, 403, 403]);
-    should(reads.consumed).be.false();
-    should(stored.rules).be.undefined();
-  });
+      should(answers.map(answer => [answer.status, jsonBody(answer).code])).eql(answers.map(() => [403, 'owner_only']));
+      should(reads.consumed).be.false();
+      should(stored.rules).be.undefined();
+    });
 
   it('should let the owner add, list and remove a rule', async () => {
     const { dispatch, stored } = await served();
@@ -422,5 +436,21 @@ describe('the secure copy settings: profile targets', () => {
 
     should([again.status, again.claimed, off.status, off.claimed]).eql([200, 0, 200, 0]);
     should(stored.settings).eql({ allowProfileTargets: false });
+  });
+});
+
+describe('the paste plans, read by the owner', () => {
+  it('should list the plans for the owner, and still refuse a ferret’s own credential in the handler', async () => {
+    // Arrange
+    const { dispatch, routes, plan } = await served();
+
+    // Act
+    const listed = await dispatch.dispatch(request({ method: 'GET', path: '/v1/copy-plans', headers: human }));
+    const direct = await handleDirectly(routes, 'GET', '/v1/copy-plans');
+
+    // Assert
+    should(listed.status).equal(200);
+    should((jsonBody(listed).plans as readonly { id: string }[]).map(entry => entry.id)).containEql(plan.id);
+    should([direct.status, direct.code]).deepEqual([403, 'forbidden']);
   });
 });

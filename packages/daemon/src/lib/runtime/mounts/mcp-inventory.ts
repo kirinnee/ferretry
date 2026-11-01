@@ -48,6 +48,7 @@ export function mcpInventoryRoutes(subsystem: McpInventorySubsystem): readonly A
       method: 'GET',
       path: '/v1/mcp',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async () => await answer(() => subsystem.inventory.machine()),
@@ -56,6 +57,7 @@ export function mcpInventoryRoutes(subsystem: McpInventorySubsystem): readonly A
       method: 'POST',
       path: '/v1/mcp/check',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
@@ -67,6 +69,7 @@ export function mcpInventoryRoutes(subsystem: McpInventorySubsystem): readonly A
       method: 'GET',
       path: '/v1/sessions/:sessionId/mcp/servers',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
       handle: async context => {

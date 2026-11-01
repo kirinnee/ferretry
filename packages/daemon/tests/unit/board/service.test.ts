@@ -303,6 +303,19 @@ describe('moving a card', () => {
     should(lastEvent(ports)?.actor).eql({ kind: 'owner' });
   });
 
+  it('should record a move made on the admin token as the admin token, never as the owner', async () => {
+    // Arrange — the host's admin token with no ferret's own credential: the owner at the machine, or a ferret
+    // that ran fy without its session. It keeps the owner's authority (it may pass the owner gate) …
+    const { ports, service } = serviceWith([card({ laneId: 'plan' })]);
+
+    // Act
+    await service.act('F1', action({ action: 'move', to: 'implement' }), { kind: 'owner', via: 'admin-token' });
+
+    // Assert — … and is recorded as what the daemon actually knows.
+    should(stored(ports).laneId).equal('implement');
+    should(lastEvent(ports)?.actor).eql({ kind: 'admin-token' });
+  });
+
   it('should let only the owner close a card on a board that has a verify lane', async () => {
     // Arrange
     const { ports, service } = serviceWith([card({ laneId: 'tested' })]);
@@ -1578,6 +1591,11 @@ describe('the reopen message and actors', () => {
     { by: { kind: 'owner' as const }, expected: '&F412 was reopened by the owner: not good' },
     { by: { kind: 'ferret' as const, sessionId: 'lead' }, expected: '&F412 was reopened by lead: not good' },
     { by: { kind: 'daemon' as const }, expected: '&F412 was reopened by the daemon: not good' },
+    {
+      by: { kind: 'admin-token' as const },
+      expected:
+        '&F412 was reopened by the admin token (the owner at this machine, or a ferret without its own credential): not good',
+    },
   ])('should say who reopened it', ({ by, expected }) => {
     // Assert
     should(reopenMessage({ id: 'F412' }, by, 'not good')).equal(expected);

@@ -8,6 +8,7 @@ import {
   stepUpSkippableAtMachine,
 } from '@ferretry/protocol';
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
+import { callerIsAgent, OWNER_ONLY_CODE } from './agent-caller.ts';
 import {
   type ApiCredentials,
   type Authentication,
@@ -110,13 +111,13 @@ export type RouteAuthorization<TRoute extends ScopedRoute> =
  * 5. ask the administrator's warden-remedy authorizer, and ONLY for a caller the token class already
  *    proved to be a warden.
  *
- * A FERRET SESSION'S CREDENTIAL is authenticated at step 1 and refused straight after it, on every route
- * this boundary authenticates: it names its own session, so `x-ferretry-session-id` naming another one is
- * `401 session_mismatch` (audited), and otherwise it is answered exactly as anonymous. The one route that
- * takes it (`POST /v1/agent/tools`) is public and reads it itself, so a session credential reaches nothing
- * it could not reach before — docs/agent-tools.md § "The ferret session credential". It is looked up only
- * when the request arrived on this machine's privileged loopback carrier: from anywhere else it is a
- * stranger's bearer, unasked about.
+ * A FERRET SESSION'S CREDENTIAL is authenticated at step 1 and names its own session, so
+ * `x-ferretry-session-id` naming another one is `401 session_mismatch` (audited). Its actor is always that
+ * session. Before the minimum, any handler or any read of the body, a `caller: 'person'` route refuses it —
+ * and every other agent (`callerIsAgent`) — with `403 owner_only`; a `caller: 'any'` route serves it as
+ * itself, ungoverned by grants, which are about remote devices (docs/agent-tools.md § "Who a ferret may
+ * be: every route says"). It is looked up only when the request arrived on this machine's privileged
+ * loopback carrier: from anywhere else it is a stranger's bearer, unasked about.
  */
 /**
  * An app from before device keys redeeming a pairing code over plain HTTP.
@@ -206,11 +207,8 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
           : errorResponse(401, 'unauthorized', 'unauthorized'),
     };
 
-  // A FERRET SESSION'S CREDENTIAL STOPS HERE, before the route is so much as named back to it. Its actor is
-  // the session it was minted for, so a header naming any other session is a forged attribution — refused
-  // and audited. Otherwise it is answered in a stranger's very words, so the answer says nothing about
-  // whether the value is live: no route this boundary authenticates takes one yet, and widening that is a
-  // per-route decision (`AuthenticatedCredential` keeps it out of handlers).
+  // A FERRET SESSION'S CREDENTIAL NAMES ITS OWN SESSION, so a header naming any other one is a forged
+  // attribution — refused and audited before the route is so much as named back to it.
   if (authentication.tokenClass === 'session') {
     const claimed = headerValue(request, SESSION_ID_HEADER)?.trim() ?? '';
     if (claimed !== '' && claimed !== authentication.sessionId)
@@ -227,7 +225,10 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
           route: `${request.method} ${request.path}`,
         },
       };
-    return { kind: 'refused', response: errorResponse(401, 'unauthorized', 'unauthorized') };
+    // The deleted pre-key pairing path is answered as it is to a stranger, so a live credential and a dead
+    // one get the same words there too.
+    if (isPreKeyPairing(request) && lookup.kind !== 'matched')
+      return { kind: 'refused', response: errorResponse(426, OLDER_APP_SENTENCE, 'app_outdated') };
   }
 
   if (lookup.kind === 'not-found') return { kind: 'unrouted' };
@@ -235,6 +236,32 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
     return {
       kind: 'refused',
       response: methodNotAllowedResponse(request.method, request.path, lookup.allowed),
+    };
+
+  // Server-derived, unforgeable: the token class decides warden versus admin versus a ferret's own
+  // session, and the self-identification headers only refine WHICH warden or peer — never a session
+  // credential's, whose actor is the session it names. The source also flipped the class to `warden`
+  // whenever a stop-capability header was merely PRESENT, so an admin CLI that passed one had its own
+  // actions journalled as the warden's.
+  const actor = resolveApiActor({
+    tokenClass: authentication.tokenClass,
+    deviceId: authentication.tokenClass === 'device' ? authentication.deviceId : undefined,
+    sessionId:
+      authentication.tokenClass === 'session' ? authentication.sessionId : headerValue(request, SESSION_ID_HEADER),
+    client: headerValue(request, CLIENT_HEADER),
+  });
+
+  // A PERSON-ONLY ROUTE REFUSES AN AGENT HERE, before the minimum, any handler or any read of the body: a
+  // ferret's own credential, a warden, or the admin token naming a ferret's session. One predicate decides
+  // it, the same one every handler's second line asks (`callerIsAgent`).
+  if (lookup.route.caller !== 'any' && callerIsAgent(authentication, actor))
+    return {
+      kind: 'refused',
+      response: errorResponse(
+        403,
+        `only a person may use ${request.method} ${request.path}; a ferret asks the owner instead`,
+        OWNER_ONLY_CODE,
+      ),
     };
 
   // The OWNER is the host's admin token over loopback, never a loopback peer on its own: a tunnel or
@@ -274,16 +301,6 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       ),
     };
 
-  // Server-derived, unforgeable: the token class decides warden versus admin, and the self-
-  // identification headers only refine WHICH warden or peer. The source also flipped the class to
-  // `warden` whenever a stop-capability header was merely PRESENT, so an admin CLI that passed one
-  // had its own actions journalled as the warden's.
-  const actor = resolveApiActor({
-    tokenClass: authentication.tokenClass,
-    deviceId: authentication.tokenClass === 'device' ? authentication.deviceId : undefined,
-    sessionId: headerValue(request, SESSION_ID_HEADER),
-    client: headerValue(request, CLIENT_HEADER),
-  });
   /**
    * The OPERATOR's answer, asked last and able only to take away.
    *
@@ -305,8 +322,10 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
   const presentation: CapabilityPresentation = {
     // The CARRIER's proof, never a header's. A relayed hop terminates on this very host and a
     // locally bound proxy forwards from a loopback peer, so anything derived from an address would
-    // read as local and hand a remote caller the machine.
-    loopback: onHost,
+    // read as local and hand a remote caller the machine. A ferret's own credential is on the host too: it
+    // is looked up ONLY for a request on this machine's privileged loopback carrier (`presentedSession`), so
+    // grants never govern it — they are about remote devices, and a ferret's policy is the route's `caller`.
+    loopback: onHost || authentication.tokenClass === 'session',
     // The AUTHENTICATED class, not the actor beside it: the actor is refined by self-identification
     // headers and would make this decision movable by a header. Attribution only.
     adminToken: authentication.tokenClass === 'admin',

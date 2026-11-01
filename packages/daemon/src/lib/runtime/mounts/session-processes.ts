@@ -92,6 +92,7 @@ export function sessionProcessRoutes(
       method: 'GET',
       path: '/v1/sessions/:sessionId/processes',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
@@ -104,6 +105,7 @@ export function sessionProcessRoutes(
       method: 'GET',
       path: '/v1/sessions/:sessionId/processes/:processId/output',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async (context): Promise<ApiResponse> => {
@@ -118,6 +120,7 @@ export function sessionProcessRoutes(
       method: 'POST',
       path: '/v1/sessions/:sessionId/processes/:processId/stop',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {

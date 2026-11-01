@@ -16,7 +16,7 @@ import {
   SessionResultSchema,
   type SessionView,
 } from '@ferretry/protocol';
-import { isHumanAdminActor } from '../../api/actor.ts';
+import { isAgentCaller } from '../../api/agent-caller.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
@@ -60,9 +60,7 @@ const CONFIGURE = { capability: 'fleet', axis: 'configure' } as const;
 
 /** Refuses a ferret's own credential: only a person (at the machine, or a paired device) does these. */
 function personOnly(context: RouteContext, act: string): void {
-  const agent =
-    context.credential !== undefined && context.credential.tokenClass !== 'device' && !isHumanAdminActor(context.actor);
-  if (agent) throw new ApiError(403, `only a person can ${act}; ask the owner`, 'forbidden');
+  if (isAgentCaller(context)) throw new ApiError(403, `only a person can ${act}; ask the owner`, 'forbidden');
 }
 
 async function view(subsystem: PackSubsystem): Promise<ApiResponse> {
@@ -142,6 +140,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/pack',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async () => await view(subsystem),
@@ -150,6 +149,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/pack/inventory',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async () => jsonResponse(PackInventorySchema.parse(await subsystem.service.inventory())),
@@ -158,6 +158,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/pack/routing/clean-up',
       minimum: 'operator',
+      caller: 'person',
       capability: USE,
       noStore: true,
       handle: async context => await cleanUp(subsystem, context),
@@ -166,6 +167,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/pack/routing/jobs/:jobId',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async context => await job(subsystem, context),
@@ -174,6 +176,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/pack/routing/accept',
       minimum: 'operator',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context =>
@@ -185,6 +188,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/pack/routing/undo',
       minimum: 'operator',
+      caller: 'person',
       capability: CONFIGURE,
       noStore: true,
       handle: async context =>
@@ -194,6 +198,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/pack/recommend',
       minimum: 'operator',
+      caller: 'any',
       capability: USE,
       noStore: true,
       handle: async context => await recommend(subsystem, context),
@@ -202,6 +207,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'POST',
       path: '/v1/pack/new',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await newChild(subsystem, context),
     },
@@ -209,6 +215,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/sessions/:sessionId/result',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await result(subsystem, context),
     },
@@ -216,6 +223,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       method: 'PATCH',
       path: '/v1/sessions/:sessionId/pack',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await setSwitch(subsystem, context),
     },

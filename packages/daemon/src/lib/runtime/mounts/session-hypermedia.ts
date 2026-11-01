@@ -42,6 +42,7 @@ export function sessionHypermediaRoutes(subsystem: SessionHypermediaSubsystem): 
       method: 'PATCH',
       path: '/v1/sessions/:sessionId/hypermedia',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => await set(subsystem, context),
     },

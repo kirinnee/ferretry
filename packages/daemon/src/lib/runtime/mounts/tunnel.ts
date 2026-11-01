@@ -32,6 +32,7 @@ export function tunnelRoutes(tunnel: TunnelSwitchPort): readonly ApiRoute[] {
       method: 'GET',
       path: '/v1/tunnel',
       minimum: 'authenticated',
+      caller: 'any',
       // The answer is live state — provisioning, connecting, up — and a cached copy is a wrong one.
       noStore: true,
       handle: async () => jsonResponse(TunnelStatusViewSchema.parse(tunnel.view())),
@@ -40,6 +41,7 @@ export function tunnelRoutes(tunnel: TunnelSwitchPort): readonly ApiRoute[] {
       method: 'PUT',
       path: '/v1/tunnel',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       capability: { capability: 'pairing', axis: 'configure' },
       handle: async context => {

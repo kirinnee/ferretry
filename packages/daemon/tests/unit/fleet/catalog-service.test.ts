@@ -999,6 +999,32 @@ describe('applying machine.settings that turns "what agents may control" back on
     should(error).be.instanceOf(FleetCatalogFreshStepUpRequired);
   });
 
+  it('should never let a ferret turn a control back ON, whatever proof it holds, and keep the change', async () => {
+    // Arrange — ungoverned and with a fresh proof: only the caller being a ferret refuses it.
+    const { service, state } = world();
+    state.reading = configReading(offModel(), 'rev-1');
+    const staged = await stageOn(service);
+    let spent = 0;
+
+    // Act
+    const error = await service
+      .apply(staged.id, { governed: false } as unknown as CallerGovernance, {
+        presentation: { loopback: true, adminToken: false, actor: 'peer:s1', stepUp: true, freshStepUp: true },
+        agent: true,
+        spend: () => {
+          spent += 1;
+        },
+      })
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+
+    // Assert
+    should(error).be.instanceOf(ApiError).and.match({ status: 403, code: 'owner_only' });
+    should(spent).equal(0);
+  });
+
   it('should allow turning a control back ON remotely with a fresh step-up, and spend it once', async () => {
     // Arrange
     const { service, state } = world();
@@ -1009,6 +1035,7 @@ describe('applying machine.settings that turns "what agents may control" back on
     // Act
     const outcome = await service.apply(staged.id, remote, {
       presentation: { loopback: false, adminToken: false, actor: 'device:x', stepUp: true, freshStepUp: true },
+      agent: false,
       spend: () => {
         spent += 1;
       },
@@ -1027,6 +1054,7 @@ describe('applying machine.settings that turns "what agents may control" back on
     let fresh = true;
     const freshStepUp = {
       presentation: { loopback: false, adminToken: false, actor: 'device:x', stepUp: true, freshStepUp: fresh },
+      agent: false,
       spend: () => {
         fresh = false;
       },
@@ -1039,6 +1067,7 @@ describe('applying machine.settings that turns "what agents may control" back on
     const error = await service
       .apply(second.id, remote, {
         presentation: { loopback: false, adminToken: false, actor: 'device:x', stepUp: true, freshStepUp: fresh },
+        agent: false,
         spend: () => {
           throw new Error('must not spend what was refused');
         },

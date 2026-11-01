@@ -113,6 +113,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       method: 'POST',
       path: '/v1/catalog-shares',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {
@@ -127,6 +128,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       method: 'GET',
       path: '/v1/catalog-shares',
       minimum: 'operator',
+      caller: 'any',
       capability: SHARING_USE,
       noStore: true,
       handle: async () => await answer(() => members.listShares()),
@@ -135,6 +137,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       method: 'DELETE',
       path: '/v1/catalog-shares/:shareId',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {
@@ -147,6 +150,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       method: 'GET',
       path: '/v1/catalog-members',
       minimum: 'operator',
+      caller: 'any',
       capability: SHARING_USE,
       noStore: true,
       handle: async () => await answer(() => members.listMembers()),
@@ -155,6 +159,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       method: 'PATCH',
       path: '/v1/catalog-members/:memberId',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {
@@ -168,6 +173,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       method: 'DELETE',
       path: '/v1/catalog-members/:memberId',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {
@@ -180,6 +186,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       method: 'DELETE',
       path: '/v1/catalog-members/:memberId/keys/:keyId',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {
@@ -193,6 +200,7 @@ export function catalogMemberRoutes(subsystem: CatalogMemberSubsystem): readonly
       method: 'DELETE',
       path: '/v1/catalog-members/:memberId/catalogs/:catalogId',
       minimum: 'operator',
+      caller: 'person',
       capability: SHARING_USE,
       noStore: true,
       handle: async context => {

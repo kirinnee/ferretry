@@ -121,6 +121,7 @@ export function sessionAnswerRoutes(subsystem: SessionAnswerSubsystem): readonly
       method: 'POST',
       path: '/v1/sessions/:sessionId/answer',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => {
         const request = await parseBody(context.request, AnswerSessionRequestSchema);

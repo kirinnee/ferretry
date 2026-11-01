@@ -34,6 +34,7 @@ export function securityRoutes(service: SecuritySettingsService): readonly ApiRo
       method: 'GET',
       path: '/v1/security',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       // How strict the machine is, readable before a confirmation on opening, so the app can say why.
       unlockExempt: true,
@@ -43,6 +44,7 @@ export function securityRoutes(service: SecuritySettingsService): readonly ApiRo
       method: 'PATCH',
       path: '/v1/security',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       capability: { capability: 'pairing', axis: 'configure' },
       handle: async context => {

@@ -187,6 +187,11 @@ describe('history', () => {
     expect(rows[2]).toMatchObject({ text: 'opened it in TODO', detail: null, minor: false, type: 'created', at: AT });
   });
 
+  it('names a move on the admin token as the token, never as you', () => {
+    const rows = historyRows([event(1, 'note', { text: 'hi' }, { kind: 'admin-token' })], context);
+    expect(rows.map(row => row.actor)).toEqual(['Admin token']);
+  });
+
   it('does not reorder the history it is given', () => {
     const given = [event(1, 'note', { text: 'a' }), event(2, 'note', { text: 'b' })];
     historyRows(given, context);
@@ -501,6 +506,15 @@ describe('askOrigin', () => {
       null,
     );
     expect(origin).toEqual({ who: 'ottilie', sessionId: null, chat: null, via: 'cli', age: null });
+  });
+
+  it('says the admin token for what it is when it opened the card: the owner, or a ferret', () => {
+    const origin = askOrigin(
+      { ...base, createdBy: { kind: 'admin-token' }, ask: { text: 't', source: 'cli' } },
+      names,
+      null,
+    );
+    expect(origin.who).toBe('the admin token (the owner at this machine, or a ferret without its own credential)');
   });
 
   it('drops the owner’s own source label and names the daemon when it opened the card', () => {

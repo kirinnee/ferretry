@@ -21,7 +21,12 @@ import { type BoardTask, formatTaskRef } from '@ferretry/protocol';
 
 /** Who is asking. The route derives it from the server-side actor, never from the body. */
 export type BoardCaller =
-  | { readonly kind: 'owner' }
+  /**
+   * The owner's authority. `via: 'admin-token'` is the host's admin token with no ferret's own credential
+   * behind it — the owner at the machine, or a ferret that left its session out — so it is RECORDED as
+   * that (`admin-token`), never as the owner, while it keeps the authority the token has always had.
+   */
+  | { readonly kind: 'owner'; readonly via?: 'admin-token' }
   | { readonly kind: 'ferret'; readonly sessionId: string }
   | { readonly kind: 'daemon'; readonly sessionId?: string };
 

@@ -29,6 +29,7 @@ export function performanceRoutes(subsystem: PerformanceSubsystem): readonly Api
       method: 'POST',
       path: '/v1/diagnostics/profile',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async ({ request }) => {
         const { seconds } = await parseBody(request, PerformanceProfileRequestSchema);
@@ -39,6 +40,7 @@ export function performanceRoutes(subsystem: PerformanceSubsystem): readonly Api
       method: 'GET',
       path: '/v1/diagnostics/profile/:id',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async ({ params }) => {
         const id = decodeParameter(params.get('id') ?? '');

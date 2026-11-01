@@ -35,6 +35,7 @@ export function legacyTaskRoutes(subsystem: LegacyTaskSubsystem): readonly ApiRo
       method: 'GET',
       path: '/v1/tasks',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async () => {
         const response: FleetTaskListResponse = {
@@ -51,6 +52,7 @@ export function legacyTaskRoutes(subsystem: LegacyTaskSubsystem): readonly ApiRo
       method: 'GET',
       path: '/v1/sessions/:sessionId/tasks',
       minimum: 'operator',
+      caller: 'any',
       noStore: true,
       handle: async context => {
         const response: SessionTaskListResponse = {

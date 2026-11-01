@@ -115,7 +115,7 @@ describe('the catalogs owner routes over real storage', () => {
 
     should(listed.status).equal(200);
     should(made.status).equal(403);
-    should(jsonBody(made)).containEql({ code: 'forbidden' });
+    should(jsonBody(made)).containEql({ code: 'owner_only' });
   });
 
   it('should refuse the same name twice and a catalog that is not there', async () => {

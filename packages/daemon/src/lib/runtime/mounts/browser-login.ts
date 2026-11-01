@@ -140,6 +140,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle, browser?: Brow
             method: 'GET',
             path: '/v1/sessions/:sessionId/browser',
             minimum: 'operator',
+            caller: 'any',
             capability: { capability: 'browser', axis: 'use' },
             noStore: true,
             handle: async () => {
@@ -150,6 +151,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle, browser?: Brow
             method: 'POST',
             path: '/v1/sessions/:sessionId/browser',
             minimum: 'operator',
+            caller: 'any',
             capability: { capability: 'browser', axis: 'use' },
             noStore: true,
             handle: async () => {
@@ -162,6 +164,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle, browser?: Brow
             method: 'GET',
             path: '/v1/sessions/:sessionId/browser',
             minimum: 'operator',
+            caller: 'any',
             capability: { capability: 'browser', axis: 'use' },
             noStore: true,
             handle: async (context: RouteContext) => await browserStatus(browser, context),
@@ -170,6 +173,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle, browser?: Brow
             method: 'POST',
             path: '/v1/sessions/:sessionId/browser',
             minimum: 'operator',
+            caller: 'any',
             capability: { capability: 'browser', axis: 'use' },
             noStore: true,
             handle: async (context: RouteContext) => await browserAction(browser, context),
@@ -180,6 +184,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle, browser?: Brow
       method: 'GET',
       path: '/v1/browser/login',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async () => await answer(async () => await window.status()),
@@ -188,6 +193,7 @@ export function browserLoginRoutes(window: BrowserLoginLifecycle, browser?: Brow
       method: 'POST',
       path: '/v1/browser/login',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'browser', axis: 'use' },
       noStore: true,
       handle: async context => await act(window, context),
@@ -204,6 +210,7 @@ export function browserSocketRoutes(browser: BrowserMountedSubsystem): readonly 
       method: 'GET',
       path: '/v1/sessions/:sessionId/browser/stream',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'browser', axis: 'use' },
       accept: async context => {
         const id = sessionId(context);

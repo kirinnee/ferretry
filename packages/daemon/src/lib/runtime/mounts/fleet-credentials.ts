@@ -68,6 +68,7 @@ export function fleetCredentialRoutes(subsystem: FleetCredentialsSubsystem): rea
       method: 'GET',
       path: '/v1/fleet/credentials',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'use' },
       noStore: true,
       handle: async () =>
@@ -80,6 +81,7 @@ export function fleetCredentialRoutes(subsystem: FleetCredentialsSubsystem): rea
       method: 'POST',
       path: '/v1/fleet/credentials/:credentialId/check',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context =>
@@ -98,6 +100,7 @@ export function fleetCredentialRoutes(subsystem: FleetCredentialsSubsystem): rea
       method: 'POST',
       path: '/v1/fleet/credentials/:credentialId/test',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'configure' },
       noStore: true,
       handle: async context =>
@@ -119,6 +122,7 @@ export function fleetCredentialRoutes(subsystem: FleetCredentialsSubsystem): rea
       method: 'GET',
       path: '/v1/fleet/presets',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'fleet', axis: 'use' },
       handle: async () => jsonResponse(FleetProviderPresetCatalogSchema.parse(await subsystem.presets())),
     },

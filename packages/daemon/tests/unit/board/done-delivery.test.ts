@@ -22,6 +22,7 @@ class FakeMessenger implements ReopenMessenger {
 }
 
 const closed = (id: string, title: string, assignee: string | null, owner = 'lead'): DoneNotice => ({
+  by: 'owner',
   task: card({
     id,
     title,
@@ -66,6 +67,32 @@ describe('the line a done card’s ferret is told', () => {
 
     // Assert
     should(line).equal('The owner marked these cards done: &F1 “First”, &F2 “Second”.');
+  });
+
+  it('should never say the owner closed it when the admin token did: that may be a ferret', () => {
+    // Act
+    const line = doneMessage([{ id: 'F164', title: 'Board Table View' }], 'admin-token');
+
+    // Assert
+    should(line).equal(
+      'The admin token (the owner at this machine, or a ferret without its own credential) marked &F164 “Board Table View” done.',
+    );
+  });
+});
+
+describe('a batch closed by different callers', () => {
+  it('should tell one ferret twice, each line naming who closed its cards', async () => {
+    // Arrange
+    const { messenger, subject } = ladder({ child: 'delivered', lead: 'delivered' });
+
+    // Act
+    await subject.done([closed('F7', 'Ship it', 'child'), { ...closed('F8', 'And this', 'child'), by: 'admin-token' }]);
+
+    // Assert
+    should(messenger.sent.map(([, message]) => message)).deepEqual([
+      'The owner marked &F7 “Ship it” done.',
+      'The admin token (the owner at this machine, or a ferret without its own credential) marked &F8 “And this” done.',
+    ]);
   });
 });
 
@@ -144,6 +171,6 @@ describe('delivering a done', () => {
 
     // Assert
     should(messenger.sent).deepEqual([]);
-    should(doneKey([{ task: card({ id: 'F9', history: [] }) }])).equal('board-done-F9-0');
+    should(doneKey([{ task: card({ id: 'F9', history: [] }), by: 'owner' }])).equal('board-done-F9-0');
   });
 });

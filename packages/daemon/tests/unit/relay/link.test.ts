@@ -3363,6 +3363,7 @@ describe('the access lease', () => {
       method: 'GET',
       path: '/v1/events',
       minimum: 'operator',
+      caller: 'any',
       capability: { capability: 'terminal', axis: 'use' },
       accept: async () => async () => ({
         open: async () => undefined,
