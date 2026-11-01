@@ -35,8 +35,8 @@ import { MessageFooter } from './send-receipt.tsx';
  * the sender's monogram, the sender as a `:name` reference (docs/reference-standard.md) through the one
  * renderer so it proves and opens like any other, what kind of message it is, and the message itself as
  * Markdown. Nothing the daemon wrote for the RECEIVING agent is shown — not the banner, not the session
- * id, not the reply command — because the person reading is not who it was addressed to. Under it, a
- * quiet link opens the sender's own conversation, and only when the sender is proved.
+ * id, not the reply command — because the person reading is not who it was addressed to. The foot is
+ * ONE row: "Show more" and the sender's own conversation at the left, the time and ticks at the right.
  *
  * A FERRETRY NOTICE — a message this machine typed into the session itself, such as a send that did
  * not arrive — is a compact system line, never a "You" bubble the person would not recognise.
@@ -78,7 +78,12 @@ export function PeerName({
   return <Markdown className="fy-peer-reference" text={`:${agent.name}`} {...surface} />;
 }
 
-/** "Open conversation with tomi" — a real link, so a modifier-click still opens a new tab. */
+/**
+ * "Open conversation with tomi" — a real link, so a modifier-click still opens a new tab. The row says
+ * only "Open conversation ›": the sender's name is already the header of the card this foots, and the
+ * shorter words are what let the control share the foot's one line. The name is still spoken — the
+ * link's accessible name keeps it, screen-reader-only.
+ */
 function OpenConversation({ agent, surface }: { readonly agent: ResolvedAgent; readonly surface: ReferenceSurface }) {
   const navigate = surface.onNavigate;
   if (navigate === undefined) return null;
@@ -90,7 +95,9 @@ function OpenConversation({ agent, surface }: { readonly agent: ResolvedAgent; r
   };
   return (
     <a className="fy-peer-open" href={to} onClick={open}>
-      Open conversation with {displayCallsign(agent.name)}
+      Open conversation
+      <span aria-hidden="true"> ›</span>
+      <span className="sr-only"> with {displayCallsign(agent.name)}</span>
     </a>
   );
 }
@@ -98,33 +105,29 @@ function OpenConversation({ agent, surface }: { readonly agent: ResolvedAgent; r
 /**
  * A ferret's message at rest: the sender chip above and the first line (about 120 characters) here, with
  * "Show more" for the rest. A message that fits in its preview has nothing to open, so no control shows.
- * `text` is what the message says, for the preview; `children` is the whole of it, drawn once opened.
+ * The control itself lives on the foot (`PeerMessageRow`), which owns the open state and `detailId` —
+ * the id of the text the control opens — because the two must name the same text from two places.
  */
-function PeerBody({ text, children }: { readonly text: string | undefined; readonly children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const id = useId();
-  const { preview, truncated } = peerPreview(text ?? '');
-  if (text === undefined || !truncated) return <>{children}</>;
-  return (
-    <>
-      {open ? (
-        <div id={id}>{children}</div>
-      ) : (
-        <p className="fy-peer-preview" data-peer-preview="" id={id}>
-          {preview}
-        </p>
-      )}
-      <button
-        aria-controls={id}
-        aria-expanded={open}
-        className="fy-peer-more"
-        data-peer-more=""
-        onClick={() => setOpen(current => !current)}
-        type="button"
-      >
-        {open ? 'Show less' : 'Show more'}
-      </button>
-    </>
+function PeerBody({
+  children,
+  detailId,
+  open,
+  preview,
+  truncated,
+}: {
+  readonly children: ReactNode;
+  readonly detailId: string;
+  readonly open: boolean;
+  readonly preview: string;
+  readonly truncated: boolean;
+}) {
+  if (!truncated) return <>{children}</>;
+  return open ? (
+    <div id={detailId}>{children}</div>
+  ) : (
+    <p className="fy-peer-preview" data-peer-preview="" id={detailId}>
+      {preview}
+    </p>
   );
 }
 
@@ -148,6 +151,11 @@ export function PeerMessageRow({
   const name = displayCallsign(peer.name);
   const agent = provedPeer(surface, peer);
   const kind = KIND_LABEL[peer.kind];
+  // The message's two quiet controls — "Show more" for a bulky one, the sender's own conversation —
+  // and where this send is, as the same small receipt mark the reader's own bubbles wear.
+  const [open, setOpen] = useState(false);
+  const detailId = useId();
+  const { preview, truncated } = peerPreview(words ?? '');
   return (
     <article
       className="fy-message fy-message-peer"
@@ -169,12 +177,41 @@ export function PeerMessageRow({
           </span>
         )}
       </header>
-      <PeerBody text={words}>
+      <PeerBody detailId={detailId} open={open} preview={preview} truncated={truncated}>
         {body ?? <Markdown className="fy-peer-body" text={stripFraming(entry.text).body} {...surface} />}
       </PeerBody>
-      {/* Where this send is, as the same small receipt mark the reader's own bubbles wear. */}
-      <MessageFooter clock={clockOfInstant(entry.at)} record={entry.send} side="other" />
-      {agent === null ? null : <OpenConversation agent={agent} surface={surface} />}
+      {/* The whole foot is ONE row — the controls at the left, the time and ticks pushed to the right
+          (`MessageFooter`'s `lead`, the handoff's "via turn file" move) — where each used to take a
+          row of its own under the message. */}
+      <MessageFooter
+        clock={clockOfInstant(entry.at)}
+        lead={
+          truncated || agent !== null ? (
+            <span className="fy-peer-controls">
+              {truncated ? (
+                <button
+                  aria-controls={detailId}
+                  aria-expanded={open}
+                  className="fy-peer-more"
+                  data-peer-more=""
+                  onClick={() => setOpen(current => !current)}
+                  type="button"
+                >
+                  {open ? 'Show less' : 'Show more'}
+                </button>
+              ) : null}
+              {truncated && agent !== null ? (
+                <span aria-hidden="true" className="fy-peer-sep">
+                  ·
+                </span>
+              ) : null}
+              {agent === null ? null : <OpenConversation agent={agent} surface={surface} />}
+            </span>
+          ) : undefined
+        }
+        record={entry.send}
+        side="other"
+      />
     </article>
   );
 }

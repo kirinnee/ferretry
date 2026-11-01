@@ -14,21 +14,24 @@
  *   ?theme=<family>-<mode>
  */
 
+import type { SessionView } from '@ferretry/protocol';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ComposerAutocompletePopover } from '../../../src/components/composer-autocomplete-popover.tsx';
 import {
   type ComposerAutocompleteCandidate,
   type ComposerTriggerMatch,
   rankComposerCandidates,
 } from '../../../src/components/composer-autocomplete.ts';
+import { ComposerAutocompletePopover } from '../../../src/components/composer-autocomplete-popover.tsx';
 import { createDirectReferenceProviders } from '../../../src/components/composer-autocomplete-providers.ts';
-import type { ComposerReferenceTask } from '../../../src/lib/composer-reference-catalogs.ts';
-import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
+import { ReferenceSurfaceProvider } from '../../../src/components/reference-surface.tsx';
 import { transcriptEntriesFromLog } from '../../../src/components/session-workspace-model.ts';
-import type { TranscriptEntry } from '../../../src/lib/session-screens.ts';
 import { Transcript } from '../../../src/components/transcript.tsx';
+import { createAgentReferenceResolver } from '../../../src/lib/agent-references.ts';
+import type { ComposerReferenceTask } from '../../../src/lib/composer-reference-catalogs.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
+import type { TranscriptEntry } from '../../../src/lib/session-screens.ts';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
@@ -38,6 +41,18 @@ const daemon = daemonConnection({ daemonId: 'daemon-chat', baseUrl: 'https://cha
 const NOW = Date.now();
 const MINUTE = 60_000;
 
+/** The fleet this scene can prove, so a peer's foot carries its quiet "Open conversation" link too. */
+const FLEET = [
+  { config: { id: 'mvtorre1-a41c8b02', teammate: 'torrey' }, state: { status: 'running' } },
+  { config: { id: 'mvlizze2-b93d70f1', teammate: 'lizzette' }, state: { status: 'running' } },
+  { config: { id: 'mvryu333-c25e9ad4', teammate: 'ryu' }, state: { status: 'running' } },
+] as unknown as readonly SessionView[];
+
+const SESSION_OF: Readonly<Record<string, string>> = {
+  torrey: 'mvtorre1-a41c8b02',
+  lizzette: 'mvlizze2-b93d70f1',
+};
+
 const peer = (id: string, at: number, text: string, name: string): TranscriptEntry => ({
   id,
   kind: 'user',
@@ -45,11 +60,35 @@ const peer = (id: string, at: number, text: string, name: string): TranscriptEnt
   at,
   peer: {
     name,
-    sessionId: 'mvb0sw7d-27f71326',
+    sessionId: SESSION_OF[name] ?? 'mvb0sw7d-27f71326',
     kind: 'message',
     replyExpected: false,
     note: `No reply needed. To reply: fy send ${name} "<reply>"`,
   },
+  // Arrived, so the foot's row carries the delivered ticks beside its controls.
+  send: {
+    sendId: `peer-${id}`,
+    acceptedAt: new Date(at).toISOString(),
+    message: text,
+    attachmentIds: [],
+    fate: 'delivered',
+  },
+});
+
+/** A message this ferret sent another ("Sent to :ryu"): the same one-row foot, on its own card. */
+const sentCard = (at: number): TranscriptEntry => ({
+  id: 'sent-card',
+  kind: 'tool',
+  text: 'sent to ryu',
+  at,
+  tools: [
+    {
+      key: 'sent-card',
+      use: { name: 'Bash', input: { command: 'fy send ryu "Ship it when CI is green"' } },
+      result: { text: 'delivered' },
+    },
+  ],
+  sent: { to: 'ryu', body: 'Ship it when CI is green — I will watch it.', ask: false, state: 'delivered' },
 });
 
 const BULKY = [
@@ -85,6 +124,7 @@ const entries = (): readonly TranscriptEntry[] => {
     { id: 'instructions', kind: 'user', text: UPDATE, at: NOW - 7 * MINUTE },
     peer('peer-long', NOW - 6 * MINUTE, BULKY, 'torrey'),
     peer('peer-short', NOW - 5 * MINUTE, 'Done — pushed to the branch.', 'lizzette'),
+    sentCard(NOW - 4 * MINUTE),
     ...log.slice(1),
   ];
 };
@@ -221,13 +261,22 @@ function Scene() {
   if (params.get('picker') === '1') return <Picker />;
   return (
     <div className="scene-chat">
-      <Transcript
-        agentName="Janella"
-        daemonId={daemon.daemonId}
-        entries={params.get('ferretry') === '1' ? ferretryEntries() : entries()}
-        onSubmit={async () => true}
-        sessionId={SESSION}
-      />
+      {/* The surface a session page assembles: enough of one to prove the peers by their sessions,
+          so the foot shows its quiet "Open conversation" link beside "Show more" and the ticks. */}
+      <ReferenceSurfaceProvider
+        surface={{
+          agentReferenceResolver: createAgentReferenceResolver(daemon.daemonId, FLEET),
+          onNavigate: () => undefined,
+        }}
+      >
+        <Transcript
+          agentName="Janella"
+          daemonId={daemon.daemonId}
+          entries={params.get('ferretry') === '1' ? ferretryEntries() : entries()}
+          onSubmit={async () => true}
+          sessionId={SESSION}
+        />
+      </ReferenceSurfaceProvider>
     </div>
   );
 }

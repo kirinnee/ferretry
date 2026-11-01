@@ -106,6 +106,34 @@ describe('chat polish', () => {
     }
   });
 
+  it('keeps a peer message’s foot on ONE row: its controls at the left, the time and ticks at the right', async () => {
+    const context = await newContext(true, 'light');
+    const centre = (box: { readonly height: number; readonly y: number } | null): number =>
+      (box?.y ?? 0) + (box?.height ?? 0) / 2;
+    try {
+      const tab = await open(context, 'theme=studio-light', '.fy-transcript-content');
+      const foot = tab.locator('.fy-message-peer[data-peer="torrey"] [data-message-footer]');
+      const more = await foot.locator('[data-peer-more]').boundingBox();
+      const link = await foot.locator('.fy-peer-open').boundingBox();
+      const time = await foot.locator('time').boundingBox();
+      expect(more).not.toBeNull();
+      expect(link).not.toBeNull();
+      expect(time).not.toBeNull();
+      // Show more, Open conversation and the time share one line — none takes a row of its own.
+      expect(Math.abs(centre(more) - centre(time))).toBeLessThanOrEqual(2);
+      expect(Math.abs(centre(link) - centre(time))).toBeLessThanOrEqual(2);
+      expect(time?.x ?? 0).toBeGreaterThan((link?.x ?? 0) + (link?.width ?? 0));
+      // A short message with nothing to open keeps the same foot: the link alone, still one row.
+      const short = tab.locator('.fy-message-peer[data-peer="lizzette"] [data-message-footer]');
+      const quiet = await short.locator('.fy-peer-open').boundingBox();
+      const shortTime = await short.locator('time').boundingBox();
+      expect(await short.locator('[data-peer-more]').count()).toBe(0);
+      expect(Math.abs(centre(quiet) - centre(shortTime))).toBeLessThanOrEqual(2);
+    } finally {
+      await context.close();
+    }
+  });
+
   it('draws an instructions update as one folded line and opens its sections', async () => {
     const context = await newContext(true, 'light');
     try {
