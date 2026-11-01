@@ -323,6 +323,60 @@ describe('AgendaBuzz notices', () => {
   });
 });
 
+describe('AgendaBuzz gates', () => {
+  const GATE = {
+    cardId: 'F412',
+    laneId: 'released',
+    laneName: 'Released · to test',
+    entry: 7,
+    projectId: 'p-1',
+    options: [
+      { id: 'done', label: 'Done', outcome: 'close' as const },
+      { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' as const },
+    ],
+  };
+  const DAEMON = { kind: 'daemon' as const, cause: 'system' as const };
+  const gateRaise = {
+    source: 'task' as const,
+    sourceRef: 'gate:F412:released:7',
+    subject: 'Try it: open the Board',
+    why: 'It shipped.',
+    howToResolve: 'Choose.',
+    kind: 'choice' as const,
+    ask: { kind: 'multiple-choice' as const, options: [{ label: 'Not good' }, { label: 'Done' }] },
+    gate: GATE,
+  };
+
+  it('should push a gate item at its raise, once, and never fold it into a stop', async () => {
+    // Arrange — the ferret is idle, so any other item it waits on would be a stop
+    const { buzz, sink, attention: agenda, snapshot } = world({ idleSince: NOW });
+    const raised = await agenda.raise(SESSION, gateRaise, DAEMON);
+    const item = (raised as Extract<typeof raised, { ok: true }>).item as AgendaItem;
+
+    // Act
+    await buzz.raised(SESSION, item, snapshot());
+    await buzz.turnChanged(SESSION);
+
+    // Assert
+    should(sink.notices).deepEqual([item.id]);
+    should(sink.stops).deepEqual([]);
+  });
+
+  it('should still make a stop of the ferret’s own items beside a gate item', async () => {
+    // Arrange
+    const { buzz, sink, attention: agenda, snapshot } = world({ idleSince: NOW });
+    await agenda.raise(SESSION, gateRaise, DAEMON);
+    await agenda.raise(SESSION, ASK, AGENT);
+
+    // Act
+    await buzz.turnChanged(SESSION);
+
+    // Assert — one stop, for the ferret's own item (the push itself leaves the gate item out of what it lists)
+    should(sink.stops).deepEqual([`${NOW}:A1,A2`]);
+    should(snapshot().items).have.length(2);
+  });
+});
+
 describe('AgendaBuzz wake', () => {
   const SYSTEM = { kind: 'daemon', cause: 'system' } as const;
   const woken = (extra: Record<string, unknown> = {}): AgendaItem =>

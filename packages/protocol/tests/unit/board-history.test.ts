@@ -148,6 +148,13 @@ describe('describeBoardEvent', () => {
     should(say({ type: 'assigned', from: KIRIN, to: null })).equal('assigned kirin → nobody');
   });
 
+  it('should say who handed a card down', () => {
+    // Act + Assert
+    should(say({ type: 'assigned', from: DENISHA, to: KIRIN, handedDown: true })).equal(
+      'assigned denisha → kirin (handed down by denisha)',
+    );
+  });
+
   it('should describe dependencies, with the owner override when there is one', () => {
     // Act + Assert
     should(say({ type: 'depended', task: { id: 'F2' }, until: 'shipped' })).equal('depends on &F2 until shipped');

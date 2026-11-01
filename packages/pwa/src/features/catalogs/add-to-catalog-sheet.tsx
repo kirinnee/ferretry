@@ -13,6 +13,7 @@ import {
   type PublishedCatalogItem,
   revealHidden,
 } from '@ferretry/protocol';
+import { Share2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
@@ -56,6 +57,8 @@ export interface AddToCatalogSheetProps {
   /** Called after an add or a publish landed, so a list can read again. */
   readonly onDone?: () => void;
   readonly publish?: PublishTarget;
+  /** When given, the last step offers "Share it now" and calls this with the catalog the item landed in. */
+  readonly onShareNow?: (catalogId: string) => void;
   /** Test and harness seam; the app uses the daemon-bound client. */
   readonly createClient?: CatalogClientFactory;
 }
@@ -65,7 +68,11 @@ type CatalogsRead =
   | { readonly kind: 'ready'; readonly catalogs: readonly OwnedCatalog[] }
   | { readonly kind: 'failed'; readonly refusal: OwnerRefusal };
 
-type Landed = { readonly catalogName: string; readonly published: PublishedCatalogItem };
+type Landed = {
+  readonly catalogId: string;
+  readonly catalogName: string;
+  readonly published: PublishedCatalogItem;
+};
 
 export function AddToCatalogSheet({
   connection,
@@ -74,6 +81,7 @@ export function AddToCatalogSheet({
   onClose,
   onDone,
   publish,
+  onShareNow,
   createClient: injected,
 }: AddToCatalogSheetProps) {
   const routed = useDaemonClient();
@@ -163,7 +171,7 @@ export function AddToCatalogSheet({
         publish === undefined
           ? await addCatalogItem(client, catalogId, { source, digest: preview.digest })
           : await publishCatalogVersion(client, catalogId, publish.itemId, preview.digest);
-      setLanded({ catalogName, published });
+      setLanded({ catalogId, catalogName, published });
       onDone?.();
     } catch (error) {
       setFailure(ownerRefusal(error));
@@ -186,8 +194,19 @@ export function AddToCatalogSheet({
               : `Saved to ${landed.catalogName} as version ${landed.published.itemVersion}.`}
           </p>
           <p className="m-0 text-cell text-muted">{FROZEN_COPY_NOTE}</p>
+          {onShareNow === undefined ? null : (
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => onShareNow(landed.catalogId)}
+              data-catalog-share-now=""
+            >
+              <Share2 size={14} aria-hidden="true" />
+              Share it now
+            </Button>
+          )}
           <Button type="button" onClick={onClose} data-catalog-done="">
-            Done
+            {onShareNow === undefined ? 'Done' : 'Not now'}
           </Button>
         </section>
       ) : read.kind === 'loading' ? (

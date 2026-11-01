@@ -80,6 +80,35 @@ plain message to its ferret — nothing here is a second path).
   only for a machine that lists it AND an item with a linked card of that machine that asked for it. The CLI sends
   `offerClose` only to a daemon that lists it; to an older one it raises the item without and says so.
 
+## Gate items
+
+A card the owner asked for that reaches a gate lane asks them here: ONE item the daemon raises and only the owner
+answers ([board.md](board.md#gates-ask-the-owner) owns the rules). It is an ordinary choice item, so an app that
+predates gates answers it by label, plus:
+
+- **`gate`** (`AgendaGateSchema`): `cardId`, `laneId`, `laneName`, `entry` (the card history's `seq` that put it
+  there), `projectId`, `projectName?`, and `options` (`id`, `label`, `outcome`: `next`, `lane`,
+  `reopen-with-agenda`, `close`), in the lane's own order. Only the daemon writes it; an add that carries one is
+  refused.
+- **`sourceRef`** `gate:<card>:<lane>:<entry>`; the title is the card's, the ask the lane's ("Try it: <first step of
+  How to test>", "OK to build? <summary>"), the premise its summary and the body its How to test, verbatim (never `steps`, which make a choice a mix).
+- **Swipes.** → the first option that moves the card on (Done), ← the reopen-with-agenda option (Not good), ↑ a third (the owner's decision !A205). A gate with one
+  option gets a second answer, **Not yet** (← ; the card stays). The ask lists its options in that order, ← · ↑ · →,
+  because a choice card lays them out by it (`gateAskOptions`, `gateAnswers` in `@ferretry/protocol`). ↓ is Skip, and
+  **Not needed** (the button) dismisses it: the owner's choice, the card stays where it is, quietly, and a device needs
+  the `fleet` grant for it as for an answer. A bare done (`resolve` with no answer) is refused.
+- **Answering** is `resolve` with `{kind: 'multiple-choice', choice: <label>}` and the owner's words as `note`; Not good
+  needs words (the note, or `{kind: 'other', answer}`). The card moves first; a refusal leaves the item open
+  (`400 invalid`, `403 forbidden`, `409 gate_moved_on`, `409 gate_not_moved`).
+- **Who.** The owner at the machine, or a paired device the `fleet` grant lets use the board. A ferret, its lead
+  (the sub-ferret rule below does not reach a gate item) and the daemon are refused every verb that would close or
+  reword one. The daemon resolves one quietly when its card moves on. Clearing the agent ferrets' backlog skips gate
+  items, and a chat message that names one does not park it.
+- **Its follow-up.** Not good opens one `reply` item about the card, `gate-followup:<card>:<entry>`, raised by the
+  daemon on behalf of the card's ferret once the card went back, starting on the ferret's turn (in discussion); the ferret edits,
+  surfaces and closes it as its own, and the owner's answer reaches it as on its own item.
+- **It buzzes once**, at its raise, and is never part of a stop's push ([notifications.md](notifications.md)).
+
 ## Turns
 
 Every open item is somebody's turn. `agendaTurn(item)` (protocol) is the one definition:
@@ -311,7 +340,7 @@ Their prompt carries no Agenda mode section even when the switch is on
 ([pack-mode.md](pack-mode.md#sub-ferret-limits)).
 
 **A lead clears its sub-ferrets' agenda.** The lead (and any ancestor) may `edit`, `surface`, `done` and `dismiss`
-items on the board of a session it started: `fy agenda done !A1 -s <sub-session>`. `AgendaService.apply` proves the
+items on the board of a session it started (never a [gate item](#gate-items)): `fy agenda done !A1 -s <sub-session>`. `AgendaService.apply` proves the
 lineage from `config.parent` and marks the actor for the state machine (`overSubFerret`; a request cannot set it);
 anyone else keeps `forbidden: an agent may change the agenda only in its own session`. The change is recorded as the
 lead's. Warden escalations are not the lead's to close.

@@ -47,7 +47,15 @@ import {
   type TaskRef,
   variantLanes,
 } from '@ferretry/protocol';
-import { type BoardOperation, type BoardStanding, mayDo, OPERATION_STANDINGS, refusalMessage } from './authority.ts';
+import {
+  type BoardOperation,
+  type BoardStanding,
+  type CardAudience,
+  mayDo,
+  mayPassGate,
+  OPERATION_STANDINGS,
+  refusalMessage,
+} from './authority.ts';
 import { BoardError } from './errors.ts';
 import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets, parentLoop } from './graph.ts';
 import { laneFromFacts } from './lane-facts.ts';
@@ -71,12 +79,19 @@ export interface CardContext {
   /** Recorded beside the actor, never inside it (`BoardActorVia`); absent for anyone but the admin token. */
   readonly actorVia?: BoardActorVia;
   readonly standing: BoardStanding;
+  /** True when the caller is the card's assignee and the new assignee is its own descendant (`mayHandDown`). */
+  readonly handsDown?: boolean;
   /** The lanes of the card's own board. */
   readonly laneSet: LaneSet;
   readonly index: BoardIndex;
   readonly laneSets: LaneSets;
   /** The version this daemon runs, for `release.running`; absent or `null` when it is not known. */
   readonly runningVersion?: string | null;
+  /**
+   * Who the card's gates ask (`CardAudience`): an internal card's owner ferret and leads pass its gates themselves.
+   * Absent reads as `external`, the strict reading: only the owner passes a gate.
+   */
+  readonly audience?: CardAudience;
   /**
    * The files the request carries, as the service found them in the attachment store; absent when it carries
    * none. Only a reopen takes them.
@@ -132,6 +147,16 @@ export const requireStanding = (
   }
 };
 
+/** The refusal for a reassign: an assignee is told the one reassign it has, handing the card down. */
+const requireAssign = (standing: BoardStanding, card: Pick<BoardTask, 'id' | 'owner' | 'assignee'>): void => {
+  if (mayDo('assign', standing)) return;
+  const message =
+    standing === 'assignee'
+      ? `${refusalMessage('assign', card)}; its assignee may only hand it down to one of its own sub-ferrets`
+      : refusalMessage('assign', card);
+  throw new BoardError('forbidden', message, OPERATION_STANDINGS.assign);
+};
+
 const laneNames = (laneSet: LaneSet): string => laneSet.lanes.map(lane => lane.id).join(', ');
 
 /** A lane of this board, or the refusal that lists the lanes it has. */
@@ -151,21 +176,53 @@ const rank = (laneSet: LaneSet, laneId: string): number => {
   return category.ok ? LANE_CATEGORIES.indexOf(category.value) : -1;
 };
 
+const isBackward = (laneSet: LaneSet, from: string, to: string): boolean => {
+  const backward = isBackwardMove(laneSet, from, to);
+  return backward.ok && backward.value;
+};
+
 const requireOpen = (card: BoardTask, doing: string): void => {
   if (card.dropped !== null) {
     throw new BoardError('invalid', `${formatTaskRef(card)} is dropped; reopen it before you ${doing} it`);
   }
 };
 
-/** Only the owner enters an owner-gated closed lane: the refusal for anyone else. */
-const requireOwnerForClosed = (lane: Lane, standing: BoardStanding, card: Pick<BoardTask, 'id'>): void => {
-  if (lane.category === 'closed' && lane.ownerGate === true && standing !== 'owner-human') {
+/**
+ * Only the owner enters an owner-gated closed lane — or, on an internal card moved, its owner ferret or a lead
+ * (`mayPassGate`): the refusal for anyone else.
+ */
+const requireOwnerForClosed = (
+  lane: Lane,
+  standing: BoardStanding,
+  card: Pick<BoardTask, 'id'>,
+  audience: CardAudience = 'external',
+): void => {
+  if (lane.category === 'closed' && lane.ownerGate === true && !mayPassGate(standing, audience)) {
     throw new BoardError(
       'owner-gate',
       `only the owner closes a card; move ${formatTaskRef(card)} to the lane before ${lane.name} and the owner closes it`,
       ['owner-human'],
     );
   }
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Gates: the one stopping point (docs/board.md § Gates ask the owner)
+// ---------------------------------------------------------------------------------------------------
+
+const isGate = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
+
+/**
+ * The gate lanes the card's variant walks strictly between its lane and `target`, in order. Entering a gate is not
+ * passing it, so `target` never counts; a move back passes none.
+ */
+export const gatesBetween = (laneSet: LaneSet, card: Pick<BoardTask, 'laneId' | 'workflow'>, target: Lane): Lane[] => {
+  const at = (id: string): number => laneSet.lanes.findIndex(lane => lane.id === id);
+  // A variant naming a lane the set lacks cannot say what is walked, so every lane is.
+  const walked = variantLanes(laneSet, card.workflow);
+  return (walked.ok ? walked.value : laneSet.lanes).filter(
+    lane => at(lane.id) > at(card.laneId) && at(lane.id) < at(target.id) && isGate(lane),
+  );
 };
 
 // ---------------------------------------------------------------------------------------------------
@@ -183,12 +240,20 @@ const move = (card: BoardTask, to: string, reason: string | undefined, context: 
     throw new BoardError('reason-required', `moving ${ref} back from ${from.name} to ${target.name} needs a reason`);
   }
   const gated = needsOwner(context.laneSet, card.laneId, to);
-  if (gated.ok && gated.value && context.standing !== 'owner-human') {
-    requireOwnerForClosed(target, context.standing, card);
+  const audience = context.audience ?? 'external';
+  const forward = !isBackward(context.laneSet, card.laneId, to);
+  // Leaving a gate is `needsOwner`'s; a gate on the way is passed too, and entering one is fine.
+  const passed = forward ? gatesBetween(context.laneSet, card, target)[0] : undefined;
+  if (((gated.ok && gated.value) || passed !== undefined) && !mayPassGate(context.standing, audience)) {
+    requireOwnerForClosed(target, context.standing, card, audience);
+    const gate = passed ?? from;
+    const where = gate.id === from.id ? `on from ${from.name}` : `past ${gate.name}`;
     throw new BoardError(
       'owner-gate',
-      `only the owner moves ${ref} on from ${from.name}; raise the ask with \`fy agenda add --task ${card.id}\``,
-      ['owner-human'],
+      audience === 'internal'
+        ? `only its owner ferret or a lead above it moves ${ref} ${where}`
+        : `only the owner moves ${ref} ${where}: the daemon asks them in the Inbox, so raise no agenda item for it`,
+      audience === 'internal' ? ['owner-human', 'owner', 'ancestor'] : ['owner-human'],
     );
   }
   if (rank(context.laneSet, to) > rank(context.laneSet, card.laneId)) {
@@ -268,6 +333,18 @@ const reopen = (
         `a reopen goes back to an earlier lane; ${ref} is in ${card.laneId}, so move it on instead`,
       );
     }
+  } else if (
+    action.to !== card.laneId &&
+    !isBackward(context.laneSet, card.laneId, action.to) &&
+    !mayPassGate(context.standing, context.audience ?? 'external')
+  ) {
+    // A dropped card comes back where it was dropped, or earlier: a drop is no way past a gate.
+    const from = requireLane(context.laneSet, card.laneId);
+    throw new BoardError(
+      'owner-gate',
+      `only the owner reopens ${ref} past ${from.name}, where it was dropped; reopen it there or earlier`,
+      ['owner-human'],
+    );
   }
   return reopenTo(card, action.to, action.reason, action.ask, context);
 };
@@ -277,6 +354,9 @@ const reopen = (
  * never goes backwards (unless `backward` says the facts pulled the card back, see {@link laneFromFacts})
  * and never moves a dropped card, and it is NOT stopped by dependencies, because
  * reality wins over the rule; the history says what it was blocked by. `null` when nothing moves.
+ *
+ * IT NEVER PASSES A GATE (docs/board.md § Gates ask the owner): a card waiting at one stays there, whatever the
+ * signal, and a move that would pass one on the way stops in it. Only the owner's own report (`passGates`) goes on.
  */
 export const triggerMove = (
   card: BoardTask,
@@ -284,6 +364,7 @@ export const triggerMove = (
   reason: string | undefined,
   context: CardContext,
   backward = false,
+  passGates = false,
 ): BoardTask | null => {
   requireStanding('trigger', context.standing, card);
   if (card.dropped !== null) return null;
@@ -292,16 +373,20 @@ export const triggerMove = (
   if (lane.value.category === 'closed' && lane.value.ownerGate === true) return null;
   const movesBack = isBackwardMove(context.laneSet, card.laneId, lane.value.id);
   if (!movesBack.ok || movesBack.value !== backward) return null;
+  if (!passGates && isGate(requireLane(context.laneSet, card.laneId))) return null;
+  const stop = passGates ? undefined : gatesBetween(context.laneSet, card, lane.value)[0];
+  const to = stop ?? lane.value;
   const blockers = backward ? [] : blockedBy(card, context.index, context.laneSets);
   const note = blockers.length === 0 ? null : `${trigger} while blocked by ${blockers.map(formatTaskRef).join(', ')}`;
-  const said = [reason, note].filter(part => part !== undefined && part !== null).join('; ');
+  const held = stop === undefined ? null : `stopped at ${stop.name}, which waits for the owner`;
+  const said = [reason, note, held].filter(part => part !== undefined && part !== null).join('; ');
   return {
     ...withEvent(
       card,
       {
         type: 'moved',
         from: card.laneId,
-        to: lane.value.id,
+        to: to.id,
         backward,
         reason: said === '' ? null : said,
         auto: true,
@@ -309,7 +394,7 @@ export const triggerMove = (
       },
       context,
     ),
-    laneId: lane.value.id,
+    laneId: to.id,
   };
 };
 
@@ -324,13 +409,8 @@ export const gateOnTheWay = (
   card: Pick<BoardTask, 'laneId' | 'workflow'>,
   target: Lane,
 ): Lane | undefined => {
-  const at = (id: string): number => laneSet.lanes.findIndex(lane => lane.id === id);
-  // A variant naming a lane the set lacks cannot say what is walked, so every lane is.
-  const walked = variantLanes(laneSet, card.workflow);
-  const between = (walked.ok ? walked.value : laneSet.lanes).filter(
-    lane => at(lane.id) > at(card.laneId) && at(lane.id) < at(target.id),
-  );
-  return [requireLane(laneSet, card.laneId), ...between].find(lane => laneStage(lane).kind === 'gate');
+  const from = requireLane(laneSet, card.laneId);
+  return isGate(from) ? from : gatesBetween(laneSet, card, target)[0];
 };
 
 /**
@@ -394,11 +474,14 @@ const report = (
     );
   }
   const { actorVia: _via, ...rest } = context;
-  const moved = triggerMove(card, action.event, action.reason, {
-    ...rest,
-    actor: { kind: 'daemon' },
-    standing: 'daemon',
-  });
+  const moved = triggerMove(
+    card,
+    action.event,
+    action.reason,
+    { ...rest, actor: { kind: 'daemon' }, standing: 'daemon' },
+    false,
+    context.standing === 'owner-human',
+  );
   // Never null by now: every case triggerMove declines was answered above.
   return { task: moved === null ? null : reportedBy(moved, context) };
 };
@@ -418,8 +501,9 @@ const reportedBy = (moved: BoardTask, context: Pick<CardContext, 'actor' | 'acto
 });
 
 /**
- * Catches a card up to its own PR facts ({@link laneFromFacts}): the daemon's automatic move, forward
- * through any owner gate, recorded with the trigger and the fact that moved it. `null` when the facts
+ * Catches a card up to its own PR facts ({@link laneFromFacts}): the daemon's automatic move, recorded with the
+ * trigger and the fact that moved it. It stops at a gate like every daemon move ({@link triggerMove}): facts move a
+ * card into one, never out of or past it — not on, and not back for an open PR. `null` when the facts
  * put the card where it already is, or have no opinion. Whoever asked for the write, the move is the
  * daemon's: a card the facts moved was moved by no one.
  */
@@ -715,12 +799,24 @@ const refile = (
   // into the other board's closed lane is no closing; the gate is for a card that is not closed yet.
   const source = categoryOf(context.laneSet, card.laneId);
   const alreadyClosed = source.ok && source.value === 'closed';
+  // Its facts land it where work resumes there, and move it on from there only as far as the first gate.
+  const atGate = card.dropped === null && !alreadyClosed && isGate(requireLane(context.laneSet, card.laneId));
   const byFacts =
     action.laneId === undefined && !alreadyClosed && card.dropped === null
       ? factsLandingLane(card, target, context)
       : undefined;
-  const lane = byFacts ?? refileLane(card, context.laneSet, target, action.laneId);
-  if (!(alreadyClosed && isClosedLane(lane))) requireOwnerForClosed(lane, context.standing, card);
+  const landing = byFacts ?? refileLane(card, context.laneSet, target, action.laneId);
+  if (!(alreadyClosed && isClosedLane(landing))) requireOwnerForClosed(landing, context.standing, card);
+  const lane =
+    alreadyClosed || mayPassGate(context.standing, context.audience ?? 'external')
+      ? landing
+      : refileGateLanding(card, {
+          from: context.laneSet,
+          target,
+          lane: landing,
+          named: action.laneId !== undefined,
+          atGate,
+        });
   const fromProject: BoardProjectId = card.projectId;
   const refiled: BoardTask = {
     ...withEvent(
@@ -732,6 +828,46 @@ const refile = (
     laneId: lane.id,
   };
   return { task: reconcileFacts(refiled, { ...context, laneSet: target }) ?? refiled };
+};
+
+/**
+ * Where a refile lands for anyone who may not pass a gate (docs/board.md § Gates ask the owner): never past a gate of
+ * the other board's variant — a landing with one before it stops in that gate, and a lane NAMED past one is refused —
+ * and a card waiting at a gate never lands in a later stage than that gate's, nor leaves it for a lane that is not a
+ * gate. Throws `owner-gate` naming the gate.
+ */
+const refileGateLanding = (
+  card: BoardTask,
+  facts: {
+    readonly from: LaneSet;
+    readonly target: LaneSet;
+    readonly lane: Lane;
+    readonly named: boolean;
+    readonly atGate: boolean;
+  },
+): Lane => {
+  const ref = formatTaskRef(card);
+  const source = requireLane(facts.from, card.laneId);
+  const stage = (lane: Lane): number => LANE_CATEGORIES.indexOf(lane.category);
+  if (
+    facts.atGate &&
+    (stage(facts.lane) > stage(source) || (!isGate(facts.lane) && stage(facts.lane) === stage(source)))
+  ) {
+    throw new BoardError(
+      'owner-gate',
+      `${ref} waits in ${source.name} for the owner; only the owner moves it on, to this board or another`,
+      ['owner-human'],
+    );
+  }
+  const entry = entryLane(facts.target, card.workflow);
+  const passed = gatesBetween(facts.target, { laneId: entry.id, workflow: card.workflow }, facts.lane)[0];
+  if (passed === undefined) return facts.lane;
+  if (!facts.named) return passed;
+  throw new BoardError(
+    'owner-gate',
+    `${ref} would land past ${passed.name} on that board, which waits for the owner; refile it without --lane, or to ${passed.name}`,
+    ['owner-human'],
+  );
 };
 
 const sameParent = (left: TaskRef | null, right: TaskRef | null): boolean =>
@@ -845,11 +981,20 @@ export const applyAction = (
     case 'trigger':
       return report(card, action, context);
     case 'assign':
-      requireStanding('assign', context.standing, card);
+      if (context.handsDown !== true) requireAssign(context.standing, card);
       if (action.assignee === card.assignee) throw new BoardError('invalid', `${ref} is already assigned that way`);
       return {
         task: {
-          ...withEvent(card, { type: 'assigned', from: card.assignee, to: action.assignee }, context),
+          ...withEvent(
+            card,
+            {
+              type: 'assigned',
+              from: card.assignee,
+              to: action.assignee,
+              ...(context.handsDown === true ? { handedDown: true as const } : {}),
+            },
+            context,
+          ),
           assignee: action.assignee,
         },
       };

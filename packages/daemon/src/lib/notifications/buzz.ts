@@ -14,7 +14,7 @@ import {
 export interface BuzzSink {
   stopped(sessionId: string, stoppedAt: string, snapshot: AgendaSnapshot): Promise<void>;
   deadline(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void>;
-  /** A notice was raised: it buzzes only when it asked to (`--ping`). */
+  /** A notice was raised: it buzzes only when it asked to (`--ping`). A card's gate item always buzzes, once. */
   raised(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void>;
   /** A snoozed item woke and it blocks the ferret or has a deadline: its one push for this wake. */
   woke(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void>;
@@ -40,7 +40,9 @@ const deadlineDue = (item: AgendaItem, horizon: number): boolean =>
  *     pushes the moment it is raised, unless it is being filled under a task plan or a paste rule: QUIET);
  *  3. a notice with `ping`;
  *  4. a SNOOZED item woke and it blocks the ferret or has a deadline — ONE push per wake (an item already
- *     inside its deadline's window gets the deadline's push instead, never both).
+ *     inside its deadline's window gets the deadline's push instead, never both);
+ *  5. a card reached a gate that asks the owner (`item.gate`, docs/board.md § Gates ask the owner) — ONE push per
+ *     gate item, at its raise. It is the gate's only signal, so it never also counts towards a stop's push.
  *
  * Everything else — a new item while the ferret works, an edit, a change of whose turn it is, a notice
  * without `ping` — only moves the Inbox badge. This replaces the push every raise used to make.
@@ -65,6 +67,10 @@ export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
 
   async raised(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
     if (item.notice === true) {
+      await this.sink.raised(sessionId, item, snapshot).catch(() => undefined);
+      return;
+    }
+    if (item.gate !== undefined) {
       await this.sink.raised(sessionId, item, snapshot).catch(() => undefined);
       return;
     }
@@ -103,8 +109,9 @@ export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
       const ledger = (await this.boards.read(sessionId)) ?? emptyAgendaLedger(sessionId, this.clock.now());
       const snapshot = agendaSnapshot(ledger);
       // A card being filled in advance is not the owner's to answer: it neither pushes its deadline nor makes a stop.
+      // A gate item made its one push when it was raised: it is never a second one inside a stop.
       const owner = ownerTurnItems(snapshot.items).filter(
-        item => item.input === undefined || !this.quiet(sessionId, item.input.requestId),
+        item => item.gate === undefined && (item.input === undefined || !this.quiet(sessionId, item.input.requestId)),
       );
       if (owner.length === 0) return;
       const horizon = Date.parse(this.clock.now()) + this.warnHours * 3_600_000;

@@ -17,7 +17,7 @@ import {
   type TaskRef,
   variantLanes,
 } from '@ferretry/protocol';
-import { withEvent } from './card-actions.ts';
+import { gatesBetween, withEvent } from './card-actions.ts';
 
 /** What a `done` with no message says on the card. */
 export const DONE_WITHOUT_MESSAGE = 'signalled done';
@@ -66,7 +66,8 @@ export type DoneMove = { readonly task: BoardTask } | { readonly held: string };
 /**
  * The move a done makes, as the daemon's automatic `signal.done` move with the message as its reason. It
  * is the ferret's claim, not a fact the world reported, so it passes no owner gate and no unfinished
- * blocker: either holds the card where it is, and the reason is said.
+ * blocker: either holds the card where it is, and the reason is said. A gate on the way is where it stops
+ * (docs/board.md § Gates ask the owner): only the owner passes one.
  */
 export const doneMove = (
   card: BoardTask,
@@ -81,6 +82,7 @@ export const doneMove = (
   if (gated.ok && gated.value) {
     return { held: `only the owner moves ${ref} on from ${card.laneId}, so it stays there` };
   }
+  const to = gatesBetween(laneSet, card, target)[0] ?? target;
   if (blockers.length > 0) {
     return { held: `${ref} is blocked by ${blockers.map(formatTaskRef).join(', ')}, so it stays in ${card.laneId}` };
   }
@@ -91,7 +93,7 @@ export const doneMove = (
         {
           type: 'moved',
           from: card.laneId,
-          to: target.id,
+          to: to.id,
           backward: false,
           reason: doneReason(message),
           auto: true,
@@ -99,7 +101,7 @@ export const doneMove = (
         },
         context,
       ),
-      laneId: target.id,
+      laneId: to.id,
     },
   };
 };

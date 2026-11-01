@@ -72,6 +72,12 @@ export const DAEMON_FEATURES = {
    */
   agendaOfferClose: 'agenda.offer-close.1',
   /**
+   * The daemon raises ONE agenda item (`AgendaItem.gate`) for every owner-asked card that enters a gate lane, and
+   * answering it moves the card (docs/board.md § Gates ask the owner). The app hides its own to-test rows only for a
+   * machine that reports it, because there the gate item is the card's one ask.
+   */
+  boardGateItems: 'board.gate-items.1',
+  /**
    * `GET /v1/sessions/:id/messages` reads backward: `?tail=1` and `?through=<cursor>`, answered with `previousCursor`.
    * A daemon without this name ignores both and serves the FIRST page forward, so the app asks only where the
    * machine reports it and otherwise walks the conversation forward as before.
