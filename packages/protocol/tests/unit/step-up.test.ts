@@ -234,6 +234,44 @@ describe('the passkey step-up wire', () => {
     ).be.false();
   });
 
+  it('should bind an add-2fa-key step-up to the one staged seed, and no other act to anything', () => {
+    // Arrange
+    const stage = `st_${'a'.repeat(24)}`;
+
+    // Act / Assert — the act every caller is asked, the machine included, and the stage its proof is bound to
+    should(stepUp.STEP_UP_ACTS.addTwoFactorKey).equal('add-2fa-key');
+    should(stepUp.STEP_UP_ACTS_EVERY_CALLER).deepEqual(['add-2fa-key']);
+    // Every other act is one the machine itself is never asked to prove; this one, every caller is.
+    should(stepUp.StepUpActSchema.options.filter(act => !stepUp.stepUpSkippableAtMachine(act))).deepEqual([
+      'add-2fa-key',
+    ]);
+    should(
+      stepUp.StepUpOptionsRequestSchema.safeParse({ origin: ORIGIN, act: 'add-2fa-key', subject: stage }).success,
+    ).be.true();
+    assertRejects([
+      {
+        name: 'adding a 2FA key with no stage',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'add-2fa-key' },
+      },
+      {
+        name: 'a stage on another act',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'catalog-install', subject: stage },
+      },
+      {
+        name: 'a stage with no act',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, subject: stage },
+      },
+      {
+        name: 'a stage that is not one',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'add-2fa-key', subject: 'tf_000000000001' },
+      },
+    ]);
+  });
+
   it('should refuse a step-up options request naming an act that does not exist', () => {
     assertRejects([
       {

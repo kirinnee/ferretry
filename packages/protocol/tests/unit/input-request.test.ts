@@ -131,6 +131,13 @@ describe('raising an input request', () => {
       should(InputRaiseSchema.safeParse({ ...raise, secretHint: hint }).success).be.false();
   });
 
+  it('should take the 2FA key a code is from, by its id only', () => {
+    const raise = { target: { kind: 'browser', key: 'app' }, prompt: 'p', sensitivity: 'private' };
+    should(InputRaiseSchema.safeParse({ ...raise, factor: 'tf_000000000001' }).success).be.true();
+    for (const factor of ['tf_0001', 'Authenticator app', 'si_0123456789abcdef', 'TF_000000000001'])
+      should(InputRaiseSchema.safeParse({ ...raise, factor }).success).be.false();
+  });
+
   it('should refuse anything the agent could use to claim what the daemon observes', () => {
     for (const extra of [{ observed: TERMINAL_FACTS }, { echo: 'off' }, { origin: 'https://github.com' }]) {
       should(
@@ -394,6 +401,16 @@ describe('delivering', () => {
     // Act / Assert — accepted and ignored, a sign-in of ANOTHER account would ride along unchecked; so it is refused
     should(InputDeliverBodySchema.safeParse(tapped).success).be.true();
     should(InputDeliverBodySchema.safeParse({ ...tapped, signIn: 'si_0123456789abcdef' }).success).be.false();
+  });
+
+  it('should name a 2FA key only with the saved account it belongs to', () => {
+    // Arrange
+    const tapped = { deliveryId: DELIVERY, observedDigest: DIGEST, entry: 'GITHUB_KIRINNEE', submit: true };
+
+    // Act / Assert
+    should(InputDeliverBodySchema.safeParse({ ...tapped, factor: 'tf_000000000001' }).success).be.true();
+    should(InputDeliverBodySchema.safeParse({ ...body, factor: 'tf_000000000001' }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...tapped, factor: 'GITHUB_KIRINNEE' }).success).be.false();
   });
 
   it('should refuse a delivery id that is not a UUID and a body with a plain value field', () => {

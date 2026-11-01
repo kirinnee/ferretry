@@ -8,7 +8,10 @@ import {
   MAX_SIGN_INS_PER_ACCOUNT,
   migratedSignInId,
   migrateLoginIndex,
+  MIGRATED_TOTP_LABEL,
+  migratedTwoFactorId,
   placeKeys,
+  sealedNamesOf,
 } from '../../src/lib/index.ts';
 import { FrozenLoginIndexV1Schema } from '../fixtures/login-index-v1.ts';
 
@@ -136,7 +139,7 @@ describe('migrating saved logins into accounts and sign-ins', () => {
     expect(FrozenLoginIndexV1Schema.safeParse({ ...(bytes as object), v: 1 }).success).toBe(false);
   });
 
-  it('should keep every account verbatim, sealed names included', () => {
+  it('should keep every account verbatim, sealed names included, and move a seed into its first 2FA key', () => {
     // Arrange / Act
     const { document } = migrated();
 
@@ -146,14 +149,88 @@ describe('migrating saved logins into accounts and sign-ins', () => {
       key: KEY(1),
       label: 'GitHub (kirinnee)',
       username: 'kirinnee',
-      seals: { password: SEAL(1, 'PASSWORD'), totp: SEAL(1, 'TOTP') },
-      totp: { algorithm: 'SHA1', digits: 6, period: 30 },
+      seals: { password: SEAL(1, 'PASSWORD') },
+      factors: [
+        {
+          id: migratedTwoFactorId(KEY(1), SEAL(1, 'TOTP')),
+          kind: 'totp',
+          label: MIGRATED_TOTP_LABEL,
+          seal: SEAL(1, 'TOTP'),
+          params: { algorithm: 'SHA1', digits: 6, period: 30 },
+          addedAt: AT,
+          addedBy: 'migration',
+        },
+      ],
       createdAt: AT,
       updatedAt: AT,
     });
+  });
+
+  it('should name every sealed name it was given, each exactly once, so a sweep after it keeps every seed (invariant 1)', () => {
+    // Arrange
     const before = Object.values(V1.entries).flatMap(entry => Object.values(entry.seals));
-    const after = Object.values(document.accounts).flatMap(account => Object.values(account.seals));
-    expect(after.sort()).toEqual(before.sort());
+
+    // Act
+    const after = Object.values(migrated().document.accounts).flatMap(account => sealedNamesOf(account));
+
+    // Assert — the sealed document is never rewritten, so the index must still point at every name in it
+    expect(before).toContain(SEAL(1, 'TOTP'));
+    expect(after.toSorted()).toEqual(before.toSorted());
+    expect(sealedNamesOf(migrated().document.accounts.GITHUB_KIRINNEE ?? { seals: {} })).toEqual([
+      SEAL(1, 'PASSWORD'),
+      SEAL(1, 'TOTP'),
+    ]);
+  });
+
+  it('should derive a moved seed’s key id from the account key and its sealed name, under its own domain separator', () => {
+    // Arrange
+    const expected = `tf_${createHash('sha256')
+      .update(`ferretry.2fa.v1\0${KEY(1)}\0${SEAL(1, 'TOTP')}`)
+      .digest('hex')
+      .slice(0, 12)}`;
+
+    // Act
+    const [key] = migrated().document.accounts.GITHUB_KIRINNEE?.factors ?? [];
+
+    // Assert
+    expect(key?.id).toBe(expected);
+    expect(migratedTwoFactorId(KEY(1), SEAL(1, 'TOTP'))).toBe(expected);
+    expect(migratedTwoFactorId(KEY(2), SEAL(1, 'TOTP'))).not.toBe(expected);
+  });
+
+  it('should leave a moved seed unchecked and owned by the migration, never by a ferret', () => {
+    const [key] = migrated().document.accounts.GITHUB_KIRINNEE?.factors ?? [];
+    expect(key?.kind === 'totp' && key.verified).toBeUndefined();
+    expect(key?.addedBy).toBe('migration');
+    expect(migrated().document.accounts.SUDO_KIRIN_BOX?.factors).toBeUndefined();
+  });
+
+  it('should refuse a seed without its parameters, or parameters without a seed, rather than invent a key', () => {
+    for (const extra of [
+      { seals: { password: SEAL(1, 'PASSWORD'), totp: SEAL(1, 'TOTP') } },
+      { totp: { algorithm: 'SHA1', digits: 6, period: 30 } as const },
+    ]) {
+      // Arrange
+      const v1: LoginIndexV1 = { v: 1, entries: { HAND_EDITED: record(1, extra) } };
+
+      // Act
+      const result = migrateLoginIndex(v1, { hostName: 'kirin-box', now: NOW });
+
+      // Assert — the caller reports the store damaged; nothing is rewritten
+      expect(result.ok).toBe(false);
+      expect(result.ok ? '' : result.error).not.toContain(SEAL(1, 'TOTP'));
+    }
+  });
+
+  it('should refuse a seed sealed under another account’s key', () => {
+    const v1: LoginIndexV1 = {
+      v: 1,
+      entries: {
+        ONE: record(1, { seals: { totp: SEAL(2, 'TOTP') }, totp: { algorithm: 'SHA1', digits: 6, period: 30 } }),
+        TWO: record(2, {}),
+      },
+    };
+    expect(migrateLoginIndex(v1, { hostName: 'kirin-box', now: NOW }).ok).toBe(false);
   });
 
   it('should make one sign-in per place: the site first, then each terminal key', () => {
@@ -225,6 +302,7 @@ describe('migrating saved logins into accounts and sign-ins', () => {
       droppedFacts: 1,
       droppedPlaces: 0,
       droppedVia: 0,
+      twoFactorKeys: 1,
     });
   });
 
