@@ -272,6 +272,13 @@ A **credential with `store: environment`** (and a **settings component**) is the
 comes from: its `env` may bind a variable to `${secret:NAME}`, which is how a runtime authenticates with
 no login at all. Same grammar, same store, same refusal — see [the account model](./account-model.md).
 
+**The refusal is judged against a published fleet, never the middle of an apply.** An apply moves the
+manifest aside before linking its replacement in, and a launch that read the gap would find no account,
+so no binding, so nothing to refuse. Every apply the daemon makes is exclusive, and every read of the
+published fleet — a start's account, the launch's bindings, the runtime names — waits for one in flight
+(`packages/daemon/src/lib/fleet/publication.ts`). A second apply landing between the judgment and the
+pane's exec is still fail-closed: the new wrapper carries its own guard for every secret-backed variable.
+
 ## Accounts and sign-ins: the store
 
 The saved logins became **accounts** (one identity: label, plain username, password, 2FA keys) and

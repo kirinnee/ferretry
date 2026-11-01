@@ -155,6 +155,73 @@ describe('FileFleetProvisioner', () => {
     should(await readFile(manifestPath, 'utf8')).equal('{"version":"previous"}\n');
   });
 
+  it('should run the whole mutation inside the publishing section, with the claim already held', async () => {
+    // Arrange — a manifest already published: the apply moves it aside before linking the new one in.
+    const root = await temporaryDirectory();
+    const manifestPath = path.join(root, 'fleet', 'manifest.json');
+    const lockPath = path.join(root, 'fleet', '.fy-fleet-apply.lock');
+    await Bun.write(manifestPath, '{"version":"previous"}\n');
+    const plan: FleetApplyPlan = { manifest: manifest(), manifestPath, operations: [] };
+    const seen: { readonly claimed: boolean; readonly manifest: string }[] = [];
+    const observe = async (): Promise<void> => {
+      seen.push({
+        claimed: await stat(lockPath).then(
+          () => true,
+          () => false,
+        ),
+        manifest: await readFile(manifestPath, 'utf8'),
+      });
+    };
+    const subject = new FileFleetProvisioner([root], undefined, {}, undefined, undefined, async mutate => {
+      await observe();
+      const result = await mutate();
+      await observe();
+      return result;
+    });
+
+    // Act
+    const result = await subject.apply(plan);
+
+    // Assert — entered holding the claim and before the old manifest moved; left with the new one in place.
+    should(result.manifestPath).equal(manifestPath);
+    should(seen.map(entry => entry.claimed)).deepEqual([true, true]);
+    should(seen[0]?.manifest).equal('{"version":"previous"}\n');
+    should(JSON.parse(seen[1]?.manifest ?? '{}')).deepEqual(manifest());
+  });
+
+  it('should never enter the publishing section while it waits for a claim somebody else holds', async () => {
+    // Arrange — a claim left behind: a directory with a token file, as a crashed apply leaves one.
+    const root = await temporaryDirectory();
+    const manifestPath = path.join(root, 'fleet', 'manifest.json');
+    const lockPath = path.join(root, 'fleet', '.fy-fleet-apply.lock');
+    await mkdir(lockPath, { recursive: true });
+    await Bun.write(
+      path.join(lockPath, 'claim-left-behind.json'),
+      `${JSON.stringify({ owner: 999_999, token: 'left-behind', at: 0 })}\n`,
+    );
+    let entered = false;
+    const subject = new FileFleetProvisioner(
+      [root],
+      undefined,
+      { waitMs: 20, pollMs: 5 },
+      undefined,
+      undefined,
+      async mutate => {
+        entered = true;
+        return await mutate();
+      },
+    );
+
+    // Act
+    const refused = await subject
+      .apply({ manifest: manifest(), manifestPath, operations: [] })
+      .catch((error: unknown) => error);
+
+    // Assert — refused for the claim, and no reader was ever held back for the wait.
+    should((refused as Error).message).match(/another fleet apply holds/u);
+    should(entered).be.false();
+  });
+
   it('should publish landed ordinary operations before surfacing a shared-history failure', async () => {
     // Arrange
     const root = await temporaryDirectory();

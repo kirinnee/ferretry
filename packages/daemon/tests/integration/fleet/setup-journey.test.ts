@@ -22,6 +22,7 @@ import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../../../src/ada
 import { fileFleetSetupDeps } from '../../../src/adapters/fleet/setup-files.ts';
 import { resolveWardenLogin } from '../../../src/lib/warden/config.ts';
 import { FleetCatalogService } from '../../../src/lib/fleet/catalog-service.ts';
+import { FleetPublication } from '../../../src/lib/fleet/publication.ts';
 import { createFleetSetupSubsystem, type FleetSetupService } from '../../../src/lib/fleet/setup-service.ts';
 import { type ConfigHome, configHome } from './config-files-fixture.ts';
 
@@ -89,6 +90,7 @@ async function machine(name: string, options: { readonly claude: boolean }): Pro
     locate: harness => (harness === 'claude' && options.claude ? '/bin/sh' : undefined),
     machineName: () => name,
     clientName: 'fy',
+    publication: new FleetPublication(),
   });
   const setup = createFleetSetupSubsystem(
     fileFleetSetupDeps({

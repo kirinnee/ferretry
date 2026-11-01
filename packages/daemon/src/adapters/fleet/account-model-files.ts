@@ -38,6 +38,7 @@ import {
 import { configFilePath, type SessionStatus, SessionStatusSchema } from '@ferretry/protocol';
 import type { ConfigFilesService } from '../../lib/config-files/index.ts';
 import type { AccountDocumentReading, FleetCatalogServiceDeps } from '../../lib/fleet/catalog-service.ts';
+import type { FleetPublication } from '../../lib/fleet/publication.ts';
 import type { FoundationPaths } from '../../lib/paths.ts';
 
 /** The largest component document the catalogue reads; a larger one is reported as unreadable. */
@@ -194,6 +195,12 @@ export interface FileFleetCatalogOptions {
    * them into a runtime is refused (docs/agent-tools.md#component-destinations).
    */
   readonly pinned?: readonly string[];
+  /**
+   * The daemon's one fleet publication: every apply runs exclusively under it, so a read of the published
+   * fleet never lands between a file moved aside and its replacement (`lib/fleet/publication.ts`).
+   * Required, so no composition can apply a fleet its readers are not kept out of.
+   */
+  readonly publication: FleetPublication;
 }
 
 /**
@@ -264,16 +271,19 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
   };
   // Strict, unlike a component read: an `ids.json` that exists and cannot be read must refuse the
   // change, because planning without it would give every runtime a new id and a new directory.
-  const ids = async (): Promise<RuntimeIds | undefined> => {
-    let text: string;
-    try {
-      text = await readFile(runtimeIdsPath(paths.fleet), 'utf8');
-    } catch (error) {
-      if (missing(error)) return undefined;
-      throw error;
-    }
-    return parseRuntimeIds(JSON.parse(text));
-  };
+  // Read between applies: mid-apply the file is moved aside, and a plan made from that gap would be
+  // exactly that — every runtime re-minted — for a republish that overlapped another one.
+  const ids = async (): Promise<RuntimeIds | undefined> =>
+    await options.publication.reading(async () => {
+      let text: string;
+      try {
+        text = await readFile(runtimeIdsPath(paths.fleet), 'utf8');
+      } catch (error) {
+        if (missing(error)) return undefined;
+        throw error;
+      }
+      return parseRuntimeIds(JSON.parse(text));
+    });
   return {
     document: async fresh =>
       await readConfigAccountDocument(
@@ -286,7 +296,8 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     ids,
     locate: options.locate,
     commandExists: command => Bun.which(command) !== null,
-    wrappersCurrent: async plan => await wrappersCurrent(layout.binDirectory, plan.operations),
+    wrappersCurrent: async plan =>
+      await options.publication.reading(async () => await wrappersCurrent(layout.binDirectory, plan.operations)),
     sessionStatuses: async () => await options.sessionStatuses(),
     ...(records === undefined
       ? {}
@@ -302,6 +313,11 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
         new SharedHistoryMigration(new FileSharedHistoryFileSystem(allowedRoots, sourceFence)),
         {},
         sourceFence,
+        undefined,
+        // Exclusive around the file mutation ONLY — after the claim is held, before the acknowledging
+        // wrapper reloads the configuration, since a load can republish and that must queue behind this
+        // apply rather than run inside it.
+        async mutate => await options.publication.publishing(mutate),
       ),
       options.config,
       options.configDirectory,

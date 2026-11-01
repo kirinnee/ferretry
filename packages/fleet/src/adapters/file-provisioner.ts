@@ -285,6 +285,17 @@ export class FileFleetProvisioner implements FleetProvisioner {
     private readonly sourceFence?: SourceFence,
     /** The destination side's disk; a test names one without descriptor paths, as macOS has. */
     private readonly destinationDisk?: FolderDisk,
+    /**
+     * Run around the mutation itself, once the claim is held and before anything is moved aside.
+     *
+     * A published name is ABSENT between being moved aside and its replacement being linked in, so a
+     * reader in that gap sees no manifest, no ids and no wrapper — not the old fleet and not the new one.
+     * A daemon passes the section that keeps its own readers out of that gap. It wraps only the mutation,
+     * never the wait for the claim: a claim left behind by a crashed apply must not hold every reader for
+     * the whole wait. It ends at the commit, or at the rollback of a failure: the cleanup and the shared-history
+     * migration after it move no name a reader looks up. Absent, the mutation simply runs.
+     */
+    private readonly publishing?: <T>(mutate: () => Promise<T>) => Promise<T>,
   ) {
     if (allowedRoots.length === 0) {
       throw new Error('at least one allowed fleet root is required');
@@ -398,43 +409,48 @@ export class FileFleetProvisioner implements FleetProvisioner {
     let operationCount = 0;
     let stage = 'the configuration and asset documents';
 
-    try {
-      for (const document of documents) {
-        const mark = journal.beginOperation();
-        await this.writeDocument(document, journal);
-        await journal.sealOperation(mark);
-      }
-
-      for (const operation of plan.operations) {
-        stage = `${operation.kind} ${operation.path}`;
-        // Recheck at the mutation boundary as well: an earlier operation must not be able to
-        // replace an ancestor with a link after the all-or-nothing preflight approved this
-        // destination.
-        await this.assertOperationWritable(operation);
-        const mark = journal.beginOperation();
-        let pruned: readonly string[] | undefined;
-        try {
-          pruned = await this.applyOperation(operation, journal);
-        } catch (error) {
-          // Refused before anything was moved or removed (see `ConfinedDestinationError`): this operation is
-          // left as the disk has it, and the result says so.
-          if (!(error instanceof ConfinedDestinationError)) throw error;
-          skipped.push({ path: operation.path, reason: error.message });
-          pruned = undefined;
+    // Everything a reader could catch moved aside — the documents, the operations, the manifest and a
+    // rollback of any of them — and nothing after the commit, which leaves every published name in place.
+    const mutate = async (): Promise<void> => {
+      try {
+        for (const document of documents) {
+          const mark = journal.beginOperation();
+          await this.writeDocument(document, journal);
+          await journal.sealOperation(mark);
         }
-        await journal.sealOperation(mark);
-        if (pruned === undefined) continue;
-        operationCount += 1;
-        prunedWrappers.push(...pruned);
-      }
 
-      stage = `the fleet manifest ${plan.manifestPath}`;
-      const mark = journal.beginOperation();
-      await this.writeManifest(plan, journal);
-      await journal.sealOperation(mark);
-    } catch (error) {
-      throw await this.rollback(journal, stage, error);
-    }
+        for (const operation of plan.operations) {
+          stage = `${operation.kind} ${operation.path}`;
+          // Recheck at the mutation boundary as well: an earlier operation must not be able to
+          // replace an ancestor with a link after the all-or-nothing preflight approved this
+          // destination.
+          await this.assertOperationWritable(operation);
+          const mark = journal.beginOperation();
+          let pruned: readonly string[] | undefined;
+          try {
+            pruned = await this.applyOperation(operation, journal);
+          } catch (error) {
+            // Refused before anything was moved or removed (see `ConfinedDestinationError`): this operation is
+            // left as the disk has it, and the result says so.
+            if (!(error instanceof ConfinedDestinationError)) throw error;
+            skipped.push({ path: operation.path, reason: error.message });
+            pruned = undefined;
+          }
+          await journal.sealOperation(mark);
+          if (pruned === undefined) continue;
+          operationCount += 1;
+          prunedWrappers.push(...pruned);
+        }
+
+        stage = `the fleet manifest ${plan.manifestPath}`;
+        const mark = journal.beginOperation();
+        await this.writeManifest(plan, journal);
+        await journal.sealOperation(mark);
+      } catch (error) {
+        throw await this.rollback(journal, stage, error);
+      }
+    };
+    await (this.publishing === undefined ? mutate() : this.publishing(mutate));
 
     // Committed. Cleanup from here is best-effort and never reclassifies a successful apply.
     const backupResidue = await journal.discard();
