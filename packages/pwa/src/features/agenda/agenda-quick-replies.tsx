@@ -23,6 +23,7 @@ import { type AnswerDirection, answerAction, CLEAR_ACTION } from '../../lib/agen
 import type { CardModel } from '../../lib/agenda-card-model.ts';
 import { type InboxAction, SWIPE_SLOP_PX, type SwipeMap, swipeIntent } from '../../lib/agenda-inbox.ts';
 import { cardLettered, letterOf } from '../../lib/agenda-options.ts';
+import { plainLabel } from '../../lib/plain-label.ts';
 import { DoneCloseChip, DoneCloseConfirm, DoneCloseError } from './agenda-done-close.tsx';
 import type { DoneCloseView } from './use-done-close-flow.ts';
 import { isDownSwipe } from './use-down-swipe.ts';
@@ -92,7 +93,9 @@ interface ChipProps {
 
 /** What a screen reader says: the full label, then whether it is the pick and which way it swipes. */
 const chipName = (label: string, recommended: boolean, swipe: string | null): string =>
-  [label, recommended ? 'recommended' : null, swipe === null ? null : `or ${swipe}`].filter(Boolean).join(', ');
+  [plainLabel(label), recommended ? 'recommended' : null, swipe === null ? null : `or ${swipe}`]
+    .filter(Boolean)
+    .join(', ');
 
 function Chip({ label, letter, lettered, recommended, busy, arrow, swipeable, primary = false, onTap }: ChipProps) {
   return (
@@ -105,7 +108,7 @@ function Chip({ label, letter, lettered, recommended, busy, arrow, swipeable, pr
       data-variant={primary ? 'primary' : undefined}
       disabled={busy}
       onClick={onTap}
-      title={label}
+      title={plainLabel(label)}
       type="button"
     >
       {arrow === undefined ? null : (
@@ -113,7 +116,7 @@ function Chip({ label, letter, lettered, recommended, busy, arrow, swipeable, pr
           {ARROW[arrow]}
         </span>
       )}
-      <span className="fy-qr__label">{lettered && letter !== undefined ? letter : label}</span>
+      <span className="fy-qr__label">{lettered && letter !== undefined ? letter : plainLabel(label)}</span>
     </button>
   );
 }

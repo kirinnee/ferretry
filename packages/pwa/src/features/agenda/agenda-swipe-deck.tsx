@@ -87,10 +87,10 @@ const visibleBottomOf = (element: HTMLElement): number => {
 };
 
 /** The room a mounted deck has, read off the layout. */
-const roomOf = (element: HTMLElement): number => {
+const roomOf = (element: HTMLElement, reserve: number): number => {
   const below = element.nextElementSibling?.getBoundingClientRect().height ?? 0;
   const padding = Number.parseFloat(getComputedStyle(element).paddingBottom) || 0;
-  return deckRoom(element.getBoundingClientRect().top, visibleBottomOf(element), below, padding);
+  return deckRoom(element.getBoundingClientRect().top, visibleBottomOf(element), below, padding + reserve);
 };
 
 /**
@@ -98,13 +98,17 @@ const roomOf = (element: HTMLElement): number => {
  * detail grows into the screen it has rather than a guess at it. Re-measured when the window resizes,
  * when a new card comes on top and when what is drawn under the deck changes size.
  */
-const useDeckRoom = (deck: { readonly current: HTMLDivElement | null }, topKey: string | undefined): number | null => {
+export const useDeckRoom = (
+  deck: { readonly current: HTMLElement | null },
+  topKey: string | undefined,
+  reserve = 0,
+): number | null => {
   const [room, setRoom] = useState<number | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new card on top is a reason to measure again
   useEffect(() => {
     const measure = (): void => {
       const element = deck.current;
-      if (element !== null) setRoom(roomOf(element));
+      if (element !== null) setRoom(roomOf(element, reserve));
     };
     measure();
     window.addEventListener('resize', measure);

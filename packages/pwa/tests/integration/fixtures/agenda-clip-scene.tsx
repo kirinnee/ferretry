@@ -5,12 +5,15 @@
  *
  *   ?theme=<family>-<mode>
  *   ?scene=item|run       the open item (its ⓘ panel carries the snooze control), or one card of the run (default run)
+ *   ?marked=1            item: the options' labels carry Markdown ("A **Send now**", "B **Wait**")
  *   ?same=1               run: the card's title is its task's name, in another case
+ *   ?steps=<n>            run: how many steps the card has (default 16: longer than the box)
  *
  * `window.__skipped` counts the run's Skip.
  */
 
 import { createRoot } from 'react-dom/client';
+import { ChatProse } from '../../../src/components/chat-prose.tsx';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
 import type { ToTestAnswers } from '../../../src/features/agenda/to-test-rows.tsx';
 import { ToTestStep } from '../../../src/features/agenda/to-test-step.tsx';
@@ -28,16 +31,20 @@ win.__done = 0;
 const item = agendaItem('A1229', {
   title: 'Send 20 pod-label PRs to their teams',
   subject: 'Send 20 pod-label PRs to their teams',
-  ask: choices('Send now', 'Wait'),
+  ask: params.get('marked') === '1' ? choices('A **Send now**', 'B **Wait**') : choices('Send now', 'Wait'),
   premise: 'The PRs add the 8 standard pod labels across 17 repos; CI green except one.',
   context: 'You asked for one table to send them out and inspect them.',
   waitingSince: '2026-08-01T11:00:00.000Z',
 });
 
+const stepCount = Number(params.get('steps') ?? 16);
+const stepWords = (): string =>
+  stepCount < 5
+    ? 'Open the card.'
+    : `ask a ferret to run something that prompts for a password through a real \`sudo\`, then read what the card says about it and about the lock.`;
 const steps = Array.from(
-  { length: 16 },
-  (_, index) =>
-    `${String(index + 1)}. Step ${String(index + 1)}: ask a ferret to run something that prompts for a password through a real \`sudo\`, then read what the card says about it and about the lock.`,
+  { length: stepCount },
+  (_, index) => `${String(index + 1)}. Step ${String(index + 1)}: ${stepWords()}`,
 ).join('\n');
 
 const same = params.get('same') === '1';
@@ -88,7 +95,7 @@ function Item() {
           onPrevious={() => undefined}
           onSnooze={() => undefined}
           position={{ index: 0, total: 1 }}
-          renderProse={text => text}
+          renderProse={text => <ChatProse text={text} />}
           swipeable
         />
       </div>
@@ -97,22 +104,29 @@ function Item() {
 }
 
 function Run() {
+  const phone = window.innerWidth < 768;
   return (
-    <div style={{ padding: '16px' }}>
-      <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open">
-        <ToTestStep
-          answers={answers}
-          index={5}
-          now={NOW}
-          onNavigate={() => undefined}
-          onNext={() => {
-            win.__skipped += 1;
-          }}
-          onPrevious={() => undefined}
-          row={row}
-          total={40}
-        />
+    <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: '1 1 0', minHeight: 0 }}>
+        <div className="fy-attn-inbox" data-agenda-inbox="card" {...(phone ? { 'data-phone': '' } : {})}>
+          <header style={{ minHeight: 32 }}>Inbox</header>
+          <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open">
+            <ToTestStep
+              answers={answers}
+              index={5}
+              now={NOW}
+              onNavigate={() => undefined}
+              onNext={() => {
+                win.__skipped += 1;
+              }}
+              onPrevious={() => undefined}
+              row={row}
+              total={40}
+            />
+          </div>
+        </div>
       </div>
+      <nav data-tab-bar="" style={{ flex: 'none', height: 56, borderTop: '1px solid currentColor' }} />
     </div>
   );
 }

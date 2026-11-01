@@ -31,6 +31,7 @@ import type { ReactNode } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import { itemOptions, type LetteredOption, letteredOptions, needsOptionsSection } from '../../lib/agenda-options.ts';
 import { bulletPoints, type RevisionHighlight } from '../../lib/agenda-revisions.ts';
+import { plainLabel } from '../../lib/plain-label.ts';
 
 type AgendaProse = (text: string) => ReactNode;
 
@@ -225,7 +226,7 @@ function OptionsList({
         <li className="fy-attn-options__row" data-agenda-option-detail={option.label} key={option.label}>
           <span className="fy-attn-options__head">
             <strong>
-              {option.letter} — {option.label}
+              {option.letter} — {plainLabel(option.label, option.letter)}
             </strong>
             {option.recommended ? <RecommendedBadge /> : null}
           </span>

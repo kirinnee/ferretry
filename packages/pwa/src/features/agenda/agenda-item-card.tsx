@@ -22,11 +22,12 @@ import { Check } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { optionAction } from '../../lib/agenda-answers.ts';
-import { useFormPicks } from '../../lib/agenda-form-state.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
+import { useFormPicks } from '../../lib/agenda-form-state.ts';
 import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
+import { plainLabel } from '../../lib/plain-label.ts';
 import { AgendaLinkRow, PointForm } from './agenda-brief.tsx';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
 import { AgendaDelivery } from './agenda-delivery.tsx';
@@ -159,7 +160,7 @@ function OptionsList({
         <li data-agenda-option-detail={option.label} key={option.label}>
           {option.pickHere ? (
             <button
-              aria-label={`Choose ${option.label}`}
+              aria-label={`Choose ${plainLabel(option.label)}`}
               className="fy-card__option-name fy-card__option-pick"
               data-agenda-option={option.label}
               disabled={busy}
@@ -309,9 +310,9 @@ export function AgendaItemCard({
   const onRow = new Set(model.answers.map(answer => answer.label.trim().toLowerCase()));
   const listed: readonly ListedOption[] = letteredOptions(options, item.optionDetails, model.recommended).map(
     option => {
-      const named = lettered ? option.letter : option.label;
+      const named = lettered ? option.letter : plainLabel(option.label);
       const meaning = lettered
-        ? `**${option.label}**${option.detail === undefined ? '' : ` — ${option.detail}`}`
+        ? `**${plainLabel(option.label, option.letter)}**${option.detail === undefined ? '' : ` — ${option.detail}`}`
         : (option.detail ?? null);
       return {
         label: option.label,

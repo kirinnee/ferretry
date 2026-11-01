@@ -306,3 +306,84 @@ describe('the Answer-quickly card', () => {
       }
     });
 });
+
+describe('a short Answer-quickly card', () => {
+  for (const { name } of VIEWPORTS)
+    for (const theme of ['studio-light', 'studio-dark', 'neo-light', 'neo-dark'] as const)
+      it(`fills the box, with its answers at the foot (${name}, ${theme})`, async () => {
+        const { tab, close } = await open('run', name, theme, '&steps=2');
+        try {
+          await tab.waitForSelector('.fy-totest__actions');
+          await framesSettled(tab);
+          const geometry = await tab.evaluate(() => {
+            const rect = (query: string) => {
+              const element = document.querySelector(query);
+              if (element === null) throw new Error(`nothing matches ${query}`);
+              const { top, bottom } = element.getBoundingClientRect();
+              return { top, bottom };
+            };
+            const step = document.querySelector('.fy-inbox-step') as HTMLElement;
+            const padding = Number.parseFloat(getComputedStyle(step).paddingBottom);
+            return {
+              box: rect('.fy-inbox-step'),
+              card: rect('.fy-totest'),
+              actions: rect('.fy-totest__actions'),
+              padding,
+              overflows: step.scrollHeight > step.clientHeight + 1,
+              tabBarTop: rect('[data-tab-bar]').top,
+              pageScrolls: (() => {
+                const page = document.querySelector('.fy-attn-inbox') as HTMLElement;
+                return page.scrollHeight > page.clientHeight + 1;
+              })(),
+            };
+          });
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${theme}-run-short.png`) });
+          expect(
+            geometry.tabBarTop - geometry.box.bottom,
+            `the box runs down to the tab bar (${JSON.stringify(geometry)})`,
+          ).toBeLessThanOrEqual(24);
+          expect(geometry.pageScrolls, 'the page does not scroll for it').toBe(false);
+          expect(geometry.overflows, `a short card does not scroll (${JSON.stringify(geometry)})`).toBe(false);
+          expect(
+            Math.abs(geometry.card.bottom - (geometry.box.bottom - geometry.padding)),
+            'the card reaches the foot of the box',
+          ).toBeLessThanOrEqual(2);
+          expect(
+            geometry.card.bottom - geometry.actions.bottom,
+            'the answers sit at the card foot, not mid-card',
+          ).toBeLessThanOrEqual(24);
+        } finally {
+          await close();
+        }
+      });
+});
+
+describe('option labels that carry Markdown, in the open item', () => {
+  for (const { name } of VIEWPORTS)
+    for (const theme of THEMES)
+      it(`read as plain words, never with literal ** marks (${name}, ${theme})`, async () => {
+        const { tab, close } = await open('item', name, theme, '&marked=1');
+        try {
+          await tab.waitForSelector('[data-agenda-need]');
+          await framesSettled(tab);
+          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${theme}-option-labels.png`) });
+          const shown = await tab.evaluate(() => {
+            const text = (query: string) => (document.querySelector(query) as HTMLElement | null)?.innerText ?? '';
+            return {
+              need: text('[data-agenda-need]'),
+              answers: [...document.querySelectorAll<HTMLElement>('[data-agenda-option]')].flatMap(button => [
+                button.innerText,
+                button.title,
+                button.getAttribute('aria-label') ?? '',
+              ]),
+            };
+          });
+          expect(shown.need, 'the need box').not.toContain('*');
+          expect(shown.need).toContain('Send now');
+          expect(shown.need.replaceAll(/\s+/gu, ' '), 'no letter said twice').not.toMatch(/\bA A\b|\bB B\b/u);
+          for (const text of shown.answers) expect(text, 'an answer button').not.toContain('*');
+        } finally {
+          await close();
+        }
+      });
+});
