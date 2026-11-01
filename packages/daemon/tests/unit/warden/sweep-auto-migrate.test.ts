@@ -3,7 +3,7 @@ import { DEFAULT_WARDEN_CONFIG, type WardenConfig } from '@ferretry/protocol';
 import should from 'should';
 import { WardenAutoMigrateService, type WardenFleetSession } from '../../../src/lib/warden/index.ts';
 import { credential, facts, runtime, tool } from '../pack/support.ts';
-import { enabled, harness, session } from './sweep-harness.ts';
+import { enabled, harness, NOW, session } from './sweep-harness.ts';
 
 const moving = (changes: Partial<WardenConfig['autoMigrate']> = {}): WardenConfig =>
   enabled({ autoMigrate: { ...DEFAULT_WARDEN_CONFIG.autoMigrate, enabled: true, ...changes } });
@@ -158,5 +158,40 @@ describe('moving in the sweep when the mover fails', () => {
     should(quiet.state().actions ?? []).deepEqual([]);
     should(kept).be.false();
     should(holding.state().actions?.[0]).match({ action: 'failover', outcome: 'held', detail: 'Not moved.' });
+  });
+});
+
+describe('moving in the sweep alongside a budget stop', () => {
+  it('should keep the action a budget stop wrote while the sweep’s moves ran, beside the sweep’s own', async () => {
+    // Arrange
+    const at = new Date(NOW).toISOString();
+    const action = (sessionId: string, detail: string) => ({
+      at,
+      sessionId,
+      action: 'failover' as const,
+      outcome: 'done' as const,
+      by: 'warden' as const,
+      actor: 'auto' as const,
+      detail,
+    });
+    let subject: ReturnType<typeof harness> | undefined;
+    const mover = {
+      run: async () => {
+        // The budget tick moves s2 while the sweep is busy moving s1.
+        await subject?.service.relocate('s2', 'budget_exceeded');
+        return { actions: [action('s1', 'Moved by the sweep.')], moved: new Set(['s1']) };
+      },
+      relocate: async () => ({ away: true, action: action('s2', 'Moved by the budget stop.') }),
+    } as unknown as WardenAutoMigrateService;
+    subject = harness({ config: moving(), fleet: [limited('s1'), limited('s2')], autoMigrate: mover });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should((subject.state().actions ?? []).map(entry => entry.detail).sort()).deepEqual([
+      'Moved by the budget stop.',
+      'Moved by the sweep.',
+    ]);
   });
 });

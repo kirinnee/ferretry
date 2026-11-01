@@ -4516,8 +4516,8 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
   const redactedJobs = async (jobs: readonly AgentJob[]): Promise<readonly AgentJob[]> =>
     await parts.redactor.batch(scrub => jobs.map(job => ({ ...job, command: scrub.text(job.command) })));
   // The move is the migration every other caller makes — same session, same conversation, same card — drawn as
-  // Ferretry · Warden on the turn it hands over. Never a context downgrade, and forced only when the owner set
-  // `forceStopBackground`, after the ferret's own jobs were stopped.
+  // Ferretry · Warden on the turn it hands over. Never a context downgrade and never forced: with
+  // `forceStopBackground` the ferret's own jobs are stopped first, and the safety check still has the last word.
   const autoMigrate = new WardenAutoMigrateService({
     ...parts.autoMigrate,
     // Every command line through the vault redactor first: the ferret's own turn quotes it whole.
@@ -5834,6 +5834,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
             // Never these, whatever a pane's tree claims: init, this daemon, and what started it.
             protectedPids: new Set([1, process.pid, process.ppid]),
             sleep: async milliseconds => await Bun.sleep(milliseconds),
+            nowMs: () => Date.now(),
           }).stop(),
       );
     },

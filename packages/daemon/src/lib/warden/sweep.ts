@@ -2049,7 +2049,9 @@ export class WardenSweepService {
       // The move ledger is the mover's own, kept under its lock: only what it did is written down here.
       const result = await service.run({ fleet, config, nowMs });
       if (result.actions.length === 0) return { state, moved: result.moved };
-      let next = state;
+      // A budget stop may have moved a ferret, and written its action, while this sweep ran: fold in every action the
+      // store holds from since the sweep began that this sweep has not seen, so this write never drops one.
+      let next = this.withForeignActions(state, parseWardenRuntimeState(await this.ports.state.read()), nowMs);
       for (const action of result.actions) next = this.recordAction(next, action);
       await this.ports.state.write(next);
       return { state: next, moved: result.moved };
@@ -2057,6 +2059,27 @@ export class WardenSweepService {
       this.ports.journal.record('fleet.warden_auto_migrate_failed', { message: failureMessage(error) });
       return { state, moved: new Set() };
     }
+  }
+
+  /**
+   * `state` with the actions `stored` holds that it lacks, recorded oldest first — what another writer (a budget
+   * stop's move) added after this sweep read the document at `sinceMs`. Recording them again counts them in this
+   * state's day too, which the stored copy already did and this one never saw.
+   */
+  private withForeignActions(
+    state: WardenRuntimeState,
+    stored: WardenRuntimeState,
+    sinceMs: number,
+  ): WardenRuntimeState {
+    const key = (action: WardenAction): string =>
+      `${action.at}|${action.sessionId}|${action.action}|${action.outcome}|${action.detail}`;
+    const known = new Set((state.actions ?? []).map(key));
+    const foreign = (stored.actions ?? [])
+      .filter(action => (instantMs(action.at) ?? 0) >= sinceMs && !known.has(key(action)))
+      .toReversed();
+    let next = state;
+    for (const action of foreign) next = this.recordAction(next, action);
+    return next;
   }
 
   /**

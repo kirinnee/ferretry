@@ -40,6 +40,8 @@ export interface AgentJobStopPorts {
   /** Deliver one signal to one pid. Answers whether it was delivered. */
   signal(pid: number, signal: StopSignal): boolean;
   sleep(ms: number): Promise<void>;
+  /** Wall-clock milliseconds: when the first look and every later one were taken, to pin each start to an instant. */
+  nowMs(): number;
   /** Pids never signalled, whatever a tree says: init, the daemon itself, the daemon's parent. */
   readonly protectedPids: ReadonlySet<number>;
 }
@@ -54,8 +56,40 @@ export const STOP_GRACE_MS = 5_000;
 export const STOP_POLL_MS = 500;
 export const KILL_GRACE_MS = 1_000;
 
-/** `ps` reports whole seconds: a process looked at twice can read one second "younger" the second time. */
-const ELAPSED_TOLERANCE_SECONDS = 1;
+/**
+ * How far apart two readings of one process's START may fall and still be the same process: each is a whole-second
+ * age subtracted from when it was read, so each may be off by up to a second.
+ */
+const START_TOLERANCE_SECONDS = 2;
+
+/** A process as first seen, pinned to when it STARTED — an instant, not an age, so a later look compares like with like. */
+export interface SeenProcess {
+  readonly pid: number;
+  readonly argv: string;
+  readonly toolShell?: number;
+  /** Seconds since the epoch, or `undefined` when the first look could not tell its age. */
+  readonly startedAt: number | undefined;
+}
+
+/** When `row`, read at `readAtMs`, started, in seconds since the epoch. */
+const startOf = (row: ProcRow, readAtMs: number): number => readAtMs / 1000 - row.startedSecondsAgo;
+
+/**
+ * Whether `now` may be the process `seen` was: the same pid, started no later than it did (within the tolerance).
+ * Enough to count it ALIVE — a pid the kernel reused started after the first look, later than the tolerance once
+ * the stop has been running for a while, and is not counted. One whose start the first look could not tell is
+ * counted alive: an unsure reading keeps the ferret where it is.
+ */
+export function mayBeSameProcess(seen: SeenProcess, now: ProcRow, readAtMs: number): boolean {
+  if (seen.pid !== now.pid) return false;
+  return seen.startedAt === undefined || startOf(now, readAtMs) <= seen.startedAt + START_TOLERANCE_SECONDS;
+}
+
+/** Whether `now` is still the process `seen` was, closely enough to SIGNAL it: the same start and command line. */
+export function sameProcess(seen: SeenProcess, now: ProcRow, readAtMs: number): boolean {
+  if (seen.pid !== now.pid || seen.startedAt === undefined || seen.argv !== now.argv) return false;
+  return Math.abs(startOf(now, readAtMs) - seen.startedAt) <= START_TOLERANCE_SECONDS;
+}
 
 /**
  * Every process of the jobs that block the move: each blocking job's tool shell and everything below it, the
@@ -70,29 +104,24 @@ export function jobProcesses(report: InflightReport): readonly ProcessInfo[] {
   return report.processes.filter(row => row.toolShell !== undefined && shells.has(row.toolShell)).toReversed();
 }
 
-/** Whether `now` may be the process `seen` was: the same pid, started no later. Enough to count it alive. */
-export function mayBeSameProcess(seen: Pick<ProcessInfo, 'pid' | 'startedSecondsAgo'>, now: ProcRow): boolean {
-  if (seen.pid !== now.pid || seen.startedSecondsAgo === undefined) return false;
-  return now.startedSecondsAgo + ELAPSED_TOLERANCE_SECONDS >= seen.startedSecondsAgo;
-}
-
-/** Whether `now` is still the process `seen` was, closely enough to signal it: the same command line too. */
-export function sameProcess(seen: Pick<ProcessInfo, 'pid' | 'startedSecondsAgo' | 'argv'>, now: ProcRow): boolean {
-  return mayBeSameProcess(seen, now) && seen.argv === now.argv;
-}
-
 export class AgentJobStopper {
   constructor(private readonly ports: AgentJobStopPorts) {}
 
   async stop(): Promise<StoppedJobs> {
     const first = await this.ports.inspect();
+    const firstAtMs = this.ports.nowMs();
     const jobs = blockingAgentJobs(first);
-    const all = jobProcesses(first);
+    const all: readonly SeenProcess[] = jobProcesses(first).map(row => ({
+      pid: row.pid,
+      argv: row.argv,
+      ...(row.toolShell === undefined ? {} : { toolShell: row.toolShell }),
+      startedAt: row.startedSecondsAgo === undefined ? undefined : firstAtMs / 1000 - row.startedSecondsAgo,
+    }));
     if (all.length === 0) return { stopped: [], survivors: [] };
     const guarded = all.filter(target => target.pid <= 1 || this.ports.protectedPids.has(target.pid));
     const targets = all.filter(target => !guarded.includes(target));
 
-    let left: readonly ProcessInfo[];
+    let left: readonly SeenProcess[];
     try {
       left = await this.signalAll(targets, 'SIGTERM');
       for (let waited = 0; left.length > 0 && waited < STOP_GRACE_MS; waited += STOP_POLL_MS) {
@@ -119,26 +148,28 @@ export class AgentJobStopper {
   }
 
   /** The targets that may still be themselves, read again by pid wherever they are now. */
-  private async living(targets: readonly ProcessInfo[]): Promise<readonly ProcessInfo[]> {
+  private async living(targets: readonly SeenProcess[]): Promise<readonly SeenProcess[]> {
     const now = await this.ports.lookup(targets.map(target => target.pid));
+    const readAtMs = this.ports.nowMs();
     return targets.filter(target => {
       const row = now.get(target.pid);
-      return row !== undefined && mayBeSameProcess(target, row);
+      return row !== undefined && mayBeSameProcess(target, row, readAtMs);
     });
   }
 
   /**
    * Signal each target that is still the same process RIGHT NOW, deepest first, reading it again first. Answers
    * the ones that may still be running: a target gone before its signal is done with, and one that may be itself
-   * but no longer reads as the same command is not signalled and is still counted.
+   * but no longer reads as the same process closely enough is not signalled and is still counted.
    */
-  private async signalAll(targets: readonly ProcessInfo[], signal: StopSignal): Promise<readonly ProcessInfo[]> {
+  private async signalAll(targets: readonly SeenProcess[], signal: StopSignal): Promise<readonly SeenProcess[]> {
     const now = await this.ports.lookup(targets.map(target => target.pid));
-    const living: ProcessInfo[] = [];
+    const readAtMs = this.ports.nowMs();
+    const living: SeenProcess[] = [];
     for (const target of targets) {
       const row = now.get(target.pid);
-      if (row === undefined || !mayBeSameProcess(target, row)) continue;
-      if (sameProcess(target, row)) this.ports.signal(target.pid, signal);
+      if (row === undefined || !mayBeSameProcess(target, row, readAtMs)) continue;
+      if (sameProcess(target, row, readAtMs)) this.ports.signal(target.pid, signal);
       living.push(target);
     }
     return living;

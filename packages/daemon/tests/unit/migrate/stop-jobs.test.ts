@@ -67,64 +67,127 @@ describe('jobProcesses', () => {
   });
 });
 
-const row = (process: ProcessInfo, changes: Partial<ProcRow> = {}): ProcRow => ({
+const T0 = Date.parse('2026-11-01T12:00:00.000Z');
+
+/** A process as the stopper's first look pins it: its start, from its age at `T0`. */
+const seen = (process: ProcessInfo) => ({
+  pid: process.pid,
+  argv: process.argv,
+  startedAt: T0 / 1000 - (process.startedSecondsAgo ?? 0),
+});
+
+/** A row read at `atMs` of a process that started `startedAt` (epoch seconds). */
+const rowAt = (process: ProcessInfo, startedAt: number, atMs: number, changes: Partial<ProcRow> = {}): ProcRow => ({
   pid: process.pid,
   ppid: process.ppid ?? 1,
-  startedSecondsAgo: process.startedSecondsAgo ?? 0,
+  startedSecondsAgo: Math.floor(atMs / 1000 - startedAt),
   argv: process.argv,
   ...changes,
 });
 
 describe('sameProcess and mayBeSameProcess', () => {
-  it('should accept the same process looked at again, a second younger by rounding, wherever its parent is now', () => {
+  it('should accept the same process read later, its age grown with the clock, wherever its parent is now', () => {
+    // Arrange
+    const first = seen(server);
+    const later = T0 + 6_000;
+
     // Act
-    const same = sameProcess(server, row(server, { startedSecondsAgo: 125 }));
-    const rounded = sameProcess(server, row(server, { startedSecondsAgo: 118 }));
-    const reparented = sameProcess(server, row(server, { ppid: 1 }));
+    const same = sameProcess(first, rowAt(server, first.startedAt, later), later);
+    const reparented = sameProcess(first, rowAt(server, first.startedAt, later, { ppid: 1 }), later);
 
     // Assert
     should(same).be.true();
-    should(rounded).be.true();
     should(reparented).be.true();
   });
 
-  it('should refuse a reused pid, and signal only the same command line while still counting it alive', () => {
+  it('should refuse a pid reused after the first look, even for a job only a second old', () => {
+    // Arrange: a one-second-old job, and the same pid running the same command, started three seconds later.
+    const young = { ...server, startedSecondsAgo: 1 };
+    const first = seen(young);
+    const later = T0 + 4_000;
+    const reused = rowAt(young, T0 / 1000 + 3, later);
+
     // Act
-    const younger = mayBeSameProcess(server, row(server, { startedSecondsAgo: 2 }));
-    const other = sameProcess(server, row(server, { argv: 'vim notes.md' }));
-    const otherAlive = mayBeSameProcess(server, row(server, { argv: 'vim notes.md' }));
+    const signal = sameProcess(first, reused, later);
+    const alive = mayBeSameProcess(first, reused, later);
 
     // Assert
-    should(younger).be.false();
+    should(reused.startedSecondsAgo).equal(1);
+    should(signal).be.false();
+    should(alive).be.false();
+  });
+
+  it('should signal only the same command line, while still counting a same-start process alive', () => {
+    // Arrange
+    const first = seen(server);
+
+    // Act
+    const other = sameProcess(first, rowAt(server, first.startedAt, T0, { argv: 'vim notes.md' }), T0);
+    const otherAlive = mayBeSameProcess(first, rowAt(server, first.startedAt, T0, { argv: 'vim notes.md' }), T0);
+    const unknownAge = mayBeSameProcess({ ...first, startedAt: undefined }, rowAt(server, 0, T0), T0);
+    const unknownSignal = sameProcess({ ...first, startedAt: undefined }, rowAt(server, 0, T0), T0);
+
+    // Assert
     should(other).be.false();
     should(otherAlive).be.true();
+    should(unknownAge).be.true();
+    should(unknownSignal).be.false();
   });
 });
 
 /** How a process answers a signal: gone on TERM, gone only on KILL, or never gone. */
 type Behaviour = 'term' | 'kill' | 'never';
 
+interface Running {
+  readonly ppid: number;
+  readonly startedAt: number;
+  readonly argv: string;
+}
+
 /**
- * A host: the pane tree the first look sees, then every process by pid as signals take effect. A child whose shell
- * dies is re-parented to init — out of the pane's tree, still on the host.
+ * A host with a clock: the pane tree the first look sees at `T0`, then every process by pid as signals take effect
+ * and time passes (each sleep moves the clock). A child whose shell dies is re-parented to init — out of the pane's
+ * tree, still on the host. `reuse` replaces a pid, once the clock passes its time, by a new process with the SAME
+ * command line, as a restarted job would.
  */
 function host(
   processes: readonly ProcessInfo[],
   behaviour: Readonly<Record<number, Behaviour>>,
-  options: { readonly unreadable?: boolean; readonly protectedPids?: readonly number[]; readonly reuse?: number } = {},
+  options: {
+    readonly unreadable?: boolean;
+    readonly protectedPids?: readonly number[];
+    readonly reuse?: { readonly pid: number; readonly afterMs: number };
+  } = {},
 ) {
+  let now = T0;
   const signals: [number, StopSignal][] = [];
-  const running = new Map(processes.map(process => [process.pid, row(process)]));
+  const running = new Map<number, Running>(
+    processes.map(process => [
+      process.pid,
+      { ppid: process.ppid ?? 1, startedAt: T0 / 1000 - (process.startedSecondsAgo ?? 0), argv: process.argv },
+    ]),
+  );
+  let reused = false;
   const service = new AgentJobStopper({
     inspect: async () => report(processes),
     lookup: async pids => {
       if (options.unreadable === true) throw new Error('ps failed');
+      const reuse = options.reuse;
+      if (reuse !== undefined && !reused && now >= T0 + reuse.afterMs) {
+        const old = running.get(reuse.pid);
+        if (old !== undefined) running.set(reuse.pid, { ...old, startedAt: (T0 + reuse.afterMs) / 1000 });
+        reused = true;
+      }
       const found = new Map<number, ProcRow>();
       for (const pid of pids) {
-        const current = running.get(pid);
-        // A reused pid is a process started after the first look: it has run for less time.
-        if (current !== undefined)
-          found.set(pid, pid === options.reuse ? { ...current, startedSecondsAgo: 0, argv: 'vim' } : current);
+        const entry = running.get(pid);
+        if (entry !== undefined)
+          found.set(pid, {
+            pid,
+            ppid: entry.ppid,
+            startedSecondsAgo: Math.floor(now / 1000 - entry.startedAt),
+            argv: entry.argv,
+          });
       }
       return found;
     },
@@ -137,7 +200,10 @@ function host(
       }
       return true;
     },
-    sleep: async () => undefined,
+    sleep: async ms => {
+      now += ms;
+    },
+    nowMs: () => now,
     protectedPids: new Set(options.protectedPids ?? []),
   });
   return { service, signals, running };
@@ -204,13 +270,28 @@ describe('AgentJobStopper', () => {
 
   it('should never signal a pid that now belongs to another process, and not count it as the job', async () => {
     // Arrange
-    const { service, signals } = host([cli, shell, server], {}, { reuse: 201 });
+    const { service, signals } = host([cli, shell, server], {}, { reuse: { pid: 201, afterMs: 0 } });
 
     // Act
     await service.stop();
 
     // Assert
     should(signals).deepEqual([[200, 'SIGTERM']]);
+  });
+
+  it('should not SIGKILL a young job’s pid once a restarted job with the same command took it', async () => {
+    // Arrange: a one-second-old server that ignores SIGTERM; three seconds in, its pid is a new copy of it.
+    const young = { ...server, startedSecondsAgo: 1 };
+    const { service, signals } = host([cli, shell, young], { 201: 'kill' }, { reuse: { pid: 201, afterMs: 3_000 } });
+
+    // Act
+    await service.stop();
+
+    // Assert
+    should(signals).deepEqual([
+      [201, 'SIGTERM'],
+      [200, 'SIGTERM'],
+    ]);
   });
 
   it('should never signal init, the daemon or its parent, and keep the job they are part of as a survivor', async () => {
