@@ -769,3 +769,152 @@ describe('the paste plan it widens (invariant 30)', () => {
     should(copyPlanOf(plan({ lines: [SIGN_IN_LINE] }))).be.undefined();
   });
 });
+
+describe('one sign-in, one line (secrev-1258 L1)', () => {
+  // The ferret named GITHUB_A on line 1, and asked for "github.com" on line 0, whose picker also offers GITHUB_A.
+  const named = {
+    ...SIGN_IN_LINE,
+    line: 1,
+    fields: ['password'],
+    candidates: [candidate(GITHUB_A, 'GITHUB_A')],
+    flags: [],
+  };
+  const overlapping = () => plan({ lines: [SIGN_IN_LINE, named, { ...PASTE_LINE, line: 2 }] });
+
+  it('should refuse to tick the same account on two lines', () => {
+    const twice = taskPlanSelection(overlapping(), { lines: [{ line: 0, signIn: GITHUB_A }, { line: 1 }] });
+    const apart = taskPlanSelection(overlapping(), { lines: [{ line: 0, signIn: GITHUB_B }, { line: 1 }] });
+
+    should(twice).deepEqual({ ok: false, line: 1, reason: 'this account is already ticked on line 1' });
+    should(apart.ok).be.true();
+    should(
+      canonicalTaskPlanApproval(overlapping(), { lines: [{ line: 0, signIn: GITHUB_A }, { line: 1 }] }, PINS),
+    ).containEql({ ok: false, line: 1 });
+  });
+
+  it('should refuse a plan record with one sign-in approved on two lines', () => {
+    const approved = { signIn: GITHUB_A, totp: false, remaining: 1 };
+    const record = (second: string) => ({
+      ...PLAN,
+      state: 'approved',
+      answered: { at: AT, by: DEVICE, proof: 'passkey' },
+      lines: [
+        { ...SIGN_IN_LINE, state: 'approved', approved },
+        {
+          ...named,
+          candidates: [candidate(GITHUB_A, 'GITHUB_A'), candidate(GITHUB_B, 'GITHUB_B')],
+          state: 'approved',
+          approved: { ...approved, signIn: second },
+        },
+        { ...PASTE_LINE, state: 'declined' },
+      ],
+    });
+
+    should(TaskPlanSchema.safeParse(record(GITHUB_B)).success).be.true();
+    should(TaskPlanSchema.safeParse(record(GITHUB_A)).success).be.false();
+  });
+});
+
+describe('a line fills only where its kind may (secrev-1258 L2)', () => {
+  const ssh = { kind: 'terminal', tool: 'ssh', host: 'kirin-box', dest: 'build.example.com' };
+  const terminalWith = (place: unknown, state = 'waiting') => ({
+    ...PLAN,
+    lines: [
+      SIGN_IN_LINE,
+      {
+        ...TERMINAL_LINE,
+        state,
+        candidates: [{ ...TERMINAL_LINE.candidates[0], place }],
+        ...(state === 'unavailable' ? { because: 'tool-not-covered' } : {}),
+      },
+      PASTE_LINE,
+    ],
+  });
+
+  it('should bind a terminal line only when every pinned key is sudo, su or doas', () => {
+    const pinned = (keys: string[]) =>
+      canonicalTaskPlanApproval(
+        plan(),
+        { lines: [{ line: 1 }] },
+        new Map([[1, { accountKey: KEY_B, placeKeys: keys }]]),
+      );
+
+    should(pinned(['sudo@kirin-box']).ok).be.true();
+    should(pinned(['doas@kirin-box', 'su@kirin-box']).ok).be.true();
+    for (const keys of [['ssh@build.example.com'], ['sudo@kirin-box', 'npm@kirin-box'], ['kirin-box']])
+      should(pinned(keys)).deepEqual({
+        ok: false,
+        line: 1,
+        reason: 'a terminal sign-in is pinned to sudo, su or doas only',
+      });
+  });
+
+  it('should bind a page line only to web hosts', () => {
+    const pinned = (keys: string[]) =>
+      canonicalTaskPlanApproval(
+        plan(),
+        { lines: [{ line: 0, signIn: GITHUB_A }] },
+        new Map([[0, { accountKey: KEY_A, placeKeys: keys }]]),
+      );
+
+    should(pinned(['github.com', 'gist.github.com']).ok).be.true();
+    should(pinned(['github.com', 'sudo@kirin-box'])).deepEqual({
+      ok: false,
+      line: 0,
+      reason: 'a page sign-in is pinned to web hosts only',
+    });
+  });
+
+  it('should offer a terminal line sudo, su or doas candidates only, and a page line sites only', () => {
+    should(
+      TaskPlanSchema.safeParse(terminalWith({ kind: 'terminal', tool: 'su', host: 'kirin-box' })).success,
+    ).be.true();
+    assertRejects([
+      { name: 'an ssh candidate on a waiting terminal line', schema: TaskPlanSchema, value: terminalWith(ssh) },
+      {
+        name: 'a site candidate on a terminal line',
+        schema: TaskPlanSchema,
+        value: terminalWith({ kind: 'site', domains: ['github.com'], match: [] }),
+      },
+      {
+        name: 'a terminal candidate on a page line',
+        schema: TaskPlanSchema,
+        value: {
+          ...PLAN,
+          lines: [
+            {
+              ...SIGN_IN_LINE,
+              candidates: [{ ...candidate(GITHUB_A, 'GITHUB_A'), place: TERMINAL_LINE.candidates[0].place }],
+            },
+            TERMINAL_LINE,
+            PASTE_LINE,
+          ],
+        },
+      },
+    ]);
+    // An unavailable line can't be ticked, so it may show the owner the ssh sign-in it can't cover.
+    should(TaskPlanSchema.safeParse(terminalWith(ssh, 'unavailable')).success).be.true();
+  });
+});
+
+describe('a paste-plan item is not a line number (secrev-1258 info 1)', () => {
+  it('should map each item copyPlanOf numbers back to its plan line, and nothing else', () => {
+    const mixed = plan({
+      lines: [
+        SIGN_IN_LINE,
+        { ...PASTE_LINE, line: 1 },
+        { ...TERMINAL_LINE, line: 2 },
+        { ...PASTE_LINE, line: 3, why: 'second' },
+      ],
+    });
+    const items = copyPlanOf(mixed)?.items ?? [];
+
+    should(items.map((_, item) => plans.taskPlanLineOfCopyItem(mixed, item))).deepEqual([1, 3]);
+    should([2, -1, 0.5].map(item => plans.taskPlanLineOfCopyItem(mixed, item))).deepEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    should(plans.taskPlanLineOfCopyItem(plan({ lines: [SIGN_IN_LINE] }), 0)).be.undefined();
+  });
+});
