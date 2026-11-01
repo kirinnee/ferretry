@@ -6,7 +6,6 @@ import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { SocketRoute } from '../../api/socket.ts';
-import type { SentDraftClearer } from './session-send.ts';
 import {
   SharedDraftError,
   type SharedDraftErrorCode,
@@ -17,6 +16,7 @@ import {
   type SharedDraftStreamTarget,
   sharedDraftOrigin,
 } from '../../shared-drafts/index.ts';
+import type { SentDraftClearer } from './session-send.ts';
 
 /**
  * The shared draft's surface: one session's unsent composer, read and edited by the owner's devices.
@@ -213,6 +213,8 @@ export function sentDraftClearer(drafts: Pick<SharedDraftService, 'edit'>): Sent
         sent: true,
       },
       sharedDraftOrigin(actor, 'send', requestId),
+      // A send's clear is the daemon's, not typing: a flood from any device never drops it.
+      { metered: false },
     );
   };
 }

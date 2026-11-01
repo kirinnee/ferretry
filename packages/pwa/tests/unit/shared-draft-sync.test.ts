@@ -5,9 +5,9 @@ import {
   diffToTextOp,
   normalizeTextOp,
   SHARED_DRAFT_EDIT_BUDGET,
-  sharedDraftFrameBytes,
   type SharedDraftClientFrame,
   type SharedDraftServerFrame,
+  sharedDraftFrameBytes,
   type TextOp,
   transformTextOps,
 } from '@ferretry/protocol';
@@ -17,10 +17,10 @@ import {
   applyLocalItems,
   applyLocalText,
   applyResync,
-  splitTextOp,
   applyServerFrame,
   initialSharedDraftState,
   type SharedDraftSyncState,
+  splitTextOp,
 } from '../../src/lib/shared-draft-sync.ts';
 
 const G = 'gen-1';
@@ -156,6 +156,24 @@ describe('applyServerFrame', () => {
       position: { generation: G, epoch: 0, rev: 3 },
       resyncing: false,
     });
+  });
+
+  test('never moves back for an answer older than what it has heard: a repeat is answered where its first copy landed', () => {
+    const ids = counter('e');
+    const state = applyLocalText(synced('a', 3), 'ab', ids).state;
+    const step = applyServerFrame(
+      state,
+      { kind: 'ack', id: 'e1', applied: applied([1, 'b'], 2), epoch: 0, rev: 2 },
+      ids,
+    );
+    expect(step.state).toMatchObject({ text: 'ab', position: { generation: G, epoch: 0, rev: 3 }, resyncing: false });
+    expect(step.state.inflight).toBeUndefined();
+    const older = applyServerFrame(
+      applyLocalText({ ...synced('a', 0), position: { generation: G, epoch: 2, rev: 0 } }, 'ab', ids).state,
+      { kind: 'ack', id: 'e2', applied: applied([1, 'b'], 9, 1), epoch: 1, rev: 9 },
+      ids,
+    );
+    expect(older.state.position).toEqual({ generation: G, epoch: 2, rev: 0 });
   });
 
   test("takes its own edit, replayed after a reconnect, as answered — and ignores answers that aren't its", () => {

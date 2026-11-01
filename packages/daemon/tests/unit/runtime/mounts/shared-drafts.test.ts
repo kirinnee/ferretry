@@ -2,9 +2,7 @@ import { describe, it } from 'bun:test';
 import { SHARED_DRAFT_MAX_CHARS } from '@ferretry/protocol';
 import should from 'should';
 import { type CapabilityGuard, NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
-import { sessionSendRoutes } from '../../../../src/lib/runtime/mounts/session-send.ts';
 import { ApiDispatcher, type ApiResponse, ApiRouter, ApiSocketDispatcher } from '../../../../src/lib/api/index.ts';
-import { SharedDraftPresence, sharedDraftOrigin } from '../../../../src/lib/shared-drafts/index.ts';
 import {
   assertDraftOwner,
   SHARED_DRAFT_MAX_BODY_BYTES,
@@ -12,6 +10,8 @@ import {
   sharedDraftRoutes,
   sharedDraftSocketRoutes,
 } from '../../../../src/lib/runtime/index.ts';
+import { sessionSendRoutes } from '../../../../src/lib/runtime/mounts/session-send.ts';
+import { SharedDraftPresence, sharedDraftOrigin } from '../../../../src/lib/shared-drafts/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { AT, agentIn, CREDENTIALS, FakeSessionSend, human, sharedDraftService } from './support.ts';
 
@@ -394,6 +394,23 @@ describe('sentDraftClearer (&F331 H1)', () => {
 
     // Assert
     should(await drafts.read('s1')).match({ text: ' world', epoch: 0 });
+  });
+
+  it("is the daemon's own edit, which no device's typing budget can crowd out", async () => {
+    const calls: unknown[][] = [];
+    const drafts = {
+      edit: async (...args: unknown[]) => {
+        calls.push(args);
+        return await Promise.reject(new Error('unused'));
+      },
+    } as unknown as Parameters<typeof sentDraftClearer>[0];
+    await sentDraftClearer(drafts)('s1', 'device:phone', 'req-1', {
+      generation: 'gen-1',
+      epoch: 0,
+      base: 1,
+      text: [-4],
+    }).catch(() => undefined);
+    should(calls[0]?.[3]).eql({ metered: false });
   });
 
   it('is the same edit as the composer clearing it on its stream: whichever lands first, it applies once', async () => {
