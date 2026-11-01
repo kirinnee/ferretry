@@ -1,12 +1,17 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { CatalogMembersPanel } from '../../../src/features/catalogs/catalog-members.tsx';
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { fakeClient } from '../../support/catalog-client.ts';
-import { KEY_A1, MEMBER_A, memberView, SHARE_1, SHARE_2, shareView, T0_MS } from '../../support/catalog-sharing.ts';
-import { CATALOG, ownedCatalog } from '../../support/catalog-views.ts';
-import { mount } from '../../support/dom.ts';
-import { click, settle } from '../../support/dom-form.ts';
+import { CatalogMembersPanel } from '../../../../src/features/catalogs/catalog-members.tsx';
+import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { fakeClient } from '../../../support/catalog-client.ts';
+import { KEY_A1, MEMBER_A, memberView, SHARE_1, SHARE_2, shareView, T0_MS } from '../../../support/catalog-sharing.ts';
+import { CATALOG, ownedCatalog } from '../../../support/catalog-views.ts';
+import { mount } from '../../../support/dom.ts';
+import { click, settle } from '../../../support/dom-form.ts';
+
+/** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
+beforeEach(() => {
+  document.body.replaceChildren();
+});
 
 const connection = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'token-a' });
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
@@ -156,6 +161,20 @@ describe('CatalogMembersPanel', () => {
     await tap('[data-members-revoke="Alice"]');
     await tap('[data-members-confirm-yes]');
     expect(q('[data-catalog-failure]')?.textContent).toContain('That person is gone');
+    expect(q('[data-members-person="Alice"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('explains Sharing off when an act is refused for it', async () => {
+    const { view } = await open({
+      [`DELETE /v1/catalog-members/${MEMBER_A}`]: () => {
+        throw new FyHttpError('off', 403, 'grant_device_not_granted');
+      },
+      'GET /v1/devices': () => ({ devices: [] }),
+    });
+    await tap('[data-members-revoke="Alice"]');
+    await tap('[data-members-confirm-yes]');
+    expect(q('[data-sharing-off]')).not.toBeNull();
     expect(q('[data-members-person="Alice"]')).not.toBeNull();
     await view.unmount();
   });

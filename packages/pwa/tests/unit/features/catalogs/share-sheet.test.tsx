@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { ShareSheet } from '../../../src/features/catalogs/share-sheet.tsx';
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { fakeClient } from '../../support/catalog-client.ts';
+import { ShareSheet } from '../../../../src/features/catalogs/share-sheet.tsx';
+import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { fakeClient } from '../../../support/catalog-client.ts';
 import {
   FAKE_CODE,
   FAKE_LINK,
@@ -12,10 +12,15 @@ import {
   SHARE_1,
   shareView,
   T0_MS,
-} from '../../support/catalog-sharing.ts';
-import { ownedCatalog } from '../../support/catalog-views.ts';
-import { mount } from '../../support/dom.ts';
-import { click, settle, typeInto } from '../../support/dom-form.ts';
+} from '../../../support/catalog-sharing.ts';
+import { ownedCatalog } from '../../../support/catalog-views.ts';
+import { mount } from '../../../support/dom.ts';
+import { click, settle, typeInto } from '../../../support/dom-form.ts';
+
+/** Earlier files in the same run can leave screens behind, and the queries here read the whole document. */
+beforeEach(() => {
+  document.body.replaceChildren();
+});
 
 const connection = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'token-a' });
 const q = (selector: string): HTMLElement | null => document.querySelector<HTMLElement>(selector);
@@ -168,6 +173,22 @@ describe('ShareSheet result', () => {
     await view.unmount();
   });
 
+  it('copies through the browser clipboard when no copier is given', async () => {
+    const written: string[] = [];
+    const clipboard = { writeText: async (value: string) => void written.push(value) };
+    const before = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, get: () => clipboard });
+    try {
+      const { view } = await makeLink({ copyText: undefined });
+      await choose('[data-share-copy]');
+      expect(written).toEqual([FAKE_LINK]);
+      await view.unmount();
+    } finally {
+      if (before === undefined) Reflect.deleteProperty(navigator, 'clipboard');
+      else Object.defineProperty(navigator, 'clipboard', before);
+    }
+  });
+
   it('says to copy by hand when the browser would not', async () => {
     const { view } = await makeLink({
       copyText: async () => {
@@ -224,7 +245,8 @@ describe('ShareSheet result', () => {
   });
 
   it('shows a sentence instead of a QR when the link is too long to draw', async () => {
-    const long = `${FAKE_LINK};pad=${'x'.repeat(1_900)}`;
+    // Past the largest symbol this app draws (version 20), and still under the wire's 2,048-character link.
+    const long = `${FAKE_LINK};pad=${'x'.repeat(1_000)}`;
     const { view } = await makeLink({}, { 'POST /v1/catalog-shares': () => mintResponse({ link: long }) });
     expect(q('[data-share-qr-failure]')?.textContent).toContain('too long');
     expect(q('[data-share-link]')).not.toBeNull();
