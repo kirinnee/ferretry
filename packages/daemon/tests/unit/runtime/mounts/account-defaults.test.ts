@@ -442,6 +442,26 @@ describe('the defaults follow the owner’s account acts', () => {
     should(text(w)).equal('sites: [broken\n');
   });
 
+  it('should keep the account change and say in the status that the lines could not follow it', async () => {
+    const w = await world();
+    await seed(w, lineOfA);
+    w.directory.write = async () => {
+      throw new Error('disk full');
+    };
+
+    await accountsOf(w).renameAccount('CLICKUP_A' as AccountId, 'CLICKUP_WORK' as AccountId);
+
+    should((await accountsOf(w).list()).accounts.map(a => a.id)).containEql('CLICKUP_WORK');
+    const said = (await w.config.status()).issues.filter(issue => issue.severity === 'warning');
+    should(
+      said.some(issue => issue.message.includes('could not be followed') && issue.message.includes('disk full')),
+    ).be.true();
+
+    w.directory.write = MemoryDirectory.prototype.write.bind(w.directory);
+    await accountsOf(w).renameAccount('CLICKUP_WORK' as AccountId, 'CLICKUP_A' as AccountId);
+    should((await w.config.status()).issues.some(issue => issue.message.includes('could not be followed'))).be.false();
+  });
+
   it('should strip a stale line that names a handle the moment an account is created with it', async () => {
     const w = await world();
     await withAccounts(w);

@@ -59,6 +59,9 @@ export interface AccountDefaultsDeps {
 }
 
 export class AccountDefaults {
+  /** Why the lines could not follow the last account act, until a later change succeeds; said in the status warnings. */
+  #failed: string | undefined;
+
   constructor(private readonly deps: AccountDefaultsDeps) {}
 
   /**
@@ -81,7 +84,14 @@ export class AccountDefaults {
    * written over, but what is in effect is still corrected, so a stale line never outlives its account.
    */
   async repoint(changes: readonly AccountDefaultsRepoint[]): Promise<void> {
-    await this.change(file => repointAccountDefaults(file, changes), 'record');
+    try {
+      await this.change(file => repointAccountDefaults(file, changes), 'record');
+      this.#failed = undefined;
+    } catch (error) {
+      // The account directory keeps the account change and swallows this; the owner reads it in the status instead.
+      this.#failed = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
   }
 
   /**
@@ -128,7 +138,18 @@ export class AccountDefaults {
   async warnings(listing: AccountListing, read: ConfigSnapshot): Promise<readonly ConfigIssue[]> {
     const file = read.evaluation.effective.accountDefaults;
     const lines = accountDefaultLines(file);
-    if (lines.length === 0) return [];
+    const unfollowed: ConfigIssue[] =
+      this.#failed === undefined
+        ? []
+        : [
+            {
+              path: DEFAULTS_PATH,
+              severity: 'warning',
+              message: `the last account change could not be followed in ${DEFAULTS_PATH} (${this.#failed}); a line may name an account that is gone or was replaced`,
+              fix: 'check the lines in this file, or set them again; the next account change or default you set retries',
+            },
+          ];
+    if (lines.length === 0) return unfollowed;
     const projects = lines.some(line => line.scope === 'projects') ? await this.deps.projects?.() : undefined;
     const handles = new Set(listing.accounts.map(account => account.id));
     const keysOf = (handle: string): ReadonlySet<string> => keysOfAccount(listing, handle);
@@ -148,7 +169,7 @@ export class AccountDefaults {
         fix: problem.fix,
       });
     }
-    return issues;
+    return [...unfollowed, ...issues];
   }
 }
 
