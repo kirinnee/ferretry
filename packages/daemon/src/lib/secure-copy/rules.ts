@@ -2,7 +2,8 @@ import {
   COPY_MAX_RULES,
   type CopyOrigin,
   DEFAULT_PASTE_RULE_SETTINGS,
-  type CopyPlanItem,
+  type CopyRouteFrom,
+  type CopyRouteTo,
   type InputActor,
   type InputTargetFacts,
   type PasteRule,
@@ -28,7 +29,28 @@ import { SecureCopyError } from './errors.ts';
  * The owner's SETTINGS live beside the rules, in the same document. `allowProfileTargets` lets a terminal rule also
  * match a program proved only through the owner's own Nix profile; it is off until the owner turns it on, and a store
  * that cannot be read holds it off with no rules.
+ *
+ * ## A FERRET'S PLAN RULES LIVE IN MEMORY ONLY
+ *
+ * The pastes an owner allowed on a ferret's task plan ({@link PasteRuleService.fromPlan}) are kept apart from the
+ * owner's standing rules, in this process's memory: never written to the store, so a restart forgets them, and they
+ * end with their plan (expiry, revoke, the session ending). Each allows the uses its line asked for (1 to 5). The
+ * owner's own standing rules and the settings stay on disk, exactly as before.
  */
+
+/** One paste a plan line allowed, kept in memory with the line it came from. */
+interface PlanRule extends PasteRule {
+  readonly plan: string;
+  readonly line: number;
+}
+
+/** One paste line of a task plan the owner allowed, as {@link PasteRuleService.fromPlan} takes it. */
+export interface PlanPaste {
+  readonly line: number;
+  readonly from: CopyRouteFrom;
+  readonly to: CopyRouteTo;
+  readonly uses: number;
+}
 
 /** What the rules file holds: the rules, and the owner's secure-copy settings beside them. */
 export interface PasteRuleDocument {
@@ -57,6 +79,8 @@ export type PasteRuleCaller =
 
 export class PasteRuleService implements InputPasteRules {
   private rules: PasteRule[] = [];
+  /** The pastes ferrets' task plans were allowed: in memory only, never in the store. */
+  private planRules: PlanRule[] = [];
   private settings: PasteRuleSettings = DEFAULT_PASTE_RULE_SETTINGS;
   private loaded = false;
   /** Settles when the store has been read: a change made before then would be computed from nothing. */
@@ -77,7 +101,9 @@ export class PasteRuleService implements InputPasteRules {
   async load(): Promise<void> {
     try {
       const stored = await this.ports.store.read();
-      this.rules = [...(stored?.rules ?? [])];
+      // A plan's rules were written to the store before they moved to memory: a restart forgets a plan, so those are
+      // dropped here too (and from the store with the next write), never honoured after it.
+      this.rules = (stored?.rules ?? []).filter(rule => rule.plan === undefined);
       this.settings = stored?.settings ?? DEFAULT_PASTE_RULE_SETTINGS;
     } catch {
       this.rules = [];
@@ -95,7 +121,10 @@ export class PasteRuleService implements InputPasteRules {
     requireOwner(caller);
     if (!this.loaded) throw new SecureCopyError('unavailable', 'the rules are still being read; try again in a moment');
     this.purge();
-    return [...this.rules];
+    return [
+      ...this.rules,
+      ...this.planRules.filter(rule => rule.remaining !== 0).map(({ line: _line, ...rule }): PasteRule => rule),
+    ];
   }
 
   /** The owner's secure-copy settings. Owner only. */
@@ -142,47 +171,69 @@ export class PasteRuleService implements InputPasteRules {
   }
 
   /**
-   * The owner allowed some items of a ferret's plan: each becomes a rule for THAT session allowing ONE paste,
-   * until the plan's expiry. All or nothing: a set that would not fit is refused whole.
+   * The owner allowed some paste lines of a ferret's task plan: each becomes a rule for THAT session allowing the uses
+   * its line asked for, until the plan's expiry. IN MEMORY ONLY: nothing is written to the store, so a restart forgets
+   * them. All or nothing: a set that would not fit is refused whole, and nothing is made.
    */
-  async fromPlan(
+  fromPlan(
     caller: PasteRuleCaller,
     sessionId: string,
     planId: string,
-    items: readonly CopyPlanItem[],
+    pastes: readonly PlanPaste[],
     expiresAt: number,
-  ): Promise<readonly PasteRule[]> {
+  ): readonly PasteRule[] {
     const owner = requireOwner(caller);
-    await this.ready;
     this.purge();
-    if (this.rules.length + items.length > COPY_MAX_RULES)
+    if (this.planRules.length + pastes.length > COPY_MAX_RULES)
       throw new SecureCopyError(
         'capacity',
-        `that would hold more than ${String(COPY_MAX_RULES)} rules; remove some first`,
+        `that would hold more than ${String(COPY_MAX_RULES)} planned pastes; revoke a plan first`,
       );
     const now = new Date(this.ports.clock.now()).toISOString();
-    const made = items.map(
-      (item): PasteRule => ({
+    const made = pastes.map(
+      (paste): PlanRule => ({
         id: this.ports.ids.ruleId(),
-        from: item.from,
-        to: item.to,
+        from: paste.from,
+        to: paste.to,
         sessionId,
         expiresAt: new Date(expiresAt).toISOString(),
-        remaining: 1,
+        remaining: paste.uses,
         used: 0,
         createdAt: now,
         createdBy: owner,
         plan: planId,
+        line: paste.line,
       }),
     );
-    await this.persist(rules => [...rules, ...made]);
+    this.planRules = [...this.planRules, ...made];
     return made;
+  }
+
+  /** A task plan's pastes end (revoked, expired, its session ended): those of `lines`, or all of them. Never written. */
+  endPlan(planId: string, lines?: readonly number[]): void {
+    this.planRules = this.planRules.filter(
+      rule => rule.plan !== planId || (lines !== undefined && !lines.includes(rule.line)),
+    );
+  }
+
+  /** The uses each of a plan's paste lines has left, by line. A line with none left still answers 0. */
+  planUses(planId: string): ReadonlyMap<number, number> {
+    this.purge();
+    return new Map(
+      this.planRules
+        .filter(rule => rule.plan === planId)
+        .map(rule => [rule.line, Math.max(0, (rule.remaining ?? 0) - this.taken(rule.id))]),
+    );
   }
 
   /** The owner takes a rule back. Unknown is not found; a rule a paste is spending right now goes all the same. */
   async revoke(caller: PasteRuleCaller, id: string): Promise<void> {
     requireOwner(caller);
     await this.ready;
+    if (this.planRules.some(rule => rule.id === id)) {
+      this.planRules = this.planRules.filter(rule => rule.id !== id);
+      return;
+    }
     if (!this.rules.some(rule => rule.id === id)) throw new SecureCopyError('not_found', 'there is no such rule');
     await this.persist(rules => rules.filter(rule => rule.id !== id));
   }
@@ -194,13 +245,16 @@ export class PasteRuleService implements InputPasteRules {
   reserve(sessionId: string, from: CopyOrigin, facts: InputTargetFacts, profile?: string): string | undefined {
     if (!this.loaded) return undefined;
     this.purge();
-    const rule = this.rules.find(
-      candidate =>
-        (candidate.sessionId === undefined || candidate.sessionId === sessionId) &&
-        (candidate.remaining === undefined || candidate.remaining - this.taken(candidate.id) > 0) &&
-        fromMatches(candidate, from) &&
-        toMatches(candidate, facts, this.settings, profile),
+    const fits = (candidate: PasteRule): boolean =>
+      (candidate.sessionId === undefined || candidate.sessionId === sessionId) &&
+      (candidate.remaining === undefined || candidate.remaining - this.taken(candidate.id) > 0) &&
+      fromMatches(candidate, from) &&
+      toMatches(candidate, facts, this.settings, profile);
+    // The owner's standing rules first; then a plan's, the one ending soonest first, so its uses go before another's.
+    const planned = [...this.planRules].sort(
+      (left, right) => Date.parse(left.expiresAt ?? '') - Date.parse(right.expiresAt ?? ''),
     );
+    const rule = this.rules.find(fits) ?? planned.find(fits);
     if (rule === undefined) return undefined;
     this.reserved.set(rule.id, this.taken(rule.id) + 1);
     return rule.id;
@@ -210,13 +264,20 @@ export class PasteRuleService implements InputPasteRules {
     this.give(ruleId);
   }
 
-  /** The use stays taken until the store has recorded it, so a paste racing the write cannot spend it twice. */
   /**
    * The use stays taken until it is recorded, and it is recorded in memory EVEN IF the store cannot be written: a
    * failing disk loses the record of a use, never the use itself, so it cannot let a counted rule allow more pastes.
+   * A plan's rule is spent in memory at once: it was never in the store.
    */
   spent(ruleId: string): void {
     if (this.taken(ruleId) === 0) return;
+    if (this.planRules.some(rule => rule.id === ruleId)) {
+      this.planRules = this.planRules.map(rule =>
+        rule.id === ruleId ? { ...rule, used: rule.used + 1, remaining: Math.max(0, (rule.remaining ?? 1) - 1) } : rule,
+      );
+      this.give(ruleId);
+      return;
+    }
     const spend = (rules: readonly PasteRule[]): PasteRule[] =>
       rules.flatMap(rule => {
         if (rule.id !== ruleId) return [rule];
@@ -243,7 +304,10 @@ export class PasteRuleService implements InputPasteRules {
   /** Drops expired rules from memory; the next write drops them from the store. */
   private purge(): void {
     const now = this.ports.clock.now();
-    this.rules = this.rules.filter(rule => rule.expiresAt === undefined || Date.parse(rule.expiresAt) > now);
+    const live = <T extends PasteRule>(rule: T): boolean =>
+      rule.expiresAt === undefined || Date.parse(rule.expiresAt) > now;
+    this.rules = this.rules.filter(live);
+    this.planRules = this.planRules.filter(live);
   }
 
   /**

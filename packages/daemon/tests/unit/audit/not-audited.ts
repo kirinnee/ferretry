@@ -110,6 +110,15 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'GET /v1/sessions/:sessionId/input-quarantines': 'a read; names and end times only',
   'POST /v1/sessions/:sessionId/phone-approvals/:approvalId/refuse':
     'audited by the phone-approval service: phone-approval.refused, the account, the site and the ferret, never the number',
+  'POST /v1/sessions/:sessionId/task-plans/:planId/approval':
+    'stages a selection, which approves nothing; a paste-only answer is audited by the task-plan service: security.changed task-plan-answered, line by line, never a value',
+  'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/commit':
+    'audited by the task-plan service: security.changed task-plan-answered with the passkey proof, line by line; the step-up that proved it is audited too',
+  'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app':
+    "shows a staged selection on the plan's own card; it approves nothing, and the commit that would is audited",
+  'DELETE /v1/sessions/:sessionId/task-plans/:planId/approval/:stage': 'drops a staged selection; approves nothing',
+  'POST /v1/sessions/:sessionId/task-plans/:planId/revoke':
+    'only narrows; audited by the task-plan service: security.changed task-plan-ended',
   'POST /v1/sessions/:sessionId/input-quarantines/:key/end':
     'audited by the input-request service: input.quarantine_ended, names and flags only',
   'DELETE /v1/sessions/:sessionId/terminals/:terminalId':

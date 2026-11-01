@@ -34,6 +34,7 @@ import {
   stepUpRefusalCode,
   TASK_PLAN_ERROR_CODES,
   TWO_FACTOR_ERROR_CODES,
+  type TaskPlanStageId,
   type TwoFactorStageId,
 } from '@ferretry/protocol';
 import {
@@ -97,7 +98,19 @@ export interface StagedSeedBinding {
   boundSubjectOf(stage: TwoFactorStageId): string | undefined;
 }
 
-export function stepUpRoutes(service: StepUpService, seeds?: StagedSeedBinding): readonly ApiRoute[] {
+/**
+ * What the step-up options need of the staged task-plan selections: what a proof for one is bound to, or nothing when
+ * it is not waiting. Absent: this daemon stages none, so it issues no challenge for `approve-task-plan`.
+ */
+export interface StagedTaskPlanBinding {
+  boundSubjectOf(stage: TaskPlanStageId): string | undefined;
+}
+
+export function stepUpRoutes(
+  service: StepUpService,
+  seeds?: StagedSeedBinding,
+  plans?: StagedTaskPlanBinding,
+): readonly ApiRoute[] {
   return [
     {
       method: 'GET',
@@ -160,14 +173,20 @@ export function stepUpRoutes(service: StepUpService, seeds?: StagedSeedBinding):
             StepUpOptionsSchema.parse(value),
           );
         }
-        // Approving a task plan's sign-in lines binds its proof to one staged selection. No selection is ever staged
-        // until the task-plan service lands, so every such ask is refused and no challenge for the act is minted.
-        if (body.act === STEP_UP_ACTS.approveTaskPlan)
-          return errorResponse(
-            404,
-            'that task plan selection is not waiting for a passkey: stage it again from the plan card',
-            TASK_PLAN_ERROR_CODES.stageNotFound,
+        // Approving a task plan's sign-in lines binds its challenge, and so its proof, to the ONE staged selection it
+        // names (`taskPlanApprovalSubject(stage, canonical)`): only that stage's commit can spend it.
+        if (body.act === STEP_UP_ACTS.approveTaskPlan) {
+          const bound = body.subject === undefined ? undefined : plans?.boundSubjectOf(body.subject as TaskPlanStageId);
+          if (bound === undefined)
+            return errorResponse(
+              404,
+              'that task plan selection is not waiting for a passkey: stage it again from the plan card',
+              TASK_PLAN_ERROR_CODES.stageNotFound,
+            );
+          return answer(await service.stepUpOptions(caller(context), body.origin, body.act, bound), value =>
+            StepUpOptionsSchema.parse(value),
           );
+        }
         return answer(await service.stepUpOptions(caller(context), body.origin, body.act), value =>
           StepUpOptionsSchema.parse(value),
         );

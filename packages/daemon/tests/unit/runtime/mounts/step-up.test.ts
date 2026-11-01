@@ -125,6 +125,8 @@ interface World {
   readonly clock?: { now: number };
   /** The staged 2FA seeds the options bind an `add-2fa-key` challenge to: stage id → what its proof is bound to. */
   readonly stages?: Readonly<Record<string, string>>;
+  /** The staged task-plan selections the options bind an `approve-task-plan` challenge to, the same way. */
+  readonly planStages?: Readonly<Record<string, string>>;
 }
 
 function mount(world: World = {}) {
@@ -160,7 +162,13 @@ function mount(world: World = {}) {
   const surface = (async () => {
     await grants.refresh();
     return new ApiDispatcher(
-      new ApiRouter(stepUpRoutes(service, { boundSubjectOf: stage => world.stages?.[stage] })),
+      new ApiRouter(
+        stepUpRoutes(
+          service,
+          { boundSubjectOf: stage => world.stages?.[stage] },
+          { boundSubjectOf: stage => world.planStages?.[stage] },
+        ),
+      ),
       credentials,
       grants,
       undefined,
@@ -350,7 +358,7 @@ describe('step-up routes', () => {
     should(world.service.claimFresh(browser, 'catalog-install')).be.true();
   });
 
-  it('should mint no approve-task-plan challenge while no task-plan selection can be staged', async () => {
+  it('should mint no approve-task-plan challenge for a selection that is not waiting', async () => {
     // Arrange — a device with a passkey, and a 2FA stage that must not be mistaken for a plan's
     const world = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]), stages: { [STAGE]: BOUND } });
     const dispatcher = await world.surface;
@@ -377,6 +385,40 @@ describe('step-up routes', () => {
     should(world.service.claimFresh(browser, 'approve-task-plan', BOUND)).be.false();
     // @ts-expect-error — an act every caller must prove names what its proof is bound to
     should(world.service.claimFresh(browser, 'approve-task-plan')).be.false();
+  });
+
+  it('should bind an approve-task-plan proof to the one staged selection it named, and to nothing else', async () => {
+    // Arrange — a selection waiting for its passkey, bound to PLAN_BOUND, beside a 2FA stage bound to BOUND
+    const planStage = `tps_${'c'.repeat(24)}`;
+    const PLAN_BOUND = 'c'.repeat(64);
+    const world = mount({
+      store: new MemoryStore([stored(CREDENTIAL_ID)]),
+      stages: { [STAGE]: BOUND },
+      planStages: { [planStage]: PLAN_BOUND },
+    });
+    const dispatcher = await world.surface;
+
+    // Act
+    const options = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/step-up/options',
+        body: json({ origin: ORIGIN, act: 'approve-task-plan', subject: planStage }),
+        ...asDevice,
+      }),
+    );
+    const stepped = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/step-up', body: assertionBody, ...asDevice }),
+    );
+
+    // Assert — a short proof for that selection only: no window, no other act, no other subject, single use
+    should([options.status, stepped.status]).deepEqual([200, 200]);
+    should(world.service.held(browser)).be.false();
+    should(world.service.claimFresh(browser)).be.false();
+    should(world.service.claimFresh(browser, 'add-2fa-key', PLAN_BOUND)).be.false();
+    should(world.service.claimFresh(browser, 'approve-task-plan', BOUND)).be.false();
+    should(world.service.claimFresh(browser, 'approve-task-plan', PLAN_BOUND)).be.true();
+    should(world.service.claimFresh(browser, 'approve-task-plan', PLAN_BOUND)).be.false();
   });
 
   it('should refuse a subject on any act but add-2fa-key, and add-2fa-key without one', async () => {

@@ -7,6 +7,7 @@ import {
   type AgendaClearableField,
   type AgendaConfirms,
   type AgendaCopyPlanRef,
+  type AgendaTaskPlanRef,
   type AgendaPhoneApprovalRef,
   type AgendaTwoFactorSeedRef,
   type AgendaDisposition,
@@ -131,6 +132,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly input?: AgendaInputRef;
   /** The paste plan a card presents (`AgendaCopyPlanRef`); only the daemon raises one. */
   readonly copyPlan?: AgendaCopyPlanRef;
+  /** The task plan a card presents (`AgendaTaskPlanRef`); only the daemon raises one (an agenda add has no field for it). */
+  readonly taskPlan?: AgendaTaskPlanRef;
   /** The staged 2FA seed a card asks the owner to save with a passkey (`AgendaTwoFactorSeedRef`); only the daemon raises one. */
   readonly twoFactorSeed?: AgendaTwoFactorSeedRef;
   /** The approve-on-phone card an `info` item presents (`AgendaPhoneApprovalRef`); only the daemon raises one. */
@@ -662,6 +665,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.task === undefined ? {} : { task: request.task }),
       ...(request.input === undefined ? {} : { input: request.input }),
       ...(request.copyPlan === undefined ? {} : { copyPlan: request.copyPlan }),
+      ...(request.taskPlan === undefined ? {} : { taskPlan: request.taskPlan }),
       ...(request.twoFactorSeed === undefined ? {} : { twoFactorSeed: request.twoFactorSeed }),
       ...(request.phoneApproval === undefined ? {} : { phoneApproval: request.phoneApproval }),
       ...(request.offerClose === true ? { offerClose: true as const } : {}),
@@ -769,6 +773,14 @@ function addressById(
     // The input form answers an input card, because the value never travels as an agenda answer.
     if (target.item.kind === 'input') {
       return failure('use_input_form', `${command.id} is answered in its input form, not as an agenda answer`);
+    }
+    // A task plan is answered by the owner's plan routes (ticks, picks, and a passkey for a sign-in): an agenda answer
+    // would approve nothing, and must never read as one.
+    if (target.item.taskPlan !== undefined) {
+      return failure(
+        'use_input_form',
+        `${command.id} is a task plan: answer it on its card in the app, where a sign-in is confirmed with your passkey`,
+      );
     }
     // A paste plan is answered by the owner's plan route, which makes its rules: an agenda answer would make none.
     if (target.item.copyPlan !== undefined) {

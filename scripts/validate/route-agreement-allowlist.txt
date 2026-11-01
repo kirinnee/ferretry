@@ -118,3 +118,11 @@ verb-unproven GET /v1/sessions/by-request/:requestId # ANALYSIS: fy-api-client.t
 unreached GET /v1/secrets/logins/hint # CORRECT: the saved-login projection kept one release for older clients (docs/secrets.md); `fy account hint` dials /v1/accounts/hint
 unreached PATCH /v1/accounts/:id/factors/:factor # TEMPORARY (&F291 R2-2): the 2FA key routes; Settings › Accounts and the code card (R2-5, R2-6) dial them in the PRs after this one, which remove this line
 unreached GET /v1/sessions/:sessionId/phone-approvals/:approvalId # TEMPORARY (&F291 R2-5): the approve card reads the list (/v1/phone-approvals); a single-approval read has no caller yet
+unreached GET /v1/task-plans # TEMPORARY (&F291 R3a-2): the task-plan routes land daemon-first; `fy plan` (R3a-3) and the plan card and Settings › Task plans (R3a-5) dial them in the PRs after this one, which remove these lines
+unreached GET /v1/sessions/:sessionId/task-plans/:planId # TEMPORARY (&F291 R3a-2): the plan card (R3a-5) reads one plan
+unreached POST /v1/sessions/:sessionId/task-plans/:planId/approval # TEMPORARY (&F291 R3a-2): `fy plan approve` (R3a-3) and the plan card (R3a-5) stage a selection
+unreached GET /v1/sessions/:sessionId/task-plans/:planId/approval/:stage # TEMPORARY (&F291 R3a-2): `fy plan approve` (R3a-3) polls a staged selection
+unreached POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/commit # TEMPORARY (&F291 R3a-2): the plan card's passkey (R3a-5) commits a selection
+unreached POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app # TEMPORARY (&F291 R3a-2): `fy plan approve` (R3a-3) asks the app to confirm
+unreached DELETE /v1/sessions/:sessionId/task-plans/:planId/approval/:stage # TEMPORARY (&F291 R3a-2): the plan card (R3a-5) drops a dismissed passkey's stage
+unreached POST /v1/sessions/:sessionId/task-plans/:planId/revoke # TEMPORARY (&F291 R3a-2): `fy plan revoke` (R3a-3) and the plan card and Settings (R3a-5) revoke

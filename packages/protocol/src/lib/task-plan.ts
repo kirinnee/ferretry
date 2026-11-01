@@ -812,6 +812,62 @@ const TASK_PLAN_DOMAIN = 'ferretry.task-plan.v1';
 export const taskPlanApprovalSubject = (stage: TaskPlanStageId, canonical: string): string =>
   sha256Hex(`${TASK_PLAN_DOMAIN}\0${stage}\0${sha256Hex(canonical)}`);
 
+// ── The owner's routes: a staged selection, its answer, revoking ────────────────────────────────────
+
+/** Most characters in one line of a staged selection's summary: the daemon's words for one ticked line. */
+export const TASK_PLAN_SUMMARY_LINE_MAX_CHARS = 240;
+
+/**
+ * A SELECTION WAITING FOR ITS PASSKEY (`POST …/approval` when it ticks a sign-in line): the stage the `approve-task-plan`
+ * proof is bound to, the lines it ticks, and the daemon's own words for each, which the passkey dialog shows. Never a
+ * value; the ferret's words are not in it.
+ */
+export const TaskPlanStagedSchema = z.strictObject({
+  stage: TaskPlanStageIdSchema,
+  plan: CopyPlanIdSchema,
+  lines: z.array(TaskPlanLineNumberSchema).min(1).max(TASK_PLAN_MAX_LINES),
+  summary: z.array(oneLine(TASK_PLAN_SUMMARY_LINE_MAX_CHARS)).min(1).max(TASK_PLAN_MAX_LINES),
+  expiresAt: InstantSchema,
+});
+export type TaskPlanStaged = z.infer<typeof TaskPlanStagedSchema>;
+
+export const TaskPlanStageStateSchema = z.enum(['waiting', 'approved', 'denied', 'expired']);
+export type TaskPlanStageState = z.infer<typeof TaskPlanStageStateSchema>;
+
+/** `GET …/approval/:stage`: where a staged selection stands, for `fy plan approve` waiting on the app. */
+export const TaskPlanStageViewSchema = z.strictObject({
+  ...TaskPlanStagedSchema.shape,
+  state: TaskPlanStageStateSchema,
+});
+export type TaskPlanStageView = z.infer<typeof TaskPlanStageViewSchema>;
+
+/**
+ * What `POST …/approval` answers: the plan, answered at once (paste lines only, or nothing ticked: declined), or the
+ * selection staged for its passkey.
+ */
+export const TaskPlanApprovalAnswerSchema = z.discriminatedUnion('outcome', [
+  z.strictObject({ outcome: z.literal('answered'), plan: TaskPlanSchema }),
+  z.strictObject({ outcome: z.literal('staged'), staged: TaskPlanStagedSchema }),
+]);
+export type TaskPlanApprovalAnswer = z.infer<typeof TaskPlanApprovalAnswerSchema>;
+
+/** `POST …/approval/:stage/confirm-in-app`: the stage is on the plan's own card now, for the passkey in the app. */
+export const TaskPlanConfirmingSchema = z.strictObject({
+  stage: TaskPlanStageIdSchema,
+  plan: CopyPlanIdSchema,
+  agendaItemId: AgendaIdSchema,
+});
+export type TaskPlanConfirming = z.infer<typeof TaskPlanConfirmingSchema>;
+
+/** `POST …/task-plans/:pid/revoke`: the lines to end, or every line when none is named. Needs no passkey: it only narrows. */
+export const TaskPlanRevokeSchema = z
+  .strictObject({ lines: z.array(TaskPlanLineNumberSchema).min(1).max(TASK_PLAN_MAX_LINES).optional() })
+  .refine(revoke => revoke.lines === undefined || new Set(revoke.lines).size === revoke.lines.length, {
+    path: ['lines'],
+    message: 'name each line once',
+  });
+export type TaskPlanRevoke = z.infer<typeof TaskPlanRevokeSchema>;
+
 /** The refusals the task-plan routes answer with, each a different next step for the person. */
 export const TASK_PLAN_ERROR_CODES = {
   /** No such staged selection, or it was committed, dropped or timed out. */

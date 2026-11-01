@@ -392,7 +392,10 @@ at admission, so one passkey buys one install. At the machine, nothing is asked 
 EVERY caller, the admin token on loopback included, and each proof is bound to the one staged thing it commits
 (`subject`: the staged save `st_…`, or the staged selection `tps_…`, never the other's), opens no step-up window,
 and is never the fresh proof another act takes ([secrets.md](secrets.md#2fa-keys),
-[secure-copy.md](secure-copy.md#task-plans)).
+[secure-copy.md](secure-copy.md#task-plans)). A task plan's routes are `caller: 'person'`: staging, committing and
+confirming a selection demand `terminal.configure` (plus `browser.use` for a page sign-in or a paste into a page, and
+`secrets.configure` for a paste into the store), while reading plans, dropping a stage and revoking only narrow and
+demand `terminal.use`; revoking never asks for a passkey.
 
 **The app asks only for the machine on screen.** With several machines paired, every page reads all of
 them in the background, so a locked second machine used to raise its unlock over the first machine's
