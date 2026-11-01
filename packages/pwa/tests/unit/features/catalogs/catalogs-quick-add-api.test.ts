@@ -1,0 +1,105 @@
+import { describe, expect, it } from 'bun:test';
+import {
+  addExistingItem,
+  type CatalogClient,
+  listSharedItems,
+  makeDefault,
+  NO_CATALOG_FEATURES,
+  quickAdd,
+  readCatalogFeatures,
+  undoQuickAdd,
+} from '../../../../src/features/catalogs/catalogs-api.ts';
+import { healthOf } from '../../../support/health.ts';
+import { addedAnswer, CATALOG, DIGEST, ITEM, ownedCatalog, sharedItem, TOKEN } from '../../../support/catalog-views.ts';
+
+interface Call {
+  readonly path: string;
+  readonly init: RequestInit | undefined;
+}
+
+function recorder(answer: unknown): { client: CatalogClient; calls: Call[] } {
+  const calls: Call[] = [];
+  const client = {
+    request: async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) => {
+      calls.push({ path, init });
+      return schema.parse(answer);
+    },
+  } as unknown as CatalogClient;
+  return { client, calls };
+}
+
+const bodyOf = (call: Call | undefined): unknown => JSON.parse(String(call?.init?.body));
+
+describe('the owner calls for the item table and one-tap Add', () => {
+  it('reads the shared items', async () => {
+    const { client, calls } = recorder({ publisher: `fy_daemon_${'q3Xk'.repeat(10)}Xkq`, items: [sharedItem()] });
+    const list = await listSharedItems(client);
+    expect(calls[0]?.path).toBe('/v1/catalog-items');
+    expect(list.items[0]?.itemId).toBe(ITEM);
+  });
+
+  it('makes a catalog the default with a PATCH of role only', async () => {
+    const { client, calls } = recorder(ownedCatalog({ role: 'default' }));
+    await makeDefault(client, CATALOG);
+    expect(calls[0]?.path).toBe(`/v1/catalogs/${CATALOG}`);
+    expect(calls[0]?.init?.method).toBe('PATCH');
+    expect(bodyOf(calls[0])).toEqual({ role: 'default' });
+  });
+
+  it('sends a source, or an item id, to quick-add', async () => {
+    const { client, calls } = recorder(addedAnswer());
+    const answer = await quickAdd(client, { source: { kind: 'skill', skill: '/x/SKILL.md' } });
+    expect(answer.outcome).toBe('added');
+    expect(calls[0]?.path).toBe('/v1/catalog-items/quick-add');
+    expect(calls[0]?.init?.method).toBe('POST');
+    expect(bodyOf(calls[0])).toEqual({ source: { kind: 'skill', skill: '/x/SKILL.md' } });
+    await quickAdd(client, { itemId: ITEM });
+    expect(bodyOf(calls[1])).toEqual({ itemId: ITEM });
+  });
+
+  it('undoes with the token the add answered', async () => {
+    const { client, calls } = recorder({
+      catalogId: CATALOG,
+      itemId: ITEM,
+      mode: 'retracted',
+      revision: 5,
+      itemRemoved: false,
+    });
+    const undone = await undoQuickAdd(client, TOKEN);
+    expect(undone.mode).toBe('retracted');
+    expect(calls[0]?.path).toBe('/v1/catalog-items/quick-add/undo');
+    expect(bodyOf(calls[0])).toEqual({ token: TOKEN });
+  });
+
+  it('adds an existing item by id and the version that was reviewed', async () => {
+    const { client, calls } = recorder({
+      catalogId: CATALOG,
+      itemId: ITEM,
+      itemVersion: 2,
+      digest: DIGEST,
+      revision: 5,
+      item: ownedCatalog().items[0],
+    });
+    await addExistingItem(client, CATALOG, ITEM, 2);
+    expect(calls[0]?.path).toBe(`/v1/catalogs/${CATALOG}/items`);
+    expect(bodyOf(calls[0])).toEqual({ itemId: ITEM, version: 2 });
+  });
+});
+
+describe('readCatalogFeatures', () => {
+  it('reads both flags from the machine', async () => {
+    const both = recorder(healthOf('1.0.0', ['catalogs.items.1', 'catalogs.quick-add.1']));
+    expect(await readCatalogFeatures(both.client)).toEqual({ items: true, quickAdd: true });
+    const older = recorder(healthOf('1.0.0'));
+    expect(await readCatalogFeatures(older.client)).toEqual(NO_CATALOG_FEATURES);
+  });
+
+  it('offers nothing when the machine cannot be asked', async () => {
+    const client = {
+      request: async () => {
+        throw new Error('offline');
+      },
+    } as unknown as CatalogClient;
+    expect(await readCatalogFeatures(client)).toEqual(NO_CATALOG_FEATURES);
+  });
+});

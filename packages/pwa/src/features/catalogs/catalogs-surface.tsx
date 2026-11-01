@@ -8,11 +8,12 @@
  */
 
 import type { OwnedCatalog, OwnedCatalogItem } from '@ferretry/protocol';
-import { CircleAlert, CircleCheck, FileDown, Share2, Trash2 } from 'lucide-react';
-import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
+import { CircleAlert, CircleCheck, FileDown, MoreHorizontal, Share2, Star, Trash2 } from 'lucide-react';
+import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
+import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '../../shell/context-menu.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { downloadText, type SaveText } from '../settings/performance-settings.tsx';
 import { AddCatalogFromLink } from './add-from-link.tsx';
@@ -24,8 +25,11 @@ import { MarkedText } from './catalog-review-view.tsx';
 import {
   type CatalogClientFactory,
   deleteCatalog,
+  type CatalogFeatures,
   exportCatalog,
   listCatalogs,
+  makeDefault,
+  readCatalogFeatures,
   updateCatalog,
   withdrawCatalogItem,
 } from './catalogs-api.ts';
@@ -39,6 +43,7 @@ import {
   type OwnerRefusal,
   ownerRefusal,
   PUBLISH_COPY_NOTE,
+  roleLabel,
 } from './catalogs-model.ts';
 import { InstallFromFileSheet, type InstallHost } from './install-from-file-sheet.tsx';
 import { ShareSheet } from './share-sheet.tsx';
@@ -53,7 +58,13 @@ export interface CatalogsSurfaceProps {
 
 export type Read =
   | { readonly kind: 'loading' }
-  | { readonly kind: 'ready'; readonly catalogs: readonly OwnedCatalog[] }
+  | {
+      readonly kind: 'ready';
+      readonly catalogs: readonly OwnedCatalog[];
+      /** The catalog one tap adds to, when the machine has made one. */
+      readonly defaultCatalogId?: string;
+      readonly features: CatalogFeatures;
+    }
   | { readonly kind: 'failed'; readonly refusal: OwnerRefusal };
 
 /** Reads the catalogs, again whenever `reload` is called. Only the detail view asks for `sourceState`. */
@@ -70,11 +81,16 @@ export function useCatalogs(
     void tick;
     void (async () => {
       try {
-        const list = await listCatalogs(
-          await createClient(connection),
-          sourceState ? { sourceState: true } : undefined,
-        );
-        if (live) setRead({ kind: 'ready', catalogs: list.catalogs });
+        const client = await createClient(connection);
+        const list = await listCatalogs(client, sourceState ? { sourceState: true } : undefined);
+        const features = await readCatalogFeatures(client);
+        if (live)
+          setRead({
+            kind: 'ready',
+            catalogs: list.catalogs,
+            features,
+            ...(list.defaultCatalogId === undefined ? {} : { defaultCatalogId: list.defaultCatalogId }),
+          });
       } catch (error) {
         if (live) setRead({ kind: 'failed', refusal: ownerRefusal(error) });
       }
@@ -126,12 +142,14 @@ export function CatalogsSurface({
           <FailureLine sentence={read.refusal.sentence} again onAgain={reload} againLabel="Try again" />
         )
       ) : openId === null ? (
-        <CatalogList catalogs={read.catalogs} onOpen={setOpenId} />
+        <CatalogList catalogs={read.catalogs} defaultCatalogId={read.defaultCatalogId} onOpen={setOpenId} />
       ) : (
         <CatalogDetail
           connection={connection}
           createClient={createClient}
           catalog={read.catalogs.find(candidate => candidate.id === openId)}
+          defaultCatalogId={read.defaultCatalogId}
+          canMakeDefault={read.features.items}
           saveFile={saveFile}
           onBack={() => setOpenId(null)}
           onChanged={reload}
@@ -152,11 +170,21 @@ export function CatalogsSurface({
   );
 }
 
+function DefaultBadge() {
+  return (
+    <span className="fy-info-chip" data-tone="accent" title="One tap on Add puts a skill here" data-catalog-default="">
+      default
+    </span>
+  );
+}
+
 function CatalogList({
   catalogs,
+  defaultCatalogId,
   onOpen,
 }: {
   readonly catalogs: readonly OwnedCatalog[];
+  readonly defaultCatalogId: string | undefined;
   readonly onOpen: (id: string) => void;
 }) {
   if (catalogs.length === 0)
@@ -176,7 +204,10 @@ function CatalogList({
             data-catalog-open={catalog.name}
           >
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="break-words text-ui font-semibold text-fg">{catalog.name}</span>
+              <span className="flex min-w-0 flex-wrap items-center gap-x-xs">
+                <span className="break-words text-ui font-semibold text-fg">{catalog.name}</span>
+                {roleLabel(catalog, defaultCatalogId) === null ? null : <DefaultBadge />}
+              </span>
               <span className="text-meta leading-tight text-muted">{catalogSummary(catalog)}</span>
             </span>
           </button>
@@ -190,6 +221,8 @@ function CatalogDetail({
   connection,
   createClient,
   catalog,
+  defaultCatalogId,
+  canMakeDefault,
   saveFile,
   onBack,
   onChanged,
@@ -198,6 +231,8 @@ function CatalogDetail({
   readonly connection: DaemonConnection;
   readonly createClient: CatalogClientFactory;
   readonly catalog: OwnedCatalog | undefined;
+  readonly defaultCatalogId: string | undefined;
+  readonly canMakeDefault: boolean;
   readonly saveFile: SaveText;
   readonly onBack: () => void;
   readonly onChanged: () => void;
@@ -210,6 +245,8 @@ function CatalogDetail({
   const [editing, setEditing] = useState(false);
   const [publishing, setPublishing] = useState<OwnedCatalogItem | null>(null);
   const [sharing, setSharing] = useState(false);
+  const moreRef = useRef<HTMLButtonElement | null>(null);
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
 
   const act = async (work: (catalogId: string) => Promise<void>): Promise<void> => {
     if (catalog === undefined) return;
@@ -225,6 +262,25 @@ function CatalogDetail({
       setConfirm(null);
     }
   };
+
+  const isDefault = catalog !== undefined && roleLabel(catalog, defaultCatalogId) !== null;
+  const menu: ContextMenuItem[] =
+    canMakeDefault && !isDefault
+      ? [
+          {
+            key: 'make-default',
+            label: 'Make default',
+            hint: 'One tap on Add puts a skill here.',
+            icon: <Star size={16} aria-hidden="true" />,
+            onSelect: () =>
+              void act(async id => {
+                await makeDefault(await createClient(connection), id);
+                setNote(`${catalog?.name ?? 'It'} is now the default catalog.`);
+                onChanged();
+              }),
+          },
+        ]
+      : [];
 
   if (catalog === undefined)
     return (
@@ -244,7 +300,10 @@ function CatalogDetail({
         </Button>
       </div>
       <div className="flex min-w-0 flex-col gap-0.5">
-        <h4 className="m-0 break-words text-row font-semibold text-fg">{catalog.name}</h4>
+        <h4 className="m-0 flex min-w-0 flex-wrap items-center gap-x-xs break-words text-row font-semibold text-fg">
+          {catalog.name}
+          {isDefault ? <DefaultBadge /> : null}
+        </h4>
         <p className="m-0 text-meta text-muted">
           {catalogSummary(catalog)} · signed as {catalog.publisherName}
         </p>
@@ -309,6 +368,25 @@ function CatalogDetail({
             <Share2 size={16} aria-hidden="true" />
             Share…
           </Button>
+          {menu.length === 0 ? null : (
+            <Button
+              ref={moreRef}
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={busy}
+              aria-label={`More for ${catalog.name}`}
+              aria-haspopup="menu"
+              aria-expanded={anchor !== null}
+              onClick={() => {
+                const rect = moreRef.current?.getBoundingClientRect();
+                setAnchor({ x: rect?.left ?? 0, y: (rect?.bottom ?? 0) + 4 });
+              }}
+              data-catalog-more-menu=""
+            >
+              <MoreHorizontal size={16} aria-hidden="true" />
+            </Button>
+          )}
         </div>
       )}
       <ul className="m-0 flex list-none flex-col gap-xs p-0" aria-label="Items" data-catalog-items="">
@@ -376,6 +454,16 @@ function CatalogDetail({
             Delete catalog…
           </Button>
         </div>
+      )}
+      {menu.length === 0 ? null : (
+        <ContextMenu
+          open={anchor !== null}
+          anchor={anchor ?? { x: 0, y: 0 }}
+          ariaLabel={`More for ${catalog.name}`}
+          triggerRef={moreRef}
+          onClose={() => setAnchor(null)}
+          items={menu}
+        />
       )}
       {sharing ? (
         <ShareSheet

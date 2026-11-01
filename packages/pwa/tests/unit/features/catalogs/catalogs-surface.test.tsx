@@ -89,7 +89,7 @@ describe('CatalogsSurface list', () => {
     const { fake, view } = await open({ 'GET /v1/catalogs': () => ({ catalogs: [rich()] }) });
     expect(q('[data-catalogs-list]')?.textContent).toContain('Team skills');
     expect(q('[data-catalogs-list]')?.textContent).toContain('2 items · revision 4');
-    expect(fake.calls.map(call => call.path)).toEqual(['/v1/catalogs']);
+    expect(fake.calls.map(call => call.path)).toEqual(['/v1/catalogs', '/v1/health']);
     await view.unmount();
   });
 
@@ -138,7 +138,7 @@ describe('CatalogsSurface detail', () => {
   it('shows items with versions and states, and goes back', async () => {
     const { fake, view } = await open(both());
     await tap('[data-catalog-open]');
-    expect(fake.calls.at(-1)?.path).toBe(DETAIL);
+    expect(fake.calls.some(call => call.path === DETAIL)).toBe(true);
     const detail = q('[data-catalog-detail]')?.textContent ?? '';
     expect(detail).toContain('Shared with the team.');
     expect(detail).toContain('signed as kirin-box');

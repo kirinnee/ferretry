@@ -8,6 +8,7 @@ import {
   type CatalogItemSource,
   type OwnedCatalog,
   type OwnedCatalogItem,
+  type OwnedSharedItem,
   revealHidden,
 } from '@ferretry/protocol';
 
@@ -38,6 +39,19 @@ export function ownedMatches(catalogs: readonly OwnedCatalog[], source: CatalogI
     }
   }
   return matches;
+}
+
+/** The shared item that stands for this row: the one whose current version came from the same source. */
+export function sharedItemFor(
+  items: readonly OwnedSharedItem[],
+  source: CatalogItemSource,
+): OwnedSharedItem | undefined {
+  const path = source.kind === 'skill' && isPath(source.skill);
+  return items.find(item =>
+    source.kind === 'mcp'
+      ? item.source.kind === 'mcp' && item.source.id === source.mcp
+      : item.source.kind === 'skill' && (path ? item.source.path === source.skill : item.name === source.skill),
+  );
 }
 
 /** What Share does for this row, before anything is shown. */
