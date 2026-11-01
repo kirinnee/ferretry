@@ -382,6 +382,70 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'id',
     detail: { action: 'login-delete' },
   },
+  // Accounts and sign-ins (docs/secrets.md) are the same store: every change is kept, by handle or sign-in id only.
+  {
+    method: 'PUT',
+    path: '/v1/accounts/:id',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'account-put' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/accounts/:id/rename',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'account-rename' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/accounts/:id',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'account-delete' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/accounts/:id/sign-ins',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'sign-in-add' },
+  },
+  {
+    method: 'PUT',
+    path: '/v1/accounts/sign-ins/:signIn',
+    event: 'secrets.changed',
+    subject: 'signIn',
+    detail: { action: 'sign-in-put' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/accounts/sign-ins/:signIn',
+    event: 'secrets.changed',
+    subject: 'signIn',
+    detail: { action: 'sign-in-delete' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId',
+    event: 'secrets.changed',
+    subject: 'signIn',
+    detail: { action: 'sign-in-recipe-decide' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/accounts/:id/merge',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'account-merge' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/accounts/:id/apart',
+    event: 'secrets.changed',
+    subject: 'id',
+    detail: { action: 'account-apart' },
+  },
   // Copying secrets to another machine: both ends name the SAME import id as the subject, so the source's
   // record and the target's can be matched up by eye. Names only — the bundle is never read here.
   {

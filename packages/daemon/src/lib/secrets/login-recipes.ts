@@ -4,6 +4,8 @@ import {
   type LoginEntrySummary,
   type LoginRecipeProposal,
   type LoginRecipeProposed,
+  type SignInId,
+  type SignInSummary,
   AgendaIdSchema,
   MAX_AGENDA_DETAIL_LENGTH,
   recipeDiff,
@@ -12,7 +14,8 @@ import type { AgendaService } from '../agenda/service.ts';
 import type { AgendaActor } from '../agenda/state-machine.ts';
 import type { AuditSink } from '../audit/types.ts';
 import type { ClockPort } from '../ports.ts';
-import { type LoginDirectory, LoginEntryError } from './logins.ts';
+import { type AccountDirectory, type AccountListing, LoginEntryError } from './accounts.ts';
+import type { LoginDirectory } from './logins.ts';
 
 /**
  * LOGIN RECIPES, as policy (docs/input-requests.md, "Login recipes"). The directory stores a recipe and its
@@ -48,11 +51,21 @@ export interface RecipeAgendaPort {
 
 export interface LoginRecipePorts {
   readonly logins: Pick<LoginDirectory, 'list' | 'put' | 'propose' | 'proposalCard' | 'decide'>;
+  /** The account store, for an owner's answer to a proposal on one sign-in (`/v1/accounts/sign-ins/…`). */
+  readonly accounts?: Pick<AccountDirectory, 'list' | 'decideSignIn'>;
   readonly values: RecipeValueCheck;
   readonly agenda: RecipeAgendaPort;
   readonly audit: Pick<AuditSink, 'record'>;
   readonly clock: ClockPort;
   readonly newId?: () => string;
+}
+
+/** What carries a recipe a route serves: a saved login, or a sign-in. */
+interface RecipeBearing {
+  readonly recipe?: string | undefined;
+  readonly recipeBy?: 'ferret' | undefined;
+  readonly recipeVersion?: number | undefined;
+  readonly proposals?: readonly LoginRecipeProposal[] | undefined;
 }
 
 export class RecipeValueError extends Error {
@@ -121,9 +134,17 @@ export class LoginRecipeService {
     return await Promise.all(entries.map(async entry => await this.scrubbedEntry(entry)));
   }
 
-  private async scrubbedEntry(entry: LoginEntrySummary): Promise<LoginEntrySummary> {
+  /** An account listing as it may be SERVED: every sign-in's recipe and proposals masked, as {@link scrubbed}. */
+  async scrubbedAccounts(listing: AccountListing): Promise<AccountListing> {
+    return {
+      accounts: listing.accounts,
+      signIns: await Promise.all(listing.signIns.map(async signIn => await this.scrubbedEntry(signIn))),
+    };
+  }
+
+  private async scrubbedEntry<T extends RecipeBearing>(entry: T): Promise<T> {
     if (entry.recipe === undefined && entry.proposals === undefined) return entry;
-    const { recipe: _recipe, recipeBy: _by, proposals: _proposals, ...bare } = entry;
+    const { recipe: _recipe, recipeBy: _by, recipeVersion: _version, proposals: _proposals, ...bare } = entry;
     try {
       const redact = async (text: string): Promise<string> => await this.ports.values.redact(text);
       const recipe = entry.recipe === undefined ? undefined : await redact(entry.recipe);
@@ -141,11 +162,12 @@ export class LoginRecipeService {
       return {
         ...bare,
         ...(recipe === undefined ? {} : { recipe }),
+        ...(recipe === undefined || entry.recipeVersion === undefined ? {} : { recipeVersion: entry.recipeVersion }),
         ...(recipe === undefined || entry.recipeBy === undefined ? {} : { recipeBy: entry.recipeBy }),
         ...(proposals === undefined ? {} : { proposals }),
-      };
+      } as T;
     } catch {
-      return bare;
+      return bare as T;
     }
   }
 
@@ -169,6 +191,24 @@ export class LoginRecipeService {
     await this.closeCard(proposal, decision === 'approve' ? 'Approved: the recipe was updated.' : 'Declined.');
     const [served] = await this.scrubbed([entry]);
     return served ?? entry;
+  }
+
+  /**
+   * The OWNER answers a proposal on one sign-in; its card closes either way. An approval is checked for values again,
+   * as {@link decide} does.
+   */
+  async decideSignIn(id: SignInId, proposalId: string, decision: 'approve' | 'decline'): Promise<SignInSummary> {
+    const accounts = this.ports.accounts;
+    if (accounts === undefined) throw new LoginEntryError('unknown_sign_in', `there is no sign-in ${id}`);
+    if (decision === 'approve') {
+      const waiting = (await accounts.list()).signIns
+        .find(each => each.id === id)
+        ?.proposals?.find(proposal => proposal.id === proposalId);
+      if (waiting !== undefined) await this.assertNoValue(waiting.recipe);
+    }
+    const { signIn, proposal } = await accounts.decideSignIn(id, proposalId, decision);
+    await this.closeCard(proposal, decision === 'approve' ? 'Approved: the recipe was updated.' : 'Declined.');
+    return await this.scrubbedEntry(signIn);
   }
 
   private async closeCard(proposal: LoginRecipeProposal, note: string): Promise<void> {

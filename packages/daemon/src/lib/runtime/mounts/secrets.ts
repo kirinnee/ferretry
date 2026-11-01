@@ -1,4 +1,17 @@
 import {
+  type AccountId,
+  AccountIdSchema,
+  type AccountList,
+  type AccountHintList,
+  accountHintsFor,
+  type AccountLookAlike,
+  AccountPairRequestSchema,
+  AddSignInRequestSchema,
+  PutAccountRequestSchema,
+  PutSignInRequestSchema,
+  RenameAccountRequestSchema,
+  type SignInId,
+  SignInIdSchema,
   type LoginEntryId,
   LoginEntryIdSchema,
   type LoginEntryList,
@@ -35,6 +48,9 @@ import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
+  type AccountDirectory,
+  type AccountListing,
+  type AccountVault,
   type LoginDirectory,
   LoginEntryError,
   type LoginRecipeService,
@@ -115,6 +131,13 @@ const LOGIN_STATUS: Readonly<Record<LoginEntryError['refusal'], number>> = {
   bad_via: 400,
   unknown_proposal: 404,
   stale_proposal: 409,
+  unknown_sign_in: 404,
+  place_taken: 409,
+  invalid_change: 409,
+  account_has_sign_ins: 409,
+  account_has_2fa_keys: 409,
+  no_sign_in: 409,
+  merge_refused: 409,
 };
 
 /** Re-raises a domain failure as its HTTP answer, and anything else as itself so a genuine bug is
@@ -324,6 +347,250 @@ function loginRoutes(logins: LoginDirectory | undefined, recipes: LoginRecipeSer
   ];
 }
 
+// ── Accounts and sign-ins (docs/secrets.md) ──────────────────────────────────────────────────────
+
+/** The account's handle in the path. */
+function pathAccountId(context: RouteContext): AccountId {
+  const parsed = AccountIdSchema.safeParse(decodeParameter(context.params.get('id') ?? '') ?? '');
+  if (!parsed.success) throw new ApiError(400, 'the account name in the path is not usable', 'invalid_account_id');
+  return parsed.data;
+}
+
+/** The sign-in id in the path. */
+function pathSignInId(context: RouteContext): SignInId {
+  const parsed = SignInIdSchema.safeParse(decodeParameter(context.params.get('signIn') ?? '') ?? '');
+  if (!parsed.success) throw new ApiError(400, 'the sign-in in the path is not usable', 'invalid_sign_in');
+  return parsed.data;
+}
+
+/** The listing as a route may answer it: every recipe and proposal masked at READ time, or left out. */
+async function servedAccounts(
+  accounts: AccountDirectory,
+  recipes: LoginRecipeService | undefined,
+): Promise<AccountListing> {
+  const listing = await accounts.list();
+  if (recipes !== undefined) return await recipes.scrubbedAccounts(listing);
+  return {
+    accounts: listing.accounts,
+    signIns: listing.signIns.map(
+      ({ recipe: _recipe, recipeBy: _by, recipeVersion: _version, proposals: _proposals, ...signIn }) => signIn,
+    ),
+  };
+}
+
+async function listAccounts(accounts: AccountDirectory, recipes: LoginRecipeService | undefined): Promise<ApiResponse> {
+  try {
+    return jsonResponse({ v: 1, health: 'ready', ...(await servedAccounts(accounts, recipes)) } satisfies AccountList);
+  } catch (error) {
+    if (!(error instanceof SecretStoreError)) throw error;
+    return jsonResponse({
+      v: 1,
+      health: 'damaged',
+      diagnosis: `the accounts cannot be read: ${error.message}`,
+      accounts: [],
+      signIns: [],
+    } satisfies AccountList);
+  }
+}
+
+/**
+ * WHAT A FERRET MAY KNOW ABOUT SIGNING IN TO A SITE, one entry per sign-in (`accountHintsFor`): never a value, which
+ * secret fields exist, a seed's existence, seals, "keep apart" pairs, look-alike groups, auto-apply or proposals.
+ */
+async function accountHint(
+  accounts: AccountDirectory,
+  recipes: LoginRecipeService | undefined,
+  context: RouteContext,
+): Promise<ApiResponse> {
+  const site = loginHintSite(context.request.query.get('site')?.[0] ?? '');
+  if (site === undefined) throw new ApiError(400, 'name a site: a host like github.com, or a URL', 'invalid_site');
+  try {
+    const hints = accountHintsFor(site, await servedAccounts(accounts, recipes));
+    return jsonResponse({ v: 1, site, hints, passkeys: 'off' } satisfies AccountHintList);
+  } catch (error) {
+    return reraise(error);
+  }
+}
+
+/** A recipe never holds a value: without the checker that proves it, a recipe is not taken at all. */
+async function checkedRecipe(recipes: LoginRecipeService | undefined, recipe: unknown): Promise<void> {
+  if (typeof recipe !== 'string') return;
+  if (recipes === undefined) throw new ApiError(503, 'this daemon cannot check recipes for values', 'unavailable');
+  await recipes.assertNoValue(recipe);
+}
+
+/** The routes of the account store. Every write is the OWNER's: a ferret is refused before the body is read. */
+function accountRoutes(
+  accounts: AccountDirectory | undefined,
+  recipes: LoginRecipeService | undefined,
+  lookAlike: Pick<AccountVault, 'lookAlike'> | undefined,
+): readonly ApiRoute[] {
+  if (accounts === undefined) return [];
+  /** An owner-only handler: a ferret is refused before the body is read, and a domain refusal is its HTTP answer. */
+  const owned =
+    (act: string, run: (context: RouteContext) => Promise<unknown>) =>
+    async (context: RouteContext): Promise<ApiResponse> => {
+      ownerOnly(context, act);
+      try {
+        return jsonResponse(await run(context));
+      } catch (error) {
+        return reraise(error);
+      }
+    };
+  const configure = { minimum: 'operator', capability: SECRETS_CONFIGURE, noStore: true } as const;
+  return [
+    {
+      method: 'GET',
+      path: '/v1/accounts',
+      minimum: 'operator',
+      capability: SECRETS_USE,
+      noStore: true,
+      // The OWNER's view: which fields each account holds, which 2FA keys Ferretry makes codes for and whether they
+      // worked, every username and place. A ferret reads `/v1/accounts/hint` instead.
+      handle: async context => {
+        ownerOnly(context, 'list the accounts');
+        return await listAccounts(accounts, recipes);
+      },
+    },
+    {
+      method: 'GET',
+      path: '/v1/accounts/hint',
+      minimum: 'operator',
+      capability: SECRETS_USE,
+      noStore: true,
+      handle: async context => await accountHint(accounts, recipes, context),
+    },
+    // "THESE LOOK LIKE ONE ACCOUNT" is derived from passwords, so it is the owner's alone even though it only reads:
+    // a ferret is refused, and the answer is handles only (never a username, never which field matched).
+    ...(lookAlike === undefined
+      ? []
+      : [
+          {
+            method: 'GET',
+            path: '/v1/accounts/look-alike',
+            minimum: 'operator',
+            capability: SECRETS_CONFIGURE,
+            noStore: true,
+            handle: async (context: RouteContext) => {
+              ownerOnly(context, 'see which accounts look like one');
+              try {
+                return jsonResponse({ v: 1, groups: await lookAlike.lookAlike() } satisfies AccountLookAlike);
+              } catch (error) {
+                return reraise(error);
+              }
+            },
+          } satisfies ApiRoute,
+        ]),
+    {
+      method: 'PUT',
+      path: '/v1/accounts/sign-ins/:signIn',
+      ...configure,
+      handle: owned('change a sign-in', async context => {
+        const signIn = pathSignInId(context);
+        const change = await parseBody(context.request, PutSignInRequestSchema);
+        await checkedRecipe(recipes, change.recipe);
+        const changed = await accounts.putSignIn(signIn, change);
+        return recipes === undefined
+          ? changed
+          : (await recipes.scrubbedAccounts({ accounts: [], signIns: [changed] })).signIns[0];
+      }),
+    },
+    {
+      method: 'DELETE',
+      path: '/v1/accounts/sign-ins/:signIn',
+      ...configure,
+      handle: owned('remove a sign-in', async context => {
+        const signIn = pathSignInId(context);
+        if (!(await accounts.removeSignIn(signIn)))
+          throw new ApiError(404, `there is no sign-in ${signIn}`, 'unknown_sign_in');
+        return { id: signIn, removed: true };
+      }),
+    },
+    ...(recipes === undefined
+      ? []
+      : [
+          {
+            method: 'POST',
+            path: '/v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId',
+            ...configure,
+            handle: owned('approve or decline a recipe proposal', async context => {
+              const signIn = pathSignInId(context);
+              const proposal = LoginRecipeProposalIdSchema.safeParse(
+                decodeParameter(context.params.get('proposalId') ?? '') ?? '',
+              );
+              if (!proposal.success)
+                throw new ApiError(400, 'the proposal in the path is not usable', 'invalid_proposal');
+              const { decision } = await parseBody(context.request, LoginRecipeDecisionSchema);
+              return await recipes.decideSignIn(signIn, proposal.data, decision);
+            }),
+          } satisfies ApiRoute,
+        ]),
+    {
+      method: 'PUT',
+      path: '/v1/accounts/:id',
+      ...configure,
+      handle: owned('change an account', async context => {
+        const id = pathAccountId(context);
+        return await accounts.putAccount(id, await parseBody(context.request, PutAccountRequestSchema));
+      }),
+    },
+    {
+      method: 'POST',
+      path: '/v1/accounts/:id/rename',
+      ...configure,
+      handle: owned('rename an account', async context => {
+        const id = pathAccountId(context);
+        const { to } = await parseBody(context.request, RenameAccountRequestSchema);
+        return await accounts.renameAccount(id, to);
+      }),
+    },
+    {
+      method: 'DELETE',
+      path: '/v1/accounts/:id',
+      ...configure,
+      handle: owned('delete an account', async context => {
+        const id = pathAccountId(context);
+        if (!(await accounts.removeAccount(id))) throw new ApiError(404, `there is no account ${id}`, 'unknown_login');
+        return { id, removed: true };
+      }),
+    },
+    {
+      method: 'POST',
+      path: '/v1/accounts/:id/sign-ins',
+      ...configure,
+      handle: owned('add a sign-in', async context => {
+        const id = pathAccountId(context);
+        const add = await parseBody(context.request, AddSignInRequestSchema);
+        await checkedRecipe(recipes, add.recipe);
+        const added = await accounts.addSignIn(id, add);
+        return recipes === undefined
+          ? added
+          : (await recipes.scrubbedAccounts({ accounts: [], signIns: [added] })).signIns[0];
+      }),
+    },
+    {
+      method: 'POST',
+      path: '/v1/accounts/:id/merge',
+      ...configure,
+      handle: owned('merge accounts', async context => {
+        const id = pathAccountId(context);
+        const { from } = await parseBody(context.request, AccountPairRequestSchema);
+        return await accounts.merge(id, from);
+      }),
+    },
+    {
+      method: 'POST',
+      path: '/v1/accounts/:id/apart',
+      ...configure,
+      handle: owned('keep accounts apart', async context => {
+        const id = pathAccountId(context);
+        const { from } = await parseBody(context.request, AccountPairRequestSchema);
+        return await accounts.apart(id, from);
+      }),
+    },
+  ];
+}
+
 /** The name in the path, decoded and validated as a name this store could ever have held. */
 function pathSecretName(context: RouteContext): SecretName {
   const decoded = decodeParameter(context.params.get('name') ?? '');
@@ -438,6 +705,10 @@ export interface SecretSubsystem {
   readonly directory: SecretDirectory;
   /** Saved logins: management only, like `directory`. It seals and never opens. */
   readonly logins?: LoginDirectory;
+  /** Accounts and sign-ins: management only, like `logins` (which projects them). Seals and never opens. */
+  readonly accounts?: AccountDirectory;
+  /** The vault's one look-alike answer (handles only): the only part of it a route holds. */
+  readonly lookAlike?: Pick<AccountVault, 'lookAlike'>;
   /** Login recipes: the value check on every recipe text, and the owner's answer to a proposal. */
   readonly loginRecipes?: LoginRecipeService;
   /** Where configuration names secrets, so an unresolvable reference is visible before it fails. */
@@ -526,5 +797,6 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       handle: async context => await exportSecrets(subsystem.exports, context),
     },
     ...loginRoutes(subsystem.logins, subsystem.loginRecipes),
+    ...accountRoutes(subsystem.accounts, subsystem.loginRecipes, subsystem.lookAlike),
   ];
 }

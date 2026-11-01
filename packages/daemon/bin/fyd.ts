@@ -917,10 +917,11 @@ import {
   type LivenessTarget,
   LOOPBACK_FIREWALL_CHECK_MS,
   LocalModelsService,
+  type AccountsBoot,
   LoginDirectory,
   LoginRecipeService,
+  narrowAccountVault,
   RecipeAgendaAdapter,
-  type LoginSweep,
   LoginVault,
   type LogLevel,
   type LoopBlockedClockPort,
@@ -1490,7 +1491,7 @@ export interface DaemonWorld {
      * lock: never while building the world, and never by `--check` or `--print-config`, which could otherwise
      * sweep a LIVE daemon's staged ciphertext from under it. Absent means nothing is swept.
      */
-    readonly sweepSavedLogins?: () => Promise<LoginSweep>;
+    readonly sweepSavedLogins?: () => Promise<AccountsBoot>;
   };
   readonly config: DaemonConfigStore;
   /** What this invocation said on the command line, overriding the document for this run only. */
@@ -7401,14 +7402,23 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const outboundAuthorizer = new OutboundProviderAuthorizer(secretVault, new FetchEnhancementTransport());
   const speedupStopwatch = new PerformanceStopwatch();
   const secretDirectory = new SecretDirectory(secretDocuments, secretCipher, clock);
-  // SAVED LOGINS (docs/input-requests.md): an index with nothing secret in it, and the secret fields sealed
-  // under the vault's key in a document of their own, which `use` cannot spend and no reference can name.
-  // The directory is what a route is handed; the vault opens, and only the redactor and the input bridge
-  // hold one. See `lib/secrets/logins.ts`.
+  // ACCOUNTS AND SIGN-INS (docs/secrets.md), which the saved logins became: an index with nothing secret in it,
+  // and the secret fields sealed under the vault's key in a document of their own, which `use` cannot spend and
+  // no reference can name. The directory is what a route is handed; the vault opens, and only the redactor and
+  // the input bridge hold one. The directory holds only the vault's seal port (a merge moves a sealed value
+  // inside it), and the look-alike route only its handles-only answer. See `lib/secrets/accounts.ts`.
   const loginIndex = new FileLoginIndexStore(paths, stateFiles);
   const loginSealed = new FileSecretDocumentStore(paths, stateFiles, LOGIN_SECRETS_DOCUMENT);
-  const loginDirectory = new LoginDirectory(loginIndex, loginSealed, secretCipher, clock);
-  const loginVault = new LoginVault(loginIndex, loginSealed, secretCipher);
+  const loginVault = new LoginVault(loginIndex, loginSealed, secretCipher, { hostName: hostname(), clock });
+  // The saved-login projection is built OVER the account directory, so the two share one store lock.
+  // The directory is handed two CLOSURES over the vault, never the vault: nothing it holds can reach `values()` or
+  // `fill()`, whatever a later handler casts it to.
+  const narrowVault = narrowAccountVault(loginVault);
+  const loginDirectory = new LoginDirectory(loginIndex, loginSealed, secretCipher, clock, {
+    hostName: hostname(),
+    seals: narrowVault.seals,
+  });
+  const accountDirectory = loginDirectory.accounts;
   // Copying secrets to another machine signs and checks offers with THIS daemon's identity — the key its
   // daemon id fingerprints — read per clone, so a daemon whose identity cannot be read refuses the copy
   // and serves everything else.
@@ -7422,6 +7432,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const secrets: SecretSubsystem = {
     directory: secretDirectory,
     logins: loginDirectory,
+    accounts: accountDirectory,
+    // Only the look-alike answer (handles), as a closure: the route table holds nothing that opens a value.
+    lookAlike: narrowVault.lookAlike,
     // TWO places name secrets now: the operator's own recipes, and the fleet accounts a profile
     // authenticates. Both are listed, so an account whose credential is missing from the store is a
     // line on a screen before it is a session that dies at start.
@@ -8650,7 +8663,34 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         stackSamplerEnabled(process.env[STACK_SAMPLER_VARIABLE]) ? await JscStackSampler.start() : undefined,
       ioPressure,
       sweepPairingRedirects: stateHome => sweepPairingRedirects(stateHome, Date.now()),
-      sweepSavedLogins: async () => await loginDirectory.sweepUnreferenced(),
+      // Migrates a saved-login index to accounts (once; the sealed document is never written), then sweeps. The
+      // migration is one kept record, in counts only: never a name, never a value.
+      sweepSavedLogins: async () => {
+        const prepared = await accountDirectory.prepare();
+        const migrated = prepared.migrated;
+        if (migrated !== undefined)
+          await auditLog
+            .record({
+              event: 'security.changed',
+              actor: { kind: 'host' },
+              cause: 'daemon',
+              subject: 'accounts',
+              outcome: 'succeeded',
+              detail: {
+                kind: 'accounts-migrated',
+                entries: migrated.entries,
+                accounts: migrated.accounts,
+                signIns: migrated.signIns,
+                droppedFacts: migrated.droppedFacts,
+                droppedPlaces: migrated.droppedPlaces,
+                droppedVia: migrated.droppedVia,
+                twoFactorKeys: migrated.twoFactorKeys,
+                providersWithoutLink: migrated.providersWithoutLink.length,
+              },
+            })
+            .catch(() => undefined);
+        return prepared;
+      },
     },
     // An operator's own document when they named one, and the state home's otherwise. The confined
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
@@ -10344,6 +10384,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // ferret's proposal waits on a card the owner answers in Settings or with `fy account recipe`.
       const loginRecipes = new LoginRecipeService({
         logins: loginDirectory,
+        accounts: accountDirectory,
         values: { redact: async text => await secretRedactor.redact(text) },
         agenda: new RecipeAgendaAdapter(agenda),
         audit: auditLog,
@@ -12714,7 +12755,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // while it is in flight drains it BEFORE storage closes (closing releases the lock), and a stop that arrives
   // before it starts means it never starts. Otherwise a second daemon could take the home while the sweep writes.
   let stopping = false;
-  let loginSweep: Promise<LoginSweep | undefined> | undefined;
+  let loginSweep: Promise<AccountsBoot | undefined> | undefined;
   cleanups.push(async () => {
     stopping = true;
     await loginSweep?.catch(() => undefined);
@@ -12737,6 +12778,17 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.notices.state(`saved logins kept as they are: ${swept.damaged}; nothing was swept`);
   else if (swept !== undefined && swept.swept > 0)
     world.notices.step('saved logins tidied', `removed ${swept.swept} sealed value(s) no saved login points at`);
+  if (swept?.migrated !== undefined) {
+    const { migrated } = swept;
+    world.notices.step(
+      'saved logins became accounts',
+      `${String(migrated.accounts)} account(s), ${String(migrated.signIns)} sign-in(s); the old index is kept as login-entries.v1.json`,
+    );
+    if (migrated.providersWithoutLink.length > 0)
+      world.notices.state(
+        `these accounts were sign-in providers whose link was dropped (they sign in on no site): ${migrated.providersWithoutLink.join(', ')}; add their site in Settings › Accounts`,
+      );
+  }
 
   progress.enter('loading configuration');
   const peeked = await world.config.peek();

@@ -46,7 +46,7 @@ import {
   unpadInputValue,
   worstRisk,
 } from '@ferretry/protocol';
-import { LoginEntryError, type LoginFieldValues } from '../secrets/logins.ts';
+import { LoginEntryError, type LoginFieldValues } from '../secrets/accounts.ts';
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';

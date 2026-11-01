@@ -48,13 +48,9 @@ function world() {
   const sealed = new MemorySecretDocuments();
   const cipher = new GatedCipher();
   let key = 0;
-  const directory = new LoginDirectory(
-    index,
-    sealed,
-    cipher,
-    CLOCK,
-    () => `L${(key++).toString(16).toUpperCase().padStart(24, '0')}`,
-  );
+  const directory = new LoginDirectory(index, sealed, cipher, CLOCK, {
+    newKey: () => `L${(key++).toString(16).toUpperCase().padStart(24, '0')}`,
+  });
   const vault = new LoginVault(index, sealed, cipher);
   const masked = async (value: string): Promise<boolean> =>
     !(await new SecretRedactor(combinedValues(vault)).redact(`echo ${value}`)).includes(value);

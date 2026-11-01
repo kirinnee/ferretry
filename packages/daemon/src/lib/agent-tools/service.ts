@@ -51,7 +51,7 @@ import { BrowserTransportError } from '../browser/transport/worker-protocol.ts';
 import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import { InputRequestError } from '../input-requests/errors.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../runtime/mounts/terminals.ts';
-import { LoginEntryError } from '../secrets/logins.ts';
+import { LoginEntryError } from '../secrets/accounts.ts';
 import { RecipeValueError } from '../secrets/login-recipes.ts';
 import type { TextRedactor } from '../secrets/redaction.ts';
 import { SecureCopyError } from '../secure-copy/errors.ts';

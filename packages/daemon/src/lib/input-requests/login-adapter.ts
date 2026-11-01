@@ -1,5 +1,6 @@
 import type { LoginEntryId, LoginEntrySummary, LoginFieldRole } from '@ferretry/protocol';
-import type { LoginDirectory, LoginFieldValues, LoginVault } from '../secrets/logins.ts';
+import type { AccountVault, LoginFieldValues } from '../secrets/accounts.ts';
+import type { LoginDirectory } from '../secrets/logins.ts';
 import type { InputLoginPort } from './ports.ts';
 
 /**
@@ -9,7 +10,7 @@ import type { InputLoginPort } from './ports.ts';
 export class InputLoginAdapter implements InputLoginPort {
   constructor(
     private readonly directory: LoginDirectory,
-    private readonly vault: LoginVault,
+    private readonly vault: Pick<AccountVault, 'fill'>,
   ) {}
 
   async entries(): Promise<readonly LoginEntrySummary[]> {

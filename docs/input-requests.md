@@ -597,7 +597,9 @@ the facts. The card says so and the agent's answer tells it to hand the page ove
 
 The bridge is also a small **password manager**. A saved login is a **labelled entry**: a label the owner
 reads ("GitHub (kirinnee)"), what it is for (`match`), and its fields. The wire is
-`packages/protocol/src/lib/login-entries.ts`; the store is `packages/daemon/src/lib/secrets/logins.ts`.
+`packages/protocol/src/lib/login-entries.ts`; the store is the account store
+(`packages/daemon/src/lib/secrets/accounts.ts`, [secrets](secrets.md#accounts-and-sign-ins-the-store)), and
+`logins.ts` projects it as saved logins for one release.
 
 | Field      | Kind               | Where it rests                                        | Who sees it                                              |
 | ---------- | ------------------ | ----------------------------------------------------- | -------------------------------------------------------- |
@@ -806,9 +808,10 @@ capability (`use` to list, `configure` to change) and each change a kept `secret
 
 ### Accounts and sign-ins (data model)
 
-> **Protocol only.** The shapes below are in `packages/protocol/src/lib/accounts.ts`; the store, the migration
-> at boot and the `/v1/accounts*` routes land in R1-2. Until then every daemon keeps saved logins as above, and
-> none reports the `accounts.signins.1` feature.
+> **The store has landed; the card has not.** The shapes are in `packages/protocol/src/lib/accounts.ts`; the store,
+> the migration at boot and the `/v1/accounts*` routes are in [secrets](secrets.md#accounts-and-sign-ins-the-store).
+> The card still offers saved logins, read through a projection of the accounts, and no daemon reports the
+> `accounts.signins.1` feature until it is sign-in aware.
 
 A saved login is being split in two:
 

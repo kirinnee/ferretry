@@ -1,280 +1,295 @@
 /**
- * SAVED LOGINS: the password manager the input bridge places values from (docs/input-requests.md,
- * "Saved logins"; the wire is `packages/protocol/src/lib/login-entries.ts`).
+ * SAVED LOGINS, AS A PROJECTION OF ACCOUNTS (docs/secrets.md, "Accounts and sign-ins"; the wire is
+ * `packages/protocol/src/lib/login-entries.ts`).
  *
- * An entry is a label, what it matches, a PLAIN username and up to two SECRET fields (a password and an
- * opt-in 2FA seed). It rests in two files, both `0600`:
+ * The store is accounts and sign-ins now (`accounts.ts`). What an older app, an older `fy` and today's input bridge
+ * read and write is still a SAVED LOGIN, so this file keeps that surface for one release, over the new store:
  *
- * - the INDEX (`login-entries.json`): label, match, username, which secret fields exist. Nothing in it is
- *   secret; it is what a listing may show.
- * - the SEALED document (`login-secrets.json`): the secret fields, AES-GCM under the vault's key, exactly
- *   as the main vault seals a value. Each is filed under the entry's immutable KEY (`L…_PASSWORD`), never
- *   its handle, so renaming an entry moves nothing that is sealed.
+ * - READ: one {@link LoginEntrySummary} per account. `match` is every place it signs in, `domains` its websites' login
+ *   domains, and the method, recipe and auto-apply are its PRIMARY sign-in's (its website, else its first terminal).
+ * - WRITE: a change to the account (label, username, password, its one seed, a rename, a delete) always works. A change
+ *   to WHERE or HOW it signs in (match, domains, method, recipe, auto-apply) maps 1:1 onto the account's one sign-in,
+ *   and is REFUSED (`409 account_has_sign_ins`) for an account that signs in at several places: that body cannot say
+ *   which one it means, and guessing would be a lossy write.
  *
- * THE SAME SPLIT AS THE VAULT, FOR THE SAME REASON:
- *
- * - {@link LoginDirectory} is what a ROUTE is handed. It lists, changes, renames and removes. It seals what
- *   it is given and never opens anything: no method returns a value.
- * - {@link LoginVault} opens. Exactly two things are given one — the redactor (values become masks) and the
- *   input service (a value is typed into the target the owner tapped "Use" for). Neither returns it.
- *
- * The sealed document is NOT the main vault: `fy secret use` cannot spend a saved login and
- * `${secret:…}` cannot name one. A saved login leaves the daemon only into an input request's target.
+ * The version 1 index schema stays here, frozen: it is what the boot migration reads, and what an older daemon still
+ * reads — and fails closed on, since a version 2 index is not one.
  */
 
-import { randomBytes } from 'node:crypto';
 import {
+  type AccountId,
+  type AccountSummary,
   type LoginEntryId,
   type LoginEntrySummary,
-  type LoginFieldRole,
   LOGIN_MATCH_MAX,
+  LOGIN_OBSERVED_MAX,
+  LOGIN_RECIPE_PROPOSALS_MAX,
   LoginDomainSchema,
-  type LoginMethod,
   type LoginObservation,
   LoginObservedSchema,
   type LoginRecipeProposal,
   LoginRecipeProposalSchema,
-  LOGIN_OBSERVED_MAX,
-  LOGIN_RECIPE_PROPOSALS_MAX,
   foldObservation,
-  recipeRenamed,
   LoginMethodSchema,
-  MAX_LOGIN_ENTRIES,
   PASSWORD_METHOD,
-  webHostsOf,
+  type Place,
+  placeHosts,
+  placeKeys,
   type PutLoginEntry,
-  type TotpParameters,
+  savedLoginPlaces,
+  SealedNameSchema,
+  type SignInId,
+  type SignInRecord,
+  type SignInSummary,
+  type SitePlace,
+  MAX_SIGN_INS_PER_ACCOUNT,
   TotpParametersSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { ClockPort } from '../ports.ts';
-import { totpCode } from './totp.ts';
 import {
-  type SealedSecret,
-  type SecretCipherPort,
-  type SecretDocumentStore,
-  SecretStoreError,
-  type SecretVaultDocument,
-} from './types.ts';
+  type AccountDirectoryOptions,
+  type AccountDraft,
+  AccountDirectory,
+  accountSummary,
+  AccountVault,
+  cardOn,
+  decideOn,
+  type LoginFieldValues,
+  LoginEntryError,
+  type LoginIndexStore,
+  type LoginSweep,
+  methodRecord,
+  primaryFirst,
+  proposeOn,
+  signInsOf,
+  signInSummary,
+  withRecipe,
+} from './accounts.ts';
+import type { SecretCipherPort, SecretDocumentStore } from './types.ts';
 
-const SEALED_NAME = /^L[0-9A-F]{24}_(?:PASSWORD|TOTP)_[0-9A-F]{8}$/u;
-
-/** One entry as it rests in the index. `key` never changes; the handle (`id`) is the index's key. */
+/** One saved login as a VERSION 1 index keeps it. Frozen: the migration reads it, and nothing writes it any more. */
 export const LoginRecordSchema = z.strictObject({
   key: z.string().regex(/^L[0-9A-F]{24}$/u),
   label: z.string().min(1).max(80),
   match: z.array(z.string().min(1).max(320)).max(16),
-  /** How it signs in. Absent: an entry from before methods, which signs in with its password. */
   method: LoginMethodSchema.optional(),
-  /** Where the sign-in happens. Absent: an entry from before login domains, which reads as its web `match` hosts. */
   domains: z.array(LoginDomainSchema).max(16).optional(),
   username: z.string().min(1).max(256).optional(),
-  /**
-   * WHERE each secret field rests in the sealed document right now. A change seals a new value under a FRESH
-   * name and only then points the index at it, so the index is the one commit point: until it is written the
-   * old value is still the entry's and still sealed (so still masked). Absent: the entry has no such field.
-   */
   seals: z.strictObject({
-    password: z.string().regex(SEALED_NAME).optional(),
-    totp: z.string().regex(SEALED_NAME).optional(),
+    password: SealedNameSchema.optional(),
+    totp: SealedNameSchema.optional(),
   }),
-  /** How the 2FA code is made; present exactly when `seals.totp` is. */
   totp: TotpParametersSchema.optional(),
-  /** The owner's sign-in steps (Markdown). Not secret; a change holding a value is refused before it gets here. */
   recipe: z.string().min(1).max(4_000).optional(),
-  /** A ferret's proposal applies without asking. Absent: it waits for the owner. */
   autoApplyRecipe: z.literal(true).optional(),
-  /** `ferret`: the recipe is an auto-applied proposal nobody reviewed. Cleared by any owner edit or approval. */
   recipeBy: z.literal('ferret').optional(),
-  /** What the daemon saw while typing this login. Written only by the input service. */
   observed: z.array(LoginObservedSchema).max(LOGIN_OBSERVED_MAX).optional(),
-  /** Ferrets' recipes waiting for the owner. */
   proposals: z.array(LoginRecipeProposalSchema).max(LOGIN_RECIPE_PROPOSALS_MAX).optional(),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 });
 export type LoginRecord = z.infer<typeof LoginRecordSchema>;
 
+/** A version 1 index. `v` is a literal: a version 2 index is not one, so a reader of only this fails closed. */
 export const LoginIndexDocumentSchema = z.strictObject({
   v: z.literal(1),
   entries: z.record(z.string().regex(/^[A-Z][A-Z0-9_]{0,63}$/u), LoginRecordSchema),
 });
 export type LoginIndexDocument = z.infer<typeof LoginIndexDocumentSchema>;
 
-/**
- * Durable boundary for the index. `read` answers `undefined` ONLY for an index never written; one that will
- * not parse raises `SecretStoreError('unreadable')`, because damaged is not empty.
- */
-export interface LoginIndexStore {
-  read(): Promise<LoginIndexDocument | undefined>;
-  write(document: LoginIndexDocument): Promise<void>;
-}
-
-/** Why a change to a saved login was refused: each is a different thing for the person to do. */
-export type LoginRefusal =
-  | 'unknown_login'
-  | 'login_exists'
-  | 'label_required'
-  | 'no_such_field'
-  | 'bad_via'
-  | 'unknown_proposal'
-  | 'stale_proposal';
-
-export class LoginEntryError extends Error {
-  constructor(
-    readonly refusal: LoginRefusal,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'LoginEntryError';
-  }
-}
+const unique = <T>(items: readonly T[]): T[] => [...new Set(items)];
 
 /**
- * A FRESH sealed name for one value of one field: the entry's immutable key (never its handle), the field, and a
- * random generation. Every write of a secret field gets a new name, so writing it never overwrites the value the
- * index still points at.
+ * An account as a saved login: every place it signs in (its websites' `match` hosts, then each terminal key), its
+ * websites' login domains, and its PRIMARY sign-in's method, recipe and auto-apply. Facts and proposals of every
+ * sign-in are listed, so the lock and the owner see all of them.
  */
-export function freshSealedName(key: string, role: 'password' | 'totp'): string {
-  return `${key}_${role === 'password' ? 'PASSWORD' : 'TOTP'}_${randomBytes(4).toString('hex').toUpperCase()}`;
-}
-
-/** How many sealed names the index points at that the sealed document does not hold. */
-function missingReferences(index: LoginIndexDocument, sealed: SecretVaultDocument): number {
-  return [...referenced(index)].filter(name => sealed.entries[name] === undefined).length;
-}
-
-/** Every sealed name an index points at. */
-function referenced(index: LoginIndexDocument): ReadonlySet<string> {
-  const names = new Set<string>();
-  for (const record of Object.values(index.entries))
-    for (const name of [record.seals.password, record.seals.totp]) if (name !== undefined) names.add(name);
-  return names;
-}
-
-/** A fresh immutable key: 96 random bits. */
-export function randomLoginKey(): string {
-  return `L${randomBytes(12).toString('hex').toUpperCase()}`;
-}
-
-function summary(id: LoginEntryId, record: LoginRecord): LoginEntrySummary {
+export function savedLoginOf(account: AccountSummary, signIns: readonly SignInSummary[]): LoginEntrySummary {
+  const own = signIns.filter(signIn => signIn.account === account.id);
+  const sites = own.filter(signIn => signIn.place.kind === 'site');
+  const terminals = own.filter(signIn => signIn.place.kind !== 'site');
+  const primary = sites[0] ?? terminals[0];
+  const match = unique([
+    ...sites.flatMap(signIn => (signIn.place as SitePlace).match),
+    ...terminals.flatMap(signIn => placeKeys(signIn.place)),
+  ]).slice(0, LOGIN_MATCH_MAX);
+  const domains = unique(sites.flatMap(signIn => (signIn.place as SitePlace).domains)).slice(0, LOGIN_MATCH_MAX);
+  const observed = [...sites, ...terminals].flatMap(signIn => signIn.observed ?? []).slice(-LOGIN_OBSERVED_MAX);
+  const proposals = [...sites, ...terminals]
+    .flatMap(signIn => signIn.proposals ?? [])
+    .slice(-LOGIN_RECIPE_PROPOSALS_MAX);
   return {
-    id,
-    label: record.label,
-    match: [...record.match],
-    method: record.method ?? PASSWORD_METHOD,
-    domains: [...(record.domains ?? webHostsOf(record.match))],
-    ...(record.username === undefined ? {} : { username: record.username }),
-    fields: { password: record.seals.password !== undefined, totp: record.seals.totp !== undefined },
-    ...(record.totp === undefined ? {} : { totp: record.totp }),
-    ...(record.recipe === undefined ? {} : { recipe: record.recipe }),
-    ...(record.recipe === undefined || record.recipeBy === undefined ? {} : { recipeBy: record.recipeBy }),
-    ...(record.autoApplyRecipe === true ? { autoApplyRecipe: true } : {}),
-    ...(record.observed === undefined ? {} : { observed: [...record.observed] }),
-    ...(record.proposals === undefined ? {} : { proposals: [...record.proposals] }),
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
+    id: account.id,
+    label: account.label,
+    match,
+    method: primary?.method ?? PASSWORD_METHOD,
+    domains,
+    ...(account.username === undefined ? {} : { username: account.username }),
+    fields: account.fields,
+    ...(account.totp === undefined ? {} : { totp: account.totp }),
+    ...(primary?.recipe === undefined ? {} : { recipe: primary.recipe }),
+    ...(primary?.recipe === undefined || primary.recipeBy === undefined ? {} : { recipeBy: primary.recipeBy }),
+    ...(primary?.autoApplyRecipe === true ? { autoApplyRecipe: true } : {}),
+    ...(observed.length === 0 ? {} : { observed }),
+    ...(proposals.length === 0 ? {} : { proposals }),
+    createdAt: account.createdAt,
+    updatedAt: account.updatedAt,
   };
 }
 
-/** The two documents, read together, so a change never pairs a fresh index with a stale sealed file. */
-class LoginDocuments {
-  constructor(
-    readonly index: LoginIndexStore,
-    readonly sealed: SecretDocumentStore,
-    readonly cipher: SecretCipherPort,
-  ) {}
+/** The saved login an account in a draft reads as. */
+function savedLoginIn(draft: Pick<AccountDraft, 'accounts' | 'signIns'>, id: AccountId): LoginEntrySummary {
+  const account = draft.accounts[id];
+  if (account === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${id}`);
+  const own = signInsOf(draft.signIns, account.key).map(([signInId, signIn]) =>
+    signInSummary(signInId, signIn, draft.accounts, draft.signIns),
+  );
+  return savedLoginOf(accountSummary(id, account, draft.signIns), own);
+}
 
-  async readIndex(): Promise<LoginIndexDocument> {
-    return (await this.index.read()) ?? { v: 1, entries: {} };
-  }
+/** The parts of a saved-login change that say where or how it signs in: they map onto ONE sign-in. */
+const SIGN_IN_FIELDS = ['match', 'domains', 'method', 'recipe', 'autoApplyRecipe'] as const;
 
-  async readSealed(): Promise<SecretVaultDocument> {
-    const stored = await this.sealed.read();
-    if (stored === undefined) return { v: 1, cipher: this.cipher.algorithm, entries: {} };
-    if (stored.cipher !== this.cipher.algorithm)
-      throw new SecretStoreError('unreadable', `the saved logins were sealed with ${stored.cipher}`);
-    return stored;
-  }
+const sameList = (left: readonly string[], right: readonly string[]): boolean =>
+  left.length === right.length && left.every((item, index) => item === right[index]);
+
+/** One sign-in as a saved login's `match` and `domains` (absent: they read as its web `match` hosts). */
+function savedLoginShapeOf(place: Place | undefined): { match: readonly string[]; domains?: readonly string[] } {
+  if (place === undefined) return { match: [] };
+  if (place.kind === 'terminal') return { match: placeKeys(place) };
+  return sameList(place.domains, place.match) ? { match: place.match } : { match: place.match, domains: place.domains };
 }
 
 /**
- * ONE CHANGE AT A TIME FOR THE WHOLE STORE. Every entry shares the same two files, and a change reads both,
- * awaits sealing and writes both back whole: two changes that overlapped would each start from the same
- * snapshot, and the later write would silently drop the earlier one's credential — and with it the only
- * ciphertext that keeps that value masked. So every mutation, from every caller (a route, the CLI, a card's
- * "Save as"), runs its read, merge and write inside this one queue. A per-entry or per-session lock is not
- * enough: the files are shared. A failed change releases the queue for the next one.
- */
-export class LoginStoreLock {
-  private tail: Promise<unknown> = Promise.resolve();
-
-  async run<T>(work: () => Promise<T>): Promise<T> {
-    const turn = this.tail.then(work);
-    this.tail = turn.catch(() => undefined);
-    return await turn;
-  }
-}
-
-/**
- * What a boot sweep did: how many unreferenced sealed values it removed, or why it removed none. `damaged` is a
- * committed index that names ciphertext the sealed document does not hold: with a reference that cannot be
- * trusted, NOTHING is swept, so no value can lose its masking on the strength of a broken index.
- */
-export interface LoginSweep {
-  readonly swept: number;
-  readonly damaged?: string;
-}
-
-/** The fields a card keeps in one saved login at once: the plain username, the secret password, or both. */
-export interface LoginFieldValues {
-  readonly username?: string;
-  readonly password?: string;
-}
-
-/**
- * The management surface. Seals what it is given; opens nothing; returns names, labels and flags only. Every
- * change runs under the store's {@link LoginStoreLock}; the composition root builds ONE directory, so every
- * caller shares it.
+ * The saved-login surface over the account store: what the input bridge, `account.hint` and the
+ * `/v1/secrets/logins*` routes use for one release. It holds the {@link AccountDirectory} it was built over, so the
+ * two always share ONE store lock.
  */
 export class LoginDirectory {
-  private readonly documents: LoginDocuments;
+  readonly accounts: AccountDirectory;
 
   constructor(
     index: LoginIndexStore,
     sealed: SecretDocumentStore,
     cipher: SecretCipherPort,
-    private readonly clock: ClockPort,
-    private readonly newKey: () => string = randomLoginKey,
-    private readonly lock: LoginStoreLock = new LoginStoreLock(),
-    private readonly newSealedName: (key: string, role: 'password' | 'totp') => string = freshSealedName,
+    clock: ClockPort,
+    options: AccountDirectoryOptions = {},
   ) {
-    this.documents = new LoginDocuments(index, sealed, cipher);
+    this.accounts = new AccountDirectory(index, sealed, cipher, clock, options);
   }
 
-  /** Every entry, by label. Raises `SecretStoreError` when it cannot tell — never an empty list. */
+  /** Every account as a saved login, by label. Raises `SecretStoreError` when it cannot tell — never an empty list. */
   async list(): Promise<readonly LoginEntrySummary[]> {
-    const index = await this.documents.readIndex();
-    await this.documents.readSealed();
-    return Object.entries(index.entries)
-      .map(([id, record]) => summary(id, record))
-      .sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
+    const listing = await this.accounts.list();
+    return listing.accounts.map(account => savedLoginOf(account, listing.signIns));
   }
 
   /**
-   * Creates the entry or changes the parts named: a field left out is kept, `null` removes it. The secret
-   * fields are sealed and written BEFORE the index names them, so an index never claims a value that is not
-   * there; a failure between the two leaves an unused sealed value, never a missing one.
+   * An older client's change (`PUT /v1/secrets/logins/:id`): the account's fields always; where and how it signs in
+   * only onto its ONE sign-in. An account that signs in at several places refuses those parts with
+   * `account_has_sign_ins`, and nothing is changed.
    */
   async put(id: LoginEntryId, change: PutLoginEntry): Promise<LoginEntrySummary> {
-    return await this.lock.run(async () => await this.change(id, change));
+    return await this.accounts.transact(async draft => {
+      const existing = Object.hasOwn(draft.accounts, id) ? draft.accounts[id] : undefined;
+      const own = existing === undefined ? [] : primaryFirst(signInsOf(draft.signIns, existing.key));
+      const touches = SIGN_IN_FIELDS.some(field => change[field] !== undefined);
+      if (touches && own.length > 1)
+        throw new LoginEntryError(
+          'account_has_sign_ins',
+          `${existing?.label ?? id} signs in at ${String(own.length)} places; update the app or use \`fy account site …\` to change one`,
+        );
+      await this.accounts.applyAccount(draft, id, {
+        ...(change.label === undefined ? {} : { label: change.label }),
+        ...(change.username === undefined ? {} : { username: change.username }),
+        ...(change.password === undefined ? {} : { password: change.password }),
+      });
+      if (change.totp !== undefined)
+        await this.accounts.applySeed(
+          draft,
+          id,
+          change.totp === null
+            ? null
+            : { seed: change.totp.seed, parameters: TotpParametersSchema.parse(change.totp.parameters ?? {}) },
+        );
+      if (touches) this.reshape(draft, id, own[0], change);
+      return savedLoginIn(draft, id);
+    });
   }
 
   /**
-   * Keeps typed values in a saved login in ONE change: a new entry labelled `label`, or the existing one (its
-   * label kept, `match` added to what it already matches). The read of what exists and the write that
-   * merges into it are one step under the store lock, so a Settings edit or another card cannot slip between
-   * them. The username and the password of one login card are kept together or not at all.
+   * The account's one sign-in (or none) made into what the changed saved login names, exactly as the migration makes
+   * a saved login's places: its website first (the primary, which keeps its id, proposals and auto-apply), then one
+   * per terminal key. Facts are kept only at a key of the place they were seen at.
+   */
+  private reshape(
+    draft: AccountDraft,
+    id: AccountId,
+    current: readonly [SignInId, SignInRecord] | undefined,
+    change: PutLoginEntry,
+  ): void {
+    const account = draft.accounts[id];
+    if (account === undefined) return;
+    const shape = savedLoginShapeOf(current?.[1].place);
+    const places = savedLoginPlaces(
+      { match: change.match ?? shape.match, domains: change.domains ?? shape.domains },
+      this.accounts.hostName,
+    );
+    const template = current?.[1];
+    // A provider that is gone, or the account itself, is refused before anything else is said about the change.
+    const method = change.method === undefined ? template?.method : methodRecord(change.method, draft.accounts, id);
+    if (places.length === 0) {
+      // Never a lossy write: a method, a recipe or auto-apply the change brings, or the sign-in it would remove still
+      // holds, has nowhere to go without a place, so it is refused rather than answered as saved.
+      const brings = method !== undefined || typeof change.recipe === 'string' || change.autoApplyRecipe === true;
+      const holds =
+        template?.recipe !== undefined || template?.proposals !== undefined || template?.method !== undefined;
+      if (brings || holds)
+        throw new LoginEntryError(
+          'no_sign_in',
+          `${account.label} would sign in nowhere, and a method or recipe needs a place; name where it signs in`,
+        );
+      if (current !== undefined) delete draft.signIns[current[0]];
+      return;
+    }
+    if (places.length > MAX_SIGN_INS_PER_ACCOUNT)
+      throw new LoginEntryError(
+        'invalid_change',
+        `an account has at most ${String(MAX_SIGN_INS_PER_ACCOUNT)} sign-ins`,
+      );
+    places.forEach((place, index) => {
+      const primary = index === 0;
+      const signInId = primary && current !== undefined ? current[0] : this.accounts.freshSignInId(draft);
+      const base: SignInRecord = template ?? {
+        account: account.key,
+        place,
+        createdAt: draft.at,
+        updatedAt: draft.at,
+      };
+      const recipe = withRecipe(base, change.recipe, draft.at);
+      const { method: _method, autoApplyRecipe: _auto, observed: _observed, proposals: _proposals, ...rest } = recipe;
+      const observed = (base.observed ?? []).filter(fact => placeKeys(place).includes(fact.at));
+      const autoApply = primary && (change.autoApplyRecipe ?? base.autoApplyRecipe === true);
+      draft.signIns[signInId] = {
+        ...rest,
+        account: account.key,
+        place,
+        ...(method === undefined ? {} : { method }),
+        ...(autoApply ? { autoApplyRecipe: true as const } : {}),
+        ...(observed.length === 0 ? {} : { observed }),
+        ...(primary && base.proposals !== undefined ? { proposals: base.proposals } : {}),
+        createdAt: primary ? base.createdAt : draft.at,
+        updatedAt: draft.at,
+      };
+    });
+  }
+
+  /**
+   * Keeps typed values in an account in ONE change ("Save as" on a card): a new account labelled `label`, or the
+   * existing one (its label kept). The place it was typed at is added when the account does not sign in there yet: to
+   * its website for a web host (as a saved login's `match` grew), else as a sign-in of its own. The username and the
+   * password of one login card are kept together or not at all.
    */
   async saveFields(
     id: LoginEntryId,
@@ -282,406 +297,141 @@ export class LoginDirectory {
     match: string | undefined,
     fields: LoginFieldValues,
   ): Promise<LoginEntrySummary> {
-    return await this.lock.run(async () => {
-      const existing = (await this.documents.readIndex()).entries[id];
-      const matches = [...new Set([...(existing?.match ?? []), ...(match === undefined ? [] : [match])])].slice(
-        -LOGIN_MATCH_MAX,
-      );
-      const domains =
-        existing?.domains === undefined || match === undefined || webHostsOf([match]).length === 0
-          ? undefined
-          : [...new Set([...existing.domains, match])].slice(-LOGIN_MATCH_MAX);
-      return await this.change(id, {
+    return await this.accounts.transact(async draft => {
+      const existing = Object.hasOwn(draft.accounts, id) ? draft.accounts[id] : undefined;
+      const account = await this.accounts.applyAccount(draft, id, {
         ...(existing === undefined ? { label } : {}),
-        match: matches,
-        ...(domains === undefined ? {} : { domains }),
         ...(fields.username === undefined ? {} : { username: fields.username }),
         ...(fields.password === undefined ? {} : { password: fields.password }),
       });
+      if (match !== undefined) this.addPlace(draft, account.key, match);
+      return savedLoginIn(draft, id);
     });
   }
 
-  /**
-   * One change, read to write, ALL OR NOTHING. Callers hold the store lock.
-   *
-   * 1. New secret values are sealed under FRESH names and ADDED to the sealed document; nothing the index points
-   *    at is touched. A failure here changes nothing.
-   * 2. The index is written pointing at the new names, with the new username, label and match: THE commit. A
-   *    failure here leaves the entry exactly as it was (old username, old password), and the old ciphertext still
-   *    sealed and masked; the new ciphertext is an orphan, still masked, swept by the next change.
-   * 3. Sealed values nothing points at any more are swept. Best effort: a failure leaves orphans, still masked,
-   *    and the change has already committed.
-   */
-  private async change(id: LoginEntryId, change: PutLoginEntry): Promise<LoginEntrySummary> {
-    const index = await this.documents.readIndex();
-    const sealed = await this.documents.readSealed();
-    const existing = index.entries[id];
-    if (existing === undefined && Object.keys(index.entries).length >= MAX_LOGIN_ENTRIES)
-      throw new SecretStoreError('full', `this daemon already keeps ${MAX_LOGIN_ENTRIES} saved logins`);
-    if (existing === undefined && change.label === undefined)
-      throw new LoginEntryError('label_required', `a new saved login needs a label; ${id} does not exist yet`);
-    checkVia(id, change.method, index);
-    const at = this.clock.now();
-    const key = existing?.key ?? this.newKey();
-    const seals: { password?: string; totp?: string } = { ...existing?.seals };
-    const added: Record<string, SealedSecret> = {};
-    const seal = async (role: 'password' | 'totp', value: string | null | undefined): Promise<void> => {
-      if (value === undefined) return;
-      if (value === null) {
-        delete seals[role];
-        return;
-      }
-      const previous = seals[role] === undefined ? undefined : sealed.entries[seals[role] as string];
-      const name = this.newSealedName(key, role);
-      added[name] = {
-        ...(await this.documents.cipher.seal(name, value)),
-        createdAt: previous?.createdAt ?? at,
-        updatedAt: at,
+  private addPlace(draft: AccountDraft, key: string, match: string): void {
+    const own = signInsOf(draft.signIns, key);
+    if (own.some(([, signIn]) => placeHosts(signIn.place).includes(match))) return;
+    const [place] = savedLoginPlaces({ match: [match] }, this.accounts.hostName);
+    if (place === undefined) return;
+    const site = own.find(([, signIn]) => signIn.place.kind === 'site');
+    if (place.kind === 'site' && site !== undefined) {
+      const [siteId, signIn] = site;
+      const at = signIn.place as SitePlace;
+      draft.signIns[siteId] = {
+        ...signIn,
+        place: {
+          kind: 'site',
+          domains: unique([...at.domains, match]).slice(-LOGIN_MATCH_MAX),
+          match: unique([...at.match, match]).slice(-LOGIN_MATCH_MAX),
+        },
+        updatedAt: draft.at,
       };
-      seals[role] = name;
+      return;
+    }
+    if (own.length >= MAX_SIGN_INS_PER_ACCOUNT) return;
+    draft.signIns[this.accounts.freshSignInId(draft)] = {
+      account: key,
+      place,
+      createdAt: draft.at,
+      updatedAt: draft.at,
     };
-    await seal('password', change.password);
-    await seal('totp', change.totp === undefined ? undefined : (change.totp?.seed ?? null));
-    const staged: SecretVaultDocument = { ...sealed, entries: { ...sealed.entries, ...added } };
-    if (Object.keys(added).length > 0) await this.documents.sealed.write(staged);
-    const record = nextRecord(existing, key, change, at, seals);
-    const committed: LoginIndexDocument = { ...index, entries: { ...index.entries, [id]: record } };
-    await this.documents.index.write(committed);
-    await this.sweep(committed, staged);
-    return summary(id, record);
   }
 
   /**
-   * AT BOOT: drops sealed values the index does not point at — what a change left when the daemon stopped between
-   * staging new ciphertext and committing the index, or before its sweep. Until then they are masked like any
-   * sealed value. Never sweeps against an index that was never written or cannot be read: with no commit to trust,
-   * everything is kept (and masked). Runs under the store lock, so no change can be mid-flight.
-   */
-  async sweepUnreferenced(): Promise<LoginSweep> {
-    return await this.lock.run(async () => {
-      const index = await this.documents.index.read();
-      if (index === undefined) return { swept: 0 };
-      const sealed = await this.documents.readSealed();
-      const missing = missingReferences(index, sealed);
-      if (missing > 0) return { swept: 0, damaged: `the index names ${missing} sealed value(s) that are not there` };
-      const before = Object.keys(sealed.entries).length;
-      await this.sweep(index, sealed);
-      return { swept: before - Object.keys((await this.documents.readSealed()).entries).length };
-    });
-  }
-
-  /** Drops sealed values the committed index no longer points at. Best effort: an orphan is still masked. */
-  private async sweep(committed: LoginIndexDocument, sealed: SecretVaultDocument): Promise<void> {
-    // A reference to ciphertext that is not there means the index cannot be trusted: keep everything.
-    if (missingReferences(committed, sealed) > 0) return;
-    const keep = referenced(committed);
-    const kept = Object.fromEntries(Object.entries(sealed.entries).filter(([name]) => keep.has(name)));
-    if (Object.keys(kept).length === Object.keys(sealed.entries).length) return;
-    await this.documents.sealed.write({ ...sealed, entries: kept }).catch(() => undefined);
-  }
-
-  /**
-   * Folds what the input service SAW while typing this login into its facts (login-recipes.ts). Only the input
-   * service calls this, from its own observation of a real target; no route or agent tool reaches it. An entry
-   * that is gone is ignored: the delivery happened, there is just nothing left to remember it on. Facts are not an
-   * owner's edit, so `updatedAt` is kept.
+   * What the input service SAW while typing this account: filed on its sign-in whose keys contain the place it was
+   * seen at. None (the owner picked this account by hand on another page) keeps nothing: a fact is never misfiled.
    */
   async observe(id: LoginEntryId, seen: LoginObservation): Promise<void> {
-    await this.lock.run(async () => {
-      const index = await this.documents.readIndex();
-      const record = index.entries[id];
-      if (record === undefined) return;
-      const observed = [...foldObservation(record.observed ?? [], seen, this.clock.now())];
-      await this.documents.index.write({ ...index, entries: { ...index.entries, [id]: { ...record, observed } } });
+    await this.accounts.transact(draft => {
+      const account = Object.hasOwn(draft.accounts, id) ? draft.accounts[id] : undefined;
+      if (account === undefined) return;
+      const found = signInsOf(draft.signIns, account.key).find(([, signIn]) =>
+        placeKeys(signIn.place).includes(seen.at),
+      );
+      if (found === undefined) return;
+      const [signInId, signIn] = found;
+      draft.signIns[signInId] = { ...signIn, observed: [...foldObservation(signIn.observed ?? [], seen, draft.at)] };
     });
   }
 
   /**
-   * Files a ferret's recipe proposal on the entry, or applies it at once when the owner turned auto-apply on for
-   * this login. A fourth proposal pushes out the oldest, which is answered back so its card can close. The caller
-   * has already refused a recipe that holds a value.
+   * A ferret's recipe proposal by account (`login.propose`, `account.propose { login }`): filed on the account's ONLY
+   * sign-in. An account that signs in nowhere, or at several places, is refused: name the sign-in.
    */
   async propose(
     id: LoginEntryId,
     proposal: LoginRecipeProposal,
   ): Promise<{ readonly applied: boolean; readonly dropped: readonly LoginRecipeProposal[] }> {
-    return await this.lock.run(async () => {
-      const index = await this.documents.readIndex();
-      const record = index.entries[id];
-      if (record === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${id}`);
-      if (record.autoApplyRecipe === true) {
-        const applied: LoginRecord = {
-          ...record,
-          recipe: proposal.recipe,
-          recipeBy: 'ferret',
-          updatedAt: this.clock.now(),
-        };
-        await this.documents.index.write({ ...index, entries: { ...index.entries, [id]: applied } });
-        return { applied: true, dropped: [] };
-      }
-      const waiting = [...(record.proposals ?? []), proposal];
-      const dropped = waiting.slice(0, Math.max(0, waiting.length - LOGIN_RECIPE_PROPOSALS_MAX));
-      const proposals = waiting.slice(-LOGIN_RECIPE_PROPOSALS_MAX);
-      await this.documents.index.write({ ...index, entries: { ...index.entries, [id]: { ...record, proposals } } });
-      return { applied: false, dropped };
+    return await this.accounts.transact(draft => {
+      const [signInId, signIn] = this.onlySignIn(draft, id);
+      return proposeOn(draft, signInId, signIn, proposal);
     });
   }
 
-  /** Remembers the agenda card a proposal was raised on, so settling it closes that card. */
-  async proposalCard(id: LoginEntryId, proposalId: string, agendaItemId: string): Promise<void> {
-    await this.lock.run(async () => {
-      const index = await this.documents.readIndex();
-      const record = index.entries[id];
-      if (record?.proposals?.some(proposal => proposal.id === proposalId) !== true) return;
-      const proposals = record.proposals.map(proposal =>
-        proposal.id === proposalId ? { ...proposal, agendaItemId } : proposal,
+  private onlySignIn(draft: AccountDraft, id: LoginEntryId): readonly [SignInId, SignInRecord] {
+    const account = this.accounts.accountIn(draft, id);
+    const own = primaryFirst(signInsOf(draft.signIns, account.key));
+    const [only] = own;
+    if (only === undefined)
+      throw new LoginEntryError('no_sign_in', `${account.label} signs in nowhere yet, so it has no recipe`);
+    if (own.length > 1)
+      throw new LoginEntryError(
+        'account_has_sign_ins',
+        `name the sign-in: ${account.label} signs in at ${String(own.length)} places (${own.map(([signInId]) => signInId).join(', ')})`,
       );
-      await this.documents.index.write({ ...index, entries: { ...index.entries, [id]: { ...record, proposals } } });
+    return only;
+  }
+
+  /** The account's sign-in that holds a proposal: proposal ids are unique, so it is one or none. */
+  private holding(draft: AccountDraft, id: LoginEntryId, proposalId: string) {
+    const account = this.accounts.accountIn(draft, id);
+    return signInsOf(draft.signIns, account.key).find(
+      ([, signIn]) => signIn.proposals?.some(proposal => proposal.id === proposalId) === true,
+    );
+  }
+
+  async proposalCard(id: LoginEntryId, proposalId: string, agendaItemId: string): Promise<void> {
+    await this.accounts.transact(draft => {
+      const found = Object.hasOwn(draft.accounts, id) ? this.holding(draft, id, proposalId) : undefined;
+      if (found !== undefined) cardOn(draft, found[0], proposalId, agendaItemId);
     });
   }
 
-  /**
-   * The owner's answer to a proposal. `approve` makes it the recipe, but only while the recipe is still the one it
-   * was proposed against: the owner was shown a diff from THAT text, so approving it over a newer edit would undo
-   * the edit unseen (`stale_proposal`; decline it, or edit the recipe by hand). Either answer removes it.
-   */
+  /** The owner's answer to a proposal, found by its id on whichever of the account's sign-ins holds it. */
   async decide(
     id: LoginEntryId,
     proposalId: string,
     decision: 'approve' | 'decline',
   ): Promise<{ readonly entry: LoginEntrySummary; readonly proposal: LoginRecipeProposal }> {
-    return await this.lock.run(async () => {
-      const index = await this.documents.readIndex();
-      const record = index.entries[id];
-      if (record === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${id}`);
-      const proposal = record.proposals?.find(waiting => waiting.id === proposalId);
-      if (proposal === undefined)
+    return await this.accounts.transact(draft => {
+      const found = this.holding(draft, id, proposalId);
+      if (found === undefined)
         throw new LoginEntryError(
           'unknown_proposal',
           `${id} has no recipe proposal ${proposalId}; it was answered or replaced`,
         );
-      if (decision === 'approve' && record.recipe !== proposal.base)
-        throw new LoginEntryError(
-          'stale_proposal',
-          `the recipe of ${id} changed after this proposal was made; decline it, or edit the recipe yourself`,
-        );
-      const proposals = (record.proposals ?? []).filter(waiting => waiting.id !== proposalId);
-      const { proposals: _old, recipeBy, ...rest } = record;
-      const next: LoginRecord = {
-        ...rest,
-        ...(proposals.length === 0 ? {} : { proposals }),
-        // An approved recipe is the owner's: whoever wrote it before, a person has now read it.
-        ...(decision === 'approve'
-          ? { recipe: proposal.recipe, updatedAt: this.clock.now() }
-          : recipeBy === undefined
-            ? {}
-            : { recipeBy }),
-      };
-      await this.documents.index.write({ ...index, entries: { ...index.entries, [id]: next } });
-      return { entry: summary(id, next), proposal };
+      const { proposal } = decideOn(draft, found[0], found[1], proposalId, decision);
+      return { entry: savedLoginIn(draft, id), proposal };
     });
   }
 
-  /** A new handle for an entry. Its sealed values stay where they are, filed under the entry's key. */
+  /** A new handle for an account. Its sealed values stay where they are, filed under its key. */
   async rename(from: LoginEntryId, to: LoginEntryId): Promise<LoginEntrySummary> {
-    return await this.lock.run(async () => await this.move(from, to));
+    await this.accounts.renameAccount(from, to);
+    return (await this.list()).find(entry => entry.id === to) as LoginEntrySummary;
   }
 
-  private async move(from: LoginEntryId, to: LoginEntryId): Promise<LoginEntrySummary> {
-    const index = await this.documents.readIndex();
-    const record = index.entries[from];
-    if (record === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${from}`);
-    if (from === to) return summary(to, record);
-    if (index.entries[to] !== undefined)
-      throw new LoginEntryError('login_exists', `${to} is already a saved login; pick another name`);
-    const { [from]: _moved, ...rest } = index.entries;
-    const renamed = { ...record, updatedAt: this.clock.now() };
-    await this.documents.index.write({ ...index, entries: { ...repointed(rest, from, to), [to]: renamed } });
-    return summary(to, renamed);
-  }
-
-  /**
-   * Removes an entry: the index first (the commit), so it is gone at once, then a sweep of what nothing points at.
-   * A failure of the sweep leaves sealed values no entry names, which are still masked and never typed.
-   */
+  /** Removes an account and every sign-in it has. */
   async remove(id: LoginEntryId): Promise<boolean> {
-    return await this.lock.run(async () => await this.drop(id));
+    return await this.accounts.removeAccount(id);
   }
 
-  private async drop(id: LoginEntryId): Promise<boolean> {
-    const index = await this.documents.readIndex();
-    const record = index.entries[id];
-    if (record === undefined) return false;
-    const { [id]: _removed, ...rest } = index.entries;
-    const committed: LoginIndexDocument = { ...index, entries: repointed(rest, id, undefined) };
-    await this.documents.index.write(committed);
-    await this.sweep(
-      committed,
-      await this.documents.readSealed().catch(() => ({ v: 1 as const, cipher: '', entries: {} })),
-    );
-    return true;
+  /** AT BOOT: the account store's boot step (migrate, then sweep). See {@link AccountDirectory.prepare}. */
+  async sweepUnreferenced(): Promise<LoginSweep> {
+    return await this.accounts.prepare();
   }
 }
 
-/**
- * A method that goes VIA another saved login names one that exists, and not itself: a dangling or circular link
- * would send the ferret to a provider page nothing can fill.
- */
-function checkVia(id: LoginEntryId, method: LoginMethod | undefined, index: LoginIndexDocument): void {
-  const via = method?.via;
-  if (via === undefined) return;
-  if (via === id)
-    throw new LoginEntryError('bad_via', `${id} cannot sign in via itself; pick the provider's saved login`);
-  if (index.entries[via] === undefined)
-    throw new LoginEntryError(
-      'bad_via',
-      `there is no saved login ${via} to sign in via; save the provider's login first`,
-    );
-  // Follow the provider's own links: one that leads back here would send the ferret round in a circle.
-  const seen = new Set<string>([id]);
-  for (let next: string | undefined = via; next !== undefined; next = index.entries[next]?.method?.via) {
-    if (seen.has(next))
-      throw new LoginEntryError(
-        'bad_via',
-        `${id} via ${via} leads back to ${next}; a provider cannot go via a site that uses it`,
-      );
-    seen.add(next);
-  }
-}
-
-/**
- * Every OTHER entry whose method goes via `from`, pointed at `to` (a rename), or no longer via anything (a
- * delete). Only the link changes; nothing sealed is touched.
- */
-function repointed(
-  entries: Readonly<Record<string, LoginRecord>>,
-  from: string,
-  to: string | undefined,
-): Record<string, LoginRecord> {
-  return Object.fromEntries(
-    Object.entries(entries).map(([handle, record]) => {
-      // A recipe that names `[[from]]` names the renamed login; after a delete the name stays, and reads as missing.
-      const named =
-        to === undefined || record.recipe === undefined
-          ? record
-          : { ...record, recipe: recipeRenamed(record.recipe, from, to) };
-      if (named.method?.via !== from) return [handle, named];
-      const { via: _gone, ...method } = named.method;
-      return [handle, { ...named, method: to === undefined ? method : { ...method, via: to } }];
-    }),
-  );
-}
-
-function nextRecord(
-  existing: LoginRecord | undefined,
-  key: string,
-  change: PutLoginEntry,
-  at: string,
-  seals: LoginRecord['seals'],
-): LoginRecord {
-  const username = change.username === undefined ? existing?.username : (change.username ?? undefined);
-  const method = change.method ?? existing?.method;
-  const domains = change.domains ?? existing?.domains;
-  const recipe = change.recipe === undefined ? existing?.recipe : (change.recipe ?? undefined);
-  // An owner's own edit makes the recipe theirs; anything else keeps who wrote it.
-  const recipeBy = change.recipe === undefined ? existing?.recipeBy : undefined;
-  const autoApply = change.autoApplyRecipe ?? existing?.autoApplyRecipe === true;
-  const totp: TotpParameters | undefined =
-    change.totp === undefined
-      ? existing?.totp
-      : change.totp === null
-        ? undefined
-        : TotpParametersSchema.parse(change.totp.parameters ?? {});
-  return {
-    key,
-    label: change.label ?? (existing?.label as string),
-    match: [...new Set(change.match ?? existing?.match ?? [])],
-    ...(method === undefined ? {} : { method }),
-    ...(domains === undefined ? {} : { domains: [...new Set(domains)] }),
-    ...(username === undefined ? {} : { username }),
-    seals,
-    ...(totp === undefined || seals.totp === undefined ? {} : { totp }),
-    ...(recipe === undefined ? {} : { recipe }),
-    ...(recipe === undefined || recipeBy === undefined ? {} : { recipeBy }),
-    ...(autoApply ? { autoApplyRecipe: true as const } : {}),
-    ...(existing?.observed === undefined ? {} : { observed: existing.observed }),
-    ...(existing?.proposals === undefined ? {} : { proposals: existing.proposals }),
-    createdAt: existing?.createdAt ?? at,
-    updatedAt: at,
-  };
-}
-
-/**
- * The plaintext side. Given only to the redactor and the input service; nothing it answers leaves the
- * daemon except into an input request's target.
- */
-export class LoginVault {
-  private readonly documents: LoginDocuments;
-
-  constructor(index: LoginIndexStore, sealed: SecretDocumentStore, cipher: SecretCipherPort) {
-    this.documents = new LoginDocuments(index, sealed, cipher);
-  }
-
-  /**
-   * Every saved secret field, opened, for MASKING: keyed `login:<ID>:password` / `login:<ID>:totp`, a shape no
-   * vault secret name can take, so the two stores can share one redaction map without one hiding the other.
-   * A sealed value no entry names (a half-finished remove) is still masked, and so is every sealed value when
-   * the INDEX cannot be read: masking needs only the sealed values, so a damaged index costs the names in the
-   * masks, never a scrub. A sealed document that cannot be opened rejects, and the redactor fails closed.
-   */
-  async values(): Promise<ReadonlyMap<string, string>> {
-    const sealed = await this.documents.readSealed();
-    const index = await this.documents.readIndex().catch((error: unknown) => {
-      if (error instanceof SecretStoreError) return { v: 1 as const, entries: {} };
-      throw error;
-    });
-    if (Object.keys(sealed.entries).length === 0) return new Map();
-    const opened = await this.documents.cipher.openAll(sealed.entries);
-    const byName = new Map<string, string>();
-    const named = new Set<string>();
-    for (const [id, record] of Object.entries(index.entries)) {
-      for (const role of ['password', 'totp'] as const) {
-        const name = record.seals[role];
-        if (name === undefined) continue;
-        const value = opened.get(name);
-        if (value === undefined) continue;
-        named.add(name);
-        byName.set(`login:${id}:${role}`, value);
-      }
-    }
-    for (const [name, value] of opened) if (!named.has(name)) byName.set(`login:unnamed:${name}`, value);
-    return byName;
-  }
-
-  /**
-   * The value an entry's field types, made inside the use boundary: the username as stored, the password
-   * opened, or the 2FA code generated from the seed at `nowMs` (the seed itself never leaves here). Raises
-   * `LoginEntryError` for an entry or field that does not exist.
-   */
-  async fill(id: LoginEntryId, role: LoginFieldRole, nowMs: number): Promise<string> {
-    const index = await this.documents.readIndex();
-    const record = index.entries[id];
-    if (record === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${id}`);
-    if (role === 'username') {
-      if (record.username === undefined)
-        throw new LoginEntryError('no_such_field', `${record.label} has no username saved`);
-      return record.username;
-    }
-    const name = record.seals[role];
-    if (name === undefined || (role === 'totp' && record.totp === undefined))
-      throw new LoginEntryError(
-        'no_such_field',
-        `${record.label} has no ${role === 'password' ? 'password' : '2FA seed'} saved`,
-      );
-    const sealed = await this.documents.readSealed();
-    const entry = sealed.entries[name];
-    if (entry === undefined) throw new LoginEntryError('no_such_field', `${record.label} has lost its ${role}`);
-    const value = (await this.documents.cipher.openAll({ [name]: entry })).get(name);
-    if (value === undefined) throw new LoginEntryError('no_such_field', `${record.label} has lost its ${role}`);
-    if (role === 'password') return value;
-    const code = totpCode(value, record.totp as TotpParameters, nowMs);
-    if (code === undefined)
-      throw new LoginEntryError('no_such_field', `${record.label} has a 2FA seed that is not base32`);
-    return code;
-  }
-}
+/** The plaintext side, under its saved-login name for the input bridge and the redactor. */
+export class LoginVault extends AccountVault {}
