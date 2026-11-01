@@ -1420,10 +1420,13 @@ export function AgendaInboxPage({
 
   const header = (
     <header className="fy-attn-inbox__head">
-      <h1 className="fy-attn-inbox__title" id={headingId}>
-        Inbox
-        <AgendaCountBadge count={count} />
-      </h1>
+      {/* A phone's top bar already says "Inbox" with the count beside it: the page draws no second title there. */}
+      {phone ? null : (
+        <h1 className="fy-attn-inbox__title" id={headingId}>
+          Inbox
+          <AgendaCountBadge count={count} />
+        </h1>
+      )}
       {updating ? (
         <span className="fy-attn-inbox__updating" data-agenda-updating="" role="status">
           <Spinner size={12} />
@@ -1649,7 +1652,11 @@ export function AgendaInboxPage({
   }
 
   return (
-    <main aria-labelledby={headingId} className="fy-attn-inbox" data-agenda-inbox={phone ? 'list' : 'panes'}>
+    <main
+      {...(phone ? { 'aria-label': 'Inbox' } : { 'aria-labelledby': headingId })}
+      className="fy-attn-inbox"
+      data-agenda-inbox={phone ? 'list' : 'panes'}
+    >
       {header}
       {banner}
       <AgentsBulk inbox={inbox} kind={kind} machines={machines} port={clearPort} />

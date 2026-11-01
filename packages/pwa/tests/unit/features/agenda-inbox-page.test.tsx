@@ -189,6 +189,18 @@ describe('AgendaInboxPage states', () => {
     await mounted.unmount();
   });
 
+  it('draws the Inbox title with its count on a wide screen, and none on a phone, whose top bar carries both', async () => {
+    const wide = await mount(page(fakeInbox(), [threeWay]));
+    expect(wide.container.querySelector('h1 [data-unread-badge]')?.getAttribute('data-count')).toBe('1');
+    await wide.unmount();
+    const phone = await mount(page(fakeInbox(), [threeWay], { phone: true }));
+    expect(phone.container.querySelector('h1')).toBeNull();
+    expect(phone.container.querySelector('main')?.getAttribute('aria-label')).toBe('Inbox');
+    // The filters stay in the head row.
+    expect(phone.container.querySelector('[aria-label="Find in Inbox"]')).not.toBeNull();
+    await phone.unmount();
+  });
+
   it('does not say nothing needs the reader while a machine holds items it could not read', async () => {
     const asleep = [{ daemonId: daemonId('laptop'), machineName: 'Laptop', items: 2 }];
     const mounted = await mount(page(fakeInbox(), [withFerret], { unavailable: asleep }));
