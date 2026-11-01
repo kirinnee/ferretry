@@ -395,3 +395,64 @@ describe('LaneSetService gives quick sets their To test lane at boot', () => {
     ]);
   });
 });
+
+describe('LaneSetService writes out every lane’s stage at boot', () => {
+  it('should stage each stored set from before stages, move no card, and ask nothing', async () => {
+    // Arrange
+    const { store, agenda, relocator, service } = world();
+    store.sets.set(UNFILED_PROJECT_ID, { ...oldQuickLanes(UNFILED_PROJECT_ID), version: 2 });
+    store.sets.set(FERRETRY_ID, { ...lanes(FERRETRY_ID), version: 5 });
+    store.sets.set(DOCS_ID, templateLanes(DOCS_ID, 'writing'));
+
+    // Act
+    const outcomes = await service.stageLanes();
+
+    // Assert
+    should(outcomes).deepEqual([
+      { projectId: UNFILED_PROJECT_ID, staged: true, version: 3 },
+      { projectId: FERRETRY_ID, staged: true, version: 6 },
+    ]);
+    should(store.sets.get(FERRETRY_ID)?.lanes.every(lane => lane.stage !== undefined)).be.true();
+    should(store.sets.get(FERRETRY_ID)?.confirmedBy).equal('owner');
+    should(store.sets.get(DOCS_ID)?.version).equal(1);
+    should(relocator.moves).be.empty();
+    should(agenda.raised).be.empty();
+  });
+
+  it('should do nothing the second time, nor for an Unfiled board that keeps the built-in lanes', async () => {
+    // Arrange
+    const { store, service } = world();
+    store.sets.set(DOCS_ID, oldQuickLanes(DOCS_ID));
+    await service.stageLanes();
+
+    // Act
+    const again = await service.stageLanes();
+
+    // Assert
+    should(again).deepEqual([]);
+    should(store.sets.has(UNFILED_PROJECT_ID)).be.false();
+    should((await service.laneSet(UNFILED_PROJECT_ID))?.lanes.every(lane => lane.stage !== undefined)).be.true();
+  });
+
+  it('should report a project whose set it could not read and go on with the rest', async () => {
+    // Arrange
+    const { store, service } = world();
+    store.sets.set(DOCS_ID, oldQuickLanes(DOCS_ID));
+    const transact = store.transact.bind(store);
+    store.transact = async (projectId, decide) => {
+      if (projectId === FERRETRY_ID) throw new Error('refusing to use a damaged lane set');
+      if (projectId === UNFILED_PROJECT_ID) return Promise.reject('disk gone');
+      return await transact(projectId, decide);
+    };
+
+    // Act
+    const outcomes = await service.stageLanes();
+
+    // Assert
+    should(outcomes).deepEqual([
+      { projectId: UNFILED_PROJECT_ID, staged: false, problem: 'disk gone' },
+      { projectId: FERRETRY_ID, staged: false, problem: 'refusing to use a damaged lane set' },
+      { projectId: DOCS_ID, staged: true, version: 2 },
+    ]);
+  });
+});

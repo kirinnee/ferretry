@@ -10463,7 +10463,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       setTimeout(() => workSearch.warm(), WORK_SEARCH_WARM_DELAY_MS).unref();
       // Released and To test are one lane now: every stored set that still has both is folded into one at boot,
       // its cards moved with it, and the owner is asked nothing. A `quick` set from before To test gains it the same
-      // way. Then the Unfiled cards that belong on a project's board are refiled there (`UnfiledRefiler`), so a
+      // way, and every lane stored before stages gets the stage its fields already describe, written out. Then the Unfiled cards that belong on a project's board are refiled there (`UnfiledRefiler`), so a
       // card stuck since before projects registered themselves moves without waiting for the watcher. Each step is
       // idempotent, so every boot runs them, once the boot has settled and before the import below.
       unrefTimer(1000, () => {
@@ -10493,6 +10493,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 outcome.added
                   ? `board lanes: ${outcome.projectId} quick lanes gained To test (version ${String(outcome.version)})\n`
                   : `board lanes: ${outcome.projectId} could not add To test to its quick lanes: ${outcome.problem}\n`,
+              );
+            }
+          })
+          .then(async () => await laneSets.stageLanes())
+          .then(outcomes => {
+            for (const outcome of outcomes) {
+              process.stderr.write(
+                outcome.staged
+                  ? `board lanes: ${outcome.projectId} lanes now state their stages (version ${String(outcome.version)})\n`
+                  : `board lanes: ${outcome.projectId} could not state its lanes' stages: ${outcome.problem}\n`,
               );
             }
           })

@@ -28,6 +28,7 @@ import {
   mergeReleaseLanes,
   proposeLaneSet,
   RELEASED_TO_TEST_NAME,
+  stageLanes,
   unfiledLaneSet,
 } from './lane-set-policy.ts';
 import type { CardRelocator, LaneProposalAgenda, LaneSetSource, LaneSetStore } from './ports.ts';
@@ -48,6 +49,11 @@ export type ReleaseLaneMergeOutcome =
 export type QuickToTestOutcome =
   | { readonly projectId: BoardProjectId; readonly added: true; readonly version: number }
   | { readonly projectId: BoardProjectId; readonly added: false; readonly problem: string };
+
+/** What the boot migration that writes out every lane's stage did to one project's set. */
+export type StageLanesOutcome =
+  | { readonly projectId: BoardProjectId; readonly staged: true; readonly version: number }
+  | { readonly projectId: BoardProjectId; readonly staged: false; readonly problem: string };
 
 /** What a card's history says when the merge moves it. */
 export const RELEASE_MERGE_REASON = `Released and To test are one lane now: ${RELEASED_TO_TEST_NAME}`;
@@ -176,6 +182,29 @@ export class LaneSetService implements LaneSetSource {
         if (version !== null) outcomes.push({ projectId, added: true, version });
       } catch (error) {
         outcomes.push({ projectId, added: false, problem: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return outcomes;
+  }
+
+  /**
+   * The boot migration that writes the stage of every lane stored without one ({@link stageLanes}): the
+   * stage its compatibility fields already describe, so no card moves and nothing behaves differently. A
+   * damaged set is refused by the store, reported, and the rest go on. Idempotent (a staged set does not
+   * match) and total. The owner is asked nothing.
+   */
+  async stageLanes(): Promise<readonly StageLanesOutcome[]> {
+    const ids = [UNFILED_PROJECT_ID, ...(await this.registry.projects()).map(project => project.id)];
+    const outcomes: StageLanesOutcome[] = [];
+    for (const projectId of ids) {
+      try {
+        const version = await this.store.transact<number | null>(projectId, current => {
+          const next = current === null ? null : stageLanes(current);
+          return next === null ? { result: null } : { next, result: next.version };
+        });
+        if (version !== null) outcomes.push({ projectId, staged: true, version });
+      } catch (error) {
+        outcomes.push({ projectId, staged: false, problem: error instanceof Error ? error.message : String(error) });
       }
     }
     return outcomes;
