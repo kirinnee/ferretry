@@ -482,6 +482,7 @@ export * from './send-ledger-join.ts';
 export * from './send-receipt.ts';
 export * from './session-activity.ts';
 export * from './session-screens.ts';
+export * from './shared-draft-client.ts';
 export * from './side-pane-preferences.ts';
 export * from './slash-commands.ts';
 export * from './stt/browser-recognition.ts';

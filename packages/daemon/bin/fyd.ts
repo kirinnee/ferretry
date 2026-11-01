@@ -399,6 +399,7 @@ import {
   readSessionResult,
 } from '../src/adapters/pack/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
+import { FileSharedDraftRepository } from '../src/adapters/shared-drafts/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
 import { releaseAcquired, terminationGate } from '../src/adapters/runtime/termination-gate.ts';
@@ -1003,6 +1004,7 @@ import {
   type PassTriggerTimers,
   PasteRuleService,
   PinService,
+  SharedDraftService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
   ProjectAdoption,
@@ -11931,6 +11933,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // next process would restart.
           { next: () => crypto.randomUUID() },
         ),
+        // The owner's unsent composer, live across their devices. Its own write queue for the same reason
+        // pins have one, and its own timer: a draft is written a second after it last changed.
+        sharedDrafts: new SharedDraftService(
+          new FilePinSessionDirectory(paths, stateFiles),
+          new FileSharedDraftRepository(paths, stateFiles, new KeyedSerialExecutor()),
+          clock,
+          {
+            after: (milliseconds, action) => {
+              const timer = setTimeout(action, milliseconds);
+              return { cancel: () => clearTimeout(timer) };
+            },
+          },
+        ),
         sessions: withRevive(
           withContext(
             withOutdated(sessions, { outdated: outdatedFor, now: () => Date.parse(clock.now()), ttlMs: 5_000 }),
@@ -13338,6 +13353,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // `localhost:1455` while it lives. It ends with the daemon, or the next Codex sign-in finds the port
   // taken by a flow nobody can see any more.
   cleanups.push(async () => await subsystems.harnessLogin.shutdown());
+  // A draft typed in the last second is still only in memory; it is written down before the daemon goes.
+  cleanups.push(async () => await subsystems.sharedDrafts.flush());
   // The FIRST self-check runs before the address is bound, so the daemon's very first health answer
   // is a measurement rather than an empty ledger — a supervisor that probes the moment the port opens
   // must not be told "no self-check has ever run" by a daemon that is about to run one. It is also

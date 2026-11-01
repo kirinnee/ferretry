@@ -28,6 +28,7 @@ import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
 import type { CopyPlanService } from '../../secure-copy/plans.ts';
 import type { PasteRuleService } from '../../secure-copy/rules.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
+import type { SharedDraftService } from '../../shared-drafts/index.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
 import type { SessionObserverHost } from '../../session/observer/host.ts';
@@ -90,6 +91,7 @@ import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
+import { sharedDraftRoutes } from './shared-drafts.ts';
 import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
 import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catalogs.ts';
 import { type CopyListing, type RuleProgramHomes, secureCopyRoutes } from './secure-copy.ts';
@@ -259,6 +261,8 @@ export interface MountedSubsystems {
   /** The owner's bulk "clear all from agent ferrets". */
   readonly agendaClearer: AgendaAgentClearer;
   readonly pins: PinService;
+  /** The owner's unsent composer, shared live between their own devices and never journaled. */
+  readonly sharedDrafts: SharedDraftService;
   /** The session read: what the fleet holds, and one session in full. */
   readonly sessions: SessionDirectorySubsystem;
   /** Which session an agent NAME addresses, for every route that takes a `:sessionId`. See
@@ -674,6 +678,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ),
         ...agendaClearRoutes(subsystems.agendaClearer),
         ...pinRoutes(subsystems.pins),
+        ...sharedDraftRoutes(subsystems.sharedDrafts),
         ...legacyTaskRoutes(subsystems.legacyTasks),
         // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed
         // literals are registered before the patterns beneath them.

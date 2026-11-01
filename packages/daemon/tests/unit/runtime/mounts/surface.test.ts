@@ -65,6 +65,7 @@ import {
   nameSubsystem,
   permissionSubsystem,
   pinService,
+  sharedDraftService,
   recommendSubsystem,
   secretSubsystem,
   sessionDirectory,
@@ -378,6 +379,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     enrolledDevices: async () => 0,
   },
   pins: pinService([]),
+  sharedDrafts: sharedDraftService([]),
   sessions: sessionDirectory([sessionView('s1')]),
   sessionAddresses: {
     has: id => id === 's1',
@@ -939,7 +941,8 @@ describe('the mounted daemon surface', () => {
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
       7 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
       9 + // the catalogs this machine publishes: list, make, change, delete, preview, add, publish, withdraw and export (docs/catalogs.md)
-      8; // the people a catalog is shared with: mint, list and end a share; list, rename, revoke a member, remove a browser or a catalog (docs/catalogs.md)
+      8 + // the people a catalog is shared with: mint, list and end a share; list, rename, revoke a member, remove a browser or a catalog (docs/catalogs.md)
+      2; // the shared draft: the owner's unsent composer, read and edited from any of their own devices (&F331)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -1233,6 +1236,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/agenda/clear-agents',
       'GET /v1/sessions/:sessionId/pins',
       'POST /v1/sessions/:sessionId/pins',
+      'GET /v1/sessions/:sessionId/shared-draft',
+      'POST /v1/sessions/:sessionId/shared-draft',
       'GET /v1/tasks',
       'GET /v1/sessions/:sessionId/tasks',
       'GET /v1/board',
