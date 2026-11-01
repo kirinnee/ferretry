@@ -263,7 +263,7 @@ async function withJourney(
 
 describe('the WebRTC carrier, in a real browser against a compiled daemon', () => {
   it(
-    'should carry the session page peer-to-peer, introduced by the relay, with no session bytes on the relay',
+    'should carry the session page peer-to-peer, introduced by the relay, with no session bytes on the relay [slow]',
     () =>
       withJourney(
         'peer-to-peer',
@@ -323,7 +323,7 @@ describe('the WebRTC carrier, in a real browser against a compiled daemon', () =
   );
 
   it(
-    'should fall back to the relay at the deadline when there is no peer-to-peer path, and say why',
+    'should fall back to the relay at the deadline when there is no peer-to-peer path, and say why [slow]',
     () =>
       withJourney('no-path', true, async ({ page, appOrigin, fingerprint, openedAt }) => {
         // The relay carries the page: WebRTC gathered nothing ICE could use and was abandoned.
