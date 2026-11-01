@@ -21,7 +21,12 @@ import {
   type PasteRuleList,
   PasteRuleListSchema,
   PasteRuleSchema,
+  type PasteRuleSettings,
+  PasteRuleSettingsSchema,
+  type PasteRuleSettingsView,
+  PasteRuleSettingsViewSchema,
 } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { z } from 'zod';
 import { targetRef } from './input-card.ts';
 
@@ -39,6 +44,38 @@ export async function addRule(client: CopyClient, rule: PasteRuleCreate): Promis
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(PasteRuleCreateSchema.parse(rule)),
+  });
+}
+
+/** What `GET /v1/copy-rules/settings` came to: the view, a daemon too old to have it, or why it could not be read. */
+export type CopySettingsRead =
+  | { readonly kind: 'view'; readonly view: PasteRuleSettingsView }
+  | { readonly kind: 'unsupported' }
+  | { readonly kind: 'failed'; readonly reason: string };
+
+/**
+ * The owner's secure-copy settings and the rules a program from their profile could satisfy. A route of its own: only a
+ * 404 means a daemon too old to have it (no setting, no badge, nothing to warn about); any other failure is said, so a
+ * hiccup never silently hides the setting and every badge.
+ */
+export async function readCopySettings(client: CopyClient): Promise<CopySettingsRead> {
+  try {
+    return { kind: 'view', view: await client.request(`${RULES_PATH}/settings`, PasteRuleSettingsViewSchema) };
+  } catch (cause) {
+    if (cause instanceof FyHttpError && cause.status === 404) return { kind: 'unsupported' };
+    return { kind: 'failed', reason: cause instanceof Error ? cause.message : String(cause) };
+  }
+}
+
+/**
+ * Changes the owner's secure-copy settings. Turning profile targets ON from a paired device needs a passkey for that
+ * act: the daemon answers with the step-up demand and the client's gate asks for it, then sends this again.
+ */
+export async function changeCopySettings(client: CopyClient, settings: PasteRuleSettings): Promise<PasteRuleSettings> {
+  return await client.request(`${RULES_PATH}/settings`, PasteRuleSettingsSchema, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(PasteRuleSettingsSchema.parse(settings)),
   });
 }
 

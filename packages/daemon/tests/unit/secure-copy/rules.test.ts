@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { COPY_MAX_RULES, type CopyPlanItem, type InputTargetFacts, type PasteRule } from '@ferretry/protocol';
+import {
+  COPY_MAX_RULES,
+  type CopyPlanItem,
+  type InputTargetFacts,
+  type PasteRule,
+  type PasteRuleSettings,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   CopyPlanService,
@@ -29,7 +35,7 @@ const settle = async (): Promise<void> => {
 
 function rules(options: { readonly unreadable?: boolean; readonly failWrites?: boolean } = {}) {
   const ms = { now: Date.parse('2026-10-31T12:00:00.000Z') };
-  const stored: { rules: readonly PasteRule[] | undefined } = { rules: undefined };
+  const stored: { rules: readonly PasteRule[] | undefined; settings?: PasteRuleSettings } = { rules: undefined };
   const warned: string[] = [];
   const disk = { failing: options.failWrites === true };
   let id = 0;
@@ -37,11 +43,14 @@ function rules(options: { readonly unreadable?: boolean; readonly failWrites?: b
     store: {
       read: async () => {
         if (options.unreadable === true) throw new Error('damaged');
-        return stored.rules;
+        return stored.rules === undefined
+          ? undefined
+          : { rules: stored.rules, settings: stored.settings ?? { allowProfileTargets: false } };
       },
       write: async next => {
         if (disk.failing) throw new Error('disk full');
-        stored.rules = next;
+        stored.rules = next.rules;
+        stored.settings = next.settings;
       },
     },
     clock: { now: () => ms.now },
@@ -517,5 +526,79 @@ describe('PasteRuleService and plans: what the security review found', () => {
     should(first.status).equal('fulfilled');
     should(second).match({ status: 'rejected', reason: { code: 'conflict' } });
     should(p.rules.list(OWNER)).have.length(1);
+  });
+});
+
+describe('PasteRuleService: the owner settings (profile targets)', () => {
+  /** No proved program: only the daemon's own profile reading (`ObserveResult.profileProgram`) names one. */
+  const IN_PROFILE = { ...AT_VERCEL, program: undefined } as InputTargetFacts;
+
+  it('should hold profile targets off by default, and off again when the store cannot be read', async () => {
+    const fresh = rules();
+    await fresh.service.load();
+    should(fresh.service.currentSettings(OWNER)).eql({ allowProfileTargets: false });
+    const damaged = rules({ unreadable: true });
+    await damaged.service.load();
+    should(damaged.service.currentSettings(OWNER)).eql({ allowProfileTargets: false });
+  });
+
+  it('should keep the setting beside the rules, and let only the owner read or change it', async () => {
+    const { service, stored } = rules();
+    await service.load();
+    await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL });
+
+    should(await service.changeSettings(OWNER, { allowProfileTargets: true })).eql({ allowProfileTargets: true });
+    should(stored.settings).eql({ allowProfileTargets: true });
+    should(stored.rules).have.length(1);
+    should(() => service.currentSettings(AGENT)).throw(/only the owner/u);
+    await should(service.changeSettings(AGENT, { allowProfileTargets: false })).be.rejectedWith(/only the owner/u);
+    should(stored.settings).eql({ allowProfileTargets: true });
+  });
+
+  it('should match a program proved only through the profile when, and only when, the owner allowed it', async () => {
+    const { service } = rules();
+    await service.load();
+    await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL });
+
+    should(service.reserve('s1', GH_COPY, IN_PROFILE, 'vercel')).be.undefined();
+    await service.changeSettings(OWNER, { allowProfileTargets: true });
+    should(service.reserve('s1', GH_COPY, IN_PROFILE, 'vercel')).not.be.undefined();
+    // Still in line mode only, never another program's profile entry, and never with no profile reading at all.
+    should(
+      service.reserve('s1', GH_COPY, { ...IN_PROFILE, canonical: false } as InputTargetFacts, 'vercel'),
+    ).be.undefined();
+    should(service.reserve('s1', GH_COPY, IN_PROFILE, 'gh')).be.undefined();
+    should(service.reserve('s1', GH_COPY, IN_PROFILE)).be.undefined();
+  });
+
+  it('should never let a profile program meet a rule for a password or code program, setting on or not (M1)', async () => {
+    const { service } = rules();
+    await service.load();
+    await service.changeSettings(OWNER, { allowProfileTargets: true });
+    for (const program of [
+      'sudo',
+      'su',
+      'doas',
+      'passwd',
+      'sudoedit',
+      'ssh',
+      'scp',
+      'vault',
+      'Sudo',
+      'SSH',
+      'PassWd',
+    ]) {
+      await service.create(OWNER, { from: GH, to: { kind: 'terminal', program } });
+      should(service.reserve('s1', GH_COPY, IN_PROFILE, program)).be.undefined();
+    }
+  });
+
+  it('should leave the setting as it was when the store cannot save the change', async () => {
+    const { service, stored, disk } = rules();
+    await service.load();
+    disk.failing = true;
+    await should(service.changeSettings(OWNER, { allowProfileTargets: true })).be.rejectedWith(/could not save/u);
+    should(service.currentSettings(OWNER)).eql({ allowProfileTargets: false });
+    should(stored.settings).be.undefined();
   });
 });

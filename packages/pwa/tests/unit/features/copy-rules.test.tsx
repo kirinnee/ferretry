@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { PasteRule, PasteRuleCreate } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { CopyRulesCard } from '../../../src/features/secure-copy/copy-rules-card.tsx';
 import { CopyRulesSurface } from '../../../src/features/secure-copy/copy-rules-surface.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
@@ -123,6 +124,59 @@ describe('the pre-approval rules card', () => {
     expect(q('[data-copy-rule-form]')).toBeNull();
   });
 
+  it('marks a rule into a program from the owner profile, and says it asks while that is not allowed', async () => {
+    const off = await card({ rules: [RULE], profileRules: [RULE.id], settings: { allowProfileTargets: false } });
+    expect(off.q('[data-copy-rule-profile]')?.textContent).toBe(
+      'your profile — a ferret could swap this program · asks you while profile programs are not allowed',
+    );
+    const on = await card({ rules: [RULE], profileRules: [RULE.id], settings: { allowProfileTargets: true } });
+    expect(on.q('[data-copy-rule-profile]')?.textContent).toBe('your profile — a ferret could swap this program');
+    const system = await card({ rules: [RULE], profileRules: [], settings: { allowProfileTargets: true } });
+    expect(system.q('[data-copy-rule-profile]')).toBeNull();
+  });
+
+  it('turns profile programs on and off with the setting, which says the risk', async () => {
+    const changed: unknown[] = [];
+    const { q, text } = await card({
+      settings: { allowProfileTargets: false },
+      onSettings: settings => {
+        changed.push(settings);
+        return true;
+      },
+    });
+    const box = must(q('[data-copy-profile-targets]') as HTMLInputElement | null, 'the setting');
+
+    expect(box.checked).toBe(false);
+    expect(text()).toContain('Copy rules may target programs in my own profile');
+    expect(text()).toContain('could swap that program for its own');
+    await click(box);
+    expect(changed).toEqual([{ allowProfileTargets: true }]);
+    expect((await card()).q('[data-copy-profile-targets]')).toBeNull();
+  });
+
+  it('warns on an existing rule into a shell or an interpreter, and only there', async () => {
+    const shell = { ...RULE, id: 'c'.repeat(32), to: { kind: 'terminal', program: 'pwsh' } } as PasteRule;
+    const { q } = await card({ rules: [RULE, shell] });
+
+    expect(q(`[data-copy-rule="${shell.id}"] [data-copy-rule-row-runs-anything]`)?.textContent).toContain(
+      'runs whatever it reads',
+    );
+    expect(q(`[data-copy-rule="${RULE.id}"] [data-copy-rule-row-runs-anything]`)).toBeNull();
+  });
+
+  it('warns that a shell or an interpreter runs whatever it reads', async () => {
+    const { q } = await card();
+    await click(q('[data-copy-rule-add-open]'));
+    await typeInto(q('[data-copy-rule-to]'), 'psql');
+    expect(q('[data-copy-rule-runs-anything]')).toBeNull();
+    for (const program of ['bash', 'python3.12', 'node']) {
+      await typeInto(q('[data-copy-rule-to]'), program);
+      expect(q('[data-copy-rule-runs-anything]')?.textContent).toContain('runs whatever it reads');
+    }
+    await select(q('[data-copy-rule-to-kind]'), 'secret');
+    expect(q('[data-copy-rule-runs-anything]')).toBeNull();
+  });
+
   it('says it is saving while busy', async () => {
     const { q } = await card({ busy: true });
     await click(q('[data-copy-rule-add-open]'));
@@ -168,8 +222,10 @@ describe('the pre-approval rules surface', () => {
 
     expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
       'GET /v1/copy-rules',
+      'GET /v1/copy-rules/settings',
       'POST /v1/copy-rules',
       'GET /v1/copy-rules',
+      'GET /v1/copy-rules/settings',
     ]);
     expect(q(`[data-copy-rule="${RULE.id}"]`)).not.toBeNull();
   });
@@ -188,6 +244,57 @@ describe('the pre-approval rules surface', () => {
 
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(2);
     expect(text()).toContain('the daemon is gone');
+  });
+
+  it('reads the setting and the badges from their own route, and changes the setting through it', async () => {
+    let allowed = false;
+    const { calls, q } = await surface(call => {
+      if (call.method === 'PUT') {
+        allowed = true;
+        return { allowProfileTargets: true };
+      }
+      if (call.path === '/v1/copy-rules/settings')
+        return { settings: { allowProfileTargets: allowed }, profileRules: [RULE.id] };
+      return { rules: [RULE] };
+    });
+    expect(q('[data-copy-rule-profile]')).not.toBeNull();
+    await click(q('[data-copy-profile-targets]'));
+    await settle();
+
+    expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
+      'GET /v1/copy-rules',
+      'GET /v1/copy-rules/settings',
+      'PUT /v1/copy-rules/settings',
+      'GET /v1/copy-rules',
+      'GET /v1/copy-rules/settings',
+    ]);
+    expect((q('[data-copy-profile-targets]') as HTMLInputElement | null)?.checked).toBe(true);
+  });
+
+  it('shows no setting and no badge for a daemon too old to have them (a 404), and still lists its rules', async () => {
+    const { q } = await surface(call => {
+      if (call.path === '/v1/copy-rules/settings') throw new FyHttpError('not found', 404, 'not_found');
+      return { rules: [RULE] };
+    });
+
+    expect(q(`[data-copy-rule="${RULE.id}"]`)).not.toBeNull();
+    expect(q('[data-copy-profile-targets]')).toBeNull();
+    expect(q('[data-copy-rule-profile]')).toBeNull();
+    expect(q('[data-copy-settings-error]')).toBeNull();
+  });
+
+  it('says so when the setting cannot be read for any other reason, never hiding it quietly', async () => {
+    for (const failure of [new FyHttpError('the daemon fell over', 500, 'internal'), new Error('relay down')]) {
+      const { q } = await surface(call => {
+        if (call.path === '/v1/copy-rules/settings') throw failure;
+        return { rules: [RULE] };
+      });
+
+      expect(q(`[data-copy-rule="${RULE.id}"]`)).not.toBeNull();
+      expect(q('[data-copy-settings-error]')?.textContent).toContain(
+        `could not check which rules a program in your own profile could satisfy, so no rule is marked: ${failure.message}`,
+      );
+    }
   });
 
   it('says a failed read is a failed read, never "no rules"', async () => {

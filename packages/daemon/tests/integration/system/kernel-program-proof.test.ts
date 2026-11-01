@@ -129,6 +129,13 @@ describe('the Linux stranger scan on the real /proc', () => {
     should(await PROC_FILES.executable(process.pid)).equal(process.execPath);
     should(await PROC_FILES.replaceable('/usr/bin/env')).be.false();
     should(await PROC_FILES.device('/dev/null')).be.above(0);
+    should((await PROC_FILES.name(process.pid)).trim()).not.be.empty();
+    const child = Bun.spawn(['sleep', '5'], { stdout: 'ignore' });
+    try {
+      should(await PROC_FILES.children(process.pid)).containEql(child.pid);
+    } finally {
+      child.kill();
+    }
   });
 
   it.skipIf(!linux)(
@@ -154,6 +161,8 @@ describe('strangerHolds: who else holds the terminal', () => {
     readonly parent?: number;
     readonly started?: number;
     readonly runs?: string;
+    readonly comm?: string;
+    readonly kids?: readonly number[];
   }
 
   const files = (procs: Record<number, Proc>): ProcFiles => ({
@@ -184,10 +193,19 @@ describe('strangerHolds: who else holds the terminal', () => {
     },
     executable: async pid => procs[pid]?.runs ?? (await Promise.reject(new Error('EACCES'))),
     replaceable: async path => !path.startsWith('/usr/lib/'),
+    name: async pid => procs[pid]?.comm ?? (await Promise.reject(new Error('ENOENT'))),
+    children: async pid => procs[pid]?.kids ?? (await Promise.reject(new Error('ENOENT'))),
   });
   const shell: Proc = { fds: { '0': { link: TTY, device: DEVICE } }, uids: [ME, ME], tty: DEVICE };
-  const manager: Proc = { fds: {}, uids: [ME, ME], runs: '/usr/lib/systemd/systemd', started: 798, parent: 1 };
-  const helper: Proc = { hidden: true, uids: [ME, ME], parent: 20, started: 801 };
+  const manager: Proc = {
+    fds: {},
+    uids: [ME, ME],
+    runs: '/usr/lib/systemd/systemd',
+    started: 798,
+    kids: [21],
+    parent: 1,
+  };
+  const helper: Proc = { hidden: true, uids: [ME, ME], parent: 20, started: 801, comm: '(sd-pam)' };
   const scan = async (procs: Record<number, Proc>, account: number | undefined = ME) =>
     await strangerHolds(files(procs), TTY, account, 1);
 
@@ -235,6 +253,29 @@ describe('strangerHolds: who else holds the terminal', () => {
       { 21: helper },
     ] as Record<number, Proc>[])
       should(await scan(odd)).be.undefined();
+    // R1: only the manager's EARLIEST child, and only under its own name. A second hidden child of the manager that
+    // started within the same first second stays unknown, and so does one that took the name.
+    const second: Proc = { ...helper, started: 820 };
+    should(await scan({ 10: shell, 20: { ...manager, kids: [21, 22] }, 21: helper, 22: second })).be.undefined();
+    should(
+      await scan({ 10: shell, 20: { ...manager, kids: [21, 22] }, 21: helper, 22: { fds: {}, started: 801 } }),
+    ).be.undefined();
+    should(
+      await scan({
+        10: shell,
+        20: { ...manager, kids: [21, 22] },
+        21: { ...helper, started: 830 },
+        22: { fds: {}, started: 801 },
+      }),
+    ).be.undefined();
+    should(
+      await scan({ 10: shell, 20: { ...manager, kids: [21, 22] }, 21: helper, 22: { fds: {}, started: 900 } }),
+    ).be.false();
+    should(await scan({ 10: shell, 20: { ...manager, kids: [21, 23] }, 21: helper })).be.false();
+    should(await scan({ 10: shell, 20: manager, 21: { ...helper, comm: 'sd-pam' } })).be.undefined();
+    should(await scan({ 10: shell, 20: manager, 21: { ...helper, comm: undefined } })).be.undefined();
+    should(await scan({ 10: shell, 20: { ...manager, kids: [22] }, 21: helper })).be.undefined();
+    should(await scan({ 10: shell, 20: { ...manager, kids: undefined }, 21: helper })).be.undefined();
   });
 
   it('should say held elsewhere over unknown, and leave the daemon itself out', async () => {

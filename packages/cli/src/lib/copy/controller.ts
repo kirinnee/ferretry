@@ -7,7 +7,12 @@ import {
   CopyRouteToSchema,
   type PasteRule,
   type PasteRuleCreate,
+  type PasteRuleList,
+  type PasteRuleSettingsView,
+  RUNS_WHAT_IT_READS_WARNING,
+  runsWhatItReads,
 } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { showUntrusted } from '../input/render.ts';
 import type { CopyPorts } from './ports.ts';
 
@@ -71,7 +76,13 @@ const toText = (to: CopyRouteTo): string =>
       ? `secret:${to.name}`
       : `browser:${to.origin}`;
 
-function renderRule(rule: PasteRule): string {
+/** What a rule into a program from the owner's own profile is labelled with (docs/secure-copy.md). */
+const PROFILE_RULE_BADGE = '[your profile — a ferret could swap this program]';
+
+/** What a rule into a shell or an interpreter is marked with. */
+const RUNS_ANYTHING_MARK = '[runs whatever it reads]';
+
+function renderRule(rule: PasteRule, inProfile = false): string {
   return [
     rule.id.slice(0, 8),
     `${fromText(rule.from)} → ${toText(rule.to)}`,
@@ -79,7 +90,28 @@ function renderRule(rule: PasteRule): string {
     rule.remaining === undefined ? 'no count' : `${String(rule.remaining)} left`,
     rule.expiresAt === undefined ? 'no expiry' : `until ${rule.expiresAt}`,
     `used ${String(rule.used)}`,
+    ...(rule.to.kind === 'terminal' && runsWhatItReads(rule.to.program) ? [RUNS_ANYTHING_MARK] : []),
+    ...(inProfile ? [PROFILE_RULE_BADGE] : []),
   ].join('  ');
+}
+
+/**
+ * The rules as `fy copy rules ls` prints them: whether profile programs are allowed, then one rule a line. `view` is
+ * absent from a daemon too old to have the setting: then nothing is said about it.
+ */
+function renderRules(list: PasteRuleList, view: PasteRuleSettingsView | undefined): string {
+  const profile = new Set(view?.profileRules ?? []);
+  const setting =
+    view === undefined
+      ? []
+      : [
+          `programs in your own profile: ${view.settings.allowProfileTargets ? 'allowed' : 'not allowed (they ask you)'}`,
+        ];
+  const rules =
+    list.rules.length === 0
+      ? ['no pastes are approved in advance']
+      : list.rules.map(rule => renderRule(rule, profile.has(rule.id)));
+  return [...setting, ...rules].join('\n');
 }
 
 function renderCopy(copy: CopyMeta): string {
@@ -121,14 +153,28 @@ export class CopyController {
 
   async rules(options: CopyCommandOptions): Promise<void> {
     this.#refuseFerret();
-    const list = await this.ports.gateway.rules();
+    const [list, view] = await Promise.all([this.ports.gateway.rules(), this.#ruleSettings()]);
     this.ports.out.success(
       options.json === true
-        ? JSON.stringify(list, null, 2)
-        : list.rules.length === 0
-          ? 'no pastes are approved in advance'
-          : list.rules.map(renderRule).join('\n'),
+        ? JSON.stringify(view === undefined ? list : { ...list, ...view }, null, 2)
+        : renderRules(list, view),
     );
+  }
+
+  /**
+   * The settings and the profile marks, or `undefined` from a daemon too old to have them (a 404 only). Any other
+   * failure is said on stderr, so the listing never silently drops every mark.
+   */
+  async #ruleSettings(): Promise<PasteRuleSettingsView | undefined> {
+    try {
+      return await this.ports.gateway.ruleSettings();
+    } catch (cause) {
+      if (!(cause instanceof FyHttpError && cause.status === 404))
+        this.ports.out.diagnostic(
+          `warning: could not check which rules a program in your own profile could satisfy, so none is marked: ${cause instanceof Error ? cause.message : String(cause)}`,
+        );
+      return undefined;
+    }
   }
 
   async addRule(options: CopyRuleOptions): Promise<void> {
@@ -145,6 +191,8 @@ export class CopyController {
       ...(count === undefined ? {} : { count }),
       ...(options.expires === undefined ? {} : { expiresInSeconds: parseLifetime(options.expires) }),
     };
+    if (request.to.kind === 'terminal' && runsWhatItReads(request.to.program))
+      this.ports.out.diagnostic(`warning: ${request.to.program}: ${RUNS_WHAT_IT_READS_WARNING}`);
     const rule = await this.ports.gateway.addRule(request);
     this.ports.out.success(
       options.json === true ? JSON.stringify(rule, null, 2) : `Approved in advance: ${renderRule(rule)}`,

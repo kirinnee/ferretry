@@ -7,8 +7,16 @@
  * typed is hidden. Nothing here is a value: a rule is a route, a count and an end.
  */
 
-import type { CopyRouteFrom, CopyRouteTo, PasteRule, PasteRuleCreate } from '@ferretry/protocol';
-import { Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import {
+  type CopyRouteFrom,
+  type CopyRouteTo,
+  type PasteRule,
+  type PasteRuleCreate,
+  type PasteRuleSettings,
+  RUNS_WHAT_IT_READS_WARNING,
+  runsWhatItReads,
+} from '@ferretry/protocol';
+import { Plus, ShieldCheck, Trash2, TriangleAlert } from 'lucide-react';
 import { type FormEvent, type ReactNode, useId, useState } from 'react';
 import { fromWords, ruleFromForm, ruleLimits, toWords } from '../../lib/secure-copy.ts';
 
@@ -21,7 +29,21 @@ export interface CopyRulesCardProps {
   readonly error?: string | null;
   readonly onAdd: (rule: PasteRuleCreate) => Write;
   readonly onRemove: (id: string) => Write;
+  /** The owner's secure-copy settings; absent before a daemon says them. */
+  readonly settings?: PasteRuleSettings;
+  /** The rules whose terminal program this daemon finds only in the owner's own profile. */
+  readonly profileRules?: readonly string[];
+  readonly onSettings?: (settings: PasteRuleSettings) => Write;
+  /** Why the setting and the badges could not be read: said in their place, never left blank. */
+  readonly settingsError?: string;
 }
+
+/** What a rule into a program from the owner's profile is labelled with (docs/secure-copy.md). */
+const PROFILE_RULE_BADGE = 'your profile — a ferret could swap this program';
+
+/** What turning on programs in the owner's own profile means, said where the switch is. */
+const PROFILE_TARGETS_HELP =
+  'A rule can then paste into a program from your own Nix profile (~/.nix-profile), not only one the system installed. Any ferret runs as you and can change your profile, so it could swap that program for its own. Turning this on from another device asks for your passkey.';
 
 const INPUT = 'kt-input min-h-[44px] w-full rounded-control border border-border bg-surface-2 px-2 text-fg';
 
@@ -71,7 +93,7 @@ const TO_KINDS: readonly {
  * one for a program installed in their own folder, which will always ask.
  */
 const TERMINAL_RULE_HINT =
-  'Only a program installed by the system (/usr/bin, a system profile) is proved, so only it pastes without asking. One from your own folder (~/.nix-profile, ~/bin) or a script always asks.';
+  'Only a program installed by the system (/usr/bin, a system profile) is proved, so only it pastes without asking. One from your own profile (~/.nix-profile) does too only if you allow programs in your own profile; one from ~/bin, or a script, always asks.';
 
 function AddRuleForm({
   busy,
@@ -164,17 +186,30 @@ function AddRuleForm({
           {...(toKind === 'terminal' ? { hint: TERMINAL_RULE_HINT } : {})}
         >
           {id => (
-            <input
-              id={id}
-              className={`${INPUT} mono`}
-              value={to}
-              placeholder={TO_KINDS.find(kind => kind.value === toKind)?.placeholder}
-              autoCapitalize="off"
-              autoComplete="off"
-              spellCheck={false}
-              data-copy-rule-to=""
-              onChange={event => setTo(event.target.value)}
-            />
+            <>
+              <input
+                id={id}
+                className={`${INPUT} mono`}
+                value={to}
+                placeholder={TO_KINDS.find(kind => kind.value === toKind)?.placeholder}
+                autoCapitalize="off"
+                autoComplete="off"
+                spellCheck={false}
+                data-copy-rule-to=""
+                onChange={event => setTo(event.target.value)}
+              />
+              {/* Right under the field, before the help line: a shell or interpreter runs whatever it reads. */}
+              {toKind === 'terminal' && runsWhatItReads(to) && (
+                <p
+                  role="status"
+                  className="m-0 flex items-start gap-1.5 text-meta font-medium text-warn"
+                  data-copy-rule-runs-anything=""
+                >
+                  <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  {RUNS_WHAT_IT_READS_WARNING}
+                </p>
+              )}
+            </>
           )}
         </Field>
       </div>
@@ -224,10 +259,14 @@ function AddRuleForm({
 function RuleRow({
   rule,
   busy,
+  inProfile,
+  profileAllowed,
   onRemove,
 }: {
   readonly rule: PasteRule;
   readonly busy: boolean;
+  readonly inProfile: boolean;
+  readonly profileAllowed: boolean;
   readonly onRemove: CopyRulesCardProps['onRemove'];
 }) {
   return (
@@ -247,6 +286,24 @@ function RuleRow({
           {ruleLimits(rule)}
           {rule.plan === undefined ? '' : ' · from a ferret’s plan'}
         </p>
+        {rule.to.kind === 'terminal' && runsWhatItReads(rule.to.program) && (
+          <p
+            className="m-0 flex items-start gap-1.5 text-meta font-medium text-warn"
+            data-copy-rule-row-runs-anything=""
+          >
+            <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+            {RUNS_WHAT_IT_READS_WARNING}
+          </p>
+        )}
+        {inProfile && (
+          <p className="m-0 flex items-start gap-1.5 text-meta text-warn" data-copy-rule-profile="">
+            <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>
+              {PROFILE_RULE_BADGE}
+              {profileAllowed ? '' : ' · asks you while profile programs are not allowed'}
+            </span>
+          </p>
+        )}
       </div>
       <button
         type="button"
@@ -261,7 +318,55 @@ function RuleRow({
   );
 }
 
-export function CopyRulesCard({ rules, busy = false, error = null, onAdd, onRemove }: CopyRulesCardProps) {
+/** "Copy rules may target programs in my own profile": off by default, and turning it on is a loosening. */
+function ProfileTargetsSetting({
+  settings,
+  busy,
+  onSettings,
+}: {
+  readonly settings: PasteRuleSettings;
+  readonly busy: boolean;
+  readonly onSettings: NonNullable<CopyRulesCardProps['onSettings']>;
+}) {
+  const id = useId();
+  return (
+    <div
+      className="flex items-start gap-3 rounded-control border border-border bg-surface-2 p-3"
+      data-copy-profile-setting=""
+    >
+      <input
+        id={id}
+        type="checkbox"
+        className="mt-1 h-5 w-5 shrink-0"
+        checked={settings.allowProfileTargets}
+        disabled={busy}
+        aria-describedby={`${id}-help`}
+        data-copy-profile-targets=""
+        onChange={event => void onSettings({ ...settings, allowProfileTargets: event.target.checked })}
+      />
+      <div className="flex min-w-0 flex-col gap-1">
+        <label htmlFor={id} className="text-ui font-medium text-fg">
+          Copy rules may target programs in my own profile
+        </label>
+        <p id={`${id}-help`} className="m-0 text-meta leading-base text-muted">
+          {PROFILE_TARGETS_HELP}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function CopyRulesCard({
+  rules,
+  busy = false,
+  error = null,
+  onAdd,
+  onRemove,
+  settings,
+  profileRules = [],
+  onSettings,
+  settingsError,
+}: CopyRulesCardProps) {
   const [adding, setAdding] = useState(false);
   return (
     <section
@@ -283,9 +388,25 @@ export function CopyRulesCard({ rules, busy = false, error = null, onAdd, onRemo
       ) : (
         <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Pastes approved in advance">
           {rules.map(rule => (
-            <RuleRow key={rule.id} rule={rule} busy={busy} onRemove={onRemove} />
+            <RuleRow
+              key={rule.id}
+              rule={rule}
+              busy={busy}
+              inProfile={profileRules.includes(rule.id)}
+              profileAllowed={settings?.allowProfileTargets === true}
+              onRemove={onRemove}
+            />
           ))}
         </ul>
+      )}
+      {settingsError !== undefined && (
+        <p role="alert" className="m-0 text-ui text-warn" data-copy-settings-error="">
+          Ferretry could not check which rules a program in your own profile could satisfy, so no rule is marked:{' '}
+          {settingsError}
+        </p>
+      )}
+      {settings !== undefined && onSettings !== undefined && (
+        <ProfileTargetsSetting settings={settings} busy={busy} onSettings={onSettings} />
       )}
       {error !== null && (
         <p role="alert" className="m-0 text-ui text-err" data-testid="copy-rules-error">

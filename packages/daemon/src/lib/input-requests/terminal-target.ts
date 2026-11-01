@@ -6,6 +6,7 @@ import { digestFacts, digestLine } from './digest.ts';
 import type {
   CodeProgramPort,
   ObserveResult,
+  ProfileProgram,
   ProgramProofPort,
   ProvenProgram,
   TerminalInputTargetPort,
@@ -53,6 +54,7 @@ type Sight =
       readonly guard: WriteGuard;
       readonly names: readonly string[];
       readonly codeProgram?: boolean;
+      readonly profileProgram?: ProfileProgram;
     }
   | { readonly ok: false; readonly reason: 'target_gone' };
 
@@ -168,6 +170,7 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
           facts: sight.facts,
           names: sight.names,
           ...(sight.codeProgram ? { codeProgram: true as const } : {}),
+          ...(sight.profileProgram === undefined ? {} : { profileProgram: sight.profileProgram }),
         }
       : sight;
   }
@@ -225,6 +228,7 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     const members = listed === undefined ? [] : foregroundPids(listed);
     const alone = (await this.proofs?.heldElsewhere(first.tty).catch(() => undefined)) === false;
     const group = alone ? await this.proveGroup(foreground.pid, members) : undefined;
+    const profile = alone && group === undefined ? await this.proveProfileGroup(foreground.pid, members) : undefined;
     const programs = this.programs;
     const codeProgram =
       alone &&
@@ -262,6 +266,7 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
       facts,
       guard: { panePid: sighting.pid, command: last.command, cursorRow },
       codeProgram,
+      ...(profile === undefined ? {} : { profileProgram: profile }),
       names: [...new Set([key, located.name, located.id].filter((name): name is string => name !== undefined))],
     };
   }
@@ -291,6 +296,31 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     };
   }
 
+  /**
+   * The foreground group proved with the owner's own profile allowed: every member proved, by a root folder or setuid
+   * as above or through the profile, all running ONE program, at least one of them only through the profile.
+   * `undefined` otherwise. Asked only when {@link proveGroup} proved nothing.
+   */
+  private async proveProfileGroup(leader: number, members: readonly number[]): Promise<ProfileProgram | undefined> {
+    const proofs = this.proofs;
+    if (proofs?.proveProfile === undefined || !members.includes(leader)) return undefined;
+    const proveProfile = proofs.proveProfile.bind(proofs);
+    const proved = await Promise.all(
+      members.map(async pid => {
+        const rooted = await proofs.prove(pid).catch(() => undefined);
+        if (rooted !== undefined) return { name: rooted.name, path: undefined };
+        const profiled = await proveProfile(pid).catch(() => undefined);
+        return profiled === undefined ? undefined : { name: profiled.name, path: profiled.path };
+      }),
+    );
+    const first = proved[0];
+    if (first === undefined || proved.some(member => member === undefined || member.name !== first.name))
+      return undefined;
+    const path = proved.find(member => member?.path !== undefined)?.path;
+    const name = plain(first.name, 64);
+    return path === undefined || name === '' ? undefined : { name, path: plain(path, 512) };
+  }
+
   async type(
     sessionId: string,
     target: InputTarget,
@@ -306,6 +336,13 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     // A code kept visible because a code program held the terminal: another member joining the foreground group (a
     // reader the ferret started) is no change to the facts, so the program is proved again here.
     if (options?.codeProgram === true && fresh.codeProgram !== true) return 'target_changed';
+    // A rule that pasted on the strength of a program from the owner's profile types only while that program holds it.
+    const profile = options?.profileProgram;
+    if (
+      profile !== undefined &&
+      (fresh.profileProgram?.name !== profile.name || fresh.profileProgram.path !== profile.path)
+    )
+      return 'target_changed';
     const { guard } = fresh;
     if (!PINNABLE_COMMAND.test(guard.command)) return 'target_changed';
     const paneId = fresh.facts.paneProof.paneId;

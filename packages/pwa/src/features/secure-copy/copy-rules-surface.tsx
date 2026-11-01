@@ -4,10 +4,24 @@
  * stated refusal rather than "no rules".
  */
 
-import type { PasteRule, PasteRuleCreate } from '@ferretry/protocol';
+import type {
+  PasteRule,
+  PasteRuleCreate,
+  PasteRuleList,
+  PasteRuleSettings,
+  PasteRuleSettingsView,
+} from '@ferretry/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { addRule, type CopyClient, listRules, removeRule } from '../../lib/secure-copy.ts';
+import {
+  addRule,
+  changeCopySettings,
+  type CopyClient,
+  listRules,
+  type CopySettingsRead,
+  readCopySettings,
+  removeRule,
+} from '../../lib/secure-copy.ts';
 import { CopyRulesCard } from './copy-rules-card.tsx';
 
 export type CopyClientFactory = (connection: DaemonConnection) => Promise<CopyClient>;
@@ -15,7 +29,26 @@ export type CopyClientFactory = (connection: DaemonConnection) => Promise<CopyCl
 interface Loaded {
   readonly daemonId: DaemonConnection['daemonId'];
   readonly rules: readonly PasteRule[];
+  /** Absent from a daemon too old to have the setting: no switch and no badge are shown. */
+  readonly settings?: PasteRuleSettingsView;
+  /** Why the setting and the badges could not be read, when that was not "an older daemon". */
+  readonly settingsError?: string;
 }
+
+/** What the screen holds from one read of the rules and one of the settings. */
+const loadedFrom = (
+  daemonId: DaemonConnection['daemonId'],
+  list: PasteRuleList,
+  settings: CopySettingsRead,
+): Loaded => ({
+  daemonId,
+  rules: list.rules,
+  ...(settings.kind === 'view' ? { settings: settings.view } : {}),
+  ...(settings.kind === 'failed' ? { settingsError: settings.reason } : {}),
+});
+
+/** Both reads, side by side. */
+const readAll = async (client: CopyClient) => await Promise.all([listRules(client), readCopySettings(client)] as const);
 
 const message = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
@@ -43,10 +76,10 @@ export function CopyRulesSurface({
     setFailure(null);
     void createClient(connection)
       .then(async next => {
-        const { rules } = await listRules(next);
+        const [list, settings] = await readAll(next);
         if (!current) return;
         setClient(next);
-        setLoaded({ daemonId: connection.daemonId, rules });
+        setLoaded(loadedFrom(connection.daemonId, list, settings));
       })
       .catch(cause => {
         if (current) setFailure({ daemonId: connection.daemonId, reason: message(cause) });
@@ -64,7 +97,7 @@ export function CopyRulesSurface({
       setError(null);
       try {
         await action(client);
-        setLoaded({ daemonId: connection.daemonId, rules: (await listRules(client)).rules });
+        setLoaded(loadedFrom(connection.daemonId, ...(await readAll(client))));
         return true;
       } catch (cause) {
         setError(message(cause));
@@ -78,6 +111,10 @@ export function CopyRulesSurface({
 
   const add = useCallback((rule: PasteRuleCreate) => write(next => addRule(next, rule)), [write]);
   const remove = useCallback((id: string) => write(next => removeRule(next, id)), [write]);
+  const changeSettings = useCallback(
+    (settings: PasteRuleSettings) => write(next => changeCopySettings(next, settings)),
+    [write],
+  );
 
   if (failure !== null && failure.daemonId === connection.daemonId)
     return (
@@ -96,5 +133,18 @@ export function CopyRulesSurface({
       </section>
     );
 
-  return <CopyRulesCard rules={loaded.rules} busy={busy} error={error} onAdd={add} onRemove={remove} />;
+  return (
+    <CopyRulesCard
+      rules={loaded.rules}
+      {...(loaded.settings === undefined
+        ? {}
+        : { settings: loaded.settings.settings, profileRules: loaded.settings.profileRules })}
+      {...(loaded.settingsError === undefined ? {} : { settingsError: loaded.settingsError })}
+      busy={busy}
+      error={error}
+      onAdd={add}
+      onRemove={remove}
+      onSettings={changeSettings}
+    />
+  );
 }

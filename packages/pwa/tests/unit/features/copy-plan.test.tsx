@@ -46,6 +46,23 @@ const card = async (plan: CopyPlan, onAnswer: (items: readonly number[]) => Prom
 };
 
 describe('the paste plan card', () => {
+  it('warns on a planned paste into a shell or an interpreter, and only there', async () => {
+    const plan: CopyPlan = {
+      ...PLAN,
+      items: [
+        { ...(PLAN.items[0] as CopyPlan['items'][number]), to: { kind: 'terminal', program: 'bash' } },
+        ...PLAN.items,
+      ],
+    };
+    const { view } = await card(plan, async () => 'ok');
+    const warned = [...view.container.querySelectorAll('[data-copy-plan-item]')].map(
+      item => item.querySelector('[data-copy-plan-runs-anything]')?.textContent ?? '',
+    );
+
+    expect(warned[0]).toContain('runs whatever it reads');
+    expect(warned.slice(1)).toEqual(['', '']);
+  });
+
   it("lists each planned route with the ferret's words, all ticked, and says until when", async () => {
     const { q, text } = await card(PLAN, async () => 'ok');
 

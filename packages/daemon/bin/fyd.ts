@@ -10,7 +10,7 @@ import {
   writeSync,
 } from 'node:fs';
 import { mkdir, realpath, rm, stat } from 'node:fs/promises';
-import { hostname, tmpdir, userInfo } from 'node:os';
+import { homedir, hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   AGENDA_ENV,
@@ -359,6 +359,7 @@ import {
   WorkerLoopWatchdog,
   type WorkerProbeReport,
   XvfbDisplay,
+  accountName,
 } from '../src/adapters/index.ts';
 import {
   CatalogPrices,
@@ -523,6 +524,7 @@ import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import { ExecutableCodePrograms } from '../src/adapters/system/executable-code-programs.ts';
 import { KernelProgramProof } from '../src/adapters/system/kernel-program-proof.ts';
+import { machineProgramHomes } from '../src/adapters/system/profile-program.ts';
 import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
 import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader.ts';
 import {
@@ -12048,6 +12050,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           copies: { list: sessionId => secureCopies.list(sessionId) },
           rules: pasteRules,
           plans: copyPlans,
+          homes: machineProgramHomes(
+            homedir(),
+            accountName(() => userInfo().username),
+            process.getuid?.(),
+          ),
         },
         browserProxy: {
           tester: new BrowserProxyTester({

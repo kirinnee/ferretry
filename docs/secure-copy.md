@@ -232,6 +232,53 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
 - **The rules file** (`<state>/secure-copy/rules.json`) holds routes and counts, never a value. One that cannot
   be read is NO rules: every paste then asks the owner.
 
+## Programs in your own profile
+
+Settings › Secure copy › "Copy rules may target programs in my own profile" (`allowProfileTargets`, owner decision
+!A182). **Off** unless you turn it on.
+
+- **The risk, plainly:** every process running as you, so every ferret, can change your profile. `~/.nix-profile`
+  and the generations behind it are links your account owns, and anyone may add a path to the Nix store. A ferret can
+  therefore put a program of its own in your profile under ANY name a rule of yours could name, and a rule for that
+  name would then paste into it without asking you. That covers every rule marked "your profile" below, including
+  one whose program is not in your profile yet.
+- **Which rules it can reach, and which never:** only a `terminal:<program>` rule whose program **no
+  root-controlled folder holds** (`/usr/bin`, `/bin`, a system profile, …; an entry your account could replace does
+  not count), and never one for a password or code program (sudo, sudoedit, su, doas, passwd, ssh, scp, sftp, mosh,
+  and the aws, gcloud, az and vault CLIs). So a rule for `/usr/bin/gh`, `sudo` or `ssh` is still met only by the
+  root-placed program, setting on or off: a fake `sudo` in your profile is never proved. This is checked when the
+  terminal is looked at, with the same check the badge uses.
+- **How the program is proved:** the entry `~/.nix-profile/bin/<program>` is walked one part at a time, every link on
+  the way must stay inside the profile chain (`~/.nix-profile`, `~/.local/state/nix/profiles`,
+  `/nix/var/nix/profiles/per-user/<you>`, the store), and the walk must end at the very store file every process
+  reading the terminal runs. Everything else still holds: every process of the foreground group proved, line mode,
+  no process of another session holding the terminal. A program in `~/bin`, any other path, or a store path your
+  profile does not name is never matched. The write itself checks again that the same profile program, by name and
+  by store file, still holds the terminal, or nothing is typed. Names are judged in any case: a rule for `Sudo` is
+  a rule for sudo.
+- **What it never allows:** a program proved through your profile earns no green card, no short lock and no one-tap
+  saved login; it only lets a rule you wrote match. The proof is the daemon's own and is never sent to the app.
+- **Who may turn it on:** the owner only. A ferret is refused before its request is read
+  (`PUT /v1/copy-rules/settings`). At the machine it takes effect at once; from a paired device it needs
+  `terminal.configure` and a passkey proved for this one act (`allow-profile-targets`), claimed in one step, so a
+  passkey proved for something else never turns it on. Turning it off never asks. It is kept beside the rules in
+  `<state>/secure-copy/rules.json`; a file that cannot be read holds it off. "The owner only" is the honest-client
+  boundary in [honest limits](#honest-limits): a ferret that reads the admin token is taken for the owner here too.
+- **What you see:** while the setting is on or off, every terminal rule a program from your profile could satisfy
+  is marked "your profile — a ferret could swap this program" (Settings, and `fy copy rules ls`), with "asks you"
+  while the setting is off. The settings and these marks come from `GET /v1/copy-rules/settings`, a route of its own;
+  an app or CLI talking to an older daemon (a 404) shows neither, and the rules list itself is unchanged. Any other
+  failure to read it is said ("could not check which rules a program in your own profile could satisfy"), never a
+  silently missing setting.
+- **What is logged:** a paste under a rule into such a program is audited as every rule paste is (`by: rule`, the
+  rule), with the store file it pasted into (`profileProgram`); never the value. Turning the setting on or off is
+  kept as `security.changed` (`copy-rule-settings`).
+- **A rule into a shell or an interpreter** (bash, sh, zsh, fish, csh, tcsh, busybox, nu, pwsh, python, pypy, node,
+  bun, perl, ruby, php, lua, …) is warned about when you add it (Settings, `fy copy rules add`), on the rule's row,
+  in `fy copy rules ls`, and on a ferret's paste plan card: such a program runs whatever it reads.
+- **GAP: Linux only.** No reading of a macOS process's executable is wired, so nothing is proved through a profile
+  there.
+
 ## Honest limits
 
 - **Not a sandbox.** An agent running as the owner's user can run the same command again and print it, or
@@ -245,12 +292,13 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
   ferret that clears its own session variables and reads the admin token is taken for the owner, and since
   allowing a paste needs no value and no terminal, that is one command. It gains no more than the
   [secrets](secrets.md) boundary already gives it; it is said here so nobody reads "owner only" as stronger.
-- **A rule's program must be a system program.** A `terminal:<program>` rule matches only when EVERY process reading
-  the terminal is proved to be that program, in line mode: on Linux, a file a root-controlled bin folder leads to under
-  that name (`/usr/bin/gh`, a system profile's `gh`), or a setuid getpass program (sudo, su, …). So a program from a
-  profile this account owns (`~/.nix-profile`, `~/bin`, `~/.local/bin`), a script (a Node CLI such as `vercel` runs
-  as `node`), or a program behind a relay (`ssh -t`, `docker exec -it`) is never proved, and every paste into it asks
-  the owner: such a rule no longer pastes unasked. On macOS only a setuid getpass program is ever proved, so a
+- **A rule's program must be a system program, unless you allow your own profile.** A `terminal:<program>` rule
+  matches only when EVERY process reading the terminal is proved to be that program, in line mode: on Linux, a file a
+  root-controlled bin folder leads to under that name (`/usr/bin/gh`, a system profile's `gh`), or a setuid getpass
+  program (sudo, su, …). So a program from `~/bin` or `~/.local/bin`, a script (a Node CLI such as `vercel` runs as
+  `node`), or a program behind a relay (`ssh -t`, `docker exec -it`) is never proved, and every paste into it asks the
+  owner. One from your own Nix profile (`~/.nix-profile`) asks too, unless you turned on
+  [programs in your own profile](#programs-in-your-own-profile). On macOS only a setuid getpass program is ever proved, so a
   `terminal:` rule there matches only sudo, su and the like (GAP). A proved program started by the ferret is still the
   ferret's own process, with arguments of its choosing: approve routes into programs you know the ferret is running,
   and prefer a count or an expiry.

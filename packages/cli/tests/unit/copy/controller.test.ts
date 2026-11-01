@@ -1,5 +1,13 @@
 import { describe, it } from 'bun:test';
-import type { CopyMeta, CopyPlan, PasteRule, PasteRuleCreate } from '@ferretry/protocol';
+import type {
+  CopyMeta,
+  CopyPlan,
+  PasteRule,
+  PasteRuleCreate,
+  PasteRuleList,
+  PasteRuleSettingsView,
+} from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
 import {
   COPY_FERRET_REFUSAL,
@@ -57,8 +65,12 @@ class FakeGateway implements ICopyGateway {
   async copies(): Promise<readonly CopyMeta[]> {
     return [COPY];
   }
-  async rules() {
+  async rules(): Promise<PasteRuleList> {
     return { rules: [RULE] };
+  }
+  /** An older daemon has no settings route: the fake answers like one unless a test says otherwise. */
+  async ruleSettings(): Promise<PasteRuleSettingsView> {
+    throw new FyHttpError('not found', 404, 'not_found');
   }
   async addRule(rule: PasteRuleCreate): Promise<PasteRule> {
     this.added.push(rule);
@@ -158,6 +170,71 @@ describe('fy copy', () => {
     should(said[0]).equal('a1b2c3d4  command:gh → terminal:vercel  any session  2 left  no expiry  used 1');
     should(gateway.removed).eql([RULE.id]);
     should(await failure(controller.removeRule('zzz', {}))).equal('no rule starts with "zzz"');
+  });
+
+  it('should say whether profile programs are allowed, and mark a rule one could satisfy', async () => {
+    const { controller, gateway, said } = rig();
+    gateway.ruleSettings = async () => ({ settings: { allowProfileTargets: false }, profileRules: [RULE.id] });
+
+    await controller.rules({});
+
+    should(said[0]).equal(
+      [
+        'programs in your own profile: not allowed (they ask you)',
+        'a1b2c3d4  command:gh → terminal:vercel  any session  2 left  no expiry  used 1  [your profile — a ferret could swap this program]',
+      ].join('\n'),
+    );
+    gateway.rules = async () => ({ rules: [] });
+    gateway.ruleSettings = async () => ({ settings: { allowProfileTargets: true }, profileRules: [] });
+    await controller.rules({});
+    should(said[1]).equal('programs in your own profile: allowed\nno pastes are approved in advance');
+  });
+
+  it('should warn when the setting cannot be read for any reason but an older daemon, and still list', async () => {
+    const warned: string[] = [];
+    const said: string[] = [];
+    const { controller, gateway } = rig({
+      out: { success: message => void said.push(message), diagnostic: message => void warned.push(message) },
+    });
+    gateway.ruleSettings = async () => {
+      throw new FyHttpError('the daemon fell over', 500, 'internal');
+    };
+
+    await controller.rules({});
+
+    should(warned).eql([
+      'warning: could not check which rules a program in your own profile could satisfy, so none is marked: the daemon fell over',
+    ]);
+    should(said[0]).startWith('a1b2c3d4  command:gh → terminal:vercel');
+    gateway.ruleSettings = async () => {
+      throw new FyHttpError('not found', 404, 'not_found');
+    };
+    await controller.rules({});
+    should(warned).have.length(1);
+  });
+
+  it('should say nothing of the setting to a daemon too old to have it, and mark a rule into a shell', async () => {
+    const { controller, gateway, said } = rig();
+    gateway.rules = async () => ({ rules: [{ ...RULE, to: { kind: 'terminal', program: 'bash' } }] });
+
+    await controller.rules({});
+
+    should(said[0]).equal(
+      'a1b2c3d4  command:gh → terminal:bash  any session  2 left  no expiry  used 1  [runs whatever it reads]',
+    );
+  });
+
+  it('should warn, and still add, a rule into a shell or an interpreter', async () => {
+    const warned: string[] = [];
+    const { controller, gateway } = rig({
+      out: { success: () => undefined, diagnostic: message => void warned.push(message) },
+    });
+
+    await controller.addRule({ from: 'command:gh', to: 'terminal:bash' });
+    await controller.addRule({ from: 'command:gh', to: 'terminal:psql' });
+
+    should(warned).eql(['warning: bash: This program runs whatever it reads: a paste into it can run as a command.']);
+    should(gateway.added).have.length(2);
   });
 
   it('should approve the numbered items of a plan, and decline it with none', async () => {

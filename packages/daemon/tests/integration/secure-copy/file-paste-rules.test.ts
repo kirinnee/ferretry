@@ -10,6 +10,7 @@ import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.
 
 /** The owner's pre-approval rules over a REAL state home: routes and counts only, in a private folder. */
 
+const OFF = { allowProfileTargets: false };
 const RULE: PasteRule = {
   id: 'a'.repeat(32),
   from: { kind: 'command', program: 'gh' },
@@ -40,16 +41,20 @@ describe('FilePasteRuleStore over a real state home', () => {
     const { directory, store } = await fixture();
 
     should(await store.read()).be.undefined();
-    await store.write([RULE]);
+    await store.write({ rules: [RULE], settings: OFF });
 
-    should(await store.read()).eql([RULE]);
-    should(JSON.parse(await readFile(join(directory, 'rules.json'), 'utf8'))).eql({ v: 1, rules: [RULE] });
+    should(await store.read()).eql({ rules: [RULE], settings: OFF });
+    should(JSON.parse(await readFile(join(directory, 'rules.json'), 'utf8'))).eql({
+      v: 1,
+      rules: [RULE],
+      settings: OFF,
+    });
     should((await stat(directory)).mode & 0o777).equal(0o700);
   });
 
   it('should throw on a damaged file rather than read it as no rules', async () => {
     const { directory, store } = await fixture();
-    await store.write([]);
+    await store.write({ rules: [], settings: OFF });
     await writeFile(join(directory, 'rules.json'), '{"v":1,"rules":[{"id":"x"}]}');
 
     should(

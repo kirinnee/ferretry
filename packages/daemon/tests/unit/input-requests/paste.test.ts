@@ -6,6 +6,7 @@ import {
   type InputRaise,
   type InputTargetFacts,
   type PasteRule,
+  type PasteRuleSettings,
   padInputValue,
   type SecretName,
 } from '@ferretry/protocol';
@@ -51,6 +52,8 @@ const PASTE: InputRaise = {
 async function world(
   options: {
     readonly facts?: InputTargetFacts;
+    /** The daemon's own profile reading beside the facts (`ObserveResult.profileProgram`). */
+    readonly profile?: { readonly name: string; readonly path: string };
     readonly stdout?: string;
     readonly transcript?: 'found' | 'clean';
     /** What an earlier run left in the journal, for a restart. */
@@ -63,6 +66,7 @@ async function world(
   const clock = { now: () => ms.now };
   const values = new EphemeralValues(clock);
   const writes: string[] = [];
+  const typedUnder: string[] = [];
   const events: InputEvent[] = [];
   const audits: InputAuditEntry[] = [];
   const stores: InputStoreAuditEntry[] = [];
@@ -90,13 +94,17 @@ async function world(
     masking: values,
     redact: async text => text,
   });
-  const stored: { rules: readonly PasteRule[] | undefined } = { rules: undefined };
+  const stored: { rules: readonly PasteRule[] | undefined; settings: PasteRuleSettings } = {
+    rules: undefined,
+    settings: { allowProfileTargets: false },
+  };
   let ruleIds = 0;
   const rules = new PasteRuleService({
     store: {
-      read: async () => stored.rules,
+      read: async () => (stored.rules === undefined ? undefined : { rules: stored.rules, settings: stored.settings }),
       write: async next => {
-        stored.rules = next;
+        stored.rules = next.rules;
+        stored.settings = next.settings;
       },
     },
     clock,
@@ -108,8 +116,13 @@ async function world(
   let id = 1;
   const service = new InputRequestService({
     target: options.target ?? {
-      observe: async () => ({ ok: true, facts: facts.current }),
-      type: async (_session, _target, values) => {
+      observe: async () => ({
+        ok: true,
+        facts: facts.current,
+        ...(options.profile === undefined ? {} : { profileProgram: options.profile }),
+      }),
+      type: async (_session, _target, values, _submit, _expected, typeOptions) => {
+        if (typeOptions?.profileProgram !== undefined) typedUnder.push(typeOptions.profileProgram.path);
         writes.push(...values.map(value => value.text));
         return typed.result;
       },
@@ -167,6 +180,7 @@ async function world(
     rules,
     stored,
     writes,
+    typedUnder,
     events,
     audits,
     stores,
@@ -369,6 +383,72 @@ describe('a paste the owner approved in advance', () => {
     should(w.audits.at(-1)).match({ event: 'input.delivered', actor: { kind: 'rule', ruleId: rule.id } });
     for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
     should(w.rules.list({ kind: 'owner', actor: { kind: 'host' } })).match([{ id: rule.id, remaining: 1, used: 1 }]);
+  });
+
+  describe('into a program proved only through the owner profile', () => {
+    const OWNER = { kind: 'owner', actor: { kind: 'host' } } as const;
+    const STORE_PATH = '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-vercel/bin/vercel';
+    const IN_PROFILE = { ...VERCEL, program: undefined } as InputTargetFacts;
+    const PROFILE = { name: 'vercel', path: STORE_PATH };
+
+    it('should ask the owner while profile targets are off (the default)', async () => {
+      const w = await world({ facts: IN_PROFILE, profile: PROFILE });
+      await w.rules.create(OWNER, RULE);
+      await w.capture();
+
+      const view = await w.service.raise(SESSION, PASTE);
+
+      should(view.state).equal('pending');
+      should(w.writes).eql([]);
+    });
+
+    it('should paste under the rule once the owner allowed them, and log the store file it pasted into', async () => {
+      const w = await world({ facts: IN_PROFILE, profile: PROFILE });
+      const rule = await w.rules.create(OWNER, RULE);
+      await w.rules.changeSettings(OWNER, { allowProfileTargets: true });
+      await w.capture();
+
+      const view = await w.service.raise(SESSION, PASTE);
+
+      should(view.state).equal('delivered');
+      should(w.writes).eql([TOKEN]);
+      // The write itself is told to type only while that profile program still holds the terminal.
+      should(w.typedUnder).eql([STORE_PATH]);
+      should(w.audits.at(-1)).match({
+        event: 'input.delivered',
+        actor: { kind: 'rule', ruleId: rule.id },
+        detail: { profileProgram: STORE_PATH },
+      });
+      should(JSON.stringify(w.audits)).not.containEql(TOKEN);
+    });
+
+    it('should never paste under a rule for sudo into a profile "sudo", setting on (M1)', async () => {
+      // Facts as a ferret's own non-setuid sudo would leave them, had the profile proof let one through.
+      const w = await world({
+        facts: { ...IN_PROFILE, foreground: { ...VERCEL.foreground, comm: 'sudo' } } as InputTargetFacts,
+        profile: { name: 'sudo', path: '/nix/store/ffffffffffffffffffffffffffffffff-sudo/bin/sudo' },
+      });
+      await w.rules.create(OWNER, { from: RULE.from, to: { kind: 'terminal', program: 'sudo' } });
+      await w.rules.changeSettings(OWNER, { allowProfileTargets: true });
+      await w.capture();
+
+      const view = await w.service.raise(SESSION, PASTE);
+
+      should(view.state).equal('pending');
+      should(w.writes).eql([]);
+    });
+
+    it('should never paste into a program proved by neither a system folder nor the profile (~/bin)', async () => {
+      const w = await world({ facts: { ...VERCEL, program: undefined } as InputTargetFacts });
+      await w.rules.create(OWNER, RULE);
+      await w.rules.changeSettings(OWNER, { allowProfileTargets: true });
+      await w.capture();
+
+      const view = await w.service.raise(SESSION, PASTE);
+
+      should(view.state).equal('pending');
+      should(w.writes).eql([]);
+    });
   });
 
   it('should wait for the owner when the destination program is not the one the rule names', async () => {

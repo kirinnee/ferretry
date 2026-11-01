@@ -866,6 +866,15 @@ export const InputAuditDetailSchema = z.strictObject({
     .regex(/^[0-9a-f]{32}$/u)
     .optional(),
   consumer: boundedLine(160).optional(),
+  /**
+   * The store file of a program proved only through the owner's own profile, when that is what read the terminal:
+   * a paste a rule made into it is logged with the very file, since any process running as the owner could swap it.
+   */
+  profileProgram: z
+    .string()
+    .max(512)
+    .regex(/^\/nix\/store\/[^\p{Cc}\p{Cf}]+$/u)
+    .optional(),
   sensitivity: InputSensitivitySchema,
   /** The terminal a quarantine was about: its name, never what was typed there. */
   surface: SurfaceKeySchema.optional(),

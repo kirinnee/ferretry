@@ -90,7 +90,7 @@ import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
 import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
 import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catalogs.ts';
-import { type CopyListing, secureCopyRoutes } from './secure-copy.ts';
+import { type CopyListing, type RuleProgramHomes, secureCopyRoutes } from './secure-copy.ts';
 import { securityRoutes } from './security.ts';
 import { type SessionAddressBook, sessionAddressedRoutes, sessionAddressedSockets } from './session-addressing.ts';
 import { type SessionAgendaModeSubsystem, sessionAgendaModeRoutes } from './session-agenda-mode.ts';
@@ -400,6 +400,8 @@ export interface MountedSubsystems {
     readonly copies: CopyListing;
     readonly rules: PasteRuleService;
     readonly plans: CopyPlanService;
+    /** Where a terminal rule's program lives, so a rule into the owner's own profile says so. */
+    readonly homes?: RuleProgramHomes;
   };
   /** Free teammate callsigns, for composing a session title before starting one. */
   readonly names: NameSubsystem;
@@ -680,7 +682,12 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // `/v1/sessions/:sessionId/surfaces`, which no other subsystem uses: none can shadow or be shadowed.
         ...agentToolRoutes(subsystems.agentTools.service, subsystems.agentTools.identities),
         ...inputRequestRoutes(subsystems.inputRequests),
-        ...secureCopyRoutes(subsystems.secureCopy.copies, subsystems.secureCopy.rules, subsystems.secureCopy.plans),
+        ...secureCopyRoutes(
+          subsystems.secureCopy.copies,
+          subsystems.secureCopy.rules,
+          subsystems.secureCopy.plans,
+          subsystems.secureCopy.homes,
+        ),
         ...terminalRoutes(subsystems.terminals),
         // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
         // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the
