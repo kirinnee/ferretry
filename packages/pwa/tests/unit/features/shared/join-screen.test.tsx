@@ -314,6 +314,22 @@ describe('a key the publisher refused', () => {
     await view.unmount();
   });
 
+  it('goes to Shared with me when Try again finds the key accepted', async () => {
+    const { view, calls, shared } = await open({
+      ...fresh,
+      ...joined(),
+      addPasskey: async () => refusedAttempt(),
+      tryAgain: async () => okAttempt(undefined),
+    });
+    await click(q('[data-join-button]'));
+    await click(q('[data-passkey-step="add"]'));
+    await click(q('[data-refused-try-again]'));
+    await settle();
+    expect(calls).toContain('tryAgain');
+    expect(shared).toEqual([sub.daemonId]);
+    await view.unmount();
+  });
+
   it('is refused from an unlock too', async () => {
     const { view } = await open({
       ...fresh,

@@ -1510,6 +1510,19 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('reads a second share link that arrives by navigation, with no hashchange, and clears it from the address', async () => {
+    const { view } = await renderShell(`/join${FAKE_FRAGMENT}`, [alpha.daemonId]);
+    await settle();
+    expect(view.container.querySelector('[data-join-button]')).not.toBeNull();
+
+    await popTo('/join#v1;this-is-not-a-share-link');
+    await settle();
+
+    expect(window.location.hash).toBe('');
+    expect(view.container.querySelector('[data-join-button]')).toBeNull();
+    await view.unmount();
+  });
+
   it('shows Join, not first-run setup, for a browser with no machine at all', async () => {
     const { view } = await renderShell(`/join${FAKE_FRAGMENT}`);
     await settle();
