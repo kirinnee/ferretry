@@ -84,7 +84,8 @@ import {
   choiceLabel,
   gateAnswerAction,
   gateAsksWords,
-  gateStageWords,
+  type GateItem,
+  gateVerb,
   gateWordsFor,
   isGateItem,
 } from '../../lib/gate-items.ts';
@@ -347,8 +348,11 @@ function OpenItem({
   const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
   return (
     <div className="fy-inbox-open" data-inbox-open={card.key} key={card.key}>
-      <InboxWhoLine card={card} onNavigate={onNavigate} />
-      <GateLine item={card.item} />
+      {isGateItem(card.item) ? (
+        <GateMeta card={card} item={card.item} onNavigate={onNavigate} />
+      ) : (
+        <InboxWhoLine card={card} onNavigate={onNavigate} />
+      )}
       <AgendaItemView
         busy={false}
         closeLabel="Back to the Inbox"
@@ -377,24 +381,49 @@ function OpenItem({
   );
 }
 
-/** A gate item says what it is: the board card's project and which gate it waits at. Nothing for any other item. */
-function GateLine({ item }: { readonly item: InboxCard['item'] }) {
-  if (!isGateItem(item)) return null;
+/** A gate item's one quiet line: what it is (the lane's verb), the project, the ferret, and the way to its chat. */
+function GateMeta({
+  card,
+  item,
+  onNavigate,
+}: {
+  readonly card: InboxCard;
+  readonly item: GateItem;
+  readonly onNavigate: (to: string) => void;
+}) {
   const { gate } = item;
+  const dot = (
+    <span aria-hidden="true" className="fy-inbox-who__dot">
+      ·
+    </span>
+  );
   return (
-    <p className="fy-inbox-gate" data-inbox-gate={gate.cardId}>
-      <span className="fy-inbox-gate__stage" data-inbox-gate-stage="">
-        {gateStageWords(item)}
-      </span>
-      {gate.projectName === undefined ? null : (
-        <span className="fy-inbox-gate__project" data-inbox-gate-project="">
-          {gate.projectName}
+    <div className="fy-inbox-who fy-inbox-who--gate" data-inbox-gate={gate.cardId} data-inbox-who="">
+      <span className="fy-inbox-who__main" data-inbox-who-main="">
+        <span className="fy-inbox-gate__stage" data-inbox-gate-stage="">
+          {gateVerb(item)}
         </span>
-      )}
-      <span className="fy-inbox-gate__lane" data-inbox-gate-lane="">
-        {gate.laneName}
+        {gate.projectName === undefined ? null : (
+          <>
+            {dot}
+            <span data-inbox-gate-project="">{gate.projectName}</span>
+          </>
+        )}
+        {dot}
+        <span className="fy-inbox-who__ferret" data-inbox-who-ferret="">
+          {inboxWho(card).ferret}
+        </span>
       </span>
-    </p>
+      <RouteLink
+        className="fy-inbox-who__chat"
+        data-inbox-open-chat=""
+        onNavigate={onNavigate}
+        to={agendaConversationPath(card.daemonId, card.view.config.id, card.item.id)}
+      >
+        Open chat
+        <ChevronRight aria-hidden="true" size={13} />
+      </RouteLink>
+    </div>
   );
 }
 

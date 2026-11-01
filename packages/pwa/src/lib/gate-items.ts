@@ -19,11 +19,7 @@ import type { ToTestCard } from './to-test-inbox.ts';
 /** An item that is a gate: it carries the card, lane and options. */
 export type GateItem = AgendaItem & { readonly gate: AgendaGate };
 
-/** The two gates the owner is asked at: a card to try, or a plan to approve. */
-export const gateStageWords = (item: GateItem): string =>
-  item.subject?.startsWith('OK to build') ? 'OK to build?' : 'Try it';
-
-/** The chip a gate item wears: the lane's verb. */
+/** What a gate item is, in the lane's verb: a card to try, or a plan to approve. */
 export const gateVerb = (item: AgendaItem): string => (item.subject.startsWith('OK to build') ? 'Approve' : 'Try it');
 
 export const isGateItem = (item: AgendaItem): item is GateItem => item.gate !== undefined;

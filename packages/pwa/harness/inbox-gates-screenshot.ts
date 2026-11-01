@@ -219,7 +219,8 @@ for (const form of ['phone', 'desktop'] as const) {
     check(
       (await gate.locator('[data-inbox-gate-stage]').textContent()) === 'Try it' &&
         (await gate.locator('[data-inbox-gate-project]').textContent()) === 'ferretry' &&
-        (await gate.locator('[data-inbox-gate-lane]').textContent()) === 'To test',
+        (await gate.locator('[data-inbox-open-chat]').count()) === 1 &&
+        (await gate.locator('[data-inbox-who]').count()) === 1,
       `${form} ${theme}: the gate line does not say stage, project and lane`,
     );
     check(
@@ -231,8 +232,8 @@ for (const form of ['phone', 'desktop'] as const) {
       `${form} ${theme}: the card lacks its 1 h / 4 h / 1 day snooze buttons`,
     );
     check(
-      (await gate.locator('.fy-attn-deck__top .fy-card__type').textContent()) === 'Try it',
-      `${form} ${theme}: the gate chip is not the lane's verb`,
+      (await gate.locator('.fy-attn-deck__top .fy-card__type').count()) === 0,
+      `${form} ${theme}: the gate card still wears a chip`,
     );
     check(
       ((await gate.locator('.fy-attn-deck__top').textContent()) ?? '').includes('Pick one option') === false &&

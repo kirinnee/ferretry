@@ -81,16 +81,19 @@ export function WantedAnswers({
 export function AgendaNeed({
   shape,
   lead,
+  heading = AGENDA_NEED_HEADING,
   children,
 }: {
   readonly shape: AgendaShape;
   /** The instruction line; the shape's own when absent, none when empty (an item that cannot be answered here). */
   readonly lead?: string;
+  /** The segment's heading when it is not "What I need from you" (a gate item's is its How to test). */
+  readonly heading?: string;
   readonly children?: ReactNode;
 }) {
   return (
-    <section aria-label={AGENDA_NEED_HEADING} className="fy-card__need" data-agenda-need={shape}>
-      <h4 className="fy-card__label fy-card__need-title">{AGENDA_NEED_HEADING}</h4>
+    <section aria-label={heading} className="fy-card__need" data-agenda-need={shape}>
+      <h4 className="fy-card__label fy-card__need-title">{heading}</h4>
       {children}
       {lead === '' ? null : (
         <p className="fy-card__need-lead" data-agenda-need-lead="">

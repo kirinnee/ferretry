@@ -254,7 +254,7 @@ const FORM = item('A43', 5, 'ottilie', {
   ],
 } as unknown as Partial<AgendaItem>);
 /** A board card waiting at the "Try it" gate, as the daemon raises it: an ordinary choice item plus `gate`. */
-const GATE = item('A60', 3, 'daemon', {
+const GATE = item('G61', 3, 'daemon', {
   title: 'Pairing a second phone',
   subject: 'Try it: open Settings and choose Pair a device',
   why: 'Pairing a second phone is in To test.',
@@ -334,27 +334,30 @@ const MACHINE: DaemonConnection = daemonConnection({
   baseUrl: 'https://studio.example.test',
   deviceId: 'harness',
 });
-/** What the conversation holds about the open item: the ferret's question, the owner's reply, the ferret's answer. */
-const conversationAbout = async (open: InboxCard): Promise<readonly TranscriptEntry[]> => [
-  {
-    id: 'c1',
-    kind: 'assistant',
-    text: `I need a call on !${open.item.id}: **SQLite** is quick to ship, Postgres is safer long term.`,
-    at: NOW - 50 * 60_000,
-  },
-  {
-    id: 'c2',
-    kind: 'user',
-    text: `Is Postgres overkill for !${open.item.id}? Lean toward SQLite.`,
-    at: NOW - 30 * 60_000,
-  },
-  {
-    id: 'c3',
-    kind: 'assistant',
-    text: `Not overkill, but the ledger is read in full once a day, so SQLite fits !${open.item.id}. I will wait for your answer.`,
-    at: NOW - 20 * 60_000,
-  },
-];
+/** What the conversation holds about the open item (a daemon-raised gate item is mentioned by nobody: none). */
+const conversationAbout = async (open: InboxCard): Promise<readonly TranscriptEntry[]> =>
+  open.item.gate !== undefined
+    ? []
+    : [
+        {
+          id: 'c1',
+          kind: 'assistant',
+          text: `I need a call on !${open.item.id}: **SQLite** is quick to ship, Postgres is safer long term.`,
+          at: NOW - 50 * 60_000,
+        },
+        {
+          id: 'c2',
+          kind: 'user',
+          text: `Is Postgres overkill for !${open.item.id}? Lean toward SQLite.`,
+          at: NOW - 30 * 60_000,
+        },
+        {
+          id: 'c3',
+          kind: 'assistant',
+          text: `Not overkill, but the ledger is read in full once a day, so SQLite fits !${open.item.id}. I will wait for your answer.`,
+          at: NOW - 20 * 60_000,
+        },
+      ];
 /** Studio offers clearing; the laptop's daemon is older and does not — so the dialog shows both cases. */
 const CLEAR_PORT: ClearPort = {
   readHealth: async connection => ({

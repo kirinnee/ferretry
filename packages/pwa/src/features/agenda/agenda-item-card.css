@@ -924,8 +924,3 @@
   -webkit-line-clamp: 2;
 }
 /* The card's summary, one line under the gate item's title. */
-.fy-card__gate-summary {
-  margin: 0 0 var(--gap-sm);
-  color: var(--muted);
-  font-size: var(--text-sm);
-}

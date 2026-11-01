@@ -1488,18 +1488,6 @@
 }
 
 /* A GATE ITEM says what it is under the who-and-what line: the gate it waits at, its project and its lane. */
-.fy-inbox-gate {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0 var(--gap-sm);
-  margin: 0;
-  border-bottom: var(--stroke) solid var(--divider-color, var(--border));
-  padding: var(--gap-xs) var(--gap-md);
-  color: var(--muted);
-  font-size: var(--text-sm);
-  touch-action: none;
-}
 .fy-inbox-gate__stage {
   color: var(--fg);
   font-weight: 600;
@@ -1526,4 +1514,13 @@
 /* The "Not good" words take the answer row's place and width. */
 .fy-inbox-gate-why {
   min-width: 0;
+}
+/* A gate item's one meta line: quiet, the lane's verb a touch stronger. */
+.fy-inbox-who--gate {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-inbox-who--gate .fy-inbox-who__ferret {
+  color: inherit;
+  font-weight: inherit;
 }

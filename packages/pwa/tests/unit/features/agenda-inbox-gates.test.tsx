@@ -92,12 +92,13 @@ const flush = async (): Promise<void> => {
 };
 
 describe('a gate item in the Inbox', () => {
-  it('says the gate, the project and the lane, and shows the card’s How to test as the body', async () => {
+  it('says the gate and the project on ONE quiet line, and shows the card’s How to test as the body', async () => {
     const mounted = await mount(page(fakeInbox(), [gate], { initialOpen: gate.key }));
     const line = must(mounted.container.querySelector('[data-inbox-gate]'), 'the gate line');
     expect(line.querySelector('[data-inbox-gate-stage]')?.textContent).toBe('Try it');
     expect(line.querySelector('[data-inbox-gate-project]')?.textContent).toBe('Ferretry');
-    expect(line.querySelector('[data-inbox-gate-lane]')?.textContent).toBe('Tested');
+    expect(line.querySelector('[data-inbox-open-chat]')?.textContent).toContain('Open chat');
+    expect(mounted.container.querySelectorAll('[data-inbox-who]').length).toBe(1);
     expect(mounted.container.textContent).toContain('Scan the code');
     await mounted.unmount();
   });
@@ -108,7 +109,7 @@ describe('a gate item in the Inbox', () => {
       sessionView('sess-h', { config: { teammate: 'judson', name: 'Plan' } as never }),
     );
     const mounted = await mount(page(fakeInbox(), [approve], { initialOpen: approve.key }));
-    expect(mounted.container.querySelector('[data-inbox-gate-stage]')?.textContent).toBe('OK to build?');
+    expect(mounted.container.querySelector('[data-inbox-gate-stage]')?.textContent).toBe('Approve');
     await mounted.unmount();
   });
 
@@ -118,24 +119,25 @@ describe('a gate item in the Inbox', () => {
     await mounted.unmount();
   });
 
-  it('wears the lane’s verb as its chip, with no "Pick one option." line', async () => {
+  it('wears the lane’s verb in its meta line only — no chip, no "Pick one option." line', async () => {
     const approve = inboxCard(
       gateItem('G2', 'F2', { subject: 'OK to build? Pairing QR' }),
       sessionView('sess-h', { config: { teammate: 'judson', name: 'Plan' } as never }),
     );
     const mounted = await mount(page(fakeInbox(), [gate, approve], { initialOpen: gate.key }));
-    const chip = (): string | undefined =>
-      mounted.container.querySelector('.fy-attn-deck__top .fy-card__type')?.textContent ?? undefined;
-    expect(chip()).toBe('Try it');
+    expect(mounted.container.querySelector('.fy-attn-deck__top [data-inbox-gate-stage]')?.textContent).toBe('Try it');
+    expect(mounted.container.querySelector('.fy-attn-deck__top .fy-card__type')).toBeNull();
     expect(mounted.container.querySelector('.fy-attn-deck__top')?.textContent).not.toContain('Pick one option');
     await mounted.unmount();
   });
 
-  it('draws the How to test steps as numbered tick-steps, and the summary as one line', async () => {
+  it('draws the How to test steps as numbered tick-steps under "How to test", and repeats neither the summary nor the ask', async () => {
     const mounted = await mount(page(fakeInbox(), [gate], { initialOpen: gate.key }));
     const top = must(mounted.container.querySelector('.fy-attn-deck__top'), 'the open card');
     expect(top.querySelectorAll('[data-test-tick]').length).toBe(2);
-    expect(top.querySelector('[data-agenda-gate-summary]')?.textContent).toContain('Pairing QR is in Tested.');
+    expect(top.querySelector('[data-agenda-need] .fy-card__need-title')?.textContent).toBe('How to test');
+    expect(top.querySelector('[data-agenda-gate-summary]')).toBeNull();
+    expect(top.querySelector('[data-agenda-question-line]')).toBeNull();
     await mounted.unmount();
   });
 

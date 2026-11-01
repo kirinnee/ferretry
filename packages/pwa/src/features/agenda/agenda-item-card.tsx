@@ -25,7 +25,6 @@ import { optionAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { useFormPicks } from '../../lib/agenda-form-state.ts';
 import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
-import { gateVerb } from '../../lib/gate-items.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
 import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
 import { plainLabel } from '../../lib/plain-label.ts';
@@ -381,38 +380,34 @@ export function AgendaItemCard({
       data-agenda-version={shown}
       data-kind={meta.tone}
     >
-      <div className="fy-card__top" data-agenda-card-top="" {...pull}>
-        <span className="fy-card__type" data-agenda-type={meta.kind} data-tone={meta.tone}>
-          {gated ? gateVerb(item) : meta.label}
-        </span>
-        <span className="fy-card__tools">
-          {canDismiss ? (
-            <button
-              aria-label="Not needed"
-              className="fy-card__dismiss"
-              data-agenda-dismiss=""
-              disabled={busy}
-              onClick={dismiss}
-              type="button"
-            >
-              Not needed
-            </button>
-          ) : null}
-          {count > 1 ? <VersionPicker item={current} now={now} onShow={setShown} shown={shown} /> : null}
-        </span>
-      </div>
+      {gated && count <= 1 ? null : (
+        <div className="fy-card__top" data-agenda-card-top="" {...pull}>
+          {gated ? null : (
+            <span className="fy-card__type" data-agenda-type={meta.kind} data-tone={meta.tone}>
+              {meta.label}
+            </span>
+          )}
+          <span className="fy-card__tools">
+            {canDismiss ? (
+              <button
+                aria-label="Not needed"
+                className="fy-card__dismiss"
+                data-agenda-dismiss=""
+                disabled={busy}
+                onClick={dismiss}
+                type="button"
+              >
+                Not needed
+              </button>
+            ) : null}
+            {count > 1 ? <VersionPicker item={current} now={now} onShow={setShown} shown={shown} /> : null}
+          </span>
+        </div>
+      )}
       {latest ? <AgendaDelivery busy={busy} ferret={ferret} item={item} onAct={onAct} /> : null}
       {latest ? <AgendaConfigChange item={item} /> : null}
       <TermLayer renderProse={renderProse} terms={terms}>
-        {gated ? (
-          premise === null ? null : (
-            <div className="fy-card__gate-summary" data-agenda-gate-summary="">
-              {premise}
-            </div>
-          )
-        ) : (
-          <Situation context={context} premise={premise} renderProse={renderProse} />
-        )}
+        {gated ? null : <Situation context={context} premise={premise} renderProse={renderProse} />}
         {questionAnswer === null ? null : (
           <div className="fy-card__answered" data-agenda-question-answer="">
             <h5 className="fy-card__label">Answer to your question</h5>
@@ -421,10 +416,15 @@ export function AgendaItemCard({
         )}
         <AgendaNeed
           shape={shape}
+          {...(gated && body !== null ? { heading: 'How to test' } : {})}
           {...(gated ? { lead: '' } : {})}
           {...(!answerable ? { lead: '' } : shape === 'form' && formKey === undefined ? { lead: FORM_ELSEWHERE } : {})}
         >
-          {askLine === '' || shape === 'answers' || shape === 'input' || shape === 'form' ? null : (
+          {askLine === '' ||
+          (gated && body !== null) ||
+          shape === 'answers' ||
+          shape === 'input' ||
+          shape === 'form' ? null : (
             <div className="fy-card__question" data-agenda-question-line="">
               {renderProse(mark(askLine))}
             </div>
