@@ -260,11 +260,16 @@ export const FERRETRY_MCP_ARGS: readonly string[] = ['mcp', 'serve'];
  * the whole of the server's authority. NOT `FY_TOKEN`: the host's admin token is no part of it. Codex
  * hands a stdio server only a short default list, so these are named for it; Claude hands it the whole
  * environment, so its entry blanks `FY_TOKEN` instead.
+ *
+ * The credential travels under both its names: `FY_SESSION_TOKEN` is the documented one the server
+ * presents as its bearer, and `FY_SESSION_BOARD_CAPABILITY` is kept for one release so a server from
+ * before the rename still finds it.
  */
 export const FERRETRY_MCP_ENV_VARS: readonly string[] = [
   'FY_HOME',
   'FY_URL',
   'FY_SESSION_ID',
+  'FY_SESSION_TOKEN',
   'FY_SESSION_BOARD_CAPABILITY',
 ];
 

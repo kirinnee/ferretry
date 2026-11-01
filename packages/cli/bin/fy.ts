@@ -9,10 +9,11 @@ import {
   DAEMON_RESTART_PATIENCE_MS,
   type DaemonRestartPatience,
   type IFyApiClient,
+  type IFyHttpTransport,
   readLoopbackFirewallMarker,
   type SessionView,
 } from '@ferretry/protocol';
-import { FyApiClient } from '@ferretry/protocol/client';
+import { FetchHttpTransport, FyApiClient } from '@ferretry/protocol/client';
 import { sweepPairingRedirects } from '@ferretry/protocol/pairing-redirect-sweep';
 import chalk from 'chalk';
 import { Command } from 'commander';
@@ -47,6 +48,12 @@ import {
   type LoopbackListenerGuardPorts,
 } from '../src/adapters/daemon/loopback-listener-guard';
 import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
+import {
+  DaemonInstanceCache,
+  HealthInstanceReader,
+  RevisitedConnection,
+  SessionBearerTransport,
+} from '../src/adapters/daemon/session-credential';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
 import { HostProcessIncarnations } from '../src/adapters/daemon/process-incarnation';
 import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
@@ -111,6 +118,14 @@ import { registerCopyCommands } from '../src/lib/copy/commands';
 import { CopyController } from '../src/lib/copy/controller';
 import { ProtocolCopyGateway } from '../src/lib/copy/gateway';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
+import {
+  AS_OWNER_NOTE,
+  type CredentialPlan,
+  credentialPlan,
+  paneCredentialValue,
+  paneCredentialWarnings,
+  presentsSessionBearer,
+} from '../src/lib/daemon/credential';
 import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
 import { DaemonController } from '../src/lib/daemon/controller';
@@ -274,12 +289,22 @@ function buildStateHomeClaims(notices?: IStateHomeClaimNotices): StateHomeClaimS
   return new StateHomeClaimService(new FileStateHomeClaim(), `${BINARY_NAME} daemon adopt`, notices);
 }
 
+/**
+ * `fy --as-owner …`: inside a ferret's pane, use the host's admin token instead of the ferret's own
+ * credential — for a person who attached to that pane. It works only where `api-token` is readable, so it
+ * is a convenience, not a permission: a ferret that passes it has made the same visible act as one that
+ * reads the file (docs/secrets.md § "What a ferret's `fy` presents").
+ */
+const AS_OWNER_FLAG = '--as-owner';
+const AS_OWNER_HELP = "inside a ferret's pane, act with the owner's admin token instead of the ferret's own credential";
+
 /** Scaffold: the commander program skeleton (identity + `--help`/`--version`), domain-free. */
 export function createProgram(): Command {
   return new Command()
     .name(BINARY_NAME)
     .description(DESCRIPTION)
     .version(assertSemver(pkg.version), '-v, --version', 'print the CLI version')
+    .option(AS_OWNER_FLAG, AS_OWNER_HELP)
     .showHelpAfterError();
 }
 
@@ -296,6 +321,8 @@ function registerDoctorCommand(program: Command, world: CliWorld): void {
     .command('doctor')
     .description('check host dependencies and what each missing program prevents')
     .action(async () => {
+      // Inside a ferret's pane: which credential its fy and tools would present, said before anything else.
+      for (const warning of paneCredentialWarnings(environment)) world.io.warn(warning);
       const daemon = DAEMON_NAME;
       const executable = Bun.which(daemon, { PATH: environment.PATH ?? '' });
       if (executable === null)
@@ -382,30 +409,92 @@ async function daemonBaseUrl(environment: Record<string, string | undefined>, st
  * pairing screen — unable to run the pairing command at all. Widening the loopback test to admit
  * that address would have been the same defect wearing a security hole: the document naming it is
  * writable by anything that can write the state home.
+ *
+ * A FERRET PRESENTS ITS OWN CREDENTIAL (`lib/daemon/credential.ts`, docs/secrets.md § "What a ferret's
+ * `fy` presents"): with a `fys_` value in its environment and no `FY_TOKEN`, the daemon's public health
+ * route is asked once, and a daemon that offers `session.credential.1` gets that bearer and nothing else —
+ * `api-token` is not opened, and every refusal is the answer. Only a daemon that does not offer it, now or
+ * on the one re-read a `401` earns, is answered with the admin token as before.
  */
 export async function daemonConnection(
   environment: Record<string, string | undefined>,
   homeDirectory: string,
   /** Whose program holds the port; the host's own socket tables unless a test says otherwise. */
   listeners?: LoopbackListenerGuardPorts,
+  options: DaemonCredentialOptions = {},
 ): Promise<{
   baseUrl: string;
   token: string;
   version: string;
+  /** Which credential `token` is; `session` connections must use {@link transport}. */
+  credential: CredentialPlan['kind'];
+  /** Present for a session bearer: the one place a `401` may re-read health and fall back. */
+  transport?: IFyHttpTransport;
+  /** Present when a ferret's credential was set aside because this daemon did not offer it. */
+  revisit?: { baseUrl: string; pid: number | undefined };
 }> {
-  const explicitToken = environment.FY_TOKEN?.trim() ?? '';
+  const plan = credentialPlan(environment, { asOwner: options.asOwner === true });
+  if (plan.kind === 'admin' && plan.why === 'as-owner') options.note?.(AS_OWNER_NOTE);
   const stateHome = resolveDaemonStateHome(homeDirectory, environment.FY_HOME, PRODUCT_NAME);
   const baseUrl = await daemonBaseUrl(environment, stateHome);
-  if (explicitToken === '' && !isLocalDaemonUrl(baseUrl)) {
+  const version = assertSemver(pkg.version);
+  if (plan.kind === 'explicit') return { baseUrl, token: plan.token, version, credential: 'explicit' };
+  if (!isLocalDaemonUrl(baseUrl)) {
     throw new Error(
       `FY_TOKEN is required when the daemon is not on this machine (${baseUrl}); local daemon credentials are never sent remotely. Set FY_TOKEN to that daemon's own token.`,
     );
   }
+  const readAdminToken = options.readAdminToken ?? readDaemonToken;
   // The local token goes only to a listener this user owns: on a shared host a stopped daemon's port is
   // anybody's to bind, and the admin token is the whole machine (`lib/daemon/listener-owner.ts`).
-  if (explicitToken === '') await assertOwnLoopbackListener(baseUrl, 'the daemon admin token', listeners);
-  const token = explicitToken === '' ? await readDaemonToken(`${stateHome}/api-token`) : explicitToken;
-  return { baseUrl, token, version: assertSemver(pkg.version) };
+  const adminToken = async (): Promise<string> => {
+    await assertOwnLoopbackListener(baseUrl, 'the daemon admin token', listeners);
+    return await readAdminToken(`${stateHome}/api-token`);
+  };
+  if (plan.kind === 'session') {
+    // The same rule for the ferret's own credential: it is the ferret's whole authority.
+    await assertOwnLoopbackListener(baseUrl, 'the session credential', listeners);
+    const instances = options.instances ?? defaultInstances();
+    const facts = await instances.facts(baseUrl);
+    if (presentsSessionBearer(facts)) {
+      const transport = new SessionBearerTransport(options.transport ?? new FetchHttpTransport(), plan.bearer, {
+        reread: async () => await instances.refresh(baseUrl),
+        adminToken,
+        ...(options.note === undefined ? {} : { note: options.note }),
+      });
+      return { baseUrl, token: plan.bearer, version, credential: 'session', transport };
+    }
+    return { baseUrl, token: await adminToken(), version, credential: 'admin', revisit: { baseUrl, pid: facts.pid } };
+  }
+  return { baseUrl, token: await adminToken(), version, credential: 'admin' };
+}
+
+/** How {@link daemonConnection} chooses a credential; the defaults are the real host's. */
+export interface DaemonCredentialOptions {
+  /** `fy --as-owner`: skip the ferret's own credential and use the admin token, where it is readable. */
+  readonly asOwner?: boolean;
+  /** What each daemon said in this process. Shared by every connection one invocation opens. */
+  readonly instances?: DaemonInstanceCache;
+  /** Opens `<state>/api-token`; a test passes a spy to prove a ferret's `fy` never does. */
+  readonly readAdminToken?: (path: string) => Promise<string>;
+  /** The wire under a session bearer's transport; `fetch` unless a test says otherwise. */
+  readonly transport?: IFyHttpTransport;
+  /** Where the one-line fallback notice goes (stderr: stdout is a command's answer and MCP's protocol). */
+  readonly note?: (line: string) => void;
+}
+
+/** A health cache for one invocation, reading without a credential and without waiting out a restart. */
+function defaultInstances(restartPatience?: DaemonRestartPatience): DaemonInstanceCache {
+  return new DaemonInstanceCache(
+    new HealthInstanceReader(baseUrl =>
+      FyApiClient.connect({
+        baseUrl,
+        token: UNAUTHENTICATED_PROBE_TOKEN,
+        version: assertSemver(pkg.version),
+        ...(restartPatience === undefined ? {} : { restartPatience }),
+      }),
+    ),
+  );
 }
 
 /**
@@ -418,12 +507,31 @@ function lazyDaemonConnection(
   environment: Record<string, string | undefined>,
   homeDirectory: string,
   restartPatience?: DaemonRestartPatience,
+  credentials: () => DaemonCredentialOptions = () => ({}),
 ): () => Promise<IFyApiClient> {
-  let connected: Promise<FyApiClient> | undefined;
-  return (): Promise<FyApiClient> =>
-    (connected ??= daemonConnection(environment, homeDirectory).then(options =>
-      FyApiClient.connect(restartPatience === undefined ? options : { ...options, restartPatience }),
-    ));
+  // A ferret's process left on the admin token asks again later (`RevisitedConnection`): `fy mcp serve` lives
+  // as long as its pane, and must pick its own credential up once the daemon offers it.
+  const connection = new RevisitedConnection<FyApiClient>(
+    async () => {
+      const { baseUrl, token, version, transport, revisit } = await daemonConnection(
+        environment,
+        homeDirectory,
+        undefined,
+        credentials(),
+      );
+      const client = await FyApiClient.connect({
+        baseUrl,
+        token,
+        version,
+        ...(transport === undefined ? {} : { transport }),
+        ...(restartPatience === undefined ? {} : { restartPatience }),
+      });
+      return revisit === undefined ? { client } : { client, revisit };
+    },
+    async baseUrl => await (credentials().instances ?? defaultInstances()).refresh(baseUrl),
+    () => Date.now(),
+  );
+  return async (): Promise<FyApiClient> => await connection.client();
 }
 
 /**
@@ -868,6 +976,8 @@ export interface DomainWiring {
   readonly ownSessionId: string | undefined;
   /** How every client in this invocation waits out a daemon restart. */
   readonly restartPatience: DaemonRestartPatience;
+  /** Which credential every client in this invocation presents (read after the arguments are parsed). */
+  readonly credentials: () => DaemonCredentialOptions;
 }
 
 /** The account model's collaborators, one set for every group that changes a machine's setup. */
@@ -930,7 +1040,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         prompt: world.prompt,
         interactive: world.interactive,
         ownSessionId,
-        agentCredential: world.environment.FY_SESSION_BOARD_CAPABILITY,
+        agentCredential: paneCredentialValue(world.environment),
         now: () => Date.now(),
         newDeliveryId: () => crypto.randomUUID(),
       }),
@@ -942,7 +1052,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         gateway: new ProtocolCopyGateway(client),
         out: world.io,
         ownSessionId,
-        agentCredential: world.environment.FY_SESSION_BOARD_CAPABILITY,
+        agentCredential: paneCredentialValue(world.environment),
       }),
     ),
   ({ program, world, client, ownSessionId }) =>
@@ -1023,8 +1133,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         binaryName: BINARY_NAME,
       }),
     ),
-  ({ program, world, ownSessionId, restartPatience: patience }) =>
-    registerSessionCommands(program, sessionCommands(world, ownSessionId, patience)),
+  ({ program, world, ownSessionId, restartPatience: patience, credentials }) =>
+    registerSessionCommands(program, sessionCommands(world, ownSessionId, patience, credentials)),
   ({ program, world, client, ownSessionId }) => {
     const board = new BoardController({
       gateway: new FyBoardGateway(client),
@@ -1071,10 +1181,10 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   // Terminals and browser pages by NAME — the agent tools' own actions, for scripts and for people. After
   // the browser group, because `browser page` mounts onto it.
   ({ program, world, client, ownSessionId, restartPatience: patience }) => {
+    // The agent routes take either form on their own header, the pre-prefix value included.
+    const capability = paneCredentialValue(world.environment);
     const toolsClient = new AgentToolsClient(agentToolsGateways(world, client, patience), {
-      ...(world.environment.FY_SESSION_BOARD_CAPABILITY === undefined
-        ? {}
-        : { capability: world.environment.FY_SESSION_BOARD_CAPABILITY }),
+      ...(capability === undefined ? {} : { capability }),
       ...(ownSessionId === undefined ? {} : { ownSessionId }),
     });
     const tools = new AgentToolsController(toolsClient, world.io, new FileScreenshotWriter());
@@ -1252,8 +1362,14 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   //
   // AND ITS SHARED CLIENT NEVER WAITS OUT A RESTART: these verbs ARE the restart, and `restart` asking
   // a stopped daemon how many ferrets are mid-turn must not wait a minute for an answer that is "none".
-  ({ program, world }) => {
-    const lifecycleClient = lazyDaemonClient(lazyDaemonConnection(world.environment, world.homeDirectory));
+  ({ program, world, credentials }) => {
+    const lifecycleClient = lazyDaemonClient(
+      lazyDaemonConnection(world.environment, world.homeDirectory, undefined, () => {
+        // Its own health read, which does not wait out a restart either.
+        const { instances: _patient, ...impatient } = credentials();
+        return impatient;
+      }),
+    );
     registerDaemonCommands(
       program,
       () => buildDaemonController(world, lifecycleClient),
@@ -1461,6 +1577,7 @@ function sessionCommands(
   world: CliWorld,
   ownSessionId: string | undefined,
   restartPatience: DaemonRestartPatience,
+  credentials: () => DaemonCredentialOptions,
 ): SessionCommandDeps {
   const cliEnvironment = world.environment;
   const environment: SessionEnvironment = {
@@ -1471,7 +1588,15 @@ function sessionCommands(
     version: assertSemver(pkg.version),
     ...(cliEnvironment.FY_URL === undefined ? {} : { url: cliEnvironment.FY_URL }),
     ...(cliEnvironment.FY_TOKEN === undefined ? {} : { token: cliEnvironment.FY_TOKEN }),
-    resolveLocalToken: () => daemonConnection(cliEnvironment, world.homeDirectory).then(connection => connection.token),
+    resolveLocalCredential: async () => {
+      const { baseUrl, token, transport } = await daemonConnection(
+        cliEnvironment,
+        world.homeDirectory,
+        undefined,
+        credentials(),
+      );
+      return transport === undefined ? { baseUrl, token } : { baseUrl, token, transport };
+    },
     ...(ownSessionId === undefined ? {} : { sessionId: ownSessionId }),
     restartPatience,
   });
@@ -1512,12 +1637,26 @@ export function registerDomain(program: Command, world: CliWorld): void {
   // One reading of "which session am I", shared by every group: blank is absent, not an empty id.
   const ownSessionId = environmentSessionId(environment);
   const patience = restartPatience(world, ownSessionId);
+  // One health read per daemon for the whole invocation, waiting out a restart as a ferret's `fy` does.
+  const instances = defaultInstances(patience);
+  // Each note once per invocation, however many connections it opens.
+  const noted = new Set<string>();
+  const credentials = (): DaemonCredentialOptions => ({
+    asOwner: program.opts<{ asOwner?: boolean }>().asOwner === true,
+    instances,
+    note: line => {
+      if (noted.has(line)) return;
+      noted.add(line);
+      world.io.diagnostic(`${BINARY_NAME}: ${line}`);
+    },
+  });
   const wiring: DomainWiring = {
     program,
     world,
-    client: lazyDaemonClient(lazyDaemonConnection(environment, world.homeDirectory, patience)),
+    client: lazyDaemonClient(lazyDaemonConnection(environment, world.homeDirectory, patience, credentials)),
     ownSessionId,
     restartPatience: patience,
+    credentials,
   };
   registerDoctorCommand(program, world);
   for (const register of DOMAIN_REGISTRARS) register(wiring);

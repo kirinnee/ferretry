@@ -272,9 +272,13 @@ cryptographic one — the same boundary `fy config confirm` has.
 **Declared gap: the agenda does not yet say "admin token".** The board and the lane sets record a call on the
 admin token with no session credential as `admin-token` ([agent-tools.md](agent-tools.md#who-a-ferret-may-be-every-route-says)).
 The agenda still records that caller as the person, so an item a ferret closed with `fy` and no session reads
-"done by you". Its authority is right (the token is the owner's at the machine); only the label is not. It
-closes when `fy` presents each ferret's own credential (RF-3), or with an `admin-token` label beside the
-agenda's own `resolvedBy`.
+"done by you". Its authority is right (the token is the owner's at the machine); only the label is not. Since a
+ferret's `fy` and MCP server present its own credential ([secrets.md](secrets.md#what-a-ferrets-fy-presents)),
+a current ferret on this machine's loopback is recorded as itself. "Done by you" still appears for an admin-token
+act with no session header from: a pane whose credential is from before the `fys_` prefix; an MCP server
+started before that change, until its pane restarts; a daemon on a wildcard, LAN or tailscale bind, which does
+not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any process that reads
+`api-token` itself. It closes only with an `admin-token` label beside the agenda's own `resolvedBy`.
 
 ## Verbs
 

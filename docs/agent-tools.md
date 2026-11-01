@@ -449,10 +449,13 @@ its own).
   always did, instead of refusing the board. **Declared gap:** the agenda still records such a call's
   answers and closes as the owner's ("done by you") — [agenda.md](agenda.md).
 
-**What this release does NOT change yet.** `fy` and the MCP server still present the admin token plus
-`x-ferretry-session-id`; presenting the session credential instead is the next change (RF-3). Until then a
-ferret is refused person routes by the header-based half of `callerIsAgent`, exactly as strong as it ever
-was, and an older `fy` keeps working.
+**A ferret's `fy` and MCP server present it.** With a `fys_` value in `FY_SESSION_TOKEN` (or the older
+name) and no `FY_TOKEN`, they send `Authorization: Bearer fys_…` to a daemon that lists `session.credential.1`
+and never open `api-token`; every refusal is the answer, and only a `401` from a daemon that no longer lists
+the feature falls back, once. An older daemon gets the admin token plus `x-ferretry-session-id`, as before, and
+`fy --as-owner` is a person's way back to the admin token inside a pane — not a permission, since anything
+that can read `api-token` can pass it. The whole order and its limits:
+[secrets.md](secrets.md#what-a-ferrets-fy-presents). An older `fy` keeps working with the header.
 
 ## Sub-ferrets and the Ferretry verbs
 
@@ -467,8 +470,8 @@ agenda items in a sub-ferret's session with `-s <session>`, proven by lineage.
 
 - **The shared admin token.** An agent runs as the same user as the daemon and can read the admin token
   from the state home. Such an agent can call a person's route without identifying itself and act past a
-  takeover, on a person's own surface, or past a switch. A ferret on its own session credential cannot:
-  the `caller` rule refuses it on every person route. One that reads `~/.ferretry/api-token` and leaves its
+  takeover, on a person's own surface, or past a switch. A ferret on its own session credential — which its
+  `fy` and MCP server present — cannot: the `caller` rule refuses it on every person route. One that reads `~/.ferretry/api-token` and leaves its
   session out is, to this daemon, the owner at the machine — for honest clients, not a sandbox, until the
   state home is walled off from ferrets.
 - **Same-user processes** can read each other's environment, including another session's credential.
@@ -491,8 +494,10 @@ agenda items in a sub-ferret's session with `-s <session>`, proven by lineage.
 
 `fy mcp serve` is a stdio MCP server (hand-written JSON-RPC 2.0: `initialize`, `ping`, `tools/list`,
 `tools/call`; notifications are never answered). It holds exactly the authority of the agent session
-whose credential is in its environment, and nothing else: it talks only to the daemon on this machine,
-sends no bearer token, and never reads the host's admin token. The fleet's fixed layer adds it to every
+whose credential is in its environment, and nothing else: it talks only to the daemon on this machine. The
+agent routes get the credential on their own header; its other calls (`search_work`) present it as the
+bearer, exactly as a ferret's `fy` does, and use the admin token only against a daemon that does not take it
+([secrets.md](secrets.md#what-a-ferrets-fy-presents)). The fleet's fixed layer adds it to every
 agent runtime as a locked entry, with a short built-in instruction (the tools, the rules for changing
 Ferretry's own settings, then how to notify the owner and, in agenda mode, raise agenda items) in the system prompt:
 
@@ -501,7 +506,7 @@ Ferretry's own settings, then how to notify the owner and, in agenda mode, raise
   `--append-system-prompt=<instruction>`. A profile's own `--append-system-prompt` is KEPT: Ferretry's
   instruction is appended after it, in the one flag Claude takes.
 - **Codex**: `-c mcp_servers.ferretry.command/args/env_vars` (forwarding `FY_HOME`, `FY_URL`,
-  `FY_SESSION_ID`, `FY_SESSION_BOARD_CAPABILITY` — never `FY_TOKEN`) and
+  `FY_SESSION_ID`, `FY_SESSION_TOKEN` and the older `FY_SESSION_BOARD_CAPABILITY` — never `FY_TOKEN`) and
   `-c developer_instructions=<instruction>`. A profile's own `developer_instructions` is kept the same
   way: the person's text first, then Ferretry's.
 

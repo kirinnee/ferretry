@@ -23,7 +23,8 @@ function agentPane(): Record<string, string | undefined> {
     TMUX: `${LIVE_SOCKET},809560,12`,
     TMUX_PANE: '%12',
     FY_SESSION_ID: 'mvu0e879-9cf09fb8',
-    FY_SESSION_BOARD_CAPABILITY: 'capability',
+    FY_SESSION_TOKEN: 'fys_capability',
+    FY_SESSION_BOARD_CAPABILITY: 'fys_capability',
     FY_PACK: '1',
   };
 }
