@@ -162,10 +162,6 @@ export function inputRequestRoutes(service: InputRequestService): readonly ApiRo
             : undefined;
         if (refused !== undefined) return refused;
         const body = await parseBody(context.request, InputDeliverBodySchema);
-        // A deliver naming a 2FA key is for a daemon that checks the key is the matched account's and holds a seed;
-        // this one makes a code from the saved login's only seed, so it refuses rather than ignore the owner's pick.
-        if (body.factor !== undefined)
-          throw new ApiError(400, 'this machine does not make codes per 2FA key yet; update it first', 'bad_request');
         const result = await service.deliver(sessionOf(context), requestOf(context), body, caller).catch(answered);
         if (intoStore) spentSecretWrite(context);
         return jsonResponse(result);

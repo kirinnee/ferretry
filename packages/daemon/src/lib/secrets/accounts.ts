@@ -915,6 +915,26 @@ export class AccountDirectory {
     });
   }
 
+  /**
+   * CHECKED BY USE: what the last code Ferretry made from this 2FA key came to, as the input service SAW it (the page
+   * moved on, or the same prompt came back). Only the login observer calls this; no route reaches it. A key that is gone,
+   * is not this account's or holds no seed is ignored. It orders a code card's buttons and grants nothing, and it is not
+   * an owner's edit, so `updatedAt` is kept.
+   */
+  async checkedByUse(id: AccountId, factorId: TwoFactorId, worked: boolean): Promise<void> {
+    await this.transact(draft => {
+      const account = Object.hasOwn(draft.accounts, id) ? draft.accounts[id] : undefined;
+      const factors = account?.factors;
+      if (account === undefined || factors === undefined) return;
+      const at = factors.findIndex(factor => factor.id === factorId);
+      const key = factors[at];
+      if (key?.kind !== 'totp' || key.seal === undefined) return;
+      const checked = [...factors];
+      checked[at] = { ...key, verified: { worked, at: draft.at } };
+      draft.accounts[id] = { ...account, factors: checked };
+    });
+  }
+
   /** Files a ferret's recipe proposal on a sign-in, or applies it at once when THAT sign-in has auto-apply on. */
   async proposeSignIn(
     id: SignInId,

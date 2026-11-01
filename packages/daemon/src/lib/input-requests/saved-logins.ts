@@ -2,8 +2,10 @@ import {
   type AccountId,
   type AccountList,
   type AccountSummary,
+  automaticKeysInOfferOrder,
   chosenSignIn,
   fillRoleFor,
+  type InputCodeKey,
   type InputSaved,
   type InputSavedOffer,
   type InputSensitivity,
@@ -20,6 +22,8 @@ import {
   strongestSensitivity,
   suggestedLoginId,
   suggestedLoginLabel,
+  type TwoFactorId,
+  type TwoFactorKeySummary,
 } from '@ferretry/protocol';
 
 /**
@@ -186,8 +190,12 @@ function offered(
   fills: LoginFieldRole,
   matchKey: string | undefined,
   listing: SavedListing,
-  context: SignInChoiceContext,
+  context: SavedChoiceContext,
 ): { readonly offers: readonly InputSavedOffer[]; readonly signIn: InputSignIn | undefined } {
+  // A code the daemon makes is offered only where it may type one ({@link codeTargetProblem}): nowhere else, not even
+  // as a button that would then be refused.
+  const makesCode = roles.includes('totp');
+  if (makesCode && context.codesHere !== true) return { offers: [], signIn: signInFor(matchKey, listing) };
   const holders = listing.accounts.filter(account => roles.every(role => holds(account, role)));
   const byId = new Map(holders.map(account => [account.id, account]));
   const matched = signInsAt(matchKey, listing).filter(signIn => byId.has(signIn.account));
@@ -205,11 +213,13 @@ function offered(
     .map(each => {
       const account = byId.get(each.account) as AccountSummary;
       const primary = choice?.signIn === each.id;
+      const codes = makesCode ? codeKeysOf(account) : [];
       return {
         ...base(account),
         matched: true,
         signIn: each.id,
         ...(hinted === account.id ? { hinted: true } : {}),
+        ...(codes.length === 0 ? {} : { codes }),
         ...(primary && choice !== undefined
           ? {
               primary: true as const,
@@ -253,12 +263,85 @@ function suggestFor(
   return account === undefined ? undefined : { id: account.id, label: account.label };
 }
 
+/**
+ * How a card's offers are chosen: the sign-in choice ({@link SignInChoiceContext}) and `codesHere`, the DAEMON's word
+ * that the target may take a one-time code it makes ({@link codeTargetProblem} found nothing). Absent: no offer that
+ * makes a code, so a caller that has not looked never offers one.
+ */
+export type SavedChoiceContext = SignInChoiceContext & { readonly codesHere?: boolean };
+
+/** The "Use code from Ferretry" buttons of an account: each key whose seed Ferretry holds, in offer order. */
+function codeKeysOf(account: AccountSummary): readonly InputCodeKey[] {
+  return automaticKeysInOfferOrder(account.factors).map(key => ({
+    factor: key.id,
+    label: key.label,
+    ...(key.kind === 'totp' && key.verified !== undefined
+      ? { checked: key.verified.worked ? 'worked' : 'failed' }
+      : {}),
+  }));
+}
+
+/**
+ * WHY THE DAEMON MAY NOT TYPE A ONE-TIME CODE IT MADE into these fields of what it saw, or `undefined` when it may. A
+ * code it makes is a second factor typed by the machine itself, so where it lands is not the owner's call on a flag:
+ *
+ * - never into the secret store, and never before the daemon has looked at the target again;
+ * - a page: only on https, into a field the browser reported visible and uncovered, in the page's own frame (a frame
+ *   from another origin could be anyone's), so the code goes exactly where the matched sign-in signs in;
+ * - a terminal: the card's one prompt, whose key (`tool@host` of a PROVED program in line mode) the sign-in matched.
+ *
+ * Fixed sentences only: they reach the owner and the log.
+ */
+export function codeTargetProblem(
+  facts: InputTargetFacts | undefined,
+  fieldIds: readonly string[],
+): string | undefined {
+  if (facts === undefined) return 'Ferretry is looking at the target again';
+  if (facts.kind === 'secret') return 'a code Ferretry makes is typed only into a sign-in';
+  if (facts.kind === 'terminal') return undefined;
+  if (!facts.secure) return 'the page is not https';
+  for (const id of fieldIds) {
+    const found = facts.fields.find(field => field.fieldId === id);
+    if (found === undefined || !found.visible) return 'Ferretry cannot see the code field on the page';
+    if (found.covered === true) return 'something on the page covers the code field';
+    if (found.frameOrigin !== facts.origin) return 'the code field is inside a frame from another site';
+  }
+  return undefined;
+}
+
+/**
+ * THE ACCOUNT A CODE CARD IS ABOUT, and its 2FA keys, for the card's title (`factorAskWords`): from the sign-ins the
+ * daemon matched to the key, WHATEVER fields their accounts hold (so whether a seed is held never changes the title).
+ * The ferret's `factor` names one key when it is a key of such an account; otherwise it is ignored, never an error.
+ * Without it, {@link chosenSignIn} picks the account (the hint, a default, or the only one); none chosen: none.
+ */
+export function codeCardKeys(
+  matchKey: string | undefined,
+  listing: SavedListing,
+  context: { readonly hint?: string; readonly factor?: TwoFactorId },
+): { readonly account: AccountSummary; readonly keys: readonly TwoFactorKeySummary[] } | undefined {
+  const matched = signInsAt(matchKey, listing);
+  const accountOf = (id: AccountId): AccountSummary | undefined => listing.accounts.find(each => each.id === id);
+  const named = context.factor;
+  if (named !== undefined) {
+    for (const signIn of matched) {
+      const account = accountOf(signIn.account);
+      const key = account?.factors.find(each => each.id === named);
+      if (account !== undefined && key !== undefined) return { account, keys: [key] };
+    }
+  }
+  const choice = chosenSignIn(matchKey, matched, context.hint === undefined ? {} : { hint: context.hint });
+  const signIn = choice === undefined ? undefined : matched.find(each => each.id === choice.signIn);
+  const account = signIn === undefined ? undefined : accountOf(signIn.account);
+  return account === undefined ? undefined : { account, keys: account.factors };
+}
+
 /** What a card of one field may offer, and what "Save as" would keep. */
 export function savedFor(
   sensitivity: InputSensitivity,
   matchKey: string | undefined,
   listing: SavedListing,
-  context: SignInChoiceContext = {},
+  context: SavedChoiceContext = {},
 ): InputSaved {
   const role = fillRoleFor(sensitivity);
   const { offers, signIn } = offered([role], role, matchKey, listing, context);
@@ -284,7 +367,7 @@ export function savedForFields(
   fields: readonly { readonly id: string; readonly sensitivity: InputSensitivity }[],
   matchKey: string | undefined,
   listing: SavedListing,
-  context: SignInChoiceContext = {},
+  context: SavedChoiceContext = {},
 ): InputSaved {
   const [only] = fields;
   if (fields.length === 1 && only !== undefined) return savedFor(only.sensitivity, matchKey, listing, context);

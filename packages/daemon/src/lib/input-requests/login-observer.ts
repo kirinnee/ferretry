@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type {
+  AccountId,
   InputRequestField,
   InputTarget,
   InputTargetFacts,
@@ -7,6 +8,7 @@ import type {
   LoginObservation,
   SignInId,
   SurfaceKind,
+  TwoFactorId,
 } from '@ferretry/protocol';
 
 /**
@@ -42,6 +44,11 @@ const POLL_MS = 1_000;
  */
 export interface LoginFactSink {
   observeSignIn(id: SignInId, seen: LoginObservation): Promise<void>;
+  /**
+   * What a code made from this 2FA key came to, as the daemon saw it (`AccountDirectory.checkedByUse`). A key that is
+   * gone, is another account's or holds no seed is ignored. Absent: nothing is kept.
+   */
+  checkedByUse?(account: AccountId, factor: TwoFactorId, worked: boolean): Promise<void>;
 }
 
 /** The daemon's own looks at a target after a submit. Each answers `undefined` when it cannot tell. */
@@ -65,6 +72,8 @@ export interface LoginProbePort {
     surfaces: readonly string[],
     values: readonly string[],
   ): Promise<boolean | undefined>;
+  /** A terminal's line at its cursor now, as a card's prompt line is read. The same pinning. Absent: never known. */
+  prompt?(sessionId: string, key: string, surfaces: readonly string[]): Promise<string | undefined>;
 }
 
 export interface LoginObserverPorts {
@@ -99,6 +108,18 @@ export interface LoginDelivery {
   /** When the request was raised: an act of the ferret on that kind of surface since then voids the after-submit facts. */
   readonly since: number;
   /** When the write returned, taken before anything else is awaited. */
+  readonly deliveredAt: number;
+}
+
+/** A one-time code the DAEMON made from a saved 2FA key and typed, then submitted: did it go through? */
+export interface CodeDelivery {
+  readonly sessionId: string;
+  readonly account: AccountId;
+  readonly factor: TwoFactorId;
+  readonly target: InputTarget;
+  /** The facts the code was typed on: the page's document, or the terminal's prompt line. */
+  readonly facts: InputTargetFacts;
+  readonly surfaces: readonly string[];
   readonly deliveredAt: number;
 }
 
@@ -251,6 +272,48 @@ export class LoginObserver {
     }
   }
 
+  /**
+   * CHECKED BY USE: whether a code Ferretry made went through, from the daemon's own looks and nothing the ferret
+   * said. A page: a new document within {@link NAVIGATION_WINDOW_MS} is `true`, none is `false`. A terminal: at the end
+   * of that window, the same prompt line again is `false`, any other line is `true`. Kept on the key and answered;
+   * `undefined`, with nothing kept, when it cannot tell or the ferret acted on that kind of surface since the write.
+   * Total.
+   */
+  async codeTyped(typed: CodeDelivery): Promise<boolean | undefined> {
+    const kind = typed.target.kind === 'browser' ? 'browser' : 'terminal';
+    const worked =
+      typed.facts.kind === 'browser'
+        ? await this.pageMoved(typed, typed.facts.navigationId)
+        : typed.facts.kind === 'terminal'
+          ? await this.promptLeft(typed, typed.facts.promptLine)
+          : undefined;
+    if (worked === undefined || this.tainted(typed.sessionId, kind, typed.deliveredAt)) return undefined;
+    await this.ports.sink.checkedByUse?.(typed.account, typed.factor, worked).catch(() => undefined);
+    return worked;
+  }
+
+  private async pageMoved(typed: CodeDelivery, startDocument: string): Promise<boolean | undefined> {
+    for (;;) {
+      const where = await this.ports.probe
+        .where(typed.sessionId, typed.target.key, typed.surfaces)
+        .catch(() => undefined);
+      if (where === undefined) return undefined;
+      if (where.navigationId !== startDocument) return this.ports.now() - typed.deliveredAt <= NAVIGATION_WINDOW_MS;
+      if (this.ports.now() - typed.deliveredAt >= NAVIGATION_WINDOW_MS) return false;
+      await this.ports.sleep(POLL_MS);
+    }
+  }
+
+  private async promptLeft(typed: CodeDelivery, promptLine: string): Promise<boolean | undefined> {
+    const read = this.ports.probe.prompt;
+    if (read === undefined) return undefined;
+    await this.ports.sleep(Math.max(0, NAVIGATION_WINDOW_MS - (this.ports.now() - typed.deliveredAt)));
+    const now = await read
+      .call(this.ports.probe, typed.sessionId, typed.target.key, typed.surfaces)
+      .catch(() => undefined);
+    return now === undefined ? undefined : now.trimEnd() !== promptLine.trimEnd();
+  }
+
   /** Whether a value shows, looked for twice: seen in either is `true`; `false` only when BOTH looks could tell. */
   private async echoed(delivery: LoginDelivery): Promise<boolean | undefined> {
     const look = async (): Promise<boolean | undefined> =>
@@ -367,9 +430,16 @@ export class InputLoginProbe implements LoginProbePort {
       text(sessionId: string, key: string, surfaces: readonly string[]): Promise<string | undefined>;
     },
     private readonly terminals:
-      | { screen(sessionId: string, key: string, surfaces: readonly string[]): Promise<string | undefined> }
+      | {
+          screen(sessionId: string, key: string, surfaces: readonly string[]): Promise<string | undefined>;
+          promptLine?(sessionId: string, key: string, surfaces: readonly string[]): Promise<string | undefined>;
+        }
       | undefined,
   ) {}
+
+  async prompt(sessionId: string, key: string, surfaces: readonly string[]): Promise<string | undefined> {
+    return await this.terminals?.promptLine?.(sessionId, key, surfaces);
+  }
 
   async where(
     sessionId: string,

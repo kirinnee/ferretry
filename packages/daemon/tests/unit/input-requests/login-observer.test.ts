@@ -425,3 +425,107 @@ describe('whether the ferret could have steered a surface, for the lock', () => 
     should(w.observer.tainted('s1', 'terminal', Number.POSITIVE_INFINITY)).be.false();
   });
 });
+
+describe('checked by use: did a code Ferretry made go through?', () => {
+  const FACTOR = 'tf_0000000000a1';
+  /** A world whose terminal shows `line` at the cursor, and whose sink keeps each verdict on a key. */
+  function checking(script: {
+    where?: (elapsed: number) => { navigationId: string; host: string } | undefined;
+    line?: (elapsed: number) => string | undefined;
+  }) {
+    let now = DELIVERED;
+    const verdicts: unknown[][] = [];
+    const observer = new LoginObserver({
+      sink: {
+        observeSignIn: async () => undefined,
+        checkedByUse: async (...args) => void verdicts.push(args),
+      },
+      probe: {
+        shows: async () => undefined,
+        where: async () => script.where?.(now - DELIVERED),
+        ...(script.line === undefined ? {} : { prompt: async () => script.line?.(now - DELIVERED) }),
+      },
+      now: () => now,
+      sleep: async ms => {
+        now += ms;
+      },
+    });
+    return { observer, verdicts, at: (ms: number) => (now = DELIVERED + ms) };
+  }
+  const code = (facts: InputTargetFacts, target: LoginDelivery['target']) => ({
+    sessionId: 's1',
+    account: 'GITHUB',
+    factor: FACTOR,
+    target,
+    facts,
+    surfaces: ['app', 'page-1'],
+    deliveredAt: DELIVERED,
+  });
+  const onPage = code(page('text'), { kind: 'browser', key: 'app' });
+  const prompt = { ...terminal(), promptLine: 'Verification code:' } as InputTargetFacts;
+  const atPrompt = code(prompt, { kind: 'terminal', key: 'dev' });
+
+  it('should call a code that moved the page within the window one that worked, and keep it on the key', async () => {
+    const w = checking({
+      where: elapsed => ({ navigationId: elapsed >= 3_000 ? 'doc-2' : 'doc-1', host: 'github.com' }),
+    });
+    should(await w.observer.codeTyped(onPage)).be.true();
+    should(w.verdicts).deepEqual([['GITHUB', FACTOR, true]]);
+  });
+
+  it('should call a page that stayed for the whole window a code that did not', async () => {
+    const w = checking({ where: () => ({ navigationId: 'doc-1', host: 'github.com' }) });
+    should(await w.observer.codeTyped(onPage)).be.false();
+    should(w.verdicts).deepEqual([['GITHUB', FACTOR, false]]);
+  });
+
+  it('should keep nothing when the ferret acted on a page since the write, ran a script, or the page went away', async () => {
+    const acted = checking({ where: () => ({ navigationId: 'doc-1', host: 'github.com' }) });
+    acted.at(500);
+    acted.observer.acted('s1', 'browser');
+    should(await acted.observer.codeTyped(onPage)).be.undefined();
+    const scripted = checking({ where: () => ({ navigationId: 'doc-2', host: 'github.com' }) });
+    scripted.observer.acted('s1', 'browser', true);
+    scripted.at(0);
+    should(await scripted.observer.codeTyped({ ...onPage, deliveredAt: DELIVERED + 1 })).be.undefined();
+    const gone = checking({ where: () => undefined });
+    should(await gone.observer.codeTyped(onPage)).be.undefined();
+    should([...acted.verdicts, ...scripted.verdicts, ...gone.verdicts]).deepEqual([]);
+  });
+
+  it('should call the same prompt again a code that did not go through, and any other line one that did', async () => {
+    const again = checking({ line: () => 'Verification code:  ' });
+    should(await again.observer.codeTyped(atPrompt)).be.false();
+    const moved = checking({ line: elapsed => (elapsed >= 10_000 ? 'kirin@bastion:~$' : 'Verification code:') });
+    should(await moved.observer.codeTyped(atPrompt)).be.true();
+    should([...again.verdicts, ...moved.verdicts]).deepEqual([
+      ['GITHUB', FACTOR, false],
+      ['GITHUB', FACTOR, true],
+    ]);
+  });
+
+  it('should keep nothing for a terminal it cannot read, or one the ferret typed into since', async () => {
+    const unread = checking({});
+    should(await unread.observer.codeTyped(atPrompt)).be.undefined();
+    const typed = checking({ line: () => 'kirin@bastion:~$' });
+    typed.at(1);
+    typed.observer.acted('s1', 'terminal');
+    should(await typed.observer.codeTyped(atPrompt)).be.undefined();
+    should([...unread.verdicts, ...typed.verdicts]).deepEqual([]);
+  });
+
+  it('should read the prompt line from the terminal through the live probe', async () => {
+    const probe = new InputLoginProbe(
+      { where: async () => undefined, text: async () => undefined },
+      { screen: async () => undefined, promptLine: async () => 'Verification code:' },
+    );
+    should(await probe.prompt('s1', 'dev', ['dev'])).equal('Verification code:');
+    should(
+      await new InputLoginProbe({ where: async () => undefined, text: async () => undefined }, undefined).prompt(
+        's1',
+        'dev',
+        [],
+      ),
+    ).be.undefined();
+  });
+});

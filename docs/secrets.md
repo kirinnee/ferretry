@@ -329,7 +329,10 @@ pairing code, widening a device or any other act takes. Both directions are test
 - **A key that says it is for another account** (its issuer or account name does not fit) is refused
   (`409 factor_mismatch`) unless the owner ticked "save it here anyway". The warning is advice: the passkey is the act.
 - **Set up from a code card** (`request`): it saves only to the account the daemon matched for that card
-  (`409 not_this_cards_account`), so a ferret cannot steer which account a card's key lands on.
+  (`409 not_this_cards_account`), so a ferret cannot steer which account a card's key lands on. Staged from a paired
+  device, the save then types the new key's first code into that card ("use it now", `typed` on the answer, `submit`
+  on the stage), under every check a "Use code from Ferretry" tap gets
+  ([input requests](input-requests.md#codes-ferretry-makes)); staged from the machine, it types nothing.
 - **At most 4 seeds wait at once on the whole daemon, 2 per caller, and callers that are not a paired device share
   only 3** (`429`), so nobody fills its memory by staging and a ferret holding junk stages never keeps the owner's
   app from staging. **Only the caller that staged a seed, or a paired device, may read, drop or card it** (another

@@ -25,6 +25,7 @@ import {
   type AgendaId,
   factorMismatch,
   factorMismatchWords,
+  type InputActor,
   MAX_LIVE_TWO_FACTOR_STAGES,
   MAX_SEEDS_PER_ACCOUNT,
   parseTotpInput,
@@ -95,9 +96,25 @@ export interface TwoFactorSeedAgendaPort {
   close(sessionId: string, id: AgendaId, note: string): Promise<void>;
 }
 
+/** Who saved a seed, as an input card's deliver names the owner: the machine, or a paired device. */
+export type SeedSaver = Extract<InputActor, { readonly kind: 'host' | 'device' }>;
+
 /** An input card the owner set a seed up from: whether it is still open, and where the daemon saw its target. */
 export interface TwoFactorSeedCardPort {
   cardTarget(requestId: string): { readonly matchKey?: string } | undefined;
+  /**
+   * "Use it now": types the new key's first code into that card under every check a "Use code from Ferretry" tap gets
+   * (`InputRequestService.useNow`). Whether it was typed; never the code. Absent: never typed.
+   */
+  useNow?(
+    requestId: string,
+    use: {
+      readonly account: AccountId;
+      readonly factor: TwoFactorId;
+      readonly submit?: boolean;
+      readonly actor: SeedSaver;
+    },
+  ): Promise<boolean>;
 }
 
 export interface TwoFactorSeedStagesDeps {
@@ -137,6 +154,12 @@ interface Stage {
   committing?: boolean;
   factor?: TwoFactorId;
   card?: { readonly sessionId: string; readonly id: AgendaId };
+  /**
+   * The input card a PAIRED DEVICE set this seed up from, to type the first code into once saved ("use it now"). Never
+   * for a stage made from the machine or a ferret's token: their save is confirmed on an agenda card that says nothing
+   * about typing, so the owner's passkey there is no tap on a code card.
+   */
+  readonly useOn?: { readonly request: string; readonly submit?: boolean };
 }
 
 interface Sealed {
@@ -235,6 +258,9 @@ export class TwoFactorSeedStages implements RedactionValueSource {
       expiresAtMs: now + STAGE_TTL_MS,
       sealed,
       state: 'waiting',
+      ...(request.request === undefined || !caller.device
+        ? {}
+        : { useOn: { request: request.request, ...(request.submit === undefined ? {} : { submit: request.submit }) } }),
     };
     this.#stages.set(id, stage);
     return {
@@ -279,12 +305,14 @@ export class TwoFactorSeedStages implements RedactionValueSource {
   /**
    * SAVES a waiting stage. `claim` is the route's claim on a fresh `add-2fa-key` proof bound to the subject it is
    * handed; without one this throws {@link TwoFactorSeedProofMissing} and the stage keeps waiting. The proof is spent
-   * by the claim whatever follows, as every act's is.
+   * by the claim whatever follows, as every act's is. A stage a paired device set up from an input card then types the
+   * new key's first code into that card (`typed`), as `saver`.
    */
   async commit(
     accountId: AccountId,
     stage: TwoFactorStageId,
     claim: (subject: string) => boolean,
+    saver?: SeedSaver,
   ): Promise<TwoFactorSeedSaved> {
     this.#sweep(this.deps.clock.nowMs());
     const held = await this.#own(accountId, stage, { finished: false });
@@ -317,7 +345,20 @@ export class TwoFactorSeedStages implements RedactionValueSource {
     }
     held.factor = saved.factor.id;
     await this.#finish(held, 'saved');
-    return { ...saved, mismatch: held.mismatch };
+    const use = held.useOn;
+    if (use === undefined) return { ...saved, mismatch: held.mismatch };
+    const typed =
+      saver === undefined || this.deps.cards?.useNow === undefined
+        ? false
+        : await this.deps.cards
+            .useNow(use.request, {
+              account: saved.account,
+              factor: saved.factor.id,
+              ...(use.submit === undefined ? {} : { submit: use.submit }),
+              actor: saver,
+            })
+            .catch(() => false);
+    return { ...saved, mismatch: held.mismatch, typed };
   }
 
   /** Drops a waiting stage (Deny, or `DELETE`): the seed is let go and nothing is saved. Never needs a passkey. */

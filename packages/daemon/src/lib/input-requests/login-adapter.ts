@@ -1,4 +1,4 @@
-import type { AccountList, LoginEntryId, LoginFieldRole } from '@ferretry/protocol';
+import type { AccountList, LoginEntryId, LoginFieldRole, TwoFactorId } from '@ferretry/protocol';
 import type { AccountVault, LoginFieldValues } from '../secrets/accounts.ts';
 import type { LoginDirectory } from '../secrets/logins.ts';
 import type { InputLoginPort } from './ports.ts';
@@ -17,8 +17,13 @@ export class InputLoginAdapter implements InputLoginPort {
     return await this.directory.accounts.list();
   }
 
-  async fill(id: LoginEntryId, role: LoginFieldRole, nowMs: number): Promise<string> {
-    return await this.vault.fill(id, role, nowMs);
+  async fill(
+    id: LoginEntryId,
+    role: LoginFieldRole,
+    nowMs: number,
+    options: { readonly factor?: TwoFactorId } = {},
+  ): Promise<string> {
+    return await this.vault.fill(id, role, nowMs, options);
   }
 
   async save(id: LoginEntryId, label: string, match: string | undefined, fields: LoginFieldValues): Promise<void> {

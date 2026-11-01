@@ -82,6 +82,7 @@ import {
   TwoFactorSeedProofMissing,
   type TwoFactorSeedStages,
   DEVICE_OWNER,
+  type SeedSaver,
   type StageCaller,
   UnknownSecretError,
 } from '../../secrets/index.ts';
@@ -638,6 +639,12 @@ function stageCaller(context: RouteContext): StageCaller {
     : { key: `${DEVICE_OWNER}${device.deviceId}`, device: true };
 }
 
+/** Who saved a seed, as an input card's deliver names the owner ("use it now"): a paired device, or the machine. */
+function seedSaver(context: RouteContext): SeedSaver {
+  const credential = context.credential;
+  return credential?.tokenClass === 'device' ? { kind: 'device', deviceId: credential.deviceId } : { kind: 'host' };
+}
+
 /** Who asked for a save, in the card's words: the owner's shell, the app at the machine, or a paired device. */
 function askedByWords(context: RouteContext): string {
   const { kind } = parseActor(context.actor ?? '');
@@ -732,6 +739,7 @@ function factorRoutes(
                   id,
                   stage,
                   subject => context.claimFreshStepUp?.(STEP_UP_ACTS.addTwoFactorKey, subject) === true,
+                  seedSaver(context),
                 );
                 return jsonResponse(TwoFactorSeedSavedSchema.parse(saved));
               } catch (error) {

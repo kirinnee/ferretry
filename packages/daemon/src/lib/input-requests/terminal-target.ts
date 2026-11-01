@@ -161,6 +161,21 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     return captured.code === 0 ? captured.stdout : undefined;
   }
 
+  /**
+   * The line at the terminal's cursor now, read as a card's prompt line is, for the DAEMON's own look at whether a code
+   * it typed went through (the same prompt again, or not). Never published. `undefined` when it cannot be had.
+   */
+  async promptLine(sessionId: string, key: string, surfaces: readonly string[]): Promise<string | undefined> {
+    const located = await this.terminals.locate(sessionId, key);
+    if (located?.id === undefined || !surfaces.includes(located.id)) return undefined;
+    const pane = terminalPaneTarget(located);
+    const described = await this.describe(pane);
+    const cursor = described?.cursor;
+    if (cursor === undefined || !/^(?:0|[1-9][0-9]*)$/u.test(cursor)) return undefined;
+    const captured = await this.tmux.execute(['capture-pane', '-p', '-N', '-S', cursor, '-E', cursor, '-t', pane]);
+    return captured.code === 0 ? plain(captured.stdout.split('\n')[0] ?? '') : undefined;
+  }
+
   async observe(sessionId: string, target: InputTarget): Promise<ObserveResult> {
     if (target.kind !== 'terminal') return { ok: false, reason: 'unsupported' };
     const sight = await this.look(sessionId, target.key);

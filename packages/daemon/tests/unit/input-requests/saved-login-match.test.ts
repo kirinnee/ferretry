@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import type { AccountSummary, InputSaved, InputTargetFacts, SignInSummary } from '@ferretry/protocol';
 import should from 'should';
 import {
+  codeCardKeys,
+  codeTargetProblem,
   remoteHostOf,
   type SavedListing,
   savedFieldFor,
@@ -377,7 +379,102 @@ describe('a one-time code is never offered by hand', () => {
       'code',
       'github.com',
       listing([account('GITHUB', seeded), account('GITLAB', seeded)], [here, elsewhere]),
+      { codesHere: true },
     );
     should(saved.offers.map(offer => [offer.id, offer.fills])).deepEqual([['GITHUB', 'totp']]);
+  });
+
+  it('should offer no code at all unless the caller says the target may take one it makes', () => {
+    const here = site('GITHUB', ['github.com']);
+    const seeded = listing([account('GITHUB', { fields: { password: true, totp: true } })], [here]);
+    should(savedFor('code', 'github.com', seeded).offers).deepEqual([]);
+    should(savedFor('code', 'github.com', seeded, { codesHere: false }).offers).deepEqual([]);
+    should(savedFor('secret', 'github.com', seeded).offers.map(offer => offer.fills)).deepEqual(['password']);
+  });
+});
+
+describe('where the daemon may type a code it made', () => {
+  const field = (over: Record<string, unknown> = {}) => ({
+    fieldId: 'code',
+    frameOrigin: 'https://github.com',
+    frameId: 'main',
+    backendNodeId: 1,
+    field: { tag: 'input', type: 'text' },
+    box: { x: 0, y: 0, w: 1, h: 1 },
+    visible: true,
+    ...over,
+  });
+  const onPage = (over: Record<string, unknown> = {}, secure = true) =>
+    ({
+      kind: 'browser',
+      pageId: 'p',
+      origin: 'https://github.com',
+      secure,
+      navigationId: 'n',
+      fields: [field(over)],
+    }) as InputTargetFacts;
+
+  it('should allow the page’s own visible field on https, and a terminal’s one prompt', () => {
+    should(codeTargetProblem(onPage(), ['code'])).be.undefined();
+    should(codeTargetProblem(terminal('ssh', 'ssh bastion'), ['value'])).be.undefined();
+  });
+
+  it('should refuse http, an unseen, covered or missing field, another site’s frame, the store and no look', () => {
+    for (const facts of [
+      onPage({}, false),
+      onPage({ visible: false }),
+      onPage({ covered: true }),
+      onPage({ frameOrigin: 'https://evil.example' }),
+    ])
+      should(codeTargetProblem(facts, ['code'])).be.a.String();
+    should(codeTargetProblem(onPage(), ['other'])).be.a.String();
+    should(codeTargetProblem(undefined, ['code'])).be.a.String();
+    should(
+      codeTargetProblem({ kind: 'secret', name: 'X', exists: false } as InputTargetFacts, ['value']),
+    ).be.a.String();
+  });
+});
+
+describe('the account a code card is titled from', () => {
+  const sms = {
+    id: 'tf_00000000000a',
+    kind: 'sms',
+    label: 'Phone',
+    endsWith: '42',
+    addedAt: AT,
+    addedBy: 'owner',
+    automatic: false,
+  } as const;
+  const app = {
+    id: 'tf_00000000000b',
+    kind: 'totp',
+    label: 'App',
+    addedAt: AT,
+    addedBy: 'owner',
+    automatic: false,
+  } as const;
+  const theirs = { ...sms, id: 'tf_00000000000c', label: 'Theirs' } as const;
+
+  it('should take the matched account’s keys, or the one key the ferret names among them', () => {
+    const world = listing(
+      [account('GITHUB', { factors: [sms, app] }), account('GITLAB', { factors: [theirs] })],
+      [site('GITHUB', ['github.com']), site('GITLAB', ['gitlab.com'])],
+    );
+    should(codeCardKeys('github.com', world, {})?.keys.map(key => key.id)).deepEqual([sms.id, app.id]);
+    should(codeCardKeys('github.com', world, { factor: app.id })?.keys.map(key => key.id)).deepEqual([app.id]);
+    should(codeCardKeys('github.com', world, { factor: theirs.id })?.keys.map(key => key.id)).deepEqual([
+      sms.id,
+      app.id,
+    ]);
+    should(codeCardKeys('example.org', world, { factor: sms.id })).be.undefined();
+  });
+
+  it('should choose no account between two that match with nothing to choose by', () => {
+    const world = listing(
+      [account('A', { factors: [sms] }), account('B', { factors: [app] })],
+      [site('A', ['github.com']), site('B', ['github.com'])],
+    );
+    should(codeCardKeys('github.com', world, {})).be.undefined();
+    should(codeCardKeys('github.com', world, { hint: 'B' })?.account.id).equal('B');
   });
 });

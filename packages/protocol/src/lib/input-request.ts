@@ -621,9 +621,10 @@ export const InputDeliverBodySchema = z
      */
     signIn: SignInIdSchema.optional(),
     /**
-     * The saved account's 2FA key whose code the daemon makes ("Use code from Ferretry · Authy backup"), with `entry`.
-     * NOT YET TAKEN: a daemon of this build refuses a deliver that names one, until the code-card change checks that
-     * the key is the matched account's and holds a seed; absent, the account's first key in offer order is used.
+     * The saved account's 2FA key whose code the daemon makes ("Use code from Ferretry · Authy backup"), with `entry`:
+     * one of that offer's `codes`. The daemon refuses the deliver with nothing typed unless the key is the MATCHED
+     * account's, holds a seed and the card has a code field it may type a code it made into. Absent: the account's
+     * first key in offer order. The code is made inside the daemon and typed; no answer, event or record holds it.
      */
     factor: TwoFactorIdSchema.optional(),
     /** Allow a paste: the daemon types the secure copy the request names (`request.source`), never one the body names. */
@@ -882,6 +883,8 @@ export const InputAuditDetailSchema = z.strictObject({
   source: z.enum(['typed', 'saved', 'sealed']).optional(),
   /** The saved login typed from, or saved to: a handle, never what it holds. */
   entry: LoginEntryIdSchema.optional(),
+  /** The 2FA key a code Ferretry made came from: its id, never the code or the seed. */
+  factor: TwoFactorIdSchema.optional(),
   /** The typed value was kept in `entry`. */
   saved: z.boolean().optional(),
   submitted: z.boolean().optional(),

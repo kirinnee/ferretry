@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SignInIdSchema } from './account-ids.ts';
+import { SignInIdSchema, TwoFactorIdSchema } from './account-ids.ts';
 import { InstantSchema } from './common.ts';
 import {
   LoginObservedSchema,
@@ -96,6 +96,14 @@ export type TotpParameters = z.infer<typeof TotpParametersSchema>;
  */
 export const LOGIN_TOTP_WARNING =
   "Keeping the password and the 2FA seed in the same place means one compromise of this machine's vault defeats both factors.";
+
+/** The same warning, short, under every "Use code from Ferretry" button on a code card. */
+export const LOGIN_ONE_FACTOR_WARNING = 'Password and code both come from this machine: together they are one factor.';
+
+/** Most 2FA keys of one account that hold a seed: a re-enrolled second authenticator, a backup app. */
+export const MAX_SEEDS_PER_ACCOUNT = 4;
+/** The longest label the owner gives a 2FA key ("Okta Verify on Pixel", "Phone ••42"). */
+export const TWO_FACTOR_LABEL_MAX_LENGTH = 60;
 
 /** A base32 TOTP seed, as authenticator setup pages show it (spaces and `=` padding allowed). */
 export const TotpSeedSchema = z
@@ -342,6 +350,19 @@ export const SIGN_IN_PROJECT_MAX_LENGTH = 128;
  * ever a matched one, with `why` it is first (and `project`, the project a "Default for ferretry" names). With
  * `primary` absent from every offer, nothing is the one-tap choice: the owner picks.
  */
+/**
+ * ONE "Use code from Ferretry" button: a 2FA key of the offer's account whose seed Ferretry holds, by its id (what a
+ * deliver's `factor` names) and the OWNER's label. `checked` is what the last code made from it came to, as the daemon
+ * saw it (`worked`, `failed`); absent: never tried. Owner view only, like the whole offer: a ferret never learns that a
+ * seed exists.
+ */
+export const InputCodeKeySchema = z.strictObject({
+  factor: TwoFactorIdSchema,
+  label: oneLine(TWO_FACTOR_LABEL_MAX_LENGTH),
+  checked: z.enum(['worked', 'failed']).optional(),
+});
+export type InputCodeKey = z.infer<typeof InputCodeKeySchema>;
+
 export const InputSavedOfferSchema = z
   .strictObject({
     id: LoginEntryIdSchema,
@@ -354,8 +375,21 @@ export const InputSavedOfferSchema = z
     primary: z.literal(true).optional(),
     why: SignInChoiceReasonSchema.optional(),
     project: oneLine(SIGN_IN_PROJECT_MAX_LENGTH).optional(),
+    /**
+     * An offer that makes a one-time code: one button per key whose seed Ferretry holds, in the order a deliver without
+     * `factor` falls back on (one that worked first, then one never tried, then one that failed; newest first). Only
+     * ever on a MATCHED offer that fills `totp`, and only where the daemon may type a code it made (docs/input-requests.md,
+     * "Codes Ferretry makes"). Absent from an older daemon: the offer is one button with the account's first seed.
+     */
+    codes: z.array(InputCodeKeySchema).min(1).max(MAX_SEEDS_PER_ACCOUNT).readonly().optional(),
   })
   .superRefine((offer, context) => {
+    if (offer.codes !== undefined && (!offer.matched || offer.signIn === undefined || offer.fills !== 'totp'))
+      context.addIssue({
+        code: 'custom',
+        path: ['codes'],
+        message: 'only a matched offer that fills a code names the keys it makes codes from',
+      });
     if (offer.primary === true && !offer.matched)
       context.addIssue({ code: 'custom', path: ['primary'], message: 'only a matched offer is the one-tap choice' });
     if (offer.primary === true && offer.signIn === undefined)
