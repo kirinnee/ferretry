@@ -50,6 +50,7 @@ export type BoardOperation =
   | 'drop'
   | 'assign'
   | 'order'
+  | 'snooze'
   | 'replan'
   | 'reparent'
   | 'adopt'
@@ -82,6 +83,7 @@ export const OPERATION_STANDINGS: Readonly<Record<BoardOperation, readonly Board
   drop: PLANNERS,
   assign: PLANNERS,
   order: PLANNERS,
+  snooze: HUMAN,
   replan: PLANNERS,
   reparent: PLANNERS,
   adopt: WORKERS,
@@ -140,6 +142,7 @@ const OPERATION_WORDS: Readonly<Record<BoardOperation, string>> = {
   drop: 'drop',
   assign: 'reassign',
   order: 'reorder',
+  snooze: 'snooze',
   replan: 'retitle or rewrite the brief of',
   reparent: 'move under another card',
   adopt: 'add a child card under',

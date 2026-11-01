@@ -239,6 +239,11 @@ describe('history', () => {
     expect(rowOf('blocked', { reason: 'r' })).toMatchObject({ text: 'blocked', detail: 'r' });
     expect(rowOf('unblocked', { reason: 'r' })).toMatchObject({ text: 'unblocked', detail: 'r' });
     expect(rowOf('dropped', { reason: 'r' })).toMatchObject({ text: 'dropped it', detail: 'r' });
+    expect(rowOf('snoozed', { until: '2026-08-02T13:00:00.000Z' })).toMatchObject({
+      text: 'snoozed it until 2026-08-02T13:00:00.000Z',
+      minor: true,
+    });
+    expect(rowOf('snoozed', { until: null })).toMatchObject({ text: 'woke it from snooze' });
     expect(rowOf('refiled', { reason: 'r' })).toMatchObject({ text: 'moved it to another project', detail: 'r' });
     expect(rowOf('migrated', { legacyRef: '#F1' }).text).toBe('brought it over from #F1');
   });

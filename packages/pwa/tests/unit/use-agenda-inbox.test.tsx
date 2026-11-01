@@ -153,6 +153,45 @@ describe('useAgendaInboxModel', () => {
     expect(read.cards).toEqual([]);
   });
 
+  test('puts a snoozed card aside, out of the count, and brings it back when its time is up', async () => {
+    const { client } = fakeClient(new Map());
+    let clock = Date.parse('2026-08-02T12:00:00.000Z');
+    const armed: { readonly run: () => void; readonly after: number }[] = [];
+    const timers: DeferredTimers = {
+      setTimeout: (run, after) => {
+        armed.push({ run, after });
+        return armed.length;
+      },
+      clearTimeout: () => undefined,
+      now: () => clock,
+    };
+    let inbox: AgendaInbox | null = null;
+    const rows = toTestCards(
+      await boardModelOf([
+        card('F1', { laneId: 'tested' }),
+        card('F2', { laneId: 'tested', snoozed: { until: '2026-08-02T13:00:00.000Z', laneId: 'tested' } }),
+      ]),
+    );
+    view = await mount(
+      <Probe client={client} machines={[]} onInbox={value => (inbox = value)} timers={timers} toTest={rows} />,
+    );
+    await settle();
+    const asleep = inbox as unknown as AgendaInbox;
+    expect(asleep.total).toBe(1);
+    expect(asleep.toTest.map(row => row.card.task.id)).toEqual(['F1']);
+    expect(asleep.toTestSnoozed.map(row => row.card.task.id)).toEqual(['F2']);
+    const wake = armed.at(-1);
+    expect(wake?.after).toBe(3_600_000 + 50);
+
+    clock = Date.parse('2026-08-02T13:00:01.000Z');
+    await interact(async () => wake?.run());
+    await settle();
+    const awake = inbox as unknown as AgendaInbox;
+    expect(awake.total).toBe(2);
+    expect(awake.toTest.map(row => row.card.task.id).sort()).toEqual(['F1', 'F2']);
+    expect(awake.toTestSnoozed).toEqual([]);
+  });
+
   test('names each card to test by the task its ferret was given, from the sessions the fleet holds', async () => {
     const { client } = fakeClient(new Map());
     const { timers } = manualTimers();

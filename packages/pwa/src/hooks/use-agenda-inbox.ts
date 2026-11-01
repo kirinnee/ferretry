@@ -26,6 +26,7 @@ import type { DaemonAgendaClient } from '../lib/agenda-client.ts';
 import { type AgendaSender, sendAgendaAction } from '../lib/agenda-send.ts';
 import {
   agendaSummaryKey,
+  browserDeferredTimers,
   DeferredAgendaActions,
   type DeferredAgendaState,
   type DeferredTimers,
@@ -45,7 +46,7 @@ import {
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
-import { sessionTaskNames, type ToTestCard, withTaskName } from '../lib/to-test-inbox.ts';
+import { nextWake, sessionTaskNames, splitSnoozed, type ToTestCard, withTaskName } from '../lib/to-test-inbox.ts';
 
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
 export interface AgendaInboxMachine {
@@ -61,6 +62,8 @@ export interface AgendaInbox {
   readonly total: number;
   /** Cards waiting in a verify lane for the owner's try (Done or Not good): counted in `total`, listed under Needs you. */
   readonly toTest: readonly ToTestCard[];
+  /** Cards the owner put aside until later: not in `toTest` and not in `total`, back in `toTest` when their time is up. */
+  readonly toTestSnoozed: readonly ToTestCard[];
   /** The deck: every read open item, newest first, minus the answers still undoable or in flight. */
   readonly cards: readonly InboxCard[];
   /** Items on the ferret's turn: not in the deck and not in `total` — the "With ferrets" section. */
@@ -150,6 +153,28 @@ const cardsKey = (cards: readonly InboxCard[]): string =>
 
 const NO_TO_TEST: readonly ToTestCard[] = [];
 
+const toTestKeyOf = (rows: readonly ToTestCard[]): string =>
+  rows
+    .map(
+      row =>
+        `${row.key}\u0000${row.card.task.laneId}\u0000${row.card.task.lastTouchedAt}\u0000${row.taskName ?? ''}\u0000${row.snoozedUntil ?? ''}`,
+    )
+    .join('\u0001');
+
+/** The clock the snoozed cards wake by: it moves to the soonest wake, so a card comes back when its time is up. */
+const useWakeClock = (rows: readonly ToTestCard[], timers: DeferredTimers): number => {
+  const [now, setNow] = useState(() => timers.now());
+  useEffect(() => {
+    const wake = nextWake(rows, now);
+    if (wake === null) return;
+    // A little past the wake, and never past what a timer can hold; a longer snooze re-arms when this fires.
+    const handle = timers.setTimeout(() => setNow(timers.now()), Math.min(wake - now + 50, MAX_TIMER_MS));
+    return () => timers.clearTimeout(handle);
+  }, [rows, now, timers]);
+  return now;
+};
+const MAX_TIMER_MS = 2_147_483_647;
+
 export function useAgendaInboxModel(
   client: DaemonAgendaClient,
   machines: readonly AgendaInboxMachine[],
@@ -158,14 +183,10 @@ export function useAgendaInboxModel(
 ): AgendaInbox {
   const taskNames = useMemo(() => sessionTaskNames(machines.flatMap(machine => machine.sessions ?? [])), [machines]);
   const named = useMemo(() => toTestRead.map(row => withTaskName(row, taskNames)), [toTestRead, taskNames]);
-  const toTest = useStable(
-    named,
-    named
-      .map(
-        row => `${row.key}\u0000${row.card.task.laneId}\u0000${row.card.task.lastTouchedAt}\u0000${row.taskName ?? ''}`,
-      )
-      .join('\u0001'),
-  );
+  const now = useWakeClock(named, timers ?? browserDeferredTimers);
+  const split = useMemo(() => splitSnoozed(named, now), [named, now]);
+  const toTest = useStable(split.awake, toTestKeyOf(split.awake));
+  const toTestSnoozed = useStable(split.snoozed, toTestKeyOf(split.snoozed));
   const latest = useRef(machines);
   latest.current = machines;
   const connectionFor = useMemo(
@@ -322,6 +343,7 @@ export function useAgendaInboxModel(
       unread,
       total: unreadTotal(unread) + toTest.length,
       toTest,
+      toTestSnoozed,
       cards,
       withFerret,
       reading,
@@ -336,6 +358,7 @@ export function useAgendaInboxModel(
     [
       unread,
       toTest,
+      toTestSnoozed,
       cards,
       withFerret,
       reading,

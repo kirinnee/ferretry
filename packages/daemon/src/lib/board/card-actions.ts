@@ -762,6 +762,19 @@ export const applyAction = (
           order: action.order,
         },
       };
+    case 'snooze':
+      requireStanding('snooze', context.standing, card);
+      if (action.until === null) {
+        if (card.snoozed == null) throw new BoardError('invalid', `${ref} is not snoozed`);
+      } else if (Date.parse(action.until) <= Date.parse(context.now)) {
+        throw new BoardError('invalid', `${ref} can only be snoozed to a time that has not passed`);
+      }
+      return {
+        task: {
+          ...withEvent(card, { type: 'snoozed', until: action.until }, context),
+          snoozed: action.until === null ? null : { until: action.until, laneId: card.laneId },
+        },
+      };
     case 'refile':
       return refile(card, action, refileTarget, context);
     case 'reparent':

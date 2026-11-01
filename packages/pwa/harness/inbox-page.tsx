@@ -355,6 +355,22 @@ const TO_TEST = TO_TEST_VIEW
       ]),
     ).map(row => withTaskName(row, LEAD_TASKS))
   : [];
+/** One card the owner parked ("?snoozed=1"): it is out of To test and listed under Snoozed with when it wakes. */
+const TO_TEST_SNOOZED =
+  TO_TEST_VIEW && new URLSearchParams(location.search).get('snoozed') === '1'
+    ? toTestCards(
+        await boardModelOf([
+          boardCard('F70', {
+            laneId: 'tested',
+            owner: 'mvuc7tsf-0c3d50df',
+            title: 'Offline banner wording',
+            shippedIn: { version: '5.2.0', tag: 'v5.2.0', at: ago(60 * 30) },
+            howToTest: '1. Turn the network off.\n2. Read the banner.',
+            snoozed: { until: new Date(NOW + 5 * 3_600_000).toISOString(), laneId: 'tested' },
+          }),
+        ]),
+      ).map(row => withTaskName(row, LEAD_TASKS))
+    : [];
 const TO_TEST_HOST: ToTestHost = {
   actions: {
     moveTask: async (target: { readonly taskId?: string; readonly id?: string }, to: string, reason?: string) => {
@@ -362,6 +378,13 @@ const TO_TEST_HOST: ToTestHost = {
       const moves = win.__moves ?? [];
       win.__moves = moves;
       moves.push({ id: target.taskId ?? target.id, to, reason });
+      return boardOk(boardCard('F61'));
+    },
+    snoozeTask: async (target: { readonly id?: string }, until: string | null) => {
+      const win = window as unknown as { __snoozes?: unknown[] };
+      const snoozes = win.__snoozes ?? [];
+      win.__snoozes = snoozes;
+      snoozes.push({ id: target.id, until });
       return boardOk(boardCard('F61'));
     },
   } as unknown as ToTestHost['actions'],
@@ -405,6 +428,7 @@ function Inbox({
     deferredState: state,
     connectionFor: id => (id === LAPTOP ? { ...MACHINE, daemonId: LAPTOP } : MACHINE),
     toTest: TO_TEST,
+    toTestSnoozed: TO_TEST_SNOOZED,
   };
   return (
     <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`} data-fixture="">

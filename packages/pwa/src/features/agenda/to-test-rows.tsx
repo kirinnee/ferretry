@@ -26,11 +26,12 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { type BoardAnswers, useBoardAnswers } from '../board/board-answers.tsx';
 import type { SendBackPorts } from '../board/board-send-back.tsx';
 import { cardProse, HowToTest } from '../board/detail/board-detail-sections.tsx';
+import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { isTouch, lockOf, startsInSidewaysScroller, startsOnInteractive } from './agenda-swipe-gesture.ts';
 
 /** What the rows need to move a card: the Board's own verbs, bound to the paired machines. */
 export interface ToTestHost {
-  readonly actions: Pick<BoardActions, 'moveTask'>;
+  readonly actions: Pick<BoardActions, 'moveTask' | 'snoozeTask'>;
   readonly ports: SendBackPorts | undefined;
   readonly connectionOf: (daemonId: DaemonId) => DaemonConnection | undefined;
 }
@@ -38,7 +39,8 @@ export interface ToTestHost {
 const NO_HOST: ToTestHost = {
   actions: {
     moveTask: async () => ({ ok: false, error: { code: 'unavailable', message: 'This page cannot move cards.' } }),
-  } as unknown as Pick<BoardActions, 'moveTask'>,
+    snoozeTask: async () => ({ ok: false, error: { code: 'unavailable', message: 'This page cannot snooze cards.' } }),
+  } as unknown as Pick<BoardActions, 'moveTask' | 'snoozeTask'>,
   ports: undefined,
   connectionOf: () => undefined,
 };
@@ -55,7 +57,11 @@ export const useToTestAnswers = (host: ToTestHost | undefined, phone: boolean) =
     onNotice: setNotice,
     portal: true,
   });
-  return { notice, composer, ...toTestAnswersOver({ requestMove, answerFor }) };
+  return {
+    notice,
+    composer,
+    ...toTestAnswersOver({ requestMove, answerFor, snooze: snoozeOver(live.actions, setNotice) }),
+  };
 };
 
 /** What a row needs to answer a card: any surface holding the Board's own `useBoardAnswers` flow can hand these over. */
@@ -63,13 +69,26 @@ export interface ToTestAnswers {
   readonly answerFor: BoardAnswers['answerFor'];
   readonly done: (row: ToTestCard) => void;
   readonly notGood: (row: ToTestCard) => void;
+  /** Park the card until `until`, or wake it now (`null`). It is the owner's, kept on the machine, so every device agrees. */
+  readonly snooze: (row: ToTestCard, until: string | null) => void;
 }
+
+/** The snooze verb for a row: a refusal is said where the page says its other notices. */
+export const snoozeOver =
+  (actions: Pick<BoardActions, 'snoozeTask'>, onNotice: (message: string) => void) =>
+  (row: ToTestCard, until: string | null): void => {
+    void actions.snoozeTask({ daemonId: row.card.daemonId, id: row.card.task.id }, until).then(result => {
+      if (!result.ok) onNotice(result.error.message);
+    });
+  };
 
 export const toTestAnswersOver = ({
   requestMove,
   answerFor,
-}: Pick<BoardAnswers, 'requestMove' | 'answerFor'>): ToTestAnswers => ({
+  snooze,
+}: Pick<BoardAnswers, 'requestMove' | 'answerFor'> & { readonly snooze: ToTestAnswers['snooze'] }): ToTestAnswers => ({
   answerFor,
+  snooze,
   done: row => requestMove(row.card, row.group, row.doneLaneId, 'done'),
   notGood: row => requestMove(row.card, row.group, row.notGoodLaneId, 'not-good'),
 });
@@ -218,7 +237,7 @@ function ToTestRow({
 }) {
   const state = answers.answerFor(row.card);
   const busy = state.pressed !== null;
-  const { done, notGood } = answers;
+  const { done, notGood, snooze } = answers;
   const swipe = useRowSwipe(
     () => done(row),
     () => notGood(row),
@@ -300,6 +319,13 @@ function ToTestRow({
           </p>
         )}
         <div className="fy-totest__actions">
+          <AgendaSnoozeMenu
+            disabled={busy}
+            label={`Snooze: ${title}`}
+            now={now}
+            onSnooze={until => snooze(row, until)}
+            triggerClass="kt-btn fy-totest__snooze"
+          />
           <button
             aria-label={`Done: ${title}`}
             className="kt-btn"

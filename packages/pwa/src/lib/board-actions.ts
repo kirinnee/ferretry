@@ -100,6 +100,8 @@ export interface BoardActions {
   link(target: BoardCardTarget, link: BoardLinkTarget): Promise<BoardMutation>;
   drop(target: BoardCardTarget, reason: string): Promise<BoardMutation>;
   editField(target: BoardCardTarget, edit: BoardEdit): Promise<BoardMutation>;
+  /** Puts a card aside until `until` (an instant), or wakes it now with `null`. The owner's own, kept on the card. */
+  snoozeTask(target: BoardCardTarget, until: string | null): Promise<BoardMutation>;
   /** Puts the card under another card, or at the top level with `parent: null`. */
   reparent(target: BoardCardTarget, parent: Action<'reparent'>['parent'], reason?: string): Promise<BoardMutation>;
   /** Opens a card the owner writes, on one machine. */
@@ -212,6 +214,7 @@ export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
     link: (target, link) => send(target, { action: 'link', ...link }),
     drop: (target, reason) => send(target, { action: 'drop', reason }),
     editField: (target, edit) => send(target, { action: 'edit', ...edit }),
+    snoozeTask: (target, until) => send(target, { action: 'snooze', until }),
     reparent: (target, parent, reason) =>
       send(target, { action: 'reparent', parent, ...(reason === undefined ? {} : { reason }) }),
     create: async (daemonId, request) => {

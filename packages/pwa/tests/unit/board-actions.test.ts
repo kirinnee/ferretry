@@ -152,6 +152,8 @@ describe('the other verbs', () => {
     await actions.editField(card1, { title: 'New title' });
     await actions.reparent(card1, { id: 'F9' } as never, 'wrong parent');
     await actions.reparent(card1, null);
+    await actions.snoozeTask(card1, '2026-08-02T15:00:00.000Z');
+    await actions.snoozeTask(card1, null);
     expect(sent.map(entry => entry.request.action)).toEqual([
       'reopen',
       'depend',
@@ -163,10 +165,14 @@ describe('the other verbs', () => {
       'edit',
       'reparent',
       'reparent',
+      'snooze',
+      'snooze',
     ]);
     expect(sent[8]?.request).toMatchObject({ parent: { id: 'F9' }, reason: 'wrong parent' });
     expect(sent[9]?.request).toMatchObject({ parent: null });
     expect(sent[9]?.request).not.toHaveProperty('reason');
+    expect(sent[10]?.request).toEqual({ action: 'snooze', until: '2026-08-02T15:00:00.000Z' });
+    expect(sent[11]?.request).toEqual({ action: 'snooze', until: null });
     expect(sent[2]?.request).toMatchObject({ override: { reason: 'urgent' } });
     expect(sent[3]?.request).toMatchObject({ action: 'undepend', reason: 'no longer needed' });
     expect(sent[1]?.request).not.toHaveProperty('override');

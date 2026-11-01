@@ -28,6 +28,8 @@ export interface ToTestCard {
   readonly taskName: string | null;
   /** When it started waiting for the owner: its release, else when it was last touched. */
   readonly since: string | null;
+  /** The owner's snooze on it, while it is still in the lane it was snoozed in; `null` when never snoozed or moved on. */
+  readonly snoozedUntil: string | null;
 }
 
 export const toTestKey = (card: BoardCardOf): string => `to-test:${card.key}`;
@@ -39,6 +41,33 @@ export const releaseWords = (shippedIn: Pick<ReleasedIn, 'version'> | null): str
 const instantMs = (since: string | null): number => (since === null ? 0 : Date.parse(since));
 
 const sinceOf = (card: BoardCardOf): string | null => card.task.shippedIn?.at ?? card.task.lastTouchedAt;
+
+/** A snooze holds only in the lane it was made in: a card sent back and released again is not hidden by an old one. */
+const snoozedUntilOf = (card: BoardCardOf): string | null => {
+  const { snoozed, laneId } = card.task;
+  return snoozed == null || snoozed.laneId !== laneId ? null : snoozed.until;
+};
+
+/** Whether the owner has put the card aside and the time is not up yet. */
+export const isSnoozed = (row: Pick<ToTestCard, 'snoozedUntil'>, now: number): boolean =>
+  row.snoozedUntil !== null && Date.parse(row.snoozedUntil) > now;
+
+/** The rows to answer now, and the ones put aside until later (soonest wake first). */
+export const splitSnoozed = (
+  rows: readonly ToTestCard[],
+  now: number,
+): { readonly awake: readonly ToTestCard[]; readonly snoozed: readonly ToTestCard[] } => ({
+  awake: rows.filter(row => !isSnoozed(row, now)),
+  snoozed: rows
+    .filter(row => isSnoozed(row, now))
+    .sort((a, b) => Date.parse(a.snoozedUntil ?? '') - Date.parse(b.snoozedUntil ?? '')),
+});
+
+/** The soonest time a snoozed row wakes after `now`, or `null` when none is snoozed. */
+export const nextWake = (rows: readonly ToTestCard[], now: number): number | null => {
+  const wakes = rows.filter(row => isSnoozed(row, now)).map(row => Date.parse(row.snoozedUntil ?? ''));
+  return wakes.length === 0 ? null : Math.min(...wakes);
+};
 
 /** One card as a card to test: `null` when it is dropped or its project's lanes do not name where Done and Not good go. */
 export const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | null => {
@@ -55,6 +84,7 @@ export const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | n
     howToTest: card.task.howToTest,
     taskName: null,
     since: sinceOf(card),
+    snoozedUntil: snoozedUntilOf(card),
   };
 };
 

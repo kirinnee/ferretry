@@ -195,6 +195,7 @@ const SUB_FERRET_DOING: Readonly<Record<BoardTaskActionRequest['action'], string
   order: 'reorder cards',
   reparent: 'move cards under another card',
   refile: 'refile cards',
+  snooze: 'snooze cards',
 };
 
 const subFerretDoing = (request: BoardTaskActionRequest): string => SUB_FERRET_DOING[request.action];

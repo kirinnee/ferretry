@@ -25,7 +25,7 @@ import type { BoardCardOf, BoardCardPlace } from '../../lib/board-view.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonBoardCardPath, daemonBoardPath } from '../../lib/pages/routes.ts';
-import { toTestAnswersOver } from '../agenda/to-test-rows.tsx';
+import { snoozeOver, toTestAnswersOver } from '../agenda/to-test-rows.tsx';
 import { useBoardAnswers } from './board-answers.tsx';
 import type { BoardCardMoves } from './board-card.tsx';
 import { BoardSideTab } from './board-side-tab.tsx';
@@ -104,7 +104,10 @@ export function ChatTasks({
     portal: true,
   });
 
-  const toTestAnswers = useMemo(() => toTestAnswersOver({ requestMove, answerFor }), [requestMove, answerFor]);
+  const toTestAnswers = useMemo(
+    () => toTestAnswersOver({ requestMove, answerFor, snooze: snoozeOver(actions, setNotice) }),
+    [requestMove, answerFor, actions],
+  );
 
   const movesFor = useCallback(
     (card: BoardCardOf, place: BoardCardPlace): BoardCardMoves | undefined => {

@@ -973,6 +973,63 @@ describe('everything else on a card', () => {
     should(same.code).equal('invalid');
   });
 
+  describe('snoozing a card to test', () => {
+    const LATER = '2026-10-30T14:00:00.000Z';
+    const toTest = () => card({ laneId: 'tested' });
+
+    it('should let the owner snooze a card and remember the lane it was snoozed in', async () => {
+      // Arrange
+      const { ports, service } = serviceWith([toTest()]);
+
+      // Act
+      const response = await service.act('F1', action({ action: 'snooze', until: LATER }), owner);
+
+      // Assert
+      should(response.task.snoozed).eql({ until: LATER, laneId: 'tested' });
+      should(stored(ports).snoozed).eql({ until: LATER, laneId: 'tested' });
+      should(lastEvent(ports)).match({ type: 'snoozed', until: LATER });
+    });
+
+    it('should wake a snoozed card, and refuse to wake one that is not snoozed', async () => {
+      // Arrange
+      const { ports, service } = serviceWith([toTest()]);
+      await service.act('F1', action({ action: 'snooze', until: LATER }), owner);
+
+      // Act
+      await service.act('F1', action({ action: 'snooze', until: null }), owner);
+      const again = await refusal(service.act('F1', action({ action: 'snooze', until: null }), owner));
+
+      // Assert
+      should(stored(ports).snoozed).equal(null);
+      should(lastEvent(ports)).match({ type: 'snoozed', until: null });
+      should(again.code).equal('invalid');
+    });
+
+    it('should refuse a time that has passed', async () => {
+      // Arrange
+      const { service } = serviceWith([toTest()]);
+
+      // Act
+      const error = await refusal(
+        service.act('F1', action({ action: 'snooze', until: '2026-10-30T09:00:00.000Z' }), owner),
+      );
+
+      // Assert
+      should(error.code).equal('invalid');
+    });
+
+    it('should leave the snooze to the owner, not a ferret', async () => {
+      // Arrange
+      const { service } = serviceWith([toTest()]);
+
+      // Act
+      const error = await refusal(service.act('F1', action({ action: 'snooze', until: LATER }), lead));
+
+      // Assert
+      should(error.code).equal('forbidden');
+    });
+  });
+
   describe('re-parenting a card', () => {
     const cards = () => [
       card({ id: 'F1', owner: 'lead', assignee: 'child' }),

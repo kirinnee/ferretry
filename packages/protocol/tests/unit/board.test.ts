@@ -165,7 +165,8 @@ const HISTORY = [
   }),
   event(19, { type: 'reparented', from: null, to: { id: 'F85' }, reason: 'it is part of the board work' }),
   event(20, { type: 'dropped', reason: 'superseded by &F20' }),
-  { ...event(21, { type: 'migrated', legacyRef: `${LEAD}:F12` }), actor: DAEMON },
+  event(21, { type: 'snoozed', until: INSTANT }),
+  { ...event(22, { type: 'migrated', legacyRef: `${LEAD}:F12` }), actor: DAEMON },
 ];
 
 const CARD: BoardTask = BoardTaskSchema.parse({
@@ -710,6 +711,8 @@ describe('board mutations', () => {
       { action: 'edit', howToTest: '1. Open the Board' },
       { action: 'file', path: 'a.ts', release: true, reason: 'done' },
       { action: 'order', order: 2 },
+      { action: 'snooze', until: '2026-10-31T09:00:00.000Z' },
+      { action: 'snooze', until: null },
       { action: 'refile', projectId: PROJECT },
       { action: 'reparent', parent: { id: 'F85' }, reason: 'fits' },
       { action: 'reparent', parent: null },
