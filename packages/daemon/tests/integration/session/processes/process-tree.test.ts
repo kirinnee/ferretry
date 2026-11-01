@@ -305,6 +305,12 @@ describe('the process-tree adapters, the rest of their surface', () => {
     const tree = new ProcfsProcessTree();
 
     try {
+      // A child between fork and exec still holds a copy of this process's descriptors — the listener
+      // among them — because close-on-exec only acts at exec, and on a loaded runner this question can
+      // be reached before the child is. Waiting for the argv to read `sleep 30` waits for the exec
+      // itself, so the reader is asked about the child that exists, not the one still being spawned.
+      await waitForRow(tree, rows => rows.find(row => row.pid === idle.pid && row.argv === 'sleep 30'));
+
       // Act
       const listening = await tree.listening([process.pid, idle.pid]);
 
