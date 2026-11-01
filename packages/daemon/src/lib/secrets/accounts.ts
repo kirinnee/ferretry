@@ -1397,10 +1397,10 @@ export class AccountVault implements AccountSealPort {
       const seeded = (account.factors ?? []).filter(key => key.kind === 'totp' && key.seal !== undefined);
       for (const name of sealedNamesOf(account)) {
         const position = seeded.findIndex(key => key.kind === 'totp' && key.seal === name);
-        const key = seeded[position];
-        if (name === account.seals.password) add(`login:${id}:password`, name);
-        else if (key !== undefined) add(position === 0 ? `login:${id}:totp` : `login:${id}:totp:${key.id}`, name);
-        else add(`login:${id}:sealed:${name}`, name);
+        // `sealedNamesOf` names only the password and seeded keys, so a name that is not the password is a seed.
+        const role =
+          name === account.seals.password ? 'password' : position <= 0 ? 'totp' : `totp:${seeded[position]?.id ?? name}`;
+        add(`login:${id}:${role}`, name);
       }
     }
     for (const [name, value] of opened) if (!named.has(name)) byName.set(`login:unnamed:${name}`, value);

@@ -51,10 +51,13 @@ class FakeSeeds implements ITwoFactorSeedGateway {
   constructor(
     private readonly states: TwoFactorSeedStageView['state'][] = ['waiting', 'saved'],
     private readonly mismatchFirst = false,
+    readonly failures: { stage?: unknown[]; view?: unknown } = {},
   ) {}
   async stage(account: string, body: StageTwoFactorSeedRequest): Promise<TwoFactorSeedStaged> {
     this.calls.push(`stage ${account}`);
     this.staged.push(body);
+    const failure = this.failures.stage?.shift();
+    if (failure !== undefined) throw failure;
     if (this.mismatchFirst && body.mismatchAcknowledged !== true)
       throw new FyHttpError(
         "This key says it is for Okta · bob@x.com, but you're saving it to GitHub · kirinnee.",
@@ -80,6 +83,7 @@ class FakeSeeds implements ITwoFactorSeedGateway {
   }
   async view(account: string, stage: string): Promise<TwoFactorSeedStageView> {
     this.calls.push(`view ${account} ${stage}`);
+    if (this.failures.view !== undefined) throw this.failures.view;
     const state = this.states.length > 1 ? (this.states.shift() as TwoFactorSeedStageView['state']) : this.states[0];
     return {
       stage: STAGE,
@@ -228,5 +232,94 @@ describe('fy account factor add --totp', () => {
     // Assert
     should(add).not.be.undefined();
     should(takesValue.sort()).deepEqual(['--label', '--session']);
+  });
+});
+
+describe('fy account factor add --totp, when things go wrong', () => {
+  const http = (status: number, code?: string) => new FyHttpError('the daemon says no', status, code);
+
+  it('should name an older daemon, carry the daemon’s own words, and pass anything else through', async () => {
+    // Arrange
+    const old = rig({ session: 's', seeds: new FakeSeeds([], false, { stage: [http(404)] }) });
+    const refused = rig({ session: 's', seeds: new FakeSeeds([], false, { stage: [http(409, 'passkey_required')] }) });
+    const broken = rig({ session: 's', seeds: new FakeSeeds([], false, { stage: [new TypeError('socket')] }) });
+
+    // Act
+    const oldMessage = await fails(() => old.controller.add('GITHUB', { totp: true }));
+    const refusedMessage = await fails(() => refused.controller.add('GITHUB', { totp: true }));
+    const brokenMessage = await fails(() => broken.controller.add('GITHUB', { totp: true }));
+
+    // Assert
+    should(oldMessage).containEql('fy daemon update');
+    should(refusedMessage).equal('the daemon says no');
+    should(brokenMessage).equal('socket');
+  });
+
+  it('should carry a refusal of the second stage after "save it here anyway"', async () => {
+    // Arrange
+    const mismatch = new FyHttpError('This key says it is for Okta.', 409, 'factor_mismatch');
+    const { controller } = rig({
+      session: 's',
+      seeds: new FakeSeeds([], false, { stage: [mismatch, http(429, 'too_many_stages')] }),
+      prompt: new FakePrompt([URI], ['yes', 'yes']),
+    });
+
+    // Act + Assert
+    should(await fails(() => controller.add('GITHUB', { totp: true }))).equal('the daemon says no');
+  });
+
+  it('should read a stage the daemon no longer has as timed out, and pass another failure through', async () => {
+    // Arrange
+    const gone = rig({ session: 's', seeds: new FakeSeeds([], false, { view: http(404, 'stage_not_found') }) });
+    const broken = rig({ session: 's', seeds: new FakeSeeds([], false, { view: http(500) }) });
+
+    // Act
+    await gone.controller.add('GITHUB', { totp: true });
+    const message = await fails(() => broken.controller.add('GITHUB', { totp: true }));
+
+    // Assert
+    should(gone.messages.at(-1)).containEql('Timed out');
+    should(message).equal('the daemon says no');
+  });
+
+  it('should take a label of one line, refuse another, and refuse a paste too long to be a key', async () => {
+    // Arrange
+    const labelled = rig({ session: 's' });
+    const long = rig({ session: 's', prompt: new FakePrompt(['A'.repeat(1_100)]) });
+
+    // Act
+    await labelled.controller.add('GITHUB', { totp: true, label: ' Authy backup ' });
+    const bad = await fails(() => rig({ session: 's' }).controller.add('GITHUB', { totp: true, label: 'a\nb' }));
+    const tooLong = await fails(() => long.controller.add('GITHUB', { totp: true }));
+
+    // Assert
+    should(labelled.seeds.staged[0]?.label).equal('Authy backup');
+    should(bad).containEql('--label');
+    should(tooLong).containEql('too long');
+    should(long.seeds.calls).deepEqual([]);
+  });
+
+  it('should run from the command line: fy account factor add <id> --totp', async () => {
+    // Arrange
+    const root = new Command().name('fy').exitOverride();
+    root.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    const { controller, seeds } = rig({ session: 'lead-1' });
+    registerAccountCommands(
+      root,
+      new LoginEntryController({
+        gateway: {} as ILoginEntryGateway,
+        out: { success: () => {} },
+        prompt: new FakePrompt([]),
+        interactive: true,
+        readRecipe: async () => '',
+      }),
+      controller,
+    );
+
+    // Act
+    await root.parseAsync(['node', 'fy', 'account', 'factor', 'add', 'GITHUB', '--totp', '--i-understand-totp']);
+
+    // Assert
+    should(seeds.calls[0]).equal('stage GITHUB');
   });
 });
