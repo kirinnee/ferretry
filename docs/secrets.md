@@ -427,7 +427,11 @@ pairing code, widening a device or any other act takes. Both directions are test
 prompt (a base32 key or an `otpauth://totp` link), stages it and puts a card on the agenda — "Save automatic codes to
 GitHub · kirinnee? Asked by `fy` on kirin-box at 14:02 UTC" — then waits. Allow it in the app with your passkey and it
 prints "Saved"; Deny, or two minutes, and nothing is saved. `--session <id>` names the board for the card (the
-current session's by default). The CLI has no way to save a seed itself. **The old path is closed:**
+current session's by default). The CLI has no way to save a seed itself.
+
+The rest of `fy account` is in [input requests](input-requests.md#managing-them): accounts, sign-ins (`site`), recipes,
+defaults, and 2FA keys that hold no value (`factor add --authenticator|--sms|--email|--push|--security-key`). Each write
+is a person route; a ferret's call is refused by the daemon and `fy` reports that rather than retrying. **The old path is closed:**
 `PUT /v1/secrets/logins/:id` with a `totp` seed — today's app form and `fy account edit --totp` — answers
 `403 add_2fa_key_needs_passkey` with where to go instead; `totp: null` (remove the seed) still works there.
 

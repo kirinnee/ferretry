@@ -1,7 +1,7 @@
 import { FyHttpError } from '@ferretry/protocol/client';
 import {
   LOGIN_TOTP_WARNING,
-  LoginEntryIdSchema,
+  AccountIdSchema,
   padInputValue,
   parseTotpInput,
   TOTP_INPUT_MAX_BYTES,
@@ -11,7 +11,7 @@ import {
   type TwoFactorSeedStaged,
   type TwoFactorSeedStageView,
 } from '@ferretry/protocol';
-import type { ILoginEntryPrompt } from './entry-ports.ts';
+import type { IAccountPrompt } from './account-ports.ts';
 import type { ITwoFactorSeedGateway } from './factor-gateway.ts';
 
 /** `fy account factor add <id> --totp`. The key is typed at a hidden prompt; there is no flag that carries one. */
@@ -26,7 +26,7 @@ export interface TwoFactorAddOptions {
 export interface TwoFactorSeedPorts {
   readonly gateway: ITwoFactorSeedGateway;
   readonly out: { success(message: string): void };
-  readonly prompt: ILoginEntryPrompt;
+  readonly prompt: IAccountPrompt;
   readonly interactive: boolean;
   /** `FY_SESSION_ID`: the session this CLI runs inside, absent at the person's own shell. */
   readonly ownSessionId?: string | undefined;
@@ -45,7 +45,7 @@ export class TwoFactorSeedController {
   constructor(private readonly ports: TwoFactorSeedPorts) {}
 
   async add(id: string, options: TwoFactorAddOptions): Promise<void> {
-    const account = LoginEntryIdSchema.safeParse(id.trim());
+    const account = AccountIdSchema.safeParse(id.trim());
     if (!account.success) throw new Error(`"${id}" is not a usable account handle (see \`account ls\`)`);
     if (options.totp !== true)
       throw new Error(

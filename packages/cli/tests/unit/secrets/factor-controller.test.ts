@@ -11,9 +11,11 @@ import {
 import { FyHttpError } from '@ferretry/protocol/client';
 import { Command } from 'commander';
 import should from 'should';
-import { registerAccountCommands } from '../../../src/lib/secrets/entry-commands';
-import { LoginEntryController } from '../../../src/lib/secrets/entry-controller';
-import type { ILoginEntryGateway, ILoginEntryPrompt } from '../../../src/lib/secrets/entry-ports';
+import { registerAccountCommands } from '../../../src/lib/secrets/account-commands';
+import { AccountController } from '../../../src/lib/secrets/account-controller';
+import type { IAccountGateway, IAccountPrompt } from '../../../src/lib/secrets/account-ports';
+import { FactorKeyController } from '../../../src/lib/secrets/factor-keys-controller';
+import { SignInController } from '../../../src/lib/secrets/sign-in-controller';
 import { TwoFactorSeedController } from '../../../src/lib/secrets/factor-controller';
 import type { ITwoFactorSeedGateway } from '../../../src/lib/secrets/factor-gateway';
 
@@ -27,7 +29,7 @@ const SEED = 'JBSWY3DPEHPK3PXP';
 const URI = `otpauth://totp/GitHub:kirinnee?secret=${SEED}&issuer=GitHub`;
 const STAGE = `st_${'a'.repeat(24)}`;
 
-class FakePrompt implements ILoginEntryPrompt {
+class FakePrompt implements IAccountPrompt {
   readonly asked: string[] = [];
   readonly hidden: string[] = [];
   constructor(
@@ -210,17 +212,19 @@ describe('fy account factor add --totp', () => {
     const root = new Command().name('fy').exitOverride();
     root.configureOutput({ writeOut: () => {}, writeErr: () => {} });
     const { controller } = rig({ session: 's' });
-    registerAccountCommands(
-      root,
-      new LoginEntryController({
-        gateway: {} as ILoginEntryGateway,
-        out: { success: () => {} },
-        prompt: new FakePrompt([]),
-        interactive: true,
-        readRecipe: async () => '',
-      }),
-      controller,
-    );
+    const ports = {
+      gateway: {} as IAccountGateway,
+      out: { success: () => {} },
+      prompt: new FakePrompt([]),
+      interactive: true,
+      readRecipe: async () => '',
+    };
+    registerAccountCommands(root, {
+      accounts: new AccountController(ports),
+      signIns: new SignInController(ports),
+      factorKeys: new FactorKeyController(ports),
+      seeds: controller,
+    });
     const add = root.commands
       .find(command => command.name() === 'account')
       ?.commands.find(command => command.name() === 'factor')
@@ -231,7 +235,7 @@ describe('fy account factor add --totp', () => {
 
     // Assert
     should(add).not.be.undefined();
-    should(takesValue.sort()).deepEqual(['--label', '--session']);
+    should(takesValue.sort()).deepEqual(['--app', '--ends-with', '--label', '--session', '--to']);
   });
 });
 
@@ -304,17 +308,19 @@ describe('fy account factor add --totp, when things go wrong', () => {
     const root = new Command().name('fy').exitOverride();
     root.configureOutput({ writeOut: () => {}, writeErr: () => {} });
     const { controller, seeds } = rig({ session: 'lead-1' });
-    registerAccountCommands(
-      root,
-      new LoginEntryController({
-        gateway: {} as ILoginEntryGateway,
-        out: { success: () => {} },
-        prompt: new FakePrompt([]),
-        interactive: true,
-        readRecipe: async () => '',
-      }),
-      controller,
-    );
+    const ports = {
+      gateway: {} as IAccountGateway,
+      out: { success: () => {} },
+      prompt: new FakePrompt([]),
+      interactive: true,
+      readRecipe: async () => '',
+    };
+    registerAccountCommands(root, {
+      accounts: new AccountController(ports),
+      signIns: new SignInController(ports),
+      factorKeys: new FactorKeyController(ports),
+      seeds: controller,
+    });
 
     // Act
     await root.parseAsync(['node', 'fy', 'account', 'factor', 'add', 'GITHUB', '--totp', '--i-understand-totp']);
