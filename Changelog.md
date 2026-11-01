@@ -1,3 +1,9 @@
+## [4.207.2](https://github.com/kirinnee/ferretry/compare/v4.207.1...v4.207.2) (2026-11-01)
+
+### Fixes
+
+* **fleet:** reach every provisioner destination through checked folder handles (&B118) ([#1262](https://github.com/kirinnee/ferretry/issues/1262)) ([ba00e24](https://github.com/kirinnee/ferretry/commit/ba00e2416d3694674178e0a088083d566d4f0c93))
+
 ## [4.207.1](https://github.com/kirinnee/ferretry/compare/v4.207.0...v4.207.1) (2026-11-01)
 
 ### Fixes
