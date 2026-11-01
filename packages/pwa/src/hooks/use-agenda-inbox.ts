@@ -45,6 +45,7 @@ import {
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
+import type { ToTestCard } from '../lib/to-test-inbox.ts';
 
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
 export interface AgendaInboxMachine {
@@ -58,6 +59,8 @@ export interface AgendaInbox {
   readonly unread: readonly UnreadSession[];
   /** Open items on the owner's turn across them, plain notifications included: the number every Inbox badge shows. */
   readonly total: number;
+  /** Cards waiting in a verify lane for the owner's try (Done or Not good): counted in `total`, listed under Needs you. */
+  readonly toTest: readonly ToTestCard[];
   /** The deck: every read open item, newest first, minus the answers still undoable or in flight. */
   readonly cards: readonly InboxCard[];
   /** Items on the ferret's turn: not in the deck and not in `total` — the "With ferrets" section. */
@@ -145,11 +148,18 @@ const unreadKey = (entries: readonly UnreadSession[]): string =>
 const cardsKey = (cards: readonly InboxCard[]): string =>
   cards.map(card => `${card.key}\u0000${JSON.stringify(card.item)}`).join('\u0001');
 
+const NO_TO_TEST: readonly ToTestCard[] = [];
+
 export function useAgendaInboxModel(
   client: DaemonAgendaClient,
   machines: readonly AgendaInboxMachine[],
   timers?: DeferredTimers,
+  toTestRead: readonly ToTestCard[] = NO_TO_TEST,
 ): AgendaInbox {
+  const toTest = useStable(
+    toTestRead,
+    toTestRead.map(row => `${row.key}\u0000${row.card.task.laneId}\u0000${row.card.task.lastTouchedAt}`).join('\u0001'),
+  );
   const latest = useRef(machines);
   latest.current = machines;
   const connectionFor = useMemo(
@@ -304,7 +314,8 @@ export function useAgendaInboxModel(
   return useMemo(
     () => ({
       unread,
-      total: unreadTotal(unread),
+      total: unreadTotal(unread) + toTest.length,
+      toTest,
       cards,
       withFerret,
       reading,
@@ -318,6 +329,7 @@ export function useAgendaInboxModel(
     }),
     [
       unread,
+      toTest,
       cards,
       withFerret,
       reading,
