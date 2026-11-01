@@ -869,7 +869,8 @@ machine holds. The tap is the permission, as for a password; what follows is whe
   that target and the target is still there; otherwise the ferret is told to read the target and raise again.
 - **Use it now.** A seed saved with a passkey from an open code card (the stage's `request`, from a paired device)
   types the new key's first code into that card at once, through the same deliver and every check above, as that
-  device; `TwoFactorSeedSaved.typed` says whether it was typed. A save staged from the machine or a ferret's token
+  device, against the card as it was when the seed was staged (a card redrawn since types nothing, as a tap on it
+  would not); `TwoFactorSeedSaved.typed` says whether it was typed. A save staged from the machine or a ferret's token
   (`fy account factor add --totp`, confirmed on an agenda card that says nothing about typing) never types anything.
 
 ### 2FA seeds (opt-in, per entry)

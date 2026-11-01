@@ -99,22 +99,39 @@ export interface TwoFactorSeedAgendaPort {
 /** Who saved a seed, as an input card's deliver names the owner: the machine, or a paired device. */
 export type SeedSaver = Extract<InputActor, { readonly kind: 'host' | 'device' }>;
 
-/** An input card the owner set a seed up from: whether it is still open, and where the daemon saw its target. */
+/**
+ * An input card the owner set a seed up from: whether it is still open, where the daemon saw its target, and the digest
+ * of the facts the card shows now (`observedDigest`, absent while the daemon looks again).
+ */
 export interface TwoFactorSeedCardPort {
-  cardTarget(requestId: string): { readonly matchKey?: string } | undefined;
+  cardTarget(requestId: string): { readonly matchKey?: string; readonly observedDigest?: string } | undefined;
   /**
    * "Use it now": types the new key's first code into that card under every check a "Use code from Ferretry" tap gets
-   * (`InputRequestService.useNow`). Whether it was typed; never the code. Absent: never typed.
+   * (`InputRequestService.useNow`), against `observedDigest`: the card as the owner saw it when they staged the seed, so
+   * a card redrawn since types nothing, as a tap on a stale card would. Whether it was typed; never the code. Absent:
+   * never typed.
    */
   useNow?(
     requestId: string,
     use: {
       readonly account: AccountId;
       readonly factor: TwoFactorId;
+      readonly observedDigest: string;
       readonly submit?: boolean;
       readonly actor: SeedSaver;
     },
   ): Promise<boolean>;
+}
+
+/**
+ * The card port as the daemon wires it: the input service is built after the seed stages, so both calls are handed on
+ * to whatever `current()` returns then. Before it exists: no card is open, and nothing is typed.
+ */
+export function lateSeedCards(current: () => TwoFactorSeedCardPort | undefined): TwoFactorSeedCardPort {
+  return {
+    cardTarget: requestId => current()?.cardTarget(requestId),
+    useNow: async (requestId, use) => (await current()?.useNow?.(requestId, use)) ?? false,
+  };
 }
 
 export interface TwoFactorSeedStagesDeps {
@@ -159,7 +176,7 @@ interface Stage {
    * for a stage made from the machine or a ferret's token: their save is confirmed on an agenda card that says nothing
    * about typing, so the owner's passkey there is no tap on a code card.
    */
-  readonly useOn?: { readonly request: string; readonly submit?: boolean };
+  readonly useOn?: { readonly request: string; readonly observedDigest?: string; readonly submit?: boolean };
 }
 
 interface Sealed {
@@ -260,7 +277,7 @@ export class TwoFactorSeedStages implements RedactionValueSource {
       state: 'waiting',
       ...(request.request === undefined || !caller.device
         ? {}
-        : { useOn: { request: request.request, ...(request.submit === undefined ? {} : { submit: request.submit }) } }),
+        : { useOn: this.#useOn(request.request, request.submit) }),
     };
     this.#stages.set(id, stage);
     return {
@@ -347,13 +364,15 @@ export class TwoFactorSeedStages implements RedactionValueSource {
     await this.#finish(held, 'saved');
     const use = held.useOn;
     if (use === undefined) return { ...saved, mismatch: held.mismatch };
+    const digest = use.observedDigest;
     const typed =
-      saver === undefined || this.deps.cards?.useNow === undefined
+      saver === undefined || digest === undefined || this.deps.cards?.useNow === undefined
         ? false
         : await this.deps.cards
             .useNow(use.request, {
               account: saved.account,
               factor: saved.factor.id,
+              observedDigest: digest,
               ...(use.submit === undefined ? {} : { submit: use.submit }),
               actor: saver,
             })
@@ -415,6 +434,16 @@ export class TwoFactorSeedStages implements RedactionValueSource {
     if (Object.keys(entries).length === 0) return new Map();
     const opened = await this.deps.cipher.openAll(entries);
     return new Map([...opened].map(([name, value]) => [`login:${name}`, value]));
+  }
+
+  /** The card a device staged from, as the owner sees it NOW: "use it now" types only into that very card. */
+  #useOn(requestId: string, submit: boolean | undefined): NonNullable<Stage['useOn']> {
+    const digest = this.deps.cards?.cardTarget(requestId)?.observedDigest;
+    return {
+      request: requestId,
+      ...(digest === undefined ? {} : { observedDigest: digest }),
+      ...(submit === undefined ? {} : { submit }),
+    };
   }
 
   async #assertCardAccount(requestId: string, accountId: AccountId): Promise<void> {

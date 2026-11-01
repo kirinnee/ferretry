@@ -677,10 +677,14 @@ export class InputRequestService {
    * An OPEN card's target key as the DAEMON saw it (never the agent's word), for a 2FA seed set up from that card:
    * it saves only to an account that signs in there (docs/secrets.md, "2FA keys"). `undefined`: no such open card.
    */
-  cardTarget(requestId: string): { readonly matchKey?: string } | undefined {
+  cardTarget(requestId: string): { readonly matchKey?: string; readonly observedDigest?: string } | undefined {
     const held = this.held.get(requestId);
     if (held === undefined || isFinal(held.request)) return undefined;
-    return held.matchKey === undefined ? {} : { matchKey: held.matchKey };
+    const { observedDigest } = held.request;
+    return {
+      ...(held.matchKey === undefined ? {} : { matchKey: held.matchKey }),
+      ...(observedDigest === undefined ? {} : { observedDigest }),
+    };
   }
 
   /**
@@ -694,13 +698,14 @@ export class InputRequestService {
     use: {
       readonly account: AccountId;
       readonly factor: TwoFactorId;
+      /** The card as the owner saw it when they set the key up: a card redrawn since is refused, nothing typed. */
+      readonly observedDigest: string;
       readonly submit?: boolean;
       readonly actor: Extract<InputActor, { readonly kind: 'host' | 'device' }>;
     },
   ): Promise<boolean> {
     const held = this.held.get(requestId);
-    if (held === undefined || held.request.state !== 'pending' || held.request.observedDigest === undefined)
-      return false;
+    if (held === undefined || held.request.state !== 'pending') return false;
     if (!held.request.fields.every(field => fillRoleFor(field.sensitivity) === 'totp')) return false;
     const caller: InputCaller = {
       kind: 'owner',
@@ -709,7 +714,7 @@ export class InputRequestService {
     };
     const body: InputDeliverBody = {
       deliveryId: crypto.randomUUID(),
-      observedDigest: held.request.observedDigest,
+      observedDigest: use.observedDigest,
       entry: use.account,
       factor: use.factor,
       submit: use.submit ?? held.request.submit === 'owner-default',

@@ -15,7 +15,13 @@ import type { CodeDelivery } from '../../../src/lib/input-requests/login-observe
 import type { InputCaller, InputCard, InputLoginPort } from '../../../src/lib/input-requests/ports.ts';
 import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.ts';
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
-import { LoginDirectory, LoginVault, totpCode } from '../../../src/lib/secrets/index.ts';
+import {
+  LoginDirectory,
+  LoginVault,
+  lateSeedCards,
+  TwoFactorSeedStages,
+  totpCode,
+} from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments, plantSeed } from '../runtime/mounts/support.ts';
 
 /**
@@ -628,7 +634,7 @@ describe('checked by use: a code Ferretry made that did not go through opens the
 });
 
 describe('use it now: the code of a key just saved from this card', () => {
-  it('should type the new key’s code into an open card of codes, as the owner who saved it', async () => {
+  it('should type the new key’s code into the open card the owner saw, as the owner who saved it', async () => {
     const h = harness();
     await github(h);
     await plantSeed(h.directory.accounts, 'GITHUB', SEED_A, 'Authy');
@@ -637,6 +643,7 @@ describe('use it now: the code of a key just saved from this card', () => {
     const typed = await h.service.useNow(request.id, {
       account: 'GITHUB',
       factor: await keyId(h, 'Authy'),
+      observedDigest: request.observedDigest as string,
       actor: { kind: 'device', deviceId: 'phone' },
     });
 
@@ -650,8 +657,13 @@ describe('use it now: the code of a key just saved from this card', () => {
     await github(h);
     await plantSeed(h.directory.accounts, 'GITHUB', SEED_A, 'Authy');
     const factor = await keyId(h, 'Authy');
-    const use = { account: 'GITHUB', factor, actor: { kind: 'host' } } as const;
     const { request } = await raised(h);
+    const use = {
+      account: 'GITHUB',
+      factor,
+      observedDigest: request.observedDigest as string,
+      actor: { kind: 'host' },
+    } as const;
     should(await h.service.useNow(request.id, use)).be.false();
     should(await h.service.useNow('f'.repeat(32), use)).be.false();
     h.setFacts(page('https://github.com', { field: { tag: 'input', type: 'password' } }));
@@ -662,6 +674,103 @@ describe('use it now: the code of a key just saved from this card', () => {
     });
     should(await h.service.useNow(secret.request.id, use)).be.false();
     should(h.writes).deepEqual([]);
+  });
+
+  it('should type nothing into a card redrawn since the owner staged the key, as a tap on it would', async () => {
+    // Arrange — the owner stages from the card as drawn; the page then loads a new document of the same site.
+    const h = harness();
+    await github(h);
+    await plantSeed(h.directory.accounts, 'GITHUB', SEED_A, 'Authy');
+    const { request } = await raised(h);
+    const seen = h.service.cardTarget(request.id)?.observedDigest as string;
+    h.setFacts({ ...page(), navigationId: 'loader-2' });
+    // A Send on the card as it was finds the page moved: the card is redrawn, nothing typed.
+    await refusal(h.service.deliver(SESSION, request.id, useCode(seen, 'GITHUB'), HOST));
+    should(h.writes).deepEqual([]);
+
+    // Act
+    const typed = await h.service.useNow(request.id, {
+      account: 'GITHUB',
+      factor: await keyId(h, 'Authy'),
+      observedDigest: seen,
+      actor: { kind: 'device', deviceId: 'phone' },
+    });
+
+    // Assert
+    should(typed).be.false();
+    should(h.writes).deepEqual([]);
+    should((await h.service.list(HOST))[0]?.observedDigest).not.equal(seen);
+  });
+});
+
+describe('a page that moves between the card and the Send', () => {
+  it('should type no code it made: the card is redrawn onto the new document and the owner checks it again', async () => {
+    // Arrange
+    const h = harness();
+    await github(h);
+    await plantSeed(h.directory.accounts, 'GITHUB', SEED_A, 'Authy');
+    const { request } = await raised(h);
+    h.setFacts({ ...page(), navigationId: 'loader-2' });
+
+    // Act
+    const refused = await refusal(
+      h.service.deliver(SESSION, request.id, useCode(request.observedDigest as string, 'GITHUB'), HOST),
+    );
+
+    // Assert — nothing opened or typed; the redrawn card says it is a new document.
+    should(refused.code).equal('conflict');
+    should(h.writes).deepEqual([]);
+    should(h.fills).deepEqual([]);
+    const [redrawn] = await h.service.list(HOST);
+    should(redrawn?.observedDigest).not.equal(request.observedDigest);
+    should(redrawn?.fields[0]?.risk?.reason).containEql('new document');
+  });
+});
+
+describe('use it now, wired as the daemon wires it', () => {
+  it('should type the first code of a seed a paired device saved from the card, through the real stages and service', async () => {
+    // Arrange — the REAL seed stages over the REAL account store, handed the input service the way fyd.ts does.
+    const h = harness();
+    await github(h);
+    let cards: InputRequestService | undefined;
+    const stages = new TwoFactorSeedStages({
+      accounts: h.directory.accounts,
+      cipher: new FakeSecretCipher(),
+      clock: { nowMs: () => NOW },
+      anyPasskey: async () => true,
+      hostName: 'kirin-box',
+      cards: lateSeedCards(() => cards),
+    });
+    const { request } = await raised(h);
+    cards = h.service;
+    const device = { key: 'device:phone', device: true } as const;
+    const staged = await stages.stage(
+      'GITHUB',
+      { padded: padInputValue(SEED_B), totpAcknowledged: true, request: request.id },
+      device,
+    );
+
+    // Act
+    const saved = await stages.commit('GITHUB', staged.stage, () => true, { kind: 'device', deviceId: 'phone' });
+
+    // Assert — the new key's code, typed once into the card; the answer says so and holds no code.
+    should(saved.typed).be.true();
+    should(h.writes).deepEqual([codeOf(SEED_B)]);
+    should(JSON.stringify(saved)).not.containEql(codeOf(SEED_B));
+    should(await h.service.list(HOST)).deepEqual([]);
+  });
+
+  it('should type nothing before the input service exists', async () => {
+    const port = lateSeedCards(() => undefined);
+    should(port.cardTarget('a'.repeat(32))).be.undefined();
+    should(
+      await port.useNow?.('a'.repeat(32), {
+        account: 'GITHUB',
+        factor: 'tf_0123456789ab' as TwoFactorId,
+        observedDigest: 'x',
+        actor: { kind: 'host' },
+      }),
+    ).be.false();
   });
 });
 
