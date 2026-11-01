@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import type { BoardQuery, BoardSkipRequest, BoardTaskActionRequest, BoardTaskCreateRequest } from '@ferretry/protocol';
+import type {
+  BoardQuery,
+  BoardSkipRequest,
+  BoardTask,
+  BoardTaskActionRequest,
+  BoardTaskCreateRequest,
+} from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher, ApiError, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { type BoardCaller, BoardError, BoardService, BoardUnavailableError } from '../../../../src/lib/board/index.ts';
@@ -12,7 +18,7 @@ import {
   reraiseBoardError,
 } from '../../../../src/lib/runtime/mounts/board.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { card, MemoryBoardStore, PROJECT, world } from '../../board/support.ts';
+import { card, FakeLanes, lanes, MemoryBoardStore, PROJECT, type ServiceWorld, world } from '../../board/support.ts';
 import { handleDirectly } from './second-line.ts';
 import { agentIn, boardSubsystem, CREDENTIALS, FERRET_SESSION, fromFerret, grantSubsystem, human } from './support.ts';
 
@@ -27,10 +33,12 @@ async function dispatcher(board: BoardSubsystem, fleet = DEFAULT_CAPABILITY_GRAN
 }
 
 /** A board that records what each route handed it. */
-const recording = () => {
+const recording = (overrides: Partial<ServiceWorld> = {}) => {
   const calls: { readonly route: string; readonly value: unknown; readonly caller?: BoardCaller }[] = [];
   const base = boardSubsystem();
-  const service = new BoardService(world({ store: new MemoryBoardStore([card({ legacyRef: 'abc:F12' })]) }));
+  const service = new BoardService(
+    world({ store: new MemoryBoardStore([card({ legacyRef: 'abc:F12' })]), ...overrides }),
+  );
   const board: BoardSubsystem = {
     board: async (query: BoardQuery) => {
       calls.push({ route: 'board', value: query });
@@ -341,6 +349,64 @@ describe('the board mount', () => {
       { kind: 'ferret', sessionId: FERRET_SESSION },
       { kind: 'owner', via: 'admin-token' },
     ]);
+  });
+
+  it('should move a card on an external trigger its ferret reports, as the daemon, and say who reported it', async () => {
+    // Arrange: a board whose Merged lane a deploy also enters.
+    const deployed = lanes(PROJECT);
+    const laneSet = {
+      ...deployed,
+      lanes: deployed.lanes.map(lane =>
+        lane.id === 'merged' ? { ...lane, enterOn: [...(lane.enterOn ?? []), 'deploy.done' as const] } : lane,
+      ),
+    };
+    const { calls, board } = recording({ lanes: new FakeLanes(new Map([[PROJECT, laneSet]])) });
+    const live = await dispatcher(board);
+    const trigger = (headers: Readonly<Record<string, string>>, body: unknown) =>
+      request({ method: 'POST', path: '/v1/board/tasks/F1', headers, body: JSON.stringify(body) });
+
+    // Act
+    const observed = await live.dispatch(trigger(agentIn('lead'), { action: 'trigger', event: 'pr.merged' }));
+    const stranger = await live.dispatch(trigger(agentIn('stranger'), { action: 'trigger', event: 'deploy.done' }));
+    const moved = await live.dispatch(
+      trigger(agentIn('lead'), { action: 'trigger', event: 'deploy.done', reason: 'deployed to production' }),
+    );
+
+    // Assert
+    should(observed.status).equal(400);
+    should(stranger.status).equal(403);
+    should(jsonBody(stranger)).match({ code: 'forbidden', allowed: ['owner-human', 'owner', 'ancestor', 'assignee'] });
+    should(moved.status).equal(200);
+    should(calls.filter(call => call.route === 'act').map(call => call.value)).eql([
+      { id: 'F1', action: 'trigger', event: 'deploy.done' },
+      { id: 'F1', action: 'trigger', event: 'deploy.done', reason: 'deployed to production' },
+    ]);
+    should(jsonBody(moved).task).match({ laneId: 'merged' });
+    should((jsonBody(moved).task as BoardTask).history.at(-1)).match({
+      type: 'moved',
+      auto: true,
+      trigger: 'deploy.done',
+      actor: { kind: 'daemon' },
+      reportedBy: { kind: 'ferret', sessionId: 'lead' },
+    });
+  });
+
+  it('should answer a report the board has no lane for as invalid', async () => {
+    // Act
+    const response = await (
+      await dispatcher(recording().board)
+    ).dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/board/tasks/F1',
+        headers: human,
+        body: JSON.stringify({ action: 'trigger', event: 'deploy.done' }),
+      }),
+    );
+
+    // Assert
+    should(response.status).equal(400);
+    should(jsonBody(response).code).equal('invalid');
   });
 
   it('should refuse a malformed action before it reaches the board', async () => {

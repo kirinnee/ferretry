@@ -38,6 +38,7 @@ import {
   type LaneTrigger,
   laneForTrigger,
   laneOf,
+  laneStage,
   moveReasonProblem,
   needsOwner,
   type PrLink,
@@ -310,6 +311,66 @@ export const triggerMove = (
     ),
     laneId: lane.value.id,
   };
+};
+
+/**
+ * An external trigger somebody reported (the task action `trigger`): something Ferretry cannot see happened —
+ * a deploy finished, a reviewer approved — so the card moves the way that trigger moves it. The move is the
+ * daemon's, through {@link triggerMove}, so it is recorded `auto` with the trigger and `reportedBy` names
+ * the caller. Never backward and never into an owner-gated closed lane; and the report of a non-owner never
+ * passes a gate the owner has not answered. Already there, or past it, is no change.
+ */
+const report = (
+  card: BoardTask,
+  action: Extract<BoardTaskActionRequest, { action: 'trigger' }>,
+  context: CardContext,
+): CardOutcome => {
+  requireStanding('report', context.standing, card);
+  requireOpen(card, 'report an event on');
+  const ref = formatTaskRef(card);
+  const found = laneForTrigger(context.laneSet, card.workflow, action.event);
+  if (!found.ok || found.value === null) {
+    throw new BoardError(
+      'invalid',
+      `no lane of this board enters on ${action.event} for ${card.workflow} work, so it does not move ${ref}; its lanes are ${laneNames(context.laneSet)}`,
+    );
+  }
+  const target = found.value;
+  if (target.id === card.laneId) return { task: null };
+  if (target.category === 'closed' && target.ownerGate === true) {
+    throw new BoardError(
+      'owner-gate',
+      `${action.event} would close ${ref} in ${target.name}, and only the owner closes a card`,
+      ['owner-human'],
+    );
+  }
+  const from = requireLane(context.laneSet, card.laneId);
+  const back = isBackwardMove(context.laneSet, card.laneId, target.id);
+  if (!back.ok || back.value) return { task: null };
+  if (laneStage(from).kind === 'gate' && context.standing !== 'owner-human') {
+    throw new BoardError(
+      'owner-gate',
+      `${ref} waits in ${from.name} for the owner; a report does not pass that gate, the owner's answer does`,
+      ['owner-human'],
+    );
+  }
+  const { actorVia: _via, ...rest } = context;
+  const moved = triggerMove(card, action.event, action.reason, {
+    ...rest,
+    actor: { kind: 'daemon' },
+    standing: 'daemon',
+  });
+  if (moved === null) return { task: null };
+  const history = moved.history.map((event, index) =>
+    index === moved.history.length - 1 && event.type === 'moved'
+      ? {
+          ...event,
+          reportedBy: context.actor,
+          ...(context.actorVia === undefined ? {} : { reportedVia: context.actorVia }),
+        }
+      : event,
+  );
+  return { task: { ...moved, history } };
 };
 
 /**
@@ -737,6 +798,8 @@ export const applyAction = (
     }
     case 'link':
       return link(card, action, context);
+    case 'trigger':
+      return report(card, action, context);
     case 'assign':
       requireStanding('assign', context.standing, card);
       if (action.assignee === card.assignee) throw new BoardError('invalid', `${ref} is already assigned that way`);

@@ -174,11 +174,13 @@ const requireValidCard = (task: BoardTask): BoardTask => {
 };
 
 /**
- * What a sub-ferret may still write: a note on its own card, and a PR or branch link, so the PR's facts move
- * the card on their own. Authority still decides WHICH card; everything else is its lead's to do.
+ * What a sub-ferret may still write: a note on its own card, a PR or branch link, so the PR's facts move the
+ * card on their own, and an external trigger it saw happen (a deploy), so the card moves as a fact would move
+ * it. Authority still decides WHICH card; everything else is its lead's to do.
  */
 const subFerretMay = (request: BoardTaskActionRequest): boolean =>
   request.action === 'note' ||
+  request.action === 'trigger' ||
   (request.action === 'link' && (request.pr !== undefined || request.branch !== undefined));
 
 const SUB_FERRET_DOING: Readonly<Record<BoardTaskActionRequest['action'], string>> = {
@@ -200,6 +202,7 @@ const SUB_FERRET_DOING: Readonly<Record<BoardTaskActionRequest['action'], string
   reparent: 'move cards under another card',
   refile: 'refile cards',
   snooze: 'snooze cards',
+  trigger: 'report events on cards',
 };
 
 const subFerretDoing = (request: BoardTaskActionRequest): string => SUB_FERRET_DOING[request.action];
