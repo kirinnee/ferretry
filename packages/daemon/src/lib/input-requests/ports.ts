@@ -24,12 +24,25 @@ import type {
  * the one write; every other port is told ids, names, states and flags.
  */
 
+/**
+ * Whether a process runs a code program (`CODE_PROGRAMS`) from an executable this account cannot replace: decided from
+ * the real file, never from the name `ps` shows (adapters/system/executable-code-programs.ts).
+ */
+export interface CodeProgramPort {
+  codeProgram(pid: number): Promise<boolean>;
+}
+
 export type ObserveResult =
   | {
       readonly ok: true;
       readonly facts: InputTargetFacts;
       /** Every name the surface is known by (its key and its id), so a quarantine holds whichever a reader uses. */
       readonly names?: readonly string[];
+      /**
+       * The terminal's foreground runs a code program (`CODE_PROGRAMS`) from an executable this account cannot
+       * replace: the only way an echo-off prompt may stay a one-time code. The daemon's own, never on the wire.
+       */
+      readonly codeProgram?: true;
     }
   | { readonly ok: false; readonly reason: 'target_gone' | 'unsupported' };
 
@@ -88,6 +101,8 @@ export interface InputTargetPort {
     values: readonly InputFieldValue[],
     submit: boolean,
     expected: InputTargetFacts,
+    /** The card kept a code visible only because a code program was proved: the write proves it again, or refuses. */
+    options?: TypeOptions,
   ): Promise<TypeResult>;
   /** A picture of where the values go, for the owner's card, taken before anything is typed; nothing when none can be had. */
   shoot?(sessionId: string, target: InputTarget, facts: InputTargetFacts): Promise<InputShot | undefined>;
@@ -117,7 +132,14 @@ export interface TerminalInputTargetPort {
     text: string,
     submit: boolean,
     expected: InputTargetFacts,
+    options?: TypeOptions,
   ): Promise<TypeResult>;
+}
+
+/** What a write must prove again, beyond the facts the card was drawn from. */
+export interface TypeOptions {
+  /** A code program (`ObserveResult.codeProgram`) must still hold the terminal, or nothing is typed. */
+  readonly codeProgram?: boolean;
 }
 
 /** The card the owner answers. The daemon words the title and ask; the agent's prompt rides as `prompt` only. */

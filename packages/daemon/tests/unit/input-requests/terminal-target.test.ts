@@ -4,6 +4,7 @@ import should from 'should';
 import { digestFacts, digestLine } from '../../../src/lib/input-requests/digest.ts';
 import type { TerminalModes } from '../../../src/lib/input-requests/terminal-modes.ts';
 import {
+  foregroundPids,
   parseForeground,
   type TerminalLocator,
   TmuxInputTarget,
@@ -80,7 +81,7 @@ function holds(condition: string, w: World): boolean {
   return comparisons.length > 0 && comparisons.every(([, name = '', value = '']) => live[name] === value);
 }
 
-function target(w: World): TmuxInputTarget {
+function target(w: World, programs?: { codeProgram(pid: number): Promise<boolean> }): TmuxInputTarget {
   const tmux: TmuxCommandPort = {
     execute: async args => {
       w.calls.push(args);
@@ -108,10 +109,16 @@ function target(w: World): TmuxInputTarget {
     ...(w.canonical === undefined ? {} : { canonical: async () => w.canonical }),
     ...(w.trusted === undefined ? {} : { trusted: async () => w.trusted as boolean }),
   };
-  return new TmuxInputTarget(tmux, terminals, modes, async argv => {
-    w.ran.push(argv);
-    return w.ps;
-  });
+  return new TmuxInputTarget(
+    tmux,
+    terminals,
+    modes,
+    async argv => {
+      w.ran.push(argv);
+      return w.ps;
+    },
+    programs,
+  );
 }
 
 const dev = { kind: 'terminal', key: 'dev' } as const;
@@ -246,6 +253,68 @@ describe('observing a terminal an input request aims at', () => {
     line.capture = ok('Password:\n');
 
     for (const w of [pane, pid, program, echo, cursor, line]) should(digestFacts(await observed(w))).not.equal(base);
+  });
+});
+
+describe('a code program is every process of the foreground group, or none', () => {
+  /** Proves the pids it is given as code programs (a real ssh), and nothing else. */
+  const proving = (...proved: number[]) => ({ codeProgram: async (pid: number) => proved.includes(pid) });
+  const observe = async (ps: string, programs?: ReturnType<typeof proving>) => {
+    const w = world();
+    w.ps = ps;
+    return await target(w, programs).observe('s1', { kind: 'terminal', key: 'dev' });
+  };
+
+  it('should list every member of the foreground group, leader or not, and no other group', () => {
+    should(foregroundPids(' 1 1 7 bash -bash\n 7 7 7 ssh ssh host\n 8 7 7 sh sh -c read\n')).eql([7, 8]);
+  });
+
+  it('should prove a code program when the only process holding the terminal is a proven ssh', async () => {
+    const seen = await observe(' 4242 4242 7 bash -bash\n 7 7 7 ssh ssh bastion\n', proving(7));
+
+    should(seen.ok && seen.codeProgram).equal(true);
+  });
+
+  it('should not prove one when ssh leads but another member reads the terminal (LocalCommand, a pipeline)', async () => {
+    // Arrange — ssh's LocalCommand: a shell the ferret wrote, in ssh's own foreground group, running read -s.
+    const seen = await observe(' 4242 4242 7 bash -bash\n 7 7 7 ssh ssh bastion\n 8 7 7 sh sh -c read\n', proving(7));
+
+    // Assert
+    should(seen.ok).be.true();
+    should(seen.ok && seen.codeProgram).be.undefined();
+  });
+
+  it('should refuse the write of a code when a reader joined the group after the card, with nothing typed', async () => {
+    // Arrange — the card saw ssh alone; by the write, the ferret's 'sh -c read' has joined ssh's foreground group.
+    const w = world();
+    w.ps = ' 4242 4242 7 bash -bash\n 7 7 7 ssh ssh bastion\n';
+    const port = target(w, proving(7));
+    const seen = await port.observe('s1', { kind: 'terminal', key: 'dev' });
+    if (!seen.ok) throw new Error('not seen');
+    w.ps = ' 4242 4242 7 bash -bash\n 7 7 7 ssh ssh bastion\n 8 7 7 sh sh -c read\n';
+
+    // Act
+    const checked = await port.type('s1', { kind: 'terminal', key: 'dev' }, '481516', true, seen.facts, {
+      codeProgram: true,
+    });
+    const unchecked = await target(w, proving(7)).type(
+      's1',
+      { kind: 'terminal', key: 'dev' },
+      '481516',
+      true,
+      seen.facts,
+    );
+
+    // Assert — refused only where the card relied on the code program; the facts themselves did not change.
+    should(checked).equal('target_changed');
+    should(w.typed).have.length(1);
+    should(unchecked).equal('typed');
+  });
+
+  it('should not prove one with no program port wired', async () => {
+    const seen = await observe(' 7 7 7 ssh ssh bastion\n');
+
+    should(seen.ok && seen.codeProgram).be.undefined();
   });
 });
 

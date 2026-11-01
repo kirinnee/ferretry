@@ -52,6 +52,8 @@ interface World {
   now: number;
   facts: InputTargetFacts | undefined;
   observeReason: 'target_gone' | 'unsupported';
+  /** The foreground runs a code program the daemon proved from its executable (ObserveResult.codeProgram). */
+  codeProgram: boolean;
   typeResult: TypeResult;
   cardOk: boolean;
   nextCard: number;
@@ -111,6 +113,7 @@ function build(overrides: Partial<World> = {}) {
     now: Date.parse('2026-10-30T12:00:00.000Z'),
     facts: FACTS,
     observeReason: 'target_gone',
+    codeProgram: false,
     typeResult: 'typed',
     cardOk: true,
     nextCard: 1,
@@ -162,14 +165,24 @@ function build(overrides: Partial<World> = {}) {
         await w.observeGate;
         return w.facts === undefined
           ? { ok: false, reason: w.observeReason }
-          : { ok: true, facts: w.facts, ...(w.names === undefined ? {} : { names: w.names }) };
+          : {
+              ok: true,
+              facts: w.facts,
+              ...(w.names === undefined ? {} : { names: w.names }),
+              ...(w.codeProgram ? { codeProgram: true as const } : {}),
+            };
       },
       // As the router does for a terminal: finding it again is looking again.
       refind: async (): Promise<ObserveResult> => {
         w.refinds += 1;
         return w.facts === undefined
           ? { ok: false, reason: w.observeReason }
-          : { ok: true, facts: w.facts, ...(w.names === undefined ? {} : { names: w.names }) };
+          : {
+              ok: true,
+              facts: w.facts,
+              ...(w.names === undefined ? {} : { names: w.names }),
+              ...(w.codeProgram ? { codeProgram: true as const } : {}),
+            };
       },
       type: async (_session, _target, values, submit) => {
         w.order.push('write');
@@ -2305,18 +2318,25 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
       { ...RAISE, prompt: 'the card wants it', fields: [{ id: 'value', label: 'Card PIN', sensitivity: 'code' }] },
     );
 
+    const hidden = await raised({ facts: OTP }, { ...CODE, prompt: 'sudo needs your pass\u200bword' });
+    const lookalike = await raised({ facts: OTP }, { ...CODE, prompt: 'sudo needs your p\u0430ssword' });
+
     // Assert
     should(prompt.request.sensitivity).equal('secret');
     should(label.request.sensitivity).equal('secret');
+    should(hidden.request.sensitivity).equal('secret');
+    should(lookalike.request.sensitivity).equal('secret');
   });
 
-  it('should keep a code at an OTP prompt with typing hidden: the pane asks for a code', async () => {
-    // Act
-    const { request } = await raised({ facts: { ...OTP, echo: 'off' } as InputTargetFacts }, CODE);
+  it('should keep a code at an OTP prompt with typing hidden only from a code program it proved', async () => {
+    // Act — the same echo-off "Verification code:" line, from a real ssh and from a shell renamed "ssh".
+    const proved = await raised({ facts: { ...OTP, echo: 'off' } as InputTargetFacts, codeProgram: true }, CODE);
+    const renamed = await raised({ facts: { ...OTP, echo: 'off' } as InputTargetFacts }, CODE);
 
     // Assert
-    should(request.sensitivity).equal('code');
-    should(request.lock).be.undefined();
+    should(proved.request.sensitivity).equal('code');
+    should(proved.request.lock).be.undefined();
+    should(renamed.request.sensitivity).equal('secret');
   });
 
   it('should check again when a restarted daemon finds the terminal now asking for a password, never back', async () => {

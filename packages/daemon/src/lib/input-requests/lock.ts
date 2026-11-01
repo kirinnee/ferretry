@@ -90,6 +90,55 @@ export function provenByFacts(
  */
 const GETPASS_PROGRAMS: ReadonlySet<string> = new Set(['sudo', 'sudoedit', 'su', 'doas', 'passwd']);
 
+/**
+ * The programs whose echo-off prompt may be a one-time code: remote shells and cloud CLIs that ask for a 2FA code. A
+ * bare shell's `read -s` is never one, whatever its line says. Matched against the REAL executable a process runs, and
+ * only one this account cannot replace (`CodeProgramPort`): a name in `ps` can be rewritten or copied.
+ */
+export const CODE_PROGRAMS: ReadonlySet<string> = new Set([
+  'ssh',
+  'scp',
+  'sftp',
+  'mosh-client',
+  'aws',
+  'gcloud',
+  'az',
+  'vault',
+]);
+
+/**
+ * Text as it is matched: compatibility-normalised (NFKC), with combining marks and invisible format characters taken
+ * out, so "pàss​word" or a fullwidth "ｐａｓｓｗｏｒｄ" reads "password". Applied to the pane's line and to the ferret's own words.
+ */
+export function matchable(text: string): string {
+  return text
+    .normalize('NFKD')
+    .replace(/[\p{Mn}\p{Me}\p{Cf}]/gu, '')
+    .normalize('NFKC');
+}
+
+/**
+ * Whether a word mixes ASCII letters with any other letter ("Pаssword" with a Cyrillic а, "Pɑssword", "ᴘᴀssword",
+ * Armenian "Passwօrd"): a look-alike spelling, read as a password word. It can only make a code a secret, so a false
+ * hit ("Straße") costs nothing but visibility.
+ */
+export function lookAlike(text: string): boolean {
+  return matchable(text)
+    .split(/[^\p{L}]+/u)
+    .some(word => /[A-Za-z]/u.test(word) && /[^A-Za-z]/u.test(word));
+}
+
+/** A password word with its letters run together: what {@link spellsPassword} looks for once separators are gone. */
+const RUN_TOGETHER = /pass(?:word|phrase|wd|wort)|kennwort|contrasena|motdepasse|credential/iu;
+
+/**
+ * Whether the text spells a password word with spaces, dots, dashes or underscores between its letters ("Pass-word",
+ * "Pass word", "P a s s w o r d"). Long words only: a short one ("pin") would match across ordinary words.
+ */
+export function spellsPassword(text: string): boolean {
+  return RUN_TOGETHER.test(matchable(text).replace(/[\s._-]+/gu, ''));
+}
+
 /** A prompt line asking for a one-time code, in the words the pane shows (never the ferret's). */
 const CODE_PROMPT = /\b(?:verification\s+code|one[\s-]?time|otp|2fa|authenticator)\b|\bcode\s*:/iu;
 /**
@@ -111,17 +160,32 @@ const NOT_A_CODE = /\b(?:password|passphrase|pin|token|secret)\b/iu;
  * - A terminal running a getpass program (sudo, sudoedit, su, doas, passwd), or whose prompt line asks for a password
  *   (password, passphrase, passwd, Passwort, Kennwort, contraseña, mot de passe, credential, secret, "pw:", PIN):
  *   always, whatever else the line says.
- * - A terminal reading with echo off, UNLESS the prompt line the daemon read from the pane asks for a code
- *   ("Verification code:", one-time, OTP, 2FA, authenticator, "code:") and says none of password, passphrase, PIN,
- *   token or secret. Whole words, any case. A bare ": " with echo off is a password.
+ * - A terminal reading with echo off, UNLESS its program is one that asks for 2FA codes (ssh, scp, sftp, mosh, the
+ *   aws, gcloud, az and vault CLIs) AND the prompt line the daemon read from the pane asks for a code ("Verification
+ *   code:", one-time, OTP, 2FA, authenticator, "code:") and says none of password, passphrase, PIN, token or secret.
+ *   Whole words, any case. A bare ": " with echo off, or a shell's `read -s`, is a password.
+ * - Every line and word is matched as {@link matchable} text, and a look-alike spelling ({@link lookAlike}) counts as a
+ *   password word.
  */
-export function passwordTarget(facts: InputTargetFacts, fieldId: string): boolean {
+export function passwordTarget(
+  facts: InputTargetFacts,
+  fieldId: string,
+  /** The foreground runs a code program this account cannot replace (`CodeProgramPort`); never the name in ps. */
+  codeProgram = false,
+): boolean {
   // (The ferret's own words are checked in service.ts: they may only raise a code to a secret.)
   if (facts.kind === 'terminal') {
-    const line = facts.promptLine;
-    if (GETPASS_PROGRAMS.has(facts.foreground.comm) || PASSWORD_PROMPT.test(line)) return true;
+    const line = matchable(facts.promptLine);
+    // A getpass NAME is enough here: faking one only makes the card stricter.
+    if (
+      GETPASS_PROGRAMS.has(facts.foreground.comm) ||
+      PASSWORD_PROMPT.test(line) ||
+      spellsPassword(facts.promptLine) ||
+      lookAlike(facts.promptLine)
+    )
+      return true;
     if (facts.echo !== 'off') return false;
-    return !(CODE_PROMPT.test(line) && !NOT_A_CODE.test(line));
+    return !(codeProgram && CODE_PROMPT.test(line) && !NOT_A_CODE.test(line));
   }
   if (facts.kind !== 'browser') return false;
   const found = facts.fields.find(field => field.fieldId === fieldId);
@@ -129,7 +193,7 @@ export function passwordTarget(facts: InputTargetFacts, fieldId: string): boolea
   return (
     found.field.type?.toLowerCase() === 'password' ||
     [found.field.name, found.field.id, found.field.autocomplete].some(
-      word => word !== undefined && PASSWORD_FIELD.test(word),
+      word => word !== undefined && (PASSWORD_FIELD.test(matchable(word)) || spellsPassword(word) || lookAlike(word)),
     )
   );
 }

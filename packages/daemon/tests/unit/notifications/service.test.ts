@@ -586,19 +586,49 @@ describe('NotificationService high priority', () => {
     should(world.push.dispatches[0]?.payload.tag).equal(`attention-${SESSION}`);
   });
 
-  it('should send at most six high pushes a rolling hour, daemon-wide, and the rest at normal priority', async () => {
+  it('should send a ferret at most three high pushes a rolling hour, and leave the others theirs', async () => {
     // Arrange — every item is a code card; the clock is moved by hand.
     let now = Date.parse(AT);
     const world = fixture({ subjectOf: () => 'one-time-code', now: () => new Date(now).toISOString() });
     const card = (n: number) => AgendaItemSchema.parse({ ...due, id: `A${String(n)}` });
 
-    // Act — seven code cards in one hour, then one more an hour after the first.
-    for (let n = 1; n <= 7; n += 1) await world.service.deadline(SESSION, card(n), snapshot);
+    // Act — one ferret raises four code cards in an hour; another ferret then raises one; an hour later, one more.
+    for (let n = 1; n <= 4; n += 1) await world.service.deadline(SESSION, card(n), snapshot);
+    await world.service.deadline(OTHER, card(5), snapshot);
     now += 3_600_000;
-    await world.service.deadline(SESSION, card(8), snapshot);
+    await world.service.deadline(SESSION, card(6), snapshot);
 
-    // Assert — still one push per card; only the urgency is capped.
+    // Assert — still one push per card; only the urgency is capped, and only for the ferret that spent its own.
     should(world.push.dispatches.map(dispatch => dispatch.urgency ?? 'normal')).eql([
+      'high',
+      'high',
+      'high',
+      'normal',
+      'high',
+      'high',
+    ]);
+    should(world.push.dispatches[3]?.payload).not.have.property('urgency');
+  });
+
+  it('should give a high slot back when the push reached no device, so it is spent only on a push that went out', async () => {
+    // Arrange — a ferret's three high slots; the first three pushes reach nobody (no device, a throw, zero accepted).
+    const push = new Push();
+    const world = fixture({ subjectOf: () => 'one-time-code', push });
+    const card = (n: number) => AgendaItemSchema.parse({ ...due, id: `A${String(n)}` });
+    const outcomes: (() => Promise<PushDeliveryResult>)[] = [
+      async () => ({ delivered: 0, failed: 0 }),
+      async () => {
+        throw new Error('the push service is down');
+      },
+      async () => ({ delivered: 0, failed: 1 }),
+    ];
+    push.notifyHook = async () => await (outcomes.shift() ?? (async () => ({ delivered: 1, failed: 0 })))();
+
+    // Act — three pushes that reached nobody, then three that did, then one more.
+    for (let n = 1; n <= 7; n += 1) await world.service.deadline(SESSION, card(n), snapshot);
+
+    // Assert — the failed three spent nothing, so the next three are still high; the seventh is capped.
+    should(push.dispatches.map(dispatch => dispatch.urgency ?? 'normal')).eql([
       'high',
       'high',
       'high',
@@ -606,9 +636,28 @@ describe('NotificationService high priority', () => {
       'high',
       'high',
       'normal',
-      'high',
     ]);
-    should(world.push.dispatches[6]?.payload).not.have.property('urgency');
+  });
+
+  it('should send at most twelve high pushes a rolling hour across the daemon', async () => {
+    // Arrange — thirteen ferrets, one code card each.
+    const sessions = new Sessions();
+    for (let n = 1; n <= 13; n += 1)
+      sessions.values.set(`ferret-${String(n)}`, { name: `Ferret ${String(n)}`, interactive: true });
+    const world = fixture({ subjectOf: () => 'one-time-code', sessions });
+
+    // Act
+    for (let n = 1; n <= 13; n += 1)
+      await world.service.deadline(
+        `ferret-${String(n)}`,
+        AgendaItemSchema.parse({ ...due, id: `A${String(n)}` }),
+        snapshot,
+      );
+
+    // Assert
+    const urgencies = world.push.dispatches.map(dispatch => dispatch.urgency ?? 'normal');
+    should(urgencies.filter(urgency => urgency === 'high')).have.length(12);
+    should(urgencies.at(-1)).equal('normal');
   });
 
   it('should push a code card past its deadline at high priority too', async () => {

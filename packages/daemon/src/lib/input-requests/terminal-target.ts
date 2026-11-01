@@ -3,7 +3,7 @@ import { hexInputChunks, terminalPaneTarget } from '../terminal/runtime-policy.t
 import type { TmuxCommandPort } from '../tmux/contracts.ts';
 import { PANE_PROOF_FORMAT, parsePaneSighting } from '../tmux/pane-proof.ts';
 import { digestFacts, digestLine } from './digest.ts';
-import type { ObserveResult, TerminalInputTargetPort, TypeResult } from './ports.ts';
+import type { CodeProgramPort, ObserveResult, TerminalInputTargetPort, TypeOptions, TypeResult } from './ports.ts';
 import { recognisedConsumer } from './recognised.ts';
 import type { ProgramRunner, TerminalModes } from './terminal-modes.ts';
 
@@ -44,6 +44,7 @@ type Sight =
       readonly facts: InputTargetFacts;
       readonly guard: WriteGuard;
       readonly names: readonly string[];
+      readonly codeProgram?: boolean;
     }
   | { readonly ok: false; readonly reason: 'target_gone' };
 
@@ -78,6 +79,20 @@ export function parseForeground(output: string): InputForeground | undefined {
 }
 
 /**
+ * Every process of the TTY's foreground process group, from the same `ps` listing as {@link parseForeground}: each
+ * one can read what is typed, so a code program is proved only when every one of them is one.
+ */
+export function foregroundPids(output: string): readonly number[] {
+  return output
+    .split('\n')
+    .map(line => ROW.exec(line))
+    .filter(match => match !== null)
+    .map(match => ({ pid: Number(match[1]), pgid: Number(match[2]), tpgid: Number(match[3]) }))
+    .filter(row => row.pid > 0 && row.pgid > 0 && row.pgid === row.tpgid)
+    .map(row => row.pid);
+}
+
+/**
  * LOOKS AT, AND TYPES INTO, A TMUX TERMINAL. Every fact is read from tmux and the kernel; nothing the agent
  * wrote is used. `type` looks at the terminal again, in full, and writes only if every fact (the pane, the
  * foreground program, echo, the prompt line, the cursor) still digests to what the card showed.
@@ -103,6 +118,8 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     private readonly terminals: TerminalLocator,
     private readonly modes: TerminalModes,
     private readonly run: ProgramRunner,
+    /** Whether the foreground runs a code program this account cannot replace; absent: none ever does. */
+    private readonly programs?: CodeProgramPort,
   ) {}
 
   /**
@@ -129,7 +146,14 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
   async observe(sessionId: string, target: InputTarget): Promise<ObserveResult> {
     if (target.kind !== 'terminal') return { ok: false, reason: 'unsupported' };
     const sight = await this.look(sessionId, target.key);
-    return sight.ok ? { ok: true, facts: sight.facts, names: sight.names } : sight;
+    return sight.ok
+      ? {
+          ok: true,
+          facts: sight.facts,
+          names: sight.names,
+          ...(sight.codeProgram ? { codeProgram: true as const } : {}),
+        }
+      : sight;
   }
 
   private async describe(pane: string): Promise<Described | undefined> {
@@ -180,6 +204,15 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     const echo = await this.modes.echo(first.tty);
     const canonical = await this.modes.canonical?.(first.tty);
     const trusted = (await this.modes.trusted?.(foreground.pid)) === true;
+    // EVERY process of the foreground group can read the TTY (an ssh LocalCommand or ProxyCommand child, a pipeline
+    // led by ssh), so each must be a proven code program, or none is. GAP: a process of another session holding the TTY
+    // open is not looked for.
+    const members = listed === undefined ? [] : foregroundPids(listed);
+    const programs = this.programs;
+    const codeProgram =
+      programs !== undefined &&
+      members.length > 0 &&
+      (await Promise.all(members.map(async pid => await programs.codeProgram(pid).catch(() => false)))).every(Boolean);
     const last = await this.describe(pane);
     if (
       last === undefined ||
@@ -209,6 +242,7 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
       ok: true,
       facts,
       guard: { panePid: sighting.pid, command: last.command, cursorRow },
+      codeProgram,
       names: [...new Set([key, located.name, located.id].filter((name): name is string => name !== undefined))],
     };
   }
@@ -219,11 +253,15 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     text: string,
     submit: boolean,
     expected: InputTargetFacts,
+    options?: TypeOptions,
   ): Promise<TypeResult> {
     if (target.kind !== 'terminal' || expected.kind !== 'terminal') return 'target_gone';
     const fresh = await this.look(sessionId, target.key);
     if (!fresh.ok || fresh.facts.kind !== 'terminal') return 'target_gone';
     if (digestFacts(fresh.facts) !== digestFacts(expected)) return 'target_changed';
+    // A code kept visible because a code program held the terminal: another member joining the foreground group (a
+    // reader the ferret started) is no change to the facts, so the program is proved again here.
+    if (options?.codeProgram === true && fresh.codeProgram !== true) return 'target_changed';
     const { guard } = fresh;
     if (!PINNABLE_COMMAND.test(guard.command)) return 'target_changed';
     const paneId = fresh.facts.paneProof.paneId;

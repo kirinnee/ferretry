@@ -6,6 +6,8 @@ import {
   type LockContext,
   lockFor,
   longerLock,
+  lookAlike,
+  matchable,
   passwordTarget,
   pageFieldsQualify,
   probeable,
@@ -261,9 +263,9 @@ describe('a password target (a `code` aimed at one is handled as a secret)', () 
   });
 
   it('should keep an echo-off prompt a code only when the pane asks for a code and names nothing secret', () => {
-    // Arrange — ssh's keyboard-interactive prompts, typing hidden.
-    const hidden = (promptLine: string, comm = 'ssh') =>
-      passwordTarget(sudo({ echo: 'off', promptLine }, comm), 'value');
+    // Arrange — ssh's keyboard-interactive prompts, typing hidden, from an ssh this account cannot replace.
+    const hidden = (promptLine: string, comm = 'ssh', codeProgram = true) =>
+      passwordTarget(sudo({ echo: 'off', promptLine }, comm), 'value', codeProgram);
 
     // Act / Assert — a code prompt stays a code.
     for (const line of ['Verification code:', 'Enter your one-time code:', 'Authenticator CODE:', '2FA: ', 'code:'])
@@ -280,8 +282,49 @@ describe('a password target (a `code` aimed at one is handled as a secret)', () 
     // A prompt that asks for a password in other words is one, typing shown or not.
     for (const line of ['[sudo] passwd for kirin:', 'Passwort:', 'pw:', 'PIN:', 'Kennwort:', 'Enter credentials:'])
       should(passwordTarget(sudo({ echo: 'on', promptLine: line }, 'bash'), 'value')).be.true();
+    // Only a code program the daemon proved from its executable keeps it a code: a name in ps is no proof.
+    should(hidden('Verification code:', 'bash', false)).be.true();
+    should(hidden('Verification code:', 'ssh', false)).be.true();
+    // A look-alike letter or a split spelling of a password word still makes it a password, from ssh too.
+    for (const line of [
+      'Verification code (P\u0251ssword):',
+      'Verification code (Pass-word):',
+      'Verification code (Passw\u0585rd):',
+    ])
+      should(hidden(line)).be.true();
     // A getpass program is always a password, whatever its prompt says.
     should(hidden('Verification code:', 'sudo')).be.true();
     should(passwordTarget(sudo({ echo: 'on', promptLine: 'Verification code:' }, 'su'), 'value')).be.true();
+  });
+});
+
+describe('look-alike and hidden spellings (the pane and the ferret are untrusted text)', () => {
+  it('should read accented, fullwidth, zero-width and mixed-script spellings of password as password', () => {
+    // Arrange
+    const shown = (promptLine: string) => passwordTarget(sudo({ echo: 'on', promptLine }, 'bash'), 'value');
+
+    // Act / Assert
+    for (const line of [
+      'Pàssword:',
+      'ｐａｓｓｗｏｒｄ:',
+      'pass\u200bword:',
+      'P\u0430ssword:',
+      'Enter Р\u0406N:',
+      'P\u0251ssword:',
+      '\u1D18\u1D00ssword:',
+      'Passw\u1D0Frd:',
+      'Passw\u0585rd:',
+      'P a s s w o r d:',
+      'Pass-word:',
+      'Pass word:',
+    ])
+      should(shown(line)).be.true();
+    should(
+      passwordTarget(sudo({ echo: 'off', promptLine: 'Verification code (p\u0430ssword):' }, 'ssh'), 'value'),
+    ).be.true();
+    should(passwordTarget(page([pageField({}, { type: 'text', name: 'p\u0430ss' })]), 'password')).be.true();
+    should(shown('Verification code:')).be.false();
+    should(lookAlike('Verification code:')).be.false();
+    should(matchable('pa\u0301ss\u200bword')).equal('password');
   });
 });

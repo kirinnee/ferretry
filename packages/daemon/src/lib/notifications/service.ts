@@ -52,15 +52,18 @@ export interface NotificationServiceOptions {
  * repeat of the same stop, item or notice is no second push, across restarts too.
  */
 /**
- * The most HIGH-priority pushes this daemon sends in any rolling hour, across every ferret. Past it a push still goes,
- * once per card as always, at normal priority: a ferret raising card after card cannot keep the owner's phone loud.
+ * The most HIGH-priority pushes in any rolling hour: per ferret, and across the whole daemon. Past either a push still
+ * goes, once per card as always, at normal priority. The per-ferret bucket is the tighter one, so a ferret raising card
+ * after card spends its own three and never the slots another ferret's real code needs.
  */
-export const HIGH_PUSHES_PER_HOUR = 6;
+export const HIGH_PUSHES_PER_SESSION_PER_HOUR = 3;
+export const HIGH_PUSHES_PER_HOUR = 12;
 const HOUR_MS = 3_600_000;
 
 export class NotificationService implements AgendaRaisedObserver {
-  /** When each recent high push was sent, oldest first: the rolling window {@link HIGH_PUSHES_PER_HOUR} counts. */
+  /** When each recent high push was sent, oldest first, daemon-wide and per session: the rolling windows. */
   private readonly highSent: number[] = [];
+  private readonly highSentBySession = new Map<string, number[]>();
 
   constructor(private readonly options: NotificationServiceOptions) {}
 
@@ -131,15 +134,37 @@ export class NotificationService implements AgendaRaisedObserver {
    * The item a push SHOWS, when its push must be high priority (a one-time code card), or nothing. Only the item the
    * push shows decides, so a code card waiting behind another item never makes that item's push loud.
    */
-  private urgentOf(sessionId: string, shown: AgendaItem): AgendaItem | undefined {
+  private urgentOf(
+    sessionId: string,
+    shown: AgendaItem,
+  ): { readonly item: AgendaItem; readonly at: number } | undefined {
     const subjectOf = this.options.subjectOf;
     if (subjectOf === undefined || pushUrgencyFor(subjectOf(sessionId, shown)) !== 'high') return undefined;
-    // The daemon-wide cap: counted and taken in one synchronous step, so two pushes cannot both take the last slot.
+    // Both caps: counted and taken in one synchronous step, so two pushes cannot both take the last slot.
     const now = Date.parse(this.options.clock.now());
-    while (this.highSent.length > 0 && (this.highSent[0] as number) <= now - HOUR_MS) this.highSent.shift();
-    if (this.highSent.length >= HIGH_PUSHES_PER_HOUR) return undefined;
+    const recent = (sent: readonly number[]): number[] => sent.filter(at => at > now - HOUR_MS);
+    const daemon = recent(this.highSent);
+    const session = recent(this.highSentBySession.get(sessionId) ?? []);
+    this.highSent.splice(0, this.highSent.length, ...daemon);
+    if (session.length === 0) this.highSentBySession.delete(sessionId);
+    else this.highSentBySession.set(sessionId, session);
+    if (session.length >= HIGH_PUSHES_PER_SESSION_PER_HOUR || daemon.length >= HIGH_PUSHES_PER_HOUR) return undefined;
     this.highSent.push(now);
-    return shown;
+    this.highSentBySession.set(sessionId, [...session, now]);
+    return { item: shown, at: now };
+  }
+
+  /** Gives back a high slot whose push reached no device: a slot is spent only on a push that went out. */
+  private refund(sessionId: string, at: number): void {
+    const drop = (sent: number[]): void => {
+      const index = sent.indexOf(at);
+      if (index >= 0) sent.splice(index, 1);
+    };
+    drop(this.highSent);
+    const session = this.highSentBySession.get(sessionId);
+    if (session === undefined) return;
+    drop(session);
+    if (session.length === 0) this.highSentBySession.delete(sessionId);
   }
 
   private async announce(
@@ -159,70 +184,90 @@ export class NotificationService implements AgendaRaisedObserver {
         // A high push gets its own tag (one per card), so the platform sounds it again rather than folding it in silently.
         const urgent = this.urgentOf(sessionId, shown);
         const payload: SessionNotificationPayload =
-          urgent === undefined ? composed : { ...composed, urgency: 'high', tag: `${composed.tag}:${urgent.id}` };
-        const enrolled = (await this.options.push.list()).length;
-        await this.options.ledger.append(
-          NotificationRecordSchema.parse({
-            v: 1,
-            phase: 'requested',
-            key,
-            at: this.options.clock.now(),
-            origin: 'agenda',
-            attribution: agendaNotificationAttribution(item),
-            sessionId,
-            agendaId: item.id,
-            ...(identity.ping === true ? { ping: true } : {}),
-            ...(identity.deadline === true ? { deadline: true } : {}),
-            ...(identity.woke === undefined ? {} : { woke: identity.woke }),
-            ...(identity.stoppedAt === undefined ? {} : { stoppedAt: identity.stoppedAt }),
-            sent: {
-              kind: payload.kind,
-              interactive: session.interactive,
-              title: payload.title,
-              body: payload.body,
-            },
-            enrolled,
-          }),
-        );
-        let delivered: number;
-        let failed: number;
+          urgent === undefined ? composed : { ...composed, urgency: 'high', tag: `${composed.tag}:${urgent.item.id}` };
+        // The high slot is kept only when a device accepted the push; every other ending gives it back.
+        let reached = false;
         try {
-          ({ delivered, failed } = await this.options.push.notify({
-            payload,
-            ...(urgent === undefined ? {} : { urgency: 'high' as const }),
-          }));
-        } catch (error) {
-          this.tell(diagnostics => diagnostics.failed(key, errorText(error)));
-          await this.options.ledger
-            .append(
-              NotificationRecordSchema.parse({
-                v: 1,
-                phase: 'outcome',
-                key,
-                at: this.options.clock.now(),
-                delivered: 0,
-                failed: 0,
-                error: errorText(error),
-              }),
-            )
-            .catch(() => undefined);
-          return;
+          reached = await this.send(identity, item, key, session, payload, urgent !== undefined);
+        } finally {
+          if (urgent !== undefined && !reached) this.refund(sessionId, urgent.at);
         }
-        this.tell(diagnostics => diagnostics.made(key, { delivered, failed }));
-        await this.options.ledger
-          .append(
-            NotificationRecordSchema.parse({
-              v: 1,
-              phase: 'outcome',
-              key,
-              at: this.options.clock.now(),
-              delivered,
-              failed,
-            }),
-          )
-          .catch(() => undefined);
       })
       .catch((error: unknown) => this.tell(diagnostics => diagnostics.failed(key, errorText(error))));
+  }
+
+  /** Records, sends and records the outcome of one push: whether a device accepted it. */
+  private async send(
+    identity: NotificationIdentity,
+    item: AgendaItem,
+    key: string,
+    session: NotificationSessionFacts,
+    payload: SessionNotificationPayload,
+    high: boolean,
+  ): Promise<boolean> {
+    const { sessionId } = identity;
+    const enrolled = (await this.options.push.list()).length;
+    await this.options.ledger.append(
+      NotificationRecordSchema.parse({
+        v: 1,
+        phase: 'requested',
+        key,
+        at: this.options.clock.now(),
+        origin: 'agenda',
+        attribution: agendaNotificationAttribution(item),
+        sessionId,
+        agendaId: item.id,
+        ...(identity.ping === true ? { ping: true } : {}),
+        ...(identity.deadline === true ? { deadline: true } : {}),
+        ...(identity.woke === undefined ? {} : { woke: identity.woke }),
+        ...(identity.stoppedAt === undefined ? {} : { stoppedAt: identity.stoppedAt }),
+        sent: {
+          kind: payload.kind,
+          interactive: session.interactive,
+          title: payload.title,
+          body: payload.body,
+        },
+        enrolled,
+      }),
+    );
+    let delivered: number;
+    let failed: number;
+    try {
+      ({ delivered, failed } = await this.options.push.notify({
+        payload,
+        ...(high ? { urgency: 'high' as const } : {}),
+      }));
+    } catch (error) {
+      this.tell(diagnostics => diagnostics.failed(key, errorText(error)));
+      await this.options.ledger
+        .append(
+          NotificationRecordSchema.parse({
+            v: 1,
+            phase: 'outcome',
+            key,
+            at: this.options.clock.now(),
+            delivered: 0,
+            failed: 0,
+            error: errorText(error),
+          }),
+        )
+        .catch(() => undefined);
+      return false;
+    }
+    this.tell(diagnostics => diagnostics.made(key, { delivered, failed }));
+    await this.options.ledger
+      .append(
+        NotificationRecordSchema.parse({
+          v: 1,
+          phase: 'outcome',
+          key,
+          at: this.options.clock.now(),
+          delivered,
+          failed,
+        }),
+      )
+      .catch(() => undefined);
+    return delivered > 0;
   }
 
   private tell(say: (diagnostics: NotificationDiagnostics) => void): void {

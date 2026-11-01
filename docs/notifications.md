@@ -112,9 +112,11 @@ What a high push does, and who honours it:
 | `renotify` with a tag per card, `silent: false`    | service worker | Chrome and Edge sound it again even when an earlier push for the ferret is showing                                                                                                               |
 | `vibrate`                                          | service worker | Chrome on Android; ignored elsewhere                                                                                                                                                             |
 
-**At most six high pushes an hour, daemon-wide** (`HIGH_PUSHES_PER_HOUR`, a rolling hour across every ferret). Past
-that a code card still pushes once, at normal priority, so a ferret raising card after card cannot keep the phone
-loud.
+**At most three high pushes an hour per ferret, and twelve across the daemon** (`HIGH_PUSHES_PER_SESSION_PER_HOUR`,
+`HIGH_PUSHES_PER_HOUR`, rolling hours). Past either a code card still pushes once, at normal priority: a ferret raising
+card after card spends only its own three, never the slots another ferret's real code needs. A slot is spent only
+on a push a device accepted: one that reached no device (none enrolled, a failed send, nothing accepted) gives it
+back.
 
 **iOS has no "time-sensitive" option for a web app.** The interruption level (time-sensitive, which can break through
 a Focus mode) is an option for native apps only; Web Push on iOS and iPadOS exposes none, so Ferretry does not and
