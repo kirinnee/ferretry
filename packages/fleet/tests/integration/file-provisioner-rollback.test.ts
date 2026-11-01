@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import { FileFleetProvisioner } from '../../src/adapters/file-provisioner.ts';
+import { fileIdentityOf } from '../../src/adapters/node-guard-disk.ts';
 import type { FleetManifest } from '../../src/lib/manifest.ts';
 import {
   type FleetApplyFailure,
@@ -407,7 +408,8 @@ describe('FileFleetProvisioner rollback', () => {
           // exactly afterwards, which leaves the content as the only thing that can differ.
           const staged = args[0] as string;
           await utimes(staged, PINNED_TIME_SECONDS, PINNED_TIME_SECONDS);
-          const identity = await original.call(target, staged, args[1], await lstat(staged));
+          const fresh = fileIdentityOf(await lstat(staged, { bigint: true }));
+          const identity = await original.call(target, staged, args[1], fresh, ...args.slice(3));
 
           // Same inode, opened by name and written in place — no unlink, no new file — and the same
           // byte length, so size is unchanged too.

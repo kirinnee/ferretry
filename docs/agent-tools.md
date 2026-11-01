@@ -618,7 +618,7 @@ A runtime's config folder (`<fleet>/homes/<id>`) is written by its harness, so b
 below it (`skills/`, `commands/`, …) can be swapped for a link into the home the moment after it was checked. The
 provisioner therefore reaches **nothing below a folder by its path**. Every list, read, write, move aside and delete
 goes through a folder it opened and checked (`openFolderOutsideStateHomes`), reaching the entry THROUGH that
-descriptor (Linux `/proc/self/fd/N/<leaf>`):
+descriptor — on Linux by `/proc/self/fd/N/<leaf>`, on macOS by descriptor calls (below):
 
 - **Inside the home by name** (every fleet runtime), each folder is opened from the home down, one at a time, through
   the one above, **without following a link**. A link anywhere on the way refuses the apply ("a symbolic link stands
@@ -639,17 +639,22 @@ descriptor (Linux `/proc/self/fd/N/<leaf>`):
 - **Reads never follow a final link** (`O_NOFOLLOW`): a settings file or wrapper swapped for a link after it was
   looked at is refused rather than merged into what the harness reads.
 
-**On macOS it fails closed below a runtime's own folder.** There is no descriptor path, so each step re-proves the
-folder — same real path, same device and inode — and then goes by path, and a swap timed between the two could still
-redirect a rename or a delete into the home (two such wins would move `state/secrets.key` aside and then delete it).
-So below a runtime's own folder nothing is moved aside or removed at all: replacing an entry that is already there,
-a copy, and every sweep (`skills/` included) are **skipped**, and the apply's result names each one ("Left … as it
-was"); a rollback that would have to take back something it created there reports it instead. The runtime's own
-folder (its `settings.json`, `CLAUDE.md`, credential link) is written as usual, since its harness cannot swap the
-folder itself. What remains on macOS is that a NEW name can still land in the home if a folder is swapped at the
-exact moment it is created (`O_EXCL`: never over an existing file), and that a host runtime's own folder
-(`~/.claude`, whose parent the agent can write) has the re-proof only. A Linux host without `/proc` refuses
-every apply instead of reading every folder as empty. The shared-history migration (`file-shared-history.ts`), which moves history folders between runtime homes
+**On macOS every step goes through the held descriptor too, by descriptor calls.** macOS has no `/proc` and this
+runtime no `openat`, so each step is one bracket (`packages/fleet/src/adapters/descriptor-calls.ts`, the
+mechanism the session-file viewer already proves on macOS): `fchdir` the held folder, prove `lstat('.')` is that
+folder's device and inode (bigint, on every step), make ONE synchronous call on a relative name, and `fchdir` back in
+a synchronous try/finally — nothing awaits in between, so nothing else can run in the window. If the working directory
+cannot be restored, every later step refuses and the step that failed reports it. The one step across two folders (a
+publish's hard link) is `linkat` on both descriptors. So macOS behaves like Linux — at a host runtime's own folder
+(`~/.claude`) and below every runtime's — and a flip of a folder after it was opened reaches nothing else.
+
+**If those C calls cannot be loaded**, or a Linux host has no `/proc` (where every apply is refused instead), steps
+fall back to re-proving the folder by path, which a swap timed between the proof and the step could still redirect.
+There the provisioner fails closed: no name is moved aside or removed anywhere but the daemon's own folders and a fleet
+runtime's own folder — replacing an entry that is already there, a copy, and every sweep are **skipped**, and the
+result names each one ("Left … as it was"), with why descriptor reach is missing; a rollback that would have to take
+back something it created there reports it instead. What that fallback still leaves is a NEW name landing in the home
+if a folder is swapped at the exact moment it is created (`O_EXCL`: never over an existing file). The shared-history migration (`file-shared-history.ts`), which moves history folders between runtime homes
 and the shared pool, still works by path and is not covered by this yet.
 
 ## Sub-ferrets and the Ferretry verbs

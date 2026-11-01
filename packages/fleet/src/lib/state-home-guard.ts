@@ -38,6 +38,10 @@ export interface FileIdentity {
   readonly owner: number;
   /** The owning group's id. */
   readonly group: number;
+  /** When its content last changed, in nanoseconds, where the disk says. */
+  readonly modified?: bigint;
+  /** When its entry last changed (content, mode, owner or a name), in nanoseconds, where the disk says. */
+  readonly changed?: bigint;
 }
 
 /** A file opened to read. */
@@ -45,6 +49,8 @@ export interface GuardReadHandle {
   readonly identity: FileIdentity;
   /** Copies what this descriptor reads into a NEW file (never through a link); throws past `maxBytes`. */
   copyTo(to: string, maxBytes: number, mode: number): Promise<number>;
+  /** Copies what this descriptor reads into `descriptor`, a file the caller just created, and closes it; throws past `maxBytes`. */
+  copyToDescriptor?(descriptor: number, maxBytes: number): Promise<number>;
   /** What this descriptor reads, as UTF-8; throws past `maxBytes`. */
   readText(maxBytes: number): Promise<string>;
   close(): Promise<void>;
@@ -65,9 +71,33 @@ export interface GuardDirectoryHandle {
   readonly identity: FileIdentity;
   /** A path that reaches `leaf` in this open folder (Linux `/proc/self/fd/N/leaf`), or `undefined` where there is none. */
   entryPath(leaf: string): string | undefined;
+  /** Calls made relative to THIS descriptor, where the platform has no descriptor path but these (macOS). */
+  readonly at?: DescriptorCalls;
   /** Sets the folder's permission bits through THIS descriptor (`fchmod`), never by a path a link could redirect. */
   chmod(mode: number): Promise<void>;
   close(): Promise<void>;
+}
+
+/**
+ * One folder step made RELATIVE TO an open folder's descriptor, so a folder swapped after it was opened is never
+ * reached: each takes one entry's name (never a path) inside that folder. The disk's own calls, which name paths,
+ * cannot promise that where there is no descriptor path.
+ */
+export interface DescriptorCalls {
+  /** The entry itself (`lstat`), never followed; `undefined` when nothing is there. */
+  identity(leaf: string): Promise<FileIdentity | undefined>;
+  list(): Promise<readonly string[]>;
+  mkdir(leaf: string, mode: number): Promise<void>;
+  /** Opens the folder `leaf` without following a link. */
+  openDirectory(leaf: string): Promise<GuardDirectoryHandle>;
+  unlink(leaf: string): Promise<void>;
+  rmdir(leaf: string): Promise<void>;
+  rename(from: string, to: string): Promise<void>;
+  symlink(target: string, leaf: string): Promise<void>;
+  /** Hard-links `fromLeaf` here as `toLeaf` in the folder `into` (which must have descriptor calls too). */
+  link(fromLeaf: string, into: GuardDirectoryHandle, toLeaf: string): Promise<void>;
+  /** A raw descriptor on the file `leaf`: `read`, or `new` (created exclusively with `mode`); never through a link. */
+  openFile(leaf: string, how: 'read' | 'new', mode: number): Promise<number>;
 }
 
 /** What the guard asks of the disk. Every open refuses a link at its last step. */
@@ -326,6 +356,8 @@ export interface GuardedFile {
   readonly path: string;
   readonly identity: FileIdentity;
   copyTo(to: string, maxBytes: number, mode?: number): Promise<number>;
+  /** Into a file the caller just created, by its descriptor (closed after); throws where the disk cannot. */
+  copyToDescriptor(descriptor: number, maxBytes: number): Promise<number>;
   readText(maxBytes: number): Promise<string>;
   close(): Promise<void>;
 }
@@ -476,6 +508,10 @@ export async function openOutsideStateHomes(
       path: real,
       identity: handle.identity,
       copyTo: async (to, maxBytes, mode = 0o600) => await handle.copyTo(to, maxBytes, mode),
+      copyToDescriptor: async (descriptor, maxBytes) => {
+        if (handle.copyToDescriptor === undefined) throw new Error('this disk cannot copy into a descriptor');
+        return await handle.copyToDescriptor(descriptor, maxBytes);
+      },
       readText: async maxBytes => await handle.readText(maxBytes),
       close: async () => await handle.close(),
     },
@@ -656,12 +692,25 @@ async function placedFolderProblem(
   return again !== place || !same(opened, await disk.identity(place)) ? refused('changed') : undefined;
 }
 
-/** What the folder primitives ask of the disk: the guard's own calls, plus removing an empty folder. */
+/** What the folder primitives ask of the disk: the guard's own calls by path, plus the writes a folder step makes. */
 export type FolderDisk = Pick<GuardDisk, 'realpath' | 'identity' | 'openDirectory' | 'mkdir' | 'list' | 'unlink'> & {
   /** Removes the EMPTY folder at `path` (`rmdir`), which never follows a link. */
   rmdir(path: string): Promise<void>;
+  /** Renames `from` to `to` (neither final step is followed). */
+  rename(from: string, to: string): Promise<void>;
+  /** Makes a symbolic link at `path` leading to `target`, failing when the name is taken. */
+  symlink(target: string, path: string): Promise<void>;
+  /** Gives the entry at `from` a second name `to` (a hard link), failing when `to` is taken. */
+  linkEntry(from: string, to: string): Promise<void>;
+  /**
+   * Opens the file at `path` and hands back its raw descriptor, never following a link and never blocking on a pipe.
+   * `read`: to read. `new`: created, failing when anything is there, with `mode`.
+   */
+  openFile(path: string, how: 'read' | 'new', mode: number): Promise<number>;
   /** Descriptor paths were asked for and this host has none (Linux without `/proc`). */
   readonly missingDescriptorPaths?: boolean;
+  /** Descriptor calls were asked for and could not be loaded (macOS without its C calls): why. */
+  readonly descriptorCallsUnavailable?: string;
 };
 
 /** A checked folder whose place no longer leads to it, so nothing more is reached through it by path. */
@@ -674,26 +723,43 @@ export class FolderChangedError extends Error {
 
 /**
  * A folder the guard opened and checked, so every entry below it is reached THROUGH it rather than through
- * whatever its path names a moment later. Where the platform gives a path through the descriptor (Linux
- * `/proc/self/fd/N/<leaf>`) that is what {@link GuardedFolder.entry} answers, and a folder swapped after the
- * check is never reached. Elsewhere (macOS) it answers the real path, and only once the folder is proven still
- * at it — same real path, same device and inode — or it throws {@link FolderChangedError}: a swap that has
- * happened is refused, one landing between that proof and the use is the declared residue.
+ * whatever its path names a moment later.
+ *
+ * - **Linux**: through `/proc/self/fd/N/<leaf>` (the handle's `entryPath`).
+ * - **macOS**: through the handle's descriptor-relative calls (`at`): the descriptor is installed as the working
+ *   directory for one synchronous call on a relative name, proven there first.
+ * - **Neither** (a disk without either): by the real path, once the folder is proven still at it — same real path,
+ *   same device and inode — or {@link FolderChangedError}. A swap timed between that proof and the step can still
+ *   redirect it, so `anchored` is false and a caller that moves or removes a name refuses to there.
+ *
+ * {@link GuardedFolder.entry} and {@link GuardedFolder.self} answer a PATH, for reads that only compare or hash
+ * (and for showing). Everything that changes the disk, or reads what is then handed on, uses the methods.
  */
 export interface GuardedFolder {
   /** Its real path when it was checked. */
   readonly path: string;
   readonly identity: FileIdentity;
-  /**
-   * Whether its entries are reached THROUGH the descriptor (Linux `/proc`). When not, each step re-proves the
-   * folder and then goes by path, which a swap timed between the two can still redirect — so a caller that moves
-   * or deletes a name it did not mint refuses to do that in a folder somebody else can swap.
-   */
+  /** Whether its entries are reached THROUGH the descriptor (see above). */
   readonly anchored: boolean;
   /** A path that reaches the ONE entry `leaf` in this folder (a name with no `/`). */
   entry(leaf: string): Promise<string>;
-  /** A path that reaches the folder itself, to list it. */
+  /** A path that reaches the folder itself. */
   self(): Promise<string>;
+  /** The entry `leaf` itself (`lstat`), never followed; `undefined` when nothing is there. */
+  describe(leaf: string): Promise<FileIdentity | undefined>;
+  /** The names in this folder. */
+  list(): Promise<readonly string[]>;
+  /** Makes the folder `leaf` (not recursive; a name already taken fails with `EEXIST`). */
+  mkdir(leaf: string, mode: number): Promise<void>;
+  unlink(leaf: string): Promise<void>;
+  rmdir(leaf: string): Promise<void>;
+  /** Renames `from` to `to`, both in this folder. */
+  rename(from: string, to: string): Promise<void>;
+  symlink(target: string, leaf: string): Promise<void>;
+  /** Hard-links `fromLeaf` in `from` as `leaf` here; a name already taken fails with `EEXIST`. */
+  link(from: GuardedFolder, fromLeaf: string, leaf: string): Promise<void>;
+  /** A raw descriptor on the file `leaf` (see {@link FolderDisk.openFile}); the caller closes it. */
+  openFile(leaf: string, how: 'read' | 'new', mode?: number): Promise<number>;
   /** Sets its permission bits through the descriptor (`fchmod`). */
   chmod(mode: number): Promise<void>;
   close(): Promise<void>;
@@ -709,30 +775,58 @@ const isOneEntry = (name: string): boolean =>
 
 const codeOf = (error: unknown): string | undefined => (error as { readonly code?: string } | undefined)?.code;
 
+/** Each checked folder's own handle, for the one call that needs two of them (`link`). */
+const handles = new WeakMap<GuardedFolder, GuardDirectoryHandle>();
+
 function checkedFolder(handle: GuardDirectoryHandle, place: string, disk: FolderDisk): GuardedFolder {
   const proven = async (): Promise<void> => {
     if ((await placedFolderProblem(place, handle.identity, disk)) !== undefined) throw new FolderChangedError(place);
   };
-  return {
+  const entry = async (leaf: string): Promise<string> => {
+    if (!isOneEntry(leaf)) throw new TypeError(`name one entry of the folder, not a path: ${leaf}`);
+    const through = handle.entryPath(leaf);
+    if (through !== undefined) return through;
+    await proven();
+    return join(place, leaf);
+  };
+  const leafOf = (leaf: string): string => {
+    if (!isOneEntry(leaf)) throw new TypeError(`name one entry of the folder, not a path: ${leaf}`);
+    return leaf;
+  };
+  const at = handle.at;
+  const folder: GuardedFolder = {
     path: place,
     identity: handle.identity,
-    anchored: handle.entryPath('.') !== undefined,
-    entry: async leaf => {
-      if (!isOneEntry(leaf)) throw new TypeError(`name one entry of the folder, not a path: ${leaf}`);
-      const through = handle.entryPath(leaf);
-      if (through !== undefined) return through;
-      await proven();
-      return join(place, leaf);
-    },
+    anchored: at !== undefined || handle.entryPath('.') !== undefined,
+    entry,
     self: async () => {
       const through = handle.entryPath('.');
       if (through !== undefined) return through;
       await proven();
       return place;
     },
+    describe: async leaf => (at ? await at.identity(leafOf(leaf)) : await disk.identity(await entry(leaf))),
+    list: async () => (at ? await at.list() : await disk.list(await folder.self())),
+    mkdir: async (leaf, mode) => (at ? await at.mkdir(leafOf(leaf), mode) : await disk.mkdir(await entry(leaf), mode)),
+    unlink: async leaf => (at ? await at.unlink(leafOf(leaf)) : await disk.unlink(await entry(leaf))),
+    rmdir: async leaf => (at ? await at.rmdir(leafOf(leaf)) : await disk.rmdir(await entry(leaf))),
+    rename: async (from, to) =>
+      at ? await at.rename(leafOf(from), leafOf(to)) : await disk.rename(await entry(from), await entry(to)),
+    symlink: async (target, leaf) =>
+      at ? await at.symlink(target, leafOf(leaf)) : await disk.symlink(target, await entry(leaf)),
+    link: async (from, fromLeaf, leaf) => {
+      const source = handles.get(from);
+      if (at !== undefined && source?.at !== undefined)
+        return await source.at.link(leafOf(fromLeaf), handle, leafOf(leaf));
+      await disk.linkEntry(await from.entry(fromLeaf), await entry(leaf));
+    },
+    openFile: async (leaf, how, mode = 0o600) =>
+      at ? await at.openFile(leafOf(leaf), how, mode) : await disk.openFile(await entry(leaf), how, mode),
     chmod: async mode => await handle.chmod(mode),
     close: async () => await handle.close(),
   };
+  handles.set(folder, handle);
+  return folder;
 }
 
 /** The home a folder at `place` IS by identity while not being at that home's own place (a bind mount), if any. */
@@ -758,27 +852,36 @@ export async function openFolderBelow(
   options: GuardFolderOptions = {},
 ): Promise<Guarded<GuardedFolder>> {
   const place = join(parent.path, leaf);
-  const at = await parent.entry(leaf).catch((error: unknown) => {
-    if (error instanceof FolderChangedError) return undefined;
+  const through = handles.get(parent)?.at;
+  try {
+    let entry = await parent.describe(leaf);
+    if (entry === undefined) {
+      if (options.make === undefined) return refused('not-found');
+      await parent.mkdir(leaf, options.make).catch((error: unknown) => {
+        if (codeOf(error) !== 'EEXIST') throw error;
+      });
+      entry = await parent.describe(leaf);
+      if (entry === undefined) return refused('changed');
+    }
+    if (entry.kind === 'link') return refused('link');
+    if (entry.kind !== 'directory') return refused('not-a-folder');
+  } catch (error) {
+    // The parent, reached by path, is no longer where it was proven.
+    if (error instanceof FolderChangedError) return refused('changed');
     throw error;
-  });
-  if (at === undefined) return refused('changed');
-  let entry = await disk.identity(at);
-  if (entry === undefined) {
-    if (options.make === undefined) return refused('not-found');
-    await disk.mkdir(at, options.make).catch((error: unknown) => {
-      if (codeOf(error) !== 'EEXIST') throw error;
-    });
-    entry = await disk.identity(at);
-    if (entry === undefined) return refused('changed');
   }
-  if (entry.kind === 'link') return refused('link');
-  if (entry.kind !== 'directory') return refused('not-a-folder');
-  const handle = await disk.openDirectory(at).catch(() => undefined);
+  // Opened through the parent: by its descriptor-relative call where it has one, else by the path through it.
+  const handle = await (
+    through === undefined
+      ? parent.entry(leaf).then(async at => await disk.openDirectory(at))
+      : through.openDirectory(leaf)
+  ).catch(() => undefined);
   if (handle === undefined) return refused('changed');
   // Reached by path (no descriptor paths here): proven to be the folder at its real place, like every later use.
   const problem =
-    handle.entryPath('.') === undefined ? await placedFolderProblem(place, handle.identity, disk) : undefined;
+    handle.at === undefined && handle.entryPath('.') === undefined
+      ? await placedFolderProblem(place, handle.identity, disk)
+      : undefined;
   const home = boundHome(homes, place, handle.identity);
   if (problem !== undefined || home !== undefined) {
     await handle.close();
@@ -894,7 +997,7 @@ export async function removeEntryWithin(
   disk: FolderDisk,
 ): Promise<void> {
   const unlinked = async (): Promise<void> =>
-    await disk.unlink(await folder.entry(leaf)).catch((error: unknown) => {
+    await folder.unlink(leaf).catch((error: unknown) => {
       if (codeOf(error) !== 'ENOENT') throw error;
     });
   // `unlink` first: it never follows a link, and it refuses a folder (`EISDIR`; `EPERM` on macOS) — so one call
@@ -913,11 +1016,11 @@ export async function removeEntryWithin(
   }
   const child = opened.value;
   try {
-    for (const name of await disk.list(await child.self())) await removeEntryWithin(child, name, homes, disk);
+    for (const name of await child.list()) await removeEntryWithin(child, name, homes, disk);
   } finally {
     await child.close();
   }
-  await disk.rmdir(await folder.entry(leaf));
+  await folder.rmdir(leaf);
 }
 
 export interface GuardTreeOptions extends GuardLinkOptions {
@@ -935,22 +1038,48 @@ export interface GuardTreeOptions extends GuardLinkOptions {
  * {@link openOutsideStateHomes}; the first refusal stops the copy (what was copied stays, for the caller to
  * remove).
  *
- * WRITTEN THROUGH CHECKED FOLDERS. Where the copy goes is the caller's (a runtime's home is inside the state home
- * by design), but it lands exactly there: the destination's folder is opened and checked first, and every entry is
- * made THROUGH an open folder (`entryPath`, Linux `/proc`) where the platform allows. Each folder the copy makes
- * is opened without following a link and checked to be the folder at its real place — so a link swapped in sends
- * nothing anywhere else — before anything is written into it; its mode is set through that descriptor. Without `/proc` (macOS) a folder swapped
- * after its check can still receive a NEW entry (never an overwrite), the declared residue of path writes.
- *
- * BOUNDED. A folder met twice anywhere in the copy is a `loop` (a link graph can otherwise multiply one folder
- * without end), more than `maxFiles` entries — files and folders — is `too-many`, and more than `maxTotalBytes`
- * written is `too-many` too.
+ * WRITTEN THROUGH CHECKED FOLDERS. The destination's folder is opened by its real path and checked, then the copy
+ * goes on as {@link copyTreeIntoFolder}. Without descriptor paths a folder swapped after that check can still
+ * receive a NEW entry (never an overwrite), the declared residue of path writes.
  */
 export async function copyTreeOutsideStateHomes(
   source: string,
   destination: string,
   homes: StateHomes,
-  disk: GuardDisk,
+  disk: GuardDisk & FolderDisk,
+  options: GuardTreeOptions,
+): Promise<Guarded<{ readonly files: number; readonly bytes: number }>> {
+  const target = absolute(destination, 'the destination');
+  const parentReal = await disk.realpath(dirname(target)).catch(() => undefined);
+  if (parentReal === undefined) return refused('not-found');
+  const parent = await disk.openDirectory(parentReal).catch(() => undefined);
+  if (parent === undefined) return refused('changed');
+  const folder = checkedFolder(parent, parentReal, disk);
+  try {
+    const parentProblem = await placedFolderProblem(parentReal, parent.identity, disk);
+    if (parentProblem !== undefined) return parentProblem;
+    return await copyTreeIntoFolder(source, folder, basename(target), homes, disk, options);
+  } finally {
+    await folder.close();
+  }
+}
+
+/**
+ * Copies `source` as the new entry `leaf` of the checked `folder`, as {@link copyTreeOutsideStateHomes} describes:
+ * every entry is made THROUGH an open folder (its descriptor where the platform gives one), each folder the copy
+ * makes is opened through its parent without following a link before anything is written into it, and its mode is
+ * set through that descriptor.
+ *
+ * BOUNDED. A folder met twice anywhere in the copy is a `loop` (a link graph can otherwise multiply one folder
+ * without end), more than `maxFiles` entries — files and folders — is `too-many`, and more than `maxTotalBytes`
+ * written is `too-many` too.
+ */
+export async function copyTreeIntoFolder(
+  source: string,
+  folder: GuardedFolder,
+  leaf: string,
+  homes: StateHomes,
+  disk: GuardDisk & FolderDisk,
   options: GuardTreeOptions,
 ): Promise<Guarded<{ readonly files: number; readonly bytes: number }>> {
   const totals = { files: 0, bytes: 0, entries: 0 };
@@ -960,8 +1089,7 @@ export async function copyTreeOutsideStateHomes(
     ...(options.hops === undefined ? {} : { hops: options.hops }),
   };
   type Refusal = { readonly ok: false; readonly rule: GuardRule; readonly home?: string };
-  /** `at`: where to make the entry (through an open folder where possible); `place`: its real path. */
-  const copy = async (from: string, at: string, place: string): Promise<Refusal | undefined> => {
+  const copy = async (from: string, parent: GuardedFolder, name: string): Promise<Refusal | undefined> => {
     const real = await disk.realpath(from).catch(() => undefined);
     if (real === undefined) return refused('not-found');
     const entry = await disk.identity(real);
@@ -973,7 +1101,13 @@ export async function copyTreeOutsideStateHomes(
       try {
         const left = options.maxTotalBytes - totals.bytes;
         if (opened.value.identity.size > left) return refused('too-many');
-        totals.bytes += await opened.value.copyTo(at, Math.min(options.maxFileBytes, left), opened.value.identity.mode);
+        const max = Math.min(options.maxFileBytes, left);
+        const mode = opened.value.identity.mode;
+        // Made through the folder, exclusively and never through a link: by its descriptor-relative call where it has
+        // one (and filled through the new file's descriptor), else at the path through it.
+        const through = handles.get(parent)?.at;
+        if (through === undefined) totals.bytes += await opened.value.copyTo(await parent.entry(name), max, mode);
+        else totals.bytes += await opened.value.copyToDescriptor(await parent.openFile(name, 'new', mode), max);
         totals.files += 1;
       } finally {
         await opened.value.close();
@@ -989,42 +1123,24 @@ export async function copyTreeOutsideStateHomes(
     const key = `${String(entry.device)}:${String(entry.inode)}`;
     if (seen.has(key)) return refused('loop');
     seen.add(key);
-    // Writable while it is filled (a Nix store folder is 0555), then given its own mode, as `cp` does.
-    const made = await disk
-      .mkdir(at, entry.mode | 0o700)
-      .then(async () => await disk.openDirectory(at))
-      .catch(() => undefined);
-    if (made === undefined) return refused('changed');
+    // Writable while it is filled (a Nix store folder is 0555), then given its own mode, as `cp` does. Made here,
+    // so a name already taken is somebody else's: `EEXIST` refuses rather than writing into theirs.
+    const made = await parent.mkdir(name, entry.mode | 0o700).catch(() => 'changed' as const);
+    if (made === 'changed') return refused('changed');
+    const opened = await openFolderBelow(parent, name, homes, disk);
+    if (!opened.ok) return opened.rule === 'link' || opened.rule === 'not-found' ? refused('changed') : opened;
+    const child = opened.value;
     try {
-      // The folder just made is the one at its real place — not one a link put there.
-      const problem = await placedFolderProblem(place, made.identity, disk);
-      if (problem !== undefined) return problem;
-      for (const name of await disk.list(real)) {
-        const below = await copy(join(real, name), made.entryPath(name) ?? join(place, name), join(place, name));
-        if (below !== undefined) return below;
+      for (const below of await disk.list(real)) {
+        const problem = await copy(join(real, below), child, below);
+        if (problem !== undefined) return problem;
       }
-      await made.chmod(entry.mode);
+      await child.chmod(entry.mode);
     } finally {
-      await made.close();
+      await child.close();
     }
     return undefined;
   };
-  const target = absolute(destination, 'the destination');
-  const leaf = basename(target);
-  const parentReal = await disk.realpath(dirname(target)).catch(() => undefined);
-  if (parentReal === undefined) return refused('not-found');
-  const parent = await disk.openDirectory(parentReal).catch(() => undefined);
-  if (parent === undefined) return refused('changed');
-  try {
-    const parentProblem = await placedFolderProblem(parentReal, parent.identity, disk);
-    if (parentProblem !== undefined) return parentProblem;
-    const problem = await copy(
-      absolute(source, 'the source'),
-      parent.entryPath(leaf) ?? join(parentReal, leaf),
-      join(parentReal, leaf),
-    );
-    return problem ?? { ok: true, value: { files: totals.files, bytes: totals.bytes } };
-  } finally {
-    await parent.close();
-  }
+  const problem = await copy(absolute(source, 'the source'), folder, leaf);
+  return problem ?? { ok: true, value: { files: totals.files, bytes: totals.bytes } };
 }

@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  copyTreeIntoFolder,
   FolderChangedError,
   type GuardedFolder,
   openFolderBelow,
@@ -16,7 +17,7 @@ import { FakeGuardDisk } from './fake-guard-disk.ts';
  * harness can swap at any moment, a host config folder `/host/.claude` outside it, and a dotfiles checkout it
  * links to.
  */
-const world = async (throughDescriptors = true) => {
+const world = async (throughDescriptors: boolean | 'calls' = true) => {
   const disk = new FakeGuardDisk(throughDescriptors);
   disk.dir('/fy');
   disk.file('/fy/api-token', 64, 'fy_admin');
@@ -435,5 +436,114 @@ describe('removeEntryWithin — a removal that never follows a link', () => {
 
     // Act + Assert
     await removeEntryWithin(folder, 'never-there', homes, disk);
+  });
+});
+
+describe('descriptor calls (macOS) — every step goes through the held folder', () => {
+  it('should reach the folder it opened after its path is swapped for a link into the home', async () => {
+    // Arrange
+    const { disk, homes } = await world('calls');
+    const folder = await opened(openFolderOutsideStateHomes(SKILLS, homes, disk));
+    disk.move(SKILLS, '/fy/fleet/homes/one/elsewhere');
+    disk.link(SKILLS, '/fy/state');
+
+    // Act
+    const listed = await folder.list();
+    const key = await folder.describe('secrets.key');
+    await folder.rename('stale', 'renamed');
+    await folder.mkdir('made', 0o700);
+    await folder.symlink('/nowhere', 'pointer');
+    const descriptor = await folder.openFile('new.txt', 'new', 0o600);
+    await folder.link(folder, 'new.txt', 'second.txt');
+    await folder.unlink('pointer');
+    await folder.rmdir('made');
+
+    // Assert — all of it landed in the folder that was opened, none of it in the home.
+    should(folder.anchored).be.true();
+    should(listed).deepEqual(['stale']);
+    should(key).be.undefined();
+    should(descriptor).be.a.Number();
+    should((await disk.list('/fy/fleet/homes/one/elsewhere')).toSorted()).deepEqual([
+      'new.txt',
+      'renamed',
+      'second.txt',
+    ]);
+    should((await disk.list('/fy/state')).toSorted()).deepEqual(['secrets.key']);
+  });
+
+  it('should open a child and remove a whole tree through the descriptor calls', async () => {
+    // Arrange
+    const { disk, homes } = await world('calls');
+    const folder = await opened(openFolderOutsideStateHomes(SKILLS, homes, disk));
+
+    // Act
+    const child = await opened(openFolderBelow(folder, 'stale', homes, disk));
+    await removeEntryWithin(folder, 'stale', homes, disk);
+
+    // Assert
+    should(child.path).equal(`${SKILLS}/stale`);
+    should(await disk.identity(`${SKILLS}/stale`)).be.undefined();
+  });
+
+  it('should copy a tree into a folder held by descriptor calls, each file filled through its new descriptor', async () => {
+    // Arrange
+    const { disk, homes } = await world('calls');
+    disk.dir('/src');
+    disk.file('/src/a.md', 5, 'hello');
+    disk.dir('/src/sub');
+    disk.file('/src/sub/b.md', 3, 'abc');
+    const folder = await opened(openFolderOutsideStateHomes(SKILLS, homes, disk));
+
+    // Act
+    const copied = await copyTreeIntoFolder('/src', folder, 'copy', homes, disk, {
+      maxFileBytes: 10,
+      maxTotalBytes: 100,
+      maxFiles: 10,
+    });
+
+    // Assert
+    should(copied).match({ ok: true, value: { files: 2, bytes: 8 } });
+    should(disk.entries.get(`${SKILLS}/copy/a.md`)).match({ kind: 'file', text: 'hello', size: 5 });
+    should(disk.entries.get(`${SKILLS}/copy/sub/b.md`)).match({ kind: 'file', text: 'abc', size: 3 });
+  });
+
+  it('should refuse to copy into a descriptor where the disk cannot read into one', async () => {
+    // Arrange — a disk whose read handles cannot fill a descriptor.
+    const { disk, homes } = await world('calls');
+    disk.dir('/src');
+    disk.file('/src/a.md', 5, 'hello');
+    const folder = await opened(openFolderOutsideStateHomes(SKILLS, homes, disk));
+    const openRead = disk.openRead.bind(disk);
+    disk.openRead = async path => {
+      const { copyToDescriptor: _dropped, ...handle } = await openRead(path);
+      return handle;
+    };
+
+    // Act + Assert
+    await should(
+      copyTreeIntoFolder('/src/a.md', folder, 'copy.md', homes, disk, {
+        maxFileBytes: 10,
+        maxTotalBytes: 100,
+        maxFiles: 10,
+      }),
+    ).be.rejectedWith(/cannot copy into a descriptor/u);
+  });
+});
+
+describe('a folder reached through descriptor paths (Linux) or by path', () => {
+  it('should give a file a second name through the folder, refusing a name already taken', async () => {
+    // Arrange
+    const { disk, homes } = await world();
+    disk.file(`${SKILLS}/a`, 1, 'a');
+    disk.file(`${SKILLS}/taken`, 1, 't');
+    const folder = await opened(openFolderOutsideStateHomes(SKILLS, homes, disk));
+
+    // Act
+    await folder.link(folder, 'a', 'b');
+    const refused = await folder.link(folder, 'a', 'taken').catch((error: unknown) => error);
+
+    // Assert
+    should(disk.entries.get(`${SKILLS}/b`)).equal(disk.entries.get(`${SKILLS}/a`));
+    should((refused as NodeJS.ErrnoException).code).equal('EEXIST');
   });
 });

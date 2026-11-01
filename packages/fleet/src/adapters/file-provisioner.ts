@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { type BigIntStats, closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
-import { cp, link, lstat, mkdir, open, readdir, readFile, realpath, stat, symlink } from 'node:fs/promises';
+import { closeSync, constants, fchmodSync, fstatSync, openSync, readSync, writeSync } from 'node:fs';
+import { cp, lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import { FleetManifestSchema } from '../lib/manifest.ts';
@@ -27,18 +27,19 @@ import {
 } from '../lib/settings.ts';
 import type { SharedHistoryMigration } from '../lib/shared-history.ts';
 import { fencedBy } from '../lib/state-home-fence.ts';
-import type { FolderDisk, GuardedFolder } from '../lib/state-home-guard.ts';
+import type { FileIdentity, FolderDisk, GuardedFolder } from '../lib/state-home-guard.ts';
 import { type FleetApplyLock, type FleetApplyLockOptions, fleetApplyLockFor } from './apply-lock.ts';
-import { ConfinedDestinationError, DestinationFolders, readRegularFile } from './destination-folders.ts';
+import { ConfinedDestinationError, DestinationFolders, readFolderFile } from './destination-folders.ts';
 import {
   assertSourceUnfenced,
-  copyFencedSource,
+  copyFencedSourceInto,
   FencedSourceError,
   type ResolvedSourceFence,
   resolveSourceFence,
   type SourceFence,
 } from './fenced-source.ts';
 import { FileMutationJournal, isMutationReservedName, STAGE_PREFIX } from './mutation-journal.ts';
+import { fileIdentityOf } from './node-guard-disk.ts';
 
 const CodexSqliteOriginalSchema = z.discriminatedUnion('present', [
   z.strictObject({ present: z.literal(false) }),
@@ -90,12 +91,12 @@ const isSingleComponent = (name: string): boolean =>
  * account's own folder, which its harness can write, so a `chmod` by path could be redirected by a link swapped in
  * there — onto a file in the state home. A link there now is refused (`ELOOP`) instead.
  */
-async function chmodStaged(staged: string, mode: number): Promise<void> {
-  const handle = await open(staged, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+async function chmodStaged(folder: GuardedFolder, staged: string, mode: number): Promise<void> {
+  const descriptor = await folder.openFile(staged, 'read');
   try {
-    await handle.chmod(mode);
+    fchmodSync(descriptor, mode);
   } finally {
-    await handle.close();
+    closeSync(descriptor);
   }
 }
 
@@ -150,14 +151,20 @@ const traversesDestination = (operation: FleetWriteOperation): boolean =>
  * A file too large to hash yields `undefined`: not knowing is not the same as knowing it is ours,
  * and the retract treats it as a reason to keep the tree rather than a reason to remove it.
  */
-async function identityOf(target: string, information: BigIntStats): Promise<string | undefined> {
-  if (information.isDirectory()) return `dir:${information.dev}:${information.ino}`;
-  if (information.size > BigInt(MAX_PUBLISH_DIGEST_BYTES)) return undefined;
-  const digest = await contentProof(target, Number(information.size));
+async function identityOf(
+  information: FileIdentity,
+  read: () => Promise<number>,
+  shown: string,
+): Promise<string | undefined> {
+  if (information.kind === 'directory') return `dir:${information.device}:${information.inode}`;
+  if (information.size > MAX_PUBLISH_DIGEST_BYTES) return undefined;
+  const digest = contentProof(await read(), information.size, shown);
   if (digest === undefined) return undefined;
-  const { dev, ino, size, mtimeMs, mode, uid, gid } = information;
-  return `file:${dev}:${ino}:${size}:${mtimeMs}:${mode}:${uid}:${gid}:${digest}`;
+  const { device, inode, size, modified, mode, owner, group } = information;
+  return `file:${device}:${inode}:${size}:${String(modified)}:${mode}:${owner}:${group}:${digest}`;
 }
+
+const READ_PROOF = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 /**
  * Hash exactly the bytes the stat said were there, and refuse if the file turns out to differ.
@@ -186,10 +193,9 @@ async function identityOf(target: string, information: BigIntStats): Promise<str
  * Synchronous for the reason `readRegularFile` is: every file of a published tree is proved, and Bun's
  * asynchronous file-handle calls cost more than reading a small file whole.
  */
-async function contentProof(target: string, size: number): Promise<string | undefined> {
-  const descriptor = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+function contentProof(descriptor: number, size: number, shown: string): string | undefined {
   try {
-    if (!fstatSync(descriptor).isFile()) throw new Error(`refusing to read ${target}: it is no longer a regular file`);
+    if (!fstatSync(descriptor).isFile()) throw new Error(`refusing to read ${shown}: it is no longer a regular file`);
     const bytes = Buffer.alloc(size);
     let filled = 0;
     while (filled < size) {
@@ -217,10 +223,6 @@ async function contentProof(target: string, size: number): Promise<string | unde
 function withLockResidue(failure: FleetApplyFailure, lockResidue: string): FleetApplyFailure {
   if (failure.kind !== 'history-failed-after-commit') return failure;
   return { ...failure, committed: { ...failure.committed, lockResidue } };
-}
-
-function isMissing(error: unknown): boolean {
-  return (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
 function reasonOf(error: unknown): string {
@@ -514,10 +516,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
 
   private async assertExpected(document: FleetDocumentWrite, journal: FileMutationJournal): Promise<void> {
     const found =
-      (await journal.withBackup(document.path, async backup => {
+      (await journal.withBackup(document.path, async (folder, backup) => {
         // A document that was a link is the owner's own (a config file kept in a dotfiles checkout), read as the
-        // link leads; anything else is read without following a link put there since.
-        const bytes = (await lstat(backup)).isSymbolicLink() ? await readFile(backup) : await readRegularFile(backup);
+        // link leads; anything else is read through its folder without following a link put there since.
+        const linked = (await folder.describe(backup))?.kind === 'link';
+        const bytes = linked ? await readFile(await folder.entry(backup)) : await readFolderFile(folder, backup);
         return new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
       })) ?? ABSENT_DOCUMENT_REVISION;
     if (found === document.expect) return;
@@ -769,7 +772,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       const existing = operation.preserveExisting
         ? await journal.withBackup(
             operation.path,
-            async backup => await this.readExistingSettings(backup, operation.format),
+            async (folder, backup) => await this.readExistingSettings(folder, backup, operation.format),
           )
         : undefined;
       const content = await this.resolveSettings(existing, operation.format, operation.layers, {
@@ -813,7 +816,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
       // moment the daemon can refuse it. A credential link is the planner's own and leads into the home.
       const fence = operation.dangling === true ? undefined : await this.resolvedSourceFence();
       if (fence !== undefined) await assertSourceUnfenced(fence, operation.source);
-      await symlink(operation.source, await folder.entry(leaf));
+      await folder.symlink(operation.source, leaf);
       return;
     }
 
@@ -840,10 +843,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
             recursive: source.isDirectory(),
             dereference: true,
           });
-        else await copyFencedSource(fence, operation.source, await folder.entry(staged));
+        else await copyFencedSourceInto(fence, operation.source, folder, staged);
         // A template linked out of a read-only store copies as 0444; force the copied root writable
         // so a harness can rewrite a file it owns. Directories remain private to the account.
-        await chmodStaged(await folder.entry(staged), operation.mode ?? (source.isDirectory() ? 0o700 : 0o644));
+        await chmodStaged(folder, staged, operation.mode ?? (source.isDirectory() ? 0o700 : 0o644));
         if (!(await journal.capture(operation.path, folder))) await journal.folders.remove(folder, leaf);
         await this.publish(folder, staged, operation.path, journal);
       } finally {
@@ -916,16 +919,11 @@ export class FileFleetProvisioner implements FleetProvisioner {
   ): Promise<string | undefined> {
     return await folders.within(path.dirname(target), async folder => {
       if (folder === undefined) return undefined;
-      const at = await folder.entry(path.basename(target));
-      let information: Awaited<ReturnType<typeof lstat>>;
-      try {
-        information = await lstat(at);
-      } catch (error) {
-        if (isMissing(error)) return undefined;
-        throw error;
-      }
-      if (!information.isFile()) throw new Error(`${label} must be a regular file: ${target}`);
-      return (await readRegularFile(at)).toString('utf8');
+      const leaf = path.basename(target);
+      const information = await folder.describe(leaf);
+      if (information === undefined) return undefined;
+      if (information.kind !== 'file') throw new Error(`${label} must be a regular file: ${target}`);
+      return (await readFolderFile(folder, leaf)).toString('utf8');
     });
   }
 
@@ -976,7 +974,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const folder = await journal.folders.existing(directory);
     if (folder === undefined) return [];
     try {
-      const entries = await readdir(await folder.self());
+      const entries = await folder.list();
       const pruned: string[] = [];
       for (const entry of entries.toSorted()) {
         if (keep.has(entry)) continue;
@@ -986,12 +984,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
         // having to be found and widened.
         if (isMutationReservedName(entry)) continue;
         const target = path.join(directory, entry);
-        const at = await folder.entry(entry);
-        const stats = await lstat(at);
-        if (!stats.isFile()) continue;
+        if ((await folder.describe(entry))?.kind !== 'file') continue;
         // An unreadable file inside a directory the fleet created at 0700 is an anomaly, and
         // swallowing it would leave a stale wrapper on PATH with nothing said about it.
-        const content = (await readRegularFile(at)).toString('utf8');
+        const content = (await readFolderFile(folder, entry)).toString('utf8');
         if (!content.includes(marker)) continue;
         await journal.capture(target, folder);
         // The decision was made from the file as it was read; the capture moved aside the file as it
@@ -1034,7 +1030,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const folder = await journal.folders.existing(directory);
     if (folder === undefined) return;
     try {
-      const entries = await readdir(await folder.self());
+      const entries = await folder.list();
       for (const entry of entries.toSorted()) {
         if (keep.has(entry)) continue;
         // A backup or staging name belongs to this very batch; sweeping one away would destroy the only
@@ -1069,14 +1065,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
       for (const entry of only) {
         if (keep.has(entry) || isMutationReservedName(entry) || !isSingleComponent(entry)) continue;
         const target = path.join(directory, entry);
-        let information: BigIntStats;
-        try {
-          information = await lstat(await folder.entry(entry), { bigint: true });
-        } catch (error) {
-          if (isMissing(error)) continue;
-          throw error;
-        }
-        if (!information.isSymbolicLink() && !recorded.has(entry)) continue;
+        const information = await folder.describe(entry);
+        if (information === undefined) continue;
+        if (information.kind !== 'link' && !recorded.has(entry)) continue;
         await journal.capture(target, folder);
       }
     } finally {
@@ -1102,10 +1093,9 @@ export class FileFleetProvisioner implements FleetProvisioner {
   }
 
   private async stillCarries(journal: FileMutationJournal, target: string, marker: string): Promise<boolean> {
-    const carries = await journal.withBackup(target, async backup => {
-      const stats = await lstat(backup);
-      if (!stats.isFile()) return false;
-      return (await readRegularFile(backup)).toString('utf8').includes(marker);
+    const carries = await journal.withBackup(target, async (folder, backup) => {
+      if ((await folder.describe(backup))?.kind !== 'file') return false;
+      return (await readFolderFile(folder, backup)).toString('utf8').includes(marker);
     });
     return carries ?? false;
   }
@@ -1135,29 +1125,29 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * runtime keys. A symlink holds only template content and an unparseable file holds nothing that
    * can be merged, so both yield nothing rather than failing the apply.
    */
-  private async readExistingSettings(destination: string, format: SettingsFormat): Promise<SettingsObject | undefined> {
-    let stats: Awaited<ReturnType<typeof lstat>>;
-    try {
-      stats = await lstat(destination);
-    } catch (error) {
-      // Absent is the ordinary first-apply case and carries nothing to preserve.
-      if (isMissing(error)) return undefined;
-      throw error;
-    }
+  private async readExistingSettings(
+    folder: GuardedFolder,
+    leaf: string,
+    format: SettingsFormat,
+  ): Promise<SettingsObject | undefined> {
+    const destination = path.join(folder.path, leaf);
+    const stats = await folder.describe(leaf);
+    // Absent is the ordinary first-apply case and carries nothing to preserve.
+    if (stats === undefined) return undefined;
     // A symlink is the one justified exception: it holds template content the assets directory is
     // the authority for, not runtime keys, so there is nothing of the person's in it to lose.
     // Everything else is fail-closed. A settings file that cannot be read or parsed — and a
     // directory or a device node where one should be — is state this apply is about to replace with
     // a merge computed without it, and silently discarding somebody's configuration because it was
     // damaged is the worst of the available answers. Refusing leaves it where it is, to be looked at.
-    if (stats.isSymbolicLink()) return undefined;
-    if (!stats.isFile()) {
+    if (stats.kind === 'link') return undefined;
+    if (stats.kind !== 'file') {
       throw new Error(`refusing to merge settings over ${destination}: it is not a regular file`);
     }
     let document: string;
     try {
       // Without following a link: the name was a regular file a moment ago, and a link put there since is not it.
-      document = (await readRegularFile(destination)).toString('utf8');
+      document = (await readFolderFile(folder, leaf)).toString('utf8');
     } catch (error) {
       throw new Error(`refusing to merge settings over ${destination}: it could not be read (${reasonOf(error)})`);
     }
@@ -1191,16 +1181,14 @@ export class FileFleetProvisioner implements FleetProvisioner {
     const folder = await journal.folders.made(path.dirname(destination), folderMode);
     const temporary = `.${path.basename(destination)}.${randomUUID()}.tmp`;
     try {
-      const handle = await open(
-        await folder.entry(temporary),
-        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-        mode,
-      );
+      const descriptor = await folder.openFile(temporary, 'new', mode);
       try {
-        await handle.writeFile(content);
-        await handle.chmod(mode);
+        const bytes = Buffer.from(content);
+        for (let written = 0; written < bytes.byteLength; )
+          written += writeSync(descriptor, bytes, written, bytes.byteLength - written);
+        fchmodSync(descriptor, mode);
       } finally {
-        await handle.close();
+        closeSync(descriptor);
       }
       await this.publish(folder, temporary, destination, journal);
     } finally {
@@ -1228,15 +1216,15 @@ export class FileFleetProvisioner implements FleetProvisioner {
     journal: FileMutationJournal,
   ): Promise<void> {
     const leaf = path.basename(destination);
-    const information = await lstat(await folder.entry(staged));
-    if (!information.isDirectory()) {
+    const information = await folder.describe(staged);
+    if (information?.kind !== 'directory') {
       // The copy makes regular files only: anything else at the staged name was put there since, by whoever can
       // write the account's folder, and is not published under the account's name.
-      if (!information.isFile())
+      if (information?.kind !== 'file')
         throw new Error(`refusing to publish ${destination}: the staged entry is not a regular file`);
       // `link` is the no-replace primitive: it fails rather than overwriting, so a destination that
       // reappeared between the capture and here is refused instead of silently replaced.
-      await link(await folder.entry(staged), await folder.entry(leaf));
+      await folder.link(folder, staged, leaf);
       await journal.folders.removeOwnFile(folder, staged);
       return;
     }
@@ -1328,9 +1316,10 @@ export class FileFleetProvisioner implements FleetProvisioner {
       const entry = expected.get(relative);
       // No proof was taken, so there is nothing this could match against. Keep the tree.
       if (entry === undefined || entry.identity === undefined) return false;
-      const information = await lstat(target, { bigint: true });
-      if (information.isDirectory() !== entry.directory) return false;
-      if ((await identityOf(target, information)) !== entry.identity) return false;
+      const information = fileIdentityOf(await lstat(target, { bigint: true }));
+      if ((information.kind === 'directory') !== entry.directory) return false;
+      const read = async (): Promise<number> => openSync(target, READ_PROOF);
+      if ((await identityOf(information, read, target)) !== entry.identity) return false;
       matched += 1;
       if (!entry.directory) return true;
       for (const name of await readdir(target)) {
@@ -1362,8 +1351,7 @@ export class FileFleetProvisioner implements FleetProvisioner {
     folders: DestinationFolders,
   ): Promise<void> {
     // Non-recursive: the parent must already exist, and an existing `destination` is somebody else's.
-    const placed = async (): Promise<string> => await destination.folder.entry(destination.leaf);
-    await mkdir(await placed(), { mode });
+    await destination.folder.mkdir(destination.leaf, mode);
     // Held open as soon as it exists, through its parent's handle and **without following a link**. A
     // descriptor refers to the object rather than to the name, so every child below is reached through it
     // and the mode set at the end lands on it even after the path is replaced. The no-follow matters as
@@ -1374,26 +1362,27 @@ export class FileFleetProvisioner implements FleetProvisioner {
     // resolves the name a second time. `O_NOFOLLOW` rules out a *symlink* substituted in that gap; it
     // does nothing about a real directory swapped in, which opens perfectly well — it is then that
     // directory this publish writes into, which is in the account's own folder. Closing it needs
-    // `mkdirat`, which Node does not expose.
+    // `mkdirat`.
     const made = await folders.child(destination.folder, destination.leaf, destination.path);
     try {
-      const opened = await stat(await made.self(), { bigint: true });
-      created.push({ relative, directory: true, identity: await identityOf(await made.self(), opened) });
+      const opened = made.identity;
+      created.push({ relative, directory: true, identity: `dir:${opened.device}:${opened.inode}` });
       const source = await folders.child(staged.folder, staged.leaf, `the staged copy of ${destination.path}`);
       try {
-        for (const entry of await readdir(await source.self(), { withFileTypes: true })) {
-          const from = await source.entry(entry.name);
-          const child = relative === '' ? entry.name : `${relative}/${entry.name}`;
-          const information = await lstat(from, { bigint: true });
+        for (const name of await source.list()) {
+          const from = await source.entry(name);
+          const child = relative === '' ? name : `${relative}/${name}`;
+          const information = await source.describe(name);
+          if (information === undefined) throw new Error(`refusing to publish ${destination.path}: ${name} vanished`);
           // Every child is reached through the handle above, so a swap cannot redirect it. The name is
           // still re-identified before each child: a destination that no longer leads to this directory
           // is refused rather than finished somewhere nobody resolving it will find.
-          await this.assertUnswapped(await placed(), opened, destination.path);
-          if (information.isDirectory()) {
+          await this.assertUnswapped(destination, opened);
+          if (information.kind === 'directory') {
             await this.publishTree(
-              { folder: source, leaf: entry.name },
-              { folder: made, leaf: entry.name, path: path.join(destination.path, entry.name) },
-              Number(information.mode) & MODE_BITS,
+              { folder: source, leaf: name },
+              { folder: made, leaf: name, path: path.join(destination.path, name) },
+              information.mode & MODE_BITS,
               created,
               child,
               folders,
@@ -1409,16 +1398,17 @@ export class FileFleetProvisioner implements FleetProvisioner {
             directory: false,
             identity: await this.publishFile(
               from,
-              await made.entry(entry.name),
+              await made.entry(name),
               information,
-              path.join(destination.path, entry.name),
+              path.join(destination.path, name),
+              { source, name, made },
             ),
           });
         }
       } finally {
         await source.close();
       }
-      await this.assertUnswapped(await placed(), opened, destination.path);
+      await this.assertUnswapped(destination, opened);
       await made.chmod(mode);
     } finally {
       await made.close();
@@ -1430,13 +1420,15 @@ export class FileFleetProvisioner implements FleetProvisioner {
    *
    * The children are written through the directory's own handle, so a swap cannot redirect them; what
    * this catches is a destination whose name was moved away from that directory, which would otherwise
-   * be published somewhere nobody resolving the name reaches. `at` reaches the name through its parent's
-   * handle; `destination` names it in the report.
+   * be published somewhere nobody resolving the name reaches. The name is looked at through its parent's handle.
    */
-  private async assertUnswapped(at: string, opened: BigIntStats, destination: string): Promise<void> {
-    const current = await lstat(at, { bigint: true });
-    if (!current.isDirectory() || current.ino !== opened.ino || current.dev !== opened.dev) {
-      throw new Error(`refusing to publish into ${destination}: it was replaced while the tree was being written`);
+  private async assertUnswapped(
+    destination: { readonly folder: GuardedFolder; readonly leaf: string; readonly path: string },
+    opened: FileIdentity,
+  ): Promise<void> {
+    const current = await destination.folder.describe(destination.leaf);
+    if (current?.kind !== 'directory' || current.inode !== opened.inode || current.device !== opened.device) {
+      throw new Error(`refusing to publish into ${destination.path}: it was replaced while the tree was being written`);
     }
   }
 
@@ -1455,21 +1447,25 @@ export class FileFleetProvisioner implements FleetProvisioner {
    * evidence gathered before the name exists at all is evidence about what we put there.
    *
    * It survives publication because it is built from the things `link` does not touch — the content,
-   * and the stat fields other than `ctimeMs` and `nlink`.
+   * and the stat fields other than the change time and `nlink`.
+   *
+   * The read and the link both go through `place`, the two checked folders; `from` and `_to` are paths reaching
+   * the two names, for whoever watches a publish, and `shown` names the file in a refusal.
    */
   private async publishFile(
     from: string,
-    to: string,
-    information: BigIntStats,
-    shown: string = to,
+    _to: string,
+    information: FileIdentity,
+    shown: string,
+    place: { readonly source: GuardedFolder; readonly name: string; readonly made: GuardedFolder },
   ): Promise<string | undefined> {
     // The copy dereferences its sources, so a link, a socket or a device here is not something this
     // apply produced — and hard-linking one into an account home is not a thing to do on a guess.
-    if (!information.isFile()) {
+    if (information.kind !== 'file') {
       throw new Error(`refusing to publish ${shown}: the staged entry is not a regular file`);
     }
-    const identity = await identityOf(from, information);
-    await link(from, to);
+    const identity = await identityOf(information, async () => await place.source.openFile(place.name, 'read'), from);
+    await place.made.link(place.source, place.name, place.name);
     return identity;
   }
 }

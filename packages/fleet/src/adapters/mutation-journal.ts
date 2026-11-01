@@ -26,15 +26,16 @@
  * ever deleted from the very folder it was moved aside in, re-checked right before, by a removal that
  * never follows a link.
  *
- * That holds where entries are reached through the folder's descriptor (Linux `/proc`). Where they are
- * not (macOS), each step re-proves the folder and then goes by path, so a swap timed between the two
- * could redirect it: there, below a runtime's top folder, **nothing is moved aside or removed at all**
+ * That holds where entries are reached through the folder's descriptor (Linux `/proc`, macOS descriptor
+ * calls). Where they cannot be (the C calls would not load), each step re-proves the folder and then
+ * goes by path, so a swap timed between the two could redirect it: there, outside the daemon's own
+ * folders and a fleet runtime's own folder, **nothing is moved aside or removed at all**
  * (`ConfinedDestinationError`) — the operation that would need it is skipped and reported, and a
  * rollback that would need it reports the entry instead.
  */
 import { randomUUID } from 'node:crypto';
 import { type BigIntStats, lstatSync, readdirSync } from 'node:fs';
-import { lstat, rename } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import type { DisplacedState, UnrestoredPath } from '../lib/provisioning.ts';
 import type { GuardedFolder } from '../lib/state-home-guard.ts';
@@ -233,19 +234,22 @@ export class FileMutationJournal {
   }
 
   /**
-   * Runs `read` with a path that reaches what the capture of `target` moved aside, through its re-checked
-   * folder, or answers `undefined` when nothing was there.
+   * Runs `read` with what the capture of `target` moved aside — its re-checked folder and its name there, to read
+   * THROUGH that folder — or answers `undefined` when nothing was there.
    *
    * This is how a caller inspects what it displaced without racing anybody: the capture already
    * renamed it out of reach, so the backup cannot change under the inspection.
    */
-  async withBackup<T>(target: string, read: (backup: string) => Promise<T>): Promise<T | undefined> {
+  async withBackup<T>(
+    target: string,
+    read: (folder: GuardedFolder, backup: string) => Promise<T>,
+  ): Promise<T | undefined> {
     const resolved = path.resolve(target);
     const entry = this.#entries.findLast(candidate => candidate.path === resolved);
     if (entry?.kind !== 'restore') return undefined;
     return await this.within(entry, async folder => {
       if (folder === undefined) throw new Error(`the original of ${entry.path} is gone from ${entry.backup}`);
-      return await read(await folder.entry(entry.backupLeaf));
+      return await read(folder, entry.backupLeaf);
     });
   }
 
@@ -287,13 +291,7 @@ export class FileMutationJournal {
 
   private async modeOf(entry: JournalEntry): Promise<number | undefined> {
     return await this.within(entry, async folder => {
-      if (folder === undefined) return undefined;
-      try {
-        return (await lstat(await folder.entry(path.basename(entry.path)))).mode & PERMISSION_BITS;
-      } catch (error) {
-        if (!isMissing(error)) throw error;
-        return undefined;
-      }
+      return folder === undefined ? undefined : (await folder.describe(path.basename(entry.path)))?.mode;
     });
   }
 
@@ -366,17 +364,12 @@ export class FileMutationJournal {
     const move = async (holder: GuardedFolder | undefined): Promise<boolean> => {
       if (holder === undefined) return record({ kind: 'remove', path: resolved });
       const identity = { device: holder.identity.device, inode: holder.identity.inode };
-      const at = await holder.entry(leaf);
-      try {
-        await lstat(at);
-      } catch (error) {
-        if (!isMissing(error)) throw error;
+      if ((await holder.describe(leaf)) === undefined)
         return record({ kind: 'remove', path: resolved, folder: identity });
-      }
-      // Where a swap could redirect the move (no descriptor paths, below a runtime's top), nothing is moved.
+      // Where a swap could redirect the move (no descriptor reach), nothing is moved.
       await this.folders.assertMayMove(holder, resolved);
       const backupLeaf = `${BACKUP_PREFIX}${randomUUID()}`;
-      await rename(at, await holder.entry(backupLeaf));
+      await holder.rename(leaf, backupLeaf);
       const backup = path.join(path.dirname(resolved), backupLeaf);
       return record({ kind: 'restore', path: resolved, backup, backupLeaf, folder: identity });
     };
@@ -499,7 +492,7 @@ export class FileMutationJournal {
           );
         }
         await this.clear(entry, folder);
-        await rename(await folder.entry(entry.backupLeaf), await folder.entry(path.basename(entry.path)));
+        await folder.rename(entry.backupLeaf, path.basename(entry.path));
       });
       return;
     }
@@ -518,13 +511,16 @@ export class FileMutationJournal {
         // `chmod` follows a link. If the directory whose mode was captured is now a symlink, applying
         // the old mode would land on whatever it points at — possibly outside the allowed roots — so
         // the entry is reported unverified instead.
-        const information = parent === undefined ? undefined : await lstat(await parent.entry(leaf));
-        if (parent === undefined || information === undefined || !information.isDirectory()) {
+        const information = parent === undefined ? undefined : await parent.describe(leaf);
+        if (parent !== undefined && information === undefined) {
+          throw Object.assign(new Error(`ENOENT: ${entry.path} is gone`), { code: 'ENOENT' });
+        }
+        if (parent === undefined || information === undefined || information.kind !== 'directory') {
           throw new Error(`refusing to restore the mode of an entry that is no longer a directory: ${entry.path}`);
         }
         // Undoing a mode change is only ours to undo while the mode is still the one this apply set.
         // Somebody who has since chosen their own is not corrected by a rollback.
-        if (entry.left !== undefined && (information.mode & PERMISSION_BITS) !== entry.left) {
+        if (entry.left !== undefined && information.mode !== entry.left) {
           throw new Error(`refusing to restore the mode of ${entry.path}: it changed after this apply set it`);
         }
         // Through the folder's own descriptor, opened without following a link.
@@ -581,7 +577,7 @@ export class FileMutationJournal {
     const displaced = path.join(path.dirname(target), displacedLeaf);
     await this.folders.assertMayMove(folder, target);
     try {
-      await rename(await folder.entry(path.basename(target)), await folder.entry(displacedLeaf));
+      await folder.rename(path.basename(target), displacedLeaf);
     } catch (error) {
       // Already gone, which is the state this was trying to reach.
       if (isMissing(error)) return;

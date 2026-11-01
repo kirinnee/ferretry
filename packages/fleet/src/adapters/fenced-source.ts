@@ -1,6 +1,9 @@
 import type { StateHomeFence } from '../lib/state-home-fence.ts';
 import {
+  copyTreeIntoFolder,
   copyTreeOutsideStateHomes,
+  type FolderDisk,
+  type GuardedFolder,
   type GuardDisk,
   type GuardLinkOptions,
   type GuardRule,
@@ -48,7 +51,7 @@ export interface SourceFence extends StateHomeFence {
 export interface ResolvedSourceFence {
   readonly homes: StateHomes;
   readonly links: GuardLinkOptions;
-  readonly disk: GuardDisk;
+  readonly disk: GuardDisk & FolderDisk;
 }
 
 /** A source the guard refused: the message names the rule and the home, never what the source holds. */
@@ -89,7 +92,7 @@ export class FencedSourceError extends Error {
  */
 export async function resolveSourceFence(
   fence: SourceFence,
-  disk: GuardDisk = new NodeGuardDisk(),
+  disk: GuardDisk & FolderDisk = new NodeGuardDisk(),
 ): Promise<ResolvedSourceFence> {
   const openings: string[] = [];
   for (const directory of fence.open) {
@@ -154,6 +157,25 @@ export async function readFencedSource(
  */
 export async function copyFencedSource(resolved: ResolvedSourceFence, source: string, to: string): Promise<void> {
   const copied = await copyTreeOutsideStateHomes(source, to, resolved.homes, resolved.disk, {
+    ...resolved.links,
+    maxFileBytes: MAX_SOURCE_FILE_BYTES,
+    maxTotalBytes: MAX_SOURCE_TOTAL_BYTES,
+    maxFiles: MAX_SOURCE_ENTRIES,
+  });
+  if (!copied.ok) throw new FencedSourceError(source, copied.rule, copied.home);
+}
+
+/**
+ * {@link copyFencedSource} into the new entry `leaf` of a checked destination folder, every entry made through it
+ * (its descriptor where the platform gives one) rather than through whatever a path names by then.
+ */
+export async function copyFencedSourceInto(
+  resolved: ResolvedSourceFence,
+  source: string,
+  folder: GuardedFolder,
+  leaf: string,
+): Promise<void> {
+  const copied = await copyTreeIntoFolder(source, folder, leaf, resolved.homes, resolved.disk, {
     ...resolved.links,
     maxFileBytes: MAX_SOURCE_FILE_BYTES,
     maxTotalBytes: MAX_SOURCE_TOTAL_BYTES,

@@ -1,5 +1,6 @@
 import { afterEach, describe, it, spyOn } from 'bun:test';
 import { constants } from 'node:fs';
+import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
 import {
   chmod,
@@ -291,13 +292,22 @@ describe('secrev-1260 L3 — the staged copy before it is published', () => {
     const { home, outside, runtime, apply } = await world();
     const token = path.join(home, 'api-token');
     const tokenMode = (await stat(token)).mode & 0o777;
-    const real = fs.open;
+    const real = fsSync.openSync;
     const flags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-    const openSpy = spyOn(fs, 'open').mockImplementation((async (target: string, mode: number, ...rest: unknown[]) => {
-      if (mode === flags && path.basename(String(target)).startsWith(STAGE_PREFIX))
-        await swapForTokenLink(String(target), token);
-      return await (real as (...args: unknown[]) => Promise<unknown>)(target, mode, ...rest);
-    }) as unknown as typeof fs.open);
+    let swapped = false;
+    const openSpy = spyOn(fsSync, 'openSync').mockImplementation(((
+      target: string,
+      mode: number,
+      ...rest: unknown[]
+    ) => {
+      if (mode === flags && path.basename(String(target)).startsWith(STAGE_PREFIX)) {
+        // Synchronously, as the swap must land before this very open.
+        fsSync.rmSync(String(target), { recursive: true, force: true });
+        fsSync.symlinkSync(token, String(target));
+        swapped = true;
+      }
+      return (real as (...args: unknown[]) => number)(target, mode, ...rest);
+    }) as unknown as typeof fsSync.openSync);
 
     try {
       // Act
@@ -306,6 +316,7 @@ describe('secrev-1260 L3 — the staged copy before it is published', () => {
       );
 
       // Assert
+      should(swapped).be.true();
       should(failed).match(/ELOOP|symbolic link/u);
       should((await stat(token)).mode & 0o777).equal(tokenMode);
       await should(readlink(path.join(runtime, 'CLAUDE.md'))).be.rejected();

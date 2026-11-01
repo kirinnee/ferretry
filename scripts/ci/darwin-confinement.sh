@@ -17,7 +17,9 @@ set -euo pipefail
 # so refused every attach there; only a Mac can show the two sides now read the same number. And the
 # file-event hub's macOS source: its directory watches are FSEvents streams, whose events — dot-files like
 # Claude's `.credentials.json` included — no Linux runner can produce, so only a Mac can say whether the
-# hub's watched paths are really heard rather than polled.
+# hub's watched paths are really heard rather than polled. And the fleet provisioner's destination side: macOS has no
+# `/proc`, so its every step goes through descriptor calls (`fchdir` + prove + one relative call, `linkat`), whose C
+# calls load from libSystem — only a Mac can say they load there and reach the held folder, not a swapped path.
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
@@ -36,4 +38,8 @@ echo "🧪 Proving fy attach accepts the daemon's pane proof on this kernel (the
 bun test --config=bunfig.int.toml packages/cli/tests/integration/reads/tmux-attacher.test.ts
 echo "🧪 Proving the file-event hub hears FSEvents on this kernel, dot-files included..."
 bun test --config=bunfig.int.toml packages/daemon/tests/integration/file-events/bun-file-event-source.test.ts
-echo "✅ Containment, the process inventory, pane identity, the attach proof and file events hold on $(uname -sm)"
+echo "🧪 Proving the provisioner's destination steps reach the held folder through descriptor calls on this kernel..."
+bun test --config=bunfig.int.toml \
+  packages/fleet/tests/integration/descriptor-calls.test.ts \
+  packages/fleet/tests/integration/file-provisioner-destination-fence.test.ts
+echo "✅ Containment, the process inventory, pane identity, the attach proof, file events and the destination steps hold on $(uname -sm)"

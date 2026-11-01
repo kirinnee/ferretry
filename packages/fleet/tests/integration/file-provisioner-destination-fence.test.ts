@@ -63,6 +63,14 @@ const manifestOf = (home: string): FleetManifest => ({
   ],
 });
 
+/**
+ * The disk every apply here uses unless a test names one. `FY_FLEET_DESCRIPTOR_REACH=calls` runs the whole file
+ * through macOS's mechanism — each step a `fchdir` bracket on the held descriptor — on any POSIX host; on macOS
+ * that is already the platform's own.
+ */
+const DEFAULT_DISK: FolderDisk | undefined =
+  process.env.FY_FLEET_DESCRIPTOR_REACH === 'calls' ? new NodeGuardDisk('calls') : undefined;
+
 /** What the state home holds, by name, so a test can prove none of it moved. */
 const SECRETS: Readonly<Record<string, string>> = {
   'api-token': 'fy_admin_secret\n',
@@ -95,7 +103,7 @@ async function world(options: WorldOptions = {}) {
     undefined,
     {},
     { homes: [home, state, path.join(home, 'config')], open: [assets] },
-    options.disk,
+    options.disk ?? DEFAULT_DISK,
   );
   const plan = (operations: readonly FleetWriteOperation[]): FleetApplyPlan => ({
     manifest: manifestOf(runtime),
@@ -528,38 +536,43 @@ describe('secrev-1262 — a publish swapped mid-tree reaches nothing in the home
 });
 
 describe('secrev-1262 — a removal swapped mid-tree on a real disk', () => {
-  it('should remove nothing in the home when a sub-folder is swapped for a link while the tree is removed', async () => {
-    // Arrange — the sub-folder is a folder when it is looked at, and a link into the home when it is opened.
-    const { home, state, skills } = await world();
-    const tree = path.join(skills, 'tree');
-    await mkdir(path.join(tree, 'sub'), { recursive: true });
-    await writeFile(path.join(tree, 'sub', 'notes.md'), 'notes\n');
-    const homes = await resolveStateHomes({ homes: [home, state, path.join(home, 'config')] }, new NodeGuardDisk());
-    let swapped = false;
-    class SwappingDisk extends NodeGuardDisk {
-      override async openDirectory(at: string) {
-        if (!swapped && at.endsWith('/sub')) {
-          swapped = true;
-          const real = path.join(await realpath(path.dirname(at)), 'sub');
-          await swapForLink(real, state, path.join(skills, 'moved-away'));
+  // Hooks the disk's by-path open, which a descriptor-calls disk (macOS) never makes; its own swap test is in
+  // descriptor-calls.test.ts.
+  it.skipIf(process.platform !== 'linux')(
+    'should remove nothing in the home when a sub-folder is swapped for a link while the tree is removed',
+    async () => {
+      // Arrange — the sub-folder is a folder when it is looked at, and a link into the home when it is opened.
+      const { home, state, skills } = await world();
+      const tree = path.join(skills, 'tree');
+      await mkdir(path.join(tree, 'sub'), { recursive: true });
+      await writeFile(path.join(tree, 'sub', 'notes.md'), 'notes\n');
+      const homes = await resolveStateHomes({ homes: [home, state, path.join(home, 'config')] }, new NodeGuardDisk());
+      let swapped = false;
+      class SwappingDisk extends NodeGuardDisk {
+        override async openDirectory(at: string) {
+          if (!swapped && at.endsWith('/sub')) {
+            swapped = true;
+            const real = path.join(await realpath(path.dirname(at)), 'sub');
+            await swapForLink(real, state, path.join(skills, 'moved-away'));
+          }
+          return await super.openDirectory(at);
         }
-        return await super.openDirectory(at);
       }
-    }
-    const folders = new DestinationFolders(homes, new SwappingDisk());
+      const folders = new DestinationFolders(homes, new SwappingDisk());
 
-    // Act
-    const outcome = await settled(
-      folders.within(skills, async folder => await folders.remove(folder as GuardedFolder, 'tree')),
-    );
+      // Act
+      const outcome = await settled(
+        folders.within(skills, async folder => await folders.remove(folder as GuardedFolder, 'tree')),
+      );
 
-    // Assert
-    should(swapped).be.true();
-    should((outcome as Error).message).match(
-      /refusing to remove .*\/sub: the state-home guard refused it \(changed\)/u,
-    );
-    await assertHomeUntouched(home);
-  });
+      // Assert
+      should(swapped).be.true();
+      should((outcome as Error).message).match(
+        /refusing to remove .*\/sub: the state-home guard refused it \(changed\)/u,
+      );
+      await assertHomeUntouched(home);
+    },
+  );
 });
 
 describe('the destination side — what each refusal says', () => {
@@ -628,8 +641,8 @@ describe('the destination side — what each refusal says', () => {
       );
 
       // Assert — neither is mistaken for an absent file.
-      should((sweep as Error).message).match(/EACCES/u);
-      should((sidecar as Error).message).match(/EACCES/u);
+      should((sweep as Error).message).match(/EACCES|could not be installed as the working directory/u);
+      should((sidecar as Error).message).match(/EACCES|could not be installed as the working directory/u);
     } finally {
       await chmod(runtime, 0o700);
     }
@@ -653,5 +666,126 @@ describe('the destination side — what each refusal says', () => {
 
     // Assert
     should(JSON.parse(await readFile(settingsPath, 'utf8'))).deepEqual({ model: 'second' });
+  });
+});
+
+describe('secrev-1262 delta — without descriptor reach the move is refused unless the folder is known safe', () => {
+  it('should confine a runtime folder that did not exist yet, under a linked folder, once it is made', async () => {
+    // Arrange — a host runtime folder that is not there at the first check, under a folder reached through a link:
+    // judged by the configured string, the folder made later (at its real place) would read as outside it.
+    const { machine, home, state } = await world();
+    const real = path.join(machine, 'host-real');
+    await mkdir(real);
+    await symlink(real, path.join(machine, 'host'));
+    const top = path.join(machine, 'host', '.codex');
+    const homes = await resolveStateHomes({ homes: [home, state] }, new NodeGuardDisk());
+    const folders = new DestinationFolders(homes, new NodeGuardDisk(false), [
+      top,
+      path.join(home, 'fleet', 'homes', 'one'),
+    ]);
+
+    // Act — asked first while the host runtime's folder is not there, then of the folder made below it, then of
+    // the fleet runtime's own folder and one below it.
+    const before = await folders.made(path.join(home, 'fleet', 'bin'), 0o700);
+    const daemonsOwn = await folders.confined(before);
+    const made = await folders.made(path.join(top, 'skills'), 0o700);
+    const runtime = await folders.made(path.join(home, 'fleet', 'homes', 'one'), 0o700);
+    const below = await folders.made(path.join(home, 'fleet', 'homes', 'one', 'skills'), 0o700);
+
+    // Assert — only the daemon's own folders (and a fleet runtime's own folder) may move or remove a name.
+    should(daemonsOwn).be.false();
+    should(await folders.confined(made)).be.true();
+    should(await folders.confined(runtime)).be.false();
+    should(await folders.confined(below)).be.true();
+    for (const folder of [before, made, runtime, below]) await folder.close();
+  });
+
+  it("should skip a host runtime's own folder too, and say why descriptor reach is missing", async () => {
+    // Arrange — the fallback when the C calls cannot load: a host runtime's settings already there.
+    const { machine, home, state } = await world();
+    const claude = path.join(machine, 'host', '.claude');
+    await mkdir(claude, { recursive: true });
+    const settingsPath = path.join(claude, 'settings.json');
+    await writeFile(settingsPath, '{"effort":"high"}\n');
+    const disk = Object.assign(new NodeGuardDisk(false), { descriptorCallsUnavailable: 'libSystem would not load' });
+    const subject = new FileFleetProvisioner(
+      [home, path.join(machine, 'host')],
+      undefined,
+      {},
+      { homes: [home, state, path.join(home, 'config')], open: [] },
+      disk,
+    );
+
+    // Act
+    const outcome = await subject.apply({
+      manifest: manifestOf(claude),
+      manifestPath: path.join(home, 'fleet', 'manifest.json'),
+      operations: [
+        {
+          kind: 'settings',
+          path: settingsPath,
+          format: 'json',
+          layers: [{ from: 'inline', settings: { model: 'model-one' } }],
+          mode: 0o600,
+          preserveExisting: true,
+        },
+      ],
+    });
+
+    // Assert — left as it was, and the result says why.
+    should(outcome.skipped).match([{ path: settingsPath }]);
+    should(outcome.skipped?.[0]?.reason).match(/could not load the calls .*: libSystem would not load/u);
+    should(await readFile(settingsPath, 'utf8')).equal('{"effort":"high"}\n');
+    await assertHomeUntouched(home);
+  });
+});
+
+describe('the destination side — retiring what an earlier apply put in a runtime', () => {
+  it('should retire only a link or a name the last apply recorded, through the checked folder', async () => {
+    // Arrange — a link, a recorded file, and a person's own file the record does not name.
+    const { runtime, assets, subject, plan } = await world();
+    await symlink(path.join(assets, 'skills', 'kept', 'SKILL.md'), path.join(runtime, 'linked.md'));
+    await writeFile(path.join(runtime, 'recorded.md'), 'the last apply wrote this\n');
+    await writeFile(path.join(runtime, 'own.md'), 'a person wrote this\n');
+    const record = path.join(runtime, '.fy', 'materialised.json');
+    await mkdir(path.dirname(record), { recursive: true });
+    await writeFile(record, `${JSON.stringify({ version: 1, entries: ['recorded.md'] })}\n`);
+
+    // Act
+    await subject.apply(
+      plan([
+        {
+          kind: 'prune-directory',
+          path: runtime,
+          keep: [],
+          only: ['linked.md', 'recorded.md', 'own.md', 'gone.md'],
+          record,
+        },
+      ]),
+    );
+
+    // Assert
+    const left = (await readdir(runtime)).filter(name => name.endsWith('.md')).toSorted();
+    should(left).deepEqual(['own.md']);
+  });
+
+  it('should treat a record that is not one, or cannot be read, as empty', async () => {
+    // Arrange
+    const { runtime, subject, plan } = await world();
+    await writeFile(path.join(runtime, 'recorded.md'), 'kept\n');
+    const record = path.join(runtime, 'materialised.json');
+    await writeFile(record, 'not json');
+
+    const unreadable = path.join(runtime, 'a-folder-not-a-record');
+    await mkdir(unreadable);
+
+    // Act — one record that is not JSON, one that cannot be read as a file at all.
+    await subject.apply(plan([{ kind: 'prune-directory', path: runtime, keep: [], only: ['recorded.md'], record }]));
+    await subject.apply(
+      plan([{ kind: 'prune-directory', path: runtime, keep: [], only: ['recorded.md'], record: unreadable }]),
+    );
+
+    // Assert — nothing is proved to be the last apply's, so nothing is retired.
+    should(await readFile(path.join(runtime, 'recorded.md'), 'utf8')).equal('kept\n');
   });
 });
