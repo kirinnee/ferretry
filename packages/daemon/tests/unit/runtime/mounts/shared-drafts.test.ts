@@ -91,10 +91,12 @@ describe('shared draft routes', () => {
     const read = await dispatch({ path: PATH, headers: agentIn('s1') });
     const write = await dispatch(edit({ epoch: 0, base: 1, text: [11, '!'] }, agentIn('s1')));
 
-    // Assert — refused before the draft is looked at, so not a word of it reaches the body.
+    // Assert — refused at the boundary (`caller: 'person'`) before the draft is looked at, so not a word of
+    // it reaches the body. A bare admin token, which the boundary takes for a person, is refused by the
+    // route's own narrower gate below.
     for (const response of [read, write]) {
       should(response.status).equal(403);
-      should(jsonBody(response)).have.property('code', 'shared_draft_owner_only');
+      should(jsonBody(response)).have.property('code', 'owner_only');
       should(JSON.stringify(jsonBody(response))).not.containEql('secret');
     }
   });
@@ -154,7 +156,7 @@ describe('shared draft routes', () => {
     // Assert
     for (const response of [malformed, oversized]) {
       should(response.status).equal(403);
-      should(jsonBody(response)).have.property('code', 'shared_draft_owner_only');
+      should(jsonBody(response)).have.property('code', 'owner_only');
     }
   });
 

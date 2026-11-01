@@ -10,11 +10,10 @@ import { SharedDraftError, type SharedDraftErrorCode, type SharedDraftService } 
 /**
  * The shared draft's surface: one session's unsent composer, read and edited by the owner's devices.
  *
- * OWNER-ONLY, AND SAID AT THE ROUTE. `operator` already keeps out the warden token and anonymous
- * callers, and the dispatcher refuses a member session before any main-table route is looked up. That
- * leaves an AGENT using the admin bearer from inside its own pane, which the boundary attributes as
- * `peer:<its session>` — and a draft is exactly what an agent must not read before it is sent. So the
- * actor is checked here too: the owner's own shell (`admin-cli`) or one of the owner's paired devices
+ * OWNER-ONLY, TWICE. `operator` keeps out the warden token and anonymous callers, the dispatcher
+ * refuses a member session before any main-table route is looked up, and `caller: 'person'` has the
+ * boundary refuse every ferret (`owner_only`) before the handler runs — a draft is exactly what an agent
+ * must not read before it is sent. The handler then checks the actor again, narrower still: the owner's own shell (`admin-cli`) or one of the owner's paired devices
  * (`device:<id>`), and nobody else. `admin-ui` is deliberately NOT admitted: every browser is a paired
  * device now, so that actor only ever means an admin token sent with no client header at all — a bare
  * request, which is what an agent that found the token would send. Like `isHumanAdminActor`, this is a
@@ -85,6 +84,7 @@ export function sharedDraftRoutes(drafts: SharedDraftService): readonly ApiRoute
       method: 'GET',
       path: '/v1/sessions/:sessionId/shared-draft',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       handle: async context => await read(drafts, context),
     },
@@ -92,6 +92,7 @@ export function sharedDraftRoutes(drafts: SharedDraftService): readonly ApiRoute
       method: 'POST',
       path: '/v1/sessions/:sessionId/shared-draft',
       minimum: 'operator',
+      caller: 'person',
       noStore: true,
       handle: async context => await edit(drafts, context),
     },
