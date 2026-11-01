@@ -105,6 +105,7 @@ import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
+import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
@@ -272,49 +273,35 @@ const copyWriter = browserClipboardWriter();
  */
 function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly onNavigate: (to: string) => void }) {
   const who = inboxWho(card);
-  const dot = (
-    <span aria-hidden="true" className="fy-inbox-who__dot">
-      ·
-    </span>
-  );
   return (
-    <div className="fy-inbox-who" data-inbox-who="">
-      {/* WHO and WHAT first, together: the task is what the owner reads, so it is never cut to make room. */}
-      <span className="fy-inbox-who__main" data-inbox-who-main="">
-        <span className="fy-inbox-who__ferret" data-inbox-who-ferret="">
-          {who.ferret}
-        </span>
-        {who.task === null ? null : (
-          <>
-            {dot}
-            <span className="fy-inbox-who__task" data-inbox-who-task="">
-              {who.task}
-            </span>
-          </>
-        )}
+    <CardMetaLine
+      chat={{
+        to: agendaConversationPath(card.daemonId, card.view.config.id, card.item.id),
+        onNavigate,
+        hooks: { 'data-inbox-open-chat': '' },
+      }}
+      hooks={{ 'data-inbox-who': '' }}
+    >
+      <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
+        {who.ferret}
       </span>
-      {/* WHERE: the card and the machine, which move to a second line before the task gives up a letter. */}
-      <span className="fy-inbox-who__meta">
-        {who.card === null ? null : (
-          <>
-            <span className="fy-inbox-who__card" data-inbox-who-card="">
-              {who.card}
-            </span>
-            {dot}
-          </>
-        )}
-        <span className="fy-inbox-who__machine">{who.machine}</span>
-      </span>
-      <RouteLink
-        className="fy-inbox-who__chat"
-        data-inbox-open-chat=""
-        onNavigate={onNavigate}
-        to={agendaConversationPath(card.daemonId, card.view.config.id, card.item.id)}
-      >
-        Open chat
-        <ChevronRight aria-hidden="true" size={13} />
-      </RouteLink>
-    </div>
+      {who.task === null ? null : (
+        <>
+          <MetaDot />
+          <span data-inbox-who-task="">{who.task}</span>
+        </>
+      )}
+      {who.card === null ? null : (
+        <>
+          <MetaDot />
+          <span className="fy-meta-line__card" data-inbox-who-card="">
+            {who.card}
+          </span>
+        </>
+      )}
+      <MetaDot />
+      <span>{who.machine}</span>
+    </CardMetaLine>
   );
 }
 
@@ -401,38 +388,30 @@ function GateMeta({
   readonly onNavigate: (to: string) => void;
 }) {
   const { gate } = item;
-  const dot = (
-    <span aria-hidden="true" className="fy-inbox-who__dot">
-      ·
-    </span>
-  );
   return (
-    <div className="fy-inbox-who fy-inbox-who--gate" data-inbox-gate={gate.cardId} data-inbox-who="">
-      <span className="fy-inbox-who__main" data-inbox-who-main="">
-        <span className="fy-inbox-gate__stage" data-inbox-gate-stage="">
-          {gateVerb(item)}
-        </span>
-        {gate.projectName === undefined ? null : (
-          <>
-            {dot}
-            <span data-inbox-gate-project="">{gate.projectName}</span>
-          </>
-        )}
-        {dot}
-        <span className="fy-inbox-who__ferret" data-inbox-who-ferret="">
-          {inboxWho(card).ferret}
-        </span>
+    <CardMetaLine
+      chat={{
+        to: agendaConversationPath(card.daemonId, card.view.config.id, card.item.id),
+        onNavigate,
+        hooks: { 'data-inbox-open-chat': '' },
+      }}
+      className="fy-meta-line--gate"
+      hooks={{ 'data-inbox-gate': gate.cardId, 'data-inbox-who': '' }}
+    >
+      <span className="fy-inbox-gate__stage" data-inbox-gate-stage="">
+        {gateVerb(item)}
       </span>
-      <RouteLink
-        className="fy-inbox-who__chat"
-        data-inbox-open-chat=""
-        onNavigate={onNavigate}
-        to={agendaConversationPath(card.daemonId, card.view.config.id, card.item.id)}
-      >
-        Open chat
-        <ChevronRight aria-hidden="true" size={13} />
-      </RouteLink>
-    </div>
+      {gate.projectName === undefined ? null : (
+        <>
+          <MetaDot />
+          <span data-inbox-gate-project="">{gate.projectName}</span>
+        </>
+      )}
+      <MetaDot />
+      <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
+        {inboxWho(card).ferret}
+      </span>
+    </CardMetaLine>
   );
 }
 

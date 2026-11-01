@@ -1057,14 +1057,12 @@
 .fy-attn-deck__peek .fy-inbox-open {
   height: 100%;
 }
-/* Who and what: the ferret and its task, then its card and machine, then the way to its chat. A swipe can start here.
-   The line WRAPS rather than cut the task: the card, the machine and "Open chat" move down a line first, and the
-   task is cut only when it alone is wider than the card. */
-.fy-inbox-who {
+/* Who and what, on ONE line: the ferret, what it works on, its card and machine, then the way to its chat. The facts are
+   cut with "…" before "Open chat" gives up a letter; a swipe can start here. The agenda card and the task card share it. */
+.fy-meta-line {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
-  gap: 0 var(--gap-sm);
+  gap: var(--gap-sm);
   border-bottom: var(--stroke) solid var(--divider-color, var(--border));
   background: var(--surface-2, var(--surface));
   padding: var(--gap-xs) var(--gap-md);
@@ -1072,44 +1070,39 @@
   font-size: var(--text-sm);
   touch-action: none;
 }
-/* Never cut with "…": a task wider than the card wraps between its words. */
-.fy-inbox-who__main {
+.fy-meta-line__facts {
   min-width: 0;
-  max-width: 100%;
-  overflow-wrap: break-word;
-}
-.fy-inbox-who__meta {
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fy-inbox-who__ferret {
+.fy-meta-line__ferret {
   color: var(--fg);
   font-weight: var(--weight-strong);
 }
-.fy-inbox-who__task {
-  color: var(--fg);
-}
-.fy-inbox-who__card {
+.fy-meta-line__card {
   font-family: var(--font-mono);
   font-size: var(--text-xs, var(--text-sm));
 }
-.fy-inbox-who__dot {
+.fy-meta-line__dot {
   margin: 0 var(--gap-xs);
   color: var(--faint);
 }
-.fy-inbox-who__chat {
+.fy-meta-line__chat {
   display: inline-flex;
-  flex-shrink: 0;
+  flex: none;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
   color: var(--accent);
   font-weight: var(--weight-strong);
   text-decoration: none;
+  white-space: nowrap;
 }
-.fy-inbox-who__chat:hover {
+.fy-meta-line__chat:hover {
   text-decoration: underline;
 }
-.fy-inbox-who__chat:focus-visible {
+.fy-meta-line__chat:focus-visible {
   outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
   outline-offset: 2px;
 }
@@ -1495,11 +1488,11 @@
   min-width: 0;
 }
 /* A gate item's one meta line: quiet, the lane's verb a touch stronger. */
-.fy-inbox-who--gate {
+.fy-meta-line--gate {
   color: var(--muted);
   font-size: var(--text-sm);
 }
-.fy-inbox-who--gate .fy-inbox-who__ferret {
+.fy-meta-line--gate .fy-meta-line__ferret {
   color: inherit;
   font-weight: inherit;
 }
@@ -1527,4 +1520,12 @@
   background: transparent;
   color: var(--muted);
   font: inherit;
+}
+
+/* On the task card the line sits inside the card's padding, not as a full-bleed band. */
+.fy-totest__surface > .fy-meta-line {
+  border-bottom: 0;
+  background: none;
+  padding: 0;
+  touch-action: pan-y;
 }

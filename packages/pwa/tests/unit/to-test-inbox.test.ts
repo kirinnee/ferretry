@@ -110,12 +110,15 @@ describe('the ferret’s task name on a card to test', () => {
     ]);
     expect(withTaskName(assigned as ToTestCard, names).taskName).toBe('Worker task');
     expect(withTaskName(owned as ToTestCard, names).taskName).toBe('Lead task');
+    expect(withTaskName(assigned as ToTestCard, names).taskSession).toBe('worker-s');
+    expect(withTaskName(owned as ToTestCard, names).taskSession).toBe('owner-s');
   });
 
   test('has no task name when the session is not known, and a card starts with none', async () => {
     const [row] = toTestCards(await boardModelOf([card('F1', { laneId: 'tested' })]));
     expect((row as ToTestCard).taskName).toBeNull();
     expect(withTaskName(row as ToTestCard, new Map()).taskName).toBeNull();
+    expect(withTaskName(row as ToTestCard, new Map()).taskSession ?? null).toBeNull();
     expect(withTaskName(row as ToTestCard, undefined)).toBe(row as ToTestCard);
   });
 });

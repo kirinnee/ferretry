@@ -53,6 +53,8 @@ export interface AgendaItemCardProps {
   readonly renderProse: Prose;
   /** The ↓ swipe: Skip (the host moves to the next item, changing nothing), or absent where there is no next item. */
   readonly onSkip?: (() => void) | undefined;
+  /** The host offers Not needed itself (under the head's ⓘ), so the card does not draw its own pill. */
+  readonly dismissAside?: boolean | undefined;
   readonly onAct: (action: InboxAction) => void;
   readonly onProgress?: ((step: number, done: boolean) => Promise<void>) | undefined;
   readonly doneClose?: DoneCloseView | undefined;
@@ -264,6 +266,7 @@ export function AgendaItemCard({
   error,
   swipeable,
   onSkip,
+  dismissAside = false,
   renderProse,
   onAct,
   onProgress,
@@ -301,7 +304,7 @@ export function AgendaItemCard({
   const isInput = inputForm !== undefined && item.kind === 'input';
   // A gate item is a card to try or approve: its steps are the card's How to test, and Not needed is a button under it.
   const gated = item.gate !== undefined;
-  const canDismiss = answerable && !isInput && model.dismissInMenu && !model.notice && !gated;
+  const canDismiss = answerable && !isInput && model.dismissInMenu && !model.notice && !gated && !dismissAside;
   const dismiss = (): void => {
     if (!busy) onAct(DISMISS_ACTION);
   };

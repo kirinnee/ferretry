@@ -23,7 +23,7 @@ import { Spinner } from '../../components/spinner.tsx';
 import { swipeIntent, swipeThreshold } from '../../lib/agenda-inbox.ts';
 import type { BoardActions } from '../../lib/board-actions.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
-import { daemonBoardCardPath } from '../../lib/pages/routes.ts';
+import { daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { releaseWords, type ToTestCard } from '../../lib/to-test-inbox.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { type BoardAnswers, useBoardAnswers } from '../board/board-answers.tsx';
@@ -40,6 +40,7 @@ import {
   startsOnInteractive,
 } from './agenda-swipe-gesture.ts';
 import { CardHead, type CardHeadPager } from './card-head.tsx';
+import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
 import { MarqueeTitle } from './marquee-title.tsx';
 import { SwipeCompass } from './swipe-reveal.tsx';
 
@@ -383,27 +384,12 @@ function ToTestRow({
         {infoOpen ? (
           <div className="fy-totest__info" data-to-test-info="" id={infoId}>
             <p className="fy-totest__meta">
-              {row.taskName === null || sameWords(row.taskName, title) ? null : (
-                <span className="fy-totest__ferret" data-to-test-ferret="">
-                  {row.taskName}
-                </span>
-              )}
-              {row.projectName === null ? null : (
-                <>
-                  <span className="fy-totest__project" data-to-test-project="">
-                    {row.projectName}
-                  </span>
-                  <span aria-hidden="true">·</span>
-                </>
-              )}
-              <span data-to-test-machine="">{row.card.machine}</span>
               {release === null ? null : (
                 <>
-                  <span aria-hidden="true">·</span>
                   <span data-to-test-release="">{release}</span>
+                  <span aria-hidden="true">·</span>
                 </>
               )}
-              <span aria-hidden="true">·</span>
               <span>Ready to test</span>
             </p>
             {skipButton ? (
@@ -424,6 +410,34 @@ function ToTestRow({
             ) : null}
           </div>
         ) : null}
+        <CardMetaLine
+          chat={
+            row.taskSession == null
+              ? undefined
+              : {
+                  to: daemonSessionPath(row.card.daemonId, row.taskSession),
+                  onNavigate,
+                  hooks: { 'data-to-test-open-chat': '' },
+                }
+          }
+          hooks={{ 'data-to-test-who': '' }}
+        >
+          {row.taskName === null || sameWords(row.taskName, title) ? null : (
+            <>
+              <span className="fy-meta-line__ferret" data-to-test-ferret="">
+                {row.taskName}
+              </span>
+              <MetaDot />
+            </>
+          )}
+          {row.projectName === null ? null : (
+            <>
+              <span data-to-test-project="">{row.projectName}</span>
+              <MetaDot />
+            </>
+          )}
+          <span data-to-test-machine="">{row.card.machine}</span>
+        </CardMetaLine>
         {empty ? null : (
           <section aria-label={`How to test ${title}`} className="fy-totest__how" data-to-test-how="">
             <h3 className="fy-totest__how-title">How to test</h3>

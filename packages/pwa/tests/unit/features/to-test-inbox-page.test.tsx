@@ -139,11 +139,18 @@ describe('Inbox — cards waiting for a try', () => {
 
   it('names the project of each card beside its machine', async () => {
     const { root } = await open();
-    await openInfo(rowOf(root, 'F22'));
-    const meta = rowOf(root, 'F22').querySelector('.fy-totest__meta');
+    const meta = rowOf(root, 'F22').querySelector('[data-to-test-who]');
     expect(meta?.querySelector('[data-to-test-project]')?.textContent).toBe('ferretry');
     expect(meta?.querySelector('[data-to-test-machine]')?.textContent).toBe('laptop');
     expect(meta?.textContent).toContain('ferretry');
+  });
+
+  it('says who and where on one line, with the way to the ferret’s chat when the ferret is known', async () => {
+    const { root } = await open();
+    const known = rowOf(root, 'F22').querySelector('[data-to-test-who]');
+    expect(known?.children[0]?.classList.contains('fy-meta-line__facts')).toBe(true);
+    expect(known?.querySelector('[data-to-test-open-chat]')?.getAttribute('href')).toContain('/session/');
+    expect(rowOf(root, 'F23').querySelector('[data-to-test-open-chat]')).toBeNull();
   });
 
   it('leaves out a card an agent made, though it waits in the same lane', async () => {
@@ -153,15 +160,13 @@ describe('Inbox — cards waiting for a try', () => {
 
   it('names the ferret by the task it was given on each card, never by its callsign', async () => {
     const { root } = await open();
-    await openInfo(rowOf(root, 'F22'));
     const ferret = rowOf(root, 'F22').querySelector('[data-to-test-ferret]');
     expect(ferret?.textContent).toBe('Credentials Build Lead');
-    expect(rowOf(root, 'F22').querySelector('.fy-totest__meta')?.textContent).toContain('Credentials Build Lead');
+    expect(rowOf(root, 'F22').querySelector('[data-to-test-who]')?.textContent).toContain('Credentials Build Lead');
   });
 
   it('says nothing about the ferret when its task is unknown', async () => {
     const { root } = await open();
-    await openInfo(rowOf(root, 'F23'));
     expect(rowOf(root, 'F23').querySelector('[data-to-test-ferret]')).toBeNull();
   });
 
