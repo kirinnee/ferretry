@@ -188,6 +188,40 @@ describe('terminationGate edges', () => {
     should(cleanups).be.empty();
   });
 
+  it('should hold released() until an early release has finished, and have it settled when none started', async () => {
+    // Arrange
+    const target = scriptedTarget();
+    const order: string[] = [];
+    const { promise: finish, resolve } = Promise.withResolvers<void>();
+    const gate = terminationGate(
+      async () => {
+        await finish;
+        order.push('released');
+      },
+      code => order.push(`exit ${String(code)}`),
+      target,
+    );
+    await gate.released();
+    order.push('unwound, nothing to wait for');
+
+    // Act
+    target.fire('SIGTERM');
+    const unwound = gate.released().then(() => order.push('boot unwound'));
+    await new Promise<void>(settle => setImmediate(settle));
+    order.push('before the release finished');
+    resolve();
+    await unwound;
+
+    // Assert
+    should(order).deepEqual([
+      'unwound, nothing to wait for',
+      'before the release finished',
+      'released',
+      `exit ${String(INTERRUPTED_BOOT_EXIT_CODE)}`,
+      'boot unwound',
+    ]);
+  });
+
   it('should resolve the wait on SIGINT too once serving, running no early release', async () => {
     // Arrange
     const target = scriptedTarget();
