@@ -365,7 +365,8 @@ the card's variant that enters on the trigger, recorded `auto` with the trigger 
 reported it (and `reportedVia: "admin-token"` beside it, as `actorVia` is beside an actor). It never goes back: a
 card already there or past it is unchanged, and the answer is the card as it is. Like a fact, it moves a blocked card
 and says what blocked it. It is `400 invalid` for a dropped card or a board with no lane for the event, and
-`403 owner-gate` for a move into an owner-gated closed lane, or out of a gate the owner has not answered, unless the
+`403 owner-gate` for a move into an owner-gated closed lane, or past a gate the owner has not answered (the card's own
+lane, or one its variant walks between that lane and the target; entering a gate is not passing it), unless the
 owner is the one reporting.
 
 **Every lane's stage is written out at boot.** Every template lane states its stage. A set stored before stages has

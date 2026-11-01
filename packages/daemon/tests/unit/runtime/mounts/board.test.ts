@@ -352,13 +352,15 @@ describe('the board mount', () => {
   });
 
   it('should move a card on an external trigger its ferret reports, as the daemon, and say who reported it', async () => {
-    // Arrange: a board whose Merged lane a deploy also enters.
+    // Arrange: a board whose Merged lane a deploy also enters, where the card's work does not stop at the
+    // Plan/Design gate (a report never passes one for a ferret).
     const deployed = lanes(PROJECT);
     const laneSet = {
       ...deployed,
       lanes: deployed.lanes.map(lane =>
         lane.id === 'merged' ? { ...lane, enterOn: [...(lane.enterOn ?? []), 'deploy.done' as const] } : lane,
       ),
+      variants: { 'design-first': deployed.lanes.map(lane => lane.id).filter(id => id !== 'plan') },
     };
     const { calls, board } = recording({ lanes: new FakeLanes(new Map([[PROJECT, laneSet]])) });
     const live = await dispatcher(board);

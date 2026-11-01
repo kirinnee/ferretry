@@ -10,7 +10,7 @@ import {
 import should from 'should';
 import { type BoardCaller, BoardError, BoardService } from '../../../src/lib/board/index.ts';
 import { DIRECTORY } from '../sub-ferret/support.ts';
-import { card, FakeLanes, MemoryBoardStore, PROJECT, type ServiceWorld, world } from './support.ts';
+import { card, FakeLanes, MemoryBoardStore, PROJECT, type ServiceWorld, templateLanes, world } from './support.ts';
 
 const owner: BoardCaller = { kind: 'owner' };
 const ferret = (sessionId: string): BoardCaller => ({ kind: 'ferret', sessionId });
@@ -53,6 +53,32 @@ const LABELLING: LaneSet = LaneSetSchema.parse({
     lane('closed', 'closed', { ownerGate: true }),
   ],
   variants: {},
+});
+
+/** The same flow, where design-first work does not stop at Send for review. */
+const SKIPS_SEND: LaneSet = LaneSetSchema.parse({
+  ...LABELLING,
+  variants: { 'design-first': LABELLING.lanes.map(entry => entry.id).filter(id => id !== 'send') },
+});
+
+/** Ferretry's own lanes, where a deploy also counts as merged: Plan/Design is a gate before them. */
+const PLANNED: LaneSet = (() => {
+  const set = templateLanes(PROJECT);
+  return LaneSetSchema.parse({
+    ...set,
+    lanes: set.lanes.map(entry =>
+      entry.id === 'merged' ? { ...entry, enterOn: ['pr.merged', 'deploy.done'], stage: undefined } : entry,
+    ),
+  });
+})();
+
+/** The same flow, where a deploy enters the owner's Confirm deployed? gate directly. */
+const CONFIRMS_DEPLOY: LaneSet = LaneSetSchema.parse({
+  ...LABELLING,
+  lanes: LABELLING.lanes.map(entry => {
+    if (entry.id === 'deployed') return lane('deployed', 'shipped', { enterOn: ['pr.merged'] });
+    return entry.id === 'confirm' ? { ...entry, enterOn: ['deploy.done'] } : entry;
+  }),
 });
 
 /** The same flow, where the deploy itself would close the card. */
@@ -116,7 +142,7 @@ describe('a reported trigger', () => {
   it('should take the report of the owner, the owner ferret and its leads', async () => {
     for (const caller of [owner, lead, ferret('grandparent')]) {
       // Arrange
-      const { ports, service } = serviceWith([card({ laneId: 'prepare', owner: 'lead' })], LABELLING, {});
+      const { ports, service } = serviceWith([card({ laneId: 'prepare', owner: 'lead' })], SKIPS_SEND, {});
       const lineage = caller === lead ? undefined : { lead: 'grandparent' };
       const withLineage =
         lineage === undefined
@@ -165,7 +191,7 @@ describe('a reported trigger', () => {
 
   it('should move a card forward past lanes its variant walks, and never back', async () => {
     // Arrange
-    const ahead = serviceWith([card({ laneId: 'prepare' })]);
+    const ahead = serviceWith([card({ laneId: 'prepare' })], SKIPS_SEND);
     const past = serviceWith([card({ laneId: 'confirm' })]);
     const there = serviceWith([card({ laneId: 'deployed' })]);
 
@@ -209,6 +235,58 @@ describe('a reported trigger', () => {
       "&F1 waits in send for the owner; a report does not pass that gate, the owner's answer does",
     );
     should(ports.store.writes).eql([]);
+  });
+
+  it('should leave to the owner a gate the card’s variant walks between its lane and the target', async () => {
+    // Arrange: Prepare → [Send for review?] → Waiting, on the reviewer's approval.
+    const { ports, service } = serviceWith([card({ laneId: 'prepare', owner: 'lead' })]);
+
+    // Act
+    const error = await refusal(service.act('F1', report('pr.review_approved'), lead));
+
+    // Assert
+    should(error.code).equal('owner-gate');
+    should(error.message).equal(
+      "&F1 would pass send, which waits for the owner; a report does not pass that gate, the owner's answer does",
+    );
+    should(ports.store.writes).eql([]);
+  });
+
+  it('should leave Plan/Design to the owner for work that plans first, and not for work that skips it', async () => {
+    // Arrange
+    const planned = serviceWith([card({ laneId: 'todo', workflow: 'design-first' })], PLANNED);
+    const quick = serviceWith([card({ laneId: 'todo', workflow: 'quick' })], PLANNED);
+
+    // Act
+    const error = await refusal(planned.service.act('F1', report('deploy.done'), lead));
+    await quick.service.act('F1', report('deploy.done'), lead);
+
+    // Assert
+    should(error.message).startWith('&F1 would pass Plan/Design, which waits for the owner;');
+    should(stored(quick.ports).laneId).equal('merged');
+  });
+
+  it('should let a report take a card INTO a gate: entering one is not passing it', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ laneId: 'waiting' })], CONFIRMS_DEPLOY);
+
+    // Act
+    await service.act('F1', report('deploy.done'), lead);
+
+    // Assert
+    should(stored(ports).laneId).equal('confirm');
+  });
+
+  it('should let the owner’s own report pass a gate on the way', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ laneId: 'prepare' })]);
+
+    // Act
+    await service.act('F1', report('deploy.done'), owner);
+
+    // Assert
+    should(stored(ports).laneId).equal('deployed');
+    should(lastEvent(ports)).match({ from: 'prepare', to: 'deployed', reportedBy: { kind: 'owner' } });
   });
 
   it('should let the owner’s own report pass the gate', async () => {

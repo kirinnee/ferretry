@@ -314,11 +314,26 @@ export const triggerMove = (
 };
 
 /**
+ * The first gate a move from the card's lane to `target` would pass: the card's own lane, else a lane of its
+ * variant strictly between the two. Entering a gate is not passing it, so `target` itself never counts.
+ */
+const gateOnTheWay = (laneSet: LaneSet, card: BoardTask, target: Lane): Lane | undefined => {
+  const at = (id: string): number => laneSet.lanes.findIndex(lane => lane.id === id);
+  // The variant resolves: the lane the trigger names was found in it.
+  const walked = variantLanes(laneSet, card.workflow);
+  const between = (walked.ok ? walked.value : laneSet.lanes).filter(
+    lane => at(lane.id) > at(card.laneId) && at(lane.id) < at(target.id),
+  );
+  return [requireLane(laneSet, card.laneId), ...between].find(lane => laneStage(lane).kind === 'gate');
+};
+
+/**
  * An external trigger somebody reported (the task action `trigger`): something Ferretry cannot see happened —
  * a deploy finished, a reviewer approved — so the card moves the way that trigger moves it. The move is the
  * daemon's, through {@link triggerMove}, so it is recorded `auto` with the trigger and `reportedBy` names
  * the caller. Never backward and never into an owner-gated closed lane; and the report of a non-owner never
- * passes a gate the owner has not answered. Already there, or past it, is no change.
+ * passes a gate the owner has not answered: neither the card's own lane nor one its variant walks on the way
+ * ({@link gateOnTheWay}). Already there, or past it, is no change.
  */
 const report = (
   card: BoardTask,
@@ -347,10 +362,13 @@ const report = (
   const from = requireLane(context.laneSet, card.laneId);
   const back = isBackwardMove(context.laneSet, card.laneId, target.id);
   if (!back.ok || back.value) return { task: null };
-  if (laneStage(from).kind === 'gate' && context.standing !== 'owner-human') {
+  const gate = context.standing === 'owner-human' ? undefined : gateOnTheWay(context.laneSet, card, target);
+  if (gate !== undefined) {
     throw new BoardError(
       'owner-gate',
-      `${ref} waits in ${from.name} for the owner; a report does not pass that gate, the owner's answer does`,
+      gate.id === from.id
+        ? `${ref} waits in ${from.name} for the owner; a report does not pass that gate, the owner's answer does`
+        : `${ref} would pass ${gate.name}, which waits for the owner; a report does not pass that gate, the owner's answer does`,
       ['owner-human'],
     );
   }
