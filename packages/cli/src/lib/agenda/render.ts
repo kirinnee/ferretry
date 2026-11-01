@@ -237,7 +237,8 @@ function resolutionLine(item: ResolvedAgendaItem): string {
         : wasWithdrawn(item)
           ? 'withdrawn'
           : 'resolved';
-  const answer = item.response === undefined ? '' : ` — ${compact(describeAnswer(item.response, item.fields), SHORT_WIDTH)}`;
+  const answer =
+    item.response === undefined ? '' : ` — ${compact(describeAnswer(item.response, item.fields), SHORT_WIDTH)}`;
   const note =
     item.resolutionNote === null || item.resolutionNote.trim() === ''
       ? ''
