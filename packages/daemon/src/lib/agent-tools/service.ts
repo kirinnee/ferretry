@@ -997,7 +997,7 @@ export class AgentToolService {
   }
 
   /**
-   * The file tools. An upload hands the page files the file service has confined to the session's folder (or
+   * The file tools. An upload hands the page the file service's own copies of files it confined to the session's folder (or
    * the session's own attachments); a download or a PDF is staged by the browser and SAVED by the file service,
    * which alone decides where — under the session's folder, never over an existing file unless asked.
    */
@@ -1044,9 +1044,15 @@ export class AgentToolService {
     const { sessionId } = caller;
     const guard = this.browserGuard(caller, surface, call.tool);
     if (call.tool === 'browser.upload') {
-      const prepared = await this.ports.files.prepareUpload(sessionId, call.files);
+      const prepared = await this.ports.files.prepareUpload(sessionId, call.files).catch((error: unknown) => {
+        // Which guard of the daemon's own files refused it, so the audit says why without the path.
+        if (error instanceof AgentFileError && error.rule !== undefined) facts.detail = { rule: error.rule };
+        throw error;
+      });
       facts.detail = uploadFacts(prepared.files);
       let answer: Awaited<ReturnType<BrowserSubsystem['filesOnPage']>>;
+      // The page was handed the daemon's own copies, which it may read later (when its form is sent): they are
+      // kept for the staging time and removed by a later upload, unless this act failed.
       try {
         answer = await this.ports.browser.filesOnPage(
           sessionId,
@@ -1059,8 +1065,9 @@ export class AgentToolService {
           },
           guard,
         );
-      } finally {
+      } catch (error) {
         await prepared.release();
+        throw error;
       }
       const started = answer.result.downloads ?? [];
       const read = await this.scrubbed({

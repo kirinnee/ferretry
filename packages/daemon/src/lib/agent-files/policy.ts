@@ -35,14 +35,23 @@ export const DEFAULT_SAVE_FOLDER = 'downloads';
 
 type AgentFileErrorCode = 'bad_request' | 'not_found' | 'forbidden' | 'conflict' | 'unavailable';
 
+/**
+ * Which guard of the daemon's own files refused a path, for the audit record: a word, never the path.
+ * `state-home`: it is inside the daemon's state home. `hard-link`: the file has another name somewhere.
+ * `changed`: what was opened is not what was checked.
+ */
+export type AgentFileRule = 'state-home' | 'hard-link' | 'changed';
+
 /** Why a file tool could not do what was asked, in a code the agent-tool path maps to its own. */
 export class AgentFileError extends Error {
   readonly code: AgentFileErrorCode;
+  readonly rule: AgentFileRule | undefined;
 
-  constructor(code: AgentFileErrorCode, message: string) {
+  constructor(code: AgentFileErrorCode, message: string, rule?: AgentFileRule) {
     super(message);
     this.name = 'AgentFileError';
     this.code = code;
+    this.rule = rule;
   }
 }
 

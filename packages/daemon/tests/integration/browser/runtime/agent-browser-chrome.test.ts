@@ -83,6 +83,7 @@ beforeAll(async () => {
   if (chrome === null || node === null) throw new Error('this test needs a real Chrome and Node on PATH');
   root = await mkdtemp(join(tmpdir(), 'ferretry-agent-browser-'));
   await mkdir(join(root, 'work'), { recursive: true });
+  await mkdir(join(root, 'work', '.fy'), { recursive: true });
   site = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
@@ -177,7 +178,9 @@ beforeAll(async () => {
         throw new Error('this test has no attachments');
       },
       uploadDirectory: join(root, 'upload'),
+      stateHomes: [join(root, 'work', '.fy')],
       token: () => crypto.randomUUID().replaceAll('-', ''),
+      now: () => Date.now(),
     }),
     audit: { record: async () => undefined },
     redactor: NO_REDACTION,
@@ -428,12 +431,14 @@ describe('the machine agent browser, in a real Chrome', () => {
     await call({ tool: 'browser.close', name: 'life' });
   }, 90_000);
 
-  it('should hand a page files through an input, a file dialog and a dropzone, and refuse a path outside the folder', async () => {
+  it('should hand a page files through an input, a file dialog and a dropzone, and refuse a path outside the folder or in the state home', async () => {
     // Arrange
     const work = join(root, 'work');
     await writeFile(join(work, 'hello.txt'), 'hello');
     await writeFile(join(root, 'outside.txt'), 'secret');
     await symlink(join(root, 'outside.txt'), join(work, 'escape.txt'));
+    await writeFile(join(root, 'work', '.fy', 'api-token'), 'fy_admin_token');
+    await symlink(join(root, 'work', '.fy', 'api-token'), join(work, 'token.txt'));
     await tools.call(agent('s1'), { tool: 'browser.open', name: 'up', url: `${base}/upload` });
     const shown = async () =>
       (await tools.call(agent('s1'), { tool: 'browser.read', name: 'up', selector: '#r' })).output;
@@ -459,6 +464,7 @@ describe('the machine agent browser, in a real Chrome', () => {
     const viaDrop = await shown();
     const parent = await refused(['../outside.txt']);
     const link = await refused(['escape.txt']);
+    const token = await refused(['token.txt']);
 
     // Assert
     should(viaInput).equal('hello.txt:5');
@@ -467,6 +473,7 @@ describe('the machine agent browser, in a real Chrome', () => {
     should(parent).be.instanceOf(AgentToolError);
     should(parent?.code).equal('forbidden');
     should(link?.code).equal('forbidden');
+    should(token?.message).containEql('state home');
     await tools.call(agent('s1'), { tool: 'browser.close', name: 'up' });
   }, 90_000);
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -14,6 +15,7 @@ import { AGENT_FILE_LIMITS, AgentFileError, AgentFiles } from '../../../src/lib/
 
 let root = '';
 let folder = '';
+let home = '';
 let files: AgentFiles;
 let attachments: Map<string, { filename: string; bytes: Uint8Array }>;
 let counter = 0;
@@ -22,6 +24,11 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'ferretry-agent-files-'));
   folder = join(root, 'work');
   await mkdir(folder, { recursive: true });
+  // The daemon's state home INSIDE the session folder: a session started in the person's home folder holds it.
+  home = join(folder, '.fy');
+  await mkdir(join(home, 'state'), { recursive: true });
+  await writeFile(join(home, 'api-token'), 'fy_admin_token');
+  await writeFile(join(home, 'state', 'secrets.key'), 'key');
   attachments = new Map();
   counter = 0;
   files = new AgentFiles({
@@ -33,6 +40,8 @@ beforeEach(async () => {
       return found;
     },
     uploadDirectory: join(root, 'upload'),
+    stateHomes: [home, join(home, 'state')],
+    now: () => 1_000,
     token: () => {
       counter += 1;
       return `t${String(counter)}`;
@@ -70,8 +79,11 @@ describe('AgentFiles.prepareUpload — what an agent may hand a page', () => {
     const relative = await files.prepareUpload('s1', ['reports/q3.pdf']);
     const absolute = await files.prepareUpload('s1', [join(folder, 'reports', 'q3.pdf')]);
 
+    // Each upload hands the page its own private copy, so the two name the same file but not the same path.
     should(relative.files).match([{ name: 'q3.pdf', size: 5 }]);
-    should(absolute.files[0]?.path).equal(relative.files[0]?.path);
+    should(absolute.files).match([{ name: 'q3.pdf', size: 5 }]);
+    should(await readFile(absolute.files[0]?.path ?? '', 'utf8')).equal('12345');
+    should(await readFile(relative.files[0]?.path ?? '', 'utf8')).equal('12345');
   });
 
   it('should refuse "..", an absolute path outside, and a session with no folder', async () => {
@@ -135,7 +147,7 @@ describe('AgentFiles.prepareUpload — what an agent may hand a page', () => {
 
     should(error.message).containEql('200 MiB');
     should(
-      await stat(join(root, 'upload', 't1')).then(
+      await stat(join(root, 'upload', '1000-t1')).then(
         () => true,
         () => false,
       ),
@@ -163,6 +175,81 @@ describe('AgentFiles.prepareUpload — what an agent may hand a page', () => {
 
   it('should refuse an attachment this session does not have', async () => {
     should((await refusal(files.prepareUpload('s1', [{ attachment: 'att_other' }]))).code).equal('not_found');
+  });
+});
+
+describe('AgentFiles.prepareUpload — never a file in the daemon’s state home, on a real disk', () => {
+  const rules = async (paths: readonly string[]) =>
+    await Promise.all(paths.map(async path => (await refusal(files.prepareUpload('s1', [path]))).rule));
+
+  it('should refuse the state home named directly, by "..", through a symlink, and through a chain of them', async () => {
+    // Arrange
+    await mkdir(join(folder, 'project'));
+    await symlink(join(home, 'api-token'), join(folder, 'project', 'token'));
+    await symlink(join(folder, 'project', 'token'), join(folder, 'project', 'hop2'));
+    await symlink(join(folder, 'project', 'hop2'), join(folder, 'project', 'hop1'));
+    await symlink(join(home, 'state'), join(folder, 'project', 'state'));
+
+    // Act
+    const refused = await rules([
+      '.fy/api-token',
+      join(home, 'state', 'secrets.key'),
+      'project/token',
+      'project/hop1',
+      'project/state/secrets.key',
+      '.fy',
+    ]);
+    const dotted = await refusal(files.prepareUpload('s1', ['project/../.fy/api-token']));
+
+    // Assert
+    should(refused).deepEqual(['state-home', 'state-home', 'state-home', 'state-home', 'state-home', 'state-home']);
+    should(dotted.code).equal('forbidden');
+    should(await readdir(join(root, 'upload')).catch(() => [])).deepEqual([]);
+  });
+
+  it('should refuse a hard link into the state home — and, since its other name cannot be told, any hard link', async () => {
+    // Arrange
+    await link(join(home, 'api-token'), join(folder, 'innocent.txt'));
+    await writeFile(join(folder, 'mine.txt'), 'mine');
+    await link(join(folder, 'mine.txt'), join(folder, 'mine-too.txt'));
+
+    // Act
+    const refused = await rules(['innocent.txt', 'mine-too.txt']);
+
+    // Assert
+    should(refused).deepEqual(['hard-link', 'hard-link']);
+  });
+
+  it('should fail closed when the real path cannot be found, and refuse a folder and a pipe', async () => {
+    // Arrange
+    await symlink(join(root, 'nowhere'), join(folder, 'dangling'));
+    await symlink(join(folder, 'loop'), join(folder, 'loop'));
+    await mkdir(join(folder, 'sub'));
+    should(spawnSync('mkfifo', [join(folder, 'pipe')]).status).equal(0);
+
+    // Act
+    const codes = await Promise.all(
+      ['dangling', 'loop', 'sub', 'pipe'].map(async path => (await refusal(files.prepareUpload('s1', [path]))).code),
+    );
+
+    // Assert
+    should(codes).deepEqual(['not_found', 'not_found', 'bad_request', 'bad_request']);
+  });
+
+  it('should still upload an ordinary file, as a private copy the agent cannot change afterwards', async () => {
+    // Arrange
+    await writeFile(join(folder, 'report.txt'), 'quarterly');
+
+    // Act
+    const prepared = await files.prepareUpload('s1', ['report.txt']);
+    await writeFile(join(folder, 'report.txt'), 'swapped after the check');
+    const copy = prepared.files[0]?.path ?? '';
+
+    // Assert
+    should(prepared.files).match([{ name: 'report.txt', size: 9 }]);
+    should(copy.startsWith(join(root, 'upload'))).be.true();
+    should((await stat(copy)).mode & 0o777).equal(0o600);
+    should(await readFile(copy, 'utf8')).equal('quarterly');
   });
 });
 
@@ -261,14 +348,34 @@ describe('AgentFiles.save — where a download or a PDF may land', () => {
   });
 });
 
-describe('NodeAgentFilesystem.lstat', () => {
-  it('should report a missing entry as nothing, but let any other failure through', async () => {
-    const disk = new NodeAgentFilesystem();
+describe('AgentFiles.save — never into the daemon’s state home, on a real disk', () => {
+  it('should write INTO an existing file when asked, never removing it or writing through a hard link', async () => {
+    // Arrange
+    const source = await staged('fresh bytes');
+    await writeFile(join(folder, 'out.txt'), 'old');
+    const before = (await stat(join(folder, 'out.txt'))).ino;
+    await link(join(home, 'api-token'), join(folder, 'token-too'));
 
-    should(await disk.lstat(join(folder, 'nope'))).be.undefined();
-    await disk.lstat(join(folder, 'x'.repeat(300))).then(
-      () => should.fail(undefined, undefined, 'a name that long should not be looked up'),
-      (error: unknown) => should(error).be.instanceOf(Error),
-    );
+    // Act
+    const saved = await files.save('s1', source, { ...SAVE, saveAs: 'out.txt', overwrite: true });
+    const linked = await refusal(files.save('s1', source, { ...SAVE, saveAs: 'token-too', overwrite: true }));
+
+    // Assert
+    should(saved.size).equal(11);
+    should((await stat(join(folder, 'out.txt'))).ino).equal(before);
+    should(await readFile(join(folder, 'out.txt'), 'utf8')).equal('fresh bytes');
+    should(linked.rule).equal('hard-link');
+    should(await readFile(join(home, 'api-token'), 'utf8')).equal('fy_admin_token');
+  });
+
+  it('should refuse the state home named directly and through a symlinked folder, writing nothing there', async () => {
+    const source = await staged('planted');
+    await symlink(join(home, 'state'), join(folder, 'state-link'));
+
+    const direct = await refusal(files.save('s1', source, { ...SAVE, saveAs: '.fy/state/passkeys.json' }));
+    const linked = await refusal(files.save('s1', source, { ...SAVE, saveAs: 'state-link/passkeys.json' }));
+
+    should([direct.rule, linked.rule]).deepEqual(['state-home', 'state-home']);
+    should(await readdir(join(home, 'state'))).deepEqual(['secrets.key']);
   });
 });

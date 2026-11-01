@@ -224,8 +224,61 @@ the folder's own real path both times. Refused, in a sentence that names the rul
 outside the folder; a symlink — file or directory — that leads out; anything inside `.git/` at any depth; and
 the daemon's own scratch entries at the top of the folder (`DAEMON_OWNED_SCRATCH_ENTRIES`: `chat.jsonl`,
 `events.jsonl`, `config.json`, `attachments/` …). An upload may instead name `{ "attachment": "att_<64 hex>" }` — a file
-the owner put in THIS session's chat; the daemon copies it into its own private directory for the call and
-removes it afterwards.
+the owner put in THIS session's chat.
+
+**Never the state home.** No file tool reads or writes inside the daemon's own state home (`FY_HOME`, by
+default `~/.ferretry`: `api-token`, `api-warden-token`, `tmux.sock`, the vault and `secrets.key`, `state/`,
+`config/`, every agent's credential home), even when the session's folder contains it — a session started
+in the person's home folder contains it. **A warden session gets no file tools at all, by design**: its
+folder (`~/.ferretry/warden`) is inside the home, so every upload, download and PDF there is refused. The
+daemon passes its own resolved paths (`paths.home`, `paths.state`, `paths.config`). A path is judged three
+ways, and refused if any says "inside": by its name as given (a direct path, `..`), by its real path after
+`realpath` (a symlink or a chain of them, a symlinked home), and by **identity** — every folder from the
+real path up to `/` is compared by device and inode with each home AND with the home's key files and
+folders (`api-token`, `api-warden-token`, `tmux.sock`, `state/secrets.key` and the sealed documents,
+`state/passkeys.json`, `state/daemon-identity.json`, `fleet/`, `fleet/homes/`, `state/sessions/`), which
+catches a bind mount of a home, of `state/` or `config/`, or of one of those files alone, and a home spelt
+in another case or Unicode form. A home that cannot be
+resolved refuses everything (fail closed). The refusal says why, and the audit record carries
+`rule: "state-home"` (or `hard-link`, `changed`) and never the path. A token in a page would hand that
+page this machine.
+
+**One guard, shared.** The checks live in `@ferretry/fleet` (`state-home-guard.ts`, with the real disk in
+`NodeGuardDisk`) so every surface that reads or writes a file for an agent uses the same ones:
+`openOutsideStateHomes` to read, `createOutsideStateHomes` to write, `copyTreeOutsideStateHomes` for a
+folder (a read-only one stays writable only while it is filled), `judgeOutsideStateHomes` to judge a file or a
+folder without opening it (before linking to it), and `stateHomeByName` for a surface that reaches its bytes
+another safe way. Each answers
+`{ ok: true, value }` or `{ ok: false, rule }`, and only an `ok` answer carries a handle that can read or
+write.
+
+**How an upload reads a file.** The path is resolved with `realpath` and checked; its entry must be a
+regular file BEFORE anything is opened (a device is never opened); it is then **opened** (never following
+a link at its last step, never blocking on a pipe), and the open file must still be the one at the checked
+place — same real path, same device and inode — or it is refused (`rule: "changed"`). A path whose real
+path cannot be found is refused. A file with more than one name (a **hard link**) is refused
+(`rule: "hard-link"`), because its other name may be inside the state home and nothing on the file says
+where: copy it and upload the copy. The daemon then copies the OPEN file into its own private directory
+(mode 0700, the copy 0600) and the browser is handed **that copy**, never the agent's path, so a path
+swapped after the check reaches nothing. An attachment is copied there too. The copies are kept 15
+minutes, because a page may read a file it was given only when its form is sent; the daemon removes older
+ones at boot, every 15 minutes and before each upload, and a call that fails removes its own at once.
+
+**How a save writes a file.** The nearest folder that exists is **opened** and checked like a file (real
+path, device and inode, not in a home, still under the session's folder and outside `.git`). Each missing
+folder below it is made THROUGH that open folder, then opened and checked in turn, and the file is reached
+through the last one (on Linux, `/proc/self/fd/<n>/<name>`), so a folder swapped for a link into the home
+after its check is never written into, nor has a folder made in it. A new file is created `O_EXCL|O_NOFOLLOW`; with
+`overwrite` an existing file is opened without being emptied, and it must be a single-named regular file
+before it is emptied and written through that descriptor. **Nothing is ever removed by path**: a mismatch is
+refused, a file the call made is removed only through the checked folder, and only while it is still that
+file, and a file that was already there is left as it is.
+
+**Hard links a caller may tolerate.** Only one root proven closed to this process may hold a file with more
+than one name: `resolveImmutableRoots` requires its real path and every folder above it to be owned by root,
+never writable by other, and writable by their group only when this process is not in that group (a
+multi-user `/nix/store` is `root:nixbld 1775`). A single-user Nix store, owned by its user, does not
+qualify, and a raw path is not accepted. The file tools tolerate none.
 
 **Caps.** An upload is at most 20 files, 50 MiB each and 200 MiB per call. A download or PDF saved is at most 500 MiB.
 
@@ -528,9 +581,19 @@ agenda items in a sub-ferret's session with `-s <session>`, proven by lineage.
   removal this change can make unconditionally. Until then a renderer exploit on a page an agent is
   steered to runs as the daemon's user.
 - **A terminal's folder** is where the shell starts, not a boundary.
-- **Files: check, then use.** A path is confined by `realpath` when the call is made, and the worker reads it a
-  moment later; a same-user process that swaps a checked path for a symlink in that window can still redirect an
-  upload. The file tools' destination is closed against this (`O_EXCL|O_NOFOLLOW`); the read side is not.
+- **Files: what the state-home guard cannot see.** Reads and saves are closed against a swap, and every hard
+  link is refused. What remains:
+  - **A bind mount of something deeper in the home that is not pinned** (say `fleet/homes/x`, or a file
+    under it) gives its files a path whose every folder is outside the listed homes and key files by
+    identity too. Making one needs root (an admin bind, a container volume); a user-namespace bind is seen
+    only inside that namespace, never by the daemon. FUSE reports its own device, but its server reads the
+    home with the ferret's own rights, so it grants nothing new.
+  - **Without `/proc` (macOS)** a save makes missing folders and reaches the file by their checked paths,
+    not through the open folder. A folder swapped in that instant still refuses, but can leave behind an
+    EMPTY new folder or file (never an overwritten one) where the link pointed.
+  - **A same-user process that can write in the state home** could move a file out of it (a rename leaves
+    one name, outside). Such a process can read the file itself anyway: the guard matters once the state
+    home is walled off from ferrets, and until then is one fewer way out, not a sandbox.
 - **PDF needs a headless browser.** In Real window mode `browser.pdf` is refused rather than faked.
 - **A staged download** sits in a daemon-owned directory (mode 0700) for up to 15 minutes before it is saved or pruned.
 

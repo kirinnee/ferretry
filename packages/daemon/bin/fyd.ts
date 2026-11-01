@@ -301,6 +301,7 @@ import {
   KeyedSerialExecutor,
   LOGIN_SECRETS_DOCUMENT,
   SECRETS_DOCUMENT,
+  SECRETS_KEY,
   LoadSafeWorker,
   ManifestAccountInventory,
   MCP_OAUTH_SECRETS_DOCUMENT,
@@ -1199,6 +1200,7 @@ import {
   SkillsInventoryService,
   type SocketRoute,
   SpeedupsService,
+  STAGED_FILE_TTL_MS,
   STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
   type StackSamplerPort,
   StagedApiSurface,
@@ -12305,16 +12307,43 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           signInChoice,
           recipes: loginRecipes,
           loginActs: loginObserver,
-          files: new AgentFiles({
-            fs: new NodeAgentFilesystem(),
-            folderOf: async sessionId => await sessionFolder(storage, sessionId),
-            readAttachment: async (sessionId, attachmentId) => {
-              const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
-              return { filename: attachment.filename, bytes };
-            },
-            uploadDirectory: join(paths.temporary, 'browser-upload'),
-            token: () => crypto.randomUUID().replaceAll('-', ''),
-          }),
+          files: (() => {
+            const agentFiles = new AgentFiles({
+              fs: new NodeAgentFilesystem(),
+              folderOf: async sessionId => await sessionFolder(storage, sessionId),
+              readAttachment: async (sessionId, attachmentId) => {
+                const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
+                return { filename: attachment.filename, bytes };
+              },
+              uploadDirectory: join(paths.temporary, 'browser-upload'),
+              // Every file tool stays out of these however a path reaches them (docs/agent-tools.md#files).
+              stateHomes: [paths.home, paths.state, paths.config],
+              // Its key files and folders by identity too, so a bind mount of one of them alone is still refused.
+              pinned: [
+                join(paths.home, 'api-token'),
+                join(paths.home, 'api-warden-token'),
+                join(paths.home, 'tmux.sock'),
+                ...[
+                  SECRETS_KEY,
+                  SECRETS_DOCUMENT,
+                  MCP_OAUTH_SECRETS_DOCUMENT,
+                  LOGIN_SECRETS_DOCUMENT,
+                  'passkeys.json',
+                ].map(name => join(paths.state, name)),
+                paths.daemonIdentity,
+                paths.fleet,
+                join(paths.fleet, 'homes'),
+                paths.sessions,
+              ],
+              token: () => crypto.randomUUID().replaceAll('-', ''),
+              now: () => Date.now(),
+            });
+            // Upload copies outlive their call by the staging time; swept at boot and on a timer, not only by the next upload.
+            const sweep = asActivity(activities, 'browser-upload sweep', async () => await agentFiles.sweep());
+            setInterval(sweep, STAGED_FILE_TTL_MS).unref();
+            setTimeout(sweep, 30_000).unref();
+            return agentFiles;
+          })(),
           redactor: secretRedactor,
         }),
         configFiles: createConfigFilesSubsystem({
