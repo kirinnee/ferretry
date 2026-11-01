@@ -871,18 +871,20 @@ describe('auditedRoutes', () => {
     should(JSON.stringify(logged)).not.match(/secret name|cqu_/u);
   });
 
-  it('should record nothing for a quick add whose success has no readable answer', async () => {
-    // Arrange
-    const { journal, routes } = decorated({ 'POST /v1/catalog-items/quick-add': async () => jsonResponse(undefined) });
-    const api = await dispatcher(routes);
+  it('should still record a quick add whose success names no outcome, or has no readable answer', async () => {
+    for (const answer of [() => jsonResponse(undefined), () => jsonResponse({ ok: true })]) {
+      // Arrange
+      const { journal, routes } = decorated({ 'POST /v1/catalog-items/quick-add': async () => answer() });
+      const api = await dispatcher(routes);
 
-    // Act
-    await api.dispatch(
-      request({ method: 'POST', path: '/v1/catalog-items/quick-add', headers: ADMIN, loopback: true, body: '{}' }),
-    );
+      // Act
+      await api.dispatch(
+        request({ method: 'POST', path: '/v1/catalog-items/quick-add', headers: ADMIN, loopback: true, body: '{}' }),
+      );
 
-    // Assert
-    should(records(journal)).have.length(0);
+      // Assert
+      should(records(journal)).have.length(1);
+    }
   });
 
   it('should record a quick add that is refused, whatever the answer would have been', async () => {

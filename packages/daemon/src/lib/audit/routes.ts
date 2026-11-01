@@ -856,7 +856,7 @@ function audited(subsystem: AuditedRoutesSubsystem, route: ApiRoute, rule: Audit
   };
 }
 
-/** A 2xx answer a rule says changed nothing (`recordOnlyWhen`): not an act, so not recorded. */
+/** A 2xx answer that names an outcome other than the one `recordOnlyWhen` wants: not an act. An unreadable answer is recorded. */
 function changedNothing(rule: AuditedRouteRule, status: number | undefined, body: string | undefined): boolean {
   if (rule.recordOnlyWhen === undefined || auditOutcomeOf(status) !== 'succeeded') return false;
   try {
@@ -865,9 +865,9 @@ function changedNothing(rule: AuditedRouteRule, status: number | undefined, body
       typeof parsed === 'object' && parsed !== null
         ? (parsed as Record<string, unknown>)[rule.recordOnlyWhen.field]
         : undefined;
-    return found !== rule.recordOnlyWhen.equals;
+    return found !== undefined && found !== rule.recordOnlyWhen.equals;
   } catch {
-    return true;
+    return false;
   }
 }
 
