@@ -13,7 +13,7 @@ import {
   MAX_GATE_OPTIONS,
   type TaskWorkflow,
 } from '@ferretry/protocol';
-import { ArrowDown, ArrowLeft, ArrowUp, Plus, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowLeft, ArrowUp, Check, Plus, Trash2, X } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useBoardActions, useBoardProjects } from '../../hooks/use-board.ts';
 import type { BoardActions } from '../../lib/board-actions.ts';
@@ -65,11 +65,13 @@ const fieldClass =
 
 const chipClass = 'rounded-control border border-border bg-surface-2 px-xs py-0.5 text-2xs text-fg';
 
-/** A chip the owner switches on and off: on reads as chosen, off is dimmed and struck through. */
+/** A chip the owner switches on and off: on is tinted and carries a tick, off is a plain outline; nothing is struck through. */
 const toggleChipClass = (on: boolean): string =>
   on
-    ? 'rounded-control border border-accent-border bg-accent-soft px-xs py-0.5 text-2xs font-medium text-accent'
-    : 'rounded-control border border-border bg-surface-2 px-xs py-0.5 text-2xs text-muted line-through';
+    ? 'inline-flex items-center gap-1 rounded-control border border-accent-border bg-accent-soft px-xs py-0.5 text-2xs font-medium text-accent'
+    : 'inline-flex items-center gap-1 rounded-control border border-border bg-transparent px-xs py-0.5 text-2xs text-fg';
+
+const ToggleTick = ({ on }: { readonly on: boolean }) => (on ? <Check size={11} aria-hidden="true" /> : null);
 
 const STAGE_CHOICES = [
   { kind: 'gate', label: 'Gate' },
@@ -147,17 +149,24 @@ function GateOptions({
           const ordinal = `option ${String(position + 1)} of ${lane.name}`;
           const value = outcomeValue(option.outcome);
           return (
-            <li className="flex flex-wrap items-center gap-xs" key={option.id} data-gate-option={option.id}>
+            <li
+              className="relative grid gap-xs rounded-control border border-border bg-surface p-xs pr-14 sm:pr-8 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center"
+              key={option.id}
+              data-gate-option={option.id}
+            >
               <input
-                className={`${fieldClass} w-40 grow`}
+                className={`${fieldClass} w-full`}
                 aria-label={`Label of ${ordinal}`}
                 aria-invalid={gateLabelProblem(option.label) !== null}
                 value={option.label}
                 disabled={busy}
                 onChange={event => onChange(setGateOptionLabel(draft, laneId, option.id, event.currentTarget.value))}
               />
+              <span className="hidden text-muted sm:inline" aria-hidden="true">
+                →
+              </span>
               <select
-                className={fieldClass}
+                className={`${fieldClass} w-full`}
                 aria-label={`Outcome of ${ordinal}`}
                 value={value}
                 disabled={busy}
@@ -178,7 +187,7 @@ function GateOptions({
                 <option value="close">{OUTCOME_LABELS.close}</option>
               </select>
               <button
-                className="kt-btn kt-btn--sm"
+                className="kt-btn kt-btn--sm absolute right-1 top-1"
                 type="button"
                 aria-label={`Remove ${ordinal}`}
                 disabled={busy || options.length <= 1}
@@ -398,6 +407,7 @@ function LaneRow({
               disabled={busy}
               onClick={() => toggleTrigger(trigger)}
             >
+              <ToggleTick on={triggers.includes(trigger)} />
               {TRIGGER_LABELS[trigger]}
               {isReportedTrigger(trigger) ? (
                 <span className="font-normal text-muted"> · reported with fy task trigger</span>
@@ -489,6 +499,7 @@ function WorkflowVariants({
                 disabled={busy}
                 onClick={() => onChange(setWorkflowLane(draft, workflow, lane.id, !walked.includes(lane.id)))}
               >
+                <ToggleTick on={walked.includes(lane.id)} />
                 {lane.name}
               </button>
             ))}

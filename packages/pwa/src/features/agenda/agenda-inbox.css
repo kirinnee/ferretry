@@ -1532,7 +1532,7 @@
   border: var(--stroke-panel) solid var(--border);
   border-radius: var(--radius-control);
   background: var(--surface);
-  box-shadow: var(--shadow-popover, 0 8px 24px rgb(0 0 0 / 0.25));
+  box-shadow: var(--shadow-popover);
 }
 .fy-attn-deck__custom .fy-snooze__custom {
   border-top: 0;

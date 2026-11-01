@@ -7,7 +7,7 @@
  * so the button keeps its width and nothing slides under the next tap; it is disabled until the move settles.
  */
 
-import { Check, RotateCcw } from 'lucide-react';
+import { ArrowRight, Check, RotateCcw } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import { type BoardDone, doneLabel, doneTitle } from '../../lib/board-done.ts';
@@ -23,6 +23,8 @@ export interface BoardDoneActionProps {
   readonly disabled?: boolean;
   /** This control's move is in flight: a spinner where the icon was, and no second press. */
   readonly pending?: boolean;
+  /** A verdict's "Done →": the arrow follows the label, on the side every Done sits (right), where a lone Done wears its tick before it. */
+  readonly arrow?: boolean;
 }
 
 /** An answer's icon, or a spinner of the same size while its move is in flight. */
@@ -50,8 +52,11 @@ export function BoardDoneAction({
   touch = false,
   disabled = false,
   pending = false,
+  arrow = false,
 }: BoardDoneActionProps) {
   const label = doneLabel(done, size === 'primary');
+  const iconSize = size === 'primary' ? 14 : 12;
+  const useArrow = arrow && done.kind !== 'reopen';
   return (
     <button
       aria-busy={pending}
@@ -69,12 +74,11 @@ export function BoardDoneAction({
       title={doneTitle(done, title)}
       type="button"
     >
-      <AnswerIcon
-        icon={done.kind === 'reopen' ? RotateCcw : Check}
-        pending={pending}
-        size={size === 'primary' ? 14 : 12}
-      />
+      {useArrow ? null : (
+        <AnswerIcon icon={done.kind === 'reopen' ? RotateCcw : Check} pending={pending} size={iconSize} />
+      )}
       <span className="fy-board-done__label">{label}</span>
+      {useArrow ? <AnswerIcon icon={ArrowRight} pending={pending} size={iconSize} /> : null}
     </button>
   );
 }

@@ -333,8 +333,10 @@ describe('editing the lanes', () => {
 
     // Assert
     expect(skipped.getAttribute('aria-pressed')).toBe('false');
-    expect(skipped.className).toContain('line-through');
+    expect(skipped.className).not.toContain('line-through');
     expect(walked.className).not.toContain('line-through');
+    expect(skipped.querySelector('svg')).toBeNull();
+    expect(walked.querySelector('svg')).not.toBeNull();
     expect(byLabel(view, 'design-first walks Plan/Design').getAttribute('aria-pressed')).toBe('true');
   });
 
@@ -516,6 +518,29 @@ describe('the stage of a lane', () => {
       'a reviewer approves the PR',
       'a deploy is reported done',
     ]);
+  });
+
+  it('draws unselected trigger chips as plain outlines and selected ones tinted with a tick', async () => {
+    const view = await show(editor(laneSetFor()));
+    const chips = [
+      ...must(view.container.querySelector('[data-lane-triggers="implement"]'), 'triggers').querySelectorAll('button'),
+    ];
+    const on = chips.filter(chip => chip.getAttribute('aria-pressed') === 'true');
+    const off = chips.filter(chip => chip.getAttribute('aria-pressed') === 'false');
+    expect(on.length).toBeGreaterThan(0);
+    expect(off.length).toBeGreaterThan(0);
+    for (const chip of on) expect(chip.querySelector('svg')).not.toBeNull();
+    for (const chip of off) expect(chip.querySelector('svg')).toBeNull();
+    expect(view.container.innerHTML).not.toContain('line-through');
+  });
+
+  it('keeps each gate option, its answer and its outcome, in one group with the remove control', async () => {
+    const view = await show(editor(laneSetFor()));
+    const group = must(view.container.querySelector('[data-lane-gate="tested"] [data-gate-option]'), 'an option');
+    expect(group.querySelector('input[aria-label^="Label of option 1"]')).not.toBeNull();
+    expect(group.querySelector('select[aria-label^="Outcome of option 1"]')).not.toBeNull();
+    expect(group.querySelector('button[aria-label^="Remove option 1"]')).not.toBeNull();
+    expect(group.textContent).toContain('→');
   });
 
   it('keeps an automatic lane’s stage in step with the triggers chosen', async () => {
