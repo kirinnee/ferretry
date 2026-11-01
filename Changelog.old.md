@@ -1,3 +1,9 @@
+## [4.210.0](https://github.com/kirinnee/ferretry/compare/v4.209.0...v4.210.0) (2026-11-01)
+
+### Features
+
+* **daemon:** fill task-plan sign-ins through the shared matcher ([#1266](https://github.com/kirinnee/ferretry/issues/1266)) ([3872ad2](https://github.com/kirinnee/ferretry/commit/3872ad252fb9b1ff8801a53673383b025aa20141))
+
 ## [4.209.0](https://github.com/kirinnee/ferretry/compare/v4.208.0...v4.209.0) (2026-11-01)
 
 ### Features

@@ -1,3 +1,9 @@
+## [4.210.1](https://github.com/kirinnee/ferretry/compare/v4.210.0...v4.210.1) (2026-11-01)
+
+### Fixes
+
+* **fleet:** route the shared-history migration through checked folder handles (&B120) ([#1269](https://github.com/kirinnee/ferretry/issues/1269)) ([783b8ba](https://github.com/kirinnee/ferretry/commit/783b8baacdfe91d793087420a4d36f2e97b7c1c4)), closes [#1262](https://github.com/kirinnee/ferretry/issues/1262)
+
 ## [4.210.0](https://github.com/kirinnee/ferretry/compare/v4.209.0...v4.210.0) (2026-11-01)
 
 ### Features
