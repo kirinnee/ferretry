@@ -376,6 +376,25 @@ describe('typing into a terminal an input request aims at', () => {
     should(w.calls.some(call => call[0] === 'send-keys')).be.false();
   });
 
+  it('should write nothing when a grant fill may no longer go ahead, asked after the last look', async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.calls.length = 0;
+    let asked = 0;
+
+    const result = await target(w).type('s1', dev, SECRET, true, expected, {
+      proceed: () => {
+        asked += 1;
+        return false;
+      },
+    });
+
+    should(result).equal('target_changed');
+    should(asked).equal(1);
+    should(sends(w)).have.length(0);
+    should(w.typed).deepEqual([]);
+  });
+
   it('should make tmux itself check the pane pid, program name, cursor row and liveness in the writing command', async () => {
     const w = world();
     const expected = await observed(w);

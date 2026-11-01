@@ -108,6 +108,8 @@ interface Options {
   onJournal?: (type: string) => void;
   /** Runs while the card is being raised, before the request is held. */
   onRaise?: () => void;
+  /** Runs inside the target's turn, before it asks whether the fill may still go ahead (a write that waited in the queue). */
+  onQueued?: () => void;
 }
 
 function harness(options: Options = {}) {
@@ -175,6 +177,9 @@ function harness(options: Options = {}) {
       type: async (_session, _target, typed, submit, _expected, more) => {
         typeOptions.push(more);
         submits.push(submit);
+        // As the real targets do: the fill is asked whether it may still go ahead inside the target's own turn.
+        options.onQueued?.();
+        if (more?.proceed?.() === false) return 'target_changed';
         if ((options.written ?? 'typed') === 'typed') writes.push(...typed.map(value => value.text));
         return options.written ?? 'typed';
       },
@@ -654,8 +659,10 @@ describe('a password left in a field is emptied before the hold ends, and the li
     const hold = h.timers.at(-1);
     // Two seconds before the write's 120-second hold ends.
     should(hold?.ms).equal(118_000);
-    // Even when the timer fires late, after the write's own hold has run out, the clear holds the page itself.
+    // The clear's own hold is taken the moment the write is done: a timer that fires late, after the write's own hold has
+    // run out by the wall clock (a stall, a suspended machine), never leaves the page unheld in between.
     h.advance(125_000);
+    should(h.service.pageHeld(SESSION, ['app'])).not.be.undefined();
     hold?.fire();
     await settled();
 
@@ -672,9 +679,13 @@ describe('a password left in a field is emptied before the hold ends, and the li
       const h = harness({ clear: outcome });
       await approve(h, await github(h), { remaining: 2 });
       await raised(h);
+      h.advance(125_000);
       h.timers.at(-1)?.fire();
       await settled();
       should(h.stopped).deepEqual(['0:did-not-move-on']);
+      // An emptied field lets the page go; an unknown one (the value may still be there) keeps it held a window more.
+      if (outcome === 'cleared') should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+      else should(h.service.pageHeld(SESSION, ['app'])).not.be.undefined();
     });
 });
 
@@ -805,6 +816,42 @@ describe('a revoke or an expiry during a fill stops the write', () => {
     // Nothing was typed, so the page is not held and the use is given back.
     should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
     should(h.used).deepEqual([]);
+  });
+
+  it('should type nothing when the line is revoked while the write waits its turn in the page queue', async () => {
+    let h: Harness | undefined;
+    h = harness({ onQueued: () => h?.lines.splice(0) });
+    await approve(h, await github(h));
+
+    const { view, request } = await raised(h);
+
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(request?.preapproval).match({ outcome: 'did-not-apply', reason: 'expired' });
+    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.used).deepEqual([]);
+  });
+
+  it('should type nothing when the line is stopped, or expires, between the last look and the write', async () => {
+    let stopped: Harness | undefined;
+    stopped = harness({
+      onJournal: type => {
+        const line = stopped?.lines[0];
+        if (type.endsWith('delivering') && stopped !== undefined && line !== undefined)
+          stopped.lines[0] = { ...line, state: 'stopped', because: 'did-not-move-on' };
+      },
+    });
+    await approve(stopped, await github(stopped));
+    const { view } = await raised(stopped);
+    should(stopped.writes).deepEqual([]);
+    should(view.state).equal('pending');
+
+    let expired: Harness | undefined;
+    expired = harness({ onJournal: type => type.endsWith('delivering') && expired?.advance(7_300_000) });
+    await approve(expired, await github(expired));
+    await expired.service.raise(SESSION, SIGN_IN);
+    should(expired.writes).deepEqual([]);
+    should(expired.used).deepEqual([]);
   });
 
   it('should hand a quiet card back to the owner at once when its line ends while it is raised', async () => {

@@ -101,6 +101,8 @@ export class PageInputTarget implements InputTargetPort {
     try {
       return await this.host.inputOnPage(sessionId, target.key, async (port, pageId) => {
         if (pageId !== expected.pageId) return 'target_changed';
+        // A grant fill that waited in this queue goes ahead only if its line is still held now.
+        if (options?.proceed?.() === false) return 'target_changed';
         if (options?.armClear === true) {
           // A grant fill arms its pagehide clear first, in this same turn of the page's queue. A browser that can't (or a
           // worker from before the call, which refuses it) types nothing: the clear is part of the fill.
@@ -111,6 +113,7 @@ export class PageInputTarget implements InputTargetPort {
             );
           if (port.inputArm === undefined || port.inputClear === undefined) return 'target_changed';
           if ((await port.inputArm(pageId, expected, passwords)) !== 'armed') return 'target_changed';
+          if (options.proceed?.() === false) return 'target_changed';
         }
         began = true;
         return await port.inputType(pageId, expected, values, submit);

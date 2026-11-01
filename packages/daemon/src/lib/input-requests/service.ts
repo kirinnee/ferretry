@@ -56,7 +56,7 @@ import {
   worstRisk,
 } from '@ferretry/protocol';
 import { LoginEntryError, type LoginFieldValues } from '../secrets/accounts.ts';
-import { type ClearJob, clearJobOf } from '../sign-in-grants/clear.ts';
+import { type ClearJob, type ClearOutcome, clearJobOf } from '../sign-in-grants/clear.ts';
 import type { GrantReservation } from '../sign-in-grants/ledger.ts';
 import { type GrantMatch, type GrantSighting, matchSignInGrant, type SignInGrant } from '../sign-in-grants/matcher.ts';
 import type { SignInGrantSource } from '../sign-in-grants/plans.ts';
@@ -838,11 +838,12 @@ export class InputRequestService {
   }
 
   /**
-   * BEFORE THE PAGE HOLD ENDS, a password a grant fill typed must not still be sitting in its field. Shortly before the
-   * write's hold ends ({@link CLEAR_LEAD_MS}), a hold of its own is taken on the same page, which cannot expire while it
-   * is in flight; the browser then empties any typed field that still holds a value, and only then is that hold let go.
-   * So no read of the page ever falls between the hold and the clear. `cleared` or `unknown` (fails closed) stops the
-   * line (`did-not-move-on`): the page didn't move on as the owner approved.
+   * BEFORE THE PAGE HOLD ENDS, a password a grant fill typed must not still be sitting in its field. The moment the write
+   * is done, a hold of its own is taken on the same page, which cannot expire while it is in flight, so no stalled timer
+   * or suspended machine can leave the page unheld with the value in it. Shortly before the write's own hold would end
+   * ({@link CLEAR_LEAD_MS}), the browser empties any typed field that still holds a value. `moved` and `cleared` let that
+   * hold go; `unknown` (the value may still be there) keeps the page held for a full window more. `cleared` and `unknown`
+   * stop the line (`did-not-move-on`): the page didn't move on as the owner approved.
    */
   private clearBeforeHoldEnds(
     held: Held,
@@ -853,19 +854,19 @@ export class InputRequestService {
     names: readonly string[],
   ): void {
     const { sessionId, target, id } = held.request;
+    const clearing = this.deps.quarantine.begin(sessionId, names, id);
+    let outcome: ClearOutcome = 'unknown';
     void this.deps.timers
       .after(Math.max(0, holdMs - CLEAR_LEAD_MS))
       .then(async () => {
-        const clearing = this.deps.quarantine.begin(sessionId, names, id);
-        try {
-          const outcome =
-            (await this.deps.target.clear?.(sessionId, target, job).catch(() => 'unknown' as const)) ?? 'unknown';
-          if (outcome !== 'moved') await grants.stopped(grant, 'did-not-move-on');
-        } finally {
-          this.deps.quarantine.release(clearing);
-        }
+        outcome = (await this.deps.target.clear?.(sessionId, target, job).catch(() => 'unknown' as const)) ?? 'unknown';
+        if (outcome !== 'moved') await grants.stopped(grant, 'did-not-move-on');
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (outcome === 'unknown') this.deps.quarantine.settle(clearing);
+        else this.deps.quarantine.release(clearing);
+      });
   }
 
   /**
@@ -1699,6 +1700,8 @@ export class InputRequestService {
           codeProgram: seen.codeProgram === true && fields.some(field => field.sensitivity === 'code'),
           ...(by.kind === 'rule' && held.pastedInto !== undefined ? { profileProgram: held.pastedInto } : {}),
           ...(clear === undefined ? {} : { armClear: true }),
+          // Asked again inside the target's own turn: a write that waited in the page's queue may find the line gone.
+          ...(grant === undefined ? {} : { proceed: () => grant.held() }),
         })
         .catch((): TypeResult => 'uncertain');
       wrote?.(outcome);
@@ -1730,6 +1733,14 @@ export class InputRequestService {
           'unavailable',
           `Ferretry could not confirm the value was typed cleanly, so it stopped and will not type it again; check the ${surfaceWord(request.target.kind)}`,
         );
+      }
+      if (outcome === 'target_changed' && grant !== undefined && !grant.held()) {
+        // The target refused because the line ended while the write waited its turn: nothing was typed, and nothing is
+        // wrong with the target, so no check is counted. The card is the owner's.
+        await this.letGo(hold);
+        hold = undefined;
+        await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
+        throw new GrantMissed('expired');
       }
       if (outcome !== 'typed') {
         await this.letGo(hold);

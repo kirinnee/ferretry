@@ -273,7 +273,9 @@ export function chromeLaunchArguments(
     '--no-default-browser-check',
     '--disable-background-mode',
     '--disable-component-update',
-    '--disable-features=Translate,MediaRouter',
+    // No back/forward cache: a page restored from it brings back its whole heap, a framework's copy of a password a
+    // grant fill typed included (docs/input-requests.md, "Task plan fills"). One flag: Chrome reads only the last.
+    '--disable-features=Translate,MediaRouter,BackForwardCache',
     ...(options.userAgent === undefined ? [] : [`--user-agent=${options.userAgent}`]),
     ...(options.proxy === undefined ? [] : chromeProxyArguments(options.proxy.server, options.proxy.bypass)),
     '--disable-dev-shm-usage',

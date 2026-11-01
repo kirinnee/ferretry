@@ -206,6 +206,12 @@ export interface TypeOptions {
    * older worker): nothing is typed.
    */
   readonly armClear?: boolean;
+  /**
+   * A grant fill: whether it may still go ahead, asked synchronously INSIDE the target's own turn (the page's queue, or
+   * just before the terminal's guarded write), right before arming and right before the first key. `false`: nothing is
+   * typed (`target_changed`). A write that waited in the page's queue behind the ferret's acts is asked again there.
+   */
+  readonly proceed?: () => boolean;
 }
 
 /** The card the owner answers. The daemon words the title and ask; the agent's prompt rides as `prompt` only. */

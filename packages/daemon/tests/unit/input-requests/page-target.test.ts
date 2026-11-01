@@ -365,6 +365,28 @@ describe('PageInputTarget: a grant fill’s clear (R3a-4)', () => {
     }
   });
 
+  it('should ask a grant fill whether it may still go ahead inside the page turn, before arming and before typing', async () => {
+    const first = host();
+    should(
+      await first.target.type('s1', APP, VALUES, true, FACTS_PAGE, { armClear: true, proceed: () => false }),
+    ).equal('target_changed');
+    should(first.calls).eql(['page:s1:app']);
+
+    // Revoked while the arm ran: armed, but not a key typed.
+    let asked = 0;
+    const second = host();
+    should(
+      await second.target.type('s1', APP, VALUES, true, FACTS_PAGE, {
+        armClear: true,
+        proceed: () => {
+          asked += 1;
+          return asked === 1;
+        },
+      }),
+    ).equal('target_changed');
+    should(second.calls).eql(['page:s1:app', 'arm:page-1:password']);
+  });
+
   it('should check and empty the typed fields in the page’s own queue, and read anything odd as unknown', async () => {
     const { target, calls } = host({ cleared: 'cleared' });
     should(await target.clear('s1', APP, JOB)).equal('cleared');

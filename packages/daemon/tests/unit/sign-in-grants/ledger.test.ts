@@ -83,6 +83,15 @@ describe('SignInGrantLedger: one use is one sign-in attempt, and each role is ty
     should(fill(ledger, ['password'], 0, NOW + 1_000)).equal('used-up');
   });
 
+  it('should keep the attempt window from its first fill: a step that joined does not slide it', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(fill(ledger, ['username'], 1, NOW)), 'a');
+    ledger.spent(reserved(fill(ledger, ['password'], 0, NOW + 100_000)), 'b');
+    // 200 s after the first fill, 100 s after the join: the attempt closed at 180 s, so a code needs a use of its own.
+    should(ledger.joinable('plan:aa:0', NOW + 200_000)).be.false();
+    should(fill(ledger, ['totp'], 0, NOW + 200_000)).equal('used-up');
+  });
+
   it('should open a new attempt after three minutes', () => {
     const ledger = new SignInGrantLedger();
     ledger.spent(reserved(fill(ledger, ['username'], 2, NOW)), 'a');

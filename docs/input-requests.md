@@ -1284,8 +1284,10 @@ or nothing is typed:
   sign-in works with the default of 1. A role already typed needs a new use: a second password (a "confirm your
   password" form) is never typed on the use the sign-in spent. A write that typed nothing gives the use back; an
   uncertain one spends it. With several lines for one sign-in, the one that expires first is used first.
-- **A revoke stops a fill in flight.** The write re-reads the line after its last look and checks it is still held,
-  synchronously, as the last thing before typing: a line revoked, expired or stopped during the fill types nothing.
+- **A revoke stops a fill in flight.** The write re-reads the line after its last look, and asks whether it is still
+  held synchronously, again inside the target's own turn (the page's queue, right before arming and right before the
+  first key; the terminal's guarded write): a line revoked, expired or stopped while the fill looked or waited its turn
+  types nothing. What is left is the worker's own round trip between that check and the keystroke.
 - **A miss is the usual card.** Nothing is typed, the card stays for the owner, and the owner's view of the request
   carries `preapproval: { by: 'plan', plan, line, outcome: 'did-not-apply', reason }`; the app draws one line from
   `grantMissLine` ("Task plan line 2 didn't apply: the sign-in form changed since you approved it"). The ferret is
@@ -1297,12 +1299,15 @@ or nothing is typed:
 - **A password left in a field is emptied, and the line stops.** Before a grant types a password into a page, the
   browser arms (its own `inputArm` call) a `pagehide` listener in an isolated world that empties every password
   input when the page is hidden (the back/forward cache would otherwise keep the value). A worker that refuses the
-  call (one from before it) types nothing. Shortly before the page hold ends, the daemon takes a hold of its own on
-  the page, so no read falls between, and asks the browser whether a typed field still holds ANY value (same
-  document, node still connected). It sends only which nodes, never a value. A field that holds one is emptied,
+  call (one from before it) types nothing. The moment the write is done, the daemon takes a hold of its own on the
+  page that cannot expire while it is in flight (so a stalled timer or a suspended machine never leaves the page
+  unheld with the value in it), and shortly before the write's own hold would end it asks the browser whether a typed
+  field still holds ANY value (same document, node still connected). It sends only which nodes, never a value. A field that holds one is emptied,
   whatever it holds (a character added during the hold changes nothing), and the line stops (`did-not-move-on`). A
   node DevTools says is gone, an empty field or another document is `moved`; any other failure is `unknown`, which
-  stops the line too. A single-page app that swapped the form has moved on once the node is gone. Terminals need
+  stops the line too and keeps the page held a full window more, since the value may still be there. The agent
+  browser runs with the back/forward cache off, so a page never comes back with its old heap; the `pagehide` arm is
+  defence in depth. A single-page app that swapped the form has moved on once the node is gone. Terminals need
   none: a line-mode prompt consumes the line.
 - **Audited, never a value.** `input.delivered` carries `by: 'plan'`, the plan, the line and the sign-in beside the
   usual names and flags. A miss is recorded as `input.requested` with `preapproval: 'did-not-apply'`, the plan, the
@@ -1411,6 +1416,10 @@ makes the card stricter.
   ferret using its tools normally (it can only ask; the owner ticks, a passkey confirms, the daemon matches) and page
   text or terminal output steering where a value goes: it can't add a line, approve one, or move a fill to another
   origin, a frame, a hidden or text field, or a renamed program.
+- **The field is emptied; a page's own script state may still hold the value.** A framework (React, Vue, a form
+  library) keeps a copy of what was typed in its own state, which the clear does not touch and which a page script
+  can read. A sign-in that swaps the form without a new document leaves that copy behind too. A tap has the same
+  property.
 - **A terminal line is proved by the program's START NAME, not its binary.** The kernel proof names a setuid-root
   program by the name it was started under, so a program root installed (`passwd`, `chfn`) started through a link
   named `sudo` reads as `sudo`, and the approved password goes to it. With full sudo that gives nothing beyond the
