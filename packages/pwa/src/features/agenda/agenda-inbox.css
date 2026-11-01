@@ -311,14 +311,18 @@
 .fy-attn-deck__top {
   position: relative;
   z-index: 3;
-  user-select: none;
-  -webkit-user-select: none;
+  user-select: text;
+  -webkit-user-select: text;
   transition: transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
   will-change: transform;
 }
-.fy-attn-deck__top textarea,
-/* The opened item reads like a chat: its prose can be selected, copied and quoted. */
-.fy-attn-deck__top .fy-item-view :is(.fy-attn-prose, .fy-attn-options, .fy-item-history__chat) {
+/* A card reads like a chat: its text can be selected, copied and quoted, on a phone by a long press. Only what is
+   pressed is not text, so a tap or a swipe never starts a highlight. */
+.fy-attn-deck__top :is(button, summary, [role='button'], [role='menuitem'], [data-agenda-no-swipe]) {
+  user-select: none;
+  -webkit-user-select: none;
+}
+.fy-attn-deck__top :is(textarea, input) {
   user-select: text;
   -webkit-user-select: text;
 }
@@ -1284,6 +1288,10 @@
   gap: var(--gap-sm);
   background: var(--surface);
   padding: var(--gap-md);
+  user-select: text;
+  -webkit-user-select: text;
+}
+.fy-totest__surface :is(button, summary, [role='button'], [role='menuitem']) {
   user-select: none;
   -webkit-user-select: none;
 }
