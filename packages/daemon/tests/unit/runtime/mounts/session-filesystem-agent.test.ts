@@ -364,7 +364,12 @@ describe('an agent with no session of its own', () => {
 
 describe('secrev-1260 M1 — the home by identity, not only by name', () => {
   /** A walk component: the root's own (100), the home's (device 1, inode 1, as `homesOf` makes it), or any other. */
-  const component = (ino: number, dev = 1) => ({ dev: BigInt(dev), ino: BigInt(ino), ctimeMs: 1000, mode: 0o40755 });
+  const component = (ino: number, dev = 1) => ({
+    dev: BigInt(dev),
+    ino: BigInt(ino),
+    ctimeNs: 1_000_000_000n,
+    mode: 0o40755,
+  });
   const ROOT = component(100);
   const HOME_ITSELF = component(1);
 

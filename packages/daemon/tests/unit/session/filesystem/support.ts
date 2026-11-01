@@ -64,7 +64,7 @@ function identitiesFor(rel: string): readonly ComponentIdentity[] {
   return Array.from({ length: depth + 1 }, (_unused, index) => ({
     dev: 1n,
     ino: BigInt(100 + index),
-    ctimeMs: 1000,
+    ctimeNs: 1_000_000_000n,
     mode: 0o40755,
   }));
 }

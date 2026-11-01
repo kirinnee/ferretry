@@ -1133,7 +1133,8 @@ export class SessionFilesystem {
    *
    * Git only accepts pathnames, so this post-check is the binding between its verdict and the descriptor
    * walk. A mismatch fails closed; a caller may retry from a fresh request once the worktree stops
-   * moving.
+   * moving. A rename round trip that leaves the original object at the name is caught only as far as its
+   * change time shows it — best-effort, and why that is safe, on {@link ComponentIdentity}.
    */
   private async policyPathUnchanged(
     pinned: PinnedRoot,
@@ -1161,7 +1162,7 @@ function sameComponentWalk(left: readonly ComponentIdentity[], right: readonly C
       other !== undefined &&
       component.dev === other.dev &&
       component.ino === other.ino &&
-      component.ctimeMs === other.ctimeMs &&
+      component.ctimeNs === other.ctimeNs &&
       component.mode === other.mode
     );
   });

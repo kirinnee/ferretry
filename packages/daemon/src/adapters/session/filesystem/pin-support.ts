@@ -33,7 +33,7 @@ export function isMissing(error: unknown): boolean {
 
 /** A walked component's identity, from a `bigint` `fstat` so its device and inode are exact. */
 export function componentIdentity(metadata: BigIntStats): ComponentIdentity {
-  return { dev: metadata.dev, ino: metadata.ino, ctimeMs: Number(metadata.ctimeMs), mode: Number(metadata.mode) };
+  return { dev: metadata.dev, ino: metadata.ino, ctimeNs: metadata.ctimeNs, mode: Number(metadata.mode) };
 }
 
 export function pinnedMetadata(metadata: BigIntStats): PinnedMetadata {

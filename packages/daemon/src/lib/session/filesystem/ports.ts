@@ -22,16 +22,31 @@ import type { FsEntryType } from './types.ts';
 /**
  * Identity of one component in the descriptor-backed walk.
  *
- * `dev` + `ino` detect replacement with another object. `ctimeMs` also detects an ABA rename — the old
- * directory moved away, the replacement used for the Git policy check, then the old directory moved
- * back — because a rename changes ctime even when the final name once again resolves to the original
- * inode. `mode` catches a type change that preserved the inode.
+ * `dev` + `ino` detect replacement with another object. `mode` catches a type change that preserved the
+ * inode. Both are exact, and nothing about them depends on a clock.
+ *
+ * `ctimeNs` detects an ABA rename — the old directory moved away, the replacement used for the Git policy
+ * check, then the old directory moved back — because a rename stamps the moved inode's ctime even when the
+ * final name once again resolves to the original inode. That detection is BEST-EFFORT: a timestamp only
+ * moves when the clock it is read from has ticked, and Linux stamps from the coarse clock (one tick is
+ * 1–10 ms) unless the filesystem has fine-grained timestamps, so a round trip inside one tick leaves ctime
+ * where it was and is invisible. It is kept at full nanosecond precision so that nothing the kernel DID
+ * record is thrown away here.
+ *
+ * Best-effort is safe because of what an ABA can and cannot change. The object at the name afterwards is
+ * the SAME directory the descriptor holds, and every byte is served through that descriptor, so containment,
+ * the state-home fence (by device and inode), the hard-link refusal and the denylist are decided on the
+ * object served and never consult ctime. What a round trip can launder is only the Git verdict, which is a
+ * verdict on a NAME — and whoever can rename inside the worktree can already move an ignored file to a name
+ * Git does not ignore, with no race at all. The ignore gate keeps a tree's own secrets out of the viewer; it
+ * was never a boundary against the tree's writer.
  */
 export interface ComponentIdentity {
   /** Exact, as a `bigint` stat gives it: an inode past 2^53 rounded to a number could match another, or miss. */
   readonly dev: bigint;
   readonly ino: bigint;
-  readonly ctimeMs: number;
+  /** Nanoseconds, from the same `bigint` stat: the millisecond figure would hide a change the kernel recorded. */
+  readonly ctimeNs: bigint;
   readonly mode: number;
 }
 

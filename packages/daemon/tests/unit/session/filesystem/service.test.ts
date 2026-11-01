@@ -362,7 +362,7 @@ describe('SessionFilesystem.list', () => {
           staged.set('src', {
             type: 'dir',
             entries: [],
-            identities: [{ dev: 1n, ino: 999n, ctimeMs: 5, mode: 0o40755 }],
+            identities: [{ dev: 1n, ino: 999n, ctimeNs: 5n, mode: 0o40755 }],
           });
         }
       },
@@ -594,7 +594,32 @@ describe('SessionFilesystem.readFile from the working tree', () => {
       tree,
       onOpen: (rel, attempt, staged) => {
         if (rel === 'a.ts' && attempt === 2) {
-          staged.set('a.ts', textFile('hello', { identities: [{ dev: 1n, ino: 7n, ctimeMs: 9, mode: 0o100644 }] }));
+          staged.set('a.ts', textFile('hello', { identities: [{ dev: 1n, ino: 7n, ctimeNs: 9n, mode: 0o100644 }] }));
+        }
+      },
+    });
+
+    // Act
+    const error = await refusalFrom(async () => await filesystem.readFile(CWD, 'a.ts'));
+
+    // Assert
+    should(error.code).eql('not_found');
+    should(error.message).match(/changed while its secrets policy/);
+  });
+
+  it('should refuse a file whose only change is a nanosecond of ctime, the trace an ABA rename leaves', async () => {
+    // Arrange — the same device, inode and mode at every step: the name came back to the original object,
+    // and the one thing that moved is the change time the round trip stamped on it.
+    const same = { dev: 1n, ctimeNs: 1_000_000_000n, mode: 0o40755 };
+    const { filesystem } = viewer({
+      tree: treeOf(['a.ts', textFile('hello')]),
+      onOpen: (rel, attempt, staged) => {
+        if (rel === 'a.ts' && attempt === 2) {
+          const identities = [
+            { ...same, ino: 100n },
+            { ...same, ino: 101n, ctimeNs: 1_000_000_001n },
+          ];
+          staged.set('a.ts', textFile('hello', { identities }));
         }
       },
     });
@@ -977,7 +1002,7 @@ describe('SessionFilesystem.diff', () => {
         tree,
         onOpen: (rel, attempt, staged) => {
           if (rel === 'a.ts' && attempt === 2) {
-            staged.set('a.ts', textFile('x', { identities: [{ dev: 2n, ino: 2n, ctimeMs: 2, mode: 0o100644 }] }));
+            staged.set('a.ts', textFile('x', { identities: [{ dev: 2n, ino: 2n, ctimeNs: 2n, mode: 0o100644 }] }));
           }
         },
       },
