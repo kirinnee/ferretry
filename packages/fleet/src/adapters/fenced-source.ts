@@ -45,6 +45,8 @@ export interface SourceFence extends StateHomeFence {
   readonly hardLinkRoots?: readonly string[];
   /** The home's key files and folders, judged by identity wherever they are met (`resolveStateHomes`). */
   readonly pinned?: readonly string[];
+  /** A home not made yet is fenced by name instead of failing closed (`resolveStateHomes`). */
+  readonly homesMayBeUnmade?: boolean;
 }
 
 /** The fence as the disk has it now. */
@@ -102,7 +104,12 @@ export async function resolveSourceFence(
   const immutable = await resolveImmutableRoots(fence.hardLinkRoots ?? HARD_LINK_ROOTS, disk).catch(() => undefined);
   return {
     homes: await resolveStateHomes(
-      { homes: fence.homes, openings, ...(fence.pinned === undefined ? {} : { pinned: fence.pinned }) },
+      {
+        homes: fence.homes,
+        openings,
+        ...(fence.pinned === undefined ? {} : { pinned: fence.pinned }),
+        ...(fence.homesMayBeUnmade === true ? { homesMayBeUnmade: true } : {}),
+      },
       disk,
     ),
     links: { hops: 'every', hardLinks: immutable === undefined ? 'refuse' : { allowUnder: immutable } },

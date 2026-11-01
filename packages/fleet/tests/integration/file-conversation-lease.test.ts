@@ -645,6 +645,21 @@ describe('FileConversationLeaseStore through checked folder handles, with the st
     },
   );
 
+  it('should claim on a fresh machine, where the home holds nothing but the fleet yet', async () => {
+    // Arrange — `fy history claim` before the daemon's first start has made the state and config folders.
+    const home = path.join(await realpath(await temporaryDirectory()), '.ferretry');
+    const fleet = path.join(home, 'fleet');
+    await mkdir(fleet, { recursive: true });
+    const store = fencedConversationLeaseStore({ stateHome: home, fleetDirectory: fleet }, new FakeStarts(new Map()));
+
+    // Act
+    const outcome = await store.claim(claim({ pid: 10 }), unknown);
+
+    // Assert
+    should(outcome).match({ kind: 'claimed', decision: 'create' });
+    should((await readdir(home)).toSorted()).eql(['fleet']);
+  });
+
   it('should fail rather than guess when a lease cannot be opened', async () => {
     // Arrange — a lease this user may not read.
     const { fleet, fence } = await world();
@@ -790,6 +805,23 @@ describe('the descriptors a folder step opens', () => {
       closeSync(closing);
       close();
     }
+  });
+
+  it('should keep every opening no-follow and non-blocking, and a new file exclusive', () => {
+    // Act
+    const required = (how: FileOpening): readonly (readonly [string, number])[] => [
+      ['O_NOFOLLOW', constants.O_NOFOLLOW],
+      ['O_NONBLOCK', constants.O_NONBLOCK],
+      ...(how === 'new' ? [['O_EXCL', constants.O_EXCL] as const] : []),
+    ];
+    const missing = (Object.entries(FILE_OPENINGS) as [FileOpening, number][]).flatMap(([how, flags]) =>
+      required(how)
+        .filter(([, flag]) => (flags & flag) !== flag)
+        .map(([name]) => `${how} lacks ${name}`),
+    );
+
+    // Assert
+    should(missing).eql([]);
   });
 
   it.each(Object.keys(FILE_OPENINGS) as FileOpening[])('should open %s close-on-exec', async how => {

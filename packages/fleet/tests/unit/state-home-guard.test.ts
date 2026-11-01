@@ -62,6 +62,64 @@ describe('resolveStateHomes', () => {
     should(file).be.instanceOf(StateHomeUnresolvedError);
     should(relative).be.instanceOf(TypeError);
   });
+
+  it('should still fail closed, where a home may be not made yet, for one that is there but cannot be identified', async () => {
+    const { disk } = await world();
+    disk.link('/loop', '/loop');
+    const unmade = { homesMayBeUnmade: true } as const;
+
+    const file = await resolveStateHomes({ homes: ['/work/a.txt'], ...unmade }, disk).catch((error: unknown) => error);
+    const below = await resolveStateHomes({ homes: ['/work/a.txt/state'], ...unmade }, disk).catch(
+      (error: unknown) => error,
+    );
+    const looping = await resolveStateHomes({ homes: ['/loop/state'], ...unmade }, disk).catch(
+      (error: unknown) => error,
+    );
+
+    should(file).be.instanceOf(StateHomeUnresolvedError);
+    should(below).be.instanceOf(StateHomeUnresolvedError);
+    should(looping).be.instanceOf(StateHomeUnresolvedError);
+  });
+
+  it('should fence a home not made yet by its name, at the real place of the folder above it', async () => {
+    // Arrange — a fresh machine: no home at all, and one named through the link to `/fy` that is not made yet.
+    const { disk } = await world();
+
+    // Act
+    const homes = await resolveStateHomes({ homes: ['/nope/deeper', '/link-fy/later'], homesMayBeUnmade: true }, disk);
+
+    // Assert — known by name and real place; by no identity, since none exists to be bound.
+    should(homes.homes).match([
+      { named: '/nope/deeper', real: '/nope/deeper', device: -1n, inode: -1n },
+      { named: '/link-fy/later', real: '/fy/later', device: -1n, inode: -1n },
+    ]);
+  });
+
+  it('should still refuse what is in a home whose state folder is not made yet', async () => {
+    // Arrange — the daemon has not laid its state folder out yet; the home itself is there.
+    const { disk } = await world();
+    disk.move('/fy/state', '/elsewhere');
+    const homes = await resolveStateHomes({ homes: ['/fy/state'], homesMayBeUnmade: true }, disk);
+
+    // Act
+    const byName = stateHomeByName(homes, '/fy/state/secrets.key');
+    const outside = await judgeOutsideStateHomes('/work/a.txt', homes, disk);
+
+    // Assert — the state folder is fenced as it will be laid out, and nothing outside the home is.
+    should(byName).match({ inside: true, home: '/fy/state' });
+    should(rule(outside)).equal('ok');
+  });
+
+  it('should refuse an opening that is not there, as before: only a home may be not made yet', async () => {
+    const { disk } = await world();
+
+    const missing = await resolveStateHomes(
+      { homes: ['/fy'], openings: ['/fy/nope'], homesMayBeUnmade: true },
+      disk,
+    ).catch((error: unknown) => error);
+
+    should(missing).be.instanceOf(StateHomeUnresolvedError);
+  });
 });
 
 describe('stateHomeByName', () => {

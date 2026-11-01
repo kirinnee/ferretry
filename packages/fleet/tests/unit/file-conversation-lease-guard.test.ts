@@ -174,3 +174,47 @@ describe('fencedConversationLeaseStore — the store `fy history claim` claims t
     should(refused.message).not.match(/state home/u);
   });
 });
+
+describe('fencedConversationLeaseStore — on a fresh machine, before the daemon lays the home out', () => {
+  it('should fence a home whose state and config folders are not made yet, by name, rather than refuse every claim', async () => {
+    // Arrange — only the fleet's pool is there; `/fy/state` and `/fy/config` are not made yet. A lease folder that is,
+    // by identity, the home itself is still refused.
+    const disk = new FakeGuardDisk(true);
+    disk.dir('/fy');
+    disk.dir(FLEET);
+    disk.dir(`${FLEET}/shared`);
+    disk.dir(`${FLEET}/shared/claude`);
+    disk.bind(LEASES, '/fy');
+    const store = fencedConversationLeaseStore(
+      { stateHome: '/fy', fleetDirectory: FLEET },
+      { startOf: async () => undefined },
+      { disk, loadLock: () => ({ tryLock: () => true }) },
+    );
+
+    // Act
+    const refused = await refusalOf(store.claim(CLAIM, unknown));
+
+    // Assert — the fence resolved, and refused the folder; nothing was written.
+    should(refused.message).match(/inside this daemon's state home/u);
+    should(disk.written).deepEqual([]);
+  });
+
+  it('should still fail closed where a home is there but cannot be identified', async () => {
+    // Arrange — a file where the state folder must be.
+    const disk = new FakeGuardDisk(true);
+    disk.dir('/fy');
+    disk.file('/fy/state', 1, 'x');
+    disk.dir(FLEET);
+    const store = fencedConversationLeaseStore(
+      { stateHome: '/fy', fleetDirectory: FLEET },
+      { startOf: async () => undefined },
+      { disk, loadLock: () => ({ tryLock: () => true }) },
+    );
+
+    // Act
+    const refused = await refusalOf(store.claim(CLAIM, unknown));
+
+    // Assert
+    should(refused.message).equal('the daemon’s state home cannot be resolved');
+  });
+});

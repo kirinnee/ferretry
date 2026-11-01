@@ -24,6 +24,11 @@ export interface StateHomeFence {
 /** The fence with the state home's key files and folders, which the guard judges by identity wherever they are met. */
 export interface PinnedStateHomeFence extends StateHomeFence {
   readonly pinned: readonly string[];
+  /**
+   * A home not made yet is fenced by name rather than failing closed: `fy history claim` runs before the daemon's
+   * first start has laid the home out, and a home that is not there holds nothing (`resolveStateHomes`).
+   */
+  readonly homesMayBeUnmade: true;
 }
 
 /**
@@ -39,6 +44,7 @@ export function stateHomeFence(home: string): PinnedStateHomeFence {
   return {
     homes: [home, state, join(home, 'config')],
     open: [join(fleet, 'assets')],
+    homesMayBeUnmade: true,
     pinned: [
       join(home, 'api-token'),
       join(home, 'api-warden-token'),
