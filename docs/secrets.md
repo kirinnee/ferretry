@@ -494,8 +494,10 @@ owner narrowed its scope to one board project or one session), **for up to 90 da
 > This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop
 > a ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
 
-**Nothing fills under a rule yet.** The service, the file, the routes, suspension and history are built. The matcher
-that fills under a rule comes next, and the app after it. `sign-in-rules.1` stays unadvertised until then.
+**No rule fills until the app ships.** The service, the file, the routes, suspension, history and the fills through the
+shared matcher ([input requests › Standing rule fills](input-requests.md#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret))
+are built; `sign-in-rules.1` stays unadvertised until the app draws the rule sheet and its cards, and until then every
+sign-in a rule would cover is a normal card.
 
 ### Only the owner, a fresh passkey every time, bound to the bytes
 

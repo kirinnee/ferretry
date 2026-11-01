@@ -2,8 +2,9 @@ import type { GrantMissReason, LoginFieldRole, SignInId } from '@ferretry/protoc
 import { SECOND_FACTOR_WINDOW_MS } from '../input-requests/login-observer.ts';
 
 /**
- * USES, ATTEMPTS AND THE RATE LIMIT of grant fills (docs/input-requests.md, "Task plan fills"). In memory: a restart
- * forgets it along with every plan.
+ * USES, ATTEMPTS AND THE RATE LIMIT of grant fills (docs/input-requests.md, "Task plan fills", "Standing rule fills").
+ * ONE instance, shared by every grant source (plan lines and standing rules), so the rate counts both. In memory: a
+ * restart forgets the attempts, pins and rate; a standing rule's count of uses is the rule service's, on disk.
  *
  * - **Synchronous.** {@link SignInGrantLedger.reserve} runs inside the session lock right before the write, and counts
  *   what is reserved and not yet settled, so two raises can never both spend a line's last use (the paste rules'
@@ -28,7 +29,14 @@ const HOUR_MS = 3_600_000;
 export interface LedgerGrant {
   readonly id: string;
   readonly signIn: SignInId;
+  /** `Infinity` for a standing rule with no cap. */
   readonly remaining: number;
+  /**
+   * A code-only fill must JOIN an open attempt of this grant that already typed the password (a standing rule): a stored
+   * code is never typed into a "confirm with 2FA" form outside a sign-in the grant filled. Otherwise
+   * `code-without-sign-in`.
+   */
+  readonly codeJoinsPassword?: boolean;
 }
 
 /** A fill held against the ledger until it is spent or released. */
@@ -54,15 +62,16 @@ const recent = (times: readonly number[] | undefined, now: number): number[] =>
   (times ?? []).filter(at => at > now - HOUR_MS);
 
 export class SignInGrantLedger {
-  readonly #attempts = new Map<string, Attempt>();
+  /** Per grant, per session: a standing rule fills for many sessions, and one session's steps never join another's. */
+  readonly #attempts = new Map<string, Map<string, Attempt>>();
   readonly #pins = new Map<string, Map<string, string>>();
   readonly #bySignIn = new Map<SignInId, number[]>();
   readonly #bySession = new Map<string, number[]>();
   readonly #open = new Set<GrantReservation>();
 
-  /** Whether a grant has an attempt open now: a later step of that sign-in may still join it. */
-  joinable(grant: string, now: number): boolean {
-    const attempt = this.#attempts.get(grant);
+  /** Whether a grant has an attempt open now in this session: a later step of that sign-in may still join it. */
+  joinable(grant: string, sessionId: string, now: number): boolean {
+    const attempt = this.#attempts.get(grant)?.get(sessionId);
     return attempt !== undefined && now - attempt.opened < SECOND_FACTOR_WINDOW_MS;
   }
 
@@ -79,12 +88,21 @@ export class SignInGrantLedger {
     now: number,
   ): GrantReservation | GrantMissReason {
     const pending = [...this.#open];
-    const attempt = this.#attempts.get(grant.id);
+    const attempt = this.#attempts.get(grant.id)?.get(sessionId);
     const typed = new Set([
       ...(attempt?.roles ?? []),
-      ...pending.filter(each => each.grant === grant.id && !each.opens).flatMap(each => each.roles),
+      ...pending
+        .filter(each => each.grant === grant.id && each.sessionId === sessionId && !each.opens)
+        .flatMap(each => each.roles),
     ]);
-    const joins = this.joinable(grant.id, now) && roles.every(role => !typed.has(role));
+    const joins = this.joinable(grant.id, sessionId, now) && roles.every(role => !typed.has(role));
+    if (
+      grant.codeJoinsPassword === true &&
+      roles.length > 0 &&
+      roles.every(role => role === 'totp') &&
+      (!joins || attempt?.roles.has('password') !== true)
+    )
+      return 'code-without-sign-in';
     if (!joins) {
       const opening = pending.filter(each => each.grant === grant.id && each.opens).length;
       if (grant.remaining - opening <= 0) return 'used-up';
@@ -118,9 +136,11 @@ export class SignInGrantLedger {
     const { grant, at, fieldSet } = reservation;
     this.#bySignIn.set(reservation.signIn, [...recent(this.#bySignIn.get(reservation.signIn), at), at]);
     this.#bySession.set(reservation.sessionId, [...recent(this.#bySession.get(reservation.sessionId), at), at]);
-    const attempt = this.#attempts.get(grant);
+    const attempts = this.#attempts.get(grant) ?? new Map<string, Attempt>();
+    this.#attempts.set(grant, attempts);
+    const attempt = attempts.get(reservation.sessionId);
     if (reservation.opens || attempt === undefined)
-      this.#attempts.set(grant, { opened: at, roles: new Set(reservation.roles) });
+      attempts.set(reservation.sessionId, { opened: at, roles: new Set(reservation.roles) });
     else for (const role of reservation.roles) attempt.roles.add(role);
     if (identity !== undefined) {
       const pins = this.#pins.get(grant) ?? new Map<string, string>();

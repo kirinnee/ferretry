@@ -18,7 +18,7 @@ import {
 } from '../../../src/lib/index.ts';
 import { AgendaBuzz, type BuzzSink } from '../../../src/lib/notifications/buzz.ts';
 import { SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
-import type { SignInGrant } from '../../../src/lib/sign-in-grants/matcher.ts';
+import { NO_SCRIPTED_ORIGINS, type SignInGrant } from '../../../src/lib/sign-in-grants/matcher.ts';
 import type { SignInGrantSource } from '../../../src/lib/sign-in-grants/plans.ts';
 import { FACTS, SESSION } from './support.ts';
 
@@ -260,6 +260,10 @@ describe('a sign-in a task-plan line fills is raised quiet', () => {
       ledger: new SignInGrantLedger(),
       used: () => undefined,
       stopped: async () => undefined,
+      verify: async () => ({ ok: true }),
+      holds: () => true,
+      projectOf: async () => undefined,
+      scriptedOrigins: () => NO_SCRIPTED_ORIGINS,
       ...source,
     };
     const service = new InputRequestService({

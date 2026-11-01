@@ -65,7 +65,7 @@ import { auditText, ruleFieldWords, stagedSummary } from './words.ts';
  *
  * Rules live in `<state>/accounts/sign-in-rules.json`. A file that does not parse means ZERO rules (`health:
  * damaged`): every sign-in asks, the owner is warned, and it is audited; the owner's next write moves it aside, never
- * deletes it. Every record's proof is checked again, offline, at load, whenever a passkey or device goes, and (R3c-4)
+ * deletes it. Every record's proof is checked again, offline, at load, whenever a passkey or device goes, and
  * before every fill. A record whose proof does not verify, or whose pinned facts drifted, is SUSPENDED.
  *
  * ## SUSPENSION IS STICKY AND NEVER SILENT
@@ -74,10 +74,10 @@ import { auditText, ruleFieldWords, stagedSummary } from './words.ts';
  * Changing the fact back resumes nothing: only a new stage and passkey does (`revision` + 1). No card is raised in a
  * ferret's session for it (R3c §18): a ferret learns nothing about rules.
  *
- * ## NO FILLS HERE
+ * ## IT DECIDES WHAT A RULE IS, NOT WHETHER ONE FILLS
  *
- * This service decides what a rule IS; the matcher (R3c-4) decides whether one fills. `sign-in-rules.1` stays
- * unadvertised until the app ships.
+ * The shared matcher decides that (`sign-in-grants/rules.ts` reads {@link fillable}, {@link verified} and
+ * {@link fillCheck}). `sign-in-rules.1` stays unadvertised until the app ships, and until then no rule fills.
  */
 
 /** The rules file. `read` rejects when the file cannot be read or does not parse: that is damage, never "no rules". */
@@ -824,7 +824,7 @@ export class SignInRuleService {
 
   /**
    * A PAGE SCRIPT RAN ON `host` (any session): every rule pinned to that login domain is suspended (`scripted-origin`),
-   * persisted, so a planted service worker or storage can't wait out a restart. Wired to the browser tools in R3c-4.
+   * persisted, so a planted service worker or storage can't wait out a restart. Told by the browser tools (`browser.eval`).
    */
   async scriptedOn(host: string): Promise<void> {
     // Queued behind a load still reading the file, so a change made meanwhile is checked against what it reads.
@@ -836,6 +836,59 @@ export class SignInRuleService {
           .map(record => ({ id: record.body.id, because: 'scripted-origin' as const, revision: record.body.revision })),
       );
     });
+  }
+
+  /**
+   * A PAGE SCRIPT RAN WHERE ITS ORIGIN COULD NOT BE READ (R3c-4): it may have run on any login domain, so every rule is
+   * suspended (`scripted-origin`). Fails closed: denial of service at most, never a fill.
+   */
+  async scriptedEverywhere(): Promise<void> {
+    await this.#serial(async () => {
+      if (this.#health !== 'ok') return;
+      await this.#suspendAll(
+        this.#records
+          .filter(record => record.suspended === undefined)
+          .map(record => ({ id: record.body.id, because: 'scripted-origin' as const, revision: record.body.revision })),
+      );
+    });
+  }
+
+  /**
+   * THE RULES A FILL READS, as they stand in memory now (R3c-4, `RuleSignInGrants`). Synchronous, so the input
+   * service's last check before typing asks it with nothing awaited. None while the file is loading or damaged.
+   */
+  fillable(): readonly SignInRuleRecord[] {
+    return this.#health === 'ok' ? this.#records : [];
+  }
+
+  /**
+   * ONE RULE CHECKED AGAIN FOR A FILL, offline, right before it types (R3c-4; secrev-1274b L1 and N3): its signed
+   * window against the clock, its proof against the registry, and its pinned facts against the accounts now. A proof or
+   * a fact that no longer holds suspends it here with its own reason. `gone`: revoked or approved again since;
+   * `unknown`: the registry or the accounts could not be read, so nothing fills and nothing is suspended.
+   */
+  async fillCheck(
+    id: SignInRuleId,
+    revision: number,
+  ): Promise<'ok' | 'gone' | 'unknown' | 'suspended' | SignInRuleSuspension> {
+    const record = this.fillable().find(each => each.body.id === id && each.body.revision === revision);
+    if (record === undefined) return 'gone';
+    if (record.suspended !== undefined) return 'suspended';
+    let because: SignInRuleSuspension | undefined;
+    if (signInRuleClockProblems(record.body, this.ports.clock.now()).length > 0) because = 'proof-invalid';
+    else {
+      const proof = await checkRuleProof(record, this.ports.proofs);
+      if (proof === 'unknown') return 'unknown';
+      if (proof !== 'ok') because = proof;
+      else {
+        const listing = await this.ports.accounts.listing().catch(() => undefined);
+        if (listing === undefined) return 'unknown';
+        because = ruleDrift(record.body, listing);
+      }
+    }
+    if (because === undefined) return 'ok';
+    await this.suspend(id, because, { revision });
+    return because;
   }
 
   /**

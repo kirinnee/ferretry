@@ -17,6 +17,7 @@ import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.t
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
 import { LoginDirectory, LoginVault, totpCode } from '../../../src/lib/secrets/index.ts';
 import type { ClearJob, ClearOutcome } from '../../../src/lib/sign-in-grants/clear.ts';
+import { SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
 import { type PlanGrantLines, PlanSignInGrants } from '../../../src/lib/sign-in-grants/plans.ts';
 import type { ApprovedSignInLine } from '../../../src/lib/task-plans/service.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments, plantSeed } from '../runtime/mounts/support.ts';
@@ -161,6 +162,7 @@ function harness(options: Options = {}) {
     plans,
     async account => (await directory.accounts.seedTarget(account).catch(() => undefined))?.key,
     () => enabled,
+    new SignInGrantLedger(),
   );
   let service: InputRequestService;
   service = new InputRequestService({

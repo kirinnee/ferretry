@@ -176,7 +176,12 @@ class FakeBrowserPages implements Pick<
   document: string | undefined = 'loader-1';
   /** Runs, oldest first, just before each act reaches its in-queue guard: something landing while the act waited. */
   readonly beforeGuard: (() => void | Promise<void>)[] = [];
-  private readonly guardPage = { document: async (): Promise<string | undefined> => this.document };
+  /** The host every page is on, as an act's in-queue guard reads it from the live page; `undefined`: unreadable. */
+  host: string | undefined = 'github.com';
+  private readonly guardPage = {
+    document: async (): Promise<string | undefined> => this.document,
+    host: async (): Promise<string | undefined> => this.host,
+  };
 
   /** An act's in-queue guard, after whatever a case lets land while the act waited in the queue. */
   private async guarded(guard: BrowserActGuard | undefined): Promise<void> {
@@ -462,6 +467,7 @@ export function agentToolWorld(
     | 'accounts'
     | 'recipes'
     | 'loginActs'
+    | 'scriptedOrigins'
   > &
     Partial<Pick<AgentToolPorts, 'redactor'>> = {},
 ) {

@@ -1,20 +1,29 @@
 import { describe, it } from 'bun:test';
-import type {
-  AccountId,
-  AccountKey,
-  AccountSummary,
-  InputRequestField,
-  InputTargetFacts,
-  SignInId,
-  SignInSummary,
+import {
+  type AccountId,
+  type AccountKey,
+  type AccountSummary,
+  factorFingerprint,
+  type InputRequestField,
+  type InputTargetFacts,
+  type SignInId,
+  type SignInRuleId,
+  type SignInSummary,
 } from '@ferretry/protocol';
 import should from 'should';
 import { identityOf } from '../../../src/lib/input-requests/login-observer.ts';
-import { type GrantSighting, matchSignInGrant, type SignInGrant } from '../../../src/lib/sign-in-grants/matcher.ts';
+import {
+  type GrantSighting,
+  matchSignInGrant,
+  NO_SCRIPTED_ORIGINS,
+  type SignInGrant,
+} from '../../../src/lib/sign-in-grants/matcher.ts';
 
 /**
- * THE SHARED MATCHER, one row per check (docs/input-requests.md, "Task plan fills"): each row's facts fail exactly that
- * check, and the miss names it. Pure, so every row is just facts in, a reason out.
+ * THE SHARED MATCHER, one row per check (docs/input-requests.md, "Task plan fills", "Standing rule fills"): each row's
+ * facts fail exactly that check, and the miss names it. Pure, so every row is just facts in, a reason out. The table runs
+ * for BOTH sources, a plan line and a standing rule (R3c invariant 11): every check a plan line passes, a rule passes
+ * too; the rule's own rows (1b, 2b, 8, 15b, 17) follow.
  */
 
 const NOW = Date.parse('2026-11-01T12:00:00.000Z');
@@ -115,6 +124,28 @@ const grant = (over: Partial<SignInGrant> = {}): SignInGrant => ({
   ...over,
 });
 
+/** A standing rule for the same sign-in, approved an hour ago with the owner's history of this very form, for any ferret. */
+const RULE = 'sr_0123456789abcdef01234567' as SignInRuleId;
+const ruleGrant = (over: Partial<SignInGrant> = {}): SignInGrant => {
+  const { sessionId: _plansOnly, plan: _plan, ...base } = grant();
+  return {
+    ...base,
+    id: `rule:${RULE}:1`,
+    source: 'rule',
+    rule: { id: RULE, revision: 1 },
+    scope: { kind: 'any' },
+    accountPins: { id: 'GITHUB' as AccountId, username: 'kirinnee', factors: factorFingerprint([]) },
+    approvedAt: NOW - 3_600_000,
+    pins: {
+      placeKeys: ['github.com'],
+      recipeVersion: undefined,
+      identities: [identityOf(page(), 'github.com') as string],
+    },
+    remaining: Number.POSITIVE_INFINITY,
+    ...over,
+  };
+};
+
 function sighting(over: Partial<GrantSighting> = {}, listing?: Partial<GrantSighting['listing']>): GrantSighting {
   const facts = over.facts ?? page();
   return {
@@ -126,6 +157,7 @@ function sighting(over: Partial<GrantSighting> = {}, listing?: Partial<GrantSigh
     listing: { accounts: [account()], signIns: [site()], ...listing },
     keys: new Map([['GITHUB' as AccountId, KEY]]),
     scripted: false,
+    scriptedOrigins: NO_SCRIPTED_ORIGINS,
     now: NOW,
     ...over,
   };
@@ -159,11 +191,18 @@ describe('matchSignInGrant: every check holds or nothing is typed (one row per c
     readonly seen?: Partial<GrantSighting>;
     readonly listing?: Partial<GrantSighting['listing']>;
     readonly reason: string;
+    /** What a standing rule says instead, when it differs (a rule for any ferret has no session; it is suspended, not stopped). */
+    readonly rule?: string;
   }[] = [
     { check: '1 expired', grant: { expiresAt: NOW }, reason: 'expired' },
-    { check: '1 another session', seen: { sessionId: 'mvv6b4qw-49d0158e' }, reason: 'other-session' },
-    { check: '1 a sub-ferret', seen: { sessionId: `${SESSION}-child` }, reason: 'other-session' },
-    { check: '1 stopped', grant: { state: 'stopped' }, reason: 'stopped' },
+    {
+      check: '1 another session',
+      seen: { sessionId: 'mvv6b4qw-49d0158e' },
+      reason: 'other-session',
+      rule: 'filled',
+    },
+    { check: '1 a sub-ferret', seen: { sessionId: `${SESSION}-child` }, reason: 'other-session', rule: 'filled' },
+    { check: '1 stopped', grant: { state: 'stopped' }, reason: 'stopped', rule: 'suspended' },
     { check: '2 the sign-in removed', listing: { signIns: [] }, reason: 'sign-in-gone' },
     {
       check: '2 the sign-in on another account',
@@ -236,6 +275,8 @@ describe('matchSignInGrant: every check holds or nothing is typed (one row per c
       check: '8 no username saved',
       listing: { accounts: [account({ username: undefined })] },
       reason: 'account-lacks-field',
+      // A rule pinned the username it was approved with: a username gone is the account changed.
+      rule: 'account-changed',
     },
     {
       check: '10 http',
@@ -308,10 +349,14 @@ describe('matchSignInGrant: every check holds or nothing is typed (one row per c
     },
   ];
 
-  for (const row of rows)
-    it(`check ${row.check}: ${row.reason}`, () => {
+  for (const row of rows) {
+    it(`check ${row.check}: ${row.reason} (a plan line)`, () => {
       should(reasonOf(grant(row.grant), sighting(row.seen, row.listing))).equal(row.reason);
     });
+    it(`check ${row.check}: ${row.rule ?? row.reason} (a standing rule)`, () => {
+      should(reasonOf(ruleGrant(row.grant), sighting(row.seen, row.listing))).equal(row.rule ?? row.reason);
+    });
+  }
 
   it('checks 13–16 on a code card: it fills with the code tick, and an unseen code field or no automatic key misses', () => {
     const factor = {
@@ -407,4 +452,170 @@ describe('matchSignInGrant: terminal lines are sudo, su or doas running setuid r
       // the row still proves the checks behind it on their own.
       should(reasonOf(sudoGrant(), sudoSeen(row.facts))).equal(row.reason);
     });
+});
+
+describe('matchSignInGrant: a standing rule’s own checks (R3c-4)', () => {
+  const PROJECT = '0b4cbd4a-6f1c-4d3c-9d55-2a3f5f1c9e01';
+  const OTHER_PROJECT = '0b4cbd4a-6f1c-4d3c-9d55-2a3f5f1c9e02';
+  const key = (id: string, addedAt: string, verified?: boolean) =>
+    ({
+      id,
+      kind: 'totp' as const,
+      label: id,
+      automatic: true,
+      addedAt,
+      addedBy: 'owner' as const,
+      ...(verified === undefined ? {} : { verified: { worked: verified, at: AT } }),
+    }) as AccountSummary['factors'][number];
+  const codePage = page({}, [pageField('otp', {}, { type: 'text', autocomplete: 'one-time-code' })]);
+  const CODE_FIELDS: InputRequestField[] = [{ id: 'otp', label: 'Code', sensitivity: 'code' }];
+
+  it('1b: a rule for any ferret fills in every session, and its sub-ferrets', () => {
+    for (const sessionId of [SESSION, 'mvv6b4qw-49d0158e', `${SESSION}-child`])
+      should(reasonOf(ruleGrant(), sighting({ sessionId }))).equal('filled');
+  });
+
+  it('1b: a rule for one session fills there only, never its children (and it is no suspension)', () => {
+    const scoped = ruleGrant({ scope: { kind: 'session', session: SESSION } });
+    should(reasonOf(scoped, sighting())).equal('filled');
+    should(reasonOf(scoped, sighting({ sessionId: `${SESSION}-child` }))).equal('out-of-scope');
+    should(reasonOf(scoped, sighting({ sessionId: 'mvv6b4qw-49d0158e' }))).equal('out-of-scope');
+  });
+
+  it('1b: a rule for one project fills only a session STAMPED with it; none stamped (folder-read, Unfiled) misses', () => {
+    const scoped = ruleGrant({ scope: { kind: 'project', project: PROJECT } });
+    should(reasonOf(scoped, sighting({ project: PROJECT }))).equal('filled');
+    should(reasonOf(scoped, sighting({ project: OTHER_PROJECT }))).equal('out-of-scope');
+    should(reasonOf(scoped, sighting())).equal('out-of-scope');
+  });
+
+  it('1b: a rule with no scope fills for nobody', () => {
+    should(reasonOf(ruleGrant({ scope: undefined }), sighting())).equal('out-of-scope');
+  });
+
+  it('2b: a renamed account (same key, new handle) is the account changed', () => {
+    const renamed = account({ id: 'GITHUB_WORK' as AccountId });
+    const seen = sighting(
+      { keys: new Map([['GITHUB_WORK' as AccountId, KEY]]) },
+      { accounts: [renamed], signIns: [site({ account: 'GITHUB_WORK' as AccountId })] },
+    );
+    should(reasonOf(ruleGrant(), seen)).equal('account-changed');
+    // A plan line pins only the key: the rename is no change to it.
+    should(reasonOf(grant(), seen)).equal('filled');
+  });
+
+  it('2b: a new username is the account changed; a rule with no account pins fills nothing', () => {
+    should(reasonOf(ruleGrant(), sighting({}, { accounts: [account({ username: 'someone-else' })] }))).equal(
+      'account-changed',
+    );
+    should(reasonOf(ruleGrant({ accountPins: undefined }), sighting())).equal('account-changed');
+  });
+
+  it('8: any change to the account’s 2FA keys is the factors changed, even for a rule that types no code', () => {
+    const added = sighting({}, { accounts: [account({ factors: [key('tf_0123456789abcdef01234567', AT)] })] });
+    should(reasonOf(ruleGrant(), added)).equal('factor-changed');
+    should(reasonOf(grant(), added)).equal('filled');
+  });
+
+  it('8: the code comes from the PINNED key, never the first key by `verified` order (secrev-1241 I1)', () => {
+    const pinned = key('tf_00000000000b', '2026-09-01T00:00:00.000Z', false);
+    const steered = key('tf_00000000000a', '2026-08-01T00:00:00.000Z', true);
+    const factors = [steered, pinned];
+    const codeIdentity = identityOf(codePage, 'github.com') as string;
+    const rule = ruleGrant({
+      fields: new Set(['username', 'password', 'totp']),
+      factor: pinned.id,
+      accountPins: { id: 'GITHUB' as AccountId, username: 'kirinnee', factors: factorFingerprint(factors) },
+      pins: { placeKeys: ['github.com'], recipeVersion: undefined, identities: [codeIdentity] },
+    });
+    const seen = sighting(
+      { facts: codePage, fields: CODE_FIELDS },
+      { accounts: [account({ fields: { password: true, totp: true }, factors })] },
+    );
+    should(matchSignInGrant(rule, seen, new Map())).match({ ok: true, fills: ['totp'], factor: pinned.id });
+    // A plan line still takes the first key in offer order: the steered one.
+    should(matchSignInGrant(grant({ fields: rule.fields }), seen, new Map())).match({ ok: true, factor: steered.id });
+  });
+
+  it('8: a pinned key that is gone or no longer automatic, or a code tick with no pinned key, makes no code', () => {
+    const pinned = key('tf_00000000000b', AT);
+    const manual = { ...pinned, automatic: false } as AccountSummary['factors'][number];
+    const codeIdentity = identityOf(codePage, 'github.com') as string;
+    const ruleWith = (factors: AccountSummary['factors'], factor?: string) =>
+      ruleGrant({
+        fields: new Set(['username', 'password', 'totp']),
+        ...(factor === undefined ? {} : { factor: factor as SignInGrant['factor'] }),
+        accountPins: { id: 'GITHUB' as AccountId, username: 'kirinnee', factors: factorFingerprint(factors) },
+        pins: { placeKeys: ['github.com'], recipeVersion: undefined, identities: [codeIdentity] },
+      });
+    const seenWith = (factors: AccountSummary['factors']) =>
+      sighting({ facts: codePage, fields: CODE_FIELDS }, { accounts: [account({ factors })] });
+    should(reasonOf(ruleWith([manual], pinned.id), seenWith([manual]))).equal('factor-changed');
+    should(reasonOf(ruleWith([pinned]), seenWith([pinned]))).equal('factor-changed');
+  });
+
+  it('15b: a page script on one of its login domains since it was approved, in ANY session, stops it', () => {
+    const at = (hosts: [string, number][], everywhere?: number): Partial<GrantSighting> => ({
+      scriptedOrigins: { hosts: new Map(hosts), ...(everywhere === undefined ? {} : { everywhere }) },
+    });
+    should(reasonOf(ruleGrant(), sighting(at([['github.com', NOW - 60_000]])))).equal('scripted-origin');
+    should(reasonOf(ruleGrant(), sighting(at([], NOW - 60_000)))).equal('scripted-origin');
+    const twoPlaces = ruleGrant({
+      pins: {
+        placeKeys: ['github.com', 'login.github.com'],
+        recipeVersion: undefined,
+        identities: ruleGrant().pins.identities,
+      },
+    });
+    const listing = {
+      signIns: [site({ place: { kind: 'site', domains: ['github.com', 'login.github.com'], match: [] } })],
+    };
+    should(reasonOf(twoPlaces, sighting(at([['login.github.com', NOW - 1]]), listing))).equal('scripted-origin');
+    // Before the owner approved it (they approved it knowing), or on another site: it fills.
+    should(reasonOf(ruleGrant(), sighting(at([['github.com', NOW - 7_200_000]])))).equal('filled');
+    should(reasonOf(ruleGrant(), sighting(at([['gitlab.com', NOW - 1]])))).equal('filled');
+    // A plan line reads the session's own taint (15), not the machine's.
+    should(reasonOf(grant(), sighting(at([['github.com', NOW - 1]])))).equal('filled');
+  });
+
+  it('17: a rule never pins a new form — no history at all, or a form outside it, never fills', () => {
+    should(
+      reasonOf(
+        ruleGrant({ pins: { placeKeys: ['github.com'], recipeVersion: undefined, identities: undefined } }),
+        sighting(),
+      ),
+    ).equal('no-history');
+    should(
+      reasonOf(
+        ruleGrant({ pins: { placeKeys: ['github.com'], recipeVersion: undefined, identities: [] } }),
+        sighting(),
+      ),
+    ).equal('no-history');
+    // The same new password form a plan line would pin on its first fill: a rule calls it a changed form.
+    const renamed = page({}, [pageField('user'), pageField('pass', {}, { name: 'pwd' })]);
+    should(reasonOf(ruleGrant(), sighting({ facts: renamed }), new Map())).equal('form-changed');
+    should(reasonOf(grant(), sighting({ facts: renamed }), new Map())).equal('filled');
+  });
+
+  it('17: a username-only or code-only step outside the history asks, and is no suspension', () => {
+    const userOnly = page({}, [pageField('user')]);
+    should(
+      reasonOf(
+        ruleGrant(),
+        sighting({ facts: userOnly, fields: [{ id: 'user', label: 'Username', sensitivity: 'plain' }] }),
+      ),
+    ).equal('no-history');
+    const withCode = ruleGrant({
+      fields: new Set(['username', 'password', 'totp']),
+      factor: 'tf_00000000000b' as SignInGrant['factor'],
+    });
+    const factors = [key('tf_00000000000b', AT)];
+    const codeRule = {
+      ...withCode,
+      accountPins: { id: 'GITHUB' as AccountId, username: 'kirinnee', factors: factorFingerprint(factors) },
+    };
+    should(
+      reasonOf(codeRule, sighting({ facts: codePage, fields: CODE_FIELDS }, { accounts: [account({ factors })] })),
+    ).equal('no-history');
+  });
 });

@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { AccountKey, SignInId } from '@ferretry/protocol';
 import should from 'should';
+import { SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
 import { type PlanGrantLines, PlanSignInGrants } from '../../../src/lib/sign-in-grants/plans.ts';
 import type { ApprovedSignInLine } from '../../../src/lib/task-plans/service.ts';
 
@@ -34,6 +35,7 @@ function source(lines: ApprovedSignInLine[]) {
     plans,
     async () => undefined,
     () => true,
+    new SignInGrantLedger(),
   );
 }
 

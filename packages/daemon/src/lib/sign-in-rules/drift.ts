@@ -17,7 +17,7 @@ import { ineligibleBecause, tappedIdentities } from './eligibility.ts';
 /**
  * PINNED FACTS AND THEIR DRIFT (docs/secrets.md, "Standing sign-in rules"). Pure: a listing comes in, pins or a
  * suspension reason come out. The same snapshot is taken when a rule is staged and again when it is committed, and the
- * same comparison runs after every account change, at load, and (R3c-4) before every fill, so the three can never
+ * same comparison runs after every account change, at load, and before every fill (`fillCheck`), so the three can never
  * disagree about what "the same sign-in" means.
  *
  * What is pinned, and so suspends the rule when it changes: the account's immutable key, its handle and its username;
