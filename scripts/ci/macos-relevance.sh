@@ -50,7 +50,7 @@ containment="${common}|^scripts/ci/darwin-confinement\.sh$"
 containment+='|^packages/daemon/(package\.json|src/(adapters|lib)/(session|filesystem|pins|git|worktrees|migrate|process|tmux|terminal|file-events)/|src/(adapters|lib)/index\.ts|src/lib/tmux-attacher\.ts|tests/integration/(session|migrate|file-events|support|process)/)'
 containment+='|^packages/protocol/(package\.json|src/adapters/process-incarnation|tests/integration/process-incarnation)'
 containment+='|^packages/cli/(package\.json|src/adapters/reads/|tests/integration/reads/)'
-containment+='|^packages/fleet/(package\.json|src/|tests/integration/(descriptor-calls|file-provisioner-destination-fence)\.test\.ts)'
+containment+='|^packages/fleet/(package\.json|src/|tests/integration/(descriptor-calls|file-provisioner-destination-fence|file-shared-history)\.test\.ts)'
 
 # The fy-render sandbox shell: the probe's own harness, the build that generates the shell, the policy
 # it reads (`public/_headers`), the render library the probe imports, and the journey fixture.

@@ -154,6 +154,18 @@ export class SharedHistoryAccessRefusedError extends Error {
   }
 }
 
+/**
+ * The migration cannot be made safely on this host: its folders cannot be reached through their descriptors, so a
+ * step could be redirected into the state home. The migration is not made and is reported as skipped; the rest of an
+ * apply stands.
+ */
+export class SharedHistoryUnavailableError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'SharedHistoryUnavailableError';
+  }
+}
+
 export interface SharedHistoryHome {
   /** Stable, path-safe account identity used only to partition preserved conflicts. */
   readonly account: string;

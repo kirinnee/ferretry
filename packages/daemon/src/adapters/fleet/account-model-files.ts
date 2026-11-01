@@ -299,7 +299,7 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     provisioner: acknowledgingProvisioner(
       new FileFleetProvisioner(
         allowedRoots,
-        new SharedHistoryMigration(new FileSharedHistoryFileSystem(allowedRoots)),
+        new SharedHistoryMigration(new FileSharedHistoryFileSystem(allowedRoots, sourceFence)),
         {},
         sourceFence,
       ),

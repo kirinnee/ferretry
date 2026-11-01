@@ -42,4 +42,6 @@ echo "🧪 Proving the provisioner's destination steps reach the held folder thr
 bun test --config=bunfig.int.toml \
   packages/fleet/tests/integration/descriptor-calls.test.ts \
   packages/fleet/tests/integration/file-provisioner-destination-fence.test.ts
+echo "🧪 Proving a whole shared-history migration goes through the held folders on this kernel..."
+bun test --config=bunfig.int.toml packages/fleet/tests/integration/file-shared-history.test.ts -t "checked folder handles"
 echo "✅ Containment, the process inventory, pane identity, the attach proof, file events and the destination steps hold on $(uname -sm)"

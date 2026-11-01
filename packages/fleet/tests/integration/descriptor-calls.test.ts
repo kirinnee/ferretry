@@ -249,6 +249,7 @@ describe('DescriptorBracket — what it refuses', () => {
           identity: folder.identity,
           entryPath: () => undefined,
           chmod: async () => undefined,
+          sync: async () => undefined,
           close: async () => undefined,
         },
         'b',
@@ -279,6 +280,27 @@ describe('DescriptorBracket — what it refuses', () => {
     // Assert
     should((outcome as Error).message).match(/did not reach the folder installed/u);
     should(ran).be.false();
+  });
+
+  it('should rename across two held folders, and name the errno of a rename that fails', async () => {
+    // Arrange
+    const { skills, folders } = await world();
+    await writeFile(path.join(skills, 'moving'), 'm');
+    await mkdir(path.join(skills, 'into'));
+    const folder = await opened(folders, skills);
+    const into = await opened(folders, path.join(skills, 'into'));
+
+    // Act
+    await folder.renameInto('moving', into, 'moved');
+    const outcome = await folder.renameInto('never-there', into, 'x').catch((error: unknown) => error);
+    const link = await folder.readlink('missing').catch((error: unknown) => error);
+
+    // Assert
+    should(await readFile(path.join(skills, 'into', 'moved'), 'utf8')).equal('m');
+    should((outcome as NodeJS.ErrnoException).code).equal('ENOENT');
+    should((link as NodeJS.ErrnoException).code).equal('ENOENT');
+    await into.close();
+    await folder.close();
   });
 
   it('should name the errno of a hard link that fails', async () => {

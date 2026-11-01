@@ -24,11 +24,12 @@ import {
   symlink,
 } from 'node:fs/promises';
 import { userInfo } from 'node:os';
-import { DescriptorBracket, descriptorHandle } from './descriptor-calls.ts';
+import { DescriptorBracket, descriptorHandle, FILE_OPENINGS } from './descriptor-calls.ts';
 import { loadDirectorySyscalls } from './directory-syscalls.ts';
 import { loadLinkSyscall } from './link-syscall.ts';
 import type {
   FileIdentity,
+  FileOpening,
   FolderDisk,
   GuardDirectoryHandle,
   GuardDisk,
@@ -41,7 +42,6 @@ const COPY_CHUNK_BYTES = 64 * 1024;
 const NEW_FILE =
   constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 const EXISTING_FILE = constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-const READ_FILE = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 const codeOf = (error: unknown): string | undefined => (error as NodeJS.ErrnoException).code;
 const isMissing = (error: unknown): boolean => codeOf(error) === 'ENOENT' || codeOf(error) === 'ENOTDIR';
@@ -222,6 +222,7 @@ export class NodeGuardDisk implements GuardDisk, FolderDisk {
       entryPath: leaf =>
         this.throughDescriptors ? `${this.descriptorFolder}/${String(handle.fd)}/${leaf}` : undefined,
       chmod: async mode => await handle.chmod(mode),
+      sync: async () => await handle.sync(),
       close: async () => await handle.close(),
     };
   }
@@ -287,8 +288,8 @@ export class NodeGuardDisk implements GuardDisk, FolderDisk {
     await link(from, to);
   }
 
-  async openFile(path: string, how: 'read' | 'new', mode: number): Promise<number> {
-    return openSync(path, how === 'read' ? READ_FILE : NEW_FILE, mode);
+  async openFile(path: string, how: FileOpening, mode: number): Promise<number> {
+    return openSync(path, FILE_OPENINGS[how], mode);
   }
 
   async groups(): Promise<readonly number[]> {

@@ -1,4 +1,5 @@
 import { afterEach, describe, it, spyOn } from 'bun:test';
+import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
 import {
   chmod,
@@ -14,10 +15,13 @@ import {
   symlink,
   utimes,
 } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import { FileSharedHistoryFileSystem, sharedHistoryMoveRefusal } from '../../src/adapters/file-shared-history.ts';
+import { FileFleetProvisioner } from '../../src/adapters/file-provisioner.ts';
+import { NodeGuardDisk } from '../../src/adapters/node-guard-disk.ts';
 import { SharedHistoryMigration, type SharedHistoryRequest } from '../../src/lib/shared-history.ts';
 
 const temporaryDirectories: string[] = [];
@@ -556,7 +560,9 @@ describe('FileSharedHistoryFileSystem', () => {
     const listing = fs.readdir;
     const spy = spyOn(fs, 'readdir').mockImplementation((async (target: string, ...rest: unknown[]) => {
       const names = await (listing as (...args: unknown[]) => Promise<string[]>)(target, ...rest);
-      return target === directory ? [...names, 'vanished'] : names;
+      // The folder is listed through its descriptor, so it is recognised by where that leads.
+      const listed = await fs.realpath(String(target)).catch(() => String(target));
+      return listed === directory ? [...names, 'vanished'] : names;
     }) as unknown as typeof fs.readdir);
     const subject = new FileSharedHistoryFileSystem([root]);
 
@@ -844,5 +850,241 @@ describe('shared-history migration with the real filesystem', () => {
     } finally {
       await writer.close();
     }
+  });
+});
+
+describe('shared-history migration through checked folder handles, with the state home fenced', () => {
+  /** Two Claude runtimes under a state home, each with a project transcript and a prompt history. */
+  const fleet = async () => {
+    const machine = await realpath(await temporaryDirectory());
+    const home = path.join(machine, '.ferretry');
+    const homeA = path.join(home, 'fleet', 'homes', 'a');
+    const homeB = path.join(home, 'fleet', 'homes', 'b');
+    const poolRoot = path.join(home, 'fleet', 'shared');
+    await write(path.join(home, 'state', 'secrets.key'), 'vault-key\n');
+    await mkdir(path.join(home, 'config'), { recursive: true });
+    await write(path.join(homeA, 'projects', 'alpha', 'one.jsonl'), 'a1\n');
+    await write(path.join(homeB, 'projects', 'beta', 'two.jsonl'), 'b1\n');
+    await write(path.join(homeA, 'history.jsonl'), '{"display":"from a"}\n');
+    await write(path.join(homeB, 'history.jsonl'), '{"display":"from b"}\n');
+    const fence = { homes: [home, path.join(home, 'state'), path.join(home, 'config')], open: [] };
+    const request: SharedHistoryRequest = {
+      kind: 'claude',
+      poolRoot,
+      homes: [
+        { account: 'a', path: homeA },
+        { account: 'b', path: homeB },
+      ],
+    };
+    return { home, homeA, homeB, poolRoot, fence, request };
+  };
+
+  it.each([
+    ['through descriptor paths (Linux)', undefined],
+    ['through descriptor calls (macOS)', 'calls' as const],
+  ])('should migrate both runtimes into the pool %s', async (_label, reach) => {
+    // Arrange
+    const { home, homeA, homeB, poolRoot, fence, request } = await fleet();
+    const disk = reach === undefined ? undefined : new NodeGuardDisk(reach);
+    const subject = new SharedHistoryMigration(new FileSharedHistoryFileSystem([home], fence, disk));
+
+    // Act
+    const actual = await subject.materialize(request);
+
+    // Assert — every transcript is in the pool, each runtime's folders lead there, the histories are merged, and the
+    // state home is as it was.
+    should(actual.migrated).be.greaterThan(0);
+    const pool = path.join(poolRoot, 'claude');
+    should(await readFile(path.join(pool, 'projects', 'alpha', 'one.jsonl'), 'utf8')).equal('a1\n');
+    should(await readFile(path.join(pool, 'projects', 'beta', 'two.jsonl'), 'utf8')).equal('b1\n');
+    for (const runtime of [homeA, homeB]) {
+      should((await lstat(path.join(runtime, 'projects'))).isSymbolicLink()).be.true();
+      should(await realpath(path.join(runtime, 'projects'))).equal(path.join(pool, 'projects'));
+    }
+    const history = await readFile(path.join(pool, 'history.jsonl'), 'utf8');
+    should(history).containEql('from a');
+    should(history).containEql('from b');
+    should(await readdir(path.join(home, 'state'))).deepEqual(['secrets.key']);
+    should(await readFile(path.join(home, 'state', 'secrets.key'), 'utf8')).equal('vault-key\n');
+  });
+
+  it.each([
+    ['through descriptor paths (Linux)', undefined],
+    ['through descriptor calls (macOS)', 'calls' as const],
+  ])('should make no change by path anywhere in a migration %s', async (_label, reach) => {
+    // Arrange — every call that changes the disk is recorded with the path it was handed. A step made through its
+    // folder hands a descriptor path (`/proc/self/fd/N/…`) or, inside a descriptor bracket, one entry's name.
+    const { home, homeA, poolRoot, fence, request } = await fleet();
+    const disk = reach === undefined ? undefined : new NodeGuardDisk(reach);
+    const files = new FileSharedHistoryFileSystem([home], fence, disk);
+    const subject = new SharedHistoryMigration(files);
+    const byPath: string[] = [];
+    const watch = (path: unknown): void => {
+      if (typeof path === 'string' && path.startsWith('/') && !path.startsWith('/proc/self/fd/')) byPath.push(path);
+    };
+    // A read is judged only inside the state home: the guard itself reads `/etc/group` by path, by design.
+    const watchRead = (path: unknown): void => {
+      if (typeof path === 'string' && path.startsWith(home)) byPath.push(path);
+    };
+    const writes = constants.O_WRONLY | constants.O_RDWR | constants.O_CREAT | constants.O_APPEND | constants.O_TRUNC;
+    /** Which of a call's arguments are paths it changes: a symbolic link's target is not one. */
+    const changed = (name: string, args: readonly unknown[]): readonly unknown[] => {
+      if (name === 'readFile' || name === 'readFileSync') {
+        watchRead(args[0]);
+        return [];
+      }
+      if (name === 'symlink' || name === 'symlinkSync') return [args[1]];
+      if (name === 'openSync') return typeof args[1] === 'number' && (args[1] & writes) !== 0 ? [args[0]] : [];
+      return args.slice(0, 2);
+    };
+    const spies: { mockRestore(): void }[] = [];
+    const spyEach = (module: object, names: readonly string[]): void => {
+      for (const name of names) {
+        const original = Reflect.get(module, name) as (...args: unknown[]) => unknown;
+        spies.push(
+          spyOn(module as Record<string, (...args: unknown[]) => unknown>, name).mockImplementation(
+            (...args: unknown[]) => {
+              for (const argument of changed(name, args)) watch(argument);
+              return original(...args);
+            },
+          ),
+        );
+      }
+    };
+    spyEach(fs, [
+      'rename',
+      'link',
+      'unlink',
+      'rm',
+      'rmdir',
+      'symlink',
+      'mkdir',
+      'writeFile',
+      'appendFile',
+      'copyFile',
+      'truncate',
+      'readFile',
+    ]);
+    spyEach(fsSync, [
+      'renameSync',
+      'linkSync',
+      'unlinkSync',
+      'rmSync',
+      'rmdirSync',
+      'symlinkSync',
+      'mkdirSync',
+      'writeFileSync',
+      'openSync',
+      'readFileSync',
+    ]);
+
+    try {
+      // Act — a migration, and then the step only a rollback takes: one runtime's link taken back.
+      const actual = await subject.materialize(request);
+      await files.removeSymbolicLink(path.join(homeA, 'projects'), path.join(poolRoot, 'claude', 'projects'));
+
+      // Assert — it migrated, and not one change or history read was made by a path a swapped folder could redirect.
+      should(actual.migrated).be.greaterThan(0);
+      should(byPath).deepEqual([]);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
+
+  it('should skip only the migration, saying why, and land the rest of an apply, where folders cannot be reached', async () => {
+    // Arrange — an apply on a host whose descriptor calls could not be loaded, with shared history on.
+    const { home, homeA, poolRoot, fence, request } = await fleet();
+    const byPathOnly = new NodeGuardDisk(false);
+    const provisioner = new FileFleetProvisioner(
+      [home],
+      new SharedHistoryMigration(new FileSharedHistoryFileSystem([home], fence, byPathOnly)),
+      {},
+      fence,
+      byPathOnly,
+    );
+    const manifest = path.join(home, 'fleet', 'manifest.json');
+
+    // Act
+    const preview = await provisioner.preview({
+      manifest: { version: 1, generatedAt: '2027-01-15T08:00:00.000Z', accounts: [] },
+      manifestPath: manifest,
+      operations: [],
+      sharedHistoryRequests: [request],
+    });
+    const outcome = await provisioner.apply({
+      manifest: { version: 1, generatedAt: '2027-01-15T08:00:00.000Z', accounts: [] },
+      manifestPath: manifest,
+      operations: [],
+      sharedHistoryRequests: [request],
+    });
+
+    // Assert — the apply landed (the manifest is written), the migration was not made, and the result says why.
+    should(preview.sharedHistory).deepEqual([]);
+    should(await Bun.file(manifest).exists()).be.true();
+    should(outcome.skipped).match([{ path: path.join(poolRoot, 'claude') }]);
+    should(outcome.skipped?.[0]?.reason).match(/cannot be reached through their descriptors here/u);
+    should((await lstat(path.join(homeA, 'projects'))).isDirectory()).be.true();
+  });
+
+  // Hooks the disk's by-path `identity`, which a descriptor-calls disk (macOS) never makes; the check is the same there.
+  it.skipIf(process.platform !== 'linux')(
+    'should refuse, not read as absent, a folder the guard did not find that is there by the check after',
+    async () => {
+      // Arrange — the folder appears between the guard looking for it and the check that confirms it is absent.
+      const { home, homeA, fence } = await fleet();
+      class LateDisk extends NodeGuardDisk {
+        override async identity(at: string) {
+          if (!at.endsWith('/later')) return await super.identity(at);
+          fsSync.mkdirSync(at);
+          return undefined;
+        }
+      }
+      const subject = new FileSharedHistoryFileSystem([home], fence, new LateDisk());
+
+      // Act + Assert
+      await should(subject.snapshot(path.join(homeA, 'later', 'history.jsonl'))).be.rejectedWith(
+        /it is there, but not as a folder the guard can reach/u,
+      );
+    },
+  );
+
+  // Hooks the disk's by-path `identity`, as above: Linux only.
+  it.skipIf(process.platform !== 'linux')(
+    'should refuse to append to what is not a regular file once it is open',
+    async () => {
+      // Arrange — the look reports a file; what the open finds is a pipe (it opens without blocking).
+      const { home, homeA, fence } = await fleet();
+      const pipe = path.join(homeA, 'history.jsonl');
+      await rm(pipe);
+      should(Bun.spawnSync(['mkfifo', pipe]).exitCode).equal(0);
+      class LookingDisk extends NodeGuardDisk {
+        override async identity(at: string) {
+          const found = await super.identity(at);
+          return at.endsWith('/history.jsonl') && found !== undefined ? { ...found, kind: 'file' as const } : found;
+        }
+      }
+      const subject = new FileSharedHistoryFileSystem([home], fence, new LookingDisk());
+
+      // Act + Assert
+      await should(subject.appendTextIfPrefix(pipe, '', 'more\n')).be.rejectedWith(
+        /append expected a file, found something else/u,
+      );
+    },
+  );
+
+  it('should refuse the migration, changing nothing, where folders cannot be reached through their descriptors', async () => {
+    // Arrange — a disk reached by path only (the C calls could not be loaded).
+    const { home, homeA, fence, request } = await fleet();
+    const subject = new SharedHistoryMigration(
+      new FileSharedHistoryFileSystem([home], fence, new NodeGuardDisk(false)),
+    );
+
+    // Act
+    const refused = await subject.materialize(request).catch((error: unknown) => error);
+
+    // Assert
+    should((refused as Error).message).match(/cannot be reached through their descriptors here/u);
+    should((await lstat(path.join(homeA, 'projects'))).isDirectory()).be.true();
+    should(await readFile(path.join(homeA, 'projects', 'alpha', 'one.jsonl'), 'utf8')).equal('a1\n');
   });
 });

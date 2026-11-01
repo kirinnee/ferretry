@@ -121,6 +121,11 @@ export class DestinationFolders {
     private readonly tops: readonly string[] = [],
   ) {}
 
+  /** Why descriptor reach could not be loaded on this disk, if it could not. */
+  get unavailable(): string | undefined {
+    return this.disk.descriptorCallsUnavailable;
+  }
+
   /**
    * Whether moving aside or removing a name in `folder` is refused here (see the class). Refused BY DEFAULT where
    * entries are reached by path: the folder must be positively known as one no runtime's harness can swap — inside a

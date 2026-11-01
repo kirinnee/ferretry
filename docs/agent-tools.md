@@ -706,8 +706,17 @@ There the provisioner fails closed: no name is moved aside or removed anywhere b
 runtime's own folder — replacing an entry that is already there, a copy, and every sweep are **skipped**, and the
 result names each one ("Left … as it was"), with why descriptor reach is missing, and the daemon keeps the last apply's skips per runtime in memory (replaced by the next committed apply, lost on a restart) and serves each runtime's paths relative to its folder as `skipped` on `GET /v1/fleet/runtimes`, never the folder's own place on disk, so every device shows "N items skipped" inside that runtime's card; a rollback that would have to take
 back something it created there reports it instead. What that fallback still leaves is a NEW name landing in the home
-if a folder is swapped at the exact moment it is created (`O_EXCL`: never over an existing file). The shared-history migration (`file-shared-history.ts`), which moves history folders between runtime homes
-and the shared pool, still works by path and is not covered by this yet.
+if a folder is swapped at the exact moment it is created (`O_EXCL`: never over an existing file).
+
+The **shared-history migration** (`file-shared-history.ts`), which moves history folders between runtime homes and the
+shared pool their links lead into, goes through the same checked folders: every read of a tree or a prompt history,
+every move (a hard link then an unlink for a file, a rename for a folder — `linkat`/`renameat` across two held
+folders on macOS), append, link and removal is made through a folder the guard opened and checked, with the state
+home's key files fenced. A folder the guard refuses — a home by identity, one that changed between two steps, one it
+cannot reach — refuses the migration with nothing moved, and only `ENOENT` reads as absent (a name the guard could not
+reach that is there anyway is refused, not read as absent). Every folder is synced through its held descriptor too.
+Where descriptor reach cannot be loaded at all, the migration is **not made** rather than made by path: the apply goes
+on without it and its result names the pool as skipped, with the reason.
 
 ## Sub-ferrets and the Ferretry verbs
 
