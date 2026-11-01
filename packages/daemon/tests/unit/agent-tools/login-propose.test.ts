@@ -169,6 +169,144 @@ describe('account.propose', () => {
   });
 });
 
+describe('account.propose with preapprove (a suggestion of a standing rule)', () => {
+  const suggest = () => {
+    const asked: unknown[] = [];
+    return {
+      asked,
+      port: {
+        suggest: async (...parameters: unknown[]) => {
+          asked.push(parameters);
+          return { signIn: SI_VERCEL as never, host: 'vercel.com', agenda: 'A9' };
+        },
+      },
+    };
+  };
+
+  it('should raise the card and tell the ferret only what it did, never what the owner has', async () => {
+    // Arrange
+    const rules = suggest();
+    const world = agentToolWorld({ ruleSuggestions: rules.port });
+
+    // Act
+    const result = await world.service.call(agent, {
+      tool: 'account.propose',
+      signIn: SI_VERCEL,
+      preapprove: true,
+      why: 'I sign in here every day.',
+    });
+
+    // Assert
+    should(rules.asked).deepEqual([['s1', { signIn: SI_VERCEL, login: undefined, why: 'I sign in here every day.' }]]);
+    should(result.summary)
+      .containEql('Suggested a standing rule for vercel.com (!A9)')
+      .and.containEql('Do not ask again');
+    should(result.summary).not.match(/already|tapped|passkey|exists/u);
+    should(result.recipe).be.undefined();
+    should(JSON.stringify(world.audit)).containEql(SI_VERCEL).and.not.containEql('every day');
+  });
+
+  it('should file the recipe too when both are sent, and say a refused suggestion without failing the recipe', async () => {
+    // Arrange
+    const world = agentToolWorld({
+      recipes: { scrubbedAccounts: async listing => listing, propose: async () => PENDING },
+      ruleSuggestions: {
+        suggest: async () => {
+          const { SignInRuleSuggestionError } = await import('../../../src/lib/sign-in-rules/index.ts');
+          throw new SignInRuleSuggestionError('bad_request', 'No standing rule can cover this sign-in.');
+        },
+      },
+    });
+
+    // Act
+    const result = await world.service.call(agent, {
+      tool: 'account.propose',
+      signIn: SI_VERCEL,
+      recipe: 'x',
+      preapprove: true,
+      why: 'y',
+    });
+
+    // Assert
+    should(result.recipe).match({ id: 'rp_0000000000000001', state: 'pending' });
+    should(result.summary).containEql('No rule was suggested: No standing rule can cover this sign-in.');
+  });
+
+  it('should refuse a suggestion on its own with the daemon’s own words and code', async () => {
+    // Arrange
+    const world = agentToolWorld({
+      ruleSuggestions: {
+        suggest: async () => {
+          const { SignInRuleSuggestionError } = await import('../../../src/lib/sign-in-rules/index.ts');
+          throw new SignInRuleSuggestionError('capacity', 'This session already suggested 3 rules this hour; wait.');
+        },
+      },
+    });
+
+    // Act
+    const refused = (await world.service
+      .call(agent, { tool: 'account.propose', signIn: SI_VERCEL, preapprove: true, why: 'y' })
+      .catch((caught: unknown) => caught)) as AgentToolError;
+
+    // Assert
+    should(refused.code).equal('capacity');
+    should(refused.message).containEql('3 rules this hour');
+  });
+
+  it('should give a neutral refusal, never the cause, when the suggestion fails for any other reason', async () => {
+    // Arrange
+    const world = agentToolWorld({
+      ruleSuggestions: {
+        suggest: async () => {
+          throw new Error('vault exploded: secret-detail');
+        },
+      },
+    });
+
+    // Act
+    const alone = (await world.service
+      .call(agent, { tool: 'account.propose', signIn: SI_VERCEL, preapprove: true, why: 'y' })
+      .catch((caught: unknown) => caught)) as AgentToolError;
+
+    // Assert
+    should(alone.code).equal('unavailable');
+    should(alone.message).not.containEql('secret-detail');
+  });
+
+  it('should say a failed suggestion in the summary, not throw, when a recipe was filed in the same call', async () => {
+    // Arrange
+    const world = agentToolWorld({
+      recipes: { scrubbedAccounts: async listing => listing, propose: async () => PENDING },
+      ruleSuggestions: {
+        suggest: async () => {
+          throw new Error('vault exploded: secret-detail');
+        },
+      },
+    });
+
+    // Act
+    const result = await world.service.call(agent, {
+      tool: 'account.propose',
+      signIn: SI_VERCEL,
+      recipe: 'x',
+      preapprove: true,
+      why: 'y',
+    });
+
+    // Assert
+    should(result.recipe).match({ state: 'pending' });
+    should(result.summary).containEql('The suggestion could not be raised right now.');
+    should(result.summary).not.containEql('secret-detail');
+  });
+
+  it('should still need a recipe or a suggestion: a call with neither is not a call', () => {
+    should(() => AgentToolCallSchema.parse({ tool: 'account.propose', signIn: SI_VERCEL, why: 'y' })).throw();
+    should(AgentToolCallSchema.parse({ tool: 'account.propose', signIn: SI_VERCEL, preapprove: true, why: 'y' })).match(
+      { preapprove: true },
+    );
+  });
+});
+
 describe('a ferret driving a surface', () => {
   it('should be told to the login observer before every call that may change a surface, and never for a read', async () => {
     const acted: unknown[] = [];

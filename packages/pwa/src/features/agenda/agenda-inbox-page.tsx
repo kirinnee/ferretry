@@ -31,7 +31,7 @@
  */
 
 import { type AgendaId, formatTaskRef } from '@ferretry/protocol';
-import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, Search, SkipForward, X, Zap } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, CloudOff, Search, SkipForward, X, Zap } from 'lucide-react';
 import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { DaemonTaskReferences } from '../../components/daemon-task-references.tsx';
 import { Spinner } from '../../components/spinner.tsx';
@@ -567,6 +567,27 @@ function OrphanedFailures({ inbox }: { readonly inbox: AgendaInbox }) {
 }
 
 /** Calm, quietly pleased: nothing is waiting on the reader anywhere. */
+/**
+ * A machine whose boards could not be read says so on its own line: the Inbox counts its items (every badge does)
+ * but cannot list them, and the reader is told why the list is shorter than the count instead of watching a spinner.
+ */
+function UnreadableMachines({ inbox }: { readonly inbox: AgendaInbox }) {
+  if (inbox.unavailable.length === 0) return null;
+  return (
+    <ul className="fy-attn-inbox__unreadable" data-agenda-unreadable="">
+      {inbox.unavailable.map(machine => (
+        <li className="fy-attn-inbox__unreadable-row" data-daemon={machine.daemonId} key={machine.daemonId}>
+          <CloudOff aria-hidden="true" size={14} />
+          <span className="min-w-0 flex-1">
+            Couldn’t read {machine.items === 1 ? '1 item' : `${machine.items} items`} on {machine.machineName}. Trying
+            again.
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function InboxEmpty() {
   return (
     <div className="fy-attn-inbox__empty" data-agenda-empty="">
@@ -1329,9 +1350,10 @@ export function AgendaInboxPage({
     row?.scrollIntoView?.({ block: 'nearest' });
   }, [selectedKey, rowRefs]);
 
-  const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length + inbox.toTest.length;
+  // The heading shows the shell's one Inbox count, the number the sidebar, top bar and tab bar show.
+  const count = inbox.total;
   const empty = inbox.cards.length === 0 && inbox.withFerret.length === 0 && inbox.toTest.length === 0;
-  const nothingForYou = inbox.cards.length === 0 && inbox.toTest.length === 0;
+  const nothingForYou = inbox.cards.length === 0 && inbox.toTest.length === 0 && inbox.unavailable.length === 0;
   const updating =
     filter === 'open'
       ? inbox.reading && !empty
@@ -1398,10 +1420,13 @@ export function AgendaInboxPage({
 
   const header = (
     <header className="fy-attn-inbox__head">
-      <h1 className="fy-attn-inbox__title" id={headingId}>
-        Inbox
-        <AgendaCountBadge count={count} />
-      </h1>
+      {/* A phone's top bar already says "Inbox" with the count beside it: the page draws no second title there. */}
+      {phone ? null : (
+        <h1 className="fy-attn-inbox__title" id={headingId}>
+          Inbox
+          <AgendaCountBadge count={count} />
+        </h1>
+      )}
       {updating ? (
         <span className="fy-attn-inbox__updating" data-agenda-updating="" role="status">
           <Spinner size={12} />
@@ -1440,7 +1465,7 @@ export function AgendaInboxPage({
     empty && !filtered ? (
       inbox.reading ? (
         <InboxReading />
-      ) : (
+      ) : inbox.unavailable.length > 0 ? null : (
         <InboxEmpty />
       )
     ) : nothingShown ? (
@@ -1627,11 +1652,16 @@ export function AgendaInboxPage({
   }
 
   return (
-    <main aria-labelledby={headingId} className="fy-attn-inbox" data-agenda-inbox={phone ? 'list' : 'panes'}>
+    <main
+      {...(phone ? { 'aria-label': 'Inbox' } : { 'aria-labelledby': headingId })}
+      className="fy-attn-inbox"
+      data-agenda-inbox={phone ? 'list' : 'panes'}
+    >
       {header}
       {banner}
       <AgentsBulk inbox={inbox} kind={kind} machines={machines} port={clearPort} />
       <OrphanedFailures inbox={inbox} />
+      {filter === 'open' ? <UnreadableMachines inbox={inbox} /> : null}
       {toTestAnswers.notice === null ? null : (
         <p className="fy-totest__error" data-to-test-notice="" role="alert">
           {toTestAnswers.notice}

@@ -15,7 +15,13 @@
  * `joined` outcome; this module neither reads nor writes a store.
  */
 
-import type { DaemonCarrier, MemberJoinedResponse, ShareLinkSeed } from '@ferretry/protocol';
+import {
+  type DaemonCarrier,
+  isLoopbackHost,
+  isLoopbackLinkAddress,
+  type MemberJoinedResponse,
+  type ShareLinkSeed,
+} from '@ferretry/protocol';
 import {
   type ConnectionMethod,
   connectionSocketUrl,
@@ -57,36 +63,73 @@ const discoveredRendezvous = (hostedRelayUrl: string | undefined): RelayCarrier 
 };
 
 /**
+ * Whether this app itself was opened on a loopback origin: a local build, on the machine whose loopback a link's
+ * address may name. Read from the page, so a hosted app is never "local" whatever its address resolves to.
+ */
+const pageOnLoopback = (): boolean =>
+  typeof location !== 'undefined' && typeof location.hostname === 'string' && isLoopbackHost(location.hostname);
+
+/**
+ * The publisher's own address goes first, unless it is LOOPBACK. A publisher that only answers on its own
+ * loopback mints a share link only because it dials a rendezvous the reader can discover, and from the reader's
+ * device that address names the reader's OWN computer: dialling it would stall the walk, could ask the reader
+ * for local-network permission (a grant that then stays with the hosted origin), and could reach the reader's
+ * own daemon — refused by the pinned fingerprint before the code leaves, but noise in that daemon's log. So
+ * beside any rendezvous a loopback address is NOT dialled at all, unless this app was itself opened on loopback
+ * (a local build, the one place that address can mean the publisher), where it is tried last. With no rendezvous
+ * to try it is the only candidate, and is kept.
+ */
+const inWalkOrder = (
+  direct: MemberCarrierMethod & { readonly kind: 'direct' },
+  relays: readonly MemberCarrierMethod[],
+  servedFromLoopback: boolean,
+): readonly MemberCarrierMethod[] => {
+  if (!isLoopbackLinkAddress(direct.daemonUrl) || relays.length === 0) return [direct, ...relays];
+  return servedFromLoopback ? [...relays, direct] : relays;
+};
+
+/**
  * Every carrier a join walks, in §1's order: the publisher's own address, then the one rendezvous this
- * build discovered. A fingerprint this protocol cannot address gets nothing, not even the direct address.
+ * build discovered — for a loopback address, see {@link inWalkOrder}. A fingerprint this
+ * protocol cannot address gets nothing, not even the direct address.
  */
 export const joinCandidates = (
   seed: Pick<ShareLinkSeed, 'daemonId' | 'daemonUrl'>,
   hostedRelayUrl: string | undefined,
+  servedFromLoopback: boolean = pageOnLoopback(),
 ): readonly MemberCarrierMethod[] => {
   if (parseDaemonId(seed.daemonId) === null) return [];
   const discovered = discoveredRendezvous(hostedRelayUrl);
-  return [{ kind: 'direct', daemonUrl: seed.daemonUrl }, ...(discovered === undefined ? [] : [discovered])];
+  return inWalkOrder(
+    { kind: 'direct', daemonUrl: seed.daemonUrl },
+    discovered === undefined ? [] : [discovered],
+    servedFromLoopback,
+  );
 };
 
 /**
  * Every carrier a member session to an already-joined publisher may try: its own address, then whatever
- * relays it published, then the discovered rendezvous if none of those is it. A tunnel is not a member
- * carrier, and a published address is held to the protocol's own rule before anything dials it.
+ * relays it published, then the discovered rendezvous if none of those is it — for a loopback address, see
+ * {@link inWalkOrder}. A tunnel is not a member carrier, and a published address is held to the
+ * protocol's own rule before anything dials it.
  */
 export const memberCandidates = (
   subscription: { readonly daemonId: string; readonly daemonUrl: string; readonly carriers: readonly DaemonCarrier[] },
   hostedRelayUrl: string | undefined,
+  servedFromLoopback: boolean = pageOnLoopback(),
 ): readonly MemberCarrierMethod[] => {
   if (parseDaemonId(subscription.daemonId) === null) return [];
   const published = publishedConnectionMethods(subscription.carriers, hostedRelayUrl).filter(
     (method): method is MemberCarrierMethod => method.kind === 'direct' || method.kind === 'relay',
   );
-  const direct: MemberCarrierMethod = { kind: 'direct', daemonUrl: subscription.daemonUrl };
   const rest = published.filter(method => !(method.kind === 'direct' && method.daemonUrl === subscription.daemonUrl));
   const discovered = discoveredRendezvous(hostedRelayUrl);
   const hasDiscovered = rest.some(method => method.kind === 'relay' && method.relayUrl === hostedRelayUrl);
-  return [direct, ...rest, ...(discovered === undefined || hasDiscovered ? [] : [discovered])];
+  return inWalkOrder(
+    { kind: 'direct', daemonUrl: subscription.daemonUrl },
+    [...rest, ...(discovered === undefined || hasDiscovered ? [] : [discovered])],
+    servedFromLoopback,
+  );
 };
 
 export interface JoinAttemptOptions {
@@ -171,6 +214,8 @@ export interface JoinPublisherOptions {
   readonly directTimeoutMs?: number;
   /** The rendezvous leg's deadline. The heartbeat grace by default; a parameter so a suite can prove it in ms. */
   readonly relayTimeoutMs?: number;
+  /** Whether this app was opened on loopback; read from the page by default (see `inWalkOrder`). */
+  readonly servedFromLoopback?: boolean;
 }
 
 /** What walking every carrier came to. */
@@ -182,7 +227,7 @@ export type JoinResult =
 /** Walks the carriers until one answers. Never throws for an outcome; only a transport problem is "unreachable". */
 export const joinPublisher = async (options: JoinPublisherOptions): Promise<JoinResult> => {
   const key = options.crypto.deviceKeyHandle(options.keys.signingKey);
-  const candidates = joinCandidates(options.seed, options.hostedRelayUrl);
+  const candidates = joinCandidates(options.seed, options.hostedRelayUrl, options.servedFromLoopback);
   let spentUnheard = false;
   for (const method of candidates) {
     try {

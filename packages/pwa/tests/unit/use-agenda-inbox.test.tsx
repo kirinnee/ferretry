@@ -12,19 +12,19 @@ import {
   useAgendaInboxModel,
   useInboxMachines,
 } from '../../src/hooks/use-agenda-inbox.ts';
-import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
 import type { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
 import { type DeferredTimers, DISMISS_ACTION, DONE_ACTION, inboxOptions } from '../../src/lib/agenda-inbox.ts';
 import { DaemonAgendaStore } from '../../src/lib/agenda-store.ts';
+import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { DaemonFleetStore, FleetSnapshot } from '../../src/lib/fleet-store.ts';
 import '../support/dom.ts';
 import { toTestCards } from '../../src/lib/to-test-inbox.ts';
 import { interact, type Mounted, mount } from '../support/dom.ts';
-import { sessionView } from '../support/sessions.ts';
-import { boardModelOf, card, laptop as boardLaptop } from './board-support.ts';
 import { healthOf } from '../support/health.ts';
+import { sessionView } from '../support/sessions.ts';
+import { laptop as boardLaptop, boardModelOf, card } from './board-support.ts';
 
 const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio' });
 const laptop = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'd-laptop' });
@@ -204,7 +204,11 @@ describe('useAgendaInboxModel', () => {
         />,
       );
       await settle();
-      return inbox as unknown as AgendaInbox;
+      const read = inbox as unknown as AgendaInbox;
+      // Snoozing follows the same health: a machine whose health answered without it cannot; one unread can.
+      expect(read.canSnooze?.(boardLaptop.daemonId)).toBe(client.wires.snoozeOf(boardLaptop.daemonId) !== false);
+      expect(read.canSnooze?.(studio.daemonId)).toBe(true);
+      return read;
     };
 
     test('on a machine that advertises gate items the row its gate item covers is not shown; the others stay', async () => {
@@ -540,13 +544,18 @@ describe('useAgendaInboxModel', () => {
     });
   });
 
-  test('says it is reading while an unread board has not arrived', async () => {
+  test('says it is reading while an unread board is on its first read', async () => {
     const { client } = fakeClient(new Map());
+    // The read is in flight and stays so.
+    const inFlight = {
+      ...client,
+      revalidate: () => new Promise<void>(() => undefined),
+    } as unknown as DaemonAgendaClient;
     const { timers } = manualTimers();
     let inbox: AgendaInbox | null = null;
     view = await mount(
       <Probe
-        client={client}
+        client={inFlight}
         machines={[{ connection: studio, name: 'Studio', sessions: [waiting('a', summary(1, 1))] }]}
         onInbox={value => (inbox = value)}
         timers={timers}
@@ -555,6 +564,79 @@ describe('useAgendaInboxModel', () => {
     await settle();
     expect((inbox as unknown as AgendaInbox).reading).toBe(true);
     expect((inbox as unknown as AgendaInbox).cards).toEqual([]);
+    expect((inbox as unknown as AgendaInbox).unavailable).toEqual([]);
+    // Until it lands the conversation counts what its summary says.
+    expect((inbox as unknown as AgendaInbox).total).toBe(1);
+  });
+
+  test('stops reading when a machine cannot be read, names it, keeps counting its items, and reads it again', async () => {
+    const boards = new Map([['studio/a', board('a', [item('A1', 1)])]]);
+    const { client, calls } = fakeClient(boards);
+    const { timers, fire } = manualTimers();
+    let inbox: AgendaInbox | null = null;
+    view = await mount(
+      <Probe
+        client={client}
+        machines={[
+          { connection: studio, name: 'Studio', sessions: [waiting('a', summary(1, 1))] },
+          { connection: laptop, name: 'Laptop', sessions: [waiting('b', summary(2, 2)), waiting('c', summary(1, 3))] },
+        ]}
+        onInbox={value => (inbox = value)}
+        timers={timers}
+      />,
+    );
+    await settle();
+    const down = inbox as unknown as AgendaInbox;
+    expect(down.reading).toBe(false);
+    expect(down.cards.map(card => card.item.id)).toEqual(['A1']);
+    expect(down.unavailable).toEqual([{ daemonId: laptop.daemonId, machineName: 'Laptop', items: 3 }]);
+    expect(down.total).toBe(1 + 3);
+
+    // The machine answers; the retry reads its boards, and the Inbox lists what it counted.
+    boards.set('laptop/b', board('b', [item('A1', 4), item('A2', 5)]));
+    boards.set('laptop/c', board('c', [item('A1', 6)]));
+    await interact(() => fire());
+    await settle();
+    const up = inbox as unknown as AgendaInbox;
+    const reads = calls.filter(call => call.method === 'revalidate').map(call => `${call.daemonId}/${call.sessionId}`);
+    // Newest first, as the inbox lists them; the two that failed are read again.
+    expect(reads).toEqual(['laptop/c', 'laptop/b', 'studio/a', 'laptop/c', 'laptop/b']);
+    expect(up.reading).toBe(false);
+    expect(up.unavailable).toEqual([]);
+    expect(up.total).toBe(4);
+    expect(up.total).toBe(up.cards.length + up.toTest.length);
+  });
+
+  test('counts what the page lists once the boards are read, whatever the summaries said', async () => {
+    const askedForInfo = (id: string): AgendaItem =>
+      ({ ...item(id, 2), waitingOn: 'ferret', askedAt: at(3), waitingFor: 'info' }) as AgendaItem;
+    const notice = { ...item('A4', 4), notice: true } as AgendaItem;
+    const snoozed = { ...item('A5', 5), parked: { reason: 'snoozed', at: at(5), until: at(50) } } as AgendaItem;
+    // The daemon's summary: three open (A1 and the two waiting for more information), the notification and the
+    // snoozed item left out. The deck: A1 and the notification.
+    const boards = new Map([
+      ['studio/a', board('a', [item('A1', 1), askedForInfo('A2'), askedForInfo('A3'), notice, snoozed])],
+    ]);
+    const { client } = fakeClient(boards);
+    const { timers } = manualTimers();
+    let inbox: AgendaInbox | null = null;
+    const rows = toTestCards(await boardModelOf([card('F1', { laneId: 'tested' })]));
+    view = await mount(
+      <Probe
+        client={client}
+        machines={[{ connection: studio, name: 'Studio', sessions: [waiting('a', summary(3, 5))] }]}
+        onInbox={value => (inbox = value)}
+        timers={timers}
+        toTest={rows}
+      />,
+    );
+    await settle();
+    const read = inbox as unknown as AgendaInbox;
+    expect(read.cards.map(entry => entry.item.id)).toEqual(['A4', 'A1']);
+    expect(read.withFerret.map(entry => entry.item.id).sort()).toEqual(['A2', 'A3']);
+    expect(read.parked.map(entry => entry.item.id)).toEqual(['A5']);
+    expect(read.total).toBe(read.cards.length + read.toTest.length);
+    expect(read.total).toBe(3);
   });
 });
 

@@ -242,6 +242,15 @@ redemption** and is never stored — what a device navigates by afterwards is th
 `carriers`, and the browser refuses a relayed pairing whose published set does not name the rendezvous
 the exchange crossed.
 
+**A catalog share link follows the same rule** ([catalogs.md](catalogs.md) "A link works on the carriers
+pairing uses"). The daemon's share gate is fed the same `discoverableRelayUrl`, so a loopback-bound machine
+on the hosted relay mints a share link exactly when it would draw a pairing QR, the link carries the same
+loopback `url` and `fp` and names no rendezvous, and the join is the sealed `join` record on whichever
+carrier answers. One difference is deliberate: for a share link with a loopback `url`, the reader's browser
+does not dial that address at all while it has a rendezvous to try (unless the app was itself opened on
+loopback, where it goes last), because the reader is by definition another person and the address names
+their own computer.
+
 `discoveredRelayUrl` on the mint response is **host-facing only**. It exists so `fy pair`, the
 Add-a-device panel and `fyd --check` know a loopback-bound daemon is redeemable anyway, and so they can
 disclose which rendezvous the daemon expects to see the exchange's metadata. It is derived from relay

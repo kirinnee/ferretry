@@ -1529,3 +1529,26 @@
   padding: 0;
   touch-action: pan-y;
 }
+
+/* A machine whose boards could not be read: one quiet line each, why the list is shorter than the count. */
+.fy-attn-inbox__unreadable {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-attn-inbox__unreadable-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--gap-sm);
+  border: var(--stroke-panel) solid var(--warn-border);
+  border-radius: var(--radius-panel);
+  background: var(--warn-bg);
+  padding: 6px 12px;
+  color: var(--warn);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}

@@ -188,10 +188,23 @@ const bodyChanges = (base: SignInRuleBody): Readonly<Record<string, SignInRuleBo
 
 const hex = (bytes: Uint8Array): string => [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
 
+const suggestionView = {
+  id: `srg_${'3'.repeat(16)}`,
+  signIn: SIGN_IN,
+  surface: 'page',
+  host: 'github.com',
+  why: 'I sign in here on every run',
+  agenda: 'A12',
+  raisedAt: CREATED,
+  expiresAt: EXPIRES,
+};
+
 const cases: SchemaCase[] = [
   { name: 'rule id', schema: rules.SignInRuleIdSchema, value: RULE },
   { name: 'rule stage id', schema: rules.SignInRuleStageIdSchema, value: STAGE },
   { name: 'suggestion id', schema: rules.SignInRuleSuggestionIdSchema, value: `srg_${'3'.repeat(16)}` },
+  { name: 'suggestion view', schema: rules.SignInRuleSuggestionViewSchema, value: suggestionView },
+  { name: 'suggestion list', schema: rules.SignInRuleSuggestionListSchema, value: { suggestions: [suggestionView] } },
   { name: 'revision', schema: rules.SignInRuleRevisionSchema, value: 2 },
   { name: 'scope: any', schema: rules.SignInRuleScopeSchema, value: { kind: 'any' } },
   { name: 'scope: project', schema: rules.SignInRuleScopeSchema, value: { kind: 'project', project: PROJECT } },

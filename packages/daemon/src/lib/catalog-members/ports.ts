@@ -42,9 +42,9 @@ export interface MemberSessionCloser {
 }
 
 /**
- * Where the owner's share link comes from: the hosted app's origin and the direct address the joining
- * browser dials, or why there is none. Asked BEFORE a code is made, so a machine with no address to put in
- * a link never spends one.
+ * Where the owner's share link comes from: the hosted app's origin and the address the link carries (the
+ * joining browser dials it first, or the discovered rendezvous first when it is loopback), or why there is none.
+ * Asked BEFORE a code is made, so a machine with no address to put in a link never spends one.
  */
 export type ShareLinkTarget =
   | { readonly kind: 'ready'; readonly appOrigin: string; readonly daemonUrl: string; readonly daemonId: string }

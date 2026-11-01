@@ -664,6 +664,33 @@ export const SignInRuleListSchema = z.strictObject({
 });
 export type SignInRuleList = z.infer<typeof SignInRuleListSchema>;
 
+/** The longest reason of a ferret's suggestion the owner's sheet shows (redacted, one line). */
+export const SIGN_IN_RULE_SUGGESTION_WHY_MAX_CHARS = 300;
+
+/**
+ * ONE FERRET'S SUGGESTION of a standing rule, as the owner's sheet reads it: the HOST the daemon drew from the
+ * sign-in's own place (never a label or a username), the card it rides, and the ferret's reason, redacted and quoted.
+ * It holds no stage, no proof and no field that could become a rule by itself.
+ */
+export const SignInRuleSuggestionViewSchema = z.strictObject({
+  id: SignInRuleSuggestionIdSchema,
+  signIn: SignInIdSchema,
+  surface: z.enum(['page', 'terminal']),
+  host: z.string().min(1).max(200),
+  /** The ferret's own words, redacted by the vault redactor: faint, quoted, never the card's text. */
+  why: z.string().max(SIGN_IN_RULE_SUGGESTION_WHY_MAX_CHARS),
+  agenda: z.string().regex(/^A[1-9][0-9]*$/u),
+  raisedAt: InstantSchema,
+  expiresAt: InstantSchema,
+});
+export type SignInRuleSuggestionView = z.infer<typeof SignInRuleSuggestionViewSchema>;
+
+/** `GET /v1/sign-in-rules/suggestions`: the suggestions still waiting on the owner. */
+export const SignInRuleSuggestionListSchema = z.strictObject({
+  suggestions: z.array(SignInRuleSuggestionViewSchema).max(100),
+});
+export type SignInRuleSuggestionList = z.infer<typeof SignInRuleSuggestionListSchema>;
+
 /**
  * `POST /v1/sign-in-rules/:id/narrow`: drop the code, end earlier, or lower the cap. Needs no passkey, because it only
  * takes away ({@link signInRuleNarrowed} refuses anything that does not).

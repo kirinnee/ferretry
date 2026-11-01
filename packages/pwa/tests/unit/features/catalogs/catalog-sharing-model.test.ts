@@ -334,6 +334,8 @@ describe('refusals', () => {
       should(refusal).match({ previewAgain: false, sharingOff: false });
     }
     should(sharingRefusal(http('share_link_unavailable', 503)).sentence).match(/Nothing was spent/);
+    // A machine already on a relay is never told to go and get one.
+    should(sharingRefusal(http('share_link_unavailable', 503)).sentence).match(/not on a relay their browser can find/);
   });
   it('falls back to the catalogs’ own wording, and to Sharing being off', () => {
     should(sharingRefusal(http('grant_step_up_required', 403)).sentence).match(/passkey/);

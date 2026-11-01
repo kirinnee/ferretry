@@ -613,6 +613,21 @@ act alone (`share-catalog`), as minting a pairing code does.
   link carrying `code=`, a pairing reader one carrying `share=`, so no link is read by both. The app routes
   by path (`/join` is a share). The publisher's address must be http(s). A link-preview fetcher never sees
   a fragment.
+- **A link works on the carriers pairing uses, and names no rendezvous.** `url` is an address another device
+  can dial, or — on a machine that answers only on loopback but dials a rendezvous another browser discovers
+  for itself (the hosted relay) — that loopback address, exactly as a pairing link from the same machine
+  carries it ([pairing.md](pairing.md) "The link names no rendezvous; the device finds one itself"). The
+  reader's browser goes to the rendezvous its build discovered and proves the publisher there against `fp`
+  before the code leaves it. Because a loopback address names the reader's own computer, a browser that has a
+  rendezvous to try **never dials that address** — for the join and for every later member session — unless the
+  app itself was opened on loopback (a local build), where it is tried last; with no rendezvous it is the only
+  candidate. Any other address is still tried first. A `publicUrl` that is itself loopback is judged as a
+  loopback bind, so a loopback link is always a relayed one. The share sheet and `fy catalog share` say so
+  beside such a link (`shareLinkNotice` in `@ferretry/protocol`): the relay sees this machine's fingerprint,
+  the person's IP address, when they connect and how much is sent, and can tell whether they joined; never
+  the code, their keys, their name or the catalogs. The relay is checked once, at boot, as pairing checks it:
+  a relay that drops this machine later still lets a link be minted (a declared GAP, at pairing's parity). There is no anonymous route for any of this: the
+  join is the sealed `join` record and nothing else.
 
 **Joining.** The browser opens the link, makes its member key and box key, proves the publisher against
 the fingerprint, and sends one sealed `join` record, on the direct address or the hosted relay. Every
@@ -680,8 +695,14 @@ SHA-256 of a code is stored.
   `GET /v1/catalog-members`, `PATCH|DELETE /v1/catalog-members/:memberId`, and `DELETE` of one browser or one
   catalog of a member. A ferret may list and nothing else. Minting needs a fresh `share-catalog` passkey from a
   governed caller, claimed atomically. The code and link appear ONLY in the mint's answer. Minting is refused
-  (`share_link_unavailable`, 503) when the daemon has no address another person could open, so no code is
-  spent on a link that only works on this machine.
+  (`share_link_unavailable`, 503) only when **no carrier** reaches the daemon from another person's browser:
+  no address another device can dial and no rendezvous it can discover (`catalog-members/link-target.ts`, fed
+  the same `discoverableRelayUrl` that decides whether pairing draws a QR, so the two cannot disagree). The
+  sentence says that and what to set — turn on the hosted relay (`{ "kind": "relay", "source": "discovery" }`,
+  not switched off), or bind and set `publicUrl` — so no code is spent on a link nobody else could open. Two
+  cases stay refused as pairing refuses them: a wildcard bind with no `publicUrl` (no address to put in `url`),
+  and a machine reached only through a **self-hosted** relay, which a stock browser cannot discover
+  (pairing's declared GAP, mirrored rather than widened).
 - **Revoke writes first** and is idempotent. Closing a removed member's live sessions is built in 2b-2 (below).
   Deleting a catalog also removes it from every member and share.
 - **CLI.** `fy catalog share <catalog...> (--member <name> | --to <person>) --expires 15m|1h|3h|8h|1d

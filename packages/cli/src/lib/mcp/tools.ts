@@ -148,7 +148,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
   {
     name: 'terminal_wait',
     tool: 'terminal.wait',
-    description: 'Wait until text appears (give "text"), or its running command ends (give "exit": true).',
+    description: 'Wait for "text" to appear, or the running command to end ("exit": true).',
     inputSchema: object(
       {
         name: NAME,
@@ -174,7 +174,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'terminal_ask_owner',
     tool: 'terminal.ask_owner',
     description:
-      'Hand a terminal to the owner when you need them to act in it (a password, a code, "press Enter"): their tab comes forward ("Your turn here"). Then wait and read it.',
+      'Hand a terminal to the owner to act in it (a password, a code, "press Enter"): their tab comes forward ("Your turn here"). Then wait and read it.',
     inputSchema: object({ name: NAME, message: ASK_MESSAGE }, ['name']),
   },
   {
@@ -223,14 +223,15 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'account_propose',
     tool: 'account.propose',
     description:
-      "After a sign-in, propose that sign-in's recipe: the steps (Markdown, no values; [[ID]] names another account). The owner approves it.",
+      'After a sign-in, propose its recipe (Markdown steps, no values; [[ID]] names another account) and/or preapprove: suggest a standing rule. The owner decides.',
     inputSchema: object(
       {
         signIn: { type: 'string', description: 'Its id from account_hint, like si_3f2a….' },
         recipe: { type: 'string', maxLength: LOGIN_RECIPE_MAX_LENGTH, description: 'The whole new recipe.' },
+        preapprove: { type: 'boolean', description: 'Also suggest a standing rule.' },
         why: { type: 'string', maxLength: LOGIN_PROPOSAL_WHY_MAX_LENGTH, description: 'One line: what changed.' },
       },
-      ['signIn', 'recipe', 'why'],
+      ['signIn', 'why'],
     ),
   },
   {
@@ -243,7 +244,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_open',
     tool: 'browser.open',
     description:
-      'Open a browser page with a name, optionally at a URL. The person sees it live as %browser:<name>. Pages share this machine’s agent sign-ins; "incognito": true gives a throwaway one.',
+      'Open a named browser page, optionally at a URL. The person sees it live as %browser:<name>. Pages share this machine’s agent sign-ins; "incognito": true gives a throwaway one.',
     inputSchema: object(
       {
         name: NEW_NAME,
@@ -340,7 +341,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_dialog',
     tool: 'browser.dialog',
     description:
-      'Answer the dialog (alert, confirm, prompt, beforeunload) a page waits on; a browser result says when one is open. Unanswered, it is dismissed after 30 s. promptText answers a prompt.',
+      'Answer the dialog (alert, confirm, prompt, beforeunload) a page waits on; a browser result says when one is open. Dismissed after 30 s unanswered. promptText answers a prompt.',
     inputSchema: object(
       { name: NAME, action: { type: 'string', enum: ['accept', 'dismiss'] }, promptText: { type: 'string' } },
       ['name', 'action'],
@@ -364,7 +365,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_wait_for',
     tool: 'browser.wait_for',
     description:
-      'Wait for one thing: an element (ref or selector, with state), text, textGone, url (part of the address), load, or time (ms). Says whether it happened in time.',
+      'Wait for one thing: an element (ref or selector, with state), text, textGone, url (part of the address), load, or time (ms). Says if it happened in time.',
     inputSchema: object(
       {
         name: NAME,
@@ -409,7 +410,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_network',
     tool: 'browser.network',
     description:
-      'list: recent requests, each with an id. get: one by id, with safe response headers and a text body. Cookies and credentials are never shown.',
+      'list: recent requests with ids. get: one by id, with safe response headers and a text body. Cookies and credentials are never shown.',
     inputSchema: object(
       {
         name: NAME,
@@ -465,7 +466,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_upload',
     tool: 'browser.upload',
     description:
-      'Give a page files: a file input or its picker button (ref or selector). files: paths in your working folder, or {"attachment": "att_…"}. mode "drop": onto a dropzone. Needs the files switch.',
+      'Give a page files: a file input or its picker (ref or selector). files: paths in your working folder, or {"attachment": "att_…"}. mode "drop": onto a dropzone. Needs the files switch.',
     inputSchema: object(
       {
         name: NAME,
@@ -526,7 +527,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_drag',
     tool: 'browser.drag',
     description:
-      'Drag one element to another (fromRef/fromSelector to toRef/toSelector), or point to point (fromX, fromY to toX, toY, in steps) for sliders, canvases, maps.',
+      'Drag between elements (fromRef/fromSelector to toRef/toSelector) or points (fromX, fromY to toX, toY, in steps): sliders, canvases, maps.',
     inputSchema: object(
       {
         name: NAME,
@@ -570,7 +571,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_press',
     tool: 'browser.press',
     description:
-      'Press up to 32 keys in order, e.g. ["Enter"], ["Control+Shift+K"]. Modifiers: Alt, Control, ControlOrMeta, Meta, Shift, then one key. ref/selector focuses an element first. Never a secret.',
+      'Press up to 32 keys in order, e.g. ["Enter"], ["Control+Shift+K"]. Modifiers: Alt, Control, ControlOrMeta, Meta, Shift, plus one key. ref/selector focuses an element first. Never a secret.',
     inputSchema: object(
       {
         name: NAME,
@@ -621,7 +622,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_fill_form',
     tool: 'browser.fill_form',
     description:
-      'Fill up to 32 fields in one call. Each: ref or selector, plus exactly one of text, checked, option (select), value (slider, date, colour). Never a secret: a password field is flagged.',
+      'Fill up to 32 fields at once. Each: ref or selector, plus exactly one of text, checked, option (select), value (slider, date, colour). Never a secret: a password field is flagged.',
     inputSchema: object(
       {
         name: NAME,
@@ -645,8 +646,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
   {
     name: 'browser_highlight',
     tool: 'browser.highlight',
-    description:
-      'Outline an element (ref or selector) so the person watching sees what you mean. clear: true removes it.',
+    description: 'Outline an element (ref or selector) for the person watching. clear: true removes it.',
     inputSchema: object({ name: NAME, ref: REF, selector: SELECTOR, clear: { type: 'boolean' } }, ['name']),
   },
   {
@@ -678,7 +678,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_ask_owner',
     tool: 'browser.ask_owner',
     description:
-      'Hand a page to the owner when you need them to act in it (a captcha, a payment, a consent screen): their tab comes forward ("Your turn here"). Then wait and read it.',
+      'Hand a page to the owner to act in it (a captcha, a payment, a consent screen): their tab comes forward ("Your turn here"). Then wait and read it.',
     inputSchema: object({ name: NAME, message: ASK_MESSAGE }, ['name']),
   },
   {
@@ -870,6 +870,6 @@ export const MCP_SEARCH_TOOLS: readonly (McpToolDefinition & { readonly searchTo
 export const MCP_INSTRUCTIONS_TOOL: McpToolDefinition = {
   name: 'instructions',
   description:
-    'Which Ferretry sections your system prompt launched with (hypermedia, Pack mode, agenda mode, lessons) and how to turn each on. Check before telling the owner one is missing.',
+    'Which Ferretry sections your prompt launched with (hypermedia, Pack mode, agenda mode, lessons) and how to turn each on. Check before saying one is missing.',
   inputSchema: object({}),
 };

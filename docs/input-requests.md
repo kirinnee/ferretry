@@ -1409,9 +1409,10 @@ in the table above holds for a rule too, plus these:
   (ssh, npm, passwd) can never have a rule (`tool-not-covered`). Its history is the owner's own taps into a proved
   setuid sudo, su or doas ([secrets › What can have a rule](secrets.md#what-can-have-a-rule)), and a miss leaves the
   ferret's view byte-identical to sudo with no rule, as for a page.
-- **A ferret can only suggest one.** `account.propose` takes `preapprove: true` (then `recipe` is optional), which will
-  raise a card that opens the owner's sheet with nothing ticked. Until that handler lands, the daemon refuses such a
-  call whole (`unavailable`) and files no recipe from it.
+- **A ferret can only suggest one.** `account.propose` takes `preapprove: true` (then `recipe` is optional). It raises a
+  card that opens the owner's sheet with nothing ticked, and creates, stages and widens nothing
+  ([agent tools › Suggesting a standing rule](agent-tools.md#suggesting-a-standing-rule)). A daemon with no suggestion
+  port refuses such a call whole (`unavailable`) and files no recipe from it.
 - **Audited, never a value.** `input.delivered` carries `by: 'rule'`, `signInRule` and `revision` beside the sign-in,
   the account handle and the 2FA key id; a miss is `input.requested` with `preapproval: 'did-not-apply'`, the rule and
   `because`. Each suspension is `sign-in-rule-suspended` with its reason.

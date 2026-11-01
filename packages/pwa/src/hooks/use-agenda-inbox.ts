@@ -8,7 +8,9 @@
  *
  * A BOARD IS READ WHEN ITS SUMMARY MOVES, and only then. The daemon rewrites `state.attention` on every
  * board change and the fleet feed re-reads the list, so a changed summary is the signal; an unchanged
- * one reads nothing. A conversation that stops being unread is not read again.
+ * one reads nothing. A conversation that stops being unread is not read again. A read that settles without
+ * the board is the exception: it is asked again on a backoff (`inbox-board-reads.ts`), and until one lands
+ * the board is said to be unavailable on its machine — never "Updating", which is only a first read in flight.
  */
 
 import type { SessionView } from '@ferretry/protocol';
@@ -23,7 +25,6 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { DaemonAgendaClient } from '../lib/agenda-client.ts';
-import { type AgendaSender, sendAgendaAction } from '../lib/agenda-send.ts';
 import {
   agendaSummaryKey,
   browserDeferredTimers,
@@ -33,20 +34,24 @@ import {
   type InboxAction,
   type InboxCard,
   type InboxResolved,
+  type InboxUnavailable,
   inboxCards,
+  inboxCount,
   inboxParked,
   inboxResolved,
+  inboxUnavailable,
   sessionsToReadForResolved,
   type UnreadSession,
   unreadSessions,
-  unreadTotal,
   withFerretCards,
   withFerretSessions,
 } from '../lib/agenda-inbox.ts';
+import { type AgendaSender, sendAgendaAction } from '../lib/agenda-send.ts';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 import { toTestBesideGates } from '../lib/gate-items.ts';
+import { InboxBoardReads } from '../lib/inbox-board-reads.ts';
 import { nextWake, sessionTaskNames, splitSnoozed, type ToTestCard, withTaskName } from '../lib/to-test-inbox.ts';
 
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
@@ -59,7 +64,7 @@ export interface AgendaInboxMachine {
 export interface AgendaInbox {
   /** Conversations with something waiting on the owner, newest first. */
   readonly unread: readonly UnreadSession[];
-  /** Open items on the owner's turn across them, plain notifications included: the number every Inbox badge shows. */
+  /** The Inbox count (`inboxCount`): the one number every Inbox badge and the Inbox page's heading show. */
   readonly total: number;
   /** Cards waiting in a verify lane for the owner's try (Done or Not good): counted in `total`, listed under Needs you. */
   readonly toTest: readonly ToTestCard[];
@@ -69,8 +74,10 @@ export interface AgendaInbox {
   readonly cards: readonly InboxCard[];
   /** Items on the ferret's turn: not in the deck and not in `total` — the "With ferrets" section. */
   readonly withFerret: readonly InboxCard[];
-  /** True while an unread conversation's board has not been read yet. */
+  /** True while an unread conversation's board is on its first read: what "Updating" says. */
   readonly reading: boolean;
+  /** Machines with an unread conversation whose board could not be read: counted in `total`, said on the page. */
+  readonly unavailable: readonly InboxUnavailable[];
   /** Snoozed and replied items of every conversation whose board is held, newest parked first. */
   readonly parked: readonly InboxCard[];
   /** Resolved items of every conversation whose board is held, newest first: the Resolved filter's list. */
@@ -259,23 +266,27 @@ export function useAgendaInboxModel(
   const withFerretEntries = useStable(freshWithFerret, unreadKey(freshWithFerret));
 
   // Read each conversation's board — one that needs the owner, or one with an item on the ferret's turn — when its
-  // summary moved since the last read.
-  const readKeys = useRef(new Map<string, string>());
+  // summary moved since the last read, and again on a backoff while a read settles without it.
+  const boardReads = useMemo(() => new InboxBoardReads(timers ?? browserDeferredTimers), [timers]);
+  useEffect(() => () => boardReads.dispose(), [boardReads]);
   useEffect(() => {
-    const seen = new Set<string>();
-    for (const entry of [...unread, ...withFerretEntries]) {
-      const connection = connectionFor(entry.daemonId);
-      if (connection === undefined) continue;
-      const scope = daemonSessionScope(connection, entry.view.config.id);
-      const id = daemonSessionKey(scope);
-      const key = agendaSummaryKey(entry.attention);
-      seen.add(id);
-      if (readKeys.current.get(id) === key) continue;
-      readKeys.current.set(id, key);
-      void client.revalidate(connection, scope).catch(() => undefined);
-    }
-    for (const id of [...readKeys.current.keys()]) if (!seen.has(id)) readKeys.current.delete(id);
-  }, [client, connectionFor, unread, withFerretEntries]);
+    boardReads.sync(
+      [...unread, ...withFerretEntries].flatMap(entry => {
+        const connection = connectionFor(entry.daemonId);
+        if (connection === undefined) return [];
+        const scope = daemonSessionScope(connection, entry.view.config.id);
+        return [
+          {
+            id: daemonSessionKey(scope),
+            key: agendaSummaryKey(entry.attention),
+            read: () => client.revalidate(connection, scope),
+            held: () => client.store.agenda(scope) !== undefined,
+          },
+        ];
+      }),
+    );
+  }, [boardReads, client, connectionFor, unread, withFerretEntries]);
+  const failedBoards = useSyncExternalStore(boardReads.subscribe, boardReads.getSnapshot, boardReads.getSnapshot);
 
   const subscribeBoards = useCallback((listener: () => void) => client.store.subscribe(listener), [client]);
   const readBoards = useCallback(() => client.store.getSnapshot(), [client]);
@@ -329,8 +340,16 @@ export function useAgendaInboxModel(
     [withFerretEntries, boards],
   );
   const withFerret = useStable(freshWithFerretCards, cardsKey(freshWithFerretCards));
-  const reading = unread.some(
-    entry => !boards.snapshots.has(daemonSessionKey({ daemonId: entry.daemonId, sessionId: entry.view.config.id })),
+  const boardKey = (entry: UnreadSession): string =>
+    daemonSessionKey({ daemonId: entry.daemonId, sessionId: entry.view.config.id });
+  const held = (entry: UnreadSession): boolean => boards.snapshots.has(boardKey(entry));
+  const failed = (entry: UnreadSession): boolean => !held(entry) && failedBoards.has(boardKey(entry));
+  const reading = unread.some(entry => !held(entry) && !failed(entry));
+  const total = inboxCount(unread, held, cards, toTest.length);
+  const freshUnavailable = inboxUnavailable(unread, failed);
+  const unavailable = useStable(
+    freshUnavailable,
+    freshUnavailable.map(entry => `${entry.daemonId}\u0000${entry.machineName}\u0000${entry.items}`).join('\u0001'),
   );
 
   const sources = useMemo(
@@ -382,12 +401,13 @@ export function useAgendaInboxModel(
   return useMemo(
     () => ({
       unread,
-      total: unreadTotal(unread) + toTest.length,
+      total,
       toTest,
       toTestSnoozed,
       cards,
       withFerret,
       reading,
+      unavailable,
       parked,
       resolved,
       resolvedReading,
@@ -399,6 +419,8 @@ export function useAgendaInboxModel(
     }),
     [
       unread,
+      total,
+      unavailable,
       toTest,
       toTestSnoozed,
       cards,

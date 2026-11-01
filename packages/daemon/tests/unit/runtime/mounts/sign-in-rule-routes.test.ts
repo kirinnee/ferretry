@@ -6,7 +6,7 @@ import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { signInRuleRoutes } from '../../../../src/lib/runtime/mounts/sign-in-rules.ts';
 import { stepUpRoutes } from '../../../../src/lib/runtime/mounts/step-up.ts';
-import { SignInRuleService } from '../../../../src/lib/sign-in-rules/index.ts';
+import { SignInRuleService, SignInRuleSuggestions } from '../../../../src/lib/sign-in-rules/index.ts';
 import {
   ChallengeLedger,
   type PasskeyStore,
@@ -111,21 +111,22 @@ async function served() {
   });
   const base = listing();
   const ruleStore = new MemoryRuleStore();
+  const accounts = {
+    listing: async () => ({
+      ...base,
+      signIns: [
+        ...base.signIns,
+        signIn({
+          id: GITLAB as never,
+          place: { kind: 'site', domains: ['gitlab.com'], match: [] },
+          observed: [tappedFact('gitlab.com')],
+        }),
+      ],
+    }),
+  };
   const rules = new SignInRuleService({
     store: ruleStore,
-    accounts: {
-      listing: async () => ({
-        ...base,
-        signIns: [
-          ...base.signIns,
-          signIn({
-            id: GITLAB as never,
-            place: { kind: 'site', domains: ['gitlab.com'], match: [] },
-            observed: [tappedFact('gitlab.com')],
-          }),
-        ],
-      }),
-    },
+    accounts,
     proofs: {
       holds: async (id, credentialId) => (await store.holder(credentialId)) === id,
       verify: async (proof, challenge) => await stepUp.verifyStoredProof(proof, challenge),
@@ -136,6 +137,21 @@ async function served() {
     warn: () => undefined,
   });
   await rules.load();
+  const raised: string[] = [];
+  const suggestions = new SignInRuleSuggestions({
+    accounts,
+    agenda: {
+      raise: async (_session, card) => {
+        raised.push(card.ask);
+        return { ok: true, id: `A${String(raised.length)}` };
+      },
+      isOpen: async () => true,
+      close: async () => undefined,
+    },
+    redact: async text => text,
+    audit: { record: async () => undefined },
+    clock: { now: () => clock.now },
+  });
   /** Stages whose ceremony a test makes over OTHER bytes than the stage's own (a challenge with one bit flipped). */
   const tampered = new Set<string>();
   const routes = [
@@ -156,7 +172,7 @@ async function served() {
         },
       },
     ),
-    ...signInRuleRoutes(rules),
+    ...signInRuleRoutes(rules, suggestions),
   ];
   const credentials = {
     ...CREDENTIALS,
@@ -164,7 +180,18 @@ async function served() {
   };
   const dispatcherWith = (guard: CapabilityGuard) =>
     new ApiDispatcher(new ApiRouter(routes), credentials, guard, undefined, stepUp);
-  return { clock, rules, ruleStore, routes, stepUp, tampered, dispatch: dispatcherWith(GRANTED), dispatcherWith };
+  return {
+    clock,
+    rules,
+    suggestions,
+    raised,
+    ruleStore,
+    routes,
+    stepUp,
+    tampered,
+    dispatch: dispatcherWith(GRANTED),
+    dispatcherWith,
+  };
 }
 
 type Served = Awaited<ReturnType<typeof served>>;
@@ -240,6 +267,8 @@ describe('a ferret never reaches a rule route (invariant 1)', () => {
         ['DELETE', `/v1/sign-in-rules/stages/${stageId}`],
         ['POST', `/v1/sign-in-rules/${rule}/narrow`],
         ['DELETE', `/v1/sign-in-rules/${rule}`],
+        ['GET', '/v1/sign-in-rules/suggestions'],
+        ['DELETE', `/v1/sign-in-rules/suggestions/srg_${'0'.repeat(16)}`],
         ['POST', '/v1/accounts/GITHUB_WORK/sign-in-rules/revoke'],
       ] as const) {
         const asked = ask(method, path, headers);
@@ -262,6 +291,8 @@ describe('a ferret never reaches a rule route (invariant 1)', () => {
             `${route.method} ${route.path} ${route.caller} ${route.capability?.capability ?? ''}.${route.capability?.axis ?? ''}`,
         ),
     ).eql([
+      'GET /v1/sign-in-rules/suggestions person secrets.use',
+      'DELETE /v1/sign-in-rules/suggestions/:sid person secrets.use',
       'GET /v1/sign-in-rules person secrets.use',
       'GET /v1/sign-in-rules/eligibility person secrets.use',
       'POST /v1/sign-in-rules/stages person secrets.configure',
@@ -580,6 +611,42 @@ describe('the owner on every route', () => {
     should(s.ruleStore.document?.rules).eql([]);
   });
 
+  it('should list a ferret’s suggestion for a paired device, and give it no way to stage, commit or widen anything', async () => {
+    // Arrange
+    const s = await served();
+    await s.suggestions.suggest('mvv6b4qw-49d0158d', { signIn: GITHUB, why: 'I sign in here daily.' });
+
+    // Act
+    const listed = await s.dispatch.dispatch(asDevice('GET', '/v1/sign-in-rules/suggestions'));
+
+    // Assert — a card was raised, and nothing else exists: no stage, no rule, no write
+    should(listed.status).equal(200);
+    should(jsonBody(listed)['suggestions']).match([
+      { signIn: GITHUB, host: 'github.com', why: 'I sign in here daily.' },
+    ]);
+    should(s.raised).eql(['A ferret suggests a standing rule for a sign-in on github.com.']);
+    should(s.ruleStore.writes).equal(0);
+    should(s.ruleStore.document?.rules ?? []).eql([]);
+    const rules = await s.dispatch.dispatch(asDevice('GET', '/v1/sign-in-rules'));
+    should(jsonBody(rules)['rules']).eql([]);
+  });
+
+  it('should let the owner turn a suggestion down, once', async () => {
+    // Arrange
+    const s = await served();
+    const { suggestion } = await s.suggestions.suggest('mvv6b4qw-49d0158d', { signIn: GITHUB, why: 'daily' });
+
+    // Act
+    const first = await s.dispatch.dispatch(asDevice('DELETE', `/v1/sign-in-rules/suggestions/${suggestion}`));
+    const again = await s.dispatch.dispatch(asDevice('DELETE', `/v1/sign-in-rules/suggestions/${suggestion}`));
+    const bad = await s.dispatch.dispatch(asDevice('DELETE', '/v1/sign-in-rules/suggestions/nope'));
+
+    // Assert
+    should([first.status, jsonBody(first)['dismissed']]).eql([200, true]);
+    should([again.status, jsonBody(again)['dismissed']]).eql([200, false]);
+    should(bad.status).equal(400);
+  });
+
   it('should answer a fault that is not a refusal as one, never dressed as a refusal', async () => {
     // Arrange — a service that fails as a bug would, not with one of its refusals
     const broken = {
@@ -591,7 +658,7 @@ describe('the owner on every route', () => {
       },
     } as never;
     const dispatch = new ApiDispatcher(
-      new ApiRouter(signInRuleRoutes(broken)),
+      new ApiRouter(signInRuleRoutes(broken, {} as never)),
       {
         ...CREDENTIALS,
         devices: { has: (id: string) => id === deviceId, grants: () => DEFAULT_CAPABILITY_GRANTS },

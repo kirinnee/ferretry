@@ -41,9 +41,9 @@ import {
   type SharedDraftEditResult,
   type SharedDraftItem,
   type SharedDraftSnapshot,
+  sharedDraftFrameBytes,
   type TextOp,
   TextOpError,
-  sharedDraftFrameBytes,
   textOpBaseLength,
   transformTextOps,
 } from '@ferretry/protocol';
@@ -60,7 +60,7 @@ import {
 export const SHARED_DRAFT_WRITE_DELAY_MS = 1_000;
 /** The longest a write that keeps failing waits between attempts: each failure doubles the wait up to this. */
 export const SHARED_DRAFT_WRITE_RETRY_MAX_MS = 60_000;
-/** Edits one draft takes in a second, from every device together. */
+/** Edits one draft takes in a second from each device (each author), counted on its own. */
 export const SHARED_DRAFT_EDITS_PER_SECOND = 60;
 /** Drafts held in memory at once; the least recently used is written down and let go. */
 export const SHARED_DRAFT_MEMORY_LIMIT = 50;
@@ -125,8 +125,8 @@ interface LiveDraft {
   dirty: boolean;
   /** Writes in a row that failed; each one doubles the wait before the next attempt. */
   failures: number;
-  /** Edits taken in the current one-second window. */
-  window: { startedAt: number; count: number };
+  /** Edits taken in the current one-second window, per author: one device's flood never refuses another's. */
+  windows: Map<string, { startedAt: number; count: number }>;
   timer?: { cancel(): void };
 }
 
@@ -217,9 +217,36 @@ export class SharedDraftService {
     };
   }
 
-  /** Sequences one edit and answers with it as applied, and the draft after it. */
-  async edit(sessionId: string, edit: SharedDraftEdit, origin?: string): Promise<SharedDraftEditOutcome> {
-    return await this.#holding(sessionId, live => this.#apply(sessionId, live, edit, origin));
+  /**
+   * Sequences one edit and answers with it as applied, and the draft after it. `metered: false` is for the
+   * daemon's own edits — a send taking its words out — which no device's typing may crowd out. `author` is who
+   * the budget counts an edit with no `origin` against: the caller the boundary authenticated.
+   */
+  async edit(
+    sessionId: string,
+    edit: SharedDraftEdit,
+    origin?: string,
+    options: { readonly metered?: boolean; readonly author?: string } = {},
+  ): Promise<SharedDraftEditOutcome> {
+    return await this.#holding(sessionId, live => this.#apply(sessionId, live, edit, origin, options));
+  }
+
+  /** Counts one edit against its author's budget for this second; refuses it past the budget. */
+  #meter(live: LiveDraft, author: string): void {
+    const now = Date.parse(this.clock.now());
+    const window = live.windows.get(author);
+    if (window !== undefined && now - window.startedAt < 1_000) {
+      window.count += 1;
+      if (window.count > this.editsPerSecond)
+        throw new SharedDraftError(
+          'rate-limited',
+          `a device sends a draft at most ${this.editsPerSecond} edits a second`,
+        );
+      return;
+    }
+    // A window over is forgotten, so the map holds only the devices typing this second.
+    for (const [key, open] of live.windows) if (now - open.startedAt >= 1_000) live.windows.delete(key);
+    live.windows.set(author, { startedAt: now, count: 1 });
   }
 
   #apply(
@@ -227,6 +254,7 @@ export class SharedDraftService {
     live: LiveDraft,
     edit: SharedDraftEdit,
     origin: string | undefined,
+    options: { readonly metered?: boolean; readonly author?: string },
   ): SharedDraftEditOutcome {
     const current = live.snapshot;
     // The same edit twice — sent again by a composer that reconnected before it heard the first landed —
@@ -240,11 +268,7 @@ export class SharedDraftService {
       if (first !== undefined) return { applied: first.applied, snapshot: current, repeatOf: first };
     }
     // Typing is a few edits a second; past this the caller is not typing, and the draft is not its to flood.
-    const now = Date.parse(this.clock.now());
-    if (now - live.window.startedAt >= 1_000) live.window = { startedAt: now, count: 0 };
-    live.window.count += 1;
-    if (live.window.count > this.editsPerSecond)
-      throw new SharedDraftError('rate-limited', `a draft takes at most ${this.editsPerSecond} edits a second`);
+    if (options.metered ?? true) this.#meter(live, from?.author ?? options.author ?? '');
     if (edit.generation !== current.generation)
       throw new SharedDraftError(
         'stale',
@@ -446,7 +470,7 @@ export class SharedDraftService {
       historyStart: snapshot.rev,
       dirty: false,
       failures: 0,
-      window: { startedAt: Number.NEGATIVE_INFINITY, count: 0 },
+      windows: new Map(),
     };
     this.#live.set(sessionId, live);
     // Trimmed: the file shrinks too, so the next load has nothing to trim.
