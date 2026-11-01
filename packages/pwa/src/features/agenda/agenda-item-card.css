@@ -405,7 +405,7 @@
   flex-direction: column;
   gap: 3px;
   margin: 0;
-  padding-left: 16px;
+  padding-left: 18px;
   list-style: disc;
 }
 :is(.fy-card, .fy-board-detail) .fy-card__points > li {
@@ -528,11 +528,12 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.fy-card__option-meaning > .md,
-.fy-card__option-meaning > div {
+/* A one-line meaning runs on after its name; one with several blocks (a list, a second paragraph) stands as a block. */
+.fy-card__option-meaning > .md:not(:has(> :is(ul, ol), > p + p)),
+.fy-card__option-meaning > div:not(:has(> :is(ul, ol), > p + p)) {
   display: inline;
 }
-.fy-card__option-meaning :is(p) {
+.fy-card__option-meaning > .md:not(:has(> :is(ul, ol), > p + p)) :is(p) {
   display: inline;
 }
 .fy-card__recommended {
@@ -881,4 +882,33 @@
     border: 0;
     background: transparent;
   }
+}
+
+/* EVERY SEGMENT, ONE LOOK (`AgendaProse`): premise, context, answer, decided, still open, body, an option's detail, a
+   term, a revision's note. Blocks sit a fixed beat apart, a bullet or number hangs under its text, bold leads, and a
+   line the ferret broke stays broken. Nothing in a segment sets its own margins. */
+.md.fy-seg {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+.md.fy-seg :is(p, ul, ol) {
+  margin: 0;
+}
+.md.fy-seg :is(ul, ol) {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-left: 18px;
+}
+.md.fy-seg li {
+  margin: 0;
+  padding-left: 2px;
+}
+.md.fy-seg li > :is(ul, ol) {
+  margin-top: 3px;
+}
+.md.fy-seg strong {
+  font-weight: var(--weight-strong);
 }

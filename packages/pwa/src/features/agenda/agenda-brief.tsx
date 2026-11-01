@@ -28,17 +28,17 @@ import type {
 import { agendaCardKind, recommendedAgendaOption } from '@ferretry/protocol';
 import { Check, ChevronRight, ExternalLink } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { ChatProse } from '../../components/chat-prose.tsx';
 import { itemOptions, type LetteredOption, letteredOptions, needsOptionsSection } from '../../lib/agenda-options.ts';
 import { bulletPoints, type RevisionHighlight } from '../../lib/agenda-revisions.ts';
 import { plainLabel } from '../../lib/plain-label.ts';
+import { defaultAgendaProse } from './agenda-prose.tsx';
 
 type AgendaProse = (text: string) => ReactNode;
 
 export { bulletPoints };
 
 /** The chat's one Markdown renderer: a brief drawn without a host's own (the board, the history) reads like the chat. */
-const markdownProse: AgendaProse = text => <ChatProse text={text} />;
+const markdownProse: AgendaProse = defaultAgendaProse;
 
 /**
  * Text drawn in point form: a bullet list when it is written as bullets, a paragraph otherwise. Every paragraph and

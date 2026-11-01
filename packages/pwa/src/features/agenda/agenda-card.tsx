@@ -23,7 +23,6 @@
 import type { AgendaItem, AgendaRevisableField } from '@ferretry/protocol';
 import { ArrowRight } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
-import { ChatProse } from '../../components/chat-prose.tsx';
 import { answerAction, CLEAR_ACTION, kindWord, optionAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { DISMISS_ACTION, historyLine, type InboxAction, updatedSinceAsked } from '../../lib/agenda-inbox.ts';
@@ -35,6 +34,7 @@ import { AgendaBriefSections, cardLede } from './agenda-brief.tsx';
 import { AgendaDelivery } from './agenda-delivery.tsx';
 import { agendaHasDetail } from './agenda-detail.tsx';
 import { WantedAnswers, wantedAnswers } from './agenda-need.tsx';
+import { defaultAgendaProse } from './agenda-prose.tsx';
 import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { AgendaBody } from './agenda-steps.tsx';
 import { AgendaDecidedSummary, AgendaUpdated } from './agenda-updated.tsx';
@@ -97,7 +97,7 @@ export interface AgendaCardProps {
   readonly planForm?: ReactNode;
 }
 
-const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
+const markdownProse = defaultAgendaProse;
 
 export function AgendaCard({
   item,

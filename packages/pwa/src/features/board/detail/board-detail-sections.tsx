@@ -7,7 +7,6 @@
 import { type BoardTaskView, formatTaskRef, type TaskRef } from '@ferretry/protocol';
 import { ExternalLink, GitBranch } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
-import { ChatProse } from '../../../components/chat-prose.tsx';
 import {
   askOrigin,
   askWords,
@@ -22,6 +21,7 @@ import {
 import type { RunningOnMachine } from '../../../lib/board-model.ts';
 import { ageLabel, type FerretNames } from '../../../lib/board-present.ts';
 import { agendaHeading } from '../../agenda/agenda-delivery.tsx';
+import { defaultAgendaProse } from '../../agenda/agenda-prose.tsx';
 import { BoardIcon } from '../board-icons.tsx';
 
 export interface DetailSectionProps {
@@ -54,8 +54,8 @@ export function Avatar({ name }: { readonly name: string }) {
   );
 }
 
-/** A card's Markdown, drawn as the chat draws it. */
-export const cardProse = (text: string): ReactNode => <ChatProse text={text} />;
+/** A card's Markdown, drawn as an agenda segment is (the chat's renderer, its lines kept). */
+export const cardProse = defaultAgendaProse;
 
 export function Prose({ text }: { readonly text: string }) {
   return <div className="fy-board-detail__prose">{cardProse(text)}</div>;

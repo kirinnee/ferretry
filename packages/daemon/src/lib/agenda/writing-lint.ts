@@ -1,6 +1,7 @@
 import {
   AGENDA_ASK_TARGET_LENGTH,
   AGENDA_PUSH_TITLE_LENGTH,
+  AGENDA_SEGMENT_PARAGRAPH_LENGTH,
   type AgendaAsk,
   type AgendaBrief,
   type AgendaCardAnswer,
@@ -139,6 +140,40 @@ function vagueOptions(item: AgendaWriting): string[] {
     .filter(label => BARE_OPTION.test(label) || label.length < MIN_OPTION_LENGTH);
 }
 
+const LIST_LINE = /^\s*(?:[-*•]|\d+[.)])\s/u;
+const FENCE_LINE = /^\s*(?:```|~~~)/u;
+const TABLE_OR_HEADING_LINE = /^\s*(?:\||#)/u;
+
+/** Whether a segment holds a paragraph (a line of prose, not a bullet, table or fenced code) past the target length. */
+function hasWallOfText(text: string): boolean {
+  let fenced = false;
+  for (const line of text.split(/\r?\n/u)) {
+    if (FENCE_LINE.test(line)) fenced = !fenced;
+    else if (fenced || LIST_LINE.test(line) || TABLE_OR_HEADING_LINE.test(line)) continue;
+    else if (line.trim().length > AGENDA_SEGMENT_PARAGRAPH_LENGTH) return true;
+  }
+  return false;
+}
+
+/** The segments the owner reads as blocks of prose, named for the warning that points at them. */
+function segmentsOf(item: AgendaWriting): Field[] {
+  const segments: Field[] = [];
+  const push = (name: string, text: string | null | undefined): void => {
+    if (!isBlank(text)) segments.push({ name, text: text ?? '' });
+  };
+  push('premise', item.premise);
+  push('context', item.context);
+  push('decided', item.decided);
+  push('still open', item.stillOpen);
+  push('answer to the question', item.questionAnswer);
+  push('impact', item.impact);
+  push('recommendation', item.recommendation?.why);
+  push('body', item.body);
+  for (const question of item.questions ?? []) push('question', question.why);
+  for (const detail of item.optionDetails ?? []) push(`option "${detail.label}"`, detail.detail);
+  return segments;
+}
+
 /** A term like `OCI work login` explains the capitals `OCI` that start it. */
 function isCoveredByTerm(word: string, defined: ReadonlySet<string>): boolean {
   return [...defined].some(term => term.split(/\s+/u).includes(word));
@@ -237,6 +272,19 @@ export function lintAgendaWriting(item: AgendaWriting): string[] {
   if (acronyms.size > 0) {
     warnings.push(
       `unexplained capitals (${quoted([...acronyms.keys()])}) in ${whereFound(acronyms)}: spell them out, or add each to terms with its meaning`,
+    );
+  }
+
+  const walls = [
+    ...new Set(
+      segmentsOf(item)
+        .filter(segment => hasWallOfText(segment.text))
+        .map(segment => segment.name),
+    ),
+  ];
+  if (walls.length > 0) {
+    warnings.push(
+      `${walls.join(', ')} ${walls.length === 1 ? 'is' : 'are'} one paragraph over ${AGENDA_SEGMENT_PARAGRAPH_LENGTH} characters: split this into short points (- …) or bold the answer first — the owner reads it on a phone`,
     );
   }
   return warnings;

@@ -476,6 +476,11 @@ describe('agenda command surface', () => {
       should(text).containEql(`e.g. fy agenda add -t "<topic>" --premise … --context … -k ${kind} `);
     }
     should(text).containEql('-q "Which region?" -q "OK to restart?" -q "Your work email?"');
+    // Writing: segments are short points, never a paragraph; the warning's threshold and fix are said up front.
+    should(text).containEql('short points, answer first, no paragraphs');
+    should(text).containEql(
+      'One paragraph over 280 characters draws a warning: split this into short points (- …) or bold the answer first.',
+    );
   });
 
   it('should explain the asymmetric dismissal policy in dismiss help', async () => {

@@ -330,6 +330,14 @@ defined with `--term`, never a secret value. The daemon lints for this and answe
 refusal — with one exception below. Agents close their own items as soon as the reason is gone: an open item
 whose blocker has cleared is a bug.
 
+**Every segment is short points, never a paragraph.** The premise, context, decided, still-open, question
+answer, body, option details, ask, revision notes and terms all read as the same Markdown on the card: bullets
+(`-` or `•`), numbered lists, **bold**, `code`, references, and a single line break kept as a line
+(`segmentMarkdown` in the app owns that, so no segment flattens its lines). Writing follows: answer first, one
+idea per line. `fy agenda add` and `agenda edit` warn, never block, when a segment is a single paragraph over
+280 characters (`AGENDA_SEGMENT_PARAGRAPH_LENGTH` in `@ferretry/protocol`), saying to split it into short points
+or bold the answer first. Lists, tables, headings and fenced code are not counted as paragraphs.
+
 **The premise and the context are required.** They are what a cold reader starts from — what is going on, and
 the facts around it — so every NEW item a ferret raises must carry both:
 

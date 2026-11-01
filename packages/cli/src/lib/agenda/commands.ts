@@ -1,4 +1,4 @@
-import { agendaShapeHelp } from '@ferretry/protocol';
+import { AGENDA_SEGMENT_PARAGRAPH_LENGTH, agendaShapeHelp } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import type { NotifyOptions } from '../notify/commands.ts';
 import { ASK_KIND_NAMES } from './ask.ts';
@@ -91,7 +91,10 @@ The answers a card gives, as buttons and swipes (left · up · right):
   reply        none: the reply box is the answer (the default)
 (task, open, multiple-choice and answer-review are still accepted as older names.) --up-why "<line>" describes
 the --up answer. Without --kind: steps alone are a todo, --option makes a choice (exactly Yes and No, a yesno),
-one --question with options is a choice, and plain questions — one or several — are a reply.`;
+one --question with options is a choice, and plain questions — one or several — are a reply.
+
+Segments (--premise, --context, --decided, --still-open, --question-answer, --body): short points, answer first, no
+paragraphs. One paragraph over ${AGENDA_SEGMENT_PARAGRAPH_LENGTH} characters draws a warning: split this into short points (- …) or bold the answer first.`;
 
 const DISMISS_POLICY = `Agents may dismiss only agenda items they raised themselves.
 A human may dismiss any agenda item. Every dismissal remains in the resolution audit.`;
