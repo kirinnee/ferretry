@@ -22,6 +22,7 @@ import {
   withoutCatalog,
   withWithdrawn,
 } from '../../../src/lib/shared-catalogs/document.ts';
+import { NORMALISED_CATALOG_ID, NORMALISED_ITEM_ID } from '../../../src/lib/shared-catalogs/freeze.ts';
 import { CatalogRefusal } from '../../../src/lib/shared-catalogs/refusal.ts';
 
 const T1 = '2026-01-01T00:00:00.000Z';
@@ -74,6 +75,32 @@ describe('the catalogs document', () => {
     should(problemOf({ ...one, schemaVersion: 1 })).be.a.String();
     should(problemOf(7)).be.a.String();
     should(documentProblem({ success: false, error: { issues: [] } as never })).equal('it is malformed');
+  });
+
+  it('should refuse the placeholder ids a shared copy is stored under, wherever they would be used', () => {
+    const added = withNewItem(one, catalogId(1), item(1), T2);
+    const catalog = findCatalog(added, catalogId(1));
+    const bound = (key: string) => ({
+      ...item(1),
+      versions: [{ ...version(1), bindings: { [key]: { digest: hex('b'), size: 11 } } }],
+    });
+    should(problemOf({ ...one, catalogs: [{ ...findCatalog(one, catalogId(1)), id: NORMALISED_CATALOG_ID }] })).match(
+      new RegExp(`${NORMALISED_CATALOG_ID} is the placeholder.*catalog id`, 'u'),
+    );
+    should(
+      problemOf({
+        ...one,
+        defaultCatalogId: NORMALISED_CATALOG_ID,
+        catalogs: [{ ...findCatalog(one, catalogId(1)), id: NORMALISED_CATALOG_ID }],
+      }),
+    ).match(/placeholder/u);
+    should(problemOf({ ...added, items: [{ ...item(1), itemId: NORMALISED_ITEM_ID }] })).match(
+      new RegExp(`${NORMALISED_ITEM_ID} is the placeholder.*item id`, 'u'),
+    );
+    should(problemOf({ ...added, items: [bound(NORMALISED_CATALOG_ID)] })).be.a.String();
+    should(
+      problemOf({ ...added, catalogs: [{ ...catalog, entries: [] }], items: [bound(catalogId(1))] }),
+    ).be.a.String();
   });
 
   it('should refuse the rules a shape cannot say', () => {

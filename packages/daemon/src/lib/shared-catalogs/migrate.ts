@@ -26,6 +26,7 @@ import {
   type StoredCatalog,
   type StoredSharedItem,
   documentProblem,
+  placeholderProblem,
 } from './document.ts';
 import type { CatalogsDocumentV1 } from './document-v1.ts';
 import { canonicalCopy, fileCountOf, sharedCopy } from './freeze.ts';
@@ -54,6 +55,11 @@ export async function migrateCatalogs(
   const catalogs: StoredCatalog[] = [];
 
   for (const catalog of v1.catalogs) {
+    for (const problem of [
+      placeholderProblem('catalog', catalog.id),
+      ...catalog.items.map(item => placeholderProblem('item', item.itemId)),
+    ])
+      if (problem !== undefined) throw upgradeRefused(problem);
     for (const item of catalog.items) {
       const versions: StoredSharedItem['versions'] = [];
       for (const stored of item.versions) {
@@ -114,12 +120,15 @@ export async function migrateCatalogs(
   }
 
   const parsed = CatalogsDocumentSchema.safeParse({ schemaVersion: 2, items, catalogs });
-  if (!parsed.success)
-    throw new CatalogRefusal(
-      'store_damaged',
-      `catalogs.json could not be upgraded: ${documentProblem(parsed) ?? 'it is malformed'}. Nothing was changed. Restore the file from a backup, or install the previous Ferretry version.`,
-    );
+  if (!parsed.success) throw upgradeRefused(documentProblem(parsed) ?? 'it is malformed');
   return { document: parsed.data, sharedBlobs: [...blobs.values()] };
+}
+
+function upgradeRefused(problem: string): CatalogRefusal {
+  return new CatalogRefusal(
+    'store_damaged',
+    `catalogs.json could not be upgraded: ${problem}. Nothing was changed. Restore the file from a backup, or install the previous Ferretry version.`,
+  );
 }
 
 function parseItem(text: string): SharedCatalogItem | undefined {

@@ -24,12 +24,11 @@ function toPem(der: ArrayBuffer): string {
   return ['-----BEGIN PRIVATE KEY-----', ...lines, '-----END PRIVATE KEY-----', ''].join('\n');
 }
 
+/** The same identity in every test, so a signature is the same bytes every run (Ed25519 signs deterministically). */
 async function newIdentity(): Promise<DaemonIdentity> {
-  const pair = (await globalThis.crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
-    'sign',
-    'verify',
-  ])) as unknown as CryptoKeyPair;
-  return crypto.importDaemonIdentity(toPem(await globalThis.crypto.subtle.exportKey('pkcs8', pair.privateKey)));
+  const seed = new Uint8Array(32).map((_, index) => index + 1);
+  const pkcs8Prefix = [0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20];
+  return crypto.importDaemonIdentity(toPem(new Uint8Array([...pkcs8Prefix, ...seed]).buffer));
 }
 
 class MemoryDocuments implements CatalogDocumentStore {
@@ -70,8 +69,14 @@ class MemoryDocuments implements CatalogDocumentStore {
 class MemoryBlobs implements CatalogBlobStore {
   constructor(readonly events: string[] = []) {}
   readonly blobs = new Map<string, string>();
+  /** Makes the put after this many succeeded ones throw, as a crash part way through would. */
+  failAfter: number | undefined;
   async put(digest: string, text: string): Promise<void> {
-    if (!this.blobs.has(digest)) this.blobs.set(digest, text);
+    if (this.failAfter !== undefined) {
+      if (this.failAfter <= 0) throw new Error('crashed');
+      this.failAfter -= 1;
+    }
+    this.blobs.set(digest, text);
     this.events.push(`blob:${digest}`);
   }
   async get(digest: string): Promise<string | undefined> {
@@ -178,3 +183,13 @@ export async function rig(overrides: Partial<SharedCatalogDeps> = {}): Promise<R
   });
   return Object.assign(state, { service });
 }
+
+/** An MCP component with a harness, the one kind of server whose harness a shared item carries. */
+export const harnessServer = (name: string): McpSourceServer => ({
+  id: `id-component-${name}`,
+  name,
+  scope: 'component',
+  harness: 'claude',
+  declaration: null,
+  component: { command: 'npx', args: ['-y', name], env: {}, harness: 'claude' },
+});

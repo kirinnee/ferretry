@@ -73,9 +73,11 @@ export class FileCatalogDocumentStore implements CatalogDocumentStore {
 }
 
 /**
- * The frozen item versions, one file per digest. A blob is written once: a digest already on disk is not
- * touched, so a published version can never be edited in place. The reader hashes what it gets back
- * (the service does), so a file changed under its name is found, not trusted.
+ * The frozen item versions, one file per digest.
+ * A blob is named by the digest of its text, which every caller has already computed, so the text a name
+ * holds is fixed: a file that already has it is left alone, and one that holds anything else (damaged on
+ * disk) is replaced atomically with the right text. The reader hashes what it gets back (the service does),
+ * so a file changed under its name is found, not trusted.
  */
 export class FileCatalogBlobStore implements CatalogBlobStore {
   constructor(
@@ -85,7 +87,7 @@ export class FileCatalogBlobStore implements CatalogBlobStore {
 
   async put(digest: string, text: string): Promise<void> {
     const file = this.fileOf(digest);
-    if ((await this.files.readText(file)) !== undefined) return;
+    if ((await this.files.readText(file)) === text) return;
     await this.files.ensureDirectory(this.paths.catalogs, DIRECTORY_MODE);
     await this.files.ensureDirectory(this.paths.catalogBlobs, DIRECTORY_MODE);
     await this.files.writeTextAtomic(file, text);

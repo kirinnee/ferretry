@@ -24,13 +24,14 @@ export interface CatalogDocumentStore {
   writeBackupV1(text: string): Promise<void>;
 }
 
-/** The frozen item versions, content-addressed by their digest (`sha256:<hex>`) and never rewritten. */
+/** The frozen item versions, content-addressed by the digest (`sha256:<hex>`) of their text. */
 export interface CatalogBlobStore {
-  /** Writes the text unless a blob of that digest is already there. */
+  /** Makes sure the blob holds exactly this text: left alone when it does, replaced when it holds anything else. */
   put(digest: string, text: string): Promise<void>;
   /** The text, or `undefined` when there is no such blob. */
   get(digest: string): Promise<string | undefined>;
 }
+
 /** The SKILL.md files the skills inventory lists, matched the way `GET /v1/skills/file` matches them. */
 export interface SkillDirectory {
   list(): Promise<readonly { readonly path: string; readonly name: string }[]>;

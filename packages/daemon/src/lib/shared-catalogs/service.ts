@@ -139,7 +139,7 @@ interface Prepared {
 /** An id of 128 random bits in the characters base64url writes — never the placeholder a shared copy is stored under. */
 function randomId(crypto: RelayCrypto, prefix: 'cat_' | 'itm_'): string {
   const placeholder = prefix === 'cat_' ? NORMALISED_CATALOG_ID : NORMALISED_ITEM_ID;
-  for (;;) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     const bytes = crypto.randomBytes(16);
     const text = btoa(String.fromCharCode(...bytes))
       .replaceAll('+', '-')
@@ -147,6 +147,7 @@ function randomId(crypto: RelayCrypto, prefix: 'cat_' | 'itm_'): string {
       .replaceAll('=', '');
     if (`${prefix}${text}` !== placeholder) return `${prefix}${text}`;
   }
+  throw new Error('The random source gave the placeholder id three times, so no id could be made.');
 }
 
 const instant = (ms: number): string => new Date(ms).toISOString();

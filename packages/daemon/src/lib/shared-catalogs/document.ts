@@ -44,6 +44,7 @@ import {
   SharedCatalogItemIdSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import { NORMALISED_CATALOG_ID, NORMALISED_ITEM_ID } from './freeze.ts';
 import { CatalogRefusal } from './refusal.ts';
 
 export const CATALOGS_SCHEMA_VERSION = 2;
@@ -107,6 +108,14 @@ const StoredCatalogSchema = z.strictObject({
 });
 export type StoredCatalog = z.infer<typeof StoredCatalogSchema>;
 
+/** Why an id may not be used, when it is the placeholder a shared copy is stored under. */
+export function placeholderProblem(kind: 'catalog' | 'item', id: string): string | undefined {
+  const placeholder = kind === 'catalog' ? NORMALISED_CATALOG_ID : NORMALISED_ITEM_ID;
+  return id === placeholder
+    ? `${id} is the placeholder id a shared copy is stored under, so it cannot be a ${kind} id`
+    : undefined;
+}
+
 /** The first thing wrong with a parsed document, or `undefined`: the rules a shape alone cannot say. */
 function firstProblem(document: {
   readonly defaultCatalogId?: string | undefined;
@@ -115,6 +124,8 @@ function firstProblem(document: {
 }): string | undefined {
   const catalogIds = new Set<string>();
   for (const catalog of document.catalogs) {
+    const placeholder = placeholderProblem('catalog', catalog.id);
+    if (placeholder !== undefined) return placeholder;
     if (catalogIds.has(catalog.id)) return `${catalog.id} is listed twice`;
     catalogIds.add(catalog.id);
   }
@@ -123,6 +134,8 @@ function firstProblem(document: {
 
   const items = new Map<string, StoredSharedItem>();
   for (const item of document.items) {
+    const placeholder = placeholderProblem('item', item.itemId);
+    if (placeholder !== undefined) return placeholder;
     if (items.has(item.itemId)) return `${item.itemId} is listed twice`;
     items.set(item.itemId, item);
     if (item.versions.some((version, index) => version.version !== index + 1))

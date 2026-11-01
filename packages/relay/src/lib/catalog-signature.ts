@@ -53,14 +53,24 @@ const canonicalBytes = (document: unknown): Uint8Array | null => {
   return canonical.ok ? utf8Bytes(canonical.text) : null;
 };
 
+/** An item's canonical text with its digest and size: the one place they are derived. `null` when it has no one spelling. */
+export async function catalogItemCanonical(
+  crypto: RelayCrypto,
+  item: SharedCatalogItem,
+): Promise<{ readonly text: string; readonly digest: CatalogDigest; readonly size: number } | null> {
+  const canonical = catalogCanonicalText(item);
+  if (!canonical.ok) return null;
+  const bytes = utf8Bytes(canonical.text);
+  return { text: canonical.text, digest: catalogDigestOf(await crypto.sha256(bytes)), size: bytes.length };
+}
+
 /** An item's digest and canonical size: what its manifest line must say. `null` when it has no one spelling. */
 export async function catalogItemDigest(
   crypto: RelayCrypto,
   item: SharedCatalogItem,
 ): Promise<{ readonly digest: CatalogDigest; readonly size: number } | null> {
-  const bytes = canonicalBytes(item);
-  if (bytes === null) return null;
-  return { digest: catalogDigestOf(await crypto.sha256(bytes)), size: bytes.length };
+  const copy = await catalogItemCanonical(crypto, item);
+  return copy === null ? null : { digest: copy.digest, size: copy.size };
 }
 
 /** What a manifest signature signs, for this manifest. */

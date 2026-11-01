@@ -14,13 +14,18 @@ import {
   install,
   LEGACY_ALONE,
   LEGACY_CATALOG,
+  LEGACY_HARNESS,
   LEGACY_MCP,
   LEGACY_OTHER,
   LEGACY_SKILL,
-  legacyExport,
+  GOLDEN,
+  GOLDEN_STATE,
   legacyState,
 } from './legacy.ts';
 import { crypto, rig, SKILL_MD, SKILL_PATH, stdio } from './support.ts';
+
+const harnessOfFirst = (file: unknown) =>
+  (file as { items: { harness?: string }[] }).items.find(item => item.harness !== undefined)?.harness;
 
 const refusal = async (work: () => Promise<unknown>): Promise<CatalogRefusal> => {
   try {
@@ -59,8 +64,8 @@ describe('migrateCatalogs', () => {
     );
     should(skill?.versions[0]?.fileCount).equal(2);
     should(first.document.items.find(item => item.itemId === LEGACY_MCP)?.versions[0]?.fileCount).be.undefined();
-    // The two catalogs hold the same MCP setup under different ids: one shared copy, kept once.
-    should(first.sharedBlobs).have.length(3);
+    // The two catalogs hold the same MCP setup under different ids: one shared copy, kept once (3 + the harness item).
+    should(first.sharedBlobs).have.length(4);
     for (const blob of first.sharedBlobs) {
       const copy = await canonicalOrRefuse(crypto, JSON.parse(blob.text));
       should(copy.digest).equal(blob.digest);
@@ -116,21 +121,43 @@ describe('migrateCatalogs', () => {
     should(failed.refusal).equal('store_damaged');
     should(failed.message).match(/could not be upgraded/u);
   });
+
+  it('should refuse a store that uses a placeholder id, naming it', async () => {
+    const { r, legacy } = await upgraded();
+    const read = async (digest: string) => r.blobs.blobs.get(digest);
+    const asCatalog = structuredClone(legacy.document);
+    Object.assign(asCatalog.catalogs[0] as object, { id: NORMALISED_CATALOG_ID });
+    const asItem = structuredClone(legacy.document);
+    Object.assign(asItem.catalogs[0]?.items[0] as object, { itemId: NORMALISED_ITEM_ID });
+    for (const [document, id] of [
+      [asCatalog, NORMALISED_CATALOG_ID],
+      [asItem, NORMALISED_ITEM_ID],
+    ] as const) {
+      const failed = await refusal(async () => await migrateCatalogs(crypto, document, read));
+      should(failed.refusal).equal('store_damaged');
+      should(failed.message)
+        .containEql(id)
+        .and.match(/placeholder/u);
+    }
+  });
 });
 
 describe('the upgrade, inside the service', () => {
   it('should keep every export byte for byte what the version 1 daemon made, and every item', async () => {
     const { r, legacy } = await upgraded();
+    should(legacy.text).equal(GOLDEN_STATE.text);
+    should(Object.fromEntries(legacy.blobs)).deepEqual(GOLDEN_STATE.blobs);
     for (const id of [LEGACY_CATALOG, LEGACY_OTHER]) {
-      const before = await legacyExport(r, legacy, id);
+      const before = GOLDEN[`export:${id}`];
       const after = await r.service.exportCatalog(id, {});
       should(JSON.stringify(after)).equal(JSON.stringify(before));
       should((await verifySharedCatalogFile(crypto, after)).ok).be.true();
       should(JSON.stringify(await r.service.exportCatalog(id, {}))).equal(JSON.stringify(before));
-      should(JSON.stringify(await r.service.signedManifest(id))).equal(JSON.stringify(before.signedManifest));
+      should(JSON.stringify(await r.service.signedManifest(id))).equal(JSON.stringify(GOLDEN[`manifest:${id}`]));
     }
+    should(JSON.stringify(harnessOfFirst(GOLDEN[`export:${LEGACY_OTHER}`]))).equal('"claude"');
     for (const [itemId, versions] of legacy.items) {
-      const catalogId = itemId === LEGACY_ALONE ? LEGACY_OTHER : LEGACY_CATALOG;
+      const catalogId = itemId === LEGACY_ALONE || itemId === LEGACY_HARNESS ? LEGACY_OTHER : LEGACY_CATALOG;
       for (const item of versions)
         if (itemId !== LEGACY_MCP)
           should(JSON.stringify(await r.service.frozenItem(catalogId, itemId, item.itemVersion))).equal(
@@ -144,6 +171,7 @@ describe('the upgrade, inside the service', () => {
   it('should answer a list as the version 1 daemon did: same digests and sizes per catalog', async () => {
     const { r, legacy } = await upgraded();
     const listed = await r.service.list();
+    should(JSON.stringify(listed)).equal(JSON.stringify(GOLDEN.list));
     const skill = legacy.document.catalogs[0]?.items[0];
     const item = listed.catalogs[0]?.items[0];
     should(item?.versions).deepEqual(
@@ -162,7 +190,7 @@ describe('the upgrade, inside the service', () => {
     const { r } = await upgraded();
     await r.service.list();
     const kinds = r.events.map(event => event.split(':')[0]);
-    should(kinds).deepEqual(['blob', 'blob', 'blob', 'backup', 'document']);
+    should(kinds).deepEqual(['blob', 'blob', 'blob', 'blob', 'backup', 'document']);
     r.events.length = 0;
     await r.service.list();
     await r.service.exportCatalog(LEGACY_CATALOG, {});
@@ -220,6 +248,79 @@ describe('the upgrade, inside the service', () => {
     should(r.documents.backup).equal(legacy.text);
   });
 
+  it('should repair a crash after one of the shared copies was put, to the same bytes', async () => {
+    const { r } = await upgraded();
+    const clean = await upgraded();
+    await clean.r.service.list();
+    r.blobs.failAfter = 1;
+    const failure = await r.service.list().then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+    should(failure?.message).equal('crashed');
+    should(r.blobs.blobs.size).equal(clean.legacy.blobs.size + 1);
+    should(r.documents.raw.version).equal(1);
+    should(r.documents.backup).be.undefined();
+    r.blobs.failAfter = undefined;
+    await r.service.list();
+    should(r.documents.raw.version).equal(2);
+    should(JSON.stringify(r.documents.document)).equal(JSON.stringify(clean.r.documents.document));
+    should([...r.blobs.blobs.keys()].sort()).deepEqual([...clean.r.blobs.blobs.keys()].sort());
+  });
+
+  it('should not read the random source to upgrade, and give the same answers as one that could', async () => {
+    const { r: plain } = await upgraded();
+    const throwing = Object.assign(Object.create(crypto) as typeof crypto, {
+      randomBytes: () => {
+        throw new Error('the upgrade asked for random bytes');
+      },
+    });
+    const r = await rig({ crypto: throwing });
+    const legacy = await legacyState(r);
+    install(r, legacy);
+    should(JSON.stringify(await r.service.list())).equal(JSON.stringify(await plain.service.list()));
+    should(JSON.stringify(r.documents.document)).equal(JSON.stringify(plain.documents.document));
+  });
+
+  it('should leave an unchanged source unchanged, and publish nothing for it, after the upgrade', async () => {
+    const { r } = await upgraded();
+    const listed = await r.service.list({ sourceState: true });
+    should(JSON.stringify(listed)).equal(JSON.stringify(GOLDEN.listWithState));
+    const states = listed.catalogs.flatMap(catalog => catalog.items.map(item => [item.itemId, item.sourceState]));
+    should(states).deepEqual([
+      [LEGACY_SKILL, 'unchanged'],
+      [LEGACY_MCP, 'withdrawn'],
+      [LEGACY_ALONE, 'unchanged'],
+      [LEGACY_HARNESS, 'unchanged'],
+    ]);
+    const before = JSON.stringify(r.documents.document);
+    for (const [catalogId, itemId] of [
+      [LEGACY_CATALOG, LEGACY_SKILL],
+      [LEGACY_OTHER, LEGACY_ALONE],
+      [LEGACY_OTHER, LEGACY_HARNESS],
+    ] as const) {
+      const preview = await r.service.previewItem(catalogId, { itemId });
+      should(preview.sameAsVersion).equal(1 + Number(itemId === LEGACY_SKILL));
+      should(
+        (await refusal(async () => await r.service.publishVersion(catalogId, itemId, { digest: preview.digest })))
+          .refusal,
+      ).equal('nothing_to_publish');
+    }
+    should(JSON.stringify(r.documents.document)).equal(before);
+  });
+
+  it('should answer a preview taken before the upgrade with changed_since_preview', async () => {
+    const { r, legacy } = await upgraded();
+    const staleDigest = legacy.document.catalogs[0]?.items[0]?.versions[1]?.contentDigest as string;
+    const fresh = await r.service.previewItem(LEGACY_CATALOG, { itemId: LEGACY_SKILL });
+    should(staleDigest).not.equal(fresh.digest);
+    const failed = await refusal(
+      async () => await r.service.publishVersion(LEGACY_CATALOG, LEGACY_SKILL, { digest: staleDigest }),
+    );
+    should(failed.refusal).equal('changed_since_preview');
+    should(r.documents.document.catalogs[0]?.revision).equal(6);
+  });
+
   it('should fail closed on a damaged frozen copy, write nothing, and try again on the next call', async () => {
     const { r, legacy } = await upgraded();
     const [digest] = [...legacy.blobs.keys()] as [string];
@@ -244,7 +345,7 @@ describe('the upgrade, inside the service', () => {
 
 describe('what every read checks', () => {
   it('should check the shared copy against its content digest and the catalog item against its own digest', async () => {
-    const { r, legacy } = await upgraded();
+    const { r } = await upgraded();
     await r.service.list();
     const document = r.documents.document;
     const skill = document.items.find(item => item.itemId === LEGACY_SKILL);
@@ -275,13 +376,13 @@ describe('what every read checks', () => {
     // The shared copy no longer matches its content digest.
     r.documents.document = document;
     const text = r.blobs.blobs.get(version.contentDigest) as string;
-    r.blobs.blobs.set(version.contentDigest, text.replace('demo summary', 'demo summarY'));
+    r.blobs.blobs.set(version.contentDigest, text.replace('Does the demo thing', 'Does the demo thinG'));
     should((await refusal(async () => await r.service.frozenItem(LEGACY_CATALOG, LEGACY_SKILL, 1))).message).match(
       /no longer matches its digest/u,
     );
     r.blobs.blobs.set(version.contentDigest, text);
     should(JSON.stringify(await r.service.exportCatalog(LEGACY_CATALOG, {}))).equal(
-      JSON.stringify(await legacyExport(r, legacy, LEGACY_CATALOG)),
+      JSON.stringify(GOLDEN[`export:${LEGACY_CATALOG}`]),
     );
   });
 
@@ -381,5 +482,23 @@ describe('new ids', () => {
     should(added.itemId).not.equal(NORMALISED_ITEM_ID);
     should(SKILL_MD).be.a.String();
     should(calls).equal(2);
+  });
+
+  it('should give up after three placeholders instead of looping', async () => {
+    let calls = 0;
+    const zeros = Object.assign(Object.create(crypto) as typeof crypto, {
+      randomBytes: (length: number) => {
+        calls += 1;
+        return new Uint8Array(length);
+      },
+    });
+    const r = await rig({ crypto: zeros });
+    const failure = await r.service.create({ name: 'Team' }).then(
+      () => undefined,
+      (error: unknown) => error as Error,
+    );
+    should(failure?.message).match(/placeholder id three times/u);
+    should(calls).equal(3);
+    should(r.events).have.length(0);
   });
 });

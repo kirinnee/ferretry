@@ -1,19 +1,10 @@
-/**
- * A catalogs store as the version 1 daemon left it, built from first principles (not from the migration), and the
- * export the version 1 daemon would have made of it. The migration is held to that export, byte for byte.
- */
-import {
-  type CatalogSkill,
-  SHARED_CATALOG_FILE_FORMAT,
-  SHARED_CATALOG_MANIFEST_FORMAT,
-  type SharedCatalogFile,
-  type SharedCatalogItem,
-} from '@ferretry/protocol';
-import { signCatalogManifest } from '@ferretry/relay';
+/** A catalogs store as the version 1 daemon left it, built from first principles (not from the migration). */
+import { readFileSync } from 'node:fs';
+import type { CatalogSkill, SharedCatalogItem } from '@ferretry/protocol';
 import type { CatalogsDocumentV1 } from '../../../src/lib/shared-catalogs/document-v1.ts';
-import { canonicalOrRefuse, freezeItem, skillOf } from '../../../src/lib/shared-catalogs/freeze.ts';
+import { canonicalOrRefuse, freezeItem, NORMALISED_ITEM_ID, skillOf } from '../../../src/lib/shared-catalogs/freeze.ts';
 import { mcpSetupOf } from '../../../src/lib/shared-catalogs/mcp-source.ts';
-import { crypto, type Rig, SKILL_MD, stdio } from './support.ts';
+import { crypto, harnessServer, type Rig, SKILL_MD, SKILL_PATH, stdio } from './support.ts';
 
 const T = (day: number) => `2026-01-0${day}T00:00:00.000Z`;
 export const LEGACY_CATALOG = `cat_${'B'.repeat(22)}`;
@@ -21,6 +12,8 @@ export const LEGACY_OTHER = `cat_${'C'.repeat(22)}`;
 export const LEGACY_SKILL = `itm_${'S'.repeat(22)}`;
 export const LEGACY_MCP = `itm_${'M'.repeat(22)}`;
 export const LEGACY_ALONE = `itm_${'L'.repeat(22)}`;
+/** An MCP setup that carries a harness, which only a fleet component does. */
+export const LEGACY_HARNESS = `itm_${'H'.repeat(22)}`;
 
 export interface Legacy {
   readonly document: CatalogsDocumentV1;
@@ -43,23 +36,34 @@ export async function legacyState(r: Rig): Promise<Legacy> {
     name: string,
     body: Parameters<typeof freezeItem>[0]['body'],
     day: number,
+    harness?: 'claude' | 'codex' | 'generic',
+    sourceId = `id-${name}`,
   ) => {
-    const summary = `${name} summary`;
-    const item = freezeItem({ publisher, catalogId, itemId, itemVersion: version, name, summary, body });
+    const summary = body.kind === 'skill' ? 'Does the demo thing' : `${name} summary`;
+    const item = freezeItem({
+      publisher,
+      catalogId,
+      itemId,
+      itemVersion: version,
+      name,
+      summary,
+      body,
+      ...(harness === undefined ? {} : { harness }),
+    });
     const copy = await canonicalOrRefuse(crypto, item);
     blobs.set(copy.digest, copy.text);
     frozen.set(itemId, [...(frozen.get(itemId) ?? []), item]);
     return {
       version,
       digest: copy.digest,
-      contentDigest: `sha256:${'d'.repeat(63)}${String(version)}`,
+      contentDigest: (await canonicalOrRefuse(crypto, { ...item, itemId: NORMALISED_ITEM_ID, itemVersion: 1 })).digest,
       size: copy.size,
       publishedAt: T(day),
       summary,
       source:
         body.kind === 'skill'
           ? { kind: 'skill' as const, path: '/home/me/.claude/skills/demo/SKILL.md' }
-          : { kind: 'mcp' as const, id: `id-${name}`, name },
+          : { kind: 'mcp' as const, id: sourceId, name },
     };
   };
   const skill = (notes: string) =>
@@ -70,8 +74,8 @@ export async function legacyState(r: Rig): Promise<Legacy> {
         { path: 'notes.txt', content: notes },
       ]) as CatalogSkill,
     }) as const;
-  const mcp = (name: string) => {
-    const converted = mcpSetupOf(stdio(name));
+  const mcp = (name: string, server = stdio(name)) => {
+    const converted = mcpSetupOf(server);
     if (!converted.ok) throw new Error('fixture');
     return { kind: 'mcp' as const, mcp: converted.setup };
   };
@@ -122,8 +126,27 @@ export async function legacyState(r: Rig): Promise<Legacy> {
             itemId: LEGACY_ALONE,
             kind: 'mcp',
             name: 'files',
-            ownSummary: false,
+            ownSummary: true,
             versions: [await versionOf(LEGACY_OTHER, LEGACY_ALONE, 1, 'files', mcp('files'), 3)],
+          },
+          {
+            itemId: LEGACY_HARNESS,
+            kind: 'mcp',
+            name: 'docs',
+            ownSummary: true,
+            harness: 'claude',
+            versions: [
+              await versionOf(
+                LEGACY_OTHER,
+                LEGACY_HARNESS,
+                1,
+                'docs',
+                mcp('docs', harnessServer('docs')),
+                3,
+                'claude',
+                harnessServer('docs').id,
+              ),
+            ],
           },
         ],
       },
@@ -132,53 +155,25 @@ export async function legacyState(r: Rig): Promise<Legacy> {
   return { document, text: `${JSON.stringify(document, undefined, 2)}\n`, blobs, items: frozen };
 }
 
-/** The export a version 1 daemon makes of a catalog: its own code path, copied, reading only the version 1 document. */
-export async function legacyExport(r: Rig, legacy: Legacy, catalogId: string): Promise<SharedCatalogFile> {
-  const identity = r.identity as NonNullable<Rig['identity']>;
-  const catalog = legacy.document.catalogs.find(candidate => candidate.id === catalogId);
-  if (catalog === undefined) throw new Error('fixture');
-  const live = catalog.items.filter(item => item.withdrawnAt === undefined);
-  const signed = await signCatalogManifest(crypto, identity, {
-    format: SHARED_CATALOG_MANIFEST_FORMAT,
-    version: 1,
-    publisher: identity.daemonId,
-    publisherName: catalog.publisherName,
-    catalogId: catalog.id,
-    name: catalog.name,
-    description: catalog.description,
-    visibility: catalog.visibility,
-    revision: catalog.revision,
-    issuedAt: catalog.issuedAt,
-    items: live.map(item => {
-      const latest = item.versions[item.versions.length - 1] as (typeof item.versions)[number];
-      return {
-        itemId: item.itemId,
-        kind: item.kind,
-        name: item.name,
-        summary: latest.summary,
-        version: latest.version,
-        digest: latest.digest,
-        size: latest.size,
-        publishedAt: latest.publishedAt,
-        ...(item.harness === undefined ? {} : { harness: item.harness }),
-      };
-    }),
-    withdrawn: catalog.items.flatMap(item =>
-      item.withdrawnAt === undefined ? [] : [{ itemId: item.itemId, at: item.withdrawnAt }],
-    ),
-  });
-  if (!signed.ok) throw new Error(signed.reason);
-  return {
-    format: SHARED_CATALOG_FILE_FORMAT,
-    version: 1,
-    exportedAt: catalog.issuedAt,
-    signedManifest: signed.value,
-    items: live.map(item => (legacy.items.get(item.itemId) as SharedCatalogItem[]).at(-1) as SharedCatalogItem),
-  };
-}
+/**
+ * What origin/main's version 1 service answered for this very store, with the fixed test identity (see
+ * `golden/README.md`): a file written once by the old code, so the byte identity is held to the old daemon
+ * and not to a copy of its logic kept here.
+ */
+export const GOLDEN: Readonly<Record<string, unknown>> = JSON.parse(
+  readFileSync(new URL('./golden/main-output.json', import.meta.url), 'utf8'),
+);
+
+/** The store text and frozen files the golden answers were made from. */
+export const GOLDEN_STATE = JSON.parse(readFileSync(new URL('./golden/v1-state.json', import.meta.url), 'utf8')) as {
+  readonly text: string;
+  readonly blobs: Readonly<Record<string, string>>;
+};
 
 /** Puts a version 1 store under a rig: the file as text and its frozen files, as an upgrade finds them. */
 export function install(r: Rig, legacy: Legacy): void {
   r.documents.raw = { version: 1, doc: legacy.document, text: legacy.text };
+  r.servers = [...r.servers, harnessServer('docs')];
+  r.tree.set(SKILL_PATH, { 'SKILL.md': SKILL_MD, 'notes.txt': 'new notes' });
   for (const [digest, text] of legacy.blobs) r.blobs.blobs.set(digest, text);
 }

@@ -29,10 +29,8 @@ import {
   catalogItemWarnings,
   revealHidden,
   SHARED_CATALOG_ITEM_FORMAT,
-  catalogCanonicalText,
-  catalogDigestOf,
 } from '@ferretry/protocol';
-import type { RelayCrypto } from '@ferretry/relay';
+import { catalogItemCanonical, type RelayCrypto } from '@ferretry/relay';
 import { skillFrontMatter } from '../skills/front-matter.ts';
 import { CatalogRefusal } from './refusal.ts';
 
@@ -138,10 +136,7 @@ export interface CanonicalCopy {
 
 /** An item's canonical text with its digest and size, or `undefined` when it has no one spelling. */
 export async function canonicalCopy(crypto: RelayCrypto, item: SharedCatalogItem): Promise<CanonicalCopy | undefined> {
-  const canonical = catalogCanonicalText(item);
-  if (!canonical.ok) return undefined;
-  const bytes = new TextEncoder().encode(canonical.text);
-  return { digest: catalogDigestOf(await crypto.sha256(bytes)), size: bytes.length, text: canonical.text };
+  return (await catalogItemCanonical(crypto, item)) ?? undefined;
 }
 
 /** `canonicalCopy`, or the refusal that this item has no one canonical spelling and so cannot be shared. */
