@@ -1,7 +1,9 @@
 import { describe, it } from 'bun:test';
 import {
+  appOriginChoice,
   DaemonIdSchema,
   formatPairingFragment,
+  HOSTED_APP_ORIGIN,
   invitationRedeemableByAnotherDevice,
   PAIRING_CODE_MAX_ATTEMPTS,
   PAIRING_CODE_TTL_SECONDS,
@@ -423,5 +425,35 @@ describe('pairing protocol', () => {
         expiresAt: '2026-08-03T12:02:00.000Z',
       }),
     ).deepEqual({ pairingId, status: 'expired', expiresAt: '2026-08-03T12:02:00.000Z' });
+  });
+});
+
+describe('appOriginChoice (the address a plan card link is built on)', () => {
+  it('should use the hosted app when nothing is set', () => {
+    should(appOriginChoice(undefined)).eql({ origin: HOSTED_APP_ORIGIN });
+    should(appOriginChoice('  ')).eql({ origin: HOSTED_APP_ORIGIN });
+  });
+
+  it('should use a machine’s own https address, keeping its path and dropping a trailing slash', () => {
+    should(appOriginChoice('https://app.example/')).eql({ origin: 'https://app.example' });
+    should(appOriginChoice(' https://box.example/fy/ ')).eql({ origin: 'https://box.example/fy' });
+  });
+
+  it('should allow plain http only on this machine', () => {
+    should(appOriginChoice('http://localhost:5173')).eql({ origin: 'http://localhost:5173' });
+    should(appOriginChoice('http://192.168.1.4').refused).be.a.String();
+  });
+
+  it.each([
+    ['-x', 'starts with'],
+    ['--help', 'starts with'],
+    ['not a url', 'absolute'],
+    ['ftp://app.example', 'https'],
+    ['javascript:alert(1)', 'https'],
+    ['https://me:pw@app.example', 'user name'],
+  ])('should refuse %s and fall back to the hosted app', (setting, why) => {
+    const choice = appOriginChoice(setting);
+    should(choice.origin).equal(HOSTED_APP_ORIGIN);
+    should(choice.refused).containEql(why);
   });
 });

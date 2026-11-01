@@ -7,7 +7,8 @@
  * `states` is a comma list of: mixed, picker, cannot, passkey, machine, approved, stopped, fallback, history, settings.
  * "mixed" is a picker, a code account with no history, a sudo line and a paste, with the sudo line and the
  * code ticked. "picker" is a two-account page line with an account picked and ticked. "cannot" is a line that asked
- * for a code the account can't make. "passkey" is the passkey sheet, over the card, with the daemon's own summary of
+ * for a code the account can't make, beside the three lines a plan can't cover (not in Accounts, via Google, ssh) and
+ * a code account with no history. "passkey" is the passkey sheet, over the card, with the daemon's own summary of
  * the selection. "machine" is a selection staged at the machine with `fy plan approve`. "approved" and "stopped" are
  * a plan the owner allowed, and one that has ended. "fallback" and "history" are the input card for a fill that did not
  * apply and one that did. "settings" is Settings › Secure copy › Task plans.
@@ -48,8 +49,8 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { fieldsOf } from '../../src/lib/input-card.ts';
 import { StepUpGate } from '../../src/lib/step-up-gate.ts';
 import {
-  EXPIRES, PLAN_ID, RAISED, SESSION, STAGE, approvedPlan, cannotLine, mixedPlan, passwordOnlyLine,
-  pickerLine, planOf, sudoLine,
+  EXPIRES, PLAN_ID, RAISED, SESSION, STAGE, GITHUB_WORK, approvedPlan, cannotLine, mixedPlan,
+  pickerLine, planOf, sudoLine, codesLine, GITHUB_HOME,
 } from '../../tests/support/task-plan-fixtures.ts';
 import { NOW, request as fakeRequest } from '../../tests/support/input-fixtures.ts';
 
@@ -57,28 +58,55 @@ const view = new URLSearchParams(location.search).get('view');
 const client = { request: async () => { throw new Error('the harness has no daemon'); } } as never;
 const quiet = () => undefined;
 
+const place = (domain: string) => ({ kind: 'site', domains: [domain], match: [] });
+const person = (signIn: string, id: string, username: string, domain: string, totp: boolean) => ({
+  signIn, account: { id, label: id.replace(/_/gu, ' ').toLowerCase() }, username, place: place(domain),
+  can: { username: true, password: true, totp }, history: true,
+});
+const base = (line: number, why: string) => ({ line, uses: 1, why, state: 'waiting', flags: [] });
+const clickupLine = (line: number) => ({
+  ...base(line, 'Open the sprint board'), kind: 'sign-in', fields: ['username', 'password', 'totp'],
+  candidates: [person('si_0000000000000011', 'CLICKUP_WORK', 'kirin@atomi.cloud', 'app.clickup.com', true), person('si_0000000000000012', 'CLICKUP_HOME', 'kirinnee', 'app.clickup.com', false)],
+  preselect: { signIn: 'si_0000000000000011', why: 'project' },
+});
+const notInAccountsLine = (line: number) => ({
+  ...base(line, 'Read the billing page'), kind: 'sign-in', fields: ['username', 'password'], candidates: [],
+  state: 'unavailable', because: 'not-in-accounts',
+});
+const viaGoogleLine = (line: number) => ({
+  ...base(line, 'Open ClickUp as you'), kind: 'sign-in', fields: ['username', 'password'], candidates: [],
+  state: 'unavailable', because: 'via-provider',
+});
+const sshLine = (line: number) => ({
+  ...base(line, 'Log in to the build box'), kind: 'terminal-sign-in', fields: ['password'],
+  candidates: [{ signIn: 'si_0000000000000013', account: { id: 'SSH_KIRIN_BOX', label: 'ssh kirin-box' }, username: 'kirin', place: { kind: 'terminal', tool: 'ssh', host: 'kirin-box', dest: 'deploy.example.com' }, can: { username: false, password: true, totp: false }, history: true }],
+  state: 'unavailable', because: 'tool-not-covered',
+});
+
 const planFor = () => {
   switch (view) {
-    case 'picker': return planOf({ lines: [pickerLine(0), passwordOnlyLine(1)] });
-    case 'cannot': return planOf({ lines: [cannotLine(0), passwordOnlyLine(1)] });
+    case 'picker': return planOf({ lines: [clickupLine(0), pickerLine(1)] });
+    case 'cannot': return planOf({ lines: [cannotLine(0), notInAccountsLine(1), viaGoogleLine(2), sshLine(3), codesLine(4)] });
     case 'machine': return TaskPlanSchema.parse({ ...mixedPlan(), machineStage: { stage: STAGE, lines: [1, 3], askedAt: '2026-08-05T10:01:00.000Z' } });
     case 'approved': return approvedPlan();
-    case 'stopped': return planOf({ state: 'ended', answered: { at: '2026-08-05T10:02:00.000Z', by: { kind: 'device', deviceId: 'phone-1' }, proof: 'passkey' }, lines: [{ ...pickerLine(0), state: 'used-up', approved: { signIn: 'si_0000000000000001', totp: true, remaining: 0, lastUsedAt: '2026-08-05T10:40:00.000Z' } }, { ...sudoLine(1), state: 'declined' }] });
+    case 'stopped': return planOf({ state: 'approved', answered: { at: '2026-08-05T10:02:00.000Z', by: { kind: 'device', deviceId: 'phone-1' }, proof: 'passkey' }, lines: [{ ...pickerLine(0), state: 'stopped', because: 'did-not-move-on', approved: { signIn: GITHUB_WORK, totp: false, remaining: 1, lastUsedAt: '2026-08-05T10:40:00.000Z' } }, { ...pickerLine(1), state: 'used-up', approved: { signIn: GITHUB_HOME, totp: false, remaining: 0, lastUsedAt: '2026-08-05T10:41:00.000Z' } }, { ...sudoLine(2), state: 'declined' }] });
     default: return mixedPlan();
   }
 };
 const plan = planFor();
 
 const MACHINE_SUMMARY = [
-  'Line 2: sign in to vercel.com as deploy@atomi.cloud, once, with the 6-digit code',
-  'Line 4: paste what vercel prints into vercel in a terminal, once',
+  'Line 2: sign in as vercel · deploy@atomi.cloud on vercel.com with its username, password and codes, 1 use',
+  'Line 4: paste what vercel prints → vercel in a terminal, 1 use',
 ];
+
+const ASK = 'Allow ' + (plan.lines.length === 1 ? 'this' : 'these ' + String(plan.lines.length)) + ' for this task, without asking, until 2026-08-05 11:58 UTC?';
 
 const item = {
   id: 'A8', source: 'question', sourceRef: PLAN_ID, sourceSeq: 2, kind: 'permission', taskPlan: { planId: PLAN_ID },
   title: 'Asks to approve its sign-ins and pastes in advance',
-  subject: 'Allow these 4 lines, each with its own uses, until 2026-08-05 11:58 UTC?',
-  why: 'Allow these 4 lines, each with its own uses, until 2026-08-05 11:58 UTC?',
+  subject: ASK,
+  why: ASK,
   context: 'The agent says: it needs to open the pull request and deploy.',
   neededBy: EXPIRES, waitingSince: RAISED, raisedBy: 'daemon', raisedBySession: SESSION,
 } as never;
@@ -104,7 +132,7 @@ const inputItem = (requestId: string) => ({ ...(item as object), kind: 'input', 
 
 if (view === 'passkey') {
   const gate = new StepUpGate({ ceremony: () => new Promise<void>(() => undefined), describe: () => 'unknown' });
-  void gate.require(daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example', deviceId: 'phone-1' }),
+  (globalThis as { __openGate?: () => void }).__openGate = () => void gate.require(daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example', deviceId: 'phone-1' }),
     MACHINE_SUMMARY.join('\\n'), 'explicit', 'approve-task-plan', STAGE);
   (globalThis as { __gate?: StepUpGate }).__gate = gate;
 }
@@ -219,6 +247,13 @@ try {
                 : state === 'passkey'
                   ? page.locator('[data-step-up-confirm]')
                   : page.locator('[data-task-plan]');
+          if (state === 'passkey') {
+            await page.locator('[data-task-plan]').first().waitFor({ state: 'visible' });
+            await page.locator('[data-task-plan-tick="1"]').check();
+            await page.locator('[data-task-plan-code-tick="1"]').check();
+            await page.locator('[data-task-plan-tick="3"]').check();
+            await page.evaluate(() => (globalThis as { __openGate?: () => void }).__openGate?.());
+          }
           await surface.first().waitFor({ state: 'visible' });
           if (state === 'mixed') {
             await page.locator('[data-task-plan-tick="1"]').check();
@@ -227,7 +262,6 @@ try {
             await page.locator('[data-task-plan-tick="3"]').check();
           }
           if (state === 'picker') {
-            await page.locator('[data-task-plan-pick="0"]').selectOption({ index: 1 });
             await page.locator('[data-task-plan-tick="0"]').check();
             await page.locator('[data-task-plan-code-tick="0"]').check();
           }
@@ -240,6 +274,18 @@ try {
               .locator('button')
               .evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().height)))
               if (height < 44) fail(`${where}: a button is ${height}px tall, under the 44px floor`);
+            for (const box of await scope.locator('input[type="checkbox"]').evaluateAll(boxes =>
+              boxes.map(each => {
+                const own = each.getBoundingClientRect();
+                const label = each.closest('label')?.getBoundingClientRect();
+                return {
+                  width: Math.max(own.width, label?.width ?? 0),
+                  height: Math.max(own.height, label?.height ?? 0),
+                };
+              }),
+            ))
+              if (box.width < 44 || box.height < 44)
+                fail(`${where}: a checkbox target is ${box.width}x${box.height}px, under the 44px floor`);
           }
           const target = join(outDir, `task-plan-${state}-${viewport.name}-${scheme}.png`);
           await page.screenshot({ path: target, fullPage: true });

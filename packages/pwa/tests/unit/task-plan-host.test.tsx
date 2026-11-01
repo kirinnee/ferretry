@@ -6,9 +6,16 @@
 import { describe, expect, it } from 'bun:test';
 import { TaskPlanHost } from '../../src/features/secure-copy/task-plan-host.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { DISMISSED_PLAN_WORDS, runApproval, runMachineConfirm } from '../../src/lib/task-plan.ts';
+import {
+  DISMISSED_PLAN_WORDS,
+  NO_ACCOUNTS_DEVICE_WORDS,
+  runApproval,
+  runMachineConfirm,
+} from '../../src/lib/task-plan.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import {
+  approvedPlan,
+  codesLine,
   EXPIRES,
   mixedPlan,
   PLAN_ID,
@@ -16,7 +23,6 @@ import {
   SESSION,
   STAGE,
   sudoLine,
-  codesLine,
 } from '../support/task-plan-fixtures.ts';
 
 const connection = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example', deviceId: 'phone-1' });
@@ -35,7 +41,9 @@ function fakeClient(answers: Readonly<Record<string, unknown>>) {
       calls.push({ path, method });
       const key = `${method} ${path}`;
       if (!(key in answers)) throw new Error(`the fake daemon has no answer for ${key}`);
-      return schema.parse(answers[key]);
+      const answer = answers[key];
+      if (answer instanceof Error) throw answer;
+      return schema.parse(answer);
     },
   };
   return { client: client as never, calls };
@@ -193,5 +201,336 @@ describe('the approval', () => {
     const outcome = await runMachineConfirm({ client, askPasskey: async () => false }, plan, STAGE);
     expect(outcome.kind).toBe('dismissed');
     expect(calls.some(call => call.method === 'DELETE')).toBe(false);
+  });
+});
+
+const click = async (root: ParentNode, selector: string): Promise<void> => {
+  await interact(() => must(root.querySelector<HTMLElement>(selector), selector).click());
+};
+
+describe('the host, around the card', () => {
+  const stagedPlan = () => ({
+    ...planOf({ lines: [codesLine(0), sudoLine(1)] }),
+    machineStage: { stage: STAGE, lines: [1], askedAt: '2026-08-05T14:02:00.000Z' },
+  });
+  const stageView = { ...staged.staged, lines: [1], state: 'waiting' };
+  const itemRef = { taskPlan: { planId: PLAN_ID } };
+
+  it('shows the daemon’s summary of a selection staged at the machine, and confirms it with the passkey', async () => {
+    const { client, calls } = fakeClient({
+      'GET /v1/task-plans': { plans: [stagedPlan()] },
+      [`GET ${PLAN_PATH}/approval/${STAGE}`]: stageView,
+      [`POST ${PLAN_PATH}/approval/${STAGE}/commit`]: approvedPlan(),
+    });
+    let done = 0;
+    const asked: string[] = [];
+    const mounted = await mount(
+      <TaskPlanHost
+        askPasskey={async (_stage, words) => {
+          asked.push(words);
+          return true;
+        }}
+        connection={connection}
+        createClient={async () => client}
+        item={itemRef}
+        offered
+        onDone={() => {
+          done += 1;
+        }}
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      expect(
+        must(mounted.container.querySelector('[data-task-plan-machine-summary]'), 'summary').textContent,
+      ).toContain(SUMMARY[0] ?? '');
+      await click(mounted.container, '[data-task-plan-machine-confirm]');
+      expect(asked).toEqual([SUMMARY.join('\n')]);
+      expect(calls.some(call => call.path.endsWith('/commit'))).toBe(true);
+      expect(mounted.container.querySelector('[data-task-plan-state="approved"]')).not.toBeNull();
+      expect(done).toBe(1);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('drops a selection staged at the machine when the owner denies it, and reads the plan again', async () => {
+    const { client, calls } = fakeClient({
+      'GET /v1/task-plans': { plans: [stagedPlan()] },
+      [`GET ${PLAN_PATH}/approval/${STAGE}`]: stageView,
+      [`DELETE ${PLAN_PATH}/approval/${STAGE}`]: { stage: STAGE, dropped: true },
+    });
+    const mounted = await mount(
+      <TaskPlanHost
+        connection={connection}
+        createClient={async () => client}
+        item={itemRef}
+        offered
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      await click(mounted.container, '[data-task-plan-machine-deny]');
+      expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(1);
+      expect(calls.filter(call => call.path === '/v1/task-plans').length).toBeGreaterThan(1);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('says so when a stage cannot be dropped', async () => {
+    const { client } = fakeClient({
+      'GET /v1/task-plans': { plans: [stagedPlan()] },
+      [`GET ${PLAN_PATH}/approval/${STAGE}`]: stageView,
+      [`DELETE ${PLAN_PATH}/approval/${STAGE}`]: new Error('the machine is away'),
+    });
+    const mounted = await mount(
+      <TaskPlanHost
+        connection={connection}
+        createClient={async () => client}
+        item={itemRef}
+        offered
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      await click(mounted.container, '[data-task-plan-machine-deny]');
+      expect(must(mounted.container.querySelector('[data-task-plan-failure]'), 'failure').textContent).toBe(
+        'the machine is away',
+      );
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('draws the staged card without a summary while the stage cannot be read', async () => {
+    const { client } = fakeClient({
+      'GET /v1/task-plans': { plans: [stagedPlan()] },
+    });
+    const mounted = await mount(
+      <TaskPlanHost
+        connection={connection}
+        createClient={async () => client}
+        item={itemRef}
+        offered
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      expect(mounted.container.querySelector('[data-task-plan-state="machine-staged"]')).not.toBeNull();
+      expect(mounted.container.querySelector('[data-task-plan-machine-summary]')).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('revokes one line of an approved plan and shows the plan the daemon answers with', async () => {
+    const revoked = { ...approvedPlan(), state: 'revoked' };
+    const { client, calls } = fakeClient({
+      'GET /v1/task-plans': { plans: [approvedPlan()] },
+      [`POST ${PLAN_PATH}/revoke`]: revoked,
+    });
+    const mounted = await mount(
+      <TaskPlanHost
+        connection={connection}
+        createClient={async () => client}
+        item={itemRef}
+        offered
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      await click(mounted.container, '[data-task-plan-revoke="0"]');
+      expect(calls.filter(call => call.path.endsWith('/revoke'))).toHaveLength(1);
+      expect(mounted.container.querySelector('[data-task-plan-state="revoked"]')).not.toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('says a failed revoke and leaves the plan as it was', async () => {
+    const { client } = fakeClient({
+      'GET /v1/task-plans': { plans: [approvedPlan()] },
+      [`POST ${PLAN_PATH}/revoke`]: new Error('could not reach the machine'),
+    });
+    const mounted = await mount(
+      <TaskPlanHost
+        connection={connection}
+        createClient={async () => client}
+        item={itemRef}
+        offered
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      await click(mounted.container, '[data-task-plan-revoke="0"]');
+      expect(must(mounted.container.querySelector('[data-task-plan-failure]'), 'failure').textContent).toBe(
+        'could not reach the machine',
+      );
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('shows what went wrong when the daemon refuses an approval', async () => {
+    const { client } = fakeClient({
+      'GET /v1/task-plans': { plans: [planOf({ lines: [codesLine(0)] })] },
+      [`POST ${PLAN_PATH}/approval`]: new Error('the daemon said no'),
+    });
+    const mounted = await mount(
+      <TaskPlanHost
+        askPasskey={async () => true}
+        connection={connection}
+        createClient={async () => client}
+        item={itemRef}
+        offered
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      await click(mounted.container, '[data-task-plan-tick="0"]');
+      await click(mounted.container, '[data-task-plan-allow]');
+      expect(must(mounted.container.querySelector('[data-task-plan-failure]'), 'failure').textContent).toBe(
+        'the daemon said no',
+      );
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('draws nothing while the plan is not on the machine, and not for another session’s plan', async () => {
+    const { client } = fakeClient({ 'GET /v1/task-plans': { plans: [mixedPlan()] } });
+    const mounted = await mount(
+      <TaskPlanHost
+        connection={connection}
+        createClient={async () => client}
+        item={itemRef}
+        offered
+        sessionId="other"
+      />,
+    );
+    try {
+      expect(mounted.container.querySelector('[data-task-plan]')).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('on a device that may not see accounts says so once, names nothing, stops asking and still offers the paste card', async () => {
+    const forbidden = Object.assign(new Error('forbidden'), { status: 403 });
+    const { client, calls } = fakeClient({
+      'GET /v1/task-plans': forbidden,
+      'GET /v1/copy-plans': { plans: [] },
+    });
+    const mounted = await mount(
+      <TaskPlanHost
+        connection={connection}
+        createClient={async () => client}
+        item={{ taskPlan: { planId: PLAN_ID }, copyPlan: { planId: PLAN_ID } }}
+        offered
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      const note = must(mounted.container.querySelector('[data-task-plan-forbidden]'), 'forbidden note');
+      expect(note.textContent).toContain(NO_ACCOUNTS_DEVICE_WORDS);
+      expect(mounted.container.textContent).not.toContain('github');
+      expect(mounted.container.querySelector('[data-task-plan]')).toBeNull();
+      expect(calls.filter(call => call.path === '/v1/task-plans')).toHaveLength(1);
+      expect(calls.some(call => call.path === '/v1/copy-plans')).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('on a device that may not see accounts and has no paste plan, says only that', async () => {
+    const forbidden = Object.assign(new Error('forbidden'), { status: 403 });
+    const { client } = fakeClient({ 'GET /v1/task-plans': forbidden });
+    const mounted = await mount(
+      <TaskPlanHost
+        connection={connection}
+        createClient={async () => client}
+        item={itemRef}
+        offered
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      expect(must(mounted.container.querySelector('[data-task-plan-forbidden]'), 'note').textContent).toBe(
+        NO_ACCOUNTS_DEVICE_WORDS,
+      );
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('retries a read that failed for another reason, quietly, and draws nothing meanwhile', async () => {
+    const { client, calls } = fakeClient({ 'GET /v1/task-plans': new Error('offline') });
+    const mounted = await mount(
+      <TaskPlanHost
+        connection={connection}
+        createClient={async () => client}
+        item={itemRef}
+        offered
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      expect(mounted.container.querySelector('[data-task-plan]')).toBeNull();
+      expect(mounted.container.querySelector('[data-task-plan-forbidden]')).toBeNull();
+      expect(calls).toHaveLength(1);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('draws nothing when the client cannot be made', async () => {
+    const mounted = await mount(
+      <TaskPlanHost
+        connection={connection}
+        createClient={async () => Promise.reject(new Error('no client'))}
+        item={itemRef}
+        offered
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      expect(mounted.container.querySelector('[data-task-plan]')).toBeNull();
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('names the agent on the card, or says “The ferret” when it was not given one', async () => {
+    const { client } = fakeClient({ 'GET /v1/task-plans': { plans: [mixedPlan()] } });
+    const named = await mount(
+      <TaskPlanHost
+        agentName="Hadi"
+        connection={connection}
+        createClient={async () => client}
+        item={itemRef}
+        offered
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      expect(named.container.textContent).toContain('Hadi says');
+    } finally {
+      await named.unmount();
+    }
+    const unnamed = await mount(
+      <TaskPlanHost
+        connection={connection}
+        createClient={async () => client}
+        item={itemRef}
+        offered
+        sessionId={SESSION}
+      />,
+    );
+    try {
+      expect(unnamed.container.textContent).toContain('The ferret says');
+    } finally {
+      await unnamed.unmount();
+    }
   });
 });

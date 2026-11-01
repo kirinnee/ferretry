@@ -4,12 +4,12 @@ import { type TaskPlan, TaskPlanSchema } from '@ferretry/protocol';
 
 export const PLAN_ID = 'c'.repeat(32);
 export const SESSION = 'sess-1';
-const RAISED = '2026-08-05T09:58:00.000Z';
+export const RAISED = '2026-08-05T09:58:00.000Z';
 export const EXPIRES = '2026-08-05T11:58:00.000Z';
 export const STAGE = `tps_${'d'.repeat(24)}`;
 
 export const GITHUB_WORK = 'si_0000000000000001';
-const GITHUB_HOME = 'si_0000000000000002';
+export const GITHUB_HOME = 'si_0000000000000002';
 const SUDO_BOX = 'si_0000000000000003';
 const VERCEL = 'si_0000000000000004';
 
@@ -142,8 +142,9 @@ export const approvedPlan = (): TaskPlan => {
     answered: { at: '2026-08-05T10:02:00.000Z', by: { kind: 'device', deviceId: 'phone-1' }, proof: 'passkey' },
     lines: [
       approvedLine(pickerLine(0)),
-      { ...sudoLine(1), state: 'declined' },
-      { ...pasteLine(2), state: 'approved', remaining: 1 },
+      { ...codesLine(1), state: 'declined' },
+      { ...sudoLine(2), state: 'declined' },
+      { ...pasteLine(3), state: 'approved', remaining: 1 },
     ],
   });
 };

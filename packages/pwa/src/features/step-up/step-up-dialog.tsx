@@ -27,6 +27,10 @@ export const STEP_UP_SCOPE_NOTE =
 export const STEP_UP_BOUND_SCOPE_NOTE =
   'This one confirmation covers exactly what is listed here, once. Nothing else, and not a later change.';
 
+/** What a confirmation does when a bound request shares its prompt with others: it is stamped for none of them. */
+export const STEP_UP_SHARED_BOUND_NOTE =
+  'More than one request is waiting on this machine, so this confirmation is not tied to the plan: after it, press Allow again for the plan.';
+
 /** Several acts waiting on one machine are named together: "open a terminal and add or manage a paired device". */
 const ACT_LIST = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' });
 
@@ -83,11 +87,16 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
   if (prompt === null) return null;
   const machine = machineName(prompt.daemon.daemonId);
   const acts = ACT_LIST.format(prompt.acts);
+  const stepUp = copy.kind === 'step-up';
   const scope =
-    prompt.scope ?? (prompt.bound === true && copy.kind === 'step-up' ? STEP_UP_BOUND_SCOPE_NOTE : copy.scope);
+    prompt.bound === true && stepUp
+      ? STEP_UP_BOUND_SCOPE_NOTE
+      : prompt.shared === true && stepUp
+        ? STEP_UP_SHARED_BOUND_NOTE
+        : (prompt.scope ?? copy.scope);
   // A confirmation bound to a staged thing lists what it approves, one line each (a task plan brings the daemon's own words).
   const lines = prompt.acts.flatMap(act => act.split('\n'));
-  const listed = prompt.bound === true && copy.kind === 'step-up';
+  const listed = prompt.bound === true && stepUp;
   // A device with no passkey yet, inside its window: the way in is to set one up, so the prompt says so
   // first — the other remedies are for after the window has closed, and its failure sentence names them.
   const setup = copy.kind === 'unlock' && prompt.firstPasskey === true;

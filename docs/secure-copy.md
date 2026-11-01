@@ -295,20 +295,27 @@ a ferret's words: a plain item with the same text is a plain item.
   beneath. **No line starts ticked**, and a line with several accounts can't be ticked until one is picked.
 - **Colour means a risk.** A `sudo`, `su` or `doas` line is red ("root on <host>"); an account with no history here is
   amber. Ticking the automatic 2FA code is red with the login-code warning; the tick is hidden when the ferret didn't
-  ask for a code and disabled ("No automatic codes for this account") when the account can't make them.
+  ask for a code, hidden until an account is picked on a picker line, and disabled ("No automatic codes for this
+  account") when the picked account can't make them. A disabled Allow says why ("Tick at least one line…").
 - **"You'll still be asked."** Every plan card lists what a plan never covers: push approvals, security keys and
   passkeys, captchas, sign-ins not in Accounts or through another account, ssh, npm, docker, gh and any program but
   `sudo`, `su` and `doas`, SMS and email codes, and anything after a line stopped.
-- **The honest-client line**, on every plan card: "Ferrets here can read Ferretry's own files, so this stops misuse
-  through their tools and page text, not a ferret that goes around Ferretry."
+- **The honest-client line**, on every plan card: "This stops misuse through a ferret's tools and page text; it can't
+  stop a ferret that reads Ferretry's own files."
 - **The passkey.** A sign-in tick asks the daemon to stage the selection, then runs the `approve-task-plan` passkey bound
   to that stage. The dialog lists the DAEMON's `summary` lines under "This approves exactly:", never text a ferret
   wrote. Dismissing the passkey drops the stage (`DELETE …/approval/:stage`); nothing is approved.
 - **Staged at the machine.** A selection `fy plan approve` made shows on the same card as "Asked at the machine by
-  `fy` at HH:MM: lines 1, 3. If you didn't just run this, Deny." with _Confirm with passkey_ and _Deny_. Only a stage
-  the machine made is shown this way.
+  `fy` at HH:MM: lines 1, 3. If you didn't just run this, Deny." with _Confirm with passkey_ and _Deny_, and every warning the
+  ticked lines would carry (root, no history, a code). The list is the daemon's own summary of that stage. Only a stage
+  the machine made is shown this way. A merged passkey prompt (several acts at once) never claims to cover "exactly
+  what is listed, once": only a prompt bound to one act says so.
 - **Approved, settled, stopped.** An approved line shows its uses left and when it ends, with _Revoke_ per line and
-  for the plan. A plan that is declined, expired, revoked or ended says so in one line.
+  for the plan. A plan that is declined, expired, revoked or ended says so in one line. The approved card and Settings name the account
+  each line was approved for and flag a ticked code; every settled card keeps the honest-client line, and "Answered at"
+  is the time the owner answered.
+- **A device without `secrets.use`** can't read the plan: the card says so once, stops retrying, and keeps the paste-plan
+  card for the item's `copyPlan`.
 - **Settings › Secure copy › Task plans** lists the live plans with the same revoke. **A link opens a card:**
   `<app>/#agenda/<id>?session=<sid>` (printed by `fy plan approve`, and opened by `--open`) goes to that agenda item on
   the machine that runs the session. The fragment never reaches a daemon; it only picks the card.
@@ -330,8 +337,8 @@ a ferret's words: a plain item with the same text is a plain item.
 - **One card, raised only by the daemon.** The card carries the `taskPlan` ref (and the paste-plan ref when the plan
   has paste lines, so an older app answers those as it always did). A ferret's agenda add has no field for either,
   and the agenda refuses a plain answer to the card (`use_input_form`): only the plan routes answer it. Every card
-  says: "Ferrets here can read Ferretry's own files, so this stops misuse through their tools and page text, not a
-  ferret that goes around Ferretry."
+  says: "This stops misuse through a ferret's tools and page text; it can't stop a ferret
+  that reads Ferretry's own files."
 - **Stage, passkey, commit.** `POST /v1/sessions/:sid/task-plans/:pid/approval` with the ticks and picks. Nothing
   ticked declines the plan; paste lines only are approved at once, with no passkey. Any ticked sign-in line is
   STAGED (`201`, `{ stage: "tps_…", summary, expiresAt }`): the daemon snapshots its pins from Accounts now (a

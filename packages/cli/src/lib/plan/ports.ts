@@ -64,6 +64,8 @@ export interface PlanPorts extends CallerPorts {
   readonly sleep: (ms: number) => Promise<void>;
   /** The app's address, where a plan's card is opened (`<origin>/#agenda/<id>?session=<sid>`); absent, no link is printed. */
   readonly appOrigin?: string | undefined;
+  /** Said with the link when a set app address was refused and the hosted one stands. */
+  readonly appOriginNote?: string | undefined;
   /** Hands a link to this host's browser; resolves to whether one was launched. */
   readonly openLink?: ((url: string) => Promise<boolean>) | undefined;
   readonly nowMs: () => number;

@@ -254,6 +254,17 @@ describe('fy plan approve: the link to the card of the plan', () => {
     should(headless.said).containEql('Could not open a browser here; use the link above.');
   });
 
+  it('should say why the hosted address stands when a set one was refused', async () => {
+    const { controller, said } = rig({
+      appOrigin: 'https://ferretry.pages.dev',
+      appOriginNote: 'FY_APP_URL is not used (it starts with "-").',
+    });
+
+    await controller.approve('feed', ['3'], {});
+
+    should(said).containEql('FY_APP_URL is not used (it starts with "-").');
+  });
+
   it('should carry nothing but the card and the session in the link', async () => {
     const { controller, said } = rig({ appOrigin: 'https://app.example' });
 

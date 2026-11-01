@@ -14,6 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import type { ComponentProps } from 'react';
 
 import {
   DaemonSettingsFrame,
@@ -21,7 +22,9 @@ import {
 } from '../../../../src/features/settings/daemon-settings-frame.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { DaemonClientProvider } from '../../../../src/lib/store.tsx';
 import { interact, mount, must } from '../../../support/dom.ts';
+import { healthOf } from '../../../support/health.ts';
 import { render, run } from '../../../support/react.ts';
 
 const alpha = daemonConnection({
@@ -286,6 +289,51 @@ describe('daemon settings panel list', () => {
       expect(view.container.querySelectorAll(marker).length).toBeGreaterThan(0);
     } finally {
       await view.unmount();
+    }
+  });
+});
+
+describe('daemon settings Secure copy panel', () => {
+  const frame = () => (
+    <DaemonSettingsFrame
+      connection={alpha}
+      name="Alpha"
+      additionalTabs={PRODUCTION_ADDITIONAL_TABS}
+      readWardenStatus={unavailable}
+      createWardenClient={unavailable}
+      createSecretClient={unavailable}
+      onOpenPanel={() => undefined}
+      panel="secure-copy"
+    />
+  );
+  const healthClient = (features: string[]) =>
+    (async () => ({
+      request: async (_path: string, schema: { parse: (value: unknown) => unknown }) =>
+        schema.parse(healthOf('1.0.0', features)),
+    })) as unknown as ComponentProps<typeof DaemonClientProvider>['client'];
+  const settled = () =>
+    interact(async () => {
+      await new Promise(resolve => setTimeout(resolve, 20));
+    });
+
+  it('lists the task plans only on a machine that offers task-plan.1', async () => {
+    const offered = await mount(
+      <DaemonClientProvider client={healthClient(['task-plan.1'])}>{frame()}</DaemonClientProvider>,
+    );
+    try {
+      await settled();
+      expect(offered.container.querySelector('[data-task-plans]')).not.toBeNull();
+    } finally {
+      await offered.unmount();
+    }
+
+    const lacking = await mount(<DaemonClientProvider client={healthClient([])}>{frame()}</DaemonClientProvider>);
+    try {
+      await settled();
+      expect(lacking.container.querySelector('[data-task-plans]')).toBeNull();
+      expect(lacking.container.querySelector('[aria-label="Loading task plans"]')).toBeNull();
+    } finally {
+      await lacking.unmount();
     }
   });
 });

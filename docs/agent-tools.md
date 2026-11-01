@@ -336,7 +336,7 @@ daemon to show the stage on the plan's card, and waits up to 125 seconds for the
 reads the plan back and prints what is really in force: Approved (also when the owner ticked other lines in the app
 meanwhile), Denied or Timed out. With `--json` the output is one JSON document and the prose goes to stderr. The CLI
 has no commit call: the machine's token cannot make the passkey proof, so no sign-in line is ever approved from the
-terminal alone. A daemon that doesn't report `task-plan.1` (an older one) is refused up front for a sign-in line and nothing is staged; paste lines still work. The command prints a link to the plan's card (`<app>/#agenda/<id>?session=<sid>`, the app at `FY_APP_URL` or the hosted default), and `--open` hands it to this machine's browser.
+terminal alone. A daemon that doesn't report `task-plan.1` (an older one) is refused up front for a sign-in line and nothing is staged; paste lines still work. The command prints a link to the plan's card (`<app>/#agenda/<id>?session=<sid>`, the app at `FY_APP_URL` or the hosted default; `FY_APP_URL` must be an absolute `https` address (`http` only on this machine), with no user name or password, or it is refused out loud and the hosted default stands), and `--open` hands it to this machine's browser.
 `--pick` takes an account handle or a `si_…` id and must be one of the line's candidates, or nothing is staged;
 a line with several candidates needs one. `--totp` ticks a code only where the ferret asked for it and the account
 can make them. A ferret's pane (and any command carrying an agent credential) is refused: these routes are the owner's.

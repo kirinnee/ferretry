@@ -15,10 +15,10 @@ import {
   type SignInId,
   TASK_PLAN_ERROR_CODES,
   TASK_PLAN_HONEST_LIMIT,
-  TaskPlanApprovalAnswerSchema,
   type TaskPlan,
   type TaskPlanApproval,
   type TaskPlanApprovalAnswer,
+  TaskPlanApprovalAnswerSchema,
   type TaskPlanCandidate,
   type TaskPlanLine,
   type TaskPlanList,
@@ -115,9 +115,13 @@ export const TOTP_TICK_WARNING = LOGIN_TOTP_WARNING;
 export const TOTP_IMPOSSIBLE_WORDS = 'No automatic codes for this account';
 export const NO_HISTORY_WORDS = 'First time Ferretry fills this sign-in: it checks the page and remembers the form';
 export const PICK_FIRST_WORDS = 'Pick an account to tick this line';
+export const NO_ACCOUNTS_DEVICE_WORDS =
+  'This device can’t see your accounts, so it can’t show this plan. Approve it on a device that can.';
 export const DISMISSED_PLAN_WORDS = 'The passkey was dismissed, so nothing was approved. Tick the lines to try again.';
 const NO_PASSKEY_DEVICE_WORDS =
   'This device cannot confirm with a passkey, so it cannot approve a sign-in line. Paste lines can still be approved.';
+export const NO_PASSKEY_TICK_WORDS =
+  'This device cannot confirm with a passkey, so a sign-in line cannot be approved here.';
 const STAGE_GONE_WORDS = 'That selection timed out or was already answered. Tick the lines again.';
 
 /** What a plan can't cover, listed on every plan card under "You'll still be asked" (r3a-plan §5). */
@@ -126,6 +130,10 @@ export const STILL_ASKED: readonly { readonly what: string; readonly instead: st
   { what: 'Security keys and passkeys', instead: 'handed to you; passkeys stay off in the agent browser' },
   { what: 'Captchas and human checks', instead: 'the ferret asks you to do it' },
   { what: 'Sign-ins not in Accounts, and sign-ins through another account', instead: 'the normal card' },
+  {
+    what: 'A paste that would replace a secret the store already holds',
+    instead: 'the normal card, in amber, every time',
+  },
   { what: 'ssh, scp, npm or docker login, gh and any program but sudo, su and doas', instead: 'the normal card' },
   { what: 'SMS and email codes, and a code you did not tick', instead: 'the ferret reads its inbox, or you type it' },
   { what: 'Anything after a line stopped', instead: 'the normal card, with the reason' },
@@ -134,18 +142,30 @@ export const STILL_ASKED: readonly { readonly what: string; readonly instead: st
 /** "kirin-box" from `sudo@kirin-box`, or the place's own words. */
 const placeLabel = (place: Place): string => placeWords(place);
 
-/** The host a terminal line types its password at. */
-export const rootHost = (candidate: TaskPlanCandidate | undefined, line: SignInLine): string | undefined => {
-  if (line.kind !== 'terminal-sign-in') return undefined;
-  const place = (candidate ?? line.candidates[0])?.place;
-  return place?.kind === 'terminal' ? place.host : undefined;
+/** The terminal places a line could type at: the picked account's, or every candidate's while none is picked. */
+const terminalPlaces = (candidate: TaskPlanCandidate | undefined, line: SignInLine) =>
+  (candidate === undefined ? line.candidates : [candidate]).flatMap(each =>
+    each.place.kind === 'terminal' ? [each.place] : [],
+  );
+
+const soleOf = (values: readonly string[]): string | undefined => {
+  const distinct = [...new Set(values)];
+  return distinct.length === 1 ? distinct[0] : undefined;
 };
 
-/** "Ferretry types kirin's password into sudo on kirin-box: this gives the ferret root on kirin-box". */
-export const rootWords = (host: string | undefined, username: string | undefined): string =>
+/** The host a terminal line types its password at, or `undefined` while that is not one host. */
+export const rootHost = (candidate: TaskPlanCandidate | undefined, line: SignInLine): string | undefined =>
+  line.kind === 'terminal-sign-in' ? soleOf(terminalPlaces(candidate, line).map(place => place.host)) : undefined;
+
+/** The program a terminal line types its password into (sudo, su or doas), or `undefined` while that is not one program. */
+export const rootTool = (candidate: TaskPlanCandidate | undefined, line: SignInLine): string | undefined =>
+  line.kind === 'terminal-sign-in' ? soleOf(terminalPlaces(candidate, line).map(place => place.tool)) : undefined;
+
+/** "Ferretry types kirin's password into su on kirin-box: this gives the ferret root on kirin-box". */
+export const rootWords = (host: string | undefined, username: string | undefined, tool = 'sudo, su or doas'): string =>
   host === undefined
-    ? 'Ferretry types a password into sudo here: this gives the ferret root on this machine'
-    : `Ferretry types ${username === undefined ? 'the' : `${username}’s`} password into sudo on ${host}: this gives the ferret root on ${host}`;
+    ? `Ferretry types a password into ${tool} here: this gives the ferret root on this machine`
+    : `Ferretry types ${username === undefined ? 'the' : `${username}’s`} password into ${tool} on ${host}: this gives the ferret root on ${host}`;
 
 export const rootBadge = (host: string | undefined): string =>
   host === undefined ? 'root on this machine' : `root on ${host}`;
@@ -185,6 +205,20 @@ const lineList = (lines: readonly number[]): string => {
 /** "Asked at the machine by `fy` at 14:02: lines 1 and 3. If you didn't just run this, Deny." */
 export const machineStageWords = (stage: { readonly lines: readonly number[]; readonly askedAt: string }): string =>
   `Asked at the machine by fy at ${clockWords(stage.askedAt)}: line${stage.lines.length === 1 ? '' : 's'} ${lineList(stage.lines)}. If you didn’t just run this, Deny.`;
+
+/** The lines of a staged selection, taken from the plan's own lines (a staged line is never one the plan does not hold). */
+export const stagedLines = (plan: TaskPlan): readonly TaskPlanLine[] =>
+  plan.lines.filter(line => plan.machineStage?.lines.includes(line.line) === true);
+
+/**
+ * Whether the daemon's summary of a staged selection says the 6-digit code is part of line N. Until the summary is
+ * read the answer is "maybe", which a line that asks for a code treats as yes: it errs toward warning.
+ */
+export const stagedCodeOn = (summary: readonly string[] | undefined, line: TaskPlanLine): boolean =>
+  isSignIn(line) &&
+  line.fields.includes('totp') &&
+  (summary === undefined ||
+    summary.some(entry => entry.startsWith(`Line ${String(line.line + 1)}:`) && /\bcodes?\b/u.test(entry)));
 
 /** The sentence a stopping or unavailable line says for its reason. */
 export const becauseWords = (reason: GrantMissReason | undefined): string | undefined =>
@@ -232,7 +266,9 @@ export function mayTick(line: TaskPlanLine, tick: LineTick | undefined): boolean
 export const totpState = (line: TaskPlanLine, tick: LineTick | undefined): 'not-asked' | 'impossible' | 'available' => {
   if (!isSignIn(line) || !line.fields.includes('totp')) return 'not-asked';
   const picked = pickedCandidate(line, tick);
-  return picked?.can.totp === true ? 'available' : 'impossible';
+  // Until an account is picked there is nothing to say about its codes.
+  if (picked === undefined) return 'not-asked';
+  return picked.can.totp ? 'available' : 'impossible';
 };
 
 /** Another line already ticked the same account: one sign-in, one line. */
@@ -271,6 +307,15 @@ export function approvalOf(plan: TaskPlan, ticks: Ticks): TaskPlanApproval {
 export function selectionProblem(plan: TaskPlan, ticks: Ticks): string | undefined {
   const selection = taskPlanSelection(plan, approvalOf(plan, ticks));
   return selection.ok ? undefined : selection.reason;
+}
+
+/** Why "Allow" is off right now, in a sentence, or `undefined` when it is on. */
+export function allowBlockedWords(plan: TaskPlan, ticks: Ticks, canUsePasskey: boolean): string | undefined {
+  if (approvalOf(plan, ticks).lines.length === 0) return 'Tick at least one line to allow it, or Decline all.';
+  const problem = selectionProblem(plan, ticks);
+  if (problem !== undefined) return problem;
+  if (ticksNeedPasskey(plan, ticks) && !canUsePasskey) return NO_PASSKEY_TICK_WORDS;
+  return undefined;
 }
 
 /** Whether any ticked line is a sign-in (so the passkey is needed). */
@@ -385,6 +430,23 @@ export function settledWords(plan: TaskPlan): string {
   }
 }
 
+/** What the owner approved for a sign-in line, as a tick: the account and the code, so a title can name them. */
+export const approvedTick = (line: TaskPlanLine): LineTick | undefined =>
+  isSignIn(line) && line.approved !== undefined
+    ? { ticked: true, signIn: line.approved.signIn, totp: line.approved.totp }
+    : undefined;
+
+/** The account an approved sign-in line was allowed for, by name, or `undefined` for a paste or an unapproved line. */
+export const approvedAccountName = (line: TaskPlanLine): string | undefined => {
+  if (!isSignIn(line) || line.approved === undefined) return undefined;
+  const { signIn } = line.approved;
+  const candidate = line.candidates.find(each => each.signIn === signIn);
+  return candidate === undefined ? undefined : candidateName(candidate);
+};
+
+/** Whether the owner ticked the 6-digit code on this approved sign-in line. */
+export const approvedCode = (line: TaskPlanLine): boolean => isSignIn(line) && line.approved?.totp === true;
+
 /** A failed route's sentence for the owner. */
 export function failureWords(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
@@ -453,6 +515,10 @@ const codeOf = (cause: unknown): string | undefined =>
   typeof cause === 'object' && cause !== null && 'code' in cause && typeof cause.code === 'string'
     ? cause.code
     : undefined;
+
+/** Whether the daemon refused the caller outright (403): a device that may not see accounts is refused every time. */
+export const isForbidden = (cause: unknown): boolean =>
+  typeof cause === 'object' && cause !== null && 'status' in cause && cause.status === 403;
 
 /** The sentence for a refused route, by the code the daemon answered with. */
 function approvalFailureWords(cause: unknown): string {

@@ -9,19 +9,21 @@ import { type AgendaItem, DAEMON_FEATURES, type TaskPlan } from '@ferretry/proto
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { machineOffers } from '../../lib/daemon-health.ts';
+import { useApproveTaskPlanStepUp, useDaemonClient } from '../../lib/store.tsx';
 import {
   type ApprovalOutcome,
   type ApprovalPorts,
   dropStage,
   failureWords,
+  isForbidden,
   listTaskPlans,
+  NO_ACCOUNTS_DEVICE_WORDS,
   readStage,
   revokeLines,
   runApproval,
   runMachineConfirm,
   type TaskPlanClient,
 } from '../../lib/task-plan.ts';
-import { useApproveTaskPlanStepUp, useDaemonClient } from '../../lib/store.tsx';
 import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { CopyPlanHost } from './copy-plan-host.tsx';
 import { TaskPlanCard, type TaskPlanPhase } from './task-plan-card.tsx';
@@ -67,7 +69,10 @@ export function TaskPlanHost({
 
   const [found, setFound] = useState<{ readonly client: TaskPlanClient; readonly plan: TaskPlan } | null>(null);
   const [phase, setPhase] = useState<TaskPlanPhase>({ kind: 'idle' });
-  const [summary, setSummary] = useState<readonly string[] | undefined>(undefined);
+  const [staged, setStaged] = useState<{ readonly stage: string; readonly summary: readonly string[] } | undefined>(
+    undefined,
+  );
+  const [forbidden, setForbidden] = useState(false);
   const [reads, setReads] = useState(0);
   const settled = useRef(false);
 
@@ -75,6 +80,7 @@ export function TaskPlanHost({
   useEffect(() => {
     if (!offered || planId === undefined) return undefined;
     let current = true;
+    setForbidden(false);
     let timer: ReturnType<typeof setTimeout> | undefined;
     const read = async (client: TaskPlanClient): Promise<void> => {
       try {
@@ -84,8 +90,11 @@ export function TaskPlanHost({
         setFound(plan === undefined ? null : { client, plan });
         // A waiting plan is watched: the machine can stage a selection for this card at any moment.
         if (plan?.state === 'pending') timer = setTimeout(() => void read(client), POLL_MS);
-      } catch {
-        if (current) timer = setTimeout(() => void read(client), POLL_MS * 3);
+      } catch (cause) {
+        // A device that can't see accounts is refused every time: say so once and stop asking.
+        if (!current) return;
+        if (isForbidden(cause)) setForbidden(true);
+        else timer = setTimeout(() => void read(client), POLL_MS * 3);
       }
     };
     void createClient(connection)
@@ -98,20 +107,25 @@ export function TaskPlanHost({
   }, [offered, connection, createClient, sessionId, planId, reads]);
 
   const stage = found?.plan.machineStage?.stage;
+  const foundClient = found?.client;
+  const foundPlanId = found?.plan.id;
+  const foundSessionId = found?.plan.sessionId;
+  // Read once per stage: a poll that hands back the same stage keeps the summary on screen.
   useEffect(() => {
-    setSummary(undefined);
-    if (found === null || stage === undefined) return undefined;
+    if (foundClient === undefined || foundPlanId === undefined || foundSessionId === undefined || stage === undefined)
+      return undefined;
     let current = true;
-    void readStage(found.client, found.plan, stage).then(
+    void readStage(foundClient, { id: foundPlanId, sessionId: foundSessionId }, stage).then(
       view => {
-        if (current) setSummary(view.summary);
+        if (current) setStaged({ stage, summary: view.summary });
       },
       () => undefined,
     );
     return () => {
       current = false;
     };
-  }, [found, stage]);
+  }, [foundClient, foundPlanId, foundSessionId, stage]);
+  const summary = staged !== undefined && staged.stage === stage ? staged.summary : undefined;
 
   const finish = useCallback(
     (outcome: ApprovalOutcome): void => {
@@ -129,8 +143,8 @@ export function TaskPlanHost({
   );
 
   if (planId === undefined || unknown) return null;
-  if (!offered)
-    return item.copyPlan === undefined ? null : (
+  const paste =
+    item.copyPlan === undefined ? null : (
       <CopyPlanHost
         connection={connection}
         item={item}
@@ -138,6 +152,16 @@ export function TaskPlanHost({
         {...(agentName === undefined ? {} : { agentName })}
         {...(injected === undefined ? {} : { createClient: injected })}
       />
+    );
+  if (!offered) return paste;
+  if (forbidden)
+    return (
+      <div className="flex min-w-0 flex-col gap-3" data-task-plan-forbidden="">
+        <p className="m-0 text-ui text-warn" role="status">
+          {NO_ACCOUNTS_DEVICE_WORDS}
+        </p>
+        {paste}
+      </div>
     );
   if (found === null) return null;
 

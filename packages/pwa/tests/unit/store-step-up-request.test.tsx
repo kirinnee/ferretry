@@ -2,7 +2,13 @@ import { describe, expect, it } from 'bun:test';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { createAppStore, StoreProvider, useAddKeyStepUp, useStepUpRequest } from '../../src/lib/store.tsx';
+import {
+  createAppStore,
+  StoreProvider,
+  useAddKeyStepUp,
+  useApproveTaskPlanStepUp,
+  useStepUpRequest,
+} from '../../src/lib/store.tsx';
 import { mount } from '../support/dom.ts';
 
 const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'alpha-token' });
@@ -30,6 +36,44 @@ function AddKeyProbe({ onAsk }: { readonly onAsk: (ask: AddKey) => void }) {
   onAsk(useAddKeyStepUp());
   return null;
 }
+
+type ApproveTaskPlan = ReturnType<typeof useApproveTaskPlanStepUp>;
+
+function ApproveTaskPlanProbe({ onAsk }: { readonly onAsk: (ask: ApproveTaskPlan) => void }) {
+  onAsk(useApproveTaskPlanStepUp());
+  return null;
+}
+
+describe('useApproveTaskPlanStepUp', () => {
+  it('is no prompt at all outside the app’s store', async () => {
+    let ask: ApproveTaskPlan = () => Promise.resolve(true);
+    const view = await mount(<ApproveTaskPlanProbe onAsk={value => (ask = value)} />);
+
+    expect(ask).toBeUndefined();
+    await view.unmount();
+  });
+
+  it('asks the one prompt for the approve-task-plan act, bound to the stage, with the daemon’s words', async () => {
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => ({}) as unknown as FyApiClient,
+      fetcher: async () => Response.json({}),
+    });
+    let ask: ApproveTaskPlan;
+    const view = await mount(
+      <StoreProvider store={store}>
+        <ApproveTaskPlanProbe onAsk={value => (ask = value)} />
+      </StoreProvider>,
+    );
+
+    const answer = ask?.(alpha, `tps_${'a'.repeat(24)}` as never, 'Line 2: sign in to vercel.com');
+
+    expect(store.stepUp.snapshot()?.acts).toEqual(['Line 2: sign in to vercel.com']);
+    store.stepUp.dismiss();
+    expect(await answer).toBe(false);
+    await view.unmount();
+  });
+});
 
 describe('useAddKeyStepUp', () => {
   it('is no prompt at all outside the app’s store', async () => {

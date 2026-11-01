@@ -1,6 +1,3 @@
-/** Where the hosted app lives; a machine that serves its own sets `FY_APP_URL`. */
-export const DEFAULT_APP_ORIGIN = 'https://ferretry.pages.dev';
-
 /** The launcher this host uses to open a URL, or `undefined` where there is none. */
 const launcher = (platform: NodeJS.Platform): string | undefined =>
   platform === 'darwin' ? 'open' : platform === 'linux' ? 'xdg-open' : undefined;

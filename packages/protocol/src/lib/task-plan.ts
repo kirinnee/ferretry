@@ -34,8 +34,8 @@ import {
 } from './secure-copy.ts';
 import { PASSKEY_CHALLENGE_TTL_SECONDS } from './step-up.ts';
 
-export { TaskPlanStageIdSchema };
 export type { TaskPlanStageId };
+export { TaskPlanStageIdSchema };
 
 /**
  * THE TASK PLAN: one card on which a ferret asks, before a task, for the owner to pre-approve its sign-ins and its
@@ -211,7 +211,7 @@ export const TASK_PLAN_MISS_AGENT_NOTE = "Your task plan didn't cover this, so t
  * (RF-5): what a plan does and does not protect against. The daemon's card text and the app's card say it in these words.
  */
 export const TASK_PLAN_HONEST_LIMIT =
-  "Ferrets here can read Ferretry's own files, so this stops misuse through their tools and page text, not a ferret that goes around Ferretry.";
+  "This stops misuse through a ferret's tools and page text; it can't stop a ferret that reads Ferretry's own files.";
 
 // ── What the ferret sends (`task.plan`) ──────────────────────────────────────────────────────────────
 

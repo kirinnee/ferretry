@@ -33,8 +33,10 @@ export interface StepUpPrompt {
   /** The acts waiting on this machine, distinct and in the order they asked; never empty. */
   readonly acts: readonly string[];
   readonly busy: boolean;
-  /** The confirmation is bound to one staged thing (a seed, a task-plan selection): it covers that and nothing else. */
+  /** The confirmation is bound to one staged thing (a seed, a task-plan selection) and nothing else waits on it: it covers exactly that. */
   readonly bound?: true;
+  /** A bound request is waiting WITH other requests: the one proof is stamped for none of them, so a bound approval asks again. */
+  readonly shared?: true;
   /** One plain sentence for the person, or nothing. */
   readonly failure?: string;
   /** What this confirmation buys, once the machine has said; until then the prompt's own words stand. */
@@ -242,12 +244,7 @@ export class StepUpGate {
   }
 
   #show(waiting: Waiting): void {
-    this.#set({
-      daemon: waiting.daemon,
-      acts: [...waiting.acts],
-      busy: false,
-      ...(waiting.subjects.size > 0 ? { bound: true as const } : {}),
-    });
+    this.#set({ daemon: waiting.daemon, acts: [...waiting.acts], busy: false, ...this.#boundness(waiting) });
     const read = this.deps.scope;
     if (read !== undefined)
       void read(waiting.daemon).then(
@@ -275,11 +272,20 @@ export class StepUpGate {
     const prompt = this.#prompt;
     if (prompt === null || prompt.daemon.daemonId !== daemonId) return;
     const waiting = this.#waiting.get(daemonId);
+    const { bound: _bound, shared: _shared, ...rest } = prompt;
     this.#set({
-      ...prompt,
+      ...rest,
       acts: [...(waiting?.acts ?? [])],
-      ...(waiting !== undefined && waiting.subjects.size > 0 ? { bound: true as const } : {}),
+      ...(waiting === undefined ? {} : this.#boundness(waiting)),
     });
+  }
+
+  /** `bound` only while exactly one bound request is waiting; `shared` once anything else has joined it. */
+  #boundness(waiting: Waiting): Pick<StepUpPrompt, 'bound' | 'shared'> {
+    if (waiting.subjects.size === 0) return {};
+    const sole =
+      !waiting.unnamed && waiting.actIds.size === 1 && waiting.subjects.size === 1 && waiting.acts.length === 1;
+    return sole ? { bound: true } : { shared: true };
   }
 
   #set(prompt: StepUpPrompt | null): void {

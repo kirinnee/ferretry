@@ -8,17 +8,22 @@ import type { TaskPlan } from '@ferretry/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
+  approvedTick,
   failureWords,
+  HONEST_CLIENT_LINE,
+  isForbidden,
   isPlanLive,
   LINE_STATE_WORDS,
   lineTitle,
   listTaskPlans,
+  NO_ACCOUNTS_DEVICE_WORDS,
   remainingOf,
   revokeLines,
   type TaskPlanClient,
   timeWords,
   usesLeftWords,
 } from '../../lib/task-plan.ts';
+import { ApprovedFacts } from './task-plan-card.tsx';
 
 interface TaskPlansCardProps {
   readonly plans: readonly TaskPlan[];
@@ -27,7 +32,7 @@ interface TaskPlansCardProps {
   readonly onRevoke: (plan: TaskPlan, lines?: readonly number[]) => void;
 }
 
-function TaskPlansCard({ plans, busy, error, onRevoke }: TaskPlansCardProps) {
+export function TaskPlansCard({ plans, busy, error, onRevoke }: TaskPlansCardProps) {
   const live = plans.filter(isPlanLive);
   return (
     <section className="kt-panel p-panel" aria-label="Task plans" data-task-plans="">
@@ -35,6 +40,9 @@ function TaskPlansCard({ plans, busy, error, onRevoke }: TaskPlansCardProps) {
       <p className="mb-0 mt-1 text-cell leading-base text-muted">
         What a ferret may sign in or paste without asking, from a plan you approved. They end on time and when this
         machine restarts.
+      </p>
+      <p className="mb-0 mt-1 text-meta text-muted" data-task-plans-honest="">
+        {HONEST_CLIENT_LINE}
       </p>
       {error === null ? null : (
         <p className="mb-0 mt-2 text-ui text-err" data-task-plans-error="" role="alert">
@@ -65,8 +73,9 @@ function TaskPlansCard({ plans, busy, error, onRevoke }: TaskPlansCardProps) {
                     <li className="flex min-w-0 flex-col gap-1" data-task-plans-line={line.line} key={line.line}>
                       <span className="min-w-0 break-words text-ui text-fg">
                         <span className="text-muted">Line {line.line + 1} · </span>
-                        {lineTitle(line)}
+                        {lineTitle(line, approvedTick(line))}
                       </span>
+                      <ApprovedFacts line={line} />
                       <span className="text-meta text-muted">
                         {LINE_STATE_WORDS[line.state]}
                         {line.state === 'approved' && left !== undefined ? ` · ${usesLeftWords(left, line.uses)}` : ''}
@@ -128,7 +137,12 @@ export function TaskPlansSurface({
         setPlans(list.plans);
       })
       .catch(cause => {
-        if (current) setError(`This browser could not read this daemon’s task plans: ${failureWords(cause)}`);
+        if (!current) return;
+        setError(
+          isForbidden(cause)
+            ? NO_ACCOUNTS_DEVICE_WORDS
+            : `This browser could not read this daemon’s task plans: ${failureWords(cause)}`,
+        );
       });
     return () => {
       current = false;

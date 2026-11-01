@@ -6,13 +6,17 @@
  * resolved, never text the ferret wrote; nothing here is a value.
  */
 
-import type { TaskPlan, TaskPlanLine } from '@ferretry/protocol';
+import type { TaskPlan, TaskPlanCandidate, TaskPlanLine } from '@ferretry/protocol';
 import { ShieldCheck, TriangleAlert } from 'lucide-react';
 import { useId, useMemo, useState } from 'react';
 import {
-  accountTakenElsewhere,
   type ApprovalProgress,
+  accountTakenElsewhere,
+  allowBlockedWords,
   approvalOf,
+  approvedAccountName,
+  approvedCode,
+  approvedTick,
   becauseWords,
   candidateName,
   clockWords,
@@ -33,10 +37,13 @@ import {
   remainingOf,
   rootBadge,
   rootHost,
+  rootTool,
   rootWords,
+  STILL_ASKED,
   selectionProblem,
   settledWords,
-  STILL_ASKED,
+  stagedCodeOn,
+  stagedLines,
   type Ticks,
   TOTP_IMPOSSIBLE_WORDS,
   TOTP_TICK_WARNING,
@@ -100,6 +107,32 @@ const Flag = ({
   </span>
 );
 
+type SignInLine = Extract<TaskPlanLine, { readonly fields: unknown }>;
+
+/** Red "root on <host>" for a line that types a password into sudo, su or doas, and the words that say what that gives. */
+function RootFlag({ line, picked }: { readonly line: SignInLine; readonly picked: TaskPlanCandidate | undefined }) {
+  if (line.kind !== 'terminal-sign-in' && !line.flags.includes('root')) return null;
+  const host = rootHost(picked, line);
+  return (
+    <div className="flex flex-col gap-1" data-task-plan-root="">
+      <Flag name="root" tone="err">
+        {rootBadge(host)}
+      </Flag>
+      <span className="text-meta text-err">{rootWords(host, picked?.username, rootTool(picked, line))}</span>
+    </div>
+  );
+}
+
+/** The honest-client line: said on every card, whatever its state. */
+function HonestLine() {
+  return (
+    <p className="m-0 flex items-start gap-2 text-meta text-muted" data-task-plan-honest="">
+      <ShieldCheck aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
+      <span className="min-w-0 break-words">{HONEST_CLIENT_LINE}</span>
+    </p>
+  );
+}
+
 export function TaskPlanCard(props: TaskPlanCardProps) {
   const { plan } = props;
   if (plan.state === 'pending' && plan.machineStage !== undefined) return <MachineStaged {...props} />;
@@ -113,21 +146,20 @@ function Ticking({ plan, agentName, phase, canUsePasskey, onApprove }: TaskPlanC
   const [ticks, setTicks] = useState<Ticks>(() => initialTicks(plan));
   const groups = useMemo(() => groupLines(plan, ticks), [plan, ticks]);
   const working = phase.kind === 'working';
+  const ticked = plan.lines.some(line => ticks[line.line]?.ticked === true);
   const approval = approvalOf(plan, ticks);
   const count = approval.lines.length;
   const needsPasskey = ticksNeedPasskey(plan, ticks);
   const problem = selectionProblem(plan, ticks);
   const blocked = needsPasskey && !canUsePasskey;
+  const why = allowBlockedWords(plan, ticks, canUsePasskey);
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-task-plan={plan.id} data-task-plan-state="pending">
-      <p className="m-0 flex items-start gap-2 text-meta text-muted" data-task-plan-honest="">
-        <ShieldCheck aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
-        <span className="min-w-0 break-words">{HONEST_CLIENT_LINE}</span>
-      </p>
+      <HonestLine />
       <p className="m-0 text-cell text-muted">
-        Tick what {agentName} may do without asking. Nothing is ticked yet. Each ticked line works for the uses it
-        shows, until <span className="mono">{timeWords(plan.expiresAt)}</span>.
+        Tick what {agentName} may do without asking.{ticked ? '' : ' Nothing is ticked yet.'} Each ticked line works for
+        the uses it shows, until <span className="mono">{timeWords(plan.expiresAt)}</span>.
       </p>
       {groups.map(group => (
         <section className="flex min-w-0 flex-col gap-2" data-task-plan-group={group.key} key={group.key}>
@@ -166,11 +198,11 @@ function Ticking({ plan, agentName, phase, canUsePasskey, onApprove }: TaskPlanC
           {phase.words}
         </p>
       ) : null}
-      {blocked ? (
-        <p className="m-0 text-meta text-warn" data-task-plan-no-passkey="">
-          This device cannot confirm with a passkey, so a sign-in line cannot be approved here.
+      {why === undefined ? null : (
+        <p className="m-0 text-meta text-warn" data-task-plan-allow-why="" role="status">
+          {why}
         </p>
-      ) : null}
+      )}
       <div className="flex flex-wrap items-center justify-end gap-2" data-task-plan-actions="">
         <button
           className="kt-btn min-h-[44px]"
@@ -221,8 +253,6 @@ function LineRow({ plan, line, ticks, agentName, disabled, canUsePasskey, onTick
   const taken = signIn !== undefined && accountTakenElsewhere(plan, ticks, signIn);
   const tickable = waiting && mayTick(line, tick) && !taken && (signIn === undefined || canUsePasskey);
   const code = signIn === undefined ? 'not-asked' : totpState(signIn, tick);
-  const isRoot = signIn !== undefined && (signIn.kind === 'terminal-sign-in' || signIn.flags.includes('root'));
-  const host = signIn === undefined ? undefined : rootHost(picked, signIn);
   const chosenByFerret = signIn?.preselect?.signIn === tick?.signIn ? signIn?.preselect?.why : undefined;
   const tag = chosenByFerret === undefined ? undefined : preselectWords(chosenByFerret);
 
@@ -235,16 +265,22 @@ function LineRow({ plan, line, ticks, agentName, disabled, canUsePasskey, onTick
     >
       <div className="flex items-start gap-3">
         {waiting ? (
-          <input
-            aria-describedby={`${id}-why`}
-            checked={tick?.ticked === true}
-            className="mt-1 h-5 w-5 shrink-0"
-            data-task-plan-tick={line.line}
-            disabled={disabled || !tickable}
-            id={id}
-            onChange={event => onTick(event.currentTarget.checked)}
-            type="checkbox"
-          />
+          <label
+            className="-my-2 -ml-2 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center"
+            data-task-plan-tap=""
+            htmlFor={id}
+          >
+            <input
+              aria-describedby={`${id}-why`}
+              checked={tick?.ticked === true}
+              className="h-5 w-5"
+              data-task-plan-tick={line.line}
+              disabled={disabled || !tickable}
+              id={id}
+              onChange={event => onTick(event.currentTarget.checked)}
+              type="checkbox"
+            />
+          </label>
         ) : null}
         <label
           className={`flex min-w-0 flex-1 flex-col gap-1 ${waiting && tickable ? 'cursor-pointer' : ''}`}
@@ -291,14 +327,7 @@ function LineRow({ plan, line, ticks, agentName, disabled, canUsePasskey, onTick
         </span>
       ) : null}
 
-      {isRoot ? (
-        <div className="flex flex-col gap-1" data-task-plan-root="">
-          <Flag name="root" tone="err">
-            {rootBadge(host)}
-          </Flag>
-          <span className="text-meta text-err">{rootWords(host, picked?.username)}</span>
-        </div>
-      ) : null}
+      {signIn === undefined ? null : <RootFlag line={signIn} picked={picked} />}
       {signIn?.flags.includes('no-history') === true && waiting ? (
         <Flag name="no-history" tone="warn">
           {NO_HISTORY_WORDS}
@@ -343,6 +372,26 @@ function LineRow({ plan, line, ticks, agentName, disabled, canUsePasskey, onTick
   );
 }
 
+/** What an approved sign-in line was allowed for: the account by name, root where it gives root, and a ticked code flagged. */
+export function ApprovedFacts({ line }: { readonly line: TaskPlanLine }) {
+  const account = approvedAccountName(line);
+  if (!isSignIn(line) || account === undefined) return null;
+  const picked = line.candidates.find(each => each.signIn === line.approved?.signIn);
+  return (
+    <>
+      <span className="min-w-0 break-words text-meta text-muted" data-task-plan-account="">
+        Account: {account}
+      </span>
+      <RootFlag line={line} picked={picked} />
+      {approvedCode(line) ? (
+        <span className="text-meta text-err" data-task-plan-one-factor="">
+          Includes the 6-digit code. {TOTP_TICK_WARNING}
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 /** A line that is not waiting says where it stands and, for a stopped or unavailable one, the daemon's reason. */
 function LineState({ line }: { readonly line: TaskPlanLine }) {
   const reason = isSignIn(line) ? becauseWords(line.because) : undefined;
@@ -377,8 +426,53 @@ function StillAsked() {
 
 // ── A selection typed at the machine, waiting here for its passkey ───────────────────────────────────
 
+/** One line of a selection staged at the machine, with every warning the ticking card gives the same line. */
+function StagedLine({
+  line,
+  agentName,
+  summary,
+}: {
+  readonly line: TaskPlanLine;
+  readonly agentName: string;
+  readonly summary: readonly string[] | undefined;
+}) {
+  const signIn = isSignIn(line) ? line : undefined;
+  // The daemon's summary names the account it will use; until then (or on a picker) the plan's own candidates stand.
+  const picked = signIn === undefined || signIn.candidates.length !== 1 ? undefined : signIn.candidates[0];
+  return (
+    <li
+      className="flex min-w-0 flex-col gap-2 rounded-control border border-border bg-surface-2 p-3"
+      data-task-plan-line={line.line}
+      data-task-plan-line-kind={line.kind}
+    >
+      <span className="min-w-0 break-words text-ui text-fg" data-task-plan-title="">
+        <span className="text-muted">Line {line.line + 1} · </span>
+        {lineTitle(line)}
+      </span>
+      <span className="text-meta text-faint" data-task-plan-uses="">
+        {usesWords(line.uses)}
+      </span>
+      {signIn === undefined ? null : <RootFlag line={signIn} picked={picked} />}
+      {signIn?.flags.includes('no-history') === true ? (
+        <Flag name="no-history" tone="warn">
+          {NO_HISTORY_WORDS}
+        </Flag>
+      ) : null}
+      {stagedCodeOn(summary, line) ? (
+        <span className="text-meta text-err" data-task-plan-one-factor="">
+          Includes the 6-digit code. {TOTP_TICK_WARNING}
+        </span>
+      ) : null}
+      <span className="text-meta text-faint" data-task-plan-why="">
+        {agentName} says: “{line.why}”
+      </span>
+    </li>
+  );
+}
+
 function MachineStaged({
   plan,
+  agentName,
   phase,
   machineSummary,
   canUsePasskey,
@@ -390,10 +484,7 @@ function MachineStaged({
   if (stage === undefined) return null;
   return (
     <div className="flex min-w-0 flex-col gap-3" data-task-plan={plan.id} data-task-plan-state="machine-staged">
-      <p className="m-0 flex items-start gap-2 text-meta text-muted" data-task-plan-honest="">
-        <ShieldCheck aria-hidden="true" className="mt-0.5 shrink-0" size={14} />
-        <span className="min-w-0 break-words">{HONEST_CLIENT_LINE}</span>
-      </p>
+      <HonestLine />
       <p className="m-0 text-ui text-fg" data-task-plan-machine="">
         {machineStageWords(stage)}
       </p>
@@ -406,6 +497,15 @@ function MachineStaged({
           ))}
         </ul>
       )}
+      <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Staged lines" data-task-plan-machine-lines="">
+        {stagedLines(plan).map(line => (
+          <StagedLine agentName={agentName} key={line.line} line={line} summary={machineSummary} />
+        ))}
+      </ul>
+      <p className="m-0 text-meta text-muted" data-task-plan-expiry="">
+        Each allowed line works for the uses it shows, until <span className="mono">{timeWords(plan.expiresAt)}</span>.
+      </p>
+      <StillAsked />
       {phase.kind === 'working' ? (
         <p className="m-0 text-ui text-muted" data-task-plan-progress={phase.progress} role="status">
           {PROGRESS_WORDS[phase.progress]}
@@ -459,13 +559,16 @@ function Settled({ plan, agentName, phase, onRevoke }: TaskPlanCardProps) {
   const revocable = plan.lines.filter(line => line.state === 'approved');
   return (
     <div className="flex min-w-0 flex-col gap-3" data-task-plan={plan.id} data-task-plan-state={plan.state}>
+      <HonestLine />
       <p
         className={`m-0 text-ui ${plan.state === 'approved' ? 'text-ok' : 'text-muted'}`}
         data-task-plan-settled=""
         role="status"
       >
         {settledWords(plan)}
-        {plan.state === 'approved' && plan.answered !== undefined ? ` Asked at ${clockWords(plan.answered.at)}.` : ''}
+        {plan.state === 'approved' && plan.answered !== undefined
+          ? ` Answered at ${clockWords(plan.answered.at)}.`
+          : ''}
       </p>
       <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="Plan lines">
         {plan.lines.map(line => (
@@ -477,19 +580,10 @@ function Settled({ plan, agentName, phase, onRevoke }: TaskPlanCardProps) {
           >
             <span className="min-w-0 break-words text-ui text-fg">
               <span className="text-muted">Line {line.line + 1} · </span>
-              {lineTitle(
-                line,
-                isSignIn(line) && line.approved !== undefined
-                  ? { ticked: true, signIn: line.approved.signIn, totp: line.approved.totp }
-                  : undefined,
-              )}
+              {lineTitle(line, approvedTick(line))}
             </span>
+            <ApprovedFacts line={line} />
             <LineState line={line} />
-            {isSignIn(line) && line.approved?.totp === true ? (
-              <span className="text-meta text-err" data-task-plan-one-factor="">
-                Includes the 6-digit code. {TOTP_TICK_WARNING}
-              </span>
-            ) : null}
             <span className="text-meta text-faint" data-task-plan-why="">
               {agentName} says: “{line.why}”
             </span>
