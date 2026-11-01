@@ -384,6 +384,8 @@ function ToTestRow({
         {infoOpen ? (
           <div className="fy-totest__info" data-to-test-info="" id={infoId}>
             <p className="fy-totest__meta">
+              <span data-to-test-machine="">{row.card.machine}</span>
+              <span aria-hidden="true">·</span>
               {release === null ? null : (
                 <>
                   <span data-to-test-release="">{release}</span>
@@ -423,20 +425,12 @@ function ToTestRow({
           hooks={{ 'data-to-test-who': '' }}
         >
           {row.taskName === null || sameWords(row.taskName, title) ? null : (
-            <>
-              <span className="fy-meta-line__ferret" data-to-test-ferret="">
-                {row.taskName}
-              </span>
-              <MetaDot />
-            </>
+            <span className="fy-meta-line__ferret" data-to-test-ferret="">
+              {row.taskName}
+            </span>
           )}
-          {row.projectName === null ? null : (
-            <>
-              <span data-to-test-project="">{row.projectName}</span>
-              <MetaDot />
-            </>
-          )}
-          <span data-to-test-machine="">{row.card.machine}</span>
+          {row.taskName === null || sameWords(row.taskName, title) || row.projectName === null ? null : <MetaDot />}
+          {row.projectName === null ? null : <span data-to-test-project="">{row.projectName}</span>}
         </CardMetaLine>
         {empty ? null : (
           <section aria-label={`How to test ${title}`} className="fy-totest__how" data-to-test-how="">

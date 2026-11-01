@@ -137,12 +137,14 @@ describe('Inbox — cards waiting for a try', () => {
     expect(root.textContent).not.toContain('Still building');
   });
 
-  it('names the project of each card beside its machine', async () => {
+  it('names the project on each card, and its machine under ⓘ', async () => {
     const { root } = await open();
     const meta = rowOf(root, 'F22').querySelector('[data-to-test-who]');
     expect(meta?.querySelector('[data-to-test-project]')?.textContent).toBe('ferretry');
-    expect(meta?.querySelector('[data-to-test-machine]')?.textContent).toBe('laptop');
+    expect(meta?.querySelector('[data-to-test-machine]')).toBeNull();
     expect(meta?.textContent).toContain('ferretry');
+    await openInfo(rowOf(root, 'F22'));
+    expect(rowOf(root, 'F22').querySelector('.fy-totest__meta [data-to-test-machine]')?.textContent).toBe('laptop');
   });
 
   it('says who and where on one line, with the way to the ferret’s chat when the ferret is known', async () => {
