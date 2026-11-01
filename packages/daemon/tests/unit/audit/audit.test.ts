@@ -881,6 +881,55 @@ describe('auditedRoutes', () => {
     should(JSON.stringify(logged) + journal.lines.join('\n')).not.match(/fy_share_|Some Person|app\.example|share=/u);
   });
 
+  it('should record which KIND of configuration file a Settings confirmation put into effect, never its name or path', async () => {
+    // Arrange
+    const confirmed: Record<string, unknown> = {
+      'warden.yaml': { path: 'warden.yaml', confirmed: true },
+      'logins/my-private-login.yaml': { path: 'logins/my-private-login.yaml', confirmed: true },
+      'components/skills/secret-skill.yaml': { path: 'components/skills/secret-skill.yaml', confirmed: true },
+    };
+    const paths = Object.keys(confirmed);
+    let next = 0;
+    const { journal, routes } = decorated({
+      'POST /v1/config/confirm': async () => jsonResponse(confirmed[paths[next++] as string]),
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    for (const _ of paths)
+      await api.dispatch(
+        request({ method: 'POST', path: '/v1/config/confirm', headers: ADMIN, loopback: true, body: '{}' }),
+      );
+
+    // Assert
+    const logged = records(journal);
+    should(logged.map(record => record.detail)).deepEqual([
+      { action: 'config-confirm', kind: 'warden', status: 200 },
+      { action: 'config-confirm', kind: 'login', status: 200 },
+      { action: 'config-confirm', kind: 'component', status: 200 },
+    ]);
+    should(JSON.stringify(logged) + journal.lines.join('\n')).not.match(/my-private-login|secret-skill|logins\//u);
+  });
+
+  it('should record a refused Settings confirmation with no kind, since the refusal names no file', async () => {
+    // Arrange
+    const { journal, routes } = decorated({
+      'POST /v1/config/confirm': async () => jsonResponse({ error: 'no', code: 'forbidden' }, 403),
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(
+      request({ method: 'POST', path: '/v1/config/confirm', headers: ADMIN, loopback: true, body: '{}' }),
+    );
+
+    // Assert
+    const logged = records(journal);
+    should(logged.map(record => [record.outcome, record.detail])).deepEqual([
+      ['refused', { action: 'config-confirm', status: 403 }],
+    ]);
+  });
+
   it('should record a catalog change with no ids when the answer is not JSON', async () => {
     // Arrange
     const { journal, routes } = decorated({

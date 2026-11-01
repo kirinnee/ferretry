@@ -20,7 +20,8 @@
  * ## Recorded
  *
  * Allow and Discard change are written to the security log as `fleet.configured` (`config-confirm` /
- * `config-discard`, `via: agenda`) with the caller the boundary proved — a paired device by its id — exactly as
+ * `config-discard`, `via: agenda`, and the file's `kind` — `warden`, `pack`, `accountDefaults` …, never its name or
+ * path) with the caller the boundary proved — a paired device by its id — exactly as
  * `POST /v1/config/confirm` is, so a loosening confirmed from a card is as visible as one confirmed in Settings.
  * The route serves every agenda answer, so the handler records the act rather than a rule on the route. Deny is
  * not recorded: it changes nothing.
@@ -30,6 +31,7 @@ import {
   type AgendaActionRequest,
   type AgendaId,
   type AgendaResponse,
+  classifyConfigPath,
   type ConfigPending,
 } from '@ferretry/protocol';
 import { ApiError } from '../../api/error.ts';
@@ -58,32 +60,34 @@ export interface AgendaConfigPort {
   confirm(path: string, etag: string): Promise<boolean>;
   /** Drop the held edit with this digest; `false` when there is no such held edit any more. */
   discard(path: string, etag: string): Promise<boolean>;
-  /** Writes one act on a held edit to the security log. Absent on a daemon that keeps none. Never throws. */
-  record?(context: RouteContext, act: HeldEditAct, outcome: 'succeeded' | 'refused'): Promise<void>;
+  /** Writes one act on the held edit to `path` to the security log, naming the file's kind. Never throws. */
+  record(context: RouteContext, act: HeldEditAct, path: string, outcome: 'succeeded' | 'refused'): Promise<void>;
 }
 
 /** What the security log calls an act on a held edit, as the Settings door's rule names it. */
 type HeldEditAct = 'config-confirm' | 'config-discard';
 
+/** The file's KIND for the security log — never its name or path, which a person chose. */
+function kindOf(path: string): { readonly kind: string } | Record<string, never> {
+  const address = classifyConfigPath(path);
+  return address === undefined ? {} : { kind: address.kind };
+}
+
 /** The port over this daemon's configuration files. */
 export function configFilesConfirmations(
   service: Pick<ConfigFilesService, 'status' | 'confirm' | 'discard'>,
-  audit?: AuditedRoutesSubsystem,
+  audit: AuditedRoutesSubsystem,
 ): AgendaConfigPort {
   return {
     held: async path => (await service.status()).pending.find(pending => pending.path === path),
     confirm: async (path, etag) => await service.confirm(path, etag),
     discard: async (path, etag) => await service.discard(path, etag),
-    ...(audit === undefined
-      ? {}
-      : {
-          record: async (context, act, outcome) =>
-            await recordHandlerAct(audit, context, {
-              event: 'fleet.configured',
-              outcome,
-              detail: { action: act, via: 'agenda' },
-            }),
-        }),
+    record: async (context, act, path, outcome) =>
+      await recordHandlerAct(audit, context, {
+        event: 'fleet.configured',
+        outcome,
+        detail: { action: act, via: 'agenda', ...kindOf(path) },
+      }),
   };
 }
 
@@ -164,12 +168,12 @@ export async function answerConfirmation(
   const act: HeldEditAct = decision === 'allow' ? 'config-confirm' : 'config-discard';
   const refused = heldEditRefusal(context, path, decision === 'allow' ? 'confirm' : 'discard');
   if (refused !== undefined) {
-    await config.record?.(context, act, 'refused');
+    await config.record(context, act, path, 'refused');
     return { proceed: false, response: refused };
   }
   const done = decision === 'allow' ? await config.confirm(path, etag) : await config.discard(path, etag);
   // Recorded as the act's own outcome: a held edit that moved on changed nothing, so it is a refusal.
-  await config.record?.(context, act, done ? 'succeeded' : 'refused');
+  await config.record(context, act, path, done ? 'succeeded' : 'refused');
   if (done) {
     if (decision === 'allow') spendHeldEditProof(context);
     return { proceed: true, note: confirmationNote(decision, path, answer.note) };

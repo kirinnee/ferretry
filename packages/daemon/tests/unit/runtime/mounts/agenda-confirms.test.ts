@@ -91,6 +91,13 @@ class MemoryAccepted implements AcceptedConfigStore {
   }
 }
 
+/** A security log that keeps nothing, for the cases that are not about it. */
+const SILENT_AUDIT = {
+  log: { record: async () => undefined },
+  failures: { auditWriteFailed: () => undefined },
+  deviceName: async () => undefined,
+};
+
 interface World {
   readonly directory: MemoryDirectory;
   readonly config: ConfigFilesService;
@@ -176,7 +183,7 @@ async function post(
   subject: World,
   caller: Caller,
   body: unknown,
-  config: AgendaConfigPort | null = configFilesConfirmations(subject.config),
+  config: AgendaConfigPort | null = configFilesConfirmations(subject.config, SILENT_AUDIT),
 ): Promise<Answer> {
   const demands: CapabilityDemand[] = [];
   let spent = 0;
@@ -852,7 +859,7 @@ describe('answering a confirmation card through the authorization boundary', () 
           event: 'fleet.configured',
           actor: { kind: 'host' },
           outcome: 'succeeded',
-          detail: { action: 'config-confirm', via: 'agenda' },
+          detail: { action: 'config-confirm', via: 'agenda', kind: 'warden' },
         },
       ]);
     });
@@ -873,7 +880,7 @@ describe('answering a confirmation card through the authorization boundary', () 
           event: 'fleet.configured',
           actor: { kind: 'device', deviceId: 'phone', deviceName: 'Owner’s phone' },
           outcome: 'succeeded',
-          detail: { action: 'config-confirm', via: 'agenda' },
+          detail: { action: 'config-confirm', via: 'agenda', kind: 'warden' },
         },
       ]);
     });
@@ -894,7 +901,9 @@ describe('answering a confirmation card through the authorization boundary', () 
       });
       should(await investigationsOn(subject)).be.false();
       should(await openItem(subject)).not.be.undefined();
-      should(on.logged.map(entry => [entry.outcome, entry.detail?.action])).deepEqual([['refused', 'config-confirm']]);
+      should(on.logged.map(entry => [entry.outcome, entry.detail?.action, entry.detail?.kind])).deepEqual([
+        ['refused', 'config-confirm', 'warden'],
+      ]);
     });
 
     it('should put the file back on Discard change from a paired phone, asking no passkey for the act, and log it', async () => {
@@ -908,8 +917,8 @@ describe('answering a confirmation card through the authorization boundary', () 
       should(answer.status).equal(200);
       should(subject.directory.texts.get('warden.yaml')).equal(WARDEN_OFF);
       should(await investigationsOn(subject)).be.false();
-      should(on.logged.map(entry => [entry.outcome, entry.detail?.action])).deepEqual([
-        ['succeeded', 'config-discard'],
+      should(on.logged.map(entry => [entry.outcome, entry.detail?.action, entry.detail?.kind])).deepEqual([
+        ['succeeded', 'config-discard', 'warden'],
       ]);
     });
 
