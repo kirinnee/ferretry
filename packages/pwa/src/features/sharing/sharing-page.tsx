@@ -22,6 +22,7 @@ import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import { CatalogMembersPanel } from '../catalogs/catalog-members.tsx';
 import { FailureLine, SharingOffPanel } from '../catalogs/catalog-parts.tsx';
 import type { CatalogClientFactory } from '../catalogs/catalogs-api.ts';
+import { AddCatalogEntry } from '../catalogs/catalog-row-tools.tsx';
 import { CatalogsSurface, useCatalogs } from '../catalogs/catalogs-surface.tsx';
 import type { InstallHost } from '../catalogs/install-from-file-sheet.tsx';
 import { SharedWithMe } from '../shared/shared-with-me.tsx';
@@ -92,7 +93,7 @@ export function SharingPage({
       </div>
       {current === 'skills' ? (
         <div className="flex min-h-0 flex-1 flex-col" data-sharing-body="">
-          <MachineSkills connection={connection} loadSkills={loadSkills} />
+          <MachineSkills connection={connection} loadSkills={loadSkills} createClient={createClient} />
         </div>
       ) : (
         <div className={`min-h-0 flex-1 overflow-y-auto scroll-thin py-3 ${GUTTER_CLASS}`} data-sharing-body="">
@@ -104,12 +105,15 @@ export function SharingPage({
                 {...(installHost === undefined ? {} : { installHost })}
               />
             ) : current === 'shared' ? (
-              <SharedWithMe
-                embedded
-                members={members}
-                machines={machines}
-                {...(installHost === undefined ? {} : { installHost })}
-              />
+              <div className="flex min-w-0 flex-col gap-md">
+                <AddCatalogEntry host={{ connection, ...(createClient === undefined ? {} : { createClient }) }} />
+                <SharedWithMe
+                  embedded
+                  members={members}
+                  machines={machines}
+                  {...(installHost === undefined ? {} : { installHost })}
+                />
+              </div>
             ) : (
               <People connection={connection} createClient={createClient} />
             )}
@@ -123,9 +127,11 @@ export function SharingPage({
 function MachineSkills({
   connection,
   loadSkills,
+  createClient,
 }: {
   readonly connection: DaemonConnection;
   readonly loadSkills: SkillsCatalogLoader | undefined;
+  readonly createClient: CatalogClientFactory | undefined;
 }) {
   const fetcher = useDaemonFetch();
   const load = useMemo(() => loadSkills ?? machineSkillsLoader(connection, fetcher), [connection, fetcher, loadSkills]);
@@ -134,6 +140,7 @@ function MachineSkills({
       scope={daemonSessionScope(connection, MACHINE_SKILLS_SESSION)}
       loadCatalog={load}
       onInsert={() => SKILLS_USE_NOTE}
+      catalogs={{ connection, ...(createClient === undefined ? {} : { createClient }) }}
     />
   );
 }

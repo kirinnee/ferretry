@@ -86,6 +86,21 @@ describe('SharingPage', () => {
     await view.unmount();
   });
 
+  it('puts the paste field and Install from a file at the top of Shared with me only', async () => {
+    const { view } = await open('shared');
+    const entry = q('[data-sharing-body] [data-catalog-add-entry]');
+    expect(entry).not.toBeNull();
+    expect(entry?.querySelector('[data-catalog-link-input]')).not.toBeNull();
+    expect(entry?.nextElementSibling?.getAttribute('data-shared-page')).toBe('');
+    expect(entry?.querySelector('[data-catalog-more]')).not.toBeNull();
+    await view.unmount();
+    for (const tab of ['people', 'skills'] as const) {
+      const other = await open(tab);
+      expect(q('[data-catalog-add-entry]')).toBeNull();
+      await other.view.unmount();
+    }
+  });
+
   it('lists the people with what each one reads', async () => {
     const { view, fake } = await open('people');
     expect(q(`[data-members-person="${memberView().label}"]`)).not.toBeNull();
@@ -154,6 +169,16 @@ describe('SharingPage', () => {
     await click(document.querySelector<HTMLElement>('button[aria-label="Use /pdf-tools in chat"]'));
     await settle();
     expect(text()).toContain(SKILLS_USE_NOTE);
+    await view.unmount();
+  });
+
+  it('draws the Skills tab rows with Share, Add and ⋯, from the same catalogs read', async () => {
+    const { view, fake } = await open('skills', { 'GET /v1/catalog-installs': () => ({ installs: [] }) });
+    const row = q('[data-catalog-item-row="pdf-tools"]');
+    expect(row?.querySelector('[data-row-share]')).not.toBeNull();
+    expect(row?.querySelector('[data-row-add]')).not.toBeNull();
+    expect(row?.querySelector('[data-row-more]')).not.toBeNull();
+    expect(fake.calls.some(call => call.path === '/v1/catalogs')).toBe(true);
     await view.unmount();
   });
 

@@ -28,8 +28,6 @@ import {
   skillFileLoader,
 } from '../../../../src/features/context-rail/context-rail-ports.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { type AppStore, StoreProvider } from '../../../../src/lib/store.tsx';
-import { chooseInstallFromFile } from '../../../support/catalog-add.ts';
 import { fakeClient } from '../../../support/catalog-client.ts';
 import { installRecord, ownedCatalog } from '../../../support/catalog-views.ts';
 import { interact, type Mounted, must } from '../../../support/dom.ts';
@@ -604,11 +602,8 @@ describe('ContextRailBody — catalogs', () => {
       }),
       'GET /v1/catalogs': () => ({ catalogs: [ownedCatalog()] }),
     });
-  const store = {
-    projects: { subscribe: () => () => undefined, slice: () => 1, projects: () => [] },
-  } as unknown as AppStore;
 
-  it('shows where a skill came from, offers Add to catalog and Install from a file on the Skills tab', async () => {
+  it('shows where a skill came from, offers Add to catalog and one small link to Sharing, with no paste box, on the Skills tab', async () => {
     const client = fake();
     const { root } = await body({ tab: 'skills', catalogs: { connection: STUDIO, createClient: client.factory } });
     const floop = must(root.querySelector('[data-context-skill-scope] [data-catalog-item-row="floop"]'), 'floop row');
@@ -618,9 +613,48 @@ describe('ContextRailBody — catalogs', () => {
     expect(root.querySelectorAll('[data-row-add]')).toHaveLength(3);
     expect(root.querySelectorAll('[data-row-share]')).toHaveLength(3);
     expect(root.querySelectorAll('[data-row-from]')).toHaveLength(1);
+    expect(text(root, '[data-catalog-add-link]')).toBe('Add from a link…');
+    expect(root.querySelector('[data-catalog-add-entry]')).toBeNull();
+    expect(root.querySelector('[data-catalog-link-input]')).toBeNull();
+    expect(root.querySelector('[data-catalog-more]')).toBeNull();
     await click(root, '[data-catalog-item-row="babysit-pr"] [data-row-add]');
     expect(root.querySelector('[data-catalog-sheet="add"]')).not.toBeNull();
     expect(client.calls.some(call => call.path === '/v1/catalogs')).toBe(true);
+  });
+
+  it('gives every MCP row a ⋯ with Show details, even one in no catalog, and hides them again', async () => {
+    const client = fake();
+    const { root } = await body({ tab: 'mcp', catalogs: { connection: STUDIO, createClient: client.factory } });
+    const servers = rows(root, 'data-context-mcp');
+    expect(root.querySelectorAll('[data-row-more]')).toHaveLength(servers.length);
+    const menuLabels = (): string[] =>
+      [...root.ownerDocument.querySelectorAll('[role="menuitem"]')].map(entry => entry.textContent ?? '');
+    const pick = async (name: string, label: string, expected?: string[]): Promise<void> => {
+      await click(root, `[data-context-mcp="${name}"] [data-row-more]`);
+      if (expected !== undefined) expect(menuLabels()).toEqual(expected);
+      const item = must(
+        [...root.ownerDocument.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+          entry => entry.textContent === label,
+        ),
+        `the ${label} item`,
+      );
+      await interact(() => item.click());
+      await settle();
+    };
+    await pick('scratch', 'Show details', ['Show details']);
+    const details = must(root.querySelector('[data-context-mcp="scratch"] [data-mcp-details]'), 'the details');
+    expect(details.textContent).toContain('Runs');
+    expect(details.textContent).not.toContain('Declared in');
+    await pick('notion', 'Show details');
+    expect(text(root, '[data-context-mcp="notion"] [data-mcp-details]')).toContain('/work/app/.mcp.json');
+    expect(text(root, '[data-context-mcp="notion"] [data-mcp-details]')).toContain('claude-work (approved)');
+    await pick('lint', 'Show details');
+    expect(text(root, '[data-context-mcp="lint"] [data-mcp-details]')).toContain('waiting for approval');
+    await pick('lint', 'Hide details');
+    await pick('notion', 'Hide details');
+    expect(root.querySelector('[data-context-mcp="linear"] [data-mcp-details]')).toBeNull();
+    await pick('scratch', 'Hide details');
+    expect(root.querySelector('[data-mcp-details]')).toBeNull();
   });
 
   it('does the same on the MCP tab, matching a server by name', async () => {
@@ -632,25 +666,9 @@ describe('ContextRailBody — catalogs', () => {
     expect(root.querySelector('[data-context-mcp="linear"] [data-row-add]')).not.toBeNull();
     expect(root.querySelector('[data-context-mcp="github"] [data-row-share]')).toBeNull();
     expect(root.querySelector('[data-context-mcp="linear"] [data-row-share]')).not.toBeNull();
-    await mounted?.render(
-      <StoreProvider store={store}>
-        <ContextRailBody
-          sessionId="session-a"
-          machineName="studio-mac"
-          loadMcp={async () => MCP}
-          loadSkills={async () => SKILLS}
-          loadDocs={async () => DOCS}
-          onInsertSkill={() => undefined}
-          onOpenFile={() => undefined}
-          now={() => NOW}
-          tab="mcp"
-          catalogs={{ connection: STUDIO, createClient: client.factory }}
-        />
-      </StoreProvider>,
-    );
-    await settle();
-    await chooseInstallFromFile(root);
-    expect(root.ownerDocument.querySelector('[data-catalog-sheet="install"]')).not.toBeNull();
+    expect(root.querySelectorAll('[data-catalog-add-link]')).toHaveLength(1);
+    expect(root.querySelector('[data-catalog-add-entry]')).toBeNull();
+    expect(root.querySelector('[data-catalog-link-input]')).toBeNull();
   });
 
   it('shows no catalog tools at all when the host names no machine', async () => {
@@ -658,5 +676,6 @@ describe('ContextRailBody — catalogs', () => {
     expect(root.querySelector('[data-row-share]')).toBeNull();
     expect(root.querySelector('[data-row-add]')).toBeNull();
     expect(root.querySelector('[data-catalog-add-entry]')).toBeNull();
+    expect(root.querySelector('[data-catalog-add-link]')).toBeNull();
   });
 });

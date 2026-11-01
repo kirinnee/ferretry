@@ -643,11 +643,12 @@ now**. The app keeps and logs nothing about the code. **People and codes** lists
 browsers (remove one browser, take away a catalog, revoke the member with the plain sentence of what stops) and the
 shares (live, used, expired).
 
-**Adding a catalog is by link.** **Add a catalog from a link** is a paste field in the Skills tab, the MCP panel and
-Sharing › My catalogs. A `/join` link (any app origin; read by path and fragment) opens `/join` with its
+**Adding a catalog is by link.** **Add a catalog from a link** is a paste field at the top of Sharing › Shared with me
+and Sharing › My catalogs. The context rail's Skills and MCP lists carry none: each has one small text link, **Add from
+a link…**, that opens Sharing › Shared with me. A `/join` link (any app origin; read by path and fragment) opens `/join` with its
 fragment, the same page the phone's camera opens, so there is one way in. A link whose fragment does not parse says
 "This link is damaged or incomplete. Ask for a new one."; a pairing link says it links a device; anything else says it
-is not a catalog share link. **Install from a file…** now lives under **More**, for offline swaps. There is no in-app
+is not a catalog share link. **Install from a file…** lives under **More** next to the paste field, for offline swaps. There is no in-app
 QR scanner; the camera app already opens the link.
 
 **A second link in the same tab is read, not left behind.** The join page re-reads the address when it changes (the
@@ -700,10 +701,15 @@ to catalog…") and the inline Open button.
 - **Share** depends on where the item sits: in **one** catalog, the Share sheet for it; in **several**, a small picker of
   those catalogs and then the Share sheet; in **none**, the Add to catalog sheet, ending in **Share it now**. Sharing
   still asks for the owner's passkey, as before; nothing about a share reaches the row.
-- **⋯** holds **Open SKILL.md** (on the skills surface, Show detail), **Add to another catalog…** (items this machine could share) and
+- **⋯** holds **Open SKILL.md** (on the skills surface, Show detail) or, on an MCP row, **Show details** / **Hide details**
+  (so every MCP row has a ⋯), **Add to another catalog…** (items this machine could share) and
   **Remove** (catalog installs only, with the same confirm; with several installs, one per catalog named
   "Remove (from ‹catalog›)"). **Versions…** and **Stop sharing** are not here yet.
-- A row never shows a secret value. The paste field and **Install from a file…** stay at the top of the list.
+- **Show details** (MCP) opens a few plain lines under the row from the inventory the list already read: what it runs
+  or its address, where it is declared, its project, the harness, and which runtimes see it with their approval. The
+  address has no query and the program no arguments by construction, and hidden characters are marked.
+- A row never shows a secret value. The side-panel lists have no paste field or **Install from a file…**: they moved
+  to Sharing › Shared with me, so the lists stay uncluttered.
 
 ## Declared gaps
 

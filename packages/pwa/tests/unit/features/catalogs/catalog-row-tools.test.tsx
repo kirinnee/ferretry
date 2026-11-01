@@ -1,11 +1,13 @@
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import {
   AddCatalogEntry,
+  AddFromLinkLink,
   type CatalogRowsRead,
   useCatalogRows,
 } from '../../../../src/features/catalogs/catalog-row-tools.tsx';
 import { type AppStore, StoreProvider } from '../../../../src/lib/store.tsx';
+import { RouterProvider } from '../../../../src/lib/router.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { fakeClient } from '../../../support/catalog-client.ts';
 import { installRecord, ownedCatalog } from '../../../support/catalog-views.ts';
@@ -99,6 +101,50 @@ describe('AddCatalogEntry', () => {
     );
     await chooseInstallFromFile();
     expect(q('[data-catalog-sheet="install"]')).not.toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('AddFromLinkLink', () => {
+  afterEach(() => {
+    mock.restore();
+  });
+
+  it('opens Sharing › Shared with me through the router', async () => {
+    const pushed: string[] = [];
+    const state: { current: unknown } = { current: null };
+    const browser = Object.assign(new EventTarget(), {
+      history: {
+        get state() {
+          return state.current;
+        },
+        pushState: (next: unknown, _title: string, url?: string | URL | null) => {
+          state.current = next;
+          pushed.push(String(url));
+        },
+        replaceState: (next: unknown) => {
+          state.current = next;
+        },
+        back: () => {},
+      },
+      location: { pathname: '/', search: '' },
+    });
+    const view = await mount(
+      <RouterProvider browser={browser as unknown as Window} trailStorage={null}>
+        <AddFromLinkLink host={{ connection }} />
+      </RouterProvider>,
+    );
+    expect(q('[data-catalog-add-link]')?.textContent).toBe('Add from a link…');
+    await click(q('[data-catalog-add-link]'));
+    expect(pushed).toEqual(['/d/alpha/sharing/shared']);
+    await view.unmount();
+  });
+
+  it('follows the address bar where there is no router', async () => {
+    const assign = spyOn(window.location, 'assign').mockImplementation(() => {});
+    const view = await mount(<AddFromLinkLink host={{ connection }} />);
+    await click(q('[data-catalog-add-link]'));
+    expect(assign).toHaveBeenCalledWith('/d/alpha/sharing/shared');
     await view.unmount();
   });
 });
