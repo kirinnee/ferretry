@@ -1,3 +1,13 @@
+## [4.191.0](https://github.com/kirinnee/ferretry/compare/v4.190.0...v4.191.0) (2026-11-01)
+
+### Features
+
+* **protocol:** 2FA keys and approve-on-phone data model (R2-1) ([#1222](https://github.com/kirinnee/ferretry/issues/1222)) ([a086429](https://github.com/kirinnee/ferretry/commit/a086429c3c333468a459371d79fc1b29c9986f57))
+* **pwa:** condense the browser tab into one bar ([#1216](https://github.com/kirinnee/ferretry/issues/1216)) ([be126ed](https://github.com/kirinnee/ferretry/commit/be126edb09266ab3b515474253941575bc20558e))
+* **pwa:** find cards and agenda items by any words in the finder and pickers ([#1203](https://github.com/kirinnee/ferretry/issues/1203)) ([cd2fe60](https://github.com/kirinnee/ferretry/commit/cd2fe60798432c490139264374ec0a33deaf011b))
+* **pwa:** notifications open the installed app at the Inbox item ([#1219](https://github.com/kirinnee/ferretry/issues/1219)) ([ee53a33](https://github.com/kirinnee/ferretry/commit/ee53a3334a334751f55692e707bc04d23cbb6be2))
+* **pwa:** open the task panel on a card stack with swipe Done / Not good ([#1215](https://github.com/kirinnee/ferretry/issues/1215)) ([f6a98e6](https://github.com/kirinnee/ferretry/commit/f6a98e68205c85d2d5d1d39a669931f7263438e7))
+
 ## [4.190.0](https://github.com/kirinnee/ferretry/compare/v4.189.0...v4.190.0) (2026-11-01)
 
 ### Features
