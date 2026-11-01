@@ -918,6 +918,7 @@ import {
   type LivenessTarget,
   LOOPBACK_FIREWALL_CHECK_MS,
   LocalModelsService,
+  type AccountDirectory,
   type AccountsBoot,
   LoginDirectory,
   LoginRecipeService,
@@ -6157,10 +6158,10 @@ function createAgentToolsSubsystem(input: {
   readonly copy: AgentCopyPort;
   readonly plans: AgentPlanPort;
   readonly copyPages: AgentCopyPagesPort;
-  /** The saved logins' directory (never the vault): `account.hint` reads labels, methods and domains from it. */
-  readonly logins: Pick<LoginDirectory, 'list'>;
+  /** The account directory (never the vault): `account.hint` reads each sign-in's non-secret projection from it. */
+  readonly accounts: Pick<AccountDirectory, 'list'>;
   /** A ferret's recipe proposals, and where its acts are told so a steered sign-in fact is not kept. */
-  readonly recipes: Pick<LoginRecipeService, 'propose' | 'scrubbed'>;
+  readonly recipes: Pick<LoginRecipeService, 'propose' | 'scrubbedAccounts'>;
   readonly loginActs: Pick<LoginObserver, 'acted'>;
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
@@ -6198,7 +6199,7 @@ function createAgentToolsSubsystem(input: {
       copy: input.copy,
       plans: input.plans,
       copyPages: input.copyPages,
-      logins: input.logins,
+      accounts: input.accounts,
       recipes: input.recipes,
       loginActs: input.loginActs,
       redactor: input.redactor,
@@ -6247,7 +6248,7 @@ function createInputRequestService(input: {
   readonly rules: InputPasteRules;
   /** Where a paste "as the secret NAME" is kept. */
   readonly secretStore: SecretStoreDirectory;
-  /** Where a saved login's observed facts go: the saved-login directory, under its store lock. */
+  /** Where a sign-in's observed facts go: the account directory, under its store lock. */
   readonly loginFacts: LoginFactSink;
 }): { readonly service: InputRequestService; readonly observer: LoginObserver } {
   const clock = { now: () => Date.now() };
@@ -10381,7 +10382,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sealed: secureCopies,
         rules: pasteRules,
         secretStore: secretDirectory,
-        loginFacts: loginDirectory,
+        loginFacts: accountDirectory,
       });
       inputRequests = inputRequestService;
       // Login recipes (docs/input-requests.md): every recipe text is checked against every value the daemon masks, and a
@@ -12048,7 +12049,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           plans: { propose: async (sessionId, items, expires) => await copyPlans.propose(sessionId, items, expires) },
           copyPages: copyPageRecords,
-          logins: loginDirectory,
+          accounts: accountDirectory,
           recipes: loginRecipes,
           loginActs: loginObserver,
           files: new AgentFiles({

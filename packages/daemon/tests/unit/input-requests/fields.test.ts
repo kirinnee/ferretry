@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
 import {
+  type AccountList,
   type AgendaId,
   type InputDeliverBody,
   type InputEvent,
   type InputRaise,
   type InputTarget,
   type InputTargetFacts,
-  type LoginEntrySummary,
   type LoginFieldRole,
   padInputValue,
 } from '@ferretry/protocol';
@@ -78,7 +78,13 @@ interface Writes {
   readonly submit: boolean;
 }
 
-function build(options: { facts?: InputTargetFacts; entries?: LoginEntrySummary[]; history?: InputEvent[] } = {}) {
+function build(
+  options: {
+    facts?: InputTargetFacts;
+    listing?: Pick<AccountList, 'accounts' | 'signIns'>;
+    history?: InputEvent[];
+  } = {},
+) {
   const writes: Writes[] = [];
   const observed: (readonly InputTargetField[])[] = [];
   const closed: AgendaId[] = [];
@@ -98,7 +104,7 @@ function build(options: { facts?: InputTargetFacts; entries?: LoginEntrySummary[
   const clock = { now: () => Date.parse('2026-10-31T12:00:00.000Z') };
   const values = new EphemeralValues(clock);
   const logins: InputLoginPort = {
-    entries: async () => options.entries ?? [],
+    listing: async () => options.listing ?? { accounts: [], signIns: [] },
     fill: async (entry, role) => {
       fills.push({ id: entry, role });
       return role === 'username' ? EMAIL : PASSWORD;
@@ -392,23 +398,46 @@ describe('a card of several fields', () => {
     ]);
   });
 
-  it('should offer only saved logins that hold every field, and suggest saving the card as one login', async () => {
-    const entry = (id: string, username: string | undefined): LoginEntrySummary => ({
+  it('should offer only saved accounts that hold every field, and suggest saving the card as one login', async () => {
+    const account = (id: string, username: string | undefined) => ({
       id,
       label: id.toLowerCase(),
-      match: ['accounts.google.com'],
       ...(username === undefined ? {} : { username }),
       fields: { password: true, totp: false },
+      factors: [],
+      signIns: [],
       createdAt: 'a',
       updatedAt: 'a',
     });
-    const { request } = await raisedLogin({
-      entries: [entry('GOOGLE_COM', 'kirin'), entry('PASSWORD_ONLY', undefined)],
+    const signIn = (id: string, owner: string) => ({
+      id,
+      account: owner,
+      place: { kind: 'site' as const, domains: ['accounts.google.com'], match: ['accounts.google.com'] },
+      method: { kind: 'password' as const },
+      createdAt: 'a',
+      updatedAt: 'a',
+    });
+    const one = await raisedLogin({
+      listing: { accounts: [account('GOOGLE_COM', 'kirin')], signIns: [signIn('si_00000000000000f1', 'GOOGLE_COM')] },
+    });
+    const two = await raisedLogin({
+      listing: {
+        accounts: [account('GOOGLE_COM', 'kirin'), account('PASSWORD_ONLY', undefined)],
+        signIns: [signIn('si_00000000000000f1', 'GOOGLE_COM'), signIn('si_00000000000000f2', 'PASSWORD_ONLY')],
+      },
     });
 
-    should(request.saved?.offers.map(offer => [offer.id, offer.matched])).eql([['GOOGLE_COM', true]]);
-    should(request.saved?.suggest).eql({ id: 'GOOGLE_COM', label: 'google_com' });
-    should(request.saved?.saves).equal('password');
+    should(one.request.saved?.offers.map(offer => [offer.id, offer.matched, offer.why])).eql([
+      ['GOOGLE_COM', true, 'only'],
+    ]);
+    should(one.request.saved?.suggest).eql({ id: 'GOOGLE_COM', label: 'google_com' });
+    should(one.request.saved?.saves).equal('password');
+    // PASSWORD_ONLY cannot fill the email, so it is not offered; it still signs in here, so "Save as" guesses neither.
+    should(two.request.saved?.offers.map(offer => [offer.id, offer.matched, offer.primary === true])).eql([
+      ['GOOGLE_COM', true, true],
+    ]);
+    should(two.request.saved).not.have.property('suggest');
+    should(two.request.saved?.saves).equal('password');
   });
 
   it('should refuse a terminal card of two fields and a terminal field that names an element', async () => {

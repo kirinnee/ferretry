@@ -1,28 +1,38 @@
 import { describe, it } from 'bun:test';
+import { ACCOUNT_HINT_NEXT, type AccountSummary, AgentToolCallSchema, type SignInSummary } from '@ferretry/protocol';
 import should from 'should';
 import { actsOn } from '../../../src/lib/agent-tools/service.ts';
 import type { AgentToolError } from '../../../src/lib/index.ts';
 import { LoginEntryError, RecipeValueError } from '../../../src/lib/secrets/index.ts';
 import { agent, agentToolWorld } from './support.ts';
 
-/** `login_propose`: a ferret's suggested recipe for a saved login, which the owner approves. */
+/** `account_propose`: a ferret's suggested recipe for ONE sign-in, which the owner approves. */
+
+const SI_VERCEL = 'si_00000000000000a1';
+const PENDING = {
+  id: 'rp_0000000000000001',
+  login: 'VERCEL',
+  signIn: SI_VERCEL,
+  state: 'pending',
+  agendaItemId: 'A4',
+} as const;
 
 describe('account.propose', () => {
-  it("should file the ferret's recipe for the owner and say the card it waits on", async () => {
+  it("should file the ferret's recipe on the sign-in it names and say the card it waits on", async () => {
     const calls: unknown[] = [];
     const world = agentToolWorld({
       recipes: {
-        scrubbed: async entries => entries,
+        scrubbedAccounts: async listing => listing,
         propose: async (...parameters) => {
           calls.push(parameters);
-          return { id: 'rp_0000000000000001', login: 'VERCEL', state: 'pending', agendaItemId: 'A4' };
+          return PENDING;
         },
       },
     });
 
     const result = await world.service.call(agent, {
       tool: 'account.propose',
-      login: 'VERCEL',
+      signIn: SI_VERCEL,
       recipe: 'Open vercel.com → Continue with Google → [[GOOGLE_KIRIN]]',
       why: 'the first sign-in needed the Google step',
     });
@@ -30,43 +40,88 @@ describe('account.propose', () => {
     should(calls).deepEqual([
       [
         's1',
-        'VERCEL',
+        { signIn: SI_VERCEL },
         'Open vercel.com → Continue with Google → [[GOOGLE_KIRIN]]',
         'the first sign-in needed the Google step',
       ],
     ]);
+    // The result keeps the shape an `fy` from before sign-ins reads strictly: the sign-in is in the summary.
     should(result.recipe).deepEqual({
       id: 'rp_0000000000000001',
       login: 'VERCEL',
       state: 'pending',
       agendaItemId: 'A4',
     });
-    should(result.summary).containEql('!A4');
-    // The audit names the login, never the ferret's text.
-    should(JSON.stringify(world.audit)).not.containEql('Continue with Google');
+    should(result.summary).containEql('!A4').and.containEql(SI_VERCEL);
+    // The audit names the sign-in, never the ferret's text.
+    should(JSON.stringify(world.audit)).containEql(SI_VERCEL).and.not.containEql('Continue with Google');
+  });
+
+  it('should resolve the older { login } through the SAME path, and audit the sign-in it resolved to', async () => {
+    const calls: unknown[] = [];
+    const world = agentToolWorld({
+      recipes: {
+        scrubbedAccounts: async listing => listing,
+        propose: async (...parameters) => {
+          calls.push(parameters);
+          return PENDING;
+        },
+      },
+    });
+
+    await world.service.call(agent, { tool: 'account.propose', login: 'VERCEL', recipe: 'x', why: 'y' });
+    // The route parses every call with the one schema: the older name and spelling arrive as account.propose { login }.
+    await world.service.call(
+      agent,
+      AgentToolCallSchema.parse({ tool: 'login.propose', login: 'VERCEL', recipe: 'x', why: 'y' }),
+    );
+
+    should(calls).deepEqual([
+      ['s1', { login: 'VERCEL' }, 'x', 'y'],
+      ['s1', { login: 'VERCEL' }, 'x', 'y'],
+    ]);
+    const audit = JSON.stringify(world.audit);
+    should(audit).containEql(`"signIn":"${SI_VERCEL}"`).and.containEql('"tool":"account.propose"');
+    should(audit).not.containEql('login.propose');
   });
 
   it('should say when the owner let it apply at once', async () => {
     const world = agentToolWorld({
       recipes: {
-        scrubbed: async entries => entries,
-        propose: async () => ({ id: 'rp_0000000000000001', login: 'VERCEL', state: 'applied' }),
+        scrubbedAccounts: async listing => listing,
+        propose: async () => ({ id: 'rp_0000000000000001', login: 'VERCEL', signIn: SI_VERCEL, state: 'applied' }),
       },
     });
-    const result = await world.service.call(agent, { tool: 'account.propose', login: 'VERCEL', recipe: 'x', why: 'y' });
-    should(result.summary).containEql('was updated');
+    const result = await world.service.call(agent, {
+      tool: 'account.propose',
+      signIn: SI_VERCEL,
+      recipe: 'x',
+      why: 'y',
+    });
+    should(result.summary).containEql('was updated').and.containEql('this sign-in');
   });
 
-  it('should refuse an unknown login, a recipe holding a value, and a daemon without recipes', async () => {
+  it('should refuse an unknown sign-in or login, a recipe holding a value, and a daemon without recipes', async () => {
     const refusing = (error: Error) =>
       agentToolWorld({
-        recipes: { scrubbed: async entries => entries, propose: async () => await Promise.reject(error) },
+        recipes: { scrubbedAccounts: async listing => listing, propose: async () => await Promise.reject(error) },
       });
     const call = { tool: 'account.propose', login: 'VERCEL', recipe: 'x', why: 'y' } as const;
     const unknown = (await refusing(new LoginEntryError('unknown_login', 'there is no saved login VERCEL'))
       .service.call(agent, call)
       .catch((caught: unknown) => caught)) as AgentToolError;
     should(unknown.code).equal('not_found');
+    const noSignIn = (await refusing(new LoginEntryError('unknown_sign_in', `there is no sign-in ${SI_VERCEL}`))
+      .service.call(agent, { ...call, login: undefined, signIn: SI_VERCEL })
+      .catch((caught: unknown) => caught)) as AgentToolError;
+    should(noSignIn.code).equal('not_found');
+    const several = (await refusing(
+      new LoginEntryError('account_has_sign_ins', 'name the sign-in: Vercel signs in at 2 places'),
+    )
+      .service.call(agent, call)
+      .catch((caught: unknown) => caught)) as AgentToolError;
+    should(several.code).equal('bad_request');
+    should(several.message).containEql('name the sign-in');
     const holding = (await refusing(new RecipeValueError('a recipe never holds a value'))
       .service.call(agent, call)
       .catch((caught: unknown) => caught)) as AgentToolError;
@@ -126,22 +181,59 @@ describe('a ferret driving a surface', () => {
   });
 });
 
-describe('account.hint masks recipes as it serves them', () => {
-  const ENTRY = {
-    id: 'VERCEL',
-    label: 'Vercel',
-    match: ['vercel.com'],
-    fields: { password: false, totp: false },
-    recipe: 'PIN 8841-2297-ab',
-    createdAt: '2026-10-31T09:00:00.000Z',
-    updatedAt: '2026-10-31T09:00:00.000Z',
+describe('account.hint, one line per sign-in', () => {
+  const AT = '2026-10-31T09:00:00.000Z';
+  const account = (id: string, label: string, extra: Partial<AccountSummary> = {}): AccountSummary => ({
+    id,
+    label,
+    fields: { password: true, totp: false },
+    factors: [],
+    signIns: [],
+    createdAt: AT,
+    updatedAt: AT,
+    ...extra,
+  });
+  const site = (id: string, owner: string, domains: string[], extra: Partial<SignInSummary> = {}): SignInSummary => ({
+    id,
+    account: owner,
+    place: { kind: 'site', domains, match: domains },
+    method: { kind: 'password' },
+    createdAt: AT,
+    updatedAt: AT,
+    ...extra,
+  });
+  const LISTING = {
+    accounts: [
+      account('VERCEL', 'Vercel'),
+      account('VERCEL_WORK', 'Vercel (work)', { fields: { password: false, totp: false } }),
+    ],
+    signIns: [
+      site(SI_VERCEL, 'VERCEL', ['vercel.com'], { recipe: 'PIN 8841-2297-ab', recipeVersion: 2 }),
+      site('si_00000000000000a2', 'VERCEL_WORK', ['vercel.com']),
+    ],
   };
+
+  it('should list each sign-in with its id, and say how to propose with it now the tool takes one', async () => {
+    const world = agentToolWorld({ accounts: { list: async () => LISTING } });
+    const result = await world.service.call(agent, { tool: 'account.hint', site: 'vercel.com' });
+    should(result.summary).containEql(`[${SI_VERCEL}]`).and.containEql('[si_00000000000000a2]');
+    should(result.summary).containEql(ACCOUNT_HINT_NEXT);
+    // Two sign in here and nothing chose one: neither is "Only account here", whatever fields each holds.
+    should(result.summary).not.containEql('Only account here');
+    // No field an `fy` from before sign-ins would refuse to read: the summary is the answer.
+    should(Object.keys(result).sort()).deepEqual(['summary']);
+  });
 
   it('should hand the ferret the recipe as the redactor masks it now', async () => {
     const world = agentToolWorld({
-      logins: { list: async () => [ENTRY] },
+      accounts: { list: async () => LISTING },
       recipes: {
-        scrubbed: async entries => entries.map(entry => ({ ...entry, recipe: 'PIN [redacted]' })),
+        scrubbedAccounts: async listing => ({
+          ...listing,
+          signIns: listing.signIns.map(signIn =>
+            signIn.recipe === undefined ? signIn : { ...signIn, recipe: 'PIN [redacted]' },
+          ),
+        }),
         propose: async () => await Promise.reject(new Error('unused')),
       },
     });
@@ -151,8 +243,14 @@ describe('account.hint masks recipes as it serves them', () => {
   });
 
   it('should hand no recipe at all where nothing can mask it', async () => {
-    const world = agentToolWorld({ logins: { list: async () => [ENTRY] } });
+    const world = agentToolWorld({ accounts: { list: async () => LISTING } });
     const result = await world.service.call(agent, { tool: 'account.hint', site: 'vercel.com' });
     should(JSON.stringify(result)).not.containEql('PIN');
+  });
+
+  it('should never say which secret fields an account holds', async () => {
+    const world = agentToolWorld({ accounts: { list: async () => LISTING } });
+    const result = await world.service.call(agent, { tool: 'account.hint', site: 'vercel.com' });
+    should(result.summary).not.match(/password: (true|false)|fields|totp/u);
   });
 });

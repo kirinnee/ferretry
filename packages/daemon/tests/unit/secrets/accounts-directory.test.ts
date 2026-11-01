@@ -1,7 +1,13 @@
 import { describe, it } from 'bun:test';
 import { type Place, PutLoginEntryRequestSchema, TotpParametersSchema } from '@ferretry/protocol';
 import should from 'should';
-import { AccountVault, LoginDirectory, narrowAccountVault, totpCode } from '../../../src/lib/secrets/index.ts';
+import {
+  AccountVault,
+  LoginDirectory,
+  LoginRecipeService,
+  narrowAccountVault,
+  totpCode,
+} from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex } from '../runtime/mounts/support.ts';
 import { CLOCK, CountingSealed, daemonOver, SEED } from './accounts-fixtures.ts';
 
@@ -304,7 +310,19 @@ describe('an older client writes a saved login', () => {
     should((await w.logins.put('GITHUB', PutLoginEntryRequestSchema.parse({ username: 'kirin' }))).username).equal(
       'kirin',
     );
-    should(await refusal(w.logins.propose('GITHUB', proposal()))).equal('account_has_sign_ins');
+    // The older { login } spelling of a proposal names no place, so it is refused too (the recipe service resolves it).
+    const recipes = new LoginRecipeService({
+      logins: w.logins,
+      accounts: w.logins.accounts,
+      values: { redact: async text => text },
+      agenda: { raise: async () => ({ ok: false, message: 'none' }), close: async () => undefined },
+      audit: { record: async () => undefined },
+      clock: CLOCK,
+    });
+    should(await refusal(recipes.propose('session-1', { login: 'GITHUB' }, 'Open github.com', 'it moved'))).equal(
+      'account_has_sign_ins',
+    );
+    should(JSON.stringify(w.index.document)).not.containEql('rp_');
   });
 
   it('should refuse a method or recipe for an account that signs in nowhere, never answering it saved (secrev-r1-2 L5)', async () => {
@@ -342,29 +360,24 @@ describe('an older client writes a saved login', () => {
     should((await w.directory.list()).signIns[0]?.recipeVersion).equal(2);
   });
 
-  it('should keep a fact only on the sign-in at the place it was seen, never misfiled', async () => {
+  it('should keep a fact only on the sign-in it is for, at one of its own places, never misfiled', async () => {
     const w = await twoPlaces();
-    await w.logins.observe('GITHUB', { at: 'gitlab.com', surface: 'page', identity: '0123456789abcdef' });
+    const { signIns } = await w.directory.list();
+    const site = signIns.find(signIn => signIn.place.kind === 'site')?.id as string;
+    const terminal = signIns.find(signIn => signIn.place.kind === 'terminal')?.id as string;
+    const seen = { surface: 'terminal', identity: '0123456789abcdef' } as const;
+    // Another place, or the other sign-in's place: nothing is kept.
+    await w.logins.accounts.observeSignIn(site, { ...seen, at: 'gitlab.com' });
+    await w.logins.accounts.observeSignIn(site, { ...seen, at: 'ssh@build.example.com' });
     should((await w.directory.list()).signIns.every(signIn => signIn.observed === undefined)).be.true();
-    await w.logins.observe('GITHUB', {
-      at: 'ssh@build.example.com',
-      surface: 'terminal',
-      identity: '0123456789abcdef',
-    });
-    const terminalSignIn = (await w.directory.list()).signIns.find(signIn => signIn.place.kind === 'terminal');
-    should(terminalSignIn?.observed?.map(fact => fact.at)).deepEqual(['ssh@build.example.com']);
+    await w.logins.accounts.observeSignIn(terminal, { ...seen, at: 'ssh@build.example.com' });
+    const after = (await w.directory.list()).signIns;
+    should(after.find(signIn => signIn.id === terminal)?.observed?.map(fact => fact.at)).deepEqual([
+      'ssh@build.example.com',
+    ]);
+    should(after.find(signIn => signIn.id === site)?.observed).be.undefined();
   });
 });
-
-function proposal() {
-  return {
-    id: 'rp_0000000000000009',
-    recipe: 'Open github.com',
-    why: 'it moved',
-    sessionId: 'session-1',
-    proposedAt: '2026-10-31T09:00:00.000Z',
-  };
-}
 
 describe('what of the vault is handed out (secrev-r1-2 L2)', () => {
   it('should hand the directory and the route table closures that cannot reach values() or fill()', async () => {

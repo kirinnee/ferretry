@@ -1,4 +1,5 @@
 import type {
+  AccountList,
   AgendaId,
   CopyMeta,
   CopyName,
@@ -13,7 +14,6 @@ import type {
   InputTarget,
   InputTargetFacts,
   LoginEntryId,
-  LoginEntrySummary,
   LoginFieldRole,
 } from '@ferretry/protocol';
 
@@ -250,8 +250,11 @@ export interface InputStoreAuditEntry {
  * or an error. Every other method answers names, labels and flags.
  */
 export interface InputLoginPort {
-  /** Every saved login, as a listing shows it. Rejects when the store cannot tell. */
-  entries(): Promise<readonly LoginEntrySummary[]>;
+  /**
+   * Every account and every sign-in, as the owner's listing shows them (names, places, methods, which fields exist and
+   * the facts the daemon saw; never a value). Rejects when the store cannot tell.
+   */
+  listing(): Promise<Pick<AccountList, 'accounts' | 'signIns'>>;
   /** The value an entry's field types: the username, the password, or the 2FA code for `nowMs`. Rejects for a missing one. */
   fill(id: LoginEntryId, role: LoginFieldRole, nowMs: number): Promise<string>;
   /**

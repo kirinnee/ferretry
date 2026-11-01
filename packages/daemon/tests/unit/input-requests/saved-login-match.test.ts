@@ -1,8 +1,9 @@
 import { describe, it } from 'bun:test';
-import type { InputTargetFacts, LoginEntrySummary } from '@ferretry/protocol';
+import type { AccountSummary, InputSaved, InputTargetFacts, SignInSummary } from '@ferretry/protocol';
 import should from 'should';
 import {
   remoteHostOf,
+  type SavedListing,
   savedFieldFor,
   savedFor,
   savedForFields,
@@ -10,7 +11,6 @@ import {
   shortHost,
   targetMatchKey,
 } from '../../../src/lib/input-requests/saved-logins.ts';
-
 const terminal = (comm: string, argv: string): InputTargetFacts => ({
   kind: 'terminal',
   paneProof: { paneId: '%3', pid: 1 },
@@ -41,16 +41,6 @@ const browser = (origin: string): InputTargetFacts => ({
       visible: true,
     },
   ],
-});
-
-const entry = (id: string, match: string[], extra: Partial<LoginEntrySummary> = {}): LoginEntrySummary => ({
-  id,
-  label: id.toLowerCase(),
-  match,
-  fields: { password: true, totp: false },
-  createdAt: 'a',
-  updatedAt: 'a',
-  ...extra,
 });
 
 describe('which saved login is for a target', () => {
@@ -95,38 +85,91 @@ describe('which saved login is for a target', () => {
   });
 });
 
+const AT = 'a';
+const account = (id: string, extra: Partial<AccountSummary> = {}): AccountSummary => ({
+  id,
+  label: id.toLowerCase(),
+  fields: { password: true, totp: false },
+  factors: [],
+  signIns: [],
+  createdAt: AT,
+  updatedAt: AT,
+  ...extra,
+});
+let next = 0;
+const sid = (): string => `si_${(++next).toString(16).padStart(16, '0')}`;
+/** A sign-in of `owner` on a site: where it signs in (`domains`) and what it is for (`match`, the same by default). */
+const site = (
+  owner: string,
+  domains: string[],
+  extra: Partial<SignInSummary> & { match?: string[] } = {},
+): SignInSummary => {
+  const { match, ...rest } = extra;
+  return {
+    id: sid(),
+    account: owner,
+    place: { kind: 'site', domains, match: match ?? domains },
+    method: { kind: 'password' },
+    createdAt: AT,
+    updatedAt: AT,
+    ...rest,
+  };
+};
+const tty = (owner: string, tool: string, host: string, dest?: string): SignInSummary => ({
+  id: sid(),
+  account: owner,
+  place: { kind: 'terminal', tool, host, ...(dest === undefined ? {} : { dest }) },
+  method: { kind: 'password' },
+  createdAt: AT,
+  updatedAt: AT,
+});
+const listing = (accounts: AccountSummary[], signIns: SignInSummary[]): SavedListing => ({ accounts, signIns });
+const EMPTY = listing([], []);
+const offersOf = (saved: InputSaved) =>
+  saved.offers.map(offer => [offer.id, offer.matched, offer.primary === true ? offer.why : undefined]);
+
 describe('what a card offers', () => {
-  it('should offer only entries holding the field, matched first, then hinted, then by label', () => {
+  it('should offer only accounts holding the field: the primary, then matched by label, then by hand', () => {
+    const match = tty('MATCH', 'sudo', 'box');
     const saved = savedFor(
       'secret',
       'sudo@box',
-      [
-        entry('ZED', ['sudo@other']),
-        entry('ALPHA', ['sudo@other']),
-        entry('HINTED', ['x@y']),
-        entry('MATCH', ['sudo@box']),
-        entry('NO_PASSWORD', ['sudo@box'], { fields: { password: false, totp: false } }),
-      ],
-      'HINTED',
+      listing(
+        [
+          account('ZED'),
+          account('ALPHA'),
+          account('HINTED'),
+          account('MATCH'),
+          account('NO_PASSWORD', { fields: { password: false, totp: false } }),
+        ],
+        [tty('ZED', 'sudo', 'other'), tty('ALPHA', 'sudo', 'other'), match, tty('NO_PASSWORD', 'sudo', 'box')],
+      ),
+      { hint: 'HINTED' },
     );
-    should(saved.offers.map(offer => [offer.id, offer.matched, offer.hinted === true])).deepEqual([
-      ['MATCH', true, false],
-      ['HINTED', false, true],
-      ['ALPHA', false, false],
-      ['ZED', false, false],
+    should(saved.offers.map(offer => [offer.id, offer.matched, offer.hinted === true, offer.signIn])).deepEqual([
+      ['MATCH', true, false, match.id],
+      ['HINTED', false, true, undefined],
+      ['ALPHA', false, false, undefined],
+      ['ZED', false, false, undefined],
     ]);
-    should(saved.suggest).deepEqual({ id: 'MATCH', label: 'match' });
+    should(saved.offers[0]).containDeep({ primary: true, why: 'only' });
+    // NO_PASSWORD cannot fill it, so MATCH is the only one offered; both sign in here, so "Save as" guesses neither.
+    should(saved).not.have.property('suggest');
+    should(savedFor('secret', 'sudo@box', listing([account('MATCH')], [match])).suggest).deepEqual({
+      id: 'MATCH',
+      label: 'match',
+    });
   });
 
-  it('should suggest a new entry from the key when none matches, and nothing to save for a code', () => {
-    should(savedFor('secret', 'sudo@box', [], undefined)).deepEqual({
+  it('should suggest a new account from the key when none signs in here, and nothing to save for a code', () => {
+    should(savedFor('secret', 'sudo@box', EMPTY)).deepEqual({
       match: 'sudo@box',
       suggest: { id: 'SUDO_BOX', label: 'sudo on box' },
       saves: 'password',
       offers: [],
     });
-    should(savedFor('private', 'sudo@box', [], undefined)).deepEqual({ match: 'sudo@box', offers: [] });
-    should(savedFor('plain', undefined, [entry('U', [], { username: 'kirin' })], undefined)).deepEqual({
+    should(savedFor('private', 'sudo@box', EMPTY)).deepEqual({ match: 'sudo@box', offers: [] });
+    should(savedFor('plain', undefined, listing([account('U', { username: 'kirin' })], []))).deepEqual({
       saves: 'username',
       offers: [{ id: 'U', label: 'u', username: 'kirin', fills: 'username', matched: false }],
     });
@@ -139,25 +182,107 @@ describe('what a card offers', () => {
   });
 });
 
-describe('a page card matches where an entry signs in', () => {
-  const google = entry('GOOGLE_KIRIN', ['accounts.google.com'], { label: 'Google (kirin@)', username: 'kirin@x.test' });
-  const vercel = entry('VERCEL', ['vercel.com'], {
-    label: 'Vercel',
-    method: { kind: 'google', via: 'GOOGLE_KIRIN' },
-    domains: ['vercel.com'],
-    fields: { password: false, totp: false },
-  });
-  const app = entry('APP', ['app.example.com'], { domains: ['login.example.com'] });
+describe('the one-tap primary: chosen ONLY among the sign-ins the daemon matched (invariants 10, 11)', () => {
+  const two = () => {
+    const a = site('GITHUB_A', ['github.com']);
+    const b = site('GITHUB_B', ['github.com']);
+    const other = site('GITLAB', ['gitlab.com']);
+    return {
+      a,
+      b,
+      other,
+      list: listing([account('GITHUB_A'), account('GITHUB_B'), account('GITLAB')], [a, b, other]),
+    };
+  };
 
-  it("should make the provider's login the one tap on the provider's page", () => {
-    const saved = savedFor('secret', 'accounts.google.com', [google, vercel, app], undefined);
-    should(saved.offers.find(offer => offer.id === 'GOOGLE_KIRIN')?.matched).be.true();
-    should(saved.signIn).be.undefined();
+  it('should make NO account the primary when two or more sign in here and nothing chose one', () => {
+    const { a, b, list } = two();
+    const saved = savedFor('secret', 'github.com', list);
+    should(saved.offers.filter(offer => offer.primary === true)).deepEqual([]);
+    should(saved.offers.filter(offer => offer.why !== undefined)).deepEqual([]);
+    should(saved.offers.map(offer => [offer.id, offer.matched, offer.signIn])).deepEqual([
+      ['GITHUB_A', true, a.id],
+      ['GITHUB_B', true, b.id],
+      ['GITLAB', false, undefined],
+    ]);
+    // "Save as" would not guess between them either.
+    should(saved).not.have.property('suggest');
   });
 
-  it('should match a page by the login domain, not by what the entry is for', () => {
-    should(savedFor('secret', 'login.example.com', [app], undefined).offers[0]?.matched).be.true();
-    should(savedFor('secret', 'app.example.com', [app], undefined).offers[0]?.matched).be.false();
+  it('should make the matched account the ferret named the primary, by handle or by sign-in id', () => {
+    const { b, list } = two();
+    for (const hint of ['GITHUB_B', b.id]) {
+      const saved = savedFor('secret', 'github.com', list, { hint });
+      should(offersOf(saved)).deepEqual([
+        ['GITHUB_B', true, 'ferret'],
+        ['GITHUB_A', true, undefined],
+        ['GITLAB', false, undefined],
+      ]);
+    }
+  });
+
+  it('should never promote what a hint or a default names but the daemon did not match here', () => {
+    const { other, list } = two();
+    const defaults = {
+      sites: { 'github.com': 'GITLAB' },
+      projects: { ferretry: { 'github.com': 'GITLAB' } },
+    };
+    for (const context of [
+      { hint: 'GITLAB' },
+      { hint: other.id },
+      { defaults },
+      { defaults, project: { id: 'p1', name: 'ferretry', nameIsUnique: true } },
+      { hint: 'GITLAB', defaults },
+    ]) {
+      const saved = savedFor('secret', 'github.com', list, context);
+      should(saved.offers.filter(offer => offer.primary === true || offer.why !== undefined)).deepEqual([]);
+      should(saved.offers.find(offer => offer.id === 'GITLAB')).containDeep({ matched: false });
+    }
+    // A hinted account that does not sign in here is still tagged, never promoted.
+    should(
+      savedFor('secret', 'github.com', list, { hint: 'GITLAB' }).offers.find(o => o.id === 'GITLAB')?.hinted,
+    ).be.true();
+  });
+
+  it('should take a site or project default only when it names a matched sign-in', () => {
+    const { list } = two();
+    const bySite = savedFor('secret', 'github.com', list, { defaults: { sites: { 'github.com': 'GITHUB_B' } } });
+    should(offersOf(bySite)[0]).deepEqual(['GITHUB_B', true, 'site']);
+    const byProject = savedFor('secret', 'github.com', list, {
+      defaults: { projects: { ferretry: { 'github.com': 'GITHUB_A' } }, sites: { 'github.com': 'GITHUB_B' } },
+      project: { id: 'p1', name: 'ferretry', nameIsUnique: true },
+    });
+    should(byProject.offers[0]).containDeep({ id: 'GITHUB_A', primary: true, why: 'project', project: 'ferretry' });
+  });
+
+  it('should choose among the accounts that can fill the card: one that cannot is not matched', () => {
+    const { list } = two();
+    const narrowed = listing(
+      list.accounts.map(each =>
+        each.id === 'GITHUB_B' ? { ...each, fields: { password: false, totp: false } } : each,
+      ),
+      [...list.signIns],
+    );
+    should(offersOf(savedFor('secret', 'github.com', narrowed))[0]).deepEqual(['GITHUB_A', true, 'only']);
+  });
+});
+
+describe('matching stays exact over sign-ins (invariant 9)', () => {
+  const google = site('GOOGLE_KIRIN', ['accounts.google.com']);
+  const app = site('APP', ['login.example.com'], { match: ['app.example.com'] });
+  const list = listing([account('GOOGLE_KIRIN', { label: 'Google (kirin@)' }), account('APP')], [google, app]);
+
+  it("should match the provider's sign-in on the provider's page", () => {
+    should(savedFor('secret', 'accounts.google.com', list).offers[0]).containDeep({
+      id: 'GOOGLE_KIRIN',
+      matched: true,
+      signIn: google.id,
+    });
+  });
+
+  it('should match a page by the login domain, never by what the site is for', () => {
+    should(savedFor('secret', 'login.example.com', list).offers.find(o => o.id === 'APP')?.matched).be.true();
+    should(savedFor('secret', 'app.example.com', list).offers.find(o => o.id === 'APP')?.matched).be.false();
   });
 
   it('should match a login domain exactly: a parent, a child or a look-alike is not it', () => {
@@ -166,31 +291,59 @@ describe('a page card matches where an entry signs in', () => {
       'evil.accounts.google.com',
       'accounts.google.com.evil.test',
       'accounts-google.com',
+      'accounts.google.com:8443',
     ])
-      should(savedFor('secret', key, [google], undefined).offers[0]?.matched).be.false();
+      should(savedFor('secret', key, list).offers.some(offer => offer.matched)).be.false();
   });
 
-  it('should still match an entry from before login domains by its web hosts', () => {
-    const old = entry('GITHUB', ['github.com']);
-    should(savedFor('secret', 'github.com', [old], undefined).offers[0]?.matched).be.true();
+  it('should match a terminal by its program and host, and ssh by its destination, exactly', () => {
+    const sudo = tty('SUDO', 'sudo', 'kirin-box');
+    const ssh = tty('BUILD', 'ssh', 'kirin-box', 'build.example.com');
+    const boxes = listing([account('SUDO'), account('BUILD')], [sudo, ssh]);
+    should(savedFor('secret', 'sudo@kirin-box', boxes).offers[0]).containDeep({ id: 'SUDO', signIn: sudo.id });
+    should(savedFor('secret', 'ssh@build.example.com', boxes).offers[0]).containDeep({ id: 'BUILD', signIn: ssh.id });
+    for (const key of [
+      'su@kirin-box',
+      'sudo@other-box',
+      'ssh@kirin-box',
+      'ssh@build.example.com.evil',
+      'scp@build.example.com',
+    ])
+      should(savedFor('secret', key, boxes).offers.some(offer => offer.matched)).be.false();
   });
+});
 
-  it('should keep matching a terminal by what the entry is for', () => {
-    const sudo = entry('SUDO', ['sudo@kirin-box'], { domains: [] });
-    should(savedFor('secret', 'sudo@kirin-box', [sudo], undefined).offers[0]?.matched).be.true();
+describe('a site that signs in through a provider (secrev-1201 L5)', () => {
+  const google = site('GOOGLE_KIRIN', ['accounts.google.com']);
+  const vercel = site('VERCEL', ['vercel.com'], {
+    method: { kind: 'google', via: 'GOOGLE_KIRIN' },
+    via: { account: { id: 'GOOGLE_KIRIN', label: 'Google (kirin@)' }, signIn: google.id },
   });
+  const accounts = [
+    account('GOOGLE_KIRIN', { label: 'Google (kirin@)', username: 'kirin@x.test' }),
+    account('VERCEL', { label: 'Vercel', fields: { password: false, totp: false } }),
+    account('UNRELATED', { label: 'Unrelated' }),
+  ];
 
-  it('should say on the card how a site that goes via a provider signs in, never offering the provider here', () => {
-    const saved = savedFor('secret', 'vercel.com', [google, vercel], undefined);
+  it('should say on the card how it signs in, and offer no saved password by hand on its page', () => {
+    const saved = savedFor('secret', 'vercel.com', listing(accounts, [google, vercel]));
     should(saved.signIn).deepEqual({
       id: 'VERCEL',
       label: 'Vercel',
       method: { kind: 'google', via: 'GOOGLE_KIRIN' },
       via: { id: 'GOOGLE_KIRIN', label: 'Google (kirin@)' },
     });
-    should(saved.offers.some(offer => offer.matched)).be.false();
+    should(saved.offers).deepEqual([]);
+    should(signInFor('sudo@kirin-box', listing(accounts, [google, vercel]))).be.undefined();
+  });
+
+  it('should never put the provider one tap away there, even when the migration dropped the via link', () => {
+    // v1 VERCEL went via GOOGLE_KIRIN, which signed in nowhere: the link was dropped, the method kept.
+    const dropped = site('VERCEL', ['vercel.com'], { method: { kind: 'google' } });
+    const saved = savedFor('secret', 'vercel.com', listing(accounts, [dropped]));
+    should(saved.signIn?.method.kind).equal('google');
     should(saved.offers.map(offer => offer.id)).not.containEql('GOOGLE_KIRIN');
-    should(signInFor('sudo@kirin-box', [google, vercel])).be.undefined();
+    should(saved.offers).deepEqual([]);
   });
 
   it('should say it on a card of several fields too', () => {
@@ -198,24 +351,33 @@ describe('a page card matches where an entry signs in', () => {
       { id: 'email', sensitivity: 'plain' as const },
       { id: 'password', sensitivity: 'secret' as const },
     ];
-    const saved = savedForFields(fields, 'vercel.com', [google, vercel], undefined);
+    const saved = savedForFields(fields, 'vercel.com', listing(accounts, [google, vercel]));
     should(saved.signIn?.via?.id).equal('GOOGLE_KIRIN');
     should(saved.offers.map(offer => offer.id)).not.containEql('GOOGLE_KIRIN');
   });
+
+  it('should never offer a provider by hand anywhere it is not matched', () => {
+    const saved = savedFor('secret', 'example.org', listing(accounts, [google, vercel]));
+    should(saved.offers.map(offer => offer.id)).deepEqual(['UNRELATED']);
+  });
+
+  it('should still offer the provider where its own login domains make it matched', () => {
+    const both = site('GOOGLE_KIRIN', ['accounts.google.com', 'vercel.com']);
+    const saved = savedFor('secret', 'vercel.com', listing(accounts, [both, vercel]));
+    should(saved.offers.find(offer => offer.id === 'GOOGLE_KIRIN')).containDeep({ matched: true, signIn: both.id });
+  });
 });
 
-describe('a provider login the owner also signs in with on the site', () => {
-  it('should still offer it where its own login domains make it matched', () => {
-    const google = entry('GOOGLE_KIRIN', ['accounts.google.com'], {
-      label: 'Google (kirin@)',
-      domains: ['accounts.google.com', 'vercel.com'],
-    });
-    const vercel = entry('VERCEL', ['vercel.com'], {
-      method: { kind: 'google', via: 'GOOGLE_KIRIN' },
-      domains: ['vercel.com'],
-      fields: { password: false, totp: false },
-    });
-    const saved = savedFor('secret', 'vercel.com', [google, vercel], undefined);
-    should(saved.offers.find(offer => offer.id === 'GOOGLE_KIRIN')?.matched).be.true();
+describe('a one-time code is never offered by hand', () => {
+  it('should offer a code only from an account that signs in here', () => {
+    const here = site('GITHUB', ['github.com']);
+    const elsewhere = site('GITLAB', ['gitlab.com']);
+    const seeded = { fields: { password: true, totp: true } };
+    const saved = savedFor(
+      'code',
+      'github.com',
+      listing([account('GITHUB', seeded), account('GITLAB', seeded)], [here, elsewhere]),
+    );
+    should(saved.offers.map(offer => [offer.id, offer.fills])).deepEqual([['GITHUB', 'totp']]);
   });
 });

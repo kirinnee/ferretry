@@ -615,6 +615,12 @@ export const InputDeliverBodySchema = z
     /** A saved login, by its handle: the daemon types the fields the request needs from it. */
     entry: LoginEntryIdSchema.optional(),
     /**
+     * The sign-in the owner tapped (the offer's `signIn`), with `entry`. It MUST be one of `entry`'s account: the daemon
+     * refuses the deliver with nothing typed otherwise. The value still comes from the account; the facts the daemon
+     * sees go to this sign-in. Absent (an older app): the account's sign-in the daemon matched here, if any.
+     */
+    signIn: SignInIdSchema.optional(),
+    /**
      * The saved account's 2FA key whose code the daemon makes ("Use code from Ferretry · Authy backup"), with `entry`.
      * NOT YET TAKEN: a daemon of this build refuses a deliver that names one, until the code-card change checks that
      * the key is the matched account's and holds a seed; absent, the account's first key in offer order is used.
@@ -643,6 +649,13 @@ export const InputDeliverBodySchema = z
   .superRefine((body, context) => {
     if (body.padded !== undefined && (body.entry !== undefined || body.fields !== undefined)) {
       context.addIssue({ code: 'custom', message: 'padded is the one value of a one-field card: send it alone' });
+    }
+    if (body.signIn !== undefined && body.entry === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a sign-in is one of a saved account: send it with entry',
+        path: ['signIn'],
+      });
     }
     if (body.factor !== undefined && body.entry === undefined) {
       context.addIssue({

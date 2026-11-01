@@ -11,6 +11,8 @@ import {
 } from '../../../src/lib/input-requests/login-observer.ts';
 
 const PASSWORD = 'hunter2-UNIQUE-pw';
+/** The sign-in the Google account was typed at: where its facts go. */
+const SI_GOOGLE = 'si_00000000000000d1';
 
 const page = (type = 'password', navigationId = 'doc-1'): InputTargetFacts => ({
   kind: 'browser',
@@ -58,7 +60,7 @@ function world(script: {
   const start = now;
   const seen: { id: string; observation: LoginObservation }[] = [];
   const observer = new LoginObserver({
-    sink: { observe: async (id, observation) => void seen.push({ id, observation }) },
+    sink: { observeSignIn: async (id, observation) => void seen.push({ id, observation }) },
     probe: {
       shows: async () => (typeof script.shows === 'function' ? script.shows(now - start) : script.shows),
       where: async () => script.where?.(now - start),
@@ -74,6 +76,7 @@ function world(script: {
 const delivery = (extra: Partial<LoginDelivery> = {}): LoginDelivery => ({
   sessionId: 's1',
   login: 'GOOGLE',
+  signIn: SI_GOOGLE,
   domains: ['accounts.google.com'],
   target: { kind: 'browser', key: 'app' },
   facts: page(),
@@ -118,7 +121,7 @@ describe('what is seen after a submit', () => {
           : { navigationId: 'doc-2', host: 'vercel.com' },
     });
     await w.observer.delivered(delivery());
-    should(w.seen.every(entry => entry.id === 'GOOGLE')).be.true();
+    should(w.seen.every(entry => entry.id === SI_GOOGLE)).be.true();
     should(facts(w.seen)).containDeep({
       at: 'accounts.google.com',
       surface: 'page',
@@ -151,7 +154,13 @@ describe('what is seen after a submit', () => {
         // The owner types the code the page asks for while the daemon is still watching the password's submit.
         if (elapsed >= 5_000 && typed === undefined)
           typed = w.observer.delivered(
-            delivery({ login: undefined, fields: [field('private')], submitted: false, facts: page('text', 'doc-2') }),
+            delivery({
+              login: undefined,
+              signIn: undefined,
+              fields: [field('private')],
+              submitted: false,
+              facts: page('text', 'doc-2'),
+            }),
           );
         return { navigationId: 'doc-2', host: 'accounts.google.com' };
       },
@@ -159,7 +168,7 @@ describe('what is seen after a submit', () => {
     await w.observer.delivered(delivery());
     await typed;
     const codes = w.seen.filter(entry => entry.observation.secondFactor !== undefined);
-    should(codes.map(entry => [entry.id, entry.observation.secondFactor])).deepEqual([['GOOGLE', 'code']]);
+    should(codes.map(entry => [entry.id, entry.observation.secondFactor])).deepEqual([[SI_GOOGLE, 'code']]);
   });
 
   it('should record the value echoed when it shows', async () => {
@@ -186,7 +195,7 @@ describe('what is seen after a submit', () => {
   it('should keep no echo fact for a terminal the ferret typed into before the look', async () => {
     const seen: LoginObservation[] = [];
     const observer: LoginObserver = new LoginObserver({
-      sink: { observe: async (_id, observation) => void seen.push(observation) },
+      sink: { observeSignIn: async (_id, observation) => void seen.push(observation) },
       probe: { shows: async () => false, where: async () => undefined },
       now: () => Date.now(),
       sleep: async () => observer.acted('s1', 'terminal'),
@@ -209,8 +218,51 @@ describe('what is seen after a submit', () => {
       ['at', 'identity', 'masked', 'surface'],
     ]);
     const none = world({ shows: false });
-    await none.observer.delivered(delivery({ login: undefined }));
+    await none.observer.delivered(delivery({ login: undefined, signIn: undefined }));
     should(none.seen).deepEqual([]);
+  });
+
+  it('should keep nothing for an account picked by hand where it has no sign-in', async () => {
+    const w = world({ shows: false, where: () => ({ navigationId: 'doc-2', host: 'vercel.com' }) });
+    await w.observer.delivered(delivery({ signIn: undefined }));
+    should(w.seen).deepEqual([]);
+  });
+});
+
+describe('two accounts that sign in on one host', () => {
+  const SI_WORK = 'si_00000000000000d2';
+
+  it('should keep each one’s facts on its own sign-in', async () => {
+    const w = world({ shows: false, where: () => ({ navigationId: 'doc-1', host: 'accounts.google.com' }) });
+    await w.observer.delivered(delivery({ submitted: false }));
+    await w.observer.delivered(
+      delivery({ login: 'GOOGLE_WORK', signIn: SI_WORK, facts: page('text'), submitted: false }),
+    );
+    should(w.seen.map(entry => [entry.id, entry.observation.masked])).deepEqual([
+      [SI_GOOGLE, true],
+      [SI_WORK, false],
+    ]);
+  });
+
+  it('should give a code made from one account to that account’s sign-in only', async () => {
+    let typed: Promise<void> | undefined;
+    const w = world({
+      shows: false,
+      where: elapsed => {
+        if (elapsed >= 5_000 && typed === undefined)
+          typed = w.observer.delivered(
+            delivery({ fields: [field('private')], submitted: false, facts: page('text', 'doc-2') }),
+          );
+        return { navigationId: 'doc-2', host: 'accounts.google.com' };
+      },
+    });
+    await Promise.all([
+      w.observer.delivered(delivery()),
+      w.observer.delivered(delivery({ login: 'GOOGLE_WORK', signIn: SI_WORK })),
+    ]);
+    await typed;
+    const codes = w.seen.filter(entry => entry.observation.secondFactor === 'code').map(entry => entry.id);
+    should(codes).deepEqual([SI_GOOGLE]);
   });
 });
 
@@ -309,7 +361,7 @@ describe('each fact is decided at its own moment', () => {
     });
     const observer: LoginObserver = new LoginObserver({
       sink: {
-        observe: async (_id, observation) => {
+        observeSignIn: async (_id, observation) => {
           seen.push(observation);
           // The ferret acts once the page has left the sign-in hosts, before the echo looks are in.
           if (observation.secondFactor !== undefined) {

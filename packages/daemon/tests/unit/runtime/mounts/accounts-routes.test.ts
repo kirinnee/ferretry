@@ -243,7 +243,12 @@ describe('the account routes, the rest of their answers', () => {
   it('should let the owner answer a proposal on a sign-in, and refuse a proposal id that is not one', async () => {
     const w = await world();
     const recipes = w.subsystem.loginRecipes as NonNullable<SecretSubsystem['loginRecipes']>;
-    await recipes.propose('ferret-1', 'SITE', 'Continue with Google, then pick kirin', 'it asks which account');
+    await recipes.propose(
+      'ferret-1',
+      { signIn: w.linked.id },
+      'Continue with Google, then pick kirin',
+      'it asks which account',
+    );
     const proposalId = (
       (await w.ok('GET', '/v1/accounts')) as { signIns: { id: string; proposals?: { id: string }[] }[] }
     ).signIns.find(signIn => signIn.id === w.linked.id)?.proposals?.[0]?.id as string;

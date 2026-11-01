@@ -24,6 +24,12 @@ import {
   AccountListSchema,
   type AccountList,
   AccountProposeCallSchema,
+  AgentToolCallSchema,
+  AddSignInRequestSchema,
+  InputDeliverBodySchema,
+  PutAccountRequestSchema,
+  PutLoginEntryRequestSchema,
+  PutSignInRequestSchema,
   AccountSummarySchema,
   chosenSignIn,
   matchedSignIns,
@@ -1091,10 +1097,49 @@ describe('config/account-defaults.yaml', () => {
 });
 
 describe('account.propose', () => {
-  it('should be keyed by the sign-in, never by a login handle', () => {
+  it('should be keyed by the sign-in, or by the older account handle, never both and never neither', () => {
     const call = { tool: 'account.propose', signIn: SI(1), recipe: 'Open the page.', why: 'the steps were missing' };
+    const { signIn: _signIn, ...bare } = call;
     expect(AccountProposeCallSchema.safeParse(call).success).toBe(true);
+    expect(AccountProposeCallSchema.safeParse({ ...bare, login: 'GITHUB' }).success).toBe(true);
     expect(AccountProposeCallSchema.safeParse({ ...call, signIn: 'GITHUB' }).success).toBe(false);
     expect(AccountProposeCallSchema.safeParse({ ...call, login: 'GITHUB' }).success).toBe(false);
+    expect(AccountProposeCallSchema.safeParse(bare).success).toBe(false);
+    expect(AccountProposeCallSchema.safeParse({ ...bare, login: SI(1) }).success).toBe(false);
+  });
+
+  it('should be the ONE schema of the live tool: the agent-tool arm is this schema, for both spellings', () => {
+    const recipe = { recipe: 'Open the page.', why: 'the steps were missing' };
+    const viaTool = (call: unknown) => AgentToolCallSchema.safeParse(call);
+    expect(viaTool({ tool: 'account.propose', signIn: SI(1), ...recipe }).success).toBe(true);
+    expect(viaTool({ tool: 'account.propose', login: 'GITHUB', ...recipe }).success).toBe(true);
+    expect(viaTool({ tool: 'login.propose', login: 'GITHUB', ...recipe }).data).toEqual({
+      tool: 'account.propose',
+      login: 'GITHUB',
+      ...recipe,
+    });
+    expect(viaTool({ tool: 'account.propose', signIn: SI(1), login: 'GITHUB', ...recipe }).success).toBe(false);
+    expect(viaTool({ tool: 'account.propose', ...recipe }).success).toBe(false);
+  });
+});
+
+describe('facts are written only by the daemon (invariant 14)', () => {
+  it('should refuse a fact in every body a route or a card takes', () => {
+    const fact = [{ at: 'github.com', surface: 'page', identity: '0123456789abcdef', since: 'a' }];
+    const place = { kind: 'site', domains: ['github.com'], match: ['github.com'] };
+    const bodies: readonly [z.ZodType, Record<string, unknown>][] = [
+      [PutAccountRequestSchema, { label: 'GitHub' }],
+      [AddSignInRequestSchema, { place }],
+      [PutSignInRequestSchema, { place }],
+      [PutLoginEntryRequestSchema, { label: 'GitHub', match: ['github.com'] }],
+      [
+        InputDeliverBodySchema,
+        { deliveryId: crypto.randomUUID(), observedDigest: 'a'.repeat(64), entry: 'GITHUB', submit: true },
+      ],
+    ];
+    for (const [schema, body] of bodies) {
+      expect(schema.safeParse(body).success).toBe(true);
+      expect(schema.safeParse({ ...body, observed: fact }).success).toBe(false);
+    }
   });
 });

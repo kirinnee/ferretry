@@ -400,6 +400,7 @@ describe('McpServer — the tools', () => {
     // account_propose (a ferret proposes a saved login's recipe) fit by trimming the words NAME, REF and ASK_OWNER
     // repeat in every tool that takes them (31,577).
     // search_work (cards and agenda by words) fit in its own words (31,981).
+    // Keying account_propose by sign-in (signIn for login) fit as it was (31,986).
     // Owner-gated groups are listed only while they are on.
     should(bytes).be.below(32_000);
     should(longest).be.belowOrEqual(300);
@@ -447,7 +448,7 @@ describe('McpServer — the tools', () => {
     should(tooLong).match({ result: { isError: true, content: [{ text: /^timeoutMs: /u }] } });
   });
 
-  it('should map account_propose to the wire call, and name the login, the recipe and why as required', async () => {
+  it('should map account_propose to the wire call, and name the sign-in, the recipe and why as required', async () => {
     // Arrange
     const { calls, request } = harness(async () => ({ summary: 'Proposed; the owner decides.' }));
     const tool = MCP_TOOLS.find(({ name }) => name === 'account_propose');
@@ -456,7 +457,7 @@ describe('McpServer — the tools', () => {
     await request(
       'tools/call',
       toolCall('account_propose', {
-        login: 'VERCEL',
+        signIn: 'si_3f2a000000000001',
         recipe: 'Open app.vercel.com → Continue with Google → [[GOOGLE_KIRIN]]',
         why: 'The Google button moved below the fold.',
       }),
@@ -466,13 +467,13 @@ describe('McpServer — the tools', () => {
     should(calls).deepEqual([
       {
         tool: 'account.propose',
-        login: 'VERCEL',
+        signIn: 'si_3f2a000000000001',
         recipe: 'Open app.vercel.com → Continue with Google → [[GOOGLE_KIRIN]]',
         why: 'The Google button moved below the fold.',
       },
     ]);
     should(tool?.tool).equal('account.propose');
-    should(tool?.inputSchema).containEql({ required: ['login', 'recipe', 'why'] });
+    should(tool?.inputSchema).containEql({ required: ['signIn', 'recipe', 'why'] });
     should(tool?.description.length).belowOrEqual(300);
   });
 
