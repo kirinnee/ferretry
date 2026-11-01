@@ -60,7 +60,7 @@ const sameBytes = (a: TranscriptFingerprint, b: TranscriptFingerprint): boolean 
  * One daemon-wide memory of the transcript tails it has already parsed.
  *
  * THIS IS THE STALL A REAL FLEET HIT. Every session read, every roster listing — the warden's 30-second
- * liveness pass, the quota-failover roster, the session monitor's 15-second question reconcile — asked
+ * liveness pass, the session monitor's 15-second question reconcile — asked
  * for the newest events of EVERY session, and each ask parsed up to 16 MiB of that session's transcript
  * again. A parse is synchronous: about a third of a second for one 200 MB conversation, and a fleet of
  * them made one listing tens of seconds of an event loop that could do nothing else — no request, no

@@ -32,7 +32,6 @@ export * from './passkeys/webcrypto-passkey-crypto.ts';
 export * from './pins/index.ts';
 export * from './provider-probe/index.ts';
 export * from './push/index.ts';
-export * from './quota-failover/index.ts';
 export * from './relay/index.ts';
 export * from './runtime/index.ts';
 export * from './scratch/index.ts';

@@ -185,7 +185,7 @@ function usageLimitWait(state: HarnessState, sourceRef: string): HarnessWait {
         'This clears by itself once the limit is gone and the dialog closes.',
       ]),
       howToResolve:
-        'Ask your admin for more usage, or open the Console tab and pick what the ferret should do. Failover to another login follows your quota-failover settings.',
+        'Ask your admin for more usage, or open the Console tab and pick what the ferret should do. The Warden may move the ferret to another login if auto-migrate is on.',
       ...(state.turnStateAt === undefined ? {} : { waitingSince: state.turnStateAt }),
     },
   };

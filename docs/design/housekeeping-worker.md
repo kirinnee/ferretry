@@ -136,7 +136,7 @@ accepted record.
 - Sharing the cache: `GET /v1/usage` (`src/lib/api/routes/usage.ts:81-87`). It first awaits
   `quotaReader.watch()`, which does **two `load()`s plus a manifest read on every call** (`bin/fyd.ts:8428-8444`),
   then runs path A **synchronously when the cache is stale**. That is why it takes 1.5 s.
-- Sharing the cache: quota failover, the warden sweep and the advisor.
+- Sharing the cache: the warden sweep (autoMigrate) and the advisor.
 - Calling `fleetCredentials.list()` directly, so every call re-reads every credential: the logins route
   (`bin/fyd.ts:8896-8903`), catalog facts for `runtimes()`/`machine()`/`republish()`
   (`src/lib/fleet/catalog-service.ts:585,626`), and the Ferretry tools snapshot (`bin/fyd.ts:8709`).
@@ -150,7 +150,6 @@ accepted record.
 | **Published model catalog**                                     | `:8384-8401`, `src/lib/models/published.ts:209-242`      | 6 h, checked lazily on every `catalogs()` call, including every analytics pass | version file, release, signature, catalog                                                                                                                                                                                                                                                                                     | `state/model-catalog.json`; `fleetCatalog.republish()`            | NET, CPU once per update                       | **Stay**. Its per-call `load()` is fixed by PR 1.                                                 |
 | **Ollama local models**                                         | `:8409-8419`, once at `:10187`                           | once, plus on Settings                                                         | loopback `/api/tags`                                                                                                                                                                                                                                                                                                          | republish                                                         | NET                                            | **Stay**                                                                                          |
 | **Terminal reaper**                                             | `:7297-7310`; lane `:10161-10165`                        | 5 s                                                                            | a survey of every session directory; a `terminal-pane` identity per session (14.2/s on the live box); `readState`; in-band `list-panes`; on macOS `ps -o lstart=` per finished pane                                                                                                                                           | kills panes                                                       | FILE, CHILD (mac)                              | **3** (3d: on `exited`). Fallback in PR 4 if 3d has not landed.                                   |
-| **Quota failover**                                              | `:9096-9103`; lane `:10095-10100`                        | max(60 s, configured), default 5 min, **off** by default                       | `quota-failover/config.json`; when enabled, the usage feed, the roster, `state.json`                                                                                                                                                                                                                                          | `state.json`, journal, migrate                                    | FILE                                           | **Stay**. It reads the model's projection after PR 3.                                             |
 | **Warden sweep**                                                | `:3653-3990`, `:9249-9293`; arm `:10199`                 | ≥ 60 s (default 2 min) plus debounced event triggers                           | **a full `configFiles.load()` on every triggering session event** (`:3945-3953`, `src/adapters/warden/documents.ts:88`), every sweep and every 30 s liveness tick; sessions; usage                                                                                                                                            | warden state; spawns                                              | CPU (config), FILE                             | **Stay**. Its config reloads are removed by PR 1.                                                 |
 | **Warden liveness tick**                                        | `:3958-3975`                                             | 30 s                                                                           | config `load()` again; pane captures; tails; `ps`                                                                                                                                                                                                                                                                             | reflex                                                            | CHILD, CPU                                     | **3**. The `ps` fallback is in §5.5.                                                              |
 | **Self-check**                                                  | `:7337-7398`; `:10030-10033`                             | 30 s (`healthIntervalSeconds`), no guard against overlapping runs              | 3 directory surveys; a deep `reconcile()` under **`serial.runExclusive`**; the exit observer's tmux queries per running session                                                                                                                                                                                               | `health-events.jsonl`, `state.json` CAS, SQLite index             | FILE, lock waits, tmux                         | **Stay** (it writes under the lock). §5.4 has the 17.7 s analysis and the fixes, outside stage 4. |
@@ -205,14 +204,14 @@ housekeeping worker:
 
 ### 2.2 What stays on main, and why
 
-| Stays on main                                                                                                            | Why                                                                                                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `CredentialStatusService`: its `SingleFlight`, `observe`/`checkNow`/`view` policy, `InMemoryCredentialStatusStore` heads | The flight is shared with launch renewal (U12) and Check now. A second lock in the worker would break the "Check now joins the in-flight read" promise. Policy is cheap; only its **ports** move.                  |
-| `CachedUsageFeed`, `WatchedUsageFeed`, the provider-quota reader                                                         | Every route and failover reads them on main. Environment-login quotas go through `OutboundProviderAuthorizer`, one of the six vault holders `docs/secrets.md:40-47` names. The worker must never become a seventh. |
-| `ConfigFilesService` and its watcher                                                                                     | The config owner. It has its own queue, the accepted-record write and `configChanges`.                                                                                                                             |
-| Session index reads (`listSessions`, `readConfig`) for Codex attribution and analytics discovery                         | `DaemonStorage` owns the SQLite handle and the document cache (stage 3 §2.4). Main sends the worker _paths_, never a storage handle.                                                                               |
-| Codex **Check now** refresh (`#codexRefresh`, `ProcessFleetTokenRefreshPort`)                                            | Person-initiated, under the flight, and it rewrites the canonical `auth.json` through the harness. Its follow-up active read does go through the worker port.                                                      |
-| Analytics SQLite, reaper kills, warden decisions, failover migrations, every journal append                              | Same rule as stage 3: anything holding a lock, the index or the in-process listeners.                                                                                                                              |
+| Stays on main                                                                                                            | Why                                                                                                                                                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CredentialStatusService`: its `SingleFlight`, `observe`/`checkNow`/`view` policy, `InMemoryCredentialStatusStore` heads | The flight is shared with launch renewal (U12) and Check now. A second lock in the worker would break the "Check now joins the in-flight read" promise. Policy is cheap; only its **ports** move.                   |
+| `CachedUsageFeed`, `WatchedUsageFeed`, the provider-quota reader                                                         | Every route and the Warden read them on main. Environment-login quotas go through `OutboundProviderAuthorizer`, one of the six vault holders `docs/secrets.md:40-47` names. The worker must never become a seventh. |
+| `ConfigFilesService` and its watcher                                                                                     | The config owner. It has its own queue, the accepted-record write and `configChanges`.                                                                                                                              |
+| Session index reads (`listSessions`, `readConfig`) for Codex attribution and analytics discovery                         | `DaemonStorage` owns the SQLite handle and the document cache (stage 3 §2.4). Main sends the worker _paths_, never a storage handle.                                                                                |
+| Codex **Check now** refresh (`#codexRefresh`, `ProcessFleetTokenRefreshPort`)                                            | Person-initiated, under the flight, and it rewrites the canonical `auth.json` through the harness. Its follow-up active read does go through the worker port.                                                       |
+| Analytics SQLite, reaper kills, warden decisions and migrations, every journal append                                    | Same rule as stage 3: anything holding a lock, the index or the in-process listeners.                                                                                                                               |
 
 ### 2.3 Protocol
 
@@ -368,14 +367,14 @@ changes it.
 - Consumption on _other devices_ signed into the same account can only be seen by asking the provider.
 - Windows reset at `resets_at`.
 
-**Why 60 s is kept for now.** It is the declared default, failover's freshness gate is built around it, and
+**Why 60 s is kept for now.** It is the declared default, the Warden's freshness gate is built around it, and
 changing it is a behaviour change.
 
 **Recommendation (Q1): move the default to 300 s, plus one read at each window's `resets_at` + 30 s.**
 
 - Resets are then seen within 30 s, which is better than now.
 - Consumption elsewhere is seen within 5 minutes. 300 s is `USAGE_REFRESH_MS`, the documented conservative
-  default (`feed-policy.ts:15`), and also failover's default tick, so failover could not act faster anyway.
+  default (`feed-policy.ts:15`), so the Warden could not act on fresher data than that anyway.
 - On the Mac that turns about 2 `security` spawns a minute into 0.4.
 
 ### 3.3 macOS Keychain: detecting a changed item cheaply
@@ -457,8 +456,8 @@ reading)`, `rateLimits(session, reading)`, `jobResult`, `tick`.
 - `fleetCredentials.list()` and the routes and catalog facts that call it directly read `views(...)`.
 - The logins route, `republish()` and the tools snapshot stop re-reading credentials.
 
-**Freshness semantics for failover and the warden.** The snapshot's `at` must stay "when the evidence was
-collected": the oldest contributing reading, not the projection time. Otherwise failover's freshness gate would
+**Freshness semantics for the warden.** The snapshot's `at` must stay "when the evidence was
+collected": the oldest contributing reading, not the projection time. Otherwise the Warden's freshness gate would
 trust a reading it should not. A unit test pins this.
 
 ## 4. Staging — behaviour-identical PRs
@@ -777,7 +776,7 @@ it is acceptable for config. A test pins writeOwn → load.
 ### 5.2 Faster is still different
 
 PR 3 sees a sign-in, sign-out or token refresh within about 1 s instead of up to one interval. That is
-visible: Settings updates sooner, and failover sees a re-signed-in login sooner. It is the same shape as stage
+visible: Settings updates sooner, and the Warden sees a re-signed-in login sooner. It is the same shape as stage
 3's exit-speed question. Accept it, or delay publication to the interval for parity (Q4)?
 
 ### 5.3 macOS unknowns

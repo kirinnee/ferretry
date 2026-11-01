@@ -15,10 +15,10 @@ import type { UsageSourcePort } from './types.ts';
  * Every number here was gathered by the EXISTING usage pass — the passive readings first, then the one
  * free usage read when those are older than the pass interval — and is read back from the credentials
  * surface's own list, which makes no network call. So the feed adds no probe of its own: a session's
- * quota, the advisor, quota-failover and every scraper read the same reading the Credentials tab shows.
+ * quota, the advisor, Warden autoMigrate and every scraper read the same reading the Credentials tab shows.
  *
  * ONE CREDENTIAL, MANY ROWS. A feed row is keyed by `agent` — the executable name a session is launched
- * with, which quota-failover hands to `migrate(...)` and the advisor matches on. A credential is shared
+ * with, which Warden autoMigrate hands to `migrate(...)` and the advisor matches on. A credential is shared
  * by every runtime on it, so each published runtime row in the manifest becomes one feed row carrying
  * its credential's reading. The join goes through the MANIFEST because that is what a launch reads:
  * a runtime the configuration names but no apply published has no executable to attribute quota to.

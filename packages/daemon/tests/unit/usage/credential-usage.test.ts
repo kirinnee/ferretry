@@ -59,7 +59,7 @@ const list = (...credentials: FleetCredentialView[]): FleetCredentialList => ({
 describe('credentialUsageRows', () => {
   /**
    * THE JOIN IS THE FEATURE. `agent` is the executable name a session launches with — the value
-   * quota-failover hands to `migrate(...)` and the advisor matches on. Keying by the credential or the
+   * Warden autoMigrate hands to `migrate(...)` and the advisor matches on. Keying by the credential or the
    * runtime id would satisfy every schema and match nothing, so failover would quietly stop moving
    * sessions off exhausted logins. This test fails if anyone ever does.
    */

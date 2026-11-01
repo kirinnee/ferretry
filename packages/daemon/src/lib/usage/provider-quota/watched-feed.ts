@@ -22,7 +22,7 @@ export function overlayProviderQuota(
 
 /**
  * The usage feed as a WATCHER reads it (docs/provider-quotas.md): a screen polling `/v1/usage`, the
- * Warden's sweep and quota failover. Each read first lets the quota reader read the environment logins
+ * Warden's sweep and auto-migrate. Each read first lets the quota reader read the environment logins
  * that are due — at most once a minute each — and then answers the shared feed with the fresh readings
  * laid over it, so a provider's quota shows on the next poll instead of the next feed refresh.
  *

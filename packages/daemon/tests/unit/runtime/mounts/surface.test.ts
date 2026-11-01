@@ -319,7 +319,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     identities: { resolve: async () => undefined },
     arm: async () => () => undefined,
   },
-  // Like the monitor and quota-failover loops, this serves no route. Its presence proves the daemon
+  // Like the monitor loop, this serves no route. Its presence proves the daemon
   // constructs the unattended evidence pass rather than leaving its timer as unreachable code.
   fleetRefresh: { run: async () => undefined, arm: async () => () => undefined },
   conversationImport: {
@@ -594,21 +594,6 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     cancel: async () => ({ cancelled: 0 }),
     drain: async () => undefined,
   },
-  // The quota-failover loop serves no route either, and for the same reason the declared-wait loop
-  // does not: a background tick is ended by a timer, not by a request.
-  quotaFailover: {
-    intervalMs: async () => 300_000,
-    run: async () => ({
-      at: '2026-01-01T00:00:00.000Z',
-      halted: 'automatic quota failover is disabled (enabled=false)',
-      warnings: [],
-      considered: 0,
-      moved: [],
-      failed: [],
-      stranded: [],
-      skipped: [],
-    }),
-  },
   // The cross-family counterpart of the migration above. Its three routes ARE part of the surface, so
   // the inventory dials them; the state machine behind them has its own coverage.
   handover: {
@@ -622,7 +607,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
-  // The reconciler serves no route, for the reason the declared-wait and quota-failover loops do not:
+  // The reconciler serves no route, for the reason the declared-wait loop does not:
   // a handover advances on a timer and on an inbound board verification, never on a request.
   handoverReconcile: new HandoverReconcileLoop(
     {

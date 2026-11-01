@@ -273,8 +273,6 @@ import {
   FileModelCatalogCache,
   FilePasteRuleStore,
   FileProjectCatalog,
-  FileQuotaFailoverConfigStore,
-  FileQuotaFailoverStateStore,
   FileRestartQueue,
   FileRoutingCatalog,
   FileScratchCollector,
@@ -327,7 +325,6 @@ import {
   ProcCgroupPlacements,
   ProjectMcpServers,
   probeBundledWorker,
-  quotaFailoverRoot,
   RegisteredCgroupPaneLedger,
   RuntimeEnvironment,
   SECRETS_DOCUMENT,
@@ -1074,8 +1071,6 @@ import {
   QueueDeliverer,
   QueueingSends,
   QueueRefused,
-  type QuotaFailoverLoop,
-  QuotaFailoverService,
   RELAY_DIRECTORY_NOT_ASKED,
   RELOAD_THE_APP,
   RETIRED_ACCOUNT_MODEL_NOTICE,
@@ -1540,7 +1535,7 @@ export interface DaemonWorld {
     readonly watchdogLimitMs: number;
     /**
      * How long after the routes are mounted the housekeeping lane opens — analytics, the fleet refresh,
-     * the terminal reaper and quota failover wait until then (see `BackgroundLane`).
+     * the terminal reaper wait until then (see `BackgroundLane`).
      */
     readonly backgroundDelayMs: number;
     /** Starts the watchdog thread. A world field so a test can drive the boot without one. */
@@ -5908,76 +5903,9 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
   };
 }
 
-/** The collaborators automatic quota failover needs from the rest of the root. */
-interface QuotaFailoverWiring {
-  readonly root: string;
-  readonly storage: DaemonStorage;
-  readonly sessions: SessionDirectorySubsystem;
-  readonly accounts: AccountInventoryPort;
-  readonly usage: UsageFeedPort;
-  /** The SAME migration the route serves — see below for why it is this one and not a private copy. */
-  readonly migrate: SessionMigrateSubsystem;
-}
-
-/**
- * The loop that makes `fy migrate` answer the journey the product advertises.
- *
- * THE MIGRATOR IS THE MOUNTED SUBSYSTEM ITSELF, not a second path built beside it. Everything that
- * makes a migration safe lives inside `createSessionMigrateSubsystem` — the in-flight preflight, the
- * same-kind refusal, the forensic report written before the pane dies, the per-session queue — and a
- * failover that reached around it to "just get the session moving" would be the exact bug the
- * preflight exists to prevent, committed by the one caller with no human watching.
- *
- * `allowContextDowngrade` IS FALSE AND NOT CONFIGURABLE. A downgrade silently truncates the
- * conversation a migration exists to preserve; a human may accept that for a session they are
- * looking at, and an unattended loop may not accept it on their behalf. A target with a smaller
- * window is therefore refused here and recorded as a refusal, which is a fact a human can act on.
- *
- * NO MODEL IS NAMED, so the planner serves the target account's own default. Carrying the source
- * account's model across would ask the new account for a model it may not publish, and the refusal
- * would arrive as an unavailability that looks like the failover failing.
- *
- * THE FEED IS THE DAEMON-WIDE CACHED ONE every other consumer reads, so a move can never be made on
- * a quota reading that disagrees with what `/v1/usage` is serving the human at the same moment.
- */
-function createQuotaFailoverSubsystem(wiring: QuotaFailoverWiring): QuotaFailoverLoop {
-  return new QuotaFailoverService({
-    config: new FileQuotaFailoverConfigStore(wiring.root),
-    state: new FileQuotaFailoverStateStore(wiring.root),
-    roster: {
-      sessions: async () =>
-        (await wiring.sessions.list()).map(view => ({
-          id: view.config.id,
-          agent: view.config.agent,
-          harness: view.config.harness,
-          status: view.state.status,
-        })),
-    },
-    accounts: wiring.accounts,
-    usage: wiring.usage,
-    migrator: {
-      migrate: async (sessionId, agent) => {
-        await wiring.migrate.migrate(sessionId, { agent, allowContextDowngrade: false, forceInflight: false });
-      },
-    },
-    journal: {
-      record: async (sessionId, event, data) => {
-        // PARSED, not asserted: an id the layout would not accept must never become a journal path.
-        const id = tryParseSessionId(sessionId);
-        if (id === undefined) return;
-        await wiring.storage.append(id, event, data);
-      },
-    },
-    // Epoch milliseconds rather than the daemon's ISO clock: every rule this loop applies is a
-    // subtraction — snapshot age, retry cooldown, revisit cooldown — and the domain says so.
-    clock: { nowMs: () => Date.now() },
-  });
-}
-
 /**
  * How many events one page of the duplicate search reads.
  *
- * A PAGE SIZE, NOT A BOUND ON THE SEARCH. `replay` returns a forward PREFIX from a sequence, so any
  * finite limit read once would answer about the OLDEST events in the journal — and the event this is
  * looking for is the newest. On a session with more than one page of history that search would find
  * nothing every time and append a duplicate on every replay, which is precisely the contract
@@ -9320,7 +9248,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         watch: (path, listener) => fileEvents.subscribe(path, () => listener()),
         load: publishedManifest,
       });
-      // WATCHED, because a reader of this feed is somebody asking: a screen, the Warden, quota failover.
+      // WATCHED, because a reader of this feed is somebody asking: a screen, the Warden, auto-migrate.
       // Each read lets the environment logins' provider quotas be read first, at most once a minute each;
       // the unattended refresh timer and the scrapes read its `unattended` half, which only reads the cache.
       return new WatchedUsageFeed(
@@ -11260,8 +11188,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         { next: () => crypto.randomUUID() },
         { modelCatalogRates: async () => modelCatalogPricingRates(await pricedModelCatalogs()) },
       );
-      // Hoisted, because the quota-failover loop below moves sessions THROUGH this exact subsystem
-      // rather than through a second, ungated path of its own.
+      // Hoisted so the handover and restart subsystems below share this exact migrator.
       const sessionMigrate = createSessionMigrateSubsystem({
         storage,
         processes: new BunProcessProbe(Bun.which('ps') ?? undefined),
@@ -12715,14 +12642,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionMigrate,
         sessionRestart: sessionRestartService,
         sessionFork,
-        quotaFailover: createQuotaFailoverSubsystem({
-          root: quotaFailoverRoot(paths.home),
-          storage,
-          sessions,
-          accounts,
-          usage,
-          migrate: sessionMigrate,
-        }),
         handover,
         // The loop drives the SAME service the route serves, so a receipt advanced by a tick and one
         // begun by a request are the same document under the same lock. Its cadence is the domain's
@@ -14173,8 +14092,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // freshness. The handle is registered for cancellation like every other acquisition, so a stopped
   // daemon does not leave a timer firing at closed storage.
   /**
-   * The housekeeping lane: analytics ingestion, the fleet refresh, the terminal reaper and quota
-   * failover, run one at a time and only once the lane opens, `backgroundDelayMs` after serving.
+   * The housekeeping lane: analytics ingestion, the fleet refresh and the terminal reaper, run one at
+   * a time and only once the lane opens, `backgroundDelayMs` after serving.
    *
    * Every one of them used to fire at boot on its own timer, all at once, while the daemon was trying to
    * answer its first requests — on a large Mac fleet the loop stalled until it answered nothing at all.
@@ -14244,30 +14163,6 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   }, 10_000);
   restartTicks.unref?.();
   cleanups.push(() => clearInterval(restartTicks));
-  /**
-   * The quota-failover tick, armed beside the other background loops and after the bind, because a
-   * tick can migrate a session and a migration relaunches an agent.
-   *
-   * THE CADENCE IS READ ONCE, here, and the timer keeps firing on it until the daemon restarts — the
-   * same rule the warden sweep follows, and for the same reason: re-arming would mean a tick could
-   * cancel the timer currently running it.
-   *
-   * NO BOOT TICK. Unlike the declared-wait watcher, there is nothing here that went unserviced while
-   * the daemon was down: a session whose account ran out is still exactly as stranded one interval
-   * later, and the first tick after a restart would run against a usage feed that has not collected
-   * yet — which the freshness gate would halt on anyway. Waiting one interval buys a real reading.
-   *
-   * Errors are swallowed for the reason every other background timer swallows its own: an unhandled
-   * rejection from a timer takes down a daemon whose fleet is fine, and a tick that could not run is
-   * visible in the ledger it did not stamp.
-   */
-  const failoverIntervalMs = await subsystems.quotaFailover.intervalMs().catch(() => undefined);
-  if (failoverIntervalMs !== undefined) {
-    const failoverTicks = setInterval(() => {
-      lane.submit('quota failover', () => subsystems.quotaFailover.run());
-    }, failoverIntervalMs);
-    cleanups.push(() => clearInterval(failoverTicks));
-  }
   /**
    * The unattended fleet evidence pass.
    *

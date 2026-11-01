@@ -118,7 +118,7 @@ describe('ActivityLedger', () => {
     // Act
     const answer = await ledger.run('warden sweep', async () => 42);
     const failed = await ledger
-      .run('quota failover', () => Promise.reject(new Error('no feed')))
+      .run('fleet sweep', () => Promise.reject(new Error('no feed')))
       .catch((error: Error) => error.message);
 
     // Assert
