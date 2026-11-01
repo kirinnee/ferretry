@@ -2193,6 +2193,7 @@ function LearningSettingsTabSurface({ connection }: { readonly connection: Daemo
 function AgendaRoute({ connection }: DaemonPageProps) {
   const { navigate } = useRouter();
   const store = useAppStore();
+  const dictation = useSttSettings(store.stt);
   const inbox = useAgendaInbox();
   const phone = useLayoutMode() === 'drawer';
   const machineNotifications = usePairedMachineNotifications();
@@ -2266,6 +2267,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
             clientFor={clientFor}
             compact={phone}
             connection={target}
+            dictationSettings={dictation.settings}
             disabled={TERMINAL_STATUSES.has(card.view.state.status)}
             answerForm={answerForm}
             formKey={card.key}

@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
+  isLongPress,
   isTouch,
   LOCK_PX,
+  LONG_PRESS_MS,
   lockOf,
   startsInHead,
+  startsInSelection,
   startsInSidewaysScroller,
   startsOnInteractive,
 } from '../../../src/features/agenda/agenda-swipe-gesture.ts';
@@ -114,5 +118,60 @@ describe('startsInHead', () => {
   it('is false in the body and for a null target', () => {
     expect(startsInHead(el('<div data-agenda-scroll><p>x</p></div>').lastElementChild)).toBe(false);
     expect(startsInHead(null)).toBe(false);
+  });
+});
+
+describe('a long press is the reader selecting, never a swipe', () => {
+  it('is a press held for LONG_PRESS_MS or more', () => {
+    expect(isLongPress(LONG_PRESS_MS - 1)).toBe(false);
+    expect(isLongPress(LONG_PRESS_MS)).toBe(true);
+  });
+});
+
+describe('startsInSelection', () => {
+  const selecting = (isCollapsed: boolean, contains: boolean) => ({
+    isCollapsed,
+    containsNode: () => contains,
+  });
+
+  it('is true only on text inside a selection that holds something', () => {
+    const text = el('<p>words</p>');
+    expect(startsInSelection(text, selecting(false, true))).toBe(true);
+    expect(startsInSelection(text, selecting(false, false))).toBe(false);
+    expect(startsInSelection(text, selecting(true, true))).toBe(false);
+    expect(startsInSelection(text, null)).toBe(false);
+    expect(startsInSelection(null, selecting(false, true))).toBe(false);
+  });
+
+  it('reads the live window selection when none is handed in', () => {
+    const text = el('<p>words</p>');
+    document.body.append(text);
+    window.getSelection()?.removeAllRanges();
+    expect(startsInSelection(text)).toBe(false);
+    const range = document.createRange();
+    range.selectNodeContents(text);
+    window.getSelection()?.addRange(range);
+    expect(startsInSelection(text.firstChild)).toBe(true);
+    window.getSelection()?.removeAllRanges();
+    text.remove();
+  });
+});
+
+describe('the Inbox card’s text', () => {
+  const css = readFileSync(new URL('../../../src/features/agenda/agenda-inbox.css', import.meta.url), 'utf8');
+  const rule = (selector: string): string => {
+    const start = css.indexOf(`${selector} {`);
+    expect(start).toBeGreaterThanOrEqual(0);
+    return css.slice(start, css.indexOf('}', start));
+  };
+
+  it('can be selected on the swipe deck’s card and the to-test card', () => {
+    expect(rule('.fy-attn-deck__top')).toContain('user-select: text');
+    expect(rule('.fy-totest__surface')).toContain('user-select: text');
+  });
+
+  it('keeps what is pressed from highlighting', () => {
+    expect(css).toMatch(/\.fy-attn-deck__top :is\(button[^)]*\) \{\s*user-select: none/);
+    expect(css).toMatch(/\.fy-totest__surface :is\(button[^)]*\) \{\s*user-select: none/);
   });
 });

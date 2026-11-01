@@ -326,6 +326,24 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     await mounted.unmount();
   });
 
+  it('never swipes from a long press, so holding to highlight text is not a swipe', async () => {
+    const mounted = await mount(deckPage(fakeInbox(), [threeWay]));
+    const title = must(deckTop(mounted).querySelector('.fy-attn-card__title'), 'the title');
+    const at = (event: PointerEvent, timeStamp: number): PointerEvent => {
+      Object.defineProperty(event, 'timeStamp', { value: timeStamp });
+      return event;
+    };
+    await interact(() => title.dispatchEvent(at(pointer('pointerdown', 100, 300), 1000)));
+    await interact(() => title.dispatchEvent(at(pointer('pointermove', 160, 300), 1600)));
+    await interact(() => title.dispatchEvent(at(pointer('pointermove', 300, 300), 1700)));
+    expect(stamp(mounted)).toBeNull();
+    expect(deckTop(mounted).hasAttribute('data-dragging')).toBe(false);
+    await interact(() => title.dispatchEvent(at(pointer('pointerdown', 100, 300), 3000)));
+    await interact(() => title.dispatchEvent(at(pointer('pointermove', 160, 300), 3050)));
+    expect(deckTop(mounted).hasAttribute('data-dragging')).toBe(true);
+    await mounted.unmount();
+  });
+
   it('springs back when the browser takes the gesture', async () => {
     const mounted = await mount(deckPage(fakeInbox(), [threeWay]));
 
