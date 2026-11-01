@@ -38,6 +38,7 @@ import {
   type LaneTrigger,
   laneForTrigger,
   laneOf,
+  laneStage,
   moveReasonProblem,
   needsOwner,
   type PrLink,
@@ -311,6 +312,110 @@ export const triggerMove = (
     laneId: lane.value.id,
   };
 };
+
+/**
+ * The first gate a move from the card's lane to `target` would pass: the card's own lane, else a lane of its
+ * variant strictly between the two (`laneStage`, so a stored or a derived gate). Entering a gate is not passing
+ * it, so `target` itself never counts, nor does a gate the card's variant skips. `undefined` when it passes
+ * none, a backward target included. Throws `unknown-lane` for a card in a lane the set lacks.
+ */
+export const gateOnTheWay = (
+  laneSet: LaneSet,
+  card: Pick<BoardTask, 'laneId' | 'workflow'>,
+  target: Lane,
+): Lane | undefined => {
+  const at = (id: string): number => laneSet.lanes.findIndex(lane => lane.id === id);
+  // A variant naming a lane the set lacks cannot say what is walked, so every lane is.
+  const walked = variantLanes(laneSet, card.workflow);
+  const between = (walked.ok ? walked.value : laneSet.lanes).filter(
+    lane => at(lane.id) > at(card.laneId) && at(lane.id) < at(target.id),
+  );
+  return [requireLane(laneSet, card.laneId), ...between].find(lane => laneStage(lane).kind === 'gate');
+};
+
+/**
+ * An external trigger somebody reported (the task action `trigger`): something Ferretry cannot see happened —
+ * a deploy finished, a reviewer approved — so the card moves the way that trigger moves it. The move is the
+ * daemon's, through {@link triggerMove}, so it is recorded `auto` with the trigger and `reportedBy` names
+ * the caller. Never backward and never into an owner-gated closed lane; the report of a non-owner never closes a
+ * card at all (a fact may close a set with no verify lane; a caller's word may not), never moves a blocked card on
+ * to a later category (as a move does not), and never passes a gate the owner has not answered: neither the card's own lane nor one its variant walks on the way
+ * ({@link gateOnTheWay}). Already there, or past it, is no change.
+ */
+const report = (
+  card: BoardTask,
+  action: Extract<BoardTaskActionRequest, { action: 'trigger' }>,
+  context: CardContext,
+): CardOutcome => {
+  requireStanding('report', context.standing, card);
+  requireOpen(card, 'report an event on');
+  const ref = formatTaskRef(card);
+  const found = laneForTrigger(context.laneSet, card.workflow, action.event);
+  if (!found.ok || found.value === null) {
+    throw new BoardError(
+      'invalid',
+      `no lane of this board enters on ${action.event} for ${card.workflow} work, so it does not move ${ref}; its lanes are ${laneNames(context.laneSet)}`,
+    );
+  }
+  const target = found.value;
+  if (target.id === card.laneId) return { task: null };
+  // Only the owner closes on a report: a fact may close a set with no verify lane, a caller's word may not.
+  if (target.category === 'closed' && (target.ownerGate === true || context.standing !== 'owner-human')) {
+    throw new BoardError(
+      'owner-gate',
+      target.ownerGate === true
+        ? `${action.event} would close ${ref} in ${target.name}, which only the owner's own move enters`
+        : `${action.event} would close ${ref} in ${target.name}, and only the owner closes a card on a report`,
+      ['owner-human'],
+    );
+  }
+  const from = requireLane(context.laneSet, card.laneId);
+  const back = isBackwardMove(context.laneSet, card.laneId, target.id);
+  if (!back.ok || back.value) return { task: null };
+  const gate = context.standing === 'owner-human' ? undefined : gateOnTheWay(context.laneSet, card, target);
+  if (gate !== undefined) {
+    throw new BoardError(
+      'owner-gate',
+      gate.id === from.id
+        ? `${ref} waits in ${from.name} for the owner; a report does not pass that gate, the owner's answer does`
+        : `${ref} would pass ${gate.name}, which waits for the owner; a report does not pass that gate, the owner's answer does`,
+      ['owner-human'],
+    );
+  }
+  // A dependency holds a caller's word as it holds a move: only a fact, or the owner, moves a blocked card on.
+  const blockers =
+    context.standing !== 'owner-human' && rank(context.laneSet, target.id) > rank(context.laneSet, card.laneId)
+      ? blockedBy(card, context.index, context.laneSets)
+      : [];
+  if (blockers.length > 0) {
+    throw new BoardError(
+      'blocked-by',
+      `${ref} is blocked by ${blockers.map(formatTaskRef).join(', ')}: a report does not move it on to ${target.name} until they ship (only the owner may override a dependency)`,
+    );
+  }
+  const { actorVia: _via, ...rest } = context;
+  const moved = triggerMove(card, action.event, action.reason, {
+    ...rest,
+    actor: { kind: 'daemon' },
+    standing: 'daemon',
+  });
+  // Never null by now: every case triggerMove declines was answered above.
+  return { task: moved === null ? null : reportedBy(moved, context) };
+};
+
+/** The move just made, with who reported the trigger beside the daemon that made it. */
+const reportedBy = (moved: BoardTask, context: Pick<CardContext, 'actor' | 'actorVia'>): BoardTask => ({
+  ...moved,
+  history: moved.history.map((event, index) =>
+    index === moved.history.length - 1 && event.type === 'moved'
+      ? {
+          ...event,
+          reportedBy: context.actor,
+          ...(context.actorVia === undefined ? {} : { reportedVia: context.actorVia }),
+        }
+      : event,
+  ),
+});
 
 /**
  * Catches a card up to its own PR facts ({@link laneFromFacts}): the daemon's automatic move, forward
@@ -737,6 +842,8 @@ export const applyAction = (
     }
     case 'link':
       return link(card, action, context);
+    case 'trigger':
+      return report(card, action, context);
     case 'assign':
       requireStanding('assign', context.standing, card);
       if (action.assignee === card.assignee) throw new BoardError('invalid', `${ref} is already assigned that way`);

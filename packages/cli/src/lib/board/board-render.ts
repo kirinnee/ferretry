@@ -1,5 +1,6 @@
 import {
   ADMIN_TOKEN_ACTOR_WORDS,
+  boardEventActor,
   type AgendaRef,
   type BoardCounts,
   type BoardProject,
@@ -190,11 +191,12 @@ export function renderBoardMarkdown(
 
 // ─── one card in full ──────────────────────────────────────────────────────────────────────────
 
-const actorLabel = (event: Pick<BoardTaskEvent, 'actor' | 'actorVia'>, names: SessionNames): string => {
-  const actor = event.actor;
+/** Who a line is by: the reporter of a reported trigger, else the actor (`boardEventActor`). */
+const actorLabel = (event: BoardTaskEvent, names: SessionNames): string => {
+  const { actor, via: actorVia } = boardEventActor(event);
   if (actor.kind === 'ferret') return names(actor.sessionId);
   const via = actor.sessionId === undefined ? '' : ` via ${names(actor.sessionId)}`;
-  return `${event.actorVia === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : actor.kind}${via}`;
+  return `${actorVia === 'admin-token' ? ADMIN_TOKEN_ACTOR_WORDS : actor.kind}${via}`;
 };
 
 /** One history line's wording, as the protocol spells it for every surface. */

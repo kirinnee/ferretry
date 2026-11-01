@@ -590,6 +590,43 @@ describe('renderCard', () => {
     );
   });
 
+  it('should print a reported trigger as by its reporter, the admin token said for what it is', () => {
+    // Arrange
+    const moved = { type: 'moved', from: 'todo', to: 'implement', backward: false, reason: 'deployed', auto: true };
+    const reported = card({
+      history: [
+        event({ seq: 1, type: 'created', laneId: 'todo' }),
+        event({
+          ...moved,
+          seq: 2,
+          trigger: 'deploy.done',
+          actor: { kind: 'daemon' },
+          reportedBy: { kind: 'ferret', sessionId: DENISHA },
+        }),
+        event({
+          ...moved,
+          seq: 3,
+          from: 'implement',
+          to: 'todo',
+          backward: true,
+          trigger: 'pr.review_approved',
+          actor: { kind: 'daemon' },
+          reportedBy: { kind: 'owner' },
+          reportedVia: 'admin-token',
+        }),
+      ],
+    });
+
+    // Act
+    const lines = renderCard(reported, lanes, [], names).split('\n');
+
+    // Assert
+    should(lines).containEql(`    2  ${AT}  denisha  reported deploy.done → moved Todo → Implement: deployed`);
+    should(lines).containEql(
+      `    3  ${AT}  the admin token (the owner at this machine, or a ferret without its own credential)  reported pr.review_approved → moved back Implement → Todo: deployed`,
+    );
+  });
+
   it('should print a dropped card as dropped, with why, and leave empty parts out', () => {
     // Arrange
     const dropped = card({ dropped: { reason: 'superseded', at: AT } });
