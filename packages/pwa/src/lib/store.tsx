@@ -1041,15 +1041,11 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       origin: appOrigin,
       crypto: relayCrypto,
       now: () => new Date(),
-      clientName: () =>
-        options.memberClientName ??
-        normalizedDeviceName(
-          defaultDeviceName(
-            typeof navigator === 'undefined' ? '' : navigator.userAgent,
-            deviceNameSuffix(length => globalThis.crypto.getRandomValues(new Uint8Array(length))),
-          ),
-        ) ??
-        'Browser',
+      clientName: () => {
+        const agent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+        const suffix = deviceNameSuffix(length => globalThis.crypto.getRandomValues(new Uint8Array(length)));
+        return options.memberClientName ?? normalizedDeviceName(defaultDeviceName(agent, suffix)) ?? 'Browser';
+      },
     }),
     pair: async (seed, deviceName) => {
       const connection = await exchangePairing(seed, {

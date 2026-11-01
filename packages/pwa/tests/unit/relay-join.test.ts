@@ -209,6 +209,23 @@ describe('walking the carriers to join', () => {
     should(routes.dialled).have.length(2);
   });
 
+  it('should leave the rendezvous leg to the heartbeat grace when no deadline is given', async () => {
+    const id = await newDaemonIdentity();
+    const auto = autoDial(id, { joined: joinedFor(id.daemonId) });
+    const routes = dialByHost({ 'relay.ferretry.test': auto.dial });
+    const result = await joinPublisher({
+      crypto: relayCrypto,
+      seed: { daemonUrl: 'https://studio.example', daemonId: id.daemonId, code: CODE },
+      clientName: 'phone',
+      keys: await testMemberKeys(),
+      hostedRelayUrl: HOSTED,
+      dial: routes.dial as never,
+      heartbeat: noHeartbeat,
+      directTimeoutMs: 30,
+    });
+    should(result).match({ kind: 'joined', carrier: { kind: 'relay' } });
+  });
+
   it('should stop at a refusal and not carry the code to the next carrier', async () => {
     const id = await newDaemonIdentity();
     const auto = autoDial(id, { joinRefused: true });
