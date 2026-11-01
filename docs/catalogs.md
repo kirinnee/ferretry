@@ -611,6 +611,32 @@ only the count shows. A name the publisher chose is shown with hidden and format
 **Install on a machine** hands the signed manifest and item to the member's **own** daemon's install preview, which
 verifies them again. The offline library is phase 3 and is not built.
 
+### The skill and MCP rows (catalogs 3b)
+
+The context rail's **Skills** list, its **MCP** list and the skills surface draw every item with **one** row
+(`features/catalogs/catalog-item-row.tsx`). It replaces the old strip under each row ("From ‹catalog›", Remove, "Add
+to catalog…") and the inline Open button.
+
+- **Left**: the name in mono (tapping it still inserts the invocation), a scope chip, a version chip when one is known,
+  and one truncated description line (the full text is its tooltip, and **Open SKILL.md** shows the file). Hidden and
+  format characters in any name, publisher or catalog name are marked.
+- **Version chip**: `v3` for an item in one of **this machine's** catalogs (the newest version it holds); for an item a
+  catalog install wrote, **from ‹publisher› · v2** (the version it is pinned to; the tooltip names the catalog). No
+  chip when no version is known. A withdrawn item is not held, so it shows none.
+- **Right, always visible, 44px tall**: **Share**, **Add** (only for items this machine could share, so not for
+  installs from someone else's catalog) and **⋯**. The columns keep their place so rows line up.
+- **Which catalog holds an item** is read from the catalogs list the machine already answers, by source: the
+  `SKILL.md` path (a list that only knows a skill's name matches by name) or the MCP server id. No new route.
+- **Add** opens the Add to catalog sheet. When it has saved the item and the row is the one that opened it, the last
+  step offers **Share it now** (or **Not now**): it opens the Share sheet for the catalog the item just joined.
+- **Share** depends on where the item sits: in **one** catalog, the Share sheet for it; in **several**, a small picker of
+  those catalogs and then the Share sheet; in **none**, the Add to catalog sheet, ending in **Share it now**. Sharing
+  still asks for the owner's passkey, as before; nothing about a share reaches the row.
+- **⋯** holds **Open SKILL.md** (on the skills surface, Show detail), **Add to another catalog…** (items this machine could share) and
+  **Remove** (catalog installs only, with the same confirm; with several installs, one per catalog named
+  "Remove (from ‹catalog›)"). **Versions…** and **Stop sharing** are not here yet.
+- A row never shows a secret value. The paste field and **Install from a file…** stay at the top of the list.
+
 ## Declared gaps
 
 What this does **not** protect against, said plainly (more in design §4.8):
