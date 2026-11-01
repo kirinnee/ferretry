@@ -108,6 +108,28 @@ describe('the open Inbox item', () => {
     await mounted.unmount();
   });
 
+  it('keeps Not needed under the head’s ⓘ with Skip, never as a pill in the card body', async () => {
+    const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
+    expect(topView(mounted).querySelector('[data-agenda-dismiss]')).toBeNull();
+    expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).toBeNull();
+    await interact(() =>
+      must(topView(mounted).querySelector<HTMLButtonElement>('[data-agenda-info-toggle]'), 'the about button').click(),
+    );
+    expect(topView(mounted).querySelector('[data-inbox-tool="skip"]')).not.toBeNull();
+    expect(topView(mounted).querySelector('[data-inbox-tool="not-needed"]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('says who and where on one line that cuts its facts, not the way to the chat', async () => {
+    const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
+    const who = whoLine(mounted);
+    expect(who.classList.contains('fy-meta-line')).toBe(true);
+    expect(who.children).toHaveLength(2);
+    expect(who.children[0]?.classList.contains('fy-meta-line__facts')).toBe(true);
+    expect(who.children[1]?.getAttribute('data-inbox-open-chat')).toBe('');
+    await mounted.unmount();
+  });
+
   it('takes the conversation’s focus card when the item names none, and says no card when there is none', async () => {
     const mounted = await mount(page(fakeInbox(), [rebase], { initialOpen: rebase.key }));
     expect(mounted.container.querySelector('[data-inbox-who-card]')?.textContent).toBe('&F4');

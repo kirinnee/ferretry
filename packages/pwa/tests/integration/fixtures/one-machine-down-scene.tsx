@@ -194,7 +194,6 @@ function Scene({ scene }: { readonly scene: 'phone' | 'desktop' | 'single' }) {
         onNavigate={navigate}
         onOpenPalette={() => undefined}
         onOpenSidebar={() => undefined}
-        sessionCount={MBP_CACHED.length}
         tabBarShown
       />
       {notice}

@@ -189,7 +189,7 @@ if (['catalogs', 'shared', 'people', 'skills'].includes(view)) {
 } else {
   createRoot(root).render(
     <div className="kt-shell flex flex-col overflow-hidden" style={{ height: '100dvh' }}>
-      <AppBar crumbs={[{ label: 'Home', href: '/d/studio/sessions' }, { label: 'Sharing' }]} daemon="studio" onOpenPalette={noop} onOpenSidebar={noop} sessionCount={2} active="sharing" tabBarShown themeToggle={<ThemeToggle touch />} />
+      <AppBar crumbs={[{ label: 'Home', href: '/d/studio/sessions' }, { label: 'Sharing' }]} daemon="studio" onOpenPalette={noop} onOpenSidebar={noop} active="sharing" tabBarShown themeToggle={<ThemeToggle touch />} />
       <div className="min-h-0 flex-1" />
       <AppTabBar daemon="studio" active="sharing" onOpenPalette={noop} whatsNew={{ open: noop, unread: true }} />
     </div>,

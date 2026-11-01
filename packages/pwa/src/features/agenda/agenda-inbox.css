@@ -1043,7 +1043,7 @@
 .fy-inbox-open[data-inbox-gate] .fy-item-view__body {
   flex: 0 1 auto;
 }
-/* A card to test in the quick-answer run: where it is in the run, then the same row as the list, scrolling on its own. */
+/* A card to test in the quick-answer run: the same row as the list (its head carries the place in the run), scrolling on its own. */
 .fy-inbox-step {
   display: flex;
   box-sizing: border-box;
@@ -1053,32 +1053,16 @@
   gap: var(--gap-sm);
   overflow-y: auto;
 }
-.fy-inbox-step__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--gap-sm);
-}
-.fy-inbox-step__rank {
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
-.fy-inbox-step__pager {
-  display: flex;
-  align-items: center;
-}
 /* A peek is only an edge (see the deck above): its view is drawn, but nothing of it shows. */
 .fy-attn-deck__peek .fy-inbox-open {
   height: 100%;
 }
-/* Who and what: the ferret and its task, then its card and machine, then the way to its chat. A swipe can start here.
-   The line WRAPS rather than cut the task: the card, the machine and "Open chat" move down a line first, and the
-   task is cut only when it alone is wider than the card. */
-.fy-inbox-who {
+/* Who and what, on ONE line: the ferret, what it works on, its card and machine, then the way to its chat. The facts are
+   cut with "…" before "Open chat" gives up a letter; a swipe can start here. The agenda card and the task card share it. */
+.fy-meta-line {
   display: flex;
-  flex-wrap: wrap;
   align-items: baseline;
-  gap: 0 var(--gap-sm);
+  gap: var(--gap-sm);
   border-bottom: var(--stroke) solid var(--divider-color, var(--border));
   background: var(--surface-2, var(--surface));
   padding: var(--gap-xs) var(--gap-md);
@@ -1086,44 +1070,39 @@
   font-size: var(--text-sm);
   touch-action: none;
 }
-/* Never cut with "…": a task wider than the card wraps between its words. */
-.fy-inbox-who__main {
+.fy-meta-line__facts {
   min-width: 0;
-  max-width: 100%;
-  overflow-wrap: break-word;
-}
-.fy-inbox-who__meta {
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fy-inbox-who__ferret {
+.fy-meta-line__ferret {
   color: var(--fg);
   font-weight: var(--weight-strong);
 }
-.fy-inbox-who__task {
-  color: var(--fg);
-}
-.fy-inbox-who__card {
+.fy-meta-line__card {
   font-family: var(--font-mono);
   font-size: var(--text-xs, var(--text-sm));
 }
-.fy-inbox-who__dot {
+.fy-meta-line__dot {
   margin: 0 var(--gap-xs);
   color: var(--faint);
 }
-.fy-inbox-who__chat {
+.fy-meta-line__chat {
   display: inline-flex;
-  flex-shrink: 0;
+  flex: none;
   align-items: center;
   gap: 2px;
-  margin-left: auto;
   color: var(--accent);
   font-weight: var(--weight-strong);
   text-decoration: none;
+  white-space: nowrap;
 }
-.fy-inbox-who__chat:hover {
+.fy-meta-line__chat:hover {
   text-decoration: underline;
 }
-.fy-inbox-who__chat:focus-visible {
+.fy-meta-line__chat:focus-visible {
   outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
   outline-offset: 2px;
 }
@@ -1273,11 +1252,6 @@
 .fy-totest__reveal[data-side='left'] {
   inset: 0 0 0 auto;
 }
-.fy-totest__reveal[data-side='down'] {
-  inset: 0 0 auto 0;
-  justify-content: center;
-  padding: var(--gap-sm) var(--gap-md);
-}
 .fy-totest[data-swipe-direction='left'] .fy-totest__reveal[data-side='left'] {
   display: flex;
   color: var(--err);
@@ -1286,17 +1260,13 @@
   display: flex;
   color: var(--ok);
 }
-.fy-totest[data-swipe-direction='down'] .fy-totest__reveal[data-side='down'] {
-  display: flex;
-  color: var(--muted);
-}
 .fy-totest__surface {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: var(--gap-sm);
   background: var(--surface);
-  padding: var(--gap-md);
+  padding: var(--gap-sm) var(--gap-md) var(--gap-md);
   user-select: text;
   -webkit-user-select: text;
 }
@@ -1307,10 +1277,16 @@
 .fy-totest__surface[data-dragging] {
   transition: none;
 }
-/* The head does not scroll, so a drag down from it is Skip rather than the page moving. */
-.fy-totest__top,
-.fy-totest__meta {
+/* The head does not scroll, so a drag down from it is the compass rather than the page moving. */
+.fy-totest__top {
   touch-action: none;
+}
+/* The quiet facts and the Skip button, behind the head's ⓘ. */
+.fy-totest__info {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
 }
 /* The head is `CardHead`: the title (one line, a marquee when too long) and the card's controls share the row. */
 .fy-totest__top {
@@ -1499,25 +1475,24 @@
   color: var(--fg);
   font-weight: 600;
 }
-/* The plain buttons for every move the compass makes, under the card: nothing depends on a gesture. */
+/* The plain buttons for the compass's quiet moves, kept under the head's ⓘ so the card body keeps its room. */
 .fy-inbox-tools {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--gap-xs) var(--gap-sm);
-  border-top: var(--stroke) solid var(--divider-color, var(--border));
-  padding: var(--gap-xs) var(--gap-md);
+  padding: var(--gap-xs) 0 var(--gap-sm);
 }
 /* The "Not good" words take the answer row's place and width. */
 .fy-inbox-gate-why {
   min-width: 0;
 }
 /* A gate item's one meta line: quiet, the lane's verb a touch stronger. */
-.fy-inbox-who--gate {
+.fy-meta-line--gate {
   color: var(--muted);
   font-size: var(--text-sm);
 }
-.fy-inbox-who--gate .fy-inbox-who__ferret {
+.fy-meta-line--gate .fy-meta-line__ferret {
   color: inherit;
   font-weight: inherit;
 }
@@ -1545,4 +1520,12 @@
   background: transparent;
   color: var(--muted);
   font: inherit;
+}
+
+/* On the task card the line sits inside the card's padding, not as a full-bleed band. */
+.fy-totest__surface > .fy-meta-line {
+  border-bottom: 0;
+  background: none;
+  padding: 0;
+  touch-action: pan-y;
 }

@@ -3,7 +3,7 @@ import type { ReactElement, ReactNode } from 'react';
 import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { StackPager } from './stack-pager.tsx';
 
-interface CardHeadPager {
+export interface CardHeadPager {
   readonly index: number;
   readonly total: number;
   /** What is stepped through, for the buttons' names: "Previous item". */

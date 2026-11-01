@@ -89,6 +89,7 @@
         "harness/doneclose-page.tsx",
         "harness/inbox-v2-screenshot.ts",
         "harness/to-test-inbox-screenshot.ts",
+        "harness/roomier-inbox-screenshot.ts",
         "harness/inbox-gates-screenshot.ts",
         "harness/answer-quickly-cards-screenshot.ts",
         "harness/task-panel-cards-screenshot.ts",

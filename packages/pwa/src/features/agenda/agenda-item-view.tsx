@@ -86,6 +86,8 @@ export interface AgendaItemViewProps {
   readonly planForm?: ReactNode;
   /** Names this item's form picks when a composer sends them (the Inbox); absent, a form is read, not filled in. */
   readonly formKey?: string;
+  /** Quiet buttons kept under ⓘ (the Inbox's Skip and Not needed), so the card body keeps the room. */
+  readonly tools?: ReactNode;
 }
 
 /** Keys that are a field's or a button's own. */
@@ -145,6 +147,7 @@ export function AgendaItemView({
   planForm,
   formKey,
   daemonId,
+  tools,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const body = useRef<HTMLDivElement | null>(null);
@@ -158,7 +161,7 @@ export function AgendaItemView({
   const map = swipeMap(item);
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
-  const hasInfo = head.description !== null;
+  const hasInfo = head.description !== null || tools !== undefined;
   const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));
   const answerable = settled === undefined && !(inputForm !== undefined && item.kind === 'input');
   // Request changes IS the owner's words: sent with what the composer holds, or the owner is put in the composer first.
@@ -233,11 +236,14 @@ export function AgendaItemView({
             {hasInfo ? (
               <div className="fy-item-view__info" data-agenda-info-panel="" hidden={!infoOpen} id={infoId}>
                 {infoOpen ? (
-                  head.description === null ? null : (
-                    <div className="fy-item-view__desc" data-agenda-ask="">
-                      {renderProse(head.description)}
-                    </div>
-                  )
+                  <>
+                    {head.description === null ? null : (
+                      <div className="fy-item-view__desc" data-agenda-ask="">
+                        {renderProse(head.description)}
+                      </div>
+                    )}
+                    {tools}
+                  </>
                 ) : null}
               </div>
             ) : null}
@@ -251,6 +257,7 @@ export function AgendaItemView({
             onAct={onAct}
             renderProse={renderProse}
             swipeable={swipeable}
+            dismissAside={tools !== undefined}
             answerDock={dock}
             {...(onNext === undefined ? {} : { onSkip: onNext })}
             {...(onProgress === undefined ? {} : { onProgress })}

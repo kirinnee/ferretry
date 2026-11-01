@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
 import {
   type AgendaId,
+  DAEMON_FEATURES,
+  daemonFeatureList,
   type InputRaise,
   type InputTargetFacts,
   PutLoginEntryRequestSchema,
@@ -1144,39 +1146,50 @@ describe('a terminal rule types the password into a proved setuid sudo, and nowh
     should(ruleOnDisk(h)?.suspended).be.undefined();
   });
 
-  // secrev-1301 / lizzette (b): a terminal rule on disk never fills while `sign-in-rules-terminal.1` is not reported.
-  it('should leave sudo a plain card, typing nothing, while terminal rules are not reported', async () => {
-    // Arrange — the rule is on disk; the fills don't read terminal rules
-    const h = await harness({ terminal: false });
+  // Owner decision !A226: with this build's `sign-in-rules-terminal.1`, sudo fills through the guarded write, and still
+  //   only once `sign-in-rules.1` is reported too.
+  const BUILD = daemonFeatureList();
+  const builtTerminal = BUILD.includes(DAEMON_FEATURES.signInRulesTerminal);
+  const builtRules = BUILD.includes(DAEMON_FEATURES.signInRules);
+
+  it('should fill sudo through the guarded write with this build’s terminal feature, once sign-in-rules.1 is reported', async () => {
+    // Arrange
+    const h = await harness({ terminal: builtTerminal, advertised: true });
     h.setFacts(sudoPrompt());
     await sudoRule(h);
-    const noRule = await harness({ terminal: false });
-    noRule.setFacts(sudoPrompt());
-    await sudoSignIn(noRule);
 
     // Act
-    const { view, request } = await raised(h, SUDO_RAISE);
-    const plain = await raised(noRule, SUDO_RAISE);
+    const { view } = await raised(h, SUDO_RAISE);
     await settled();
 
-    // Assert — no grant reached the matcher (no preapproval, not quiet), nothing typed, nothing suspended
-    should(h.ruleGrants.of(SESSION).some(grant => grant.surface === 'terminal')).be.false();
-    should(h.writes).deepEqual([]);
-    should(view.state).equal('pending');
-    should(h.quietAtRaise).deepEqual([false]);
-    should(request?.preapproval).be.undefined();
-    should(h.typeOptions).deepEqual([]);
-    should(ruleOnDisk(h)?.suspended).be.undefined();
-    should(JSON.stringify(view)).equal(JSON.stringify(plain.view));
-    should(JSON.stringify(h.cards)).equal(JSON.stringify(noRule.cards));
+    // Assert
+    should(builtTerminal).be.true();
+    should(h.ruleGrants.of(SESSION).some(grant => grant.surface === 'terminal')).be.true();
+    should(h.writes).deepEqual([PASSWORD]);
+    should(h.typeOptions[0]).match({ reprove: true });
+    should(view.state).equal('delivered');
   });
 
-  it('should still fill a page rule while terminal rules are not reported', async () => {
-    const h = await harness({ terminal: false });
+  it('should leave every raise a plain card, sudo and page alike, while this build does not report sign-in-rules.1', async () => {
+    // Arrange — both rules on disk, the features exactly as this build reports them
+    const h = await harness({ terminal: builtTerminal, advertised: builtRules });
     await ruleFor(h, await github(h));
-    const { view } = await raised(h);
-    should(view.state).equal('delivered');
-    should(h.writes).deepEqual([USERNAME, PASSWORD]);
+    h.setFacts(sudoPrompt());
+    await sudoRule(h);
+
+    // Act
+    const sudo = await raised(h, SUDO_RAISE);
+    h.setFacts(loginPage());
+    const login = await raised(h);
+    await settled();
+
+    // Assert
+    should(builtRules).be.false();
+    should(h.writes).deepEqual([]);
+    should([sudo.view.state, login.view.state]).eql(['pending', 'pending']);
+    should(h.quietAtRaise).deepEqual([false, false]);
+    should([sudo.request?.preapproval, login.request?.preapproval]).eql([undefined, undefined]);
+    should(h.typeOptions).deepEqual([]);
   });
 
   it('should ask the target to prove the reader again before Enter, for a terminal rule only (secrev-1301 M1)', async () => {

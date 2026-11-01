@@ -101,6 +101,7 @@ const ERROR_CODES: Readonly<Record<SharedDraftErrorCode, string>> = {
 interface PresenceState {
   readonly typing: boolean;
   readonly selection?: readonly [number, number];
+  readonly uploading?: readonly string[];
 }
 
 type PresenceFrame = Extract<SharedDraftServerFrame, { kind: 'presence' | 'left' }>;
@@ -149,6 +150,7 @@ export class SharedDraftPresence {
       device,
       typing: state.typing,
       ...(state.selection === undefined ? {} : { selection: state.selection }),
+      ...(state.uploading === undefined || state.uploading.length === 0 ? {} : { uploading: state.uploading }),
     };
   }
 }
@@ -277,6 +279,7 @@ export class SharedDraftStreamHandler implements SocketHandler {
     this.presence.publish(this.target.sessionId, this.target.peer, {
       typing: frame.typing,
       ...(frame.selection === undefined ? {} : { selection: frame.selection }),
+      ...(frame.uploading === undefined ? {} : { uploading: frame.uploading }),
     });
   }
 

@@ -1587,7 +1587,6 @@ function AppChromeHarness({ active }: { readonly active: string }) {
             daemon={daemon.daemonId}
             onOpenPalette={() => {}}
             onOpenSidebar={() => {}}
-            sessionCount={7}
             active={destination ?? 'settings'}
             tabBarShown={phone}
           />
@@ -7557,7 +7556,6 @@ function Shell() {
         daemon={daemon.daemonId}
         onOpenPalette={() => {}}
         onOpenSidebar={() => {}}
-        sessionCount={7}
         connectionStatus="reconnecting"
         // The rebuilt phone bar gives transient state its own row, so this no
         // longer has to disappear at 390px to protect navigation or item #6's

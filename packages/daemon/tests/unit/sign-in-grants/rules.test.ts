@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { type AccountKey, type SignInRuleId, UNFILED_PROJECT_ID } from '@ferretry/protocol';
+import {
+  type AccountKey,
+  DAEMON_FEATURES,
+  daemonFeatureList,
+  type SignInRuleId,
+  UNFILED_PROJECT_ID,
+} from '@ferretry/protocol';
 import should from 'should';
 import { SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
 import { RuleSignInGrants, stampedProjectOf } from '../../../src/lib/sign-in-grants/rules.ts';
@@ -517,9 +523,25 @@ describe('SignInRuleService.fillCheck: a check that cannot be made drops the old
   });
 });
 
-// secrev-1301 / lizzette (b): with `sign-in-rules-terminal.1` off, no terminal rule reaches a fill.
+// Owner decision !A226: this build reports `sign-in-rules-terminal.1`; a daemon not wired for it offers none.
 describe('RuleSignInGrants: terminal rules only while sign-in-rules-terminal.1 is reported', () => {
   const PASSWORD_ONLY = { ...LOGIN, roles: ['password'] as const };
+
+  it('should offer a terminal rule on disk to the fills and hold it at the write, with this build’s features', async () => {
+    // Arrange
+    const w = await world();
+    await approved(w, { signIn: SUDO, fields: ['password'] });
+    await approved(w);
+    const built = grants(w, { terminal: daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal) }).source;
+
+    // Act
+    const offered = built.of(SESSION);
+    const sudo = offered.find(grant => grant.surface === 'terminal');
+
+    // Assert
+    should(offered.map(grant => grant.surface).sort()).eql(['page', 'terminal']);
+    should(sudo === undefined ? false : built.holds(sudo, PASSWORD_ONLY)).be.true();
+  });
 
   it('should offer a terminal rule on disk to no fill, and hold it at no write, while the gate is off or not wired', async () => {
     // Arrange — a sudo rule approved and on disk, beside a page rule

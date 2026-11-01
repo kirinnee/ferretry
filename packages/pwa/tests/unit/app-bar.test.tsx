@@ -12,11 +12,11 @@ import {
   crumbTrail,
   INSIGHTS_PLACES,
   MORE_PLACES,
-  TAB_BAR_PLACES,
   mobileDestinationMenuOpen,
   SESSIONS_ENTRY,
   SidebarDrawerTrigger,
   showsTabBar,
+  TAB_BAR_PLACES,
   UPDATE_CHIP,
 } from '../../src/shell/app-bar.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../../src/shell/palette-shortcut.ts';
@@ -847,7 +847,7 @@ describe('AppTabBar', () => {
 describe('SidebarDrawerTrigger', () => {
   it('renders only at drawer widths, where no permanent column fits', async () => {
     setViewport(DESKTOP);
-    const desktop = await mount(bar({ onOpenSidebar: () => {}, sessionCount: 7 }));
+    const desktop = await mount(bar({ onOpenSidebar: () => {} }));
 
     expect(byLabel('Open the fleet sidebar')).toBeNull();
 
@@ -855,10 +855,10 @@ describe('SidebarDrawerTrigger', () => {
 
     setViewport(PHONE);
     let opened = 0;
-    const mounted = await mount(bar({ onOpenSidebar: () => (opened += 1), sessionCount: 7 }));
+    const mounted = await mount(bar({ onOpenSidebar: () => (opened += 1) }));
     const trigger = byLabel('Open the fleet sidebar') as HTMLButtonElement;
 
-    expect(trigger.textContent).toContain('7');
+    expect(trigger.textContent).toBe('');
 
     await interact(() => trigger.dispatchEvent(new Event('click', { bubbles: true })));
 
@@ -876,17 +876,33 @@ describe('SidebarDrawerTrigger', () => {
     await mounted.unmount();
   });
 
-  it('reports zero rather than nothing when the fleet is empty', async () => {
+  it('is a plain icon button: no session count, a 40px target', async () => {
     setViewport(PHONE);
-    const mounted = await mount(<SidebarDrawerTrigger onOpen={() => {}} sessionCount={0} />);
+    const mounted = await mount(<SidebarDrawerTrigger onOpen={() => {}} />);
 
-    expect(mounted.container.textContent).toContain('0');
+    expect(mounted.container.textContent).toBe('');
+    expect(mounted.container.querySelector('button')?.className).toContain('size-10');
 
     await mounted.unmount();
   });
 });
 
 describe('AppBar phone title', () => {
+  it('puts the open Inbox count beside the Inbox title, and nothing beside other titles', async () => {
+    setViewport(PHONE);
+    const inbox = await mount(bar({ active: 'attention', agendaCount: 6, crumbs: [{ label: 'Inbox' }] }));
+    const title = inbox.container.querySelector('[data-app-bar-title]') as HTMLElement;
+    expect(title.textContent).toContain('Inbox');
+    expect(title.textContent).toContain('6');
+    await inbox.unmount();
+    const calm = await mount(bar({ active: 'attention', agendaCount: 0, crumbs: [{ label: 'Inbox' }] }));
+    expect(calm.container.querySelector('[data-app-bar-title]')?.textContent).toBe('Inbox');
+    await calm.unmount();
+    const other = await mount(bar({ active: 'settings', agendaCount: 6, crumbs: [{ label: 'Settings' }] }));
+    expect(other.container.querySelector('[data-app-bar-title]')?.textContent).toBe('Settings');
+    await other.unmount();
+  });
+
   it('names Insights for the three views under More, and nothing elsewhere', () => {
     expect(INSIGHTS_PLACES.map(appBarTitle)).toEqual(['Insights', 'Insights', 'Insights']);
     expect(appBarTitle('projects')).toBeNull();
@@ -903,7 +919,6 @@ describe('AppBar phone title', () => {
         active: 'warden',
         crumbs: [{ label: 'Warden' }],
         onOpenSidebar: () => {},
-        sessionCount: 7,
         tabBarShown: true,
       }),
     );

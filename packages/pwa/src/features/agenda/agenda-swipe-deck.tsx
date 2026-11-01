@@ -50,10 +50,8 @@ import {
   swipeIntent,
   swipeThreshold,
 } from '../../lib/agenda-inbox.ts';
-import { usePrefersReducedMotion } from '../../shell/bottom-sheet.tsx';
-import { DeckDownContext } from './deck-down-context.ts';
-import { SwipeCompass } from './swipe-reveal.tsx';
 import { snoozePicks } from '../../lib/agenda-snooze.ts';
+import { usePrefersReducedMotion } from '../../shell/bottom-sheet.tsx';
 import { type CompassAvailable, compassReading } from './agenda-compass.ts';
 import { CustomSnoozeForm } from './agenda-snooze-menu.tsx';
 import {
@@ -61,11 +59,14 @@ import {
   isTouch,
   type Lock,
   lockOf,
+  startsAtScrollTop,
   startsInHead,
   startsInSelection,
   startsInSidewaysScroller,
   startsOnInteractive,
 } from './agenda-swipe-gesture.ts';
+import { DeckDownContext } from './deck-down-context.ts';
+import { SwipeCompass } from './swipe-reveal.tsx';
 
 /** How long a committed card takes to leave. The answer is handed over at once; this is only the look. */
 const FLY_MS = 220;
@@ -263,6 +264,8 @@ interface RawDrag extends Drag {
   readonly width: number;
   /** Whether it began in the card's head: see {@link bodyTargets}. */
   readonly head: boolean;
+  /** It began in a body already at its top, where a pull down is the compass and not a scroll. */
+  readonly pull: boolean;
   /** Which way the touch locked: a downward drag that began vertically is the compass's. */
   readonly lock: Lock;
 }
@@ -273,6 +276,7 @@ interface Gesture {
   readonly startY: number;
   readonly width: number;
   readonly head: boolean;
+  readonly pull: boolean;
   /** It began inside a region that swipes on its own (`ownGesturesIn`): the deck keeps only a pull down from there. */
   readonly own: boolean;
   readonly startedAt: number;
@@ -386,6 +390,23 @@ export function AgendaSwipeDeck({
     deck.current?.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-frame]')?.focus();
   }, [topKey]);
 
+  // A pull down from a body at its top is the compass, not a scroll: the browser is told so while the touch is still
+  // cancellable, or it would claim the touch and cancel the pointer. React's own touch handlers are passive.
+  useEffect(() => {
+    const element = deck.current;
+    if (element === null) return;
+    const hold = (event: TouchEvent): void => {
+      const current = gesture.current;
+      const touch = event.touches[0];
+      if (current === null || !current.pull || touch === undefined || !event.cancelable) return;
+      const dx = touch.clientX - current.startX;
+      const dy = touch.clientY - current.startY;
+      if (dy > Math.abs(dx)) event.preventDefault();
+    };
+    element.addEventListener('touchmove', hold, { passive: false });
+    return () => element.removeEventListener('touchmove', hold);
+  }, []);
+
   useEffect(() => {
     if (leaving === null) return;
     const timer = setTimeout(() => setLeaving(null), FLY_MS);
@@ -481,6 +502,7 @@ export function AgendaSwipeDeck({
       startY: event.clientY,
       width: event.currentTarget.getBoundingClientRect().width,
       head: own || startsInHead(event.target),
+      pull: canDown && !own && !startsInHead(event.target) && startsAtScrollTop(event.target, event.currentTarget),
       own,
       startedAt: event.timeStamp,
       moved: false,
@@ -508,7 +530,7 @@ export function AgendaSwipeDeck({
         gesture.current = null;
         return;
       }
-      if (lock === 'vertical' && !current.head) {
+      if (lock === 'vertical' && !current.head && !(current.pull && current.dy > 0)) {
         // The body scrolls: the browser has this touch now, and it is never a swipe.
         gesture.current = null;
         return;
@@ -521,7 +543,14 @@ export function AgendaSwipeDeck({
         // A pointer the browser already released cannot be captured; the drag still reads.
       }
     }
-    setDrag({ dx: current.dx, dy: current.dy, width: current.width, head: current.head, lock: current.lock });
+    setDrag({
+      dx: current.dx,
+      dy: current.dy,
+      width: current.width,
+      head: current.head,
+      pull: current.pull,
+      lock: current.lock,
+    });
   };
 
   const onPointerUp = (event: PointerEvent<HTMLDivElement>): void => {
@@ -531,7 +560,7 @@ export function AgendaSwipeDeck({
     if (!current.moved) return;
     swallowClick.current = true;
     const live = bodyTargets(targets, current.head);
-    const downs = canDown && current.head;
+    const downs = canDown && (current.head || current.pull);
     const from = dragOffset(current.dx, current.dy, live, downs);
     if (downs && current.lock === 'vertical' && current.dy > 0) {
       const { intent } = compassReading(current.dx, current.dy, current.width, available);
@@ -556,7 +585,7 @@ export function AgendaSwipeDeck({
   if (top === undefined && leaving === null) return null;
 
   const live = drag === null ? targets : bodyTargets(targets, drag.head);
-  const downs = canDown && (drag === null || drag.head);
+  const downs = canDown && (drag === null || drag.head || drag.pull);
   const compass =
     drag !== null && downs && drag.lock === 'vertical' && drag.dy > 0
       ? compassReading(drag.dx, drag.dy, drag.width, available)

@@ -2,21 +2,25 @@
  * ONE COMPOSER'S COPY OF THE SHARED DRAFT, KEPT IN STEP WITH THE DAEMON.
  *
  * The daemon is the one sequencer (`@ferretry/protocol` `shared-draft.ts`). This is the other half of
- * that bargain, the textbook central-server OT client: at most ONE edit is in flight, everything typed
+ * that bargain, the textbook central-server OT client: at most ONE edit is in flight, everything done
  * meanwhile is folded into one buffered edit behind it, and every edit the daemon hands down from
- * another device is transformed past both before it touches the text on screen. The daemon's edit is
+ * another device is transformed past both before it touches what is on screen. The daemon's edit is
  * always passed FIRST to `transformTextOps`, exactly as the daemon does, so a tie breaks the same way on
  * every device.
  *
- * Pure: it takes frames and the person's typing, and answers with the text to show, the edit that
+ * AN EDIT IS TEXT AND ITEMS TOGETHER. The files and places riding with the draft travel in the same
+ * edits as the words, so they share its revisions. Items need no transform: they are a set by id, and
+ * every device applies `remove` before `add`, as the daemon does.
+ *
+ * Pure: it takes frames and the person's changes, and answers with what to show, the text edit that
  * produced it (so a caret can be moved), and the frames to send. The stream, the timers and React live
- * elsewhere (`shared-draft-stream.ts`, `components/use-shared-draft.ts`).
+ * elsewhere (`shared-draft-stream.ts`, `hooks/use-shared-draft.ts`).
  *
  * WHAT IS NEVER MERGED BLINDLY. When this copy cannot be brought into step edit by edit — a refused
  * edit, a daemon that restarted, a first connection that finds different words already there — the
- * daemon's draft wins on screen, and what this device had is handed back as `conflict`, for the person
- * to restore with one tap. Words are never silently dropped, and never silently spliced into text they
- * were not typed against.
+ * daemon's draft wins on screen, and the words this device had are handed back as `conflict`, for the
+ * person to restore with one tap. Files this device had added are added again: adding a file the
+ * person attached can never cost anybody their words.
  */
 import {
   applyTextOp,
@@ -28,6 +32,7 @@ import {
   sharedDraftFrameBytes,
   textOpBaseLength,
   type SharedDraftClientFrame,
+  type SharedDraftItem,
   type SharedDraftServerFrame,
   type TextOp,
   transformTextOps,
@@ -42,6 +47,8 @@ export interface SharedDraftPosition {
 
 interface PendingEdit {
   readonly op: TextOp;
+  readonly add: readonly SharedDraftItem[];
+  readonly remove: readonly string[];
   /** Part of a send: the daemon may end the message if nothing is left. */
   readonly sent: boolean;
 }
@@ -59,14 +66,20 @@ interface InflightEdit extends PendingEdit {
 }
 
 export interface SharedDraftSyncState {
-  /** What the person sees: the daemon's draft with this device's unanswered edits on top. */
+  /** What the person sees: the daemon's words with this device's unanswered edits on top. */
   readonly text: string;
+  /** The files and places the person sees, the same way. */
+  readonly items: readonly SharedDraftItem[];
+  /** The items as the daemon last confirmed them. */
+  readonly serverItems: readonly SharedDraftItem[];
   /** Unset until the first snapshot: nothing is sent before this copy knows what it is editing. */
   readonly position?: SharedDraftPosition;
   readonly inflight?: InflightEdit;
   readonly buffer?: PendingEdit;
   /** Set after a refusal: everything is held until a fresh snapshot arrives. */
   readonly resyncing: boolean;
+  /** Items a refused edit was adding, to be added again once the snapshot arrives. */
+  readonly lost?: readonly SharedDraftItem[];
 }
 
 /** What one step produced. */
@@ -82,10 +95,49 @@ export interface SharedDraftStep {
   readonly resync?: true;
 }
 
-export const initialSharedDraftState = (text: string): SharedDraftSyncState => ({ text, resyncing: false });
+export const initialSharedDraftState = (
+  text: string,
+  items: readonly SharedDraftItem[] = [],
+): SharedDraftSyncState => ({ text, items, serverItems: [], resyncing: false });
 
 /** Mints the id an edit travels under; injected so a test can predict it. */
 export type SharedDraftIdSource = () => string;
+
+/** `remove` first, then `add` — the daemon's order, so every device ends with the same chips. */
+export const applyItems = (
+  items: readonly SharedDraftItem[],
+  add: readonly SharedDraftItem[],
+  remove: readonly string[],
+): readonly SharedDraftItem[] => {
+  const kept = items.filter(item => !remove.includes(item.id));
+  const added = add.filter(
+    (item, index) =>
+      !kept.some(existing => existing.id === item.id) && add.findIndex(other => other.id === item.id) === index,
+  );
+  return [...kept, ...added];
+};
+
+/** `a` then `b` as one edit. */
+const composePending = (a: PendingEdit, b: PendingEdit): PendingEdit => ({
+  op: composeTextOps(a.op, b.op),
+  remove: [...new Set([...a.remove, ...b.remove])],
+  add: [...a.add.filter(item => !b.remove.includes(item.id) && !b.add.some(next => next.id === item.id)), ...b.add],
+  sent: a.sent || b.sent,
+});
+
+const identity = (text: string): TextOp => (text.length === 0 ? [] : [text.length]);
+
+/** What the person sees: the confirmed items with this device's unanswered changes on top. */
+const visibleItems = (
+  serverItems: readonly SharedDraftItem[],
+  inflight: PendingEdit | undefined,
+  buffer: PendingEdit | undefined,
+): readonly SharedDraftItem[] => {
+  let items = serverItems;
+  for (const pending of [inflight, buffer])
+    if (pending !== undefined) items = applyItems(items, pending.add, pending.remove);
+  return items;
+};
 
 const editFrame = (position: SharedDraftPosition, inflight: InflightEdit): SharedDraftClientFrame => ({
   kind: 'edit',
@@ -95,6 +147,8 @@ const editFrame = (position: SharedDraftPosition, inflight: InflightEdit): Share
     epoch: inflight.epoch,
     base: inflight.base,
     text: inflight.op,
+    ...(inflight.add.length === 0 ? {} : { add: inflight.add }),
+    ...(inflight.remove.length === 0 ? {} : { remove: inflight.remove }),
     ...(inflight.sent ? { sent: true as const } : {}),
   },
 });
@@ -168,9 +222,10 @@ const launch = (
     );
   while (measure(first) > SHARED_DRAFT_EDIT_BUDGET && insertedChars(first.op) > 1) {
     const [head, tail] = splitTextOp(first.op, Math.floor(insertedChars(first.op) / 2));
-    const later: PendingEdit = { op: tail, sent: first.sent };
-    remainder = remainder === undefined ? later : { op: composeTextOps(tail, remainder.op), sent: remainder.sent };
-    first = { op: head, sent: false };
+    // The files and places go with the first part; a send's mark stays on the last.
+    const later: PendingEdit = { op: tail, add: [], remove: [], sent: first.sent };
+    remainder = remainder === undefined ? later : composePending(later, remainder);
+    first = { ...first, op: head, sent: false };
   }
   const inflight: InflightEdit = { ...first, id: ids(), epoch: position.epoch, base: position.rev };
   return {
@@ -184,8 +239,34 @@ const launch = (
  * comes in parts), offering back whatever this device had not had answered.
  */
 export const applyResync = (state: SharedDraftSyncState): SharedDraftSyncState => {
-  const { inflight: _inflight, buffer: _buffer, ...rest } = state;
-  return { ...rest, resyncing: true };
+  const { inflight, buffer, ...rest } = state;
+  const lost = [...(inflight?.add ?? []), ...(buffer?.add ?? [])];
+  return { ...rest, resyncing: true, ...(lost.length === 0 ? {} : { lost }) };
+};
+
+const isEmpty = (pending: PendingEdit): boolean =>
+  isNoopTextOp(pending.op) && pending.add.length === 0 && pending.remove.length === 0 && !pending.sent;
+
+/** One local change, folded behind the edit in flight or sent now. */
+const local = (
+  state: SharedDraftSyncState,
+  change: PendingEdit,
+  next: Partial<SharedDraftSyncState>,
+  ids: SharedDraftIdSource,
+): SharedDraftStep => {
+  const changed: SharedDraftSyncState = { ...state, ...next };
+  if (state.position === undefined) return { state: changed, send: [] };
+  if (state.resyncing) {
+    // Held until the snapshot; files added meanwhile are added again then, like the refused ones.
+    const lost = applyItems(state.lost ?? [], change.add, change.remove);
+    return { state: { ...changed, lost }, send: [] };
+  }
+  if (state.inflight !== undefined) {
+    const buffer = state.buffer === undefined ? change : composePending(state.buffer, change);
+    return { state: { ...changed, buffer }, send: [] };
+  }
+  if (isEmpty(change)) return { state: changed, send: [] };
+  return launch(changed, change, ids);
 };
 
 /**
@@ -199,18 +280,25 @@ export const applyLocalText = (
   sent = false,
 ): SharedDraftStep => {
   if (next === state.text && !sent) return { state, send: [] };
-  const op = diffToTextOp(state.text, next);
-  const changed = { ...state, text: next };
-  if (state.position === undefined || state.resyncing) return { state: changed, send: [] };
-  if (state.inflight !== undefined) {
-    const buffer: PendingEdit =
-      state.buffer === undefined
-        ? { op, sent }
-        : { op: composeTextOps(state.buffer.op, op), sent: state.buffer.sent || sent };
-    return { state: { ...changed, buffer }, send: [] };
-  }
-  if (isNoopTextOp(op) && !sent) return { state: changed, send: [] };
-  return launch(changed, { op, sent }, ids);
+  const change: PendingEdit = { op: diffToTextOp(state.text, next), add: [], remove: [], sent };
+  return local(state, change, { text: next }, ids);
+};
+
+/**
+ * The person added or removed files and places. `remove` goes first, so an id in both replaces the
+ * item (a place renamed, say).
+ */
+export const applyLocalItems = (
+  state: SharedDraftSyncState,
+  change: { readonly add?: readonly SharedDraftItem[]; readonly remove?: readonly string[] },
+  ids: SharedDraftIdSource,
+): SharedDraftStep => {
+  const add = change.add ?? [];
+  // Removing what is not there is nothing at all, not an edit.
+  const remove = (change.remove ?? []).filter(id => state.items.some(item => item.id === id));
+  if (add.length === 0 && remove.length === 0) return { state, send: [] };
+  const pending: PendingEdit = { op: identity(state.text), add, remove, sent: false };
+  return local(state, pending, { items: applyItems(state.items, add, remove) }, ids);
 };
 
 /** The whole draft: on first connection, after a refusal, or when a reconnect cannot be caught up. */
@@ -221,31 +309,49 @@ const fromSnapshot = (
 ): SharedDraftStep => {
   const { snapshot } = frame;
   const position: SharedDraftPosition = { generation: snapshot.generation, epoch: snapshot.epoch, rev: snapshot.rev };
-  const fresh: SharedDraftSyncState = { text: snapshot.text, position, resyncing: false };
+  const fresh: SharedDraftSyncState = {
+    text: snapshot.text,
+    items: snapshot.items,
+    serverItems: snapshot.items,
+    position,
+    resyncing: false,
+  };
+  // Files this device added that the daemon does not have: on first contact every one it holds, after a
+  // refusal the ones the refused edits were adding.
+  const mineItems = state.position === undefined && !state.resyncing ? state.items : (state.lost ?? []);
+  const readd = mineItems.filter(item => !snapshot.items.some(existing => existing.id === item.id));
   const mine = state.text;
-  if (mine === snapshot.text) return { state: fresh, send: [] };
   // First contact with a draft NOBODY HAS EVER TOUCHED (epoch 0, revision 0): what this device was
   // already holding — a draft from before drafts were shared — becomes the draft. An empty draft that has
   // been used is not that: it may be empty because its words were SENT, and this device's cached copy of
   // them must never seed the next message on its own.
   const untouched = snapshot.epoch === 0 && snapshot.rev === 0 && snapshot.text === '';
-  if (state.position === undefined && untouched && !state.resyncing) {
-    const step = launch(fresh, { op: diffToTextOp('', mine), sent: false }, ids);
-    return { state: { ...step.state, text: mine }, send: step.send };
-  }
-  if (mine.trim() === '') return { state: fresh, send: [] };
+  const firstPush = state.position === undefined && untouched && !state.resyncing && mine !== '';
   // A copy that was in step and had nothing unanswered simply missed what happened elsewhere — a send
   // from another device, most often: the draft as it now stands is taken, and nothing is offered back.
   const unanswered = state.inflight !== undefined || state.buffer !== undefined || state.resyncing;
-  if (state.position !== undefined && !unanswered) return { state: fresh, send: [] };
-  return { state: fresh, send: [], conflict: mine };
+  const offered =
+    mine !== snapshot.text && !firstPush && mine.trim() !== '' && (state.position === undefined || unanswered);
+  const conflict = offered ? mine : undefined;
+  const op = firstPush ? diffToTextOp('', mine) : identity(snapshot.text);
+  if (!firstPush && readd.length === 0)
+    return { state: fresh, send: [], ...(conflict === undefined ? {} : { conflict }) };
+  const step = launch(fresh, { op, add: readd, remove: [], sent: false }, ids);
+  return {
+    state: { ...step.state, text: firstPush ? mine : snapshot.text, items: applyItems(snapshot.items, readd, []) },
+    send: step.send,
+    ...(conflict === undefined ? {} : { conflict }),
+  };
 };
 
 /** Somebody else's edit, as sequenced: transformed past what this device has not had answered yet. */
-const fromRemote = (state: SharedDraftSyncState, op: TextOp, epoch: number, rev: number): SharedDraftStep => {
+const fromRemote = (
+  state: SharedDraftSyncState,
+  frame: Extract<SharedDraftServerFrame, { kind: 'edit' }>,
+): SharedDraftStep => {
   const position = state.position;
   if (position === undefined) return { state, send: [] };
-  let remote = op;
+  let remote = frame.applied.text;
   let inflight = state.inflight;
   let buffer = state.buffer;
   if (inflight !== undefined) {
@@ -258,11 +364,14 @@ const fromRemote = (state: SharedDraftSyncState, op: TextOp, epoch: number, rev:
     remote = remotePrime;
     buffer = { ...buffer, op: bufferPrime };
   }
+  const serverItems = applyItems(state.serverItems, frame.applied.add, frame.applied.remove);
   return {
     state: {
       ...state,
       text: applyTextOp(state.text, remote),
-      position: { ...position, epoch, rev },
+      serverItems,
+      items: visibleItems(serverItems, inflight, buffer),
+      position: { ...position, epoch: frame.epoch, rev: frame.rev },
       ...(inflight === undefined ? {} : { inflight }),
       ...(buffer === undefined ? {} : { buffer }),
     },
@@ -274,14 +383,19 @@ const fromRemote = (state: SharedDraftSyncState, op: TextOp, epoch: number, rev:
 /** This device's own edit, answered: the next one goes. */
 const answered = (
   state: SharedDraftSyncState,
-  epoch: number,
-  rev: number,
+  frame: Extract<SharedDraftServerFrame, { kind: 'edit' | 'ack' }>,
   ids: SharedDraftIdSource,
 ): SharedDraftStep => {
   const position = state.position;
   if (position === undefined) return { state, send: [] };
   const { inflight: _inflight, buffer, ...rest } = state;
-  const settled: SharedDraftSyncState = { ...rest, position: { ...position, epoch, rev } };
+  const serverItems = applyItems(state.serverItems, frame.applied.add, frame.applied.remove);
+  const settled: SharedDraftSyncState = {
+    ...rest,
+    serverItems,
+    items: visibleItems(serverItems, undefined, buffer),
+    position: { ...position, epoch: frame.epoch, rev: frame.rev },
+  };
   if (buffer === undefined) return { state: settled, send: [] };
   return launch(settled, buffer, ids);
 };
@@ -300,12 +414,11 @@ export const applyServerFrame = (
     case 'snapshot':
       return fromSnapshot(state, frame, ids);
     case 'ack':
-      return state.inflight?.id === frame.id ? answered(state, frame.epoch, frame.rev, ids) : { state, send: [] };
+      return state.inflight?.id === frame.id ? answered(state, frame, ids) : { state, send: [] };
     case 'edit':
       // Our own edit, landed while the stream was down: it is answered, not somebody else's.
-      if (frame.id !== undefined && frame.id === state.inflight?.id)
-        return answered(state, frame.epoch, frame.rev, ids);
-      return fromRemote(state, frame.applied.text, frame.epoch, frame.rev);
+      if (frame.id !== undefined && frame.id === state.inflight?.id) return answered(state, frame, ids);
+      return fromRemote(state, frame);
     case 'ready': {
       // Caught up, and an edit from the last stream never landed (its own id was not in the replay): send
       // it again. Every edit replayed meanwhile has already been transformed into it, so it now belongs at
@@ -318,9 +431,11 @@ export const applyServerFrame = (
     }
     case 'error': {
       if (state.inflight?.id !== frame.id) return { state, send: [] };
-      // Refused: hold everything, and start again from the daemon's whole draft.
-      const { inflight: _inflight, buffer: _buffer, ...rest } = state;
-      return { state: { ...rest, resyncing: true }, send: [], resync: true };
+      // Refused: hold everything, and start again from the daemon's whole draft — remembering the files
+      // the refused edits were adding, so they can be added again.
+      const { inflight, buffer, ...rest } = state;
+      const lost = [...inflight.add, ...(buffer?.add ?? [])];
+      return { state: { ...rest, resyncing: true, lost }, send: [], resync: true };
     }
     default:
       return { state, send: [] };

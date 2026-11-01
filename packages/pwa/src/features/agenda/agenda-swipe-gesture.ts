@@ -11,7 +11,8 @@
  *   keeps the drag that began in it.
  * - THE DIRECTION IS DECIDED ONCE, AFTER {@link LOCK_PX} of travel ({@link lockOf}): sideways is a swipe; up or down
  *   is the reader scrolling, handed to the browser — except from the card's head, which does not scroll and
- *   keeps its up and down answers ({@link startsInHead}).
+ *   keeps its up and down answers ({@link startsInHead}), and a pull DOWN from a body that is already at its top
+ *   ({@link startsAtScrollTop}): there is nothing above to scroll to, so that pull is the compass.
  */
 
 import { SWIPE_SLOP_PX } from '../../lib/agenda-inbox.ts';
@@ -56,6 +57,26 @@ export const startsInHead = (target: EventTarget | null): boolean =>
   target.closest(
     '.fy-attn-card__meta, [data-agenda-title], [data-agenda-top], [data-inbox-who], [data-agenda-quick-replies]',
   ) !== null;
+
+const scrollsDown = (element: Element): boolean => {
+  if (element.scrollHeight <= element.clientHeight + 1) return false;
+  const overflow = getComputedStyle(element).overflowY;
+  return overflow === 'auto' || overflow === 'scroll';
+};
+
+/**
+ * Whether a touch went down in a body with nothing above it to scroll to: every scroller between the touch and
+ * `boundary` is at its top (or does not scroll at all). A pull down from there cannot be a scroll.
+ */
+export const startsAtScrollTop = (target: EventTarget | null, boundary: Element): boolean => {
+  for (
+    let node = target instanceof Element ? target : null;
+    node !== null && node !== boundary;
+    node = node.parentElement
+  )
+    if (scrollsDown(node) && node.scrollTop > 0) return false;
+  return true;
+};
 
 export type Lock = 'sideways' | 'vertical';
 
