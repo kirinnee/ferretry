@@ -96,6 +96,8 @@ describe('an approval as the owner reads it', () => {
       { ...terminal, origin: 'https://company.okta.com' },
       { ...APPROVAL, number: undefined, numberMissing: 'terminal' },
       { ...APPROVAL, numberMissing: 'scripted' },
+      { ...APPROVAL, account: undefined, via: undefined },
+      { ...APPROVAL, account: undefined, username: undefined },
     ])
       expect(PhoneApprovalSchema.safeParse(bad).success).toBe(false);
   });
@@ -215,6 +217,11 @@ describe('the words of an approve-on-phone card', () => {
     const words = phoneApprovalWords({ surface: 'browser', origin: 'https://login.microsoftonline.com' });
     expect(words.who).toBe("a sign-in Ferretry doesn't know, on login.microsoftonline.com");
     expect(words.subject).toBe("Approve on your phone: a sign-in Ferretry doesn't know, on login.microsoftonline.com");
+  });
+
+  it('should name no host for an origin that is not one, rather than fail', () => {
+    expect(phoneApprovalWords({ surface: 'browser', origin: 'not an origin' }).where).toBe('a page');
+    expect(phoneApprovalWords({ surface: 'browser' }).who).toBe("a sign-in Ferretry doesn't know, on a page");
   });
 
   it('should keep a long subject and push within what an agenda item holds', () => {

@@ -947,6 +947,10 @@ describe('2FA keys as the owner reads them', () => {
 
     // Assert
     expect(order).toEqual([TF(5), TF(3), TF(4), TF(2), TF(1)]);
+    // Two keys alike in all but their id keep one order, whichever way they were listed.
+    const twin = (n: number) => key(n, '2026-10-06T00:00:00.000Z', true);
+    expect(automaticKeysInOfferOrder([twin(9), twin(8)]).map(each => each.id)).toEqual([TF(8), TF(9)]);
+    expect(automaticKeysInOfferOrder([twin(8), twin(9)]).map(each => each.id)).toEqual([TF(8), TF(9)]);
   });
 
   it('should bind an add-2fa-key proof to one account and one staged seed', () => {
