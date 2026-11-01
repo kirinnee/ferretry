@@ -496,14 +496,19 @@ describe('a ferret’s change waiting for the owner', () => {
     expect(actions.calls).toEqual([{ accept: 2, projectId: PROJECT }]);
   });
 
-  it('says what accepting would do that is the owner’s to decide', async () => {
-    // Arrange: the proposal drops the verify lane and sends its cards to the closed lane.
+  /** The proposal drops the verify lane (a gate) and sends its cards to the closed lane. */
+  const risky = (): LaneSet => {
     const live = laneSetFor();
-    const verify = live.lanes.find(lane => lane.category === 'verify');
-    const closed = live.lanes.find(lane => lane.category === 'closed');
-    if (verify === undefined || closed === undefined) throw new Error('the fixture has a verify and a closed lane');
+    const verify = must(
+      live.lanes.find(lane => lane.category === 'verify'),
+      'a verify lane',
+    );
+    const closed = must(
+      live.lanes.find(lane => lane.category === 'closed'),
+      'a closed lane',
+    );
     const base = waiting();
-    const risky: LaneSet = {
+    return {
       ...base,
       pending: {
         ...(base.pending as NonNullable<LaneSet['pending']>),
@@ -512,20 +517,49 @@ describe('a ferret’s change waiting for the owner', () => {
         relocate: { [verify.id]: closed.id },
       },
     };
+  };
 
-    // Act
-    const view = await show(editor(risky));
+  it('says what accepting would do in the agenda card’s words, and asks again before it does it', async () => {
+    // Arrange
+    const actions = recorder();
+    const set = risky();
+    const verify = must(
+      laneSetFor().lanes.find(lane => lane.category === 'verify'),
+      'a verify lane',
+    );
+    const view = await show(editor(set, actions));
+    const banner = must(view.container.querySelector('[data-lane-banner="pending"]'), 'the banner');
+
+    // Act: the first tap only asks.
+    await click(buttonSaying(view, 'Accept'));
 
     // Assert
-    const warnings = must(view.container.querySelector('[data-lane-warnings]'), 'the warnings');
+    const warnings = must(banner.querySelector('[data-lane-warnings]'), 'the warnings');
     expect(warnings.textContent).toContain(
-      `Accepting would remove ${verify.name} and move its cards to ${closed.name}`,
+      `This change removes ${verify.name}, which waits for the owner, and sends its cards into the closed lane, which closes them`,
     );
-    expect(
-      must(view.container.querySelector('[data-lane-banner="pending"]'), 'banner').querySelector(
-        '[data-lane-warnings]',
-      ),
-    ).not.toBeNull();
+    expect(actions.calls).toEqual([]);
+    expect(must(banner.querySelector('[data-lane-confirm]'), 'the confirm').textContent).toContain(
+      'cards move and may close',
+    );
+
+    // Act: the second tap accepts.
+    await click(buttonSaying(view, 'Accept these changes'));
+
+    // Assert
+    expect(actions.calls).toEqual([{ accept: 2, projectId: PROJECT }]);
+  });
+
+  it('lets the owner back out of the second tap', async () => {
+    const actions = recorder();
+    const view = await show(editor(risky(), actions));
+
+    await click(buttonSaying(view, 'Accept'));
+    await click(buttonSaying(view, 'Cancel'));
+
+    expect(view.container.querySelector('[data-lane-confirm]')).toBeNull();
+    expect(buttonSaying(view, 'Accept').textContent).toBe('Accept');
+    expect(actions.calls).toEqual([]);
   });
 
   it('lists no warnings for a change that only renames', async () => {

@@ -40,13 +40,12 @@ import {
   type LaneSet,
   type LaneTemplateError,
   type LaneTemplateName,
+  type LaneGateProblem,
   laneLayoutFromTemplate,
   laneStage,
   laneTargets,
   QUICK_TO_TEST_LANE,
-  TaskWorkflowSchema,
   UNFILED_PROJECT_ID,
-  variantLanes,
 } from '@ferretry/protocol';
 
 /** Who is changing the lanes. */
@@ -62,71 +61,12 @@ export type LaneSetProblem =
   | { readonly code: 'owner-only' }
   | { readonly code: 'already-confirmed'; readonly version: number }
   | { readonly code: 'relocation-missing'; readonly laneIds: readonly string[] }
-  | { readonly code: 'owner-gate'; readonly problems: readonly LaneGateProblem[] };
+  | { readonly code: 'owner-gate'; readonly problems: readonly LaneGateProblem[] }
+  /** Another ferret's proposal waits for the owner: only it, a lead above it or the owner replaces it. */
+  | { readonly code: 'proposal-waiting'; readonly version: number; readonly proposedBy: string };
 
-/** One way a lane change would take a gate from the owner: the lane it is about, and what it would do, in words. */
-export interface LaneGateProblem {
-  readonly laneId: string;
-  readonly why: string;
-}
-
-const isGate = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
-
-/**
- * Everything a change from `current` to `next` (moving `relocate`'s cards: removed lane → kept lane) would do to a
- * gate that only the owner may: remove a gate lane, make it automatic, drop its `ownerGate`, move it among the lanes
- * a variant walks, stop a variant walking it, and send cards into a closed lane or past a gate. Empty when it touches
- * none. Pure and total; whoever is asking decides whether that refuses the change or is shown to the owner.
- */
-export const laneGateProblems = (
-  current: Pick<LaneSet, 'lanes' | 'variants'>,
-  next: Pick<LaneLayoutValue, 'lanes' | 'variants'>,
-  relocate: Readonly<Record<string, string>> = {},
-): readonly LaneGateProblem[] => {
-  const problems: LaneGateProblem[] = [];
-  for (const gate of current.lanes.filter(isGate)) {
-    const kept = next.lanes.find(lane => lane.id === gate.id);
-    if (kept === undefined) {
-      problems.push({ laneId: gate.id, why: `removes ${gate.name}, which waits for the owner` });
-      continue;
-    }
-    if (!isGate(kept))
-      problems.push({ laneId: gate.id, why: `makes ${gate.name} automatic: it would stop waiting for the owner` });
-    else if (gate.ownerGate === true && kept.ownerGate !== true) {
-      problems.push({ laneId: gate.id, why: `drops the owner gate of ${gate.name}` });
-    }
-    for (const workflow of TaskWorkflowSchema.options) {
-      const was = walk(current, workflow);
-      if (!was.includes(gate.id)) continue;
-      const now = walk(next, workflow);
-      if (!now.includes(gate.id)) {
-        problems.push({ laneId: gate.id, why: `lets ${workflow} work skip ${gate.name}` });
-      } else if (!sameBefore(gate.id, was, now)) {
-        problems.push({ laneId: gate.id, why: `moves ${gate.name} among the lanes ${workflow} work walks` });
-      }
-    }
-  }
-  for (const [from, to] of Object.entries(relocate)) {
-    const target = next.lanes.find(lane => lane.id === to);
-    if (target?.category === 'closed') {
-      problems.push({ laneId: to, why: `sends the cards of ${from} into ${target.name}, which only the owner closes` });
-      continue;
-    }
-    // Judged where the cards end up: the new layout. A lane that is new gives no account of what it passed.
-    if (!current.lanes.some(lane => lane.id === to)) {
-      problems.push({ laneId: to, why: `sends the cards of ${from} into ${target?.name ?? to}, a lane that is new` });
-      continue;
-    }
-    const passed = passedGate(current, next, from, to);
-    if (passed !== undefined) {
-      problems.push({
-        laneId: passed.id,
-        why: `sends the cards of ${from} past ${passed.name}, which waits for the owner`,
-      });
-    }
-  }
-  return problems;
-};
+/** Moved to the protocol, where the lane editor reads it too; re-exported so the board's imports keep working. */
+export { type LaneGateProblem, laneGateProblems } from '@ferretry/protocol';
 
 /** What a lane change decided ({@link decideLaneChange}): the set to store, and the cards that move. */
 export interface LaneSetDecision {
@@ -154,13 +94,20 @@ export const decideLaneChange = (
   current: LaneSet | null,
   request: LaneSetActionRequest,
   actor: LaneActor,
+  /** Whether `actor` leads the session that proposed a waiting proposal, so it may replace that proposal. */
+  leads: (proposerSession: string) => boolean = () => false,
 ): BoardResult<LaneSetDecision, LaneSetProblem> => {
+  if (actor.kind === 'ferret' && request.action !== 'confirm' && current?.pending !== undefined) {
+    const { proposerSession, version, proposedBy } = current.pending;
+    const theirs = proposerSession !== undefined && proposerSession !== actor.sessionId && !leads(proposerSession);
+    if (theirs) return boardErr({ code: 'proposal-waiting', version, proposedBy });
+  }
   switch (request.action) {
     case 'propose': {
       const built = proposeLaneSet(projectId, current, request.template, request.renames, actorName(actor));
       if (!built.ok) return built;
       return actor.kind === 'ferret' && current !== null
-        ? waitForOwner(current, built.value, {})
+        ? waitForOwner(current, built.value, {}, actor.sessionId)
         : boardOk({ next: built.value, change: 'live', relocate: {} });
     }
     case 'edit': {
@@ -168,7 +115,7 @@ export const decideLaneChange = (
       if (!built.ok) return built;
       const relocate = definedMoves(request.relocate);
       return actor.kind === 'ferret' && current !== null
-        ? waitForOwner(current, built.value, relocate)
+        ? waitForOwner(current, built.value, relocate, actor.sessionId)
         : boardOk({ next: built.value, change: 'live', relocate });
     }
     case 'confirm': {
@@ -190,6 +137,7 @@ const waitForOwner = (
   current: LaneSet,
   built: LaneSet,
   relocate: Readonly<Record<string, string>>,
+  proposerSession: string,
 ): BoardResult<LaneSetDecision, LaneSetProblem> => {
   // A proposal that drops a lane says where its cards go, or the owner's Accept would strand them.
   const unplaced = laneEditProblems(current, { layout: built, relocate });
@@ -198,6 +146,7 @@ const waitForOwner = (
     version: built.version,
     baseVersion: current.version,
     proposedBy: built.proposedBy,
+    proposerSession,
     lanes: built.lanes,
     variants: built.variants,
     doneLane: built.doneLane,
@@ -240,8 +189,8 @@ export const acceptPendingLaneSet = (
 export interface RelocationProblem {
   readonly from: string;
   readonly to: string;
-  readonly why: 'closes' | 'leaves-gate' | 'passes-gate';
-  /** The gate it leaves or passes; absent for `closes`. */
+  readonly why: 'closes' | 'leaves-gate' | 'passes-gate' | 'no-such-lane';
+  /** The gate it leaves or passes; absent otherwise. */
   readonly gate?: string;
 }
 
@@ -263,8 +212,12 @@ export const relocationProblems = (
   const isGate = (lane: Lane | undefined): boolean => lane !== undefined && laneStage(lane).kind === 'gate';
   const problems: RelocationProblem[] = [];
   for (const [from, to] of Object.entries(moves)) {
+    if (from === to) continue;
     const target = after.lanes.find(lane => lane.id === to);
-    if (target === undefined || from === to) continue;
+    if (target === undefined) {
+      problems.push({ from, to, why: 'no-such-lane' });
+      continue;
+    }
     if (target.category === 'closed') {
       problems.push({ from, to, why: 'closes' });
       continue;
@@ -281,50 +234,6 @@ export const relocationProblems = (
     if (passed !== undefined) problems.push({ from, to, why: 'passes-gate', gate: passed.id });
   }
   return problems;
-};
-
-/**
- * The first gate of the NEW layout a relocation `from` → `to` would put cards past, in any variant's walk: a gate that
- * comes before `to` there, and that came after `from` before (or is new).
- */
-const passedGate = (
-  current: Pick<LaneSet, 'lanes' | 'variants'>,
-  next: Pick<LaneLayoutValue, 'lanes' | 'variants'>,
-  from: string,
-  to: string,
-): Lane | undefined => {
-  for (const workflow of TaskWorkflowSchema.options) {
-    const was = walk(current, workflow);
-    const now = walk(next, workflow);
-    if (!was.includes(from) || !now.includes(to)) continue;
-    const passed = now
-      .slice(0, now.indexOf(to))
-      .map(id => next.lanes.find(lane => lane.id === id))
-      .find(
-        lane =>
-          lane !== undefined && isGate(lane) && (!was.includes(lane.id) || was.indexOf(lane.id) > was.indexOf(from)),
-      );
-    if (passed !== undefined) return passed;
-  }
-  return undefined;
-};
-
-/** The lanes a workflow walks, in the set's order (whatever order its variant names them in). */
-const walk = (
-  set: Pick<LaneSet, 'lanes' | 'variants'>,
-  workflow: (typeof TaskWorkflowSchema.options)[number],
-): readonly string[] => {
-  const walked = variantLanes(set, workflow);
-  const named = new Set((walked.ok ? walked.value : set.lanes).map(lane => lane.id));
-  return set.lanes.filter(lane => named.has(lane.id)).map(lane => lane.id);
-};
-
-/** Whether the same lanes come before `gate` in both walks, counting only the lanes both walk. */
-const sameBefore = (gate: string, was: readonly string[], now: readonly string[]): boolean => {
-  const both = (id: string): boolean => was.includes(id) && now.includes(id);
-  const left = was.slice(0, was.indexOf(gate)).filter(both);
-  const right = now.slice(0, now.indexOf(gate)).filter(both);
-  return left.length === right.length && left.every(id => right.includes(id));
 };
 
 /** Where lane `at` of `before` would sit in `after`: the index of the first later lane of `before` that survives. */
@@ -347,6 +256,8 @@ export const describeRelocationProblem = (problem: RelocationProblem): string =>
       return `would take the cards of ${problem.from} out of a gate the owner has not answered, into ${problem.to}`;
     case 'passes-gate':
       return `would carry the cards of ${problem.from} past ${problem.gate ?? 'a gate'}, which waits for the owner, into ${problem.to}`;
+    case 'no-such-lane':
+      return `would move the cards of ${problem.from} into ${problem.to}, which the lanes do not have`;
   }
 };
 
@@ -437,6 +348,8 @@ export const describeLaneSetFailure = (
       return 'this project has no lanes yet; propose them first';
     case 'owner-only':
       return 'only the owner confirms lanes';
+    case 'proposal-waiting':
+      return `${failure.proposedBy}'s lane proposal (version ${String(failure.version)}) is waiting for the owner; only they, a lead above them or the owner may replace it`;
     case 'owner-gate':
       return `only the owner may change these gates: this change ${failure.problems.map(problem => problem.why).join('; ')}`;
   }

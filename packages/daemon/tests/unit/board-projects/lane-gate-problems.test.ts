@@ -91,11 +91,12 @@ describe('laneGateProblems', () => {
   it('finds cards sent into a closed lane, or past a gate', () => {
     const without = withLanes(current(), lane => (lane.id === 'implement' || lane.id === 'review' ? undefined : lane));
     should(whys(laneGateProblems(current(), without, { implement: 'closed', review: 'merged' }))).eql([
-      'sends the cards of implement into Closed, which only the owner closes',
+      'removes Implement, and sends its cards into the closed lane, which closes them',
+      'removes Review/CI, and moves its cards to Merged',
     ]);
     const pastPlan = withLanes(current(), lane => (lane.id === 'todo' ? undefined : lane));
     should(whys(laneGateProblems(current(), pastPlan, { todo: 'implement' }))).eql([
-      'sends the cards of todo past Plan/Design, which waits for the owner',
+      'removes Todo, and sends its cards to Implement, past Plan/Design, which waits for the owner',
     ]);
   });
 });
@@ -120,7 +121,10 @@ describe('a lane change that takes a gate from the owner', () => {
   it('waits in a ferret’s proposal over a set it would disarm, and a first proposal is free', () => {
     const live: LaneSet = { ...current(), confirmedBy: null };
     const propose = { action: 'propose', template: 'pr-release-verify', renames: {} } as const;
-    should(decideLaneChange(PROJECT, live, propose, FERRET)).match({ ok: false, error: { code: 'relocation-missing' } });
+    should(decideLaneChange(PROJECT, live, propose, FERRET)).match({
+      ok: false,
+      error: { code: 'relocation-missing' },
+    });
     should(decideLaneChange(PROJECT, null, propose, FERRET)).match({ ok: true, value: { change: 'live' } });
   });
 });
@@ -158,7 +162,14 @@ describe('a relocation judged where the cards end up (kyan R3)', () => {
 
     // Assert
     should(problems.map(problem => problem.laneId)).containEql('after');
-    should(decideLaneChange(PROJECT, set, { action: 'edit', version: 1, layout: next, relocate: { review: 'after' } }, FERRET)).match({
+    should(
+      decideLaneChange(
+        PROJECT,
+        set,
+        { action: 'edit', version: 1, layout: next, relocate: { review: 'after' } },
+        FERRET,
+      ),
+    ).match({
       ok: true,
       value: { change: 'pending', relocate: {} },
     });
@@ -200,6 +211,8 @@ describe('a relocation judged where the cards end up (kyan R3)', () => {
     const problems = laneGateProblems(set, next, { implement: 'merged' });
 
     // Assert
-    should(whys(problems)).eql(['sends the cards of implement past Review/CI, which waits for the owner']);
+    should(whys(problems)).eql([
+      'removes Implement, and sends its cards to Merged, past Review/CI, which waits for the owner',
+    ]);
   });
 });

@@ -49,6 +49,7 @@ const FAILURE_STATUS: Readonly<Record<LaneSetFailure['code'], number>> = {
   'already-confirmed': 409,
   'no-lane-set': 409,
   'owner-only': 403,
+  'proposal-waiting': 409,
 };
 
 /**

@@ -492,13 +492,16 @@ const withDerivedTargets = (value: unknown): unknown => {
  * accepts it. `version` is the number the set takes when it is accepted and the key of its agenda card; it is
  * above every number the set has had, so an Accept of an older card never names it. `baseVersion` is the live
  * set it was made against: an accept once the live set moved on is a version conflict. `relocate` is where the
- * cards of the lanes it removes go, moved only when it goes live, as the owner.
+ * cards of the lanes it removes go, moved only when it goes live, as the owner. `proposerSession` is the session whose
+ * agenda holds its card: only that session, a lead above it or the owner replaces it. Absent on a proposal stored
+ * before it was recorded, which anyone may replace.
  */
 export const PendingLaneSetSchema = z
   .object({
     version: PositiveIntegerSchema,
     baseVersion: PositiveIntegerSchema,
     proposedBy: z.string().min(1),
+    proposerSession: z.string().min(1).optional(),
     lanes: LaneLayoutShape.lanes,
     variants: LaneLayoutShape.variants,
     ...LaneTargetsShape,
@@ -512,27 +515,139 @@ export const PendingLaneSetSchema = z
   });
 export type PendingLaneSet = z.infer<typeof PendingLaneSetSchema>;
 
+/** One thing a lane change would do that is the owner's to decide: the lane it is about, and what, in words. */
+export interface LaneGateProblem {
+  readonly laneId: string;
+  readonly why: string;
+}
+
+const isGateLane = (lane: Pick<Lane, 'category' | 'enterOn' | 'ownerGate' | 'stage'>): boolean =>
+  laneStage(lane).kind === 'gate';
+
+type Walkable = Pick<LaneSet, 'lanes' | 'variants'>;
+
+/** The lanes a workflow walks, in the set's order (whatever order its variant names them in). */
+const walk = (set: Walkable, workflow: TaskWorkflow): readonly string[] => {
+  const walked = variantLanes(set, workflow);
+  const named = new Set((walked.ok ? walked.value : set.lanes).map(lane => lane.id));
+  return set.lanes.filter(lane => named.has(lane.id)).map(lane => lane.id);
+};
+
+/** Whether the same lanes come before `gate` in both walks, counting only the lanes both walk. */
+const sameBefore = (gate: string, was: readonly string[], now: readonly string[]): boolean => {
+  const both = (id: string): boolean => was.includes(id) && now.includes(id);
+  const left = was.slice(0, was.indexOf(gate)).filter(both);
+  const right = now.slice(0, now.indexOf(gate)).filter(both);
+  return left.length === right.length && left.every(id => right.includes(id));
+};
+
 /**
- * What a waiting proposal would do that is the owner's to decide, in the owner's words, for its agenda card and
- * the lane editor alike: each lane it removes and where that lane's cards go, and each gate ({@link laneStage})
- * that would stop waiting for the owner. Empty when it does neither.
+ * The first gate of the NEW layout a relocation `from` → `to` would put cards past, in any variant's walk: a gate
+ * that comes before `to` there, and that came after `from` before (or is new).
  */
-export const laneChangeWarnings = (
-  live: { readonly lanes: readonly Lane[] },
-  pending: Pick<PendingLaneSet, 'lanes' | 'relocate'>,
-): readonly string[] => {
-  const name = (id: string): string => pending.lanes.find(lane => lane.id === id)?.name ?? id;
-  const warnings: string[] = [];
-  for (const lane of live.lanes) {
-    const kept = pending.lanes.find(candidate => candidate.id === lane.id);
-    const to = pending.relocate[lane.id];
+const passedGate = (current: Walkable, next: Walkable, from: string, to: string): Lane | undefined => {
+  for (const workflow of TaskWorkflowSchema.options) {
+    const was = walk(current, workflow);
+    const now = walk(next, workflow);
+    if (!was.includes(from) || !now.includes(to)) continue;
+    const passed = now
+      .slice(0, now.indexOf(to))
+      .map(id => next.lanes.find(lane => lane.id === id))
+      .find(
+        lane =>
+          lane !== undefined &&
+          isGateLane(lane) &&
+          (!was.includes(lane.id) || was.indexOf(lane.id) > was.indexOf(from)),
+      );
+    if (passed !== undefined) return passed;
+  }
+  return undefined;
+};
+
+/** What a gate's answers do, in a form two gates can be compared by. */
+const answersOf = (lane: Lane): string => JSON.stringify(gateOptions(lane).map(option => [option.id, option.outcome]));
+
+/**
+ * EVERYTHING a change from `current` to `next` would do that is the owner's to decide (`docs/board.md` § A ferret's
+ * lane change waits for the owner), in the owner's words, for a waiting proposal's Accept card and the lane editor:
+ *
+ * - each lane it removes (saying when it is a gate) and where its cards go: into the closed lane (named by its
+ *   CATEGORY, never by a name the proposal chose), into a lane that is new, or past a gate of the new layout;
+ * - each gate it makes automatic, whose `ownerGate` it drops, or whose answers it rewires;
+ * - each lane it makes the closed lane, which closes the cards in it;
+ * - each gate a workflow would skip, or walk to from a different place.
+ *
+ * A lane is named as the owner knows it: by its current name. Empty when the change does none of these (a rename,
+ * say). Pure and total.
+ */
+export const laneGateProblems = (
+  current: Walkable,
+  next: Walkable,
+  relocate: Readonly<Partial<Record<string, string>>> = {},
+): readonly LaneGateProblem[] => {
+  const known = (id: string): string => current.lanes.find(lane => lane.id === id)?.name ?? id;
+  const problems: LaneGateProblem[] = [];
+  for (const lane of current.lanes) {
+    const kept = next.lanes.find(candidate => candidate.id === lane.id);
+    const gate = isGateLane(lane);
     if (kept === undefined) {
-      warnings.push(to === undefined ? `remove ${lane.name}` : `remove ${lane.name} and move its cards to ${name(to)}`);
-    } else if (laneStage(lane).kind === 'gate' && laneStage(kept).kind !== 'gate') {
-      warnings.push(`make ${lane.name} stop waiting for you`);
+      problems.push(removal(current, next, lane, gate, relocate[lane.id], known));
+      continue;
+    }
+    if (kept.category === 'closed' && lane.category !== 'closed') {
+      problems.push({ laneId: lane.id, why: `makes ${lane.name} the closed lane, which closes the cards in it` });
+    }
+    if (!gate) continue;
+    if (!isGateLane(kept)) {
+      problems.push({ laneId: lane.id, why: `makes ${lane.name} automatic: it would stop waiting for the owner` });
+    } else {
+      if (lane.ownerGate === true && kept.ownerGate !== true) {
+        problems.push({ laneId: lane.id, why: `drops the owner gate of ${lane.name}` });
+      }
+      if (answersOf(lane) !== answersOf(kept)) {
+        problems.push({ laneId: lane.id, why: `changes what the answers to ${lane.name} do` });
+      }
+    }
+    for (const workflow of TaskWorkflowSchema.options) {
+      const was = walk(current, workflow);
+      if (!was.includes(lane.id)) continue;
+      const now = walk(next, workflow);
+      if (!now.includes(lane.id)) {
+        problems.push({ laneId: lane.id, why: `lets ${workflow} work skip ${lane.name}` });
+      } else if (!sameBefore(lane.id, was, now)) {
+        problems.push({ laneId: lane.id, why: `moves ${lane.name} among the lanes ${workflow} work walks` });
+      }
     }
   }
-  return warnings;
+  return problems;
+};
+
+/** A removed lane in words: what it was, and where its cards go. */
+const removal = (
+  current: Walkable,
+  next: Walkable,
+  lane: Lane,
+  gate: boolean,
+  to: string | undefined,
+  known: (id: string) => string,
+): LaneGateProblem => {
+  const removed = `removes ${lane.name}${gate ? ', which waits for the owner' : ''}`;
+  const target = to === undefined ? undefined : next.lanes.find(candidate => candidate.id === to);
+  if (to === undefined || target === undefined) return { laneId: lane.id, why: removed };
+  if (target.category === 'closed') {
+    return { laneId: to, why: `${removed}, and sends its cards into the closed lane, which closes them` };
+  }
+  // Judged where the cards end up: the new layout. A lane that is new gives no account of what it passed.
+  if (!current.lanes.some(candidate => candidate.id === to)) {
+    return { laneId: to, why: `${removed}, and sends its cards into ${target.name}, a lane that is new` };
+  }
+  const passed = passedGate(current, next, lane.id, to);
+  return passed === undefined
+    ? { laneId: lane.id, why: `${removed}, and moves its cards to ${known(to)}` }
+    : {
+        laneId: passed.id,
+        why: `${removed}, and sends its cards to ${known(to)}, past ${known(passed.id)}, which waits for the owner`,
+      };
 };
 
 /**

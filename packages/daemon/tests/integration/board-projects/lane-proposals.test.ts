@@ -73,7 +73,10 @@ const daemon = async () => {
     laneStore,
     { projects: async () => [{ ...project(PROJECT, '/work/ferretry'), name: 'Ferretry' }] },
     { projectOf: async () => PROJECT },
-    new AgendaLaneAgenda({ raise: async (...parameters) => await agenda.raise(...parameters) }),
+    new AgendaLaneAgenda({
+      raise: async (...parameters) => await agenda.raise(...parameters),
+      resolveSource: async (...parameters) => await agenda.resolveSource(...parameters),
+    }),
     { relocate: async (projectId, moves, by, reason) => void (await board?.relocate(projectId, moves, reason, by)) },
   );
   board = new BoardService({ ...boardPorts(), store: cards, lanes });
@@ -195,7 +198,9 @@ describe('a ferret’s lane edit over the route', () => {
     const board = await read(world);
     should(board.laneSet?.lanes.some(lane => lane.id === 'released')).be.true();
     should(board.laneSet?.pending?.relocate).deepEqual({ released: 'closed' });
-    should((await proposalCard(world, 2)).why).containEql('move its cards to Closed');
+    should((await proposalCard(world, 2)).why).containEql(
+      'removes Released · to test, which waits for the owner, and sends its cards into the closed lane, which closes them',
+    );
   });
 
   it('should refuse a ferret’s confirm of its own proposal, and the agenda its own Accept', async () => {
@@ -251,6 +256,30 @@ describe('a ferret’s lane edit over the route', () => {
     const closed = (await world.board.task('F2')).task;
     should(closed.laneId).equal('closed');
     should(closed.history.at(-1)).match({ type: 'moved', from: 'released', to: 'closed', actor: { kind: 'owner' } });
+  });
+
+  it('should close the card of a proposal a newer one replaced, saying so (probe P5)', async () => {
+    // Arrange
+    const world = await daemon();
+    await post(world, { action: 'edit', version: 1, layout: planAutomatic(world.live), relocate: {} }, agentIn(FERRET));
+    const first = await proposalCard(world, 2);
+
+    // Act
+    await post(
+      world,
+      { action: 'edit', version: 1, layout: withoutReleased(world.live), relocate: { released: 'closed' } },
+      agentIn(FERRET),
+    );
+
+    // Assert: only the newer card is open; the first is closed with the reason, and its Accept is gone.
+    const listed = await world.agenda.list(FERRET);
+    if (!listed.ok) throw new Error('the agenda did not list');
+    should(listed.value.items.filter(item => item.sourceRef?.startsWith('lanes:')).map(item => item.sourceRef)).eql([
+      laneProposalReference(PROJECT, 3),
+    ]);
+    const closed = listed.value.resolved.find(item => item.id === first.id);
+    should(JSON.stringify(closed)).containEql('A newer proposal replaced this one');
+    should(await laneOf(world, 'F2')).equal('released');
   });
 
   it('should take the owner’s own edit live at once over the route, as before', async () => {

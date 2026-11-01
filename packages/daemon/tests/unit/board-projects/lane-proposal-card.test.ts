@@ -3,7 +3,8 @@ import {
   LANE_PROPOSAL_ANSWERS,
   LANE_TEMPLATES,
   type LaneSet,
-  laneChangeWarnings,
+  laneGateProblems,
+  MAX_AGENDA_DETAIL_LENGTH,
   laneProposalReference,
   type PendingLaneSet,
   type ResolvedAgendaItem,
@@ -88,13 +89,54 @@ describe('laneChangeCard', () => {
     should(card.subject).equal('Lanes for Ferretry: Todo → Plan/Design → In progress → Merged → Closed');
     should(card.why).containEql('koen proposes new lanes for Ferretry');
     should(card.why).containEql('keeps its lanes until you accept');
-    should(card.why).containEql('make Plan/Design stop waiting for you');
-    should(card.why).containEql('remove Released · to test and move its cards to Closed');
+    should(card.why).containEql('This change makes Plan/Design automatic: it would stop waiting for the owner');
+    should(card.why).containEql(
+      'removes Released · to test, which waits for the owner, and sends its cards into the closed lane, which closes them',
+    );
     should(card.why).not.containEql('live already');
+    should(card.why).not.containEql('more, all in the Board lane editor');
     should(card.answers.map(answer => answer.label)).deepEqual([
       LANE_PROPOSAL_ANSWERS.accept,
       LANE_PROPOSAL_ANSWERS.edit,
     ]);
+  });
+
+  it('should never cut a warning short: the ones that do not fit are counted and pointed at', () => {
+    // Arrange: fourteen long-named gates, every one removed with its cards closed — far more than a card holds.
+    const name = (index: number) => `Owner review stage number ${String(index).padStart(2, '0')} of the many`;
+    const gates = Array.from({ length: 14 }, (_, index) => ({
+      id: `gate-${String(index)}`,
+      name: name(index),
+      category: 'active' as const,
+      ownerGate: true,
+    }));
+    const todo = { id: 'todo', name: 'Todo', category: 'backlog' as const };
+    const closed = { id: 'closed', name: 'Closed', category: 'closed' as const, ownerGate: true };
+    const crowded: LaneSet = { ...live, lanes: [todo, ...gates, closed], variants: {} };
+    const emptied: PendingLaneSet = {
+      ...risky,
+      lanes: [todo, closed],
+      variants: {},
+      relocate: Object.fromEntries(gates.map(gate => [gate.id, 'closed'])),
+    };
+
+    // Act
+    const card = laneChangeCard('The project with the longest name a registry would ever hold', crowded, emptied);
+
+    // Assert
+    should(card.why.length).be.belowOrEqual(MAX_AGENDA_DETAIL_LENGTH);
+    should(card.why).match(/; and \d+ more, all in the Board lane editor\.$/u);
+    should(card.why).containEql(
+      `removes ${name(0)}, which waits for the owner, and sends its cards into the closed lane`,
+    );
+    should(card.why).not.match(/closes the cards… |closes th$/u);
+  });
+
+  it('should cap a long proposer name so it never crowds out the warnings', () => {
+    const card = laneChangeCard('Ferretry', live, { ...risky, proposedBy: 'x'.repeat(500) });
+
+    should(card.why).containEql('This change makes Plan/Design automatic');
+    should(card.why.startsWith('x'.repeat(61))).be.false();
   });
 
   it('should warn of nothing for a change that only renames', () => {
@@ -105,8 +147,8 @@ describe('laneChangeCard', () => {
       relocate: {},
     };
 
-    should(laneChangeWarnings(live, renamed)).deepEqual([]);
-    should(laneChangeCard('Ferretry', live, renamed).why).not.containEql('It would');
+    should(laneGateProblems(live, renamed, renamed.relocate)).deepEqual([]);
+    should(laneChangeCard('Ferretry', live, renamed).why).not.containEql('This change');
   });
 });
 

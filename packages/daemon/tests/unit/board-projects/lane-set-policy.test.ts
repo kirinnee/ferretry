@@ -454,8 +454,13 @@ describe('relocationProblems', () => {
     should(relocationProblems(before, without('implement'), { implement: 'merged' })).deepEqual([]);
   });
 
-  it('should leave alone a move into a lane the set lacks or onto itself, and say every problem in words', () => {
-    should(relocationProblems(before, without('released'), { released: 'nowhere', merged: 'merged' })).deepEqual([]);
+  it('should refuse a move into a lane the set lacks, leave one onto itself alone, and say every problem', () => {
+    should(relocationProblems(before, without('released'), { released: 'nowhere', merged: 'merged' })).deepEqual([
+      { from: 'released', to: 'nowhere', why: 'no-such-lane' },
+    ]);
+    should(describeRelocationProblem({ from: 'released', to: 'nowhere', why: 'no-such-lane' })).containEql(
+      'which the lanes do not have',
+    );
     should(describeRelocationProblem({ from: 'released', to: 'closed', why: 'closes' })).containEql('only the owner');
     should(describeRelocationProblem({ from: 'plan', to: 'implement', why: 'leaves-gate', gate: 'plan' })).containEql(
       'out of a gate',
@@ -482,6 +487,9 @@ describe('the words of a refusal', () => {
     should(describeLaneSetFailure({ code: 'already-confirmed', version: 2 })).containEql('version 2');
     should(describeLaneSetFailure({ code: 'no-lane-set' })).containEql('no lanes yet');
     should(describeLaneSetFailure({ code: 'owner-only' })).containEql('only the owner');
+    should(describeLaneSetFailure({ code: 'proposal-waiting', version: 4, proposedBy: 'koen' })).equal(
+      "koen's lane proposal (version 4) is waiting for the owner; only they, a lead above them or the owner may replace it",
+    );
     should(
       describeLaneSetFailure({ code: 'owner-gate', problems: [{ laneId: 'plan', why: 'would pass Plan' }] }),
     ).equal('only the owner may change these gates: this change would pass Plan');

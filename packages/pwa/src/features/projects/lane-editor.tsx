@@ -3,7 +3,7 @@ import {
   LANE_CATEGORIES,
   LANE_TEMPLATES,
   type LaneCategory,
-  laneChangeWarnings,
+  laneGateProblems,
   type LaneTemplateName,
   type LaneTrigger,
   LaneTriggerSchema,
@@ -362,7 +362,11 @@ function LaneSetEditor({
   const proposed = laneSet.confirmedBy === null;
   // A ferret's change to these lanes, waiting for the owner: not the board's lanes until it is accepted.
   const { pending } = laneSet;
-  const warnings = pending === undefined ? [] : laneChangeWarnings(laneSet, pending);
+  // What accepting it would do that is the owner's to decide: the agenda card's words, from the same function.
+  const warnings =
+    pending === undefined ? [] : laneGateProblems(laneSet, pending, pending.relocate).map(problem => problem.why);
+  // An Accept that would change a gate or move cards takes a second, deliberate tap.
+  const [confirming, setConfirming] = useState(false);
 
   const change = (next: LaneDraft) => {
     setFailure(null);
@@ -412,21 +416,37 @@ function LaneSetEditor({
             {warnings.length > 0 && (
               <ul className="m-0 grid list-disc gap-xs pl-panel text-meta text-warn" data-lane-warnings="">
                 {warnings.map(warning => (
-                  <li key={warning}>Accepting would {warning}</li>
+                  <li key={warning}>This change {warning}</li>
                 ))}
               </ul>
             )}
+            {confirming && (
+              <span className="text-meta text-fg" role="alert" data-lane-confirm="">
+                Accepting does every change above now, as you: cards move and may close.
+              </span>
+            )}
           </span>
-          <button
-            className="kt-btn kt-btn--sm"
-            data-variant="primary"
-            type="button"
-            disabled={busy || changed}
-            title={changed ? 'Save or discard your edits first' : undefined}
-            onClick={() => void run(() => actions.acceptLanes(daemonId, project.id, pending.version))}
-          >
-            Accept
-          </button>
+          <span className="flex flex-wrap gap-xs">
+            {confirming && (
+              <button className="kt-btn kt-btn--sm" type="button" disabled={busy} onClick={() => setConfirming(false)}>
+                Cancel
+              </button>
+            )}
+            <button
+              className="kt-btn kt-btn--sm"
+              data-variant="primary"
+              type="button"
+              disabled={busy || changed}
+              title={changed ? 'Save or discard your edits first' : undefined}
+              onClick={() =>
+                warnings.length > 0 && !confirming
+                  ? setConfirming(true)
+                  : void run(() => actions.acceptLanes(daemonId, project.id, pending.version))
+              }
+            >
+              {confirming ? 'Accept these changes' : 'Accept'}
+            </button>
+          </span>
         </section>
       )}
 

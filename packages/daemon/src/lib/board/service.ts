@@ -62,6 +62,8 @@ import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
 import { gateEntry } from './gate-policy.ts';
 import { cardAudience, decideAskedBy } from './origin.ts';
+import { describeRelocationProblem, relocationProblems } from '../board-projects/lane-set-policy.ts';
+import type { RelocationAuthority } from '../board-projects/ports.ts';
 import type {
   ActivityDeriver,
   AgendaLinkSource,
@@ -170,6 +172,14 @@ export const doneMessage = (
  */
 const viaOf = (caller: BoardCaller): { readonly actorVia?: BoardActorVia } =>
   caller.kind === 'owner' && caller.via === 'admin-token' ? { actorVia: 'admin-token' } : {};
+
+/** Who a relocation is recorded as: the owner (with how they acted), or the daemon. */
+const callerOf = (by: RelocationAuthority): BoardCaller =>
+  by.kind === 'owner'
+    ? by.via === undefined
+      ? { kind: 'owner' }
+      : { kind: 'owner', via: by.via }
+    : { kind: 'daemon' };
 
 /** The board actor a caller is recorded as. */
 export const actorOf = (caller: BoardCaller): BoardActor => {
@@ -601,16 +611,16 @@ export class BoardService {
     projectId: BoardProjectId,
     moves: Readonly<Record<string, string>>,
     reason?: string,
-    by: BoardCaller = { kind: 'daemon' },
+    by: RelocationAuthority = { kind: 'daemon' },
   ): Promise<readonly BoardTaskId[]> {
-    const laneSet = by.kind === 'owner' ? null : await this.ports.lanes.laneSet(projectId);
-    const closes = (laneId: string): boolean =>
-      laneSet !== null && laneSet.lanes.some(lane => lane.id === laneId && lane.category === 'closed');
+    const refused =
+      by.kind === 'owner' ? new Map<string, string>() : await this.refusedRelocations(projectId, moves, by);
     const pending = (await this.ports.store.read()).cards.filter(card => {
       if (card.projectId !== projectId || moves[card.laneId] === undefined) return false;
-      if (!closes(moves[card.laneId] ?? '')) return true;
+      const why = refused.get(card.laneId);
+      if (why === undefined) return true;
       this.ports.diagnostics.warn(
-        `board: left ${formatTaskRef(card)} in ${card.laneId}: only the owner moves a card into ${moves[card.laneId] ?? ''}, a closed lane`,
+        `board: left ${formatTaskRef(card)} in ${card.laneId}: the daemon's relocation ${why}`,
       );
       return false;
     });
@@ -628,16 +638,31 @@ export class BoardService {
             backward: false,
             reason: reason ?? `lane ${current.laneId} was removed from the board`,
           },
-          { now: this.ports.clock.now(), actor: actorOf(by), ...viaOf(by) },
+          { now: this.ports.clock.now(), actor: actorOf(callerOf(by)), ...viaOf(callerOf(by)) },
         );
         const valid = requireValidCard({ ...next, laneId: to });
         return { task: valid, result: valid };
       });
       if (task === null) continue;
       moved.push(task.id);
-      await this.afterWrite(by, task, [projectId]);
+      await this.afterWrite(callerOf(by), task, [projectId]);
     }
     return moved;
+  }
+
+  /**
+   * The moves of a relocation that is not the owner's that only the owner may make (`relocationProblems`): into a
+   * closed lane or a lane the set lacks, forward out of a gate or past one. Judged from `by.before`, the lanes the
+   * cards were in, to the lanes as they are now. Removed lane → why.
+   */
+  private async refusedRelocations(
+    projectId: BoardProjectId,
+    moves: Readonly<Record<string, string>>,
+    by: Extract<RelocationAuthority, { kind: 'daemon' }>,
+  ): Promise<ReadonlyMap<string, string>> {
+    const after = (await this.ports.lanes.laneSet(projectId)) ?? { lanes: [] };
+    const problems = relocationProblems(by.before ?? after, after, moves);
+    return new Map(problems.map(problem => [problem.from, describeRelocationProblem(problem)]));
   }
 
   // -------------------------------------------------------------------------------------------------

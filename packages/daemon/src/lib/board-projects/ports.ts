@@ -25,18 +25,23 @@ export interface LaneSetStore {
   transact<T>(projectId: BoardProjectId, decide: (current: LaneSet | null) => LaneSetMutation<T>): Promise<T>;
 }
 
-/** Puts one proposal in front of the owner as a single agenda choice on the proposing session's board. */
+/**
+ * Puts one proposal in front of the owner as a single agenda choice on the proposing session's board, and takes it
+ * away again, saying why, once the proposal it names is gone: replaced, accepted elsewhere, or dropped.
+ */
 export interface LaneProposalAgenda {
   raise(sessionId: string, reference: string, card: LaneProposalCard): Promise<void>;
+  withdraw(sessionId: string, reference: string, note: string): Promise<void>;
 }
 
 /**
  * Whose a relocation is: the OWNER's (their own edit, or their Accept of a ferret's proposal), recorded as theirs
- * and free to close a card; or the DAEMON's (a boot migration), which never moves a card into a closed lane.
+ * and free to close a card; or the DAEMON's (a boot migration), which runs every check an owner-less move does
+ * (`relocationProblems`) against `before`, the lanes the cards were in (absent: the lanes as they are now).
  */
 export type RelocationAuthority =
   | { readonly kind: 'owner'; readonly via?: BoardActorVia }
-  | { readonly kind: 'daemon' };
+  | { readonly kind: 'daemon'; readonly before?: Pick<LaneSet, 'lanes'> };
 
 /**
  * Moves the cards of a deleted lane to the lane the edit named, in the board store (U2). Called after the

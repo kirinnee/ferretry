@@ -10049,13 +10049,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new GitRepositoryProbe(),
           [...COMMON_SCRATCH_ROOTS, tmpdir()],
         ),
-        new AgendaLaneAgenda({ raise: async (...parameters) => await agenda.raise(...parameters) }),
+        new AgendaLaneAgenda({
+          raise: async (...parameters) => await agenda.raise(...parameters),
+          resolveSource: async (...parameters) => await agenda.resolveSource(...parameters),
+        }),
         // A lane change that went live moves the cards of the lanes it removed, as whoever made it live.
         {
           relocate: async (projectId, moves, by, reason) => {
             await boardWorld.board.relocate(projectId, moves, reason, by);
           },
         },
+        // A lead may replace its own ferret's waiting lane proposal.
+        new StorageSessionParents(storage),
       );
       // BEFORE session control and Pack, which make a card with every start that has a brief. The agenda link
       // reads the agenda service lazily: it is built further down, and a board is only read once requests flow.

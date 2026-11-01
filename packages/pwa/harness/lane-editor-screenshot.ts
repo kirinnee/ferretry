@@ -3,7 +3,8 @@
  *
  * - `board-u15-*.png`: its "Proposed by <ferret>, not confirmed" banner;
  * - `lane-proposal-pending-*.png`: a ferret's change waiting for the owner, with what accepting it would do;
- * - `lane-proposal-accepted-*.png`: the same page once the owner pressed that banner's Accept.
+ * - `lane-proposal-confirm-*.png`: the second tap that Accept asks for, since the change moves cards;
+ * - `lane-proposal-accepted-*.png`: the same page once the owner accepted it.
  *
  *   bun harness/lane-editor-screenshot.ts [outDir]    # default /tmp/claude-1000
  *
@@ -124,7 +125,11 @@ try {
         const waiting = await open(context, theme, 'pending');
         await waiting.locator('[data-lane-warnings]').waitFor({ state: 'visible' });
         await shot(waiting, `lane-proposal-pending-${scheme}-${label}`);
-        await waiting.locator('[data-lane-banner="pending"] button').click();
+        await waiting.getByRole('button', { name: 'Accept', exact: true }).click();
+        await waiting.locator('[data-lane-confirm]').waitFor({ state: 'visible' });
+        await settle(waiting, 'confirm');
+        await shot(waiting, `lane-proposal-confirm-${scheme}-${label}`);
+        await waiting.getByRole('button', { name: 'Accept these changes' }).click();
         await waiting.locator('[data-lane-banner="pending"]').waitFor({ state: 'detached' });
         await waiting.getByText('Version 4 · confirmed').waitFor({ state: 'visible' });
         await settle(waiting, 'accepted');

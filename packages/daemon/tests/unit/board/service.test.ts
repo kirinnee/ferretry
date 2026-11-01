@@ -1777,28 +1777,28 @@ describe("relocating a removed lane's cards", () => {
   it('should move each card of a removed lane on that board once, and say why', async () => {
     // Arrange
     const { ports, service } = serviceWith([
-      card({ id: 'F1', laneId: 'plan' }),
+      card({ id: 'F1', laneId: 'review' }),
       card({ id: 'F2', laneId: 'implement' }),
-      card({ id: 'F3', laneId: 'plan', projectId: OTHER_PROJECT }),
+      card({ id: 'F3', laneId: 'review', projectId: OTHER_PROJECT }),
     ]);
 
     // Act
-    const first = await service.relocate(PROJECT, { plan: 'implement' });
-    const again = await service.relocate(PROJECT, { plan: 'implement' });
+    const first = await service.relocate(PROJECT, { review: 'merged' });
+    const again = await service.relocate(PROJECT, { review: 'merged' });
 
     // Assert
     should(first).eql(['F1']);
     should(again).eql([]);
-    should(stored(ports, 'F1').laneId).equal('implement');
+    should(stored(ports, 'F1').laneId).equal('merged');
     should(lastEvent(ports, 'F1')).match({
       type: 'moved',
-      from: 'plan',
-      to: 'implement',
+      from: 'review',
+      to: 'merged',
       backward: false,
-      reason: 'lane plan was removed from the board',
+      reason: 'lane review was removed from the board',
       actor: { kind: 'daemon' },
     });
-    should(stored(ports, 'F3').laneId).equal('plan');
+    should(stored(ports, 'F3').laneId).equal('review');
     should(ports.changes.events).eql([{ sessionId: 'lead', event: { projectId: PROJECT, taskIds: ['F1'] } }]);
   });
 
@@ -1821,19 +1821,59 @@ describe("relocating a removed lane's cards", () => {
     should(store.writes).eql([]);
   });
 
-  it('should never close a card on the daemon’s relocation, and say so', async () => {
-    // Arrange
-    const { ports, service } = serviceWith([card({ id: 'F1', laneId: 'tested' }), card({ id: 'F2', laneId: 'plan' })]);
+  it('should never close a card, free one from a gate, carry one past a gate or lose one on the daemon’s relocation', async () => {
+    // Arrange: the classic lanes; Plan/Design and To test are gates.
+    const { ports, service } = serviceWith([
+      card({ id: 'F1', laneId: 'tested' }),
+      card({ id: 'F2', laneId: 'plan' }),
+      card({ id: 'F3', laneId: 'todo' }),
+      card({ id: 'F4', laneId: 'merged' }),
+      card({ id: 'F5', laneId: 'review' }),
+    ]);
 
     // Act
-    const moved = await service.relocate(PROJECT, { tested: 'closed', plan: 'implement' });
+    const moved = await service.relocate(PROJECT, {
+      tested: 'closed',
+      plan: 'implement',
+      todo: 'implement',
+      merged: 'nowhere',
+      review: 'merged',
+    });
 
     // Assert
-    should(moved).eql(['F2']);
-    should(stored(ports, 'F1').laneId).equal('tested');
+    should(moved).eql(['F5']);
+    for (const [id, lane] of [
+      ['F1', 'tested'],
+      ['F2', 'plan'],
+      ['F3', 'todo'],
+      ['F4', 'merged'],
+    ] as const) {
+      should(stored(ports, id).laneId).equal(lane);
+    }
     should(
       ports.warnings.some(warning => warning.includes('F1 in tested') && warning.includes('only the owner')),
     ).be.true();
+    should(
+      ports.warnings.some(warning => warning.includes('F2 in plan') && warning.includes('out of a gate')),
+    ).be.true();
+    should(ports.warnings.some(warning => warning.includes('F3 in todo') && warning.includes('past plan'))).be.true();
+    should(
+      ports.warnings.some(warning => warning.includes('F4 in merged') && warning.includes('do not have')),
+    ).be.true();
+  });
+
+  it('should judge the daemon’s relocation from the lanes the cards were in', async () => {
+    // Arrange: To test is gone from the lanes now; the cards were in it, a gate, and go back to Released.
+    const { lanes } = await import('./support.ts');
+    const before = lanes(PROJECT);
+    const { ports, service } = serviceWith([card({ id: 'F1', laneId: 'tested' })]);
+
+    // Act
+    const moved = await service.relocate(PROJECT, { tested: 'released' }, undefined, { kind: 'daemon', before });
+
+    // Assert
+    should(moved).eql(['F1']);
+    should(stored(ports, 'F1').laneId).equal('released');
   });
 
   it('should move the cards of the owner’s relocation as the owner’s, closing them when it says so', async () => {
