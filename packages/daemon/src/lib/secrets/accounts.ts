@@ -1332,6 +1332,18 @@ export function narrowAccountVault(vault: AccountVault): {
   };
 }
 
+/**
+ * The mask name of one sealed value an account points at: `password`, `totp` (its first seed), `totp:<tf_id>` (any
+ * other seed), and — for a name that is neither, which `sealedNamesOf` never yields today — `totp:<the sealed name>`,
+ * so every value still gets a key of its own and is never left unmasked by sharing one.
+ */
+export function maskRoleOf(account: Pick<AccountRecord, 'seals' | 'factors'>, name: string): string {
+  if (name === account.seals.password) return 'password';
+  const seeded = (account.factors ?? []).filter(key => key.kind === 'totp' && key.seal !== undefined);
+  const position = seeded.findIndex(key => key.kind === 'totp' && key.seal === name);
+  return position === 0 ? 'totp' : `totp:${seeded[position]?.id ?? name}`;
+}
+
 /** The fields a card keeps in one account at once: the plain username, the secret password, or both. */
 export interface LoginFieldValues {
   readonly username?: string;
@@ -1394,14 +1406,7 @@ export class AccountVault implements AccountSealPort {
     // The same walk the sweep keeps ({@link sealedNamesOf}), so every value an account points at is masked under its
     // name; a field this does not know by role is still masked under the account, never left unmasked.
     for (const [id, account] of Object.entries(index.accounts)) {
-      const seeded = (account.factors ?? []).filter(key => key.kind === 'totp' && key.seal !== undefined);
-      for (const name of sealedNamesOf(account)) {
-        const position = seeded.findIndex(key => key.kind === 'totp' && key.seal === name);
-        // `sealedNamesOf` names only the password and seeded keys, so a name that is not the password is a seed.
-        const role =
-          name === account.seals.password ? 'password' : position <= 0 ? 'totp' : `totp:${seeded[position]?.id ?? name}`;
-        add(`login:${id}:${role}`, name);
-      }
+      for (const name of sealedNamesOf(account)) add(`login:${id}:${maskRoleOf(account, name)}`, name);
     }
     for (const [name, value] of opened) if (!named.has(name)) byName.set(`login:unnamed:${name}`, value);
     return byName;

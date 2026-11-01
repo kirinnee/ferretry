@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { TotpParametersSchema } from '@ferretry/protocol';
 import should from 'should';
-import { totpCode } from '../../../src/lib/secrets/index.ts';
+import { maskRoleOf, totpCode } from '../../../src/lib/secrets/index.ts';
 import { MemoryLoginIndex } from '../runtime/mounts/support.ts';
 import { CountingSealed, daemonOver } from './accounts-fixtures.ts';
 
@@ -104,5 +104,26 @@ describe('2FA keys in the account store', () => {
     should(fifth).match({ refusal: 'invalid_change' });
     should(clash).match({ refusal: 'invalid_change' });
     should(w.index.accounts.accounts.GITHUB?.factors).have.length(4);
+  });
+});
+
+describe('the mask name of a sealed value', () => {
+  it('should give the password, the first seed, other seeds and an unknown name each a key of their own', () => {
+    // Arrange — the "stub": a name that is neither the password nor a seed, which sealedNamesOf never yields today
+    const account = {
+      seals: { password: 'LPW' },
+      factors: [
+        { id: 'tf_aaaaaaaaaaaa', kind: 'totp', label: 'A', seal: 'LONE', addedAt: 't', addedBy: 'owner' },
+        { id: 'tf_bbbbbbbbbbbb', kind: 'totp', label: 'B', seal: 'LTWO', addedAt: 't', addedBy: 'owner' },
+        { id: 'tf_cccccccccccc', kind: 'sms', label: 'C', addedAt: 't', addedBy: 'owner' },
+      ],
+    } as never;
+
+    // Act
+    const roles = ['LPW', 'LONE', 'LTWO', 'LSTRAY', 'LOTHER'].map(name => maskRoleOf(account, name));
+
+    // Assert — all distinct, so no value shares a key with another and goes unmasked
+    should(roles).deepEqual(['password', 'totp', 'totp:tf_bbbbbbbbbbbb', 'totp:LSTRAY', 'totp:LOTHER']);
+    should(new Set(roles).size).equal(roles.length);
   });
 });
