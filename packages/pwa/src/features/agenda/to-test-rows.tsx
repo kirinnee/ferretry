@@ -3,19 +3,21 @@
  * chat task panel's Cards view draws one at a time; both draw this one row, so the gesture, the buttons and the reason
  * box are the same on both.
  *
- * - SWIPE RIGHT IS DONE, LEFT IS NOT GOOD, the same sideways swipe the agenda deck has (touch only, decided after the
+ * - SWIPE LEFT IS DONE, RIGHT IS NOT GOOD, DOWN IS SKIP, the same swipe the agenda deck has (touch only, decided after the
  *   same slop, committed past the same threshold, never started on something the reader presses or inside a sideways
- *   scroller). What letting go would do is kept as `data-swipe-*` and named (icon + word) in the area the row uncovers.
- * - THE BUTTONS ARE THE SAME TWO ANSWERS for a mouse, a keyboard and a screen reader.
+ *   scroller). DOWN is read only from the row's head (its title line and who-and-what line), the part that does not
+ *   scroll, so a drag down anywhere else is still the page scrolling. Skip changes nothing: it goes to the next card.
+ *   What letting go would do is kept as `data-swipe-*` and named (icon + word) in the area the row uncovers.
+ * - THE BUTTONS ARE THE SAME ANSWERS for a mouse, a keyboard and a screen reader, in the order of the swipes.
  * - NOTHING CLOSES A CARD HERE THAT THE BOARD DOES NOT: both answers go through `useBoardAnswers`, the Board's own flow.
  *   Done moves the card forward at once; Not good opens the Board's reason box and reopens the card with the owner's
  *   words as the ask.
  */
 
-import { Check, ThumbsDown, X } from 'lucide-react';
-import { type PointerEvent, useMemo, useRef, useState } from 'react';
+import { Check, SkipForward, ThumbsDown, X } from 'lucide-react';
+import { type PointerEvent, useRef, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
-import { swipeIntent, swipeThreshold } from '../../lib/agenda-inbox.ts';
+import { SWIPE_SLOP_PX, swipeIntent, swipeThreshold } from '../../lib/agenda-inbox.ts';
 import type { BoardActions } from '../../lib/board-actions.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonBoardCardPath } from '../../lib/pages/routes.ts';
@@ -72,24 +74,49 @@ export const toTestAnswersOver = ({
   notGood: row => requestMove(row.card, row.group, row.notGoodLaneId, 'not-good'),
 });
 
+type RowDirection = 'left' | 'right' | 'down';
+
 interface Drag {
   readonly dx: number;
+  readonly dy: number;
   readonly width: number;
 }
 
-/** A sideways swipe on one row: right is `onRight`, left is `onLeft`. */
-const useRowSwipe = (onRight: () => void, onLeft: () => void, disabled: boolean) => {
+interface RowIntent {
+  readonly direction: RowDirection | null;
+  readonly committed: boolean;
+}
+
+const SIDEWAYS = { left: true, right: true } as const;
+
+/** What letting go of a drag would do: sideways answers, and DOWN only where it is a skip. */
+const rowIntent = (drag: Drag, down: boolean): RowIntent => {
+  if (down && drag.dy > Math.abs(drag.dx)) {
+    if (drag.dy < SWIPE_SLOP_PX) return { direction: null, committed: false };
+    return { direction: 'down', committed: drag.dy >= swipeThreshold(drag.width) };
+  }
+  const { direction, committed } = swipeIntent(drag.dx, 0, drag.width, SIDEWAYS);
+  return { direction: direction === 'left' || direction === 'right' ? direction : null, committed };
+};
+
+/** The row's head: its title line and who-and-what line. It does not scroll, so a drag down there is a swipe. */
+const startsInRowHead = (target: EventTarget | null): boolean =>
+  target instanceof Element && target.closest('.fy-totest__top, .fy-totest__meta') !== null;
+
+/** A swipe on one row: left is `onLeft`, right is `onRight`, and down (from the head) is `onDown`. */
+const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void, disabled: boolean) => {
   const gesture = useRef<{
     readonly pointerId: number;
     readonly startX: number;
     readonly startY: number;
     readonly width: number;
-    moved: boolean;
+    readonly head: boolean;
+    axis: 'sideways' | 'vertical' | null;
     dx: number;
+    dy: number;
   } | null>(null);
   const swallowClick = useRef(false);
   const [drag, setDrag] = useState<Drag | null>(null);
-  const targets = useMemo(() => ({ left: true, right: true }), []);
 
   const onPointerDown = (event: PointerEvent<HTMLElement>): void => {
     swallowClick.current = false;
@@ -105,8 +132,10 @@ const useRowSwipe = (onRight: () => void, onLeft: () => void, disabled: boolean)
       startX: event.clientX,
       startY: event.clientY,
       width: event.currentTarget.getBoundingClientRect().width,
-      moved: false,
+      head: startsInRowHead(event.target),
+      axis: null,
       dx: 0,
+      dy: 0,
     };
   };
   const onPointerMove = (event: PointerEvent<HTMLElement>): void => {
@@ -114,32 +143,37 @@ const useRowSwipe = (onRight: () => void, onLeft: () => void, disabled: boolean)
     if (current === null || current.pointerId !== event.pointerId) return;
     const dx = event.clientX - current.startX;
     const dy = event.clientY - current.startY;
-    if (!current.moved) {
+    if (current.axis === null) {
       const lock = lockOf(dx, dy);
       if (lock === null) return;
-      if (lock === 'vertical') {
+      // Down belongs to the head; everywhere else a vertical drag is the page scrolling, and up is nothing.
+      if (lock === 'vertical' && !(current.head && dy > 0)) {
         gesture.current = null;
         return;
       }
-      current.moved = true;
+      current.axis = lock;
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
       } catch {
         // A pointer the browser already released cannot be captured; the drag still reads.
       }
     }
-    current.dx = dx;
-    setDrag({ dx, width: current.width });
+    current.dx = current.axis === 'sideways' ? dx : 0;
+    current.dy = current.axis === 'vertical' ? Math.max(0, dy) : 0;
+    setDrag({ dx: current.dx, dy: current.dy, width: current.width });
   };
   const onPointerUp = (event: PointerEvent<HTMLElement>): void => {
     const current = gesture.current;
     if (current === null || current.pointerId !== event.pointerId) return;
     gesture.current = null;
-    if (!current.moved) return;
+    if (current.axis === null) return;
     swallowClick.current = true;
-    const intent = swipeIntent(current.dx, 0, current.width, targets);
+    const intent = rowIntent({ dx: current.dx, dy: current.dy, width: current.width }, true);
     setDrag(null);
-    if (intent.committed) (intent.direction === 'right' ? onRight : onLeft)();
+    if (!intent.committed) return;
+    if (intent.direction === 'left') onLeft();
+    else if (intent.direction === 'right') onRight();
+    else onDown();
   };
   const onPointerCancel = (event: PointerEvent<HTMLElement>): void => {
     if (gesture.current?.pointerId !== event.pointerId) return;
@@ -153,29 +187,34 @@ const useRowSwipe = (onRight: () => void, onLeft: () => void, disabled: boolean)
     event.stopPropagation();
   };
 
-  const intent = drag === null ? null : swipeIntent(drag.dx, 0, drag.width, targets);
+  const intent = drag === null ? null : rowIntent(drag, true);
   // The row follows the finger, but never further than the commit distance plus a little give.
   const reach = drag === null ? 0 : swipeThreshold(drag.width) * 1.25;
-  const offset = drag === null ? 0 : Math.max(-reach, Math.min(reach, drag.dx));
+  const clamp = (value: number): number => Math.max(-reach, Math.min(reach, value));
   return {
     handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onClickCapture },
-    offset,
+    offsetX: drag === null ? 0 : clamp(drag.dx),
+    offsetY: drag === null ? 0 : clamp(drag.dy),
     intent,
   };
 };
 
-const ANSWER_WORD = { right: 'Done', left: 'Not good' } as const;
+const ANSWER_WORD = { left: 'Done', right: 'Not good', down: 'Skip' } as const;
 
 function ToTestRow({
   row,
   answers,
   now,
   onNavigate,
+  onSkip,
+  skipButton,
 }: {
   readonly row: ToTestCard;
   readonly answers: ToTestAnswers;
   readonly now: number | undefined;
   readonly onNavigate: (to: string) => void;
+  readonly onSkip: (row: ToTestCard) => void;
+  readonly skipButton: boolean;
 }) {
   const state = answers.answerFor(row.card);
   const busy = state.pressed !== null;
@@ -183,10 +222,10 @@ function ToTestRow({
   const swipe = useRowSwipe(
     () => done(row),
     () => notGood(row),
+    () => onSkip(row),
     busy,
   );
-  const direction =
-    swipe.intent?.direction === 'left' || swipe.intent?.direction === 'right' ? swipe.intent.direction : null;
+  const direction = swipe.intent?.direction ?? null;
   const release = releaseWords(row.card.task.shippedIn);
   const title = row.card.task.title;
   const empty = row.howToTest.trim() === '';
@@ -199,12 +238,16 @@ function ToTestRow({
       data-to-test={row.key}
     >
       <span aria-hidden="true" className="fy-totest__reveal" data-side="right" data-to-test-reveal="right">
-        <Check size={16} />
-        Done
+        <X size={16} />
+        Not good
       </span>
       <span aria-hidden="true" className="fy-totest__reveal" data-side="left" data-to-test-reveal="left">
-        Not good
-        <X size={16} />
+        Done
+        <Check size={16} />
+      </span>
+      <span aria-hidden="true" className="fy-totest__reveal" data-side="down" data-to-test-reveal="down">
+        <SkipForward size={16} />
+        Skip
       </span>
       <div
         className="fy-totest__surface"
@@ -212,7 +255,10 @@ function ToTestRow({
         {...swipe.handlers}
         style={{
           touchAction: 'pan-y',
-          transform: swipe.offset === 0 ? undefined : `translate3d(${swipe.offset}px, 0, 0)`,
+          transform:
+            swipe.offsetX === 0 && swipe.offsetY === 0
+              ? undefined
+              : `translate3d(${swipe.offsetX}px, ${swipe.offsetY}px, 0)`,
         }}
       >
         <div className="fy-totest__top">
@@ -227,6 +273,11 @@ function ToTestRow({
           <span className="fy-totest__age">{ageWords(row.since, now)}</span>
         </div>
         <p className="fy-totest__meta">
+          {row.taskName === null ? null : (
+            <span className="fy-totest__ferret" data-to-test-ferret="">
+              {row.taskName}
+            </span>
+          )}
           <span>{row.card.machine}</span>
           {release === null ? null : (
             <>
@@ -250,18 +301,6 @@ function ToTestRow({
         )}
         <div className="fy-totest__actions">
           <button
-            aria-label={`Not good: ${title}`}
-            className="kt-btn"
-            data-to-test-not-good=""
-            data-variant="ghost"
-            disabled={busy}
-            onClick={() => notGood(row)}
-            type="button"
-          >
-            {state.pressed === 'not-good' ? <Spinner size={14} /> : <ThumbsDown aria-hidden="true" size={14} />}
-            Not good
-          </button>
-          <button
             aria-label={`Done: ${title}`}
             className="kt-btn"
             data-to-test-done=""
@@ -273,6 +312,32 @@ function ToTestRow({
             {state.pressed === 'done' ? <Spinner size={14} /> : <Check aria-hidden="true" size={14} />}
             Done
           </button>
+          <button
+            aria-label={`Not good: ${title}`}
+            className="kt-btn"
+            data-to-test-not-good=""
+            data-variant="ghost"
+            disabled={busy}
+            onClick={() => notGood(row)}
+            type="button"
+          >
+            {state.pressed === 'not-good' ? <Spinner size={14} /> : <ThumbsDown aria-hidden="true" size={14} />}
+            Not good
+          </button>
+          {skipButton ? (
+            <button
+              aria-label={`Skip: ${title}`}
+              className="kt-btn"
+              data-to-test-skip=""
+              data-variant="ghost"
+              disabled={busy}
+              onClick={() => onSkip(row)}
+              type="button"
+            >
+              <SkipForward aria-hidden="true" size={14} />
+              Skip
+            </button>
+          ) : null}
         </div>
       </div>
     </li>
@@ -290,22 +355,40 @@ const ageWords = (since: string | null, now: number | undefined): string => {
   return `${Math.floor(hours / 24)}d`;
 };
 
-/** The rows of the cards waiting for a try, newest release first. */
+/**
+ * The rows of the cards waiting for a try, newest release first. `onSkip` is where Skip goes (the run's next card,
+ * the Cards view's next card) and gives the rows a Skip button; with none, a swipe down brings the next row into view.
+ */
 export function ToTestList({
   rows,
   answers,
   now,
   onNavigate,
+  onSkip,
 }: {
   readonly rows: readonly ToTestCard[];
   readonly answers: ToTestAnswers;
   readonly now: number | undefined;
   readonly onNavigate: (to: string) => void;
+  readonly onSkip?: (row: ToTestCard) => void;
 }) {
+  const list = useRef<HTMLUListElement>(null);
+  const scrollToNext = (row: ToTestCard): void => {
+    const current = [...(list.current?.children ?? [])].find(item => item.getAttribute('data-to-test') === row.key);
+    current?.nextElementSibling?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  };
   return (
-    <ul aria-label="Ready to test" className="fy-totest-list" data-to-test-list="">
+    <ul aria-label="Ready to test" className="fy-totest-list" data-to-test-list="" ref={list}>
       {rows.map(row => (
-        <ToTestRow answers={answers} key={row.key} now={now} onNavigate={onNavigate} row={row} />
+        <ToTestRow
+          answers={answers}
+          key={row.key}
+          now={now}
+          onNavigate={onNavigate}
+          onSkip={onSkip ?? scrollToNext}
+          row={row}
+          skipButton={onSkip !== undefined}
+        />
       ))}
     </ul>
   );

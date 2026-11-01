@@ -45,6 +45,8 @@ export interface BoardSideTabProps {
   readonly scope: DaemonSessionScope;
   /** Ferret callsigns by session id. */
   readonly callsigns: ReadonlyMap<string, string>;
+  /** The task each ferret was given, by session id (the Cards view's card to test names its ferret by it). */
+  readonly taskNames?: ReadonlyMap<string, string> | undefined;
   readonly now: number;
   readonly view: BoardSideView;
   readonly onView: (view: BoardSideView) => void;
@@ -144,6 +146,7 @@ export function BoardSideTab({
   chat,
   scope,
   callsigns,
+  taskNames,
   now,
   view,
   onView,
@@ -238,7 +241,14 @@ export function BoardSideTab({
       ) : (
         <>
           {view === 'cards' ? (
-            <BoardCardsView cards={cards} draw={draw} now={now} onOpenCard={onOpenCard} toTestAnswers={toTestAnswers} />
+            <BoardCardsView
+              cards={cards}
+              draw={draw}
+              now={now}
+              onOpenCard={onOpenCard}
+              taskNames={taskNames}
+              toTestAnswers={toTestAnswers}
+            />
           ) : view === 'kanban' ? (
             <div className={density === 'page' ? 'fy-board-kanban' : 'fy-board-side__kanban'} data-board-side-kanban="">
               {cards.lanes.map(lane => (

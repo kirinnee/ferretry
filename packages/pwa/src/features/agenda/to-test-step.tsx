@@ -30,7 +30,13 @@ export function ToTestStep({
           <StackPager index={index} noun="card" onNext={onNext} onPrevious={onPrevious} total={total} />
         </div>
       </div>
-      <ToTestList answers={answers} now={now} onNavigate={onNavigate} rows={[row]} />
+      <ToTestList
+        answers={answers}
+        now={now}
+        onNavigate={onNavigate}
+        onSkip={onNext === undefined ? undefined : () => onNext()}
+        rows={[row]}
+      />
     </section>
   );
 }

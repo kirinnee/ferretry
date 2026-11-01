@@ -85,7 +85,7 @@ const PHONE = {
 // A touch laptop: the swipe is touch only, so the desktop picture of it needs a touch screen to be held.
 const DESKTOP = { viewport: { width: 1_440, height: 900 }, hasTouch: true } as const;
 const LOCALE = { timezoneId: 'UTC', locale: 'en-US' } as const;
-const THEMES = ['studio-light', 'studio-dark'] as const;
+const THEMES = (process.env.FY_SHOT_THEMES ?? 'studio-light,studio-dark').split(',');
 type Form = 'phone' | 'desktop';
 
 const violations: string[] = [];
@@ -147,18 +147,18 @@ const touch = (
 
 const rowOf = (page: Page) => page.locator('[data-board-cards] [data-to-test]').first();
 
-/** A finger on the row's meta line, dragged by `dx`; the caller lets go or cancels. */
-const hold = async (page: Page, client: CDPSession, dx: number): Promise<{ x: number; y: number }> => {
+/** A finger on the row's meta line, dragged by `dx`, `dy`; the caller lets go or cancels. */
+const hold = async (page: Page, client: CDPSession, dx: number, dy = 0): Promise<{ x: number; y: number }> => {
   await rowOf(page).scrollIntoViewIfNeeded();
   const grip = await rowOf(page).locator('.fy-totest__meta').boundingBox();
   if (grip === null) return fail('the card to test has no place to grab');
   const x = grip.x + 20;
   const y = grip.y + grip.height / 2;
   await touch(client, 'touchStart', x, y);
-  await touch(client, 'touchMove', x + Math.sign(dx) * 14, y);
-  for (let step = 1; step <= 6; step += 1) await touch(client, 'touchMove', x + (dx * step) / 6, y);
+  await touch(client, 'touchMove', x + Math.sign(dx) * 14, y + Math.sign(dy) * 14);
+  for (let step = 1; step <= 6; step += 1) await touch(client, 'touchMove', x + (dx * step) / 6, y + (dy * step) / 6);
   await page.waitForTimeout(120);
-  return { x: x + dx, y };
+  return { x: x + dx, y: y + dy };
 };
 
 const pressed = (page: Page): Promise<string | null> =>
@@ -171,6 +171,11 @@ for (const form of ['phone', 'desktop'] as const) {
       ...LOCALE,
       colorScheme: theme.endsWith('-dark') ? 'dark' : 'light',
     });
+    // The desktop shell publishes the stored theme, so the pack under test is stored too.
+    await context.addInitScript(
+      ([family, mode]) => localStorage.setItem('fy-theme-v1', JSON.stringify({ family, mode, textScale: 'default' })),
+      [theme.slice(0, theme.lastIndexOf('-')), theme.slice(theme.lastIndexOf('-') + 1)] as const,
+    );
 
     // The default: the panel opens on the Cards, the card waiting for a try first.
     const page = await open(context, theme, 'cards');
@@ -194,13 +199,14 @@ for (const form of ['phone', 'desktop'] as const) {
     );
     await shot(page, 'cards', form, theme);
 
-    // Mid-swipe both ways.
+    // Mid-swipe all three ways.
     const client = await context.newCDPSession(page);
     for (const [name, dx, aim, direction] of [
-      ['swipe-right', 150, 'Done', 'right'],
-      ['swipe-left', -150, 'Not good', 'left'],
+      ['swipe-left', -150, 'Done', 'left'],
+      ['swipe-right', 150, 'Not good', 'right'],
+      ['swipe-down', 0, 'Skip', 'down'],
     ] as const) {
-      await hold(page, client, dx);
+      await hold(page, client, dx, direction === 'down' ? 150 : 0);
       check(
         (await row.getAttribute('data-swipe-direction')) === direction &&
           (await row.getAttribute('data-swipe-answer')) === aim,
@@ -220,21 +226,21 @@ for (const form of ['phone', 'desktop'] as const) {
       );
     }
 
-    // Past the threshold: right is Done at once, left opens the reason box.
-    const end = await hold(page, client, 300);
+    // Past the threshold: left is Done at once, right opens the reason box.
+    const end = await hold(page, client, -300);
     await touch(client, 'touchEnd', end.x, end.y);
     await page.waitForTimeout(300);
     const moves = await page.evaluate(() => (window as unknown as { __moves: { to: string }[] }).__moves);
     check(
       moves.length === 1 && moves[0]?.to === 'closed',
-      `${form} ${theme}: a right swipe sent ${JSON.stringify(moves)}`,
+      `${form} ${theme}: a left swipe sent ${JSON.stringify(moves)}`,
     );
-    const away = await hold(page, client, -300);
+    const away = await hold(page, client, 300);
     await touch(client, 'touchEnd', away.x, away.y);
     await page.waitForTimeout(300);
     check(
       (await page.locator('[role="dialog"]').count()) === 1,
-      `${form} ${theme}: a left swipe did not open the reason box`,
+      `${form} ${theme}: a right swipe did not open the reason box`,
     );
     await shot(page, 'reason', form, theme);
     await page.keyboard.press('Escape');

@@ -41,6 +41,8 @@ export interface ChatTasksProps {
   readonly chat: BoardChat;
   readonly scope: DaemonSessionScope;
   readonly callsigns: ReadonlyMap<string, string>;
+  /** The task each ferret was given, by session id: a card to test names its ferret by this, never by callsign. */
+  readonly taskNames?: ReadonlyMap<string, string>;
   /** A phone shows the open card as a page of its own, over the chat. */
   readonly phone: boolean;
   readonly now: number;
@@ -77,6 +79,7 @@ export function ChatTasks({
   chat,
   scope,
   callsigns,
+  taskNames,
   phone,
   now,
   onNavigate,
@@ -200,6 +203,7 @@ export function ChatTasks({
       <BoardSideTab
         callsigns={callsigns}
         chat={chat}
+        taskNames={taskNames}
         answerFor={answerFor}
         density={expanded ? 'page' : 'side'}
         doneFor={doneFor}

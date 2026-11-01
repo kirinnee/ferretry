@@ -27,7 +27,7 @@ import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/
 import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
-import { toTestCards } from '../src/lib/to-test-inbox.ts';
+import { toTestCards, withTaskName } from '../src/lib/to-test-inbox.ts';
 import { AppTabBar } from '../src/shell/app-bar.tsx';
 import { PageScrollRegion } from '../src/shell/page-scroll-region.tsx';
 import { PullToPaletteRegion } from '../src/shell/pull-to-palette-region.tsx';
@@ -333,11 +333,13 @@ const CLEAR_PORT: ClearPort = {
 };
 /** Cards waiting for the owner's try, from a real board model; nothing is sent, a move is only noted on the window. */
 const TO_TEST_VIEW = ['to-test', 'quick-to-test'].includes(new URLSearchParams(location.search).get('view') ?? '');
+const LEAD_TASKS = new Map([['mvuc7tsf-0c3d50df', 'Credentials Build Lead']]);
 const TO_TEST = TO_TEST_VIEW
   ? toTestCards(
       await boardModelOf([
         boardCard('F61', {
           laneId: 'tested',
+          owner: 'mvuc7tsf-0c3d50df',
           title: 'Pairing a second phone',
           shippedIn: { version: '5.4.0', tag: 'v5.4.0', at: ago(90) },
           howToTest:
@@ -345,12 +347,13 @@ const TO_TEST = TO_TEST_VIEW
         }),
         boardCard('F58', {
           laneId: 'tested',
+          owner: 'mvuc7tsf-0c3d50df',
           title: 'Faster board loading',
           shippedIn: { version: '5.3.2', tag: 'v5.3.2', at: ago(60 * 26) },
           howToTest: '1. Open the Board on a phone.\n2. It should draw in under a second.',
         }),
       ]),
-    )
+    ).map(row => withTaskName(row, LEAD_TASKS))
   : [];
 const TO_TEST_HOST: ToTestHost = {
   actions: {

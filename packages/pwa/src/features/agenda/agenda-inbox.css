@@ -1223,7 +1223,7 @@
   padding: 0;
   list-style: none;
 }
-/* The row's own ground shows as the surface slides: green for Done, red for Not good. */
+/* The row's own ground shows as the surface slides: green for Done (left), red for Not good (right), quiet for Skip (down). */
 .fy-totest {
   position: relative;
   min-width: 0;
@@ -1232,13 +1232,16 @@
   border-radius: var(--radius-control);
   background: var(--surface);
 }
-.fy-totest[data-swipe-direction='right'] {
+.fy-totest[data-swipe-direction='left'] {
   background: var(--ok-bg);
   border-color: var(--ok-border);
 }
-.fy-totest[data-swipe-direction='left'] {
+.fy-totest[data-swipe-direction='right'] {
   background: var(--err-bg);
   border-color: var(--err-border);
+}
+.fy-totest[data-swipe-direction='down'] {
+  background: var(--surface-2);
 }
 .fy-totest[data-swipe-committed] {
   filter: saturate(1.4);
@@ -1257,13 +1260,22 @@
 .fy-totest__reveal[data-side='left'] {
   inset: 0 0 0 auto;
 }
-.fy-totest[data-swipe-direction='right'] .fy-totest__reveal[data-side='right'] {
-  display: flex;
-  color: var(--ok);
+.fy-totest__reveal[data-side='down'] {
+  inset: 0 0 auto 0;
+  justify-content: center;
+  padding: var(--gap-sm) var(--gap-md);
 }
 .fy-totest[data-swipe-direction='left'] .fy-totest__reveal[data-side='left'] {
   display: flex;
+  color: var(--ok);
+}
+.fy-totest[data-swipe-direction='right'] .fy-totest__reveal[data-side='right'] {
+  display: flex;
   color: var(--err);
+}
+.fy-totest[data-swipe-direction='down'] .fy-totest__reveal[data-side='down'] {
+  display: flex;
+  color: var(--muted);
 }
 .fy-totest__surface {
   display: flex;
@@ -1277,6 +1289,11 @@
 }
 .fy-totest__surface[data-dragging] {
   transition: none;
+}
+/* The head does not scroll, so a drag down from it is Skip rather than the page moving. */
+.fy-totest__top,
+.fy-totest__meta {
+  touch-action: none;
 }
 .fy-totest__top {
   display: flex;
@@ -1310,13 +1327,18 @@
   color: var(--muted);
   font-size: var(--text-sm);
 }
+.fy-totest__ferret {
+  flex-basis: 100%;
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+}
 .fy-totest__how {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: var(--gap-xs);
   border-radius: var(--radius-control);
-  background: var(--border-soft);
+  background: var(--surface-2);
   padding: var(--gap-sm) var(--gap-md);
   user-select: text;
   -webkit-user-select: text;

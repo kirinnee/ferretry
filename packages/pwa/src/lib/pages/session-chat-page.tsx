@@ -126,6 +126,7 @@ import { useComposerReferenceCatalogs } from '../composer-reference-catalogs.ts'
 import type { ConnectionHealthState } from '../connection-health.ts';
 import type { ChatWidthPreference } from '../controls.ts';
 import type { DaemonConnection } from '../daemon-connection.ts';
+import { sessionTaskNames } from '../to-test-inbox.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts';
 import { answerHarnessDialog } from '../harness-dialogs.ts';
@@ -643,6 +644,7 @@ export function SessionChatPage({
     }
     return names;
   }, [daemonSessions]);
+  const taskNames = useMemo(() => sessionTaskNames(daemonSessions ?? []), [daemonSessions]);
   const openTasks = useCallback(() => showInfo(hasBoard ? 'tasks' : 'overview'), [showInfo, hasBoard]);
   // Where a proved reference opens: the workspace's tabs, and the context rail for a skill. ONE click
   // behaviour still — Markdown calls the surface — with these as its destinations.
@@ -1439,6 +1441,7 @@ export function SessionChatPage({
                       tasks: (
                         <ChatTasks
                           callsigns={callsigns}
+                          taskNames={taskNames}
                           chat={cardChat}
                           machine={{ connection, name: machineName }}
                           now={Date.now()}
@@ -1729,6 +1732,7 @@ export function SessionChatPage({
         <section aria-label="Tasks" className="fy-board-full" data-board-full="">
           <ChatTasks
             callsigns={callsigns}
+            taskNames={taskNames}
             chat={cardChat}
             expanded
             machine={{ connection, name: machineName }}

@@ -279,6 +279,7 @@ function Harness() {
         ports={{ sendMessage: async () => undefined }}
         scope={scope}
         store={store}
+        taskNames={new Map(Object.entries(NAMES))}
       />
     );
   const info = (

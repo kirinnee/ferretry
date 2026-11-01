@@ -7,7 +7,9 @@
  * card: the moves are the board's own (`useBoardAnswers`), so no new way to close a card exists.
  */
 
-import type { ReleasedIn } from '@ferretry/protocol';
+import type { ReleasedIn, SessionView } from '@ferretry/protocol';
+import { sessionTask } from '../shell/session-title.ts';
+import { displayCallsign } from './callsign.ts';
 import { doneLaneOf, notGoodLaneOf } from './board-done.ts';
 import type { BoardModel } from './board-model.ts';
 import type { BoardCardOf, BoardGroupOf } from './board-view.ts';
@@ -22,6 +24,8 @@ export interface ToTestCard {
   /** Where Not good sends it back. */
   readonly notGoodLaneId: string;
   readonly howToTest: string;
+  /** The task the ferret that worked on it was given ("Credentials Build Lead"), never its callsign; `null` when unknown. */
+  readonly taskName: string | null;
   /** When it started waiting for the owner: its release, else when it was last touched. */
   readonly since: string | null;
 }
@@ -49,8 +53,28 @@ export const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | n
     doneLaneId,
     notGoodLaneId,
     howToTest: card.task.howToTest,
+    taskName: null,
     since: sinceOf(card),
   };
+};
+
+/** Each session's task by session id: the work it was given. A session with none (or only its callsign) is left out. */
+export const sessionTaskNames = (sessions: readonly Pick<SessionView, 'config'>[]): ReadonlyMap<string, string> => {
+  const names = new Map<string, string>();
+  for (const { config } of sessions) {
+    const task = sessionTask(config.name);
+    if (task !== '' && task.toLowerCase() !== displayCallsign(config.teammate).toLowerCase())
+      names.set(config.id, task);
+  }
+  return names;
+};
+
+/** The card with the task name of the ferret on it (its assignee, else its owner); the same card when nothing is known. */
+export const withTaskName = (row: ToTestCard, names: ReadonlyMap<string, string> | undefined): ToTestCard => {
+  if (names === undefined) return row;
+  const { assignee, owner } = row.card.task;
+  const taskName = (assignee === null ? undefined : names.get(assignee)) ?? names.get(owner) ?? null;
+  return taskName === row.taskName ? row : { ...row, taskName };
 };
 
 /**
