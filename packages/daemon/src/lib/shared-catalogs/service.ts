@@ -37,6 +37,10 @@ import {
   type OwnedCatalogItem,
   type OwnedCatalogList,
   type PublishedCatalogItem,
+  type QuickAddAnswer,
+  type QuickAddRequest,
+  type QuickAddUndone,
+  type SharedItemPreview,
   type SharedCatalogFile,
   SharedCatalogFileSchema,
   type SharedCatalogItem,
@@ -80,6 +84,7 @@ import {
   withNewVersion,
   withWithdrawn,
   withoutCatalog,
+  withoutEntry,
 } from './document.ts';
 import {
   type FrozenBody,
@@ -108,6 +113,7 @@ import type {
 } from './ports.ts';
 import { CatalogRefusal } from './refusal.ts';
 import { readSkillFolder, type SkillTreePort } from './skill-source.ts';
+import { UndoLedger } from './undo-ledger.ts';
 
 export interface SharedCatalogDeps {
   readonly documents: CatalogDocumentStore;
@@ -160,20 +166,49 @@ function randomId(crypto: RelayCrypto, prefix: 'cat_' | 'itm_'): string {
 
 const instant = (ms: number): string => new Date(ms).toISOString();
 
+/** A source with nothing to say about itself and no summary given: one-tap Add answers `review` instead of failing. */
+class NeedsSummary extends CatalogRefusal {}
+
+const sameSource = (left: CatalogSourceReference, right: CatalogSourceReference): boolean =>
+  left.kind === 'skill'
+    ? right.kind === 'skill' && left.path === right.path
+    : right.kind === 'mcp' && left.id === right.id;
+
+/** The label cut by whole characters until `around(cut)` is a label the contract accepts (it counts UTF-16 units, not characters). */
+function cutToFit(label: string, around: (cut: string) => string): string {
+  const characters = Array.from(label);
+  while (characters.length > 0 && !CatalogLabelSchema.safeParse(around(characters.join('').trimEnd())).success)
+    characters.pop();
+  return characters.join('').trimEnd();
+}
+
+/** The names the default catalog may take, in order: "<label>'s skills", then the same with 2 to 9, each a valid label. */
+export function defaultCatalogNames(label: string): readonly string[] {
+  return [
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(number => {
+      const tail = number === 1 ? "'s skills" : `'s skills ${number}`;
+      return `${cutToFit(label, cut => `${cut}${tail}`)}${tail}`;
+    }),
+  ];
+}
+
 /** The name this machine gives itself as a publisher: one clean line, at most 80 characters. */
 export function publisherLabel(name: string): string {
   const cleaned = Array.from(name.trim())
     .filter(character => CatalogLabelSchema.safeParse(character).success)
     .join('')
     .trim();
-  const bounded = Array.from(cleaned).slice(0, 80).join('').trim();
+  const bounded = cutToFit(cleaned, cut => cut);
   return bounded === '' ? 'This machine' : bounded;
 }
 
 export class SharedCatalogService {
   #queue: Promise<unknown> = Promise.resolve();
+  readonly #ledger: UndoLedger;
 
-  constructor(private readonly deps: SharedCatalogDeps) {}
+  constructor(private readonly deps: SharedCatalogDeps) {
+    this.#ledger = new UndoLedger(deps.crypto);
+  }
 
   // ── Reads ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -320,21 +355,259 @@ export class SharedCatalogService {
       const identity = await this.#identity();
       const document = await this.#writable();
       const catalog = findCatalog(document, catalogId);
-      const item = findItem(document, itemId);
-      const entry = catalog.entries.find(candidate => candidate.itemId === itemId);
-      const bindings: Record<number, CatalogBinding> = {};
-      if (entry === undefined)
-        for (const stored of item.versions) {
-          const shared = await this.#sharedCopy(item, stored);
-          const own = await canonicalOrRefuse(
-            this.deps.crypto,
-            itemForCatalog(shared, { catalogId, itemId, itemVersion: stored.version }),
-          );
-          bindings[stored.version] = { digest: own.digest, size: own.size };
-        }
-      const next = withListedItem(document, catalogId, itemId, version, bindings, instant(this.deps.now()));
+      const next = await this.#listExisting(document, catalog.id, findItem(document, itemId), version);
       await this.#commit(next);
       return await this.#published(next, identity, findCatalog(next, catalogId), itemId);
+    });
+  }
+
+  /** An item this machine keeps, listed by one more catalog (or again): every version bound for it, current as the floor. */
+  async #listExisting(
+    document: CatalogsDocument,
+    catalogId: string,
+    item: StoredSharedItem,
+    version: number,
+  ): Promise<CatalogsDocument> {
+    const catalog = findCatalog(document, catalogId);
+    const bindings: Record<number, CatalogBinding> = {};
+    if (!catalog.entries.some(candidate => candidate.itemId === item.itemId))
+      for (const stored of item.versions) {
+        const shared = await this.#sharedCopy(item, stored);
+        const own = await canonicalOrRefuse(
+          this.deps.crypto,
+          itemForCatalog(shared, { catalogId, itemId: item.itemId, itemVersion: stored.version }),
+        );
+        bindings[stored.version] = { digest: own.digest, size: own.size };
+      }
+    return withListedItem(document, catalogId, item.itemId, version, bindings, instant(this.deps.now()));
+  }
+
+  // ── One-tap Add, and Undo ──────────────────────────────────────────────────────────────────────
+
+  /**
+   * Lists a source or a kept item in the default catalog, only if it is CLEAN, and says how to take it back.
+   * Clean is decided here, from the one frozen object that is stored: any warning, any file left out, a missing
+   * summary, or a kept version with warnings answers `review` and writes nothing.
+   */
+  quickAdd(caller: string, request: QuickAddRequest): Promise<QuickAddAnswer> {
+    return this.#serially(async () => {
+      const identity = await this.#identity();
+      const document = await this.#writable();
+      const reference = 'source' in request ? await this.#resolve(request.source) : undefined;
+      const matches =
+        'itemId' in request
+          ? [findItem(document, request.itemId)]
+          : document.items.filter(item => sameSource(currentVersion(item).source, reference as CatalogSourceReference));
+      if (matches.length > 1)
+        throw new CatalogRefusal(
+          'source_ambiguous',
+          `More than one kept item is this source: ${matches.map(item => item.itemId).join(', ')}. Name one by its itemId.`,
+        );
+      const kept = matches[0];
+      return kept === undefined
+        ? await this.#quickAddNew(caller, identity, document, reference as CatalogSourceReference)
+        : await this.#quickAddKept(caller, identity, document, kept);
+    });
+  }
+
+  async #quickAddNew(
+    caller: string,
+    identity: DaemonIdentity,
+    document: CatalogsDocument,
+    reference: CatalogSourceReference,
+  ): Promise<QuickAddAnswer> {
+    let prepared: Prepared;
+    try {
+      prepared = await this.#prepare({ reference });
+    } catch (error) {
+      if (error instanceof NeedsSummary) return { outcome: 'review', reasons: ['needs-summary'] };
+      throw error;
+    }
+    const frozen = freezeItem(this.#input(identity, NORMALISED_CATALOG_ID, prepared, NORMALISED_ITEM_ID, 1));
+    const reading = readItem(frozen);
+    const reasons = [
+      ...(reading.warnings.length > 0 ? (['warnings'] as const) : []),
+      ...(prepared.problems.length > 0 ? (['problems'] as const) : []),
+    ];
+    if (reasons.length > 0) {
+      const print = await fingerprint(this.deps.crypto, frozen);
+      return {
+        outcome: 'review',
+        reasons,
+        preview: {
+          kind: prepared.body.kind,
+          name: prepared.name,
+          summary: prepared.summary,
+          ...(prepared.harness === undefined ? {} : { harness: prepared.harness }),
+          location: prepared.location,
+          version: 1,
+          digest: print.contentDigest,
+          size: print.size,
+          ...reading,
+          problems: prepared.problems,
+        },
+      };
+    }
+    const target = this.#defaultCatalog(document);
+    const itemId = randomId(this.deps.crypto, 'itm_');
+    const version = await this.#versionOf(frozen, prepared, itemId, 1, [target.catalogId]);
+    const now = instant(this.deps.now());
+    const item: StoredSharedItem = {
+      itemId,
+      kind: prepared.body.kind,
+      name: prepared.name,
+      ...(prepared.harness === undefined ? {} : { harness: prepared.harness }),
+      ownSummary: prepared.ownSummary,
+      createdAt: now,
+      current: 1,
+      versions: [version.stored(now)],
+    };
+    const next = withNewItem(target.document, target.catalogId, item, now);
+    await this.deps.blobs.put(version.contentDigest, version.text);
+    await this.#commit(next);
+    return this.#added(caller, next, target, item, { newItem: true, sourceChanged: false, relisted: false });
+  }
+
+  async #quickAddKept(
+    caller: string,
+    identity: DaemonIdentity,
+    document: CatalogsDocument,
+    kept: StoredSharedItem,
+  ): Promise<QuickAddAnswer> {
+    const own = document.catalogs
+      .find(catalog => catalog.id === document.defaultCatalogId)
+      ?.entries.find(entry => entry.itemId === kept.itemId);
+    if (own !== undefined && own.withdrawnAt === undefined && document.defaultCatalogId !== undefined)
+      return {
+        outcome: 'already',
+        catalogId: document.defaultCatalogId,
+        itemId: kept.itemId,
+        itemVersion: kept.current,
+      };
+    const shared = await this.#sharedCopy(kept, currentVersion(kept));
+    if (readItem(shared).warnings.length > 0)
+      return { outcome: 'review', reasons: ['warnings'], preview: await this.#currentPreview(kept) };
+    const target = this.#defaultCatalog(document);
+    const next = await this.#listExisting(target.document, target.catalogId, kept, kept.current);
+    const { state } = await this.#sourceState(identity, kept, {
+      itemId: kept.itemId,
+      addedAt: instant(this.deps.now()),
+    });
+    await this.#commit(next);
+    return this.#added(caller, next, target, kept, {
+      newItem: false,
+      sourceChanged: state === 'changed',
+      relisted: own !== undefined,
+    });
+  }
+
+  #added(
+    caller: string,
+    next: CatalogsDocument,
+    target: { readonly catalogId: string; readonly created: boolean },
+    item: StoredSharedItem,
+    how: { readonly newItem: boolean; readonly sourceChanged: boolean; readonly relisted: boolean },
+  ): QuickAddAnswer {
+    const catalog = findCatalog(next, target.catalogId);
+    const stored = itemOf(next, item.itemId);
+    const current = currentVersion(stored);
+    const now = this.deps.now();
+    const undo = this.#ledger.issue(
+      {
+        catalogId: catalog.id,
+        itemId: item.itemId,
+        revisionAfterAdd: catalog.revision,
+        createdItem: how.newItem,
+        createdCatalog: target.created,
+        relisted: how.relisted,
+      },
+      caller,
+      now,
+    );
+    return {
+      outcome: 'added',
+      catalog: { catalogId: catalog.id, name: catalog.name, revision: catalog.revision, created: target.created },
+      itemId: item.itemId,
+      itemVersion: current.version,
+      digest: bindingOf(current, catalog.id).digest,
+      newItem: how.newItem,
+      sourceChanged: how.sourceChanged,
+      undo: { token: undo.token, expiresAt: instant(undo.expiresAt) },
+    };
+  }
+
+  /** The default catalog, or the document with the one this machine would make: "<label>'s skills", numbered when taken. */
+  #defaultCatalog(document: CatalogsDocument): {
+    readonly document: CatalogsDocument;
+    readonly catalogId: string;
+    readonly created: boolean;
+  } {
+    if (document.defaultCatalogId !== undefined)
+      return { document, catalogId: document.defaultCatalogId, created: false };
+    const label = publisherLabel(this.deps.identity.publisherName());
+    const name = defaultCatalogNames(label).find(
+      candidate => !document.catalogs.some(catalog => catalog.name === candidate),
+    );
+    if (name === undefined)
+      throw new CatalogRefusal(
+        'name_taken',
+        'Every name for the default catalog is taken. Name one of your catalogs the default.',
+      );
+    const id = randomId(this.deps.crypto, 'cat_');
+    const made = withCatalog(document, {
+      id,
+      name,
+      description: '',
+      publisherName: label,
+      now: instant(this.deps.now()),
+    });
+    return { document: withDefault(made, id), catalogId: id, created: true };
+  }
+
+  /** Takes an add back while its token holds: out with no trace if nobody was shown it, else withdrawn as usual. */
+  undoQuickAdd(caller: string, token: string): Promise<QuickAddUndone> {
+    return this.#serially(async () => {
+      const record = this.#ledger.peek(token, caller, this.deps.now());
+      const gone = () =>
+        new CatalogRefusal(
+          'undo_expired',
+          'That Undo has run out, or was already used. Withdraw the item from the catalog instead.',
+        );
+      if (record === undefined) throw gone();
+      const document = await this.#writable();
+      const catalog = document.catalogs.find(candidate => candidate.id === record.catalogId);
+      const entry = catalog?.entries.find(candidate => candidate.itemId === record.itemId);
+      if (catalog === undefined || entry === undefined || entry.withdrawnAt !== undefined) {
+        this.#ledger.spend(token);
+        throw gone();
+      }
+      const now = instant(this.deps.now());
+      const retract =
+        !record.relisted &&
+        catalog.revision === record.revisionAfterAdd &&
+        !this.#ledger.wasSigned(catalog.id, catalog.revision);
+      if (retract) {
+        const taken = withoutEntry(document, catalog.id, record.itemId, now, record.createdItem);
+        await this.#commit(taken.document);
+        this.#ledger.spend(token);
+        return {
+          catalogId: catalog.id,
+          itemId: record.itemId,
+          mode: 'retracted',
+          revision: findCatalog(taken.document, catalog.id).revision,
+          itemRemoved: taken.itemRemoved,
+        };
+      }
+      const next = withWithdrawn(document, catalog.id, record.itemId, now);
+      await this.#commit(next);
+      this.#ledger.spend(token);
+      return {
+        catalogId: catalog.id,
+        itemId: record.itemId,
+        mode: 'withdrawn',
+        revision: findCatalog(next, catalog.id).revision,
+        itemRemoved: false,
+      };
     });
   }
 
@@ -388,9 +661,13 @@ export class SharedCatalogService {
 
   // ── Export ─────────────────────────────────────────────────────────────────────────────────────
 
-  async exportCatalog(catalogId: string, request: ExportCatalogRequest): Promise<SharedCatalogFile> {
+  exportCatalog(catalogId: string, request: ExportCatalogRequest): Promise<SharedCatalogFile> {
+    return this.#serially(() => this.#export(catalogId, request));
+  }
+
+  async #export(catalogId: string, request: ExportCatalogRequest): Promise<SharedCatalogFile> {
     const identity = await this.#identity();
-    const document = await this.#document();
+    const document = await this.#writable();
     const catalog = findCatalog(document, catalogId);
     const live = liveEntries(catalog);
     const chosen = new Set(request.itemIds ?? live.map(entry => entry.itemId));
@@ -438,10 +715,12 @@ export class SharedCatalogService {
   // ── What a member reads ────────────────────────────────────────────────────────────────────────
 
   /** The catalog's signed manifest as it stands, made exactly as an export makes it. */
-  async signedManifest(catalogId: string): Promise<SignedCatalogManifest> {
-    const identity = await this.#identity();
-    const document = await this.#document();
-    return await this.#signedManifest(document, identity, findCatalog(document, catalogId));
+  signedManifest(catalogId: string): Promise<SignedCatalogManifest> {
+    return this.#serially(async () => {
+      const identity = await this.#identity();
+      const document = await this.#writable();
+      return await this.#signedManifest(document, identity, findCatalog(document, catalogId));
+    });
   }
 
   /** One frozen version of a live item, checked against the digests the document lists for it. */
@@ -501,6 +780,7 @@ export class SharedCatalogService {
       ),
     });
     if (!signed.ok) throw new CatalogRefusal('export_failed', signed.reason);
+    this.#ledger.noteSigned(catalog.id, catalog.revision);
     return signed.value;
   }
 
@@ -605,10 +885,14 @@ export class SharedCatalogService {
 
   /** What an installer would see of the version a catalog would list: read from the frozen copy, never the source. */
   async #reviewCurrent(catalog: StoredCatalog, item: StoredSharedItem): Promise<CatalogItemPreview> {
+    return { catalogId: catalog.id, ...(await this.#currentPreview(item)) };
+  }
+
+  /** The preview of an item's current version, read from its frozen copy. */
+  async #currentPreview(item: StoredSharedItem): Promise<SharedItemPreview> {
     const current = currentVersion(item);
     const shared = await this.#sharedCopy(item, current);
     return {
-      catalogId: catalog.id,
       itemId: item.itemId,
       kind: item.kind,
       name: item.name,
@@ -690,7 +974,23 @@ export class SharedCatalogService {
     version: number,
     listedBy: readonly string[],
   ) {
-    const item = freezeItem(this.#input(identity, catalog.id, prepared, itemId, version));
+    return await this.#versionOf(
+      freezeItem(this.#input(identity, catalog.id, prepared, itemId, version)),
+      prepared,
+      itemId,
+      version,
+      listedBy,
+    );
+  }
+
+  /** The stored version of an item already frozen: the SAME object a clean check read is the one stored. */
+  async #versionOf(
+    item: SharedCatalogItem,
+    prepared: Prepared,
+    itemId: string,
+    version: number,
+    listedBy: readonly string[],
+  ) {
     const shared = await canonicalOrRefuse(this.deps.crypto, sharedCopy(item));
     const bindings: Record<string, CatalogBinding> = {};
     for (const catalogId of listedBy) {
@@ -735,6 +1035,7 @@ export class SharedCatalogService {
   async #prepare(
     from:
       | { readonly source: CatalogItemSource; readonly summary?: string | undefined }
+      | { readonly reference: CatalogSourceReference; readonly summary?: undefined }
       | { readonly item: StoredSharedItem; readonly entry: CatalogEntry },
   ): Promise<Prepared> {
     const existing = 'item' in from ? from.item : undefined;
@@ -744,7 +1045,7 @@ export class SharedCatalogService {
     const read =
       'item' in from
         ? await this.#read(reference as CatalogSourceReference)
-        : await this.#read(await this.#resolve(from.source));
+        : await this.#read('reference' in from ? from.reference : await this.#resolve(from.source));
     if (existing !== undefined && existing.name !== read.name)
       throw new CatalogRefusal(
         'source_refused',
@@ -775,7 +1076,7 @@ export class SharedCatalogService {
   }
 
   #noSummary(derived: { readonly problem: string } | { readonly summary: string }): never {
-    throw new CatalogRefusal('source_refused', 'problem' in derived ? derived.problem : 'This needs a summary.');
+    throw new NeedsSummary('source_refused', 'problem' in derived ? derived.problem : 'This needs a summary.');
   }
 
   /** What a person named, as the exact path or inventory id it is. */

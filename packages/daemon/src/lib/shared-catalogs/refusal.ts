@@ -13,6 +13,7 @@ export const CATALOG_REFUSALS = [
   'items_full',
   'item_listed',
   'current_changed',
+  'undo_expired',
   'public_unavailable',
   'source_unknown',
   'source_ambiguous',

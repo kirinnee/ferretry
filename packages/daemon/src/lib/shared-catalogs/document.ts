@@ -503,6 +503,47 @@ export function withWithdrawn(
   });
 }
 
+/**
+ * Takes an entry out as if it had never been listed: no withdrawal record, because nobody was shown the revision that
+ * listed it. The revision still rises (a number is never reused). The catalog's digests for the item go with the entry,
+ * and with `dropItem` the item itself goes when no other catalog lists it (its frozen copy stays on disk, harmless).
+ */
+export function withoutEntry(
+  document: CatalogsDocument,
+  catalogId: string,
+  itemId: string,
+  now: string,
+  dropItem: boolean,
+): { readonly document: CatalogsDocument; readonly itemRemoved: boolean } {
+  const catalog = findCatalog(document, catalogId);
+  findEntry(catalog, itemId);
+  const next = bumped({ ...catalog, entries: catalog.entries.filter(entry => entry.itemId !== itemId) }, now);
+  const listedElsewhere = document.catalogs.some(
+    other => other.id !== catalogId && other.entries.some(entry => entry.itemId === itemId),
+  );
+  const itemRemoved = dropItem && !listedElsewhere;
+  const replaced = replaceCatalog(document, next);
+  return {
+    itemRemoved,
+    document: {
+      ...replaced,
+      items: itemRemoved
+        ? replaced.items.filter(item => item.itemId !== itemId)
+        : replaced.items.map(item =>
+            item.itemId === itemId
+              ? {
+                  ...item,
+                  versions: item.versions.map(version => {
+                    const { [catalogId]: _removed, ...bindings } = version.bindings;
+                    return { ...version, bindings };
+                  }),
+                }
+              : item,
+          ),
+    },
+  };
+}
+
 /** Why a stored document cannot be used, in one line, or `null` when it parses. */
 export function documentProblem(
   parsed: { readonly success: true } | { readonly success: false; readonly error: z.ZodError },

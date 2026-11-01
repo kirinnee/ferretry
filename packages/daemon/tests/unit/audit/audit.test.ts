@@ -816,6 +816,105 @@ describe('auditedRoutes', () => {
     should(JSON.stringify(logged)).not.match(/secret name|files/u);
   });
 
+  it('should record a one-tap Add and its Undo by id, and nothing for an answer that changed nothing', async () => {
+    // Arrange
+    const CAT = `cat_${'A'.repeat(22)}`;
+    const ITEM = `itm_${'B'.repeat(22)}`;
+    const DIGEST = `sha256:${'c'.repeat(64)}`;
+    const answers: unknown[] = [
+      {
+        outcome: 'added',
+        catalog: { catalogId: CAT, name: 'secret name text with spaces', revision: 2, created: true },
+        itemId: ITEM,
+        itemVersion: 1,
+        digest: DIGEST,
+        undo: { token: `cqu_${'u'.repeat(22)}`, expiresAt: '2026-01-01T00:01:00.000Z' },
+      },
+      { outcome: 'already', catalogId: CAT, itemId: ITEM, itemVersion: 1 },
+      { outcome: 'review', reasons: ['warnings'] },
+    ];
+    const { journal, routes } = decorated({
+      'POST /v1/catalog-items/quick-add': async () => jsonResponse(answers.shift()),
+      'POST /v1/catalog-items/quick-add/undo': async () =>
+        jsonResponse({ catalogId: CAT, itemId: ITEM, mode: 'retracted', revision: 3, itemRemoved: true }),
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    for (const path of [
+      '/v1/catalog-items/quick-add',
+      '/v1/catalog-items/quick-add',
+      '/v1/catalog-items/quick-add',
+      '/v1/catalog-items/quick-add/undo',
+    ])
+      await api.dispatch(
+        request({
+          method: 'POST',
+          path,
+          headers: ADMIN,
+          loopback: true,
+          body: path.endsWith('/undo') ? JSON.stringify({ token: `cqu_${'u'.repeat(22)}` }) : '{}',
+        }),
+      );
+
+    // Assert
+    const logged = records(journal);
+    should(logged).have.length(2);
+    should(logged[0]?.detail).containEql({
+      action: 'publish',
+      catalogId: CAT,
+      itemId: ITEM,
+      itemVersion: 1,
+      digest: DIGEST,
+      revision: 2,
+      created: true,
+    });
+    should(logged[1]?.detail).containEql({
+      action: 'undo',
+      catalogId: CAT,
+      itemId: ITEM,
+      revision: 3,
+      mode: 'retracted',
+    });
+    should(JSON.stringify(logged)).not.match(/secret name|cqu_/u);
+  });
+
+  it('should still record a quick add whose success names no outcome, or has no readable answer', async () => {
+    for (const answer of [() => jsonResponse(undefined), () => jsonResponse({ ok: true }), () => jsonResponse(null)]) {
+      // Arrange
+      const { journal, routes } = decorated({ 'POST /v1/catalog-items/quick-add': async () => answer() });
+      const api = await dispatcher(routes);
+
+      // Act
+      await api.dispatch(
+        request({ method: 'POST', path: '/v1/catalog-items/quick-add', headers: ADMIN, loopback: true, body: '{}' }),
+      );
+
+      // Assert
+      should(records(journal)).have.length(1);
+    }
+  });
+
+  it('should record a quick add that is refused, whatever the answer would have been', async () => {
+    // Arrange
+    const { journal, routes } = decorated({
+      'POST /v1/catalog-items/quick-add': async () => {
+        throw new ApiError(409, 'refused', 'source_ambiguous');
+      },
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(
+      request({ method: 'POST', path: '/v1/catalog-items/quick-add', headers: ADMIN, loopback: true, body: '{}' }),
+    );
+
+    // Assert
+    const logged = records(journal);
+    should(logged).have.length(1);
+    should(logged[0]?.outcome).equal('refused');
+  });
+
   it('should record sharing and member changes by id, and never the code, the link or a label', async () => {
     // Arrange
     const SHARE = `shr_${'S'.repeat(22)}`;

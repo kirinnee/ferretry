@@ -158,6 +158,12 @@ export const DAEMON_FEATURES = {
    */
   catalogItems: 'catalogs.items.1',
   /**
+   * One-tap Add into the default catalog, and its Undo (docs/catalogs.md § One-tap Add):
+   * `POST /v1/catalog-items/quick-add` and `…/quick-add/undo`. A daemon without this name answers 404: the app offers
+   * the one-tap button only where the machine reports it, and opens the review sheet otherwise.
+   */
+  catalogQuickAdd: 'catalogs.quick-add.1',
+  /**
    * Standing rules for TERMINAL sign-ins (sudo, su or doas: root on demand, sign-in-rules.ts): staged, offered to the
    * matcher and filled only while the daemon reports this name, beside `sign-in-rules.1`. A daemon that does not report
    * it refuses to stage one (`tool_not_covered`) and offers no terminal rule to a fill, whatever its file holds.

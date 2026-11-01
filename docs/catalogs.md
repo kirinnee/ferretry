@@ -307,11 +307,13 @@ All are `sharing`/`use`, `noStore`, and the writes answer a ferret 403 `forbidde
 | `POST /v1/catalogs/:id/items`                  | add the previewed source as a new item, or `{itemId, version}` to list an item already kept (201) | refused |
 | `POST /v1/catalogs/:id/items/:itemId/versions` | publish the next version (201)                                                                    | refused |
 | `DELETE /v1/catalogs/:id/items/:itemId`        | withdraw an item                                                                                  | refused |
+| `POST /v1/catalog-items/quick-add`             | one-tap Add into the default catalog: 201 `added`, 200 `already` or `review`                      | refused |
+| `POST /v1/catalog-items/quick-add/undo`        | take that add back with its token (single use, 60 s)                                              | refused |
 | `POST /v1/catalogs/:id/export`                 | sign and return the catalog file                                                                  | refused |
 
 Refusals keep their code: 404 `catalog_unknown` / `item_unknown` / `source_unknown`; 409 `item_withdrawn`,
 `name_taken`, `catalog_full`, `catalogs_full` (256 catalogs), `items_full` (4,096 items), `item_listed`, `current_changed`, `source_ambiguous`, `changed_since_preview`, `nothing_to_publish`; 400
-`public_unavailable`; 413 `export_too_big` (the file would be over 32 MiB: export fewer items); 422
+`public_unavailable`; 410 `undo_expired`; 413 `export_too_big` (the file would be over 32 MiB: export fewer items); 422
 `source_refused`; 503 `signing_unavailable`; 500 `store_damaged` / `export_failed`.
 
 ### One item in many catalogs, and the default (catalogs 3c-2)
@@ -327,7 +329,42 @@ catalog that lists the item live.
 no demoting to none: another catalog replaces it, and deleting the default clears it. `role` and `defaultCatalogId` are
 optional response fields. The CLI: `fy catalog ls` marks the default, `fy catalog default <catalog>` sets it, and
 `fy catalog add <catalog> --item <itemId>` prints the frozen review and asks y/N. The feature flag is
-`catalogs.items.1`. Not here yet: quick add and undo, the app's use of these, and versions.
+`catalogs.items.1`. Not here yet: the app's use of these, and versions.
+
+### One-tap Add, and Undo (catalogs 3c-3)
+
+`POST /v1/catalog-items/quick-add` takes `{source}` (a skill or an MCP server, named as in a preview) or `{itemId}` (an
+item already kept) and lists it in the **default catalog**, the only target. There is no field to say "this is clean":
+the daemon decides.
+
+- **Clean means the one frozen object that is stored.** The source is read once, frozen once, and the warnings are read
+  from that same object, which is then written. Any warning (a script, hidden characters, a possible secret, an MCP
+  command), any file left out (`problems`), a missing summary, or a kept item whose current version has warnings answers
+  **200 `review`** with the reasons (`warnings`, `problems`, `needs-summary`) and, except for a missing summary, the
+  preview a person reads. **Nothing is written**, including the default catalog.
+- **`added` (201)** answers the catalog (and whether this tap made it), the item, version and digest, whether the item is
+  new, whether its source has since changed (a kept item is never re-published by a tap), and an Undo token with its expiry.
+  **`already` (200)** is a double tap: the item is live in the default catalog and nothing is written.
+- **The default catalog is made lazily**, in the same single write as the item: "<this machine's label>'s skills", the label
+  cut so the name is at most 80 characters, then "… 2" to "… 9" when the name is taken (`name_taken` after nine). A refusal
+  (`catalogs_full`, `catalog_full`, `items_full`) leaves nothing written. A source is matched to a kept item by that
+  item's **current** version; when two or more kept items are the same source (the sheet made one per catalog) the tap is
+  409 `source_ambiguous`, naming the item ids, and the caller names one by `itemId`. Whether the item is already live,
+  or needs review, is decided before the default catalog is made or checked. A kept item joins through the same step as
+  `POST /items`, so its audience starts at its **current** version (`sinceVersion`); older versions are not served.
+- **Undo** (`POST …/quick-add/undo` with `{token}`) is bound to the credential that tapped (a paired device, or the host),
+  good once, for 60 seconds. A token is used up only when its write has landed, so a failed write leaves it good. It **retracts** (the entry is removed with no withdrawal record, and the item with it when this
+  tap made it and no catalog lists it) only while the catalog is still on the revision the add made **and** no signed
+  manifest of that revision was ever produced (a member reading it, or an export). Otherwise it **withdraws**, the ordinary
+  withdrawal that members see. An item relisted over an earlier withdrawal is always withdrawn again. The default catalog
+  the tap made stays. An unknown, lapsed, used or other caller's token is 410 `undo_expired` with nothing changed; withdraw the item the ordinary way.
+- Every write, and every manifest or export that signs, runs in the one write queue, so a manifest read and an Undo cannot
+  interleave. **Member manifest reads and exports now wait in that queue** behind a write in flight, instead of reading
+  alongside it.
+- Declared gap: **the undo record is in memory.** A restart forgets every token, so Undo then answers 410 and the person
+  must withdraw the item the ordinary way (nothing does it for them); it also forgets which revisions were signed, which is why no add survives a restart as
+  retractable. The feature flag is `catalogs.quick-add.1`. Audit: `catalog.changed`, `publish` or `undo`, ids only
+  ([audit.md](audit.md)); a `review` or `already` answer changed nothing and is not recorded.
 
 ### Why a ferret may only list
 

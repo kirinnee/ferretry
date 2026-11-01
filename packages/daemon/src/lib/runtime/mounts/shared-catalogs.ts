@@ -18,6 +18,8 @@ import {
   CreateCatalogRequestSchema,
   ExportCatalogRequestSchema,
   PublishCatalogVersionRequestSchema,
+  QuickAddRequestSchema,
+  QuickAddUndoRequestSchema,
   SharedCatalogIdSchema,
   SharedCatalogItemIdSchema,
   UpdateCatalogRequestSchema,
@@ -47,6 +49,8 @@ export interface SharedCatalogSubsystem {
     | 'publishVersion'
     | 'withdraw'
     | 'exportCatalog'
+    | 'quickAdd'
+    | 'undoQuickAdd'
   >;
 }
 
@@ -74,11 +78,16 @@ const STATUS: Readonly<Record<CatalogRefusalCode, number>> = {
   store_damaged: 500,
   export_failed: 500,
   export_too_big: 413,
+  undo_expired: 410,
 };
 
-async function answer(work: () => Promise<unknown>, success = 200): Promise<ApiResponse> {
+async function answer(
+  work: () => Promise<unknown>,
+  success: number | ((answered: unknown) => number) = 200,
+): Promise<ApiResponse> {
   try {
-    return jsonResponse(await work(), success);
+    const answered = await work();
+    return jsonResponse(answered, typeof success === 'number' ? success : success(answered));
   } catch (error) {
     if (error instanceof CatalogRefusal) throw new ApiError(STATUS[error.refusal], error.message, error.refusal);
     throw error;
@@ -93,6 +102,13 @@ function ownerOnly(context: RouteContext, act: string): void {
     `a ferret cannot ${act}; the owner does. A catalog hands skills and MCP setups to other machines, so the owner makes, changes and exports it.`,
     'forbidden',
   );
+}
+
+/** Who tapped, from the credential and never the body: a paired device, the agents, or the host's own shell. */
+function callerOf(context: RouteContext): string {
+  const credential = context.credential;
+  if (credential?.tokenClass === 'device') return `device:${credential.deviceId}`;
+  return isAgentCaller(context) ? 'agents' : 'host';
 }
 
 function catalogId(context: RouteContext): string {
@@ -224,6 +240,35 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
         const id = catalogId(context);
         const item = itemId(context);
         return await answer(() => catalogs.withdraw(id, item));
+      },
+    },
+    {
+      method: 'POST',
+      path: '/v1/catalog-items/quick-add',
+      minimum: 'operator',
+      caller: 'person',
+      capability: SHARING_USE,
+      noStore: true,
+      handle: async context => {
+        ownerOnly(context, 'add to the default catalog');
+        const request = await parseBody(context.request, QuickAddRequestSchema);
+        return await answer(
+          () => catalogs.quickAdd(callerOf(context), request),
+          answered => ((answered as { outcome?: unknown }).outcome === 'added' ? 201 : 200),
+        );
+      },
+    },
+    {
+      method: 'POST',
+      path: '/v1/catalog-items/quick-add/undo',
+      minimum: 'operator',
+      caller: 'person',
+      capability: SHARING_USE,
+      noStore: true,
+      handle: async context => {
+        ownerOnly(context, 'undo an add to the default catalog');
+        const request = await parseBody(context.request, QuickAddUndoRequestSchema);
+        return await answer(() => catalogs.undoQuickAdd(callerOf(context), request.token));
       },
     },
     {
