@@ -871,7 +871,7 @@ describe('BOARD_INSTRUCTION', () => {
     should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');
     should(text).containEql("Owner's bug:");
     should(text).containEql('PRs, merges, `zz signal done` self-move; owner closes.');
-    should(text).endWith('Gates: the daemon asks; raise no agenda item for one.');
+    should(text).endWith('Gate? The daemon asks; raise nothing.');
     should(text).not.containEql('`fy ');
   });
 
