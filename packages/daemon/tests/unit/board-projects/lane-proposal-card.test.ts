@@ -16,6 +16,7 @@ import type { AgendaBoardChange } from '../../../src/lib/agenda/service.ts';
 import {
   acceptedProposal,
   LaneProposalAcceptance,
+  LANE_CHANGE_LATER,
   laneChangeCard,
   laneProposalCard,
 } from '../../../src/lib/board-projects/index.ts';
@@ -130,6 +131,19 @@ describe('laneChangeCard', () => {
       `removes ${name(0)}, which waits for the owner, and sends its cards into the closed lane`,
     );
     should(card.why).not.match(/closes the cards… |closes th$/u);
+    // A change the card cannot show in full is accepted only in the lane editor.
+    should(card.ask).deepEqual({
+      kind: 'multiple-choice',
+      options: [
+        {
+          label: LANE_PROPOSAL_ANSWERS.edit,
+          description: 'Change them in the Board lane editor (Board, then this project, then Lanes)',
+        },
+        { label: LANE_CHANGE_LATER, description: 'Leave it waiting; the board keeps its lanes' },
+      ],
+    });
+    should(card.answers.map(answer => answer.label)).not.containEql(LANE_PROPOSAL_ANSWERS.accept);
+    should(card.howToResolve).containEql('accepted in the Board lane editor');
   });
 
   it('should cap a long proposer name so it never crowds out the warnings', () => {

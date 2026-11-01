@@ -310,10 +310,13 @@ test an automatic step and watch its card move on, or remove Released · to test
   B → …", which says the board keeps its lanes until the owner accepts and names EVERYTHING the change would do
   that is the owner's to decide (`laneGateProblems`, `@ferretry/protocol`): each lane it removes and where that
   lane's cards go — into the closed lane (named by its category, never by a name the proposal gives it), into a
-  lane that is new, or past a gate — each gate it makes automatic, whose `ownerGate` it drops or whose answers it
-  rewires, each lane it makes the closed lane, and each gate a workflow would skip or reach from a different place.
-  A warning is never cut short: the proposer's name is capped, and what does not fit on the card is counted and
-  pointed at the lane editor. `fy board lanes show` adds one line, "Proposed by <ferret>, waiting for the owner",
+  lane that is new, or past a gate — each gate it makes automatic or whose `ownerGate` it drops, each answer of a
+  gate that would send cards somewhere else (resolved per workflow, so a reorder that moves where `next` goes counts:
+  "changes where "OK to build" on Plan/Design sends cards: In progress → the closed lane, which closes them"), is
+  removed or is added, each lane it makes the closed lane and the closed lane it makes an open one (reopening its
+  cards), and each gate workflows would skip or reach from a different place (one line per gate). A warning is never
+  cut short: the proposer's name is capped, and when some do not fit on the card they are counted and the card has
+  no Accept (Edit or Later): a change the owner has not read in full is accepted only in the lane editor. `fy board lanes show` adds one line, "Proposed by <ferret>, waiting for the owner",
   and the lane editor a banner with the same warnings, in the same words; when there are any, its Accept takes a
   second tap ("Accept these changes"), saying that cards move and may close.
 - **Accept makes it live, as the owner.** The owner's Accept on that card (only a person's answer counts: a lead
@@ -331,6 +334,9 @@ test an automatic step and watch its card move on, or remove Released · to test
   would do nothing.
 - **The owner's own edit stays immediate** and drops a waiting proposal. The owner confirming the live set itself
   leaves the proposal waiting, for its own answer.
+- **The closed lane is last.** Every layout a change submits, and every waiting proposal, keeps the closed lane as
+  the last lane of the set (and so of every workflow): nothing comes after done, so no answer's `next` can close a
+  card. A set stored before keeps reading as it was.
 - **A ferret's propose on unconfirmed lanes** waits too, and is refused `relocation-missing` when the template
   drops a lane: a template cannot say where that lane's cards go, so the ferret edits instead. Once the owner has
   confirmed a set, `propose` is refused `already-confirmed` as before.

@@ -23,6 +23,8 @@ import {
   LaneSchema,
   type LaneSet,
   LaneSetSchema,
+  closedLaneProblems,
+  gateOptions,
   laneGateProblems,
   type PendingLaneSet,
   PendingLaneSetSchema,
@@ -268,9 +270,11 @@ describe('laneGateProblems', () => {
     should(whys(laneGateProblems(FERRETRY, without('merged'), { merged: 'implement' }))).deepEqual([
       'removes Merged, and moves its cards to In progress',
     ]);
-    should(whys(laneGateProblems(FERRETRY, intoNew, { merged: 'later' }))).deepEqual([
-      'removes Merged, and sends its cards into Later, a lane that is new',
-    ]);
+    should(
+      whys(
+        laneGateProblems(FERRETRY, { ...intoNew, doneLane: 'closed', notGoodLane: 'implement' }, { merged: 'later' }),
+      ),
+    ).deepEqual(['removes Merged, and sends its cards into Later, a lane that is new']);
     should(laneGateProblems(FERRETRY, without('todo'), { todo: 'implement' })).deepEqual([
       {
         laneId: 'plan',
@@ -304,6 +308,7 @@ describe('laneGateProblems', () => {
     should(whys(laneGateProblems(FERRETRY, swapped))).deepEqual([
       'makes Released · to test the closed lane, which closes the cards in it',
       'makes Released · to test automatic: it would stop waiting for the owner',
+      'makes Closed an open lane, which reopens the cards in it',
     ]);
   });
 
@@ -329,17 +334,77 @@ describe('laneGateProblems', () => {
     };
 
     // Act + Assert
-    should(whys(laneGateProblems(FERRETRY, rewired))).deepEqual(['changes what the answers to Plan/Design do']);
+    should(whys(laneGateProblems(FERRETRY, rewired))).deepEqual([
+      'changes where "OK to build" on Plan/Design sends cards: In progress → the closed lane, which closes them',
+    ]);
     should(whys(laneGateProblems(FERRETRY, ungated))).deepEqual(['drops the owner gate of Released · to test']);
   });
 
   it('should find a gate moved among the lanes a workflow walks', () => {
     const order = ['todo', 'implement', 'plan', 'merged', 'released', 'closed'];
-    const moved = { lanes: order.map(id => lanes.find(each => each.id === id) as Lane), variants };
+    const moved = {
+      lanes: order.map(id => lanes.find(each => each.id === id) as Lane),
+      variants,
+      doneLane: 'closed',
+      notGoodLane: 'implement',
+    };
 
+    // One line for the workflows it moves in; and "OK to build", which goes on to the next lane, now skips building.
     should(whys(laneGateProblems(FERRETRY, moved))).deepEqual([
-      'moves Plan/Design among the lanes design-first work walks',
-      'moves Plan/Design among the lanes research-first work walks',
+      'changes where "OK to build" on Plan/Design sends cards: In progress → Merged',
+      'moves Plan/Design among the lanes design-first and research-first work walks',
+    ]);
+  });
+
+  it('should say when a reorder sends a gate’s answer straight to the closed lane (review probe P8)', () => {
+    // Arrange: Closed moved right after Plan/Design, every workflow following that order.
+    const order = ['todo', 'plan', 'closed', 'implement', 'merged', 'released'];
+    const reordered = {
+      lanes: order.map(id => lanes.find(each => each.id === id) as Lane),
+      variants: Object.fromEntries(
+        Object.entries(variants).map(([workflow, ids]) => [workflow, order.filter(id => (ids ?? []).includes(id))]),
+      ),
+      doneLane: 'closed',
+      notGoodLane: 'implement',
+    };
+
+    // Act
+    const said = whys(laneGateProblems(FERRETRY, reordered));
+
+    // Assert: the owner's next "OK to build" would close the card; and no such layout is accepted any more.
+    should(said).containEql(
+      'changes where "OK to build" on Plan/Design sends cards: In progress → the closed lane, which closes them',
+    );
+    should(closedLaneProblems(reordered)).deepEqual([
+      ['lanes', 'the closed lane is the last lane: nothing comes after done'],
+    ]);
+    should(LaneLayoutSchema.safeParse(reordered).success).be.false();
+    should(PendingLaneSetSchema.safeParse({ ...WAITING, ...reordered, relocate: {} }).success).be.false();
+    should(closedLaneProblems(FERRETRY)).deepEqual([]);
+  });
+
+  it('should say an answer a gate gains or loses', () => {
+    const plan = lanes.find(each => each.id === 'plan') as Lane;
+    const withStop = {
+      lanes: lanes.map(each =>
+        each.id === 'plan'
+          ? {
+              ...each,
+              stage: {
+                kind: 'gate' as const,
+                options: [{ id: 'stop', label: 'Stop', outcome: { kind: 'close' as const } }],
+              },
+            }
+          : each,
+      ),
+      variants,
+      doneLane: 'closed',
+      notGoodLane: 'implement',
+    };
+
+    should(whys(laneGateProblems(FERRETRY, withStop))).deepEqual([
+      `removes the answer "${gateOptions(plan)[0]?.label ?? ''}" from Plan/Design`,
+      'adds the answer "Stop" to Plan/Design, which sends cards to the closed lane, which closes them',
     ]);
   });
 });

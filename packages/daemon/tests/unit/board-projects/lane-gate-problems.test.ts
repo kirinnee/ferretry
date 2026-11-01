@@ -76,7 +76,13 @@ describe('laneGateProblems', () => {
         lane.id === 'review' ? [lane, plan] : [lane],
       ),
     };
-    should(whys(laneGateProblems(set, moved))).containEql('moves Plan/Design among the lanes design-first work walks');
+    should(whys(laneGateProblems(set, moved))).containEql(
+      'moves Plan/Design among the lanes design-first, research-first and investigate work walks',
+    );
+    // Moved after Review/CI, Plan's "OK to build" (next) now sends a card on to Merged: that is said too.
+    should(whys(laneGateProblems(set, moved))).containEql(
+      'changes where "OK to build" on Plan/Design sends cards: Implement → Merged',
+    );
   });
 
   it('finds a variant that stops walking a gate', () => {
@@ -91,8 +97,10 @@ describe('laneGateProblems', () => {
   it('finds cards sent into a closed lane, or past a gate', () => {
     const without = withLanes(current(), lane => (lane.id === 'implement' || lane.id === 'review' ? undefined : lane));
     should(whys(laneGateProblems(current(), without, { implement: 'closed', review: 'merged' }))).eql([
+      'changes where "OK to build" on Plan/Design sends cards: Implement → Merged',
       'removes Implement, and sends its cards into the closed lane, which closes them',
       'removes Review/CI, and moves its cards to Merged',
+      'changes where "Not good" on To test sends cards: Implement → Plan/Design',
     ]);
     const pastPlan = withLanes(current(), lane => (lane.id === 'todo' ? undefined : lane));
     should(whys(laneGateProblems(current(), pastPlan, { todo: 'implement' }))).eql([
@@ -212,7 +220,9 @@ describe('a relocation judged where the cards end up (kyan R3)', () => {
 
     // Assert
     should(whys(problems)).eql([
+      'changes where "OK to build" on Plan/Design sends cards: Implement → Review/CI',
       'removes Implement, and sends its cards to Merged, past Review/CI, which waits for the owner',
+      'changes where "Not good" on To test sends cards: Implement → Plan/Design',
     ]);
   });
 });

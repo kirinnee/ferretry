@@ -60,7 +60,8 @@ export const MAX_PROPOSER_NAME = 60;
  * The card a ferret's change to lanes the project already has raises (`docs/board.md` § A ferret's lane change
  * waits for the owner): the proposed lanes, everything they would do that only the owner may decide
  * (`laneGateProblems`), and that NOTHING changes until the owner accepts. A warning is never cut short: the ones
- * that do not fit are counted, with where to read them all.
+ * that do not fit are counted, with where to read them all — and then the card has no Accept, so a change the owner
+ * has not read in full is accepted only in the lane editor, which shows every warning.
  */
 export const laneChangeCard = (projectName: string, live: LaneSet, pending: PendingLaneSet): LaneProposalCard => {
   const accept = { label: LANE_PROPOSAL_ANSWERS.accept, description: 'Switch the board to these lanes' };
@@ -72,24 +73,37 @@ export const laneChangeCard = (projectName: string, live: LaneSet, pending: Pend
   const warnings = laneGateProblems(live, pending, pending.relocate).map(problem => problem.why);
   const proposer = clipAtWord(pending.proposedBy, MAX_PROPOSER_NAME);
   const opening = `${proposer} proposes new lanes for ${clipAtWord(projectName, MAX_PROPOSER_NAME)}. The board keeps its lanes until you accept.`;
+  const { why, hidden } = withWarnings(opening, warnings);
+  const later = { label: LANE_CHANGE_LATER, description: 'Leave it waiting; the board keeps its lanes' };
+  const [first, second] = hidden ? [edit, later] : [accept, edit];
   return {
     subject: clipAtWord(`Lanes for ${projectName}: ${path}`, MAX_AGENDA_SUBJECT_LENGTH),
     title: clipAtWord(`Lanes for ${projectName}`, 60),
     kind: 'choice',
-    ask: { kind: 'multiple-choice', options: [accept, edit] },
+    ask: { kind: 'multiple-choice', options: [first, second] },
     answers: [
-      { direction: 'right', does: 'choose', ...accept },
-      { direction: 'left', does: 'choose', ...edit },
+      { direction: 'right', does: 'choose', ...first },
+      { direction: 'left', does: 'choose', ...second },
     ],
-    why: withWarnings(opening, warnings),
-    howToResolve:
-      'Choose Accept to switch the board to these lanes; any cards they move, move then. Choose Edit to change them in the Board lane editor; the board keeps its lanes until you save.',
+    why,
+    howToResolve: hidden
+      ? 'This change does more than a card can show, so it is accepted in the Board lane editor, where every part of it is listed. Choose Edit to go there; the board keeps its lanes until you accept.'
+      : 'Choose Accept to switch the board to these lanes; any cards they move, move then. Choose Edit to change them in the Board lane editor; the board keeps its lanes until you save.',
   };
 };
 
-/** The card's words and as many WHOLE warnings as fit; the rest are counted and pointed at, never cut. */
-const withWarnings = (opening: string, warnings: readonly string[]): string => {
-  if (warnings.length === 0) return opening;
+/** The second answer of a card with no Accept: leave the proposal waiting. Never an Accept, so it confirms nothing. */
+export const LANE_CHANGE_LATER = 'Later';
+
+/**
+ * The card's words and as many WHOLE warnings as fit; the rest are counted and pointed at, never cut. `hidden`: some
+ * did not fit.
+ */
+const withWarnings = (
+  opening: string,
+  warnings: readonly string[],
+): { readonly why: string; readonly hidden: boolean } => {
+  if (warnings.length === 0) return { why: opening, hidden: false };
   const say = (shown: readonly string[]): string => {
     const hidden = warnings.length - shown.length;
     const more = hidden === 0 ? '' : `; and ${String(hidden)} more, all in the Board lane editor`;
@@ -98,7 +112,7 @@ const withWarnings = (opening: string, warnings: readonly string[]): string => {
   // One warning always fits: a lane's name is at most 40 characters, so a warning is a few hundred at most.
   let shown = [...warnings];
   while (shown.length > 1 && say(shown).length > MAX_AGENDA_DETAIL_LENGTH) shown = shown.slice(0, -1);
-  return say(shown);
+  return { why: say(shown), hidden: shown.length < warnings.length };
 };
 
 /**
