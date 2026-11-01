@@ -590,6 +590,10 @@ describe('SharedDraftService', () => {
     // Assert
     should(laptop.snapshot).match({ text: 'ab!', rev: 3 });
     should(cleared.snapshot).match({ text: '!', rev: 4 });
+    // An edit with no origin counts against the author it names: the phone's, over HTTP, is still refused.
+    await should(
+      service.edit('s1', { generation: G, epoch: 0, base: 4, text: [1, '?'] }, undefined, { author: 'device:phone' }),
+    ).be.rejectedWith({ code: 'rate-limited' });
   });
 
   it('L2: refuses files and places whose names together would not fit one frame', async () => {

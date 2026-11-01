@@ -60,7 +60,7 @@ import {
 export const SHARED_DRAFT_WRITE_DELAY_MS = 1_000;
 /** The longest a write that keeps failing waits between attempts: each failure doubles the wait up to this. */
 export const SHARED_DRAFT_WRITE_RETRY_MAX_MS = 60_000;
-/** Edits one draft takes in a second, from every device together. */
+/** Edits one draft takes in a second from each device (each author), counted on its own. */
 export const SHARED_DRAFT_EDITS_PER_SECOND = 60;
 /** Drafts held in memory at once; the least recently used is written down and let go. */
 export const SHARED_DRAFT_MEMORY_LIMIT = 50;
@@ -219,15 +219,16 @@ export class SharedDraftService {
 
   /**
    * Sequences one edit and answers with it as applied, and the draft after it. `metered: false` is for the
-   * daemon's own edits — a send taking its words out — which no device's typing may crowd out.
+   * daemon's own edits — a send taking its words out — which no device's typing may crowd out. `author` is who
+   * the budget counts an edit with no `origin` against: the caller the boundary authenticated.
    */
   async edit(
     sessionId: string,
     edit: SharedDraftEdit,
     origin?: string,
-    options: { readonly metered?: boolean } = {},
+    options: { readonly metered?: boolean; readonly author?: string } = {},
   ): Promise<SharedDraftEditOutcome> {
-    return await this.#holding(sessionId, live => this.#apply(sessionId, live, edit, origin, options.metered ?? true));
+    return await this.#holding(sessionId, live => this.#apply(sessionId, live, edit, origin, options));
   }
 
   /** Counts one edit against its author's budget for this second; refuses it past the budget. */
@@ -253,7 +254,7 @@ export class SharedDraftService {
     live: LiveDraft,
     edit: SharedDraftEdit,
     origin: string | undefined,
-    metered: boolean,
+    options: { readonly metered?: boolean; readonly author?: string },
   ): SharedDraftEditOutcome {
     const current = live.snapshot;
     // The same edit twice — sent again by a composer that reconnected before it heard the first landed —
@@ -267,7 +268,7 @@ export class SharedDraftService {
       if (first !== undefined) return { applied: first.applied, snapshot: current, repeatOf: first };
     }
     // Typing is a few edits a second; past this the caller is not typing, and the draft is not its to flood.
-    if (metered) this.#meter(live, from?.author ?? '');
+    if (options.metered ?? true) this.#meter(live, from?.author ?? options.author ?? '');
     if (edit.generation !== current.generation)
       throw new SharedDraftError(
         'stale',

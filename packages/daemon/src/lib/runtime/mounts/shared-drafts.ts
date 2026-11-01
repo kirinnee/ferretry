@@ -91,7 +91,10 @@ async function edit(drafts: SharedDraftService, context: RouteContext): Promise<
   const sessionId = pathSessionId(context);
   const request = await parseBody(context.request, SharedDraftEditSchema, { maxBytes: SHARED_DRAFT_MAX_BODY_BYTES });
   // The wire answer is the edit and the draft; whether it was a repeat is the stream's business.
-  const { repeatOf: _repeatOf, ...result } = await drafts.edit(sessionId, request).catch(reraise);
+  // Counted against this caller's own budget, the same one its stream edits use.
+  const { repeatOf: _repeatOf, ...result } = await drafts
+    .edit(sessionId, request, undefined, { author: context.actor ?? '' })
+    .catch(reraise);
   return jsonResponse(result);
 }
 
@@ -202,6 +205,8 @@ export function sharedDraftSocketRoutes(
 export function sentDraftClearer(drafts: Pick<SharedDraftService, 'edit'>): SentDraftClearer {
   return async (sessionId, actor, requestId, sent) => {
     if (!isDraftOwner(actor) || actor === undefined) return;
+    // A send only ever takes words out; one that would add any is not a clear, and is not applied unmetered.
+    if (sent.text.some(part => typeof part === 'string')) return;
     await drafts.edit(
       sessionId,
       {
