@@ -338,9 +338,10 @@ describe('BoardImporter: the cards', () => {
     await w.importer.run();
 
     // Assert
+    // A task that recorded no creator is the owner's (its gates stay the owner's); one the daemon made stays the daemon's.
     should(byRef(w.store, 'lead:F1')).match({
       assignee: 'child',
-      createdBy: { kind: 'daemon' },
+      createdBy: { kind: 'owner' },
       clarifications: [{ by: { kind: 'ferret', sessionId: 'child' } }],
     });
     should(byRef(w.store, 'lead:F2')).match({ assignee: 'lead', createdBy: { kind: 'daemon' } });

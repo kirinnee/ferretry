@@ -652,7 +652,9 @@ hand-over, refile and reopen), or the session that wrote it was started by a fer
 person asked for it (`askedBy` is not `person`). Anything else — a top-level ferret's `fy task create`, whatever its
 ask's source says; a lineage that could not be read — is EXTERNAL. One function decides it for the gate items and for
 who passes the gate alike (`BoardService.audienceOf`, `cardAudience` in `origin.ts`), so an external card at a gate
-always has its item, and an internal one always has someone who may pass it.
+always has its item, and an internal one always has someone who may pass it. By design a lead's `fy new` sub-card is internal even when the lead is top-level: the owner's own session card
+stays external and gated, so the owner still passes the gate that matters. An imported legacy task that recorded no
+creator is read as the owner's.
 
 | Standing             | External card's gate | Internal card's gate |
 | -------------------- | -------------------- | -------------------- |
