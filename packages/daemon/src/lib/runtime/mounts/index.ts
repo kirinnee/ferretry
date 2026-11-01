@@ -25,7 +25,6 @@ import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
 import { observedRoutes } from '../../performance/observed-routes.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
 import type { PinService } from '../../pins/index.ts';
-import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
 import type { SignInRuleService } from '../../sign-in-rules/service.ts';
 import type { TaskPlanService } from '../../task-plans/service.ts';
 import type { PasteRuleService } from '../../secure-copy/rules.ts';
@@ -364,19 +363,12 @@ export interface MountedSubsystems {
   /** The other half of that operation, and the reason a handover survives a caller hanging up: the
    *  tick that drives every receipt which is not yet terminal through the next step of its ladder. It
    *  serves no route — a handover advances on a timer and on an inbound board verification, not on a
-   *  request — and it is a mounted subsystem for the reason `monitor` and `quotaFailover` are: a
+   *  request — and it is a mounted subsystem for the reason `monitor` is: a
    *  background loop nothing constructs is the same absent capability as an unserved route, and a
    *  handover nothing advanced would stop at `requested` forever. */
   readonly handoverReconcile: HandoverReconcileLoop;
   /** A durable conversation fork creates a separate session without changing its source. */
   readonly sessionFork: SessionForkSubsystem;
-  /** The other half of that operation: NOTICING that an account has measurably run out of tokens and
-   *  moving its sessions onto a pooled same-kind account with confirmed headroom — through the same
-   *  migration above, preflight included. It serves no route, and it is a mounted subsystem for the
-   *  reason `monitor` is: a background loop nothing constructs is the same absent capability as an
-   *  unserved route, and before this field `fy migrate` was a manual operation with nothing watching
-   *  the quota that makes it necessary. */
-  readonly quotaFailover: QuotaFailoverLoop;
   /** The retired per-session task store's two list reads, answered empty for older clients (see legacy-tasks.ts). */
   readonly legacyTasks: LegacyTaskSubsystem;
   /** The project boards (v2): every project's cards, one file per card, written under ownership and lineage. */
@@ -392,8 +384,8 @@ export interface MountedSubsystems {
   readonly analyticsPricing: AnalyticsPricingSubsystem;
   /** The other half of analytics: the pass that PUTS a finished session in the store, folding its
    *  transcript once and pricing it at the rates in force when the row was written. It serves no route
-   *  — nobody asks for an ingestion — and it is a mounted subsystem for the reason `monitor` and
-   *  `quotaFailover` are: a background loop nothing constructs is the same absent capability as an
+   *  — nobody asks for an ingestion — and it is a mounted subsystem for the reason `monitor` is: a
+   *  background loop nothing constructs is the same absent capability as an
    *  unserved route, and an analytics store nothing writes to answers every query with an empty fleet. */
   readonly analyticsIngest: AnalyticsIngestionLoop;
   /** Independent shell terminals attached to a session's working directory. */

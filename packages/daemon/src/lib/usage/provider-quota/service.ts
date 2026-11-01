@@ -4,7 +4,7 @@
  * ## When a read happens
  *
  * - **Only on demand.** {@link ProviderQuotaService.watch} is called by a screen being read (the logins
- *   list, the usage feed a composer chip or Info › Usage polls) and by the Warden and quota failover
+ *   list, the usage feed a composer chip or Info › Usage polls) and by the Warden
  *   when they ask the usage feed. Nothing here owns a timer, and the daemon's unattended refresh pass
  *   reads {@link ProviderQuotaService.peek} — the cache — and nothing else.
  * - **At most once a minute per login**, whatever the number of watchers: an attempt, answered or not,

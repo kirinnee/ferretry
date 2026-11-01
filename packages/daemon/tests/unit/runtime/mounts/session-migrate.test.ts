@@ -15,7 +15,11 @@ import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { SessionMigrateError, sessionMigrateRoutes } from '../../../../src/lib/runtime/mounts/session-migrate.ts';
+import {
+  moverOf,
+  SessionMigrateError,
+  sessionMigrateRoutes,
+} from '../../../../src/lib/runtime/mounts/session-migrate.ts';
 import { request } from '../../api/support.ts';
 import { agentIn, CREDENTIALS, FakeSessionMigrate, human } from './support.ts';
 
@@ -74,8 +78,33 @@ describe('the session migrate mount', () => {
     should(view.config.id).equal('s1');
     should(view.config.agent).equal('codex-auto');
     should(migrator.migrations).deepEqual([
-      ['s1', { agent: 'codex-auto', model: 'gpt-5.6-terra', allowContextDowngrade: false, forceInflight: false }],
+      [
+        's1',
+        {
+          agent: 'codex-auto',
+          model: 'gpt-5.6-terra',
+          allowContextDowngrade: false,
+          forceInflight: false,
+          movedBy: 'owner',
+        },
+      ],
     ]);
+  });
+
+  it('should record who asked: the owner, or the ferret that called', async () => {
+    // Arrange
+    const migrator = new FakeSessionMigrate();
+    const subject = dispatcher(migrator);
+
+    // Act
+    await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-owner')));
+    await subject.dispatch(migrateRequest('s1', withRequestId(agentIn('s9'), 'req-peer')));
+
+    // Assert
+    should(migrator.migrations.map(([, sent]) => sent.movedBy)).deepEqual(['owner', 'session:s9']);
+    should(moverOf('peer:')).equal('session');
+    should(moverOf(undefined)).equal('owner');
+    should(moverOf('device:d1')).equal('owner');
   });
 
   it('should pass an unstated context downgrade through as a refusal rather than as consent', async () => {

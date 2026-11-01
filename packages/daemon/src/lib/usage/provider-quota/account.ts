@@ -1,7 +1,7 @@
 /**
  * A provider quota reading in the two shapes the rest of the daemon already speaks: the credential
  * row's 5-hour and weekly windows, and the usage feed's account row — so the composer chip, Info ›
- * Usage, the logins list, the Warden and quota failover all read the one reading.
+ * Usage, the logins list, the Warden all read the one reading.
  *
  * Pure. A window the provider did not measure stays absent, never 0%.
  */

@@ -168,6 +168,10 @@ export const fakePort = (overrides: Partial<BoardPort> = {}): BoardPort & { read
       calls.push(`task:${daemon.daemonId}:${id}`);
       return null;
     },
+    ids: async daemon => {
+      calls.push(`ids:${daemon.daemonId}`);
+      return null;
+    },
     projects: async daemon => {
       calls.push(`projects:${daemon.daemonId}`);
       return null;

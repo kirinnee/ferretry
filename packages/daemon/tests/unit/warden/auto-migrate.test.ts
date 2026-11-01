@@ -3,12 +3,15 @@ import { DEFAULT_WARDEN_CONFIG, type WardenConfig } from '@ferretry/protocol';
 import should from 'should';
 import {
   autoMigrateHoldKey,
+  chooseFailoverTarget,
   chooseMoveTarget,
   EMPTY_AUTO_MIGRATE_MEMORY,
+  headroomRefusal,
   movesInLastHour,
   moveTriggers,
   providerOf,
   pruneAutoMigrateMemory,
+  rankMoveTargets,
   rateLimitedSubjects,
   recordMove,
   triedLine,
@@ -126,7 +129,7 @@ describe('chooseMoveTarget', () => {
     });
 
     // Act
-    const choice = chooseMoveTarget({ source, facts: known, targets: [] });
+    const choice = chooseMoveTarget({ source, facts: known, targets: [], minHeadroomPercent: 20 });
 
     // Assert
     should(choice.kind).equal('chosen');
@@ -163,7 +166,7 @@ describe('chooseMoveTarget', () => {
     });
 
     // Act
-    const choice = chooseMoveTarget({ source, facts: known, targets: [] });
+    const choice = chooseMoveTarget({ source, facts: known, targets: [], minHeadroomPercent: 20 });
 
     // Assert
     should(choice.kind).equal('none');
@@ -185,7 +188,7 @@ describe('chooseMoveTarget', () => {
     });
 
     // Act
-    const choice = chooseMoveTarget({ source, facts: known, targets: [] });
+    const choice = chooseMoveTarget({ source, facts: known, targets: [], minHeadroomPercent: 20 });
 
     // Assert
     should(choice).deepEqual({
@@ -207,7 +210,12 @@ describe('chooseMoveTarget', () => {
     });
 
     // Act
-    const choice = chooseMoveTarget({ source, facts: known, targets: ['missing', 'glm', 'claude-b'] });
+    const choice = chooseMoveTarget({
+      source,
+      facts: known,
+      targets: ['missing', 'glm', 'claude-b'],
+      minHeadroomPercent: 20,
+    });
 
     // Assert
     should(choice.kind === 'chosen' ? choice.runtime.name : undefined).equal('glm');
@@ -223,7 +231,7 @@ describe('chooseMoveTarget', () => {
     });
 
     // Act
-    const choice = chooseMoveTarget({ source, facts: known, targets: ['codex-a'] });
+    const choice = chooseMoveTarget({ source, facts: known, targets: ['codex-a'], minHeadroomPercent: 20 });
 
     // Assert
     should(choice).deepEqual({ kind: 'none', tried: [{ runtime: 'codex-a', why: 'it runs codex, not claude' }] });
@@ -238,16 +246,179 @@ describe('chooseMoveTarget', () => {
     };
 
     // Act
-    const any = chooseMoveTarget({ source: { agent: 'gone', harness: 'claude' }, facts: known, targets: [] });
+    const any = chooseMoveTarget({
+      source: { agent: 'gone', harness: 'claude' },
+      facts: known,
+      targets: [],
+      minHeadroomPercent: 20,
+    });
     const named = chooseMoveTarget({
       source: { agent: 'gone', harness: 'claude' },
       facts: known,
       targets: ['claude-b'],
+      minHeadroomPercent: 20,
     });
 
     // Assert
     should(any).deepEqual(expected);
     should(named).deepEqual(expected);
+  });
+});
+
+describe('the headroom floor', () => {
+  const claudeTool = tool('claude', true);
+  const source = { agent: 'claude-a-wrapper', harness: 'claude' as const };
+  const used = (percent: number) => ({ usage: { fiveHour: { usedPercent: percent }, weekly: {} } });
+  const known = facts({
+    runtimes: [runtime('claude-a'), runtime('claude-b'), runtime('claude-c'), runtime('claude-d')],
+    credentials: [
+      credential('claude-a-login', used(100)),
+      credential('claude-b-login', used(85)),
+      credential('claude-c-login', used(60)),
+      credential('claude-d-login'),
+    ],
+    tools: [claudeTool],
+    now: iso(NOW),
+  });
+
+  it('should turn a login below the floor away with the share it has left, and rank the others', () => {
+    // Act
+    const { ready, tried } = rankMoveTargets({ source, facts: known, targets: [], minHeadroomPercent: 20 });
+
+    // Assert
+    should(ready.map(entry => entry.name)).deepEqual(['claude-d', 'claude-c']);
+    should(tried).have.length(1);
+    should(tried[0]?.runtime).equal('claude-b');
+    should(tried[0]?.why).match(/^only 15% is left \(.*\), under the 20% the Warden settings require/);
+    should(tried[0]?.why).match(/autoMigrate\.minHeadroomPercent/);
+  });
+
+  it('should have no floor at 0, and not hold an unmeasured login to one', () => {
+    // Act
+    const none = rankMoveTargets({ source, facts: known, targets: [], minHeadroomPercent: 0 });
+    const unmeasured = headroomRefusal(runtime('claude-d'), known, 90);
+    const low = headroomRefusal(runtime('claude-b'), known, 16);
+    const enough = headroomRefusal(runtime('claude-b'), known, 15);
+
+    // Assert
+    should(none.ready.map(entry => entry.name)).deepEqual(['claude-d', 'claude-c', 'claude-b']);
+    should(unmeasured).equal(undefined);
+    should(low).match(/^only 15% is left/);
+    should(enough).equal(undefined);
+  });
+
+  it('should refuse a named login below the floor too', () => {
+    // Act
+    const choice = chooseMoveTarget({ source, facts: known, targets: ['claude-b'], minHeadroomPercent: 20 });
+
+    // Assert
+    should(choice.kind).equal('none');
+    should(choice.tried[0]?.why).match(/^only 15% is left/);
+  });
+});
+
+describe('chooseFailoverTarget', () => {
+  const claudeTool = tool('claude', true);
+  const source = { agent: 'claude-a-wrapper', harness: 'claude' as const };
+  const used = (percent: number) => ({ usage: { fiveHour: { usedPercent: percent }, weekly: {} } });
+  const known = facts({
+    runtimes: [
+      runtime('claude-a'),
+      runtime('claude-b'),
+      runtime('claude-c'),
+      runtime('claude-spent'),
+      runtime('glm', { catalogId: 'zai' }),
+    ],
+    credentials: [
+      credential('claude-a-login', used(100)),
+      credential('claude-b-login', used(10)),
+      credential('claude-c-login', used(50)),
+      credential('claude-spent-login', used(100)),
+      credential('glm-login'),
+    ],
+    tools: [claudeTool],
+    now: iso(NOW),
+  });
+  const choose = (named: string, targets: readonly string[] = []) =>
+    chooseFailoverTarget({ source, facts: known, targets, minHeadroomPercent: 20, named });
+
+  it('should take the login the verdict named when the rules allow it', () => {
+    // Act
+    const choice = choose('claude-c');
+
+    // Assert
+    should(choice.kind === 'chosen' ? choice.runtime.name : undefined).equal('claude-c');
+    should(choice.kind === 'chosen' ? choice.refusedNamed : 'none').equal(undefined);
+  });
+
+  it('should fall back to the best login when the named one has no quota, and say what was refused', () => {
+    // Act
+    const choice = choose('claude-spent');
+
+    // Assert
+    should(choice.kind === 'chosen' ? choice.runtime.name : undefined).equal('claude-b');
+    should(choice.kind === 'chosen' ? choice.refusedNamed?.runtime : undefined).equal('claude-spent');
+    should(choice.tried[0]?.runtime).equal('claude-spent');
+    should(choice.tried.filter(entry => entry.runtime === 'claude-spent')).have.length(1);
+  });
+
+  it('should refuse a name that is no runtime here, and a login of another provider the owner did not name', () => {
+    // Act
+    const missing = choose('nowhere');
+    const foreign = choose('glm');
+    const allowed = choose('glm', ['glm']);
+
+    // Assert
+    should(missing.kind === 'chosen' ? missing.refusedNamed?.why : undefined).equal(
+      'there is no runtime by that name on this machine',
+    );
+    should(foreign.kind === 'chosen' ? foreign.refusedNamed?.runtime : undefined).equal('glm');
+    should(allowed.kind === 'chosen' ? allowed.runtime.name : undefined).equal('glm');
+  });
+
+  it('should keep a verdict inside the list the owner set, same provider or not', () => {
+    // Act
+    const unlisted = choose('claude-c', ['claude-b']);
+    const listed = choose('claude-b', ['claude-b']);
+
+    // Assert
+    should(unlisted.kind === 'chosen' ? unlisted.runtime.name : undefined).equal('claude-b');
+    should(unlisted.kind === 'chosen' ? unlisted.refusedNamed?.why : undefined).equal(
+      'it is not in the autoMigrate.targets the owner set',
+    );
+    should(listed.kind === 'chosen' ? listed.refusedNamed : 'none').equal(undefined);
+  });
+
+  it('should refuse with every reason when nothing qualifies, and when the ferret is on no known login', () => {
+    // Arrange
+    const bare = facts({
+      runtimes: [runtime('claude-a'), runtime('claude-spent')],
+      credentials: [credential('claude-a-login', used(100)), credential('claude-spent-login', used(100))],
+      tools: [claudeTool],
+      now: iso(NOW),
+    });
+
+    // Act
+    const none = chooseFailoverTarget({
+      source,
+      facts: bare,
+      targets: [],
+      minHeadroomPercent: 20,
+      named: 'claude-spent',
+    });
+    const unknown = chooseFailoverTarget({
+      source: { agent: 'gone', harness: 'claude' },
+      facts: bare,
+      targets: [],
+      minHeadroomPercent: 20,
+      named: 'claude-spent',
+    });
+
+    // Assert
+    should(none.kind).equal('none');
+    should(none.tried.map(entry => entry.runtime)).deepEqual(['claude-spent']);
+    should(unknown.kind).equal('none');
+    should(unknown.tried[0]?.runtime).equal('gone');
   });
 });
 

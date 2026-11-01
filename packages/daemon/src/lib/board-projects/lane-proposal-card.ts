@@ -54,10 +54,16 @@ export const laneProposalCard = (projectName: string, laneSet: LaneSet): LanePro
  * The project and version an Accept confirms, or `undefined` for any answer that confirms nothing: another
  * card, a dismissal, Edit, or the owner's own words.
  */
+/** The agenda source a lane proposal's card is raised under: the producer an Accept must come from. */
+export const LANE_PROPOSAL_SOURCE = 'task';
+
 export const acceptedProposal = (
   addressed: ResolvedAgendaItem,
 ): { readonly projectId: BoardProjectId; readonly version: number } | undefined => {
   const { sourceRef, response } = addressed;
+  // Only the lane producer's own card: a reference alone could be written by anything else (docs/agenda.md §
+  // Reserved sourceRefs), and an Accept confirms lanes as the owner.
+  if (addressed.raisedBy !== 'daemon' || addressed.source !== LANE_PROPOSAL_SOURCE) return undefined;
   if (response?.kind !== 'multiple-choice' || response.choice.trim() !== LANE_PROPOSAL_ANSWERS.accept) return undefined;
   return parseLaneProposalReference(sourceRef);
 };

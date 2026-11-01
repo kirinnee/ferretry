@@ -1828,8 +1828,8 @@ The rules, each of which is a reason it can be trusted:
   observer of sizes recover it a byte at a time. A list of routes that must NOT be compressed is wrong
   the day someone adds a route and forgets it, so the default is off and the set that is on is the
   short, audited one: `GET /v1/sessions` (the fleet list: names, states, context counters and the
-  hashes of launch-instruction sections, which authorise nothing) and `GET /v1/board` (the board list:
-  work-item titles, states and the people's own work text). Every other route — passkeys, secrets, the
+  hashes of launch-instruction sections, which authorise nothing), `GET /v1/board` (the board list:
+  work-item titles, states and the people's own work text) and `GET /v1/board/ids` (the card ids alone). Every other route — passkeys, secrets, the
   security settings, pairing codes and devices, fleet credentials and MCP authorisation, the tunnel,
   push subscriptions, the browser sign-in window and state, file, diff and attachment bytes, session
   transcripts, messages, logs and any input request — answers plain, and so does any route added

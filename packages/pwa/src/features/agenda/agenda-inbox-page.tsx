@@ -33,6 +33,7 @@
 import { type AgendaId, formatTaskRef } from '@ferretry/protocol';
 import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, Search, SkipForward, X, Zap } from 'lucide-react';
 import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { DaemonTaskReferences } from '../../components/daemon-task-references.tsx';
 import { Spinner } from '../../components/spinner.tsx';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { CLEAR_ACTION, kindWord } from '../../lib/agenda-answers.ts';
@@ -166,17 +167,19 @@ const renderInboxCard = (
   card: InboxCard,
   act: (action: InboxAction) => void,
 ) => (
-  <AgendaCard
-    error={failureFor(inbox.deferredState.failed, card.key)}
-    item={card.item}
-    key={card.key}
-    onAct={act}
-    onSnooze={until => act(snoozeAction(until))}
-    origin={inboxCardOrigin(card, onNavigate)}
-    swipeHints={false}
-    {...inputFormFor(inbox, card)}
-    {...(now === undefined ? {} : { now })}
-  />
+  <DaemonTaskReferences connection={inbox.connectionFor(card.daemonId)} key={card.key} onNavigate={onNavigate}>
+    <AgendaCard
+      error={failureFor(inbox.deferredState.failed, card.key)}
+      item={card.item}
+      key={card.key}
+      onAct={act}
+      onSnooze={until => act(snoozeAction(until))}
+      origin={inboxCardOrigin(card, onNavigate)}
+      swipeHints={false}
+      {...inputFormFor(inbox, card)}
+      {...(now === undefined ? {} : { now })}
+    />
+  </DaemonTaskReferences>
 );
 
 /**
@@ -346,42 +349,44 @@ function OpenItem({
   const entries = useItemConversation(card, readConversation);
   const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
   return (
-    <div
-      className="fy-inbox-open"
-      data-inbox-gate={isGateItem(card.item) ? '' : undefined}
-      data-inbox-open={card.key}
-      key={card.key}
-    >
-      {isGateItem(card.item) ? (
-        <GateMeta card={card} item={card.item} onNavigate={onNavigate} />
-      ) : (
-        <InboxWhoLine card={card} onNavigate={onNavigate} />
-      )}
-      <AgendaItemView
-        busy={false}
-        closeLabel="Back to the Inbox"
-        daemonId={card.daemonId}
-        error={failureFor(inbox.deferredState.failed, card.key)}
-        ferret={inboxWho(card).ferret}
-        formKey={card.key}
-        history={history}
-        item={card.item}
-        onAct={act}
-        onClose={place.onClose}
-        onNext={skip}
-        {...(canSnooze ? { onSnooze: (until: string) => act(snoozeAction(until)) } : {})}
-        position={{ index: place.index, total: place.total }}
-        quoteScope={scopeOf(card)}
-        {...inputFormFor(inbox, card)}
-        renderProse={agendaProse(copyWriter)}
-        // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
-        // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
-        swipeable={place.swipeable}
-        {...(now === undefined ? {} : { now })}
-        {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
-      />
-      <CardTools act={act} skip={skip} />
-    </div>
+    <DaemonTaskReferences connection={inbox.connectionFor(card.daemonId)} key={card.key} onNavigate={onNavigate}>
+      <div
+        className="fy-inbox-open"
+        data-inbox-gate={isGateItem(card.item) ? '' : undefined}
+        data-inbox-open={card.key}
+        key={card.key}
+      >
+        {isGateItem(card.item) ? (
+          <GateMeta card={card} item={card.item} onNavigate={onNavigate} />
+        ) : (
+          <InboxWhoLine card={card} onNavigate={onNavigate} />
+        )}
+        <AgendaItemView
+          busy={false}
+          closeLabel="Back to the Inbox"
+          daemonId={card.daemonId}
+          error={failureFor(inbox.deferredState.failed, card.key)}
+          ferret={inboxWho(card).ferret}
+          formKey={card.key}
+          history={history}
+          item={card.item}
+          onAct={act}
+          onClose={place.onClose}
+          onNext={skip}
+          {...(canSnooze ? { onSnooze: (until: string) => act(snoozeAction(until)) } : {})}
+          position={{ index: place.index, total: place.total }}
+          quoteScope={scopeOf(card)}
+          {...inputFormFor(inbox, card)}
+          renderProse={agendaProse(copyWriter)}
+          // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
+          // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
+          swipeable={place.swipeable}
+          {...(now === undefined ? {} : { now })}
+          {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
+        />
+        <CardTools act={act} skip={skip} />
+      </div>
+    </DaemonTaskReferences>
   );
 }
 

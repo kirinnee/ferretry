@@ -2,7 +2,7 @@
 
 An [environment login](provider-presets.md) shows its real quota or spend in the same places a Claude or
 Codex sign-in does: the composer's quota chip, Info › Usage, the logins list, and the usage feed the
-Warden and quota failover read. This page is the contract for how that number is found.
+Warden and Warden autoMigrate read. This page is the contract for how that number is found.
 
 The code is `packages/daemon/src/lib/usage/provider-quota/`.
 
@@ -30,7 +30,7 @@ when nothing else measured them, and lays itself over the usage feed's row for e
 Only when somebody is watching, and never inference:
 
 - **Watchers**: `GET /v1/fleet/credentials` (the logins list on screen), `GET /v1/usage` (the PWA polls it
-  while a quota chip or Info › Usage is showing), the Warden's sweep and quota failover. Each asks the
+  while a quota chip or Info › Usage is showing), the Warden's sweep and auto-migrate. Each asks the
   reader first; the reader reads every environment login whose last attempt is **60 s** old or more, and
   concurrent watchers share one read.
 - **Not watchers**: the daemon's unattended usage refresh timer, `GET /usage` and `GET /metrics` (both opt-in, `publicUsageFeed`;

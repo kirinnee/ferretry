@@ -23,7 +23,7 @@ them was native.
 | renderer  | `api/metrics.ts` `renderUsageMetrics`                                            | `lib/usage.ts` `renderFleetUsageMetrics` — **uncalled** |
 | cache     | `CachedUsageFeed` — lazy refresh, shared in-flight, retains last good            | none; collects per request                              |
 | source    | `HttpUsageSource(usage.url)` → kfleet `serve`; `CommandUsageSource` → kfleet CLI | `AnthropicUsageProbe`, native                           |
-| consumers | the advisor, quota-failover, the PWA, any Prometheus scraper                     | a person typing `fy fleet usage`                        |
+| consumers | the advisor, autoMigrate, the PWA, any Prometheus scraper                        | a person typing `fy fleet usage`                        |
 
 Path A is the better _machinery_ — it already has the loop, the rendering, and a `ready`/`stale` flag
 that keeps "the fleet is empty" apart from "the collector failed"
@@ -42,7 +42,7 @@ CommandUsageSource(usageProbeCommand(...))              → kfleet's CLI, with -
 ```
 
 So on a host where kfleet is deleted, a daemon configured with neither serves an empty feed and says so
-honestly — but the advisor, quota-failover and every scraper then have no quota data at all, while
+honestly — but the advisor, Warden autoMigrate and every scraper then have no quota data at all, while
 `fy fleet usage` on the same host reports real numbers. Capability F reads as closed from the CLI and
 open from the daemon.
 
@@ -55,14 +55,13 @@ the native one is trusted.
 
 ### The one thing that will silently break routing if it is got wrong
 
-`AccountUsage.agent` is **not** an account id. It is the name a session is launched with:
-`quota-failover/service.ts` calls `migrate(session.id, migration.target.agent)`, and the advisor matches
-on the same field. A `FleetUsage` row carries only `accountId` and `kind`, so a source **must join back
+`AccountUsage.agent` is **not** an account id. It is the name a session is launched with,
+and the advisor and other usage consumers match on that field. (Warden autoMigrate does not read it: it
+chooses a `FleetRuntimeView` from the fleet catalog facts.) A `FleetUsage` row carries only `accountId` and `kind`, so a source **must join back
 to the manifest** and use `account.wrapper`.
 
 Mapping an account id into `agent` would type-check, pass every schema, produce a plausible-looking
-`/usage` document — and then silently match nothing, so failover would quietly stop moving sessions off
-exhausted accounts. This is the same shape as the false exhaustion that
+`/usage` document — and then silently match nothing, so the advisor would quietly stop matching exhausted accounts. This is the same shape as the false exhaustion that
 [kfleet-map.md](kfleet-map.md) records under F: internal measures all look fine while the fleet stops
 working.
 

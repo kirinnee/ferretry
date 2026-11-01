@@ -1,3 +1,14 @@
+## [4.220.0](https://github.com/kirinnee/ferretry/compare/v4.219.0...v4.220.0) (2026-11-01)
+
+### Features
+
+* **pwa:** declutter the catalog side panel and give every MCP row a ⋯ ([#1299](https://github.com/kirinnee/ferretry/issues/1299)) ([4db28e8](https://github.com/kirinnee/ferretry/commit/4db28e8174d1b1f75431a8fdcf04ce8641ad21fe))
+
+### Fixes
+
+* **agenda:** bind owner answers to the daemon's own items, not a forged sourceRef ([#1297](https://github.com/kirinnee/ferretry/issues/1297)) ([ee8c335](https://github.com/kirinnee/ferretry/commit/ee8c335180a803c7a88a3e94af0fccc439f1a868))
+* **warden:** auto-moves check quota, headroom and record the actor ([#1296](https://github.com/kirinnee/ferretry/issues/1296)) ([1c72e48](https://github.com/kirinnee/ferretry/commit/1c72e4839f671ec4c7369339d0084cb465e55884))
+
 ## [4.219.0](https://github.com/kirinnee/ferretry/compare/v4.218.0...v4.219.0) (2026-11-01)
 
 ### Features

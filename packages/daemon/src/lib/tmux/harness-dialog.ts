@@ -205,6 +205,7 @@ const KINDS: readonly { readonly kind: HarnessDialogKind; readonly marker: RegEx
   { kind: 'hooks-review', marker: /^hooks need review$/iu },
   { kind: 'update', marker: /update available/iu },
   { kind: 'sign-in', marker: /^welcome to codex\b/iu },
+  { kind: 'usage-limit', marker: /^usage limit reached$/iu },
   { kind: 'mcp-servers', marker: /^new mcp servers? found\b/iu },
   { kind: 'settings-error', marker: /^settings error$/iu },
   // Codex from 0.156 titles its folder screens "Folder access": the trust question, and the restricted

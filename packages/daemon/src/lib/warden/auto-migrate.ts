@@ -10,10 +10,15 @@
  * - Only to a login that is ready: an agent runtime, its CLI installed, signed in, not switched off, not
  *   holding spend, not out of quota. That is `fy recommend`'s own readiness check (`runtimeRefusal`), so a
  *   login the Warden moves onto is one `fy new` would start.
+ * - Only to a login with at least `minHeadroomPercent` of its tightest window left ({@link headroomRefusal}): a
+ *   login 99% used is ready by `fy recommend`'s reading, and still not a place to send a ferret that just ran dry.
  * - Never onto the login that ran out — a second runtime on the same login shares its quota and its budget.
  * - Never to another provider unless the owner named that login: "any ready login" stays within the provider
  *   ({@link providerOf}).
  * - At most `maxMovesPerHour` moves of one ferret an hour ({@link movesInLastHour}).
+ *
+ * A verdict the LLM Warden wrote that NAMES a login is held to the same rules ({@link chooseFailoverTarget}): a named
+ * login that is refused falls back to the best candidate, or is refused with the reason.
  *
  * When no login qualifies, every one that was tried is named with its reason, in one line ({@link triedLine}),
  * so the owner can see at a glance what to fix.
@@ -109,6 +114,14 @@ export interface MoveTargetInput {
   readonly facts: PackFleetFacts;
   /** The owner's list, in order. Empty: any ready login of the same harness and provider. */
   readonly targets: readonly string[];
+  /** The least share of its tightest window a target must have left, in percent. 0: no floor. */
+  readonly minHeadroomPercent: number;
+}
+
+/** The logins a ferret may move to, most headroom first, and every one turned down with its reason. */
+export interface MoveTargets {
+  readonly ready: readonly FleetRuntimeView[];
+  readonly tried: readonly MoveTargetTried[];
 }
 
 const named = (runtime: FleetRuntimeView, name: string): boolean => runtime.name === name || runtime.wrapper === name;
@@ -121,14 +134,21 @@ const named = (runtime: FleetRuntimeView, name: string): boolean => runtime.name
  * terminal-only runtimes — and names every other one it turned down. A named login is always accounted for.
  */
 export function chooseMoveTarget(input: MoveTargetInput): MoveTargetChoice {
-  const { source, facts, targets } = input;
+  const { ready, tried } = rankMoveTargets(input);
+  const chosen = ready[0];
+  return chosen === undefined ? { kind: 'none', tried } : { kind: 'chosen', runtime: chosen, tried };
+}
+
+/** Every login the ferret may move to, in the order {@link chooseMoveTarget} takes them. */
+export function rankMoveTargets(input: MoveTargetInput): MoveTargets {
+  const { source, facts, targets, minHeadroomPercent } = input;
   const own = facts.runtimes.find(runtime => named(runtime, source.agent));
   const explicit = targets.length > 0;
   // Not a runtime here: neither its provider nor its login can be told, so not even a named target is safe — it
   // might share the very login that ran out.
   if (own === undefined)
     return {
-      kind: 'none',
+      ready: [],
       tried: [
         { runtime: source.agent, why: 'it is not a runtime on this machine, so its login and provider are unknown' },
       ],
@@ -143,13 +163,49 @@ export function chooseMoveTarget(input: MoveTargetInput): MoveTargetChoice {
       tried.push({ runtime: candidate, why: 'there is no runtime by that name on this machine' });
       continue;
     }
-    const why = moveRefusal(candidate, { own, harness: source.harness, explicit, facts });
+    const why = moveRefusal(candidate, { own, harness: source.harness, explicit, facts, minHeadroomPercent });
     if (why === undefined) ready.push(candidate);
     else tried.push({ runtime: candidate.name, why });
   }
-  const ordered = explicit ? ready : ready.toSorted((left, right) => headroomOrder(left, right, facts));
-  const chosen = ordered[0];
-  return chosen === undefined ? { kind: 'none', tried } : { kind: 'chosen', runtime: chosen, tried };
+  return { ready: explicit ? ready : ready.toSorted((left, right) => headroomOrder(left, right, facts)), tried };
+}
+
+/** A failover's choice: what {@link chooseMoveTarget} gives, and the login the verdict named when it was turned down. */
+export type FailoverChoice =
+  | (Extract<MoveTargetChoice, { kind: 'chosen' }> & { readonly refusedNamed?: MoveTargetTried })
+  | Extract<MoveTargetChoice, { kind: 'none' }>;
+
+/**
+ * The login an LLM verdict's `MIGRATE (agent)` moves a ferret to. The named login goes through the rules every
+ * automatic move goes through; if it is refused, the best login those rules allow takes its place, and if there is
+ * none the move is refused with every reason. A verdict names a login on a belief about its quota; only the machine's
+ * own facts say it is true.
+ */
+export function chooseFailoverTarget(input: MoveTargetInput & { readonly named: string }): FailoverChoice {
+  const { named: name, ...rest } = input;
+  const fallback = chooseMoveTarget(rest);
+  const own = rest.facts.runtimes.find(runtime => named(runtime, rest.source.agent));
+  if (own === undefined) return fallback;
+  const runtime = rest.facts.runtimes.find(candidate => named(candidate, name));
+  const listed = runtime !== undefined && rest.targets.some(target => named(runtime, target));
+  const why =
+    runtime === undefined
+      ? 'there is no runtime by that name on this machine'
+      : rest.targets.length > 0 && !listed
+        ? 'it is not in the autoMigrate.targets the owner set'
+        : moveRefusal(runtime, {
+            own,
+            harness: rest.source.harness,
+            explicit: listed,
+            facts: rest.facts,
+            minHeadroomPercent: rest.minHeadroomPercent,
+          });
+  if (why === undefined) return { kind: 'chosen', runtime: runtime as FleetRuntimeView, tried: fallback.tried };
+  const refused = { runtime: runtime?.name ?? name, why };
+  const tried = [refused, ...fallback.tried.filter(entry => entry.runtime !== refused.runtime)];
+  return fallback.kind === 'chosen'
+    ? { kind: 'chosen', runtime: fallback.runtime, tried, refusedNamed: refused }
+    : { kind: 'none', tried };
 }
 
 function moveRefusal(
@@ -159,28 +215,44 @@ function moveRefusal(
     readonly harness: HarnessKind;
     readonly explicit: boolean;
     readonly facts: PackFleetFacts;
+    readonly minHeadroomPercent: number;
   },
 ): string | undefined {
-  const { own, harness, explicit, facts } = context;
+  const { own, harness, explicit, facts, minHeadroomPercent } = context;
   if (runtime === own) return 'it is the login the ferret is on';
   if (runtime.harness !== harness) return `it runs ${runtime.harness}, not ${harness}`;
   if (runtime.credential.id === own.credential.id)
     return `it shares the login ${own.credential.id}, the one that ran out`;
   if (!explicit && providerOf(runtime) !== providerOf(own))
     return `another provider (${providerOf(runtime)}), which only a named target may reach`;
-  return runtimeRefusal(runtime, undefined, facts)?.message;
+  return runtimeRefusal(runtime, undefined, facts)?.message ?? headroomRefusal(runtime, facts, minHeadroomPercent);
 }
+
+/**
+ * Why a ready login is still not a place to move to: less than `minHeadroomPercent` of its tightest window left.
+ * A login whose usage was never measured has no share to be short of, as `fy recommend` reads it.
+ */
+export function headroomRefusal(
+  runtime: FleetRuntimeView,
+  facts: PackFleetFacts,
+  minPercent: number,
+): string | undefined {
+  const { leftPercent, summary } = quotaOfRuntime(runtime, facts);
+  if (minPercent <= 0 || leftPercent === undefined || leftPercent >= minPercent) return undefined;
+  return `only ${leftPercent}% is left (${summary}), under the ${minPercent}% the Warden settings require (autoMigrate.minHeadroomPercent)`;
+}
+
+const quotaOfRuntime = (runtime: FleetRuntimeView, facts: PackFleetFacts) =>
+  quotaOf(
+    facts.credentials.find(credential => credential.id === runtime.credential.id),
+    facts.now,
+    facts.paneLimits?.get(runtime.credential.id),
+  );
 
 /** Most headroom first: the band, then the share left; unmeasured counts as all of it, as `fy recommend` reads it. */
 function headroomOrder(left: FleetRuntimeView, right: FleetRuntimeView, facts: PackFleetFacts): number {
-  const quota = (runtime: FleetRuntimeView) =>
-    quotaOf(
-      facts.credentials.find(credential => credential.id === runtime.credential.id),
-      facts.now,
-      facts.paneLimits?.get(runtime.credential.id),
-    );
-  const a = quota(left);
-  const b = quota(right);
+  const a = quotaOfRuntime(left, facts);
+  const b = quotaOfRuntime(right, facts);
   return QUOTA_RANK[a.state] - QUOTA_RANK[b.state] || (b.leftPercent ?? 100) - (a.leftPercent ?? 100);
 }
 

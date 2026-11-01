@@ -235,6 +235,7 @@ describe('warden.yaml', () => {
       forceStopBackground: false,
       waitMinutes: 10,
       maxMovesPerHour: 1,
+      minHeadroomPercent: 20,
     });
   });
 
@@ -258,6 +259,9 @@ describe('warden.yaml', () => {
     ['a wait under a minute', { waitMinutes: 0 }],
     ['a wait over an hour', { waitMinutes: 61 }],
     ['more than six moves an hour', { maxMovesPerHour: 7 }],
+    ['a headroom floor over 90 percent', { minHeadroomPercent: 91 }],
+    ['a negative headroom floor', { minHeadroomPercent: -1 }],
+    ['a fractional headroom floor', { minHeadroomPercent: 12.5 }],
     ['a blank target', { targets: [' '] }],
     ['an unknown key', { force: true }],
   ])('should reject %s in the autoMigrate section', (_name, autoMigrate) => {

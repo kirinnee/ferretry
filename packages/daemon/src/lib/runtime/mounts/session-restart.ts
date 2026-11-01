@@ -10,6 +10,7 @@ import { parseBody } from '../../api/body.ts';
 import { headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
+import { moverOf } from './session-migrate.ts';
 
 /**
  * Restarting the ferrets whose instructions are out of date: `POST`, `GET` and `DELETE /v1/restarts`
@@ -25,7 +26,7 @@ import type { ApiRoute } from '../../api/route.ts';
  * `noStore` because every answer describes live sessions.
  */
 export interface SessionRestartSubsystem {
-  restart(request: RestartRequest, requestId?: string): Promise<RestartResult>;
+  restart(request: RestartRequest, requestId?: string, requestedBy?: string): Promise<RestartResult>;
   status(): Promise<RestartStatus>;
   cancel(): Promise<RestartCancelResult>;
   /** One pass over the waiting restarts. It serves no route: a timer calls it. */
@@ -43,7 +44,7 @@ export function sessionRestartRoutes(subsystem: SessionRestartSubsystem): readon
       handle: async context => {
         const request = await parseBody(context.request, RestartRequestSchema);
         const id = headerValue(context.request, FY_REQUEST_ID_HEADER)?.trim();
-        return jsonResponse(await subsystem.restart(request, id === '' ? undefined : id));
+        return jsonResponse(await subsystem.restart(request, id === '' ? undefined : id, moverOf(context.actor)));
       },
     },
     {

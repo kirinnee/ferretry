@@ -215,6 +215,34 @@ describe('sessionReferenceSurface', () => {
     should(surface.taskReferenceResolver?.('F8')).be.false();
   });
 
+  test('should prove and open a card on another project from the machine-wide ids', () => {
+    // Arrange
+    const visited: string[] = [];
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      onNavigate: to => visited.push(to),
+      tasks: [{ id: 'F12' }],
+      taskIds: new Set(['F12', 'F364']),
+    });
+
+    // Act
+    surface.onTaskOpen?.('f364');
+
+    // Assert
+    should(surface.taskReferenceResolver?.('f364')).be.true();
+    should(surface.taskReferenceResolver?.('F365')).be.false();
+    should(visited).deepEqual(['/d/daemon-a/board/F364']);
+  });
+
+  test('should prove from the machine-wide ids when the host holds no project slice', () => {
+    const surface = sessionReferenceSurface({ connection, scope, fetcher: browserFetch, taskIds: new Set(['F364']) });
+
+    should(surface.taskReferenceResolver?.('F364')).be.true();
+    should(surface.taskReferenceResolver?.('F1')).be.false();
+  });
+
   test("should open a task on this machine's board when the host can navigate, not the Tasks sheet", () => {
     // Arrange
     const visited: string[] = [];

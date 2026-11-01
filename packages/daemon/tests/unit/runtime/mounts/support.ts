@@ -106,7 +106,6 @@ import {
 } from '../../../../src/lib/learning/index.ts';
 import { CALLSIGN_WINDOW_MS, type NameClaim } from '../../../../src/lib/names/index.ts';
 import { type PinRepository, PinService, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
-import { SharedDraftService } from '../../../../src/lib/shared-drafts/index.ts';
 import type { ClockPort } from '../../../../src/lib/ports.ts';
 import type { AnalyticsSubsystem } from '../../../../src/lib/runtime/mounts/analytics.ts';
 import type { BoardSubsystem } from '../../../../src/lib/runtime/mounts/board.ts';
@@ -178,6 +177,7 @@ import { ProvedPaneCapture, SessionPermissionService } from '../../../../src/lib
 import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index.ts';
 import type { ObservedTerminalPane, RegisteredTerminalPane } from '../../../../src/lib/session/reap.ts';
 import type { ResumeActor } from '../../../../src/lib/session/resume/index.ts';
+import { SharedDraftService } from '../../../../src/lib/shared-drafts/index.ts';
 import { SttEnhancementError } from '../../../../src/lib/stt/errors.ts';
 import {
   DEFAULT_TERMINAL_SIZE,
@@ -1464,6 +1464,7 @@ export class FakeSessionMigrate implements SessionMigrateSubsystem {
         readonly model?: string;
         readonly allowContextDowngrade: boolean;
         readonly forceInflight: boolean;
+        readonly movedBy?: string;
       },
     ]
   > = [];
@@ -1482,6 +1483,7 @@ export class FakeSessionMigrate implements SessionMigrateSubsystem {
       readonly model?: string;
       readonly allowContextDowngrade: boolean;
       readonly forceInflight: boolean;
+      readonly movedBy?: string;
     },
   ): Promise<SessionView> {
     this.migrations.push([sessionId, request]);
@@ -2365,6 +2367,7 @@ export function boardSubsystem(overrides: Partial<BoardSubsystem> = {}): BoardSu
       nextCursor: null,
       quarantined: [],
     }),
+    ids: async () => ({ ids: [] }),
     task: missing,
     taskByLegacyRef: missing,
     importLegacy: async () => ({

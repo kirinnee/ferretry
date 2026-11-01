@@ -3,7 +3,8 @@ import { DEFAULT_WARDEN_CONFIG, type WardenConfig } from '@ferretry/protocol';
 import should from 'should';
 import { WardenAutoMigrateService, type WardenFleetSession } from '../../../src/lib/warden/index.ts';
 import { credential, facts, runtime, tool } from '../pack/support.ts';
-import { enabled, harness, NOW, session } from './sweep-harness.ts';
+import type { WardenRuntimeState } from '../../../src/lib/warden/index.ts';
+import { at, enabled, harness, NOW, session } from './sweep-harness.ts';
 
 const moving = (changes: Partial<WardenConfig['autoMigrate']> = {}): WardenConfig =>
   enabled({ autoMigrate: { ...DEFAULT_WARDEN_CONFIG.autoMigrate, enabled: true, ...changes } });
@@ -14,14 +15,18 @@ const limited = (id = 's1'): WardenFleetSession => {
   return { ...view, config: { ...view.config, agent: 'claude-a-wrapper', harness: 'claude' } };
 };
 
-function mover(moved: { sessionId: string; agent: string }[]) {
+const spent = { usage: { fiveHour: { usedPercent: 100 }, weekly: {} } };
+
+function mover(
+  moved: { sessionId: string; agent: string }[],
+  fleet: Parameters<typeof facts>[0] = {
+    runtimes: [runtime('claude-a'), runtime('claude-b')],
+    credentials: [credential('claude-a-login'), credential('claude-b-login')],
+    tools: [tool('claude', true)],
+  },
+) {
   return new WardenAutoMigrateService({
-    facts: async () =>
-      facts({
-        runtimes: [runtime('claude-a'), runtime('claude-b')],
-        credentials: [credential('claude-a-login'), credential('claude-b-login')],
-        tools: [tool('claude', true)],
-      }),
+    facts: async () => facts(fleet),
     ownerHold: async () => undefined,
     blockingJobs: async () => [],
     askToStopJobs: async () => undefined,
@@ -193,5 +198,154 @@ describe('moving in the sweep alongside a budget stop', () => {
       'Moved by the budget stop.',
       'Moved by the sweep.',
     ]);
+  });
+});
+
+describe('a MIGRATE verdict, in the sweep', () => {
+  const stuck = (): WardenFleetSession => {
+    const view = session({ id: 's1', status: 'rate_limited' });
+    return { ...view, config: { ...view.config, agent: 'claude-a-wrapper', harness: 'claude' } };
+  };
+  const verdict = (): Partial<WardenRuntimeState> => ({
+    assignments: {
+      s1: { wardenId: 'w0', spawnedAt: at(-30), capability: 'c', kinds: ['unattended_question'], reportPath: '/r.md' },
+    },
+    investigations: [
+      {
+        id: 'w0',
+        scope: 'session',
+        origin: 'jev',
+        targetId: 's1',
+        anomalyKind: 'unattended_question',
+        startedAt: at(-30),
+        reportPath: '/r.md',
+      },
+    ],
+  });
+  const reports = (login: string) => ({
+    '/r.md': `Verdict: NUDGE\n\n# Warden report — s1 (teammate :s1, -)\n\n- **Anomaly kind:** unattended_question\n\n## Summary\n- **Recommended action:** MIGRATE (${login}) — quota is out\n- **Outcome:** done\n`,
+  });
+  const three = {
+    runtimes: [runtime('claude-a'), runtime('claude-b'), runtime('claude-c')],
+    credentials: [
+      credential('claude-a-login', spent),
+      credential('claude-b-login', spent),
+      credential('claude-c-login'),
+    ],
+    tools: [tool('claude', true)],
+  };
+  const run = async (login: string, fleet?: Parameters<typeof mover>[1]) => {
+    const subject = harness({
+      config: enabled(),
+      fleet: [stuck()],
+      reports: reports(login),
+      state: verdict(),
+      autoMigrate: mover([], fleet),
+    });
+    await subject.service.run({ force: false });
+    return subject;
+  };
+
+  it('should move to the login the verdict named when it is ready', async () => {
+    // Act
+    const subject = await run('claude-b-wrapper');
+
+    // Assert
+    should(subject.remedies).deepEqual([{ action: 'failover', sessionId: 's1', detail: 'claude-b-wrapper' }]);
+    should(subject.state().actions?.[0]).match({ action: 'failover', outcome: 'done', agent: 'claude-b-wrapper' });
+  });
+
+  it('should move to the best ready login instead when the named one is out of quota, and say so', async () => {
+    // Act
+    const subject = await run('claude-b-wrapper', three);
+
+    // Assert
+    should(subject.remedies).deepEqual([{ action: 'failover', sessionId: 's1', detail: 'claude-c-wrapper' }]);
+    should(subject.state().actions?.[0]).match({
+      action: 'failover',
+      outcome: 'done',
+      agent: 'claude-c-wrapper',
+      detail: /claude-b-wrapper was turned down \(.*\), so it went to claude-c instead\./,
+    });
+  });
+
+  it('should refuse the move, with every reason, when no login can take the ferret', async () => {
+    // Act
+    const subject = await run('claude-b-wrapper', {
+      ...three,
+      credentials: [
+        credential('claude-a-login', spent),
+        credential('claude-b-login', spent),
+        credential('claude-c-login', spent),
+      ],
+    });
+
+    // Assert
+    should(subject.remedies).deepEqual([]);
+    should(subject.state().actions?.[0]).match({
+      action: 'failover',
+      outcome: 'failed',
+      detail: /no login could take it\. Tried claude-b/,
+    });
+  });
+
+  it('should name the login it was routed to, and why, when that move is refused', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [stuck()],
+      reports: reports('claude-b-wrapper'),
+      state: verdict(),
+      autoMigrate: mover([], three),
+      remedyFails: 'failover',
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().actions?.[0]).match({
+      action: 'failover',
+      outcome: 'failed',
+      agent: 'claude-c-wrapper',
+      detail: /\(claude-c-wrapper\) did not take: failover refused\. claude-b-wrapper was turned down/,
+    });
+  });
+
+  it('should refuse a ferret that records no login to move from', async () => {
+    // Arrange
+    const nameless = stuck();
+    const subject = harness({
+      config: enabled(),
+      fleet: [{ ...nameless, config: { ...nameless.config, agent: undefined, harness: undefined } }],
+      reports: reports('claude-b-wrapper'),
+      state: verdict(),
+      autoMigrate: mover([]),
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.remedies).deepEqual([]);
+    should(subject.state().actions?.[0]).match({ outcome: 'failed', detail: /records no login to move from/ });
+  });
+
+  it('should hand the investigation the logins each flagged ferret may move to', async () => {
+    // Arrange
+    const flagged = session({ id: 's1', status: 'rate_limited', state: { quota: { resetAt: NOW - 60_000 } } });
+    const subject = harness({
+      config: enabled(),
+      fleet: [{ ...flagged, config: { ...flagged.config, agent: 'claude-a-wrapper', harness: 'claude' } }],
+      autoMigrate: mover([], three),
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.spawns[0]?.prompt).containEql('## Migrate candidates');
+    should(subject.spawns[0]?.prompt).containEql('claude-c-wrapper');
+    should(subject.spawns[0]?.prompt).not.containEql('claude-b-wrapper');
   });
 });

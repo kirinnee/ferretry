@@ -156,7 +156,7 @@ describe('harness prompts on the board', () => {
     // Assert
     should(
       file.entries.map((entry: { item: { source: string; sourceRef: string } }) => entry.item.sourceRef),
-    ).deepEqual(['toolu_1']);
+    ).deepEqual(['question:toolu_1']);
     should(file.entries[0].origin).deepEqual({ kind: 'daemon', cause: 'harness-prompt' });
     should(driven).deepEqual([
       { toolUseId: 'toolu_1', answers: [{ kind: 'selection', labels: ['eu'] }], requestId: 'attention:session-1:A1' },
@@ -181,7 +181,9 @@ describe('harness prompts on the board', () => {
     should(events.filter(event => event.type === HARNESS_ANSWER_FAILED_EVENT).map(event => event.data)).deepEqual([
       { id: 'A1', toolUseId: 'toolu_1', reason: "Couldn't answer automatically." },
     ]);
-    should(listed.ok && listed.value.items.map(item => [item.id, item.sourceRef])).deepEqual([['A2', 'toolu_1']]);
+    should(listed.ok && listed.value.items.map(item => [item.id, item.sourceRef])).deepEqual([
+      ['A2', 'question:toolu_1'],
+    ]);
   });
 
   it('should keep one item across a restart and clear it once the session ended while down', async () => {

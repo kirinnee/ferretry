@@ -55,7 +55,7 @@ former blocker is named where it closed; deliberate content and convenience GAPs
 Five facts that the capability rows assume and that are easy to miss:
 
 1. **The daemon now gets quota from its native fleet first.** `/usage`, `/v1/usage` and `/metrics` —
-   read by the advisor, quota-failover and the PWA — share `CachedUsageFeed` over the native
+   read by the advisor, Warden autoMigrate and the PWA — share `CachedUsageFeed` over the native
    `FleetUsageSource`; the older kfleet HTTP and command sources remain fallback only for an
    unapplied fleet. The source joins usage rows back to manifest wrappers, not account ids, so routing
    continues to address the executable a session can launch: [quota-two-paths.md](quota-two-paths.md).
@@ -516,7 +516,7 @@ healing (`:885`), and secrets-file resolution (`:703`). The entire CLIProxyAPI a
 **The daemon now gets its quota from the native fleet collector.** `FleetUsageSource` is first in the
 same cached feed that serves `/usage`, `/v1/usage` and `/metrics`; the former kfleet HTTP and command
 sources are fallback only for a host whose fleet has not been applied. Its manifest join maps a usage
-row onto `account.wrapper`, never `accountId`, so advisor and quota-failover routing still targets the
+row onto `account.wrapper`, never `accountId`, so advisor and autoMigrate routing still targets the
 launchable executable. See [quota-two-paths.md](quota-two-paths.md).
 
 `renderFleetUsageMetrics` and `renderFleetUsageJson` are therefore **unnecessary rather than uncalled**:

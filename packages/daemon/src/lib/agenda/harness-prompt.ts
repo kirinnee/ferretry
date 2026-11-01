@@ -1,4 +1,10 @@
 import {
+  isDaemonSourceRef,
+  HARNESS_QUESTION_REF_PREFIX,
+  harnessToolUseId,
+  harnessQuestionRef,
+  agendaCardKind,
+  isHarnessQuestionId,
   AGENDA_ASK_TARGET_LENGTH,
   type AgendaAsk,
   AgendaAskSchema,
@@ -130,7 +136,7 @@ export function harnessQuestionRequest(pending: PendingQuestion, failed = false)
   const ask = questionAsk(pending, questions);
   return {
     source: 'question',
-    sourceRef: pending.toolUseId,
+    sourceRef: harnessQuestionRef(pending.toolUseId),
     title: failed ? 'Your answer did not arrive' : 'Question from the ferret',
     kind: kindOfAsk(ask),
     subject: failed ? 'Your answer did not reach the ferret. Answer again.' : clip(first, AGENDA_ASK_TARGET_LENGTH),
@@ -179,7 +185,7 @@ function usageLimitWait(state: HarnessState, sourceRef: string): HarnessWait {
         'This clears by itself once the limit is gone and the dialog closes.',
       ]),
       howToResolve:
-        'Ask your admin for more usage, or open the Console tab and pick what the ferret should do. Failover to another login follows your quota-failover settings.',
+        'Ask your admin for more usage, or open the Console tab and pick what the ferret should do. The Warden may move the ferret to another login if auto-migrate is on.',
       ...(state.turnStateAt === undefined ? {} : { waitingSince: state.turnStateAt }),
     },
   };
@@ -225,15 +231,42 @@ export function harnessWait(state: unknown): HarnessWait | undefined {
   if (current.status !== undefined && ENDED.has(current.status)) return undefined;
   const pending = current.pendingQuestion ?? undefined;
   if (pending !== undefined) {
-    if (pending.toolUseId.length > MAX_AGENDA_SOURCE_REF_LENGTH) return undefined;
-    return { sourceRef: pending.toolUseId, request: harnessQuestionRequest(pending) };
+    // The ferret's harness wrote this id: one shaped like the daemon's own references is no question to raise.
+    if (!isHarnessQuestionId(pending.toolUseId)) return undefined;
+    return { sourceRef: harnessQuestionRef(pending.toolUseId), request: harnessQuestionRequest(pending) };
   }
   return current.turnState === 'needs-input' ? consolePromptWait(current) : undefined;
 }
 
-/** Whether a board row is one this producer raised. */
+/**
+ * The tool id of a pending question that is NOT raised because it is shaped like a daemon reference (docs/agenda.md §
+ * Reserved sourceRefs), for the diagnostic; `undefined` for any other state.
+ */
+export function refusedQuestionId(state: unknown): string | undefined {
+  const parsed = HarnessStateSchema.safeParse(state);
+  const id = parsed.success ? parsed.data.pendingQuestion?.toolUseId : undefined;
+  return id === undefined || isHarnessQuestionId(id) ? undefined : id;
+}
+
+/** Text a ferret chose, fit for one log line: every control character and line break shown as `?`. */
+const printable = (text: string): string => [...text].map(char => (/\p{Cc}/u.test(char) ? '?' : char)).join('');
+
+/**
+ * Whether a board row is one this producer raised: its own `question:` and `prompt:` references. Every other daemon
+ * producer raises `question` items too (input and secret cards, phone approvals, 2FA seeds, login recipes, task
+ * plans), so the source alone is never enough. A question raised before the namespace (its bare tool id) is still
+ * this producer's when it carries none of the others' marks and is no recipe card (a to-do).
+ */
 export function isHarnessPromptItem(item: AgendaItem | ResolvedAgendaItem): boolean {
-  return item.source === 'question' && item.raisedBy === 'daemon' && item.sourceRef !== null;
+  if (item.source !== 'question' || item.raisedBy !== 'daemon' || item.sourceRef === null) return false;
+  if (item.sourceRef.startsWith(HARNESS_QUESTION_REF_PREFIX) || isHarnessConsolePromptRef(item.sourceRef)) return true;
+  const marked =
+    item.input !== undefined ||
+    item.phoneApproval !== undefined ||
+    item.twoFactorSeed !== undefined ||
+    item.taskPlan !== undefined ||
+    agendaCardKind(item) === 'task';
+  return !marked && !isDaemonSourceRef(item.sourceRef);
 }
 
 export type HarnessAnswerMapping =
@@ -341,6 +374,8 @@ export class HarnessPromptAgenda {
     private readonly legacyAttention: HarnessAgenda,
     private readonly serial: Pick<SerialExecutor, 'run'>,
     private readonly states: { read(sessionId: string): Promise<unknown> },
+    /** Where a refused question is told: one shaped like a daemon reference raises nothing. */
+    private readonly diagnostics: { warn(message: string): void } = { warn: () => undefined },
   ) {}
 
   /** A state document was written. Total: a failure is retried at the next write. */
@@ -348,6 +383,14 @@ export class HarnessPromptAgenda {
     const wait = harnessWait(state);
     const key = wait?.sourceRef ?? '';
     if (this.seen.get(sessionId) === key) return;
+    const refused = refusedQuestionId(state);
+    if (refused !== undefined) {
+      // The id is the ferret's own text: no control characters or line breaks reach the log.
+      const shown = printable(refused).slice(0, 80);
+      this.diagnostics.warn(
+        `${sessionId}: a question whose id (${shown}) is shaped like a daemon reference was not raised`,
+      );
+    }
     // A session with no wait and nothing open on its board has nothing to clear.
     if (wait === undefined && !this.seen.has(sessionId) && !hasOpenAgenda(state)) {
       this.seen.set(sessionId, key);
@@ -417,8 +460,8 @@ export class HarnessPromptAnswerDelivery implements AgendaChangeObserver {
     const item = change.addressed;
     if (change.change !== 'answered' || change.via !== 'board' || change.actor.kind !== 'human') return;
     if (item === undefined || item.response === undefined || !isHarnessPromptItem(item)) return;
-    const toolUseId = item.sourceRef as string;
-    if (isHarnessConsolePromptRef(toolUseId)) return;
+    if (isHarnessConsolePromptRef(item.sourceRef as string)) return;
+    const toolUseId = harnessToolUseId(item.sourceRef as string);
     const failure = await this.drive(sessionId, item.id, toolUseId, item.response);
     if (failure === undefined) return;
     await this.journal
