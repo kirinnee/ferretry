@@ -114,6 +114,10 @@ export interface ComposerProps {
     Partial<Pick<IFyApiClient, 'history' | 'resolveComposerDraft' | 'submitSend' | 'cancelSend' | 'retrySend'>>;
   readonly busy?: boolean;
   readonly disabled?: boolean;
+  /** Send is allowed with an empty box: the host's send needs no words (a form card whose fields carry the answer). */
+  readonly allowEmptySend?: boolean;
+  /** A count the host bumps when the thing an error was about changed: the error line goes away with it. */
+  readonly clearErrorOn?: number;
   readonly placeholder?: string;
   /** This session's own daemon reading; composer quota is never ambient state. */
   readonly quota?: ComposerQuotaProps['quota'];
@@ -368,6 +372,8 @@ export function Composer({
   api,
   busy = false,
   disabled = false,
+  allowEmptySend = false,
+  clearErrorOn,
   placeholder = 'Message this session',
   quota,
   draftStore = documentDraftStore,
@@ -658,6 +664,10 @@ export function Composer({
     [scope, setDraft],
   );
 
+  useEffect(() => {
+    if (clearErrorOn !== undefined) setError(null);
+  }, [clearErrorOn]);
+
   // `scope` already carries the daemon identity, so it changes whenever the daemon does; listing
   // daemon.daemonId as well only re-ran this redundantly.
   useEffect(() => {
@@ -739,6 +749,7 @@ export function Composer({
     !attachments.uploading &&
     attachments.failed.length === 0 &&
     (canSubmitComposer(draft, disabled, sending) ||
+      (allowEmptySend && !disabled && !sending) ||
       ((attachmentIds.length > 0 || attachments.deferred.length > 0 || location?.kind === 'ready') &&
         !disabled &&
         !sending));

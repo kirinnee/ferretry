@@ -633,7 +633,7 @@ describe('passive learning teaching', () => {
     should(PASSIVE_LEARNING_ENV).equal('FY_LEARNING_PASSIVE');
     should(teaching).containEql('`fy lesson suggest "<rule>" --scope global|repo`');
     should(teaching).containEql('global = every ferret, repo = this project');
-    should(teaching).containEql('File each once; the owner reviews them.');
+    should(teaching).containEql('File each once.');
     // Compressed to make room for the Board section (cap 7,400 for the whole prompt).
     should(teaching.length).be.below(270);
     should(teaching).containEql('lessons_suggest');
@@ -782,7 +782,8 @@ describe('AGENDA_INSTRUCTION', () => {
     // ONE ANSWER SHAPE PER KIND, in the protocol's own words (the CLI's help and refusals say the same).
     should(text).containEql(AGENDA_SHAPE_LINE);
     should(text).containEql('choice=ONE question+2–3 `-o "Label: why"`, `--recommend`');
-    should(text).containEql('reply=open question or several/mixed asks (one `-q` each, no options)');
+    should(text).containEql('reply=open or several asks (one `-q` each)');
+    should(text).containEql('form=several structured answers (`--field`), text in the reply');
     should(text).containEql('todo=`--step`s');
     should(text).containEql('info=Got it');
     should(text).containEql('permission=Approve/Deny');

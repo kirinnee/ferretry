@@ -10,6 +10,7 @@
  *   ?view=to-test         the Needs you section with cards waiting for the owner's try among the agenda items
  *   ?view=quick-to-test   the quick-answer run already on the first card waiting for a try (a wide screen has no button)
  *   ?view=open-5|open-7   an item with five or seven options: the row of three, the rest in full-width rows
+ *   ?view=form            a FORM item open: radios, checkboxes, Yes/No and a text field, the composer its one Send
  *
  * The REAL `AgendaInboxPage` and `Composer`; only the data is invented and nothing is sent anywhere.
  */
@@ -208,11 +209,48 @@ const SEVEN = item('A42', 10, 'johnnie', {
   premise: '- The release train is ready',
   context: '- A release needs two quiet days after it',
 } as Partial<AgendaItem>);
+const FORM = item('A43', 5, 'ottilie', {
+  title: 'Set up the new relay',
+  kind: 'form',
+  subject: 'Four things I need before I can set up the second relay.',
+  ask: { kind: 'open-question' },
+  premise:
+    '- The second relay halves the round trip for half the fleet\n- It needs a region, its alerts and a restart window',
+  context: '- Restarting drops live sessions for about ten seconds',
+  fields: [
+    {
+      id: '1',
+      type: 'one',
+      label: 'Which region should it run in?',
+      name: 'Region',
+      options: [
+        { label: 'EU', description: 'data stays in Europe' },
+        { label: 'US', description: 'cheapest' },
+        { label: 'Asia', description: 'closest to the build box' },
+      ],
+      recommended: ['EU'],
+    },
+    {
+      id: '2',
+      type: 'many',
+      label: 'Which alerts should page you?',
+      name: 'Alerts',
+      options: [
+        { label: 'Relay down', description: 'no session can connect' },
+        { label: 'High latency', description: 'over 200 ms for five minutes' },
+        { label: 'Disk full', description: 'logs stop being kept' },
+      ],
+    },
+    { id: '3', type: 'yesno', label: 'OK to restart the old relay tonight?', name: 'Restart', recommended: ['Yes'] },
+    { id: '4', type: 'text', label: 'Anything else I should know?', name: 'Notes', required: false },
+  ],
+} as unknown as Partial<AgendaItem>);
 /** The items the open-* views open: drawn first, so each is the top card. */
 const OPENED: Readonly<Record<string, InboxCard>> = {
   'open-long': card(LONG, LEDGER, 'studio'),
   'open-5': card(FIVE, RELAY, 'studio'),
   'open-7': card(SEVEN, RELEASE, 'studio'),
+  form: card(FORM, RELAY, 'studio'),
 };
 
 const OWNER: readonly InboxCard[] = [
@@ -328,7 +366,11 @@ const TO_TEST_HOST: ToTestHost = {
   connectionOf: () => boardLaptop,
 };
 const FAKE_CLIENT = { send: async () => ({}) as never };
-const deferred = new DeferredAgendaActions(async () => undefined);
+const committed: unknown[] = [];
+(window as unknown as { __committed: unknown[] }).__committed = committed;
+const deferred = new DeferredAgendaActions(async (_card, action) => {
+  committed.push(action);
+});
 
 function Inbox({
   phone,
@@ -345,10 +387,11 @@ function Inbox({
 }): ReactElement {
   const state = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot);
   const [source, setSource] = useState(from);
+  const held = new Set([...state.pending.map(entry => entry.key), ...state.sending]);
   const inbox: AgendaInbox = {
     unread: [],
     total: OWNER.length + (extra === undefined ? 0 : 1) + TO_TEST.length,
-    cards: extra === undefined ? OWNER : [extra, ...OWNER],
+    cards: (extra === undefined ? OWNER : [extra, ...OWNER]).filter(card => !held.has(card.key)),
     withFerret: FERRET,
     reading: false,
     resolved: [],
@@ -382,13 +425,15 @@ function Inbox({
               reducedMotion
               readConversation={conversationAbout}
               {...(openAt === undefined ? {} : { initialOpen: openAt })}
-              renderComposer={open => (
+              renderComposer={(open, answerForm) => (
                 <AgendaInboxComposer
                   clientFor={async () => FAKE_CLIENT}
                   compact={phone}
+                  key={open.key}
+                  {...(answerForm === undefined ? {} : { answerForm })}
+                  formKey={open.key}
                   connection={MACHINE}
                   itemId={open.item.id}
-                  key={open.key}
                   view={open.view}
                 />
               )}

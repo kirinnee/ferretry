@@ -56,7 +56,35 @@ const OPEN = item('A3', { subject: 'Which region?', ask: { kind: 'open-question'
 const PERMISSION = item('A4', { subject: 'Deploy?', ask: { kind: 'permission' } });
 const PLAIN = item('A5', { subject: 'Look at the flaky test' });
 
+const FORM = item('A8', {
+  subject: 'Deploy settings',
+  kind: 'form',
+  ask: { kind: 'open-question' },
+  fields: [
+    { id: '1', type: 'one', label: 'Which region?', options: [{ label: 'EU' }, { label: 'US' }] },
+    { id: '2', type: 'yesno', label: 'OK to restart?' },
+    { id: '3', type: 'text', label: 'Anything else?' },
+  ],
+});
+
 describe('Attention in a conversation', () => {
+  it('should deliver a filled-in form as the numbered answer, with the typed words in their field', () => {
+    const answered = closed(FORM, {
+      response: {
+        kind: 'form',
+        answers: [
+          { id: '1', picked: 'EU' },
+          { id: '2', picked: 'Yes' },
+          { id: '3', picked: 'Ship after 6pm' },
+        ],
+      },
+    });
+
+    should(boardReplyMessage(answered)).equal(
+      '[answer to !A8 «Deploy settings»] \n1. Which region: EU\n2. OK to restart: Yes\n3. Anything else: Ship after 6pm',
+    );
+  });
+
   it('should find only open items referenced with the grammar’s own boundaries', () => {
     // Arrange
     const open = [CHOICE, OPEN, PERMISSION];

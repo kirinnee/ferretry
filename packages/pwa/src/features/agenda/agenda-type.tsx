@@ -22,6 +22,7 @@ const META: Readonly<Record<AgendaKind, Omit<AgendaTypeMeta, 'kind'>>> = {
   review: { tone: 'review', label: 'Review' },
   info: { tone: 'note', label: 'Note' },
   reply: { tone: 'reply', label: 'Reply' },
+  form: { tone: 'reply', label: 'Form' },
   input: { tone: 'approval', label: 'Input' },
 };
 

@@ -7,13 +7,18 @@
  * - IT IS THE SAME DRAFT: drafts are kept per conversation, so a word typed here is there when the chat opens, and
  *   a quick reply tapped on the item takes it as its note (`agenda-inbox-page.tsx`).
  *
+ * A FORM ITEM'S Send answers the form: `answerForm` (the page's) combines the picks on the card with what is typed, and
+ * the message is not sent as chat. It may throw the one sentence the composer shows (empty fields, asked once).
+ *
  * The client is the host's (one per paired machine); until it is ready the composer is not drawn.
  */
 
 import type { AgendaId, SessionView } from '@ferretry/protocol';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Composer, type ComposerProps } from '../../components/composer.tsx';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
+import { useFormChanges } from '../../lib/agenda-form-state.ts';
+import { withFormSend } from '../../lib/agenda-form-send.ts';
 import { withReferencePrefix } from '../../lib/answer-chip.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonUsageStore } from '../../lib/usage-store.ts';
@@ -38,6 +43,10 @@ export interface AgendaInboxComposerProps {
   /** Phone chrome. */
   readonly compact: boolean;
   readonly disabled?: boolean;
+  /** The open item is a form: Send runs this instead of chatting, even with an empty box. */
+  readonly answerForm?: (() => void) | undefined;
+  /** The open form's picks key: a changed pick clears the "not answered yet" line under the box. */
+  readonly formKey?: string | undefined;
   readonly autocompleteFetcher?: ComposerProps['autocompleteFetcher'];
   readonly enterKeyPreference?: ComposerProps['enterKeyPreference'];
   readonly phoneEnterKeyPreference?: ComposerProps['phoneEnterKeyPreference'];
@@ -51,6 +60,8 @@ export function AgendaInboxComposer({
   clientFor,
   compact,
   disabled = false,
+  answerForm,
+  formKey,
   autocompleteFetcher,
   enterKeyPreference = null,
   phoneEnterKeyPreference = null,
@@ -70,17 +81,27 @@ export function AgendaInboxComposer({
     };
   }, [clientFor, connection]);
   const api = client?.daemonId === connection.daemonId ? client.api : null;
-  const about = useMemo(() => (api === null ? null : withReferencePrefix(api, () => [itemId])), [api, itemId]);
+  const changes = useFormChanges(formKey ?? '');
+  const answer = useRef(answerForm);
+  answer.current = answerForm;
+  const forForm = answerForm !== undefined;
+  const about = useMemo(() => {
+    if (api === null) return null;
+    const chat = withReferencePrefix(api, () => [itemId]);
+    return forForm ? withFormSend(chat, () => answer.current?.()) : chat;
+  }, [api, itemId, forForm]);
   if (about === null) return null;
   return (
     <Composer
+      allowEmptySend={forForm}
+      {...(forForm ? { clearErrorOn: changes } : {})}
       api={about}
       compact={compact}
       daemon={connection}
       disabled={disabled}
       enterKeyPreference={enterKeyPreference}
       phoneEnterKeyPreference={phoneEnterKeyPreference}
-      placeholder={`Reply to ${ferretName(view)}…`}
+      placeholder={forForm ? `Anything else for ${ferretName(view)}?` : `Reply to ${ferretName(view)}…`}
       quota={quota}
       sessionId={view.config.id}
       {...(autocompleteFetcher === undefined ? {} : { autocompleteFetcher })}

@@ -677,3 +677,117 @@
     margin: -6px 0 2px;
   }
 }
+
+/* A form card's fields: numbered questions answered in place; the reply box is the free-text field. */
+.fy-form {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 0;
+  list-style: none;
+}
+.fy-form__field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+.fy-form__q {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  font-weight: var(--weight-strong);
+}
+.fy-form__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fy-form__label :is(p, .md) {
+  display: inline;
+  font-weight: inherit;
+}
+.fy-form__hint {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: normal;
+}
+.fy-form__options,
+.fy-form__seg {
+  margin: 0;
+  min-width: 0;
+  border: 0;
+}
+.fy-form__options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: calc(1.4em + 8px);
+}
+.fy-form__option {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.fy-form__option input {
+  margin-top: 4px;
+  accent-color: var(--accent);
+}
+.fy-form__option-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+}
+.fy-form__option-meaning {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-form__rec {
+  margin-left: 6px;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: normal;
+}
+.fy-form__seg {
+  display: flex;
+  gap: 6px;
+  padding-left: calc(1.4em + 8px);
+}
+.fy-form__seg-btn {
+  flex: 1;
+  min-height: 40px;
+  border: var(--stroke, 1px) solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+.fy-form__seg-btn[data-on] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong, var(--accent));
+  font-weight: var(--weight-strong);
+}
+.fy-form__seg-btn:focus-visible,
+.fy-form__option input:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
+}
+
+/* On a phone the card is already inside the open item's frame, so a form's "What I need from you" drops its own frame:
+   three nested boxes would squeeze the fields. */
+@media (max-width: 639px) {
+  .fy-card__need[data-agenda-need='form'] {
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+}

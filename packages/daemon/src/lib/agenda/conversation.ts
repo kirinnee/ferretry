@@ -1,4 +1,5 @@
 import {
+  type AgendaFormField,
   type AgendaMessageItem,
   type AgendaItem,
   type AgendaResponse,
@@ -11,6 +12,7 @@ import {
   agendaCardKind,
   agendaChatReply,
   agendaTitle,
+  formWords,
   referencedAgendaIds,
   type ResolvedAgendaItem,
   type SessionAgendaSummary,
@@ -50,7 +52,7 @@ export function referencedAgenda(message: string, items: readonly AgendaItem[]):
 }
 
 /** The owner's answer in words: the choice they made, or what they wrote. */
-export function responseWords(response: AgendaResponse): string {
+export function responseWords(response: AgendaResponse, fields: readonly AgendaFormField[] = []): string {
   switch (response.kind) {
     case 'permission':
       return response.decision === 'approve' ? 'Approved.' : 'Rejected.';
@@ -60,6 +62,8 @@ export function responseWords(response: AgendaResponse): string {
       return response.verdict === 'good' ? 'Your answer is good.' : `Please clarify: ${response.clarification}`;
     case 'open-question':
       return response.answer;
+    case 'form':
+      return `\n${formWords(fields, response.answers)}`;
     case 'other':
       return `Other answer (none of the options): ${response.answer}`;
   }
@@ -93,7 +97,8 @@ export function isQuietAcknowledgement(item: ResolvedAgendaItem): boolean {
  */
 export function boardReplyMessage(item: ResolvedAgendaItem): string {
   const note = item.resolutionNote?.trim() ?? '';
-  if (item.response !== undefined) return agendaAnswerMessage(byAsk(item), responseWords(item.response), note);
+  if (item.response !== undefined)
+    return agendaAnswerMessage(byAsk(item), responseWords(item.response, item.fields), note);
   if (item.disposition === 'dismissed') return agendaDismissedMessage(byAsk(item), note);
   return note === '' ? agendaDoneMessage(byAsk(item)) : agendaAnswerMessage(byAsk(item), 'Done', note);
 }

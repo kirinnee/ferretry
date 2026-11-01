@@ -101,8 +101,10 @@ export const cardModel = (item: AgendaItem): CardModel => {
     dismissInMenu: !answers.some(answer => answer.does === 'dismiss'),
     composerHint: textOnly
       ? AGENDA_SHAPE_LEADS[shape]
-      : asksForWords
-        ? 'To request changes, type them in the message box below.'
-        : undefined,
+      : shape === 'form'
+        ? 'Open it to fill in the form, then tap Send.'
+        : asksForWords
+          ? 'To request changes, type them in the message box below.'
+          : undefined,
   };
 };

@@ -145,6 +145,13 @@ function briefLines(item: AgendaItem): string[] {
       lines.push(`${INDENT}  recommended: ${compact(question.recommended, SHORT_WIDTH)}${why}`);
     }
   });
+  for (const [index, field] of (item.fields ?? []).entries()) {
+    const options = field.options?.map(option => `"${compact(option.label, OPTION_WIDTH)}"`).join(' | ');
+    const picks = options === undefined ? '' : `: ${options}`;
+    lines.push(
+      `${INDENT}field ${field.id} (${field.type}): ${index + 1}. ${compact(field.label, SHORT_WIDTH)}${picks}`,
+    );
+  }
   for (const each of item.optionDetails ?? []) {
     lines.push(`${INDENT}option "${compact(each.label, OPTION_WIDTH)}": ${compact(each.detail)}`);
   }
@@ -230,7 +237,8 @@ function resolutionLine(item: ResolvedAgendaItem): string {
         : wasWithdrawn(item)
           ? 'withdrawn'
           : 'resolved';
-  const answer = item.response === undefined ? '' : ` — ${compact(describeAnswer(item.response), SHORT_WIDTH)}`;
+  const answer =
+    item.response === undefined ? '' : ` — ${compact(describeAnswer(item.response, item.fields), SHORT_WIDTH)}`;
   const note =
     item.resolutionNote === null || item.resolutionNote.trim() === ''
       ? ''

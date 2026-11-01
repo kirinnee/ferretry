@@ -197,6 +197,42 @@ describe('the open Inbox item', () => {
     await mounted.unmount();
   });
 
+  it('answers a form from its composer’s one Send: the picks and the typed words go into the undo window together', async () => {
+    const fake = fakeInbox();
+    let draft = 'and keep the logs';
+    const formCard = inboxCard(
+      agendaItem('A4', {
+        kind: 'form',
+        ask: { kind: 'open-question' },
+        fields: [{ id: '1', type: 'yesno', label: 'OK to restart?', recommended: ['Yes'] }],
+      } as never),
+      sessionView('sess-3'),
+    );
+    const unregister = registerComposerQuoteTarget({
+      daemonId: formCard.daemonId,
+      sessionId: formCard.view.config.id,
+      draft: () => draft,
+      replaceDraft: next => {
+        draft = next;
+      },
+    });
+    const mounted = await mount(
+      page(fake, [formCard], {
+        initialOpen: formCard.key,
+        renderComposer: (_card, answerForm) => (
+          <button data-fake-send="" onClick={answerForm} type="button">
+            Send
+          </button>
+        ),
+      }),
+    );
+    await interact(() => must(mounted.container.querySelector<HTMLButtonElement>('[data-fake-send]'), 'Send').click());
+    expect(fake.deferred.getSnapshot().pending).toHaveLength(1);
+    expect(draft).toBe('');
+    unregister();
+    await mounted.unmount();
+  });
+
   it('carries what is typed in the ferret’s composer as a quick reply’s note, and empties it', async () => {
     const fake = fakeInbox();
     let draft = 'only after the smoke test';

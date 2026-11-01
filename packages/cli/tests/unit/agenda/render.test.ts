@@ -223,6 +223,26 @@ describe('attention listing', () => {
     should(several).not.containEql('answers: ←');
   });
 
+  it('should list a form’s fields by id and type, with the options of a pick', () => {
+    // Act
+    const form = renderAgendaList(
+      snapshot([
+        humanItem('A1', 'x', {
+          kind: 'form',
+          ask: { kind: 'open-question' },
+          fields: [
+            { id: '1', type: 'one', label: 'Which region?', options: [{ label: 'EU' }, { label: 'US' }] },
+            { id: '2', type: 'text', label: 'Anything else?' },
+          ],
+        }),
+      ]),
+    );
+
+    // Assert
+    should(form).containEql('field 1 (one): 1. Which region?: "EU" | "US"');
+    should(form).containEql('field 2 (text): 2. Anything else?');
+  });
+
   it('should omit the answer hint for an item with no ask', () => {
     // Act
     const actual = renderAgendaList(snapshot([humanItem('A1', 'x')]));

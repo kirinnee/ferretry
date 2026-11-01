@@ -1,4 +1,4 @@
-import { type AgendaResponse, NO_LABEL, YES_LABEL } from '@ferretry/protocol';
+import { type AgendaFormField, type AgendaResponse, formWords, NO_LABEL, YES_LABEL } from '@ferretry/protocol';
 
 /** The flags that carry a human's answer to an ask. */
 export interface AnswerFlags {
@@ -60,7 +60,7 @@ export function parseAnswer(flags: AnswerFlags): AgendaResponse | undefined {
 }
 
 /** Describe a recorded answer for the history listing. */
-export function describeAnswer(response: AgendaResponse): string {
+export function describeAnswer(response: AgendaResponse, fields: readonly AgendaFormField[] = []): string {
   switch (response.kind) {
     case 'permission':
       return response.decision === 'approve' ? 'approved' : 'rejected';
@@ -70,6 +70,8 @@ export function describeAnswer(response: AgendaResponse): string {
       return response.verdict === 'good' ? 'answer accepted' : `clarification requested: ${response.clarification}`;
     case 'open-question':
       return `answered: ${response.answer}`;
+    case 'form':
+      return `form answered: ${formWords(fields, response.answers, ' · ')}`;
     case 'other':
       return `answered with none of the options: ${response.answer}`;
   }

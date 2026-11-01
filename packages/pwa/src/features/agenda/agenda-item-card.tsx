@@ -22,6 +22,7 @@ import { Check } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { optionAction } from '../../lib/agenda-answers.ts';
+import { useFormPicks } from '../../lib/agenda-form-state.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import { cardLettered, itemOptions, letteredOptions } from '../../lib/agenda-options.ts';
@@ -29,6 +30,7 @@ import { itemAtVersion, revisionStamp, shortAgo, versionCount } from '../../lib/
 import { AgendaLinkRow, PointForm } from './agenda-brief.tsx';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
 import { AgendaDelivery } from './agenda-delivery.tsx';
+import { AgendaFormFields } from './agenda-form-fields.tsx';
 import { AgendaNeed, WantedAnswers, wantedAnswers } from './agenda-need.tsx';
 import { AgendaQuickReplies } from './agenda-quick-replies.tsx';
 import { AgendaBody, AgendaSteps } from './agenda-steps.tsx';
@@ -68,6 +70,11 @@ export interface AgendaItemCardProps {
    * item's sticky dock, so the buttons stay in reach while a long card scrolls. Absent: the row ends the card.
    */
   readonly answerDock?: HTMLElement | null | undefined;
+  /**
+   * Names the picks of a form card whose fields are answered here, because a composer sends them (the Inbox). Absent: a
+   * form's fields are drawn to read, and the owner is told to fill them in in the Inbox.
+   */
+  readonly formKey?: string | undefined;
 }
 
 /** The detail without its premise: the daemon also writes a confirmed change into it for older apps. */
@@ -243,6 +250,8 @@ function VersionPicker({
   );
 }
 
+const FORM_ELSEWHERE = 'Open this in the Inbox to fill it in, or answer in the reply box, numbered.';
+
 export function AgendaItemCard({
   item: current,
   ferret,
@@ -260,6 +269,7 @@ export function AgendaItemCard({
   planForm,
   onRequestChanges,
   answerDock,
+  formKey,
 }: AgendaItemCardProps) {
   const count = versionCount(current);
   // `null` follows the latest version, so an edit that lands while the card is open shows at once.
@@ -271,7 +281,7 @@ export function AgendaItemCard({
   const read = forConfirmation(item);
   const model = cardModel(item);
   const meta = agendaTypeMeta(item);
-  // The segment LEADS WITH THE ASK, whatever the header above it says: the lone question, else the item's one-line
+  // The segment LEADS WITH THE ASK, whatever the header above it says (a form's is its header's, said once): the lone question, else the item's one-line
   // ask — what is being chosen, approved, done or read. Several questions are their own numbered list instead.
   const askLine = singleAgendaQuestion(item)?.question.trim() || item.subject.trim();
   const terms = item.terms ?? [];
@@ -281,6 +291,8 @@ export function AgendaItemCard({
   const context = read.context?.trim() ? mark(read.context) : null;
 
   const answerable = latest && settled === undefined;
+  const formFields = item.fields ?? [];
+  const formPicks = useFormPicks(formKey ?? item.id, formFields);
   const isInput = inputForm !== undefined && item.kind === 'input';
   const canDismiss = answerable && !isInput && model.dismissInMenu && !model.notice;
   const dismiss = (): void => {
@@ -393,8 +405,11 @@ export function AgendaItemCard({
             <PointForm renderProse={renderProse} text={mark(questionAnswer)} />
           </div>
         )}
-        <AgendaNeed shape={shape} {...(answerable ? {} : { lead: '' })}>
-          {askLine === '' || shape === 'answers' || shape === 'input' ? null : (
+        <AgendaNeed
+          shape={shape}
+          {...(!answerable ? { lead: '' } : shape === 'form' && formKey === undefined ? { lead: FORM_ELSEWHERE } : {})}
+        >
+          {askLine === '' || shape === 'answers' || shape === 'input' || shape === 'form' ? null : (
             <div className="fy-card__question" data-agenda-question-line="">
               {renderProse(mark(askLine))}
             </div>
@@ -422,6 +437,15 @@ export function AgendaItemCard({
               <h5 className="fy-card__label">What to review</h5>
               <LinksList links={item.links} renderProse={renderProse} />
             </div>
+          ) : null}
+          {shape === 'form' ? (
+            <AgendaFormFields
+              disabled={busy || !answerable}
+              fields={formFields}
+              formKey={formKey ?? null}
+              picks={formPicks}
+              renderProse={renderProse}
+            />
           ) : null}
           {shape === 'answers' ? (
             <WantedAnswers answers={wantedAnswers(questions, steps.length > 0)} renderProse={renderProse} />

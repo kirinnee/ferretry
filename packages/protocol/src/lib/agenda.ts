@@ -10,6 +10,10 @@ export const MAX_AGENDA_DETAIL_LENGTH = 2_048;
 export const MAX_AGENDA_SOURCE_REF_LENGTH = 512;
 export const MAX_AGENDA_ASK_OPTIONS = 12;
 export const MAX_AGENDA_ASK_OPTION_LENGTH = 120;
+/** The most fields a form carries, and the longest id one has. */
+export const MAX_AGENDA_FIELDS = 12;
+export const MAX_AGENDA_FIELD_ID_LENGTH = 24;
+export const MAX_AGENDA_FIELD_NAME_LENGTH = 40;
 export const MAX_AGENDA_ASK_OPTION_DETAIL_LENGTH = 240;
 export const MAX_NOTIFICATION_TITLE_LENGTH = 120;
 export const MAX_NOTIFICATION_BODY_LENGTH = 500;
@@ -80,11 +84,24 @@ export type AgendaAsk = z.infer<typeof AgendaAskSchema>;
  * - `review`: look at something and say whether it is good (the `answer-review` ask).
  * - `info`: something the owner should know, acknowledged with Got it (no ask).
  * - `reply`: a question only words answer (the `open-question` ask).
+ * - `form`: several structured answers at once — pick-one, pick-many and yes/no fields on the card, one free-text
+ *   field answered in the reply box (`fields`, `AgendaFormFieldSchema`). It asks in words (the `open-question` ask), so
+ *   an app that does not know forms still lets the owner reply.
  * - `input`: a value only the owner can type, for an agent's terminal or browser field (docs/input-requests.md).
  *   Only the daemon raises one, it has no ask or swipes, and the generic answer routes refuse it: the value
  *   must never travel as an agenda answer.
  */
-export const AgendaKindSchema = z.enum(['task', 'yesno', 'permission', 'choice', 'review', 'info', 'reply', 'input']);
+export const AgendaKindSchema = z.enum([
+  'task',
+  'yesno',
+  'permission',
+  'choice',
+  'review',
+  'info',
+  'reply',
+  'form',
+  'input',
+]);
 export type AgendaKind = z.infer<typeof AgendaKindSchema>;
 
 /** The way a card is swiped to give one of its answers. Down is never one: the card scrolls that way. */
@@ -191,6 +208,16 @@ const AnswerReviewResponseSchema = z.discriminatedUnion('verdict', [
   }),
 ]);
 
+/** One answered form field: the field's id and its value — the picked label(s), Yes or No, or the typed text. */
+export const AgendaFormAnswerSchema = z.strictObject({
+  id: z.string().trim().min(1).max(MAX_AGENDA_FIELD_ID_LENGTH),
+  picked: z.union([
+    z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
+    z.array(singleLine(MAX_AGENDA_ASK_OPTION_LENGTH)).min(1).max(MAX_AGENDA_ASK_OPTIONS),
+  ]),
+});
+export type AgendaFormAnswer = z.infer<typeof AgendaFormAnswerSchema>;
+
 export const AgendaResponseSchema = z.union([
   z.strictObject({ kind: z.literal('permission'), decision: z.enum(['approve', 'reject']) }),
   z.strictObject({
@@ -201,6 +228,11 @@ export const AgendaResponseSchema = z.union([
   z.strictObject({
     kind: z.literal('open-question'),
     answer: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH),
+  }),
+  /** A form answered: each field the owner filled in, by id (`AgendaFormAnswerSchema`). */
+  z.strictObject({
+    kind: z.literal('form'),
+    answers: z.array(AgendaFormAnswerSchema).min(1).max(MAX_AGENDA_FIELDS),
   }),
   /**
    * The owner's own words INSTEAD of the item's options — "none of these". Any ask with options takes it
@@ -300,6 +332,51 @@ export const AgendaQuestionSchema = z
   });
 export type AgendaQuestion = z.infer<typeof AgendaQuestionSchema>;
 
+/** How a form field is answered: pick one (radio), pick any (checkboxes), yes or no, or typed in the reply box. */
+export const AgendaFieldTypeSchema = z.enum(['one', 'many', 'yesno', 'text']);
+export type AgendaFieldType = z.infer<typeof AgendaFieldTypeSchema>;
+
+/**
+ * One field of a `form` card. `label` is the question; `name` is the short word its line in the answer uses
+ * ("Region"), else the question is used. `one` and `many` carry their options (each can say what it means);
+ * `yesno` and `text` carry none. `recommended` is the asker's pick: one option for `one`, any for `many`, Yes
+ * or No for `yesno`. A field is required unless it says otherwise or is `text` (the reply box).
+ */
+export const AgendaFormFieldSchema = z
+  .strictObject({
+    id: z
+      .string()
+      .trim()
+      .min(1)
+      .max(MAX_AGENDA_FIELD_ID_LENGTH)
+      .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/u, 'must be letters, digits, - or _ (e.g. 1 or region)'),
+    type: AgendaFieldTypeSchema,
+    label: prose(MAX_AGENDA_QUESTION_LENGTH),
+    name: singleLine(MAX_AGENDA_FIELD_NAME_LENGTH).optional(),
+    options: z.array(AgendaAskOptionSchema).min(2).max(MAX_AGENDA_ASK_OPTIONS).optional(),
+    recommended: z.array(singleLine(MAX_AGENDA_ASK_OPTION_LENGTH)).min(1).max(MAX_AGENDA_ASK_OPTIONS).optional(),
+    required: z.boolean().optional(),
+  })
+  .superRefine((value, context) => {
+    const issue = (message: string, path: string) => context.addIssue({ code: 'custom', message, path: [path] });
+    const labels = (value.options ?? []).map(option => option.label.trim());
+    if (value.type === 'one' || value.type === 'many') {
+      if (value.options === undefined) issue(`a ${value.type} field needs 2 or more options`, 'options');
+      if (new Set(labels).size !== labels.length) issue('option labels must be unique', 'options');
+    } else if (value.options !== undefined) {
+      issue(`a ${value.type} field has no options`, 'options');
+    }
+    const picks = value.recommended ?? [];
+    const allowed = value.type === 'yesno' ? ['Yes', 'No'] : labels;
+    if (value.type === 'text' && picks.length > 0) issue('a text field has no recommended option', 'recommended');
+    else if (value.type !== 'many' && picks.length > 1)
+      issue('only a pick-many field recommends several', 'recommended');
+    else if (picks.some(pick => !allowed.includes(pick.trim()))) {
+      issue('a recommendation must name one of the field options', 'recommended');
+    }
+  });
+export type AgendaFormField = z.infer<typeof AgendaFormFieldSchema>;
+
 /** The asker's overall suggested decision, and why. */
 export const AgendaRecommendationSchema = z.strictObject({
   decision: prose(MAX_AGENDA_QUESTION_LENGTH),
@@ -348,6 +425,8 @@ export const AgendaBriefShape = {
   recommendation: AgendaRecommendationSchema.optional(),
   /** A longer Markdown explanation per option, each naming its option by label: the card's Options section. */
   optionDetails: z.array(AgendaOptionDetailSchema).min(1).max(MAX_AGENDA_ASK_OPTIONS).optional(),
+  /** The fields of a `form` card, in order: what the owner fills in before one Send (`agendaFormProblems`). */
+  fields: z.array(AgendaFormFieldSchema).min(1).max(MAX_AGENDA_FIELDS).optional(),
   /** What happens if nobody answers. */
   impact: z.preprocess(asBullets, prose(MAX_AGENDA_REASON_LENGTH)).optional(),
   /** By when it matters, in words: "before the 14:00 deploy", "no rush". */
@@ -385,6 +464,7 @@ export const agendaBriefOf = (value: AgendaBrief): AgendaBrief => ({
   ...(value.questions === undefined ? {} : { questions: value.questions }),
   ...(value.recommendation === undefined ? {} : { recommendation: value.recommendation }),
   ...(value.optionDetails === undefined ? {} : { optionDetails: value.optionDetails }),
+  ...(value.fields === undefined ? {} : { fields: value.fields }),
   ...(value.impact === undefined ? {} : { impact: value.impact }),
   ...(value.urgency === undefined ? {} : { urgency: value.urgency }),
   ...(value.blockingNow === undefined ? {} : { blockingNow: value.blockingNow }),
@@ -423,6 +503,23 @@ export const agendaOptionDetailProblems = (item: {
     ...named
       .filter(label => !labels.has(label))
       .map(label => `optionDetails names "${label}", which is not one of the options`),
+  ];
+};
+
+/** What is wrong with a form's fields: an id used twice, or more than one free-text field (the reply box is one). */
+export const agendaFormProblems = (item: {
+  readonly kind?: AgendaKind | undefined;
+  readonly fields?: readonly AgendaFormField[] | undefined;
+}): string[] => {
+  const fields = item.fields;
+  if (fields === undefined) return item.kind === 'form' ? ['a form needs at least one field (--field)'] : [];
+  if (item.kind !== undefined && item.kind !== 'form') return ['fields belong to a form (--kind form)'];
+  const ids = fields.map(field => field.id);
+  return [
+    ...(new Set(ids).size === ids.length ? [] : ['every field needs its own id']),
+    ...(fields.filter(field => field.type === 'text').length > 1
+      ? ['a form has one free-text field: the reply box. Put the rest in separate fields or in that one answer']
+      : []),
   ];
 };
 
@@ -569,6 +666,7 @@ export const AgendaRevisableFieldSchema = z.enum([
   'questions',
   'recommendation',
   'optionDetails',
+  'fields',
   'impact',
   'urgency',
   'blockingNow',
@@ -848,6 +946,9 @@ export const AgendaItemSchema = z
         path: ['phoneApproval'],
       });
     }
+    for (const problem of agendaFormProblems(value)) {
+      context.addIssue({ code: 'custom', message: problem, path: ['fields'] });
+    }
     if (value.sourceSeq !== undefined && value.source !== 'agent-raised') {
       context.addIssue({ code: 'custom', message: 'sourceSeq is valid only for agent-raised agenda items' });
     }
@@ -911,7 +1012,9 @@ export const ResolvedAgendaItemSchema = z
     if (value.disposition !== 'done' && value.response !== undefined) {
       context.addIssue({ code: 'custom', message: 'only a done item may carry a response', path: ['response'] });
     }
-    if (value.response !== undefined && !responseKindFitsAsk(value.ask?.kind, value.response.kind)) {
+    // A form is asked as an open question (an old app still lets the owner reply) but answered by field.
+    const answeredAsForm = value.kind === 'form' && value.response?.kind === 'form';
+    if (value.response !== undefined && !answeredAsForm && !responseKindFitsAsk(value.ask?.kind, value.response.kind)) {
       context.addIssue({ code: 'custom', message: 'response kind must match the original ask', path: ['response'] });
     }
     if (value.response?.kind === 'multiple-choice' && value.ask?.kind === 'multiple-choice') {
@@ -1160,6 +1263,9 @@ export const AgendaActionRequestSchema = z
     }
     for (const message of agendaOptionDetailProblems(value)) {
       context.addIssue({ code: 'custom', message, path: ['optionDetails'] });
+    }
+    for (const problem of agendaFormProblems(value)) {
+      context.addIssue({ code: 'custom', message: problem, path: ['fields'] });
     }
     if (value.kind === 'input') {
       context.addIssue({

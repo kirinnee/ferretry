@@ -22,6 +22,8 @@ import {
   type AgendaSource,
   type AgendaUndelivered,
   agendaBriefOf,
+  agendaCardKind,
+  agendaFormProblems,
   agendaBriefRequiredProblems,
   agendaEditShapeProblems,
   agendaNoticeProblems,
@@ -30,6 +32,7 @@ import {
   agendaShape,
   agendaShapeProblems,
   agendaWakeAt,
+  formAnswerProblems,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_HISTORY,
   MAX_AGENDA_PER_SESSION,
@@ -579,6 +582,8 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   }
   const optionDetailProblem = agendaOptionDetailProblems(request)[0];
   if (optionDetailProblem !== undefined) return failure('invalid', optionDetailProblem);
+  const formProblem = agendaFormProblems(request)[0];
+  if (formProblem !== undefined) return failure('invalid', formProblem);
   if (request.notice === true && actor.kind === 'human') {
     return failure('forbidden', 'only a ferret or the daemon sends a notice');
   }
@@ -770,7 +775,13 @@ function addressById(
         `only the owner answers ${command.id}: it decides a change to ${target.item.confirms.path}; close it with dismiss instead`,
       );
     }
-    if (!responseMatchesAsk(target.item.ask, command.response)) {
+    if (command.response.kind === 'form') {
+      const formProblem =
+        target.item.kind !== 'form' || target.item.fields === undefined
+          ? `${command.id} is not a form`
+          : formAnswerProblems(target.item.fields, command.response.answers)[0];
+      if (formProblem !== undefined) return failure('invalid', formProblem);
+    } else if (!responseMatchesAsk(target.item.ask, command.response)) {
       const message =
         target.item.ask === undefined
           ? `${command.id} has no structured ask`
@@ -1014,6 +1025,7 @@ const EDITABLE_FIELDS = [
   'questions',
   'recommendation',
   'optionDetails',
+  'fields',
   'impact',
   'urgency',
   'blockingNow',
@@ -1093,6 +1105,11 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
     ...(patch.optionDetails === undefined ? {} : { optionDetails: patch.optionDetails }),
   })[0];
   if (optionDetailProblem !== undefined) return failure('invalid', optionDetailProblem);
+  const fieldsProblem = agendaFormProblems({
+    kind: agendaCardKind(target.item),
+    fields: patch.fields ?? target.item.fields,
+  })[0];
+  if (patch.fields !== undefined && fieldsProblem !== undefined) return failure('invalid', fieldsProblem);
   // Steps belong to a to-do alone: an edit never gives them to a card of another shape.
   const shapeProblem = command.actor.kind === 'agent' ? agendaEditShapeProblems(target.item, patch)[0] : undefined;
   if (shapeProblem !== undefined) return failure('invalid', shapeProblem);

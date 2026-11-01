@@ -211,6 +211,7 @@ const KIND_WORDS: Readonly<Record<AgendaKind, string>> = {
   review: 'Review',
   info: 'Info',
   reply: 'Reply',
+  form: 'Form',
   input: 'Input',
 };
 

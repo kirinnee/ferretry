@@ -198,6 +198,21 @@ const agendaCases: SchemaCase[] = [
     schema: agenda.AgendaAskOptionSchema,
     value: { label: 'Proceed', description: 'Run the operation' },
   },
+  { name: 'form field type', schema: agenda.AgendaFieldTypeSchema, value: 'many' },
+  {
+    name: 'form field',
+    schema: agenda.AgendaFormFieldSchema,
+    value: {
+      id: 'region',
+      type: 'one',
+      label: 'Which region?',
+      name: 'Region',
+      options: [{ label: 'EU', description: 'data stays in Europe' }, { label: 'US' }],
+      recommended: ['EU'],
+      required: true,
+    },
+  },
+  { name: 'form answer', schema: agenda.AgendaFormAnswerSchema, value: { id: 'alerts', picked: ['Page', 'Mail'] } },
   {
     name: 'brief term',
     schema: agenda.AgendaTermSchema,

@@ -174,7 +174,8 @@ describe('the shipped shape wording', () => {
   it('should say every kind → shape in the one prompt line', () => {
     for (const rule of [
       'choice=ONE question+2–3 `-o "Label: why"`',
-      'several/mixed asks (one `-q` each, no options)',
+      'reply=open or several asks (one `-q` each)',
+      'form=several structured answers (`--field`)',
       'todo=`--step`s',
       'info=Got it',
       'permission=Approve/Deny',
