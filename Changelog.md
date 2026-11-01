@@ -1,3 +1,9 @@
+## [4.204.2](https://github.com/kirinnee/ferretry/compare/v4.204.1...v4.204.2) (2026-11-01)
+
+### Fixes
+
+* **daemon:** finish an early release before the unwinding boot may exit ([#1254](https://github.com/kirinnee/ferretry/issues/1254)) ([b715e81](https://github.com/kirinnee/ferretry/commit/b715e81f5f5c12f605b5707b2f756ebfae412b0c))
+
 ## [4.204.1](https://github.com/kirinnee/ferretry/compare/v4.204.0...v4.204.1) (2026-11-01)
 
 ### Fixes
