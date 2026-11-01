@@ -6,7 +6,7 @@ import { type Marquee, marqueeOf } from '../../lib/title-marquee.ts';
  * (`fy-item-view__title[data-marquee]`). Under `prefers-reduced-motion` it does not move: it ends in an ellipsis, and a
  * tap shows the whole title (and a second tap folds it again).
  */
-export function MarqueeTitle({ title }: { readonly title: string }) {
+export function MarqueeTitle({ title, wrap = false }: { readonly title: string; readonly wrap?: boolean }) {
   const box = useRef<HTMLHeadingElement | null>(null);
   const text = useRef<HTMLSpanElement | null>(null);
   const [marquee, setMarquee] = useState<Marquee | null>(null);
@@ -19,7 +19,7 @@ export function MarqueeTitle({ title }: { readonly title: string }) {
     if (outer === null || inner === null) return undefined;
     const measure = (): void => {
       // An expanded title wraps, so its width says nothing about the one-line row: keep what was measured.
-      if (outer.dataset.expanded !== undefined) return;
+      if (wrap || outer.dataset.expanded !== undefined) return;
       const next = marqueeOf(inner.getBoundingClientRect().width, outer.clientWidth);
       setMarquee(previous =>
         previous?.distance === next?.distance && previous?.seconds === next?.seconds ? previous : next,
@@ -30,7 +30,7 @@ export function MarqueeTitle({ title }: { readonly title: string }) {
     const watch = new ResizeObserver(measure);
     watch.observe(outer);
     return () => watch.disconnect();
-  }, [title]);
+  }, [title, wrap]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new title starts folded
   useEffect(() => setExpanded(false), [title]);
@@ -48,6 +48,7 @@ export function MarqueeTitle({ title }: { readonly title: string }) {
     <h2
       className="fy-item-view__title"
       data-agenda-title=""
+      {...(wrap ? { 'data-wrap': '' } : {})}
       {...(marquee === null ? {} : { 'data-marquee': '' })}
       {...(expanded ? { 'data-expanded': '' } : {})}
       onClick={marquee === null && !expanded ? undefined : () => setExpanded(open => !open)}

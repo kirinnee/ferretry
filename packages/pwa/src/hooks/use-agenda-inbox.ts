@@ -82,6 +82,8 @@ export interface AgendaInbox {
   readonly deferred: DeferredAgendaActions;
   readonly deferredState: DeferredAgendaState;
   readonly connectionFor: (daemonId: DaemonId) => DaemonConnection | undefined;
+  /** Whether a machine can snooze (`agenda.snooze.1`): false only once its health answered without it. Absent: it can. */
+  readonly canSnooze?: (daemonId: DaemonId) => boolean;
 }
 
 /** One paired machine to count Attention on: its pairing and the name the reader knows it by. */
@@ -193,7 +195,10 @@ export function useAgendaInboxModel(
     client.wires.subscribe,
     () =>
       latest.current
-        .map(machine => `${machine.connection.daemonId}=${client.wires.gateItemsOf(machine.connection.daemonId)}`)
+        .map(
+          ({ connection }) =>
+            `${connection.daemonId}=${client.wires.gateItemsOf(connection.daemonId)}/${client.wires.snoozeOf(connection.daemonId)}`,
+        )
         .join(','),
     () => '',
   );
@@ -299,7 +304,16 @@ export function useAgendaInboxModel(
       ).filter(card => card.item.gate !== undefined),
     [unread, boards],
   );
-  const offersGates = useCallback((daemonId: DaemonId): boolean => gateFlags.includes(`${daemonId}=true`), [gateFlags]);
+  const offersGates = useCallback(
+    (daemonId: DaemonId): boolean => gateFlags.includes(`${daemonId}=true/`),
+    [gateFlags],
+  );
+  const canSnooze = useCallback(
+    (daemonId: DaemonId): boolean =>
+      !gateFlags.includes(`${daemonId}=`) ||
+      !gateFlags.split(',').some(entry => entry.startsWith(`${daemonId}=`) && entry.endsWith('/false')),
+    [gateFlags],
+  );
   const awakeRows = useMemo(
     () => toTestBesideGates(split.awake, gateHolders, offersGates),
     [split.awake, gateHolders, offersGates],
@@ -384,6 +398,7 @@ export function useAgendaInboxModel(
       deferred,
       deferredState,
       connectionFor,
+      canSnooze,
     }),
     [
       unread,
@@ -399,6 +414,7 @@ export function useAgendaInboxModel(
       deferred,
       deferredState,
       connectionFor,
+      canSnooze,
     ],
   );
 }

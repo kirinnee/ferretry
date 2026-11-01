@@ -30,12 +30,12 @@ const gateItem = (g: ReturnType<typeof gate>, extra: Partial<AgendaItem> = {}): 
     subject: 'Pairing QR',
     kind: 'choice',
     raisedBy: 'daemon',
-    // The protocol lays a choice's options out left · up · right in the ask's order, so the forward option comes last.
-    ask: { kind: 'multiple-choice', options: g.options.map(option => ({ label: option.label })).reverse() },
+    // The daemon lays the options out left · up · right: the forward option first (Done), Not good last.
+    ask: { kind: 'multiple-choice', options: g.options.map(option => ({ label: option.label })) },
     gate: g,
     answers: [
-      { direction: 'right', does: 'choose', label: g.options[0]?.label ?? '' },
-      { direction: 'left', does: 'choose', label: g.options[1]?.label ?? '' },
+      { direction: 'left', does: 'choose', label: g.options[0]?.label ?? '' },
+      { direction: 'right', does: 'choose', label: g.options[1]?.label ?? '' },
     ],
     ...extra,
   } as Partial<AgendaItem>);
@@ -46,17 +46,17 @@ const twoOptions = gate([
 ]);
 
 describe('a gate item answers as a plain multiple choice', () => {
-  test('→ is the forward option and sends the choice, nothing else', () => {
+  test('← is the forward option and sends the choice, nothing else', () => {
     const targets = swipeTargets(gateItem(twoOptions));
-    expect(targets.right?.action).toEqual({
+    expect(targets.left?.action).toEqual({
       kind: 'respond',
       label: 'Done',
       response: { kind: 'multiple-choice', choice: 'Done' },
     });
   });
 
-  test('← is Not good, and it carries the words as the note', () => {
-    expect(swipeTargets(gateItem(twoOptions), 'The QR is blank').left?.action).toEqual({
+  test('→ is Not good, and it carries the words as the note', () => {
+    expect(swipeTargets(gateItem(twoOptions), 'The QR is blank').right?.action).toEqual({
       kind: 'respond',
       label: 'Not good',
       response: { kind: 'multiple-choice', choice: 'Not good' },
@@ -98,8 +98,8 @@ describe('which answers wait for words', () => {
   test('Not yet, an ask option outside gate.options, takes words but never needs them', () => {
     const one = gateItem(gate([['OK to build', 'lane']]), {
       answers: [
-        { direction: 'right', does: 'choose', label: 'OK to build' },
-        { direction: 'left', does: 'choose', label: 'Not yet' },
+        { direction: 'left', does: 'choose', label: 'OK to build' },
+        { direction: 'right', does: 'choose', label: 'Not yet' },
       ],
     } as Partial<AgendaItem>);
     expect(gateWordsFor(one, send('Not yet'))).toBe('optional');

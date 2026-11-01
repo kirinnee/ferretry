@@ -109,6 +109,12 @@ const open = async (context: { newPage: () => Promise<Page> }, theme: string, vi
   await page.waitForTimeout(300);
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   check(wide <= 0, `${view}: scrolls sideways by ${wide}px`);
+  if (view === 'cards') {
+    check(
+      (await page.locator('[data-board-side] input[data-filter="agents"]').count()) === 0,
+      `${view}: the Cards view has an "Agent tasks" toggle`,
+    );
+  }
   return page;
 };
 
@@ -250,8 +256,13 @@ for (const form of ['phone', 'desktop'] as const) {
     await page.locator('[data-board-cards] button[aria-label="Next card"]').click();
     await page.waitForTimeout(150);
     check(
-      (await page.locator('[data-board-cards-rank]').textContent()) === 'Waiting on you',
-      `${form} ${theme}: the third card is not the one waiting on the owner`,
+      (await page.locator('[data-board-cards-rank]').textContent()) === 'To approve',
+      `${form} ${theme}: the third card is not the one to approve`,
+    );
+    // Only cards waiting on the owner are in the stack: the 2 to test and the 2 to approve, never the 60+ other cards.
+    check(
+      ((await page.locator('[data-board-cards]').textContent()) ?? '').includes('3 of 4'),
+      `${form} ${theme}: the stack holds other than the 4 cards waiting on the owner`,
     );
     await shot(page, 'cards-waiting', form, theme);
 

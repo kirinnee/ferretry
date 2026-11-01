@@ -217,7 +217,7 @@ export function AgendaItemView({
         <div className="fy-item-view__column">
           <header className="fy-item-view__head" data-agenda-top="" ref={top}>
             <div className="fy-item-view__bar">
-              <MarqueeTitle title={head.title} />
+              <MarqueeTitle title={head.title} wrap={item.gate !== undefined} />
               <div className="fy-item-view__pager">
                 {status === null ? null : (
                   <span className="fy-item-view__status" title={status.label}>

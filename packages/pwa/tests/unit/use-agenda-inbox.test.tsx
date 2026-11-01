@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaItem, AgendaSnapshot, SessionAgendaSummary, SessionView } from '@ferretry/protocol';
+import {
+  type AgendaItem,
+  type AgendaSnapshot,
+  DAEMON_FEATURES,
+  type SessionAgendaSummary,
+  type SessionView,
+} from '@ferretry/protocol';
 import {
   type AgendaInbox,
   type AgendaInboxMachine,
   useAgendaInboxModel,
   useInboxMachines,
 } from '../../src/hooks/use-agenda-inbox.ts';
+import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
 import type { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
 import { type DeferredTimers, DISMISS_ACTION, DONE_ACTION, inboxOptions } from '../../src/lib/agenda-inbox.ts';
 import { DaemonAgendaStore } from '../../src/lib/agenda-store.ts';
@@ -16,7 +23,8 @@ import '../support/dom.ts';
 import { toTestCards } from '../../src/lib/to-test-inbox.ts';
 import { interact, type Mounted, mount } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
-import { boardModelOf, card } from './board-support.ts';
+import { boardModelOf, card, laptop as boardLaptop } from './board-support.ts';
+import { healthOf } from '../support/health.ts';
 
 const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio' });
 const laptop = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'd-laptop' });
@@ -79,6 +87,7 @@ const fakeClient = (boards: Map<string, AgendaSnapshot>) => {
     };
   const client = {
     store,
+    wires: new AgendaWireDirectory(),
     revalidate: record('revalidate'),
     respond: record('respond'),
     resolve: record('resolve'),
@@ -151,6 +160,63 @@ describe('useAgendaInboxModel', () => {
     expect(read.total).toBe(2);
     expect(read.toTest.map(row => row.card.task.id).sort()).toEqual(['F1', 'F2']);
     expect(read.cards).toEqual([]);
+  });
+
+  describe('the health switch for gate items', () => {
+    const gateItemFor = (cardId: string): AgendaItem =>
+      ({
+        ...item('A1', 1),
+        raisedBy: 'daemon',
+        raisedBySession: null,
+        kind: 'choice',
+        ask: { kind: 'multiple-choice', options: [{ label: 'Done' }, { label: 'Not good' }] },
+        gate: {
+          cardId,
+          laneId: 'tested',
+          laneName: 'Try it',
+          entry: 1,
+          projectId: 'p1',
+          options: [
+            { id: 'o0', label: 'Done', outcome: 'close' },
+            { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
+          ],
+        },
+      }) as AgendaItem;
+
+    const run = async (flag: boolean) => {
+      const { client } = fakeClient(new Map([[`${boardLaptop.daemonId}/g`, board('g', [gateItemFor('F1')])]]));
+      client.wires.note(boardLaptop.daemonId, {
+        kind: 'read',
+        health: healthOf('4.110.0', flag ? [DAEMON_FEATURES.boardGateItems] : []),
+      });
+      const { timers } = manualTimers();
+      let inbox: AgendaInbox | null = null;
+      const rows = toTestCards(
+        await boardModelOf([card('F1', { laneId: 'tested' }), card('F2', { laneId: 'tested' })]),
+      );
+      view = await mount(
+        <Probe
+          client={client}
+          machines={[{ connection: boardLaptop, name: 'Laptop', sessions: [waiting('g', summary(1, 1))] }]}
+          onInbox={value => (inbox = value)}
+          timers={timers}
+          toTest={rows}
+        />,
+      );
+      await settle();
+      return inbox as unknown as AgendaInbox;
+    };
+
+    test('on a machine that advertises gate items the row its gate item covers is not shown; the others stay', async () => {
+      const read = await run(true);
+      expect(read.cards.map(entry => entry.item.id)).toEqual(['A1']);
+      expect(read.toTest.map(row => row.card.task.id)).toEqual(['F2']);
+    });
+
+    test('without the flag, every to-test row stays, as before', async () => {
+      const read = await run(false);
+      expect(read.toTest.map(row => row.card.task.id).sort()).toEqual(['F1', 'F2']);
+    });
   });
 
   test('puts a snoozed card aside, out of the count, and brings it back when its time is up', async () => {

@@ -457,13 +457,69 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   - **↓ is Skip**, everywhere a card swipes (the deck, the chat dock, the card's top bar and answer row, the ↓ key,
     and the to-test and task-panel cards): it moves on to the next one; nothing is sent, nothing is dismissed and
     the item stays open. A single mis-swipe can therefore never close a card.
-  - **Not needed is a button only**, the pill in the card's top bar (no arrow, no swipe), into the same undo window
-    as any answer. A notice has no Not needed (it is cleared, not dismissed). The item's › also skips.
+  - **Not needed is a button, or the far side of the compass** (below) — never a plain swipe. It is the pill in the
+    card's top bar and a button under the card, into the same undo window as any answer. A notice has no Not needed
+    (it is cleared, not dismissed). The item's › also skips.
 
   A held drag is stamped with what letting go would do (there is no hint line under the card); a card pulled down shows
   "Skip" on the ground it uncovers, in the to-test rows' style. Every answer
   goes into the same undo window as a tap. Reduced motion (the OS preference or Settings › Appearance › Motion) drops
   the fly-off and the spring.
+
+### The compass
+
+Every item — a question, a gate, a notice — has a second swipe layer. Pull **down** past the Skip threshold and **keep the
+pointer down**: a small compass opens on the ground the card uncovers, and where the pointer goes from there is what
+letting go does:
+
+- **↓ (let go)** is Skip, unchanged: the plain swipe down never reaches the compass.
+- **↓ ←** is Skip too, the left arm of the compass.
+- **↓ →** is **Not needed**: the item is dismissed into the undo window, and **Undo** (about five seconds, the toast every
+  answer gets) really un-dismisses it — nothing is sent while the window is open.
+- **↓ ↓** is **Snooze**, and going further down shows the three lengths — **↓↓↓ 1 h / 4 h / 1 day**, one per column;
+  letting go over one snoozes the item until then, into the same undo window.
+- Pulling back up, or letting go before the threshold, cancels: the card springs back and nothing happens.
+
+A swipe down is therefore never destructive without Undo. The choices are a pure state machine
+(`agenda-compass.ts`: a drag path in, an intent out), so the thresholds are tested without a pointer. Nothing depends on the
+gesture: under every open card are plain buttons — **Skip**, **Not needed** and **Snooze 1 h · 4 h · 1 day** — and the arrow
+keys are unchanged. Snooze is offered only where the machine advertises it (`agenda.snooze.1`), in the compass and as buttons
+alike. The touch rules stay: a drag never starts on a control, and the direction locks on its first move.
+
+### Gate items
+
+A **gate item** is a board card waiting on the owner at a gate, raised as an ordinary Inbox item (`item.gate`: the card, its lane and what each option does):
+the owner meets one stream, not a question list and a separate to-test list. It looks
+like any item and says, under the who-and-what line, **what it is** — "Try it" (a card in a verify lane) or "OK to build?"
+(a plan awaiting approval) — the project and the lane. Its body is the card's _How to test_ (Markdown, as written), and its
+options are the gate's own, laid out as every choice is: the first ←, the second ↑, the third →.
+
+- **←** is the forward option (Done, OK, Yes), the same as the side panel's Cards view; **→** is **Not good**, which reopens the card with an agenda item; **↓** is Skip.
+- **Not good needs words.** Pressing it (or →) answers nothing yet: the "why" composer opens where the answer row was, and
+  Send back stays disabled until something is written. The words go as the answer's note. Cancel changes nothing.
+- On a **one-option gate** the right answer is **Not yet** — not one of `gate.options`: the card stays where it is, and words
+  are welcome but not required.
+- Answering is a plain choice, `{ kind: 'multiple-choice', choice: <label> }`, held in the undo window like any answer. A
+  refusal (the card moved on, or the gate was not reached) shows beside the buttons, as for every answer.
+- **Question items keep their sticky options and composer exactly as they were.**
+
+**The app ships before the daemon.** A machine that advertises `board.gate-items.1` on its health sends gate items, and the
+Inbox then drops the _synthesized_ to-test rows those items replace. A machine that does not keeps today's rows. A person-asked
+card in a gate lane **with no open gate item** keeps its to-test row even on a machine that advertises gates, so no card
+waiting on the owner is ever lost between the two lists.
+
+**GAP — attachments.** The board's Not good takes pictures and files. The agenda's resolve carries a choice and a note but no
+attachment ids, so **Not good from the Inbox is words only**; the composer says nothing about pictures. Sending pictures with
+it needs the resolve contract to carry attachment ids; until then the owner opens the card on the Board for that.
+
+### What the side panel's Cards view shows
+
+The task panel's **Cards** view and the Inbox ask the same question of a card — _is it waiting on the owner?_ — through one
+pure selector (`awaitingOwner`, `lib/awaiting-owner.ts`): a card shows only if it is **not dropped, asked of a person (not an
+internal agent), and sitting in a gate lane**. A gate lane is a verify lane ("Try it") or an owner-gate lane that is not
+closed ("OK to build?"). Everything else — to do, in progress, in review, merged, released, closed, and every internal or
+agent-asked card — never appears there; the Kanban and the List show the rest. With nothing waiting, the view says so in one
+line rather than listing cards that need nothing from the owner.
 
 ## Delivery
 

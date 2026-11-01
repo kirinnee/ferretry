@@ -134,7 +134,7 @@ describe('the open Inbox item', () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: shipIt.key }));
     const first = topView(mounted).getAttribute('data-agenda-view');
-    await swipeFrom(head(mounted), 0, 200);
+    await swipeFrom(head(mounted), 0, 120);
     expect(pending(fake)).toEqual([]);
     expect(fake.commits).toEqual([]);
     expect(topView(mounted).getAttribute('data-agenda-view')).not.toBe(first);
@@ -148,7 +148,7 @@ describe('the open Inbox item', () => {
     expect(up.getAttribute('data-swipe-direction')).toBe('left');
     expect(up.getAttribute('data-swipe-answer')).toBe('Ship');
     await interact(() => whoLine(mounted).dispatchEvent(pointer('pointercancel', 100, 100)));
-    await swipeFrom(whoLine(mounted), 0, 200, false);
+    await swipeFrom(whoLine(mounted), 0, 120, false);
     const down = must(mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]'), 'the card mid-drag');
     expect(down.getAttribute('data-swipe-direction')).toBe('down');
     expect(down.getAttribute('data-swipe-answer')).toBe('Skip');

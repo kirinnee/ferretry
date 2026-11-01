@@ -499,7 +499,7 @@ describe('ChatTasks — Show agent tasks and Expand', () => {
 const ASK = { sessionId: 's1', id: 'A1' };
 const waiting = card('F40', {
   owner: SELF,
-  laneId: 'implement',
+  laneId: 'plan',
   title: 'Needs a call',
   activity: 'waiting',
   waitingOnOwner: [ASK],
@@ -531,28 +531,36 @@ describe('ChatTasks — the Cards view', () => {
     ]);
   });
 
-  it('shows one card at a time, the card to test first and then the one waiting on the owner', async () => {
+  it('shows one card at a time, the card to test first and then the plan to approve', async () => {
     const { root } = await open({ extraCards: [waiting] });
-    expect(where(root)).toBe('1 of 6');
+    expect(where(root)).toBe('1 of 3');
     expect(shownTitle(root)).toBe('Try the board');
     expect(root.querySelectorAll('[data-board-cards] [data-task], [data-board-cards] [data-to-test]')).toHaveLength(1);
     expect(root.querySelector('[data-board-cards-rank]')?.textContent).toBe('To test');
     await interact(() => step(root, 'Next card').click());
-    expect(where(root)).toBe('2 of 6');
-    expect(shownTitle(root)).toBe('Needs a call');
-    expect(root.querySelector('[data-board-cards-rank]')?.textContent).toBe('Waiting on you');
-    await interact(() => step(root, 'Next card').click());
-    expect(root.querySelector('[data-board-cards-rank]')?.textContent).toBe('Other');
+    expect(where(root)).toBe('2 of 3');
+    expect(root.querySelector('[data-board-cards-rank]')?.textContent).toBe('To approve');
+  });
+
+  it('holds only the cards waiting on the owner: nothing in progress, in review or merged', async () => {
+    const { root } = await open({ extraCards: [waiting] });
+    const titles: (string | null | undefined)[] = [];
+    for (let at = 0; at < 3; at += 1) {
+      titles.push(shownTitle(root));
+      if (at < 2) await interact(() => step(root, 'Next card').click());
+    }
+    expect(titles.slice(0, 1)).toEqual(['Try the board']);
+    expect([...titles].sort()).toEqual(['Board system', 'Needs a call', 'Try the board']);
   });
 
   it('stops at both ends of the stack', async () => {
     const { root } = await open({ extraCards: [waiting] });
     expect(step(root, 'Previous card').disabled).toBe(true);
-    for (let at = 1; at < 6; at += 1) await interact(() => step(root, 'Next card').click());
-    expect(where(root)).toBe('6 of 6');
+    for (let at = 1; at < 3; at += 1) await interact(() => step(root, 'Next card').click());
+    expect(where(root)).toBe('3 of 3');
     expect(step(root, 'Next card').disabled).toBe(true);
     await interact(() => step(root, 'Previous card').click());
-    expect(where(root)).toBe('5 of 6');
+    expect(where(root)).toBe('2 of 3');
   });
 
   it('marks a card to test Done with the button, through the Board’s own move', async () => {
@@ -589,7 +597,7 @@ describe('ChatTasks — the Cards view', () => {
     const { root } = await open({ extraCards: [waiting] });
     await interact(() => step(root, 'Next card').click());
     expect(root.querySelector('[data-board-cards] [data-to-test]')).toBeNull();
-    expect(root.querySelector('[data-board-cards] [data-task="F40"]')).not.toBeNull();
+    expect(root.querySelector('[data-board-cards] [data-task]')).not.toBeNull();
   });
 
   it('names the ferret by its task on the card to test, never by its callsign', async () => {
@@ -600,7 +608,7 @@ describe('ChatTasks — the Cards view', () => {
   it('has a Skip button on a card to test that steps to the next card', async () => {
     const { root, acts } = await open({ extraCards: [waiting] });
     await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-skip]'), 'Skip').click());
-    expect(where(root)).toBe('2 of 6');
+    expect(where(root)).toBe('2 of 3');
     expect(acts).toEqual([]);
   });
 
@@ -618,6 +626,14 @@ describe('ChatTasks — the Cards view', () => {
     expect(root.querySelector('[data-board-side-kanban]')).not.toBeNull();
     await interact(() => must(root.querySelector<HTMLButtonElement>('button[data-view="cards"]'), 'Cards').click());
     expect(root.querySelector('[data-board-cards]')).not.toBeNull();
+  });
+
+  it('has no "Agent tasks" toggle in the Cards view, which only ever holds the cards waiting on the owner', async () => {
+    const chat: BoardChat = { ...(await chatOf()), splitsAgents: true };
+    const { root } = await open({ chat });
+    expect(root.querySelector('input[data-filter="agents"]')).toBeNull();
+    await interact(() => must(root.querySelector<HTMLButtonElement>('button[data-view="kanban"]'), 'Kanban').click());
+    expect(root.querySelector('input[data-filter="agents"]')).not.toBeNull();
   });
 
   it('says so when the ferret has no cards', async () => {
@@ -673,7 +689,7 @@ describe('ChatTasks — swiping a card to test, at once', () => {
     await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 600 })));
     await interact(() => grip.dispatchEvent(pointer('pointerup', 100, { clientY: 600 })));
     await interact(() => flush());
-    expect(where(root)).toBe('2 of 6');
+    expect(where(root)).toBe('2 of 3');
     expect(acts).toEqual([]);
   });
 

@@ -19,10 +19,17 @@ import type { ToTestCard } from './to-test-inbox.ts';
 /** An item that is a gate: it carries the card, lane and options. */
 export type GateItem = AgendaItem & { readonly gate: AgendaGate };
 
+/** The two gates the owner is asked at: a card to try, or a plan to approve. */
+export const gateStageWords = (item: GateItem): string =>
+  item.subject?.startsWith('OK to build') ? 'OK to build?' : 'Try it';
+
+/** The chip a gate item wears: the lane's verb. */
+export const gateVerb = (item: AgendaItem): string => (item.subject.startsWith('OK to build') ? 'Approve' : 'Try it');
+
 export const isGateItem = (item: AgendaItem): item is GateItem => item.gate !== undefined;
 
 /** The option the answer picked, as the owner read it: the label of a multiple choice. */
-const chosenLabel = (action: InboxAction): string | null =>
+export const choiceLabel = (action: InboxAction): string | null =>
   action.kind === 'respond' && action.response.kind === 'multiple-choice' ? action.response.choice : null;
 
 export type GateWords = 'required' | 'optional' | 'none';
@@ -30,7 +37,7 @@ export type GateWords = 'required' | 'optional' | 'none';
 /** Whether this answer to the item takes words: "Not good" needs them, "Not yet" may carry them, the rest take none. */
 export const gateWordsFor = (item: AgendaItem, action: InboxAction): GateWords => {
   if (!isGateItem(item)) return 'none';
-  const label = chosenLabel(action);
+  const label = choiceLabel(action);
   if (label === null) return 'none';
   const option = item.gate.options.find(candidate => candidate.label === label);
   if (option === undefined) return 'optional';
@@ -40,6 +47,10 @@ export const gateWordsFor = (item: AgendaItem, action: InboxAction): GateWords =
 /** Whether the answer must wait: it needs words and carries none. */
 export const gateHeld = (item: AgendaItem, action: InboxAction): boolean =>
   gateWordsFor(item, action) === 'required' && !('note' in action && (action.note ?? '').trim() !== '');
+
+/** Whether the answer should first open the words box: it takes words (needed or optional) and carries none yet. */
+export const gateAsksWords = (item: AgendaItem, action: InboxAction): boolean =>
+  gateWordsFor(item, action) !== 'none' && !('note' in action && (action.note ?? '').trim() !== '');
 
 /** The option "Not good" is, if the gate has one. */
 export const gateReopenOption = (item: GateItem): AgendaGate['options'][number] | undefined =>
