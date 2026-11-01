@@ -86,6 +86,13 @@ describe('isGateLane', () => {
     should(isGateLane(byId('plan'))).be.true();
     should(isGateLane(byId('closed'))).be.false();
     should(isGateLane(byId('implement'))).be.false();
+    should(
+      isGateLane({
+        ...byId('implement'),
+        stage: { kind: 'gate', options: [{ id: 'ok', label: 'OK', outcome: { kind: 'next' } }] },
+      }),
+    ).be.true();
+    should(isGateLane({ ...byId('plan'), stage: { kind: 'auto', triggers: ['work.started'] } })).be.false();
   });
 });
 

@@ -1,4 +1,4 @@
-import type { BoardTaskResponse, Lane, TaskRef } from '@ferretry/protocol';
+import { type BoardTaskResponse, type Lane, type TaskRef, laneStage } from '@ferretry/protocol';
 import { raisesAgendaItem } from '../agenda/turn-nudge.ts';
 import type { TranscriptEvent } from '../transcript/types.ts';
 import { BoardError } from './errors.ts';
@@ -57,8 +57,8 @@ export interface BoardGateCheckPorts {
   readonly record: (sessionId: string, items: readonly string[], cards: readonly string[]) => Promise<void>;
 }
 
-/** Whether a lane is a gate: the owner passes it. A lane that declares no stage reads from its category. */
-export const isGateLane = (lane: Lane): boolean => lane.ownerGate === true && lane.category !== 'closed';
+/** Whether a lane is a gate stage: its stored stage, else the one its category and owner gate derive. */
+export const isGateLane = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
 
 const atGate = (response: BoardTaskResponse): boolean => {
   if (response.task.dropped !== null) return false;
