@@ -1,3 +1,9 @@
+## [4.199.0](https://github.com/kirinnee/ferretry/compare/v4.198.0...v4.199.0) (2026-11-01)
+
+### Features
+
+* **daemon:** decide at the route spine whether a ferret may call each route (RF-2) ([#1242](https://github.com/kirinnee/ferretry/issues/1242)) ([90b9587](https://github.com/kirinnee/ferretry/commit/90b9587c90d12a50dc6a5036fbfa242b2e585601)), closes [#1240](https://github.com/kirinnee/ferretry/issues/1240)
+
 ## [4.198.0](https://github.com/kirinnee/ferretry/compare/v4.197.0...v4.198.0) (2026-11-01)
 
 ### Features
