@@ -1,3 +1,9 @@
+## [4.211.0](https://github.com/kirinnee/ferretry/compare/v4.210.1...v4.211.0) (2026-11-01)
+
+### Features
+
+* **pwa:** task-plan card, passkey-bound approval, advertise task-plan.1 ([#1268](https://github.com/kirinnee/ferretry/issues/1268)) ([edefedf](https://github.com/kirinnee/ferretry/commit/edefedf7cb7094ba00ee680e6a39f57a83939c28))
+
 ## [4.210.1](https://github.com/kirinnee/ferretry/compare/v4.210.0...v4.210.1) (2026-11-01)
 
 ### Fixes
