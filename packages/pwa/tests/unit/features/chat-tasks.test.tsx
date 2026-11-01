@@ -553,6 +553,20 @@ describe('ChatTasks — the Cards view', () => {
     expect([...titles].sort()).toEqual(['Board system', 'Needs a call', 'Try the board']);
   });
 
+  it('says so in one line when no card is waiting on the owner', async () => {
+    const model = await boardModelOf([card('F23', { owner: SELF, laneId: 'closed', title: 'Shipped board' })]);
+    const cards = chatCards(model, {
+      daemonId: laptop.daemonId,
+      sessionId: SELF,
+      focus: null,
+      relatives: new Set(),
+      agents: false,
+    });
+    const { root } = await open({ chat: { ...(await chatOf()), cards } });
+    expect(root.querySelector('[data-board-cards-empty]')?.textContent).toContain('Nothing is waiting on you');
+    expect(root.querySelector('[data-to-test]')).toBeNull();
+  });
+
   it('stops at both ends of the stack', async () => {
     const { root } = await open({ extraCards: [waiting] });
     expect(step(root, 'Previous card').disabled).toBe(true);

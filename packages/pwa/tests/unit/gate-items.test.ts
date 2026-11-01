@@ -4,6 +4,7 @@ import { swipeTargets } from '../../src/lib/agenda-answers.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
   gateAnswerAction,
+  gateAsksWords,
   gateHeld,
   gateReopenOption,
   gateWordsFor,
@@ -106,6 +107,12 @@ describe('which answers wait for words', () => {
     expect(gateWordsFor(one, send('Not yet'))).toBe('optional');
     expect(gateHeld(one, send('Not yet'))).toBe(false);
     expect(gateWordsFor(one, send('OK to build'))).toBe('none');
+  });
+
+  test('opens the words box for an answer that takes words and carries none yet', () => {
+    expect(gateAsksWords(item, send('Not good'))).toBe(true);
+    expect(gateAsksWords(item, send('Not good', 'blank'))).toBe(false);
+    expect(gateAsksWords(item, send('Done'))).toBe(false);
   });
 
   test('an item without a gate holds nothing', () => {
