@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { chmod, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -14,6 +15,7 @@ import { AGENT_FILE_LIMITS, AgentFileError, AgentFiles } from '../../../src/lib/
 
 let root = '';
 let folder = '';
+let home = '';
 let files: AgentFiles;
 let attachments: Map<string, { filename: string; bytes: Uint8Array }>;
 let counter = 0;
@@ -22,6 +24,11 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'ferretry-agent-files-'));
   folder = join(root, 'work');
   await mkdir(folder, { recursive: true });
+  // The daemon's state home INSIDE the session folder: a session started in the person's home folder holds it.
+  home = join(folder, '.fy');
+  await mkdir(join(home, 'state'), { recursive: true });
+  await writeFile(join(home, 'api-token'), 'fy_admin_token');
+  await writeFile(join(home, 'state', 'secrets.key'), 'key');
   attachments = new Map();
   counter = 0;
   files = new AgentFiles({
@@ -33,6 +40,8 @@ beforeEach(async () => {
       return found;
     },
     uploadDirectory: join(root, 'upload'),
+    stateHomes: [home, join(home, 'state')],
+    now: () => 1_000,
     token: () => {
       counter += 1;
       return `t${String(counter)}`;
@@ -135,7 +144,7 @@ describe('AgentFiles.prepareUpload — what an agent may hand a page', () => {
 
     should(error.message).containEql('200 MiB');
     should(
-      await stat(join(root, 'upload', 't1')).then(
+      await stat(join(root, 'upload', '1000-t1')).then(
         () => true,
         () => false,
       ),
@@ -163,6 +172,81 @@ describe('AgentFiles.prepareUpload — what an agent may hand a page', () => {
 
   it('should refuse an attachment this session does not have', async () => {
     should((await refusal(files.prepareUpload('s1', [{ attachment: 'att_other' }]))).code).equal('not_found');
+  });
+});
+
+describe('AgentFiles.prepareUpload — never a file in the daemon’s state home, on a real disk', () => {
+  const rules = async (paths: readonly string[]) =>
+    await Promise.all(paths.map(async path => (await refusal(files.prepareUpload('s1', [path]))).rule));
+
+  it('should refuse the state home named directly, by "..", through a symlink, and through a chain of them', async () => {
+    // Arrange
+    await mkdir(join(folder, 'project'));
+    await symlink(join(home, 'api-token'), join(folder, 'project', 'token'));
+    await symlink(join(folder, 'project', 'token'), join(folder, 'project', 'hop2'));
+    await symlink(join(folder, 'project', 'hop2'), join(folder, 'project', 'hop1'));
+    await symlink(join(home, 'state'), join(folder, 'project', 'state'));
+
+    // Act
+    const refused = await rules([
+      '.fy/api-token',
+      join(home, 'state', 'secrets.key'),
+      'project/token',
+      'project/hop1',
+      'project/state/secrets.key',
+      '.fy',
+    ]);
+    const dotted = await refusal(files.prepareUpload('s1', ['project/../.fy/api-token']));
+
+    // Assert
+    should(refused).deepEqual(['state-home', 'state-home', 'state-home', 'state-home', 'state-home', 'state-home']);
+    should(dotted.code).equal('forbidden');
+    should(await readdir(join(root, 'upload')).catch(() => [])).deepEqual([]);
+  });
+
+  it('should refuse a hard link into the state home — and, since its other name cannot be told, any hard link', async () => {
+    // Arrange
+    await link(join(home, 'api-token'), join(folder, 'innocent.txt'));
+    await writeFile(join(folder, 'mine.txt'), 'mine');
+    await link(join(folder, 'mine.txt'), join(folder, 'mine-too.txt'));
+
+    // Act
+    const refused = await rules(['innocent.txt', 'mine-too.txt']);
+
+    // Assert
+    should(refused).deepEqual(['hard-link', 'hard-link']);
+  });
+
+  it('should fail closed when the real path cannot be found, and refuse a folder and a pipe', async () => {
+    // Arrange
+    await symlink(join(root, 'nowhere'), join(folder, 'dangling'));
+    await symlink(join(folder, 'loop'), join(folder, 'loop'));
+    await mkdir(join(folder, 'sub'));
+    should(spawnSync('mkfifo', [join(folder, 'pipe')]).status).equal(0);
+
+    // Act
+    const codes = await Promise.all(
+      ['dangling', 'loop', 'sub', 'pipe'].map(async path => (await refusal(files.prepareUpload('s1', [path]))).code),
+    );
+
+    // Assert
+    should(codes).deepEqual(['not_found', 'not_found', 'bad_request', 'bad_request']);
+  });
+
+  it('should still upload an ordinary file, as a private copy the agent cannot change afterwards', async () => {
+    // Arrange
+    await writeFile(join(folder, 'report.txt'), 'quarterly');
+
+    // Act
+    const prepared = await files.prepareUpload('s1', ['report.txt']);
+    await writeFile(join(folder, 'report.txt'), 'swapped after the check');
+    const copy = prepared.files[0]?.path ?? '';
+
+    // Assert
+    should(prepared.files).match([{ name: 'report.txt', size: 9 }]);
+    should(copy.startsWith(join(root, 'upload'))).be.true();
+    should((await stat(copy)).mode & 0o777).equal(0o600);
+    should(await readFile(copy, 'utf8')).equal('quarterly');
   });
 });
 
@@ -270,5 +354,71 @@ describe('NodeAgentFilesystem.lstat', () => {
       () => should.fail(undefined, undefined, 'a name that long should not be looked up'),
       (error: unknown) => should(error).be.instanceOf(Error),
     );
+  });
+});
+
+describe('NodeAgentFilesystem — what the upload guard reads', () => {
+  it('should list a folder, list nothing where there is none, and let any other failure through', async () => {
+    const disk = new NodeAgentFilesystem();
+    await writeFile(join(folder, 'a.txt'), 'a');
+
+    should(await disk.list(folder)).containEql('a.txt');
+    should(await disk.list(join(folder, 'nope'))).deepEqual([]);
+    await disk.list(join(folder, 'x'.repeat(300))).then(
+      () => should.fail(undefined, undefined, 'a name that long should not be listed'),
+      (error: unknown) => should(error).be.instanceOf(Error),
+    );
+  });
+
+  it('should tell a file by its device and inode, and refuse to open a link at the last step', async () => {
+    // Arrange
+    const disk = new NodeAgentFilesystem();
+    await writeFile(join(folder, 'a.txt'), 'abc');
+    await link(join(folder, 'a.txt'), join(folder, 'b.txt'));
+    await symlink(join(folder, 'a.txt'), join(folder, 'c.txt'));
+
+    // Act
+    const opened = await disk.openRead(join(folder, 'a.txt'));
+    const named = await disk.identity(join(folder, 'b.txt'));
+    const linked = await disk.identity(join(folder, 'c.txt'));
+    const followed = await disk.openRead(join(folder, 'c.txt')).then(
+      () => 'opened',
+      () => 'refused',
+    );
+    await opened.close();
+
+    // Assert
+    should(opened.identity).match({ kind: 'file', links: 2, size: 3 });
+    should(named?.inode).equal(opened.identity.inode);
+    should(named?.device).equal(opened.identity.device);
+    should(linked?.kind).equal('link');
+    should(followed).equal('refused');
+  });
+
+  it('should copy from the open file into a new private one, never over an existing file, and stop at the cap', async () => {
+    // Arrange
+    const disk = new NodeAgentFilesystem();
+    await writeFile(join(folder, 'big.bin'), new Uint8Array(200_000));
+    await writeFile(join(folder, 'taken.bin'), 'x');
+    const opened = await disk.openRead(join(folder, 'big.bin'));
+
+    // Act
+    const copied = await opened.copyTo(join(folder, 'copy.bin'), 1_000_000);
+    const over = await opened.copyTo(join(folder, 'small.bin'), 100_000).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const taken = await opened.copyTo(join(folder, 'taken.bin'), 1_000_000).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await opened.close();
+
+    // Assert
+    should(copied).equal(200_000);
+    should((await stat(join(folder, 'copy.bin'))).mode & 0o777).equal(0o600);
+    should(over).be.instanceOf(AgentFileError);
+    should(taken).be.instanceOf(Error);
+    should(await readFile(join(folder, 'taken.bin'), 'utf8')).equal('x');
   });
 });

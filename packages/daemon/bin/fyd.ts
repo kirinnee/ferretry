@@ -12313,7 +12313,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               return { filename: attachment.filename, bytes };
             },
             uploadDirectory: join(paths.temporary, 'browser-upload'),
+            // Every file tool stays out of these however a path reaches them (docs/agent-tools.md#files).
+            stateHomes: [paths.home, paths.state, paths.config],
             token: () => crypto.randomUUID().replaceAll('-', ''),
+            now: () => Date.now(),
           }),
           redactor: secretRedactor,
         }),

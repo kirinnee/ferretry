@@ -224,8 +224,29 @@ the folder's own real path both times. Refused, in a sentence that names the rul
 outside the folder; a symlink — file or directory — that leads out; anything inside `.git/` at any depth; and
 the daemon's own scratch entries at the top of the folder (`DAEMON_OWNED_SCRATCH_ENTRIES`: `chat.jsonl`,
 `events.jsonl`, `config.json`, `attachments/` …). An upload may instead name `{ "attachment": "att_<64 hex>" }` — a file
-the owner put in THIS session's chat; the daemon copies it into its own private directory for the call and
-removes it afterwards.
+the owner put in THIS session's chat.
+
+**Never the state home.** No file tool reads or writes inside the daemon's own state home (`FY_HOME`, by
+default `~/.ferretry`: `api-token`, `api-warden-token`, `tmux.sock`, the vault and `secrets.key`, `state/`,
+`config/`, every agent's credential home), even when the session's folder contains it — a session started
+in the person's home folder, or a warden session, whose folder is inside it. The daemon passes its own
+resolved paths (`paths.home`, `paths.state`, `paths.config`), each checked as configured and as its real
+path, so a symlinked home is recognised too. A path is refused there when it is named directly, by `..`,
+through a symlink or a chain of them, or when the home cannot be resolved at all (fail closed). The
+refusal says why, and the audit record carries `rule: "state-home"` and never the path. A token in a page
+would hand that page this machine.
+
+**How an upload reads a file.** The path is resolved with `realpath`, checked, then **opened** (never
+following a link at its last step, never blocking on a pipe), and the open file must still be the one at
+the checked place — same real path, same device and inode — or it is refused (`rule: "changed"`). Only a
+regular file is accepted: a folder, a pipe or a device is refused, and so is a path whose real path cannot
+be found. A file with more than one name (a **hard link**) is refused (`rule: "hard-link"`), because its
+other name may be inside the state home and nothing on the file says where: copy it and upload the copy.
+The daemon then copies the open file into its own private directory (mode 0700, the copy 0600) and the
+browser is handed **that copy**, never the agent's path, so a path swapped after the check reaches nothing.
+An attachment is copied there too. The copies are kept 15 minutes, because a page may read a file it was
+given only when its form is sent, and the next upload removes older ones; a call that fails removes its
+own at once.
 
 **Caps.** An upload is at most 20 files, 50 MiB each and 200 MiB per call. A download or PDF saved is at most 500 MiB.
 
@@ -528,9 +549,12 @@ agenda items in a sub-ferret's session with `-s <session>`, proven by lineage.
   removal this change can make unconditionally. Until then a renderer exploit on a page an agent is
   steered to runs as the daemon's user.
 - **A terminal's folder** is where the shell starts, not a boundary.
-- **Files: check, then use.** A path is confined by `realpath` when the call is made, and the worker reads it a
-  moment later; a same-user process that swaps a checked path for a symlink in that window can still redirect an
-  upload. The file tools' destination is closed against this (`O_EXCL|O_NOFOLLOW`); the read side is not.
+- **Files: what the state-home guard cannot see.** An upload's read is closed against a swap (open, then
+  check the open file; the browser reads a private copy), and every hard link is refused. Two limits remain:
+  a same-user process that can WRITE in the state home could move a file out of it (a rename leaves one
+  name, outside), and such a process can read the file itself anyway — the guard matters once the state home
+  is walled off from ferrets, and until then is one fewer way out, not a sandbox. A save checks the folder
+  it writes into again after making it, then writes `O_EXCL|O_NOFOLLOW`.
 - **PDF needs a headless browser.** In Real window mode `browser.pdf` is refused rather than faked.
 - **A staged download** sits in a daemon-owned directory (mode 0700) for up to 15 minutes before it is saved or pruned.
 

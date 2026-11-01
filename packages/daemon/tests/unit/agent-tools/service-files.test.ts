@@ -22,7 +22,7 @@ const opened = async () => {
 };
 
 describe('AgentToolService — browser.upload', () => {
-  it('should hand the page the files the file service confined, in the mode asked, and release them', async () => {
+  it('should hand the page the file service’s copies, in the mode asked, and keep them for the page to read later', async () => {
     // Arrange
     const world = await opened();
     world.files.sizes = [2048, 4096];
@@ -46,7 +46,7 @@ describe('AgentToolService — browser.upload', () => {
         mode: 'drop',
       },
     ]);
-    should(world.files.released).equal(1);
+    should(world.files.released).equal(0);
     should(result.summary).startWith('Dropped 2 files (6.0 KiB) onto %browser:app');
   });
 
@@ -96,6 +96,32 @@ describe('AgentToolService — browser.upload', () => {
     should(error).match({ code: 'forbidden', message: 'that path is outside this session’s folder' });
     should(world.browser.fileActions).deepEqual([]);
     should(world.audit.entries).match([{ outcome: 'refused', detail: { tool: 'browser.upload' } }]);
+  });
+
+  it('should audit which guard refused a file in the state home, by its rule and never by the path', async () => {
+    // Arrange
+    const world = await opened();
+    world.files.failure = new AgentFileError(
+      'forbidden',
+      "that path is inside this daemon's state home (/home/me/.ferretry), which holds this machine's credentials, so the file tools never read there",
+      'state-home',
+    );
+
+    // Act
+    const error = await refusal(
+      world.service.call(agent, {
+        tool: 'browser.upload',
+        name: 'app',
+        selector: '#f',
+        files: ['.ferretry/api-token'],
+      }),
+    );
+
+    // Assert
+    should(error).match({ code: 'forbidden', message: /state home/u });
+    should(world.browser.fileActions).deepEqual([]);
+    should(world.audit.entries).match([{ outcome: 'refused', detail: { tool: 'browser.upload', rule: 'state-home' } }]);
+    should(JSON.stringify(world.audit.entries)).not.containEql('api-token');
   });
 
   it('should audit the count, total size, and each file by leaf name and size — never a path or content', async () => {
