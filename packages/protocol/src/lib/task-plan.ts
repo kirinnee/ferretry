@@ -206,6 +206,13 @@ export const grantMissLine = (line: number, reason: GrantMissReason): string | u
 /** What the FERRET is told when a plan did not fill a card: the same sentence for every reason. */
 export const TASK_PLAN_MISS_AGENT_NOTE = "Your task plan didn't cover this, so the owner was asked.";
 
+/**
+ * The one line every plan card carries while no ferret on this machine can be walled off from Ferretry's own files
+ * (RF-5): what a plan does and does not protect against. The daemon's card text and the app's card say it in these words.
+ */
+export const TASK_PLAN_HONEST_LIMIT =
+  "Ferrets here can read Ferretry's own files, so this stops misuse through their tools and page text, not a ferret that goes around Ferretry.";
+
 // ── What the ferret sends (`task.plan`) ──────────────────────────────────────────────────────────────
 
 const WhySchema = oneLine(TASK_PLAN_WHY_MAX_CHARS);
@@ -877,3 +884,7 @@ export const TASK_PLAN_ERROR_CODES = {
   /** The paste-plan approve route was asked to tick a sign-in line: that needs the passkey, in the app. */
   needsPasskey: 'needs_passkey',
 } as const;
+
+/** The fragment that opens one agenda card in the app (`<app>/#agenda/<id>?session=<sessionId>`), printed by `fy plan approve`. */
+export const agendaDeepLinkFragment = (id: string, sessionId?: string): string =>
+  `#agenda/${encodeURIComponent(id)}${sessionId === undefined ? '' : `?session=${encodeURIComponent(sessionId)}`}`;

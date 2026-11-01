@@ -1,4 +1,5 @@
 import {
+  agendaDeepLinkFragment,
   DAEMON_FEATURES,
   namesSignIn,
   placeKeys,
@@ -23,6 +24,8 @@ export interface PlanCommandOptions {
 export interface PlanApproveOptions extends PlanCommandOptions {
   readonly pick?: readonly string[] | undefined;
   readonly totp?: readonly string[] | undefined;
+  /** Opens the plan's card in this host's browser once the selection is staged. */
+  readonly open?: boolean | undefined;
 }
 
 const POLL_MS = 1_000;
@@ -124,6 +127,7 @@ export class PlanController {
     say(
       `Confirm it with your passkey on the plan's card !${card.agendaItemId} in the Ferretry app (Agenda).\nNothing is approved until you do; waiting up to ${String(TASK_PLAN_STAGE_TTL_SECONDS / 60)} minutes…`,
     );
+    await this.#showCard(plan, card.agendaItemId, options, say);
     const state = await this.#wait(plan, staged.stage);
     const inForce = state === 'approved' ? undefined : await this.#inForce(plan);
     const final = inForce === undefined ? { state } : { state: 'approved' as const, plan: inForce };
@@ -133,6 +137,28 @@ export class PlanController {
         : inForce === undefined
           ? OUTCOME[state](plan)
           : `Approved in the app. Line ${lineList(inForce.lines.filter(line => line.state === 'approved').map(line => line.line))} of the plan ${plan.id.slice(0, 8)} are in force; each goes through for the uses it asked.`,
+    );
+  }
+
+  /** Prints the link that opens the plan's card, and opens it with `--open`. It carries no secret: it only picks a card. */
+  async #showCard(
+    plan: TaskPlan,
+    agendaItemId: string,
+    options: PlanApproveOptions,
+    say: (message: string) => void,
+  ): Promise<void> {
+    const { appOrigin, openLink } = this.ports;
+    if (appOrigin === undefined) {
+      if (options.open === true) say('--open has nowhere to open: this machine does not know the app address.');
+      return;
+    }
+    const link = `${appOrigin.replace(/\/+$/u, '')}/${agendaDeepLinkFragment(agendaItemId, plan.sessionId)}`;
+    say(`Open the card: ${link}`);
+    if (options.open !== true) return;
+    say(
+      openLink !== undefined && (await openLink(link))
+        ? 'Opened it in your browser.'
+        : 'Could not open a browser here; use the link above.',
     );
   }
 

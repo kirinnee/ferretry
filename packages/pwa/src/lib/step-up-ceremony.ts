@@ -6,13 +6,7 @@
  * HTTP status is never what a person reads.
  */
 
-import {
-  type PasskeyView,
-  type StepUpAct,
-  type StepUpRefusal,
-  stepUpRefusalCode,
-  type TwoFactorStageId,
-} from '@ferretry/protocol';
+import { type PasskeyView, type StepUpAct, type StepUpRefusal, stepUpRefusalCode } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { DaemonConnection } from './daemon-connection.ts';
 import {
@@ -32,6 +26,7 @@ import {
   submitUnlock,
   unlockOptions,
 } from './step-up-client.ts';
+import type { StepUpSubject } from './step-up-gate.ts';
 
 export interface StepUpCeremonyDependencies {
   readonly client: (daemon: DaemonConnection) => Promise<StepUpClient>;
@@ -42,7 +37,7 @@ export interface StepUpCeremonyDependencies {
 
 export const stepUpCeremony =
   (deps: StepUpCeremonyDependencies) =>
-  async (daemon: DaemonConnection, act?: StepUpAct, subject?: TwoFactorStageId): Promise<void> => {
+  async (daemon: DaemonConnection, act?: StepUpAct, subject?: StepUpSubject): Promise<void> => {
     const client = await deps.client(daemon);
     const options = await stepUpOptions(client, deps.origin, act, subject);
     const assertion = await assertPasskey(deps.credentials, options);

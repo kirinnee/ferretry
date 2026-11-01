@@ -226,6 +226,44 @@ describe('fy plan approve: a sign-in line is never approved without the app', ()
   });
 });
 
+describe('fy plan approve: the link to the card of the plan', () => {
+  const LINK = 'https://app.example/#agenda/A9?session=s1';
+
+  it('should print the card link, and open nothing without --open', async () => {
+    const opened: string[] = [];
+    const { controller, said } = rig({
+      appOrigin: 'https://app.example/',
+      openLink: async url => void opened.push(url) === undefined,
+    });
+
+    await controller.approve('feed', ['3'], {});
+
+    should(said).containEql(`Open the card: ${LINK}`);
+    should(opened).eql([]);
+  });
+
+  it('should open the link with --open, and say so when no browser can be launched', async () => {
+    const opened: string[] = [];
+    const ok = rig({ appOrigin: 'https://app.example', openLink: async url => void opened.push(url) === undefined });
+    await ok.controller.approve('feed', ['3'], { open: true });
+    const headless = rig({ appOrigin: 'https://app.example', openLink: async () => false });
+    await headless.controller.approve('feed', ['3'], { open: true });
+
+    should(opened).eql([LINK]);
+    should(ok.said).containEql('Opened it in your browser.');
+    should(headless.said).containEql('Could not open a browser here; use the link above.');
+  });
+
+  it('should carry nothing but the card and the session in the link', async () => {
+    const { controller, said } = rig({ appOrigin: 'https://app.example' });
+
+    await controller.approve('feed', ['3'], {});
+
+    const link = said.find(line => line.startsWith('Open the card: '));
+    should(link).equal(`Open the card: ${LINK}`);
+  });
+});
+
 describe('fy plan approve: what is checked before anything is staged', () => {
   it('should stage nothing for a --pick outside the line’s accounts', async () => {
     const { controller, gateway } = rig();

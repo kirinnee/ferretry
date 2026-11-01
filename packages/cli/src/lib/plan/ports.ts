@@ -62,5 +62,9 @@ export interface PlanPorts extends CallerPorts {
   readonly gateway: IPlanGateway;
   readonly out: ICopyOutput;
   readonly sleep: (ms: number) => Promise<void>;
+  /** The app's address, where a plan's card is opened (`<origin>/#agenda/<id>?session=<sid>`); absent, no link is printed. */
+  readonly appOrigin?: string | undefined;
+  /** Hands a link to this host's browser; resolves to whether one was launched. */
+  readonly openLink?: ((url: string) => Promise<boolean>) | undefined;
   readonly nowMs: () => number;
 }

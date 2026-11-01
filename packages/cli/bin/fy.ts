@@ -114,6 +114,7 @@ import { BrowserController, registerBrowserCommands, registerFirewallCommands } 
 import { registerConfigCommands } from '../src/lib/config/commands';
 import { ConfigController } from '../src/lib/config/controller';
 import { ProtocolConfigGateway } from '../src/lib/config/gateway';
+import { DEFAULT_APP_ORIGIN, openInBrowser } from '../src/adapters/plan/open-link';
 import { registerCopyCommands } from '../src/lib/plan/commands';
 import { CopyController } from '../src/lib/plan/controller';
 import { ProtocolCopyGateway, ProtocolPlanGateway } from '../src/lib/plan/gateway';
@@ -1071,6 +1072,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         agentCredential: paneCredentialValue(world.environment),
         sleep: async ms => await Bun.sleep(ms),
         nowMs: () => Date.now(),
+        appOrigin: world.environment.FY_APP_URL?.trim() || DEFAULT_APP_ORIGIN,
+        openLink: async url => openInBrowser(url),
       }),
     ),
   ({ program, world, client, ownSessionId }) =>

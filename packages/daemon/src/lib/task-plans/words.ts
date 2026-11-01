@@ -5,6 +5,7 @@ import {
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_SUBJECT_LENGTH,
   placeWords,
+  TASK_PLAN_HONEST_LIMIT,
   TASK_PLAN_SUMMARY_LINE_MAX_CHARS,
   type TaskPlan,
   type TaskPlanCandidate,
@@ -12,19 +13,14 @@ import {
   type TaskPlanSelectedLine,
 } from '@ferretry/protocol';
 
+export { TASK_PLAN_HONEST_LIMIT };
+
 /**
  * THE DAEMON'S WORDS FOR A TASK PLAN: the card's ask and context, the passkey dialog's summary, and what the ferret is
  * told. Every word about a line comes from what the daemon RESOLVED (the account, the place, the fields); the ferret's
  * own reason is shown only after "The ferret says", as its words. No word here is a value, and nothing the ferret is
  * told says which secret fields an account holds.
  */
-
-/**
- * The one line every plan card carries while no ferret on this machine can be walled off from Ferretry's own files
- * (RF-5): what a plan does and does not protect against.
- */
-export const TASK_PLAN_HONEST_LIMIT =
-  "Ferrets here can read Ferretry's own files, so this stops misuse through their tools and page text, not a ferret that goes around Ferretry.";
 
 /** "a copy from gh → the vercel program in a terminal", in plain words. */
 export function routeOf(from: CopyRouteFrom, to: CopyRouteTo): string {

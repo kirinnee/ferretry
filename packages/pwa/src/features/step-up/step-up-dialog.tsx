@@ -23,6 +23,10 @@ import type { StepUpGate } from '../../lib/step-up-gate.ts';
 export const STEP_UP_SCOPE_NOTE =
   'This covers changes on this machine for 15 minutes, in this open copy of the app. Closing the page ends it.';
 
+/** What a confirmation bound to one staged thing buys: that thing, once. */
+export const STEP_UP_BOUND_SCOPE_NOTE =
+  'This one confirmation covers exactly what is listed here, once. Nothing else, and not a later change.';
+
 /** Several acts waiting on one machine are named together: "open a terminal and add or manage a paired device". */
 const ACT_LIST = new Intl.ListFormat('en', { style: 'long', type: 'conjunction' });
 
@@ -79,7 +83,11 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
   if (prompt === null) return null;
   const machine = machineName(prompt.daemon.daemonId);
   const acts = ACT_LIST.format(prompt.acts);
-  const scope = prompt.scope ?? copy.scope;
+  const scope =
+    prompt.scope ?? (prompt.bound === true && copy.kind === 'step-up' ? STEP_UP_BOUND_SCOPE_NOTE : copy.scope);
+  // A confirmation bound to a staged thing lists what it approves, one line each (a task plan brings the daemon's own words).
+  const lines = prompt.acts.flatMap(act => act.split('\n'));
+  const listed = prompt.bound === true && copy.kind === 'step-up';
   // A device with no passkey yet, inside its window: the way in is to set one up, so the prompt says so
   // first — the other remedies are for after the window has closed, and its failure sentence names them.
   const setup = copy.kind === 'unlock' && prompt.firstPasskey === true;
@@ -128,6 +136,14 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
               </span>{' '}
               with your passkey.
             </>
+          ) : listed ? (
+            <>
+              Confirm with your passkey on{' '}
+              <span className="font-semibold text-fg" data-step-up-machine="">
+                {machine}
+              </span>
+              . This approves exactly:
+            </>
           ) : (
             <>
               Confirm with your passkey to <span data-step-up-act="">{acts}</span> on{' '}
@@ -138,6 +154,18 @@ export function StepUpDialog({ gate, machineName, copy = STEP_UP_COPY }: StepUpD
             </>
           )}
         </p>
+        {listed ? (
+          <ul
+            className="m-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-ui leading-base text-fg"
+            data-step-up-summary=""
+          >
+            {lines.map(line => (
+              <li className="break-words" key={line}>
+                {line}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {scope === null ? null : (
           <p className="m-0 mt-2 text-meta leading-base text-muted" data-step-up-scope="">
             {scope}

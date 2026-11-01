@@ -140,6 +140,8 @@ import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
+import { useAgendaDeepLink } from './hooks/use-agenda-deep-link.ts';
+import { captureAgendaDeepLink } from './lib/agenda-deep-link.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { type BoardMachine, useBoard, useBoardActions } from './hooks/use-board.ts';
@@ -2485,6 +2487,9 @@ function DeviceRefusedGate({
 
 /** The mounted shell; exported so render tests can inject the router and store providers. */
 export function AppShell() {
+  useState(() => {
+    if (typeof window !== 'undefined') captureAgendaDeepLink();
+  });
   const layout = useLayoutMode();
   const install = useInstallPrompt();
   const installDue = layout === 'drawer' && install !== null && installBanner(install.snapshot) !== null;
@@ -2560,12 +2565,9 @@ export function AppShell() {
   );
   const lockedMachines = useLockedMachines(store.unlockGate);
   const toTest = useToTestCards(store.board, everyPairedMachine);
-  const agendaInbox = useAgendaInboxModel(
-    store.attention,
-    useInboxMachines(store.fleet, everyPairedMachine),
-    undefined,
-    toTest,
-  );
+  const inboxMachines = useInboxMachines(store.fleet, everyPairedMachine);
+  useAgendaDeepLink(inboxMachines, navigate);
+  const agendaInbox = useAgendaInboxModel(store.attention, inboxMachines, undefined, toTest);
   const machineSources = useMachineSources(store, listedMachines, lockedMachines);
   const allMachines = useMemo<AllMachinesList | undefined>(
     () =>

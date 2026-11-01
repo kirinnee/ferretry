@@ -90,6 +90,7 @@ import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
+import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
@@ -176,6 +177,17 @@ const inputFormFor = (
   card: InboxCard,
 ): { readonly inputForm?: ReactNode; readonly planForm?: ReactNode } => {
   const connection = inbox.connectionFor(card.daemonId);
+  if (connection !== undefined && card.item.taskPlan !== undefined)
+    return {
+      planForm: (
+        <TaskPlanHost
+          agentName={inboxWho(card).ferret}
+          connection={connection}
+          item={card.item}
+          sessionId={card.view.config.id}
+        />
+      ),
+    };
   if (connection !== undefined && card.item.copyPlan !== undefined)
     return {
       planForm: (

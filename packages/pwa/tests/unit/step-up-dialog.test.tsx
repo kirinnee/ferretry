@@ -7,6 +7,7 @@ import { describe, expect, it } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   FIRST_PASSKEY_TITLE,
+  STEP_UP_BOUND_SCOPE_NOTE,
   STEP_UP_SCOPE_NOTE,
   StepUpDialog,
   UNLOCK_COPY,
@@ -321,6 +322,36 @@ describe('the unlock prompt', () => {
       expect(dialog.textContent).not.toContain('fy passkey window');
       expect(confirmButton(mounted.container).textContent).toContain('Set up passkey');
       expect(confirmButton(mounted.container).hasAttribute('data-step-up-first-passkey')).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});
+
+describe('the passkey prompt bound to a staged task plan', () => {
+  it("lists the daemon's own summary, one line each, and says it covers exactly that", async () => {
+    const { gate } = harness();
+    const mounted = await mount(<StepUpDialog gate={gate} machineName={id => `Name of ${id}`} />);
+    try {
+      await interact(
+        () =>
+          void gate.require(
+            studio,
+            'Line 2: sign in to vercel.com once\nLine 4: paste into vercel once',
+            'explicit',
+            'approve-task-plan',
+            `tps_${'d'.repeat(24)}` as never,
+          ),
+      );
+      await interact(async () => await Promise.resolve());
+      const summary = must(mounted.container.querySelector('[data-step-up-summary]'), 'the summary');
+      expect([...summary.querySelectorAll('li')].map(item => item.textContent)).toEqual([
+        'Line 2: sign in to vercel.com once',
+        'Line 4: paste into vercel once',
+      ]);
+      expect(must(mounted.container.querySelector('[data-step-up-scope]'), 'the scope').textContent).toBe(
+        STEP_UP_BOUND_SCOPE_NOTE,
+      );
     } finally {
       await mounted.unmount();
     }

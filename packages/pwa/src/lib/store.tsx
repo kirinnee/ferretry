@@ -2,6 +2,7 @@ import {
   type ConfigChangeKind,
   DaemonCarriersViewSchema,
   type PairingResponse,
+  type TaskPlanStageId,
   type TwoFactorStageId,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
@@ -1315,6 +1316,26 @@ export function useAddKeyStepUp():
         ? undefined
         : async (daemon: DaemonConnection, stage: TwoFactorStageId, words: string) =>
             await store.stepUp.require(daemon, words, 'explicit', 'add-2fa-key', stage),
+    [store],
+  );
+}
+
+/**
+ * The passkey for ONE approval of a staged task plan, asked BEFORE the commit is sent: the proof is bound to this stage
+ * (act `approve-task-plan`, subject the stage id), so the daemon takes it for that commit and no other. The words on the
+ * prompt are the daemon's own summary of the staged bytes — nothing a ferret wrote reaches them. Outside a provider
+ * there is no prompt and the answer is `undefined`.
+ */
+export function useApproveTaskPlanStepUp():
+  | ((daemon: DaemonConnection, stage: TaskPlanStageId, words: string) => Promise<boolean>)
+  | undefined {
+  const store = useContext(StoreContext);
+  return useMemo(
+    () =>
+      store === null
+        ? undefined
+        : async (daemon: DaemonConnection, stage: TaskPlanStageId, words: string) =>
+            await store.stepUp.require(daemon, words, 'explicit', 'approve-task-plan', stage),
     [store],
   );
 }
