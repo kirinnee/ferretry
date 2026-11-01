@@ -474,6 +474,18 @@ describe('a gate’s options', () => {
     expect(options(own)[0]?.outcome).toEqual({ kind: 'next' });
   });
 
+  it('leaves a gate’s other options alone when a lane they do not name is deleted', () => {
+    const named = setGateOptionOutcome(addGateOption(plan(), 'plan'), 'plan', 'ok', {
+      kind: 'lane',
+      laneId: 'implement',
+    });
+    const moved = must(deleteLane(named, 'implement', 'merged'));
+    expect(options(moved).map(option => option.outcome)).toEqual([
+      { kind: 'lane', laneId: 'merged' },
+      { kind: 'next' },
+    ]);
+  });
+
   it('names a blank or over-long option label against its lane', () => {
     const blank = setGateOptionLabel(plan(), 'plan', 'ok', '   ');
     expect(draftProblems(current, blank)).toContainEqual({ laneId: 'plan', message: 'An option needs a label.' });
