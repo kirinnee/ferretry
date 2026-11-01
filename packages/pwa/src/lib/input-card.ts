@@ -234,7 +234,9 @@ export const observedWords = (request: InputRequest): ObservedWords | undefined 
     };
   if (facts.kind === 'terminal')
     return {
-      program: facts.foreground.comm,
+      // Unproved, the name is only what the process calls itself (a shell can call itself sudo): the card says so.
+      program: facts.program ?? facts.foreground.comm,
+      ...(facts.program === undefined ? { verb: 'is asking · unverified' } : {}),
       echo: ECHO_WORDS[facts.echo],
       promptLine: facts.promptLine,
       recognised: facts.recognisedConsumer,

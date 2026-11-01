@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import type { InputTargetFacts } from '@ferretry/protocol';
 import should from 'should';
 import { digestFacts, digestLine } from '../../../src/lib/input-requests/digest.ts';
+import type { ProgramProofPort, ProvenProgram } from '../../../src/lib/input-requests/ports.ts';
 import type { TerminalModes } from '../../../src/lib/input-requests/terminal-modes.ts';
 import {
   foregroundPids,
@@ -43,10 +44,18 @@ interface World {
   queued: (readonly string[])[];
   /** Runs after tmux's condition held and the bytes were enqueued, before any program reads them. */
   afterEnqueue: ((w: World) => void) | undefined;
-  /** What the line-mode and trusted-program reads answer; absent: the modes cannot tell. */
+  /** What the line-mode read answers; absent: the modes cannot tell. */
   canonical?: boolean;
-  trusted?: boolean;
+  /** What the kernel proves each pid runs; a pid not here is unproved. */
+  proved: Record<number, ProvenProgram>;
+  /** Whether a process of another session holds the TTY open; `undefined`: it cannot be told. */
+  elsewhere: boolean | undefined;
+  /** The TTYs the daemon asked about strangers on. */
+  askedElsewhere: string[];
 }
+
+/** A real sudo at its password prompt: running setuid root, so the kernel proves it whatever it is called. */
+const SUDO: ProvenProgram = { name: 'sudo', setuidRoot: true };
 
 const world = (): World => ({
   proof: '%3|4242|0|1700000000',
@@ -65,6 +74,9 @@ const world = (): World => ({
   ran: [],
   queued: [],
   afterEnqueue: undefined,
+  proved: { 4300: SUDO, 4301: SUDO },
+  elsewhere: false,
+  askedElsewhere: [],
 });
 
 const GUARD = /#\{==:#\{(\w+)\},([^}]*)\}/gu;
@@ -107,7 +119,13 @@ function target(w: World, programs?: { codeProgram(pid: number): Promise<boolean
   const modes: TerminalModes = {
     echo: async () => w.echo,
     ...(w.canonical === undefined ? {} : { canonical: async () => w.canonical }),
-    ...(w.trusted === undefined ? {} : { trusted: async () => w.trusted as boolean }),
+  };
+  const proofs: ProgramProofPort = {
+    prove: async pid => w.proved[pid],
+    heldElsewhere: async tty => {
+      w.askedElsewhere.push(tty);
+      return w.elsewhere;
+    },
   };
   return new TmuxInputTarget(
     tmux,
@@ -118,6 +136,7 @@ function target(w: World, programs?: { codeProgram(pid: number): Promise<boolean
       return w.ps;
     },
     programs,
+    proofs,
   );
 }
 
@@ -143,8 +162,11 @@ describe('observing a terminal an input request aims at', () => {
       cursorRow: 7,
       promptLine: '[sudo] password for kirin:                       ',
       promptLineDigest: digestLine('[sudo] password for kirin:                       '),
+      program: 'sudo',
       recognisedConsumer: true,
+      trustedProgram: true,
     });
+    should(w.askedElsewhere).deepEqual(['/dev/pts/9']);
     should(w.ran).deepEqual([['ps', '-t', 'pts/9', '-o', 'pid=,pgid=,tpgid=,comm=,args=']]);
     should(w.calls[1]).deepEqual(['capture-pane', '-p', '-N', '-S', '7', '-E', '7', '-t', PANE]);
   });
@@ -598,24 +620,178 @@ describe('the screen look is pinned to the terminal typed into', () => {
 });
 
 describe('the facts the adaptive lock reads from a terminal', () => {
-  it('should say the terminal is in line mode and the program is trusted, when the modes can tell', async () => {
+  it('should say the terminal is in line mode and the program is trusted, when the kernel proves it', async () => {
     const w = world();
     w.canonical = true;
-    w.trusted = true;
     const facts = await observed(w);
     should(facts.canonical).be.true();
     should(facts.trustedProgram).be.true();
   });
 
   it('should leave out what it cannot tell, and never claim a program it does not trust', async () => {
-    const quiet = await observed(world());
+    const w = world();
+    w.proved = { 4300: { name: 'sudo', setuidRoot: false }, 4301: SUDO };
+    const quiet = await observed(w);
     should(quiet).not.have.property('canonical');
     should(quiet).not.have.property('trustedProgram');
-    const w = world();
     w.canonical = false;
-    w.trusted = false;
     const facts = await observed(w);
     should(facts.canonical).be.false();
     should(facts).not.have.property('trustedProgram');
+  });
+});
+
+describe('the program a secret card names is proved for every reader of the terminal, never taken from ps', () => {
+  /** sudo at its prompt leads the foreground group; the ferret's `sh -c 'read -s X'` is a second member. */
+  const SUDO_AND_READER =
+    ' 4242  4242  4300 bash -bash\n 4300  4300  4300 sudo sudo -v\n 4301  4300  4300 sh sh -c read\n';
+
+  it('should not trust a shell that renamed itself sudo: unverified, not recognised, not trusted', async () => {
+    // Arrange — `printf sudo > /proc/$$/comm; read -s X`: ps says sudo, the kernel proves nothing.
+    const w = world();
+    w.ps = ' 4242  4242  4300 bash -bash\n 4300  4300  4300 sudo sudo -v\n';
+    w.proved = {};
+    w.canonical = true;
+
+    // Act
+    const facts = await observed(w);
+
+    // Assert — the name is still shown as what the process calls itself, but nothing is claimed for it.
+    should(facts.foreground.comm).equal('sudo');
+    should(facts).not.have.property('program');
+    should(facts.recognisedConsumer).be.false();
+    should(facts).not.have.property('trustedProgram');
+  });
+
+  it('should not trust a real sudo leader when another member of its group reads the terminal', async () => {
+    // Arrange — the leader is a real setuid sudo; the member is a shell the ferret controls.
+    const w = world();
+    w.ps = SUDO_AND_READER;
+    w.proved = { 4300: SUDO };
+    w.canonical = true;
+
+    // Act
+    const facts = await observed(w);
+
+    // Assert
+    should(facts).not.have.property('program');
+    should(facts.recognisedConsumer).be.false();
+    should(facts).not.have.property('trustedProgram');
+  });
+
+  it('should not call a group trusted when a member runs the same program but not setuid root', async () => {
+    // Arrange — a setuid sudo leads; the second member is proved to be sudo by its executable, not setuid: the group
+    // runs one recognised program, and is still not trusted for the short lock.
+    const w = world();
+    w.ps = SUDO_AND_READER;
+    w.proved = { 4300: SUDO, 4301: { name: 'sudo', setuidRoot: false } };
+
+    // Act
+    const facts = await observed(w);
+
+    // Assert
+    should(facts.program).equal('sudo');
+    should(facts.recognisedConsumer).be.true();
+    should(facts).not.have.property('trustedProgram');
+  });
+
+  it('should name no program when the group runs two, each proved (sudo leading a proved sh, ssh and nc)', async () => {
+    // Arrange — every member is proved, but not to be the same program: the terminal goes to whichever reads first.
+    for (const second of [
+      { name: 'sh', setuidRoot: false },
+      { name: 'ssh', setuidRoot: false },
+    ]) {
+      const w = world();
+      w.ps = SUDO_AND_READER;
+      w.proved = { 4300: SUDO, 4301: second };
+
+      // Act
+      const facts = await observed(w);
+
+      // Assert
+      should(facts).not.have.property('program');
+      should(facts.recognisedConsumer).be.false();
+      should(facts).not.have.property('trustedProgram');
+    }
+  });
+
+  it('should name a proved program that does not ask for secrets, and not recognise it (a system bash)', async () => {
+    const w = world();
+    w.ps = ' 4242  4242  4300 bash -bash\n 4300  4300  4300 bash bash\n';
+    w.proved = { 4300: { name: 'bash', setuidRoot: false } };
+
+    const facts = await observed(w);
+
+    should(facts.program).equal('bash');
+    should(facts.recognisedConsumer).be.false();
+    should(facts).not.have.property('trustedProgram');
+  });
+
+  for (const [why, elsewhere] of [
+    ['a process of another session holds the terminal open (cat /dev/pts/N)', true],
+    ['it cannot be told who else holds the terminal', undefined],
+  ] as const)
+    it(`should prove nothing, not even a code program, when ${why}`, async () => {
+      // Arrange — a real sudo alone in its group, and a real ssh for the code check.
+      const w = world();
+      w.elsewhere = elsewhere;
+
+      // Act
+      const facts = await observed(w);
+      const coded = await target(w, { codeProgram: async () => true }).observe('s1', dev);
+
+      // Assert
+      should(facts).not.have.property('program');
+      should(facts.recognisedConsumer).be.false();
+      should(facts).not.have.property('trustedProgram');
+      should(coded.ok && coded.codeProgram).be.undefined();
+    });
+
+  it('should prove nothing when a proof throws, or with no proof port wired', async () => {
+    const w = world();
+    const throwing = new TmuxInputTarget(
+      { execute: async args => (args[0] === 'display-message' ? ok(`${w.proof}\t/dev/pts/9\t7\tsudo\n`) : w.capture) },
+      { locate: async () => ({ tmuxSession: SESSION, id: 't-dev' }) },
+      { echo: async () => 'off' },
+      async () => w.ps,
+      undefined,
+      {
+        prove: async () => await Promise.reject(new Error('EACCES')),
+        heldElsewhere: async () => false,
+      },
+    );
+    const bare = new TmuxInputTarget(
+      { execute: async args => (args[0] === 'display-message' ? ok(`${w.proof}\t/dev/pts/9\t7\tsudo\n`) : w.capture) },
+      { locate: async () => ({ tmuxSession: SESSION, id: 't-dev' }) },
+      { echo: async () => 'off' },
+      async () => w.ps,
+    );
+
+    for (const port of [throwing, bare]) {
+      const seen = await port.observe('s1', dev);
+      should(seen.ok).be.true();
+      if (!seen.ok || seen.facts.kind !== 'terminal') continue;
+      should(seen.facts).not.have.property('program');
+      should(seen.facts.recognisedConsumer).be.false();
+      should(seen.facts).not.have.property('trustedProgram');
+    }
+  });
+
+  it('should refuse the write when an unproved reader joined the group after the card, with nothing typed', async () => {
+    // Arrange — the card saw sudo alone and proved; by the write, the ferret's reader has joined sudo's group.
+    const w = world();
+    w.ps = ' 4242  4242  4300 bash -bash\n 4300  4300  4300 sudo sudo -v\n';
+    const port = target(w);
+    const seen = await port.observe('s1', dev);
+    if (!seen.ok) throw new Error('not seen');
+    w.ps = SUDO_AND_READER;
+    w.proved = { 4300: SUDO };
+
+    // Act
+    const result = await port.type('s1', dev, SECRET, true, seen.facts);
+
+    // Assert
+    should(result).equal('target_changed');
+    should(w.typed).be.empty();
   });
 });

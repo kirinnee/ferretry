@@ -3,7 +3,15 @@ import { hexInputChunks, terminalPaneTarget } from '../terminal/runtime-policy.t
 import type { TmuxCommandPort } from '../tmux/contracts.ts';
 import { PANE_PROOF_FORMAT, parsePaneSighting } from '../tmux/pane-proof.ts';
 import { digestFacts, digestLine } from './digest.ts';
-import type { CodeProgramPort, ObserveResult, TerminalInputTargetPort, TypeOptions, TypeResult } from './ports.ts';
+import type {
+  CodeProgramPort,
+  ObserveResult,
+  ProgramProofPort,
+  ProvenProgram,
+  TerminalInputTargetPort,
+  TypeOptions,
+  TypeResult,
+} from './ports.ts';
 import { recognisedConsumer } from './recognised.ts';
 import type { ProgramRunner, TerminalModes } from './terminal-modes.ts';
 
@@ -47,6 +55,12 @@ type Sight =
       readonly codeProgram?: boolean;
     }
   | { readonly ok: false; readonly reason: 'target_gone' };
+
+interface ProvedGroup {
+  readonly program: string;
+  readonly recognised: boolean;
+  readonly setuidRoot: boolean;
+}
 
 interface Described {
   readonly proof: string;
@@ -120,6 +134,8 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     private readonly run: ProgramRunner,
     /** Whether the foreground runs a code program this account cannot replace; absent: none ever does. */
     private readonly programs?: CodeProgramPort,
+    /** What the kernel proves about who can read the TTY; absent: nothing is proved, so every card is unverified. */
+    private readonly proofs?: ProgramProofPort,
   ) {}
 
   /**
@@ -203,13 +219,15 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     const promptLine = plain(captured.stdout.split('\n')[0] ?? '');
     const echo = await this.modes.echo(first.tty);
     const canonical = await this.modes.canonical?.(first.tty);
-    const trusted = (await this.modes.trusted?.(foreground.pid)) === true;
     // EVERY process of the foreground group can read the TTY (an ssh LocalCommand or ProxyCommand child, a pipeline
-    // led by ssh), so each must be a proven code program, or none is. GAP: a process of another session holding the TTY
-    // open is not looked for.
+    // led by sudo, a shell that renamed itself), and so can a process of another session that opened it by its path.
+    // So each member must be proved, and no stranger may hold it, or nothing is: the card is unverified.
     const members = listed === undefined ? [] : foregroundPids(listed);
+    const alone = (await this.proofs?.heldElsewhere(first.tty).catch(() => undefined)) === false;
+    const group = alone ? await this.proveGroup(foreground.pid, members) : undefined;
     const programs = this.programs;
     const codeProgram =
+      alone &&
       programs !== undefined &&
       members.length > 0 &&
       (await Promise.all(members.map(async pid => await programs.codeProgram(pid).catch(() => false)))).every(Boolean);
@@ -234,9 +252,10 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
       cursorRow,
       promptLine,
       promptLineDigest: digestLine(promptLine),
-      recognisedConsumer: recognisedConsumer(foreground.comm),
+      ...(group === undefined ? {} : { program: group.program }),
+      recognisedConsumer: group?.recognised === true,
       ...(canonical === undefined ? {} : { canonical }),
-      ...(trusted ? { trustedProgram: true as const } : {}),
+      ...(group?.setuidRoot === true ? { trustedProgram: true as const } : {}),
     };
     return {
       ok: true,
@@ -244,6 +263,31 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
       guard: { panePid: sighting.pid, command: last.command, cursorRow },
       codeProgram,
       names: [...new Set([key, located.name, located.id].filter((name): name is string => name !== undefined))],
+    };
+  }
+
+  /**
+   * The foreground group, proved member by member: the ONE program every member is proved to run, whether it asks for
+   * a secret, and whether every member runs setuid root. `undefined` when any member is unproved, or two members run
+   * different programs (sudo leading a proved `sh` still hands the terminal to a shell).
+   */
+  private async proveGroup(leader: number, members: readonly number[]): Promise<ProvedGroup | undefined> {
+    const proofs = this.proofs;
+    if (proofs === undefined || !members.includes(leader)) return undefined;
+    const proved = await Promise.all(
+      members.map(async pid => ({ pid, proven: await proofs.prove(pid).catch(() => undefined) })),
+    );
+    const named = proved.flatMap(({ pid, proven }) => (proven === undefined ? [] : [{ pid, proven }]));
+    const head = named.find(member => member.pid === leader);
+    if (named.length !== members.length || head === undefined) return undefined;
+    const all = (test: (proven: ProvenProgram) => boolean): boolean => named.every(member => test(member.proven));
+    if (!all(proven => proven.name === head.proven.name)) return undefined;
+    const program = plain(head.proven.name, 64);
+    if (program === '') return undefined;
+    return {
+      program,
+      recognised: recognisedConsumer(program),
+      setuidRoot: all(proven => proven.setuidRoot),
     };
   }
 

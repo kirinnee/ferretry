@@ -82,6 +82,7 @@ describe('a one-time code card, raised on the real agenda', () => {
   const OTP = {
     ...FACTS,
     foreground: { ...FACTS.foreground, comm: 'ssh', argv: 'ssh bastion' },
+    program: 'ssh',
     echo: 'on',
     promptLine: 'Verification code:',
   } as InputTargetFacts;

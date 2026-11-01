@@ -4,7 +4,7 @@
  *
  *   bun harness/input-card-screenshot.tsx [out-dir] [states]   # writes input-card-*.png, input-p2-*.png, saved-logins-*.png
  *
- * `states` is a comma list (first,next,google,chain,codeterm,signin,logins) when only some are wanted.
+ * `states` is a comma list (first,next,google,chain,codeterm,signin,unverified,logins) when only some are wanted.
  *
  * Fake fixtures only (`tests/support/input-fixtures.ts`): no real account, no real daemon, and the typed value
  * is a made-up phrase. Two card states are captured. "first" is the first time a password is asked for: a
@@ -12,7 +12,8 @@
  * saved login the daemon matched, one tap, with another login folded away. "google" is a browser login of two
  * fields (Email plain, Password secret) with the email typed, each plain field flagged red; "chain" is the second
  * step of that login, a one-time `code` typed and visible; "codeterm" is a one-time code at a terminal. Settings is shown with a 2FA seed form open on one row, so the warning and
- * its tick are on screen. Every width asserts no sideways scroll and the touch floor on every button of the phone.
+ * its tick are on screen. "unverified" is a secret
+ * card whose reader the kernel did not prove (a shell that calls itself sudo): amber, "unverified", the full lock. Every width asserts no sideways scroll and the touch floor on every button of the phone.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -117,6 +118,7 @@ const codeterm = fakeRequest({
     cursorRow: 12,
     promptLine: 'Verification code:',
     promptLineDigest: 'a'.repeat(64),
+    program: 'ssh',
     recognisedConsumer: true,
   },
 });
@@ -143,7 +145,30 @@ const signin = fakeRequest({
     offers: [],
   }),
 });
-const request = { first, next, google, chain, codeterm, signin }[view] ?? first;
+// A ferret's shell that wrote sudo into its own name: ps says sudo, the kernel proves nothing (no program fact). The
+// daemon's own sentence (service.ts UNVERIFIED_FLAG) and the full lock (lock.ts, not-proven).
+const UNVERIFIED_RISK = {
+  level: 'amber',
+  reason:
+    'Unverified: Ferretry could not prove which program is reading the terminal, so the name it shows may be a disguise and the value may land somewhere unexpected.',
+};
+const unverified = fakeRequest({
+  fields: [field('secret', { risk: UNVERIFIED_RISK })],
+  risk: UNVERIFIED_RISK,
+  lock: { seconds: 120, reason: 'not-proven' },
+  observed: {
+    kind: 'terminal',
+    paneProof: { paneId: '%1', pid: 4242 },
+    foreground: { pid: 4300, pgid: 4300, comm: 'sudo', argv: 'sudo -k apt update' },
+    echo: 'off',
+    cursorRow: 12,
+    promptLine: '[sudo] password for kirin:',
+    promptLineDigest: 'a'.repeat(64),
+    recognisedConsumer: false,
+    canonical: true,
+  },
+});
+const request = { first, next, google, chain, codeterm, signin, unverified }[view] ?? first;
 const subject =
   view === 'google' || view === 'chain'
     ? 'Sign in to Google'
@@ -151,7 +176,9 @@ const subject =
       ? 'Sign in to Vercel'
       : view === 'codeterm'
         ? 'Type it into ssh'
-        : 'Type it into sudo';
+        : view === 'unverified'
+          ? 'Type it into the terminal'
+          : 'Type it into sudo';
 
 // The agenda item the daemon raises for the request (lib/input-requests/agenda-adapter.ts), drawn by the REAL v5
 // item view with the card as its form: the type badge, the header and the paging are the item view's own.
@@ -240,7 +267,7 @@ run('./node_modules/.bin/tailwindcss', [
 ]);
 
 const wanted = process.argv[3]?.split(',');
-const STATES = (['first', 'next', 'google', 'chain', 'codeterm', 'signin', 'logins'] as const).filter(
+const STATES = (['first', 'next', 'google', 'chain', 'codeterm', 'signin', 'unverified', 'logins'] as const).filter(
   state => wanted === undefined || wanted.includes(state),
 );
 

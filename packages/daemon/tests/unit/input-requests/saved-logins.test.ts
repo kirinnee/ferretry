@@ -38,6 +38,8 @@ const sudoFacts = (comm = 'sudo', argv = 'sudo -v'): InputTargetFacts => ({
   cursorRow: 1,
   promptLine: '[sudo] password for kirin:',
   promptLineDigest: 'a'.repeat(64),
+  program: comm,
+  canonical: true,
   recognisedConsumer: true,
 });
 

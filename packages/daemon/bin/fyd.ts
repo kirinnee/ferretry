@@ -521,6 +521,7 @@ import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.t
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import { ExecutableCodePrograms } from '../src/adapters/system/executable-code-programs.ts';
+import { KernelProgramProof } from '../src/adapters/system/kernel-program-proof.ts';
 import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
 import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader.ts';
 import {
@@ -6262,6 +6263,9 @@ function createInputRequestService(input: {
     runProgram,
     // An echo-off code prompt stays a code only from a code program this account cannot replace (never the ps name).
     ExecutableCodePrograms.forPlatform(process.platform),
+    // Who can read the TTY, proved by the kernel for EVERY process of the foreground group, never by the name ps shows:
+    // without it a card is unverified, never green, and keeps the full lock.
+    KernelProgramProof.forPlatform(process.platform, runProgram, process.getuid?.()),
   );
   const pageTarget = new PageInputTarget(input.pages);
   // What a saved login's sign-in looked like, from the daemon's own looks at the target (docs/input-requests.md,

@@ -1819,6 +1819,8 @@ function riskOf(field: Pick<InputRequestField, 'id' | 'sensitivity'>, facts: Inp
       level: 'amber',
       reason: 'Ferretry could not tell whether the terminal echoes, so the value may show on screen.',
     };
+  if (facts.program === undefined) return UNVERIFIED_FLAG;
+  if (facts.canonical !== true) return RELAY_FLAG;
   if (!facts.recognisedConsumer)
     return {
       level: 'amber',
@@ -1827,6 +1829,28 @@ function riskOf(field: Pick<InputRequestField, 'id' | 'sensitivity'>, facts: Inp
     };
   return { level: 'green', reason: 'Typing is hidden and the program is one known to ask for a password.' };
 }
+
+/**
+ * The program reading the terminal could not be PROVED: a process of its foreground group is not a program the kernel
+ * shows came from a root-controlled place (a shell that renamed itself `sudo`, a `read -s` in a pipeline sudo leads),
+ * or a process of another session holds the terminal open. Never green, and the lock stays full.
+ */
+const UNVERIFIED_FLAG: InputRisk = {
+  level: 'amber',
+  reason:
+    'Unverified: Ferretry could not prove which program is reading the terminal, so the name it shows may be a disguise and the value may land somewhere unexpected.',
+};
+
+/**
+ * The proved program reads the terminal key by key (raw or readline mode, or a mode that could not be read): a relay
+ * such as `ssh -t` or `docker exec -it` passes every key on to a reader outside this machine's foreground group. A
+ * real password prompt (getpass, readpassphrase, Go's ReadPassword) reads in line mode. Never green.
+ */
+const RELAY_FLAG: InputRisk = {
+  level: 'amber',
+  reason:
+    'The terminal is not reading a line, so the program may be passing each key on to something else (a remote shell or a container) rather than asking for a password itself.',
+};
 
 const PAGE_PRIVATE_FLAG = 'This value will show on the page; Ferretry hides the page from the ferret for 2 minutes.';
 /**
@@ -1935,6 +1959,8 @@ function hidesTyping(facts: InputTargetFacts): boolean {
 /** What a terminal's facts read as while it is quarantined: what a secret may have left on the screen is gone. */
 function maskedFacts(facts: InputTargetFacts): InputTargetFacts {
   if (facts.kind !== 'terminal') return facts;
+  // `program` stays: it is a root-controlled folder's entry or a setuid-root process's own name, never something the
+  // reading program could write a typed value into, unlike `comm`.
   return {
     ...facts,
     promptLine: QUARANTINE_NOTICE,

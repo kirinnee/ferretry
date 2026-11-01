@@ -61,10 +61,17 @@ const TO_KINDS: readonly {
   readonly label: string;
   readonly placeholder: string;
 }[] = [
-  { value: 'terminal', label: 'A program in a terminal', placeholder: 'vercel' },
+  { value: 'terminal', label: 'A program in a terminal', placeholder: 'psql' },
   { value: 'browser', label: 'A field on a page', placeholder: 'https://vercel.com' },
   { value: 'secret', label: 'A secret, by name', placeholder: 'VERCEL_TOKEN' },
 ];
+
+/**
+ * A terminal rule matches only a program the daemon PROVES (docs/secure-copy.md): the owner should know before adding
+ * one for a program installed in their own folder, which will always ask.
+ */
+const TERMINAL_RULE_HINT =
+  'Only a program installed by the system (/usr/bin, a system profile) is proved, so only it pastes without asking. One from your own folder (~/.nix-profile, ~/bin) or a script always asks.';
 
 function AddRuleForm({
   busy,
@@ -154,6 +161,7 @@ function AddRuleForm({
         </Field>
         <Field
           label={toKind === 'terminal' ? 'Program reading it' : toKind === 'secret' ? 'Secret name' : 'Page origin'}
+          {...(toKind === 'terminal' ? { hint: TERMINAL_RULE_HINT } : {})}
         >
           {id => (
             <input

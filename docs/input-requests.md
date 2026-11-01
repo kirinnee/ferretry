@@ -60,7 +60,8 @@ through the input tool; the generic add refuses it.
   is accepted from the agent.
 - **`InputTargetFactsSchema`**: what the daemon saw: for a terminal, the pane proof, the foreground
   program (pid, pgid, `comm`, argv), `echo` (`off`, `on` or `unknown`), the cursor row, the prompt
-  line with its digest, and `recognisedConsumer`. For a page: the page, its origin and whether it is
+  line with its digest, `program` (the reader the kernel PROVED, absent when unverified:
+  [who reads the terminal](#who-reads-the-terminal)), `recognisedConsumer` and `trustedProgram`. For a page: the page, its origin and whether it is
   secure, the document (`navigationId`), and per field the frame and its origin, the node, the field's
   attributes, its box and whether it is visible; and `challenge` when the page shows a captcha.
 - **`InputRequestSchema`**: the aggregate: ids, target, prompt, `fields` (each with its own sensitivity
@@ -154,9 +155,10 @@ one-time.
     gcloud, az and vault CLIs), proved for EVERY process of the terminal's foreground group (an ssh `LocalCommand` or a pipeline led by ssh is
     not one) from the file it RUNS (`/proc/<pid>/exe`, Linux only: on macOS nothing proves the program, so an
     echo-off code prompt there is always a secret), and only when that file is what a system folder resolves the
-    name to (`/usr/bin`, `/bin`, `/usr/local/bin`, `/run/current-system/sw/bin`,
-    `/nix/var/nix/profiles/default/bin`) and no part of that entry is owned by this account or open to anyone (the
-    secure-copy rule). A name in `ps` can be rewritten, a shell copied to `~/bin/ssh`, and anyone may add a shell to
+    name to (`/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, `/usr/local/bin`, `/run/current-system/sw/bin`,
+    `/nix/var/nix/profiles/default/bin`, `/etc/profiles/per-user/<account>/bin`) and no hop of that entry is owned by
+    this account or open to anyone (the secure-copy rule), and no process of another session holds the terminal open.
+    A name in `ps` can be rewritten, a shell copied to `~/bin/ssh`, and anyone may add a shell to
     the Nix store, so none of those is proof, and the prompt line the daemon read from the pane asks for a code (verification code,
     one-time, OTP, 2FA, authenticator, "code:") and says none of password, passphrase, PIN, token or secret; a
     shell's `read -s` is never a code;
@@ -302,15 +304,17 @@ card draws what the **daemon** observed (`sudo` is reading it, typing is hidden)
 **agent** wrote small, and carries a **risk flag** with one fixed sentence that says what the risk is
 (`request.risk`: a level and a reason; the sentence never contains terminal text):
 
-| Level   | When                                                                                                                                                                        |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| green   | A `secret`, echo off, and a recognised program (`sudo`, `ssh`, `gpg` and so on).                                                                                            |
-| amber   | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.                                                           |
-| amber   | A `private` value (it echoes): "This value will show on screen while the terminal is hidden from the ferret for 2 minutes."                                                 |
-| neutral | A one-time `code`: "One-time code: the ferret can see it." A page field's amber checks (missing, covered, not https, another site's frame) still come first.                |
-| amber   | A page field: the page is not https, the field is in a frame from another site, a `secret` is going into a field that is not a password field, or the field cannot be seen. |
-| green   | A page's `secret` going into a password field on a secure page.                                                                                                             |
-| red     | A `plain` value: "Not secret: the ferret can see this value."                                                                                                               |
+| Level   | When                                                                                                                                                                                       |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| green   | A `secret`, echo off in line mode, and EVERY process of the foreground group PROVED to run one recognised program (`sudo`, `ssh`, `gpg` and so on), with no stranger holding the terminal. |
+| amber   | A proved program in raw or readline mode: it may be relaying keys (`ssh -t`, `docker exec -it`), not asking for a password itself.                                                         |
+| amber   | **Unverified**: the program reading the terminal is not proved ([who reads the terminal](#who-reads-the-terminal)), whatever name `ps` shows. The card says "unverified".                  |
+| amber   | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.                                                                          |
+| amber   | A `private` value (it echoes): "This value will show on screen while the terminal is hidden from the ferret for 2 minutes."                                                                |
+| neutral | A one-time `code`: "One-time code: the ferret can see it." A page field's amber checks (missing, covered, not https, another site's frame) still come first.                               |
+| amber   | A page field: the page is not https, the field is in a frame from another site, a `secret` is going into a field that is not a password field, or the field cannot be seen.                |
+| green   | A page's `secret` going into a password field on a secure page.                                                                                                                            |
+| red     | A `plain` value: "Not secret: the ferret can see this value."                                                                                                                              |
 
 The flag is computed from what the daemon observed, when the request is raised and again when it is
 restored. Send is available at every level. The only refusals are a control character or line break in
@@ -399,13 +403,13 @@ The owner chose an **adaptive** lock (!A149). The card shows its length and why 
 after typing. …"), from `request.lock` (`InputLockSchema`: `seconds` and a fixed `reason`); the agent learns the
 seconds (`lockSeconds`). It is decided only from what the daemon observed (`packages/daemon/src/lib/input-requests/lock.ts`):
 
-| Reason            | Lock  | When                                                                                                                                                                                                                                                                                                 |
-| ----------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hidden-terminal` | 10 s  | A LOCAL password prompt: echo off AND line (canonical) mode, the program is sudo, sudoedit, su, doas or passwd, and it runs setuid root (effective uid 0, real uid not), which a script or binary the ferret wrote cannot. ssh, docker, psql and every readline or raw-mode program are never short. |
-| `proven-field`    | 10 s  | A submitted value into exactly the page fields below, AND a saved login's facts for that very field identity say masked, no echo after submit and moved on, with no record saying otherwise.                                                                                                         |
-| `probed-field`    | 10 s  | One password field as below, and the daemon's **dummy probe** at raise came back clean.                                                                                                                                                                                                              |
-| `code`            | 120 s | A `private` value: it shows as it is typed. (A one-time `code` field gets no lock at all; the reason's name is older than the sensitivity.)                                                                                                                                                          |
-| `not-proven`      | 120 s | Anything else, every probe that did not run cleanly, an unreadable login store, a ferret that could have steered the page.                                                                                                                                                                           |
+| Reason            | Lock  | When                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hidden-terminal` | 10 s  | A LOCAL password prompt: echo off AND line (canonical) mode, the PROVED program is sudo, sudoedit, su, doas or passwd, and EVERY process of the foreground group runs setuid root (effective uid 0, real uid not), which a script or binary the ferret wrote cannot. ssh, docker, psql, every readline or raw-mode program and every unverified card are never short. |
+| `proven-field`    | 10 s  | A submitted value into exactly the page fields below, AND a saved login's facts for that very field identity say masked, no echo after submit and moved on, with no record saying otherwise.                                                                                                                                                                          |
+| `probed-field`    | 10 s  | One password field as below, and the daemon's **dummy probe** at raise came back clean.                                                                                                                                                                                                                                                                               |
+| `code`            | 120 s | A `private` value: it shows as it is typed. (A one-time `code` field gets no lock at all; the reason's name is older than the sensitivity.)                                                                                                                                                                                                                           |
+| `not-proven`      | 120 s | Anything else, every probe that did not run cleanly, an unreadable login store, a ferret that could have steered the page.                                                                                                                                                                                                                                            |
 
 A page field qualifies when every secret field is a visible, uncovered `input type=password` on a secure page, in the
 page's own origin, with no human check showing.
@@ -420,7 +424,7 @@ A card of `plain` values and one-time `code`s has **no lock** (`heldFromView`): 
 - **The ferret's own steering voids a page's proof**: a session that ever ran a page script never gets a short page
   lock and is never probed, and at Send any act of the ferret on a page since the card was raised voids it.
 - **A terminal's OBSERVED facts never shorten it** (a program the ferret placed can carry the right name). Only the
-  card's own facts do, and only for a setuid-root password program.
+  card's own facts do, and only when every process of the foreground group is a setuid-root password program.
 - **The dummy probe** runs on a page card only, for exactly ONE secret field, after the field picture and before the
   owner is asked, inside the page's own queue. It is skipped for a session that ran a page script, for any card with a
   `private` value or a one-time `code`, and for a field whose `autocomplete`, `name` or `id` says code, PIN, OTP, 2FA, verification, CVV or
@@ -991,6 +995,70 @@ Placing a saved login **without a tap** is not built. A later phase may add it a
 per entry and per target ("standing permission for `SUDO_KIRIN_BOX` on `sudo@kirin-box`"), **off by
 default**, revocable, and audited on every use. Until then every placement is a tap.
 
+## Who reads the terminal
+
+A secret card's green flag, its short lock, the code exception, a secure-copy rule's destination and a saved login's
+one-tap match all rest on ONE question: which program will read what the owner types? The daemon answers it from
+the kernel (`TmuxInputTarget` with `KernelProgramProof`, `packages/daemon/src/adapters/system/kernel-program-proof.ts`),
+never from the name `ps` shows. Before this (#1218's review, &B112) every one of them trusted that name, for the
+foreground group's LEADER only, and both halves were wrong:
+
+- **The name is the process's own.** Any process can rewrite it: `printf sudo > /proc/$/comm; read -s X` makes `ps`
+  print `sudo` for a shell, and on macOS `ps -o comm=` is argv[0] (`exec -a sudo bash`). The card then said green
+  "sudo is asking", locked for 10 s, and the owner's password landed in a variable the ferret could read.
+- **The leader is not the only reader.** Every process of the TTY's foreground process group can read it: an ssh
+  `LocalCommand` or `ProxyCommand` child, or `sudo … | sh -c 'read -s X'`, a pipeline a real setuid sudo leads.
+  Which one wins a read is a race, so naming the one that is blocked in `read` (`/proc/<pid>/wchan`) would not say
+  who gets the next byte, and a setuid process's wchan cannot be read by this account anyway.
+- **A process of another session can read too.** The pty belongs to this account, so a ferret can `cat /dev/pts/N`
+  from any other terminal: it has no controlling terminal there, so job control does not stop it.
+
+So the daemon proves the GROUP or nothing:
+
+1. Every process of the foreground group (`ps -t <tty>`, every row whose group is the terminal's foreground group) is
+   proved, one by one. A process is proved when it runs **setuid root** right now (effective uid 0, real uid not: only
+   a root-owned setuid file gives that) under a getpass name (sudo, sudoedit, su, doas, passwd); or, on Linux, when its
+   **executable** (`/proc/<pid>/exe`) is what a root-controlled bin folder resolves its name to (the folders and walk
+   of the [secure-copy rule](secure-copy.md#pasting)). The exe proof says WHICH system program runs, bash included;
+   what the name is worth is each decision's own. A process root runs outright (`sudo -n bash -c 'read -s X'` leaves
+   one) is never proved: its executable cannot be read, and it is whatever a ferret with a cached sudo started.
+2. No process whose controlling terminal is another (or none) holds the TTY open: on Linux every `/proc/<pid>/fd`,
+   each descriptor matched by the DEVICE it reaches, not by how its path is spelled; on macOS `lsof` and `ps`. A
+   process of this account whose descriptors cannot be read (one can make itself not dumpable) makes the answer
+   unknown, with one exception every systemd login has: systemd's own PAM helper `(sd-pam)`, told apart by the
+   kernel and not by its name (its parent runs a root-owned `systemd` this account cannot replace, and it started
+   within a second of that parent). tmux itself holds only the pty's master side.
+3. Then `program` is the ONE program every member is proved to run (two different programs, such as sudo leading a
+   proved `sh`, are unverified), `recognisedConsumer` says it is a program that asks for a secret, and `trustedProgram`
+   says every member runs setuid root. Anything unread, unproved or thrown leaves `program` out: the card is
+   **unverified** (amber, never green), the lock stays full, the code exception is refused, no secure-copy rule matches
+   and no saved login is the one-tap choice. A member that joins the group after the card changes the facts, so the
+   write refuses with nothing typed.
+4. **Line mode too.** A proved program that RELAYS keys (`ssh -t` to a remote shell, `docker exec -it`) hands them to a
+   reader outside this machine's foreground group. A real password prompt (getpass, readpassphrase, Go's
+   `ReadPassword`) reads a line; a relay puts the terminal in raw mode. So green, a secure-copy rule's match and the
+   one-tap saved login also need the terminal in line (canonical) mode, as the short lock always did. Otherwise the
+   card is amber: "The terminal is not reading a line…".
+
+Raising a card to a password from the NAME (`sudo` in `ps`, or the prompt line) still happens: a fake name there only
+makes the card stricter.
+
+- **GAP: a macOS daemon proves only setuid programs.** No reading of a macOS process's executable is wired, so ssh,
+  gpg, psql and every other program there is unverified (amber, full lock); sudo and su stay green.
+- **GAP: another account's processes are not looked at.** They cannot open this account's pty for reading unless
+  they are root, and root is outside this model. A setuid-root process whose descriptors cannot be read is passed over
+  too: it is a program root placed, the same trust its proof gives.
+- **GAP: the name of a setuid program is the caller's choice.** Whoever starts it picks the name: a link's name on
+  Linux, any argv[0] on macOS (`exec -a sudo /usr/bin/<another setuid program>`). So the proved `program` of a setuid
+  process says only that root placed it and that it runs under a getpass name; the card may say sudo while another
+  setuid program reads. What reads the value is still a program root put there, and no common setuid program is known
+  to hand what it reads to its caller.
+- **The stranger scan is a look at one moment, and best effort against this same account.** A TTY opened after the
+  final look, or held outside any descriptor table, is not seen.
+- **A ferret that can already run sudo without a password is root.** Nothing here holds against it.
+- **The proof is as old as the last look.** The write still only ENQUEUES ([honest limits](#honest-limits)); a process
+  that joins the group, or execs, between the final look and the program's read is not seen.
+
 ## Honest limits
 
 - **Not a sandbox.** An agent running as the owner's user that builds a capture program and talks the
@@ -1040,9 +1108,9 @@ default**, revocable, and audited on every use. Until then every placement is a 
   user account ([secrets](secrets.md)). An agent that reads the admin token can deliver a saved login into a
   capture program it built; the card, the risk flag and the exact match make that visible, not impossible.
 - **A 2FA seed beside its password is one factor.** That is why it is opt-in with the warning above.
-- **Matching is exact and by name.** `sudo@kirin-box` is the program's name and this machine's name; a
-  program that renames itself `sudo` matches. The risk flag and the daemon-observed facts on the card are the
-  defence, as for a typed value. A `ssh` destination is read from the command line and can be wrong; it then
+- **Matching is exact and by the PROVED program.** `sudo@kirin-box` is the proved program's name and this machine's
+  name; a terminal whose program is unverified has no key, so a shell that renames itself `sudo` never makes the sudo
+  login the one-tap choice (the owner can still pick any entry by hand, under the amber "unverified" flag). A `ssh` destination is read from the command line and can be wrong; it then
   matches nothing.
 - **No migration from the first saved-login format.** An index written before versioned keys (an entry with
   `password: true` and no `seals`) does not parse, so the store reads as damaged — it fails closed: nothing is

@@ -17,7 +17,11 @@ const GH = { kind: 'command', program: 'gh' } as const;
 /** A copy from the gh the daemon found on its PATH, in a folder no ferret can write. */
 const GH_COPY = { ...GH, path: '/usr/bin/gh' } as const;
 const VERCEL_TERMINAL = { kind: 'terminal', program: 'vercel' } as const;
-const AT_VERCEL: InputTargetFacts = { ...FACTS, foreground: { ...FACTS.foreground, comm: 'vercel' } };
+const AT_VERCEL: InputTargetFacts = {
+  ...FACTS,
+  foreground: { ...FACTS.foreground, comm: 'vercel' },
+  program: 'vercel',
+};
 
 const settle = async (): Promise<void> => {
   for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
@@ -165,9 +169,32 @@ describe('PasteRuleService: matching a paste', () => {
     should(service.reserve('s1', GH_COPY, AT_VERCEL)).equal(rule.id);
     should(service.reserve('s1', { kind: 'command', program: 'curl' }, AT_VERCEL)).be.undefined();
     should(
-      service.reserve('s1', GH_COPY, { ...FACTS, foreground: { ...FACTS.foreground, comm: 'zsh' } }),
+      service.reserve('s1', GH_COPY, { ...FACTS, foreground: { ...FACTS.foreground, comm: 'zsh' }, program: 'zsh' }),
     ).be.undefined();
     should(service.reserve('s1', { kind: 'browser', origin: 'https://github.com' }, AT_VERCEL)).be.undefined();
+  });
+
+  it('should never paste under a rule into a terminal whose program only ps names: the kernel must prove it', async () => {
+    // Arrange — the ferret's shell renamed itself vercel (`printf vercel > /proc/$$/comm`): ps agrees, nothing is proved.
+    const { service } = rules();
+    await service.load();
+    await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL });
+    const disguised = { ...AT_VERCEL, program: undefined } as InputTargetFacts;
+    const provedOther = { ...AT_VERCEL, program: 'bash' } as InputTargetFacts;
+
+    // Act / Assert
+    should(service.reserve('s1', GH_COPY, disguised)).be.undefined();
+    should(service.reserve('s1', GH_COPY, provedOther)).be.undefined();
+  });
+
+  it('should never paste under a rule into a proved program that reads key by key: it may relay them (L2)', async () => {
+    const { service } = rules();
+    await service.load();
+    await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL });
+
+    for (const canonical of [false, undefined])
+      should(service.reserve('s1', GH_COPY, { ...AT_VERCEL, canonical } as InputTargetFacts)).be.undefined();
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).not.be.undefined();
   });
 
   it('should keep a session rule to its session, and a lapsed rule to nobody', async () => {

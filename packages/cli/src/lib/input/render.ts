@@ -2,6 +2,12 @@ import type { InputReason, InputRequest, InputRequestList } from '@ferretry/prot
 
 const UNSEEN = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
 
+/** What the daemon could not prove about the program reading a terminal, or nothing when it is proved and known. */
+function readerWords(observed: { readonly program?: string; readonly recognisedConsumer: boolean }): string {
+  if (observed.program === undefined) return ' (UNVERIFIED: Ferretry could not prove which program this is)';
+  return observed.recognisedConsumer ? '' : ' (not a program known to ask for secrets)';
+}
+
 /** Untrusted text made visible: a control or format character is spelled out, never sent to the terminal. */
 export function showUntrusted(value: string): string {
   return value.replaceAll(UNSEEN, char => {
@@ -68,7 +74,7 @@ export function renderInputFacts(request: InputRequest): string[] {
     );
   if (observed?.kind === 'terminal') {
     lines.push(
-      `reading the terminal now: ${showUntrusted(observed.foreground.comm)}${observed.recognisedConsumer ? '' : ' (not a program known to ask for secrets)'}`,
+      `reading the terminal now: ${showUntrusted(observed.program ?? observed.foreground.comm)}${readerWords(observed)}`,
       `echo: ${observed.echo}`,
       ...(observed.promptLine === '' ? [] : [`its prompt line: ${showUntrusted(observed.promptLine)}`]),
     );

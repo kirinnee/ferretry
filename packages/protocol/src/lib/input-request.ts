@@ -333,14 +333,26 @@ const TerminalFactsSchema = z.strictObject({
     .max(200)
     .regex(/^[^\p{Cc}\p{Cf}]*$/u),
   promptLineDigest: Digest,
-  /** The program is one that asks for a secret (sudo, ssh, gpg, …); the shell itself or an interpreter is not. */
+  /**
+   * The program reading the terminal, PROVED by the kernel to be the one program every process of the foreground group
+   * runs, with no process of another session holding the TTY open. Absent: UNVERIFIED — `foreground.comm` is only the
+   * name a process gave itself, and a ferret's shell can call itself `sudo`.
+   */
+  program: boundedLine(64).optional(),
+  /**
+   * Every process of the foreground group is PROVED to be a program that asks for a secret (sudo, ssh, gpg, …); the
+   * shell itself or an interpreter is not. Never true without `program`.
+   */
   recognisedConsumer: z.boolean(),
   /**
    * The TTY is in canonical (line) mode, as a password prompt reads it. A program in raw or readline mode turns echo
    * off and draws every character itself (ssh to a remote shell, psql), so echo off alone proves nothing.
    */
   canonical: z.boolean().optional(),
-  /** The foreground program runs setuid root (effective uid 0, real uid not): not a script or binary a ferret placed. */
+  /**
+   * EVERY process of the foreground group runs setuid root (effective uid 0, real uid not): not a script or binary a
+   * ferret placed. Never true without `program`.
+   */
   trustedProgram: z.literal(true).optional(),
 });
 

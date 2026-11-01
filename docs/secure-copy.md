@@ -185,7 +185,10 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
   one demands `terminal.configure`, so a remote device follows "ask again for each change"; each add, removal
   and plan answer is kept in the security log as `security.changed`.
 - **Matching** runs on what the DAEMON observed: the program the copy was captured from, and the program
-  reading the terminal as tmux names it (`pane_current_command`, at most 15 characters on Linux). A match
+  reading the terminal as the KERNEL proves it (`program` in the card's facts: the one program every process of the
+  terminal's foreground group runs, in line mode: [who reads the terminal](input-requests.md#who-reads-the-terminal)). The name
+  `ps` or tmux shows is never enough: a ferret's shell can call itself `vercel` (`printf vercel > /proc/$/comm`),
+  so a terminal whose program is not proved matches no rule and the owner is asked. A match
   pastes at once, still as one guarded write, with the card raised and closed so it shows in the log, and the
   audit actor is the rule. A rule's use is taken synchronously, so two pastes can never both spend its last
   use. A write that typed nothing gives the use back and leaves the card for the owner; a write that may have
@@ -206,8 +209,16 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
   bare name only for a program the daemon found AND that this account cannot change. It is `replaceable` (and every
   paste of it asks the owner, whose card shows the path) when any part of its path, or of the real file behind it,
   up to `/`, is OWNED by the account the daemon and every ferret run as, or is a folder anyone may write without the
-  sticky bit. Ownership, not permission bits: an owner can `chmod` its way back in. So a rule auto-pastes only from
-  system programs (`/usr/bin/gh`); anything under `$HOME`, a `~/.nix-profile` link included, always asks.
+  sticky bit. Ownership, not permission bits: an owner can `chmod` its way back in. EVERY hop is checked: the path is
+  walked one part at a time as the kernel walks it, so a root-owned link that points through a link the account
+  owns (`/usr/bin/gh` → `~/link` → anywhere) is replaceable too. A file in the **Nix store** is root-owned whoever
+  put it there (any user can `nix-store --add` a shell copy named `<hash>-gh/bin/gh`), so a store file counts only
+  when a root-controlled bin folder leads to it: `<folder>/gh` walks to that very file, for a folder of
+  `/usr/bin`, `/bin`, `/usr/sbin`, `/sbin`, `/usr/local/bin`, `/run/current-system/sw/bin`,
+  `/nix/var/nix/profiles/default/bin` or `/etc/profiles/per-user/<account>/bin` (the per-user profile a nix-darwin or
+  NixOS activation builds as root), each itself passing the same walk. So a rule auto-pastes only from system
+  programs (`/usr/bin/gh`, a system profile's `gh`); anything under `$HOME`, a `~/.nix-profile` link included, or a
+  store path named directly, always asks.
   A rule names a program, not what it runs: `gh` (its aliases and extensions), `env`, `node` or `op run` can run
   anything, and a rule for one matches whatever arguments the ferret gives it.
 - **The secret store is never written by a rule** unless that rule names the exact secret NAME: `secret:<NAME>`
@@ -234,9 +245,15 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
   ferret that clears its own session variables and reads the admin token is taken for the owner, and since
   allowing a paste needs no value and no terminal, that is one command. It gains no more than the
   [secrets](secrets.md) boundary already gives it; it is said here so nobody reads "owner only" as stronger.
-- **A rule trusts a program's name.** tmux reports the foreground command's name, so a program named `vercel`
-  that the agent wrote itself matches a `terminal:vercel` rule. Approve routes into programs you know the
-  ferret is running, and prefer a count or an expiry.
+- **A rule's program must be a system program.** A `terminal:<program>` rule matches only when EVERY process reading
+  the terminal is proved to be that program, in line mode: on Linux, a file a root-controlled bin folder leads to under
+  that name (`/usr/bin/gh`, a system profile's `gh`), or a setuid getpass program (sudo, su, …). So a program from a
+  profile this account owns (`~/.nix-profile`, `~/bin`, `~/.local/bin`), a script (a Node CLI such as `vercel` runs
+  as `node`), or a program behind a relay (`ssh -t`, `docker exec -it`) is never proved, and every paste into it asks
+  the owner: such a rule no longer pastes unasked. On macOS only a setuid getpass program is ever proved, so a
+  `terminal:` rule there matches only sudo, su and the like (GAP). A proved program started by the ferret is still the
+  ferret's own process, with arguments of its choosing: approve routes into programs you know the ferret is running,
+  and prefer a count or an expiry.
 - **Command arguments are the agent's own words.** They are not audited (only their count), but they are in
   the agent's transcript, so a secret belongs in a `${secret:NAME}` use, never in `argv`.
 - **Not zeroed, not locked.** Strings are immutable in the runtime; "let go of" means unreachable.

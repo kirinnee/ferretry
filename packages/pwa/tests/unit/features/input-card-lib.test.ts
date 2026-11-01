@@ -73,6 +73,33 @@ describe('the card words', () => {
     expect(observedWords(into(true))?.echo).toBe('replaces its value');
   });
 
+  it('names a terminal by the PROVED program, and calls one only ps names unverified', () => {
+    const terminal = (observed: Record<string, unknown>) =>
+      request({
+        target: { kind: 'terminal', key: 'dev' },
+        observed: {
+          kind: 'terminal',
+          paneProof: { paneId: '%3', pid: 1 },
+          foreground: { pid: 2, pgid: 2, comm: 'sudo', argv: 'sudo -v' },
+          echo: 'off',
+          cursorRow: 0,
+          promptLine: '',
+          promptLineDigest: 'a'.repeat(64),
+          ...observed,
+        } as never,
+      });
+    expect(observedWords(terminal({ program: 'sudo', recognisedConsumer: true }))).toMatchObject({
+      program: 'sudo',
+      recognised: true,
+    });
+    expect(observedWords(terminal({ program: 'sudo', recognisedConsumer: true }))?.verb).toBeUndefined();
+    expect(observedWords(terminal({ recognisedConsumer: false }))).toMatchObject({
+      program: 'sudo',
+      verb: 'is asking · unverified',
+      recognised: false,
+    });
+  });
+
   it('counts down and says expired', () => {
     expect(expiryWords('2026-08-05T10:04:05.000Z', NOW)).toBe('4m 05s left');
     expect(expiryWords('2026-08-05T09:59:00.000Z', NOW)).toBe('expired');

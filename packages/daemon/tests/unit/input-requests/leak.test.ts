@@ -40,6 +40,8 @@ const FACTS: InputTargetFacts = {
   cursorRow: 1,
   promptLine: '[sudo] password for kirin:',
   promptLineDigest: 'a'.repeat(64),
+  program: 'sudo',
+  canonical: true,
   recognisedConsumer: true,
 };
 

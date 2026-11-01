@@ -65,6 +65,7 @@ const paste = fakeRequest({
     cursorRow: 9,
     promptLine: '? What’s the value of TOKEN?',
     promptLineDigest: 'a'.repeat(64),
+    program: 'vercel',
     recognisedConsumer: true,
   },
 });

@@ -55,6 +55,7 @@ const sudo = (
   cursorRow: 0,
   promptLine: '',
   promptLineDigest: 'a'.repeat(64),
+  program: comm,
   recognisedConsumer: true,
   canonical: true,
   trustedProgram: true,
@@ -98,6 +99,16 @@ describe('a terminal', () => {
     ])
       should(lockFor(facts, SECRET, QUIET)).deepEqual({ seconds: 120, reason: 'not-proven' });
     should(terminalHides(page())).be.false();
+  });
+
+  it('should be long when only ps calls the program sudo: the PROVED program decides, never the name', () => {
+    // A shell that renamed itself sudo is never proved (no `program`); a group whose proved program is bash is not one.
+    for (const facts of [
+      sudo({ program: undefined }),
+      sudo({ program: 'bash' }),
+      sudo({ program: undefined, trustedProgram: undefined }),
+    ])
+      should(lockFor(facts, SECRET, QUIET)).deepEqual({ seconds: 120, reason: 'not-proven' });
   });
 });
 

@@ -36,13 +36,17 @@ describe('untrusted text on the owner’s screen', () => {
       observed: {
         ...base.observed!,
         foreground: { pid: 1, pgid: 1, comm: 'su\u001bdo', argv: 'sudo \u001b[8m' },
+        program: undefined,
+        recognisedConsumer: false,
         promptLine: 'password:\u009b8m\u007f\nfake',
       } as never,
     });
 
     for (const line of lines) should(line).not.match(RAW_CONTROL);
     should(lines.join('\n')).not.containEql('argv');
-    should(lines).containEql('reading the terminal now: su\\x1bdo');
+    should(lines).containEql(
+      'reading the terminal now: su\\x1bdo (UNVERIFIED: Ferretry could not prove which program this is)',
+    );
     should(lines).containEql('its prompt line: password:\\x9b8m\\x7f\\x0afake');
   });
 

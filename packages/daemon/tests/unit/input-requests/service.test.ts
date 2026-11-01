@@ -38,6 +38,8 @@ const FACTS: InputTargetFacts = {
   cursorRow: 1,
   promptLine: '[sudo] password for kirin:',
   promptLineDigest: 'a'.repeat(64),
+  program: 'sudo',
+  canonical: true,
   recognisedConsumer: true,
 };
 
@@ -281,7 +283,11 @@ async function raised(over: Partial<World> = {}, raise: InputRaise = RAISE) {
 }
 
 /** Another program now holds the terminal: a genuinely different target, which a Send must refuse and count. */
-const ANOTHER_PROGRAM: InputTargetFacts = { ...FACTS, foreground: { ...FACTS.foreground, pid: 5100, comm: 'bash' } };
+const ANOTHER_PROGRAM: InputTargetFacts = {
+  ...FACTS,
+  foreground: { ...FACTS.foreground, pid: 5100, comm: 'bash' },
+  program: 'bash',
+};
 
 const refused = async (promise: Promise<unknown>): Promise<InputRequestError> => {
   try {
@@ -536,7 +542,7 @@ describe('InputRequestService.deliver', () => {
     ['pane', f => ({ ...f, paneProof: { ...f.paneProof, paneId: '%9' } })],
     ['pane pid', f => ({ ...f, paneProof: { ...f.paneProof, pid: 1 } })],
     ['foreground', f => ({ ...f, foreground: { ...f.foreground, pid: 9999 } })],
-    ['program', f => ({ ...f, foreground: { ...f.foreground, comm: 'bash' } })],
+    ['program', f => ({ ...f, foreground: { ...f.foreground, comm: 'bash' }, program: 'bash' })],
     ['echo', f => ({ ...f, echo: 'on' })],
     ['prompt line', f => ({ ...f, promptLineDigest: 'f'.repeat(64) })],
   ];
@@ -674,6 +680,7 @@ describe('InputRequestService.deliver', () => {
       ...FACTS,
       recognisedConsumer: false,
       foreground: { ...FACTS.foreground, comm: 'myapp' },
+      program: 'myapp',
     } as InputTargetFacts;
     const green = await raised();
     const amber = await raised({ facts: odd });
@@ -689,11 +696,50 @@ describe('InputRequestService.deliver', () => {
     should(redCard?.risk?.reason).equal('Not secret: the ferret can see this value.');
   });
 
+  it('should flag an UNVERIFIED reader amber with the full lock, even when ps calls it sudo', async () => {
+    // Arrange — a ferret's shell renamed itself sudo: echo off, line mode, but the kernel proved no program.
+    const disguised = {
+      ...FACTS,
+      recognisedConsumer: false,
+      canonical: true,
+      program: undefined,
+      trustedProgram: undefined,
+    } as InputTargetFacts;
+
+    // Act
+    const [card] = await (await raised({ facts: disguised })).service.list(HOST);
+
+    // Assert
+    should(card?.risk?.level).equal('amber');
+    should(card?.risk?.reason).startWith('Unverified: Ferretry could not prove which program is reading the terminal');
+    should(card?.risk?.reason).not.containEql('sudo');
+  });
+
+  it('should never flag a proved program green when the terminal is not reading a line: it may be a relay (L2)', async () => {
+    // Arrange — a proved ssh with echo off in raw mode: `ssh -t host` passing keys to a remote shell, not asking itself.
+    for (const canonical of [false, undefined]) {
+      const relay = {
+        ...FACTS,
+        foreground: { ...FACTS.foreground, comm: 'ssh', argv: 'ssh -t host' },
+        program: 'ssh',
+        canonical,
+      } as InputTargetFacts;
+
+      // Act
+      const [card] = await (await raised({ facts: relay })).service.list(HOST);
+
+      // Assert
+      should(card?.risk?.level).equal('amber');
+      should(card?.risk?.reason).startWith('The terminal is not reading a line');
+    }
+  });
+
   it('should type a secret into an unrecognised program without any extra tick, since the flag is the warning', async () => {
     const odd: InputTargetFacts = {
       ...FACTS,
       recognisedConsumer: false,
       foreground: { ...FACTS.foreground, comm: 'myapp' },
+      program: 'myapp',
     } as InputTargetFacts;
     const { w, service, id, digest } = await raised({ facts: odd });
     const ok = await service.deliver(SESSION, id, bodyFor(digest), HOST);
@@ -2216,6 +2262,7 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
   const OTP: InputTargetFacts = {
     ...FACTS,
     foreground: { ...FACTS.foreground, comm: 'ssh', argv: 'ssh bastion' },
+    program: 'ssh',
     echo: 'on',
     promptLine: 'Verification code:',
   } as InputTargetFacts;
@@ -2281,6 +2328,7 @@ describe('a one-time code (`code`): visible, never locked, never masked when the
       {
         ...FACTS,
         foreground: { ...FACTS.foreground, comm: 'bash', argv: 'bash' },
+        program: 'bash',
         echo: 'on',
         recognisedConsumer: false,
       } as InputTargetFacts,
@@ -2362,6 +2410,7 @@ describe('what a request push is about', () => {
     const otp = {
       ...FACTS,
       foreground: { ...FACTS.foreground, comm: 'ssh' },
+      program: 'ssh',
       echo: 'on',
       promptLine: 'Verification code:',
     } as InputTargetFacts;

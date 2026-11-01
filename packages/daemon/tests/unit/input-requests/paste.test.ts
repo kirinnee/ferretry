@@ -34,6 +34,7 @@ const AGENT: InputCaller = { kind: 'agent', sessionId: SESSION };
 const VERCEL: InputTargetFacts = {
   ...FACTS,
   foreground: { pid: 5100, pgid: 5100, comm: 'vercel', argv: 'vercel env add TOKEN production' },
+  program: 'vercel',
   promptLine: '? What’s the value of TOKEN?',
   recognisedConsumer: false,
 };
@@ -371,7 +372,7 @@ describe('a paste the owner approved in advance', () => {
   });
 
   it('should wait for the owner when the destination program is not the one the rule names', async () => {
-    const w = await world({ facts: { ...VERCEL, foreground: { ...VERCEL.foreground, comm: 'zsh' } } });
+    const w = await world({ facts: { ...VERCEL, foreground: { ...VERCEL.foreground, comm: 'zsh' }, program: 'zsh' } });
     await w.rules.create({ kind: 'owner', actor: { kind: 'host' } }, RULE);
     await w.capture();
 
