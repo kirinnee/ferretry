@@ -127,6 +127,22 @@ automatic-install setting (`PATCH /v1/daemon/update/settings`, subject `daemon-u
 `autoInstall` in `detail`), and updating an agent CLI (`POST /v1/harnesses/update`, subject `harness-update`),
 are also `security.changed`: each lets new code run on the machine ([updating.md](updating.md)).
 
+**Standing sign-in rules** ([secrets.md](secrets.md#standing-sign-in-rules)) write `security.changed` themselves.
+The subject is the rule id (`sr_…`). The detail holds the revision, the sign-in, the account handle, the fields, the
+scope's kind, the end and any use cap. It never holds a username or a value. These are the actions:
+
+| `detail.action`                                  | When                                                                                                                                 |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `sign-in-rule-created`                           | a rule committed with its passkey; actor is the approving device, with `proof: passkey`                                              |
+| `sign-in-rule-resumed` / `-renewed` / `-widened` | the same rule approved again, `revision` + 1: it was suspended, it had ended or been used up, or it was in force                     |
+| `sign-in-rule-narrowed`                          | the owner dropped the code, ended it earlier or lowered the cap (`dropTotp`, `narrowedTo`, `narrowedUses`); no passkey               |
+| `sign-in-rule-revoked`                           | one rule revoked, or each rule of an account (`wholeAccount`); no passkey                                                            |
+| `sign-in-rule-suspended`                         | the daemon suspended it (`cause: daemon`): `because` is the reason and `words` the owner's sentence; `session` when a fill caused it |
+| `sign-in-rule-expired`                           | the rule reached its end (`cause: daemon`), once                                                                                     |
+| `sign-in-rules-damaged`                          | the rules file did not parse at load (outcome `failed`): no rule fills until the owner approves one again                            |
+
+Fills under a rule will be `input.delivered` with `by: 'rule'` and `signInRule` once the matcher uses them.
+
 Routes are recorded by decorating the finished route and socket tables (`auditedRoutes` and
 `auditedSocketRoutes` in `packages/daemon/src/lib/audit/routes.ts`), so a relayed request is recorded
 exactly like a direct one. A step-up is a passkey ceremony, so every reader calls it "Passkey

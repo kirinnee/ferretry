@@ -252,6 +252,24 @@ describe('the login hint a ferret reads', () => {
     expect(hints[0]?.via).toEqual({ id: 'GOOGLE_KIRIN', label: 'Google (kirin@)' });
   });
 
+  it('should drop the owner-tap count from what was observed (secrev-1271 L2)', () => {
+    const fact = {
+      at: 'github.com',
+      surface: 'page' as const,
+      identity: '0123456789abcdef',
+      since: AT,
+      masked: { value: true, observedAt: AT, count: 2 },
+    };
+    const plain = loginHintsFor('github.com', [{ ...SUMMARY, observed: [fact] }]);
+    const tapped = loginHintsFor('github.com', [
+      { ...SUMMARY, observed: [{ ...fact, tapped: { value: true, observedAt: AT, count: 2 } }] },
+    ]);
+    expect(JSON.stringify(tapped)).toBe(JSON.stringify(plain));
+    expect(LoginHintListSchema.safeParse({ v: 1, site: 'github.com', hints: tapped, passkeys: 'off' }).success).toBe(
+      true,
+    );
+  });
+
   it('should carry no secret field, and say passkeys are off', () => {
     const hints = loginHintsFor('github.com', [SUMMARY]);
     expect(LoginHintListSchema.safeParse({ v: 1, site: 'github.com', hints, passkeys: 'off' }).success).toBe(true);

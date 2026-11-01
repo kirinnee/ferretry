@@ -117,6 +117,18 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app':
     "shows a staged selection on the plan's own card; it approves nothing, and the commit that would is audited",
   'DELETE /v1/sessions/:sessionId/task-plans/:planId/approval/:stage': 'drops a staged selection; approves nothing',
+  'POST /v1/sign-in-rules/stages': 'stages a standing rule, which approves nothing; the commit that would is audited',
+  'POST /v1/sign-in-rules/stages/:stage/confirm-in-app':
+    'shows a rule staged at the machine in the app; it approves nothing, and the commit that would is audited',
+  'POST /v1/sign-in-rules/stages/:stage/commit':
+    'audited by the standing-rule service: security.changed sign-in-rule-created (or -resumed, -renewed, -widened) with the device and the passkey; the step-up that proved it is audited too',
+  'DELETE /v1/sign-in-rules/stages/:stage': 'drops a staged standing rule; approves nothing',
+  'POST /v1/sign-in-rules/:id/narrow':
+    'only narrows; audited by the standing-rule service: security.changed sign-in-rule-narrowed',
+  'DELETE /v1/sign-in-rules/:id':
+    'only narrows; audited by the standing-rule service: security.changed sign-in-rule-revoked',
+  'POST /v1/accounts/:id/sign-in-rules/revoke':
+    'only narrows; audited by the standing-rule service: security.changed sign-in-rule-revoked, one record per rule',
   'POST /v1/sessions/:sessionId/task-plans/:planId/revoke':
     'only narrows; audited by the task-plan service: security.changed task-plan-ended',
   'POST /v1/sessions/:sessionId/input-quarantines/:key/end':

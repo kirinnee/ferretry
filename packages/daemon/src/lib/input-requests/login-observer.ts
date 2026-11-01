@@ -1,14 +1,16 @@
 import { createHash } from 'node:crypto';
-import type {
-  AccountId,
-  InputRequestField,
-  InputTarget,
-  InputTargetFacts,
-  LoginEntryId,
-  LoginObservation,
-  SignInId,
-  SurfaceKind,
-  TwoFactorId,
+import {
+  type AccountId,
+  type InputRequestField,
+  type InputTarget,
+  type InputTargetFacts,
+  type LoginEntryId,
+  type LoginObservation,
+  type LoginObserverBy,
+  ownerTapped,
+  type SignInId,
+  type SurfaceKind,
+  type TwoFactorId,
 } from '@ferretry/protocol';
 
 /**
@@ -22,6 +24,10 @@ import type {
  *   showed a new document within {@link NAVIGATION_WINDOW_MS} (`navigatedAway`), and which second factor followed:
  *   a one-time code typed on the same login soon after (`code`), the page leaving the login's hosts only after
  *   waiting there (`push`: an approval elsewhere), or leaving at once (`none`).
+ * - `tapped`, ONLY for the owner's own tap from a paired device (`by: 'device'`): on a page, written beside
+ *   `navigatedAway`, at the same moment and under the same "not steered" rule — `true` when it moved on, `false`
+ *   (which starts the count again) when it did not. A plan fill, a rule fill or the admin token's delivery never writes
+ *   it, so only this fact counts toward a standing rule's history (sign-in-rules/eligibility.ts).
  *
  * THE FERRET CAN STEER WHAT A PAGE OR SCREEN SHOWS (it can navigate, clear the screen, click "Continue"), so a fact
  * from after the submit is DROPPED when the ferret drove a surface of that kind in the session meanwhile: only a
@@ -110,10 +116,10 @@ export interface LoginDelivery {
   /** When the write returned, taken before anything else is awaited. */
   readonly deliveredAt: number;
   /**
-   * Who filled it: the owner's tap, a task-plan line or a paste rule. A fill under a plan is not a tap, and a standing
-   * rule's history (R3c) must count taps only.
+   * Who filled it (`observerByOf`): the owner's tap from a paired `device`, the machine's admin token (`host`), a
+   * task-plan line or a rule. Only a `device` tap writes `tapped`; absent is never one.
    */
-  readonly by?: 'owner' | 'plan' | 'rule';
+  readonly by?: LoginObserverBy;
 }
 
 /** A one-time code the DAEMON made from a saved 2FA key and typed, then submitted: did it go through? */
@@ -361,9 +367,11 @@ export class LoginObserver {
     const watch = async (): Promise<void> => {
       if (delivery.target.kind !== 'browser' || startDocument === undefined) return;
       let moved: boolean | undefined;
+      // The owner's own device tap writes `tapped` in the same keep, so it is decided and steered exactly as moving on is.
+      const tap = delivery.by !== undefined && ownerTapped(delivery.by);
       const settleMove = async (): Promise<void> => {
         if (moved === undefined) return;
-        await keep({ navigatedAway: moved });
+        await keep({ navigatedAway: moved, ...(tap ? { tapped: moved } : {}) });
       };
       while (elapsed() < SECOND_FACTOR_WINDOW_MS && !waiting.settled) {
         const where = await this.ports.probe

@@ -632,6 +632,45 @@ describe('what a ferret may learn about signing in (account.hint)', () => {
     expect(AccountHintListSchema.safeParse({ v: 1, site: 'vercel.com', hints, passkeys: 'off' }).success).toBe(true);
   });
 
+  it('should not change when the owner taps a sign-in in from a paired device: no owner-tap count (secrev-1271 L2)', () => {
+    // Arrange — the same sign-in before and after two owner taps that went through
+    const tapped = AccountListSchema.parse({
+      ...LIST,
+      signIns: LIST.signIns.map(signIn =>
+        signIn.id === SI(3)
+          ? {
+              ...signIn,
+              observed: signIn.observed?.map(fact => ({
+                ...fact,
+                tapped: { value: true, observedAt: AT, count: 2 },
+              })),
+            }
+          : signIn,
+      ),
+    });
+
+    // Act
+    const before = accountHintsFor('vercel.com', LIST);
+    const after = accountHintsFor('vercel.com', tapped);
+
+    // Assert — the hint says what was observed, never whether the owner's taps qualify the sign-in for a rule
+    expect(JSON.stringify(after)).toBe(JSON.stringify(before));
+    expect(JSON.stringify(after)).not.toContain('tapped');
+    expect(accountHintSummary('vercel.com', after)).toBe(accountHintSummary('vercel.com', before));
+    // A projection that forgot to drop it fails to parse, rather than reaching a ferret.
+    const leaked = after.map(hint =>
+      hint.observed === undefined
+        ? hint
+        : {
+            ...hint,
+            observed: hint.observed.map(fact => ({ ...fact, tapped: { value: true, observedAt: AT, count: 2 } })),
+          },
+    );
+    expect(AccountHintListSchema.safeParse({ v: 1, site: 'vercel.com', hints: leaked, passkeys: 'off' }).success).toBe(
+      false,
+    );
+  });
+
   it('should never say which secret fields an account holds (invariant 2)', () => {
     // Arrange — the same account twice, once with a password and a 2FA seed, once with nothing sealed
     const key = { id: TF(1), kind: 'totp', label: 'Authenticator app', addedAt: AT, addedBy: 'owner' };

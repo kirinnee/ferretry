@@ -26,6 +26,7 @@ import { observedRoutes } from '../../performance/observed-routes.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
 import type { PinService } from '../../pins/index.ts';
 import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
+import type { SignInRuleService } from '../../sign-in-rules/service.ts';
 import type { TaskPlanService } from '../../task-plans/service.ts';
 import type { PasteRuleService } from '../../secure-copy/rules.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
@@ -96,6 +97,7 @@ import { sharedDraftRoutes } from './shared-drafts.ts';
 import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
 import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catalogs.ts';
 import { type CopyListing, type RuleProgramHomes, secureCopyRoutes } from './secure-copy.ts';
+import { signInRuleRoutes } from './sign-in-rules.ts';
 import { taskPlanRoutes } from './task-plans.ts';
 import { securityRoutes } from './security.ts';
 import { type SessionAddressBook, sessionAddressedRoutes, sessionAddressedSockets } from './session-addressing.ts';
@@ -417,6 +419,11 @@ export interface MountedSubsystems {
     /** Where a terminal rule's program lives, so a rule into the owner's own profile says so. */
     readonly homes?: RuleProgramHomes;
   };
+  /**
+   * The owner's standing sign-in rules (docs/secrets.md, "Standing sign-in rules"): on disk, each approved with a passkey
+   * whose challenge commits to the rule's bytes. The step-up options ask it for a staged rule's derived challenge.
+   */
+  readonly signInRules: SignInRuleService;
   /** Free teammate callsigns, for composing a session title before starting one. */
   readonly names: NameSubsystem;
   /** The learning review board: the evidence the daemon holds, and a human's verdict on each rule
@@ -537,7 +544,12 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // The passkey step-up sits beside pairing too: it is how a paired device proves its owner is
         // holding it. Every path is under `/v1/passkeys` or `/v1/step-up`, which nothing else uses, and
         // there are no patterns among them, so it can neither shadow nor be shadowed.
-        ...stepUpRoutes(subsystems.stepUp, subsystems.secrets.seeds, subsystems.secureCopy.plans),
+        ...stepUpRoutes(
+          subsystems.stepUp,
+          subsystems.secrets.seeds,
+          subsystems.secureCopy.plans,
+          subsystems.signInRules,
+        ),
         // The machine's security settings sit beside the step-up they tune. `/v1/security` is a fixed
         // literal no other subsystem uses, so it can neither shadow nor be shadowed.
         ...securityRoutes(subsystems.security),
@@ -716,6 +728,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ),
         // `/v1/task-plans` and `/v1/sessions/:sessionId/task-plans/*` are literals no other subsystem uses.
         ...taskPlanRoutes(subsystems.secureCopy.plans),
+        // `/v1/sign-in-rules` is a literal no other subsystem uses; `/v1/accounts/:id/sign-in-rules/revoke` ends in two
+        // literals no account route has, so neither can shadow or be shadowed.
+        ...signInRuleRoutes(subsystems.signInRules),
         ...terminalRoutes(subsystems.terminals),
         // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
         // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the

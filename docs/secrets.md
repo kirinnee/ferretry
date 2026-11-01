@@ -485,6 +485,146 @@ card reads only where the stage stands (`GET …/seed/:stage`) and the account's
 Each is a kept `secrets.changed` record by account and key id (`factor-added`, `factor-relabelled`,
 `factor-removed`, `factor-seed-staged`, …); a seed's save records `proof: passkey`. None records a value.
 
+## Standing sign-in rules
+
+A standing rule is **one owner-signed permission for Ferretry to fill one page sign-in, for any ferret** (unless the
+owner narrowed its scope to one board project or one session), **for up to 90 days**. Rules are owner state on disk,
+`<state>/accounts/sign-in-rules.json` (directory 0700, file 0600, written atomically). Task-plan grants stay in memory.
+
+> This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop
+> a ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
+
+**Nothing fills under a rule yet.** The service, the file, the routes, suspension and history are built. The matcher
+that fills under a rule comes next, and the app after it. `sign-in-rules.1` stays unadvertised until then.
+
+### Only the owner, a fresh passkey every time, bound to the bytes
+
+Creating, resuming, renewing or widening a rule is a **stage** and a **commit**.
+
+- **Stage** (`POST /v1/sign-in-rules/stages`). The owner ticks the username and password, and optionally the 2FA code.
+  The code needs the red one-factor acknowledgement. The daemon then builds the rule's body itself:
+  - It finds the sign-in and checks that it can have a rule.
+  - It snapshots every pin (below).
+  - It fixes `createdAt` and `expiresAt` (30 days by default, 1 hour to 90 days).
+  - It draws a 32-byte nonce.
+
+  The stage waits two minutes, one per sign-in. Nothing is approved yet.
+
+- **Passkey.** The `approve-sign-in-rule` challenge is _derived_ from the body:
+  `signInRuleChallenge(nonce, signInRuleSubject(stage, canonical))`. `canonical` is the body's RFC 8785 bytes, and the
+  body names the approving device. The challenge is answered only to the paired device the stage waits on:
+  - A stage made in the app waits on the device that made it.
+  - A stage made at the machine (`fy rules add`) waits in the app after `confirm-in-app`, and is bound to the first
+    device that asks.
+
+  The step-up service keeps the verified assertion
+  ([zero-trust.md](design/zero-trust.md#stored-passkey-proofs)).
+
+- **Commit** (`POST /v1/sign-in-rules/stages/:stage/commit`), in this order:
+  1. It derives the challenge again from the body it is about to write.
+  2. It claims the kept assertion with that challenge (`claimStoredProof`). The claim hands it over only if it is the
+     challenge the live ceremony verified.
+  3. It verifies the assertion offline over those bytes, from the device the body names.
+  4. It re-reads the accounts and snapshots the pins again. If they differ from the staged ones, the answer is
+     `409 conflict` and no rule is made.
+  5. It writes the file, then memory.
+  6. It audits the rule.
+
+  A refusal before the claim spends nothing. After it, the stage is spent. The machine's admin token holds no passkey,
+  so it can never commit.
+
+- **Narrow** (drop the code, end earlier, lower the cap) and **revoke** (one rule, or every rule of an account) need no
+  passkey: they only take away. There is no PUT or PATCH on a rule. Anything wider is a new stage.
+
+### What can have a rule
+
+A rule can only be made for a **page password sign-in the owner signed in to by hand from a paired device, at least
+twice in a row with the page moving on**. Otherwise the stage answers `409` with the reason:
+
+| Reason             | When                                                                                        |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| `tool_not_covered` | A terminal sign-in. Rules are pages only; sudo, su and doas stay covered per task by plans. |
+| `via_provider`     | The sign-in goes through another account ("via Google").                                    |
+| `not_password`     | The sign-in does not use a password.                                                        |
+| `no_history`       | "Sign in yourself twice from the app first".                                                |
+| `passkey_required` | No passkey has been added on a paired device yet.                                           |
+| `no_code_key`      | The code was ticked, but no 2FA key on the account has a seed Ferretry holds.               |
+
+History is the observed fact `tapped`. The login observer writes it only for a fill by the owner's own **device**
+(`observerByOf`, exhaustive), at the moment the page moved on, and only if the ferret had not steered the page. These
+never count:
+
+- task-plan fills;
+- rule fills;
+- the admin token's deliveries (`host`: the owner at the machine, or a ferret that read `api-token`).
+
+`tapped` is the owner's alone. It is stripped from `account_hint` and the login hint, so a ferret can't learn which
+sign-ins qualify. A rule that types the code pins the account's **newest** 2FA key that has a seed, chosen by when it was
+added. It is never chosen by whether a code worked: a ferret can steer that.
+
+### Pinned facts suspend, never silently
+
+The body pins:
+
+- the account's immutable key, its handle and its username;
+- the sign-in's login domains and its recipe version;
+- the field identities the owner's taps have history with;
+- a fingerprint of the account's 2FA keys (id, kind, whether Ferretry holds the seed; never `verified`, the label or
+  when it was added).
+
+A rule is **suspended**, and stays suspended until a new passkey approves it again (`revision` + 1), in these cases:
+
+- **After every committed account change:** `AccountDirectory.followRulesWith`, under the same lock.
+  - The sign-in or its account is removed: `sign-in-gone`. The rule can't be resumed, only removed, and it goes at its
+    end.
+  - A rename, a merge or a username change: `account-changed`.
+  - A domains edit: `place-changed`.
+  - A recipe change by the owner, an approved proposal or an auto-applied one: `recipe-changed`.
+  - Any 2FA key added, removed, changed in kind, or given or stripped of its seed: `factor-changed`.
+  - A new form at a pinned place: `form-changed`.
+- **When a passkey or device goes:** every proof is checked again (`passkey-removed` or `proof-invalid`). A revoked
+  device suspends every rule it approved, even if the passkey purge after it fails ([pairing.md](pairing.md#revoking)).
+- **At load:**
+  - A body created in the future, or a proof that does not verify against the bytes on disk: `proof-invalid`.
+  - Any drift: suspended with that reason.
+- **A page script on a pinned host:** `scripted-origin`. Fills will also suspend for their own reasons.
+
+A label, a password change, `verified`, a pending proposal and a default suspend nothing. Changing a fact back resumes
+nothing. Every suspension is persisted, audited (`sign-in-rule-suspended` with its reason) and shown in the owner's
+list. No card is raised in a ferret's session for it, so a ferret learns nothing about rules. If the file can't be
+written, the rule stays suspended in memory as `store-write-failed`.
+
+### Strict, and fails closed
+
+The whole file is parsed strictly: `v: 1`, no unknown key, one rule per id and per sign-in. A file that is unreadable,
+truncated or does not parse means:
+
+- **zero rules**, with `health: damaged` in the list, so every sign-in asks;
+- a line on stderr and an audited `sign-in-rules-damaged`.
+
+The owner's next write copies the damaged file aside to `sign-in-rules.json.damaged-<stamp>` and starts fresh. That can
+only drop approvals, and nothing is deleted. The overlay beside the signed body (suspension, narrowing, usage) is
+unsigned. A same-user edit can clear it, but never widen the body: the schema refuses an overlay that would. A
+rolled-back file can bring a revoked rule back until its signed end, at most 90 days after it was created.
+
+### Routes
+
+Every route is `caller: 'person'` ([grants.md](grants.md)).
+
+| Route                                                 | Does                                                              | Grant                               |
+| ----------------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------- |
+| `GET /v1/sign-in-rules[?signIn=]`                     | every rule (or one sign-in's), machine stages waiting, the health | `secrets.use`                       |
+| `GET /v1/sign-in-rules/eligibility?signIn=`           | whether a rule can be made, and why not                           | `secrets.use`                       |
+| `POST /v1/sign-in-rules/stages`                       | stage a rule                                                      | `secrets.configure` + `browser.use` |
+| `GET` / `DELETE /v1/sign-in-rules/stages/:stage`      | where a stage stands; drop it                                     | `secrets.use`                       |
+| `POST /v1/sign-in-rules/stages/:stage/confirm-in-app` | show a machine stage in the app                                   | `secrets.configure` + `browser.use` |
+| `POST /v1/sign-in-rules/stages/:stage/commit`         | commit, **with the kept `approve-sign-in-rule` proof**            | `secrets.configure` + `browser.use` |
+| `POST /v1/sign-in-rules/:id/narrow`                   | drop the code, end earlier, lower the cap                         | `secrets.use`                       |
+| `DELETE /v1/sign-in-rules/:id`                        | revoke one rule                                                   | `secrets.use`                       |
+| `POST /v1/accounts/:id/sign-in-rules/revoke`          | revoke every rule of an account                                   | `secrets.use`                       |
+
+Each change is a kept `security.changed` record ([audit.md](audit.md)). None holds a username or a value.
+
 ## The Accounts screen
 
 Settings › Accounts is gated on the daemon's health: a machine that reports `accounts.signins.1` gets the screen below,

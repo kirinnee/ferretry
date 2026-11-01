@@ -394,13 +394,23 @@ included, and each proof is bound to the one staged thing it commits (`subject`:
 selection `tps_…` or the staged rule `srs_…`, never another's), opens no step-up window, and is never the fresh proof
 another act takes ([secrets.md](secrets.md#2fa-keys), [secure-copy.md](secure-copy.md#task-plans)). A standing rule's
 proof is also a **stored proof** (`STEP_UP_ACTS_STORED_PROOF`): its challenge is derived from the rule's signed bytes
-and the daemon keeps the assertion, claimed only through `ClaimStoredProof`, never as a fresh proof. Until the rule
-service lands, its options answer `404 stage_not_found` and mint no challenge
-([input-requests.md](input-requests.md#coming-and-off-by-default-standing-sign-in-rules)). A task plan's routes are `caller: 'person'`: staging, committing and
+and the daemon keeps the assertion, claimed only through `ClaimStoredProof`, never as a fresh proof. Its options
+answer only the paired device the stage waits on; any other caller, or a stage that is not waiting, gets
+`404 stage_not_found` and no challenge ([secrets.md](secrets.md#standing-sign-in-rules)). A task plan's routes are `caller: 'person'`: staging, committing and
 confirming a selection demand `terminal.configure` (plus `browser.use` for a page sign-in or a paste into a page, and
 `secrets.configure` for a paste into the store), while reading plans, dropping a stage and revoking only narrow and
 demand `terminal.use`; revoking never asks for a passkey. Every one that answers a plan or a stage's summary also
 needs `secrets.use`, as `GET /v1/accounts` does, because a plan names the owner's accounts.
+
+**Standing sign-in rules** (`/v1/sign-in-rules`, [secrets.md](secrets.md#standing-sign-in-rules)) are `caller:
+'person'` on every route, so a ferret's credential is refused `owner_only` before a body is read. Reading the list,
+the eligibility and a staged rule, dropping a stage, narrowing and revoking (one rule, or
+`POST /v1/accounts/:id/sign-in-rules/revoke` for an account's) demand `secrets.use` — a rule names the owner's
+accounts and says whether their own taps qualify a sign-in — and never ask for a passkey. Staging, confirming a
+machine stage in the app and committing loosen what any ferret may have filled unasked, so they demand
+`secrets.configure` and `browser.use` too, decided before the commit claims its proof, so a refusal never spends
+it. The commit takes only the kept `approve-sign-in-rule` assertion over that stage's bytes, from a paired device:
+the admin token on loopback is answered the step-up demand, like every other caller without one.
 
 **The app asks only for the machine on screen.** With several machines paired, every page reads all of
 them in the background, so a locked second machine used to raise its unlock over the first machine's

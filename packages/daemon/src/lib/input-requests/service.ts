@@ -44,6 +44,7 @@ import {
   type LoginEntryId,
   type LoginObserved,
   MAX_AGENDA_TITLE_LENGTH,
+  observerByOf,
   type PushSubject,
   placeKeys,
   type SignInChoiceContext,
@@ -1772,7 +1773,9 @@ export class InputRequestService {
         deliveredAt,
         body.entry ?? (saved?.ok === true ? body.save?.entry : undefined),
         body.signIn,
-        by.kind === 'plan' || by.kind === 'rule' ? by.kind : 'owner',
+        // EXHAUSTIVE, no default (secrev-1271 L1a): a new actor kind fails typecheck in observerByOf until it is mapped,
+        // instead of reaching the observer as the owner's own tap and qualifying a sign-in for a standing rule.
+        observerByOf(by),
       );
       const made = codeFields.length > 0 && factor !== undefined ? factor : undefined;
       await this.finish(held, 'delivered', undefined, by, {

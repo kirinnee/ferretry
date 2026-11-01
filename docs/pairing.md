@@ -392,6 +392,13 @@ governed device that asked — never a credential. The record is the LAST step, 
 is gone and its sessions are closed, so a refused or unknown revocation leaves none; a journal that cannot be
 written does not undo the revocation, it surfaces as an error after the device is already gone.
 
+**A revoked device's standing sign-in rules are suspended.** Every standing rule whose passkey was proved on that
+device is suspended (`passkey-removed`) as part of the same revocation, because the rule service is one of the
+device-state purges. Every purge is attempted even when an earlier one fails, so a push store that cannot be written
+still leaves the rules suspended. A rule's kept proof also stops verifying once its device is no longer paired, so a
+missed purge costs a refusal, never a fill. Only a new passkey from a device that is still paired resumes one
+([secrets.md](secrets.md#standing-sign-in-rules)). The same holds for an idle expiry.
+
 **Order matters when a device is stolen: revoke the device first, then switch `pairing` off.** Both acts
 carry the same `pairing.use` demand, so turning the capability off from away from the machine also refuses
 the revoke — and turning it back on is a local act. See [grants.md](grants.md).

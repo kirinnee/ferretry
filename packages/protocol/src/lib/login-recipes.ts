@@ -130,6 +130,18 @@ export const LoginObservedSchema = z.strictObject({
 });
 export type LoginObserved = z.infer<typeof LoginObservedSchema>;
 
+/**
+ * An observed fact as a FERRET may read it (`account_hint`, the login hint): everything but `tapped`, which exists only
+ * to say whether the owner's own taps qualify a sign-in for a standing rule. A ferret learns nothing about rules, so the
+ * hint never changes because of one (secrev-1271 L2). Strict, so a projection that forgot to drop it fails to parse.
+ */
+export const LoginObservedHintSchema = LoginObservedSchema.omit({ tapped: true });
+export type LoginObservedHint = z.infer<typeof LoginObservedHintSchema>;
+
+/** The facts a ferret may read: each without its `tapped` count. */
+export const ferretObserved = (facts: readonly LoginObserved[]): LoginObservedHint[] =>
+  facts.map(({ tapped: _ownerOnly, ...fact }) => fact);
+
 /** One delivery's worth of facts, as the input service reports them; folded into {@link LoginObserved}. */
 export interface LoginObservation {
   readonly at: string;
