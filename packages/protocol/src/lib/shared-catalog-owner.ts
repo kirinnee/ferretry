@@ -87,6 +87,8 @@ export const CatalogItemVersionSchema = z.strictObject({
   digest: CatalogDigestSchema,
   size: z.number().int().min(1),
   publishedAt: InstantSchema,
+  /** When the version was retired (versions, 3d); unset while it is in use. */
+  retiredAt: InstantSchema.optional(),
 });
 export type CatalogItemVersion = z.infer<typeof CatalogItemVersionSchema>;
 
@@ -157,6 +159,8 @@ export const OwnedSharedItemVersionSchema = z.strictObject({
   /** Bytes of the frozen copy, which is the same whichever catalog lists it. */
   size: z.number().int().min(1),
   publishedAt: InstantSchema,
+  /** When the version was retired (versions, 3d); unset while it is in use. */
+  retiredAt: InstantSchema.optional(),
   summary: CatalogSummarySchema,
   /** Skills only: how many files it holds. */
   fileCount: z.number().int().min(0).optional(),

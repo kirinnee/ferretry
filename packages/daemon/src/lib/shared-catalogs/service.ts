@@ -57,6 +57,7 @@ import {
   type CatalogBinding,
   type CatalogEntry,
   type CatalogsDocument,
+  CatalogsDocumentSchema,
   EMPTY_CATALOGS_DOCUMENT,
   type StoredCatalog,
   type StoredSharedItem,
@@ -256,7 +257,7 @@ export class SharedCatalogService {
         publisherName: publisherLabel(this.deps.identity.publisherName()),
         now: instant(this.deps.now()),
       });
-      await this.deps.documents.write(next);
+      await this.#commit(next);
       return await this.#owned(next, findCatalog(next, id), identity);
     });
   }
@@ -268,7 +269,7 @@ export class SharedCatalogService {
       const document = await this.#writable();
       const patched = withCatalogPatch(document, catalogId, request, instant(this.deps.now()));
       const next = request.role === 'default' ? withDefault(patched, catalogId) : patched;
-      if (next !== document) await this.deps.documents.write(next);
+      if (next !== document) await this.#commit(next);
       return await this.#owned(next, findCatalog(next, catalogId), identity);
     });
   }
@@ -279,7 +280,7 @@ export class SharedCatalogService {
       // BEFORE the catalog's own file changes: a failure in between leaves people without a catalog that still
       // exists, never holding a name for one that is gone.
       await this.deps.membership?.forgetCatalog(catalogId);
-      await this.deps.documents.write(next);
+      await this.#commit(next);
       return { catalogId };
     });
   }
@@ -309,7 +310,7 @@ export class SharedCatalogService {
       };
       const next = withNewItem(document, catalogId, item, now);
       await this.deps.blobs.put(version.contentDigest, version.text);
-      await this.deps.documents.write(next);
+      await this.#commit(next);
       return await this.#published(next, identity, findCatalog(next, catalogId), itemId);
     });
   }
@@ -332,7 +333,7 @@ export class SharedCatalogService {
           bindings[stored.version] = { digest: own.digest, size: own.size };
         }
       const next = withListedItem(document, catalogId, itemId, version, bindings, instant(this.deps.now()));
-      await this.deps.documents.write(next);
+      await this.#commit(next);
       return await this.#published(next, identity, findCatalog(next, catalogId), itemId);
     });
   }
@@ -366,7 +367,7 @@ export class SharedCatalogService {
       const now = instant(this.deps.now());
       const next = withNewVersion(document, catalogId, itemId, version.stored(now), now);
       await this.deps.blobs.put(version.contentDigest, version.text);
-      await this.deps.documents.write(next);
+      await this.#commit(next);
       return await this.#published(next, identity, findCatalog(next, catalogId), itemId);
     });
   }
@@ -374,7 +375,7 @@ export class SharedCatalogService {
   withdraw(catalogId: string, itemId: string): Promise<WithdrawnCatalogItem> {
     return this.#serially(async () => {
       const next = withWithdrawn(await this.#writable(), catalogId, itemId, instant(this.deps.now()));
-      await this.deps.documents.write(next);
+      await this.#commit(next);
       const catalog = findCatalog(next, catalogId);
       return {
         catalogId,
@@ -453,6 +454,10 @@ export class SharedCatalogService {
     const stored = item.versions.find(candidate => candidate.version === version);
     if (stored === undefined)
       throw new CatalogRefusal('item_unknown', `${item.name} has no version ${String(version)}.`);
+    // A catalog never serves a version published before the item joined it, except the current one: the person
+    // who added it reviewed that one only.
+    if (version !== item.current && Date.parse(stored.publishedAt) < Date.parse(entry.addedAt))
+      throw new CatalogRefusal('item_unknown', `${item.name} has no version ${String(version)} in this catalog.`);
     return await this.#frozen(catalogId, item, stored);
   }
 
@@ -497,6 +502,17 @@ export class SharedCatalogService {
     });
     if (!signed.ok) throw new CatalogRefusal('export_failed', signed.reason);
     return signed.value;
+  }
+
+  /** The one door to a write: a document the schema would refuse never reaches the file, and nothing is written. */
+  async #commit(next: CatalogsDocument): Promise<void> {
+    const checked = CatalogsDocumentSchema.safeParse(next);
+    if (!checked.success)
+      throw new CatalogRefusal(
+        'store_damaged',
+        'That change would leave the catalogs file inconsistent, so nothing was saved.',
+      );
+    await this.deps.documents.write(next);
   }
 
   #serially<T>(run: () => Promise<T>): Promise<T> {

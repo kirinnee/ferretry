@@ -121,8 +121,8 @@ export class CatalogController {
 
   /** Shows the frozen current version of an item this machine already keeps, and lists it here if the person says yes. */
   async #addExisting(catalog: string, item: string, options: CatalogAddOptions): Promise<void> {
-    if (options.skill !== undefined || options.mcp !== undefined)
-      throw new Error('pass --item alone, or --skill / --mcp for something new');
+    if (options.skill !== undefined || options.mcp !== undefined || options.summary !== undefined)
+      throw new Error('pass --item alone: --skill, --mcp and --summary are for something new');
     const found = await this.#catalog(catalog);
     const target = resolveSharedItem((await this.gateway.listItems()).items, item);
     if (found.items.some(listed => listed.itemId === target.itemId && listed.withdrawnAt === undefined))

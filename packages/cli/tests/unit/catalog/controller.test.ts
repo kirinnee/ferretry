@@ -395,5 +395,6 @@ describe('fy catalog add --item', () => {
     await should(controller.add('Team tools', { item: 'nope', yes: true })).rejectedWith(/no shared item "nope"/);
     await should(controller.add('Team tools', { item: 'x', skill: 'y' })).rejectedWith(/--item alone/);
     await should(controller.add('Team tools', { item: 'x', mcp: 'y' })).rejectedWith(/--item alone/);
+    await should(controller.add('Team tools', { item: 'x', summary: 'y' })).rejectedWith(/--item alone/);
   });
 });

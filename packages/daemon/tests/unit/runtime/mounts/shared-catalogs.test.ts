@@ -139,6 +139,20 @@ describe('the shared catalogs routes', () => {
     should(calls).have.length(3);
   });
 
+  it('should refuse a role other than default at the route, with nothing called', async () => {
+    const { dispatch, calls } = stubbed();
+    const response = await dispatch.dispatch(call('PATCH', `/v1/catalogs/${CAT}`, { role: 'collection' }));
+    should(response.status).equal(400);
+    should(calls).deepEqual([]);
+  });
+
+  it('should let a ferret read the shared items', async () => {
+    const { dispatch } = stubbed();
+    const ferret = agentIn('session-1');
+    should((await dispatch.dispatch(call('GET', '/v1/catalog-items', undefined, ferret))).status).equal(200);
+    should((await dispatch.dispatch(fromFerret(call('GET', '/v1/catalog-items')))).status).equal(200);
+  });
+
   it('should let a failure that is not a refusal through', async () => {
     const catalogs = {
       list: async () => {

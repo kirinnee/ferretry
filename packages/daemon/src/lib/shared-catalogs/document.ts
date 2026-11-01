@@ -275,6 +275,10 @@ export interface NewCatalog {
   readonly now: string;
 }
 
+/**
+ * `catalogs_full` is the cap on catalogs this machine keeps (256). `catalog_full` is a different limit: the items
+ * one catalog holds. An app naming either must say which, because the remedy differs.
+ */
 export function withCatalog(document: CatalogsDocument, created: NewCatalog): CatalogsDocument {
   if (document.catalogs.length >= CATALOGS_MAX_PER_PUBLISHER)
     throw new CatalogRefusal(
@@ -376,6 +380,13 @@ export function withNewItem(
   return replaceCatalog({ ...document, items: [...document.items, item] }, next);
 }
 
+function bindingFor(bindings: Readonly<Record<number, CatalogBinding>>, version: number): CatalogBinding {
+  const binding = bindings[version];
+  if (binding === undefined)
+    throw new CatalogRefusal('store_damaged', `Version ${String(version)} has no digest for this catalog.`);
+  return binding;
+}
+
 /**
  * An item this machine already keeps, listed live by one more catalog at the version the person reviewed.
  *
@@ -394,17 +405,18 @@ export function withListedItem(
 ): CatalogsDocument {
   const catalog = findCatalog(document, catalogId);
   const item = findItem(document, itemId);
+  const entry = catalog.entries.find(candidate => candidate.itemId === itemId);
+  if (entry !== undefined && entry.withdrawnAt === undefined)
+    throw new CatalogRefusal('item_listed', `${catalog.name} already lists ${item.name}.`);
   if (version !== item.current)
     throw new CatalogRefusal(
       'current_changed',
       `${item.name} is at version ${item.current} now, not version ${version}. Review it again, then add it.`,
     );
-  const entry = catalog.entries.find(candidate => candidate.itemId === itemId);
-  if (entry !== undefined && entry.withdrawnAt === undefined)
-    throw new CatalogRefusal('item_listed', `${catalog.name} already lists ${item.name}.`);
   assertRoom(document, catalog, item);
   if (entry !== undefined) {
-    const { withdrawnAt: _forgotten, ...listed } = entry;
+    const { withdrawnAt: _forgotten, ...kept } = entry;
+    const listed = { ...kept, addedAt: now };
     return replaceCatalog(
       document,
       bumped({ ...catalog, entries: catalog.entries.map(other => (other === entry ? listed : other)) }, now),
@@ -419,7 +431,7 @@ export function withListedItem(
             ...other,
             versions: other.versions.map(stored => ({
               ...stored,
-              bindings: { ...stored.bindings, [catalogId]: bindings[stored.version] as CatalogBinding },
+              bindings: { ...stored.bindings, [catalogId]: bindingFor(bindings, stored.version) },
             })),
           }
         : other,

@@ -104,7 +104,7 @@ describe('catalog default and add --item', () => {
 
   it('should list an item the machine keeps, when the catalog does not', async () => {
     const { parsed, gateway } = run(['catalog', 'add', 'Team tools', '--item', 'github', '-y']);
-    await parsed.catch((error: Error) => should(error.message).match(/no shared item/));
+    await should(parsed).be.rejectedWith(/no shared item/);
     should(gateway.calls.some(call => call.call === 'listItems')).equal(true);
   });
 });

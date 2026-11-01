@@ -10,7 +10,7 @@ import {
   withNewItem,
 } from '../../../src/lib/shared-catalogs/document.ts';
 import { CatalogRefusal } from '../../../src/lib/shared-catalogs/refusal.ts';
-import { rig, SKILL_MD, SKILL_PATH, stdio } from './support.ts';
+import { rig, SKILL_MD, SKILL_PATH } from './support.ts';
 
 const refusal = async (work: () => Promise<unknown>): Promise<CatalogRefusal> => {
   try {
@@ -143,10 +143,6 @@ describe('one item in many catalogs', () => {
     ).equal('catalog_unknown');
     const lookalike = await r.service.previewItem(second.id, { source: { kind: 'skill', skill: 'demo' } });
     await r.service.addItem(second.id, { source: { kind: 'skill', skill: 'demo' }, digest: lookalike.digest });
-    r.skills = [...r.skills];
-    const third = await r.service.create({ name: 'Third' });
-    r.servers = [stdio('files')];
-    should(third.items).eql([]);
     should(
       (await refusal(async () => await r.service.addItem(second.id, { itemId: added.itemId, version: 1 }))).refusal,
     ).equal('name_taken');
@@ -328,6 +324,110 @@ describe('the caps and the document rules', () => {
     document.items.push(...Array.from({ length: 256 }, (_, index) => filler(index + 10)));
     should(refusalOf(() => withListedItem(document, 'cat_two', item.itemId, 1, {}, '2026-01-02T00:00:00.000Z'))).equal(
       'catalog_full',
+    );
+  });
+});
+
+describe('what a catalog serves of an item it joined later', () => {
+  async function newerVersion(r: Awaited<ReturnType<typeof rig>>, catalogId: string, itemId: string) {
+    r.clock.ms += 1000;
+    r.tree.set(SKILL_PATH, { 'SKILL.md': SKILL_MD, 'notes.txt': `notes ${r.clock.ms}` });
+    const preview = await r.service.previewItem(catalogId, { itemId });
+    await r.service.publishVersion(catalogId, itemId, { digest: preview.digest });
+  }
+
+  it('should refuse a version published before the item joined, and serve the current one', async () => {
+    const { r, first, second, added } = await twoCatalogs();
+    await newerVersion(r, first.id, added.itemId);
+    r.clock.ms += 1000;
+    await r.service.addItem(second.id, { itemId: added.itemId, version: 2 });
+    should((await r.service.frozenItem(second.id, added.itemId, 2)).itemVersion).equal(2);
+    should((await refusal(async () => await r.service.frozenItem(second.id, added.itemId, 1))).refusal).equal(
+      'item_unknown',
+    );
+    should((await r.service.frozenItem(first.id, added.itemId, 1)).itemVersion).equal(1);
+  });
+
+  it('should serve a version published after the item joined', async () => {
+    const { r, first, second, added } = await twoCatalogs();
+    r.clock.ms += 1000;
+    await r.service.addItem(second.id, { itemId: added.itemId, version: 1 });
+    await newerVersion(r, first.id, added.itemId);
+    should((await refusal(async () => await r.service.frozenItem(second.id, added.itemId, 1))).refusal).equal(
+      'item_unknown',
+    );
+    should((await r.service.frozenItem(second.id, added.itemId, 2)).itemVersion).equal(2);
+  });
+
+  it('should bump a relisted catalog, forget what it served before, and leave a withdrawn catalog alone on a publish', async () => {
+    const { r, first, second, added } = await twoCatalogs();
+    await r.service.addItem(second.id, { itemId: added.itemId, version: 1 });
+    await r.service.withdraw(second.id, added.itemId);
+    const withdrawnRevision = (await r.service.list()).catalogs.find(catalog => catalog.id === second.id)?.revision;
+    const writes = r.documents.writes;
+    await newerVersion(r, first.id, added.itemId);
+    should(r.documents.writes).equal(writes + 1);
+    should((await r.service.list()).catalogs.find(catalog => catalog.id === second.id)?.revision).equal(
+      withdrawnRevision,
+    );
+    r.clock.ms += 1000;
+    const relisted = await r.service.addItem(second.id, { itemId: added.itemId, version: 2 });
+    should(relisted.revision).equal((withdrawnRevision ?? 0) + 1);
+    should((await r.service.frozenItem(second.id, added.itemId, 2)).itemVersion).equal(2);
+    should((await refusal(async () => await r.service.frozenItem(second.id, added.itemId, 1))).refusal).equal(
+      'item_unknown',
+    );
+  });
+
+  it('should refuse a catalog past the cap through create', async () => {
+    const r = await rig();
+    for (let index = 0; index < CATALOGS_MAX_PER_PUBLISHER; index += 1) await r.service.create({ name: `c${index}` });
+    should((await refusal(async () => await r.service.create({ name: 'one more' }))).refusal).equal('catalogs_full');
+  });
+
+  it('should write nothing when the change would break the schema', async () => {
+    const { r, first, added } = await twoCatalogs();
+    const doc = r.documents.document;
+    r.documents.document = {
+      ...doc,
+      items: doc.items.map(item => ({
+        ...item,
+        versions: item.versions.map(version => {
+          const { [first.id]: _gone, ...bindings } = version.bindings;
+          return { ...version, bindings };
+        }),
+      })),
+    };
+    const writes = r.documents.writes;
+    should((await refusal(async () => await r.service.create({ name: 'Third' }))).refusal).equal('store_damaged');
+    should(r.documents.writes).equal(writes);
+    should(added.itemId).be.a.String();
+  });
+});
+
+describe('a listing with a binding missing', () => {
+  it('should refuse rather than write a document the schema would not accept', () => {
+    const catalog = {
+      id: 'cat_one',
+      name: 'one',
+      description: '',
+      publisherName: 'studio',
+      visibility: 'members' as const,
+      revision: 1,
+      issuedAt: '2026-01-01T00:00:00.000Z',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      entries: [],
+    };
+    const item = {
+      itemId: 'itm_one',
+      kind: 'skill',
+      name: 'one',
+      current: 1,
+      versions: [{ version: 1, bindings: {} }],
+    } as unknown as StoredSharedItem;
+    const document = { schemaVersion: 2, items: [item], catalogs: [catalog] } as unknown as CatalogsDocument;
+    should(refusalOf(() => withListedItem(document, 'cat_one', 'itm_one', 1, {}, '2026-01-02T00:00:00.000Z'))).equal(
+      'store_damaged',
     );
   });
 });

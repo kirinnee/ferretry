@@ -282,6 +282,10 @@ new version, a withdrawal, a rename, a new description, a new publisher name), a
 instant of that change, and a file's `exportedAt` is that same instant, so **two exports with nothing
 between them are byte-identical**. A reader that saw revision 7 refuses a signed 6.
 
+Exactly one catalog's revision rises for a rename, a description, an add (new or existing), a withdrawal or a relist. A new version raises the revision of **every catalog that lists the item live** (one write carries all of them), and leaves a catalog that withdrew the item alone. Making a catalog the default changes no manifest, so no revision rises.
+
+A catalog never serves a version published before the item joined it, except the current one: the person who added an item reviewed that version only. A relist counts as joining again. Only the current version is exported.
+
 The publisher name the manifest carries is **stored with the catalog** when it is made (the machine's
 name then) and signed from the store at every export, so a change of host name does not change the bytes
 of a revision. `PATCH` may set it, which is a change like a rename. Restoring `catalogs.json` from a
@@ -316,7 +320,7 @@ An item is kept once and can be listed in any number of catalogs. `POST /items` 
 the machine already keeps in another catalog. `version` must equal the item's current version, else 409
 `current_changed`; an item the catalog already lists live is 409 `item_listed`; a withdrawn entry is **listed again in
 place**. Only the catalog it joins gains a revision. A preview with `{itemId}` for an item the catalog does not list shows
-the frozen current version and reads no source. Publishing a new version through one catalog raises the revision of every
+the frozen current version and reads no source. That preview is open to a ferret like the others, for withdrawn and orphaned items too: it only shows what the owner already keeps, and writes nothing. Publishing a new version through one catalog raises the revision of every
 catalog that lists the item live.
 
 `PATCH` with `role: "default"` makes a catalog the default **without a revision** (it is not in any manifest). There is
@@ -409,8 +413,8 @@ the file it wrote and is lost either way; keep that file too if you need it.
 
 ### Audit
 
-Ids only, never what an item holds ([audit.md](audit.md)): `catalog.changed` (create, update, default, delete, an existing item listed,
-publish, withdraw, with item id, version, digest and revision) and `catalog.exported` (revision and
+Ids only, never what an item holds ([audit.md](audit.md)): `catalog.changed` (`create`, `update` (a rename, or a role change, which records `role`), `delete`, `publish` (a new item, a new version or an existing item listed in another catalog) and `withdraw`,
+with item id, version, digest and revision) and `catalog.exported` (revision and
 item ids). Both are **kept** events.
 
 ## Installing from a file
