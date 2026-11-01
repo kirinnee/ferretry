@@ -122,6 +122,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'PATCH /v1/accounts/:id/factors/:factor operator person',
   'DELETE /v1/accounts/:id/factors/:factor operator person',
   'GET /v1/catalogs operator any',
+  'GET /v1/catalog-items operator any',
   'POST /v1/catalogs operator person',
   'PATCH /v1/catalogs/:id operator person',
   'DELETE /v1/catalogs/:id operator person',

@@ -30,6 +30,7 @@
  * Every change below returns the whole next document, so one atomic write carries every catalog it bumped.
  */
 import {
+  CATALOGS_MAX_PER_PUBLISHER,
   CATALOG_MAX_ITEMS,
   CATALOG_MAX_WITHDRAWN,
   CatalogDescriptionSchema,
@@ -40,6 +41,7 @@ import {
   CatalogSummarySchema,
   CatalogItemNameSchema,
   InstantSchema,
+  SHARED_ITEMS_MAX,
   SharedCatalogIdSchema,
   SharedCatalogItemIdSchema,
 } from '@ferretry/protocol';
@@ -89,6 +91,8 @@ export type StoredSharedItem = z.infer<typeof StoredSharedItemSchema>;
 const CatalogEntrySchema = z.strictObject({
   itemId: SharedCatalogItemIdSchema,
   addedAt: InstantSchema,
+  /** The first version this catalog serves; absent means 1 (every version), as for catalogs made before 3c-2. */
+  sinceVersion: z.number().int().min(1).optional(),
   withdrawnAt: InstantSchema.optional(),
 });
 export type CatalogEntry = z.infer<typeof CatalogEntrySchema>;
@@ -156,6 +160,8 @@ function firstProblem(document: {
       if (item === undefined) return `${catalog.name} lists ${entry.itemId}, which is not an item`;
       if (seen.has(entry.itemId)) return `${catalog.name} lists ${entry.itemId} twice`;
       seen.add(entry.itemId);
+      if (entry.sinceVersion !== undefined && entry.sinceVersion > item.versions.length)
+        return `${catalog.name} serves ${entry.itemId} from version ${String(entry.sinceVersion)}, which does not exist`;
       const lists = listedBy.get(entry.itemId) ?? new Set<string>();
       lists.add(catalog.id);
       listedBy.set(entry.itemId, lists);
@@ -215,6 +221,17 @@ export const latestVersion = (item: StoredSharedItem): StoredVersion =>
 export const currentVersion = (item: StoredSharedItem): StoredVersion =>
   item.versions.find(version => version.version === item.current) as StoredVersion;
 
+/** An item of the table, or the refusal that this machine keeps none by that id. */
+export function findItem(document: CatalogsDocument, itemId: string): StoredSharedItem {
+  const item = document.items.find(candidate => candidate.itemId === itemId);
+  if (item === undefined) throw new CatalogRefusal('item_unknown', `There is no item ${itemId} on this machine.`);
+  return item;
+}
+
+/** Whether a catalog is the default (where one tap adds) or one of the others. Derived, never stored. */
+export const roleOf = (document: CatalogsDocument, catalogId: string): 'default' | 'collection' =>
+  document.defaultCatalogId === catalogId ? 'default' : 'collection';
+
 /** The digest and size a catalog's manifest lists for this version: the schema guarantees one for every entry. */
 export const bindingOf = (version: StoredVersion, catalogId: string): CatalogBinding =>
   version.bindings[catalogId] as CatalogBinding;
@@ -262,7 +279,17 @@ export interface NewCatalog {
   readonly now: string;
 }
 
+/**
+ * `catalogs_full` is the cap on catalogs this machine keeps (256). `catalog_full` is a different limit: the items
+ * one catalog holds. catalog-members has its own `catalogs_full`, the limit on share codes. An app naming any of
+ * them must say which, because the remedy differs.
+ */
 export function withCatalog(document: CatalogsDocument, created: NewCatalog): CatalogsDocument {
+  if (document.catalogs.length >= CATALOGS_MAX_PER_PUBLISHER)
+    throw new CatalogRefusal(
+      'catalogs_full',
+      `This machine keeps at most ${CATALOGS_MAX_PER_PUBLISHER} catalogs. Delete one first.`,
+    );
   if (document.catalogs.some(catalog => catalog.name === created.name))
     throw new CatalogRefusal('name_taken', `You already have a catalog called ${created.name}.`);
   const catalog: StoredCatalog = {
@@ -332,6 +359,17 @@ function nameTaken(document: CatalogsDocument, catalog: StoredCatalog, kind: str
   });
 }
 
+/** Refuses unless the catalog has room for one more live item of this kind and name. */
+function assertRoom(document: CatalogsDocument, catalog: StoredCatalog, item: StoredSharedItem): void {
+  if (liveEntries(catalog).length >= CATALOG_MAX_ITEMS)
+    throw new CatalogRefusal('catalog_full', `A catalog holds at most ${CATALOG_MAX_ITEMS} items. Withdraw one first.`);
+  if (nameTaken(document, catalog, item.kind, item.name))
+    throw new CatalogRefusal(
+      'name_taken',
+      `${catalog.name} already has a ${item.kind === 'skill' ? 'skill' : 'MCP setup'} called ${item.name}. Publish a new version of it instead, or withdraw it first.`,
+    );
+}
+
 /** A new item, listed live by one catalog. The item arrives with its digest for that catalog. */
 export function withNewItem(
   document: CatalogsDocument,
@@ -340,15 +378,82 @@ export function withNewItem(
   now: string,
 ): CatalogsDocument {
   const catalog = findCatalog(document, catalogId);
-  if (liveEntries(catalog).length >= CATALOG_MAX_ITEMS)
-    throw new CatalogRefusal('catalog_full', `A catalog holds at most ${CATALOG_MAX_ITEMS} items. Withdraw one first.`);
-  if (nameTaken(document, catalog, item.kind, item.name))
-    throw new CatalogRefusal(
-      'name_taken',
-      `${catalog.name} already has a ${item.kind === 'skill' ? 'skill' : 'MCP setup'} called ${item.name}. Publish a new version of it instead, or withdraw it first.`,
-    );
+  if (document.items.length >= SHARED_ITEMS_MAX)
+    throw new CatalogRefusal('items_full', `This machine keeps at most ${SHARED_ITEMS_MAX} shared items.`);
+  assertRoom(document, catalog, item);
   const next = bumped({ ...catalog, entries: [...catalog.entries, { itemId: item.itemId, addedAt: now }] }, now);
   return replaceCatalog({ ...document, items: [...document.items, item] }, next);
+}
+
+function bindingFor(bindings: Readonly<Record<number, CatalogBinding>>, version: number): CatalogBinding {
+  const binding = bindings[version];
+  if (binding === undefined)
+    throw new CatalogRefusal('store_damaged', `Version ${String(version)} has no digest for this catalog.`);
+  return binding;
+}
+
+/**
+ * An item this machine already keeps, listed live by one more catalog at the version the person reviewed.
+ *
+ * `version` must still be the item's current one (else `current_changed`). An item the catalog already lists
+ * live is `item_listed`; one it withdrew is listed again IN PLACE, its withdrawal forgotten. A catalog that never
+ * listed it arrives with the digest of EVERY version in its own terms (`bindings`, keyed by version), because the
+ * schema wants one for each. Only this catalog's revision rises.
+ */
+export function withListedItem(
+  document: CatalogsDocument,
+  catalogId: string,
+  itemId: string,
+  version: number,
+  bindings: Readonly<Record<number, CatalogBinding>>,
+  now: string,
+): CatalogsDocument {
+  const catalog = findCatalog(document, catalogId);
+  const item = findItem(document, itemId);
+  const entry = catalog.entries.find(candidate => candidate.itemId === itemId);
+  if (entry !== undefined && entry.withdrawnAt === undefined)
+    throw new CatalogRefusal('item_listed', `${catalog.name} already lists ${item.name}.`);
+  if (version !== item.current)
+    throw new CatalogRefusal(
+      'current_changed',
+      `${item.name} is at version ${item.current} now, not version ${version}. Review it again, then add it.`,
+    );
+  assertRoom(document, catalog, item);
+  if (entry !== undefined) {
+    const { withdrawnAt: _forgotten, ...kept } = entry;
+    const listed = { ...kept, sinceVersion: item.current };
+    return replaceCatalog(
+      document,
+      bumped({ ...catalog, entries: catalog.entries.map(other => (other === entry ? listed : other)) }, now),
+    );
+  }
+  const next = bumped(
+    { ...catalog, entries: [...catalog.entries, { itemId, addedAt: now, sinceVersion: item.current }] },
+    now,
+  );
+  return {
+    ...replaceCatalog(document, next),
+    items: document.items.map(other =>
+      other.itemId === itemId
+        ? {
+            ...other,
+            versions: other.versions.map(stored => ({
+              ...stored,
+              bindings: { ...stored.bindings, [catalogId]: bindingFor(bindings, stored.version) },
+            })),
+          }
+        : other,
+    ),
+  };
+}
+
+/**
+ * Makes a catalog the default. Nothing a manifest says changes, so no revision rises. Saying what it already is
+ * changes nothing. There is no way back to "none": the default moves by promoting another catalog.
+ */
+export function withDefault(document: CatalogsDocument, id: string): CatalogsDocument {
+  findCatalog(document, id);
+  return document.defaultCatalogId === id ? document : { ...document, defaultCatalogId: id };
 }
 
 /**

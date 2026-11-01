@@ -28,6 +28,7 @@ function stubbed(failWith?: CatalogRefusalCode) {
     };
   const catalogs = {
     list: act('list'),
+    listItems: act('listItems'),
     create: act('create'),
     update: act('update'),
     remove: act('remove'),
@@ -60,6 +61,8 @@ const call = (
 const WRITES: readonly (readonly [string, string, unknown])[] = [
   ['POST', '/v1/catalogs', { name: 'Team' }],
   ['PATCH', `/v1/catalogs/${CAT}`, { name: 'New' }],
+  ['PATCH', `/v1/catalogs/${CAT}`, { role: 'default' }],
+  ['POST', `/v1/catalogs/${CAT}/items`, { itemId: ITEM, version: 1 }],
   ['DELETE', `/v1/catalogs/${CAT}`, undefined],
   ['POST', `/v1/catalogs/${CAT}/items`, { source: { kind: 'skill', skill: 'demo' }, digest: DIGEST }],
   ['POST', `/v1/catalogs/${CAT}/items/${ITEM}/versions`, { digest: DIGEST }],
@@ -68,10 +71,11 @@ const WRITES: readonly (readonly [string, string, unknown])[] = [
 ];
 
 describe('the shared catalogs routes', () => {
-  it('should serve nine routes, all behind sharing/use', () => {
+  it('should serve ten routes, all behind sharing/use', () => {
     const routes = sharedCatalogRoutes(stubbed().dispatch as never as SharedCatalogSubsystem);
     should(routes.map(route => `${route.method} ${route.path}`)).deepEqual([
       'GET /v1/catalogs',
+      'GET /v1/catalog-items',
       'POST /v1/catalogs',
       'PATCH /v1/catalogs/:id',
       'DELETE /v1/catalogs/:id',
@@ -89,14 +93,17 @@ describe('the shared catalogs routes', () => {
     const statuses: number[] = [];
     for (const [method, path, body] of WRITES)
       statuses.push((await dispatch.dispatch(call(method, path, body))).status);
-    should(statuses).deepEqual([201, 200, 200, 201, 201, 200, 200]);
+    should(statuses).deepEqual([201, 200, 200, 201, 200, 201, 201, 200, 200]);
     const listed = await dispatch.dispatch(call('GET', '/v1/catalogs'));
     should(listed.status).equal(200);
     const previewed = await dispatch.dispatch(
       call('POST', `/v1/catalogs/${CAT}/items/preview`, { source: { kind: 'mcp', mcp: 'files' } }),
     );
     should(previewed.status).equal(200);
-    should(calls).have.length(9);
+    should(
+      (await dispatch.dispatch(call('GET', '/v1/catalog-items', undefined, human, [['sourceState', '1']]))).status,
+    ).equal(200);
+    should(calls).have.length(12);
   });
 
   it('should check the sources only when the list is asked with sourceState=1', async () => {
@@ -130,6 +137,20 @@ describe('the shared catalogs routes', () => {
     );
     should(preview.status).equal(200);
     should(calls).have.length(3);
+  });
+
+  it('should refuse a role other than default at the route, with nothing called', async () => {
+    const { dispatch, calls } = stubbed();
+    const response = await dispatch.dispatch(call('PATCH', `/v1/catalogs/${CAT}`, { role: 'collection' }));
+    should(response.status).equal(400);
+    should(calls).deepEqual([]);
+  });
+
+  it('should let a ferret read the shared items', async () => {
+    const { dispatch } = stubbed();
+    const ferret = agentIn('session-1');
+    should((await dispatch.dispatch(call('GET', '/v1/catalog-items', undefined, ferret))).status).equal(200);
+    should((await dispatch.dispatch(fromFerret(call('GET', '/v1/catalog-items')))).status).equal(200);
   });
 
   it('should let a failure that is not a refusal through', async () => {
@@ -167,6 +188,10 @@ describe('the shared catalogs routes', () => {
       item_withdrawn: 409,
       name_taken: 409,
       catalog_full: 409,
+      catalogs_full: 409,
+      items_full: 409,
+      item_listed: 409,
+      current_changed: 409,
       public_unavailable: 400,
       source_unknown: 404,
       source_ambiguous: 409,

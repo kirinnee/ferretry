@@ -152,7 +152,11 @@ describe('SharedCatalogService', () => {
     const { r, catalog, added } = await withSkill();
     await r.service.withdraw(catalog.id, added.itemId);
     should(
-      (await refusal(async () => await r.service.previewItem(catalog.id, { itemId: added.itemId }))).refusal,
+      (
+        await refusal(
+          async () => await r.service.publishVersion(catalog.id, added.itemId, { digest: `sha256:${'0'.repeat(64)}` }),
+        )
+      ).refusal,
     ).equal('item_withdrawn');
     should((await refusal(async () => await r.service.withdraw(catalog.id, added.itemId))).refusal).equal(
       'item_withdrawn',

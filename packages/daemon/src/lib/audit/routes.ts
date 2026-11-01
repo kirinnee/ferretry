@@ -564,7 +564,7 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     event: 'catalog.changed',
     subject: 'id',
     detail: { action: 'update' },
-    responseFields: { revision: ['revision'] },
+    responseFields: { revision: ['revision'], role: ['role'] },
   },
   { method: 'DELETE', path: '/v1/catalogs/:id', event: 'catalog.changed', subject: 'id', detail: { action: 'delete' } },
   {

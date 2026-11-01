@@ -53,6 +53,11 @@ describe('daemon features', () => {
     should(daemonFeatureList()).containEql('accounts.2fa-keys.1');
   });
 
+  it('should report the shared catalog items, so the app offers a default catalog only where the machine keeps one', () => {
+    should(DAEMON_FEATURES.catalogItems).equal('catalogs.items.1');
+    should(daemonFeatureList()).containEql('catalogs.items.1');
+  });
+
   it('should report task plans now that the app draws the plan card', () => {
     // A plan fill closes an input card with a `plan` actor an older app's strict parse refuses: only a daemon that reports this fills one.
     should(DAEMON_FEATURES.taskPlan).equal('task-plan.1');

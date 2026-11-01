@@ -43,7 +43,8 @@ function renderItem(item: OwnedCatalogItem): string {
 
 function renderCatalogBlock(catalog: OwnedCatalog): string {
   const live = catalog.items.filter(item => item.withdrawnAt === undefined).length;
-  const head = `${catalog.name} (${catalog.id}) · revision ${catalog.revision} · ${plural(live, 'item')} · ${catalog.visibility}`;
+  const role = catalog.role === 'default' ? ' · default' : '';
+  const head = `${catalog.name} (${catalog.id})${role} · revision ${catalog.revision} · ${plural(live, 'item')} · ${catalog.visibility}`;
   const description = catalog.description === '' ? [] : [`${INDENT}${catalog.description}`];
   return [head, ...description, ...catalog.items.map(renderItem)].join('\n');
 }
@@ -60,6 +61,10 @@ export function renderCatalogCreated(catalog: OwnedCatalog): string {
 
 export function renderCatalogUpdated(catalog: OwnedCatalog): string {
   return `Catalog ${catalog.name} (${catalog.id}) is now at revision ${catalog.revision}.`;
+}
+
+export function renderCatalogDefault(catalog: OwnedCatalog): string {
+  return `${catalog.name} (${catalog.id}) is now the default catalog.`;
 }
 
 export function renderCatalogDeleted(name: string, catalogId: string): string {
@@ -99,6 +104,10 @@ export function renderPreview(preview: CatalogItemPreview): string {
 
 export function renderPublished(published: PublishedCatalogItem): string {
   return `Published ${published.item.name} version ${published.itemVersion} (${published.itemId}); catalog revision ${published.revision}.`;
+}
+
+export function renderListed(published: PublishedCatalogItem, catalogName: string): string {
+  return `Added ${published.item.name} version ${published.itemVersion} (${published.itemId}) to ${catalogName}; catalog revision ${published.revision}.`;
 }
 
 export function renderWithdrawn(withdrawn: WithdrawnCatalogItem, name: string): string {

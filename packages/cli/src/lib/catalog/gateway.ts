@@ -13,12 +13,15 @@ import {
   ExportCatalogRequestSchema,
   type OwnedCatalog,
   type OwnedCatalogList,
+  type OwnedSharedItemList,
   OwnedCatalogListSchema,
   OwnedCatalogSchema,
+  OwnedSharedItemListSchema,
   type PublishCatalogVersionRequest,
   PublishCatalogVersionRequestSchema,
   type PublishedCatalogItem,
   PublishedCatalogItemSchema,
+  CATALOG_ITEMS_PATH,
   SHARED_CATALOGS_PATH,
   type SharedCatalogFile,
   SharedCatalogFileSchema,
@@ -75,6 +78,10 @@ export class ProtocolCatalogGateway implements ICatalogGateway {
       options.sourceState ? `${SHARED_CATALOGS_PATH}?sourceState=1` : SHARED_CATALOGS_PATH,
       OwnedCatalogListSchema,
     );
+  }
+
+  async listItems(): Promise<OwnedSharedItemList> {
+    return await this.client.request(CATALOG_ITEMS_PATH, OwnedSharedItemListSchema);
   }
 
   async create(request: CreateCatalogRequest): Promise<OwnedCatalog> {

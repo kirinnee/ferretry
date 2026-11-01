@@ -94,3 +94,17 @@ describe('catalog command surface', () => {
     should(files.written.get('/tmp/x.json')?.overwrite).equal(true);
   });
 });
+
+describe('catalog default and add --item', () => {
+  it('should make a catalog the default', async () => {
+    const { parsed, gateway } = run(['catalog', 'default', 'Team tools']);
+    await parsed;
+    should(gateway.calls.at(-1)).eql({ call: 'update', catalogId: CATALOG_ID, request: { role: 'default' } });
+  });
+
+  it('should list an item the machine keeps, when the catalog does not', async () => {
+    const { parsed, gateway } = run(['catalog', 'add', 'Team tools', '--item', 'github', '-y']);
+    await should(parsed).be.rejectedWith(/no shared item/);
+    should(gateway.calls.some(call => call.call === 'listItems')).equal(true);
+  });
+});

@@ -150,6 +150,13 @@ export const DAEMON_FEATURES = {
    * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the rule service and the app's sheet ship first.
    */
   signInRules: 'sign-in-rules.1',
+  /**
+   * Shared catalog items (docs/catalogs.md § One item in many catalogs, and the default): `GET /v1/catalog-items`, a default catalog
+   * (`role` and `defaultCatalogId` in the lists, `PATCH /v1/catalogs/:id { role: 'default' }`) and adding an item
+   * this machine already keeps to another catalog (`POST /v1/catalogs/:id/items { itemId, version }`). A daemon
+   * without this name answers 404 or refuses the strict body: the app offers these only where the machine reports it.
+   */
+  catalogItems: 'catalogs.items.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

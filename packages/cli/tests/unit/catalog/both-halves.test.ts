@@ -61,6 +61,7 @@ describe.each<Order>(['publisher first', 'installer first'])('both halves of fy 
       [
         'add',
         'create',
+        'default',
         'describe',
         'export',
         'install',
