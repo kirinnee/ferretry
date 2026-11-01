@@ -193,8 +193,14 @@ export class PushService {
     const addressed = to === undefined ? enrolled : enrolled.filter(record => to.includes(record.id));
     const payload = JSON.stringify(dispatch.payload);
     // A high push is about something that expires (a one-time code): it asks to be delivered now, and not at all later.
-    const urgent =
-      dispatch.urgency === 'high' ? { urgency: dispatch.urgency, ttlSeconds: PUSH_URGENT_TTL_SECONDS } : {};
+    // A push about something that ends sooner (an approve-on-phone card) is held no longer than it lives.
+    const held = dispatch.ttlSeconds === undefined ? undefined : Math.max(0, Math.floor(dispatch.ttlSeconds));
+    const ttlSeconds =
+      dispatch.urgency === 'high' ? Math.min(held ?? PUSH_URGENT_TTL_SECONDS, PUSH_URGENT_TTL_SECONDS) : held;
+    const urgent = {
+      ...(dispatch.urgency === 'high' ? { urgency: dispatch.urgency } : {}),
+      ...(ttlSeconds === undefined ? {} : { ttlSeconds }),
+    };
     const outcomes = await Promise.all(
       addressed.map(
         async record => await this.options.transport.deliver({ subscription: record.subscription, payload, ...urgent }),

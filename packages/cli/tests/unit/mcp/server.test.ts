@@ -401,6 +401,8 @@ describe('McpServer — the tools', () => {
     // repeat in every tool that takes them (31,577).
     // search_work (cards and agenda by words) fit in its own words (31,981).
     // Keying account_propose by sign-in (signIn for login) fit as it was (31,986).
+    // Approve on your phone (push on both request tools, pa_ ids in input_wait) fit by trimming
+    // lessons_suggest, browser_open, browser_pdf, config_write and a few older phrases (31,899).
     // Owner-gated groups are listed only while they are on.
     should(bytes).be.below(32_000);
     should(longest).be.belowOrEqual(300);

@@ -21,5 +21,8 @@
     "node-datachannel": "0.33.4",
     "playwright-core": "1.62.1",
     "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "happy-dom": "20.11.1"
   }
 }

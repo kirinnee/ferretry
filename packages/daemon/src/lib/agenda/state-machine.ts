@@ -7,6 +7,7 @@ import {
   type AgendaClearableField,
   type AgendaConfirms,
   type AgendaCopyPlanRef,
+  type AgendaPhoneApprovalRef,
   type AgendaTwoFactorSeedRef,
   type AgendaDisposition,
   type AgendaErrorCode,
@@ -56,6 +57,7 @@ export const DAEMON_AGENDA_CAUSES = [
   'input-request',
   'secure-copy',
   'login-recipe',
+  'phone-approval',
 ] as const;
 export type DaemonAgendaCause = (typeof DAEMON_AGENDA_CAUSES)[number];
 const isDaemonAgendaCause = (value: unknown): value is DaemonAgendaCause =>
@@ -131,6 +133,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly copyPlan?: AgendaCopyPlanRef;
   /** The staged 2FA seed a card asks the owner to save with a passkey (`AgendaTwoFactorSeedRef`); only the daemon raises one. */
   readonly twoFactorSeed?: AgendaTwoFactorSeedRef;
+  /** The approve-on-phone card an `info` item presents (`AgendaPhoneApprovalRef`); only the daemon raises one. */
+  readonly phoneApproval?: AgendaPhoneApprovalRef;
   /** The owner's one tap may close `task` too (`DAEMON_FEATURES.agendaOfferClose`); needs a card. */
   readonly offerClose?: true;
 }
@@ -659,6 +663,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.input === undefined ? {} : { input: request.input }),
       ...(request.copyPlan === undefined ? {} : { copyPlan: request.copyPlan }),
       ...(request.twoFactorSeed === undefined ? {} : { twoFactorSeed: request.twoFactorSeed }),
+      ...(request.phoneApproval === undefined ? {} : { phoneApproval: request.phoneApproval }),
       ...(request.offerClose === true ? { offerClose: true as const } : {}),
     },
     actor,
@@ -777,6 +782,13 @@ function addressById(
       return failure(
         'use_input_form',
         `${command.id} saves a 2FA key: allow it on its card in the app, with your passkey`,
+      );
+    }
+    // An approval on the phone is answered by the phone and settled by what the daemon sees: never by an agenda answer.
+    if (target.item.phoneApproval !== undefined) {
+      return failure(
+        'use_input_form',
+        `${command.id} is a sign-in to approve on your phone: approve it there, or tap Not me on its card`,
       );
     }
     // An answer to a confirmation is the owner's decision about a configuration change: never a ferret's.

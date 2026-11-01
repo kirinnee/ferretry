@@ -1038,17 +1038,24 @@ saving it to GitHub · kirinnee." The daemon refuses the save unless the owner t
 
 #### Approve on your phone
 
-> **Protocol only.** The shapes are in `phone-approval.ts`. No daemon reports `input.phone-approval.1` yet, so
-> no daemon raises one.
+> **Daemon side built, not yet offered.** The daemon raises, reads, pushes and settles approvals
+> (`packages/daemon/src/lib/input-requests/phone-approval.ts`), but it still refuses `push: true` with "update the
+> app first": `input.phone-approval.1` is not reported until the app that draws the card ships (R2-5).
 
 A sign-in that waits for a push the owner approves on their phone has its own card, a `PhoneApproval`. It is
 not an input request, because nothing is typed.
 
+**How a ferret asks.** `browser_request_input` or `terminal_request_input` with `push: true` and no prompt. No
+new tool: the MCP list stays under its byte budget. A page call names no element: the daemon reads only the provider's
+own challenge view (see below). It may also pass `secretHint`, `factor` and `waitSeconds`. The answer is a `pa_…` id. The ferret
+waits with `input_wait` on that id and is told `waiting`, `moved-on` (with `secondFactor: 'push'` when the daemon
+kept that fact), `timed-out`, `refused` or `gone`. It is never told the number.
+
 **Nothing of the ferret's is shown.** The raise (`PhoneApprovalRaise`) names only:
 
 - where: a page or a terminal;
-- optionally, the element it thinks shows the number. This is only **where to look**: the browser reads the
-  element, never the ferret;
+- an `element` field the schema still carries for the wire. **The daemon ignores it**: see "Never where the ferret
+  points" below;
 - optionally, the account and the push key, as hints;
 - how long to wait: 30 to 300 seconds, 2 minutes by default.
 
@@ -1068,11 +1075,103 @@ the agenda subject and the push from the approval's own fields, and from nothing
   login.microsoftonline.com"), so an unexpected push is easy to refuse.
 - **Every card** ends with: "Never use a number a ferret tells you."
 
+**Which sign-in it is.** The daemon matches the page's host, or the terminal's `program@host`, as a card does. The
+ferret's hint only orders among the matched sign-ins. One more case: when the hint names a sign-in whose `via` chain
+signs in at this host, the card names that sign-in. On ClickUp's Okta page, a hint of `CLICKUP` reads "ClickUp via
+Okta on company.okta.com". A hint that reaches nothing here is ignored. The account's push key is named when the
+ferret's `factor` is one of its push keys, or when it has exactly one.
+
+**The number comes only from the page, past three gates.** The browser reads it (`push-number.ts`, in the page's own
+queue). The daemon believes it only when all of these hold:
+
+1. **Where.** The page is https, with no port, on a login domain of the matched sign-in or of a sign-in its `via`
+   chain reaches, or on a fixed identity-provider host: `login.microsoftonline.com`, `login.live.com`,
+   `accounts.google.com`, `*.okta.com`, `*.oktapreview.com`, `*.okta-emea.com` or `*.duosecurity.com`. This is
+   what keeps an adversary-in-the-middle proxy's page off the card: it shows the real number of the attacker's
+   sign-in. A provider's number must also be on that provider's own host, so a Microsoft number is believed only on
+   Microsoft's two hosts. Okta's widget gives a number off Okta's own hosts only on an organisation's **custom Okta
+   domain**: a login domain of a provider sign-in that the matched sign-in reaches through its `via` chain. A domain
+   of the matched sign-in itself never qualifies, since a site the ferret can write pages on could carry the widget's
+   markup (secrev-1244 R1). And it must be **the host the approval was raised on**: a page that moves to another host,
+   even another tenant on the same identity provider, shows no number (`numberMissing: 'origin'`).
+2. **Not steered.** No page script ran in this session (`browser.eval`). Otherwise the card says
+   `numberMissing: 'scripted'`.
+3. **What.** The number is in a provider's own challenge view: Okta's Identity Engine widget (Gen2 and Gen3),
+   Microsoft Entra's `#idRichContext_DisplaySign`, Google's challenge page, or Duo's Verified Push code, and that
+   provider's view is what the document is. It must be visible, not editable, in the main frame, and exactly 1 to 3
+   digits to tap (3 to 6 to type into Duo Mobile). The document must be the same before and after the read. English
+   pages only: another language reads as no number.
+
+**Never where the ferret points** (secrev-1244 H1). An earlier design let a ferret name the element showing the
+number. It is gone: a page may echo back text the ferret typed, and Okta shows the username it was given in a
+visible element no one can type into. A ferret steered by an attacker could type the attacker's number as the
+username and point at the echo. So the daemon reads only a recognised provider view. When it finds none, the card
+says it couldn't read a number and offers View the page. The raise's `element` field and the `pointed` number source
+stay in the protocol for the wire only: no daemon reads the one or produces the other.
+
+**While it waits**, the daemon looks at the page every second. When the document changes, the number is cleared, and
+only a number read in the new document shows. **After the ferret acts on its pages** (any browser tool that changes a
+page: navigate, click, type, press, a script), a new document's number is never shown: the card says
+`numberMissing: 'steered'`. Only a number from the page the owner's sign-in reached on its own counts, so a ferret
+cannot restart challenges until the card matches an attacker's push (secrev-1244 R2). The page the approval was raised
+on is still read. A new number pushes again, under the same tag, at most four pushes per
+approval. A ferret may have two approvals waiting and raise ten an hour, and one page or terminal holds one at a time.
+
 **A terminal never shows a number.** A ferret can print any text into its own pane, so a terminal card always
 reads `numberMissing: 'terminal'` and sends the owner to the terminal.
 
-**Success is observed, never claimed.** `moved-on` is set only by the daemon, when it sees the sign-in move on.
-There is no "I approved" button and no route that sets it.
+**Success is observed, never claimed.** `moved-on` is set only by the daemon, when it sees the sign-in move on:
+
+- **A page:** a new document that is no longer the challenge. That is another host that is not an identity
+  provider's, or the same host once a provider's challenge view gives way to a page with none (Microsoft's "Stay
+  signed in?", but also a provider's own "denied" or "expired" view, which Ferretry cannot yet tell apart). Only the
+  first, a page that left the identity providers, keeps `secondFactor: 'push'` on the sign-in and tells the ferret
+  so. The card only ever says "The page moved on.", never that the sign-in went through.
+- **A terminal:** its prompt line or its program changed.
+
+There is no "I approved" button and no route that sets it. When the ferret acted on that kind of surface since the
+raise, or ran a page script, the move still ends the card. But the daemon keeps no `secondFactor: 'push'` fact on
+the sign-in, and does not tell the ferret one: the move may be the ferret's own.
+
+**How it ends.**
+
+| State       | When                                                           | The card's note                                         |
+| ----------- | -------------------------------------------------------------- | ------------------------------------------------------- |
+| `moved-on`  | the daemon saw the page move on                                | "The page moved on."                                    |
+| `refused`   | the owner tapped **Not me — stop**; the ferret is told to stop | "You said this was not you. Deny it on your phone too." |
+| `timed-out` | its wait ran out                                               | "Nothing happened in time: the ferret can ask again."   |
+| `gone`      | the page or terminal closed, or its name is another one now    | "The page or terminal closed."                          |
+
+An approval lives in RAM. A restart ends it: at start, the daemon closes every card that still presents one.
+
+**The owner's routes** (owner only, like every input route; an agent is refused before anything is read):
+`GET /v1/phone-approvals` (the ones waiting), `GET /v1/sessions/:sessionId/phone-approvals/:approvalId` (one, for
+its card) and `POST /v1/sessions/:sessionId/phone-approvals/:approvalId/refuse` ("Not me"). Answering the agenda
+card itself is refused (`use_input_form`). Only the daemon raises a card with the `phoneApproval` ref: the agenda's
+add route has no field for it, so a ferret's own "Approve on your phone" note draws as a plain note.
+
+**The security log** records `phone-approval.raised`, `phone-approval.refused` and `phone-approval.settled`. Each
+names the account, the sign-in, the site, the ferret, where the number came from or why there was none, and how it
+ended. **It never records the number.**
+
+**The push** is high priority inside the code cards' caps. It is held no longer than the card has left, under the
+tag `pa-<id>` ([notifications](notifications.md#high-priority)).
+
+**Declared GAPs.**
+
+- **The recognisers are pinned from reconstructed fixtures, not live captures**
+  (`packages/daemon/tests/fixtures/push/`). Okta's are built from the open-source sign-in widget. Microsoft's element
+  id comes from public reports. Google's and Duo's have no public markup and rest on the plan's description. Each
+  fixture says so. Replace them with scrubbed captures of real tenants.
+- **The browser profile is shared, the "scripted" gate is per session** (secrev-1244 L3). Every ferret's pages share
+  the machine's agent sign-ins, cookies and site storage. Gate 2 asks only whether THIS session ran a page script, so
+  another session's script on the same identity-provider origin could arm site storage a later page renders. The
+  recognisers read fixed provider elements, so this is not known to be exploitable, but the gate is not
+  machine-wide.
+- **A tenant host is anyone's.** `*.okta.com` and `*.duosecurity.com` are tenants that anyone can create. A sign-in
+  Ferretry doesn't know may show a number there, and the card names that host so the owner can judge it.
+- **No "denied" auto-close yet.** A sign-in the owner denies on the phone ends `timed-out` (or `moved-on`, if the
+  page leaves the challenge), not `refused`.
 
 While it waits, the ferret is told only the state and, once the sign-in moved on, `secondFactor: 'push'`
 (`PhoneApprovalAgentView`). It is **never told the number**.

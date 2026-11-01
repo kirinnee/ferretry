@@ -1,0 +1,30 @@
+<!-- PROVENANCE: reconstructed, NOT a live capture, and the least grounded fixture here: no public markup source was found. It follows the R2 plan's description (r2-plan §2.2: host accounts.google.com, a /challenge/ path, the sentence "tap N on your phone" in the main column, and an element whose whole text is that number). Google's real class names are obfuscated and change; the recogniser therefore pins only the sentence and a standalone number element, never a class. Scrubbed: a@example.com. Replace with a scrubbed live capture of a Google "Check your phone" number prompt. URL: https://accounts.google.com/v3/signin/challenge/dp?TL=example -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Sign in - Google Accounts</title>
+  </head>
+  <body>
+    <div class="main" role="main">
+      <div class="header">
+        <h1 id="headingText"><span>2-Step Verification</span></h1>
+        <div id="headingSubtext">
+          <span>To help keep your account safe, Google wants to make sure it's really you trying to sign in</span>
+        </div>
+        <div class="identity"><div data-email="a@example.com">a@example.com</div></div>
+      </div>
+      <div class="content">
+        <h2><span>Check your phone</span></h2>
+        <div class="number"><samp>63</samp></div>
+        <div>
+          Google sent a notification to your phone. Open the Google app, tap <strong>Yes</strong> on the prompt, then
+          tap 63 on your phone to verify it's you.
+        </div>
+        <div>
+          <label><input type="checkbox" checked="" /> Don't ask again on this device</label>
+        </div>
+        <div><button type="button">Resend it</button><button type="button">Try another way</button></div>
+      </div>
+    </div>
+  </body>
+</html>

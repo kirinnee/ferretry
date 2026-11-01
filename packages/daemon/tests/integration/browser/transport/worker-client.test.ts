@@ -629,6 +629,42 @@ describe('browser worker client — a secure copy', () => {
   });
 });
 
+describe('browser worker client — a push number', () => {
+  it('should carry a push-number read and believe only an answer in its exact shape, quoting none of a bad one', async () => {
+    // Arrange
+    const client = await connect();
+
+    // Act
+    const read = await client.pushNumberRead('p1');
+    const none = await client.pushNumberRead('none');
+    // A number "from the element the ferret pointed at" is no source at all any more (secrev-1244 H1): refused.
+    const failures = await Promise.all(
+      ['both', 'long', 'extra', 'source', 'pointed', 'unread', 'garbled', 'reason'].map(
+        async page => await rejection(client.pushNumberRead(page)),
+      ),
+    );
+
+    // Assert
+    should(read).deepEqual({
+      origin: 'https://login.microsoftonline.com',
+      navigationId: 'loader-1',
+      provider: 'microsoft',
+      number: { value: '42', from: 'microsoft', frameOrigin: 'https://login.microsoftonline.com' },
+    });
+    should(none).deepEqual({
+      origin: 'https://login.microsoftonline.com',
+      navigationId: 'loader-1',
+      provider: 'microsoft',
+      missing: 'none-found',
+    });
+    for (const failure of failures) {
+      should(failure.code).equal('upstream_failed');
+      should(failure.message).not.containEql('42');
+      should(failure.message).not.containEql('fake-');
+    }
+  });
+});
+
 describe('browser worker client — the input bridge', () => {
   it('should carry the four input calls and believe only answers in the protocol’s shape', async () => {
     // Arrange

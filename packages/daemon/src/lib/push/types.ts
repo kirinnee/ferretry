@@ -100,6 +100,11 @@ export interface PushDispatch {
   readonly payload: PushNotificationPayload;
   /** How urgently every device should be reached (`pushUrgencyFor`); absent is `normal`. */
   readonly urgency?: PushUrgency;
+  /**
+   * How long a push service may hold it undelivered, when it is about something that ends sooner than a high push's
+   * own limit (an approve-on-phone card's seconds left). Never lengthens one.
+   */
+  readonly ttlSeconds?: number;
 }
 
 export interface PushClock {

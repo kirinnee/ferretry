@@ -78,6 +78,8 @@ const AgendaNotificationRequestedRecordObjectSchema = z
     ping: z.literal(true).optional(),
     /** The push for a snoozed item that woke: the instant it woke. At most one per wake. */
     woke: z.string().min(1).optional(),
+    /** An approve-on-phone card's push: 0 at the raise, then one per new number read. At most one per number. */
+    phoneApproval: NonNegativeIntegerSchema.optional(),
     sent: SentNotificationSchema,
     enrolled: NonNegativeIntegerSchema,
   })

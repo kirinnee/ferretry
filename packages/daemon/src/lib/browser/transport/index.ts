@@ -16,6 +16,8 @@ export * from './page-script.ts';
 export * from './passkeys.ts';
 export * from './pointer.ts';
 export * from './pointer-acts.ts';
+export * from './push-number.ts';
+export * from './push-number-read.ts';
 export * from './viewer-contracts.ts';
 export * from './viewer-stream.ts';
 export * from './worker-protocol.ts';

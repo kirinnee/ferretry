@@ -7,6 +7,7 @@ import {
   agendaNotificationPath,
   agendaTitle,
   clipAtWord,
+  PHONE_APPROVAL_TITLE,
   type PushNotificationPayload,
   PushNotificationPayloadSchema,
 } from '@ferretry/protocol';
@@ -31,6 +32,11 @@ export interface NotificationIdentity {
   readonly stoppedAt?: string;
   /** The one push a snoozed item makes when it wakes, named by the instant it woke. */
   readonly woke?: string;
+  /**
+   * An approve-on-phone card's push (docs/input-requests.md, "Approve on your phone"): 0 at the raise, then one more
+   * for each new number the daemon read. One push per number, never a second for the same one.
+   */
+  readonly phoneApproval?: number;
   /** @deprecated retired; ledgers written before the buzz policy carry it. */
   readonly infoRequest?: number;
   /** @deprecated retired; ledgers written before the buzz policy carry it. */
@@ -57,6 +63,7 @@ export function notificationKey(identity: NotificationIdentity): string {
   if (identity.stoppedAt !== undefined) return `${KEY_PREFIX}${identity.sessionId}:stopped:${identity.stoppedAt}`;
   const base = `${KEY_PREFIX}${identity.sessionId}:${identity.agendaId}`;
   if (identity.woke !== undefined) return `${base}:woke:${identity.woke}`;
+  if (identity.phoneApproval !== undefined) return `${base}:phone-approval:${identity.phoneApproval}`;
   if (identity.ping === true) return `${base}:ping`;
   if (identity.deadline === true) return `${base}:deadline`;
   return `${base}${identity.infoRequest === undefined ? '' : `:info-${identity.infoRequest}`}${identity.surfaced === true ? ':surfaced' : ''}`;
@@ -125,6 +132,34 @@ export function wokeNotificationPayload(
     count: agendaBadgeCount(snapshot),
   }) as SessionNotificationPayload;
 }
+
+/**
+ * WHAT AN APPROVE-ON-PHONE PUSH SAYS: the daemon's own heading and the body `phoneApprovalWords` built from what the
+ * daemon observed (the number first when it read one, owner decision !A171). Never through `agendaNotificationTitle`:
+ * the heading is reserved for this push, and its tag is the approval's own, so a new number replaces the last one on
+ * the lock screen instead of piling up.
+ */
+export function phoneApprovalNotificationPayload(
+  sessionId: string,
+  item: AgendaItem,
+  approval: { readonly id: string; readonly body: string },
+  snapshot: AgendaSnapshot,
+): SessionNotificationPayload {
+  return PushNotificationPayloadSchema.parse({
+    version: 1,
+    eventKey: `phone-approval:${approval.id}`,
+    sessionId,
+    kind: 'attention',
+    title: PHONE_APPROVAL_TITLE,
+    body: clipAtWord(oneLine(approval.body), AGENDA_PUSH_BODY_LENGTH),
+    tag: phoneApprovalTag(approval.id),
+    url: agendaNotificationPath(sessionId, item.id),
+    count: agendaBadgeCount(snapshot),
+  }) as SessionNotificationPayload;
+}
+
+/** The tag every push of one approval shares (`pa-<id>`): the service worker renotifies under it. */
+export const phoneApprovalTag = (id: string): string => `pa-${id}`;
 
 /** The item a stop's push shows and opens: the one blocking now, else the oldest waiting. */
 export function stopShows(waiting: readonly [AgendaItem, ...AgendaItem[]]): AgendaItem {
@@ -230,6 +265,8 @@ function letterSkeleton(text: string): string {
 const RESERVED_ALERT_SKELETONS = [
   letterSkeleton(DEVICE_PAIRED_TITLE.split(' ').slice(1, 3).join(' ')),
   letterSkeleton(DEVICE_PAIRED_TITLE.split(' ').at(-1) ?? ''),
+  // A ferret's own push must never read as the daemon's approve-on-phone push, whose number the owner taps.
+  letterSkeleton(PHONE_APPROVAL_TITLE),
 ].filter(skeleton => skeleton !== '');
 
 /**
@@ -237,7 +274,8 @@ const RESERVED_ALERT_SKELETONS = [
  * boundary.
  *
  * A ferret chooses these words, so one that READS as the daemon's own new-device alert
- * (`DEVICE_PAIRED_TITLE`) — in any letters that look like it (`letterSkeleton`) — is labelled, as
+ * (`DEVICE_PAIRED_TITLE`) or its approve-on-phone push (`PHONE_APPROVAL_TITLE`) — in any letters that look like
+ * it (`letterSkeleton`) — is labelled, as
  * `Ferret “…”`, which no real alert ever opens with. Every other title is the words as written.
  */
 export function agendaNotificationTitle(title: string): string {

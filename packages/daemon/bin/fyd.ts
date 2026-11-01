@@ -60,6 +60,8 @@ import {
   CatalogMemberKeyIdSchema,
   CONFIG_ACCEPTED_FILE,
   type ConversionPreview,
+  DAEMON_FEATURES,
+  daemonFeatureList,
   type ConversionSummary as ConversionSummaryView,
   commandLabel,
   configFilePath,
@@ -689,6 +691,7 @@ import {
   type AgentCopyPort,
   AgentFiles,
   type AgentInputPort,
+  type AgentPhoneApprovalPort,
   type AgentPlanPort,
   AgentSendFailureNotifier,
   AgentToolService,
@@ -890,6 +893,10 @@ import {
   InputCardClosedObserver,
   InputLoginAdapter,
   InputLoginProbe,
+  PhoneApprovalAgendaAdapter,
+  PhoneApprovalAuditAdapter,
+  type PhoneApprovalPushPort,
+  PhoneApprovalService,
   type LoginFactSink,
   LoginObserver,
   type InputPasteRules,
@@ -6173,6 +6180,7 @@ function createAgentToolsSubsystem(input: {
   readonly audit: AuditLog;
   readonly policy: AgentControlPolicy;
   readonly input: AgentInputPort;
+  readonly phoneApprovals: AgentPhoneApprovalPort;
   readonly scrub: (sessionId: string, text: string) => string;
   readonly quarantinedUntil: (sessionId: string, names: readonly (string | undefined)[]) => number | undefined;
   readonly files: AgentFiles;
@@ -6217,6 +6225,7 @@ function createAgentToolsSubsystem(input: {
       files: input.files,
       audit: input.audit,
       input: input.input,
+      phoneApprovals: input.phoneApprovals,
       scrub: input.scrub,
       quarantinedUntil: input.quarantinedUntil,
       copy: input.copy,
@@ -6273,7 +6282,13 @@ function createInputRequestService(input: {
   readonly secretStore: SecretStoreDirectory;
   /** Where a sign-in's observed facts go: the account directory, under its store lock. */
   readonly loginFacts: LoginFactSink;
-}): { readonly service: InputRequestService; readonly observer: LoginObserver } {
+  /** An approve-on-phone card's buzz: at the raise and for each new number, inside the high-priority caps. */
+  readonly approvalPush: PhoneApprovalPushPort;
+}): {
+  readonly service: InputRequestService;
+  readonly observer: LoginObserver;
+  readonly approvals: PhoneApprovalService;
+} {
   const clock = { now: () => Date.now() };
   const terminalTarget = new TmuxInputTarget(
     input.tmux,
@@ -6376,7 +6391,28 @@ function createInputRequestService(input: {
     rules: input.rules,
     hostName: hostname(),
   });
-  return { service, observer };
+  // Approve on your phone (docs/input-requests.md): the number is read by the browser from the page only, and the card
+  // settles only on the daemon's own look at the page or terminal; the ferret's acts are the observer's to weigh.
+  const approvals = new PhoneApprovalService({
+    pages: { look: async (sessionId, key) => await pageTarget.pushNumber(sessionId, key) },
+    terminals: terminalTarget,
+    agenda: new PhoneApprovalAgendaAdapter(input.agenda),
+    push: input.approvalPush,
+    notifier: new InputAgentNotifierAdapter(
+      async (sessionId, key, message) => await input.agentReplies.add(sessionId, key, message),
+    ),
+    audit: new PhoneApprovalAuditAdapter(input.audit),
+    clock,
+    timers: { after: async milliseconds => await Bun.sleep(milliseconds) },
+    ids: () => `pa_${crypto.randomUUID().replaceAll('-', '').slice(0, 24)}`,
+    observer,
+    logins: input.logins,
+    facts: input.loginFacts,
+    hostName: hostname(),
+    // Offered only once the app that draws the card reports it (DAEMON_FEATURES.phoneApproval is not yet reported).
+    enabled: () => daemonFeatureList().includes(DAEMON_FEATURES.phoneApproval),
+  });
+  return { service, observer, approvals };
 }
 
 /** Who an agent is, from the session credential it presents — the one resolver every agent route uses. */
@@ -10430,7 +10466,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       setInterval(() => copyPlans.sweep(), INPUT_REQUEST_SWEEP_MS).unref();
       // An agent stuck at a password prompt asks the owner through an agenda card (docs/input-requests.md). The value
       // lives only in this process's memory and in the one tmux write; the journal and the audit log carry names and flags.
-      const { service: inputRequestService, observer: loginObserver } = createInputRequestService({
+      const {
+        service: inputRequestService,
+        observer: loginObserver,
+        approvals: phoneApprovals,
+      } = createInputRequestService({
         storage,
         terminals,
         tmux,
@@ -10454,8 +10494,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         rules: pasteRules,
         secretStore: secretDirectory,
         loginFacts: accountDirectory,
+        approvalPush: {
+          push: async (sessionId, agendaId, approval) => {
+            const listed = await agenda.list(sessionId).catch(() => undefined);
+            if (listed?.ok !== true) return;
+            const item = listed.value.items.find(each => each.id === agendaId);
+            if (item !== undefined) await notifications.phoneApproval(sessionId, item, listed.value, approval);
+          },
+        },
       });
       inputRequests = inputRequestService;
+      void asActivity(
+        activities,
+        'phone-approvals-restore',
+        async () => await phoneApprovals.restore(storage.listSessions().map(session => session.id)),
+      )();
       // A 2FA seed set up from an input card saves only to the account matched for it; one staged at the machine asks
       // the owner on the agenda (docs/secrets.md, "2FA keys").
       seedCards = inputRequestService;
@@ -10479,6 +10532,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             ...secureCopies.sessions(),
             ...copyPageRecords.sessions(),
             ...loginObserver.sessions(),
+            ...phoneApprovals.sessions(),
           ])) {
             const id = tryParseSessionId(sessionId);
             const state =
@@ -10488,6 +10542,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             if (state === undefined || (state.success && INPUT_ENDED_SESSION_STATUSES.has(state.data.status))) {
               secureCopies.drop(sessionId);
               loginObserver.forget(sessionId);
+              await phoneApprovals.sessionEnded(sessionId);
             }
           }
         }),
@@ -12096,6 +12151,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         browserLogin,
         browser: browserHost,
         inputRequests: inputRequestService,
+        phoneApprovals,
         secureCopy: {
           copies: { list: sessionId => secureCopies.list(sessionId) },
           rules: pasteRules,
@@ -12123,6 +12179,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           audit: auditLog,
           policy: agentControl,
           input: inputRequestService,
+          phoneApprovals,
           scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
           quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
           copy: {

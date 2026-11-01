@@ -55,6 +55,13 @@ import {
   InputSubmitModeSchema,
 } from './input-request.ts';
 import { LoginEntryIdSchema, LoginHintListSchema } from './login-entries.ts';
+import {
+  PHONE_APPROVAL_MAX_WAIT_SECONDS,
+  PHONE_APPROVAL_MIN_WAIT_SECONDS,
+  PhoneApprovalAgentViewSchema,
+  PhoneApprovalIdSchema,
+  PhoneApprovalRaiseSchema,
+} from './phone-approval.ts';
 import { LoginRecipeProposedSchema } from './login-recipes.ts';
 import { SecretNameSchema } from './secrets.ts';
 import {
@@ -238,6 +245,31 @@ const SaveAsSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_PATH_CHARS);
 /** Where in history `browser.navigate` goes instead of to a URL. */
 export const BrowserHistoryStepSchema = z.enum(['back', 'forward', 'reload']);
 
+/**
+ * A PUSH APPROVAL (docs/input-requests.md, "Approve on your phone"): `push: true` on a request tool asks the owner to
+ * approve a push on their phone, with nothing typed. It takes exactly the {@link PhoneApprovalRaiseSchema}'s hints and
+ * nothing a card could show: no prompt, label, sensitivity or field, and the object is strict, so one is refused.
+ */
+const PushApprovalShape = {
+  push: z.literal(true),
+  name: SurfaceKeySchema,
+  secretHint: PhoneApprovalRaiseSchema.shape.secretHint,
+  factor: PhoneApprovalRaiseSchema.shape.factor,
+  waitSeconds: z.number().int().min(PHONE_APPROVAL_MIN_WAIT_SECONDS).max(PHONE_APPROVAL_MAX_WAIT_SECONDS).optional(),
+};
+const TerminalPushApprovalCallSchema = z.strictObject({
+  tool: z.literal('terminal.request_input'),
+  ...PushApprovalShape,
+});
+/**
+ * On a page too, no element: the number is read only from a provider's own challenge view, never from where the ferret
+ * points, because the page may echo back text the ferret typed (secrev-1244 H1).
+ */
+const BrowserPushApprovalCallSchema = z.strictObject({
+  tool: z.literal('browser.request_input'),
+  ...PushApprovalShape,
+});
+
 const AgentToolCallBodySchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('terminal.list') }),
   z.strictObject({
@@ -277,47 +309,56 @@ const AgentToolCallBodySchema = z.discriminatedUnion('tool', [
     })
     .refine(call => (call.text === undefined) !== (call.exit === undefined), 'wait for text or for exit, not both'),
   z.strictObject({ tool: z.literal('terminal.close'), name: SurfaceKeySchema }),
-  z.strictObject({
-    tool: z.literal('terminal.request_input'),
-    name: SurfaceKeySchema,
-    /** What the owner is told the value is for: shown as "the agent says", never as fact. */
-    prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
-    sensitivity: InputSensitivitySchema,
-    submit: InputSubmitModeSchema.optional(),
-    expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
-    blocking: z.boolean().optional(),
-    chain: AgendaIdSchema.optional(),
-    /** The saved login the agent expects; a hint only, the daemon decides what matches. */
-    secretHint: LoginEntryIdSchema.optional(),
-    /** What the card calls the value ("Passphrase"); the daemon words one from the sensitivity when absent. */
-    label: InputFieldLabelSchema.optional(),
-  }),
-  z.strictObject({
-    tool: z.literal('browser.request_input'),
-    name: SurfaceKeySchema,
-    /** What the owner is told the values are for: shown as "the agent says", never as fact. */
-    prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
-    /** The values, in the order they are typed: each with its own sensitivity and its own element. */
-    fields: z
-      .array(BrowserInputFieldSchema)
-      .min(1)
-      .max(INPUT_MAX_FIELDS)
-      .refine(fields => new Set(fields.map(field => field.id)).size === fields.length, 'each field needs its own id'),
-    /** Press Enter in the last field after typing: offered to the owner by default. */
-    submit: InputSubmitModeSchema.optional(),
-    expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
-    blocking: z.boolean().optional(),
-    chain: AgendaIdSchema.optional(),
-    secretHint: LoginEntryIdSchema.optional(),
-  }),
+  z.discriminatedUnion('push', [
+    TerminalPushApprovalCallSchema,
+    z.strictObject({
+      tool: z.literal('terminal.request_input'),
+      /** Not a push approval: a value the owner types. */
+      push: z.literal(false).optional(),
+      name: SurfaceKeySchema,
+      /** What the owner is told the value is for: shown as "the agent says", never as fact. */
+      prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
+      sensitivity: InputSensitivitySchema,
+      submit: InputSubmitModeSchema.optional(),
+      expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
+      blocking: z.boolean().optional(),
+      chain: AgendaIdSchema.optional(),
+      /** The saved login the agent expects; a hint only, the daemon decides what matches. */
+      secretHint: LoginEntryIdSchema.optional(),
+      /** What the card calls the value ("Passphrase"); the daemon words one from the sensitivity when absent. */
+      label: InputFieldLabelSchema.optional(),
+    }),
+  ]),
+  z.discriminatedUnion('push', [
+    BrowserPushApprovalCallSchema,
+    z.strictObject({
+      tool: z.literal('browser.request_input'),
+      push: z.literal(false).optional(),
+      name: SurfaceKeySchema,
+      /** What the owner is told the values are for: shown as "the agent says", never as fact. */
+      prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
+      /** The values, in the order they are typed: each with its own sensitivity and its own element. */
+      fields: z
+        .array(BrowserInputFieldSchema)
+        .min(1)
+        .max(INPUT_MAX_FIELDS)
+        .refine(fields => new Set(fields.map(field => field.id)).size === fields.length, 'each field needs its own id'),
+      /** Press Enter in the last field after typing: offered to the owner by default. */
+      submit: InputSubmitModeSchema.optional(),
+      expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
+      blocking: z.boolean().optional(),
+      chain: AgendaIdSchema.optional(),
+      secretHint: LoginEntryIdSchema.optional(),
+    }),
+  ]),
   z.strictObject({
     tool: z.literal('input.wait'),
-    /** The card raised by `*.request_input`, written `!A7` or `A7`. */
+    /** The card raised by `*.request_input`, written `!A7` or `A7`; or a phone approval's `pa_` id. */
     id: z
       .string()
       .trim()
       .transform(value => value.replace(/^!/u, ''))
-      .pipe(AgendaIdSchema),
+      .pipe(z.union([AgendaIdSchema, PhoneApprovalIdSchema])),
     timeoutMs: z.number().int().min(100).max(AGENT_TOOL_MAX_WAIT_MS).optional(),
   }),
   z
@@ -806,6 +847,8 @@ export const AgentToolResultSchema = z.strictObject({
   surfaces: z.array(AgentSurfaceSchema).optional(),
   /** `*.request_input` and `input.wait` only: where the request stands. */
   input: InputAgentViewSchema.optional(),
+  /** `*.request_input` with `push`, and `input.wait` on its `pa_` id: where the approval stands, never its number. */
+  phoneApproval: PhoneApprovalAgentViewSchema.optional(),
   /** `secure.*` only: what the agent may know about its copies (docs/secure-copy.md), never a value. */
   copies: z
     .array(CopyMetaSchema)

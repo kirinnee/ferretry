@@ -73,6 +73,28 @@ export interface BrowserInputDocument {
   readonly host?: string;
 }
 
+/** A provider whose own sign-in page shows a push number (push-number.ts). */
+export type PushNumberProvider = 'okta' | 'microsoft' | 'google' | 'duo';
+
+/**
+ * One look at a page for the number a push approval shows (docs/input-requests.md, "Approve on your phone"), as the
+ * BROWSER answers it: where the page is (its origin and document, read before and after the look), which provider's
+ * challenge the document is when one's document test held, and the number when one was found. The daemon decides
+ * whether to believe it (the origin and the session's scripts); the browser only reads.
+ */
+export interface BrowserPushNumberRead {
+  /** `scheme://host[:port]` of the page, from the browser. */
+  readonly origin: string;
+  /** The document the look was made in, read before it; a different one after is `missing: 'changed'`. */
+  readonly navigationId: string;
+  /** The provider whose challenge this document is, when its document test held (with or without a number). */
+  readonly provider?: PushNumberProvider;
+  /** The number: 1 to 6 digits, from the provider's own view, visible and no one can type into, in the main frame. */
+  readonly number?: { readonly value: string; readonly from: PushNumberProvider; readonly frameOrigin: string };
+  /** Why there is no number: none recognised, or the page changed meanwhile. */
+  readonly missing?: 'none-found' | 'changed';
+}
+
 /** The most of each part of a page (text, snapshot, markup) the daemon looks at for a value after a sign-in. */
 export const BROWSER_INPUT_TEXT_MAX_CHARS = 400_000;
 
@@ -92,6 +114,11 @@ export interface BrowserInputFieldsPort {
     fieldIds: readonly string[],
     dummy: string,
   ): Promise<'hidden' | 'shown' | 'aborted'>;
+  /**
+   * The push number the page shows (`readPushNumber`): a provider's own challenge view only, never an element a ferret
+   * points at. Absent: this browser cannot read one, and no card shows one.
+   */
+  pushNumberRead?(pageId: string): Promise<BrowserPushNumberRead>;
   inputObserve(pageId: string, fields: readonly BrowserInputFieldPointer[]): Promise<BrowserInputObservation>;
   /**
    * The fields `expected` describes, found again in the page as it is now. Each field: the node the card showed, if
@@ -133,4 +160,5 @@ export const BROWSER_INPUT_WORKER_METHODS = {
   type: 'inputType',
   text: 'inputText',
   probe: 'inputProbe',
+  pushNumber: 'pushNumberRead',
 } as const;

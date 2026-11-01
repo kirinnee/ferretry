@@ -1,5 +1,5 @@
 import type { BrowserElementTarget, InputShot, InputTarget, InputTargetFacts } from '@ferretry/protocol';
-import type { BrowserInputFieldsPort } from '../browser/transport/input-contracts.ts';
+import type { BrowserInputFieldsPort, BrowserPushNumberRead } from '../browser/transport/input-contracts.ts';
 import type { InputFieldValue, InputTargetField, InputTargetPort, ObserveResult, TypeResult } from './ports.ts';
 
 /**
@@ -162,6 +162,24 @@ export class PageInputTarget implements InputTargetPort {
       );
     } catch {
       return 'aborted';
+    }
+  }
+
+  /**
+   * The push number the page shows (docs/input-requests.md, "Approve on your phone"), read by the browser in the page's
+   * own queue, with the page's id so a page opened again under the name is told apart. Only a provider's own challenge
+   * view is read: nothing the ferret points at. Nothing when the page is gone or this browser cannot read one.
+   */
+  async pushNumber(
+    sessionId: string,
+    key: string,
+  ): Promise<{ readonly pageId: string; readonly read: BrowserPushNumberRead } | undefined> {
+    try {
+      return await this.host.inputOnPage(sessionId, key, async (port, pageId) =>
+        port.pushNumberRead === undefined ? undefined : { pageId, read: await port.pushNumberRead(pageId) },
+      );
+    } catch {
+      return undefined;
     }
   }
 

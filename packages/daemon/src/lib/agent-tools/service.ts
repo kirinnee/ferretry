@@ -24,6 +24,8 @@ import {
   copyHandle,
   INPUT_SINGLE_FIELD_ID,
   type InputAgentView,
+  type PhoneApprovalAgentView,
+  PhoneApprovalRaiseSchema,
   type AccountList,
   accountHintsFor,
   accountHintSummary,
@@ -71,6 +73,7 @@ import type {
   AgentCopyPagesPort,
   AgentCopyPort,
   AgentInputPort,
+  AgentPhoneApprovalPort,
   AgentPlanPort,
   AgentToolCaller,
   AgentToolClock,
@@ -138,6 +141,8 @@ export interface AgentToolPorts {
   readonly sleep: (milliseconds: number) => Promise<void>;
   /** The owner's input requests; absent where none are wired, which refuses the two input tools. */
   readonly input?: AgentInputPort;
+  /** Phone approvals (`push: true` on a request tool); absent where none are wired, which refuses `push`. */
+  readonly phoneApprovals?: AgentPhoneApprovalPort;
   /** Masks the values the daemon just typed out of any screen text handed to the agent. */
   readonly scrub?: (sessionId: string, text: string) => string;
   /**
@@ -609,6 +614,14 @@ export class AgentToolService {
       case 'account.propose':
         return await this.loginPropose(caller, call, facts);
       case 'input.wait': {
+        if (call.id.startsWith('pa_')) {
+          const view = await this.approvalPort(caller).agentView(
+            sessionId,
+            call.id,
+            call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS,
+          );
+          return { summary: approvalSummary(view), phoneApproval: view };
+        }
         const input = this.inputPort(caller);
         const view = await input.agentView(sessionId, call.id, call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS);
         if (view.observed === undefined) return { summary: inputSummary(view), input: view };
@@ -712,6 +725,7 @@ export class AgentToolService {
       case 'terminal.wait':
         return await this.wait(caller, call, surface, reference);
       case 'terminal.request_input': {
+        if (call.push === true) return await this.approval(caller, call, surface, reference);
         if (caller.kind !== 'agent')
           throw new AgentToolError(
             'bad_request',
@@ -731,6 +745,7 @@ export class AgentToolService {
         };
       }
       case 'browser.request_input': {
+        if (call.push === true) return await this.approval(caller, call, surface, reference);
         if (caller.kind !== 'agent')
           throw new AgentToolError(
             'bad_request',
@@ -1455,6 +1470,38 @@ export class AgentToolService {
     return this.ports.copy;
   }
 
+  private approvalPort(caller: AgentToolCaller): AgentPhoneApprovalPort {
+    if (caller.kind !== 'agent')
+      throw new AgentToolError('bad_request', 'Only an agent raises or waits on a phone approval.');
+    if (this.ports.phoneApprovals === undefined)
+      throw new AgentToolError('unavailable', 'Approving a sign-in on the phone is not available on this machine.');
+    return this.ports.phoneApprovals;
+  }
+
+  /**
+   * A push approval (`push: true` on a request tool): the owner approves on their phone and nothing is typed. The
+   * call's hints are handed on as the raise schema takes them; the card is the daemon's own.
+   */
+  private async approval(
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly push: true }>,
+    surface: ResolvedSurface,
+    reference: string,
+  ): Promise<AgentToolResult> {
+    const port = this.approvalPort(caller);
+    const raise = PhoneApprovalRaiseSchema.parse({
+      target: { kind: call.tool === 'browser.request_input' ? 'browser' : 'terminal', key: surface.name ?? surface.id },
+      ...(call.secretHint === undefined ? {} : { secretHint: call.secretHint }),
+      ...(call.factor === undefined ? {} : { factor: call.factor }),
+      ...(call.waitSeconds === undefined ? {} : { waitSeconds: call.waitSeconds }),
+    });
+    const view = await port.raise(caller.sessionId, caller.kind === 'agent' ? caller.name : undefined, raise);
+    return {
+      summary: `Asked the owner to approve the sign-in on their phone (${view.id}) for ${reference}. Wait with input.wait on ${view.id}; never tell the owner a number.`,
+      phoneApproval: view,
+    };
+  }
+
   private inputPort(caller: AgentToolCaller): AgentInputPort {
     if (caller.kind !== 'agent')
       throw new AgentToolError('bad_request', 'Only an agent raises or waits on an input request.');
@@ -1846,9 +1893,11 @@ function callFacts(call: AgentToolCall): AuditDetail {
         ...(call.format === undefined ? {} : { format: call.format }),
       };
     case 'terminal.request_input':
-      return { sensitivity: call.sensitivity };
+      return call.push === true ? { push: true } : { sensitivity: call.sensitivity };
     case 'browser.request_input':
-      return { sensitivity: strongestSensitivity(call.fields), fields: call.fields.length };
+      return call.push === true
+        ? { push: true }
+        : { sensitivity: strongestSensitivity(call.fields), fields: call.fields.length };
     case 'input.wait':
       return { timeoutMs: call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS };
     case 'account.hint':
@@ -1957,7 +2006,10 @@ function callFacts(call: AgentToolCall): AuditDetail {
 
 /** What both request tools pass on unchanged: who presses Enter, how long the card lives, whether it pings, what it follows. */
 function raiseOptions(
-  call: Extract<AgentToolCall, { readonly tool: 'terminal.request_input' | 'browser.request_input' }>,
+  call: Exclude<
+    Extract<AgentToolCall, { readonly tool: 'terminal.request_input' | 'browser.request_input' }>,
+    { readonly push: true }
+  >,
 ) {
   return {
     submit: call.submit ?? ('offer-owner' as const),
@@ -1982,6 +2034,24 @@ function copiedSummary(copy: CopyMeta): string {
       ? ' The page is not pictured until it shows another document; its text reads come back masked.'
       : '';
   return `Sealed ${plural(copy.length, 'character')} from ${from} as ${copy.handle}, until ${copy.expiresAt}. You cannot read it; paste it by handle.${page}${seen}`;
+}
+
+/** Where a phone approval stands, in one sentence an agent can act on: never its number. */
+function approvalSummary(view: PhoneApprovalAgentView): string {
+  switch (view.state) {
+    case 'waiting':
+      return `${view.id} is still waiting for the owner to approve on their phone. Wait again with input.wait; do not act on that page or terminal meanwhile.`;
+    case 'moved-on':
+      return view.secondFactor === 'push'
+        ? `${view.id}: the sign-in went through after a push. Read the page or terminal and carry on.`
+        : `${view.id}: the sign-in moved on. Read the page or terminal to see where it is.`;
+    case 'timed-out':
+      return `${view.id} ran out of time without the sign-in moving on. Ask again only if the site sent a new push.`;
+    case 'refused':
+      return `${view.id}: the owner did not expect this sign-in and said "Not me". Stop signing in there and do not ask again.`;
+    case 'gone':
+      return `${view.id} ended: the page or terminal closed.`;
+  }
 }
 
 /** Where an input request stands, in one sentence an agent can act on. */

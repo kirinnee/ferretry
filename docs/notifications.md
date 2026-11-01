@@ -45,7 +45,10 @@ is, a notice without `--ping`, the owner's own moves — moves the Inbox badge a
 | 3   | A notice with **`--ping`**                                                                 | The notice's summary                                              | Once per notice                         |
 | 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**              | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
 
-An input card always counts as inside the window (row 2), so it pushes once the moment it is raised. A woken item already inside its deadline's window gets the deadline's push (row 2) instead, never both. A snoozed
+An input card always counts as inside the window (row 2), so it pushes once the moment it is raised. An
+**approve-on-phone card** ([input requests](input-requests.md#approve-on-your-phone)) is the one card that pushes
+outside these rows: once when it is raised, and once more for each new number the daemon reads off the page (at most
+four in all). It has no `neededBy`, so row 2 never pushes it a second time. A woken item already inside its deadline's window gets the deadline's push (row 2) instead, never both. A snoozed
 or replied item is parked ([agenda.md](agenda.md#parked-items)): it never counts toward a stop or a deadline while
 it sleeps.
 
@@ -68,7 +71,8 @@ never pushes twice — across a daemon restart too — and the next idle period 
 
 **Duplicate suppression is durable.** Each push is recorded in the notification ledger before it is
 sent, under a key naming its reason — `attention:<session>:stopped:<stoppedAt>`,
-`attention:<session>:<id>:deadline`, `attention:<session>:<id>:ping` — so a repeat of the same stop,
+`attention:<session>:<id>:deadline`, `attention:<session>:<id>:ping`, `agenda:<session>:<id>:phone-approval:<n>`
+(`n` is 0 at the raise, then one per new number) — so a repeat of the same stop,
 item or notice is no second push. Keys of the retired pushes (`:info-N`, `:surfaced`) still read, so an
 old ledger loads.
 
@@ -91,16 +95,29 @@ Read at start; a change needs a restart.
   ask (`agendaTitle`). The body is at most 120 characters, trimmed with `…`. A push never carries the
   context, the options or the recommendation.
 
-A title is an agent's own words, so it must never read as the daemon's new-device alert title. Only a name
-that reads as that alert is labelled, as `Ferret “…”`: any spelling, case or punctuation, and Cyrillic, Greek
-and accented look-alikes (`agendaNotificationTitle`). Every other title is as written.
+- **An approve-on-phone card:** the daemon's own title, "Approve on your phone", and a body built by
+  `phoneApprovalWords` from what the daemon observed. By owner decision !A171 the body leads with the number
+  the daemon read off the page: "Tap 42 on your phone: ClickUp · a@gmail.com", or "Enter 123 in Duo Mobile: …".
+  With no number it ends "— open for the number" ("— check the terminal" for a terminal). The number only ever comes
+  from the provider's own challenge view, never from an element a ferret points at. A sign-in
+  Ferretry doesn't know is never named by its host here: the ferret chose that host by navigating.
+
+A title is an agent's own words, so it must never read as one of the daemon's own: the new-device alert or the
+approve-on-phone push. Only a name that reads as one of those is labelled, as `Ferret “…”`: any spelling, case or
+punctuation, and Cyrillic, Greek and accented look-alikes (`agendaNotificationTitle`). Every other title is as
+written.
 
 ### High priority
 
 The owner asked for it: a push about a **one-time code** waiting on an input card (sensitivity `code`,
 [input requests](input-requests.md#one-time-codes-code)) is high priority: only a push that SHOWS the code card, its own
 push at raise or a stop whose shown item is the card (a code card waiting behind another item does not make that item loud). One rule decides it, `pushUrgencyFor` (`packages/protocol/src/lib/push.ts`):
-`one-time-code` is high, everything else normal. The approve-on-phone card joins it by adding its subject there.
+`one-time-code` and `approve-on-phone` are high, everything else normal.
+
+An **approve-on-phone push** differs from a code card's in three ways: its tag is the approval's own (`pa-<id>`) at
+every priority, so a new number replaces the last one on the lock screen; its TTL is the seconds the card has left,
+never more than 600; and it pushes once per new number, not once per card. It spends the same per-ferret and
+daemon-wide high slots as a code card.
 
 What a high push does, and who honours it:
 
@@ -277,6 +294,7 @@ recorded push errored or reached no device, plus a `notification log` note for s
 | A ferret stops on the owner                      | daemon `AgendaBuzz` → `NotificationService` | **The** push. One per stop, grouped. See above.                                                                        |
 | An item's `neededBy` comes near                  | daemon `AgendaBuzz`                         | **One push** per item.                                                                                                 |
 | A notice with `--ping`                           | `fy notify --ping`                          | **One push** per notice.                                                                                               |
+| A sign-in to approve on the phone                | daemon `PhoneApprovalService`               | **One push** at the raise and one per new number read (at most four), high inside the caps.                            |
 | An item is created, edited, surfaced or answered | daemon                                      | **Never pushed.** Inbox badge only. (The per-turn grouped push, the surfaced push and the more-info push are retired.) |
 | A notice without `--ping`                        | `fy notify`, legacy `POST …/notify`         | **Never pushed.** Inbox badge only.                                                                                    |
 | Enrolment confirmation                           | daemon `PushService.register`               | Kept. One push, only to the browser that just enrolled.                                                                |

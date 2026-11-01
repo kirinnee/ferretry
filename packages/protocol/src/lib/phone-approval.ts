@@ -17,7 +17,8 @@ import { SurfaceKeySchema } from './surface-names.ts';
  * NOTHING OF THE FERRET'S IS SHOWN. A ferret names where (a page or a terminal), optionally which element it thinks
  * shows the number, which account and which push key; it cannot say anything the owner reads. The account, the site,
  * the time and the number all come from the daemon: the number is read by the browser from the page, only on an exact
- * sign-in or identity-provider origin, in a document no ferret has scripted. A terminal never shows a number, because
+ * sign-in or identity-provider origin, in a document no ferret has scripted, from a provider's own challenge view: a
+ * daemon never reads the element a ferret names (secrev-1244 H1). A terminal never shows a number, because
  * a ferret can print any text into its own pane. And the card settles only on the daemon's own observation that the
  * sign-in moved on, never on anyone's say-so: there is no "I approved" button and no route that sets it.
  */
@@ -41,7 +42,11 @@ export const PhoneApprovalRaiseSchema = z
       z.strictObject({ kind: z.literal('browser'), key: SurfaceKeySchema }),
       z.strictObject({ kind: z.literal('terminal'), key: SurfaceKeySchema }),
     ]),
-    /** The element the ferret thinks shows the number: WHERE TO LOOK only. The browser reads it, never the ferret. */
+    /**
+     * The element the ferret thinks shows the number. KEPT ONLY FOR THE WIRE, AND IGNORED: the daemon reads a number from
+     * a provider's own challenge view and never from where a ferret points, because a page may echo back text the ferret
+     * typed (Okta shows the username it was given). The agent tools no longer send it.
+     */
     element: InputFieldElementSchema.optional(),
     /** The account it expects (a handle, or a sign-in): orders only among the sign-ins the daemon matched. */
     secretHint: z.union([LoginEntryIdSchema, SignInIdSchema]).optional(),
@@ -60,7 +65,10 @@ export const PhoneApprovalRaiseSchema = z
   });
 export type PhoneApprovalRaise = z.infer<typeof PhoneApprovalRaiseSchema>;
 
-/** Where a number the daemon read came from: a provider's own sign-in page, or the element the ferret pointed at. */
+/**
+ * Where a number the daemon read came from: a provider's own sign-in page. `pointed` (the element a ferret pointed at)
+ * stays in the list for the wire only: no daemon produces it any more (secrev-1244 H1), and the words still mark one.
+ */
 export const PHONE_APPROVAL_NUMBER_SOURCES = ['okta', 'microsoft', 'google', 'duo', 'pointed'] as const;
 
 /**
@@ -105,7 +113,8 @@ export type PhoneApprovalNumber = z.infer<typeof PhoneApprovalNumberSchema>;
 /**
  * Why the card shows no number: the page had none Ferretry recognises; a ferret scripted the page this session; the
  * page is not a sign-in or identity-provider origin; the pointed element can be typed into; the page changed while it
- * was read; or it is a terminal, which never shows one.
+ * was read; it is a terminal, which never shows one; or the page is a new document since the ferret asked and the
+ * ferret acted on its pages meanwhile (`steered`), so it may have restarted the challenge to fish for a number.
  */
 export const PhoneApprovalNumberMissingSchema = z.enum([
   'none-found',
@@ -114,6 +123,7 @@ export const PhoneApprovalNumberMissingSchema = z.enum([
   'editable',
   'changed',
   'terminal',
+  'steered',
 ]);
 export type PhoneApprovalNumberMissing = z.infer<typeof PhoneApprovalNumberMissingSchema>;
 
@@ -186,6 +196,12 @@ export const PhoneApprovalSchema = z
   });
 export type PhoneApproval = z.infer<typeof PhoneApprovalSchema>;
 
+/** `GET /v1/phone-approvals`: the approvals still waiting, oldest first. Owner only. */
+export const PhoneApprovalListSchema = z.strictObject({
+  approvals: z.array(PhoneApprovalSchema).max(64).readonly(),
+});
+export type PhoneApprovalList = z.infer<typeof PhoneApprovalListSchema>;
+
 /**
  * WHAT THE FERRET IS TOLD while it waits (`input_wait` with a `pa_` id): where the approval stands and, once the
  * sign-in moved on, that it was a push. NEVER THE NUMBER, the account the daemon matched or anything else on the card.
@@ -212,15 +228,30 @@ export interface PhoneApprovalWords {
   readonly where: string;
   /** What to do with the number: "Tap 42 on your phone", "Enter 123 in Duo Mobile". Absent: no number. */
   readonly numberLine?: string;
+  /**
+   * Where a number from the element the ferret pointed at came from, said on the card under the number: the browser
+   * read it on a sign-in page, but the ferret chose which element. Absent for a provider's own page, and with no number.
+   */
+  readonly numberSource?: string;
   /** Why there is no number, and what to do instead. Absent: there is one. */
   readonly noNumber?: string;
   /** The line every card ends with. */
   readonly warning: string;
   /** The agenda item's subject: what an app that does not know these cards shows. Never the number. */
   readonly subject: string;
-  /** The push's body: the number first when there is one (owner decision !A171), else where to look for it. */
+  /**
+   * The push's body: the number first when there is one (owner decision !A171), else where to look for it. A sign-in
+   * Ferretry doesn't know is never named by its host here: the ferret chose that host by navigating, and a lock screen
+   * shows it with no card around it.
+   */
   readonly push: string;
 }
+
+/** What a card says under a number read from the element the ferret pointed at. */
+export const PHONE_APPROVAL_POINTED_SOURCE = 'Read from the element the ferret pointed at, on this sign-in page.';
+
+/** The heading of every approve-on-phone card and push: no ferret's push may read as it (`agendaNotificationTitle`). */
+export const PHONE_APPROVAL_TITLE = 'Approve on your phone';
 
 /** The line every approve-on-phone card carries. */
 export const PHONE_APPROVAL_WARNING = 'Never use a number a ferret tells you.';
@@ -245,6 +276,7 @@ const NO_NUMBER_WORDS: Readonly<Record<PhoneApprovalNumberMissing, string>> = {
   editable: "The number the ferret pointed at can be typed into, so Ferretry won't read it.",
   changed: 'The page changed while Ferretry read it: it will look again.',
   terminal: 'Check the terminal: Ferretry never reads a number from one.',
+  steered: "The ferret acted on the page after asking, so Ferretry won't read a number from the page it reached.",
 };
 
 /**
@@ -259,12 +291,13 @@ export function phoneApprovalWords(
   const terminal = approval.surface === 'terminal';
   const place = terminal ? 'in a terminal' : host === undefined ? 'on a page' : `on ${host}`;
   const account = approval.account;
-  const who =
+  const known =
     account === undefined
-      ? `a sign-in Ferretry doesn't know, ${place}`
+      ? undefined
       : approval.username === undefined
         ? account.label
         : `${account.label} · ${approval.username}`;
+  const who = known ?? `a sign-in Ferretry doesn't know, ${place}`;
   const where = terminal
     ? 'in a terminal'
     : approval.via !== undefined && account !== undefined
@@ -281,16 +314,20 @@ export function phoneApprovalWords(
     number !== undefined
       ? undefined
       : NO_NUMBER_WORDS[terminal ? 'terminal' : (approval.numberMissing ?? 'none-found')];
+  const pointed = number?.from === 'pointed';
   const subject = cut(`Approve on your phone: ${who}`, MAX_AGENDA_SUBJECT_LENGTH);
+  // The push names a sign-in it doesn't know without its host (see `push`), and says when the ferret chose the element.
+  const pushWho = known ?? "a sign-in Ferretry doesn't know";
   const push =
     numberLine !== undefined
-      ? `${numberLine}: ${who}`
-      : `Approve on your phone: ${who} — ${terminal ? 'check the terminal' : 'open for the number'}`;
+      ? `${numberLine}${pointed ? ' (read where the ferret pointed)' : ''}: ${pushWho}`
+      : `Approve on your phone: ${pushWho} — ${terminal ? 'check the terminal' : 'open for the number'}`;
   return {
-    title: 'Approve on your phone',
+    title: PHONE_APPROVAL_TITLE,
     who,
     where,
     ...(numberLine === undefined ? {} : { numberLine }),
+    ...(pointed ? { numberSource: PHONE_APPROVAL_POINTED_SOURCE } : {}),
     ...(noNumber === undefined ? {} : { noNumber }),
     warning: PHONE_APPROVAL_WARNING,
     subject,

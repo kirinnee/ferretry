@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { z } from 'zod';
 import {
+  AgendaActionRequestSchema,
   AgendaItemSchema,
   PHONE_APPROVAL_WARNING,
   type PhoneApproval,
@@ -219,6 +220,30 @@ describe('the words of an approve-on-phone card', () => {
     expect(words.subject).toBe("Approve on your phone: a sign-in Ferretry doesn't know, on login.microsoftonline.com");
   });
 
+  it('should keep a host the ferret navigated to out of the push, which a lock screen shows bare', () => {
+    // A sign-in Ferretry does not know: the card names the host, the push does not (secrev-r2-1, L4).
+    const words = phoneApprovalWords({ surface: 'browser', origin: 'https://tap-17-now.okta.com' });
+    expect(words.who).toBe("a sign-in Ferretry doesn't know, on tap-17-now.okta.com");
+    expect(words.push).toBe("Approve on your phone: a sign-in Ferretry doesn't know — open for the number");
+    const withNumber = phoneApprovalWords({
+      surface: 'browser',
+      origin: 'https://login.microsoftonline.com',
+      number: { value: '17', from: 'microsoft', direction: 'tap-on-phone', readAt: AT },
+    });
+    expect(withNumber.push).toBe("Tap 17 on your phone: a sign-in Ferretry doesn't know");
+  });
+
+  it('should say when a number was read from the element the ferret pointed at, on the card and in the push', () => {
+    const words = phoneApprovalWords({
+      ...APPROVAL,
+      number: { value: '7', from: 'pointed', direction: 'tap-on-phone', readAt: AT },
+    });
+    expect(words.numberLine).toBe('Tap 7 on your phone');
+    expect(words.numberSource).toBe('Read from the element the ferret pointed at, on this sign-in page.');
+    expect(words.push).toBe('Tap 7 on your phone (read where the ferret pointed): ClickUp · a@gmail.com');
+    expect(phoneApprovalWords(APPROVAL).numberSource).toBeUndefined();
+  });
+
   it('should name no host for an origin that is not one, rather than fail', () => {
     expect(phoneApprovalWords({ surface: 'browser', origin: 'not an origin' }).where).toBe('a page');
     expect(phoneApprovalWords({ surface: 'browser' }).who).toBe("a sign-in Ferretry doesn't know, on a page");
@@ -262,5 +287,19 @@ describe('the agenda card that presents an approval', () => {
     expect(Object.keys(parsed)).not.toContain('someRefFromTheFuture');
     expect(parsed.kind).toBe('info');
     expect(parsed.subject).toBe('Approve on your phone: ClickUp · a@gmail.com');
+  });
+});
+
+describe('who may raise an approve card', () => {
+  it('should refuse the ref on a ferret’s own agenda item, so only the daemon’s card draws as one (secrev-r2-1, I5)', () => {
+    const add = {
+      action: 'add',
+      kind: 'info',
+      subject: 'Approve on your phone: ClickUp · a@gmail.com',
+      why: 'Tap 42 on your phone.',
+      howToResolve: 'Tap 42.',
+    };
+    expect(AgendaActionRequestSchema.safeParse(add).success).toBe(true);
+    expect(AgendaActionRequestSchema.safeParse({ ...add, phoneApproval: { id: ID } }).success).toBe(false);
   });
 });

@@ -266,3 +266,51 @@ describe('the router and the dummy probe', () => {
     should(await new InputTargetRouter(terminal).probe('s1', APP, FACTS_PAGE, ['password'])).equal('aborted');
   });
 });
+
+describe('PageInputTarget.pushNumber', () => {
+  const READ = { origin: 'https://company.okta.com', navigationId: 'loader-1', provider: 'okta' } as const;
+  const pages = (port: Partial<BrowserInputFieldsPort>, refuse = false): PageInputHost => ({
+    inputOnPage: async (_session, _key, work) => {
+      if (refuse) throw new Error('no such page in this session');
+      return await work(port as BrowserInputFieldsPort, 'page-7');
+    },
+  });
+
+  it('should read the number in the page’s own queue, with the page’s id', async () => {
+    // Arrange
+    const asked: unknown[] = [];
+    const target = new PageInputTarget(
+      pages({
+        pushNumberRead: async pageId => {
+          asked.push(pageId);
+          return READ;
+        },
+      }),
+    );
+
+    // Act
+    const read = await target.pushNumber('s1', 'app');
+
+    // Assert
+    should(read).eql({ pageId: 'page-7', read: READ });
+    should(asked).eql(['page-7']);
+  });
+
+  it('should answer nothing from a browser that cannot read one, a page that is not the session’s, or a failed read', async () => {
+    // Arrange
+    const unable = new PageInputTarget(pages({}));
+    const missing = new PageInputTarget(pages({ pushNumberRead: async () => READ }, true));
+    const failing = new PageInputTarget(
+      pages({
+        pushNumberRead: async () => {
+          throw new Error('the worker went away');
+        },
+      }),
+    );
+
+    // Act + Assert
+    should(await unable.pushNumber('s1', 'app')).be.undefined();
+    should(await missing.pushNumber('s1', 'app')).be.undefined();
+    should(await failing.pushNumber('s1', 'app')).be.undefined();
+  });
+});

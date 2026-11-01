@@ -303,6 +303,22 @@ describe('PushService.notify', () => {
     should(transport.sent[1]).not.have.property('urgency');
     should(transport.sent[1]).not.have.property('ttlSeconds');
   });
+
+  it('should hold a push no longer than what it is about lives, and never longer than a high push may wait', async () => {
+    // Arrange
+    const { service, transport } = world({ records: [record()] });
+
+    // Act — an approve-on-phone card with 90 s left, one with an hour (capped), and a normal one with 90 s left.
+    await service.notify({ payload: { ...agenda, urgency: 'high' }, urgency: 'high', ttlSeconds: 90 });
+    await service.notify({ payload: { ...agenda, urgency: 'high' }, urgency: 'high', ttlSeconds: 3_600 });
+    await service.notify({ payload: agenda, ttlSeconds: 90 });
+
+    // Assert
+    should(transport.sent[0]).containDeep({ urgency: 'high', ttlSeconds: 90 });
+    should(transport.sent[1]).containDeep({ urgency: 'high', ttlSeconds: 600 });
+    should(transport.sent[2]).containDeep({ ttlSeconds: 90 });
+    should(transport.sent[2]).not.have.property('urgency');
+  });
   it('should address only the enrolments it was asked to', async () => {
     const one = record();
     const two = record({ id: 'push-77777777-7777-4777-8777-777777777777' });
