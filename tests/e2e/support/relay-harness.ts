@@ -591,6 +591,8 @@ const SPA_ROUTES: readonly (readonly [RegExp, string])[] = [
   [/^\/d\/.*$/u, 'app/index.html'],
   [/^\/setup$/u, 'app/index.html'],
   [/^\/pair(\/.*)?$/u, 'app/index.html'],
+  [/^\/join$/u, 'app/index.html'],
+  [/^\/shared$/u, 'app/index.html'],
 ];
 
 async function contentSecurityPolicy(): Promise<string> {

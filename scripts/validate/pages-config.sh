@@ -136,6 +136,8 @@ rg -q '^/d/\* /app/index\.html 200$' "${redirects}"
 rg -q '^/setup /app/index\.html 200$' "${redirects}"
 rg -q '^/pair /app/index\.html 200$' "${redirects}"
 rg -q '^/pair/\* /app/index\.html 200$' "${redirects}"
+rg -q '^/join /app/index\.html 200$' "${redirects}"
+rg -q '^/shared /app/index\.html 200$' "${redirects}"
 tail -n 1 "${redirects}" | grep -qx '/\* /index.html 200'
 
 # The pairing URL the daemon mints — and so the QR `fy pair` draws from it — addresses this Pages
