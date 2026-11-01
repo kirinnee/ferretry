@@ -80,6 +80,62 @@ describe('transcriptEntriesFromLog', () => {
     expect(entries[1]).not.toHaveProperty('at');
   });
 
+  test('dates a message the agent drained from its queue on its own day, though it is written after later records', () => {
+    // The real shape: a note queued while the agent ran a tool carries the time it was QUEUED, so it is
+    // written after records a few seconds later than it. That step is not a midnight.
+    const now = Date.parse('2026-11-01T00:33:13.000Z');
+    const entries = transcriptEntriesFromLog(
+      [
+        '[00:23:36] assistant/message: The claim card is now closed.',
+        '[00:33:01] user/message: block it on the cal thanks. 6pm to 11pm',
+        '[00:33:06] assistant/tool-call: Bash({"command":"date"})',
+        '[00:33:06] tool/tool-result: Sat 2026-10-31 17:33 PDT',
+        '[00:33:01] user/message: the note the agent was sent while busy',
+        '[00:33:10] assistant/message: On it.',
+      ].join('\n'),
+      now,
+    );
+    expect(entries.map(entry => entry.tools?.[0]?.ts ?? new Date(entry.at ?? 0).toISOString())).toEqual([
+      '2026-11-01T00:23:36.000Z',
+      '2026-11-01T00:33:01.000Z',
+      '2026-11-01T00:33:06.000Z',
+      '2026-11-01T00:33:01.000Z',
+      '2026-11-01T00:33:10.000Z',
+    ]);
+  });
+
+  test('reads a record a little later than the one after it as out of order, even across midnight', () => {
+    const now = Date.parse('2026-11-01T00:05:00.000Z');
+    const entries = transcriptEntriesFromLog(
+      [
+        '[23:59:40] user/message: before midnight',
+        '[00:00:03] assistant/message: written first, just after midnight',
+        '[23:59:58] user/message: queued just before midnight, drained after',
+        '[00:01:00] assistant/message: after midnight',
+      ].join('\n'),
+      now,
+    );
+    expect(entries.map(entry => (entry.at === undefined ? undefined : new Date(entry.at).toISOString()))).toEqual([
+      '2026-10-31T23:59:40.000Z',
+      '2026-11-01T00:00:03.000Z',
+      '2026-10-31T23:59:58.000Z',
+      '2026-11-01T00:01:00.000Z',
+    ]);
+  });
+
+  test('still reads a long quiet night between two records as a midnight', () => {
+    const entries = transcriptEntriesFromLog(
+      ['[20:00:00] user/message: good night', '[09:00:00] user/message: good morning'].join('\n'),
+      NOW,
+    );
+    expect(entries.map(entry => entry.at)).toEqual([Date.UTC(2026, 9, 17, 20, 0, 0), Date.UTC(2026, 9, 18, 9, 0, 0)]);
+  });
+
+  test('dates a record a few seconds after a browser clock that runs behind the daemon today, not yesterday', () => {
+    const [entry] = transcriptEntriesFromLog('[12:00:05] user/message: just sent', NOW);
+    expect(entry?.at).toBe(Date.UTC(2026, 9, 18, 12, 0, 5));
+  });
+
   test('leaves every bookkeeping record out of the conversation entirely', () => {
     const entries = transcriptEntriesFromLog(
       [
