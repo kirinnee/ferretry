@@ -376,6 +376,8 @@ export const BoardTaskEventSchema = z.discriminatedUnion('type', [
     type: z.literal('assigned'),
     from: SessionIdSchema.nullable(),
     to: SessionIdSchema.nullable(),
+    /** Present when the card's assignee handed it down to one of its own descendants; the actor is that assignee. */
+    handedDown: z.literal(true).optional(),
   }),
   z.object({
     ...EventBase,

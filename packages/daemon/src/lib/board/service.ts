@@ -37,7 +37,7 @@ import {
 } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
 import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
-import { type BoardCaller, type BoardStanding, effectiveAssignee, standingOf } from './authority.ts';
+import { type BoardCaller, type BoardStanding, effectiveAssignee, mayHandDown, standingOf } from './authority.ts';
 import {
   applyAction,
   type CardContext,
@@ -388,7 +388,9 @@ export class BoardService {
         `${formatTaskRef(card)} is dropped; reopen it before you hand it to a sub-ferret`,
       );
     }
-    requireStanding('assign', await this.standing({ kind: 'ferret', sessionId: lead }, card), card);
+    // The assignee may hand it down; the child does not exist yet, and `handOver` proves it is the lead's own.
+    const standing = await this.standing({ kind: 'ferret', sessionId: lead }, card);
+    if (standing !== 'assignee') requireStanding('assign', standing, card);
     return card;
   }
 
@@ -407,7 +409,11 @@ export class BoardService {
           `${formatTaskRef(card)} is dropped; reopen it before you hand it to a sub-ferret`,
         );
       }
-      const applied = applyAction(card, { action: 'assign', assignee: session }, await this.context(card, caller));
+      const applied = applyAction(
+        card,
+        { action: 'assign', assignee: session },
+        await this.context(card, caller, session),
+      );
       const task = requireValidCard(applied.task as BoardTask);
       return { task, result: task };
     });
@@ -453,7 +459,10 @@ export class BoardService {
 
   /** One action on one card. */
   async act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<BoardTaskResponse> {
-    if (!subFerretMay(request)) await this.refuseSubFerret(caller, subFerretDoing(request));
+    // An assign is judged inside the write: a sub-ferret that is the card's assignee may hand it down (`decide`).
+    if (!subFerretMay(request) && request.action !== 'assign') {
+      await this.refuseSubFerret(caller, subFerretDoing(request));
+    }
     if (request.action === 'focus' && caller.kind !== 'ferret') {
       throw new BoardError('invalid', 'focus is for a ferret: it names the card its session works on');
     }
@@ -639,7 +648,10 @@ export class BoardService {
     if (request.action === 'trigger' && caller.kind === 'ferret' && caller.sessionId !== effectiveAssignee(card)) {
       await this.refuseSubFerret(caller, 'report events on a card they are not doing');
     }
-    const context = await this.context(card, caller);
+    const context = await this.context(card, caller, request.action === 'assign' ? request.assignee : undefined);
+    if (request.action === 'assign' && context.handsDown !== true) {
+      await this.refuseSubFerret(caller, subFerretDoing(request));
+    }
     const target =
       request.action === 'refile' && request.projectId !== card.projectId
         ? await this.ports.lanes.laneSet(request.projectId)
@@ -698,7 +710,11 @@ export class BoardService {
     return found === undefined ? null : await this.standing(caller, found);
   }
 
-  private async context(card: BoardTask, caller: BoardCaller) {
+  /**
+   * `assignee` is the session an assign would name: when the caller is the card's assignee and that session is one of
+   * its own descendants, the context says the card is handed down.
+   */
+  private async context(card: BoardTask, caller: BoardCaller, assignee?: string | null) {
     const snapshot = await this.ports.store.read();
     const index = new BoardIndex(snapshot.cards, this.requireMachine());
     const laneSet = await this.requireLaneSet(card.projectId);
@@ -706,12 +722,19 @@ export class BoardService {
     const laneSets = await this.laneSetsOf(
       projects.filter((project): project is BoardProjectId => project !== undefined),
     );
+    const standing = await this.standing(caller, card);
+    const handsDown =
+      assignee !== undefined &&
+      assignee !== null &&
+      standing === 'assignee' &&
+      mayHandDown(caller, standing, assignee, await ancestorsOf(assignee, this.ports.parents));
     return {
       now: this.ports.clock.now(),
       runningVersion: this.ports.runningVersion?.() ?? null,
       actor: actorOf(caller),
       ...viaOf(caller),
-      standing: await this.standing(caller, card),
+      standing,
+      ...(handsDown ? { handsDown } : {}),
       laneSet,
       index,
       laneSets: new Map([...laneSets, [card.projectId, laneSet]]),
