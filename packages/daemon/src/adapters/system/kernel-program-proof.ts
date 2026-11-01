@@ -1,8 +1,11 @@
-import { readdir, readFile, readlink, stat } from 'node:fs/promises';
+import { lstat, readdir, readFile, readlink, stat } from 'node:fs/promises';
+import { homedir, userInfo } from 'node:os';
 import { basename } from 'node:path';
-import type { ProgramProofPort, ProgramRunner, ProvenProgram } from '../../lib/input-requests/index.ts';
+import type { ProfileProgram, ProgramProofPort, ProgramRunner, ProvenProgram } from '../../lib/input-requests/index.ts';
 import { GETPASS_PROGRAMS, parseUids } from '../../lib/input-requests/index.ts';
+import { accountName } from '../terminal/system-login-shell.ts';
 import { ExecutableCodePrograms } from './executable-code-programs.ts';
+import { profileChainOf, profileProgramOf } from './profile-program.ts';
 import { replaceableBy } from './replaceable-file.ts';
 
 /** What the kernel says about processes and a TTY, one reading each. `undefined` (or a throw) is "cannot tell". */
@@ -18,6 +21,8 @@ export interface ProcessHost {
   executable(pid: number): Promise<string | undefined>;
   /** Whether a process whose controlling terminal is not `ttyPath` holds it open. */
   heldElsewhere(ttyPath: string): Promise<boolean | undefined>;
+  /** The program a process runs, proved only through the owner's own profile (profile-program.ts). */
+  profile?(pid: number): Promise<ProfileProgram | undefined>;
 }
 
 /**
@@ -79,6 +84,17 @@ export class KernelProgramProof implements ProgramProofPort {
     if (uids.real === 0) return undefined;
     const name = await this.host.executable(pid).catch(() => undefined);
     return name !== undefined && NAME.test(name) ? { name, setuidRoot: false } : undefined;
+  }
+
+  /**
+   * The program a process runs, proved through the owner's own Nix profile ONLY. Never for a process running setuid or
+   * as root: those are proved, or not, by {@link prove}.
+   */
+  async proveProfile(pid: number): Promise<ProfileProgram | undefined> {
+    if (!Number.isSafeInteger(pid) || pid <= 0 || this.host.profile === undefined) return undefined;
+    const uids = await this.host.uids(pid).catch(() => undefined);
+    if (uids === undefined || uids.real === 0 || uids.effective !== uids.real) return undefined;
+    return await this.host.profile(pid).catch(() => undefined);
   }
 
   async heldElsewhere(ttyPath: string): Promise<boolean | undefined> {
@@ -270,6 +286,14 @@ export function linuxHost(account: number | undefined): ProcessHost {
     name: async pid => (await readFile(`/proc/${String(pid)}/comm`, 'utf8')).replace(/\n$/u, ''),
     executable: async pid => await executables.provenRootProgram(pid, ANY_NAME),
     heldElsewhere: async ttyPath => await strangerHolds(PROC_FILES, ttyPath, account, process.pid),
+    profile: async pid => {
+      const chain = profileChainOf(
+        homedir(),
+        accountName(() => userInfo().username),
+      );
+      const runs = await readlink(`/proc/${String(pid)}/exe`);
+      return chain === undefined ? undefined : await profileProgramOf(runs, chain, { lstat, readlink });
+    },
   };
 }
 

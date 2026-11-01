@@ -1973,6 +1973,9 @@ function auditDetail(request: InputRequest): InputAuditDetail {
     targetKind: request.target.kind,
     sensitivity: request.sensitivity,
     ...(facts?.kind === 'terminal' ? { recognised: facts.recognisedConsumer } : {}),
+    ...(facts?.kind === 'terminal' && facts.program === undefined && facts.profileProgram !== undefined
+      ? { profileProgram: facts.profileProgram.path }
+      : {}),
     ...(request.source === undefined ? {} : { copy: request.source.name }),
   };
 }

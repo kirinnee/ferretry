@@ -1,8 +1,9 @@
 import { describe, it } from 'bun:test';
-import type { PasteRule } from '@ferretry/protocol';
+import { type PasteRule, type PasteRuleSettings, STEP_UP_ACTS, STEP_UP_REQUIRED_CODE } from '@ferretry/protocol';
 import should from 'should';
-import type { CapabilityGuard } from '../../../../src/lib/api/capability.ts';
+import type { CallerGovernance, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
+import type { ApiRoute, RouteContext } from '../../../../src/lib/api/route.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { CopyPlanService, EphemeralValues, PasteRuleService, SecureCopyService } from '../../../../src/lib/index.ts';
 import { secureCopyRoutes } from '../../../../src/lib/runtime/mounts/secure-copy.ts';
@@ -28,13 +29,17 @@ async function served(guard: CapabilityGuard = GRANTED) {
     redact: async text => text,
   });
   await copies.capture(SESSION, { name: 'gh', source: { kind: 'command', argv: ['gh', 'auth', 'token'] } });
-  const stored: { rules: readonly PasteRule[] | undefined } = { rules: undefined };
+  const stored: { rules: readonly PasteRule[] | undefined; settings: PasteRuleSettings } = {
+    rules: undefined,
+    settings: { allowProfileTargets: false },
+  };
   let id = 0;
   const rules = new PasteRuleService({
     store: {
-      read: async () => stored.rules,
+      read: async () => (stored.rules === undefined ? undefined : { rules: stored.rules, settings: stored.settings }),
       write: async next => {
-        stored.rules = next;
+        stored.rules = next.rules;
+        stored.settings = next.settings;
       },
     },
     clock,
@@ -54,9 +59,14 @@ async function served(guard: CapabilityGuard = GRANTED) {
     { from: RULE.from, to: INTO_STORE, why: 'kept for the deploy script' },
     { from: RULE.from, to: INTO_PAGE, why: 'the env page' },
   ]);
-  const routes = secureCopyRoutes({ list: sessionId => copies.list(sessionId) }, rules, plans);
+  const routes = secureCopyRoutes({ list: sessionId => copies.list(sessionId) }, rules, plans, {
+    profileOnly: async program => {
+      if (program === 'broken') throw new Error('cannot look');
+      return program === 'vercel';
+    },
+  });
   const dispatch = new ApiDispatcher(new ApiRouter(routes), CREDENTIALS, guard);
-  return { dispatch, routes, stored, plan };
+  return { dispatch, routes, stored, plan, rules };
 }
 
 const post = (path: string, body: unknown, headers: Readonly<Record<string, string>> = human, reads = bodyReads()) =>
@@ -81,9 +91,18 @@ describe('the secure copy routes', () => {
       dispatch.dispatch(request({ method: 'GET', path: '/v1/copy-plans', headers: agent })),
       dispatch.dispatch(request({ method: 'GET', path: `/v1/sessions/${SESSION}/copies`, headers: agent })),
       dispatch.dispatch(request({ method: 'DELETE', path: `/v1/copy-rules/${'1'.padStart(32, '0')}`, headers: agent })),
+      dispatch.dispatch(
+        request({
+          method: 'PUT',
+          path: '/v1/copy-rules/settings',
+          headers: { ...agent, 'content-type': 'application/json' },
+          body: JSON.stringify({ allowProfileTargets: true }),
+          reads,
+        }),
+      ),
     ]);
 
-    should(answers.map(answer => answer.status)).eql([403, 403, 403, 403, 403, 403]);
+    should(answers.map(answer => answer.status)).eql([403, 403, 403, 403, 403, 403, 403]);
     should(reads.consumed).be.false();
     should(stored.rules).be.undefined();
   });
@@ -149,6 +168,8 @@ describe('the secure copy routes', () => {
     should(routes.map(route => `${route.method} ${route.path} ${route.capability?.axis ?? 'none'}`)).eql([
       'GET /v1/sessions/:sessionId/copies use',
       'GET /v1/copy-rules use',
+      // Turning profile targets ON demands terminal.configure and a passkey inside the route; OFF only narrows.
+      'PUT /v1/copy-rules/settings use',
       'POST /v1/copy-rules configure',
       'DELETE /v1/copy-rules/:ruleId use',
       'GET /v1/copy-plans use',
@@ -250,5 +271,109 @@ describe('approving pastes into a page', () => {
     should([page.status, rest.status]).eql([403, 200]);
     should(refused.stored.rules ?? []).eql([]);
     should(others.stored.rules?.map(rule => rule.to.kind)).eql(['terminal', 'secret']);
+  });
+});
+
+type SettingsCaller = 'host' | 'device' | 'fresh-device' | 'device-without-configure';
+
+/** `PUT /v1/copy-rules/settings`, driven as one caller through the route alone, as the boundary would hand it over. */
+async function putSettings(routes: readonly ApiRoute[], body: unknown, caller: SettingsCaller) {
+  const found = new ApiRouter(routes).lookup('PUT', '/v1/copy-rules/settings');
+  if (found.kind !== 'matched') throw new Error('no settings route');
+  const device = caller !== 'host';
+  let spent = 0;
+  const governance: CallerGovernance = {
+    governed: device,
+    decide: () =>
+      caller === 'device-without-configure'
+        ? { allowed: false, refusal: 'not-granted' }
+        : { allowed: true, refusal: 'granted' },
+  };
+  const context: RouteContext = {
+    request: request({
+      method: 'PUT',
+      path: '/v1/copy-rules/settings',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+    params: found.params,
+    actor: device ? 'device:d1' : 'admin-cli',
+    credential: device
+      ? { kind: 'authenticated', tokenClass: 'device', deviceId: 'd1' }
+      : { kind: 'authenticated', tokenClass: 'admin' },
+    governance,
+    presentation: {
+      loopback: !device,
+      adminToken: !device,
+      actor: device ? 'device:d1' : 'admin-cli',
+      stepUp: caller === 'fresh-device',
+      freshStepUp: caller === 'fresh-device',
+    },
+    spendFreshStepUp: () => {
+      spent += 1;
+    },
+  };
+  const response = await found.route.handle(context);
+  return { status: response.status, body: jsonBody(response) as Record<string, unknown>, spent };
+}
+
+describe('the secure copy settings: profile targets', () => {
+  it('should list the settings, off by default, and which rules point into the owner profile', async () => {
+    const { dispatch } = await served();
+    await dispatch.dispatch(post('/v1/copy-rules', RULE));
+    await dispatch.dispatch(post('/v1/copy-rules', { ...RULE, to: { kind: 'terminal', program: 'psql' } }));
+    await dispatch.dispatch(post('/v1/copy-rules', { ...RULE, to: { kind: 'terminal', program: 'broken' } }));
+    await dispatch.dispatch(post('/v1/copy-rules', { ...RULE, to: INTO_PAGE }));
+
+    const listed = jsonBody(
+      await dispatch.dispatch(request({ method: 'GET', path: '/v1/copy-rules', headers: human })),
+    );
+    const rules = listed.rules as { id: string; to: { program?: string } }[];
+
+    should(listed.settings).eql({ allowProfileTargets: false });
+    should(listed.profileRules).eql(rules.filter(rule => rule.to.program === 'vercel').map(rule => rule.id));
+  });
+
+  it('should let the owner at the machine turn it on and off, with no passkey', async () => {
+    const { routes, stored } = await served();
+
+    const on = await putSettings(routes, { allowProfileTargets: true }, 'host');
+    should([on.status, on.body, on.spent]).eql([200, { allowProfileTargets: true }, 0]);
+    should(stored.settings).eql({ allowProfileTargets: true });
+    const off = await putSettings(routes, { allowProfileTargets: false }, 'host');
+    should([off.status, off.spent]).eql([200, 0]);
+    should(stored.settings).eql({ allowProfileTargets: false });
+  });
+
+  it('should hold turning it on from a device for a passkey proved for that act, and spend it', async () => {
+    const { routes, stored } = await served();
+
+    const held = await putSettings(routes, { allowProfileTargets: true }, 'device');
+    should(held.status).equal(403);
+    should(held.body).match({
+      code: STEP_UP_REQUIRED_CODE,
+      demand: { capability: 'terminal', axis: 'configure', act: STEP_UP_ACTS.allowProfileTargets },
+    });
+    should(stored.settings).eql({ allowProfileTargets: false });
+
+    const refused = await putSettings(routes, { allowProfileTargets: true }, 'device-without-configure');
+    should(refused.status).equal(403);
+    should(refused.body.code).not.equal(STEP_UP_REQUIRED_CODE);
+    should(stored.settings).eql({ allowProfileTargets: false });
+
+    const confirmed = await putSettings(routes, { allowProfileTargets: true }, 'fresh-device');
+    should([confirmed.status, confirmed.spent]).eql([200, 1]);
+    should(stored.settings).eql({ allowProfileTargets: true });
+  });
+
+  it('should let a device turn it off, or leave it on, with no passkey at all', async () => {
+    const { routes, stored } = await served();
+    await putSettings(routes, { allowProfileTargets: true }, 'host');
+
+    const again = await putSettings(routes, { allowProfileTargets: true }, 'device');
+    const off = await putSettings(routes, { allowProfileTargets: false }, 'device-without-configure');
+
+    should([again.status, again.spent, off.status, off.spent]).eql([200, 0, 200, 0]);
+    should(stored.settings).eql({ allowProfileTargets: false });
   });
 });

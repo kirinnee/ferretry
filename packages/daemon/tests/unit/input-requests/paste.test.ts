@@ -6,6 +6,7 @@ import {
   type InputRaise,
   type InputTargetFacts,
   type PasteRule,
+  type PasteRuleSettings,
   padInputValue,
   type SecretName,
 } from '@ferretry/protocol';
@@ -90,13 +91,17 @@ async function world(
     masking: values,
     redact: async text => text,
   });
-  const stored: { rules: readonly PasteRule[] | undefined } = { rules: undefined };
+  const stored: { rules: readonly PasteRule[] | undefined; settings: PasteRuleSettings } = {
+    rules: undefined,
+    settings: { allowProfileTargets: false },
+  };
   let ruleIds = 0;
   const rules = new PasteRuleService({
     store: {
-      read: async () => stored.rules,
+      read: async () => (stored.rules === undefined ? undefined : { rules: stored.rules, settings: stored.settings }),
       write: async next => {
-        stored.rules = next;
+        stored.rules = next.rules;
+        stored.settings = next.settings;
       },
     },
     clock,
@@ -369,6 +374,57 @@ describe('a paste the owner approved in advance', () => {
     should(w.audits.at(-1)).match({ event: 'input.delivered', actor: { kind: 'rule', ruleId: rule.id } });
     for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
     should(w.rules.list({ kind: 'owner', actor: { kind: 'host' } })).match([{ id: rule.id, remaining: 1, used: 1 }]);
+  });
+
+  describe('into a program proved only through the owner profile', () => {
+    const OWNER = { kind: 'owner', actor: { kind: 'host' } } as const;
+    const STORE_PATH = '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-vercel/bin/vercel';
+    const IN_PROFILE = {
+      ...VERCEL,
+      program: undefined,
+      profileProgram: { name: 'vercel', path: STORE_PATH },
+    } as InputTargetFacts;
+
+    it('should ask the owner while profile targets are off (the default)', async () => {
+      const w = await world({ facts: IN_PROFILE });
+      await w.rules.create(OWNER, RULE);
+      await w.capture();
+
+      const view = await w.service.raise(SESSION, PASTE);
+
+      should(view.state).equal('pending');
+      should(w.writes).eql([]);
+    });
+
+    it('should paste under the rule once the owner allowed them, and log the store file it pasted into', async () => {
+      const w = await world({ facts: IN_PROFILE });
+      const rule = await w.rules.create(OWNER, RULE);
+      await w.rules.changeSettings(OWNER, { allowProfileTargets: true });
+      await w.capture();
+
+      const view = await w.service.raise(SESSION, PASTE);
+
+      should(view.state).equal('delivered');
+      should(w.writes).eql([TOKEN]);
+      should(w.audits.at(-1)).match({
+        event: 'input.delivered',
+        actor: { kind: 'rule', ruleId: rule.id },
+        detail: { profileProgram: STORE_PATH },
+      });
+      should(JSON.stringify(w.audits)).not.containEql(TOKEN);
+    });
+
+    it('should never paste into a program proved by neither a system folder nor the profile (~/bin)', async () => {
+      const w = await world({ facts: { ...VERCEL, program: undefined } as InputTargetFacts });
+      await w.rules.create(OWNER, RULE);
+      await w.rules.changeSettings(OWNER, { allowProfileTargets: true });
+      await w.capture();
+
+      const view = await w.service.raise(SESSION, PASTE);
+
+      should(view.state).equal('pending');
+      should(w.writes).eql([]);
+    });
   });
 
   it('should wait for the owner when the destination program is not the one the rule names', async () => {

@@ -57,6 +57,18 @@ export interface ProgramProofPort {
    * control. `false` only when that was looked for and none was found; `undefined` when it cannot be told.
    */
   heldElsewhere(ttyPath: string): Promise<boolean | undefined>;
+  /**
+   * The program `pid` runs, proved ONLY through the owner's own Nix profile: `~/.nix-profile/bin/<name>` walks, through
+   * the profile's own links and the store, to the very store file it runs. Any process running as the owner can swap
+   * that program, so this proof earns nothing but what the owner allowed (secure-copy `allowProfileTargets`).
+   */
+  proveProfile?(pid: number): Promise<ProfileProgram | undefined>;
+}
+
+/** A program proved through the owner's own profile: its name and the store file it runs. */
+export interface ProfileProgram {
+  readonly name: string;
+  readonly path: string;
 }
 
 export type ObserveResult =

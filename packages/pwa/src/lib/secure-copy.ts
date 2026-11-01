@@ -21,6 +21,8 @@ import {
   type PasteRuleList,
   PasteRuleListSchema,
   PasteRuleSchema,
+  type PasteRuleSettings,
+  PasteRuleSettingsSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import { targetRef } from './input-card.ts';
@@ -39,6 +41,18 @@ export async function addRule(client: CopyClient, rule: PasteRuleCreate): Promis
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(PasteRuleCreateSchema.parse(rule)),
+  });
+}
+
+/**
+ * Changes the owner's secure-copy settings. Turning profile targets ON from a paired device needs a passkey for that
+ * act: the daemon answers with the step-up demand and the client's gate asks for it, then sends this again.
+ */
+export async function changeCopySettings(client: CopyClient, settings: PasteRuleSettings): Promise<PasteRuleSettings> {
+  return await client.request(`${RULES_PATH}/settings`, PasteRuleSettingsSchema, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(PasteRuleSettingsSchema.parse(settings)),
   });
 }
 

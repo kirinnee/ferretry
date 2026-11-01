@@ -7,6 +7,9 @@ import {
   CopyRouteToSchema,
   type PasteRule,
   type PasteRuleCreate,
+  type PasteRuleList,
+  RUNS_WHAT_IT_READS_WARNING,
+  runsWhatItReads,
 } from '@ferretry/protocol';
 import { showUntrusted } from '../input/render.ts';
 import type { CopyPorts } from './ports.ts';
@@ -71,7 +74,10 @@ const toText = (to: CopyRouteTo): string =>
       ? `secret:${to.name}`
       : `browser:${to.origin}`;
 
-function renderRule(rule: PasteRule): string {
+/** What a rule into a program from the owner's own profile is labelled with (docs/secure-copy.md). */
+const PROFILE_RULE_BADGE = '[your profile — a ferret could swap this program]';
+
+function renderRule(rule: PasteRule, inProfile = false): string {
   return [
     rule.id.slice(0, 8),
     `${fromText(rule.from)} → ${toText(rule.to)}`,
@@ -79,7 +85,24 @@ function renderRule(rule: PasteRule): string {
     rule.remaining === undefined ? 'no count' : `${String(rule.remaining)} left`,
     rule.expiresAt === undefined ? 'no expiry' : `until ${rule.expiresAt}`,
     `used ${String(rule.used)}`,
+    ...(inProfile ? [PROFILE_RULE_BADGE] : []),
   ].join('  ');
+}
+
+/** The rules as `fy copy rules ls` prints them: whether profile programs are allowed, then one rule a line. */
+function renderRules(list: PasteRuleList): string {
+  const profile = new Set(list.profileRules ?? []);
+  const setting =
+    list.settings === undefined
+      ? []
+      : [
+          `programs in your own profile: ${list.settings.allowProfileTargets ? 'allowed' : 'not allowed (they ask you)'}`,
+        ];
+  const rules =
+    list.rules.length === 0
+      ? ['no pastes are approved in advance']
+      : list.rules.map(rule => renderRule(rule, profile.has(rule.id)));
+  return [...setting, ...rules].join('\n');
 }
 
 function renderCopy(copy: CopyMeta): string {
@@ -122,13 +145,7 @@ export class CopyController {
   async rules(options: CopyCommandOptions): Promise<void> {
     this.#refuseFerret();
     const list = await this.ports.gateway.rules();
-    this.ports.out.success(
-      options.json === true
-        ? JSON.stringify(list, null, 2)
-        : list.rules.length === 0
-          ? 'no pastes are approved in advance'
-          : list.rules.map(renderRule).join('\n'),
-    );
+    this.ports.out.success(options.json === true ? JSON.stringify(list, null, 2) : renderRules(list));
   }
 
   async addRule(options: CopyRuleOptions): Promise<void> {
@@ -145,6 +162,8 @@ export class CopyController {
       ...(count === undefined ? {} : { count }),
       ...(options.expires === undefined ? {} : { expiresInSeconds: parseLifetime(options.expires) }),
     };
+    if (request.to.kind === 'terminal' && runsWhatItReads(request.to.program))
+      this.ports.out.diagnostic(`warning: ${request.to.program}: ${RUNS_WHAT_IT_READS_WARNING}`);
     const rule = await this.ports.gateway.addRule(request);
     this.ports.out.success(
       options.json === true ? JSON.stringify(rule, null, 2) : `Approved in advance: ${renderRule(rule)}`,

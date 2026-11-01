@@ -4,7 +4,12 @@ import {
   type CopyPlanList,
   PasteRuleCreateSchema,
   type PasteRuleList,
+  PasteRuleSettingsSchema,
+  STEP_UP_ACTS,
+  STEP_UP_REQUIRED_CODE,
+  type StepUpRequiredBody,
 } from '@ferretry/protocol';
+import { grantRefusalCode } from '../../api/capability.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -26,6 +31,13 @@ import { refusedPageInput, refusedSecretWrite, spentSecretWrite } from './secret
  * device follows the owner's "ask again for each change" setting. Removing a rule only narrows, so it demands
  * `terminal.use`. No route returns a copy's value: the copies list is {@link CopyMeta}, and no schema here has a
  * field for one.
+ *
+ * ## THE SETTINGS: LOOSEN AT THE MACHINE, OR WITH A PASSKEY
+ *
+ * `PUT /v1/copy-rules/settings` is owner only like every route here. Turning `allowProfileTargets` ON loosens what
+ * a rule matches, so a governed (remote) device needs `terminal.configure` AND a passkey proved for that one act
+ * (`allow-profile-targets`), which this route then spends. Turning it OFF only narrows, and asks no more than
+ * `terminal.use`.
  */
 
 const STATUS: Readonly<Record<SecureCopyError['code'], number>> = {
@@ -59,10 +71,53 @@ export interface CopyListing {
   list(sessionId: string): readonly CopyMeta[];
 }
 
+/** Where this machine finds a terminal rule's program: only in the owner's own profile, or not. */
+export interface RuleProgramHomes {
+  profileOnly(program: string): Promise<boolean>;
+}
+
+/** The rules whose terminal program lives only in the owner's profile. A look that fails says nothing about it. */
+async function profileRulesOf(homes: RuleProgramHomes | undefined, list: PasteRuleList['rules']): Promise<string[]> {
+  if (homes === undefined) return [];
+  const found = await Promise.all(
+    list.map(async rule =>
+      rule.to.kind === 'terminal' && (await homes.profileOnly(rule.to.program).catch(() => false)) ? [rule.id] : [],
+    ),
+  );
+  return found.flat();
+}
+
+/**
+ * Whether this caller may turn profile targets ON: at the machine, or from a device holding `terminal.configure` with
+ * a passkey proved for this act. Answers the refusal, or `undefined` when allowed.
+ */
+function profileTargetsRefusal(context: RouteContext): ReturnType<typeof jsonResponse> | undefined {
+  const governance = context.governance;
+  if (governance?.governed === false) return undefined;
+  const decision = governance?.decide({ capability: 'terminal', axis: 'configure' });
+  if (decision !== undefined && !decision.allowed && decision.refusal !== 'step-up-required')
+    return jsonResponse(
+      { error: 'this device may not let copy rules paste into your profile', code: grantRefusalCode(decision.refusal) },
+      403,
+    );
+  if (decision === undefined || context.presentation?.freshStepUp !== true)
+    return jsonResponse(
+      {
+        error:
+          'letting copy rules paste into programs in your own profile needs a passkey confirmation for this change',
+        code: STEP_UP_REQUIRED_CODE,
+        demand: { capability: 'terminal', axis: 'configure', act: STEP_UP_ACTS.allowProfileTargets },
+      } satisfies StepUpRequiredBody,
+      403,
+    );
+  return undefined;
+}
+
 export function secureCopyRoutes(
   copies: CopyListing,
   rules: PasteRuleService,
   plans: CopyPlanService,
+  homes?: RuleProgramHomes,
 ): readonly ApiRoute[] {
   return [
     {
@@ -83,8 +138,31 @@ export function secureCopyRoutes(
       capability: { capability: 'terminal', axis: 'use' },
       noStore: true,
       handle: async context => {
-        const body: PasteRuleList = { rules: [...rules.list(ruleOwner(context))] };
+        const caller = ruleOwner(context);
+        const listed = [...rules.list(caller)];
+        const body: PasteRuleList = {
+          rules: listed,
+          settings: rules.currentSettings(caller),
+          profileRules: await profileRulesOf(homes, listed),
+        };
         return jsonResponse(body);
+      },
+    },
+    {
+      method: 'PUT',
+      path: '/v1/copy-rules/settings',
+      minimum: 'operator',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: async context => {
+        const caller = ruleOwner(context);
+        const settings = await parseBody(context.request, PasteRuleSettingsSchema);
+        const loosens = settings.allowProfileTargets && !rules.currentSettings(caller).allowProfileTargets;
+        const refused = loosens ? profileTargetsRefusal(context) : undefined;
+        if (refused !== undefined) return refused;
+        const changed = await rules.changeSettings(caller, settings).catch(answered);
+        if (loosens && context.governance?.governed !== false) context.spendFreshStepUp?.();
+        return jsonResponse(changed);
       },
     },
     {

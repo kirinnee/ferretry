@@ -1,11 +1,13 @@
 import {
   COPY_MAX_RULES,
   type CopyOrigin,
+  DEFAULT_PASTE_RULE_SETTINGS,
   type CopyPlanItem,
   type InputActor,
   type InputTargetFacts,
   type PasteRule,
   type PasteRuleCreate,
+  type PasteRuleSettings,
 } from '@ferretry/protocol';
 import type { InputPasteRules } from '../input-requests/ports.ts';
 import { SecureCopyError } from './errors.ts';
@@ -19,14 +21,24 @@ import { SecureCopyError } from './errors.ts';
  * then waits for the owner.
  *
  * Matching runs on what the DAEMON observed: the copy's program or origin as it was captured, and the program
- * reading the destination terminal as tmux reports it. A rule for the secret store matches nothing here: a paste
+ * reading the destination terminal as the kernel proves it. A rule for the secret store matches nothing here: a paste
  * into the store always asks the owner unless a rule names that exact secret (the secret-store phase).
+ *
+ * The owner's SETTINGS live beside the rules, in the same document. `allowProfileTargets` lets a terminal rule also
+ * match a program proved only through the owner's own Nix profile; it is off until the owner turns it on, and a store
+ * that cannot be read holds it off with no rules.
  */
 
+/** What the rules file holds: the rules, and the owner's secure-copy settings beside them. */
+export interface PasteRuleDocument {
+  readonly rules: readonly PasteRule[];
+  readonly settings: PasteRuleSettings;
+}
+
 export interface PasteRuleStore {
-  /** The rules as they rest; `undefined` for a store never written; throws when it cannot be read. */
-  read(): Promise<readonly PasteRule[] | undefined>;
-  write(rules: readonly PasteRule[]): Promise<void>;
+  /** The document as it rests; `undefined` for a store never written; throws when it cannot be read. */
+  read(): Promise<PasteRuleDocument | undefined>;
+  write(document: PasteRuleDocument): Promise<void>;
 }
 
 export interface PasteRulePorts {
@@ -44,6 +56,7 @@ export type PasteRuleCaller =
 
 export class PasteRuleService implements InputPasteRules {
   private rules: PasteRule[] = [];
+  private settings: PasteRuleSettings = DEFAULT_PASTE_RULE_SETTINGS;
   private loaded = false;
   /** Settles when the store has been read: a change made before then would be computed from nothing. */
   private readonly ready: Promise<void>;
@@ -62,9 +75,12 @@ export class PasteRuleService implements InputPasteRules {
   /** Reads the store once, at start. Damage is no rules, said once. */
   async load(): Promise<void> {
     try {
-      this.rules = [...((await this.ports.store.read()) ?? [])];
+      const stored = await this.ports.store.read();
+      this.rules = [...(stored?.rules ?? [])];
+      this.settings = stored?.settings ?? DEFAULT_PASTE_RULE_SETTINGS;
     } catch {
       this.rules = [];
+      this.settings = DEFAULT_PASTE_RULE_SETTINGS;
       this.ports.warn(
         'the secure copy rules could not be read; every paste will ask the owner until they are set again',
       );
@@ -79,6 +95,24 @@ export class PasteRuleService implements InputPasteRules {
     if (!this.loaded) throw new SecureCopyError('unavailable', 'the rules are still being read; try again in a moment');
     this.purge();
     return [...this.rules];
+  }
+
+  /** The owner's secure-copy settings. Owner only. */
+  currentSettings(caller: PasteRuleCaller): PasteRuleSettings {
+    requireOwner(caller);
+    if (!this.loaded) throw new SecureCopyError('unavailable', 'the rules are still being read; try again in a moment');
+    return this.settings;
+  }
+
+  /**
+   * The owner changes the settings. Turning `allowProfileTargets` ON loosens what a rule matches: whether this caller
+   * may (at the machine, or a device with a passkey for it) is the route's to decide; this only refuses an agent.
+   */
+  async changeSettings(caller: PasteRuleCaller, settings: PasteRuleSettings): Promise<PasteRuleSettings> {
+    requireOwner(caller);
+    await this.ready;
+    await this.persist(rules => [...rules], settings);
+    return this.settings;
   }
 
   /** The owner approves a route in advance. */
@@ -164,7 +198,7 @@ export class PasteRuleService implements InputPasteRules {
         (candidate.sessionId === undefined || candidate.sessionId === sessionId) &&
         (candidate.remaining === undefined || candidate.remaining - this.taken(candidate.id) > 0) &&
         fromMatches(candidate, from) &&
-        toMatches(candidate, facts),
+        toMatches(candidate, facts, this.settings),
     );
     if (rule === undefined) return undefined;
     this.reserved.set(rule.id, this.taken(rule.id) + 1);
@@ -189,7 +223,7 @@ export class PasteRuleService implements InputPasteRules {
         if (remaining === 0) return [];
         return [{ ...rule, used: rule.used + 1, ...(remaining === undefined ? {} : { remaining }) }];
       });
-    void this.persist(spend, { keepOnFailure: true })
+    void this.persist(spend, undefined, { keepOnFailure: true })
       .catch(() => undefined)
       .finally(() => this.give(ruleId));
   }
@@ -217,18 +251,21 @@ export class PasteRuleService implements InputPasteRules {
    */
   private async persist(
     change: (rules: readonly PasteRule[]) => PasteRule[],
+    settings?: PasteRuleSettings,
     options: { readonly keepOnFailure?: boolean } = {},
   ): Promise<void> {
     const write = this.writes.then(async () => {
       const next = change(this.rules);
+      const nextSettings = settings ?? this.settings;
       try {
-        await this.ports.store.write(next);
+        await this.ports.store.write({ rules: next, settings: nextSettings });
       } catch {
         if (options.keepOnFailure === true) this.rules = next;
         this.ports.warn('the secure copy rules could not be saved');
         throw new SecureCopyError('unavailable', 'Ferretry could not save the rules, so nothing changed');
       }
       this.rules = next;
+      this.settings = nextSettings;
     });
     this.writes = write.catch(() => undefined);
     await write;
@@ -259,17 +296,20 @@ function fromMatches(rule: PasteRule, from: CopyOrigin): boolean {
   }
 }
 
-function toMatches(rule: PasteRule, facts: InputTargetFacts): boolean {
+function toMatches(rule: PasteRule, facts: InputTargetFacts, settings: PasteRuleSettings): boolean {
   switch (rule.to.kind) {
     case 'terminal':
       // The PROVED program (every process of the foreground group, by the kernel), never the name ps shows: a ferret's
       // shell can call itself `sudo` and would be pasted into without a card. And line mode: a relay (`ssh -t`,
       // `docker exec -it`) reads key by key and hands them to a reader the proof never saw. Otherwise the owner is asked.
+      // A program proved only through the owner's own profile counts when, and only when, the owner allowed that.
       return (
         facts.kind === 'terminal' &&
         facts.canonical === true &&
-        facts.program !== undefined &&
-        facts.program === rule.to.program
+        (facts.program === rule.to.program ||
+          (settings.allowProfileTargets &&
+            facts.program === undefined &&
+            facts.profileProgram?.name === rule.to.program))
       );
     case 'browser':
       return facts.kind === 'browser' && facts.origin === rule.to.origin;

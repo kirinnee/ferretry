@@ -6,6 +6,7 @@ import { type AgendaLedger, type AgendaLedgerRepository, AgendaService } from '.
 import { parseAgendaLedger } from '../../../src/lib/agenda/state-machine.ts';
 import { CopyPlanAgendaAdapter } from '../../../src/lib/index.ts';
 
+const OFF = { allowProfileTargets: false };
 const RULE: PasteRule = {
   id: 'a'.repeat(32),
   from: { kind: 'command', program: 'gh' },
@@ -36,11 +37,11 @@ describe('FilePasteRuleStore', () => {
     const store = new FilePasteRuleStore('/state/secure-copy', fs.port);
 
     should(await store.read()).be.undefined();
-    await store.write([RULE]);
+    await store.write({ rules: [RULE], settings: OFF });
 
     should(fs.directories).eql(['/state/secure-copy:700']);
-    should(JSON.parse(fs.text.get('/state/secure-copy/rules.json') ?? '')).eql({ v: 1, rules: [RULE] });
-    should(await store.read()).eql([RULE]);
+    should(JSON.parse(fs.text.get('/state/secure-copy/rules.json') ?? '')).eql({ v: 1, rules: [RULE], settings: OFF });
+    should(await store.read()).eql({ rules: [RULE], settings: OFF });
   });
 
   it('should throw on a damaged document rather than read it as no rules', async () => {

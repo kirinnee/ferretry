@@ -340,6 +340,22 @@ const TerminalFactsSchema = z.strictObject({
    */
   program: boundedLine(64).optional(),
   /**
+   * The program every process of the foreground group runs, proved ONLY through the owner's own Nix profile
+   * (`~/.nix-profile/bin/<name>` walks to the very store file it runs): a program the owner installed, which any process
+   * running as the owner can swap. Present only when `program` is not. It earns nothing on its own — no green, no short
+   * lock, no one-tap — and a secure-copy rule matches it only when the owner allowed profile targets.
+   */
+  profileProgram: z
+    .strictObject({
+      name: boundedLine(64),
+      /** The store file it runs, for the security log. */
+      path: z
+        .string()
+        .max(512)
+        .regex(/^\/nix\/store\/[^\p{Cc}\p{Cf}]+$/u),
+    })
+    .optional(),
+  /**
    * Every process of the foreground group is PROVED to be a program that asks for a secret (sudo, ssh, gpg, …); the
    * shell itself or an interpreter is not. Never true without `program`.
    */
@@ -866,6 +882,15 @@ export const InputAuditDetailSchema = z.strictObject({
     .regex(/^[0-9a-f]{32}$/u)
     .optional(),
   consumer: boundedLine(160).optional(),
+  /**
+   * The store file of a program proved only through the owner's own profile, when that is what read the terminal:
+   * a paste a rule made into it is logged with the very file, since any process running as the owner could swap it.
+   */
+  profileProgram: z
+    .string()
+    .max(512)
+    .regex(/^\/nix\/store\/[^\p{Cc}\p{Cf}]+$/u)
+    .optional(),
   sensitivity: InputSensitivitySchema,
   /** The terminal a quarantine was about: its name, never what was typed there. */
   surface: SurfaceKeySchema.optional(),

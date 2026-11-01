@@ -160,6 +160,36 @@ describe('fy copy', () => {
     should(await failure(controller.removeRule('zzz', {}))).equal('no rule starts with "zzz"');
   });
 
+  it('should say whether profile programs are allowed, and mark a rule into one', async () => {
+    const { controller, gateway, said } = rig();
+    gateway.rules = async () => ({ rules: [RULE], settings: { allowProfileTargets: false }, profileRules: [RULE.id] });
+
+    await controller.rules({});
+
+    should(said[0]).equal(
+      [
+        'programs in your own profile: not allowed (they ask you)',
+        'a1b2c3d4  command:gh → terminal:vercel  any session  2 left  no expiry  used 1  [your profile — a ferret could swap this program]',
+      ].join('\n'),
+    );
+    gateway.rules = async () => ({ rules: [], settings: { allowProfileTargets: true }, profileRules: [] });
+    await controller.rules({});
+    should(said[1]).equal('programs in your own profile: allowed\nno pastes are approved in advance');
+  });
+
+  it('should warn, and still add, a rule into a shell or an interpreter', async () => {
+    const warned: string[] = [];
+    const { controller, gateway } = rig({
+      out: { success: () => undefined, diagnostic: message => void warned.push(message) },
+    });
+
+    await controller.addRule({ from: 'command:gh', to: 'terminal:bash' });
+    await controller.addRule({ from: 'command:gh', to: 'terminal:psql' });
+
+    should(warned).eql(['warning: bash: This program runs whatever it reads: a paste into it can run as a command.']);
+    should(gateway.added).have.length(2);
+  });
+
   it('should approve the numbered items of a plan, and decline it with none', async () => {
     const { controller, gateway, said } = rig();
 

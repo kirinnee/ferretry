@@ -115,6 +115,7 @@ const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = 
   'catalog-install': 'install something from a shared catalog',
   'share-catalog': 'share a catalog with someone',
   'add-2fa-key': 'save automatic 2FA codes for an account',
+  'allow-profile-targets': 'let copy rules paste into programs in your own profile',
 };
 
 /**

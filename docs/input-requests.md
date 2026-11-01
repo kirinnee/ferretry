@@ -1065,12 +1065,17 @@ So the daemon proves the GROUP or nothing:
    of the [secure-copy rule](secure-copy.md#pasting)). The exe proof says WHICH system program runs, bash included;
    what the name is worth is each decision's own. A process root runs outright (`sudo -n bash -c 'read -s X'` leaves
    one) is never proved: its executable cannot be read, and it is whatever a ferret with a cached sudo started.
+   Separately, `profileProgram` names a program every member runs that is proved only through the owner's OWN Nix
+   profile (`~/.nix-profile`); it earns no green, no short lock and no one-tap, and only a secure-copy rule the owner
+   allowed for it ([secure copy](secure-copy.md#programs-in-your-own-profile)) reads it.
 2. No process whose controlling terminal is another (or none) holds the TTY open: on Linux every `/proc/<pid>/fd`,
    each descriptor matched by the DEVICE it reaches, not by how its path is spelled; on macOS `lsof` and `ps`. A
    process of this account whose descriptors cannot be read (one can make itself not dumpable) makes the answer
-   unknown, with one exception every systemd login has: systemd's own PAM helper `(sd-pam)`, told apart by the
-   kernel and not by its name (its parent runs a root-owned `systemd` this account cannot replace, and it started
-   within a second of that parent). tmux itself holds only the pty's master side.
+   unknown, with one exception every systemd login has: systemd's own PAM helper `(sd-pam)`, singled out by the
+   kernel, its name only one check among them: its parent runs a root-owned `systemd` this account cannot replace,
+   it started within a second of that parent, it is that parent's EARLIEST child (other children start in the same
+   second), and it is named `(sd-pam)`. A second hidden child of the manager stays unknown. tmux itself holds only
+   the pty's master side.
 3. Then `program` is the ONE program every member is proved to run (two different programs, such as sudo leading a
    proved `sh`, are unverified), `recognisedConsumer` says it is a program that asks for a secret, and `trustedProgram`
    says every member runs setuid root. Anything unread, unproved or thrown leaves `program` out: the card is

@@ -123,6 +123,49 @@ describe('the pre-approval rules card', () => {
     expect(q('[data-copy-rule-form]')).toBeNull();
   });
 
+  it('marks a rule into a program from the owner profile, and says it asks while that is not allowed', async () => {
+    const off = await card({ rules: [RULE], profileRules: [RULE.id], settings: { allowProfileTargets: false } });
+    expect(off.q('[data-copy-rule-profile]')?.textContent).toBe(
+      'your profile — a ferret could swap this program · asks you while profile programs are not allowed',
+    );
+    const on = await card({ rules: [RULE], profileRules: [RULE.id], settings: { allowProfileTargets: true } });
+    expect(on.q('[data-copy-rule-profile]')?.textContent).toBe('your profile — a ferret could swap this program');
+    const system = await card({ rules: [RULE], profileRules: [], settings: { allowProfileTargets: true } });
+    expect(system.q('[data-copy-rule-profile]')).toBeNull();
+  });
+
+  it('turns profile programs on and off with the setting, which says the risk', async () => {
+    const changed: unknown[] = [];
+    const { q, text } = await card({
+      settings: { allowProfileTargets: false },
+      onSettings: settings => {
+        changed.push(settings);
+        return true;
+      },
+    });
+    const box = must(q('[data-copy-profile-targets]') as HTMLInputElement | null, 'the setting');
+
+    expect(box.checked).toBe(false);
+    expect(text()).toContain('Copy rules may target programs in my own profile');
+    expect(text()).toContain('could swap that program for its own');
+    await click(box);
+    expect(changed).toEqual([{ allowProfileTargets: true }]);
+    expect((await card()).q('[data-copy-profile-targets]')).toBeNull();
+  });
+
+  it('warns that a shell or an interpreter runs whatever it reads', async () => {
+    const { q } = await card();
+    await click(q('[data-copy-rule-add-open]'));
+    await typeInto(q('[data-copy-rule-to]'), 'psql');
+    expect(q('[data-copy-rule-runs-anything]')).toBeNull();
+    for (const program of ['bash', 'python3.12', 'node']) {
+      await typeInto(q('[data-copy-rule-to]'), program);
+      expect(q('[data-copy-rule-runs-anything]')?.textContent).toContain('runs whatever it reads');
+    }
+    await select(q('[data-copy-rule-to-kind]'), 'secret');
+    expect(q('[data-copy-rule-runs-anything]')).toBeNull();
+  });
+
   it('says it is saving while busy', async () => {
     const { q } = await card({ busy: true });
     await click(q('[data-copy-rule-add-open]'));
@@ -188,6 +231,27 @@ describe('the pre-approval rules surface', () => {
 
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(2);
     expect(text()).toContain('the daemon is gone');
+  });
+
+  it('reads the setting and the profile rules, and changes the setting through its own route', async () => {
+    let allowed = false;
+    const { calls, q } = await surface(call => {
+      if (call.method === 'PUT') {
+        allowed = true;
+        return { allowProfileTargets: true };
+      }
+      return { rules: [RULE], settings: { allowProfileTargets: allowed }, profileRules: [RULE.id] };
+    });
+    expect(q('[data-copy-rule-profile]')).not.toBeNull();
+    await click(q('[data-copy-profile-targets]'));
+    await settle();
+
+    expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
+      'GET /v1/copy-rules',
+      'PUT /v1/copy-rules/settings',
+      'GET /v1/copy-rules',
+    ]);
+    expect((q('[data-copy-profile-targets]') as HTMLInputElement | null)?.checked).toBe(true);
   });
 
   it('says a failed read is a failed read, never "no rules"', async () => {

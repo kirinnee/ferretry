@@ -285,9 +285,42 @@ export const PasteRuleCreateSchema = z.strictObject({
 });
 export type PasteRuleCreate = z.infer<typeof PasteRuleCreateSchema>;
 
+/**
+ * The owner's secure-copy settings, kept beside the rules. `allowProfileTargets` ("Copy rules may target programs in
+ * my own profile", owner decision !A182): a `terminal:<program>` rule may also match a program reached through the
+ * owner's own Nix profile (`~/.nix-profile`), which every process running as the owner, every ferret included, can
+ * change. OFF unless the owner turns it on; turning it on LOOSENS, so a remote device needs a passkey for it.
+ */
+export const PasteRuleSettingsSchema = z.strictObject({ allowProfileTargets: z.boolean() });
+export type PasteRuleSettings = z.infer<typeof PasteRuleSettingsSchema>;
+export const DEFAULT_PASTE_RULE_SETTINGS: PasteRuleSettings = { allowProfileTargets: false };
+
 /** `GET /v1/copy-rules`. */
-export const PasteRuleListSchema = z.strictObject({ rules: z.array(PasteRuleSchema).max(COPY_MAX_RULES) });
+export const PasteRuleListSchema = z.strictObject({
+  rules: z.array(PasteRuleSchema).max(COPY_MAX_RULES),
+  settings: PasteRuleSettingsSchema.optional(),
+  /**
+   * The rules whose terminal program this machine finds only in the owner's own profile, never in a system folder:
+   * each is shown as "your profile — a ferret could swap this program". Worked out when listed, never stored.
+   */
+  profileRules: z.array(RuleIdSchema).max(COPY_MAX_RULES).optional(),
+});
 export type PasteRuleList = z.infer<typeof PasteRuleListSchema>;
+
+/**
+ * Programs that run whatever they read: a shell or an interpreter. A rule that pastes into one hands the value to
+ * whatever the ferret typed before it, so the rule editor and `fy copy rules add` warn about it.
+ */
+const RUNS_WHAT_IT_READS = new Set(['bash', 'sh', 'dash', 'ksh', 'zsh', 'fish', 'node', 'bun', 'deno', 'perl', 'ruby']);
+
+/** Whether a rule's terminal program is a shell or an interpreter (`python`, `python3.12` too). */
+export const runsWhatItReads = (program: string): boolean => {
+  const name = program.trim().toLowerCase();
+  return RUNS_WHAT_IT_READS.has(name) || /^python[0-9.]*$/u.test(name);
+};
+
+/** What the rule editor and the CLI say about such a rule. */
+export const RUNS_WHAT_IT_READS_WARNING = 'This program runs whatever it reads: a paste into it can run as a command.';
 
 /** One paste a ferret plans, said before it starts. `why` is the agent's own words, shown as such. */
 export const CopyPlanItemSchema = z.strictObject({

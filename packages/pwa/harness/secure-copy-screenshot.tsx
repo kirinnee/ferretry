@@ -11,7 +11,9 @@
  * %terminal:dev, with the daemon's risk flag. "store" is the same copy saved as the secret VERCEL_TOKEN, which
  * already holds a value, so the card warns it replaces it. "page" is a copy from the vercel found in
  * ~/.bun/bin going into a password field on vercel.com. "plan" is the card a ferret raises before it starts, two planned
- * pastes with one ticked off. "rules" is Settings › Secure copy › Pastes approved in advance, with the add form open.
+ * pastes with one ticked off. "rules" is Settings › Secure copy › Pastes approved in advance, with programs in the
+ * owner's own profile allowed, the gh → vercel rule marked as one into the profile, and the add form open on a rule
+ * into bash, which it warns runs whatever it reads.
  * Every width asserts no sideways scroll and the touch floor on every button of the phone.
  */
 import { spawnSync } from 'node:child_process';
@@ -175,7 +177,14 @@ createRoot(root).render(
   <div className="kt-shell flex min-h-full flex-col items-center bg-bg p-3">
     <div className="w-full max-w-[640px]">
       {view === 'rules' ? (
-        <CopyRulesCard rules={rules} onAdd={quiet} onRemove={quiet} />
+        <CopyRulesCard
+          rules={rules}
+          settings={{ allowProfileTargets: true }}
+          profileRules={['1'.repeat(32)]}
+          onAdd={quiet}
+          onRemove={quiet}
+          onSettings={quiet}
+        />
       ) : view === 'plan' ? (
         itemView(planItem, { planForm: <CopyPlanCard agentName="Hadi" onAnswer={async () => 'Allowed 1 of 2, each once.'} plan={plan} /> })
       ) : view === 'page' ? (
@@ -280,7 +289,7 @@ try {
           if (state === 'rules') {
             await page.locator('[data-copy-rule-add-open]').click();
             await page.locator('[data-copy-rule-from]').fill('gh');
-            await page.locator('[data-copy-rule-to]').fill('fly');
+            await page.locator('[data-copy-rule-to]').fill('bash');
           }
           const where = `${state} at ${viewport.name}/${scheme}`;
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

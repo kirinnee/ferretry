@@ -4,10 +4,16 @@
  * stated refusal rather than "no rules".
  */
 
-import type { PasteRule, PasteRuleCreate } from '@ferretry/protocol';
+import {
+  DEFAULT_PASTE_RULE_SETTINGS,
+  type PasteRule,
+  type PasteRuleCreate,
+  type PasteRuleList,
+  type PasteRuleSettings,
+} from '@ferretry/protocol';
 import { useCallback, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { addRule, type CopyClient, listRules, removeRule } from '../../lib/secure-copy.ts';
+import { addRule, changeCopySettings, type CopyClient, listRules, removeRule } from '../../lib/secure-copy.ts';
 import { CopyRulesCard } from './copy-rules-card.tsx';
 
 export type CopyClientFactory = (connection: DaemonConnection) => Promise<CopyClient>;
@@ -15,7 +21,17 @@ export type CopyClientFactory = (connection: DaemonConnection) => Promise<CopyCl
 interface Loaded {
   readonly daemonId: DaemonConnection['daemonId'];
   readonly rules: readonly PasteRule[];
+  readonly settings: PasteRuleSettings;
+  readonly profileRules: readonly string[];
 }
+
+/** What the screen holds from one listing. A daemon too old to say its settings has profile targets off. */
+const loadedFrom = (daemonId: DaemonConnection['daemonId'], list: PasteRuleList): Loaded => ({
+  daemonId,
+  rules: list.rules,
+  settings: list.settings ?? DEFAULT_PASTE_RULE_SETTINGS,
+  profileRules: list.profileRules ?? [],
+});
 
 const message = (cause: unknown): string => (cause instanceof Error ? cause.message : String(cause));
 
@@ -43,10 +59,10 @@ export function CopyRulesSurface({
     setFailure(null);
     void createClient(connection)
       .then(async next => {
-        const { rules } = await listRules(next);
+        const list = await listRules(next);
         if (!current) return;
         setClient(next);
-        setLoaded({ daemonId: connection.daemonId, rules });
+        setLoaded(loadedFrom(connection.daemonId, list));
       })
       .catch(cause => {
         if (current) setFailure({ daemonId: connection.daemonId, reason: message(cause) });
@@ -64,7 +80,7 @@ export function CopyRulesSurface({
       setError(null);
       try {
         await action(client);
-        setLoaded({ daemonId: connection.daemonId, rules: (await listRules(client)).rules });
+        setLoaded(loadedFrom(connection.daemonId, await listRules(client)));
         return true;
       } catch (cause) {
         setError(message(cause));
@@ -78,6 +94,10 @@ export function CopyRulesSurface({
 
   const add = useCallback((rule: PasteRuleCreate) => write(next => addRule(next, rule)), [write]);
   const remove = useCallback((id: string) => write(next => removeRule(next, id)), [write]);
+  const changeSettings = useCallback(
+    (settings: PasteRuleSettings) => write(next => changeCopySettings(next, settings)),
+    [write],
+  );
 
   if (failure !== null && failure.daemonId === connection.daemonId)
     return (
@@ -96,5 +116,16 @@ export function CopyRulesSurface({
       </section>
     );
 
-  return <CopyRulesCard rules={loaded.rules} busy={busy} error={error} onAdd={add} onRemove={remove} />;
+  return (
+    <CopyRulesCard
+      rules={loaded.rules}
+      settings={loaded.settings}
+      profileRules={loaded.profileRules}
+      busy={busy}
+      error={error}
+      onAdd={add}
+      onRemove={remove}
+      onSettings={changeSettings}
+    />
+  );
 }

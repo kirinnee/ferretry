@@ -280,3 +280,40 @@ describe('a plan the agent asks for', () => {
     ).be.false();
   });
 });
+
+describe('the secure copy settings and the rule warnings', () => {
+  it('should keep profile targets off by default, and list the setting and the profile rules optionally', async () => {
+    const { DEFAULT_PASTE_RULE_SETTINGS, PasteRuleListSchema, PasteRuleSettingsSchema } =
+      await import('../../src/lib/secure-copy.ts');
+    should(DEFAULT_PASTE_RULE_SETTINGS).eql({ allowProfileTargets: false });
+    should(PasteRuleSettingsSchema.safeParse({ allowProfileTargets: true, more: 1 }).success).be.false();
+    should(PasteRuleListSchema.safeParse({ rules: [] }).success).be.true();
+    should(
+      PasteRuleListSchema.safeParse({
+        rules: [],
+        settings: { allowProfileTargets: true },
+        profileRules: ['a'.repeat(32)],
+      }).success,
+    ).be.true();
+    should(PasteRuleListSchema.safeParse({ rules: [], profileRules: ['not-an-id'] }).success).be.false();
+  });
+
+  it('should call a shell or an interpreter a program that runs whatever it reads, and nothing else', async () => {
+    const { runsWhatItReads } = await import('../../src/lib/secure-copy.ts');
+    for (const program of [
+      'bash',
+      'sh',
+      'zsh',
+      'fish',
+      'python',
+      'python3',
+      'python3.12',
+      ' Node ',
+      'bun',
+      'perl',
+      'ruby',
+    ])
+      should(runsWhatItReads(program)).be.true();
+    for (const program of ['psql', 'gh', 'vercel', 'pythonista', 'sudo']) should(runsWhatItReads(program)).be.false();
+  });
+});

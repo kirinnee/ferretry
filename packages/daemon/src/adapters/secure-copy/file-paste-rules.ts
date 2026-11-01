@@ -1,9 +1,14 @@
 import { join } from 'node:path';
-import { type PasteRule, PasteRuleSchema } from '@ferretry/protocol';
+import { DEFAULT_PASTE_RULE_SETTINGS, PasteRuleSchema, PasteRuleSettingsSchema } from '@ferretry/protocol';
 import { z } from 'zod';
-import type { FileSystemPort, PasteRuleStore } from '../../lib/index.ts';
+import type { FileSystemPort, PasteRuleDocument, PasteRuleStore } from '../../lib/index.ts';
 
-const RulesDocumentSchema = z.strictObject({ v: z.literal(1), rules: z.array(PasteRuleSchema) });
+/** `settings` is optional on disk: a file written before it existed holds the defaults (profile targets off). */
+const RulesDocumentSchema = z.strictObject({
+  v: z.literal(1),
+  rules: z.array(PasteRuleSchema),
+  settings: PasteRuleSettingsSchema.optional(),
+});
 
 /**
  * The owner's pre-approval rules, `<state>/secure-copy/rules.json`: routes and counts, never a value. Written
@@ -21,14 +26,16 @@ export class FilePasteRuleStore implements PasteRuleStore {
     this.file = join(directory, 'rules.json');
   }
 
-  async read(): Promise<readonly PasteRule[] | undefined> {
+  async read(): Promise<PasteRuleDocument | undefined> {
     const text = await this.files.readText(this.file);
     if (text === undefined) return undefined;
-    return RulesDocumentSchema.parse(JSON.parse(text)).rules;
+    const document = RulesDocumentSchema.parse(JSON.parse(text));
+    return { rules: document.rules, settings: document.settings ?? DEFAULT_PASTE_RULE_SETTINGS };
   }
 
-  async write(rules: readonly PasteRule[]): Promise<void> {
+  async write(document: PasteRuleDocument): Promise<void> {
     await this.files.ensureDirectory(this.directory, 0o700);
-    await this.files.writeTextAtomic(this.file, `${JSON.stringify(RulesDocumentSchema.parse({ v: 1, rules }))}\n`);
+    const written = RulesDocumentSchema.parse({ v: 1, rules: document.rules, settings: document.settings });
+    await this.files.writeTextAtomic(this.file, `${JSON.stringify(written)}\n`);
   }
 }

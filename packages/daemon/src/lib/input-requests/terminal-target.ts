@@ -6,6 +6,7 @@ import { digestFacts, digestLine } from './digest.ts';
 import type {
   CodeProgramPort,
   ObserveResult,
+  ProfileProgram,
   ProgramProofPort,
   ProvenProgram,
   TerminalInputTargetPort,
@@ -225,6 +226,7 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     const members = listed === undefined ? [] : foregroundPids(listed);
     const alone = (await this.proofs?.heldElsewhere(first.tty).catch(() => undefined)) === false;
     const group = alone ? await this.proveGroup(foreground.pid, members) : undefined;
+    const profile = alone && group === undefined ? await this.proveProfileGroup(foreground.pid, members) : undefined;
     const programs = this.programs;
     const codeProgram =
       alone &&
@@ -253,6 +255,7 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
       promptLine,
       promptLineDigest: digestLine(promptLine),
       ...(group === undefined ? {} : { program: group.program }),
+      ...(profile === undefined ? {} : { profileProgram: profile }),
       recognisedConsumer: group?.recognised === true,
       ...(canonical === undefined ? {} : { canonical }),
       ...(group?.setuidRoot === true ? { trustedProgram: true as const } : {}),
@@ -289,6 +292,31 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
       recognised: recognisedConsumer(program),
       setuidRoot: all(proven => proven.setuidRoot),
     };
+  }
+
+  /**
+   * The foreground group proved with the owner's own profile allowed: every member proved, by a root folder or setuid
+   * as above or through the profile, all running ONE program, at least one of them only through the profile.
+   * `undefined` otherwise. Asked only when {@link proveGroup} proved nothing.
+   */
+  private async proveProfileGroup(leader: number, members: readonly number[]): Promise<ProfileProgram | undefined> {
+    const proofs = this.proofs;
+    if (proofs?.proveProfile === undefined || !members.includes(leader)) return undefined;
+    const proveProfile = proofs.proveProfile.bind(proofs);
+    const proved = await Promise.all(
+      members.map(async pid => {
+        const rooted = await proofs.prove(pid).catch(() => undefined);
+        if (rooted !== undefined) return { name: rooted.name, path: undefined };
+        const profiled = await proveProfile(pid).catch(() => undefined);
+        return profiled === undefined ? undefined : { name: profiled.name, path: profiled.path };
+      }),
+    );
+    const first = proved[0];
+    if (first === undefined || proved.some(member => member === undefined || member.name !== first.name))
+      return undefined;
+    const path = proved.find(member => member?.path !== undefined)?.path;
+    const name = plain(first.name, 64);
+    return path === undefined || name === '' ? undefined : { name, path: plain(path, 512) };
   }
 
   async type(

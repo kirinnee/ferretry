@@ -75,6 +75,7 @@ export const StepUpActSchema = z.enum([
   'catalog-install',
   'share-catalog',
   'add-2fa-key',
+  'allow-profile-targets',
 ]);
 export type StepUpAct = z.infer<typeof StepUpActSchema>;
 
@@ -328,6 +329,12 @@ export const STEP_UP_ACTS = {
    * the one staged seed it saves ({@link STEP_UP_ACTS_EVERY_CALLER}). Removing a key never asks.
    */
   addTwoFactorKey: 'add-2fa-key',
+  /**
+   * Letting secure-copy rules paste into programs from the owner's OWN profile (`~/.nix-profile`), which any process
+   * running as the owner — every ferret — can change (docs/secure-copy.md, owner decision !A182). Turning it OFF
+   * never asks.
+   */
+  allowProfileTargets: 'allow-profile-targets',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**
