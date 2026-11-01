@@ -61,10 +61,12 @@ interface SharedWithMeProps {
   /** The machines this browser is paired with. None means no Install button. */
   readonly machines: readonly InstallMachine[];
   readonly installHost?: InstallHost;
-  readonly onHome: () => void;
+  readonly onHome?: () => void;
+  /** One tab of the Sharing page: no page frame, no way back to the machine list. */
+  readonly embedded?: boolean;
 }
 
-export function SharedWithMe({ members, machines, installHost, onHome }: SharedWithMeProps) {
+export function SharedWithMe({ members, machines, installHost, onHome, embedded = false }: SharedWithMeProps) {
   const [subs, setSubs] = useState<readonly MemberSubscription[] | null>(null);
   const [left, setLeft] = useState(false);
   const reload = useCallback(async (): Promise<void> => {
@@ -75,7 +77,7 @@ export function SharedWithMe({ members, machines, installHost, onHome }: SharedW
   }, [reload]);
 
   return (
-    <SharedPage title={SHARED_WITH_ME}>
+    <SharedPage title={SHARED_WITH_ME} embedded={embedded}>
       {left ? (
         <p className="m-0 text-cell text-ok" role="status" data-shared-left="">
           {LEFT_SENTENCE}
@@ -108,11 +110,13 @@ export function SharedWithMe({ members, machines, installHost, onHome }: SharedW
           ))}
         </ul>
       )}
-      <div>
-        <Button type="button" variant="ghost" className="kt-btn--flush-start" onClick={onHome} data-shared-home="">
-          {BACK_TO_MACHINES}
-        </Button>
-      </div>
+      {embedded || onHome === undefined ? null : (
+        <div>
+          <Button type="button" variant="ghost" className="kt-btn--flush-start" onClick={onHome} data-shared-home="">
+            {BACK_TO_MACHINES}
+          </Button>
+        </div>
+      )}
     </SharedPage>
   );
 }

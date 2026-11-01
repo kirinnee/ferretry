@@ -143,6 +143,19 @@ export interface DaemonLearningRoute {
   readonly daemonId: DaemonId;
 }
 
+/** Sharing's four tabs, in the order the page shows them. */
+export const SHARING_TABS = ['catalogs', 'shared', 'people', 'skills'] as const;
+export type SharingTab = (typeof SHARING_TABS)[number];
+
+export const isSharingTab = (value: string): value is SharingTab => (SHARING_TABS as readonly string[]).includes(value);
+
+/** Sharing: catalogs, what is shared with this browser, people, and skills. Absent `tab` means My catalogs. */
+export interface DaemonSharingRoute {
+  readonly kind: 'sharing';
+  readonly daemonId: DaemonId;
+  readonly tab?: SharingTab;
+}
+
 export interface DaemonImportedHistoryRoute {
   readonly kind: 'imported-history';
   readonly daemonId: DaemonId;
@@ -172,6 +185,7 @@ export type DaemonPageRoute =
   | DaemonWardenRoute
   | DaemonAnalyticsRoute
   | DaemonLearningRoute
+  | DaemonSharingRoute
   | DaemonImportedHistoryRoute
   | DaemonMachineSetupRoute;
 
@@ -322,6 +336,10 @@ export const daemonAnalyticsQueryPath = (id: DaemonId, query?: string | null): s
 /** Builds the canonical learning pathname for one daemon. */
 export const daemonLearningPath = (id: DaemonId): string => `${daemonHomePath(id)}/learning`;
 
+/** Builds the Sharing pathname for one daemon; a tab makes it linkable: `/d/<id>/sharing/<tab>`. */
+export const daemonSharingPath = (id: DaemonId, tab?: SharingTab): string =>
+  `${daemonHomePath(id)}/sharing${tab === undefined ? '' : `/${tab}`}`;
+
 /** Builds the canonical history-import pathname for one daemon. */
 export const daemonImportedHistoryPath = (id: DaemonId): string => `${daemonHomePath(id)}/history`;
 
@@ -350,6 +368,7 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'warden') return { kind: 'warden', daemonId: id };
     if (destination === 'analytics') return { kind: 'analytics', daemonId: id };
     if (destination === 'learning') return { kind: 'learning', daemonId: id };
+    if (destination === 'sharing') return { kind: 'sharing', daemonId: id };
     if (destination === 'history') return { kind: 'imported-history', daemonId: id };
     if (destination === 'setup') return { kind: 'machine-setup', daemonId: id };
     if (destination === 'board') return { kind: 'board', daemonId: id };
@@ -363,6 +382,12 @@ export const parseRoute = (pathname: string): Route => {
   if (destination === 'board' && sessionSegment !== undefined && remainder.length === 0) {
     const taskId = decodeRouteSegment(sessionSegment);
     return { kind: 'board', daemonId: id, taskId };
+  }
+
+  if (destination === 'sharing' && sessionSegment !== undefined && remainder.length === 0) {
+    const tab = decodeRouteSegment(sessionSegment);
+    // A tab that does not exist resolves to Sharing itself: the path names the place, only the tab is unusable.
+    return isSharingTab(tab) ? { kind: 'sharing', daemonId: id, tab } : { kind: 'sharing', daemonId: id };
   }
 
   if (destination === 'analytics' && sessionSegment === 'query' && remainder.length === 0)
@@ -439,6 +464,8 @@ export const routePath = (route: Route): string => {
       return route.view === 'query' ? daemonAnalyticsQueryPath(route.daemonId) : daemonAnalyticsPath(route.daemonId);
     case 'learning':
       return daemonLearningPath(route.daemonId);
+    case 'sharing':
+      return daemonSharingPath(route.daemonId, route.tab);
     case 'imported-history':
       return daemonImportedHistoryPath(route.daemonId);
     case 'machine-setup':

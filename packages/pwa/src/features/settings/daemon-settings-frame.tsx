@@ -43,12 +43,13 @@ import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { machineOffers } from '../../lib/daemon-health.ts';
 import { useAddKeyStepUp, useDaemonClient } from '../../lib/store.tsx';
+import { daemonSharingPath } from '../../lib/pages/routes.ts';
+import { useOptionalRouter } from '../../lib/router.tsx';
 import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { Button } from '../../shell/primitives.tsx';
+import { RouteLink } from '../../shell/route-link.tsx';
 import { AccountsSurface } from '../accounts/accounts-surface.tsx';
 import { ActiveCarrierCard, type CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
-import type { CatalogClientFactory } from '../catalogs/catalogs-api.ts';
-import { CatalogsSurface } from '../catalogs/catalogs-surface.tsx';
 import { LoginsSurface } from '../secrets/logins-surface.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { CopyRulesSurface } from '../secure-copy/copy-rules-surface.tsx';
@@ -156,7 +157,6 @@ interface FrameLive {
   readonly connectionRecord: DaemonConnectionRecord | undefined;
   readonly createWardenClient: WardenClientFactory | undefined;
   readonly createSecretClient: SecretClientFactory | undefined;
-  readonly createCatalogClient: CatalogClientFactory | undefined;
   readonly otherMachines: readonly DaemonConnectionRecord[];
   readonly createGrantClient: GrantClientFactory | undefined;
   readonly createPairingClient: PairingClientFactory | undefined;
@@ -234,15 +234,21 @@ function SecureCopyPanel({ connection }: DaemonSettingsTabProps) {
   );
 }
 
+/** Catalogs live on the Sharing page now; this tab id stays so an old link still lands on a sentence that says so. */
 function CatalogsPanel({ connection }: DaemonSettingsTabProps) {
-  const { createCatalogClient } = useFrameLive();
+  const router = useOptionalRouter();
+  const to = daemonSharingPath(connection.daemonId, 'catalogs');
   return (
-    <CatalogsSurface
-      connection={connection}
-      {...(createCatalogClient
-        ? { createClient: createCatalogClient, installHost: { createClient: createCatalogClient } }
-        : {})}
-    />
+    <p className="m-0 text-cell text-muted" data-catalogs-moved="">
+      <RouteLink
+        to={to}
+        {...(router === null ? {} : { onNavigate: router.navigate })}
+        className="text-accent underline"
+      >
+        Catalogs moved to Sharing
+      </RouteLink>
+      . Sharing is where you make, share and read them now.
+    </p>
   );
 }
 
@@ -335,7 +341,7 @@ const LEADING_TABS: readonly DaemonSettingsTabDefinition[] = [
   {
     id: 'catalogs',
     label: 'Catalogs',
-    description: 'Share skills and MCP servers as a signed file, or install from one.',
+    description: 'Moved: catalogs are on the Sharing page now.',
     Surface: CatalogsPanel,
   },
   {
@@ -404,8 +410,6 @@ export interface DaemonSettingsFrameProps {
   readonly createWardenClient?: WardenClientFactory;
   /** The same seam for the secret store. */
   readonly createSecretClient?: SecretClientFactory;
-  /** And for the catalogs, so no harness signs or reads a real one. */
-  readonly createCatalogClient?: CatalogClientFactory;
   /** The other machines this browser is paired with, so secrets can be copied to one. */
   readonly otherMachines?: readonly DaemonConnectionRecord[];
   /** And for the grant surface, so no test or harness opens a socket to read a limit. */
@@ -447,7 +451,6 @@ export function DaemonSettingsFrame({
   name,
   createWardenClient,
   createSecretClient,
-  createCatalogClient,
   otherMachines = NO_OTHER_MACHINES,
   createGrantClient,
   createPairingClient,
@@ -475,7 +478,6 @@ export function DaemonSettingsFrame({
       connectionRecord,
       createWardenClient,
       createSecretClient,
-      createCatalogClient,
       otherMachines,
       createGrantClient,
       createPairingClient,
@@ -494,7 +496,6 @@ export function DaemonSettingsFrame({
       connectionRecord,
       createWardenClient,
       createSecretClient,
-      createCatalogClient,
       otherMachines,
       createGrantClient,
       createPairingClient,

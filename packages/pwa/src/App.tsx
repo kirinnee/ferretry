@@ -221,6 +221,7 @@ import {
   type ProjectDetailPageProps,
   type QueuePageProps,
   type SessionChatPageProps,
+  type SharingPageProps,
 } from './lib/pages/page-host.tsx';
 import {
   connectionPickerPath,
@@ -291,6 +292,7 @@ import {
 import { AppUpdatedToast } from './shell/app-updated-toast.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
+import { SharingPage } from './features/sharing/sharing-page.tsx';
 import { InsightsFrame } from './shell/insights-frame.tsx';
 import { PageScrollRegion } from './shell/page-scroll-region.tsx';
 import {
@@ -515,6 +517,8 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       return [{ href: home, label: 'Home' }, { label: 'Analytics' }];
     case 'learning':
       return [{ href: home, label: 'Home' }, { label: 'Learning' }];
+    case 'sharing':
+      return [{ href: home, label: 'Home' }, { label: 'Sharing' }];
     case 'imported-history':
       return [{ href: home, label: 'Home' }, { label: 'Imported history' }];
     case 'machine-setup':
@@ -700,12 +704,10 @@ function JoinRoute() {
   );
 }
 
-/** /shared: what other people share with this browser, and the machines it can install them on. */
-function SharedRoute() {
-  const store = useAppStore();
+/** Every machine this browser is paired with, named so two of the same name stay apart. */
+function useInstallMachines() {
   const { connections } = useConnectionSnapshot();
-  const { navigate } = useRouter();
-  const machines = useMemo(
+  return useMemo(
     () =>
       connections.map(record => ({
         connection: record,
@@ -713,6 +715,13 @@ function SharedRoute() {
       })),
     [connections],
   );
+}
+
+/** /shared: what other people share with this browser, and the machines it can install them on. */
+function SharedRoute() {
+  const store = useAppStore();
+  const { navigate } = useRouter();
+  const machines = useInstallMachines();
   return <SharedWithMe members={store.members} machines={machines} onHome={() => navigate(connectionPickerPath())} />;
 }
 
@@ -1019,6 +1028,8 @@ export const sessionsBarPlace = (route: PageRoute): SessionsBarPlace | null => {
     case 'warden':
     case 'learning':
       return 'insights';
+    case 'sharing':
+      return 'sharing';
     case 'settings':
       return 'settings';
     case 'attention':
@@ -1874,6 +1885,16 @@ const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
   machine: MachineSettingsSurface,
 };
 
+/** /d/:daemon/sharing[/:tab]: catalogs, what is shared with this browser, people, and skills. */
+function SharingRoute({ connection, tab }: SharingPageProps) {
+  const store = useAppStore();
+  const { navigate } = useRouter();
+  const machines = useInstallMachines();
+  return (
+    <SharingPage connection={connection} tab={tab} onNavigate={navigate} members={store.members} machines={machines} />
+  );
+}
+
 function SettingsRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
   const lockedMachines = useLockedMachines(store.unlockGate);
@@ -2447,6 +2468,7 @@ const PAGE_SLOTS: PageHostSlots = {
   ProjectDetail: ProjectDetailRoute,
   ProjectLanes: ProjectLanesRoute,
   SessionChat: SessionRoute,
+  Sharing: SharingRoute,
   Settings: SettingsRoute,
   Warden: WardenRoute,
   Analytics: AnalyticsRoute,

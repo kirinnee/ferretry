@@ -302,14 +302,12 @@ describe('CatalogsSurface detail', () => {
     await view.unmount();
   });
 
-  it('opens People and codes from the list and comes back', async () => {
+  it('leaves people and codes to the Sharing page: the list carries no People button', async () => {
     const { view } = await open(
       both({ 'GET /v1/catalog-members': () => ({ members: [] }), 'GET /v1/catalog-shares': () => ({ shares: [] }) }),
     );
-    await tap('[data-catalogs-people]');
-    expect(q('[data-catalog-members]')).not.toBeNull();
-    await tap('[data-members-back]');
     expect(q('[data-catalogs-list]')).not.toBeNull();
+    expect(q('[data-catalogs-people]')).toBeNull();
     await view.unmount();
   });
 

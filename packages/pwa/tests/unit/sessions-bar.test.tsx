@@ -325,6 +325,20 @@ describe('SessionsBar as a column', () => {
     expect(view.container.querySelector('[data-sbar-place="insights"]')?.getAttribute('aria-current')).toBe('page');
   });
 
+  test('lists the foot places in order, with Sharing between Projects and Insights', async () => {
+    const { calls, element } = bar({ active: 'sharing' });
+    view = await mount(element);
+    const places = [...view.container.querySelectorAll('[data-sbar-place]')].map(node =>
+      node.getAttribute('data-sbar-place'),
+    );
+    expect(places.filter(place => place !== 'attention')).toEqual(['projects', 'sharing', 'insights', 'settings']);
+    const sharing = must(view.container.querySelector('[data-sbar-place="sharing"]'), 'Sharing');
+    expect(sharing.getAttribute('aria-current')).toBe('page');
+    expect(sharing.textContent).toContain('Sharing');
+    await click(sharing, 'Sharing');
+    expect(calls).toContain('navigate:/d/alpha/sharing');
+  });
+
   test('opens the finder with the shortcut it claims, and folds itself to a rail', async () => {
     const { calls, element } = bar();
     view = await mount(element);

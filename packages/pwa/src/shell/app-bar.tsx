@@ -40,6 +40,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  Share2,
   ShieldCheck,
   Sparkles,
   SquareKanban,
@@ -57,6 +58,7 @@ import {
   daemonProjectsPath,
   daemonSessionsPath,
   daemonSettingsPath,
+  daemonSharingPath,
   daemonWardenPath,
   type Route,
 } from '../lib/pages/routes.ts';
@@ -118,6 +120,10 @@ export const BOARD_ENTRY = {
   title: 'Every task on every machine as lanes: what is moving, stuck or waiting on you',
 } as const;
 export const PROJECTS_ENTRY = { label: 'Projects', title: 'Open registered workspaces and folders' } as const;
+export const SHARING_ENTRY = {
+  label: 'Sharing',
+  title: 'Share skills and MCP servers, see what is shared with you, and who can read your catalogs',
+} as const;
 export const AGENDA_ENTRY = {
   label: 'Inbox',
   title: 'Everything your ferrets are waiting on you for, across every machine',
@@ -134,6 +140,7 @@ export const APP_BAR_DESTINATIONS = [
   { id: 'attention', ...AGENDA_ENTRY, path: daemonAgendaPath, Icon: Inbox },
   { id: 'board', ...BOARD_ENTRY, path: daemonBoardPath, Icon: SquareKanban },
   { id: 'projects', ...PROJECTS_ENTRY, path: daemonProjectsPath, Icon: FolderKanban },
+  { id: 'sharing', ...SHARING_ENTRY, path: daemonSharingPath, Icon: Share2 },
   { id: 'analytics', ...ANALYTICS_ENTRY, path: daemonAnalyticsPath, Icon: ChartNoAxesCombined },
   { id: 'warden', ...WARDEN_ENTRY, path: daemonWardenPath, Icon: ShieldCheck },
   { id: 'learning', ...LEARNING_ENTRY, path: daemonLearningPath, Icon: GraduationCap },
@@ -161,7 +168,14 @@ export type AppBarDestinationId = AppNavigationEntry['id'];
 
 /** The phone's bottom bar: Sessions · Inbox · Board, then Find and More. Every other place is under More. */
 export const TAB_BAR_PLACES: readonly AppBarDestinationId[] = ['sessions', 'attention', 'board'];
-export const MORE_PLACES: readonly AppBarDestinationId[] = ['projects', 'analytics', 'warden', 'learning', 'settings'];
+export const MORE_PLACES: readonly AppBarDestinationId[] = [
+  'projects',
+  'sharing',
+  'analytics',
+  'warden',
+  'learning',
+  'settings',
+];
 /** The three Insights views, which sit together under More and share a phone title. */
 export const INSIGHTS_PLACES: readonly AppBarDestinationId[] = ['analytics', 'warden', 'learning'];
 
@@ -192,6 +206,7 @@ export const appBarDestinationForRoute = (route: Route): AppBarDestinationId | n
     case 'project-detail':
     case 'project-lanes':
       return 'projects';
+    case 'sharing':
     case 'analytics':
     case 'warden':
     case 'learning':
@@ -577,6 +592,7 @@ const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
   attention: <Inbox size={20} aria-hidden="true" />,
   board: <SquareKanban size={20} aria-hidden="true" />,
   projects: <FolderKanban size={20} aria-hidden="true" />,
+  sharing: <Share2 size={20} aria-hidden="true" />,
   analytics: <ChartNoAxesCombined size={20} aria-hidden="true" />,
   warden: <ShieldCheck size={20} aria-hidden="true" />,
   learning: <GraduationCap size={20} aria-hidden="true" />,
@@ -585,7 +601,7 @@ const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
 
 /**
  * The phone's level one: a bottom bar with Sessions, Inbox and Board plus Find and More (Projects,
- * Analytics, Warden, Learning, Settings), safe-area aware so it sits above the home indicator. Rendered by the shell only at drawer
+ * Sharing, Analytics, Warden, Learning, Settings), safe-area aware so it sits above the home indicator. Rendered by the shell only at drawer
  * widths, and not inside a session ({@link showsTabBar}).
  *
  * WHILE THE KEYBOARD IS UP THE BAR IS GONE (`data-kb-hide`). It rode up above the keyboard and sat on top
@@ -666,8 +682,12 @@ export function AppTabBar({
         closeLabel="Dismiss more places"
         panelClassName="px-panel pb-panel"
       >
-        <nav aria-label="More places" className="flex flex-col gap-xs pb-md">
-          <h2 className="m-0 mb-sm text-title font-semibold text-fg">More</h2>
+        <nav
+          aria-label="More places"
+          className="scroll-thin flex min-h-0 flex-1 flex-col gap-xs overflow-y-auto overscroll-contain pb-[calc(var(--gap-md)+var(--safe-bottom))]"
+          data-app-more-list=""
+        >
+          <h2 className="m-0 mb-sm shrink-0 text-title font-semibold text-fg">More</h2>
           {MORE_PLACES.map(id => {
             const destination = entry(id);
             return (
@@ -678,7 +698,7 @@ export function AppTabBar({
                 aria-current={active === id ? 'page' : undefined}
                 onClick={select}
                 data-app-more={id}
-                className="kt-navpill min-h-[48px]"
+                className="kt-navpill min-h-[48px] shrink-0"
               >
                 <span className="flex w-5 shrink-0 justify-center" aria-hidden="true">
                   {TAB_ICONS[id]}
@@ -693,7 +713,7 @@ export function AppTabBar({
           {whatsNew === undefined ? null : (
             <button
               type="button"
-              className="kt-navpill min-h-[48px] text-left"
+              className="kt-navpill min-h-[48px] shrink-0 text-left"
               data-app-more-whats-new=""
               onClick={() => {
                 select();

@@ -2,7 +2,7 @@ import type { ComponentType } from 'react';
 
 import type { DaemonConnection, DaemonId } from '../daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts';
-import type { PageRoute } from './routes.ts';
+import type { PageRoute, SharingTab } from './routes.ts';
 
 export interface DaemonPageProps {
   readonly connection: DaemonConnection;
@@ -27,6 +27,11 @@ export interface ProjectDetailPageProps extends DaemonPageProps {
   readonly projectId: string;
 }
 
+export interface SharingPageProps extends DaemonPageProps {
+  /** The tab the address names (`/sharing/<tab>`); `undefined` opens My catalogs. */
+  readonly tab: SharingTab | undefined;
+}
+
 export interface PageHostSlots {
   readonly ConnectionPicker: ComponentType;
   /** First-run setup. Connection-free: it exists precisely because there is none yet. */
@@ -46,6 +51,8 @@ export interface PageHostSlots {
   readonly Warden: ComponentType<DaemonPageProps>;
   readonly Analytics: ComponentType<DaemonPageProps>;
   readonly Learning: ComponentType<DaemonPageProps>;
+  /** Sharing: catalogs, shared with me, people and skills, one tab each. */
+  readonly Sharing?: ComponentType<SharingPageProps>;
   /** The Inbox: every open item across every paired machine. */
   readonly Attention?: ComponentType<DaemonPageProps>;
   /** The Board: every card across every paired machine, as lanes. */
@@ -121,6 +128,9 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
       return <slots.Analytics connection={matchedConnection} />;
     case 'learning':
       return <slots.Learning connection={matchedConnection} />;
+    case 'sharing':
+      if (slots.Sharing === undefined) throw new Error('the sharing route is not mounted');
+      return <slots.Sharing connection={matchedConnection} tab={route.tab} />;
     case 'attention':
       if (slots.Attention === undefined) throw new Error('the agenda route is not mounted');
       return <slots.Attention connection={matchedConnection} />;

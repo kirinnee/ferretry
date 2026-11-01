@@ -74,8 +74,12 @@ describe('FleetNavigationRail', () => {
       '/d/workshop/new',
       '/d/workshop/warden',
       '/d/workshop/history',
+      '/d/workshop/sharing',
       '/d/workshop/settings',
     ]);
+    const sharing = links.find(link => link.getAttribute('href') === '/d/workshop/sharing');
+    expect(sharing?.getAttribute('aria-label')).toBe('Open sharing');
+    expect(sharing?.nextElementSibling?.getAttribute('aria-label')).toBe('Open settings');
 
     await mounted.unmount();
   });
