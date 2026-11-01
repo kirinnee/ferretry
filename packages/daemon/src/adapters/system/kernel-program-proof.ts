@@ -141,6 +141,10 @@ export interface ProcFiles {
   stat(pid: number): Promise<string>;
   /** The file a process runs (`/proc/<pid>/exe`). */
   executable(pid: number): Promise<string>;
+  /** The name the kernel keeps for a process (`/proc/<pid>/comm`). */
+  name(pid: number): Promise<string>;
+  /** A process's children (`/proc/<pid>/task/<pid>/children`). */
+  children(pid: number): Promise<readonly number[]>;
   /** Whether this account could change or replace a file (replaceable-file.ts). */
   replaceable(path: string): Promise<boolean>;
 }
@@ -150,10 +154,11 @@ const AT_START_TICKS = 100;
 
 /**
  * systemd's own PAM helper, `(sd-pam)`: the one process of this account every systemd login has whose descriptors
- * cannot be read (forked as root, then it dropped to this account and never ran another program). Told apart by
- * the kernel, not by its name: its parent runs a root-owned `systemd` this account cannot replace (the user's
- * service manager), and it started within a second of that parent, before any program of this account could exist.
- * A process a ferret hides (`prctl(PR_SET_DUMPABLE, 0)`, or one `systemd-run --user` starts) fails one or the other.
+ * cannot be read (forked as root, then it dropped to this account and never ran another program). Singled out by the
+ * kernel, its name only one check among them: its parent runs a root-owned `systemd` this account cannot replace (the
+ * user's service manager), it started within a second of that parent, it is that parent's EARLIEST child (systemd
+ * forks it before anything else, and other children can start in that same second), and it is called `(sd-pam)`. A
+ * process a ferret hides (`prctl(PR_SET_DUMPABLE, 0)`, or one `systemd-run --user` starts) fails at least one.
  */
 async function systemdLoginHelper(files: ProcFiles, pid: number, status: string): Promise<boolean> {
   const parent = parseStatusParent(status);
@@ -167,7 +172,22 @@ async function systemdLoginHelper(files: ProcFiles, pid: number, status: string)
   const started = parseStatStart(own ?? '');
   const parentStarted = parseStatStart(theirs ?? '');
   if (started === undefined || parentStarted === undefined) return false;
-  return started >= parentStarted && started - parentStarted <= AT_START_TICKS;
+  if (started < parentStarted || started - parentStarted > AT_START_TICKS) return false;
+  if ((await files.name(pid).catch(() => undefined))?.trim() !== SD_PAM) return false;
+  return await earliestChild(files, parent, pid, started);
+}
+
+/** systemd's PAM helper as the kernel names it. */
+const SD_PAM = '(sd-pam)';
+
+/** `pid` is `parent`'s child, and every other child started strictly later (one that has gone is passed over). */
+async function earliestChild(files: ProcFiles, parent: number, pid: number, started: number): Promise<boolean> {
+  const children = await files.children(parent).catch(() => undefined);
+  if (children?.includes(pid) !== true) return false;
+  const others = await Promise.all(
+    children.filter(child => child !== pid).map(async child => parseStatStart(await files.stat(child).catch(() => ''))),
+  );
+  return others.every(other => other === undefined || other > started);
 }
 
 /** A descriptor that is never a terminal: no stat needed. */
@@ -233,6 +253,12 @@ export const PROC_FILES: ProcFiles = {
   status: async pid => await readFile(`/proc/${String(pid)}/status`, 'utf8'),
   stat: async pid => await readFile(`/proc/${String(pid)}/stat`, 'utf8'),
   executable: async pid => await readlink(`/proc/${String(pid)}/exe`),
+  name: async pid => await readFile(`/proc/${String(pid)}/comm`, 'utf8'),
+  children: async pid =>
+    (await readFile(`/proc/${String(pid)}/task/${String(pid)}/children`, 'utf8'))
+      .split(/\s+/u)
+      .filter(word => /^[1-9][0-9]*$/u.test(word))
+      .map(Number),
   replaceable: async path => await replaceableBy(process.getuid?.(), path),
 };
 
