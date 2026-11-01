@@ -133,6 +133,23 @@ function refusedFor(context: RouteContext, path: string, axis: 'use' | 'configur
   );
 }
 
+/**
+ * The fleet's `use` grant, which every configuration route demands at the boundary. For a fleet file the file's own
+ * `configure` question already implies it; for `warden.yaml` it does not, so a device the owner kept off the fleet is
+ * refused at every door. Asked only after `refusedFor`, which has refused a caller with no standing.
+ */
+function refusedFleetUse(context: RouteContext, path: string): ApiResponse | undefined {
+  const decision = context.governance?.decide(USE);
+  if (decision === undefined || decision.allowed) return undefined;
+  return jsonResponse(
+    {
+      error: `this device may not use the agent fleet, so it may not change ${path}`,
+      code: grantRefusalCode(decision.refusal),
+    },
+    403,
+  );
+}
+
 function invalid(issues: readonly ConfigIssue[]): ApiResponse {
   const errors = issues.filter(issue => issue.severity === 'error');
   return jsonResponse(
@@ -184,8 +201,9 @@ async function put(subsystem: ConfigFilesSubsystem, context: RouteContext): Prom
 }
 
 /**
- * Whether this caller may act on a HELD edit to `path` as the owner (docs/config-files.md): the file's
- * capability on `configure`, never an agent, and — to put the edit into effect (`act: 'confirm'`) — from a
+ * Whether this caller may act on a HELD edit to `path` as the owner (docs/config-files.md): the fleet on `use`
+ * (what `POST /v1/config/confirm` demands at the boundary, asked here too so a door that demands nothing of its
+ * own asks it as well), the file's capability on `configure`, never an agent, and — to put the edit into effect (`act: 'confirm'`) — from a
  * governed device a passkey proved for this act (`loosen-config`). Dropping a held edit (`act: 'discard'`)
  * only tightens, so it asks no more than `configure`. Answers a refusal, or `undefined` when allowed; an
  * agent is refused by throwing. Shared by `POST /v1/config/confirm` and the agenda's Allow
@@ -196,7 +214,7 @@ export function heldEditRefusal(
   path: string,
   act: 'confirm' | 'discard',
 ): ApiResponse | undefined {
-  const refused = refusedFor(context, path, 'configure');
+  const refused = refusedFor(context, path, 'configure') ?? refusedFleetUse(context, path);
   if (refused !== undefined) return refused;
   if (isAgentCaller(context)) {
     throw new ApiError(403, 'an agent cannot confirm a configuration change; the owner confirms it', 'forbidden');

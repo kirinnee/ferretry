@@ -1391,6 +1391,23 @@ describe('the mounted daemon surface', () => {
     should(firstLiteral).be.below(firstPattern);
   });
 
+  it('should let only the agenda’s answer routes consult the grants without a demand, so a new one is a reviewed diff', () => {
+    // `consultsGrants` hands a handler the caller's grant standing on a route that demands nothing. It decides
+    // nothing itself, but a ferret's own credential reads `governed: false`, so a handler that relaxed on that
+    // without also asking `isAgentCaller` would serve a ferret. Each route that sets it is listed here.
+    // Arrange
+    const routes = mountedDaemonRoutes(base, subsystems());
+
+    // Act
+    const consulting = routes
+      .filter(route => route.consultsGrants === true)
+      .map(route => `${route.method} ${route.path}`);
+
+    // Assert — an answer to a card that confirms a held configuration change (docs/agenda.md).
+    should(consulting).eql(['POST /v1/sessions/:sessionId/agenda', 'POST /v1/sessions/:sessionId/attention']);
+    should(routes.filter(route => route.consultsGrants === true && route.capability !== undefined)).eql([]);
+  });
+
   it('should compress only the audited GET routes, so every other answer — and every new one — stays plain', () => {
     // BREACH: a compressed answer's length depends on its content, so an answer that can carry a secret, a
     // token, a digest of one, a pairing code or input-request material is never gzipped

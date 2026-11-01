@@ -854,6 +854,32 @@ async function record(
   });
 }
 
+/**
+ * One act a HANDLER records itself, for a route that serves far more than that act: the agenda's answer route
+ * confirms a held configuration change only on a card that names one, so a rule on the route would record every
+ * answer. The row is built as a rule's is — the actor from the boundary's credential, a paired device by name, a
+ * ferret's session in the detail — and, like a rule's, it never fails the request: a gap is said out loud.
+ */
+export async function recordHandlerAct(
+  subsystem: AuditedRoutesSubsystem,
+  context: RouteContext,
+  act: { readonly event: AuditEvent; readonly outcome: AuditOutcome; readonly detail?: AuditDetail },
+): Promise<void> {
+  try {
+    const credential = context.credential;
+    const actorName = credential?.tokenClass === 'device' ? await subsystem.deviceName(credential.deviceId) : undefined;
+    const detail: AuditDetail = { ...act.detail, ...agentAuditDetail(credential) };
+    await subsystem.log.record({
+      event: act.event,
+      actor: auditActorOf(credential, actorName),
+      outcome: act.outcome,
+      ...(Object.keys(detail).length === 0 ? {} : { detail }),
+    });
+  } catch (error) {
+    subsystem.failures.auditWriteFailed(describeFailure(act, error));
+  }
+}
+
 /** The status an error would be answered with: an `ApiError` says, anything else is a failure. */
 function statusOf(error: unknown): number | undefined {
   if (typeof error !== 'object' || error === null || !('status' in error)) return undefined;
