@@ -289,8 +289,20 @@ export class FakeGuardDisk implements GuardDisk {
   }
 
   async unlink(path: string): Promise<void> {
-    const { key } = await this.lookup(path);
+    const { key, entry } = await this.lookup(path);
+    if (entry === undefined) throw errno('ENOENT', path);
+    if (entry.kind === 'directory') throw errno('EISDIR', path);
     this.unlinked.push(key);
+    this.entries.delete(key);
+  }
+
+  /** Removes an EMPTY folder, never following a link (`rmdir(2)`). */
+  async rmdir(path: string): Promise<void> {
+    const { key, entry } = await this.lookup(path);
+    if (entry === undefined) throw errno('ENOENT', path);
+    if (entry.kind !== 'directory') throw errno('ENOTDIR', path);
+    if ([...this.entries.keys()].some(other => other.startsWith(`${key}/`))) throw errno('ENOTEMPTY', path);
+    this.removed.push(key);
     this.entries.delete(key);
   }
 

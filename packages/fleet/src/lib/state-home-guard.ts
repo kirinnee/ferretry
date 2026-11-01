@@ -9,7 +9,9 @@ import { basename, dirname, isAbsolute, join, normalize, relative, sep } from 'n
  *
  *   {@link resolveStateHomes} once — each home by name, by real path AND by device+inode;
  *   {@link openOutsideStateHomes} to read, {@link createOutsideStateHomes} to write,
- *   {@link copyTreeOutsideStateHomes} for a whole folder.
+ *   {@link copyTreeOutsideStateHomes} for a whole folder;
+ *   {@link openFolderOutsideStateHomes} for a folder to write BELOW (the provisioner's destinations), then
+ *   {@link openFolderBelow} and {@link removeEntryWithin} through that handle.
  *
  * Each answers a {@link Guarded} result — `ok: false` names the rule — and only an `ok` result carries a
  * handle that can read or write, so a caller cannot read a file it did not check. A path is judged as named,
@@ -92,12 +94,17 @@ export interface GuardDisk {
   writable(path: string): Promise<boolean>;
 }
 
-/** Why the guard refused. `state-home`: inside a home. `outside`: outside the folder the caller confined it to. */
+/**
+ * Why the guard refused. `state-home`: inside a home. `outside`: outside the folder the caller confined it to.
+ * `link`: a symbolic link where a folder must be. `not-a-folder`: something else where a folder must be.
+ */
 export type GuardRule =
   | 'state-home'
   | 'outside'
   | 'not-found'
   | 'not-a-file'
+  | 'not-a-folder'
+  | 'link'
   | 'changed'
   | 'hard-link'
   | 'taken'
@@ -633,11 +640,259 @@ async function openedFolderProblem(
 async function placedFolderProblem(
   place: string,
   opened: FileIdentity,
-  disk: GuardDisk,
+  disk: Pick<GuardDisk, 'realpath' | 'identity'>,
 ): Promise<{ readonly ok: false; readonly rule: GuardRule } | undefined> {
   if (opened.kind !== 'directory') return refused('not-a-file');
   const again = await disk.realpath(place).catch(() => undefined);
   return again !== place || !same(opened, await disk.identity(place)) ? refused('changed') : undefined;
+}
+
+/** What the folder primitives ask of the disk: the guard's own calls, plus removing an empty folder. */
+export type FolderDisk = Pick<GuardDisk, 'realpath' | 'identity' | 'openDirectory' | 'mkdir' | 'list' | 'unlink'> & {
+  /** Removes the EMPTY folder at `path` (`rmdir`), which never follows a link. */
+  rmdir(path: string): Promise<void>;
+};
+
+/** A checked folder whose place no longer leads to it, so nothing more is reached through it by path. */
+export class FolderChangedError extends Error {
+  constructor(readonly folder: string) {
+    super(`refusing to write in ${folder}: it was replaced after it was checked`);
+    this.name = 'FolderChangedError';
+  }
+}
+
+/**
+ * A folder the guard opened and checked, so every entry below it is reached THROUGH it rather than through
+ * whatever its path names a moment later. Where the platform gives a path through the descriptor (Linux
+ * `/proc/self/fd/N/<leaf>`) that is what {@link GuardedFolder.entry} answers, and a folder swapped after the
+ * check is never reached. Elsewhere (macOS) it answers the real path, and only once the folder is proven still
+ * at it — same real path, same device and inode — or it throws {@link FolderChangedError}: a swap that has
+ * happened is refused, one landing between that proof and the use is the declared residue.
+ */
+export interface GuardedFolder {
+  /** Its real path when it was checked. */
+  readonly path: string;
+  readonly identity: FileIdentity;
+  /** A path that reaches the ONE entry `leaf` in this folder (a name with no `/`). */
+  entry(leaf: string): Promise<string>;
+  /** A path that reaches the folder itself, to list it. */
+  self(): Promise<string>;
+  /** Sets its permission bits through the descriptor (`fchmod`). */
+  chmod(mode: number): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface GuardFolderOptions {
+  /** The permission bits of each missing folder, made THROUGH its checked parent. Without it a missing one is `not-found`. */
+  readonly make?: number;
+}
+
+const isOneEntry = (name: string): boolean =>
+  name !== '' && name !== '.' && name !== '..' && !name.includes('/') && !name.includes(sep);
+
+const codeOf = (error: unknown): string | undefined => (error as { readonly code?: string } | undefined)?.code;
+
+function checkedFolder(handle: GuardDirectoryHandle, place: string, disk: FolderDisk): GuardedFolder {
+  const proven = async (): Promise<void> => {
+    if ((await placedFolderProblem(place, handle.identity, disk)) !== undefined) throw new FolderChangedError(place);
+  };
+  return {
+    path: place,
+    identity: handle.identity,
+    entry: async leaf => {
+      if (!isOneEntry(leaf)) throw new TypeError(`name one entry of the folder, not a path: ${leaf}`);
+      const through = handle.entryPath(leaf);
+      if (through !== undefined) return through;
+      await proven();
+      return join(place, leaf);
+    },
+    self: async () => {
+      const through = handle.entryPath('.');
+      if (through !== undefined) return through;
+      await proven();
+      return place;
+    },
+    chmod: async mode => await handle.chmod(mode),
+    close: async () => await handle.close(),
+  };
+}
+
+/** The home a folder at `place` IS by identity while not being at that home's own place (a bind mount), if any. */
+function boundHome(homes: StateHomes | undefined, place: string, entry: FileIdentity): string | undefined {
+  if (homes === undefined) return undefined;
+  const home = homes.homes.find(directory => same(directory, entry));
+  if (home !== undefined) return home.real === place ? undefined : home.named;
+  return homes.pinned.some(key => same(key, entry)) ? (homes.homes[0]?.named ?? place) : undefined;
+}
+
+/**
+ * Opens the folder `leaf` inside the checked `parent`, THROUGH it, without following a link: a link there is
+ * `link`, anything else that is not a folder is `not-a-folder`, and a folder that is a home (or a pinned key) by
+ * identity anywhere but at that home's own place — a bind mount — is `state-home`. With `make`, a missing folder is
+ * made through the parent first (one somebody else made in the meantime is opened and checked like any other).
+ */
+export async function openFolderBelow(
+  parent: GuardedFolder,
+  leaf: string,
+  homes: StateHomes | undefined,
+  disk: FolderDisk,
+  options: GuardFolderOptions = {},
+): Promise<Guarded<GuardedFolder>> {
+  const place = join(parent.path, leaf);
+  const at = await parent.entry(leaf).catch((error: unknown) => {
+    if (error instanceof FolderChangedError) return undefined;
+    throw error;
+  });
+  if (at === undefined) return refused('changed');
+  let entry = await disk.identity(at);
+  if (entry === undefined) {
+    if (options.make === undefined) return refused('not-found');
+    await disk.mkdir(at, options.make).catch((error: unknown) => {
+      if (codeOf(error) !== 'EEXIST') throw error;
+    });
+    entry = await disk.identity(at);
+    if (entry === undefined) return refused('changed');
+  }
+  if (entry.kind === 'link') return refused('link');
+  if (entry.kind !== 'directory') return refused('not-a-folder');
+  const handle = await disk.openDirectory(at).catch(() => undefined);
+  if (handle === undefined) return refused('changed');
+  // Reached by path (no descriptor paths here): proven to be the folder at its real place, like every later use.
+  const problem =
+    handle.entryPath('.') === undefined ? await placedFolderProblem(place, handle.identity, disk) : undefined;
+  const home = boundHome(homes, place, handle.identity);
+  if (problem !== undefined || home !== undefined) {
+    await handle.close();
+    return problem ?? refused('state-home', home);
+  }
+  return { ok: true, value: checkedFolder(handle, place, disk) };
+}
+
+/** The home whose name (as configured or real) holds `path` most closely, unless an opening holds it. */
+function homeHolding(
+  homes: StateHomes,
+  path: string,
+): { readonly home: KnownDirectory; readonly name: string } | undefined {
+  const names = (directory: KnownDirectory): readonly string[] => [directory.named, directory.real];
+  if (homes.openings.some(opening => names(opening).some(name => within(name, path)))) return undefined;
+  let holding: { readonly home: KnownDirectory; readonly name: string } | undefined;
+  for (const home of homes.homes)
+    for (const name of names(home))
+      if (within(name, path) && (holding === undefined || name.length > holding.name.length)) holding = { home, name };
+  return holding;
+}
+
+/**
+ * Opens the absolute folder `path` to WRITE BELOW IT, checked, so every later step goes through the handle.
+ *
+ * - **Inside a home by name** (a runtime's folder lives in the state home by design): reached from that home's
+ *   real path one folder at a time, each opened THROUGH the one above WITHOUT FOLLOWING A LINK. A link anywhere
+ *   below the home is `link`, so a folder a harness swapped for a link into the home's secrets is never entered.
+ * - **Anywhere else** (a host `~/.claude`, which may well be a link into a dotfiles checkout): links are followed,
+ *   and where it lands must be outside every home by real path and identity, then opened and proven to be the
+ *   folder at that real place.
+ *
+ * Either way, a folder that is a home by identity anywhere but at its own place (a bind mount) is `state-home`,
+ * and with `make` the missing folders are made through their checked parents. `homes` absent judges no home and
+ * still hands back a checked handle.
+ */
+export async function openFolderOutsideStateHomes(
+  path: string,
+  homes: StateHomes | undefined,
+  disk: FolderDisk,
+  options: GuardFolderOptions = {},
+): Promise<Guarded<GuardedFolder>> {
+  const target = absolute(path, 'the folder');
+  const holding = homes === undefined ? undefined : homeHolding(homes, target);
+  let start: string;
+  let below: readonly string[];
+  if (holding !== undefined) {
+    start = holding.home.real;
+    below = relative(holding.name, target)
+      .split(sep)
+      .filter(segment => segment !== '');
+  } else {
+    let existing = target;
+    const missing: string[] = [];
+    let real = await disk.realpath(existing).catch(() => undefined);
+    while (real === undefined && options.make !== undefined && dirname(existing) !== existing) {
+      missing.unshift(basename(existing));
+      existing = dirname(existing);
+      real = await disk.realpath(existing).catch(() => undefined);
+    }
+    if (real === undefined) return refused('not-found');
+    if (homes !== undefined) {
+      const verdict = await stateHomeOf(homes, real, disk);
+      if (verdict.inside) return refused('state-home', verdict.home);
+    }
+    if ((await disk.identity(real))?.kind !== 'directory') return refused('not-a-folder');
+    start = real;
+    below = missing;
+  }
+  const top = await disk.openDirectory(start).catch(() => undefined);
+  if (top === undefined) return refused('changed');
+  const topProblem =
+    holding !== undefined
+      ? same(holding.home, top.identity)
+        ? undefined
+        : refused('changed')
+      : await placedFolderProblem(start, top.identity, disk);
+  if (topProblem !== undefined) {
+    await top.close();
+    return topProblem;
+  }
+  let folder = checkedFolder(top, start, disk);
+  for (const segment of below) {
+    let next: Guarded<GuardedFolder>;
+    try {
+      next = await openFolderBelow(folder, segment, homes, disk, options);
+    } finally {
+      await folder.close();
+    }
+    if (!next.ok) return next;
+    folder = next.value;
+  }
+  return { ok: true, value: folder };
+}
+
+/**
+ * Removes the entry `leaf` of the checked `folder` — a file, a link (never what it points at) or a whole folder —
+ * WITHOUT EVER FOLLOWING A LINK: each folder in the tree is opened through the one above it with no-follow
+ * (`openFolderBelow`) and emptied through that handle, so a sub-folder swapped for a link into a home while the
+ * removal runs is unlinked as the link it now is, and nothing it points at is touched. A folder that is a home by
+ * identity (a bind mount) throws. Already gone is done.
+ */
+export async function removeEntryWithin(
+  folder: GuardedFolder,
+  leaf: string,
+  homes: StateHomes | undefined,
+  disk: FolderDisk,
+): Promise<void> {
+  const unlinked = async (): Promise<void> =>
+    await disk.unlink(await folder.entry(leaf)).catch((error: unknown) => {
+      if (codeOf(error) !== 'ENOENT') throw error;
+    });
+  // `unlink` first: it never follows a link, and it refuses a folder (`EISDIR`; `EPERM` on macOS) — so one call
+  // removes every file and link, and only a folder is opened and walked.
+  try {
+    return await unlinked();
+  } catch (error) {
+    if (codeOf(error) !== 'EISDIR' && codeOf(error) !== 'EPERM') throw error;
+  }
+  const opened = await openFolderBelow(folder, leaf, homes, disk);
+  if (!opened.ok) {
+    if (opened.rule === 'not-found') return;
+    // A link (or a file) put where the folder was since it was looked at: only the name is removed.
+    if (opened.rule === 'link' || opened.rule === 'not-a-folder') return await unlinked();
+    throw new Error(`refusing to remove ${join(folder.path, leaf)}: the state-home guard refused it (${opened.rule})`);
+  }
+  const child = opened.value;
+  try {
+    for (const name of await disk.list(await child.self())) await removeEntryWithin(child, name, homes, disk);
+  } finally {
+    await child.close();
+  }
+  await disk.rmdir(await folder.entry(leaf));
 }
 
 export interface GuardTreeOptions extends GuardLinkOptions {

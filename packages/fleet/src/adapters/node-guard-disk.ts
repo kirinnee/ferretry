@@ -1,19 +1,9 @@
-import { type BigIntStats, constants, createReadStream } from 'node:fs';
-import {
-  access,
-  type FileHandle,
-  lstat,
-  mkdir,
-  open,
-  readdir,
-  readFile,
-  readlink,
-  realpath,
-  unlink,
-} from 'node:fs/promises';
+import { type BigIntStats, constants, createReadStream, rmdirSync, unlinkSync } from 'node:fs';
+import { access, type FileHandle, lstat, mkdir, open, readdir, readFile, readlink, realpath } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import type {
   FileIdentity,
+  FolderDisk,
   GuardDirectoryHandle,
   GuardDisk,
   GuardReadHandle,
@@ -84,7 +74,7 @@ async function opened(path: string, flags: number, mode?: number): Promise<[File
  * file is `O_EXCL`; a read never blocks on a pipe. On Linux an open folder's entries are reached through
  * `/proc/self/fd/N/<leaf>`, so a folder swapped after it was checked is never written into.
  */
-export class NodeGuardDisk implements GuardDisk {
+export class NodeGuardDisk implements GuardDisk, FolderDisk {
   /**
    * `throughDescriptors`: reach a folder's entries through its open descriptor (Linux `/proc`). `groupDatabase`:
    * the group file read for this user's listed groups — a test names another.
@@ -181,8 +171,14 @@ export class NodeGuardDisk implements GuardDisk {
     await mkdir(path, { mode });
   }
 
+  // Synchronous, like a guarded removal's every step: one cheap call each, and a tree is removed one name at a
+  // time (`removeEntryWithin`), where Bun's per-call cost of the asynchronous form made a skills tree slow.
   async unlink(path: string): Promise<void> {
-    await unlink(path);
+    unlinkSync(path);
+  }
+
+  async rmdir(path: string): Promise<void> {
+    rmdirSync(path);
   }
 
   async groups(): Promise<readonly number[]> {

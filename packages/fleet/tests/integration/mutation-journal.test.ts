@@ -58,7 +58,7 @@ describe('FileMutationJournal sealing a directory mode', () => {
     await writeFile(parent, 'a file where a directory was');
 
     // Act / Assert
-    await should(recorder.sealOperation(0)).be.rejectedWith(/ENOTDIR/u);
+    await should(recorder.sealOperation(0)).be.rejectedWith(/is not a folder/u);
   });
 });
 
