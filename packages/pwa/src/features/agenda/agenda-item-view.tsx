@@ -162,6 +162,7 @@ export function AgendaItemView({
   const map = swipeMap(item);
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
+  const hasInfo = head.description !== null || onSnooze !== undefined;
   const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));
   const answerable = settled === undefined && !(inputForm !== undefined && item.kind === 'input');
   const canDismiss = answerable && model.dismissInMenu && !model.notice;
@@ -226,26 +227,29 @@ export function AgendaItemView({
                     <AgendaStatusPill status={status} />
                   </span>
                 )}
-                <StackPager index={position.index} onNext={onNext} onPrevious={onPrevious} total={position.total} />
-                {onSnooze === undefined ? null : (
-                  <AgendaSnoozeMenu disabled={busy} now={now} onSnooze={onSnooze} triggerClass="fy-item-view__step" />
-                )}
-                {head.description === null ? null : (
+                <StackPager
+                  compact
+                  index={position.index}
+                  onNext={onNext}
+                  onPrevious={onPrevious}
+                  total={position.total}
+                />
+                {hasInfo ? (
                   <button
                     aria-controls={infoId}
                     aria-expanded={infoOpen}
                     aria-label="About this item"
-                    className="fy-item-view__step fy-item-view__info-toggle"
+                    className="fy-item-view__step fy-item-view__step--tight fy-item-view__info-toggle"
                     data-agenda-info-toggle=""
                     onClick={() => setInfoFor(infoOpen ? null : item.id)}
                     type="button"
                   >
                     <Info aria-hidden="true" size={18} />
                   </button>
-                )}
+                ) : null}
                 <button
                   aria-label={closeLabel}
-                  className="fy-item-view__step fy-item-view__close"
+                  className="fy-item-view__step fy-item-view__step--tight fy-item-view__close"
                   data-agenda-close=""
                   onClick={onClose}
                   type="button"
@@ -254,15 +258,30 @@ export function AgendaItemView({
                 </button>
               </div>
             </div>
-            {head.description === null ? null : (
+            {hasInfo ? (
               <div className="fy-item-view__info" data-agenda-info-panel="" hidden={!infoOpen} id={infoId}>
                 {infoOpen ? (
-                  <div className="fy-item-view__desc" data-agenda-ask="">
-                    {renderProse(head.description)}
-                  </div>
+                  <>
+                    {head.description === null ? null : (
+                      <div className="fy-item-view__desc" data-agenda-ask="">
+                        {renderProse(head.description)}
+                      </div>
+                    )}
+                    {onSnooze === undefined ? null : (
+                      <div className="fy-item-view__snooze">
+                        <AgendaSnoozeMenu
+                          disabled={busy}
+                          now={now}
+                          onSnooze={onSnooze}
+                          triggerClass="fy-item-view__step"
+                        />
+                        <span className="fy-item-view__snooze-label">Snooze this item</span>
+                      </div>
+                    )}
+                  </>
                 ) : null}
               </div>
-            )}
+            ) : null}
           </header>
           <AgendaItemCard
             busy={busy}

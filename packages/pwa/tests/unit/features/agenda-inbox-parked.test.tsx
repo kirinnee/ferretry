@@ -225,6 +225,12 @@ describe('AgendaInboxPage snooze from the open item', () => {
   it('snoozes the open item from its clock menu: it leaves and the toast says until when', async () => {
     const fake = fakeInbox();
     const { view } = await mountPage({}, [], fake, open.key);
+    await interact(() =>
+      must(
+        view.container.querySelector<HTMLButtonElement>('[data-agenda-view="A1"] [data-agenda-info-toggle]'),
+        'ⓘ',
+      ).click(),
+    );
     const clock = must(
       view.container.querySelector<HTMLButtonElement>('[data-agenda-view="A1"] [data-agenda-snooze]'),
       'the clock',

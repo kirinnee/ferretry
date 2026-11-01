@@ -92,10 +92,12 @@ describe('the item view snooze control', () => {
     expect(root().querySelector('[data-agenda-snooze]')).toBeNull();
   });
 
-  test('puts a clock in the head pager that snoozes, and is off while busy', async () => {
+  test('keeps the clock out of the row — it is in the ⓘ panel — and snoozes from there; off while busy', async () => {
     const snoozed: string[] = [];
     await draw(richItem, { onSnooze: until => snoozed.push(until) });
-    const clock = one<HTMLButtonElement>('[data-agenda-top] .fy-item-view__pager [data-agenda-snooze]');
+    expect(root().querySelector('.fy-item-view__bar [data-agenda-snooze]')).toBeNull();
+    await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
+    const clock = one<HTMLButtonElement>('[data-agenda-top] [data-agenda-info-panel] [data-agenda-snooze]');
     expect(clock.className).toBe('fy-item-view__step');
     await interact(() => clock.click());
     await interact(() => must(root().querySelector<HTMLElement>('[role="menuitem"]'), '1 hour').click());
@@ -103,6 +105,7 @@ describe('the item view snooze control', () => {
     await view?.unmount();
     view = null;
     await draw(richItem, { onSnooze: () => undefined, busy: true });
+    await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
     expect(one<HTMLButtonElement>('[data-agenda-snooze]').disabled).toBe(true);
   });
 });
@@ -124,7 +127,7 @@ describe('the v6 layout: title, ONE card, history — one column', () => {
     expect(root().querySelectorAll('[data-agenda-quick-replies]')).toHaveLength(1);
   });
 
-  test('is ONE row: the title, then the status dot, the pager, the clock, ⓘ and ✕ — nothing under it until ⓘ opens', async () => {
+  test('is ONE row: the title, then the status dot, the pager, ⓘ and ✕ — nothing under it until ⓘ opens', async () => {
     await draw(richItem, { onSnooze: () => undefined });
     const head = one('.fy-item-view__head');
     expect([...head.children].filter(child => !child.hasAttribute('hidden')).map(child => child.className)).toEqual([
@@ -139,12 +142,12 @@ describe('the v6 layout: title, ONE card, history — one column', () => {
     const tools = [...bar.querySelectorAll('.fy-item-view__pager > *')].map(
       node => node.getAttribute('aria-label') ?? node.getAttribute('data-agenda-where') ?? node.className,
     );
+    expect(one('[data-agenda-where]').textContent).toBe('2/3');
     expect(tools).toEqual([
       expect.stringContaining('fy-item-view__status'),
       'Previous item',
-      '',
+      '2 of 3',
       'Next item',
-      'fy-snooze',
       'About this item',
       'Back to the chat',
     ]);

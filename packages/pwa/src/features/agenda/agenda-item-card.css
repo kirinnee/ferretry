@@ -216,6 +216,26 @@
 .fy-item-view__info-toggle[aria-expanded='true'] {
   background: var(--accent-soft);
 }
+/* Snooze lives in the panel, not the row: the title keeps the row. */
+.fy-item-view__snooze {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  margin-top: var(--gap-xs);
+}
+.fy-item-view__snooze-label {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+/* Tight hit areas for the row's own controls (‹ › ⓘ ✕): it is height, not width, that a thumb needs. The global
+   coarse-pointer floor is (0,1,1); `:root` here wins it. */
+:root .fy-item-view__step--tight {
+  min-width: 28px;
+}
+:root .fy-item-view__info-toggle,
+:root .fy-item-view__close {
+  min-width: 36px;
+}
 .fy-item-view__desc {
   margin: 0;
   color: var(--muted);
@@ -740,9 +760,6 @@
   /* The row's controls shrink, so the title keeps most of it. */
   .fy-item-view__bar {
     gap: var(--gap-xs);
-  }
-  .fy-item-view__step {
-    min-width: 32px;
   }
   .fy-item-view__status {
     padding-inline: 2px;
