@@ -401,15 +401,20 @@ describe('a reviewed change applied by the real provisioner', () => {
     const applied = host.catalog.apply(profile.id, LOCAL).finally(() => {
       applying = false;
     });
-    const seen: { accounts: number; named: boolean }[] = [];
+    const seen: { accounts: number; named: boolean; planned: boolean }[] = [];
     while (applying)
-      seen.push({ accounts: (await published.accounts()).length, named: (await published.ids()) !== undefined });
+      seen.push({
+        accounts: (await published.accounts()).length,
+        named: (await published.ids()) !== undefined,
+        // The catalogue's own planning read: a gap here would re-mint every runtime's id.
+        planned: (await host.deps.ids()) !== undefined,
+      });
     const outcome = await applied;
 
-    // Assert — every read found the one published runtime and its name, before the apply or after it.
+    // Assert — every read found the one published runtime and its ids, before the apply or after it.
     should(outcome).match({ outcome: 'applied', apply: { outcome: 'committed' } });
     should(seen.length).be.above(0);
-    should(seen.filter(read => read.accounts !== 1 || !read.named)).deepEqual([]);
+    should(seen.filter(read => read.accounts !== 1 || !read.named || !read.planned)).deepEqual([]);
   });
 
   it('should write a component file and link it in the SAME apply, when that apply is what creates the file', async () => {

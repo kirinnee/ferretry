@@ -24,9 +24,10 @@
  * ## Why in memory and not a file
  *
  * The daemon is the only thing that applies a fleet — the command-line tool asks the daemon — and
- * every apply it makes goes through the one provisioner the catalogue and the setup share. Two
- * applies are still kept apart by the provisioner's own claim beside the manifest; this does not
- * replace that, it only keeps readers out of the window.
+ * every apply it makes goes through the one provisioner the catalogue and the setup share, which runs
+ * its mutation inside {@link FleetPublication.publishing} once it holds its claim beside the manifest.
+ * The claim still keeps two applies apart; this only keeps readers out of the window, and never for
+ * the time an apply spends waiting for a claim somebody else holds.
  *
  * ## What it does not cover
  *
@@ -41,7 +42,7 @@
  * again.
  */
 
-import type { FleetProvisioner, RuntimeIds } from '@ferretry/fleet';
+import type { RuntimeIds } from '@ferretry/fleet';
 import type { AccountInventoryPort, CoreAccount } from '../core/inventory.ts';
 import type { RuntimeNamesPort } from './start-resolution.ts';
 
@@ -104,20 +105,4 @@ export class PublishedFleetInventory implements AccountInventoryPort, RuntimeNam
   async ids(): Promise<RuntimeIds | undefined> {
     return await this.publication.reading(async () => await this.inner.ids());
   }
-}
-
-/**
- * The provisioner, with every apply exclusive and every preview a read.
- *
- * Wrap the provisioner that touches the files and nothing outside it: a wrapper that also reloads
- * the configuration afterwards can trigger another republish, and that must not run inside this one.
- */
-export function exclusiveProvisioner(
-  inner: Pick<FleetProvisioner, 'preview' | 'apply'>,
-  publication: FleetPublication,
-): Pick<FleetProvisioner, 'preview' | 'apply'> {
-  return {
-    preview: async plan => await publication.reading(async () => await inner.preview(plan)),
-    apply: async (plan, documents) => await publication.publishing(async () => await inner.apply(plan, documents)),
-  };
 }

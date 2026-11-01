@@ -12,17 +12,11 @@
  * NO REAL CREDENTIAL APPEARS HERE. Every "value" is a fixture string.
  */
 import { describe, it } from 'bun:test';
-import {
-  type FleetApplyPlan,
-  type FleetApplyResult,
-  type FleetDocumentWrite,
-  MissingFleetSecretsError,
-  type RuntimeIds,
-} from '@ferretry/fleet';
+import { MissingFleetSecretsError, type RuntimeIds } from '@ferretry/fleet';
 import should from 'should';
 import type { CoreAccount } from '../../../src/lib/core/inventory.ts';
 import { FleetLaunchEnvironment } from '../../../src/lib/fleet/launch-environment.ts';
-import { exclusiveProvisioner, FleetPublication, PublishedFleetInventory } from '../../../src/lib/fleet/publication.ts';
+import { FleetPublication, PublishedFleetInventory } from '../../../src/lib/fleet/publication.ts';
 
 const WRAPPER = '/state/fleet/bin/claude-auto-profiled';
 
@@ -42,8 +36,6 @@ const profiled: CoreAccount = {
 };
 
 const IDS = { version: 1, runtimes: {} } as unknown as RuntimeIds;
-const PLAN = { manifestPath: '/state/fleet/manifest.json' } as unknown as FleetApplyPlan;
-const APPLIED = { outcome: 'applied' } as unknown as FleetApplyResult;
 
 /** A promise the test resolves when it chooses. */
 function latch(): { readonly opened: Promise<void>; open(): void } {
@@ -64,10 +56,8 @@ const settle = async (): Promise<void> => await new Promise(resolve => setTimeou
  */
 function manifestOnDisk(): {
   readonly inventory: { accounts(): Promise<readonly CoreAccount[]>; ids(): Promise<RuntimeIds | undefined> };
-  readonly provisioner: {
-    preview(plan: FleetApplyPlan): Promise<never>;
-    apply(plan: FleetApplyPlan, documents?: readonly FleetDocumentWrite[]): Promise<FleetApplyResult>;
-  };
+  /** The mutation an apply runs: what the provisioner does once it holds its claim. */
+  readonly mutate: () => Promise<void>;
   readonly movedAside: Promise<void>;
   readonly release: () => void;
 } {
@@ -79,17 +69,11 @@ function manifestOnDisk(): {
       accounts: async () => (present ? [profiled] : []),
       ids: async () => (present ? IDS : undefined),
     },
-    provisioner: {
-      preview: async () => {
-        throw new Error('not previewed here');
-      },
-      apply: async () => {
-        present = false;
-        aside.open();
-        await hold.opened;
-        present = true;
-        return APPLIED;
-      },
+    mutate: async () => {
+      present = false;
+      aside.open();
+      await hold.opened;
+      present = true;
     },
     movedAside: aside.opened,
     release: hold.open,
@@ -101,7 +85,7 @@ describe('a start during a fleet apply', () => {
     // Arrange — the reader the daemon had: straight through to the file.
     const disk = manifestOnDisk();
     const subject = new FleetLaunchEnvironment(disk.inventory, { values: async () => new Map() });
-    const applying = disk.provisioner.apply(PLAN);
+    const applying = disk.mutate();
     await disk.movedAside;
 
     // Act
@@ -120,7 +104,7 @@ describe('a start during a fleet apply', () => {
     const subject = new FleetLaunchEnvironment(new PublishedFleetInventory(disk.inventory, publication), {
       values: async () => new Map(),
     });
-    const applying = exclusiveProvisioner(disk.provisioner, publication).apply(PLAN, []);
+    const applying = publication.publishing(disk.mutate);
     await disk.movedAside;
 
     // Act
@@ -146,7 +130,7 @@ describe('a start during a fleet apply', () => {
     const disk = manifestOnDisk();
     const publication = new FleetPublication();
     const inventory = new PublishedFleetInventory(disk.inventory, publication);
-    const applying = exclusiveProvisioner(disk.provisioner, publication).apply(PLAN);
+    const applying = publication.publishing(disk.mutate);
     await disk.movedAside;
 
     // Act
@@ -297,69 +281,5 @@ describe('FleetPublication', () => {
     // Assert
     should(((await reading) as Error).message).equal('the manifest could not be parsed');
     should(await applied).equal('applied');
-  });
-});
-
-describe('exclusiveProvisioner', () => {
-  it('should hand the inner provisioner the plan and documents, and answer what it did', async () => {
-    // Arrange
-    const seen: unknown[] = [];
-    const documents: readonly FleetDocumentWrite[] = [];
-    const subject = exclusiveProvisioner(
-      {
-        preview: async plan => {
-          seen.push(['preview', plan]);
-          return { operations: [] } as never;
-        },
-        apply: async (plan, written) => {
-          seen.push(['apply', plan, written]);
-          return APPLIED;
-        },
-      },
-      new FleetPublication(),
-    );
-
-    // Act
-    const preview = await subject.preview(PLAN);
-    const applied = await subject.apply(PLAN, documents);
-
-    // Assert
-    should(preview).deepEqual({ operations: [] });
-    should(applied).equal(APPLIED);
-    should(seen).deepEqual([
-      ['preview', PLAN],
-      ['apply', PLAN, documents],
-    ]);
-  });
-
-  it('should make a preview wait for an apply in flight, since it reads the files the apply moves', async () => {
-    // Arrange
-    const publication = new FleetPublication();
-    const hold = latch();
-    const order: string[] = [];
-    const subject = exclusiveProvisioner(
-      {
-        preview: async () => {
-          order.push('preview');
-          return {} as never;
-        },
-        apply: async () => {
-          await hold.opened;
-          order.push('apply');
-          return APPLIED;
-        },
-      },
-      publication,
-    );
-    const applying = subject.apply(PLAN);
-
-    // Act
-    const previewing = subject.preview(PLAN);
-    await settle();
-    hold.open();
-    await Promise.all([applying, previewing]);
-
-    // Assert
-    should(order).deepEqual(['apply', 'preview']);
   });
 });
