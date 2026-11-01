@@ -249,10 +249,10 @@ describe('the gate policy', () => {
     should(long.body?.endsWith('…')).be.true();
     should(long).not.have.property('premise');
     should(gateRaise(gate, { ...task, howToTest: '' })).not.have.property('body');
-    should(raise.ask.options.map(option => option.label)).eql(['Not good', 'Done']);
+    should(raise.ask.options.map(option => option.label)).eql(['Done', 'Not good']);
     should(raise.answers).eql([
-      { direction: 'left', label: 'Not good', does: 'choose' },
-      { direction: 'right', label: 'Done', does: 'choose' },
+      { direction: 'left', label: 'Done', does: 'choose' },
+      { direction: 'right', label: 'Not good', does: 'choose' },
     ]);
     const plan = gateOf(
       { task: external({ laneId: 'plan' }), laneSet: lanes(PROJECT), audience: 'external' },

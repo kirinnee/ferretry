@@ -92,8 +92,8 @@ predates gates answers it by label, plus:
   refused.
 - **`sourceRef`** `gate:<card>:<lane>:<entry>`; the title is the card's, the ask the lane's ("Try it: <first step of
   How to test>", "OK to build? <summary>"), the premise its summary and the body its How to test, verbatim (never `steps`, which make a choice a mix).
-- **Swipes.** → the first option that moves the card on, ← the reopen-with-agenda option, ↑ a third. A gate with one
-  option gets a second answer, **Not yet** (← ; the card stays). The ask lists its options in that order, ← · ↑ · →,
+- **Swipes.** ← the first option that moves the card on (Done), → the reopen-with-agenda option (Not good), ↑ a third. A gate with one
+  option gets a second answer, **Not yet** (→ ; the card stays). The ask lists its options in that order, ← · ↑ · →,
   because a choice card lays them out by it (`gateAskOptions`, `gateAnswers` in `@ferretry/protocol`). ↓ is Skip, and
   **Not needed** (the button) dismisses it: the card stays where it is.
 - **Answering** is `resolve` with `{kind: 'multiple-choice', choice: <label>}` and the owner's words as `note`; Not good

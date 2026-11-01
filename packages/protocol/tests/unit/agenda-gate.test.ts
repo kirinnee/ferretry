@@ -100,9 +100,9 @@ describe('gate items', () => {
   });
 
   describe('answers', () => {
-    it('puts the forward option on → and the reopen option on ←', () => {
-      should(layout(verify)).deepEqual(['left:Not good', 'right:Done']);
-      should(layout({ ...verify, options: [...verify.options].reverse() })).deepEqual(['left:Not good', 'right:Done']);
+    it('puts the forward option on ← and the reopen option on → (← Done, → Not good)', () => {
+      should(layout(verify)).deepEqual(['left:Done', 'right:Not good']);
+      should(layout({ ...verify, options: [...verify.options].reverse() })).deepEqual(['left:Done', 'right:Not good']);
     });
 
     it('puts a third option on ↑', () => {
@@ -110,7 +110,7 @@ describe('gate items', () => {
         ...verify,
         options: [...verify.options, { id: 'later', label: 'Ship later', outcome: 'lane' }],
       };
-      should(layout(three)).deepEqual(['left:Not good', 'up:Ship later', 'right:Done']);
+      should(layout(three)).deepEqual(['left:Done', 'up:Ship later', 'right:Not good']);
     });
 
     it('fills the free directions when no option reopens', () => {
@@ -121,33 +121,33 @@ describe('gate items', () => {
           { id: 'close', label: 'Close', outcome: 'close' },
         ],
       };
-      should(layout(two)).deepEqual(['left:Close', 'right:Merge']);
+      should(layout(two)).deepEqual(['left:Merge', 'right:Close']);
     });
 
-    it('gives a one-option gate a second answer, Not yet, on ←', () => {
+    it('gives a one-option gate a second answer, Not yet, on →', () => {
       should(gateNotYetLabel(plan)).equal(GATE_NOT_YET_LABEL);
       should(gateNotYetLabel(verify)).be.undefined();
-      should(gateAskOptions(plan)).deepEqual([{ label: 'Not yet' }, { label: 'OK to build' }]);
-      should(layout(plan)).deepEqual(['left:Not yet', 'right:OK to build']);
+      should(gateAskOptions(plan)).deepEqual([{ label: 'OK to build' }, { label: 'Not yet' }]);
+      should(layout(plan)).deepEqual(['left:OK to build', 'right:Not yet']);
     });
 
     it('never repeats a label when the one option is itself called Not yet', () => {
       const odd: AgendaGate = { ...plan, options: [{ id: 'wait', label: 'Not yet', outcome: 'next' }] };
-      should(gateAskOptions(odd).map(option => option.label)).deepEqual(['Not now', 'Not yet']);
+      should(gateAskOptions(odd).map(option => option.label)).deepEqual(['Not yet', 'Not now']);
     });
 
     it('lists the ask options in swipe order, ← · ↑ · →, as a choice card lays them out', () => {
-      should(gateAskOptions(verify).map(option => option.label)).deepEqual(['Not good', 'Done']);
+      should(gateAskOptions(verify).map(option => option.label)).deepEqual(['Done', 'Not good']);
       const three: AgendaGate = {
         ...verify,
         options: [...verify.options, { id: 'later', label: 'Ship later', outcome: 'lane' }],
       };
-      should(gateAskOptions(three).map(option => option.label)).deepEqual(['Not good', 'Ship later', 'Done']);
+      should(gateAskOptions(three).map(option => option.label)).deepEqual(['Done', 'Ship later', 'Not good']);
     });
 
-    it('lays a lone reopen option on ← and Not yet on →', () => {
+    it('lays a lone reopen option on → and Not yet on ←', () => {
       const back: AgendaGate = { ...verify, options: [{ id: 'redo', label: 'Redo', outcome: 'reopen-with-agenda' }] };
-      should(layout(back)).deepEqual(['left:Redo', 'right:Not yet']);
+      should(layout(back)).deepEqual(['left:Not yet', 'right:Redo']);
     });
 
     it('answers fit the multiple-choice ask the item carries', () => {
