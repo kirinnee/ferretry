@@ -1,3 +1,9 @@
+## [4.213.0](https://github.com/kirinnee/ferretry/compare/v4.212.1...v4.213.0) (2026-11-01)
+
+### Features
+
+* **daemon:** stored passkey proofs for standing sign-in rules (R3c-2) ([#1272](https://github.com/kirinnee/ferretry/issues/1272)) ([aef4bd0](https://github.com/kirinnee/ferretry/commit/aef4bd0d6cbd7f3cae26ce841273f4e692a00fed))
+
 ## [4.212.1](https://github.com/kirinnee/ferretry/compare/v4.212.0...v4.212.1) (2026-11-01)
 
 ### Fixes
