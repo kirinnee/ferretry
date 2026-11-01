@@ -5,8 +5,8 @@
  * Pure. The caller says how a lane id and a session id read, because only it holds the lane set and the
  * session directory.
  */
-import type { BoardAttachment, BoardTaskEvent } from './board.ts';
-import { formatTaskRef } from './board-refs.ts';
+import type { BoardActor, BoardAttachment, BoardTaskEvent } from './board.ts';
+import { type BoardActorVia, formatTaskRef } from './board-refs.ts';
 
 /** How a lane id or a session id reads to whoever is shown the line. */
 export type BoardNamer = (id: string) => string;
@@ -22,6 +22,21 @@ export function attachmentsPhrase(files: readonly Pick<BoardAttachment, 'mime'>[
     .join(' and ');
 }
 
+/**
+ * Who a history line is BY: its actor, except a move on a trigger somebody reported, which reads as by whoever
+ * reported it (`reportedBy`, with `reportedVia` for its `actorVia`) — the daemon only carried out their word,
+ * and a ferret's report must never read as a fact Ferretry saw for itself.
+ */
+export const boardEventActor = (
+  event: Pick<BoardTaskEvent, 'actor' | 'actorVia'> & {
+    readonly reportedBy?: BoardActor;
+    readonly reportedVia?: BoardActorVia;
+  },
+): { readonly actor: BoardActor; readonly via: BoardActorVia | undefined } =>
+  event.reportedBy === undefined
+    ? { actor: event.actor, via: event.actorVia }
+    : { actor: event.reportedBy, via: event.reportedVia };
+
 /** One history event's wording; the closed union means every event this build can read is spelled here. */
 export function describeBoardEvent(event: BoardTaskEvent, lane: BoardNamer, names: BoardNamer): string {
   switch (event.type) {
@@ -29,8 +44,10 @@ export function describeBoardEvent(event: BoardTaskEvent, lane: BoardNamer, name
       return `created in ${lane(event.laneId)}`;
     case 'moved': {
       const why = event.reason === null ? '' : `: ${event.reason}`;
+      const moved = `${event.backward ? 'moved back' : 'moved'} ${lane(event.from)} → ${lane(event.to)}`;
+      if (event.reportedBy !== undefined) return `reported ${event.trigger ?? 'a trigger'} → ${moved}${why}`;
       const auto = event.auto === true ? ` (auto${event.trigger === undefined ? '' : `, ${event.trigger}`})` : '';
-      return `${event.backward ? 'moved back' : 'moved'} ${lane(event.from)} → ${lane(event.to)}${auto}${why}`;
+      return `${moved}${auto}${why}`;
     }
     case 'reopened':
       return `reopened ${lane(event.from)} → ${lane(event.to)}: ${event.reason} — ask: ${event.ask.text}${

@@ -13,6 +13,8 @@
  * - **merge the release lanes** ({@link mergeReleaseLanes}) folds a set's Released and To test lanes into one
  *   at boot: a release is what the owner tests, so the two were one step drawn twice.
  * - **add quick's To test lane** ({@link addQuickToTestLane}) at boot, to a `quick` set from before it.
+ * - **stage the lanes** ({@link stageLanes}) at boot: every lane stored without a stage gets the one its
+ *   compatibility fields already describe, written out.
  */
 import {
   type BoardResult,
@@ -28,6 +30,7 @@ import {
   type LaneTemplateName,
   laneEditProblems,
   laneLayoutFromTemplate,
+  laneStage,
   laneTargets,
   QUICK_TO_TEST_LANE,
   UNFILED_PROJECT_ID,
@@ -222,7 +225,8 @@ export const addQuickToTestLane = (current: LaneSet): LaneSet | null => {
     });
   if (!shaped) return null;
   const [todo, doing, closed] = current.lanes as [Lane, Lane, Lane];
-  const { enterOn, ...rest } = closed;
+  // The stage goes with the triggers it mirrored: Closed reads the stage its new fields describe.
+  const { enterOn, stage: _stage, ...rest } = closed;
   const kept = enterOn?.filter(trigger => trigger !== 'signal.done') ?? [];
   const gated: Lane = { ...rest, ...(kept.length === 0 ? {} : { enterOn: kept }), ownerGate: true };
   const lanes = [todo, doing, QUICK_TO_TEST_LANE, gated];
@@ -239,4 +243,17 @@ export const addQuickToTestLane = (current: LaneSet): LaneSet | null => {
   const layout = { lanes, variants };
   const targets = laneTargets(layout, current) ?? { doneLane: current.doneLane, notGoodLane: current.notGoodLane };
   return { ...current, version: current.version + 1, ...layout, ...targets };
+};
+
+/**
+ * Writes every lane's stage into a set stored before stages: each lane without one gets {@link laneStage}'s,
+ * the stage its `enterOn` and `ownerGate` already describe, so nothing a reader decides changes and no card
+ * moves. A lane that has a stage keeps it. The VERSION STAYS: the set means what it meant, so an edit made
+ * against it still applies, and the Accept on a pending proposal's card still confirms it. The confirmation
+ * stands and the owner is asked nothing. `null` when every lane has a stage already, so it is idempotent.
+ */
+export const stageLanes = (current: LaneSet): LaneSet | null => {
+  if (current.lanes.every(lane => lane.stage !== undefined)) return null;
+  const lanes = current.lanes.map(lane => (lane.stage === undefined ? { ...lane, stage: laneStage(lane) } : lane));
+  return { ...current, lanes };
 };

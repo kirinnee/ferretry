@@ -98,6 +98,17 @@ describe('renaming and fields', () => {
     expect(draft.lanes.find(lane => lane.id === 'merged')?.emphasis).toBeUndefined();
   });
 
+  it('drops a stored stage when the fields it is read from change, so the saved lane is never refused for it', () => {
+    const staged = draftFromLaneSet({ ...current, lanes: LANE_TEMPLATES['pr-release-verify'].lanes });
+    const lane = (draft: LaneDraft, id: string) => draft.lanes.find(entry => entry.id === id) as Lane;
+    const ungated = setLaneOwnerGate(staged, 'plan', false);
+    expect(lane(ungated, 'plan').stage).toBeUndefined();
+    expect(LaneSetActionRequestSchema.safeParse(draftToEdit(current, ungated)).success).toBe(true);
+    expect(lane(setLaneTriggers(staged, 'merged', ['ci.green']), 'merged').stage).toBeUndefined();
+    expect(lane(setLaneCategory(staged, 'merged', 'review'), 'merged').stage).toBeUndefined();
+    expect(lane(setLaneTriggers(staged, 'plan', []), 'plan').stage).toEqual(lane(staged, 'plan').stage);
+  });
+
   it('counts a change undone as no change, whatever order the fields were put back in', () => {
     let draft = setLaneStaleAfter(start(), 'merged', '9d');
     draft = setLaneStaleAfter(draft, 'merged', '3d');
@@ -280,6 +291,7 @@ describe('the words the editor uses', () => {
     expect(Object.keys(TRIGGER_LABELS).sort()).toEqual([...LaneTriggerSchema.options].sort());
     for (const label of Object.values(TRIGGER_LABELS)) expect(label).not.toMatch(/[a-z]\.[a-z]/);
     expect(TRIGGER_LABELS['release.running']).toBe('this machine runs that release');
+    expect(TRIGGER_LABELS['deploy.done']).toBe('a deploy is reported done');
   });
 
   it('has a label for every lane category', () => {

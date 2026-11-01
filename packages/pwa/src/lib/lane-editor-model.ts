@@ -95,17 +95,26 @@ export const moveLane = (draft: LaneDraft, id: string, step: -1 | 1): LaneDraft 
 export const renameLane = (draft: LaneDraft, id: string, name: string): LaneDraft =>
   replaceLane(draft, id, lane => ({ ...lane, name }));
 
+/**
+ * The category, the gate and (for an automatic stage) the triggers are what a lane's stage is read from, so
+ * changing one drops the stage the lane stored: it reads the stage its fields now describe (`laneStage`)
+ * instead of a stale one. A gate keeps its options when only its triggers change: they say how a card
+ * enters the lane, the gate how it leaves.
+ */
 export const setLaneCategory = (draft: LaneDraft, id: string, category: LaneCategory): LaneDraft =>
-  replaceLane(draft, id, ({ emphasis: _emphasis, ...lane }) => ({ ...lane, category }));
+  replaceLane(draft, id, ({ emphasis: _emphasis, stage: _stage, ...lane }) => ({ ...lane, category }));
 
 /** The triggers that move a card into the lane; none removes the field, which the protocol wants. */
 export const setLaneTriggers = (draft: LaneDraft, id: string, triggers: readonly LaneTrigger[]): LaneDraft =>
-  replaceLane(draft, id, ({ enterOn: _, ...lane }) =>
-    triggers.length === 0 ? lane : { ...lane, enterOn: [...triggers] },
-  );
+  replaceLane(draft, id, ({ enterOn: _, stage, ...lane }) => {
+    const kept = stage?.kind === 'gate' ? { ...lane, stage } : lane;
+    return triggers.length === 0 ? kept : { ...kept, enterOn: [...triggers] };
+  });
 
 export const setLaneOwnerGate = (draft: LaneDraft, id: string, ownerGate: boolean): LaneDraft =>
-  replaceLane(draft, id, ({ ownerGate: _, ...lane }) => (ownerGate ? { ...lane, ownerGate: true } : lane));
+  replaceLane(draft, id, ({ ownerGate: _, stage: _stage, ...lane }) =>
+    ownerGate ? { ...lane, ownerGate: true } : lane,
+  );
 
 /** A blank value removes the field (the category's default applies); anything else is kept as typed. */
 export const setLaneStaleAfter = (draft: LaneDraft, id: string, staleAfter: string): LaneDraft =>
@@ -251,10 +260,12 @@ export const TRIGGER_LABELS: Readonly<Record<LaneTrigger, string>> = {
   'pr.opened': 'a PR opens',
   'pr.ready': 'a PR is ready',
   'ci.green': 'CI passes',
+  'pr.review_approved': 'a reviewer approves the PR',
   'pr.merged': 'the PR merges',
   'release.published': 'a release ships it',
   'release.running': 'this machine runs that release',
   'signal.done': 'the ferret says done',
+  'deploy.done': 'a deploy is reported done',
 };
 
 /** Each lane category as the owner reads it. */
