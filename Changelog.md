@@ -1,3 +1,9 @@
+## [4.209.0](https://github.com/kirinnee/ferretry/compare/v4.208.0...v4.209.0) (2026-11-01)
+
+### Features
+
+* **pwa:** show the provisioner's skipped entries under each runtime ([#1267](https://github.com/kirinnee/ferretry/issues/1267)) ([6b838c0](https://github.com/kirinnee/ferretry/commit/6b838c00f736a75f3c2112132b8ac1946944747c))
+
 ## [4.208.0](https://github.com/kirinnee/ferretry/compare/v4.207.2...v4.208.0) (2026-11-01)
 
 ### Features
