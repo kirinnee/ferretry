@@ -733,3 +733,33 @@ describe('browser worker client — the input bridge', () => {
     should(refused).equal('uncertain');
   });
 });
+
+describe('browser worker client — a grant fill’s clear (R3a-4)', () => {
+  const facts = {
+    kind: 'browser' as const,
+    pageId: 'p1',
+    origin: 'https://example.test',
+    secure: true,
+    navigationId: 'loader-1',
+    fields: [],
+  } as never;
+  const job = {
+    navigationId: 'loader-1',
+    fields: [{ frameId: 'main', backendNodeId: 7, salt: 'a'.repeat(32), digest: 'b'.repeat(64) }],
+  };
+
+  it('should send the pagehide clear with the write only when asked', async () => {
+    const client = await connect();
+    const values = [{ field: 'password', text: 'x' }];
+    should(await client.inputType('arms', facts, values, true, { armClear: true })).equal('typed');
+    should(await client.inputType('arms', facts, values, true)).equal('target_changed');
+  });
+
+  it('should carry the clear job and believe only its three words, reading anything else as unknown', async () => {
+    const client = await connect();
+    should(await client.inputClear('p1', job)).equal('cleared');
+    should(await client.inputClear('gone', job)).equal('moved');
+    should(await client.inputClear('garbled', job)).equal('unknown');
+    should(await client.inputClear('refuses', job)).equal('unknown');
+  });
+});

@@ -255,7 +255,21 @@ function inputReply(id, method, params) {
       true,
       page === 'garbled'
         ? { outcome: 'maybe' }
-        : { outcome: params?.values?.length === 1 && params?.submit === true ? 'typed' : 'target_changed' },
+        : page === 'arms'
+          ? // A grant fill's write: typed only when the client asked for the pagehide clear, and only then.
+            { outcome: params?.armClear === true ? 'typed' : 'target_changed' }
+          : { outcome: params?.values?.length === 1 && params?.submit === true ? 'typed' : 'target_changed' },
+    );
+  // The check when a grant fill's hold ends: a salted hash in, one word out, never a value either way.
+  else if (method === 'inputClear')
+    reply(
+      id,
+      true,
+      page === 'garbled'
+        ? { outcome: 'maybe' }
+        : page === 'gone'
+          ? { outcome: 'moved' }
+          : { outcome: params?.job?.fields?.[0]?.digest?.length === 64 ? 'cleared' : 'unknown' },
     );
 }
 
