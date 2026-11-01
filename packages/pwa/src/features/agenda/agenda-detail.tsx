@@ -11,9 +11,9 @@
 
 import type { AgendaItem } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
-import { ChatProse } from '../../components/chat-prose.tsx';
 import { revisionHighlight } from '../../lib/agenda-revisions.ts';
 import { type AgendaBriefProps, AgendaBriefSections } from './agenda-brief.tsx';
+import { defaultAgendaProse } from './agenda-prose.tsx';
 import { AgendaBody, AgendaSteps } from './agenda-steps.tsx';
 import { AgendaUpdated } from './agenda-updated.tsx';
 
@@ -33,7 +33,7 @@ export interface AgendaDetailProps {
   readonly brief?: Pick<AgendaBriefProps, 'ask' | 'askLabel' | 'askShown' | 'recommendation'>;
 }
 
-const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
+const markdownProse = defaultAgendaProse;
 
 /** Whether the item has anything to read beyond its question and options. */
 export const agendaHasDetail = (item: AgendaItem): boolean =>

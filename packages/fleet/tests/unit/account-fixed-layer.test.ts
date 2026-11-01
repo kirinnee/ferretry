@@ -772,7 +772,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('Search first (`zz search`).');
     // The agenda is never a tracker: testing and checking ride the board's Done / Not good, and only a Not good result opens an item.
     should(text).containEql('Never track work ("please test/verify")');
-    should(text).containEql('the board covers it (Done/Not good)');
+    should(text).containEql('the board covers it; after a Not good');
     should(text).containEql('after a Not good, open one only if you need input.');
     // An owner's question about an item is answered ON that item, whose options stay open: Got it on a separate info item never ends the question.
     should(text).containEql("Owner's question: answer ON it, options stay");
@@ -789,7 +789,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`--decided`=settled, `--still-open`=left');
     should(text).containEql('`--body`=hypermedia.');
     // Each item stands alone, in full Markdown.
-    should(text).containEql('ALONE: Markdown;');
+    should(text).containEql('ALONE: Markdown, short points, answer first, no paragraphs;');
     // ONE ANSWER SHAPE PER KIND, in the protocol's own words (the CLI's help and refusals say the same).
     should(text).containEql(AGENDA_SHAPE_LINE);
     should(text).containEql('choice=ONE question+2–3 `-o "Label: why"`, `--recommend`');
@@ -811,7 +811,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('else `done --reason "<why>"` withdraws.');
     should(text).not.containEql('agenda surface');
     // Every item stays current, in the turn the facts changed: edited or closed, never left stale.
-    should(text).containEql('KEEP CURRENT this turn');
+    should(text).containEql('KEEP CURRENT:');
     should(text).containEql('`edit` if changed');
     should(text).containEql('`done` if settled');
     should(text).containEql('`ls` = open');

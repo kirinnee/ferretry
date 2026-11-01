@@ -51,6 +51,7 @@
         "harness/cred-cards-screenshot.tsx",
         "harness/accounts-screenshot.tsx",
         "harness/agenda-question-answer-screenshot.tsx",
+        "harness/agenda-segments-screenshot.tsx",
         "harness/work-search-screenshot.tsx",
         "harness/agenda-cards-screenshot.ts",
         "harness/agenda-cards-page.tsx",

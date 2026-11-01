@@ -27,7 +27,6 @@
 import type { AgendaId, AgendaItem, AgendaSnapshot, ResolvedAgendaItem } from '@ferretry/protocol';
 import { CircleAlert } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ChatProse } from '../../components/chat-prose.tsx';
 import type { InboxAction } from '../../lib/agenda-answers.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
@@ -55,6 +54,7 @@ import { AgendaDeliveryContext, agendaHeading, deliveringIds } from './agenda-de
 import { AgendaInfoList } from './agenda-info-list.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
 import { AgendaDrawer, AgendaLine } from './agenda-line.tsx';
+import { agendaProse } from './agenda-prose.tsx';
 import { byNewestResolution } from './agenda-resolved.tsx';
 import { AgendaSettled, isResolved } from './agenda-settled.tsx';
 
@@ -385,7 +385,7 @@ export const useAgenda = ({
           onClose={() => update(() => ({ card: null }))}
           position={paged >= 0 ? { index: paged, total: openItems.length } : { index: 0, total: 1 }}
           quoteScope={scope}
-          renderProse={proseText => <ChatProse copyable={copyWriter} text={proseText} />}
+          renderProse={agendaProse(copyWriter)}
           {...(cardItem.copyPlan !== undefined
             ? {
                 planForm: (

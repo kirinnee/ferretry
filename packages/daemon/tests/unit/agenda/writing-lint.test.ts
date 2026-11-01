@@ -235,3 +235,49 @@ describe('attention writing lint: premise and isolation', () => {
     should(text).match(/unexplained capitals \("OCI"\) in premise/u);
   });
 });
+
+describe('attention writing lint: walls of text', () => {
+  const wall = `${'Yes, by design: one plan and one data model. '.repeat(8)}Done.`;
+
+  it('should warn about a segment that is one paragraph past the target, naming it and the fix', () => {
+    const actual = lintAgendaWriting({ ...clean, questionAnswer: wall });
+
+    should(actual).have.length(1);
+    should(actual[0]).match(/^answer to the question is one paragraph over 280 characters: /u);
+    should(actual[0]).containEql('split this into short points (- …) or bold the answer first');
+  });
+
+  it('should name every segment that is a wall, once, and read the premise, context, still open, body and an option', () => {
+    const actual = lintAgendaWriting({
+      ...clean,
+      premise: wall,
+      context: wall,
+      stillOpen: wall,
+      body: wall,
+      optionDetails: [{ label: 'Ship', detail: wall }],
+    });
+
+    should(actual).have.length(1);
+    should(actual[0]).match(/^premise, context, still open, body, option "Ship" are one paragraph over 280 /u);
+  });
+
+  it('should say nothing about short points, a bold lead over bullets, or a paragraph at the target', () => {
+    const bullets = Array.from({ length: 12 }, () => '- one plan and one data model for everyone').join('\n');
+
+    should(lintAgendaWriting({ ...clean, questionAnswer: `**Yes, by design.**\n${bullets}` })).deepEqual([]);
+    should(lintAgendaWriting({ ...clean, context: 'x'.repeat(280) })).deepEqual([]);
+  });
+
+  it('should judge each line on its own: a long text broken into short lines is fine, one long line among them is not', () => {
+    const lines = Array.from({ length: 10 }, () => 'One short line of the answer.').join('\n');
+
+    should(lintAgendaWriting({ ...clean, context: lines })).deepEqual([]);
+    should(lintAgendaWriting({ ...clean, context: `${lines}\n${wall}` })).have.length(1);
+  });
+
+  it('should leave fenced code, tables and headings in a body alone', () => {
+    const body = `# ${wall}\n\n| ${wall} |\n\n\`\`\`\n${wall}\n\`\`\``;
+
+    should(lintAgendaWriting({ ...clean, body })).deepEqual([]);
+  });
+});

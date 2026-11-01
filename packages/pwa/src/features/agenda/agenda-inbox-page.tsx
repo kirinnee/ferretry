@@ -33,9 +33,7 @@
 import { type AgendaId, formatTaskRef } from '@ferretry/protocol';
 import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, Search, SkipForward, X, Zap } from 'lucide-react';
 import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { ChatProse } from '../../components/chat-prose.tsx';
 import { Spinner } from '../../components/spinner.tsx';
-
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { CLEAR_ACTION, kindWord } from '../../lib/agenda-answers.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
@@ -95,6 +93,7 @@ import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
+import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
@@ -352,7 +351,7 @@ function OpenItem({
         position={{ index: place.index, total: place.total }}
         quoteScope={scopeOf(card)}
         {...inputFormFor(inbox, card)}
-        renderProse={text => <ChatProse copyable={copyWriter} text={text} />}
+        renderProse={agendaProse(copyWriter)}
         // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
         // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
         swipeable={place.swipeable}
