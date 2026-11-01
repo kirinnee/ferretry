@@ -334,6 +334,10 @@ pairing code, widening a device or any other act takes. Both directions are test
   only 3** (`429`), so nobody fills its memory by staging and a ferret holding junk stages never keeps the owner's
   app from staging. **Only the caller that staged a seed, or a paired device, may read, drop or card it** (another
   caller is told it is not waiting): the stage id is on the agenda card, so knowing it proves nothing.
+  **Until ferrets have their own credentials (RF-2/RF-3), "caller" is honest-client:** a ferret that uses the admin
+  token without its session header counts as the SAME caller as your own shell's `fy` (`admin-cli`), so it can use up
+  or drop the stages `fy` made — never save a seed (that still takes your passkey). A paired device always keeps its
+  own slot, so the app can always stage.
 - **The old seed path is refused in the store itself** (`applySeed`), not only at its route: no caller, now or later,
   writes a seed except through the passkey-bound save.
 - **Write-only.** No route, command, log, agenda item or push answers a seed or a code made from it. After the save

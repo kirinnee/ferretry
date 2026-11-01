@@ -848,6 +848,8 @@ export type TwoFactorSeedStageView = z.infer<typeof TwoFactorSeedStageViewSchema
 export const TwoFactorSeedSavedSchema = z.strictObject({
   account: AccountIdSchema,
   factor: TwoFactorKeySummarySchema,
+  /** Whether the key said it was for another account and was saved here anyway ("save it here anyway"). */
+  mismatch: z.boolean(),
 });
 export type TwoFactorSeedSaved = z.infer<typeof TwoFactorSeedSavedSchema>;
 

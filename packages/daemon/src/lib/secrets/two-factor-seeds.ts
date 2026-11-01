@@ -133,6 +133,8 @@ interface Stage {
   /** The seed and the text it came from, sealed. Dropped the moment the stage is no longer waiting. */
   sealed?: { readonly seed: Sealed; readonly input: Sealed };
   state: StageState;
+  /** A commit is saving it: no second commit, drop or expiry may touch it, and it stays masked until that ends. */
+  committing?: boolean;
   factor?: TwoFactorId;
   card?: { readonly sessionId: string; readonly id: AgendaId };
 }
@@ -286,13 +288,15 @@ export class TwoFactorSeedStages implements RedactionValueSource {
   ): Promise<TwoFactorSeedSaved> {
     this.#sweep(this.deps.clock.nowMs());
     const held = await this.#own(accountId, stage, { finished: false });
+    // ONE COMMIT PER STAGE, decided before anything awaits (and before a proof is spent): a second commit racing this
+    // one finds it committing and is told it is gone, so one stage is one key whatever proofs are presented. The seed
+    // stays sealed on the stage, and so MASKED, until the store has its own sealed copy (secrev-1236 N1).
+    if (held.committing === true) throw this.#gone();
     if (!claim(addTwoFactorKeySubject(held.accountKey, held.id))) throw new TwoFactorSeedProofMissing();
-    // TAKEN before anything awaits: a second commit of this stage racing this one finds nothing to save, so one stage
-    // is one key whatever proofs are presented. A save that then fails drops the stage; staging again is the retry.
     const sealed = held.sealed;
     if (sealed === undefined) throw this.#gone();
-    delete held.sealed;
-    let saved: TwoFactorSeedSaved | undefined;
+    held.committing = true;
+    let saved: Omit<TwoFactorSeedSaved, 'mismatch'> | undefined;
     try {
       const name = sealName(held.id, 'seed');
       const seed = (await this.deps.cipher.openAll({ [name]: sealed.seed })).get(name);
@@ -313,7 +317,7 @@ export class TwoFactorSeedStages implements RedactionValueSource {
     }
     held.factor = saved.factor.id;
     await this.#finish(held, 'saved');
-    return saved;
+    return { ...saved, mismatch: held.mismatch };
   }
 
   /** Drops a waiting stage (Deny, or `DELETE`): the seed is let go and nothing is saved. Never needs a passkey. */
@@ -391,6 +395,7 @@ export class TwoFactorSeedStages implements RedactionValueSource {
   ): Promise<Stage> {
     const held = this.#stages.get(stage);
     if (held === undefined || (held.state !== 'waiting' && !options.finished)) throw this.#gone();
+    if (held.committing === true && !options.finished) throw this.#gone();
     // Another caller's stage reads as gone: the id is on the agenda card, so knowing it proves nothing.
     const caller = options.caller;
     if (caller !== undefined && !caller.device && caller.key !== held.owner) throw this.#gone();
@@ -448,7 +453,8 @@ export class TwoFactorSeedStages implements RedactionValueSource {
   /** Lets go of every seed past its two minutes, and forgets finished stages once nobody is waiting on their state. */
   #sweep(nowMs: number): void {
     for (const [id, stage] of this.#stages) {
-      if (stage.state === 'waiting' && stage.expiresAtMs <= nowMs) void this.#finish(stage, 'expired');
+      if (stage.state === 'waiting' && stage.committing !== true && stage.expiresAtMs <= nowMs)
+        void this.#finish(stage, 'expired');
       else if (stage.state !== 'waiting' && stage.expiresAtMs + FINISHED_KEPT_MS <= nowMs) this.#stages.delete(id);
     }
   }

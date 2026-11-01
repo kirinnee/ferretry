@@ -497,6 +497,8 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'id',
     detail: { action: 'factor-added', proof: 'passkey' },
     responseFields: { factor: ['factor', 'id'] },
+    // `mismatch`: the key said it was for another account and the owner saved it here anyway.
+    responseSettings: [],
     refusalCode: true,
   },
   {
