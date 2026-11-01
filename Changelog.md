@@ -1,3 +1,9 @@
+## [4.207.0](https://github.com/kirinnee/ferretry/compare/v4.206.1...v4.207.0) (2026-11-01)
+
+### Features
+
+* **daemon:** task plan service and owner routes (R3a-2) ([#1261](https://github.com/kirinnee/ferretry/issues/1261)) ([eba4f5e](https://github.com/kirinnee/ferretry/commit/eba4f5e53a659841080cdfa891b26bf40e0ce703))
+
 ## [4.206.1](https://github.com/kirinnee/ferretry/compare/v4.206.0...v4.206.1) (2026-11-01)
 
 ### Fixes

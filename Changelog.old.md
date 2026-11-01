@@ -1,3 +1,9 @@
+## [4.206.1](https://github.com/kirinnee/ferretry/compare/v4.206.0...v4.206.1) (2026-11-01)
+
+### Fixes
+
+* keep component sources and agent session-file reads out of the state home ([#1260](https://github.com/kirinnee/ferretry/issues/1260)) ([c284c3c](https://github.com/kirinnee/ferretry/commit/c284c3c3a2cf285f43f255b0491f6d40d8b6c0ab)), closes [#1255](https://github.com/kirinnee/ferretry/issues/1255)
+
 ## [4.206.0](https://github.com/kirinnee/ferretry/compare/v4.205.1...v4.206.0) (2026-11-01)
 
 ### Features
