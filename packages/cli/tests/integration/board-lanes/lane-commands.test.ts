@@ -55,6 +55,68 @@ describe('the lane commands', () => {
     should(changes[0]?.request).have.property('action', 'edit');
   });
 
+  it('should show the workflow of the calling session’s board, gates and automatic steps', async () => {
+    // Arrange
+    const { lines, program } = harness();
+
+    // Act
+    await program.parseAsync(['bun', 'fy', 'board', 'workflow', 'show']);
+
+    // Assert
+    should(lines[0]).match(/Ferretry workflow, lanes version 3/u);
+    should(lines[0]).match(/plan\tPlan\/Design\tGATE\tOK to build/u);
+  });
+
+  it('should show the workflow as JSON for a named project', async () => {
+    const { lines, program } = harness();
+    await program.parseAsync(['bun', 'fy', 'board', 'workflow', 'show', '--json', '--project', 'Ferretry']);
+    should(JSON.parse(lines[0] ?? '')).have.property('name', 'Ferretry');
+  });
+
+  it('should edit a lane into a gate against the version it read', async () => {
+    // Arrange
+    const { changes, lines, program } = harness();
+
+    // Act
+    await program.parseAsync([
+      'bun',
+      'fy',
+      'board',
+      'workflow',
+      'edit',
+      '--lane',
+      'implement',
+      '--gate',
+      'Ship it=next',
+      '--gate',
+      'Rework=reopen',
+    ]);
+
+    // Assert
+    const request = changes[0]?.request;
+    if (request?.action !== 'edit') throw new Error('expected an edit');
+    should(request.version).equal(3);
+    should(request.layout.lanes.find(lane => lane.id === 'implement')?.stage?.kind).equal('gate');
+    should(lines[0]).match(/The owner has one Accept \/ Edit choice/u);
+  });
+
+  it('should edit a lane into an automatic step with --auto', async () => {
+    const { changes, program } = harness();
+    await program.parseAsync(['bun', 'fy', 'board', 'workflow', 'edit', '--lane', 'plan', '--auto', 'deploy.done']);
+    const request = changes[0]?.request;
+    if (request?.action !== 'edit') throw new Error('expected an edit');
+    should(request.layout.lanes.find(lane => lane.id === 'plan')?.stage).eql({
+      kind: 'auto',
+      triggers: ['deploy.done'],
+    });
+  });
+
+  it('should refuse an edit with no lane before it reaches the daemon', async () => {
+    const { changes, program } = harness();
+    await should(program.parseAsync(['bun', 'fy', 'board', 'workflow', 'edit', '--gate', 'Go=next'])).rejected();
+    should(changes).have.length(0);
+  });
+
   it('should read and throw the board switch', async () => {
     const { switched, lines, program } = harness();
     await program.parseAsync(['bun', 'fy', 'board', 'status']);
