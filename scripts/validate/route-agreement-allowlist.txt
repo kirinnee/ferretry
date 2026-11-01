@@ -132,3 +132,7 @@ unreached DELETE /v1/sign-in-rules/:id # TEMPORARY (&F291 R3c-3): `fy rules rm` 
 unreached POST /v1/accounts/:id/sign-in-rules/revoke # TEMPORARY (&F291 R3c-3): `fy rules rm --account` (R3c-5) and the site panel (R3c-6)
 unreached POST /v1/catalog-items/quick-add # CORRECT: the one-tap Add is a daemon-first slice (catalogs 3c-3); the app's Add button dials it in the next slice
 unreached POST /v1/catalog-items/quick-add/undo # CORRECT: the one-tap Add's Undo is a daemon-first slice (catalogs 3c-3); the app's Undo toast dials it in the next slice
+unreached GET /v1/catalog-items/:itemId/versions/:version # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
+unreached GET /v1/catalog-items/:itemId/changes # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
+unreached POST /v1/catalog-items/:itemId/versions/preview # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice
+unreached POST /v1/catalog-items/:itemId/versions # CORRECT: daemon-first slice (catalogs 3d-1); the app's version view and publish dial it in a later slice

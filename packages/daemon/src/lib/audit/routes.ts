@@ -590,6 +590,18 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     responseFields: { itemId: ['itemId'], itemVersion: ['itemVersion'], digest: ['digest'], revision: ['revision'] },
   },
   {
+    method: 'POST',
+    path: '/v1/catalog-items/:itemId/versions',
+    event: 'catalog.changed',
+    subject: 'itemId',
+    detail: { action: 'publish' },
+    responseFields: {
+      itemId: ['itemId'],
+      itemVersion: ['itemVersion'],
+      catalogIds: ['catalogs', '*', 'catalogId'],
+    },
+  },
+  {
     method: 'DELETE',
     path: '/v1/catalogs/:id/items/:itemId',
     event: 'catalog.changed',

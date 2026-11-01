@@ -5,10 +5,12 @@ import {
   renderCatalogDeleted,
   renderCatalogList,
   renderCatalogUpdated,
+  renderChanges,
   renderExported,
   renderPreview,
   renderPublished,
   renderSigning,
+  renderVersions,
   renderWithdrawn,
 } from '../../../src/lib/catalog/render';
 import {
@@ -20,6 +22,7 @@ import {
   preview,
   published,
   SKILL_ID,
+  sharedItem,
   skillItem,
   withdrawn,
 } from './fixtures';
@@ -128,5 +131,99 @@ describe('rendering a preview', () => {
     );
     should(text).containEql('Warnings:\n  - This skill carries scripts.');
     should(text).containEql('Left out of the frozen copy:\n  - logo.png: not text');
+  });
+});
+
+describe('rendering what changed', () => {
+  const base = { entries: [], unchanged: 0, newWarnings: [], goneWarnings: [] };
+
+  it('should say plainly when a reader would see nothing differently', () => {
+    should(renderChanges(base)).equal(
+      'What changed since the version installers get now:\n  nothing a reader would see differently',
+    );
+  });
+
+  it('should show a one-line entry before and after, with its flag', () => {
+    const text = renderChanges({
+      ...base,
+      unchanged: 2,
+      entries: [
+        { label: 'Starts', change: 'changed', document: false, before: 'npx a', after: 'npx b', flag: 'command' },
+        { label: 'Reaches', change: 'added', document: false, after: 'https://x' },
+        { label: 'Environment K', change: 'removed', document: false, before: 'old' },
+      ],
+    });
+    should(text).containEql('  ~ Starts [command]\n    was: npx a\n    now: npx b');
+    should(text).containEql('  + Reaches\n    now: https://x');
+    should(text).containEql('  - Environment K\n    was: old');
+    should(text).containEql('  2 parts the same');
+  });
+
+  it('should show hunks, whole added and removed files, and a file too large for a diff', () => {
+    const text = renderChanges({
+      ...base,
+      unchanged: 1,
+      entries: [
+        {
+          label: 'Skill file SKILL.md',
+          change: 'changed',
+          document: true,
+          hunks: [
+            {
+              beforeStart: 2,
+              beforeLines: 2,
+              afterStart: 2,
+              afterLines: 2,
+              lines: [
+                { kind: 'context', text: 'same' },
+                { kind: 'remove', text: 'old' },
+                { kind: 'add', text: 'new' },
+              ],
+            },
+          ],
+        },
+        { label: 'Skill file a.sh', change: 'added', document: true, after: 'echo hi\nexit', flag: 'script' },
+        { label: 'Skill file b.txt', change: 'removed', document: true, before: 'gone' },
+        { label: 'Skill file c.txt', change: 'changed', document: true, tooLarge: true },
+        { label: 'Skill file d.txt', change: 'changed', document: true },
+      ],
+      newWarnings: [{ code: 'carries-scripts', text: 'This skill carries scripts.' }],
+      goneWarnings: [{ code: 'carries-scripts', text: 'Old one.' }],
+      truncated: true,
+    });
+    should(text).containEql('    @@ -2,2 +2,2 @@\n      same\n    - old\n    + new');
+    should(text).containEql('  + Skill file a.sh [script]\n    echo hi\n    exit');
+    should(text).containEql('  - Skill file b.txt\n    gone');
+    should(text).containEql('too large to show line by line');
+    should(text).containEql('  ~ Skill file d.txt');
+    should(text).containEql('  1 part the same');
+    should(text).containEql('new warning: This skill carries scripts.');
+    should(text).containEql('no longer warned: Old one.');
+    should(text).containEql('cut short');
+  });
+
+  it('should come before the full review in a preview', () => {
+    const text = renderPreview(preview({ changes: base }));
+    should(text.indexOf('What changed')).be.above(-1);
+    should(text.indexOf('What changed')).be.below(text.indexOf('What an installer would get'));
+  });
+});
+
+describe('rendering the versions of an item', () => {
+  it('should mark the current one and a retired one, oldest first', () => {
+    const text = renderVersions(
+      sharedItem({
+        current: 2,
+        versions: [
+          { version: 1, size: 10, publishedAt: AT, summary: 'first', retiredAt: AT, usedBy: { catalogIds: [] } },
+          { version: 2, size: 20, publishedAt: AT, summary: 'second', usedBy: { catalogIds: [] } },
+          { version: 3, size: 30, publishedAt: AT, summary: 'third', usedBy: { catalogIds: [] } },
+        ],
+      }),
+    );
+    should(text).startWith('pdf-tools (' + SKILL_ID + ') · 3 versions');
+    should(text).containEql('v1 · ' + AT + ' · 10 bytes · retired ' + AT + '\n    first');
+    should(text).containEql('v2 · ' + AT + ' · 20 bytes · current\n    second');
+    should(text).containEql('v3 · ' + AT + ' · 30 bytes\n    third');
   });
 });

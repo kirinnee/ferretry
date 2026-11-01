@@ -3,10 +3,14 @@ import should from 'should';
 import {
   AddCatalogItemRequestSchema,
   OwnedSharedItemListSchema,
+  PreviewSharedItemVersionRequestSchema,
+  PublishedSharedItemSchema,
+  PublishSharedItemVersionRequestSchema,
   QuickAddAnswerSchema,
   QuickAddRequestSchema,
   QuickAddUndoneSchema,
   QuickAddUndoRequestSchema,
+  SharedItemPreviewSchema,
   UpdateCatalogRequestSchema,
 } from '../../src/lib/index.ts';
 
@@ -106,5 +110,37 @@ describe('the quick add answers', () => {
     should(QuickAddUndoneSchema.safeParse(done).success).equal(true);
     should(QuickAddUndoneSchema.safeParse({ ...done, mode: 'withdrawn' }).success).equal(true);
     should(QuickAddUndoneSchema.safeParse({ ...done, mode: 'erased' }).success).equal(false);
+  });
+});
+
+describe('publishing at the item', () => {
+  it('should take an empty preview body and a digest to publish, and nothing else', () => {
+    should(PreviewSharedItemVersionRequestSchema.safeParse({}).success).equal(true);
+    should(PreviewSharedItemVersionRequestSchema.safeParse({ source: 'x' }).success).equal(false);
+    should(PublishSharedItemVersionRequestSchema.safeParse({ digest: DIGEST }).success).equal(true);
+    should(PublishSharedItemVersionRequestSchema.safeParse({ digest: 'nope' }).success).equal(false);
+    should(PublishSharedItemVersionRequestSchema.safeParse({ digest: DIGEST, extra: 1 }).success).equal(false);
+  });
+
+  it('should hold the answer to one entry per catalog, each with a revision and a digest', () => {
+    const answer = {
+      itemId: ITEM,
+      itemVersion: 2,
+      current: 2,
+      catalogs: [{ catalogId: `cat_${'A'.repeat(22)}`, revision: 3, digest: DIGEST }],
+    };
+    should(PublishedSharedItemSchema.safeParse({ ...answer, item: undefined }).success).equal(false);
+    should(
+      PublishedSharedItemSchema.safeParse({ ...answer, catalogs: [{ ...answer.catalogs[0], revision: 0 }] }).success,
+    ).equal(false);
+  });
+
+  it('should let a preview carry what changed, or not', () => {
+    should(SharedItemPreviewSchema.shape.changes.safeParse(undefined).success).equal(true);
+    should(
+      SharedItemPreviewSchema.shape.changes.safeParse({ entries: [], unchanged: 0, newWarnings: [], goneWarnings: [] })
+        .success,
+    ).equal(true);
+    should(SharedItemPreviewSchema.shape.changes.safeParse({ entries: [] }).success).equal(false);
   });
 });

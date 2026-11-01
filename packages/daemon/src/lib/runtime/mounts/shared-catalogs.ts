@@ -17,7 +17,9 @@ import {
   CatalogItemPreviewRequestSchema,
   CreateCatalogRequestSchema,
   ExportCatalogRequestSchema,
+  PreviewSharedItemVersionRequestSchema,
   PublishCatalogVersionRequestSchema,
+  PublishSharedItemVersionRequestSchema,
   QuickAddRequestSchema,
   QuickAddUndoRequestSchema,
   SharedCatalogIdSchema,
@@ -47,6 +49,11 @@ export interface SharedCatalogSubsystem {
     | 'previewItem'
     | 'addItem'
     | 'publishVersion'
+    | 'getItem'
+    | 'itemVersion'
+    | 'itemChanges'
+    | 'previewItemVersion'
+    | 'publishItemVersion'
     | 'withdraw'
     | 'exportCatalog'
     | 'quickAdd'
@@ -74,6 +81,8 @@ const STATUS: Readonly<Record<CatalogRefusalCode, number>> = {
   source_refused: 422,
   changed_since_preview: 409,
   nothing_to_publish: 409,
+  same_as_version: 409,
+  version_unknown: 404,
   signing_unavailable: 503,
   store_damaged: 500,
   export_failed: 500,
@@ -123,6 +132,13 @@ function itemId(context: RouteContext): string {
   return parsed.data;
 }
 
+/** A version number as the wire writes it: digits, from 1. Anything else is a version nobody published. */
+function versionNumber(value: string | undefined): number {
+  const parsed = /^[1-9][0-9]{0,8}$/u.test(value ?? '') ? Number(value) : Number.NaN;
+  if (!Number.isSafeInteger(parsed)) throw new ApiError(404, 'there is no such version', 'version_unknown');
+  return parsed;
+}
+
 export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly ApiRoute[] {
   const { catalogs } = subsystem;
   return [
@@ -145,6 +161,74 @@ export function sharedCatalogRoutes(subsystem: SharedCatalogSubsystem): readonly
       noStore: true,
       handle: async context =>
         await answer(() => catalogs.listItems({ sourceState: queryValue(context.request, 'sourceState') === '1' })),
+    },
+    {
+      method: 'GET',
+      path: '/v1/catalog-items/:itemId',
+      minimum: 'operator',
+      caller: 'any',
+      capability: SHARING_USE,
+      noStore: true,
+      handle: async context => {
+        const item = itemId(context);
+        return await answer(() =>
+          catalogs.getItem(item, { sourceState: queryValue(context.request, 'sourceState') === '1' }),
+        );
+      },
+    },
+    {
+      method: 'GET',
+      path: '/v1/catalog-items/:itemId/versions/:version',
+      minimum: 'operator',
+      caller: 'any',
+      capability: SHARING_USE,
+      noStore: true,
+      handle: async context => {
+        const item = itemId(context);
+        const version = versionNumber(decodeParameter(context.params.get('version') ?? ''));
+        return await answer(() => catalogs.itemVersion(item, version));
+      },
+    },
+    {
+      method: 'GET',
+      path: '/v1/catalog-items/:itemId/changes',
+      minimum: 'operator',
+      caller: 'any',
+      capability: SHARING_USE,
+      noStore: true,
+      handle: async context => {
+        const item = itemId(context);
+        const from = versionNumber(queryValue(context.request, 'from'));
+        const to = versionNumber(queryValue(context.request, 'to'));
+        return await answer(() => catalogs.itemChanges(item, from, to));
+      },
+    },
+    {
+      method: 'POST',
+      path: '/v1/catalog-items/:itemId/versions/preview',
+      minimum: 'operator',
+      caller: 'any',
+      capability: SHARING_USE,
+      noStore: true,
+      handle: async context => {
+        const item = itemId(context);
+        await parseBody(context.request, PreviewSharedItemVersionRequestSchema);
+        return await answer(() => catalogs.previewItemVersion(item));
+      },
+    },
+    {
+      method: 'POST',
+      path: '/v1/catalog-items/:itemId/versions',
+      minimum: 'operator',
+      caller: 'person',
+      capability: SHARING_USE,
+      noStore: true,
+      handle: async context => {
+        ownerOnly(context, 'publish a new version of an item');
+        const item = itemId(context);
+        const request = await parseBody(context.request, PublishSharedItemVersionRequestSchema);
+        return await answer(() => catalogs.publishItemVersion(item, request), 201);
+      },
     },
     {
       method: 'POST',

@@ -1,6 +1,7 @@
 import {
   type AddCatalogItemRequest,
   AddCatalogItemRequestSchema,
+  CATALOG_ITEMS_PATH,
   type CatalogItemPreview,
   type CatalogItemPreviewRequest,
   CatalogItemPreviewRequestSchema,
@@ -13,15 +14,16 @@ import {
   ExportCatalogRequestSchema,
   type OwnedCatalog,
   type OwnedCatalogList,
-  type OwnedSharedItemList,
   OwnedCatalogListSchema,
   OwnedCatalogSchema,
+  type OwnedSharedItem,
+  type OwnedSharedItemList,
   OwnedSharedItemListSchema,
+  OwnedSharedItemSchema,
   type PublishCatalogVersionRequest,
   PublishCatalogVersionRequestSchema,
   type PublishedCatalogItem,
   PublishedCatalogItemSchema,
-  CATALOG_ITEMS_PATH,
   SHARED_CATALOGS_PATH,
   type SharedCatalogFile,
   SharedCatalogFileSchema,
@@ -47,6 +49,10 @@ const jsonPatch = (body: unknown): RequestInit => ({
 /** One catalog, `/v1/catalogs/<id>`. Composed as literals so `route-agreement.sh` can read the address. */
 export function catalogPath(catalogId: string): string {
   return `${SHARED_CATALOGS_PATH}/${encodeURIComponent(catalogId)}`;
+}
+
+export function sharedItemPath(itemId: string): string {
+  return `${CATALOG_ITEMS_PATH}/${encodeURIComponent(itemId)}`;
 }
 
 export function catalogItemsPath(catalogId: string): string {
@@ -82,6 +88,10 @@ export class ProtocolCatalogGateway implements ICatalogGateway {
 
   async listItems(): Promise<OwnedSharedItemList> {
     return await this.client.request(CATALOG_ITEMS_PATH, OwnedSharedItemListSchema);
+  }
+
+  async getItem(itemId: string): Promise<OwnedSharedItem> {
+    return await this.client.request(sharedItemPath(itemId), OwnedSharedItemSchema);
   }
 
   async create(request: CreateCatalogRequest): Promise<OwnedCatalog> {

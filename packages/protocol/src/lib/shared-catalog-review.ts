@@ -19,10 +19,10 @@ import { z } from 'zod';
 import { commandLine } from './fleet-clone-review.ts';
 import {
   CATALOG_SKILL_ENTRY_FILE,
+  type CatalogMcpSetup,
   hiddenCharacters,
   holdsRawKey,
   revealHidden,
-  type CatalogMcpSetup,
   type SharedCatalogItem,
 } from './shared-catalog.ts';
 
@@ -494,12 +494,15 @@ export function packageRegistries(
 
 /** A file a ferret could run rather than read: a script by extension, or anything with a `#!` line. */
 const SCRIPT_EXTENSION = /\.(?:sh|bash|zsh|fish|py|js|mjs|cjs|ts|rb|pl|php|ps1|bat|cmd|lua)$/iu;
-const isScript = (file: { readonly path: string; readonly content: string }): boolean =>
+export const isScriptFile = (file: { readonly path: string; readonly content: string }): boolean =>
   SCRIPT_EXTENSION.test(file.path) || file.content.startsWith('#!');
 
 /** Files a tool runs or obeys on its own when it opens the folder: a direnv file, editor tasks, package scripts. */
 const RUNS_ON_ITS_OWN =
   /(?:^|\/)(?:\.envrc|\.env|package\.json|Makefile|justfile|\.?mise\.toml|\.pre-commit-config\.yaml|\.mcp\.json|\.(?:vscode|idea|husky|claude|codex|agents|mise)\/.*)$/iu;
+
+/** Whether a tool runs or obeys a file at this path on its own: the rule behind the `runs-on-its-own` warning. */
+export const runsOnItsOwnPath = (path: string): boolean => RUNS_ON_ITS_OWN.test(path);
 
 /** Which carried files hold what the raw-key rule would refuse in an MCP setup. A guess, so a warning. */
 const filesWithPossibleSecret = (files: readonly { readonly path: string; readonly content: string }[]): string[] =>
@@ -518,8 +521,8 @@ const filesWithHidden = (files: readonly { readonly path: string; readonly conte
 export function catalogItemWarnings(item: SharedCatalogItem): readonly CatalogInstallWarning[] {
   if (item.kind === 'skill') {
     const files = item.skill.files;
-    const scripts = files.filter(isScript).map(file => file.path);
-    const automatic = files.filter(file => RUNS_ON_ITS_OWN.test(file.path)).map(file => file.path);
+    const scripts = files.filter(isScriptFile).map(file => file.path);
+    const automatic = files.filter(file => runsOnItsOwnPath(file.path)).map(file => file.path);
     const hidden = filesWithHidden(files);
     const secrets = filesWithPossibleSecret(files);
     return [

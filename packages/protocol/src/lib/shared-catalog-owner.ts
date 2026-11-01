@@ -18,7 +18,6 @@
 import { z } from 'zod';
 import { InstantSchema } from './common.ts';
 import { DaemonIdSchema } from './pairing.ts';
-import { CatalogInstallWarningSchema, CatalogReviewEntrySchema } from './shared-catalog-review.ts';
 import {
   CatalogDescriptionSchema,
   CatalogDigestSchema,
@@ -31,6 +30,8 @@ import {
   SharedCatalogIdSchema,
   SharedCatalogItemIdSchema,
 } from './shared-catalog.ts';
+import { CatalogChangesSchema } from './shared-catalog-diff.ts';
+import { CatalogInstallWarningSchema, CatalogReviewEntrySchema } from './shared-catalog-review.ts';
 
 export const SHARED_CATALOGS_PATH = '/v1/catalogs';
 
@@ -42,6 +43,9 @@ export const CATALOGS_MAX_PER_PUBLISHER = 256;
 
 /** Most shared items one machine keeps. A new item past it is refused `items_full`. */
 export const SHARED_ITEMS_MAX = 4_096;
+
+/** Most versions one item keeps. A version past it is refused `items_full`. */
+export const CATALOG_ITEM_MAX_VERSIONS = 1_000;
 
 /** The sentence a request for a public catalog is refused with. */
 export const CATALOG_PUBLIC_UNAVAILABLE =
@@ -279,6 +283,8 @@ export const CatalogItemPreviewSchema = z.strictObject({
   review: z.array(CatalogReviewEntrySchema).readonly(),
   warnings: z.array(CatalogInstallWarningSchema).readonly(),
   problems: z.array(CatalogSourceProblemSchema).readonly(),
+  /** Against the CURRENT version, when this would be a new version of an item that exists: what a person reads differently. */
+  changes: CatalogChangesSchema.optional(),
 });
 export type CatalogItemPreview = z.infer<typeof CatalogItemPreviewSchema>;
 
@@ -423,3 +429,52 @@ export const QuickAddUndoneSchema = z.strictObject({
   itemRemoved: z.boolean(),
 });
 export type QuickAddUndone = z.infer<typeof QuickAddUndoneSchema>;
+
+// ── Versions of one item ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * `GET /v1/catalog-items/:itemId/versions/:version`: one frozen version, read in full — what an installer of
+ * exactly that version would be shown. Read from the stored copy, never the source.
+ */
+export const SharedItemVersionDetailSchema = z.strictObject({
+  itemId: SharedCatalogItemIdSchema,
+  version: z.number().int().min(1),
+  kind: CatalogItemKindSchema,
+  name: CatalogItemNameSchema,
+  summary: CatalogSummarySchema,
+  harness: CatalogHarnessSchema.optional(),
+  size: z.number().int().min(1),
+  publishedAt: InstantSchema,
+  retiredAt: InstantSchema.optional(),
+  review: z.array(CatalogReviewEntrySchema).readonly(),
+  warnings: z.array(CatalogInstallWarningSchema).readonly(),
+});
+export type SharedItemVersionDetail = z.infer<typeof SharedItemVersionDetailSchema>;
+
+/** `POST /v1/catalog-items/:itemId/versions/preview`: nothing to say; the item remembers where its source is. */
+export const PreviewSharedItemVersionRequestSchema = z.strictObject({});
+export type PreviewSharedItemVersionRequest = z.infer<typeof PreviewSharedItemVersionRequestSchema>;
+
+/** `POST /v1/catalog-items/:itemId/versions`: the next version, only if the source still hashes to `digest`. */
+export const PublishSharedItemVersionRequestSchema = z.strictObject({ digest: CatalogDigestSchema });
+export type PublishSharedItemVersionRequest = z.infer<typeof PublishSharedItemVersionRequestSchema>;
+
+/** Where a published version went: one entry per catalog that lists the item live, each bumped by one revision. */
+export const PublishedSharedItemCatalogSchema = z.strictObject({
+  catalogId: SharedCatalogIdSchema,
+  revision: z.number().int().min(1),
+  /** The digest that catalog's signed manifest lists for this version. */
+  digest: CatalogDigestSchema,
+});
+export type PublishedSharedItemCatalog = z.infer<typeof PublishedSharedItemCatalogSchema>;
+
+/** The answer to publishing a version at the item. */
+export const PublishedSharedItemSchema = z.strictObject({
+  itemId: SharedCatalogItemIdSchema,
+  itemVersion: z.number().int().min(1),
+  /** The version every live catalog serves now. */
+  current: z.number().int().min(1),
+  catalogs: z.array(PublishedSharedItemCatalogSchema).readonly(),
+  item: OwnedSharedItemSchema,
+});
+export type PublishedSharedItem = z.infer<typeof PublishedSharedItemSchema>;

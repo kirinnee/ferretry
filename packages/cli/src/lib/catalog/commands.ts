@@ -130,6 +130,16 @@ export function registerCatalogCommands(program: Command, controller: CatalogCon
     });
 
   catalog
+    .command('versions')
+    .description('list every version of an item in a catalog; the current one is marked')
+    .argument('<catalog>', 'the catalog id or name')
+    .argument('<item>', 'the item id or name')
+    .option('--json', JSON_HELP)
+    .action(async (name: string, item: string, _flags: unknown, command: Command) => {
+      await controller.versions(name, item, merged(command));
+    });
+
+  catalog
     .command('withdraw')
     .description('take an item out of the catalog; installers are told it is gone')
     .argument('<catalog>', 'the catalog id or name')

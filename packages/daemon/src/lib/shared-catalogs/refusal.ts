@@ -20,6 +20,8 @@ export const CATALOG_REFUSALS = [
   'source_refused',
   'changed_since_preview',
   'nothing_to_publish',
+  'same_as_version',
+  'version_unknown',
   'signing_unavailable',
   'store_damaged',
   'export_failed',

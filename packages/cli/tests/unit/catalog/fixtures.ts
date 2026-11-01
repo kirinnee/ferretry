@@ -235,6 +235,7 @@ export class MemoryFiles implements ICatalogFileWriter {
 export type GatewayCall =
   | { call: 'list'; sourceState: boolean }
   | { call: 'listItems' }
+  | { call: 'getItem'; itemId: string }
   | { call: 'create'; request: CreateCatalogRequest }
   | { call: 'update'; catalogId: string; request: UpdateCatalogRequest }
   | { call: 'remove'; catalogId: string }
@@ -268,6 +269,12 @@ export class FakeGateway implements ICatalogGateway {
   listItems(): Promise<OwnedSharedItemList> {
     this.calls.push({ call: 'listItems' });
     return Promise.resolve({ publisher: PUBLISHER, items: this.state.shared ?? [sharedItem()] });
+  }
+  getItem(itemId: string): Promise<OwnedSharedItem> {
+    this.calls.push({ call: 'getItem', itemId });
+    return Promise.resolve(
+      (this.state.shared ?? [sharedItem()]).find(item => item.itemId === itemId) ?? sharedItem({ itemId }),
+    );
   }
   create(request: CreateCatalogRequest): Promise<OwnedCatalog> {
     this.calls.push({ call: 'create', request });

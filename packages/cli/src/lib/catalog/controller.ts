@@ -12,6 +12,7 @@ import {
   renderPreview,
   renderPublished,
   renderSigning,
+  renderVersions,
   renderWithdrawn,
 } from './render.ts';
 import { catalogFileSlug, resolveCatalog, resolveItem, resolveSharedItem } from './resolve.ts';
@@ -150,6 +151,14 @@ export class CatalogController {
     await this.#confirm(`Publish version ${preview.version} of ${target.name} exactly as shown above?`, options);
     const published = await this.gateway.publishVersion(found.id, target.itemId, { digest: preview.digest });
     this.#report(published, options, () => renderPublished(published));
+  }
+
+  /** Every version of an item a catalog lists, with the one installers get marked. Reads only. */
+  async versions(catalog: string, item: string, options: CatalogCommandOptions): Promise<void> {
+    const found = await this.#catalog(catalog);
+    const target = resolveItem(found, item);
+    const kept = await this.gateway.getItem(target.itemId);
+    this.#report(kept, options, () => renderVersions(kept));
   }
 
   async withdraw(catalog: string, item: string, options: CatalogConfirmedOptions): Promise<void> {

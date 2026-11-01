@@ -223,7 +223,9 @@ fy catalog export "Team skills" --out team.catalog.json
 - `add` and `publish` print the full review and the warnings the installer will see, then ask `y/N`.
   `--yes` skips the question, not the printing. `rm` and `withdraw` ask too.
 - `publish <catalog> <item>` freezes the source again as the item's **next version**. If the source
-  has not changed it says "nothing to publish".
+  has not changed it says "nothing to publish". It prints [what changed](#what-changed-catalogs-3d-1) from the
+  version installers get now, then the full review, and only then asks `y/N`.
+- `versions <catalog> <item>` lists every version the item has, oldest first, with the current one marked. It only reads.
 - `export` writes `<catalog-name>.catalog.json` (or `--out`) and refuses to overwrite without `--force`
   (before asking the daemon to sign anything). Before it signs, it **prints every live item with its
   version and digest and asks `y/N`** (`--yes` skips the ask, not the printing), and after the daemon
@@ -282,9 +284,9 @@ new version, a withdrawal, a rename, a new description, a new publisher name), a
 instant of that change, and a file's `exportedAt` is that same instant, so **two exports with nothing
 between them are byte-identical**. A reader that saw revision 7 refuses a signed 6.
 
-Exactly one catalog's revision rises for a rename, a description, an add (new or existing), a withdrawal or a relist. A new version raises the revision of **every catalog that lists the item live** (one write carries all of them), and leaves a catalog that withdrew the item alone. Making a catalog the default changes no manifest, so no revision rises.
+Exactly one catalog's revision rises for a rename, a description, an add (new or existing), a withdrawal or a relist. A new version raises the revision of **every catalog that lists the item live** (one write carries all of them, whichever route published it), and leaves a catalog that withdrew the item alone. Making a catalog the default changes no manifest, so no revision rises.
 
-A catalog serves the versions from the one it joined at (or was relisted at) onward: the entry's optional `sinceVersion` (absent means 1, so catalogs made before 3c-2 serve every version) is set to the item's current version when an existing item is added or relisted, and `frozenItem` refuses any older version as `item_unknown`. Only the current version is exported. A 3c-1 daemon refuses a document carrying `sinceVersion` (it fails closed and never writes), so a downgrade after this slice needs the catalogs file restored from before it.
+A catalog serves the versions from the one it joined at (or was relisted at) onward: the entry's optional `sinceVersion` (absent means 1, so catalogs made before 3c-2 serve every version) is set to the item's current version when an existing item is added or relisted, and `frozenItem` refuses any older version as `item_unknown`, so **a catalog never serves a version below its `sinceVersion`**. Publishing a new version leaves `sinceVersion` alone. A live entry's `sinceVersion` can never be newer than the item's current version: the document is refused as damaged if it is. Only the current version is exported. A 3c-1 daemon refuses a document carrying `sinceVersion` (it fails closed and never writes), so a downgrade after this slice needs the catalogs file restored from before it.
 
 The publisher name the manifest carries is **stored with the catalog** when it is made (the machine's
 name then) and signed from the store at every export, so a change of host name does not change the bytes
@@ -296,25 +298,60 @@ the restored older one, and the fix is to publish something new so the revision 
 
 All are `sharing`/`use`, `noStore`, and the writes answer a ferret 403 `forbidden`.
 
-| Route                                          | Does                                                                                              | Ferret  |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------- | ------- |
-| `GET /v1/catalogs[?sourceState=1]`             | every catalog, its items and versions (`sourceState` only when asked), and which is the default   | may     |
-| `GET /v1/catalog-items[?sourceState=1]`        | every shared item once, with the catalogs that list it and where each version is used             | may     |
-| `POST /v1/catalogs`                            | make one (201)                                                                                    | refused |
-| `PATCH /v1/catalogs/:id`                       | rename, describe, set the publisher name, or `role: "default"` (no revision)                      | refused |
-| `DELETE /v1/catalogs/:id`                      | delete it (its items and versions are kept in the store)                                          | refused |
-| `POST /v1/catalogs/:id/items/preview`          | freeze a source for review; writes nothing                                                        | may     |
-| `POST /v1/catalogs/:id/items`                  | add the previewed source as a new item, or `{itemId, version}` to list an item already kept (201) | refused |
-| `POST /v1/catalogs/:id/items/:itemId/versions` | publish the next version (201)                                                                    | refused |
-| `DELETE /v1/catalogs/:id/items/:itemId`        | withdraw an item                                                                                  | refused |
-| `POST /v1/catalog-items/quick-add`             | one-tap Add into the default catalog: 201 `added`, 200 `already` or `review`                      | refused |
-| `POST /v1/catalog-items/quick-add/undo`        | take that add back with its token (single use, 60 s)                                              | refused |
-| `POST /v1/catalogs/:id/export`                 | sign and return the catalog file                                                                  | refused |
+| Route                                             | Does                                                                                                                                          | Ferret  |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `GET /v1/catalogs[?sourceState=1]`                | every catalog, its items and versions (`sourceState` only when asked), and which is the default                                               | may     |
+| `GET /v1/catalog-items[?sourceState=1]`           | every shared item once, with the catalogs that list it and where each version is used                                                         | may     |
+| `GET /v1/catalog-items/:itemId[?sourceState=1]`   | one shared item, as the list shows it (404 `item_unknown`)                                                                                    | may     |
+| `GET /v1/catalog-items/:itemId/versions/:version` | one frozen version in full: what an installer of exactly that version is shown (404 `version_unknown`)                                        | may     |
+| `GET /v1/catalog-items/:itemId/changes?from=&to=` | what a person would read differently in `to` than in `from` (404 `version_unknown`)                                                           | may     |
+| `POST /v1/catalog-items/:itemId/versions/preview` | the next version from the source the item remembers, with what changed from the current one; body `{}`; works while no catalog lists the item | may     |
+| `POST /v1/catalog-items/:itemId/versions`         | publish the previewed next version to every catalog that lists the item live (201)                                                            | refused |
+| `POST /v1/catalogs`                               | make one (201)                                                                                                                                | refused |
+| `PATCH /v1/catalogs/:id`                          | rename, describe, set the publisher name, or `role: "default"` (no revision)                                                                  | refused |
+| `DELETE /v1/catalogs/:id`                         | delete it (its items and versions are kept in the store)                                                                                      | refused |
+| `POST /v1/catalogs/:id/items/preview`             | freeze a source for review; writes nothing                                                                                                    | may     |
+| `POST /v1/catalogs/:id/items`                     | add the previewed source as a new item, or `{itemId, version}` to list an item already kept (201)                                             | refused |
+| `POST /v1/catalogs/:id/items/:itemId/versions`    | publish the next version (201)                                                                                                                | refused |
+| `DELETE /v1/catalogs/:id/items/:itemId`           | withdraw an item                                                                                                                              | refused |
+| `POST /v1/catalog-items/quick-add`                | one-tap Add into the default catalog: 201 `added`, 200 `already` or `review`                                                                  | refused |
+| `POST /v1/catalog-items/quick-add/undo`           | take that add back with its token (single use, 60 s)                                                                                          | refused |
+| `POST /v1/catalogs/:id/export`                    | sign and return the catalog file                                                                                                              | refused |
 
 Refusals keep their code: 404 `catalog_unknown` / `item_unknown` / `source_unknown`; 409 `item_withdrawn`,
-`name_taken`, `catalog_full`, `catalogs_full` (256 catalogs), `items_full` (4,096 items), `item_listed`, `current_changed`, `source_ambiguous`, `changed_since_preview`, `nothing_to_publish`; 400
+`name_taken`, `catalog_full`, `catalogs_full` (256 catalogs), `items_full` (4,096 items, or 1,000 versions of one item), `item_listed`, `current_changed`, `source_ambiguous`, `changed_since_preview`, `nothing_to_publish`, `same_as_version`; 404 `version_unknown`; 400
 `public_unavailable`; 410 `undo_expired`; 413 `export_too_big` (the file would be over 32 MiB: export fewer items); 422
 `source_refused`; 503 `signing_unavailable`; 500 `store_damaged` / `export_failed`.
+
+### What changed (catalogs 3d-1)
+
+Before a person publishes, they are shown what would be different. `POST …/items/preview` and
+`POST /v1/catalog-items/:itemId/versions/preview` carry an optional `changes` when the item already exists. It is
+worked out **against the current version**, the one every catalog serves, from the same review text a person reads, so
+text that hides a character is already marked when it is compared.
+
+- **One entry per thing in the review**, keyed by its label (`Skill file <path>`, `Starts`, `Reaches`, `Environment X`, …):
+  `added`, `removed` or `changed`. A one-line entry carries its text `before` and `after`. A file carries **hunks**
+  (unified-diff shaped, three lines of context), or its whole text when added or removed. `unchanged` counts the rest.
+- **Flagged first.** A change to what a setup starts, reaches or has in its environment is flagged `command`; a
+  changed script is `script`; a file a harness runs by itself is `runs-on-its-own`. Flagged entries are listed
+  before the others.
+- **Warnings** are compared too: `newWarnings` are ones the next version would draw that the current one does not,
+  `goneWarnings` the reverse.
+- **Bounded.** A file needing more than 4,000 edits is `tooLarge` (read it whole in the full review), and the answer
+  stops at 20,000 lines in all: the entries that did not fit say `tooLarge` and the answer says `truncated`.
+  Nothing is dropped without saying so.
+- **`sameAsVersion`** says the source hashes to a version already kept. The current one is checked first, then older
+  ones. Publishing it is refused: 409 `nothing_to_publish` when it is the current version, 409 `same_as_version`
+  when it is an older one (making an older version current comes later).
+- Publishing keeps the preview binding: the source is read again and refused (409 `changed_since_preview`) unless
+  it still hashes to the previewed digest. One item holds at most 1,000 versions (409 `items_full`).
+- `POST /v1/catalogs/:id/items/:itemId/versions` stays, as the same publish for an item that catalog lists. Both
+  routes bump every catalog that lists the item live in **one write** and leave each `sinceVersion` alone.
+
+The reads are open to a ferret (they show only what the owner already keeps); the publish is the owner's. The
+`changes` and the version reads are the same bytes whoever asks. A version read reads the kept copy, and
+refuses a copy that no longer matches its digest.
 
 ### One item in many catalogs, and the default (catalogs 3c-2)
 

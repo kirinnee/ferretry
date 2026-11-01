@@ -1,11 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  bindingOf,
   type CatalogsDocument,
   CatalogsDocumentSchema,
-  type StoredSharedItem,
-  type StoredVersion,
-  bindingOf,
   catalogsListing,
   currentVersion,
   documentProblem,
@@ -15,15 +13,17 @@ import {
   itemOf,
   latestVersion,
   liveEntries,
+  type StoredSharedItem,
+  type StoredVersion,
   withCatalog,
   withCatalogPatch,
   withNewItem,
-  withNewVersion,
   withoutCatalog,
+  withPublishedVersion,
   withWithdrawn,
 } from '../../../src/lib/shared-catalogs/document.ts';
 import { NORMALISED_CATALOG_ID, NORMALISED_ITEM_ID } from '../../../src/lib/shared-catalogs/freeze.ts';
-import { CatalogRefusal } from '../../../src/lib/shared-catalogs/refusal.ts';
+import type { CatalogRefusal } from '../../../src/lib/shared-catalogs/refusal.ts';
 
 const T1 = '2026-01-01T00:00:00.000Z';
 const T2 = '2026-01-02T00:00:00.000Z';
@@ -152,6 +152,22 @@ describe('the catalogs document', () => {
     ).match(/more than 1000 withdrawn/u);
   });
 
+  it('should refuse a live entry that serves from a version newer than the current one', () => {
+    const added = withNewItem(one, catalogId(1), item(1), T2);
+    const listed = findCatalog(added, catalogId(1));
+    const entry = { itemId: itemId(1), addedAt: T1 };
+    const twoVersions = { ...item(1), versions: [version(1), version(2)] };
+    const serving = (patch: object) => ({
+      ...added,
+      items: [twoVersions],
+      catalogs: [{ ...listed, entries: [{ ...entry, ...patch }] }],
+    });
+    should(problemOf(serving({ sinceVersion: 2 }))).match(/newer than its current version 1/u);
+    should(problemOf(serving({ sinceVersion: 1 }))).be.null();
+    should(problemOf(serving({ sinceVersion: 2, withdrawnAt: T2 }))).be.null();
+    should(problemOf({ ...serving({ sinceVersion: 2 }), items: [{ ...twoVersions, current: 2 }] })).be.null();
+  });
+
   it('should require a digest for every catalog that lists an item, and for none that does not', () => {
     const added = withNewItem(one, catalogId(1), item(1), T2);
     should(problemOf({ ...added, items: [{ ...item(1), versions: [{ ...version(1), bindings: {} }] }] })).match(
@@ -180,7 +196,7 @@ describe('the revision rule', () => {
   it('should start at 1 and rise by exactly one per visible change', () => {
     const added = withNewItem(one, catalogId(1), item(1), T2);
     should(findCatalog(added, catalogId(1)).revision).equal(2);
-    const next = withNewVersion(added, catalogId(1), itemId(1), version(2, 'b'), T2);
+    const next = withPublishedVersion(added, itemId(1), version(2, 'b'), T2);
     should(findCatalog(next, catalogId(1)).revision).equal(3);
     should(itemOf(next, itemId(1)).current).equal(2);
     const out = withWithdrawn(next, catalogId(1), itemId(1), T2);
@@ -196,11 +212,11 @@ describe('the revision rule', () => {
       items: [item(1, 'item1', [1, 2])],
       catalogs: two.catalogs.map(catalog => ({ ...catalog, entries: [{ itemId: itemId(1), addedAt: T1 }] })),
     };
-    const next = withNewVersion(shared, catalogId(1), itemId(1), version(2, 'b', [1, 2]), T2);
+    const next = withPublishedVersion(shared, itemId(1), version(2, 'b', [1, 2]), T2);
     should(next.catalogs.map(catalog => catalog.revision)).deepEqual([2, 2]);
     should(CatalogsDocumentSchema.safeParse(next).success).be.true();
     const withdrawnHere = withWithdrawn(shared, catalogId(2), itemId(1), T2);
-    const again = withNewVersion(withdrawnHere, catalogId(1), itemId(1), version(2, 'b', [1, 2]), T2);
+    const again = withPublishedVersion(withdrawnHere, itemId(1), version(2, 'b', [1, 2]), T2);
     should(again.catalogs[0]?.revision).equal(2);
     should(again.catalogs[1]).equal(withdrawnHere.catalogs[1]);
   });
@@ -216,6 +232,63 @@ describe('the revision rule', () => {
     should(findCatalog(renamed, catalogId(1)).revision).equal(2);
     const described = withCatalogPatch(one, catalogId(1), { description: 'hello' }, T2);
     should(findCatalog(described, catalogId(1)).description).equal('hello');
+  });
+});
+
+describe('publishing at the item', () => {
+  const shared = (sinceVersion: number | undefined) => ({
+    ...two,
+    items: [{ ...item(1, 'item1', [1, 2]), current: 2, versions: [version(1, 'a', [1, 2]), version(2, 'b', [1, 2])] }],
+    catalogs: two.catalogs.map((catalog, index) => ({
+      ...catalog,
+      entries: [
+        { itemId: itemId(1), addedAt: T1, ...(index === 1 && sinceVersion !== undefined ? { sinceVersion } : {}) },
+      ],
+    })),
+  });
+
+  it('should raise every live catalog once, in one change, and leave where each began serving alone', () => {
+    const before = shared(2);
+    const next = withPublishedVersion(before, itemId(1), version(3, 'c', [1, 2]), T2);
+    should(next.catalogs.map(catalog => catalog.revision)).deepEqual([2, 2]);
+    should(itemOf(next, itemId(1)).current).equal(3);
+    should(next.catalogs.map(catalog => catalog.entries[0]?.sinceVersion)).deepEqual([undefined, 2]);
+    should(CatalogsDocumentSchema.safeParse(next).success).be.true();
+  });
+
+  it('should not raise a catalog that took the item out, and should accept an item nobody lists', () => {
+    const out = withWithdrawn(shared(undefined), catalogId(2), itemId(1), T2);
+    const next = withPublishedVersion(out, itemId(1), version(3, 'c', [1, 2]), T2);
+    should(next.catalogs[0]?.revision).equal(findCatalog(out, catalogId(1)).revision + 1);
+    should(next.catalogs[1]).equal(out.catalogs[1]);
+    const nobody = { ...one, items: [item(1, 'item1', [])] };
+    should(withPublishedVersion(nobody, itemId(1), version(2, 'b', []), T2).catalogs).deepEqual(nobody.catalogs);
+  });
+
+  it('should refuse a version past the most one item keeps', () => {
+    const full = {
+      ...one,
+      items: [
+        {
+          ...item(1, 'item1', []),
+          current: 1000,
+          versions: Array.from({ length: 1000 }, (_, n) => version(n + 1, 'a', [])),
+        },
+      ],
+    };
+    should(refusalOf(() => withPublishedVersion(full, itemId(1), version(1001, 'b', []), T2))).equal('items_full');
+    const almost = {
+      ...full,
+      items: [
+        {
+          ...(full.items[0] as StoredSharedItem),
+          versions: full.items[0]?.versions.slice(0, 999) as StoredVersion[],
+          current: 999,
+        },
+      ],
+    };
+    should(refusalOf(() => withPublishedVersion(almost, itemId(1), version(1000, 'b', []), T2))).equal('none');
+    should(refusalOf(() => withPublishedVersion(one, itemId(9), version(1, 'b', []), T2))).equal('item_unknown');
   });
 });
 
@@ -241,9 +314,8 @@ describe('refusals', () => {
     should(refusalOf(() => withNewItem(added, catalogId(1), skill, T2))).equal('none');
   });
 
-  it('should refuse a version of, and a second withdrawal of, a withdrawn item', () => {
+  it('should refuse a second withdrawal of a withdrawn item', () => {
     const out = withWithdrawn(withNewItem(one, catalogId(1), item(1), T2), catalogId(1), itemId(1), T2);
-    should(refusalOf(() => withNewVersion(out, catalogId(1), itemId(1), version(2, 'b'), T2))).equal('item_withdrawn');
     should(refusalOf(() => withWithdrawn(out, catalogId(1), itemId(1), T2))).equal('item_withdrawn');
   });
 

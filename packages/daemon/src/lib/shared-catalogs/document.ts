@@ -30,16 +30,17 @@
  * Every change below returns the whole next document, so one atomic write carries every catalog it bumped.
  */
 import {
-  CATALOGS_MAX_PER_PUBLISHER,
+  CATALOG_ITEM_MAX_VERSIONS,
   CATALOG_MAX_ITEMS,
   CATALOG_MAX_WITHDRAWN,
+  CATALOGS_MAX_PER_PUBLISHER,
   CatalogDescriptionSchema,
   CatalogDigestSchema,
   CatalogHarnessSchema,
+  CatalogItemNameSchema,
   CatalogLabelSchema,
   CatalogSourceReferenceSchema,
   CatalogSummarySchema,
-  CatalogItemNameSchema,
   InstantSchema,
   SHARED_ITEMS_MAX,
   SharedCatalogIdSchema,
@@ -165,6 +166,8 @@ function firstProblem(document: {
       const lists = listedBy.get(entry.itemId) ?? new Set<string>();
       lists.add(catalog.id);
       listedBy.set(entry.itemId, lists);
+      if (entry.withdrawnAt === undefined && entry.sinceVersion !== undefined && entry.sinceVersion > item.current)
+        return `${catalog.name} serves ${entry.itemId} from version ${String(entry.sinceVersion)}, which is newer than its current version ${String(item.current)}`;
       if (entry.withdrawnAt !== undefined) {
         withdrawn += 1;
         continue;
@@ -459,19 +462,23 @@ export function withDefault(document: CatalogsDocument, id: string): CatalogsDoc
 /**
  * A new version of an item, which becomes its current one. Every catalog that lists the item live puts it in
  * its manifest from now on, so every one of them rises a revision, in this one change. The version arrives with
- * its digest for every catalog that has a line for the item.
+ * its digest for every catalog that has a line for the item. No entry's `sinceVersion` moves: a catalog that
+ * began serving the item at version 3 still does, and now serves the new one.
+ *
+ * `items_full` when the item already holds `CATALOG_ITEM_MAX_VERSIONS` versions.
  */
-export function withNewVersion(
+export function withPublishedVersion(
   document: CatalogsDocument,
-  catalogId: string,
   itemId: string,
   version: StoredVersion,
   now: string,
 ): CatalogsDocument {
-  const entry = findEntry(findCatalog(document, catalogId), itemId);
-  const item = itemOf(document, itemId);
-  if (entry.withdrawnAt !== undefined)
-    throw new CatalogRefusal('item_withdrawn', `${item.name} was withdrawn, so it takes no new version.`);
+  const item = findItem(document, itemId);
+  if (item.versions.length >= CATALOG_ITEM_MAX_VERSIONS)
+    throw new CatalogRefusal(
+      'items_full',
+      `${item.name} already has ${String(CATALOG_ITEM_MAX_VERSIONS)} versions, which is the most one item keeps.`,
+    );
   return {
     ...document,
     items: document.items.map(other =>
