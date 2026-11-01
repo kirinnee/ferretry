@@ -56,6 +56,19 @@ describe('the secret routes', () => {
       'POST /v1/secrets/logins/:id/recipe/proposals/:proposalId',
       'POST /v1/secrets/logins/:id/rename',
       'DELETE /v1/secrets/logins/:id',
+      // Accounts and sign-ins: the same store, and the same rule. The look-alike answer is handles only.
+      'GET /v1/accounts',
+      'GET /v1/accounts/hint',
+      'GET /v1/accounts/look-alike',
+      'PUT /v1/accounts/sign-ins/:signIn',
+      'DELETE /v1/accounts/sign-ins/:signIn',
+      'POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId',
+      'PUT /v1/accounts/:id',
+      'POST /v1/accounts/:id/rename',
+      'DELETE /v1/accounts/:id',
+      'POST /v1/accounts/:id/sign-ins',
+      'POST /v1/accounts/:id/merge',
+      'POST /v1/accounts/:id/apart',
     ]);
   });
 

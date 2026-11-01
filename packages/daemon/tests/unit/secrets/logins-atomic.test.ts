@@ -1,9 +1,8 @@
 import { describe, it } from 'bun:test';
-import { PutLoginEntryRequestSchema, type SecretName } from '@ferretry/protocol';
+import { type AccountIndexDocument, PutLoginEntryRequestSchema, type SecretName } from '@ferretry/protocol';
 import should from 'should';
 import {
   combinedValues,
-  type LoginIndexDocument,
   LoginDirectory,
   LoginVault,
   SecretRedactor,
@@ -28,7 +27,7 @@ const NEW_PASSWORD = 'NEW-UNIQUE-password-2';
 /** An index whose writes fail while `failing` is set: the commit itself is refused. */
 class FailingIndex extends MemoryLoginIndex {
   failing = false;
-  override async write(document: LoginIndexDocument): Promise<void> {
+  override async write(document: AccountIndexDocument): Promise<void> {
     if (this.failing) throw new Error('disk full writing the index');
     await super.write(document);
   }
@@ -53,13 +52,9 @@ class FailingSealed extends MemorySecretDocuments {
 function boot(index: FailingIndex, sealed: FailingSealed) {
   const cipher = new FakeSecretCipher();
   let key = 0;
-  const directory = new LoginDirectory(
-    index,
-    sealed,
-    cipher,
-    CLOCK,
-    () => `L${(key++).toString(16).toUpperCase().padStart(24, '0')}`,
-  );
+  const directory = new LoginDirectory(index, sealed, cipher, CLOCK, {
+    newKey: () => `L${(key++).toString(16).toUpperCase().padStart(24, '0')}`,
+  });
   const vault = new LoginVault(index, sealed, cipher);
   const masked = async (value: string): Promise<boolean> =>
     !(await new SecretRedactor(combinedValues(vault)).redact(`echo ${value}`)).includes(value);
@@ -164,7 +159,7 @@ describe('a saved login changed all or nothing', () => {
 
   it('should never write the new value under the name the index points at', async () => {
     const { index, sealed, daemon } = await withOldPair();
-    const before = index.document?.entries.GITHUB?.seals.password as SecretName;
+    const before = index.accounts.accounts.GITHUB?.seals.password as SecretName;
     const sealedBefore = (await sealed.read())?.entries[before];
     index.failing = true;
     await daemon.directory.saveFields('GITHUB', 'GitHub', undefined, { password: NEW_PASSWORD }).catch(() => undefined);
@@ -202,7 +197,7 @@ describe('the boot sweep against a damaged index (F6)', () => {
     index.failing = true;
     await daemon.directory.saveFields('GITHUB', 'GitHub', undefined, { password: NEW_PASSWORD }).catch(() => undefined);
     index.failing = false;
-    const committed = index.document?.entries.GITHUB?.seals.password as string;
+    const committed = index.accounts.accounts.GITHUB?.seals.password as string;
     const document = (await sealed.read()) as SecretVaultDocument;
     const { [committed]: _lost, ...rest } = document.entries;
     await sealed.write({ ...document, entries: rest });
@@ -218,7 +213,7 @@ describe('the boot sweep against a damaged index (F6)', () => {
 
   it('should sweep nothing after a commit either while another entry points at missing ciphertext', async () => {
     const { index, sealed, daemon } = await withOldPair();
-    const committed = index.document?.entries.GITHUB?.seals.password as string;
+    const committed = index.accounts.accounts.GITHUB?.seals.password as string;
     const document = (await sealed.read()) as SecretVaultDocument;
     const { [committed]: _lost, ...rest } = document.entries;
     await sealed.write({
@@ -285,7 +280,7 @@ class GatedIndex extends FailingIndex {
     this.gate = undefined;
     open();
   }
-  override async write(document: LoginIndexDocument): Promise<void> {
+  override async write(document: AccountIndexDocument): Promise<void> {
     if (this.gate !== undefined) {
       this.arrived();
       await this.gate;

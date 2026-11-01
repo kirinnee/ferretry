@@ -60,12 +60,15 @@ its own sealed document of refresh tokens and client secrets), the
 alone can open — and none of them returns what it read.
 A getter added "just for testing" would delete the whole property.
 
-[Saved logins](input-requests.md#saved-logins) — the input bridge's password manager — follow the same rule
-over a **separate** sealed document (`login-secrets.json`, under the same key). The route table is handed a
-`LoginDirectory`, which seals and never opens; only two things hold the `LoginVault` that opens it: the
-redactor (saved values are masked as `[redacted:login:<ID>:password]`) and the input-request service, which
-types one into the target the owner tapped "Use" for and answers only what happened. `use` cannot spend a
-saved login and `${secret:…}` cannot name one. The agent tool `account_hint` (`login_hint` still works) (and `GET /v1/secrets/logins/hint`) is
+[Accounts](#accounts-and-sign-ins-the-store) (the former saved logins) — the input bridge's password manager — follow the
+same rule over a **separate** sealed document (`login-secrets.json`, under the same key). The route table is
+handed an `AccountDirectory` (and the saved-login `LoginDirectory` built over it), which seals and never opens;
+only two things hold the `AccountVault` that opens it: the redactor (saved values are masked as
+`[redacted:login:<ID>:password]`) and the input-request service, which types one into the target the owner tapped
+"Use" for and answers only what happened. Two narrow parts of it are handed out, and neither answers a value: the
+directory holds its **seal port** (a merge moves a sealed value to the kept account inside the vault, and asks
+whether two seeds are the same), and the look-alike route holds its **look-alike answer** (handles only). `use`
+cannot spend an account and `${secret:…}` cannot name one. The agent tool `account_hint` (`login_hint` still works) (and `GET /v1/secrets/logins/hint`) is
 handed the same `LoginDirectory`: it answers labels, sign-in methods, login domains and usernames, never a value.
 
 ## Redaction
@@ -182,6 +185,99 @@ reference and whether the store holds it, so a broken one is visible before anyt
 A **credential with `store: environment`** (and a **settings component**) is the other place a reference
 comes from: its `env` may bind a variable to `${secret:NAME}`, which is how a runtime authenticates with
 no login at all. Same grammar, same store, same refusal — see [the account model](./account-model.md).
+
+## Accounts and sign-ins: the store
+
+The saved logins became **accounts** (one identity: label, plain username, password, 2FA keys) and
+**sign-ins** (how one account signs in at one place, a website or a terminal tool). The model, and how a saved
+login maps onto it, is in [input requests](input-requests.md#accounts-and-sign-ins-data-model); this is the store.
+The code is `packages/daemon/src/lib/secrets/accounts.ts`.
+
+| File (`state/`, all `0600`) | Holds                                                                       | Written by                      |
+| --------------------------- | --------------------------------------------------------------------------- | ------------------------------- |
+| `login-entries.json`        | the index, `v: 2`: accounts by handle, sign-ins by id. Nothing secret.      | every change (the commit point) |
+| `login-secrets.json`        | the secret fields, sealed under the vault's key, filed under account keys   | a change that seals a value     |
+| `login-entries.v1.json`     | the saved-login index exactly as it was before the migration (`v: 1` bytes) | the migration, once, if absent  |
+
+**The migration runs once, at boot, before any route mounts**, under the store's one lock:
+
+1. Read the index. Absent: nothing to do. It parses as neither version: **damaged** — nothing is migrated,
+   written or swept ([damaged is not empty](#damaged-is-not-empty)). Already `v: 2`: nothing to migrate.
+2. A `v: 1` index: read the sealed document. Every sealed name the saved logins point at must be in it, and the
+   accounts must point at every one of them. Otherwise **damaged**: nothing is migrated, nothing swept.
+3. Keep the `v: 1` bytes as `login-entries.v1.json`, **only if no such file exists**.
+4. Write the `v: 2` index. **This is the one commit point.**
+5. **The sealed document is not written at all.** An account keeps its saved login's key, so every sealed name is
+   the one it always was; only the index moves where it names a value from. The sweep then runs against `v: 2`.
+
+A stop before 4 leaves `v: 1` in place, and the next boot does the same again, to the same ids. A stop after 4 is
+committed. A reader before the commit migrates `v: 1` in memory with the same pure function, so it sees exactly
+what the commit will write; a change made before the commit (there is none at boot, but the rule holds) keeps the
+`v: 1` copy first and checks the sealed document the same way.
+
+**The sweep keeps every seal an account points at: its password AND each 2FA key's seed.** The list it keeps is
+built from one function in the protocol (`sealedNamesOf`); a sweep that walked only the password would delete
+every saved 2FA seed at the next boot, and a test fails if it does.
+
+**The migration is one kept `security.changed` record** (`kind: accounts-migrated`), in counts only: saved
+logins, accounts, sign-ins, facts dropped (seen at a place that is none of the login's), places dropped, via
+links dropped, 2FA seeds moved, and providers left without a link. The boot log names those providers: a login
+went **via** them (Sign in with Google), the provider signs in on no site, so the link was dropped and nothing
+ties them to that site's page any more. Give such an account its site in Settings › Accounts.
+
+### Going back to an older daemon
+
+An older daemon reads `login-entries.json` with its `v: 1` schema, so a `v: 2` index is **damaged** to it, never
+empty: its list says so, every change to a saved login refuses, its boot sweep keeps everything, saved values stay
+masked, and no card offers a saved login. To go back:
+
+1. Stop the daemon.
+2. `mv ~/.ferretry/state/login-entries.v1.json ~/.ferretry/state/login-entries.json`
+3. Start the older daemon.
+
+Every change made to accounts after the upgrade is lost: the older daemon sees the saved logins as they were. A
+value sealed after the upgrade stays in `login-secrets.json`, masked, until the older daemon's sweep removes it.
+
+### Routes
+
+All under the `secrets` capability (`use` to read, `configure` to change); every change is a kept
+`secrets.changed` record, by handle or sign-in id only. **Every write is the owner's**: a ferret is refused before
+its body is read, exactly as for the vault (honest-client until a ferret has its own credential).
+
+| Route                                                     | Does                                                                   |
+| --------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `GET /v1/accounts`                                        | accounts and sign-ins; recipes masked at read time; damaged says so    |
+| `GET /v1/accounts/hint?site=`                             | one hint per sign-in for the site, and the providers it leads to       |
+| `GET /v1/accounts/look-alike`                             | owner only: groups of accounts with the same username AND password     |
+| `PUT /v1/accounts/:id`                                    | create or change an account: label, username, password                 |
+| `POST /v1/accounts/:id/rename`, `DELETE /v1/accounts/:id` | rename (`[[ID]]` in recipes follows); delete (its sign-ins go with it) |
+| `POST /v1/accounts/:id/sign-ins`                          | add a sign-in `{ place, method?, recipe?, autoApplyRecipe? }`          |
+| `PUT` / `DELETE /v1/accounts/sign-ins/:si`                | change or remove one sign-in                                           |
+| `POST /v1/accounts/sign-ins/:si/recipe/proposals/:pid`    | the owner approves or declines a ferret's recipe                       |
+| `POST /v1/accounts/:id/merge {from}`, `…/apart {from}`    | "these look like one account": merge, or keep apart                    |
+
+2FA keys have no route here yet: a seed is saved only with a passkey bound to that one save, which is its own
+change. Until then the older `PUT /v1/secrets/logins/:id` with `totp` saves an account's one seed.
+
+**"These look like one account" is offered, never automatic, and never stored.** It is computed on demand inside
+the vault: same username (trimmed, case-folded) and same password, compared in constant time. The answer is
+**handles only**; a pair the owner kept apart is left out. Writing it into the index would let anyone who can read
+that file learn which accounts share a password. **Merge** moves the other account's sign-ins to the one kept,
+takes its password and seeds only when the kept one has none (resealed under the kept account's key, inside the
+vault), and is refused, with nothing changed, when both keep a different seed, when both sign in at one place, or
+when a via link would point an account at itself; via links and `[[FROM]]` in recipes follow to the kept account.
+
+**The saved-login routes keep working for one release, as a projection.** `GET /v1/secrets/logins` (and its hint)
+answer one saved login per account: `match` is every place it signs in, `domains` its websites' login domains,
+and method, recipe and auto-apply its primary sign-in's (its website, else its first terminal). A change to the
+account (label, username, password, its one seed, rename, delete) always works. A change to **where or how** it
+signs in (`match`, `domains`, `method`, `recipe`, `autoApplyRecipe`) maps 1:1 onto the account's one sign-in,
+and for an account that signs in at several places it is `409 account_has_sign_ins`: an older app's or CLI's body
+cannot say which sign-in it means, and guessing would be a lossy write. A fact the daemon sees is filed on the
+sign-in at the place it was seen; one at no place of the account is not kept.
+
+**Not advertised yet.** The daemon does not report `accounts.signins.1`: the card still offers saved logins
+through the projection, and an app keeps today's surface. It is reported once the card is sign-in aware.
 
 ## Damaged is not empty
 

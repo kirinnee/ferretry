@@ -126,3 +126,15 @@ unreached POST /v1/shared/redeem # served by the member route table; its browser
 unreached POST /v1/shared/unlock # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
 unreached POST /v1/shared/unlock/options # served by the member route table; its browser client is the 2c app (catalogs.md phase table)
 unreached POST /v1/search/related # TEMPORARY (&F303): `fy task create` / `fy agenda add` dial it in the CLI PR stacked on this one; remove this line there
+unreached GET /v1/accounts # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
+unreached GET /v1/accounts/hint # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
+unreached GET /v1/accounts/look-alike # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
+unreached PUT /v1/accounts/sign-ins/:signIn # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
+unreached DELETE /v1/accounts/sign-ins/:signIn # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
+unreached POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
+unreached PUT /v1/accounts/:id # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
+unreached POST /v1/accounts/:id/rename # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
+unreached DELETE /v1/accounts/:id # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
+unreached POST /v1/accounts/:id/sign-ins # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
+unreached POST /v1/accounts/:id/merge # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line
+unreached POST /v1/accounts/:id/apart # TEMPORARY (&F291 R1-2): the account store's routes; `fy account` (R1-6) and Settings › Accounts (R1-7) dial them in the PRs after this one, which remove this line

@@ -48,7 +48,7 @@ function world(options: { redactorFails?: boolean } = {}) {
 describe('a recipe never holds a value', () => {
   it('should refuse a recipe or a reason in which the redactor finds a value', async () => {
     const w = world();
-    await w.directory.put('VERCEL', change({ label: 'Vercel' }));
+    await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
     await should(w.service.assertNoValue(`type ${SECRET} here`)).be.rejectedWith(RecipeValueError);
     await should(w.service.propose('s1', 'VERCEL', `type ${SECRET}`, 'it works')).be.rejectedWith(RecipeValueError);
     await should(w.service.propose('s1', 'VERCEL', 'steps', `the password is ${SECRET}`)).be.rejectedWith(
@@ -67,7 +67,10 @@ describe('a recipe never holds a value', () => {
 describe('a ferret proposes', () => {
   it("should file it and raise a card with the diff and the ferret's reason, the card approving nothing", async () => {
     const w = world();
-    await w.directory.put('VERCEL', change({ label: 'Vercel', recipe: 'Open vercel.com\nClick Log in' }));
+    await w.directory.put(
+      'VERCEL',
+      change({ label: 'Vercel', match: ['vercel.com'], recipe: 'Open vercel.com\nClick Log in' }),
+    );
     const proposed = await w.service.propose(
       's1',
       'VERCEL',
@@ -86,7 +89,7 @@ describe('a ferret proposes', () => {
 
   it('should apply at once, audited, only for a login the owner allowed it on', async () => {
     const w = world();
-    await w.directory.put('VERCEL', change({ label: 'Vercel', autoApplyRecipe: true }));
+    await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], autoApplyRecipe: true }));
     const proposed = await w.service.propose('s1', 'VERCEL', 'new steps', 'first sign-in');
     should(proposed.state).equal('applied');
     should(w.cards).deepEqual([]);
@@ -101,7 +104,7 @@ describe('a ferret proposes', () => {
 
   it('should close the card of a proposal pushed out by a fourth', async () => {
     const w = world();
-    await w.directory.put('VERCEL', change({ label: 'Vercel' }));
+    await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
     for (const n of [1, 2, 3, 4]) await w.service.propose('s1', 'VERCEL', `steps ${String(n)}`, 'again');
     should(w.closed).deepEqual([{ sessionId: 's1', id: 'A1', note: 'Replaced by a newer recipe proposal.' }]);
   });
@@ -110,7 +113,7 @@ describe('a ferret proposes', () => {
 describe('the owner decides', () => {
   it('should apply an approval and close its card', async () => {
     const w = world();
-    await w.directory.put('VERCEL', change({ label: 'Vercel' }));
+    await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
     const proposed = await w.service.propose('s1', 'VERCEL', 'new steps', 'why');
     const entry = await w.service.decide('VERCEL', proposed.id, 'approve');
     should(entry.recipe).equal('new steps');
@@ -119,7 +122,7 @@ describe('the owner decides', () => {
 
   it('should drop a declined one and close its card', async () => {
     const w = world();
-    await w.directory.put('VERCEL', change({ label: 'Vercel' }));
+    await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
     const proposed = await w.service.propose('s1', 'VERCEL', 'new steps', 'why');
     const entry = await w.service.decide('VERCEL', proposed.id, 'decline');
     should(entry).not.have.property('recipe');
@@ -186,7 +189,7 @@ describe('a proposal’s card', () => {
     const directory = new LoginDirectory(new MemoryLoginIndex(), new MemorySecretDocuments(), new FakeSecretCipher(), {
       now: () => NOW,
     });
-    await directory.put('VERCEL', change({ label: 'Vercel', recipe: 'same' }));
+    await directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], recipe: 'same' }));
     const service = new LoginRecipeService({
       logins: directory,
       values: { redact: async text => text },
@@ -252,7 +255,7 @@ describe('a recipe is masked when it is served', () => {
 
   it('should refuse to approve a proposal holding a value kept after it was made', async () => {
     const w = world();
-    await w.directory.put('VERCEL', change({ label: 'Vercel' }));
+    await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
     await w.directory.propose('VERCEL', {
       id: 'rp_00000000000000aa',
       recipe: `type ${SECRET}`,
@@ -268,7 +271,7 @@ describe('a recipe is masked when it is served', () => {
 describe('a proposal card and an answer are masked too', () => {
   it('should mask the current recipe on the card and in the approval’s answer', async () => {
     const w = world();
-    await w.directory.put('VERCEL', change({ label: 'Vercel', recipe: `old ${SECRET}` }));
+    await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], recipe: `old ${SECRET}` }));
     const proposed = await w.service.propose('s1', 'VERCEL', 'new steps', 'why');
     should(w.cards[0]?.context).not.containEql(SECRET);
     should(w.cards[0]?.context).containEql('[redacted:login:X:password]');

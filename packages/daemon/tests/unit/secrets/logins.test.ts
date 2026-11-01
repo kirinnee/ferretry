@@ -26,7 +26,7 @@ function world(index = new MemoryLoginIndex(), sealed = new MemorySecretDocument
   return {
     index,
     sealed,
-    directory: new LoginDirectory(index, sealed, cipher, CLOCK, newKey),
+    directory: new LoginDirectory(index, sealed, cipher, CLOCK, { newKey }),
     vault: new LoginVault(index, sealed, cipher),
   };
 }
@@ -236,6 +236,7 @@ describe('the saved-login vault when what it reads is wrong', () => {
         throw new Error('the disk went away');
       },
       write: async () => undefined,
+      keepVersion1: async () => undefined,
     };
     const vault = new LoginVault(broken, new MemorySecretDocuments(), new FakeSecretCipher());
     should(await vault.values().catch(error => error)).be.instanceOf(Error);
@@ -264,7 +265,7 @@ describe('how a saved login signs in, at rest', () => {
         },
       },
     };
-    await index.write(old);
+    index.document = old;
     const [summary] = await world(index).directory.list();
     should(summary?.method).deepEqual({ kind: 'password' });
     should(summary?.domains).deepEqual(['github.com']);
@@ -303,14 +304,17 @@ describe('how a saved login signs in, at rest', () => {
 
   it('should refuse a circle of provider links', async () => {
     const w = world();
-    await w.directory.put('GOOGLE', change({ label: 'Google' }));
-    await w.directory.put('SITE', change({ label: 'Site', method: { kind: 'google', via: 'GOOGLE' } }));
+    await w.directory.put('GOOGLE', change({ label: 'Google', match: ['google.com'] }));
+    await w.directory.put(
+      'SITE',
+      change({ label: 'Site', match: ['site.example'], method: { kind: 'google', via: 'GOOGLE' } }),
+    );
     const error = await w.directory
       .put('GOOGLE', change({ method: { kind: 'sso', name: 'Site SSO', via: 'SITE' } }))
       .catch(caught => caught);
     should(error).be.instanceOf(LoginEntryError);
     should(error.refusal).equal('bad_via');
-    should(error.message).containEql('leads back');
+    should(error.message).containEql('circle');
   });
 
   it('should refuse a provider that is not saved, or the entry itself', async () => {
@@ -320,7 +324,7 @@ describe('how a saved login signs in, at rest', () => {
       ['SITE', 'SITE'],
     ] as const) {
       const error = await w.directory
-        .put(id, change({ label: 'Site', method: { kind: 'github', via } }))
+        .put(id, change({ label: 'Site', match: ['site.example'], method: { kind: 'github', via } }))
         .catch(caught => caught);
       should(error).be.instanceOf(LoginEntryError);
       should(error.refusal).equal('bad_via');

@@ -9,6 +9,7 @@ import {
   FileSecretDocumentStore,
   FileSecretKey,
   LOGIN_INDEX_DOCUMENT,
+  LOGIN_INDEX_VERSION_1_BACKUP,
   LOGIN_SECRETS_DOCUMENT,
   WebCryptoSecretCipher,
 } from '../../../src/adapters/secrets/index.ts';
@@ -94,5 +95,36 @@ describe('saved logins at rest', () => {
     should(await index.read().catch(error => error)).be.instanceOf(SecretStoreError);
     await writeFile(join(paths.state, LOGIN_INDEX_DOCUMENT), JSON.stringify({ v: 2, entries: {} }));
     should(await index.read().catch(error => error)).be.instanceOf(SecretStoreError);
+    await writeFile(join(paths.state, LOGIN_INDEX_DOCUMENT), JSON.stringify({ v: 3, accounts: {}, signIns: {} }));
+    should(await index.read().catch(error => error)).be.instanceOf(SecretStoreError);
+  });
+
+  it('should migrate a version 1 index once, keeping its exact bytes 0600 beside it and never overwriting them', async () => {
+    const { paths, directory } = await store('login-index-migrate');
+    const indexPath = join(paths.state, LOGIN_INDEX_DOCUMENT);
+    const copyPath = join(paths.state, LOGIN_INDEX_VERSION_1_BACKUP);
+    const entry = {
+      label: 'sudo',
+      match: ['sudo@kirin-box'],
+      seals: {},
+      createdAt: CLOCK.now(),
+      updatedAt: CLOCK.now(),
+    };
+    const version1 = (key: string) =>
+      `${JSON.stringify({ v: 1, entries: { SUDO: { key, ...entry } } }, undefined, 2)}\n`;
+    const first = version1('L000000000000000000000001');
+    await writeFile(indexPath, first, { mode: 0o600 });
+
+    const booted = await directory.accounts.prepare();
+
+    should(booted.migrated?.accounts).equal(1);
+    should(JSON.parse(await readFile(indexPath, 'utf8')).v).equal(2);
+    should(await readFile(copyPath, 'utf8')).equal(first);
+    should((await stat(copyPath)).mode & 0o777).equal(0o600);
+    should((await stat(indexPath)).mode & 0o777).equal(0o600);
+    // Put back by hand (a downgrade and an upgrade again): migrated again, the FIRST copy kept.
+    await writeFile(indexPath, version1('L000000000000000000000002'), { mode: 0o600 });
+    await directory.accounts.prepare();
+    should(await readFile(copyPath, 'utf8')).equal(first);
   });
 });

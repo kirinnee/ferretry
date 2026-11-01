@@ -273,6 +273,13 @@ export const LoginEntryListSchema = z.strictObject({
 });
 export type LoginEntryList = z.infer<typeof LoginEntryListSchema>;
 
+/** A password as a write sends it: no control character or line break, which would press keys. */
+export const LoginPasswordSchema = z
+  .string()
+  .min(LOGIN_PASSWORD_MIN_LENGTH)
+  .max(LOGIN_PASSWORD_MAX_LENGTH)
+  .regex(/^[^\p{Cc}]*$/u, 'a password with a control character or line break would press keys');
+
 /**
  * `PUT /v1/secrets/logins/:id`: create the entry, or change the parts named. A field left out is kept;
  * `null` removes it. Values travel IN only. Adding a seed needs `totpAcknowledged: true`, which the
@@ -286,13 +293,7 @@ export const PutLoginEntryRequestSchema = z
     method: LoginMethodChangeSchema.optional(),
     domains: z.array(LoginDomainSchema).max(LOGIN_MATCH_MAX).optional(),
     username: oneLine(LOGIN_USERNAME_MAX_LENGTH).nullable().optional(),
-    password: z
-      .string()
-      .min(LOGIN_PASSWORD_MIN_LENGTH)
-      .max(LOGIN_PASSWORD_MAX_LENGTH)
-      .regex(/^[^\p{Cc}]*$/u, 'a password with a control character or line break would press keys')
-      .nullable()
-      .optional(),
+    password: LoginPasswordSchema.nullable().optional(),
     totp: z.strictObject({ seed: TotpSeedSchema, parameters: TotpParametersSchema.optional() }).nullable().optional(),
     totpAcknowledged: z.literal(true).optional(),
     /** The recipe, replaced whole; `null` removes it. A text holding any saved or vault value is refused. */

@@ -23,8 +23,10 @@ import {
   type LoginMatch,
   LoginMatchSchema,
   type LoginMethod,
+  LoginMethodChangeSchema,
   LoginMethodKindSchema,
   loginMethodIssues,
+  LoginPasswordSchema,
   LoginMethodSchema,
   loginMethodSentence,
   MAX_LOGIN_ENTRIES,
@@ -669,6 +671,68 @@ export const AccountListSchema = z.strictObject({
 });
 export type AccountList = z.infer<typeof AccountListSchema>;
 
+// ── Owner writes (`/v1/accounts*`) ─────────────────────────────────────────────────────────────
+
+/**
+ * `PUT /v1/accounts/:id`: create the account, or change the parts named. A field left out is kept; `null` removes it.
+ * The password travels IN only. 2FA keys are not here: they have routes of their own, and a seed is saved only with a
+ * passkey bound to that one save.
+ */
+export const PutAccountRequestSchema = z.strictObject({
+  label: oneLine(LOGIN_LABEL_MAX_LENGTH).optional(),
+  username: oneLine(LOGIN_USERNAME_MAX_LENGTH).nullable().optional(),
+  password: LoginPasswordSchema.nullable().optional(),
+});
+export type PutAccountRequest = z.infer<typeof PutAccountRequestSchema>;
+
+/** `POST /v1/accounts/:id/rename`. Its sign-ins and sealed values follow; nothing is re-typed. */
+export const RenameAccountRequestSchema = z.strictObject({ to: AccountIdSchema });
+export type RenameAccountRequest = z.infer<typeof RenameAccountRequestSchema>;
+
+/** `DELETE /v1/accounts/:id`: its sign-ins go with it. A 404 is how "there was none" is reported. */
+export const RemovedAccountSchema = z.strictObject({ id: AccountIdSchema, removed: z.literal(true) });
+export type RemovedAccount = z.infer<typeof RemovedAccountSchema>;
+
+/**
+ * `POST /v1/accounts/:id/sign-ins`: one more place the account signs in. `method.via` is the provider ACCOUNT's
+ * handle. A recipe holding any saved or vault value is refused.
+ */
+export const AddSignInRequestSchema = z.strictObject({
+  place: PlaceSchema,
+  method: LoginMethodChangeSchema.optional(),
+  recipe: LoginRecipeSchema.optional(),
+  autoApplyRecipe: z.boolean().optional(),
+});
+export type AddSignInRequest = z.infer<typeof AddSignInRequestSchema>;
+
+/** `PUT /v1/accounts/sign-ins/:si`: change the parts named; `recipe: null` removes the recipe. */
+export const PutSignInRequestSchema = z.strictObject({
+  place: PlaceSchema.optional(),
+  method: LoginMethodChangeSchema.optional(),
+  recipe: LoginRecipeSchema.nullable().optional(),
+  autoApplyRecipe: z.boolean().optional(),
+});
+export type PutSignInRequest = z.infer<typeof PutSignInRequestSchema>;
+
+/** `DELETE /v1/accounts/sign-ins/:si`. */
+export const RemovedSignInSchema = z.strictObject({ id: SignInIdSchema, removed: z.literal(true) });
+export type RemovedSignIn = z.infer<typeof RemovedSignInSchema>;
+
+/** `POST /v1/accounts/:id/merge` and `…/apart`: the OTHER account. Merge keeps `:id` and folds `from` into it. */
+export const AccountPairRequestSchema = z.strictObject({ from: AccountIdSchema });
+export type AccountPairRequest = z.infer<typeof AccountPairRequestSchema>;
+
+/**
+ * `GET /v1/accounts/look-alike` (owner only): groups of accounts with the same username AND the same password, which
+ * may be one account. HANDLES ONLY: never a username, never a password, never which one matched. Computed on demand
+ * and never stored, because "these two share a password" is derived from secrets.
+ */
+export const AccountLookAlikeSchema = z.strictObject({
+  v: z.literal(1),
+  groups: z.array(z.array(AccountIdSchema).min(2).max(MAX_ACCOUNTS).readonly()).max(MAX_ACCOUNTS).readonly(),
+});
+export type AccountLookAlike = z.infer<typeof AccountLookAlikeSchema>;
+
 // ── `config/account-defaults.yaml` ───────────────────────────────────────────────────────────────
 
 const DefaultsMapSchema = z
@@ -1140,7 +1204,7 @@ const unique = <T>(items: readonly T[]): readonly T[] => [...new Set(items)];
 
 /** An entry's places, primary first: its one site (if any), then one terminal place per terminal key. */
 function placesOf(
-  record: LoginRecordV1,
+  record: Pick<LoginRecordV1, 'match' | 'domains'>,
   host: LoginDomain,
 ): { readonly places: readonly Place[]; readonly dropped: number } {
   const keys = unique(record.match);
@@ -1161,6 +1225,14 @@ function placesOf(
     );
   }
   return { places, dropped: keys.length - valid.length };
+}
+
+/**
+ * The places a saved login's `match` and `domains` make, primary first, exactly as {@link migrateLoginIndex} makes
+ * them: what an older client's write to `/v1/secrets/logins/:id` changes an account's one sign-in into.
+ */
+export function savedLoginPlaces(login: Pick<LoginRecordV1, 'match' | 'domains'>, hostName: string): readonly Place[] {
+  return placesOf(login, shortHostOf(hostName)).places;
 }
 
 /**

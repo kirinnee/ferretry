@@ -314,7 +314,11 @@ describe('the login recipe routes', () => {
       newId: () => 'rp_0000000000000001',
     });
     const subsystem: SecretSubsystem = { ...base, loginRecipes };
-    await dispatch(subsystem, 'PUT', '/v1/secrets/logins/VERCEL', { label: 'Vercel', password: PASSWORD });
+    await dispatch(subsystem, 'PUT', '/v1/secrets/logins/VERCEL', {
+      label: 'Vercel',
+      match: ['vercel.com'],
+      password: PASSWORD,
+    });
     return { subsystem, loginRecipes };
   }
 
