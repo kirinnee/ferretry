@@ -365,3 +365,39 @@ describe('GET /v1/accounts/hint orders its "default" by the calling session (R1-
     should(asked).deepEqual([undefined]);
   });
 });
+
+describe('what a ferret may read of the owner’s taps (secrev-1271 L2, secrev-1274b N1)', () => {
+  it('should never answer the owner-tap count on either hint route, while still answering what was observed', async () => {
+    // Arrange — two owner taps from a paired device that went through, at GitHub's sign-in
+    const w = await world();
+    const listing = (await w.ok('GET', '/v1/accounts')) as { signIns: { id: string; place: { domains?: string[] } }[] };
+    const github = listing.signIns.find(signIn => signIn.place.domains?.includes('github.com'));
+    const accounts = w.subsystem.accounts as NonNullable<SecretSubsystem['accounts']>;
+    for (let tap = 0; tap < 2; tap += 1)
+      await accounts.observeSignIn(github?.id as never, {
+        at: 'github.com',
+        surface: 'page',
+        identity: '0123456789abcdef',
+        masked: true,
+        navigatedAway: true,
+        tapped: true,
+      });
+    const owner = JSON.stringify(await w.ok('GET', '/v1/accounts'));
+
+    // Act — as a ferret, on both hint routes
+    const hints = await Promise.all(
+      ['/v1/accounts/hint?site=github.com', '/v1/secrets/logins/hint?site=github.com'].map(
+        async path => await dispatchAs(agentIn('s1'), w.subsystem, 'GET', path),
+      ),
+    );
+    const bodies = await Promise.all(hints.map(async hint => JSON.stringify(await jsonBody(hint))));
+
+    // Assert — the owner sees the count; no ferret answer carries it, though each says what was observed
+    should(owner).containEql('"tapped"');
+    should(hints.map(hint => hint.status)).eql([200, 200]);
+    for (const body of bodies) {
+      should(body).containEql('"navigatedAway"');
+      should(body).not.containEql('tapped');
+    }
+  });
+});

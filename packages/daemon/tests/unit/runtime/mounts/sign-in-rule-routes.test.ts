@@ -136,14 +136,26 @@ async function served() {
     warn: () => undefined,
   });
   await rules.load();
+  /** Stages whose ceremony a test makes over OTHER bytes than the stage's own (a challenge with one bit flipped). */
+  const tampered = new Set<string>();
   const routes = [
-    ...stepUpRoutes(stepUp, undefined, undefined, {
-      challengeOf: (stage, device) => {
-        const challenge = rules.challengeOf(stage, device);
-        if (challenge !== undefined) verifier.issued.add(b64(challenge));
-        return challenge;
+    ...stepUpRoutes(
+      stepUp,
+      // A 2FA seed and a task-plan selection waiting for their passkeys, so their proofs can be made too.
+      { boundSubjectOf: () => 'b'.repeat(64) },
+      { boundSubjectOf: () => 'c'.repeat(64) },
+      {
+        challengeOf: (stage, device) => {
+          const challenge = rules.challengeOf(stage, device);
+          if (challenge === undefined) return undefined;
+          const issued = tampered.has(stage)
+            ? challenge.map((byte, index) => (index === 0 ? byte ^ 1 : byte))
+            : challenge;
+          verifier.issued.add(b64(issued));
+          return issued;
+        },
       },
-    }),
+    ),
     ...signInRuleRoutes(rules),
   ];
   const credentials = {
@@ -152,7 +164,7 @@ async function served() {
   };
   const dispatcherWith = (guard: CapabilityGuard) =>
     new ApiDispatcher(new ApiRouter(routes), credentials, guard, undefined, stepUp);
-  return { clock, rules, ruleStore, routes, stepUp, dispatch: dispatcherWith(GRANTED), dispatcherWith };
+  return { clock, rules, ruleStore, routes, stepUp, tampered, dispatch: dispatcherWith(GRANTED), dispatcherWith };
 }
 
 type Served = Awaited<ReturnType<typeof served>>;
@@ -223,6 +235,7 @@ describe('a ferret never reaches a rule route (invariant 1)', () => {
         ['POST', '/v1/sign-in-rules/stages'],
         ['GET', `/v1/sign-in-rules/stages/${stageId}`],
         ['POST', `/v1/sign-in-rules/stages/${stageId}/confirm-in-app`],
+        ['POST', `/v1/sign-in-rules/stages/${stageId}/bind`],
         ['POST', `/v1/sign-in-rules/stages/${stageId}/commit`],
         ['DELETE', `/v1/sign-in-rules/stages/${stageId}`],
         ['POST', `/v1/sign-in-rules/${rule}/narrow`],
@@ -254,6 +267,7 @@ describe('a ferret never reaches a rule route (invariant 1)', () => {
       'POST /v1/sign-in-rules/stages person secrets.configure',
       'GET /v1/sign-in-rules/stages/:stage person secrets.use',
       'POST /v1/sign-in-rules/stages/:stage/confirm-in-app person secrets.configure',
+      'POST /v1/sign-in-rules/stages/:stage/bind person secrets.configure',
       'POST /v1/sign-in-rules/stages/:stage/commit person secrets.configure',
       'DELETE /v1/sign-in-rules/stages/:stage person secrets.use',
       'POST /v1/sign-in-rules/:id/narrow person secrets.use',
@@ -301,6 +315,8 @@ describe('a rule is committed only with the kept proof over its own stage (invar
     const shown = await s.dispatch.dispatch(
       atMachine('POST', `/v1/sign-in-rules/stages/${stageId}/confirm-in-app`, {}),
     );
+    const unbound = await ceremony(s, 'approve-sign-in-rule', stageId);
+    const taken = await s.dispatch.dispatch(asDevice('POST', `/v1/sign-in-rules/stages/${stageId}/bind`, {}));
     await ceremony(s, 'approve-sign-in-rule', stageId);
 
     // Act
@@ -308,7 +324,9 @@ describe('a rule is committed only with the kept proof over its own stage (invar
     const phone = await commit(s.dispatch, stageId);
 
     // Assert
-    should([staged.status, shown.status]).eql([201, 201]);
+    should([staged.status, shown.status, taken.status]).eql([201, 201, 201]);
+    // Passkey options for a machine stage nobody took yet mint nothing (secrev-1274a L3).
+    should(unbound.options).equal(404);
     should(machine.status).equal(403);
     should(jsonBody(machine)).containDeep({ code: STEP_UP_REQUIRED_CODE, demand: { act: 'approve-sign-in-rule' } });
     should(phone.status).equal(201);
@@ -362,6 +380,87 @@ describe('a rule is committed only with the kept proof over its own stage (invar
     should(jsonBody(reused).code).equal(STEP_UP_REQUIRED_CODE);
     should([lapsed.status, jsonBody(lapsed).code]).eql([404, 'stage_not_found']);
     should(s.ruleStore.document?.rules.map(each => each.body.revision)).eql([1]);
+  });
+});
+
+describe('no other proof commits a rule (invariant 3, secrev-1274a TG1)', () => {
+  it('should refuse an unlock, an approve-task-plan proof and an add-2fa-key proof, and spend none of them', async () => {
+    // Arrange
+    const s = await served();
+    const stageId = await stage(s);
+
+    // Act — each other kind of passkey proof, then a commit with it
+    const answers = [];
+    const unlockOptions = await s.dispatch.dispatch(asDevice('POST', '/v1/unlock/options', { origin: ORIGIN }));
+    const unlocked = await s.dispatch.dispatch(
+      request({ method: 'POST', path: '/v1/unlock', body: assertionBody, device: browser }),
+    );
+    answers.push(await commit(s.dispatch, stageId));
+    const plan = await ceremony(s, 'approve-task-plan', `tps_${'c'.repeat(24)}`);
+    answers.push(await commit(s.dispatch, stageId));
+    const seed = await ceremony(s, 'add-2fa-key', `st_${'a'.repeat(24)}`);
+    answers.push(await commit(s.dispatch, stageId));
+
+    // Assert — every proof was really made, and none bought the rule
+    should([unlockOptions.status, unlocked.status, plan, seed]).eql([
+      200,
+      200,
+      { options: 200, stepped: 200 },
+      { options: 200, stepped: 200 },
+    ]);
+    for (const answer of answers) {
+      should(answer.status).equal(403);
+      should(jsonBody(answer)).containDeep({ code: STEP_UP_REQUIRED_CODE, demand: { act: 'approve-sign-in-rule' } });
+    }
+    should(s.ruleStore.writes).equal(0);
+    should(s.stepUp.claimFresh(browser, 'add-2fa-key', 'b'.repeat(64))).be.true();
+  });
+
+  it('should hand the commit no proof made over other bytes for the same stage, and leave that proof unspent', async () => {
+    // Arrange — the ceremony for this stage answered a challenge that is not the one its body derives
+    const s = await served();
+    const stageId = await stage(s);
+    s.tampered.add(stageId);
+    await ceremony(s, 'approve-sign-in-rule', stageId);
+    const derived = s.rules.challengeOf(stageId, deviceId) ?? new Uint8Array();
+    const issued = derived.map((byte, index) => (index === 0 ? byte ^ 1 : byte));
+
+    // Act
+    const refused = await commit(s.dispatch, stageId);
+
+    // Assert — the claim compared the kept challenge with the re-derived one and handed nothing over
+    should(refused.status).equal(403);
+    should(jsonBody(refused).code).equal(STEP_UP_REQUIRED_CODE);
+    should(s.stepUp.claimStoredProof(browser, 'approve-sign-in-rule', stageId, issued)).containDeep({ deviceId });
+    should(s.ruleStore.writes).equal(0);
+  });
+});
+
+describe('a machine stage is taken only by a device that could commit it (secrev-1274a L3)', () => {
+  it('should refuse a device denied the configure grant, and leave the stage for the owner’s phone', async () => {
+    // Arrange
+    const s = await served();
+    const staged = await s.dispatch.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sign-in-rules/stages',
+        headers: { ...human, 'content-type': 'application/json' },
+        body: json({ signIn: GITHUB, fields: ['username', 'password'] }),
+        loopback: true,
+        privilegedLoopback: true,
+      }),
+    );
+    const stageId = jsonBody(staged)['stage'] as string;
+    s.rules.confirmInApp({ kind: 'owner', actor: { kind: 'host' } }, stageId as SignInRuleStageId);
+    const narrowed = s.dispatcherWith(withoutGrant({ capability: 'secrets', axis: 'configure' }));
+
+    // Act
+    const refused = await narrowed.dispatch(asDevice('POST', `/v1/sign-in-rules/stages/${stageId}/bind`, {}));
+    const taken = await s.dispatch.dispatch(asDevice('POST', `/v1/sign-in-rules/stages/${stageId}/bind`, {}));
+
+    // Assert
+    should(refused.status).equal(403);
+    should(taken.status).equal(201);
   });
 });
 

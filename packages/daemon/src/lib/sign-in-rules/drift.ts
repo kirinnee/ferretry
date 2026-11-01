@@ -122,8 +122,9 @@ export function samePins(left: SignInRulePins, right: SignInRulePins): boolean {
  * suspends on any answer, and a fact changed back later does not resume the rule.
  *
  * - `sign-in-gone`: the sign-in (or its account) was removed.
- * - `account-changed`: the sign-in moved to another account (a merge: another key), the account was renamed, or its
- *   username changed.
+ * - `account-changed`: the sign-in moved to another account (a merge: another key), the account was renamed, its
+ *   username changed, or the sign-in no longer types a password of its own (another method, or "via" a provider). The
+ *   same refusal {@link snapshotPins} makes, so the stage, the commit and the follower agree (secrev-1274a L4).
  * - `place-changed`: its login domains changed, or it is no longer a page sign-in.
  * - `recipe-changed`: its recipe version moved (the owner's edit, an approved proposal or an auto-applied one).
  * - `factor-changed`: any 2FA key added, removed, changed in kind, or given or stripped of its seed.
@@ -137,6 +138,8 @@ export function ruleDrift(body: SignInRuleBody, listing: RuleListing): SignInRul
   const pins = body.pins;
   if (listing.keys.get(account.id) !== pins.accountKey) return 'account-changed';
   if (account.id !== pins.account || account.username !== pins.username) return 'account-changed';
+  if (signIn.via !== undefined || signIn.method.via !== undefined || signIn.method.kind !== 'password')
+    return 'account-changed';
   if (signIn.place.kind !== 'site' || !sameSet(placeKeys(signIn.place), pins.placeKeys)) return 'place-changed';
   if (signIn.recipeVersion !== pins.recipeVersion) return 'recipe-changed';
   if (factorFingerprint(account.factors) !== pins.factors) return 'factor-changed';

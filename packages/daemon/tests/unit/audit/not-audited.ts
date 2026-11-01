@@ -120,6 +120,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/sign-in-rules/stages': 'stages a standing rule, which approves nothing; the commit that would is audited',
   'POST /v1/sign-in-rules/stages/:stage/confirm-in-app':
     'shows a rule staged at the machine in the app; it approves nothing, and the commit that would is audited',
+  'POST /v1/sign-in-rules/stages/:stage/bind':
+    'a paired device takes a machine-staged rule to approve it with its own passkey; it approves nothing, and the commit that would is audited',
   'POST /v1/sign-in-rules/stages/:stage/commit':
     'audited by the standing-rule service: security.changed sign-in-rule-created (or -resumed, -renewed, -widened) with the device and the passkey; the step-up that proved it is audited too',
   'DELETE /v1/sign-in-rules/stages/:stage': 'drops a staged standing rule; approves nothing',

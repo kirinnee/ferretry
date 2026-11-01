@@ -284,6 +284,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/sign-in-rules/stages operator person',
   'GET /v1/sign-in-rules/stages/:stage operator person',
   'POST /v1/sign-in-rules/stages/:stage/confirm-in-app operator person',
+  'POST /v1/sign-in-rules/stages/:stage/bind operator person',
   'POST /v1/sign-in-rules/stages/:stage/commit operator person',
   'DELETE /v1/sign-in-rules/stages/:stage operator person',
   'POST /v1/sign-in-rules/:id/narrow operator person',

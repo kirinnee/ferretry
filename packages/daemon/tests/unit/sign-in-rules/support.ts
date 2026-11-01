@@ -177,6 +177,8 @@ export interface WorldOptions {
   readonly store?: MemoryRuleStore;
   readonly proofs?: FakeProofs;
   readonly passkeys?: boolean;
+  /** Whether the device asking holds a passkey (`of`), when it differs from whether any device does. */
+  readonly devicePasskeys?: boolean;
   readonly listing?: RuleListing;
   /** The device names, as pairing answers them; it may act on the service (an idle device revoked while it is read). */
   readonly label?: (deviceId: string, service: SignInRuleService) => Promise<string | undefined>;
@@ -203,7 +205,10 @@ export async function world(options: WorldOptions = {}) {
       },
     },
     proofs,
-    passkeys: { any: async () => options.passkeys !== false, of: async () => options.passkeys !== false },
+    passkeys: {
+      any: async () => options.passkeys !== false,
+      of: async () => (options.devicePasskeys ?? options.passkeys) !== false,
+    },
     devices: {
       label: async deviceId =>
         options.label === undefined
@@ -237,7 +242,10 @@ export async function approved(
   deviceId = DEVICE,
 ) {
   const staged = await w.service.stage(caller, draft);
-  if (caller.kind === 'owner' && caller.actor.kind === 'host') w.service.confirmInApp(caller, staged.stage);
+  if (caller.kind === 'owner' && caller.actor.kind === 'host') {
+    w.service.confirmInApp(caller, staged.stage);
+    await w.service.bind(deviceOwner(deviceId), staged.stage);
+  }
   const challenge = w.service.challengeOf(staged.stage, deviceId);
   if (challenge === undefined) throw new Error('no challenge for that device');
   const committer = caller.kind === 'owner' && caller.actor.kind === 'host' ? deviceOwner(deviceId) : caller;

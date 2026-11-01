@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { SIGN_IN_RULE_MAX, type SignInId, type SignInRuleStageId } from '@ferretry/protocol';
 import should from 'should';
-import { SignInRuleError } from '../../../src/lib/sign-in-rules/index.ts';
+import { FINISHED_STAGES_KEPT, SignInRuleError } from '../../../src/lib/sign-in-rules/index.ts';
 import {
   actions,
   approved,
@@ -66,19 +66,78 @@ describe('the service before it has read its file', () => {
     should(w.store.writes).equal(0);
   });
 
-  it('should still check the proofs when the accounts cannot be read at load, and say so', async () => {
-    // Arrange
+  it('should keep every rule unverified while the accounts cannot be read, and check them on a later sweep', async () => {
+    // Arrange — a rule whose domains changed while the daemon was down
     const first = await world();
     const { view } = await approved(first);
-
-    // Act
     const again = await world({ store: first.store, load: false });
     again.state.listingBroken = true;
-    await again.service.load();
 
-    // Assert — the proof checked out; drift is left to the next account change
+    // Act
+    await again.service.load();
+    const atLoad = {
+      verified: again.service.verified(view.id, 1),
+      view: (await again.service.list(HOST_OWNER)).rules[0],
+    };
+    await again.service.sweepRules();
+    const stillBroken = again.service.verified(view.id, 1);
+    const base = listing();
+    again.state.listingBroken = false;
+    again.state.listing = {
+      ...base,
+      signIns: base.signIns.map(each =>
+        each.id === GITHUB ? { ...each, place: { kind: 'site', domains: ['gh.io'], match: [] } } : each,
+      ),
+    } as never;
+    await again.service.sweepRules();
+
+    // Assert — never verified (so never filling) until the check could be made; then the drift suspends it
+    should(atLoad.verified).be.false();
+    should(atLoad.view).containDeep({ status: 'active', unverified: true });
+    should(stillBroken).be.false();
+    should((await again.service.list(HOST_OWNER)).rules[0]?.suspended?.because).equal('place-changed');
+    should(again.warnings[0]).startWith('the accounts could not be read');
+  });
+
+  it('should keep a rule unverified while the passkeys cannot be read, and verify it on a later sweep', async () => {
+    const first = await world();
+    const { view } = await approved(first);
+    first.proofs.broken = true;
+    const again = await world({ store: first.store, proofs: first.proofs });
+    should(again.service.verified(view.id, 1)).be.false();
+    await again.service.sweepRules();
+    should(again.service.verified(view.id, 1)).be.false();
+    first.proofs.broken = false;
+    await again.service.sweepRules();
     should(again.service.verified(view.id, 1)).be.true();
-    should(again.warnings).eql(['the accounts could not be read, so the standing rules were not checked against them']);
+    should((await again.service.list(HOST_OWNER)).rules[0]?.unverified).be.undefined();
+  });
+
+  it('should answer 503 to the list while load is still checking the rules, never show them as active', async () => {
+    // Arrange — a registry that answers only when the test lets it
+    const first = await world();
+    await approved(first);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const verify = first.proofs.verify.bind(first.proofs);
+    first.proofs.verify = async (proof, challenge) => {
+      await gate;
+      return await verify(proof, challenge);
+    };
+    const again = await world({ store: first.store, proofs: first.proofs, load: false });
+
+    // Act
+    const loading = again.service.load();
+    await Bun.sleep(0);
+    const during = await refusal(again.service.list(HOST_OWNER));
+    release();
+    await loading;
+
+    // Assert
+    should([during.status, during.code]).eql([503, 'unavailable']);
+    should((await again.service.list(HOST_OWNER)).rules[0]?.status).equal('active');
   });
 });
 
@@ -281,5 +340,46 @@ describe('a fill under a rule is counted (used)', () => {
     });
     should(w.store.document?.rules[0]?.usage.count).equal(0);
     should(actions(w)).eql(['sign-in-rule-created', 'sign-in-rule-suspended']);
+  });
+});
+
+describe('finished stages are bounded (secrev-1274a N2)', () => {
+  it(`should keep at most ${String(FINISHED_STAGES_KEPT)} finished stages for a poll, dropping the oldest`, async () => {
+    const w = await world();
+    const stages: SignInRuleStageId[] = [];
+    for (let index = 0; index < FINISHED_STAGES_KEPT + 3; index += 1)
+      stages.push((await w.service.stage(deviceOwner(), DRAFT)).stage);
+    should((await refusal(() => w.service.viewStage(deviceOwner(), stages[0] as SignInRuleStageId))).code).equal(
+      'stage_not_found',
+    );
+    should(w.service.viewStage(deviceOwner(), stages.at(-2) as SignInRuleStageId).state).equal('denied');
+    should(w.service.viewStage(deviceOwner(), stages.at(-1) as SignInRuleStageId).state).equal('waiting');
+  });
+});
+
+describe('a device taking a machine stage (secrev-1274a L3)', () => {
+  it('should let a device with a passkey take it and approve it', async () => {
+    const w = await world();
+    const { view } = await approved(w, DRAFT, HOST_OWNER);
+    should(view.approvedWith.deviceId).equal(DEVICE);
+  });
+
+  it('should refuse a device with no passkey, and a device id that cannot be signed, leaving the stage untaken', async () => {
+    // Arrange
+    const keyless = await world({ devicePasskeys: false });
+    const machine = await keyless.service.stage(HOST_OWNER, DRAFT);
+    keyless.service.confirmInApp(HOST_OWNER, machine.stage);
+    const odd = await world();
+    const other = await odd.service.stage(HOST_OWNER, DRAFT);
+    odd.service.confirmInApp(HOST_OWNER, other.stage);
+
+    // Act
+    const noPasskey = await refusal(keyless.service.bind(deviceOwner(), machine.stage));
+    const unsigned = await refusal(odd.service.bind(deviceOwner('phone-1'), other.stage));
+
+    // Assert
+    should([noPasskey.status, noPasskey.code]).eql([409, 'passkey_required']);
+    should([unsigned.status, unsigned.code]).eql([404, 'stage_not_found']);
+    should(await odd.service.bind(deviceOwner(), other.stage)).containDeep({ stage: other.stage });
   });
 });

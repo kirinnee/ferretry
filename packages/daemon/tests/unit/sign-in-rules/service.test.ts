@@ -199,22 +199,31 @@ describe('stage and commit: a fresh passkey bound to the bytes written (invarian
     should(w.service.challengeOf(staged.stage, DEVICE)).not.be.undefined();
   });
 
-  it("should put a machine stage in the app, bind it to the first device that asks, and never let the machine's token commit", async () => {
+  it("should put a machine stage in the app, bind it only when a device takes it, and never let the machine's token commit", async () => {
     // Arrange
     const w = await world();
     const staged = await w.service.stage(HOST_OWNER, DRAFT);
 
     // Act
-    const beforeConfirm = w.service.challengeOf(staged.stage, DEVICE);
+    const beforeConfirm = await refusal(w.service.bind(deviceOwner(), staged.stage));
     const confirmed = w.service.confirmInApp(HOST_OWNER, staged.stage);
     const listed = await w.service.list(deviceOwner());
+    const asked = w.service.challengeOf(staged.stage, DEVICE);
+    const machineBind = await refusal(w.service.bind(HOST_OWNER, staged.stage));
+    const taken = await w.service.bind(deviceOwner(), staged.stage);
+    const again = await w.service.bind(deviceOwner(), staged.stage);
+    const otherBind = await refusal(w.service.bind(deviceOwner(OTHER_DEVICE), staged.stage));
     const bound = w.service.challengeOf(staged.stage, DEVICE);
     const other = w.service.challengeOf(staged.stage, OTHER_DEVICE);
     const machine = await w.service.commit(HOST_OWNER, staged.stage, () => undefined).catch((error: unknown) => error);
     const made = await w.service.commit(deviceOwner(), staged.stage, () => evidenceFor(bound ?? new Uint8Array()));
 
-    // Assert
-    should(beforeConfirm).be.undefined();
+    // Assert — asking for passkey options before a device took it binds nothing (secrev-1274a L3)
+    should([beforeConfirm.status, beforeConfirm.code]).eql([404, 'stage_not_found']);
+    should(asked).be.undefined();
+    should([machineBind.status, machineBind.code]).eql([403, 'forbidden']);
+    should([taken.stage, again.stage]).eql([staged.stage, staged.stage]);
+    should([otherBind.status, otherBind.code]).eql([404, 'stage_not_found']);
     should(confirmed.machine?.askedAt).equal(new Date(NOW).toISOString());
     should(listed.stages.map(stage => stage.stage)).eql([staged.stage]);
     should(bound).not.be.undefined();

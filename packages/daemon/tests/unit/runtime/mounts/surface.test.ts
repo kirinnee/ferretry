@@ -961,7 +961,7 @@ describe('the mounted daemon surface', () => {
       3 + // approving a sign-in on the phone: the list, one approval, and "Not me" (docs/input-requests.md)
       8 + // secure copy: a session's copies, the rules (list, add, remove, settings read and change), the paste plans and an answer to one (docs/secure-copy.md)
       8 + // task plans: the list, one plan, a selection's stage, read, passkey-bound commit, confirm-in-app and drop, and revoke (docs/secure-copy.md)
-      10 + // standing sign-in rules: the list, eligibility, a stage, its read, confirm-in-app, the kept-proof commit and drop, narrow, revoke one and revoke an account's (docs/secrets.md)
+      11 + // standing sign-in rules: the list, eligibility, a stage, its read, confirm-in-app, a device taking a machine stage, the kept-proof commit and drop, narrow, revoke one and revoke an account's (docs/secrets.md)
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
       7 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
       9 + // the catalogs this machine publishes: list, make, change, delete, preview, add, publish, withdraw and export (docs/catalogs.md)
@@ -1324,6 +1324,7 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sign-in-rules/stages',
       'GET /v1/sign-in-rules/stages/:stage',
       'POST /v1/sign-in-rules/stages/:stage/confirm-in-app',
+      'POST /v1/sign-in-rules/stages/:stage/bind',
       'POST /v1/sign-in-rules/stages/:stage/commit',
       'DELETE /v1/sign-in-rules/stages/:stage',
       'POST /v1/sign-in-rules/:id/narrow',

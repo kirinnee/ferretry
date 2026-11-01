@@ -138,9 +138,21 @@ export type LoginObserved = z.infer<typeof LoginObservedSchema>;
 export const LoginObservedHintSchema = LoginObservedSchema.omit({ tapped: true });
 export type LoginObservedHint = z.infer<typeof LoginObservedHintSchema>;
 
-/** The facts a ferret may read: each without its `tapped` count. */
+/**
+ * The facts a ferret may read, built field by field from an ALLOWLIST: a field added to {@link LoginObservedSchema}
+ * later reaches a ferret only once it is named here (secrev-1274b N1), and `tapped` never is.
+ */
 export const ferretObserved = (facts: readonly LoginObserved[]): LoginObservedHint[] =>
-  facts.map(({ tapped: _ownerOnly, ...fact }) => fact);
+  facts.map(fact => ({
+    at: fact.at,
+    surface: fact.surface,
+    identity: fact.identity,
+    since: fact.since,
+    ...(fact.masked === undefined ? {} : { masked: fact.masked }),
+    ...(fact.noEchoAfterSubmit === undefined ? {} : { noEchoAfterSubmit: fact.noEchoAfterSubmit }),
+    ...(fact.navigatedAway === undefined ? {} : { navigatedAway: fact.navigatedAway }),
+    ...(fact.secondFactor === undefined ? {} : { secondFactor: fact.secondFactor }),
+  }));
 
 /** One delivery's worth of facts, as the input service reports them; folded into {@link LoginObserved}. */
 export interface LoginObservation {

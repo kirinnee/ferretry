@@ -580,7 +580,7 @@ subject: srs_… }` issues `signInRuleChallenge(nonce, signInRuleSubject(stage, 
   device** (`challengeOf(stage, deviceId)`), so a stage is answered only to the device it waits on: another
   paired device that learns an `srs_` id gets no challenge. A stage that isn't waiting, or isn't waiting
   for this device, answers `404 stage_not_found` and no challenge is made. A stage made in the app waits on
-  the device that made it; one made at the machine waits in the app and is bound to the first device that asks
+  the device that made it; one made at the machine waits in the app until a paired device takes it, behind the commit's own grants
   ([secrets.md](../secrets.md#standing-sign-in-rules)).
 - **The live ceremony is unchanged.** The counter must move, the origin must be allowed, UV must be set,
   and an overdue device key is rotated. A stored proof is a good live proof first. The daemon then keeps

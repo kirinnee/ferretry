@@ -431,6 +431,11 @@ export const SignInRuleViewSchema = z
     uses: z.number().int().min(0).max(SIGN_IN_RULE_MAX_USES).optional(),
     remaining: z.number().int().min(0).max(SIGN_IN_RULE_MAX_USES).optional(),
     status: SignInRuleStatusSchema,
+    /**
+     * Its proof or its pinned facts could not be checked yet (the passkeys or the accounts could not be read): it fills
+     * nothing until the daemon has checked them. Only on a rule that is not suspended.
+     */
+    unverified: z.literal(true).optional(),
     suspended: z.strictObject({ at: InstantSchema, because: SignInRuleSuspensionSchema }).optional(),
     usage: SignInRuleUsageSchema,
     flags: z.array(SignInRuleFlagSchema).max(SIGN_IN_RULE_FLAGS.length),
@@ -449,6 +454,7 @@ export const SignInRuleViewSchema = z
       ...((view.status === 'suspended') === (view.suspended !== undefined)
         ? []
         : ['a suspended rule says why, and only a suspended one']),
+      ...(view.unverified === true && view.suspended !== undefined ? ['a suspended rule is not also unverified'] : []),
       ...((view.uses === undefined) === (view.remaining === undefined) ? [] : ['uses left come with a cap only']),
       ...(view.uses !== undefined && view.remaining !== undefined && view.remaining > view.uses
         ? ['a rule never has more uses left than its cap']

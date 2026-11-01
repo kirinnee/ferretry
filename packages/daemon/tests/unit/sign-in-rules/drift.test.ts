@@ -95,6 +95,16 @@ describe('drift suspends, with the reason (invariant 16)', () => {
       'account-changed',
     ],
     ['a username change', world => withAccount(world, { username: 'someone-else' }), 'account-changed'],
+    ['another method', world => withSignIn(world, { method: { kind: 'google' } }), 'account-changed'],
+    [
+      'a provider it now goes via',
+      world =>
+        withSignIn(world, {
+          method: { kind: 'google', via: 'GOOGLE' },
+          via: { account: { id: 'GOOGLE', label: 'Google' } },
+        }),
+      'account-changed',
+    ],
     [
       'a domains edit',
       world => withSignIn(world, { place: { kind: 'site', domains: ['github.com', 'gh.io'], match: [] } }),

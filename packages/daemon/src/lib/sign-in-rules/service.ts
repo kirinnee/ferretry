@@ -147,8 +147,14 @@ interface Stage {
   readonly nonce: string;
   /** The body without `approvedBy`, which is fixed when the approving device is known. */
   readonly unsigned: Omit<SignInRuleBody, 'approvedBy'>;
-  /** The rule a resume, renew or widen approves again, and the revision it had. */
-  readonly replaces?: { readonly id: SignInRuleId; readonly revision: number } | undefined;
+  /**
+   * The rule a resume, renew or widen approves again: the revision it had and why it was suspended (or not) when the
+   * owner looked. A commit refuses when either moved, so a suspension that lands after the stage is never cleared by a
+   * passkey the owner gave without its reason in front of them (secrev-1274a L2).
+   */
+  readonly replaces?:
+    | { readonly id: SignInRuleId; readonly revision: number; readonly suspended?: SignInRuleSuspension | undefined }
+    | undefined;
   readonly account: AccountRef;
   readonly username?: string | undefined;
   readonly place: Place;
@@ -166,6 +172,8 @@ const STAGE_TTL_MS = SIGN_IN_RULE_STAGE_TTL_SECONDS * 1_000;
 /** How long a finished stage still answers its state, so `fy rules add` reads "Approved" rather than "gone". */
 const FINISHED_STAGE_KEPT_MS = STAGE_TTL_MS;
 const HOST = 'host';
+/** Most finished stages kept for a poll. */
+export const FINISHED_STAGES_KEPT = 64;
 
 const ownerKey = (owner: Owner): string => (owner.actor.kind === 'device' ? `device:${owner.actor.deviceId}` : HOST);
 const auditActor = (owner: Owner): AuditActor =>
@@ -203,6 +211,16 @@ export class SignInRuleService {
   readonly #stages = new Map<SignInRuleStageId, Stage>();
   /** Records whose proof checked out against the registry as it stood at the last look, by `id:revision`. */
   readonly #verified = new Set<string>();
+  /**
+   * A check that could not be made yet: the accounts or the passkeys could not be read at load or after. Until a sweep
+   * makes it, the rules it covers are not `verified`, so none fills (secrev-1274a L4, secrev-1274b L1, N3).
+   */
+  #unsettled = false;
+  /**
+   * Memory holds a suspension or a use the file does not: its write failed. Every later write carries it, and the sweep
+   * and {@link flush} retry until one lands (secrev-1274b L3).
+   */
+  #dirty = false;
   /** Rules whose expiry was already audited, by `id:revision`. */
   readonly #expiredSaid = new Set<string>();
   /** Every change to the file and the records in memory runs here, one at a time. */
@@ -240,19 +258,35 @@ export class SignInRuleService {
         await this.#record('sign-in-rules', { action: 'sign-in-rules-damaged' }, { kind: 'host' }, 'failed');
         return;
       }
+      // Still `loading` while every record is checked, so no list shows a rule as active before it was (secrev-1274a N3).
       this.#records = document?.rules ?? [];
+      await this.#settle();
       this.#health = 'ok';
-      const listing = await this.ports.accounts.listing().catch(() => undefined);
-      if (listing === undefined && this.#records.length > 0)
-        this.ports.warn('the accounts could not be read, so the standing rules were not checked against them');
-      const suspending: Suspending[] = [];
-      for (const record of this.#records) {
-        if (record.suspended !== undefined) continue;
-        const because = await this.#recheck(record, listing);
-        if (because !== undefined) suspending.push({ id: record.body.id, because });
-      }
-      await this.#suspendAll(suspending);
     });
+  }
+
+  /**
+   * Inside the queue: checks every rule still in force against the registry and the accounts as they stand, suspends
+   * what no longer holds, and leaves `#unsettled` set when either could not be read — then no rule is `verified`
+   * until a later sweep settles it, so none fills while it cannot be checked.
+   */
+  async #settle(): Promise<void> {
+    this.#unsettled = false;
+    const listing = await this.ports.accounts.listing().catch(() => undefined);
+    if (listing === undefined && this.#records.length > 0) {
+      this.#unsettled = true;
+      this.ports.warn(
+        'the accounts could not be read, so the standing rules were not checked against them: none fills',
+      );
+    }
+    const suspending: Suspending[] = [];
+    for (const record of this.#records) {
+      if (record.suspended !== undefined) continue;
+      const because = await this.#recheck(record, listing);
+      if (because !== undefined) suspending.push({ id: record.body.id, because });
+    }
+    if (listing === undefined) this.#verified.clear();
+    await this.#suspendAll(suspending);
   }
 
   /** Waiting stages past their time lapse; finished ones are kept a while for a poll, then forgotten. */
@@ -274,6 +308,8 @@ export class SignInRuleService {
     this.sweep();
     await this.#serial(async () => {
       if (this.#health !== 'ok') return;
+      if (this.#unsettled) await this.#settle();
+      if (this.#dirty) await this.#write(this.#records).catch(() => undefined);
       const now = this.ports.clock.now();
       const ended = this.#records.filter(record => now >= Date.parse(signInRuleEffective(record, now).expiresAt));
       for (const record of ended) {
@@ -403,7 +439,15 @@ export class SignInRuleService {
       owner: ownerKey(owner),
       nonce: this.#newNonce(),
       unsigned,
-      ...(existing === undefined ? {} : { replaces: { id: existing.body.id, revision: existing.body.revision } }),
+      ...(existing === undefined
+        ? {}
+        : {
+            replaces: {
+              id: existing.body.id,
+              revision: existing.body.revision,
+              ...(existing.suspended === undefined ? {} : { suspended: existing.suspended.because }),
+            },
+          }),
       account: { id: snap.account.id, label: snap.account.label },
       ...(snap.account.username === undefined ? {} : { username: snap.account.username }),
       place: snap.signIn.place,
@@ -419,17 +463,47 @@ export class SignInRuleService {
   }
 
   /**
-   * The challenge an `approve-sign-in-rule` passkey for this stage must answer, for THIS device only, or nothing. A
-   * stage made by a device is answered to that device. A stage made at the machine is answered once it waits in the
-   * app (`confirmInApp`), to the first device that asks, which it is then bound to (the signed body names it). Any
-   * other device, an unknown, finished or lapsed stage, or one being committed, gets nothing.
+   * The challenge an `approve-sign-in-rule` passkey for this stage must answer, for THIS device only, or nothing: the
+   * device the stage is bound to (the one that made it, or the one that took a machine stage with {@link bind}). A pure
+   * read: asking for passkey options binds nothing, so a device that could not commit can't take a stage from the
+   * owner's phone (secrev-1274a L3). Any other device, an unknown, finished or lapsed stage, or one being committed,
+   * gets nothing.
    */
   challengeOf(stageId: SignInRuleStageId, deviceId: string): Uint8Array | undefined {
     this.sweep();
     const held = this.#stages.get(stageId);
     if (held === undefined || held.state !== 'waiting' || held.committing === true) return undefined;
-    if (held.bound === undefined && held.owner === HOST && held.machine !== undefined) this.#bind(held, deviceId);
     return held.bound?.deviceId === deviceId ? held.bound.challenge.slice() : undefined;
+  }
+
+  /**
+   * A PAIRED DEVICE TAKES A MACHINE STAGE (`fy rules add`, waiting in the app) to approve it with its own passkey: the
+   * signed body then names it, and the challenge is derived from that body. Behind the same route demands as the commit
+   * (`secrets.configure`, `browser.use`), and only for a device that holds a passkey. A stage bound to this device
+   * already answers itself again; one bound to another device is not waiting for this one.
+   */
+  async bind(caller: PasteRuleCaller, stageId: SignInRuleStageId): Promise<SignInRuleStaged> {
+    const owner = requireOwner(caller);
+    this.#ready();
+    this.sweep();
+    if (owner.actor.kind !== 'device')
+      throw new SignInRuleError(403, 'forbidden', 'only a paired device approves a standing rule, with its passkey');
+    const deviceId = owner.actor.deviceId;
+    const held = this.#ownStage(owner, stageId, false);
+    if (held.bound?.deviceId === deviceId) return this.#staged(held);
+    if (held.owner !== HOST || held.machine === undefined || held.committing === true) throw this.#stageGone();
+    if (!(await this.#passkeyFor(owner)))
+      throw new SignInRuleError(
+        409,
+        SIGN_IN_RULE_ERROR_CODES.passkeyRequired,
+        SIGN_IN_RULE_INELIGIBLE_WORDS['no-passkey'],
+      );
+    // Looked at again after the await: another device may have taken it (then it is not this one's), or it lapsed.
+    const still = this.#ownStage(owner, stageId, false);
+    if (still.bound?.deviceId === deviceId) return this.#staged(still);
+    // A device id that can't be signed (not a paired device's) binds nothing.
+    if (!this.#bind(still, deviceId)) throw this.#stageGone();
+    return this.#staged(still);
   }
 
   /** Where a staged rule stands, for `fy rules add` waiting on the app. */
@@ -499,7 +573,7 @@ export class SignInRuleService {
     if (evidence === undefined) throw new SignInRuleProofMissing();
     held.committing = true;
     try {
-      const made = await this.#committed(owner, held, bound.body, evidence, challenge);
+      const made = await this.#committed(owner, held, bound.body, evidence);
       this.#finish(held, 'approved');
       return made;
     } catch (error) {
@@ -515,7 +589,6 @@ export class SignInRuleService {
     held: Stage,
     body: SignInRuleBody,
     evidence: StoredStepUpProof,
-    challenge: Uint8Array,
   ): Promise<SignInRuleView> {
     if (evidence.deviceId !== body.approvedBy.deviceId)
       throw new SignInRuleError(
@@ -530,15 +603,6 @@ export class SignInRuleService {
     });
     if (!record.success)
       throw new SignInRuleError(403, SIGN_IN_RULE_ERROR_CODES.proofInvalid, 'the proof is not usable');
-    const verified = await this.ports.proofs.verify(evidence, challenge).catch(() => {
-      throw new SignInRuleError(503, 'unavailable', 'the passkeys cannot be read right now; nothing was approved');
-    });
-    if (!verified)
-      throw new SignInRuleError(
-        403,
-        SIGN_IN_RULE_ERROR_CODES.proofInvalid,
-        'the passkey confirmation does not match this rule; nothing was approved',
-      );
     // The view is drawn AFTER the queue: naming the approving device asks pairing, which may revoke an idle device, and a
     // revocation is told to this service through the same queue.
     const { made, listing } = await this.#serial(async () => {
@@ -561,11 +625,34 @@ export class SignInRuleService {
           SIGN_IN_RULE_ERROR_CODES.conflict,
           'the sign-in’s standing rule changed since this one was staged; nothing was approved',
         );
+      // A suspension is sticky and keeps its first reason, so the only way this differs is one that landed since.
+      const suspendedNow = existing?.suspended?.because;
+      if (held.replaces !== undefined && suspendedNow !== held.replaces.suspended)
+        throw new SignInRuleError(
+          409,
+          SIGN_IN_RULE_ERROR_CODES.conflict,
+          `the standing rule was suspended after this approval was staged (${signInRuleSuspensionWords(suspendedNow ?? 'proof-invalid')}); nothing was approved: look at it again`,
+        );
       if (existing === undefined && this.#records.length >= SIGN_IN_RULE_MAX)
         throw new SignInRuleError(
           429,
           'capacity',
           `this machine already has ${String(SIGN_IN_RULE_MAX)} standing rules`,
+        );
+      // THE PROOF, CHECKED INSIDE THE QUEUE, right before the write (secrev-1274a L1, secrev-1274b M1): a revocation or a
+      // passkey removal already queued has run, and one that lands while this check runs is queued behind the write and
+      // sees the new rule. The device must still be paired and hold the credential, and the assertion must verify over
+      // the very bytes written (the challenge derived again from the record).
+      const proof = await checkRuleProof(record.data, this.ports.proofs);
+      if (proof === 'unknown')
+        throw new SignInRuleError(503, 'unavailable', 'the passkeys cannot be read right now; nothing was approved');
+      if (proof !== 'ok')
+        throw new SignInRuleError(
+          403,
+          SIGN_IN_RULE_ERROR_CODES.proofInvalid,
+          proof === 'passkey-removed'
+            ? 'the passkey or device that approved this rule is gone; nothing was approved'
+            : 'the passkey confirmation does not match this rule; nothing was approved',
         );
       await this.#write([...this.#records.filter(each => each.body.id !== body.id), record.data]).catch(() => {
         throw new SignInRuleError(503, 'unavailable', 'the standing rules could not be saved; nothing was approved');
@@ -753,6 +840,7 @@ export class SignInRuleService {
         this.#records = this.#records.map(each =>
           each === record ? { ...next, suspended: this.#suspension('store-write-failed') } : each,
         );
+        this.#dirty = true;
         await this.#auditRule(
           next,
           'sign-in-rule-suspended',
@@ -761,6 +849,16 @@ export class SignInRuleService {
           'daemon',
         );
       }
+    });
+  }
+
+  /**
+   * At shutdown: a suspension or a use whose write failed is written now, if the file can be written at all. What a
+   * crash before any write lands still loses is declared (docs/secrets.md).
+   */
+  async flush(): Promise<void> {
+    await this.#serial(async () => {
+      if (this.#dirty) await this.#write(this.#records).catch(() => undefined);
     });
   }
 
@@ -787,6 +885,7 @@ export class SignInRuleService {
     const check = await checkRuleProof(record, this.ports.proofs);
     if (check === 'ok') this.#verified.add(recordKey(record));
     else this.#verified.delete(recordKey(record));
+    if (check === 'unknown') this.#unsettled = true;
     return check === 'passkey-removed' || check === 'proof-invalid' ? check : undefined;
   }
 
@@ -810,6 +909,7 @@ export class SignInRuleService {
       await this.#write(suspended(change => change.because));
     } catch {
       saved = false;
+      this.#dirty = true;
       this.ports.warn('a standing rule was suspended, but the rules file could not be written; it stays suspended');
       this.#records = suspended(() => 'store-write-failed');
     }
@@ -843,7 +943,8 @@ export class SignInRuleService {
       await this.ports.store.setAside(new Date(this.ports.clock.now()).toISOString().replaceAll(/[:.]/gu, '-'));
     await this.ports.store.write({ v: 1, rules: [...records] });
     this.#records = records;
-    this.#health = 'ok';
+    this.#dirty = false;
+    if (this.#health === 'damaged') this.#health = 'ok';
   }
 
   /** The store's own failure, said as the person's refusal (`#write` throws nothing of this service's). */
@@ -923,6 +1024,10 @@ export class SignInRuleService {
     if (stage.state !== 'waiting') return;
     stage.state = state;
     stage.finishedAtMs = this.ports.clock.now();
+    // Finished stages are kept only to answer a poll: at most this many, the oldest dropped (secrev-1274a N2).
+    const finished = [...this.#stages.values()].filter(each => each.state !== 'waiting');
+    for (const old of finished.slice(0, Math.max(0, finished.length - FINISHED_STAGES_KEPT)))
+      this.#stages.delete(old.id);
   }
 
   #freshStageId(): SignInRuleStageId {
@@ -960,6 +1065,7 @@ export class SignInRuleService {
           uses: body.uses,
           autoRecipe: stage.autoRecipe,
           revision: body.revision,
+          suspended: stage.replaces?.suspended,
         }),
       ],
       fields: [...body.fields],
@@ -1002,6 +1108,7 @@ export class SignInRuleService {
       expiresAt: effective.expiresAt,
       ...(effective.uses === undefined ? {} : { uses: effective.uses, remaining: effective.remaining ?? 0 }),
       status: effective.status,
+      ...(record.suspended === undefined && !this.#verified.has(recordKey(record)) ? { unverified: true } : {}),
       ...(record.suspended === undefined ? {} : { suspended: record.suspended }),
       usage: record.usage,
       flags,

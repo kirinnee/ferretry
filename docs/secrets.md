@@ -514,8 +514,10 @@ Creating, resuming, renewing or widening a rule is a **stage** and a **commit**.
   `signInRuleChallenge(nonce, signInRuleSubject(stage, canonical))`. `canonical` is the body's RFC 8785 bytes, and the
   body names the approving device. The challenge is answered only to the paired device the stage waits on:
   - A stage made in the app waits on the device that made it.
-  - A stage made at the machine (`fy rules add`) waits in the app after `confirm-in-app`, and is bound to the first
-    device that asks.
+  - A stage made at the machine (`fy rules add`) waits in the app after `confirm-in-app`. A paired device then
+    _takes_ it (`POST …/stages/:stage/bind`). That needs the same grants as the commit and a passkey on that device,
+    and only then does the body name the device. Asking for passkey options binds nothing, so a device that could not
+    commit can't take the stage from the owner's phone.
 
   The step-up service keeps the verified assertion
   ([zero-trust.md](design/zero-trust.md#stored-passkey-proofs)).
@@ -524,9 +526,13 @@ Creating, resuming, renewing or widening a rule is a **stage** and a **commit**.
   1. It derives the challenge again from the body it is about to write.
   2. It claims the kept assertion with that challenge (`claimStoredProof`). The claim hands it over only if it is the
      challenge the live ceremony verified.
-  3. It verifies the assertion offline over those bytes, from the device the body names.
-  4. It re-reads the accounts and snapshots the pins again. If they differ from the staged ones, the answer is
-     `409 conflict` and no rule is made.
+  3. In the service's one-at-a-time queue, it re-reads the accounts and snapshots the pins again. If they differ from
+     the staged ones, the answer is `409 conflict` and no rule is made. A resume, renew or widen is also refused
+     (`409`, with the reason) when the rule it replaces was suspended after the stage, so no suspension is ever cleared
+     by a passkey the owner gave without seeing why.
+  4. Still in the queue, right before the write, it checks the proof: the device is still paired and holds the
+     passkey, and the assertion verifies over those bytes. A revocation or a passkey removal that lands during the
+     commit is queued behind the write, so it sees the new rule and suspends it.
   5. It writes the file, then memory.
   6. It audits the rule.
 
@@ -577,7 +583,8 @@ A rule is **suspended**, and stays suspended until a new passkey approves it aga
 - **After every committed account change:** `AccountDirectory.followRulesWith`, under the same lock.
   - The sign-in or its account is removed: `sign-in-gone`. The rule can't be resumed, only removed, and it goes at its
     end.
-  - A rename, a merge or a username change: `account-changed`.
+  - A rename, a merge or a username change: `account-changed`. So is a sign-in that stops typing a password of its
+    own (another method, or "via" a provider); switching it back does not resume the rule.
   - A domains edit: `place-changed`.
   - A recipe change by the owner, an approved proposal or an auto-applied one: `recipe-changed`.
   - Any 2FA key added, removed, changed in kind, or given or stripped of its seed: `factor-changed`.
@@ -587,12 +594,18 @@ A rule is **suspended**, and stays suspended until a new passkey approves it aga
 - **At load:**
   - A body created in the future, or a proof that does not verify against the bytes on disk: `proof-invalid`.
   - Any drift: suspended with that reason.
+  - The list answers `503` until every record has been checked, so it never shows a rule as active before then.
+  - If the accounts or the passkeys can't be read, no rule is verified, so none fills. The list marks each one
+    `unverified`, and the daemon's sweep checks again every 15 seconds until it can.
 - **A page script on a pinned host:** `scripted-origin`. Fills will also suspend for their own reasons.
 
 A label, a password change, `verified`, a pending proposal and a default suspend nothing. Changing a fact back resumes
 nothing. Every suspension is persisted, audited (`sign-in-rule-suspended` with its reason) and shown in the owner's
-list. No card is raised in a ferret's session for it, so a ferret learns nothing about rules. If the file can't be
-written, the rule stays suspended in memory as `store-write-failed`.
+list. No card is raised in a ferret's session for it, so a ferret learns nothing about rules.
+
+If the file can't be written, the rule stays suspended in memory as `store-write-failed`, and so does a use that
+couldn't be counted. Every later write carries it, the sweep retries the write, and the daemon tries once more when it
+stops.
 
 ### Strict, and fails closed
 
@@ -607,6 +620,16 @@ only drop approvals, and nothing is deleted. The overlay beside the signed body 
 unsigned. A same-user edit can clear it, but never widen the body: the schema refuses an overlay that would. A
 rolled-back file can bring a revoked rule back until its signed end, at most 90 days after it was created.
 
+Two more limits are declared:
+
+- **A crash before an owed write lands.** A suspension or a use that only memory holds is lost if the daemon crashes
+  before any write succeeds. The rule's drift, its proof and its expiry are found again at load; a suspension caused
+  by an event (a page script, a page that did not move on, a failed write) is not.
+- **Timing.** An account change that suspends a rule takes one rules-file write and an audit record longer than one
+  that does not. A ferret that can cause such a change (an auto-applied recipe, a new form recorded after its own fill)
+  could time it to learn that a rule existed. The probe costs it the rule, which is then suspended until the owner
+  approves it again. This is accepted.
+
 ### Routes
 
 Every route is `caller: 'person'` ([grants.md](grants.md)).
@@ -618,6 +641,7 @@ Every route is `caller: 'person'` ([grants.md](grants.md)).
 | `POST /v1/sign-in-rules/stages`                       | stage a rule                                                      | `secrets.configure` + `browser.use` |
 | `GET` / `DELETE /v1/sign-in-rules/stages/:stage`      | where a stage stands; drop it                                     | `secrets.use`                       |
 | `POST /v1/sign-in-rules/stages/:stage/confirm-in-app` | show a machine stage in the app                                   | `secrets.configure` + `browser.use` |
+| `POST /v1/sign-in-rules/stages/:stage/bind`           | a paired device with a passkey takes a machine stage              | `secrets.configure` + `browser.use` |
 | `POST /v1/sign-in-rules/stages/:stage/commit`         | commit, **with the kept `approve-sign-in-rule` proof**            | `secrets.configure` + `browser.use` |
 | `POST /v1/sign-in-rules/:id/narrow`                   | drop the code, end earlier, lower the cap                         | `secrets.use`                       |
 | `DELETE /v1/sign-in-rules/:id`                        | revoke one rule                                                   | `secrets.use`                       |

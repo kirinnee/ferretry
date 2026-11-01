@@ -191,6 +191,20 @@ export function signInRuleRoutes(rules: SignInRuleService): readonly ApiRoute[] 
       },
     },
     {
+      // A paired device TAKES a machine stage to approve it with its own passkey: gated like the commit, so a device
+      // that could not commit can't take the stage from the owner's phone. Asking for passkey options binds nothing.
+      method: 'POST',
+      path: '/v1/sign-in-rules/stages/:stage/bind',
+      ...CONFIGURE,
+      handle: async context => {
+        const caller = owner(context);
+        const stage = stageOf(context);
+        const refused = refusedLoosening(context);
+        if (refused !== undefined) return refused;
+        return jsonResponse(SignInRuleStagedSchema.parse(await rules.bind(caller, stage).catch(answered)), 201);
+      },
+    },
+    {
       // COMMIT: only the KEPT `approve-sign-in-rule` assertion over this stage's bytes, from every caller.
       method: 'POST',
       path: '/v1/sign-in-rules/stages/:stage/commit',

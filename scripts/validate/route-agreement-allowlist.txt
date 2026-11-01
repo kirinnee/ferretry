@@ -124,6 +124,7 @@ unreached GET /v1/sign-in-rules/eligibility # TEMPORARY (&F291 R3c-3): the creat
 unreached POST /v1/sign-in-rules/stages # TEMPORARY (&F291 R3c-3): `fy rules add` (R3c-5) and the create sheet (R3c-6) stage a rule
 unreached GET /v1/sign-in-rules/stages/:stage # TEMPORARY (&F291 R3c-3): `fy rules add` (R3c-5) polls the stage it made
 unreached POST /v1/sign-in-rules/stages/:stage/confirm-in-app # TEMPORARY (&F291 R3c-3): `fy rules add` (R3c-5) puts its stage in the app
+unreached POST /v1/sign-in-rules/stages/:stage/bind # TEMPORARY (&F291 R3c-3): the app takes a machine stage (`fy rules add`) before its passkey (R3c-6)
 unreached POST /v1/sign-in-rules/stages/:stage/commit # TEMPORARY (&F291 R3c-3): the app's passkey sheet (R3c-6) commits; the CLI never does
 unreached DELETE /v1/sign-in-rules/stages/:stage # TEMPORARY (&F291 R3c-3): Deny or a dismissed passkey in the app (R3c-6)
 unreached POST /v1/sign-in-rules/:id/narrow # TEMPORARY (&F291 R3c-3): `fy rules narrow` (R3c-5) and the narrow sheet (R3c-6)

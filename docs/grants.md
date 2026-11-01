@@ -407,7 +407,7 @@ needs `secrets.use`, as `GET /v1/accounts` does, because a plan names the owner'
 the eligibility and a staged rule, dropping a stage, narrowing and revoking (one rule, or
 `POST /v1/accounts/:id/sign-in-rules/revoke` for an account's) demand `secrets.use` — a rule names the owner's
 accounts and says whether their own taps qualify a sign-in — and never ask for a passkey. Staging, confirming a
-machine stage in the app and committing loosen what any ferret may have filled unasked, so they demand
+machine stage in the app, a device taking one (`…/bind`) and committing loosen what any ferret may have filled unasked, so they demand
 `secrets.configure` and `browser.use` too, decided before the commit claims its proof, so a refusal never spends
 it. The commit takes only the kept `approve-sign-in-rule` assertion over that stage's bytes, from a paired device:
 the admin token on loopback is answered the step-up demand, like every other caller without one.

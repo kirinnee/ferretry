@@ -5,6 +5,8 @@ import {
   SIGN_IN_RULE_HONEST_LIMIT,
   type SignInField,
   type SignInRuleScope,
+  type SignInRuleSuspension,
+  signInRuleSuspensionWords,
   TASK_PLAN_SUMMARY_LINE_MAX_CHARS,
 } from '@ferretry/protocol';
 
@@ -55,6 +57,8 @@ export function stagedSummary(facts: {
   readonly uses?: number | undefined;
   readonly autoRecipe: boolean;
   readonly revision: number;
+  /** Why the rule this approves again is suspended, when it is: a resume says what it resumes. */
+  readonly suspended?: SignInRuleSuspension | undefined;
 }): readonly string[] {
   return [
     line(`Ferretry types the ${ruleFieldWords(facts.fields)} without asking`),
@@ -67,6 +71,7 @@ export function stagedSummary(facts: {
     ),
     ...(facts.autoRecipe ? [line("Its recipe takes a ferret's edits without your review")] : []),
     ...(facts.revision > 1 ? [line(`Approves this rule again (revision ${String(facts.revision)})`)] : []),
+    ...(facts.suspended === undefined ? [] : [line(`It was suspended: ${signInRuleSuspensionWords(facts.suspended)}`)]),
   ];
 }
 
