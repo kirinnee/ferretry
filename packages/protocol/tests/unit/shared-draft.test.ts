@@ -214,11 +214,83 @@ describe('shared draft schemas', () => {
       schema: draft.SharedDraftEditResultSchema,
       value: { applied: { generation: 'gen-1', epoch: 0, rev: 4, text: [5, '!'], add: [], remove: [] }, snapshot },
     },
+    {
+      name: 'what a send takes out of the draft',
+      schema: draft.SharedDraftSentSchema,
+      value: { generation: 'gen-1', epoch: 0, base: 3, text: [-5, 2], remove: ['att-1'] },
+    },
+    {
+      name: 'client edit frame',
+      schema: draft.SharedDraftClientFrameSchema,
+      value: { kind: 'edit', id: 'e1', edit: { generation: 'gen-1', epoch: 0, base: 3, text: [5, '!'] } },
+    },
+    {
+      name: 'server presence frame',
+      schema: draft.SharedDraftServerFrameSchema,
+      value: { kind: 'presence', peer: 'p1', device: 'Kirin’s iPhone', typing: true, selection: [2, 4] },
+    },
   ];
+
+  it('round-trips every frame either end of the live stream sends', () => {
+    const applied = { generation: 'gen-1', epoch: 0, rev: 4, text: [5, '!'], add: [], remove: [] };
+    assertRoundTrips([
+      { name: 'presence up', schema: draft.SharedDraftClientFrameSchema, value: { kind: 'presence', typing: false } },
+      { name: 'snapshot', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'snapshot', snapshot } },
+      { name: 'edit', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'edit', applied, epoch: 0, rev: 4 } },
+      {
+        name: 'ack',
+        schema: draft.SharedDraftServerFrameSchema,
+        value: { kind: 'ack', id: 'e1', applied, epoch: 1, rev: 0 },
+      },
+      {
+        name: 'error',
+        schema: draft.SharedDraftServerFrameSchema,
+        value: { kind: 'error', id: 'e1', code: 'shared_draft_stale', message: 'read the draft again' },
+      },
+      { name: 'left', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'left', peer: 'p1' } },
+      { name: 'ready', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'ready' } },
+      {
+        name: 'snapshot, first of three parts',
+        schema: draft.SharedDraftServerFrameSchema,
+        value: { kind: 'snapshot', snapshot, more: 2 },
+      },
+      {
+        name: 'a later part',
+        schema: draft.SharedDraftServerFrameSchema,
+        value: { kind: 'snapshot-text', text: 'rest' },
+      },
+      {
+        name: 'own edit, replayed',
+        schema: draft.SharedDraftServerFrameSchema,
+        value: { kind: 'edit', id: 'e1', applied, epoch: 0, rev: 4 },
+      },
+    ]);
+    assertRejects([
+      {
+        name: 'a device label on two lines',
+        schema: draft.SharedDraftServerFrameSchema,
+        value: { kind: 'presence', peer: 'p', device: 'a\nb', typing: true },
+      },
+      { name: 'an unknown frame', schema: draft.SharedDraftClientFrameSchema, value: { kind: 'snapshot' } },
+      { name: 'an empty part', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'snapshot-text', text: '' } },
+      {
+        name: 'an edit id holding a NUL',
+        schema: draft.SharedDraftClientFrameSchema,
+        value: { kind: 'edit', id: 'a\u0000b', edit: { generation: 'g', epoch: 0, base: 0 } },
+      },
+      { name: 'no parts', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'snapshot', snapshot, more: 0 } },
+    ]);
+  });
 
   it('round-trips every schema', () => {
     assertRoundTrips(cases);
     assertCoversEverySchema(draft, cases);
+  });
+
+  it('measures a frame as the wire carries it: escaped twice, in UTF-8 bytes', () => {
+    should(draft.sharedDraftFrameBytes('a')).equal(7);
+    should(draft.sharedDraftFrameBytes('"')).equal(10);
+    should(draft.sharedDraftFrameBytes('é')).equal(8);
   });
 
   it('accepts an edit that inserts exactly one whole draft', () => {

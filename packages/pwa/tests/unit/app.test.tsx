@@ -2305,12 +2305,17 @@ describe('AppShell', () => {
     }
     const streamsOpened = (): { t: string; path?: string }[] =>
       (daemonNetwork?.requests('alpha.example.test') ?? []) as { t: string; path?: string }[];
+    // The composer holds a stream of its own (the shared draft, &F331) from the moment the page opens; the
+    // question here is the TERMINAL's stream, so only those are counted.
+    const terminalStream = (record: { t: string; path?: string }): boolean =>
+      record.t === 'stream' && record.path?.includes('/terminals/') === true;
     const { carrierRequests, store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     try {
       await settle();
       // No terminal tab is open yet, so no shell is attached — the page reads the LISTING only, to
       // prove `%terminal:` chips in the transcript.
-      expect(streamsOpened().some(record => record.t === 'stream')).toBe(false);
+      expect(streamsOpened().some(terminalStream)).toBe(false);
+      expect(streamsOpened().some(record => record.path === '/v1/sessions/shared/shared-draft/stream')).toBe(true);
 
       // A terminal tab in this agent's workspace — as a chip click or a remembered layout opens it —
       // attaches that one shell.
@@ -2332,7 +2337,7 @@ describe('AppShell', () => {
       // guessed on a runner nobody can attach a debugger to — which cost two CI rounds before it said
       // this much.
       await settleUntil(
-        () => streamsOpened().some(record => record.t === 'stream'),
+        () => streamsOpened().some(terminalStream),
         () =>
           [
             'the terminal deck to open its stream session',
@@ -2352,7 +2357,7 @@ describe('AppShell', () => {
       expect(carrierRequests).toContain('https://alpha.example.test/v1/sessions/shared/terminals');
       expect(
         streamsOpened()
-          .filter(record => record.t === 'stream')
+          .filter(terminalStream)
           .map(record => record.path),
       ).toEqual([`/v1/sessions/shared/terminals/${TERMINAL_ID}/stream`]);
       // No ticket exists to be asked for, on any route.

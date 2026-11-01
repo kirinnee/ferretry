@@ -33,6 +33,7 @@ import {
   applyTextOp,
   normalizeTextOp,
   SHARED_DRAFT_HISTORY_LIMIT,
+  SHARED_DRAFT_ITEMS_BUDGET,
   SHARED_DRAFT_MAX_CHARS,
   SHARED_DRAFT_MAX_ITEMS,
   SHARED_DRAFT_SCHEMA_VERSION,
@@ -42,6 +43,7 @@ import {
   type SharedDraftSnapshot,
   type TextOp,
   TextOpError,
+  sharedDraftFrameBytes,
   textOpBaseLength,
   transformTextOps,
 } from '@ferretry/protocol';
@@ -54,8 +56,12 @@ import {
   type SharedDraftSessionDirectory,
 } from './types.ts';
 
-/** How long after its last change a draft is written down, and how long before a failed write is tried again. */
+/** How long after its last change a draft is written down, and how long before a failed write is first tried again. */
 export const SHARED_DRAFT_WRITE_DELAY_MS = 1_000;
+/** The longest a write that keeps failing waits between attempts: each failure doubles the wait up to this. */
+export const SHARED_DRAFT_WRITE_RETRY_MAX_MS = 60_000;
+/** Edits one draft takes in a second, from every device together. */
+export const SHARED_DRAFT_EDITS_PER_SECOND = 60;
 /** Drafts held in memory at once; the least recently used is written down and let go. */
 export const SHARED_DRAFT_MEMORY_LIMIT = 50;
 /**
@@ -67,20 +73,75 @@ export const SHARED_DRAFT_HISTORY_MAX_CHARS = 256_000;
 
 type Applied = SharedDraftEditResult['applied'];
 
+/**
+ * One sequenced edit, as every open composer for the session hears of it: the edit, where the draft
+ * stands after it, and which composer made it (`origin`, opaque, whatever the caller passed), so the
+ * one that made it can answer its own and everyone else can apply it.
+ */
+export interface SharedDraftChange {
+  readonly applied: Applied;
+  readonly epoch: number;
+  readonly rev: number;
+  readonly origin?: string;
+}
+
+export type SharedDraftListener = (change: SharedDraftChange) => void;
+
+/** An edit's answer; `repeatOf` when it was a repeat, answered by the edit it repeats instead of applied again. */
+export type SharedDraftEditOutcome = SharedDraftEditResult & { readonly repeatOf?: SharedDraftChange };
+
+const ORIGIN_SEPARATOR = '\u0000';
+
+/**
+ * The origin a stream's edit travels under: WHO sent it (the caller the boundary authenticated — a device,
+ * or the owner's shell), which stream, and the id its composer gave it. A repeated edit is recognised by
+ * author and id together, so an id another device happens to choose can never stand in for this one's.
+ */
+export const sharedDraftOrigin = (author: string, stream: string, editId: string): string =>
+  [author, stream, editId].join(ORIGIN_SEPARATOR);
+
+/** The three parts of an origin, when it has them. */
+export const splitSharedDraftOrigin = (
+  origin: string | undefined,
+): { readonly author: string; readonly stream: string; readonly editId: string } | undefined => {
+  const parts = origin?.split(ORIGIN_SEPARATOR);
+  if (parts === undefined || parts.length !== 3) return undefined;
+  const [author, stream, editId] = parts as [string, string, string];
+  return { author, stream, editId };
+};
+
 interface LiveDraft {
   snapshot: SharedDraftSnapshot;
-  /** The edits after `historyStart`, oldest first; entry `i` moved the draft to `historyStart + i + 1`. */
-  history: Applied[];
+  /**
+   * The edits after `historyStart`, oldest first; entry `i` moved the draft to `historyStart + i + 1`.
+   * Each keeps its origin, so a composer that reconnects can recognise its own edit among what it missed.
+   */
+  history: SharedDraftChange[];
   /** Characters `history` inserts in total. */
   historyChars: number;
   /** The oldest revision an edit may still be based on. */
   historyStart: number;
   /** Not yet written down. */
   dirty: boolean;
+  /** Writes in a row that failed; each one doubles the wait before the next attempt. */
+  failures: number;
+  /** Edits taken in the current one-second window. */
+  window: { startedAt: number; count: number };
   timer?: { cancel(): void };
 }
 
 const identity = (text: string): TextOp => (text.length === 0 ? [] : [text.length]);
+
+/** The leading items that fit {@link SHARED_DRAFT_ITEMS_BUDGET}. */
+const withinItemsBudget = (items: readonly SharedDraftItem[]): readonly SharedDraftItem[] => {
+  if (sharedDraftFrameBytes(items) <= SHARED_DRAFT_ITEMS_BUDGET) return items;
+  const kept: SharedDraftItem[] = [];
+  for (const item of items) {
+    if (sharedDraftFrameBytes([...kept, item]) > SHARED_DRAFT_ITEMS_BUDGET) break;
+    kept.push(item);
+  }
+  return kept;
+};
 
 const insertedChars = (op: TextOp): number =>
   op.reduce<number>((total, component) => total + (typeof component === 'string' ? component.length : 0), 0);
@@ -95,6 +156,15 @@ export class SharedDraftService {
   readonly #loading = new Map<string, Promise<LiveDraft>>();
   /** Writes in flight, so `flush` and a reload can wait for one a timer already started. */
   readonly #writes = new Set<Promise<void>>();
+  /**
+   * Sessions a read or an edit is between loading and finishing with, or an open composer is listening
+   * to. Eviction skips them, so a draft is never let go of in the moment between being handed to an edit
+   * and the edit changing it, nor while a composer is open on it.
+   */
+  readonly #holds = new Map<string, number>();
+  readonly #listeners = new Map<string, Set<SharedDraftListener>>();
+  /** Set by `close`: the daemon is stopping, so a failed write is not scheduled again. */
+  #stopping = false;
 
   constructor(
     private readonly sessions: SharedDraftSessionDirectory,
@@ -103,17 +173,78 @@ export class SharedDraftService {
     private readonly scheduler: SharedDraftScheduler,
     private readonly generations: SharedDraftGenerationSource,
     private readonly memoryLimit: number = SHARED_DRAFT_MEMORY_LIMIT,
+    private readonly editsPerSecond: number = SHARED_DRAFT_EDITS_PER_SECOND,
   ) {}
 
   /** The draft as it stands now; an empty one for a session nobody has typed into. */
   async read(sessionId: string): Promise<SharedDraftSnapshot> {
-    return (await this.#draft(sessionId)).snapshot;
+    return await this.#holding(sessionId, live => live.snapshot);
+  }
+
+  /**
+   * The edits after `rev`, in order — what a composer that reconnects has missed — or `undefined` when
+   * they can no longer be told edit by edit (another generation, a sent message, or older than the
+   * remembered history), in which case the composer starts again from the whole draft.
+   */
+  async since(
+    sessionId: string,
+    position: { readonly generation: string; readonly epoch: number; readonly rev: number },
+  ): Promise<readonly SharedDraftChange[] | undefined> {
+    return await this.#holding(sessionId, live => {
+      const current = live.snapshot;
+      if (position.generation !== current.generation || position.epoch !== current.epoch) return undefined;
+      if (position.rev < live.historyStart || position.rev > current.rev) return undefined;
+      return live.history.slice(position.rev - live.historyStart);
+    });
+  }
+
+  /** Hears every edit sequenced for this session from now on. Answers the way to stop. */
+  subscribe(sessionId: string, listener: SharedDraftListener): () => void {
+    const listeners = this.#listeners.get(sessionId) ?? new Set<SharedDraftListener>();
+    listeners.add(listener);
+    this.#listeners.set(sessionId, listeners);
+    // An open composer holds its draft in memory: letting it go would mint a new generation under the
+    // composer's feet, and its next keystroke would be refused for nothing.
+    this.#hold(sessionId);
+    let subscribed = true;
+    return () => {
+      if (!subscribed) return;
+      subscribed = false;
+      listeners.delete(listener);
+      if (listeners.size === 0 && this.#listeners.get(sessionId) === listeners) this.#listeners.delete(sessionId);
+      this.#release(sessionId);
+      this.#evict();
+    };
   }
 
   /** Sequences one edit and answers with it as applied, and the draft after it. */
-  async edit(sessionId: string, edit: SharedDraftEdit): Promise<SharedDraftEditResult> {
-    const live = await this.#draft(sessionId);
+  async edit(sessionId: string, edit: SharedDraftEdit, origin?: string): Promise<SharedDraftEditOutcome> {
+    return await this.#holding(sessionId, live => this.#apply(sessionId, live, edit, origin));
+  }
+
+  #apply(
+    sessionId: string,
+    live: LiveDraft,
+    edit: SharedDraftEdit,
+    origin: string | undefined,
+  ): SharedDraftEditOutcome {
     const current = live.snapshot;
+    // The same edit twice — sent again by a composer that reconnected before it heard the first landed —
+    // is answered by the first and applied once. The composer already heard the first one, by its id.
+    const from = splitSharedDraftOrigin(origin);
+    if (from !== undefined && edit.generation === current.generation) {
+      const first = live.history.find(change => {
+        const earlier = splitSharedDraftOrigin(change.origin);
+        return earlier?.author === from.author && earlier.editId === from.editId;
+      });
+      if (first !== undefined) return { applied: first.applied, snapshot: current, repeatOf: first };
+    }
+    // Typing is a few edits a second; past this the caller is not typing, and the draft is not its to flood.
+    const now = Date.parse(this.clock.now());
+    if (now - live.window.startedAt >= 1_000) live.window = { startedAt: now, count: 0 };
+    live.window.count += 1;
+    if (live.window.count > this.editsPerSecond)
+      throw new SharedDraftError('rate-limited', `a draft takes at most ${this.editsPerSecond} edits a second`);
     if (edit.generation !== current.generation)
       throw new SharedDraftError(
         'stale',
@@ -147,6 +278,9 @@ export class SharedDraftService {
     const items = [...kept, ...added];
     if (items.length > SHARED_DRAFT_MAX_ITEMS)
       throw new SharedDraftError('too-many-items', `a draft holds at most ${SHARED_DRAFT_MAX_ITEMS} files and places`);
+    // Bounded by size too, so the whole set always fits one stream frame beside a part of the text.
+    if (added.length > 0 && sharedDraftFrameBytes(items) > SHARED_DRAFT_ITEMS_BUDGET)
+      throw new SharedDraftError('too-many-items', 'the files and places in this draft have names too long to share');
 
     const applied: Applied = {
       generation: current.generation,
@@ -169,27 +303,67 @@ export class SharedDraftService {
       items,
       updatedAt: this.clock.now(),
     };
+    const change: SharedDraftChange = {
+      applied,
+      epoch: live.snapshot.epoch,
+      rev: live.snapshot.rev,
+      ...(origin === undefined ? {} : { origin }),
+    };
     if (finished) {
       live.history = [];
       live.historyChars = 0;
       live.historyStart = 0;
     } else {
-      live.history.push(applied);
+      live.history.push(change);
       live.historyChars += insertedChars(text);
       while (
         live.history.length > SHARED_DRAFT_HISTORY_LIMIT ||
         (live.historyChars > SHARED_DRAFT_HISTORY_MAX_CHARS && live.history.length > 0)
       ) {
         const oldest = live.history.shift();
-        live.historyChars -= oldest === undefined ? 0 : insertedChars(oldest.text);
+        live.historyChars -= oldest === undefined ? 0 : insertedChars(oldest.applied.text);
       }
       live.historyStart = applied.rev - live.history.length;
     }
     this.#schedule(live);
+    for (const listener of [...(this.#listeners.get(sessionId) ?? [])]) {
+      try {
+        listener(change);
+      } catch {
+        // One composer's broken stream must not cost the edit, or any other composer its copy.
+      }
+    }
     return { applied, snapshot: live.snapshot };
   }
 
-  /** Writes every draft still waiting for its timer. Called when the daemon stops. */
+  /** Loads the draft and runs `work` on it while eviction is kept off it. */
+  async #holding<T>(sessionId: string, work: (live: LiveDraft) => T): Promise<T> {
+    this.#hold(sessionId);
+    try {
+      return work(await this.#draft(sessionId));
+    } finally {
+      this.#release(sessionId);
+      this.#evict();
+    }
+  }
+
+  #hold(sessionId: string): void {
+    this.#holds.set(sessionId, (this.#holds.get(sessionId) ?? 0) + 1);
+  }
+
+  #release(sessionId: string): void {
+    const left = (this.#holds.get(sessionId) ?? 1) - 1;
+    if (left === 0) this.#holds.delete(sessionId);
+    else this.#holds.set(sessionId, left);
+  }
+
+  /** The daemon is stopping: write everything still waiting, and schedule nothing after it. */
+  async close(): Promise<void> {
+    this.#stopping = true;
+    await this.flush();
+  }
+
+  /** Writes every draft still waiting for its timer, now. */
   async flush(): Promise<void> {
     for (const live of [...this.#live.values(), ...this.#unwritten.values()]) {
       live.timer?.cancel();
@@ -205,7 +379,8 @@ export class SharedDraftService {
     if (edit.text === undefined) return identity(live.snapshot.text);
     let op = edit.text;
     try {
-      for (const entry of live.history.slice(edit.base - live.historyStart)) op = transformTextOps(entry.text, op)[1];
+      for (const entry of live.history.slice(edit.base - live.historyStart))
+        op = transformTextOps(entry.applied.text, op)[1];
       if (textOpBaseLength(op) !== live.snapshot.text.length) throw new TextOpError('length');
     } catch (error) {
       if (!(error instanceof TextOpError)) throw error;
@@ -255,17 +430,36 @@ export class SharedDraftService {
       items: [],
       updatedAt: this.clock.now(),
     };
-    // A new life for this draft: no revision number a device held before is trusted in it.
-    const snapshot: SharedDraftSnapshot = { ...base, generation: this.generations.next() };
-    const live: LiveDraft = { snapshot, history: [], historyChars: 0, historyStart: snapshot.rev, dirty: false };
+    // A new life for this draft: no revision number a device held before is trusted in it. A draft saved
+    // before its files and places were bounded by size keeps only as many as fit one frame — a snapshot
+    // no stream could carry would close every composer that opened it, forever. Only the references go;
+    // the files stay where they are.
+    const snapshot: SharedDraftSnapshot = {
+      ...base,
+      items: withinItemsBudget(base.items),
+      generation: this.generations.next(),
+    };
+    const live: LiveDraft = {
+      snapshot,
+      history: [],
+      historyChars: 0,
+      historyStart: snapshot.rev,
+      dirty: false,
+      failures: 0,
+      window: { startedAt: Number.NEGATIVE_INFINITY, count: 0 },
+    };
     this.#live.set(sessionId, live);
+    // Trimmed: the file shrinks too, so the next load has nothing to trim.
+    if (snapshot.items.length !== base.items.length) this.#schedule(live);
     this.#evict();
     return live;
   }
 
   #evict(): void {
-    while (this.#live.size > this.memoryLimit) {
-      const [sessionId, live] = this.#live.entries().next().value as [string, LiveDraft];
+    // Least recently used first, passing over any draft a read or an edit is still holding.
+    for (const [sessionId, live] of [...this.#live]) {
+      if (this.#live.size <= this.memoryLimit) return;
+      if (this.#holds.has(sessionId)) continue;
       this.#live.delete(sessionId);
       if (!live.dirty && live.timer === undefined) continue;
       live.timer?.cancel();
@@ -275,10 +469,10 @@ export class SharedDraftService {
     }
   }
 
-  #schedule(live: LiveDraft): void {
+  #schedule(live: LiveDraft, delay: number = SHARED_DRAFT_WRITE_DELAY_MS): void {
     live.dirty = true;
     if (live.timer !== undefined) return;
-    live.timer = this.scheduler.after(SHARED_DRAFT_WRITE_DELAY_MS, () => {
+    live.timer = this.scheduler.after(delay, () => {
       live.timer = undefined;
       this.#write(live);
     });
@@ -289,14 +483,22 @@ export class SharedDraftService {
     const snapshot = live.snapshot;
     const write = this.repository.save(snapshot).then(
       () => {
+        live.failures = 0;
         // Written, and nothing newer since: a draft that was let go of may now really go. A newer
         // state keeps it, and that state's own write decides.
         const sessionId = snapshot.sessionId;
         if (live.snapshot === snapshot && this.#unwritten.get(sessionId) === live) this.#unwritten.delete(sessionId);
       },
       () => {
-        // Still in memory — in `#live` or `#unwritten` — so nothing is lost; try again shortly.
-        this.#schedule(live);
+        // Still in memory — in `#live` or `#unwritten` — so nothing is lost. Try again, waiting longer
+        // each time a disk keeps refusing; a daemon that is stopping does not schedule anything new.
+        live.failures += 1;
+        live.dirty = true;
+        if (this.#stopping) return;
+        this.#schedule(
+          live,
+          Math.min(SHARED_DRAFT_WRITE_DELAY_MS * 2 ** live.failures, SHARED_DRAFT_WRITE_RETRY_MAX_MS),
+        );
       },
     );
     this.#writes.add(write);

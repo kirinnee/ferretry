@@ -623,3 +623,38 @@ describe('the person’s own draft in the composer', () => {
     should(sessions.drafts).be.empty();
   });
 });
+
+describe('a send that carries what it takes out of the shared draft (&F331 H1)', () => {
+  const sharedDraft = { generation: 'g', epoch: 0, base: 3, text: [-5, 6] };
+  const body = (extra: object = {}) => JSON.stringify({ message: 'hello', sharedDraft, ...extra });
+
+  it('hands it to the clearer only once the send is accepted, with the session, the caller and the request id', async () => {
+    const cleared: unknown[] = [];
+    const subsystem = new FakeSessionSend(['s1']);
+    const routes = sessionSendRoutes(subsystem, async (...args) => {
+      cleared.push(args);
+    });
+    const dispatch = new ApiDispatcher(new ApiRouter(routes), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+
+    const accepted = await dispatch.dispatch(sendRequest('s1', body()));
+    const refused = await dispatch.dispatch(sendRequest('s2', body(), withRequestId(human, 'req-2')));
+
+    should(accepted.status).equal(200);
+    should(refused.status).not.equal(200);
+    should(cleared).deepEqual([['s1', 'admin-cli', 'req-1', sharedDraft]]);
+  });
+
+  it('never fails the send when the draft cannot be cleared, and ignores the field with no clearer at all', async () => {
+    const failing = new ApiDispatcher(
+      new ApiRouter(
+        sessionSendRoutes(new FakeSessionSend(), async () => {
+          throw new Error('draft moved on');
+        }),
+      ),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
+    should((await failing.dispatch(sendRequest('s1', body()))).status).equal(200);
+    should((await dispatcher().dispatch(sendRequest('s1', body()))).status).equal(200);
+  });
+});

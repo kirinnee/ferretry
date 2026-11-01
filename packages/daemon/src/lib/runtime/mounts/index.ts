@@ -93,7 +93,12 @@ import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
 import { type ScratchGcSubsystem, scratchGcRoutes } from './scratch-gc.ts';
 import { type SecretSubsystem, secretRoutes } from './secrets.ts';
-import { sharedDraftRoutes } from './shared-drafts.ts';
+import {
+  type SharedDraftStreamSubsystem,
+  sentDraftClearer,
+  sharedDraftRoutes,
+  sharedDraftSocketRoutes,
+} from './shared-drafts.ts';
 import { type CatalogMemberSubsystem, catalogMemberRoutes } from './catalog-members.ts';
 import { type SharedCatalogSubsystem, sharedCatalogRoutes } from './shared-catalogs.ts';
 import { type CopyListing, type RuleProgramHomes, secureCopyRoutes } from './secure-copy.ts';
@@ -270,6 +275,8 @@ export interface MountedSubsystems {
   readonly pins: PinService;
   /** The owner's unsent composer, shared live between their own devices and never journaled. */
   readonly sharedDrafts: SharedDraftService;
+  /** The live stream each open composer holds on its session's shared draft. */
+  readonly sharedDraftStream: SharedDraftStreamSubsystem;
   /** The session read: what the fleet holds, and one session in full. */
   readonly sessions: SessionDirectorySubsystem;
   /** Which session an agent NAME addresses, for every route that takes a `:sessionId`. See
@@ -687,7 +694,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // revive, the migration and the signal all do: each is a one-segment pattern under
         // `/v1/sessions/:sessionId` whose final literal no other route uses, so none can shadow or be
         // shadowed, and all belong above the deeper per-session subsystems.
-        ...sessionSendRoutes(subsystems.sessionSend),
+        ...sessionSendRoutes(subsystems.sessionSend, sentDraftClearer(subsystems.sharedDrafts)),
         ...sessionAnswerRoutes(subsystems.sessionAnswer),
         // Attachment routes are mounted before sends may honour attachment ids. Their
         // deeper unlock path cannot shadow this one-segment upload route.
@@ -845,6 +852,7 @@ export function mountedSocketRoutes(subsystems: MountedSubsystems): readonly Soc
         ...fleetEventSocketRoutes(subsystems.fleetEvents, subsystems.sessions, subsystems.configChanges),
         ...terminalSocketRoutes(subsystems.terminals, subsystems.inputRequests),
         ...browserSocketRoutes(subsystems.browser),
+        ...sharedDraftSocketRoutes(subsystems.sharedDrafts, subsystems.sharedDraftStream),
       ]),
     ),
   );
