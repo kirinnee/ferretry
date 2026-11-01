@@ -239,6 +239,13 @@ const cases: SchemaCase[] = [
     value: { health: 'damaged', rules: [view], stages: [{ ...staged, machine: { askedAt: CREATED } }] },
   },
   { name: 'narrow', schema: SignInRuleNarrowSchema, value: { dropTotp: true } },
+  { name: 'ineligible', schema: rules.SignInRuleIneligibleSchema, value: 'no-history' },
+  { name: 'eligibility: yes', schema: rules.SignInRuleEligibilitySchema, value: { signIn: SIGN_IN, eligible: true } },
+  {
+    name: 'eligibility: no, with its rule',
+    schema: rules.SignInRuleEligibilitySchema,
+    value: { signIn: SIGN_IN, eligible: false, because: 'tool-not-covered', rule: RULE },
+  },
 ];
 
 describe('standing sign-in rules: the wire', () => {

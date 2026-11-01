@@ -877,6 +877,33 @@ describe('what the daemon saw is kept on the saved login', () => {
     });
   });
 
+  it('should tell the observer WHO filled it, exhaustively: the admin token is the host, a paired device its tap', async () => {
+    // Arrange — on main both read as the owner's tap, so the admin token (which a ferret can hold) qualified a sign-in
+    const told: LoginDelivery[] = [];
+    const h = harness({
+      observer: () => ({ delivered: async delivery => void told.push(delivery), tainted: () => false }),
+    });
+    await h.directory.put(
+      'SUDO_KIRIN_BOX',
+      PutLoginEntryRequestSchema.parse({ label: 'sudo', match: ['sudo@kirin-box'], password: PASSWORD }),
+    );
+    const device: InputCaller = {
+      kind: 'owner',
+      actor: { kind: 'device', deviceId: `fy_device_id_${'a'.repeat(22)}` },
+      carrier: 'direct',
+    };
+
+    // Act
+    for (const caller of [HOST, device]) {
+      const { request } = await raised(h);
+      await h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'SUDO_KIRIN_BOX'), caller);
+      await Bun.sleep(0);
+    }
+
+    // Assert
+    should(told.map(delivery => delivery.by)).eql(['host', 'device']);
+  });
+
   it('should keep the facts of the write on the login, never the value', async () => {
     const h = harness({
       observer: directory =>

@@ -267,6 +267,7 @@ import {
   FileModelCatalogCache,
   FilePasteRuleStore,
   FileProjectCatalog,
+  FileSignInRuleStore,
   FileQuotaFailoverConfigStore,
   FileQuotaFailoverStateStore,
   FileRestartQueue,
@@ -780,6 +781,9 @@ import {
   CredentialAgentIdentities,
   TaskPlanAgendaAdapter,
   TaskPlanService,
+  SignInRuleService,
+  SignInRuleDevicePurge,
+  connectSignInRules,
   PlanSignInGrants,
   type SignInGrantSource,
   CredentialUsageSource,
@@ -7533,6 +7537,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     const cause = error instanceof Error ? error.message : String(error);
     process.stderr.write(`passkeys: a listener failed after ${change.cause}: ${cause}\n`);
   });
+  // The owner's standing sign-in rules, built with the subsystems (they need the step-up service); pairing's device
+  // purge reaches them through this hand-off, so a revoked device suspends every rule its passkey approved.
+  const signInRuleDevices = new SignInRuleDevicePurge();
   // The member side of every carrier: the carriers are built before the subsystems that answer for members, so
   // they hold the deferred half and the subsystem build binds the real one. `memberConnections` is what a revoke closes.
   const memberSessions = new DeferredMemberSessions();
@@ -9284,9 +9291,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           cryptography,
           devices: repository,
           credentials,
-          // Revoking a device takes its notifications away in the same act. The purge runs BEFORE the
-          // grant is removed — see `PairingService.revokeDevice` for why that order is the safe one.
-          deviceState: [push, stepUp],
+          // Revoking a device takes its notifications, its passkeys and its standing rules away in the same act. The
+          // grant is removed FIRST, then every owner here is purged, each in its own try — see
+          // `PairingService.revokeDevice` for why that order is the safe one.
+          deviceState: [push, stepUp, signInRuleDevices],
           // Ended AFTER the grant is gone — see `LiveDeviceConnections` for why the order matters.
           connections: deviceConnections,
           // A revocation somebody asked for lands in the owner's journal beside the grant changes.
@@ -10637,6 +10645,35 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ids: { planId: () => crypto.randomUUID().replaceAll('-', '') },
       });
       setInterval(() => copyPlans.sweep(), INPUT_REQUEST_SWEEP_MS).unref();
+      // THE OWNER'S STANDING SIGN-IN RULES (docs/secrets.md, "Standing sign-in rules"): on disk, each carrying the
+      // owner's passkey assertion over its own bytes, checked again offline at load and whenever a passkey or device
+      // goes. Every account change is followed: a pinned fact that drifted suspends its rule. Nothing fills under a
+      // rule yet (R3c-4), and `sign-in-rules.1` is not advertised.
+      const signInRules = new SignInRuleService({
+        store: new FileSignInRuleStore(join(paths.state, 'accounts'), stateFiles),
+        accounts: { listing: async () => await accountDirectory.keyedList() },
+        proofs: {
+          // The passkey store alone: whether the device is still PAIRED is `verifyStoredProof`'s first question,
+          // asked of the grant store without expiring anyone (a revocation reaches the rules through their queue).
+          holds: async (deviceId, credentialId) => (await seedPasskeys.holder(credentialId)) === deviceId,
+          verify: async (proof, challenge) => await stepUp.verifyStoredProof(proof, challenge),
+        },
+        passkeys: {
+          any: async () => await seedPasskeys.any(),
+          of: async deviceId => (await seedPasskeys.list(deviceId)).length > 0,
+        },
+        devices: { label: async deviceId => (await pairing.devices()).find(device => device.id === deviceId)?.name },
+        audit: auditLog,
+        clock: { now: () => Date.now() },
+        warn: message => void process.stderr.write(`sign-in rules: ${message}\n`),
+      });
+      connectSignInRules(signInRules, {
+        accounts: accountDirectory,
+        passkeys: passkeysChanged,
+        devices: signInRuleDevices,
+      });
+      void asActivity(activities, 'sign-in-rules', async () => await signInRules.load())();
+      setInterval(() => void signInRules.sweepRules().catch(() => undefined), INPUT_REQUEST_SWEEP_MS).unref();
       signInChoiceLate.current = new SessionSignInContext({
         defaults: async () => await accountDefaults.current(),
         projectOf: async sessionId => await laneSets.projectOf(sessionId),
@@ -12372,6 +12409,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         browser: browserHost,
         inputRequests: inputRequestService,
         phoneApprovals,
+        signInRules,
         secureCopy: {
           copies: { list: sessionId => secureCopies.list(sessionId) },
           rules: pasteRules,
@@ -13579,6 +13617,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   cleanups.push(async () => await subsystems.harnessLogin.shutdown());
   // A draft typed in the last second is still only in memory; it is written down before the daemon goes.
   cleanups.push(async () => await subsystems.sharedDrafts.flush());
+  // A standing rule's suspension or use whose write failed is written before the daemon goes, if it can be.
+  cleanups.push(async () => await subsystems.signInRules.flush());
   // The FIRST self-check runs before the address is bound, so the daemon's very first health answer
   // is a measurement rather than an empty ledger — a supervisor that probes the moment the port opens
   // must not be told "no self-check has ever run" by a daemon that is about to run one. It is also

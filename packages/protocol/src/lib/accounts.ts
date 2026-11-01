@@ -44,7 +44,9 @@ import {
   LOGIN_OBSERVED_MAX,
   LOGIN_RECIPE_MAX_LENGTH,
   LOGIN_RECIPE_PROPOSALS_MAX,
+  ferretObserved,
   type LoginObserved,
+  LoginObservedHintSchema,
   LoginObservedSchema,
   LoginRecipeAuthorSchema,
   type LoginRecipeProposal,
@@ -1291,7 +1293,8 @@ export const AccountHintSchema = z.strictObject({
   recipe: LoginRecipeSchema.optional(),
   recipeVersion: z.number().int().min(1).optional(),
   recipeBy: LoginRecipeAuthorSchema.optional(),
-  observed: z.array(LoginObservedSchema).max(LOGIN_OBSERVED_MAX).readonly().optional(),
+  /** What the daemon saw, as a ferret may read it: never the owner-tap count (`ferretObserved`). */
+  observed: z.array(LoginObservedHintSchema).max(LOGIN_OBSERVED_MAX).readonly().optional(),
   /**
    * The account's 2FA keys by id, kind and label ONLY, so a ferret knows to expect a code or a push. Never whether
    * Ferretry holds a seed, the code parameters, whether one worked, where a code goes, or times. Absent: none.
@@ -1337,7 +1340,9 @@ function hintOf(
       ? {}
       : { recipeVersion: signIn.recipeVersion }),
     ...(signIn.recipe === undefined || signIn.recipeBy === undefined ? {} : { recipeBy: signIn.recipeBy }),
-    ...(signIn.observed === undefined || signIn.observed.length === 0 ? {} : { observed: [...signIn.observed] }),
+    ...(signIn.observed === undefined || signIn.observed.length === 0
+      ? {}
+      : { observed: ferretObserved(signIn.observed) }),
     ...(account.factors.length === 0 ? {} : { factors: account.factors.map(twoFactorKeyHintOf) }),
     ...(preferred === undefined ? {} : { default: preferred }),
   };

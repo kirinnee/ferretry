@@ -579,8 +579,9 @@ subject: srs_… }` issues `signInRuleChallenge(nonce, signInRuleSubject(stage, 
   be 32 bytes. The mount asks the rule service for the stage's challenge **for the session's own
   device** (`challengeOf(stage, deviceId)`), so a stage is answered only to the device it waits on: another
   paired device that learns an `srs_` id gets no challenge. A stage that isn't waiting, or isn't waiting
-  for this device, answers `404 stage_not_found` and no challenge is made. Until the rule service exists
-  (R3c-3), no stage is ever waiting.
+  for this device, answers `404 stage_not_found` and no challenge is made. A stage made in the app waits on
+  the device that made it; one made at the machine waits in the app until a paired device takes it, behind the commit's own grants
+  ([secrets.md](../secrets.md#standing-sign-in-rules)).
 - **The live ceremony is unchanged.** The counter must move, the origin must be allowed, UV must be set,
   and an overdue device key is rotated. A stored proof is a good live proof first. The daemon then keeps
   the evidence beside the bound grant: `{ deviceId, credentialId, clientDataJSON, authenticatorData,
@@ -613,11 +614,11 @@ signature }`, the bytes exactly as verified, never the rotation, together with t
 **The passkeys-changed signal.** When a device is forgotten (revoked, its passkeys with it), or a
 catalog member's key is (one browser removed, or the whole member revoked: every key goes), the daemon
 emits `PasskeysChangedSignal` once the passkeys are gone. Whatever keeps a stored proof subscribes and
-checks every proof again (R3c-3: the rule service, suspending `passkey-removed`). Listeners run at once
+checks every proof again (the standing-rule service, suspending `passkey-removed` or `proof-invalid`). Listeners run at once
 and the removal waits for them for at most 5 s; a listener that fails, or is still running then, is
 reported and never undoes or stalls the removal. A device revocation attempts every owner's purge even
 when an earlier one fails, records the revocation, then reports each failure. A stored proof is
-re-checked before every use anyway, so a missed signal costs a later refusal, never a fill. Today nothing
+re-checked before every use anyway, so a missed signal costs a later refusal, never a fill. The standing-rule service
 subscribes. A member's passkey can't back a rule; the signal fires for it only so "a passkey was removed"
 is one signal whichever route removed it.
 

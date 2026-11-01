@@ -4,6 +4,8 @@ import { InstantSchema } from './common.ts';
 import {
   LOGIN_OBSERVED_MAX,
   LOGIN_RECIPE_PROPOSALS_MAX,
+  ferretObserved,
+  LoginObservedHintSchema,
   LoginObservedSchema,
   LoginRecipeAuthorSchema,
   LoginRecipeProposalSchema,
@@ -467,8 +469,11 @@ export const LoginHintSchema = z.strictObject({
   recipe: LoginRecipeSchema.optional(),
   /** `ferret`: an auto-applied ferret's steps nobody reviewed, never to be read as the owner's. */
   recipeBy: LoginRecipeAuthorSchema.optional(),
-  /** What the daemon saw while typing this login (field kinds, echo, the page moving on, the 2FA kind). */
-  observed: z.array(LoginObservedSchema).max(LOGIN_OBSERVED_MAX).readonly().optional(),
+  /**
+   * What the daemon saw while typing this login (field kinds, echo, the page moving on, the 2FA kind). Never the
+   * owner-tap count (`ferretObserved`).
+   */
+  observed: z.array(LoginObservedHintSchema).max(LOGIN_OBSERVED_MAX).readonly().optional(),
 });
 export type LoginHint = z.infer<typeof LoginHintSchema>;
 
@@ -507,7 +512,9 @@ function hintOf(entry: LoginEntrySummary, role: LoginHint['role'], entries: read
     ...(entry.username === undefined ? {} : { username: entry.username }),
     ...(entry.recipe === undefined ? {} : { recipe: entry.recipe }),
     ...(entry.recipe === undefined || entry.recipeBy === undefined ? {} : { recipeBy: entry.recipeBy }),
-    ...(entry.observed === undefined || entry.observed.length === 0 ? {} : { observed: [...entry.observed] }),
+    ...(entry.observed === undefined || entry.observed.length === 0
+      ? {}
+      : { observed: ferretObserved(entry.observed) }),
   };
 }
 

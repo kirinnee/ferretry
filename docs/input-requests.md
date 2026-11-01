@@ -706,8 +706,8 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   - `navigatedAway`: the page showed a new document within 10 s of the submit.
   - `secondFactor`: `code` (a one-time code card was typed on the same account soon after), `push` (the page waited on
     the sign-in hosts, then left them with no code typed), or `none` (it left at once). Watched for 3 minutes.
-  - `tapped` (in the wire contract; written from R3c-3): the fill was the OWNER's own tap from a paired device that
-    went through (a page that moved on unsteered; a proved sudo, su or doas typed hidden). Who filled a card maps to
+  - `tapped`: the fill was the OWNER's own tap from a paired device that went through, on a page that moved on
+    unsteered (written beside `navigatedAway`; `false` for one that did not move on). It is never shown to a ferret. Who filled a card maps to
     the observer through one exhaustive table (`observerByOf`: `device`, `host`, `plan` or `rule`, with no default),
     and only `device` writes this fact, so plan fills, rule fills and the admin token never count toward a standing
     rule's history.
@@ -1335,12 +1335,12 @@ ships, a placement without a tap happens only under a task plan line, as above. 
   `approve-sign-in-rule` act, asked of every caller, the admin token on loopback included. Its challenge is DERIVED:
   `signInRuleChallenge(nonce, signInRuleSubject(stage, canonicalSignInRule(body)))`, where the canonical bytes are RFC
   8785 JSON of the whole body (sets sorted) and each step has its own domain string, apart from a task plan's and a 2FA
-  seed's. The daemon keeps the assertion with the rule (a stored proof) so it can check it again offline. Until the
-  rule service lands, `POST /v1/step-up/options` answers this act `404 stage_not_found` and mints no challenge.
+  seed's. The daemon keeps the assertion with the rule (a stored proof) so it can check it again offline
+  ([secrets.md](secrets.md#standing-sign-in-rules)).
 - **Pinned facts are signed.** The account's key, handle and username, the login domains, the recipe version, the
   field identities the owner's own taps have history with (required: a rule never pins a new form) and a fingerprint
   of the account's 2FA keys (`factorFingerprint`: ids, kinds and whether Ferretry makes the codes, never `verified`).
-  Lifetime is between one hour and 90 days, inside the signed body. The schema never reads a clock; the daemon will check (R3c-3)
+  Lifetime is between one hour and 90 days, inside the signed body. The schema never reads a clock; the daemon checks
   `signInRuleClockProblems(body, now)` (a body created more than 5 minutes ahead is refused) as it stages, commits
   and loads a rule, and a rule is in force only between its signed start and end. A staged rule names its account and
   place as fields, so the passkey dialog never learns which sign-in it is from (clippable) summary words alone.

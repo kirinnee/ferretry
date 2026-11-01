@@ -326,6 +326,28 @@ export interface AccountListing {
   readonly signIns: readonly SignInSummary[];
 }
 
+/**
+ * The listing with each account's IMMUTABLE key beside its handle: what a standing sign-in rule pins (the key survives a
+ * rename; a merge moves a sign-in to another key). Never a value.
+ */
+export interface KeyedAccountListing extends AccountListing {
+  /** Handle → `L…` key, for every account listed. */
+  readonly keys: ReadonlyMap<string, string>;
+}
+
+/** The listing of one committed index document: accounts by label, sign-ins in their account's order. */
+function listingOf(document: Pick<AccountIndexDocument, 'accounts' | 'signIns'>): KeyedAccountListing {
+  const accounts = Object.entries(document.accounts)
+    .map(([id, account]) => accountSummary(id, account, document.signIns))
+    .sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
+  const order = new Map(accounts.map((account, index) => [account.id, index]));
+  const signIns = Object.entries(document.signIns)
+    .map(([id, signIn]) => signInSummary(id, signIn, document.accounts, document.signIns))
+    .sort((left, right) => (order.get(left.account) ?? 0) - (order.get(right.account) ?? 0));
+  const keys = new Map(Object.entries(document.accounts).map(([handle, account]) => [handle, account.key]));
+  return { accounts, signIns, keys };
+}
+
 /** The handle each account key has right now. */
 const handlesByKey = (accounts: Readonly<Record<string, AccountRecord>>): ReadonlyMap<string, string> =>
   new Map(Object.entries(accounts).map(([handle, account]) => [account.key, handle]));
@@ -470,6 +492,7 @@ export class AccountDirectory {
   private readonly newSealedName: (key: string, role: 'password' | 'totp') => string;
   private readonly seals: AccountSealPort | undefined;
   private repointDefaults: ((changes: readonly AccountDefaultsRepoint[]) => Promise<void>) | undefined;
+  private followRules: ((after: KeyedAccountListing) => Promise<void>) | undefined;
   readonly hostName: string;
 
   constructor(
@@ -495,18 +518,26 @@ export class AccountDirectory {
     this.repointDefaults = repoint;
   }
 
+  /**
+   * The composition root hands over the standing sign-in rules once their service exists: after EVERY committed change,
+   * under the same lock, they are told the listing as it now stands, so a pinned fact that drifted suspends its rule in
+   * the same act (docs/secrets.md, "Standing sign-in rules"). A failure is the callee's to report; the change stands.
+   */
+  followRulesWith(follow: (after: KeyedAccountListing) => Promise<void>): void {
+    this.followRules = follow;
+  }
+
   /** Every account by label, and every sign-in. Raises `SecretStoreError` when it cannot tell — never an empty list. */
   async list(): Promise<AccountListing> {
+    const { accounts, signIns } = await this.keyedList();
+    return { accounts, signIns };
+  }
+
+  /** {@link list}, with each account's immutable key: what a standing sign-in rule pins and checks. */
+  async keyedList(): Promise<KeyedAccountListing> {
     const { document } = await this.documents.read();
     await this.documents.readSealed();
-    const accounts = Object.entries(document.accounts)
-      .map(([id, account]) => accountSummary(id, account, document.signIns))
-      .sort((left, right) => left.label.localeCompare(right.label) || left.id.localeCompare(right.id));
-    const order = new Map(accounts.map((account, index) => [account.id, index]));
-    const signIns = Object.entries(document.signIns)
-      .map(([id, signIn]) => signInSummary(id, signIn, document.accounts, document.signIns))
-      .sort((left, right) => (order.get(left.account) ?? 0) - (order.get(right.account) ?? 0));
-    return { accounts, signIns };
+    return listingOf(document);
   }
 
   /**
@@ -553,6 +584,7 @@ export class AccountDirectory {
       await this.documents.commit(read, next, staged);
       if (sealed !== undefined) await this.sweep(next, staged);
       await this.followDefaults(read.document.accounts, next.accounts, draft.repoints);
+      await this.followRules?.(listingOf(next)).catch(() => undefined);
       return result;
     });
   }

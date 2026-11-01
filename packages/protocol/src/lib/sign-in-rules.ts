@@ -431,6 +431,11 @@ export const SignInRuleViewSchema = z
     uses: z.number().int().min(0).max(SIGN_IN_RULE_MAX_USES).optional(),
     remaining: z.number().int().min(0).max(SIGN_IN_RULE_MAX_USES).optional(),
     status: SignInRuleStatusSchema,
+    /**
+     * Its proof or its pinned facts could not be checked yet (the passkeys or the accounts could not be read): it fills
+     * nothing until the daemon has checked them. Only on a rule that is not suspended.
+     */
+    unverified: z.literal(true).optional(),
     suspended: z.strictObject({ at: InstantSchema, because: SignInRuleSuspensionSchema }).optional(),
     usage: SignInRuleUsageSchema,
     flags: z.array(SignInRuleFlagSchema).max(SIGN_IN_RULE_FLAGS.length),
@@ -449,6 +454,7 @@ export const SignInRuleViewSchema = z
       ...((view.status === 'suspended') === (view.suspended !== undefined)
         ? []
         : ['a suspended rule says why, and only a suspended one']),
+      ...(view.unverified === true && view.suspended !== undefined ? ['a suspended rule is not also unverified'] : []),
       ...((view.uses === undefined) === (view.remaining === undefined) ? [] : ['uses left come with a cap only']),
       ...(view.uses !== undefined && view.remaining !== undefined && view.remaining > view.uses
         ? ['a rule never has more uses left than its cap']
@@ -683,4 +689,68 @@ export const SIGN_IN_RULE_ERROR_CODES = {
   stageNotFound: 'stage_not_found',
   /** No device has a passkey yet, so no rule can be approved: "Add a passkey in Settings › Security first". */
   passkeyRequired: 'passkey_required',
+  /** The owner has not signed in to it from the app twice yet: "Sign in yourself twice from the app first". */
+  noHistory: 'no_history',
+  /** A provider sign-in ("ClickUp via Google"): there is no password of its own to fill. */
+  viaProvider: 'via_provider',
+  /** Not a password sign-in. */
+  notPassword: 'not_password',
+  /** A terminal sign-in (sudo, su, doas, ssh…): a standing rule is for a page only; a task plan covers sudo per task. */
+  toolNotCovered: 'tool_not_covered',
+  /** The code was ticked, but the account has no 2FA key Ferretry makes codes for. */
+  noCodeKey: 'no_code_key',
+  /** The sign-in, its account or a pinned fact changed between the stage and the commit: nothing was approved. */
+  conflict: 'conflict',
+  /** The passkey assertion did not verify against the staged bytes: nothing was approved. */
+  proofInvalid: 'proof_invalid',
 } as const;
+
+// ── Eligibility ──────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Why a sign-in cannot have a standing rule yet: the owner has no tapped history with it, it is a provider sign-in or
+ * not a password one, it is a terminal sign-in (pages only, R3c §18), or no paired device holds a passkey.
+ */
+export const SIGN_IN_RULE_INELIGIBLE = [
+  'no-history',
+  'via-provider',
+  'not-password',
+  'tool-not-covered',
+  'no-passkey',
+] as const;
+export const SignInRuleIneligibleSchema = z.enum(SIGN_IN_RULE_INELIGIBLE);
+export type SignInRuleIneligible = z.infer<typeof SignInRuleIneligibleSchema>;
+
+/** Each refusal's code, as the stage answers it (`409`). */
+export const SIGN_IN_RULE_INELIGIBLE_CODES = {
+  'no-history': SIGN_IN_RULE_ERROR_CODES.noHistory,
+  'via-provider': SIGN_IN_RULE_ERROR_CODES.viaProvider,
+  'not-password': SIGN_IN_RULE_ERROR_CODES.notPassword,
+  'tool-not-covered': SIGN_IN_RULE_ERROR_CODES.toolNotCovered,
+  'no-passkey': SIGN_IN_RULE_ERROR_CODES.passkeyRequired,
+} as const satisfies Record<SignInRuleIneligible, string>;
+
+/** The owner's sentence for each. */
+export const SIGN_IN_RULE_INELIGIBLE_WORDS = {
+  'no-history': 'Sign in yourself twice from the app first',
+  'via-provider': "This sign-in goes through another account, so it can't be pre-approved",
+  'not-password': 'Only a password sign-in can be pre-approved',
+  'tool-not-covered': 'A standing rule is for a page sign-in; a task plan covers sudo for one task',
+  'no-passkey': 'Add a passkey in Settings › Security first',
+} as const satisfies Record<SignInRuleIneligible, string>;
+
+/**
+ * `GET /v1/sign-in-rules/eligibility?signIn=`: whether the owner could make a standing rule for a sign-in now, and why
+ * not. `rule` is the sign-in's rule, when it has one (a new approval replaces it). The owner's alone (it names nothing,
+ * but it says whether the owner's taps qualify a sign-in, which no ferret may learn).
+ */
+export const SignInRuleEligibilitySchema = z.discriminatedUnion('eligible', [
+  z.strictObject({ signIn: SignInIdSchema, eligible: z.literal(true), rule: SignInRuleIdSchema.optional() }),
+  z.strictObject({
+    signIn: SignInIdSchema,
+    eligible: z.literal(false),
+    because: SignInRuleIneligibleSchema,
+    rule: SignInRuleIdSchema.optional(),
+  }),
+]);
+export type SignInRuleEligibility = z.infer<typeof SignInRuleEligibilitySchema>;
