@@ -310,9 +310,9 @@ call.
 - **Logins go through the input bridge.** `browser_request_input` asks the owner for a form's values on one
   card (a `plain` e-mail and a `secret` password, say) and the daemon types each into its field; the agent
   never holds a secret. A captcha is never solved: the agent hands the page over.
-- **A push to approve on the phone** is `push: true` on either request tool, with no prompt (and on a page,
-  optionally the element showing the number). The daemon reads the number from the page itself and settles the
-  card when it sees the sign-in move on; the agent waits on the `pa_` id and is never told the number. See
+- **A push to approve on the phone** is `push: true` on either request tool, with no prompt and no element. The
+  daemon reads the number only from the provider's own challenge view, never where the agent points, and settles the
+  card when it sees the page move on; the agent waits on the `pa_` id and is never told the number. See
   [input requests › Approve on your phone](input-requests.md#approve-on-your-phone).
 - The CDP port listens on loopback and accepts no cross-origin WebSocket (`--remote-allow-origins` is
   gone; the worker sends no `Origin`).

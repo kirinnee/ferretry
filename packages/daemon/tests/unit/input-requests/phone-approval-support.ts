@@ -1,4 +1,4 @@
-import type { AgendaId, InputTargetFacts, LoginObservation, PhoneApprovalRaise } from '@ferretry/protocol';
+import type { AgendaId, InputTargetFacts, LoginObservation } from '@ferretry/protocol';
 import { PhoneApprovalRaiseSchema } from '@ferretry/protocol';
 import type { BrowserPushNumberRead } from '../../../src/lib/browser/transport/input-contracts.ts';
 import {
@@ -78,7 +78,9 @@ export const terminalFacts = (promptLine: string, comm = 'okta-aws-cli'): InputT
   }) as unknown as InputTargetFacts;
 
 /** A clock that moves only when the test ticks, and timers that fire when it reaches them. */
-export function world(options: { readonly enabled?: boolean; readonly listing?: SavedListing } = {}) {
+export function world(
+  options: { readonly enabled?: boolean; readonly listing?: SavedListing; readonly auditFails?: boolean } = {},
+) {
   let now = START;
   let pending: { at: number; resolve: () => void }[] = [];
   let ids = 0;
@@ -94,13 +96,14 @@ export function world(options: { readonly enabled?: boolean; readonly listing?: 
   const told: string[] = [];
   const audits: Parameters<PhoneApprovalAudit['record']>[0][] = [];
   const facts: { signIn: string; seen: LoginObservation }[] = [];
-  const looks: (PhoneApprovalRaise['element'] | undefined)[] = [];
+  /** The pages looked at, by key: nothing the ferret pointed at is ever passed on. */
+  const looks: string[] = [];
   /** `fail`: how many of the observer's next answers throw, as a look that cannot be made. */
   const acted = { scripted: false, since: Number.NEGATIVE_INFINITY, terminalSince: Number.NEGATIVE_INFINITY, fail: 0 };
   const service = new PhoneApprovalService({
     pages: {
-      look: async (_session, _key, element) => {
-        looks.push(element);
+      look: async (_session, key) => {
+        looks.push(key);
         return page.current;
       },
     },
@@ -127,6 +130,7 @@ export function world(options: { readonly enabled?: boolean; readonly listing?: 
     },
     audit: {
       record: async entry => {
+        if (options.auditFails === true) throw new Error('the audit log is full');
         audits.push(entry);
       },
     },

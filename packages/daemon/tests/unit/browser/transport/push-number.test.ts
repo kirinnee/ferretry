@@ -6,7 +6,6 @@ import should from 'should';
 import {
   identityProviderOf,
   numberSourceFits,
-  readPointedNumber,
   scanPushNumber,
 } from '../../../../src/lib/browser/transport/push-number.ts';
 
@@ -116,7 +115,7 @@ describe('which identity provider a host is', () => {
     for (const host of lookAlikes) should(identityProviderOf(host)).be.undefined();
   });
 
-  it("should fit a provider's number only to its own hosts, and an Okta or pointed number to any", () => {
+  it("should fit a provider's number only to its own hosts, and an Okta number to any", () => {
     should(numberSourceFits('microsoft', 'login.live.com')).be.true();
     should(numberSourceFits('microsoft', 'login.microsoftonline.com.evil.example')).be.false();
     should(numberSourceFits('microsoft', 'accounts.google.com')).be.false();
@@ -126,7 +125,6 @@ describe('which identity provider a host is', () => {
     should(numberSourceFits('duo', 'evil-duosecurity.com')).be.false();
     should(numberSourceFits('duo', 'duosecurity.com')).be.false();
     should(numberSourceFits('okta', 'login.company.com')).be.true();
-    should(numberSourceFits('pointed', 'login.company.com')).be.true();
   });
 });
 
@@ -261,49 +259,23 @@ describe("reading the number off a provider's own page (captured-shape fixtures)
   });
 });
 
-describe('reading the element a ferret pointed at', () => {
-  const pointed = (html: string, url = 'https://login.example.test/') => {
-    const window = pageOf(page(html), url);
-    const element = window.document.querySelector('#n');
-    return readPointedNumber(element, {}, window);
-  };
+describe('a number the ferret typed, echoed back by the page (secrev-1244 H1)', () => {
+  // The ferret types "42" as the username on the owner's real Okta page: Okta echoes it back in a visible element no one
+  // can type into. Only the provider's own challenge element gives a number, so the echo never does.
+  const echoing = (name: string, typed: string): string => fixture(name).replaceAll('a@example.com', typed);
 
-  it('should read one to three digits from a visible element no one can type into', () => {
-    should(pointed('<b id="n"> 17 </b>')).eql({ value: '17' });
+  it('should read no number from a push page with none, whatever its identifier says', () => {
+    should(scan(echoing('okta-push-no-number.html', '42'), OKTA).number).be.undefined();
   });
 
-  it('should refuse a field, an editable element or one inside either as editable', () => {
-    for (const html of [
-      '<input id="n" value="17" />',
-      '<textarea id="n">17</textarea>',
-      '<select id="n"><option>17</option></select>',
-      '<div id="n" contenteditable="true">17</div>',
-      '<div contenteditable=""><b id="n">17</b></div>',
-    ])
-      should(pointed(html)).eql({ missing: 'editable' }, html);
-  });
-
-  it('should find none in a hidden, covered or invisible element, or in one that is not only one to three digits', () => {
-    for (const html of [
-      '<b id="n" hidden>17</b>',
-      '<b id="n" style="visibility: hidden">17</b>',
-      '<b id="n" data-covered>17</b>',
-      '<b id="n">1234</b>',
-      '<b id="n">17a</b>',
-      '<b id="n"></b>',
-    ])
-      should(pointed(html)).eql({ missing: 'none-found' }, html);
-  });
-
-  it('should find none in an element that answers no box or has nothing at its centre', () => {
-    const env = { document: {} };
-    should(readPointedNumber({ tagName: 'B', innerText: '17' }, {}, env)).eql({ missing: 'none-found' });
-    should(
-      readPointedNumber(
-        { tagName: 'B', textContent: '17', getBoundingClientRect: () => ({ x: 0, y: 0, width: 2, height: 2 }) },
-        {},
-        env,
-      ),
-    ).eql({ missing: 'none-found' });
+  it('should read the challenge’s own number, never the echoed identifier', () => {
+    for (const [name, own] of [
+      ['okta-gen2.html', '42'],
+      ['okta-gen3.html', '37'],
+    ] as const) {
+      const html = echoing(name, '17');
+      should(html).containEql('>17<');
+      should(scan(html, OKTA)).eql({ provider: 'okta', number: { value: own, from: 'okta' } }, name);
+    }
   });
 });

@@ -149,13 +149,16 @@ function pushNumberReply(id, params) {
   const page = params?.pageId;
   const base = { origin: 'https://login.microsoftonline.com', navigationId: 'loader-1', provider: 'microsoft' };
   if (page === 'none') reply(id, true, { read: { ...base, missing: 'none-found' } });
+  else if (page === 'unread') reply(id, true, {});
+  else if (page === 'garbled') reply(id, true, { read: { ...base, navigationId: 7, missing: 'none-found' } });
+  else if (page === 'reason') reply(id, true, { read: { ...base, missing: 'fake-gone' } });
   else if (page === 'pointed')
     reply(id, true, {
       read: {
         origin: 'https://login.example.test',
         navigationId: 'loader-1',
         number: {
-          value: params?.element?.ref === 'e9' ? '17' : '0',
+          value: '17',
           from: 'pointed',
           frameOrigin: 'https://login.example.test',
         },

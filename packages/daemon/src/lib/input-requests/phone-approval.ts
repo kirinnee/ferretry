@@ -42,15 +42,17 @@ import { type SavedListing, targetMatchKey } from './saved-logins.ts';
  *
  * - THE NUMBER COMES ONLY FROM THE PAGE, read by the browser (push-number.ts), and only past three gates: the page is
  *   https on a login domain of the sign-in it matched (or one its provider chain reaches) or on a fixed identity
- *   provider's host; no ferret ran a page script in this session; and the element is visible and not one anyone can
- *   type into, in a document that did not change while it was read. A terminal never shows one: a ferret can print
- *   anything into its own pane.
+ *   provider's host, and still the host it was raised on; no ferret ran a page script in this session; and the number
+ *   is in a provider's own challenge view, visible and not one anyone can type into, in a document that did not change
+ *   while it was read. An element the ferret points at is never read: the page may echo back text the ferret typed. A
+ *   terminal never shows one: a ferret can print anything into its own pane.
  * - NOTHING OF THE FERRET'S IS SHOWN. Its raise names where and gives hints; the card, the agenda subject, the push
  *   and the log are {@link phoneApprovalWords} over the approval's own fields.
  * - SUCCESS IS OBSERVED, NEVER CLAIMED. `moved-on` is set only here, when the page shows a new document that is no
  *   longer the challenge (or the terminal's prompt or program changed). No route sets it, and the owner's only
  *   button is "Not me — stop". A move the ferret could have caused (it acted on that kind of surface since the raise,
- *   or ran a page script) still ends the card, but keeps no fact and tells the ferret no `secondFactor`.
+ *   or ran a page script) still ends the card, but keeps no fact and tells the ferret no `secondFactor`; so does a
+ *   page that stayed on the provider's host, which may be its "denied" view.
  *
  * The approval lives in RAM: a restart ends it (its card is closed by {@link PhoneApprovalService.restore}).
  */
@@ -70,13 +72,12 @@ const VIA_DEPTH = 3;
 /** The page as an approval needs it: one look for the number, in the page's own queue. */
 export interface PhoneApprovalPagePort {
   /**
-   * The session's page `key` now: its id and what the browser read there (`element` is the ferret's pointer, a WHERE TO
-   * LOOK only). Nothing when there is no such page, or the browser cannot read a number at all.
+   * The session's page `key` now: its id and what the browser read there, from a provider's own challenge view only.
+   * Nothing when there is no such page, or the browser cannot read a number at all.
    */
   look(
     sessionId: string,
     key: string,
-    element?: PhoneApprovalRaise['element'],
   ): Promise<{ readonly pageId: string; readonly read: BrowserPushNumberRead } | undefined>;
 }
 
@@ -169,7 +170,6 @@ interface Held {
   approval: PhoneApproval;
   readonly agendaId: AgendaId;
   readonly key: string;
-  readonly element?: PhoneApprovalRaise['element'];
   readonly matched: Matched;
   /** The raise instant, as the observer's clock reads it: an act of the ferret at or after it voids the fact. */
   readonly since: number;
@@ -207,22 +207,32 @@ function httpsHost(origin: string): string | undefined {
 /**
  * THE THREE GATES, on the browser's own answer (docs/input-requests.md, "Approve on your phone"). A number is believed
  * only when: the page is https on a host the matched sign-in (or its provider chain) signs in at, or a fixed identity
- * provider's; no ferret scripted a page this session; the browser found it in the main frame or one of the page's own
- * origin, on a host that source can be on, in a document that did not change while it was read; and it has the shape
- * its source shows (1 to 3 digits to tap, 3 to 6 to type). Anything else is a reason, never a number.
+ * provider's, and it is still the host the approval was raised on; no ferret scripted a page this session; the browser
+ * found it in a provider's OWN challenge view (never an element the ferret pointed at, which may show text it typed), in
+ * the main frame, on a host that provider is on, in a document that did not change while it was read; and it has the
+ * shape its source shows (1 to 3 digits to tap, 3 to 6 to type). Anything else is a reason, never a number.
  */
 export function gatedNumber(
   read: BrowserPushNumberRead,
-  context: { readonly domains: ReadonlySet<string>; readonly scripted: boolean; readonly now: number },
+  context: {
+    readonly domains: ReadonlySet<string>;
+    readonly scripted: boolean;
+    readonly now: number;
+    /** The host the approval was raised on: a read anywhere else, even another identity provider's, has no number. */
+    readonly pinnedHost?: string;
+  },
 ): { readonly number: PhoneApprovalNumber } | { readonly numberMissing: PhoneApprovalNumberMissing } {
   const host = httpsHost(read.origin);
   if (host === undefined || (!context.domains.has(host) && identityProviderOf(host) === undefined))
     return { numberMissing: 'origin' };
+  if (context.pinnedHost !== undefined && host !== context.pinnedHost) return { numberMissing: 'origin' };
   if (context.scripted) return { numberMissing: 'scripted' };
   if (read.missing === 'changed') return { numberMissing: 'changed' };
   const found = read.number;
-  if (found === undefined) return { numberMissing: read.missing === 'editable' ? 'editable' : 'none-found' };
+  if (found === undefined) return { numberMissing: 'none-found' };
   if (found.frameOrigin !== read.origin || !numberSourceFits(found.from, host)) return { numberMissing: 'origin' };
+  // Only the provider whose challenge view this document IS may give its number (secrev-1244 H1).
+  if (read.provider === undefined || found.from !== read.provider) return { numberMissing: 'none-found' };
   const parsed = PhoneApprovalNumberSchema.safeParse({
     value: found.value,
     from: found.from,
@@ -232,17 +242,20 @@ export function gatedNumber(
   return parsed.success ? { number: parsed.data } : { numberMissing: 'none-found' };
 }
 
-/** Whether a page the approval was raised on has moved on: a new document that is no longer the challenge. */
+/**
+ * Whether a page the approval was raised on has moved on, and how: `left`, a new document on a host no identity
+ * provider serves (the sign-in finished somewhere); `challenge-ended`, a new document on the same host that is no
+ * longer the provider's challenge (Microsoft's "Stay signed in?", or a provider's own "denied" or "expired" view, which
+ * cannot be told apart yet). Undefined: it may be the same challenge again.
+ */
 export function movedOn(
   held: { readonly document?: string; readonly raisedOnChallenge: boolean; readonly raisedHost?: string },
   now: { readonly navigationId: string; readonly host?: string; readonly provider?: string },
-): boolean {
-  if (held.document === undefined || now.navigationId === held.document) return false;
-  // Another host that is no identity provider's: the sign-in left its challenge.
-  if (now.host !== undefined && now.host !== held.raisedHost && identityProviderOf(now.host) === undefined) return true;
-  // The same host, a new document: moved on only when the raise was a provider's challenge and this one is none
-  // (Microsoft's "Stay signed in?" after the number); anything else may be the same challenge again.
-  return held.raisedOnChallenge && now.provider === undefined;
+): 'left' | 'challenge-ended' | undefined {
+  if (held.document === undefined || now.navigationId === held.document) return undefined;
+  if (now.host !== undefined && now.host !== held.raisedHost && identityProviderOf(now.host) === undefined)
+    return 'left';
+  return held.raisedOnChallenge && now.provider === undefined ? 'challenge-ended' : undefined;
 }
 
 const digest = (parts: readonly unknown[]): string =>
@@ -283,7 +296,8 @@ export class PhoneApprovalService {
     };
     let held: Omit<Held, 'agendaId'>;
     if (raise.target.kind === 'browser') {
-      const look = await this.deps.pages.look(sessionId, raise.target.key, raise.element);
+      // The raise's `element` is never read (secrev-1244 H1): the ferret could point at text it typed itself.
+      const look = await this.deps.pages.look(sessionId, raise.target.key);
       if (look === undefined)
         throw new InputRequestError('not_found', `there is no page named ${raise.target.key} in this session`);
       const host = httpsHost(look.read.origin);
@@ -298,7 +312,6 @@ export class PhoneApprovalService {
           ...gated,
         }),
         key: raise.target.key,
-        ...(raise.element === undefined ? {} : { element: raise.element }),
         matched,
         since,
         names: [look.pageId],
@@ -346,9 +359,12 @@ export class PhoneApprovalService {
     this.held.set(id, kept);
     this.noteRaise(sessionId, now);
     if (kept.approval.number !== undefined) kept.pushedNumber = kept.approval.number.value;
-    await this.deps.audit.record({ event: 'phone-approval.raised', actor: { kind: 'agent' }, approval: kept.approval });
-    await this.buzz(kept, words.push);
+    // The watch starts first, and a log that cannot be written fails nothing: an approval always times out.
     void this.watch(kept);
+    await this.deps.audit
+      .record({ event: 'phone-approval.raised', actor: { kind: 'agent' }, approval: kept.approval })
+      .catch(() => undefined);
+    await this.buzz(kept, words.push);
     return this.view(kept);
   }
 
@@ -584,7 +600,7 @@ export class PhoneApprovalService {
 
   private async lookAtPage(held: Held): Promise<void> {
     const { sessionId } = held.approval;
-    const look = await this.deps.pages.look(sessionId, held.key, held.element).catch(() => undefined);
+    const look = await this.deps.pages.look(sessionId, held.key).catch(() => undefined);
     if (isFinal(held.approval)) return;
     // The page closed, or the name is another page now.
     if (look === undefined || !held.names.includes(look.pageId)) {
@@ -593,20 +609,25 @@ export class PhoneApprovalService {
     }
     const read = look.read;
     const host = httpsHost(read.origin);
-    if (
-      movedOn(held, {
-        navigationId: read.navigationId,
-        ...(host === undefined ? {} : { host }),
-        ...(read.provider === undefined ? {} : { provider: read.provider }),
-      })
-    ) {
-      await this.settle(held, 'moved-on');
+    const moved = movedOn(held, {
+      navigationId: read.navigationId,
+      ...(host === undefined ? {} : { host }),
+      ...(read.provider === undefined ? {} : { provider: read.provider }),
+    });
+    if (moved !== undefined) {
+      // Only a page that left the identity providers says the sign-in finished; the same host may be a denial.
+      await this.settle(held, 'moved-on', undefined, moved === 'left');
       return;
     }
     const now = this.deps.clock.now();
     const changed = held.document !== read.navigationId;
     held.document = read.navigationId;
-    const gated = gatedNumber(read, { domains: held.matched.domains, scripted: this.scripted(sessionId), now });
+    const gated = gatedNumber(read, {
+      domains: held.matched.domains,
+      scripted: this.scripted(sessionId),
+      now,
+      ...(held.raisedHost === undefined ? {} : { pinnedHost: held.raisedHost }),
+    });
     // A number belongs to the document it was read in: a new document clears it, and only a number read in the new
     // one shows again. The same number in the same document keeps the instant it was first read.
     const kept = held.approval.number;
@@ -653,17 +674,23 @@ export class PhoneApprovalService {
 
   /**
    * Ends an approval: its state, its card closed with a note in the owner's words, the ferret woken (and, refused,
-   * told to stop), the log. `moved-on` keeps `secondFactor: 'push'` on the sign-in only when nothing the ferret did
+   * told to stop), the log. `moved-on` keeps `secondFactor: 'push'` on the sign-in only when the move says the
+   * sign-in finished (`finished`: a page that left the identity providers, or a terminal) and nothing the ferret did
    * could have moved it.
    */
-  private async settle(held: Held, state: Exclude<PhoneApprovalState, 'waiting'>, owner?: InputActor): Promise<void> {
+  private async settle(
+    held: Held,
+    state: Exclude<PhoneApprovalState, 'waiting'>,
+    owner?: InputActor,
+    finished = true,
+  ): Promise<void> {
     if (isFinal(held.approval)) return;
     const { sessionId } = held.approval;
     const steered =
       state === 'moved-on' &&
       this.deps.observer.tainted(sessionId, held.approval.surface === 'browser' ? 'browser' : 'terminal', held.since);
     held.approval = PhoneApprovalSchema.parse({ ...held.approval, state });
-    if (state === 'moved-on' && !steered) {
+    if (state === 'moved-on' && !steered && finished) {
       held.pushed = true;
       await this.keepFact(held);
     }
@@ -708,7 +735,7 @@ export class PhoneApprovalService {
 
 /** The note a card closes with, in the owner's words. */
 const SETTLED_NOTES: Readonly<Record<Exclude<PhoneApprovalState, 'waiting'>, string>> = {
-  'moved-on': 'The sign-in went through.',
+  'moved-on': 'The page moved on.',
   'timed-out': 'Nothing happened in time: the ferret can ask again.',
   refused: 'You said this was not you. Deny it on your phone too.',
   gone: 'The page or terminal closed.',

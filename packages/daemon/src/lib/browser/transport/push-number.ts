@@ -1,4 +1,4 @@
-import type { PushNumberProvider, PushNumberSource } from './input-contracts.ts';
+import type { PushNumberProvider } from './input-contracts.ts';
 
 /**
  * THE NUMBER A PUSH APPROVAL SHOWS, READ OFF THE PROVIDER'S OWN PAGE (docs/input-requests.md, "Approve on your
@@ -26,8 +26,11 @@ import type { PushNumberProvider, PushNumberSource } from './input-contracts.ts'
  * - Google: the sentence "tap 42 on your phone", and an element whose whole text is that number;
  * - Duo Universal Prompt (Verified Duo Push): `.verification-code`, under "Enter code in Duo Mobile".
  *
- * Pure, and free of runtime imports: the browser worker runs {@link scanPushNumber} and {@link readPointedNumber}
- * INSIDE the page (`page.evaluate`), so each is self-contained, its helpers nested in it.
+ * NOTHING A FERRET POINTS AT IS READ: a page may echo back text the ferret typed (Okta shows the username it was given,
+ * in a visible element no one can type into), so only these views give a number (secrev-1244 H1).
+ *
+ * Pure, and free of runtime imports: the browser worker runs {@link scanPushNumber} INSIDE the page (`page.evaluate`),
+ * so it is self-contained, its helpers nested in it.
  */
 
 /** A host is `domain` or one of its subdomains, on a label boundary: never a look-alike that merely ends the same. */
@@ -54,10 +57,9 @@ export function identityProviderOf(host: string): PushNumberProvider | undefined
 /**
  * Whether a number from `from` can have been read on `host`: Microsoft's only on its two sign-in hosts, Google's only on
  * accounts.google.com, Duo's only on a Duo host. Okta's widget also runs on an organisation's own domain
- * (`login.company.com`) and a pointed element can be anywhere, so those two fit any host: whether the host is one the
- * daemon trusts is its own gate.
+ * (`login.company.com`), so it fits any host: whether the host is one the daemon trusts is its own gate.
  */
-export function numberSourceFits(from: PushNumberSource, host: string): boolean {
+export function numberSourceFits(from: PushNumberProvider, host: string): boolean {
   const name = host.toLowerCase();
   switch (from) {
     case 'microsoft':
@@ -67,7 +69,6 @@ export function numberSourceFits(from: PushNumberSource, host: string): boolean 
     case 'duo':
       return under(name, DUO_DOMAIN);
     case 'okta':
-    case 'pointed':
       return true;
   }
 }
@@ -77,12 +78,6 @@ export interface PushNumberScan {
   readonly provider?: PushNumberProvider;
   readonly number?: { readonly value: string; readonly from: PushNumberProvider };
   readonly missing?: 'none-found';
-}
-
-/** What a look at the element a ferret pointed at found. */
-export interface PointedNumberRead {
-  readonly value?: string;
-  readonly missing?: 'none-found' | 'editable';
 }
 
 /**
@@ -195,48 +190,4 @@ export function scanPushNumber(_args: Readonly<Record<string, never>> = {}, env:
   }
 
   return { missing: 'none-found' };
-}
-
-/**
- * Runs IN THE PAGE, on the element a ferret pointed at: its number when it is visible, no one can type into it, and its
- * whole text is one to three digits. The element is only where to look: its text is read here, never taken from a
- * ferret. `env` is the element's window; a test passes one of its own.
- */
-export function readPointedNumber(
-  element: unknown,
-  _args: Readonly<Record<string, never>> = {},
-  env: unknown = globalThis,
-): PointedNumberRead {
-  type Node = {
-    readonly tagName?: string;
-    readonly isContentEditable?: boolean;
-    readonly innerText?: string;
-    readonly textContent?: string | null;
-    getBoundingClientRect?(): { x: number; y: number; width: number; height: number };
-    closest?(selector: string): Node | null;
-    contains?(other: Node): boolean;
-  };
-  const win = env as {
-    readonly document: { elementFromPoint?(x: number, y: number): Node | null };
-    getComputedStyle?(element: Node): { readonly visibility?: string; readonly display?: string };
-  };
-  const node = element as Node;
-  const tag = (node.tagName ?? '').toLowerCase();
-  if (
-    tag === 'input' ||
-    tag === 'textarea' ||
-    tag === 'select' ||
-    node.isContentEditable === true ||
-    (node.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]') ?? null) !== null
-  )
-    return { missing: 'editable' };
-  const box = node.getBoundingClientRect?.();
-  if (box === undefined || !(box.width > 0) || !(box.height > 0)) return { missing: 'none-found' };
-  const style = win.getComputedStyle?.(node);
-  if (style?.visibility === 'hidden' || style?.display === 'none') return { missing: 'none-found' };
-  const hit = win.document.elementFromPoint?.(box.x + box.width / 2, box.y + box.height / 2) ?? null;
-  if (hit === null || (hit !== node && node.contains?.(hit) !== true)) return { missing: 'none-found' };
-  const text = node.innerText ?? node.textContent ?? '';
-  const match = /^\s*([0-9]{1,3})\s*$/u.exec(text);
-  return match?.[1] === undefined ? { missing: 'none-found' } : { value: match[1] };
 }

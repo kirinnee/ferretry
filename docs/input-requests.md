@@ -1046,16 +1046,16 @@ A sign-in that waits for a push the owner approves on their phone has its own ca
 not an input request, because nothing is typed.
 
 **How a ferret asks.** `browser_request_input` or `terminal_request_input` with `push: true` and no prompt. No
-new tool: the MCP list stays under its byte budget. A page call may name `ref` or `selector`: the element it thinks
-shows the number. It may also pass `secretHint`, `factor` and `waitSeconds`. The answer is a `pa_…` id. The ferret
+new tool: the MCP list stays under its byte budget. A page call names no element: the daemon reads only the provider's
+own challenge view (see below). It may also pass `secretHint`, `factor` and `waitSeconds`. The answer is a `pa_…` id. The ferret
 waits with `input_wait` on that id and is told `waiting`, `moved-on` (with `secondFactor: 'push'` when the daemon
 kept that fact), `timed-out`, `refused` or `gone`. It is never told the number.
 
 **Nothing of the ferret's is shown.** The raise (`PhoneApprovalRaise`) names only:
 
 - where: a page or a terminal;
-- optionally, the element it thinks shows the number. This is only **where to look**: the browser reads the
-  element, never the ferret;
+- an `element` field the schema still carries for the wire. **The daemon ignores it**: see "Never where the ferret
+  points" below;
 - optionally, the account and the push key, as hints;
 - how long to wait: 30 to 300 seconds, 2 minutes by default.
 
@@ -1089,17 +1089,22 @@ queue). The daemon believes it only when all of these hold:
    `accounts.google.com`, `*.okta.com`, `*.oktapreview.com`, `*.okta-emea.com` or `*.duosecurity.com`. This is
    what keeps an adversary-in-the-middle proxy's page off the card: it shows the real number of the attacker's
    sign-in. A provider's number must also be on that provider's own host, so a Microsoft number is believed only on
-   Microsoft's two hosts.
+   Microsoft's two hosts. And it must be **the host the approval was raised on**: a page that moves to another host,
+   even another tenant on the same identity provider, shows no number (`numberMissing: 'origin'`).
 2. **Not steered.** No page script ran in this session (`browser.eval`). Otherwise the card says
    `numberMissing: 'scripted'`.
 3. **What.** The number is in a provider's own challenge view: Okta's Identity Engine widget (Gen2 and Gen3),
-   Microsoft Entra's `#idRichContext_DisplaySign`, Google's challenge page, or Duo's Verified Push code. Or it is in
-   the element the ferret pointed at. It must be visible, not editable, in the main frame or a frame of the page's
-   own origin, and exactly 1 to 3 digits to tap (3 to 6 to type into Duo Mobile). The document must be the same
-   before and after the read. English pages only: another language reads as no number.
+   Microsoft Entra's `#idRichContext_DisplaySign`, Google's challenge page, or Duo's Verified Push code, and that
+   provider's view is what the document is. It must be visible, not editable, in the main frame, and exactly 1 to 3
+   digits to tap (3 to 6 to type into Duo Mobile). The document must be the same before and after the read. English
+   pages only: another language reads as no number.
 
-A number from the element the ferret pointed at is marked on the card ("Read from the element the ferret pointed at,
-on this sign-in page.") and in the push.
+**Never where the ferret points** (secrev-1244 H1). An earlier design let a ferret name the element showing the
+number. It is gone: a page may echo back text the ferret typed, and Okta shows the username it was given in a
+visible element no one can type into. A ferret steered by an attacker could type the attacker's number as the
+username and point at the echo. So the daemon reads only a recognised provider view. When it finds none, the card
+says it couldn't read a number and offers View the page. The raise's `element` field and the `pointed` number source
+stay in the protocol for the wire only: no daemon reads the one or produces the other.
 
 **While it waits**, the daemon looks at the page every second. When the document changes, the number is cleared, and
 only a number read in the new document shows. A new number pushes again, under the same tag, at most four pushes per
@@ -1112,7 +1117,9 @@ reads `numberMissing: 'terminal'` and sends the owner to the terminal.
 
 - **A page:** a new document that is no longer the challenge. That is another host that is not an identity
   provider's, or the same host once a provider's challenge view gives way to a page with none (Microsoft's "Stay
-  signed in?").
+  signed in?", but also a provider's own "denied" or "expired" view, which Ferretry cannot yet tell apart). Only the
+  first, a page that left the identity providers, keeps `secondFactor: 'push'` on the sign-in and tells the ferret
+  so. The card only ever says "The page moved on.", never that the sign-in went through.
 - **A terminal:** its prompt line or its program changed.
 
 There is no "I approved" button and no route that sets it. When the ferret acted on that kind of surface since the
@@ -1123,7 +1130,7 @@ the sign-in, and does not tell the ferret one: the move may be the ferret's own.
 
 | State       | When                                                           | The card's note                                         |
 | ----------- | -------------------------------------------------------------- | ------------------------------------------------------- |
-| `moved-on`  | the daemon saw the sign-in move on                             | "The sign-in went through."                             |
+| `moved-on`  | the daemon saw the page move on                                | "The page moved on."                                    |
 | `refused`   | the owner tapped **Not me — stop**; the ferret is told to stop | "You said this was not you. Deny it on your phone too." |
 | `timed-out` | its wait ran out                                               | "Nothing happened in time: the ferret can ask again."   |
 | `gone`      | the page or terminal closed, or its name is another one now    | "The page or terminal closed."                          |
@@ -1149,6 +1156,11 @@ tag `pa-<id>` ([notifications](notifications.md#high-priority)).
   (`packages/daemon/tests/fixtures/push/`). Okta's are built from the open-source sign-in widget. Microsoft's element
   id comes from public reports. Google's and Duo's have no public markup and rest on the plan's description. Each
   fixture says so. Replace them with scrubbed captures of real tenants.
+- **The browser profile is shared, the "scripted" gate is per session** (secrev-1244 L3). Every ferret's pages share
+  the machine's agent sign-ins, cookies and site storage. Gate 2 asks only whether THIS session ran a page script, so
+  another session's script on the same identity-provider origin could arm site storage a later page renders. The
+  recognisers read fixed provider elements, so this is not known to be exploitable, but the gate is not
+  machine-wide.
 - **A tenant host is anyone's.** `*.okta.com` and `*.duosecurity.com` are tenants that anyone can create. A sign-in
   Ferretry doesn't know may show a number there, and the card names that host so the owner can judge it.
 - **No "denied" auto-close yet.** A sign-in the owner denies on the phone ends `timed-out` (or `moved-on`, if the

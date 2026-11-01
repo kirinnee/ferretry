@@ -106,8 +106,7 @@ function parseCopyRead(raw: unknown): BrowserCopyRead {
 }
 
 const PUSH_NUMBER_PROVIDERS: ReadonlySet<unknown> = new Set(['okta', 'microsoft', 'google', 'duo']);
-const PUSH_NUMBER_SOURCES: ReadonlySet<unknown> = new Set([...PUSH_NUMBER_PROVIDERS, 'pointed']);
-const PUSH_NUMBER_MISSING: ReadonlySet<unknown> = new Set(['none-found', 'editable', 'changed']);
+const PUSH_NUMBER_MISSING: ReadonlySet<unknown> = new Set(['none-found', 'changed']);
 const PUSH_NUMBER_KEYS: ReadonlySet<string> = new Set(['origin', 'navigationId', 'provider', 'number', 'missing']);
 const PUSH_NUMBER_VALUE_KEYS: ReadonlySet<string> = new Set(['value', 'from', 'frameOrigin']);
 
@@ -146,7 +145,7 @@ export function parsePushNumberRead(raw: unknown): BrowserPushNumberRead {
   if (!object(number) || Object.keys(number).some(key => !PUSH_NUMBER_VALUE_KEYS.has(key))) return refuse();
   const { value, from, frameOrigin } = number;
   if (typeof value !== 'string' || !/^[0-9]{1,6}$/u.test(value)) return refuse();
-  if (!PUSH_NUMBER_SOURCES.has(from) || !bounded(frameOrigin, COPY_READ_LIMITS.origin)) return refuse();
+  if (!PUSH_NUMBER_PROVIDERS.has(from) || !bounded(frameOrigin, COPY_READ_LIMITS.origin)) return refuse();
   return {
     ...base,
     number: { value, from: from as NonNullable<BrowserPushNumberRead['number']>['from'], frameOrigin },
@@ -482,14 +481,11 @@ export class BrowserWorkerClient implements BrowserAutomation {
   }
 
   /**
-   * The push number a page shows (push-number-read.ts), as a provider's view or the element a ferret pointed at shows
-   * it. Believed only in its exact shape; anything else is refused in words that quote none of it.
+   * The push number a page shows (push-number-read.ts), as a provider's own challenge view shows it. Believed only in
+   * its exact shape; anything else is refused in words that quote none of it.
    */
-  async pushNumberRead(pageId: string, element?: BrowserElementTarget): Promise<BrowserPushNumberRead> {
-    const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.pushNumber, {
-      pageId,
-      ...(element === undefined ? {} : { element }),
-    });
+  async pushNumberRead(pageId: string): Promise<BrowserPushNumberRead> {
+    const raw = await this.request(BROWSER_INPUT_WORKER_METHODS.pushNumber, { pageId });
     return parsePushNumberRead((raw as { read?: unknown } | null)?.read);
   }
 

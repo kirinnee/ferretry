@@ -98,8 +98,8 @@ Read at start; a change needs a restart.
 - **An approve-on-phone card:** the daemon's own title, "Approve on your phone", and a body built by
   `phoneApprovalWords` from what the daemon observed. By owner decision !A171 the body leads with the number
   the daemon read off the page: "Tap 42 on your phone: ClickUp · a@gmail.com", or "Enter 123 in Duo Mobile: …".
-  With no number it ends "— open for the number" ("— check the terminal" for a terminal). A number read from the
-  element the ferret pointed at says so: "Tap 7 on your phone (read where the ferret pointed): …". A sign-in
+  With no number it ends "— open for the number" ("— check the terminal" for a terminal). The number only ever comes
+  from the provider's own challenge view, never from an element a ferret points at. A sign-in
   Ferretry doesn't know is never named by its host here: the ferret chose that host by navigating.
 
 A title is an agent's own words, so it must never read as one of the daemon's own: the new-device alert or the

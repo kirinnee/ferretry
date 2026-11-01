@@ -570,8 +570,8 @@ describe('a push approval on a request tool (docs/input-requests.md, "Approve on
     // Arrange
     const calls = [
       { tool: 'terminal.request_input', name: 'aws', push: true },
-      { tool: 'browser.request_input', name: 'app', push: true, ref: 'e12', secretHint: 'CLICKUP', waitSeconds: 300 },
-      { tool: 'browser.request_input', name: 'app', push: true, selector: '#code', factor: 'tf_000000000001' },
+      { tool: 'browser.request_input', name: 'app', push: true, secretHint: 'CLICKUP', waitSeconds: 300 },
+      { tool: 'browser.request_input', name: 'app', push: true, factor: 'tf_000000000001' },
     ];
 
     // Act + Assert
@@ -587,7 +587,9 @@ describe('a push approval on a request tool (docs/input-requests.md, "Approve on
       { tool: 'terminal.request_input', name: 'aws', push: true, ref: 'e1' },
       { tool: 'browser.request_input', name: 'app', push: true, number: '42' },
       { tool: 'browser.request_input', name: 'app', push: true, fields: [{ id: 'n', sensitivity: 'plain' }] },
-      { tool: 'browser.request_input', name: 'app', push: true, ref: 'e1', selector: '#n' },
+      // No element either: a number is never read where the ferret points (secrev-1244 H1).
+      { tool: 'browser.request_input', name: 'app', push: true, ref: 'e12' },
+      { tool: 'browser.request_input', name: 'app', push: true, selector: '[data-se="identifier"] span' },
       { tool: 'browser.request_input', name: 'app', push: true, waitSeconds: 10 },
     ];
 

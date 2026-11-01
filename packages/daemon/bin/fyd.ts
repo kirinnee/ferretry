@@ -6394,7 +6394,7 @@ function createInputRequestService(input: {
   // Approve on your phone (docs/input-requests.md): the number is read by the browser from the page only, and the card
   // settles only on the daemon's own look at the page or terminal; the ferret's acts are the observer's to weigh.
   const approvals = new PhoneApprovalService({
-    pages: { look: async (sessionId, key, element) => await pageTarget.pushNumber(sessionId, key, element) },
+    pages: { look: async (sessionId, key) => await pageTarget.pushNumber(sessionId, key) },
     terminals: terminalTarget,
     agenda: new PhoneApprovalAgendaAdapter(input.agenda),
     push: input.approvalPush,

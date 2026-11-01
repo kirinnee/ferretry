@@ -17,7 +17,8 @@ import { SurfaceKeySchema } from './surface-names.ts';
  * NOTHING OF THE FERRET'S IS SHOWN. A ferret names where (a page or a terminal), optionally which element it thinks
  * shows the number, which account and which push key; it cannot say anything the owner reads. The account, the site,
  * the time and the number all come from the daemon: the number is read by the browser from the page, only on an exact
- * sign-in or identity-provider origin, in a document no ferret has scripted. A terminal never shows a number, because
+ * sign-in or identity-provider origin, in a document no ferret has scripted, from a provider's own challenge view: a
+ * daemon never reads the element a ferret names (secrev-1244 H1). A terminal never shows a number, because
  * a ferret can print any text into its own pane. And the card settles only on the daemon's own observation that the
  * sign-in moved on, never on anyone's say-so: there is no "I approved" button and no route that sets it.
  */
@@ -41,7 +42,11 @@ export const PhoneApprovalRaiseSchema = z
       z.strictObject({ kind: z.literal('browser'), key: SurfaceKeySchema }),
       z.strictObject({ kind: z.literal('terminal'), key: SurfaceKeySchema }),
     ]),
-    /** The element the ferret thinks shows the number: WHERE TO LOOK only. The browser reads it, never the ferret. */
+    /**
+     * The element the ferret thinks shows the number. KEPT ONLY FOR THE WIRE, AND IGNORED: the daemon reads a number from
+     * a provider's own challenge view and never from where a ferret points, because a page may echo back text the ferret
+     * typed (Okta shows the username it was given). The agent tools no longer send it.
+     */
     element: InputFieldElementSchema.optional(),
     /** The account it expects (a handle, or a sign-in): orders only among the sign-ins the daemon matched. */
     secretHint: z.union([LoginEntryIdSchema, SignInIdSchema]).optional(),
@@ -60,7 +65,10 @@ export const PhoneApprovalRaiseSchema = z
   });
 export type PhoneApprovalRaise = z.infer<typeof PhoneApprovalRaiseSchema>;
 
-/** Where a number the daemon read came from: a provider's own sign-in page, or the element the ferret pointed at. */
+/**
+ * Where a number the daemon read came from: a provider's own sign-in page. `pointed` (the element a ferret pointed at)
+ * stays in the list for the wire only: no daemon produces it any more (secrev-1244 H1), and the words still mark one.
+ */
 export const PHONE_APPROVAL_NUMBER_SOURCES = ['okta', 'microsoft', 'google', 'duo', 'pointed'] as const;
 
 /**

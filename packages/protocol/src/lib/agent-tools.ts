@@ -261,10 +261,14 @@ const TerminalPushApprovalCallSchema = z.strictObject({
   tool: z.literal('terminal.request_input'),
   ...PushApprovalShape,
 });
-/** On a page, the element the ferret thinks shows the number may be named: where to look, never what it says. */
-const BrowserPushApprovalCallSchema = z
-  .strictObject({ tool: z.literal('browser.request_input'), ...PushApprovalShape, ...ElementTargetShape })
-  .superRefine(refineBrowserTarget({ point: false, required: false }));
+/**
+ * On a page too, no element: the number is read only from a provider's own challenge view, never from where the ferret
+ * points, because the page may echo back text the ferret typed (secrev-1244 H1).
+ */
+const BrowserPushApprovalCallSchema = z.strictObject({
+  tool: z.literal('browser.request_input'),
+  ...PushApprovalShape,
+});
 
 const AgentToolCallBodySchema = z.discriminatedUnion('tool', [
   z.strictObject({ tool: z.literal('terminal.list') }),

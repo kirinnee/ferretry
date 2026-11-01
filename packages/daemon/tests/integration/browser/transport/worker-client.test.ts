@@ -637,9 +637,11 @@ describe('browser worker client — a push number', () => {
     // Act
     const read = await client.pushNumberRead('p1');
     const none = await client.pushNumberRead('none');
-    const pointed = await client.pushNumberRead('pointed', { kind: 'ref', ref: 'e9' });
+    // A number "from the element the ferret pointed at" is no source at all any more (secrev-1244 H1): refused.
     const failures = await Promise.all(
-      ['both', 'long', 'extra', 'source'].map(async page => await rejection(client.pushNumberRead(page))),
+      ['both', 'long', 'extra', 'source', 'pointed', 'unread', 'garbled', 'reason'].map(
+        async page => await rejection(client.pushNumberRead(page)),
+      ),
     );
 
     // Assert
@@ -655,7 +657,6 @@ describe('browser worker client — a push number', () => {
       provider: 'microsoft',
       missing: 'none-found',
     });
-    should(pointed).match({ number: { value: '17', from: 'pointed' } });
     for (const failure of failures) {
       should(failure.code).equal('upstream_failed');
       should(failure.message).not.containEql('42');

@@ -167,17 +167,16 @@ export class PageInputTarget implements InputTargetPort {
 
   /**
    * The push number the page shows (docs/input-requests.md, "Approve on your phone"), read by the browser in the page's
-   * own queue, with the page's id so a page opened again under the name is told apart. `element` is the ferret's
-   * pointer: where to look, never what it says. Nothing when the page is gone or this browser cannot read one.
+   * own queue, with the page's id so a page opened again under the name is told apart. Only a provider's own challenge
+   * view is read: nothing the ferret points at. Nothing when the page is gone or this browser cannot read one.
    */
   async pushNumber(
     sessionId: string,
     key: string,
-    element?: BrowserElementTarget,
   ): Promise<{ readonly pageId: string; readonly read: BrowserPushNumberRead } | undefined> {
     try {
       return await this.host.inputOnPage(sessionId, key, async (port, pageId) =>
-        port.pushNumberRead === undefined ? undefined : { pageId, read: await port.pushNumberRead(pageId, element) },
+        port.pushNumberRead === undefined ? undefined : { pageId, read: await port.pushNumberRead(pageId) },
       );
     } catch {
       return undefined;

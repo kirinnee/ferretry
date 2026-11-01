@@ -934,14 +934,10 @@ async function act(request: Request): Promise<Record<string, unknown>> {
     }
     case 'pushNumberRead': {
       const page = targetPage(params.pageId);
-      const element = params.element === undefined ? undefined : browserElementParam(params.element);
-      if (params.element !== undefined && element === undefined)
-        throw new Error('a push number read names its element');
       return {
         read: await readPushNumber(
           page as unknown as PushNumberPage,
           async () => await describeInputDocument(inputSubject(page)),
-          element,
         ),
       };
     }

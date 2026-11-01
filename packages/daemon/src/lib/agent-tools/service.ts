@@ -1489,11 +1489,8 @@ export class AgentToolService {
     reference: string,
   ): Promise<AgentToolResult> {
     const port = this.approvalPort(caller);
-    const target = call.tool === 'browser.request_input' ? browserTargetOf(call) : undefined;
     const raise = PhoneApprovalRaiseSchema.parse({
       target: { kind: call.tool === 'browser.request_input' ? 'browser' : 'terminal', key: surface.name ?? surface.id },
-      ...(target?.kind === 'ref' ? { element: { kind: 'ref', ref: target.ref } } : {}),
-      ...(target?.kind === 'selector' ? { element: { kind: 'selector', selector: target.selector } } : {}),
       ...(call.secretHint === undefined ? {} : { secretHint: call.secretHint }),
       ...(call.factor === undefined ? {} : { factor: call.factor }),
       ...(call.waitSeconds === undefined ? {} : { waitSeconds: call.waitSeconds }),
@@ -1899,7 +1896,7 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return call.push === true ? { push: true } : { sensitivity: call.sensitivity };
     case 'browser.request_input':
       return call.push === true
-        ? { push: true, ...(call.ref === undefined && call.selector === undefined ? {} : { pointed: true }) }
+        ? { push: true }
         : { sensitivity: strongestSensitivity(call.fields), fields: call.fields.length };
     case 'input.wait':
       return { timeoutMs: call.timeoutMs ?? AGENT_TOOL_DEFAULT_WAIT_MS };

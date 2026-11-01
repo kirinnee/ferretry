@@ -276,24 +276,24 @@ describe('PageInputTarget.pushNumber', () => {
     },
   });
 
-  it('should read the number in the page’s own queue, looking where the ferret pointed, with the page’s id', async () => {
+  it('should read the number in the page’s own queue, with the page’s id', async () => {
     // Arrange
     const asked: unknown[] = [];
     const target = new PageInputTarget(
       pages({
-        pushNumberRead: async (pageId, element) => {
-          asked.push([pageId, element]);
+        pushNumberRead: async pageId => {
+          asked.push(pageId);
           return READ;
         },
       }),
     );
 
     // Act
-    const read = await target.pushNumber('s1', 'app', { kind: 'ref', ref: 'e12' });
+    const read = await target.pushNumber('s1', 'app');
 
     // Assert
     should(read).eql({ pageId: 'page-7', read: READ });
-    should(asked).eql([['page-7', { kind: 'ref', ref: 'e12' }]]);
+    should(asked).eql(['page-7']);
   });
 
   it('should answer nothing from a browser that cannot read one, a page that is not the session’s, or a failed read', async () => {

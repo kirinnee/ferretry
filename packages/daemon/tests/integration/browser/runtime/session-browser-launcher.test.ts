@@ -227,6 +227,10 @@ describe('NodeSessionBrowserLauncher', () => {
         calls.push(`probe:${pageId}:${fieldIds.join(',')}:${dummy}`);
         return 'hidden';
       },
+      pushNumberRead: async (pageId: string) => {
+        calls.push(`push-number:${pageId}`);
+        return { origin: 'https://login.microsoftonline.com', navigationId: 'loader-1', missing: 'none-found' };
+      },
     };
     const launcher = new NodeSessionBrowserLauncher(
       new BrowserProfileStore(root),
@@ -250,6 +254,11 @@ describe('NodeSessionBrowserLauncher', () => {
     });
     should(await browser.inputText?.('p1')).equal('Welcome back');
     should(await browser.inputProbe?.('p1', facts, ['password'], '~abcde')).equal('hidden');
+    should(await browser.pushNumberRead?.('p1')).eql({
+      origin: 'https://login.microsoftonline.com',
+      navigationId: 'loader-1',
+      missing: 'none-found',
+    });
     should(calls).eql([
       'document:p1',
       'observe:p1:0',
@@ -259,6 +268,7 @@ describe('NodeSessionBrowserLauncher', () => {
       'copy:p1:attribute:title',
       'text:p1',
       'probe:p1:password:~abcde',
+      'push-number:p1',
     ]);
     await browser.close();
   });

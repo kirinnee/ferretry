@@ -30,7 +30,7 @@ const refusal = async (work: Promise<unknown>): Promise<AgentToolError> =>
   )) as AgentToolError;
 
 describe('AgentToolService — push: true on a request tool', () => {
-  it('should raise a phone approval on the page, handing on where to look and the hints only', async () => {
+  it('should raise a phone approval on the page, handing on the hints only', async () => {
     // Arrange
     const phoneApprovals = new FakeApprovals();
     const world = agentToolWorld({ phoneApprovals });
@@ -41,7 +41,6 @@ describe('AgentToolService — push: true on a request tool', () => {
       tool: 'browser.request_input',
       name: 'app',
       push: true,
-      ref: 'e12',
       secretHint: 'CLICKUP',
       waitSeconds: 60,
     });
@@ -53,7 +52,6 @@ describe('AgentToolService — push: true on a request tool', () => {
         agentName: 'Hadi',
         raise: {
           target: { kind: 'browser', key: 'app' },
-          element: { kind: 'ref', ref: 'e12' },
           secretHint: 'CLICKUP',
           waitSeconds: 60,
         },

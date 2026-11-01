@@ -709,7 +709,6 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
         submit: INPUT_OPTIONS.submit,
         chain: INPUT_OPTIONS.chain,
         push: PUSH,
-        ref: { type: 'string', description: 'push: the number' },
       },
       ['name'],
     ),

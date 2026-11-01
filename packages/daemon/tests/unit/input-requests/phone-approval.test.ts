@@ -131,14 +131,19 @@ describe('PhoneApprovalService raise', () => {
     const tooLong = read('https://company.okta.com', 'doc-1', {
       number: { value: '4242', from: 'okta', frameOrigin: 'https://company.okta.com' },
     });
-    const editable = read('https://company.okta.com', 'doc-1', { missing: 'editable' });
+    // A number from no provider's own challenge view (an element the page merely shows): never believed.
+    const unrecognised = read('https://company.okta.com', 'doc-1', {
+      number: { value: '42', from: 'okta', frameOrigin: 'https://company.okta.com' },
+    });
+    const anotherHost = okta('42', 'doc-1', 'https://other.okta.com');
 
     // Act + Assert
     should(gatedNumber(changed, context)).eql({ numberMissing: 'changed' });
     should(gatedNumber(framed, context)).eql({ numberMissing: 'origin' });
     should(gatedNumber(wrongProvider, context)).eql({ numberMissing: 'origin' });
     should(gatedNumber(tooLong, context)).eql({ numberMissing: 'none-found' });
-    should(gatedNumber(editable, context)).eql({ numberMissing: 'editable' });
+    should(gatedNumber(unrecognised, context)).eql({ numberMissing: 'none-found' });
+    should(gatedNumber(anotherHost, { ...context, pinnedHost: 'company.okta.com' })).eql({ numberMissing: 'origin' });
     should(gatedNumber(okta('42'), context)).containDeep({ number: { value: '42', from: 'okta' } });
   });
 
@@ -163,22 +168,57 @@ describe('PhoneApprovalService raise', () => {
     should(run.pushes[0]?.body).equal("Tap 17 on your phone: a sign-in Ferretry doesn't know");
   });
 
-  it('should mark a number read from the element the ferret pointed at, and look only where it pointed', async () => {
-    // Arrange
+  it('should never read where the ferret pointed: a username it typed and Okta echoes is no number (secrev-1244 H1)', async () => {
+    // Arrange — the ferret typed "42" as the username on the owner's real Okta page and points at Okta's echo of it. The
+    // page is Okta's push page with no number of its own, so whatever reaches the daemon is no challenge view's number.
     const run = world();
     run.page.current = {
       pageId: 'page-1',
       read: read('https://company.okta.com', 'doc-1', {
-        number: { value: '7', from: 'pointed', frameOrigin: 'https://company.okta.com' },
+        number: { value: '42', from: 'okta', frameOrigin: 'https://company.okta.com' },
       }),
     };
 
     // Act
-    await run.raise({ element: { kind: 'ref', ref: 'e12' } });
+    const view = await run.raise({ element: { kind: 'selector', selector: '[data-se="identifier"] span' } });
+
+    // Assert — only the page's key is looked at, and neither the card nor the push carries a number.
+    const approval = run.service.get(OWNER, SESSION, view.id);
+    should(run.looks).eql(['app']);
+    should(approval.number).be.undefined();
+    should(approval.numberMissing).equal('none-found');
+    should(run.pushes[0]?.body).equal('Approve on your phone: ClickUp · a@gmail.com — open for the number');
+    should(JSON.stringify([approval, run.cards, run.pushes])).not.match(/\b42\b/u);
+  });
+
+  it('should read nothing on another host than the one it was raised on, even another identity provider’s (M1)', async () => {
+    // Arrange
+    const run = world();
+    const view = await run.raise();
+
+    // Act — the page goes to another Okta tenant, still a challenge, with a number of its own.
+    run.page.current = { pageId: 'page-1', read: okta('17', 'doc-2', 'https://other.okta.com') };
+    await run.tick();
 
     // Assert
-    should(run.looks[0]).eql({ kind: 'ref', ref: 'e12' });
-    should(run.pushes[0]?.body).equal('Tap 7 on your phone (read where the ferret pointed): ClickUp · a@gmail.com');
+    const approval = run.service.get(OWNER, SESSION, view.id);
+    should(approval.state).equal('waiting');
+    should(approval.number).be.undefined();
+    should(approval.numberMissing).equal('origin');
+    should(run.pushes).have.length(1);
+  });
+
+  it('should keep watching when the raise cannot be logged, so the approval still times out (L1)', async () => {
+    // Arrange
+    const run = world({ auditFails: true });
+
+    // Act
+    const view = await run.raise({ waitSeconds: 30 });
+    for (let second = 0; second < 31; second += 1) await run.tick();
+
+    // Assert
+    should(run.service.get(OWNER, SESSION, view.id).state).equal('timed-out');
+    should(run.pushes).have.length(1);
   });
 
   it('should never show a number for a terminal, whatever the pane says (invariant 9)', async () => {
@@ -234,7 +274,7 @@ describe('PhoneApprovalService settling (invariant 10)', () => {
       state: 'moved-on',
       secondFactor: 'push',
     });
-    should(run.closed).eql([{ id: 'A1', note: 'The sign-in went through.' }]);
+    should(run.closed).eql([{ id: 'A1', note: 'The page moved on.' }]);
     // Kept under the identity the sign-in already has there, so its other facts are counted up, not replaced.
     should(run.facts).eql([
       {
@@ -278,6 +318,21 @@ describe('PhoneApprovalService settling (invariant 10)', () => {
 
     // Assert
     should(run.service.get(OWNER, SESSION, view.id).state).equal('moved-on');
+  });
+
+  it('should claim nothing when the provider’s challenge gives way on its own host, which may be its denial (L2)', async () => {
+    // Arrange — Okta's number, then a page on the same host that is no challenge (its "denied" view, say).
+    const run = world();
+    const view = await run.raise();
+
+    // Act
+    run.page.current = { pageId: 'page-1', read: read('https://company.okta.com', 'doc-2') };
+    await run.tick();
+
+    // Assert — the card ends, says only that the page moved on, and keeps no fact and tells the ferret no push.
+    should(await run.service.agentView(SESSION, view.id, 0)).eql({ id: view.id, state: 'moved-on' });
+    should(run.closed).eql([{ id: 'A1', note: 'The page moved on.' }]);
+    should(run.facts).be.empty();
   });
 
   it('should clear the number on a new document of the same challenge, and push again only for a new number', async () => {
