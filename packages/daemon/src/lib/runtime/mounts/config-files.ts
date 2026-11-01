@@ -106,8 +106,16 @@ function refusedFor(context: RouteContext, path: string, axis: 'use' | 'configur
   const capability = configFileCapability(addressOf(path));
   const governance = context.governance;
   if (governance === undefined) {
+    // A wiring mistake, never the caller's: the route that reached here has no grant standing to read
+    // (`ScopedRoute.consultsGrants`). Refused, and the person is told what still works.
     return jsonResponse(
-      { error: 'this daemon cannot say whether this caller may change its configuration', code: 'forbidden' },
+      {
+        error:
+          axis === 'use'
+            ? `this daemon could not check whether this caller may read ${path} on this route, which is a daemon bug (update it: fy daemon update)`
+            : `nothing was changed: this daemon could not check what this caller may do with ${path} on this route, which is a daemon bug (update it: fy daemon update); meanwhile, at the machine, fy config confirm ${path} confirms it`,
+        code: 'forbidden',
+      },
       403,
     );
   }
