@@ -805,11 +805,18 @@ const refile = (
     action.laneId === undefined && !alreadyClosed && card.dropped === null
       ? factsLandingLane(card, target, context)
       : undefined;
-  const lane = byFacts ?? refileLane(card, context.laneSet, target, action.laneId);
-  if (!(alreadyClosed && isClosedLane(lane))) requireOwnerForClosed(lane, context.standing, card);
-  if (!alreadyClosed && !mayPassGate(context.standing, context.audience ?? 'external')) {
-    refileGateProblem(card, { from: context.laneSet, target, lane, named: action.laneId !== undefined, atGate });
-  }
+  const landing = byFacts ?? refileLane(card, context.laneSet, target, action.laneId);
+  if (!(alreadyClosed && isClosedLane(landing))) requireOwnerForClosed(landing, context.standing, card);
+  const lane =
+    alreadyClosed || mayPassGate(context.standing, context.audience ?? 'external')
+      ? landing
+      : refileGateLanding(card, {
+          from: context.laneSet,
+          target,
+          lane: landing,
+          named: action.laneId !== undefined,
+          atGate,
+        });
   const fromProject: BoardProjectId = card.projectId;
   const refiled: BoardTask = {
     ...withEvent(
@@ -824,11 +831,12 @@ const refile = (
 };
 
 /**
- * A refile is no way past a gate (docs/board.md § Gates ask the owner): for anyone who may not pass one, a card
- * waiting at a gate lands at a gate or earlier, and a lane named for it is the lane of its category there, or one no
- * gate of that board's variant stands before. Throws `owner-gate` naming the gate.
+ * Where a refile lands for anyone who may not pass a gate (docs/board.md § Gates ask the owner): never past a gate of
+ * the other board's variant — a landing with one before it stops in that gate, and a lane NAMED past one is refused —
+ * and a card waiting at a gate never lands in a later stage than that gate's, nor leaves it for a lane that is not a
+ * gate. Throws `owner-gate` naming the gate.
  */
-const refileGateProblem = (
+const refileGateLanding = (
   card: BoardTask,
   facts: {
     readonly from: LaneSet;
@@ -837,27 +845,29 @@ const refileGateProblem = (
     readonly named: boolean;
     readonly atGate: boolean;
   },
-): void => {
+): Lane => {
   const ref = formatTaskRef(card);
   const source = requireLane(facts.from, card.laneId);
-  const ahead = LANE_CATEGORIES.indexOf(facts.lane.category) >= LANE_CATEGORIES.indexOf(source.category);
-  if (facts.atGate && !isGate(facts.lane) && ahead) {
+  const stage = (lane: Lane): number => LANE_CATEGORIES.indexOf(lane.category);
+  if (
+    facts.atGate &&
+    (stage(facts.lane) > stage(source) || (!isGate(facts.lane) && stage(facts.lane) === stage(source)))
+  ) {
     throw new BoardError(
       'owner-gate',
       `${ref} waits in ${source.name} for the owner; only the owner moves it on, to this board or another`,
       ['owner-human'],
     );
   }
-  if (!facts.named || facts.lane.id === refileLane(card, facts.from, facts.target, undefined).id) return;
   const entry = entryLane(facts.target, card.workflow);
   const passed = gatesBetween(facts.target, { laneId: entry.id, workflow: card.workflow }, facts.lane)[0];
-  if (passed !== undefined) {
-    throw new BoardError(
-      'owner-gate',
-      `${ref} would land past ${passed.name} on that board, which waits for the owner; refile it without --lane, or to ${passed.name}`,
-      ['owner-human'],
-    );
-  }
+  if (passed === undefined) return facts.lane;
+  if (!facts.named) return passed;
+  throw new BoardError(
+    'owner-gate',
+    `${ref} would land past ${passed.name} on that board, which waits for the owner; refile it without --lane, or to ${passed.name}`,
+    ['owner-human'],
+  );
 };
 
 const sameParent = (left: TaskRef | null, right: TaskRef | null): boolean =>

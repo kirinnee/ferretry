@@ -380,6 +380,7 @@ describe('the board as the gate items read it', () => {
         },
         sweepBoard: async () => await daemon.board.sweepBoard(),
         act: async (id, request, caller) => await daemon.board.act(id, request, caller),
+        audienceOf: async card => await daemon.board.audienceOf(card),
       },
       { project: async () => undefined },
     );

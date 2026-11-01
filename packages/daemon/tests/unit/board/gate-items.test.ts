@@ -1171,3 +1171,40 @@ describe('telling a gate item apart', () => {
     should(await world.gates.isGate('nobody', 'A1')).be.false();
   });
 });
+
+describe('an external card at a gate always has its item', () => {
+  it('raises one for a top-level ferret’s card whatever session its ask names, so someone can always pass it', async () => {
+    // Arrange — the gate holds for this card (only the owner passes it), so the owner must be asked
+    const world = fixture([
+      external({
+        laneId: 'tested',
+        owner: 'lead',
+        assignee: null,
+        createdBy: { kind: 'ferret', sessionId: 'lead' },
+        ask: { text: 'Build X', source: 'session:child' },
+        askedBy: 'agent',
+      }),
+    ]);
+
+    // Act
+    await world.gates.backfill();
+
+    // Assert
+    should(await world.board.audienceOf(world.stored())).equal('external');
+    should(world.open('lead').map(item => item.sourceRef)).eql(['gate:F1:tested:1']);
+  });
+
+  it('raises none for a card the daemon made for a sub-ferret, whose lead passes its gate', async () => {
+    // Arrange
+    const world = fixture([
+      external({ laneId: 'tested', createdBy: { kind: 'daemon', sessionId: 'lead' }, askedBy: 'agent' }),
+    ]);
+
+    // Act
+    const raised = await world.gates.backfill();
+
+    // Assert
+    should(raised).equal(0);
+    should(await world.board.audienceOf(world.stored())).equal('internal');
+  });
+});

@@ -135,3 +135,71 @@ describe('the refusal in words', () => {
     ).equal('only the owner may change these gates: this change removes Plan/Design, which waits for the owner');
   });
 });
+
+describe('a relocation judged where the cards end up (kyan R3)', () => {
+  it('refuses moving Review/CI’s cards into a new lane past To test', () => {
+    // Arrange — the review's proof: remove Review/CI, add a lane after To test, relocate review → after
+    const set = current();
+    const after: Lane = { id: 'after', name: 'After', category: 'verify' };
+    const next = {
+      lanes: set.lanes
+        .filter(lane => lane.id !== 'review')
+        .flatMap(lane => (lane.id === 'tested' ? [lane, after] : [lane])),
+      variants: Object.fromEntries(
+        Object.entries(set.variants).map(([workflow, walked]) => [
+          workflow,
+          (walked ?? []).filter(id => id !== 'review').flatMap(id => (id === 'tested' ? [id, 'after'] : [id])),
+        ]),
+      ),
+    };
+
+    // Act
+    const problems = laneGateProblems(set, next, { review: 'after' });
+
+    // Assert
+    should(problems.map(problem => problem.laneId)).containEql('after');
+    should(editLaneSet(set, { version: 1, layout: next, relocate: { review: 'after' } }, FERRET)).match({
+      ok: false,
+      error: { code: 'owner-gate' },
+    });
+  });
+
+  it('refuses moving cards before Plan into a new lane after it on a pr board', () => {
+    // Arrange — Todo removed, its cards sent into a new lane placed after Plan/Design
+    const set = lanes(PROJECT, 'pr');
+    const later: Lane = { id: 'later', name: 'Later', category: 'active' };
+    const next = {
+      lanes: set.lanes
+        .filter(lane => lane.id !== 'todo')
+        .flatMap(lane => (lane.id === 'plan' ? [lane, later] : [lane])),
+      variants: Object.fromEntries(
+        Object.entries(set.variants).map(([workflow, walked]) => [
+          workflow,
+          (walked ?? []).filter(id => id !== 'todo').flatMap(id => (id === 'plan' ? [id, 'later'] : [id])),
+        ]),
+      ),
+    };
+
+    // Act
+    const problems = laneGateProblems(set, next, { todo: 'later' });
+
+    // Assert
+    should(problems.length).be.above(0);
+  });
+
+  it('refuses a relocation that puts cards past a gate the new layout moved ahead of them', () => {
+    // Arrange — Implement removed and its cards sent to Merged, which To test does not stand before; but Review/CI,
+    // made a gate, does
+    const set = {
+      ...current(),
+      lanes: current().lanes.map(lane => (lane.id === 'review' ? { ...lane, ownerGate: true } : lane)),
+    };
+    const next = withLanes(set, lane => (lane.id === 'implement' ? undefined : lane));
+
+    // Act
+    const problems = laneGateProblems(set, next, { implement: 'merged' });
+
+    // Assert
+    should(whys(problems)).eql(['sends the cards of implement past Review/CI, which waits for the owner']);
+  });
+});

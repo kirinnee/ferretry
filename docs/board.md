@@ -611,16 +611,17 @@ its owner ferret's or a lead's move, below). Every other path may bring a card I
 automatic stages, never out of one or past one: a ferret's `fy task move` (refused `owner-gate`, naming the lane),
 a daemon trigger (`work.started`, a PR, a release — it stops in the first gate on its way, and the history says
 "stopped at <lane>, which waits for the owner"), PR facts (they never pull a card back out of a gate for an open PR
-either), `fy signal done` (held, or stopped at the gate) and a refile's facts. A refile by anyone else lands a card
-waiting at a gate at a gate (or earlier), and a lane named for it only where no gate of the other board's variant stands
-before it; a dropped card is reopened by anyone else only where it was dropped, or earlier. Leaving a gate is
+either), `fy signal done` (held, or stopped at the gate) and a refile's facts. A refile by anyone else never lands a card
+past a gate of the other board's variant: it stops in the first one on the way, and a lane named past one is refused;
+and a card waiting at a gate lands at a gate of the same stage or earlier, never a later one; a dropped card is reopened by anyone else only where it was dropped, or earlier. Leaving a gate is
 `needsOwner`'s and a gate on the way `gatesBetween`'s (`card-actions.ts`), both from each lane's stage
 (`laneStage`), so a `verify` lane with no `ownerGate` is a gate too. A ferret may still move a card back out of a
 gate, with a reason. A card's workflow never changes, so no variant can skip one.
 
 **Lane changes.** A ferret's lane edit or proposal over a live set may not take a gate from the owner
 (`laneGateProblems`, `lane-set-policy.ts`): remove a gate lane, make it automatic, drop its `ownerGate`, move it
-among the lanes a variant walks, let a variant skip it, or send cards into a closed lane or past a gate. It is refused
+among the lanes a variant walks, let a variant skip it, or send cards into a closed lane, into a new lane, or past a gate
+of the new layout. It is refused
 `403 owner-gate`, naming the lane. Interim: a ferret's allowed edit still goes live; making every ferret edit a
 proposal the owner accepts is its own follow-up.
 
@@ -645,13 +646,13 @@ second push. A daemon that raises gate items lists `board.gate-items.1` on `GET 
 own to-test rows only for such a machine.
 
 **Internal cards.** A card that is positively a ferret's own errand never raises a gate item, never buzzes and is not
-in the Inbox: made by the daemon, or recorded from a session a ferret started (`origin: agent`), AND no person asked
-for it (`askedBy` is not `person`). The reading is the conservative one because it decides who passes a gate
-(`cardAudience` / `audienceOf` in `origin.ts`): an unknown session, a lineage that could not be read, or a top-level
-ferret's own card is EXTERNAL, so a ferret cannot make the owner's work its own by how it writes the ask.
-Its owner ferret, or a lead above it, passes its gate with an ordinary `fy task move`, closing included; its assignee,
-a sub-ferret and any other ferret are still refused. An external card's gate stays the owner's: a ferret is refused
-`owner-gate` and told the owner is asked in the Inbox, so it raises no agenda item of its own for it.
+in the Inbox. Only what the daemon recorded decides it, never what a ferret wrote: the daemon made the card (`createdBy`
+`daemon`: a board import, or the card `fy new` makes for a sub-ferret — written by that start alone, kept by every
+hand-over, refile and reopen), or the session that wrote it was started by a ferret (a sub-lead's own card); AND no
+person asked for it (`askedBy` is not `person`). Anything else — a top-level ferret's `fy task create`, whatever its
+ask's source says; a lineage that could not be read — is EXTERNAL. One function decides it for the gate items and for
+who passes the gate alike (`BoardService.audienceOf`, `cardAudience` in `origin.ts`), so an external card at a gate
+always has its item, and an internal one always has someone who may pass it.
 
 | Standing             | External card's gate | Internal card's gate |
 | -------------------- | -------------------- | -------------------- |

@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { type BoardTask, BoardTaskActionRequestSchema, type LaneSet, type PrLink } from '@ferretry/protocol';
+import {
+  type BoardTask,
+  BoardTaskActionRequestSchema,
+  BoardTaskCreateRequestSchema,
+  type LaneSet,
+  type PrLink,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   type BoardCaller,
@@ -473,5 +479,167 @@ describe('the security review’s ways past a gate (&F364 PR B)', () => {
 
   it('never lets a card’s workflow change, so no variant can skip a gate', () => {
     should(BoardTaskActionRequestSchema.safeParse({ action: 'edit', workflow: 'quick' }).success).be.false();
+  });
+});
+
+describe('who a card’s gates ask comes only from what the daemon recorded (kyan R1)', () => {
+  const lead: BoardCaller = { kind: 'ferret', sessionId: 'lead' };
+  const toImplement = move('implement');
+
+  it('keeps a top-level ferret’s card external whatever session its ask names', async () => {
+    // Arrange — the review's proof: lead (top level) writes that its own sub-ferret asked
+    const world = serviceOver([
+      cardFor('external', 'plan', {
+        owner: 'lead',
+        assignee: null,
+        createdBy: { kind: 'ferret', sessionId: 'lead' },
+        ask: { text: 'Build X', source: 'session:child' },
+        askedBy: 'agent',
+      }),
+    ]);
+
+    // Act
+    const error = await attempt(world.service.act('F1', toImplement, lead));
+
+    // Assert
+    should(await world.service.audienceOf(world.stored())).equal('external');
+    should(error?.code).equal('owner-gate');
+    should(world.stored().laneId).equal('plan');
+  });
+
+  it('reads a sub-lead’s own card as internal: a ferret-started session wrote it', async () => {
+    // Arrange — child was started by lead
+    const world = serviceOver([
+      cardFor('external', 'plan', { createdBy: { kind: 'ferret', sessionId: 'child' }, askedBy: 'agent' }),
+    ]);
+
+    // Act
+    await world.service.act('F1', toImplement, CALLERS.owner);
+
+    // Assert
+    should(world.stored().laneId).equal('implement');
+  });
+
+  const spawned = async (source: string) => {
+    const world = serviceOver([]);
+    const request = BoardTaskCreateRequestSchema.parse({
+      kind: 'feature',
+      title: 'Sub-PR',
+      ask: { text: 'do the sub-PR', source },
+      workflow: 'design-first',
+    });
+    await world.service.spawn('F1', request, { owner: 'lead', by: 'lead', focus: 'child', projectId: PROJECT });
+    await world.store.write('F1', async current => ({
+      task: { ...(current as BoardTask), laneId: 'plan' },
+      result: undefined,
+    }));
+    return world;
+  };
+
+  it('reads a card the daemon made for a fy new as internal, and lets its lead pass the gate', async () => {
+    // Arrange — the daemon's own record of the card: createdBy daemon, written by the spawn alone
+    const world = await spawned('session:lead');
+
+    // Act
+    await world.service.act('F1', toImplement, lead);
+
+    // Assert
+    should(world.stored().createdBy.kind).equal('daemon');
+    should(await world.service.audienceOf(world.stored())).equal('internal');
+    should(world.stored().laneId).equal('implement');
+  });
+
+  it('keeps a daemon-made card the owner asked for external', async () => {
+    // Arrange
+    const world = await spawned('owner');
+
+    // Act
+    const error = await attempt(world.service.act('F1', toImplement, lead));
+
+    // Assert
+    should(world.stored().askedBy).equal('person');
+    should(error?.code).equal('owner-gate');
+  });
+
+  it('never makes an owner’s card internal by handing it to a sub-ferret, refiling or reopening it', async () => {
+    // Arrange — the owner made it; lead hands it to child (fy new --card)
+    const world = serviceOver([
+      cardFor('external', 'plan', {
+        owner: 'lead',
+        assignee: null,
+        createdBy: { kind: 'owner' },
+        ask: { text: 'make the gates ask me', source: 'owner (board)' },
+        askedBy: 'person',
+      }),
+    ]);
+    await world.service.handOver('F1', 'lead', 'child');
+    await world.service.act(
+      'F1',
+      BoardTaskActionRequestSchema.parse({ action: 'refile', projectId: OTHER_PROJECT }),
+      CALLERS['owner-human'],
+    );
+
+    // Act
+    const error = await attempt(world.service.act('F1', toImplement, lead));
+
+    // Assert
+    should(world.stored().createdBy).eql({ kind: 'owner' });
+    should(await world.service.audienceOf(world.stored())).equal('external');
+    should(error?.code).equal('owner-gate');
+  });
+
+  it('cannot be set by a request: a create names no creator', () => {
+    should(
+      BoardTaskCreateRequestSchema.safeParse({
+        kind: 'feature',
+        title: 'Sneaky',
+        ask: { text: 'x', source: 'owner' },
+        createdBy: { kind: 'daemon' },
+      }).success,
+    ).be.false();
+  });
+});
+
+describe('a refile never skips a gate of the other board (kyan R2)', () => {
+  const refile = (projectId: string, laneId?: string) =>
+    BoardTaskActionRequestSchema.parse({ action: 'refile', projectId, ...(laneId === undefined ? {} : { laneId }) });
+  const quick = { ...lanes(PROJECT, 'quick'), projectId: OTHER_PROJECT };
+  const twoBoards = (task: BoardTask) => {
+    const store = new MemoryBoardStore([task]);
+    const service = new BoardService(
+      world({
+        store,
+        lanes: new FakeLanes(
+          new Map([
+            [PROJECT, lanes(PROJECT)],
+            [OTHER_PROJECT, quick],
+          ]),
+        ),
+      }),
+    );
+    return { service, stored: () => store.cards.get('F1') as BoardTask };
+  };
+
+  it('refuses a card waiting at Plan a named landing in the other board’s To test gate', async () => {
+    // Arrange — the review's (a): Plan here, To test on the quick board, then back unnamed to To test here
+    const world = twoBoards(cardFor('external', 'plan'));
+
+    // Act
+    const error = await attempt(world.service.act('F1', refile(OTHER_PROJECT, 'to-test'), CALLERS.assignee));
+
+    // Assert
+    should(error?.code).equal('owner-gate');
+    should(world.stored()).match({ projectId: PROJECT, laneId: 'plan' });
+  });
+
+  it('stops an unnamed refile back at the first gate it would skip', async () => {
+    // Arrange — the review's (b): a card that reached the quick board's To test comes home unnamed
+    const world = twoBoards(cardFor('external', 'to-test', { projectId: OTHER_PROJECT }));
+
+    // Act
+    await world.service.act('F1', refile(PROJECT), CALLERS.assignee);
+
+    // Assert
+    should(world.stored()).match({ projectId: PROJECT, laneId: 'plan' });
   });
 });

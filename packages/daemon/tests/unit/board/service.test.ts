@@ -1962,8 +1962,25 @@ describe('lanes follow PR facts at the write', () => {
           ]),
         ),
       });
-    const unfiledAt = (laneId: string, prs: readonly PrLink[]): BoardTask =>
-      card({ projectId: UNFILED_PROJECT_ID, laneId, links: { prs: [...prs], branch: null, commits: [], docs: [] } });
+    // Quick work walks no Plan gate: these cases are about where the facts land a card, not about a gate.
+    const unfiledAt = (laneId: string, prs: readonly PrLink[], workflow: BoardTask['workflow'] = 'quick'): BoardTask =>
+      card({
+        projectId: UNFILED_PROJECT_ID,
+        laneId,
+        workflow,
+        links: { prs: [...prs], branch: null, commits: [], docs: [] },
+      });
+
+    it('should stop a design-first card at the board’s Plan gate, whatever its PRs say', async () => {
+      // Arrange — the review's exploit: a card done on the quick board comes back past a Plan it never had
+      const { ports, service } = unfiledWorld(unfiledAt('to-test', [known({ releasedIn: RELEASE })], 'design-first'));
+
+      // Act
+      await service.act('F1', action({ action: 'refile', projectId: PROJECT }), daemon);
+
+      // Assert
+      should(stored(ports)).match({ projectId: PROJECT, laneId: 'plan' });
+    });
 
     it('should land a card merged but not released in Merged, not in Released · to test by its To test lane', async () => {
       // Arrange
@@ -2015,7 +2032,7 @@ describe('lanes follow PR facts at the write', () => {
 
   it('should re-evaluate a card refiled to another board against that board lanes', async () => {
     // Arrange
-    const { ports, service } = serviceWith([holding(known(), { id: 'F1' })]);
+    const { ports, service } = serviceWith([holding(known(), { id: 'F1', workflow: 'quick' })]);
 
     // Act
     await service.act('F1', action({ action: 'refile', projectId: OTHER_PROJECT }), lead);

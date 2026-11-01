@@ -104,10 +104,12 @@ export const laneGateProblems = (
       problems.push({ laneId: to, why: `sends the cards of ${from} into ${target.name}, which only the owner closes` });
       continue;
     }
-    const at = (id: string): number => current.lanes.findIndex(lane => lane.id === id);
-    const passed = current.lanes.find(
-      lane => isGate(lane) && at(lane.id) > at(from) && to !== lane.id && at(to) > at(lane.id) && at(to) !== -1,
-    );
+    // Judged where the cards end up: the new layout. A lane that is new gives no account of what it passed.
+    if (!current.lanes.some(lane => lane.id === to)) {
+      problems.push({ laneId: to, why: `sends the cards of ${from} into ${target?.name ?? to}, a lane that is new` });
+      continue;
+    }
+    const passed = passedGate(current, next, from, to);
     if (passed !== undefined) {
       problems.push({
         laneId: passed.id,
@@ -116,6 +118,32 @@ export const laneGateProblems = (
     }
   }
   return problems;
+};
+
+/**
+ * The first gate of the NEW layout a relocation `from` → `to` would put cards past, in any variant's walk: a gate that
+ * comes before `to` there, and that came after `from` before (or is new).
+ */
+const passedGate = (
+  current: Pick<LaneSet, 'lanes' | 'variants'>,
+  next: Pick<LaneLayoutValue, 'lanes' | 'variants'>,
+  from: string,
+  to: string,
+): Lane | undefined => {
+  for (const workflow of TaskWorkflowSchema.options) {
+    const was = walk(current, workflow);
+    const now = walk(next, workflow);
+    if (!was.includes(from) || !now.includes(to)) continue;
+    const passed = now
+      .slice(0, now.indexOf(to))
+      .map(id => next.lanes.find(lane => lane.id === id))
+      .find(
+        lane =>
+          lane !== undefined && isGate(lane) && (!was.includes(lane.id) || was.indexOf(lane.id) > was.indexOf(from)),
+      );
+    if (passed !== undefined) return passed;
+  }
+  return undefined;
 };
 
 /** The lanes a workflow walks, in the set's order (whatever order its variant names them in). */

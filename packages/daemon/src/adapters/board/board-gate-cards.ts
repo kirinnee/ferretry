@@ -5,10 +5,10 @@
  */
 import type { BoardProjectId, BoardTaskActionRequest, BoardTaskId, BoardTaskView, LaneSet } from '@ferretry/protocol';
 import {
-  audienceOf,
   type BoardCaller,
   BoardError,
   type BoardService,
+  type CardAudience,
   type GateBoard,
   type GateCard,
   type GateExpectation,
@@ -21,7 +21,7 @@ export interface GateProjectNames {
 
 export class BoardGateCards implements GateBoard {
   constructor(
-    private readonly board: Pick<BoardService, 'task' | 'sweepBoard' | 'act'>,
+    private readonly board: Pick<BoardService, 'task' | 'sweepBoard' | 'act' | 'audienceOf'>,
     private readonly projects: GateProjectNames,
   ) {}
 
@@ -41,7 +41,18 @@ export class BoardGateCards implements GateBoard {
     for (const projectId of new Set(views.map(view => view.projectId))) {
       names.set(projectId, (await this.projects.project(projectId).catch(() => undefined))?.name);
     }
-    return views.map(view => cardOf(view, laneSets.get(view.projectId) ?? null, names.get(view.projectId)));
+    const cards: GateCard[] = [];
+    for (const view of views) {
+      cards.push(
+        cardOf(
+          view,
+          laneSets.get(view.projectId) ?? null,
+          names.get(view.projectId),
+          await this.board.audienceOf(view),
+        ),
+      );
+    }
+    return cards;
   }
 
   async act(
@@ -55,13 +66,19 @@ export class BoardGateCards implements GateBoard {
 
   private async gateCard(view: BoardTaskView, laneSet: LaneSet | null): Promise<GateCard> {
     const name = (await this.projects.project(view.projectId).catch(() => undefined))?.name;
-    return cardOf(view, laneSet, name);
+    return cardOf(view, laneSet, name, await this.board.audienceOf(view));
   }
 }
 
-const cardOf = (view: BoardTaskView, laneSet: LaneSet | null, projectName: string | undefined): GateCard => ({
+/** The card as the gates read it; who it asks is the board's one rule (`BoardService.audienceOf`), as its moves use. */
+const cardOf = (
+  view: BoardTaskView,
+  laneSet: LaneSet | null,
+  projectName: string | undefined,
+  audience: CardAudience,
+): GateCard => ({
   task: view,
   laneSet,
-  audience: audienceOf(view.origin, view.askedBy),
+  audience,
   ...(projectName === undefined ? {} : { projectName }),
 });

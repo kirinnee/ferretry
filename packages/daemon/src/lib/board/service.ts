@@ -37,7 +37,14 @@ import {
 } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
 import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
-import { type BoardCaller, type BoardStanding, effectiveAssignee, mayHandDown, standingOf } from './authority.ts';
+import {
+  type BoardCaller,
+  type BoardStanding,
+  type CardAudience,
+  effectiveAssignee,
+  mayHandDown,
+  standingOf,
+} from './authority.ts';
 import {
   applyAction,
   type CardContext,
@@ -48,7 +55,7 @@ import {
   triggerMove,
   withEvent,
 } from './card-actions.ts';
-import { deriveView, gatherDerivation, neighbourhoodOf, originFacts } from './derive.ts';
+import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
@@ -759,11 +766,21 @@ export class BoardService {
       ...viaOf(caller),
       standing,
       ...(handsDown ? { handsDown } : {}),
-      audience: cardAudience(card, await originFacts([card], this.ports.parents)),
+      audience: await this.audienceOf(card),
       laneSet,
       index,
       laneSets: new Map([...laneSets, [card.projectId, laneSet]]),
     };
+  }
+
+  /**
+   * Who a card's gates ask (`cardAudience`): the session that wrote it is read for whether a ferret started it, and a
+   * read that fails reads as the owner's.
+   */
+  async audienceOf(card: Pick<BoardTask, 'createdBy' | 'ask' | 'askedBy'>): Promise<CardAudience> {
+    const writer = card.createdBy.kind === 'ferret' ? card.createdBy.sessionId : undefined;
+    const parent = writer === undefined ? undefined : await this.ports.parents.parentOf(writer).catch(() => undefined);
+    return cardAudience(card, parent !== undefined);
   }
 
   /** The caller's standing on a card; the owner's lineage is walked only for a ferret that is not it. */

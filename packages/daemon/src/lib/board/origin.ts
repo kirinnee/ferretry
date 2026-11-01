@@ -118,15 +118,15 @@ export const decideAskedBy = async (
 /**
  * Who a card's gates ask: the ONE reading the gates use (docs/board.md § Gates ask the owner), and the CONSERVATIVE
  * one, because it decides who may pass them. A card is INTERNAL — its owner ferret and leads pass its gates, and the
- * owner is never asked — only when it is positively a ferret's own errand: made by the daemon, or recorded from a
- * session a ferret started ({@link cardOrigin} `agent`), AND no person asked for it (`askedBy`). Anything else — an
- * unknown session, a lineage that could not be read, a top-level ferret's own card — is EXTERNAL: the owner decides.
+ * owner is never asked — only when it is positively a ferret's own errand: the daemon made it, or the session that
+ * REALLY wrote it (`createdBy`, never the ask's source, which the ferret writes) was started by a ferret; AND no
+ * person asked for it (`askedBy`). `startedByFerret` answers for `createdBy`'s session alone. Anything else — a
+ * top-level ferret's card, whatever its ask says; a lineage that could not be read — is EXTERNAL: the owner decides.
  */
 export const cardAudience = (
   card: Pick<BoardTask, 'createdBy' | 'ask' | 'askedBy'>,
-  facts: OriginFacts,
-): CardAudience => audienceOf(cardOrigin(card, facts), card.askedBy ?? cardAskedBy(card));
-
-/** {@link cardAudience} from a card's derived origin and who asked: a view that says neither is external. */
-export const audienceOf = (origin: BoardTaskOrigin | undefined, askedBy: BoardTaskAskedBy | undefined): CardAudience =>
-  origin === 'agent' && askedBy !== undefined && askedBy !== 'person' ? 'internal' : 'external';
+  startedByFerret: boolean,
+): CardAudience => {
+  const own = card.createdBy.kind === 'daemon' || (card.createdBy.kind === 'ferret' && startedByFerret);
+  return own && (card.askedBy ?? cardAskedBy(card)) !== 'person' ? 'internal' : 'external';
+};
