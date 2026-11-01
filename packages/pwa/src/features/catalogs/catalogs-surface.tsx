@@ -8,17 +8,20 @@
  */
 
 import type { OwnedCatalog, OwnedCatalogItem } from '@ferretry/protocol';
-import { CircleAlert, CircleCheck, FileDown, FileUp, Trash2 } from 'lucide-react';
+import { CircleAlert, CircleCheck, FileDown, Share2, Trash2, Users } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { downloadText, type SaveText } from '../settings/performance-settings.tsx';
+import { AddCatalogFromLink } from './add-from-link.tsx';
 import { AddToCatalogSheet } from './add-to-catalog-sheet.tsx';
+import { CatalogMoreMenu } from './catalog-more-menu.tsx';
+import { CatalogMembersPanel } from './catalog-members.tsx';
+import { FailureLine, SharingOffPanel } from './catalog-parts.tsx';
 import { formatBytes, plural, shortDigest } from './catalog-review-model.ts';
 import { MarkedText } from './catalog-review-view.tsx';
-import { FailureLine, SharingOffPanel } from './catalog-parts.tsx';
 import {
   type CatalogClientFactory,
   deleteCatalog,
@@ -28,7 +31,7 @@ import {
   withdrawCatalogItem,
 } from './catalogs-api.ts';
 import {
-  CATALOG_NOT_SHARED_YET,
+  CATALOGS_INTRO,
   catalogSummary,
   EXPORT_NOTE,
   exportFileName,
@@ -39,6 +42,7 @@ import {
   PUBLISH_COPY_NOTE,
 } from './catalogs-model.ts';
 import { InstallFromFileSheet, type InstallHost } from './install-from-file-sheet.tsx';
+import { ShareSheet } from './share-sheet.tsx';
 
 export interface CatalogsSurfaceProps {
   readonly connection: DaemonConnection;
@@ -93,6 +97,7 @@ export function CatalogsSurface({
   const createClient: CatalogClientFactory = injected ?? routed;
   const [openId, setOpenId] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
+  const [showPeople, setShowPeople] = useState(false);
   const detail = openId !== null;
   const { read, reload } = useCatalogs(connection, createClient, detail);
 
@@ -100,8 +105,18 @@ export function CatalogsSurface({
     <section className="flex min-w-0 flex-col gap-sm" aria-label="Catalogs" data-catalogs-surface="">
       <header className="flex min-w-0 flex-col gap-0.5">
         <h3 className="m-0 text-row font-semibold text-fg">Catalogs</h3>
-        <p className="m-0 text-cell text-muted">{CATALOG_NOT_SHARED_YET}</p>
+        <p className="m-0 text-cell text-muted">{CATALOGS_INTRO}</p>
       </header>
+      {openId === null && !showPeople ? (
+        <div className="flex min-w-0 flex-col gap-xs" data-catalogs-add="">
+          <AddCatalogFromLink />
+          {read.kind === 'failed' && read.refusal.sharingOff ? null : (
+            <div>
+              <CatalogMoreMenu onInstallFromFile={() => setInstalling(true)} />
+            </div>
+          )}
+        </div>
+      ) : null}
       {read.kind === 'loading' ? (
         <p className="m-0 text-cell text-muted" role="status">
           Reading catalogs…
@@ -112,8 +127,25 @@ export function CatalogsSurface({
         ) : (
           <FailureLine sentence={read.refusal.sentence} again onAgain={reload} againLabel="Try again" />
         )
+      ) : showPeople ? (
+        <CatalogMembersPanel
+          connection={connection}
+          createClient={createClient}
+          catalogs={read.catalogs}
+          onBack={() => setShowPeople(false)}
+        />
       ) : openId === null ? (
-        <CatalogList catalogs={read.catalogs} onOpen={setOpenId} />
+        <>
+          <CatalogList catalogs={read.catalogs} onOpen={setOpenId} />
+          {read.catalogs.length === 0 ? null : (
+            <div>
+              <Button type="button" onClick={() => setShowPeople(true)} data-catalogs-people="">
+                <Users size={16} aria-hidden="true" />
+                People and codes
+              </Button>
+            </div>
+          )}
+        </>
       ) : (
         <CatalogDetail
           connection={connection}
@@ -127,14 +159,6 @@ export function CatalogsSurface({
             reload();
           }}
         />
-      )}
-      {read.kind === 'failed' && read.refusal.sharingOff ? null : (
-        <div className="flex min-w-0 flex-col gap-1">
-          <Button type="button" onClick={() => setInstalling(true)} data-catalogs-install-from-file="">
-            <FileUp size={16} aria-hidden="true" />
-            Install from a file…
-          </Button>
-        </div>
       )}
       {installing ? (
         <InstallFromFileSheet
@@ -204,6 +228,7 @@ function CatalogDetail({
   const [confirm, setConfirm] = useState<'delete' | { readonly withdraw: string } | null>(null);
   const [editing, setEditing] = useState(false);
   const [publishing, setPublishing] = useState<OwnedCatalogItem | null>(null);
+  const [sharing, setSharing] = useState(false);
 
   const act = async (work: (catalogId: string) => Promise<void>): Promise<void> => {
     if (catalog === undefined) return;
@@ -292,6 +317,17 @@ function CatalogDetail({
             <FileDown size={16} aria-hidden="true" />
             Export file
           </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="primary"
+            disabled={busy}
+            onClick={() => setSharing(true)}
+            data-catalog-share=""
+          >
+            <Share2 size={16} aria-hidden="true" />
+            Share…
+          </Button>
         </div>
       )}
       <ul className="m-0 flex list-none flex-col gap-xs p-0" aria-label="Items" data-catalog-items="">
@@ -360,6 +396,14 @@ function CatalogDetail({
           </Button>
         </div>
       )}
+      {sharing ? (
+        <ShareSheet
+          connection={connection}
+          createClient={createClient}
+          catalog={catalog}
+          onClose={() => setSharing(false)}
+        />
+      ) : null}
       {publishing === null ? null : (
         <AddToCatalogSheet
           connection={connection}

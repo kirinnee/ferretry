@@ -13,7 +13,7 @@ import { Plus } from 'lucide-react';
 import {
   CatalogRowTools,
   type CatalogRowsHost,
-  InstallFromFileButton,
+  AddCatalogEntry,
   useCatalogInstalls,
 } from '../catalogs/catalog-row-tools.tsx';
 import { sortedMcpServers } from '../mcp/mcp-model.ts';
@@ -118,9 +118,9 @@ export function ContextMcpPanel({
               <Plus aria-hidden="true" size={12} /> Add…
             </button>
           )}
-          {catalogs === undefined ? null : <InstallFromFileButton host={catalogs} />}
         </span>
       </div>
+      {catalogs === undefined ? null : <AddCatalogEntry host={catalogs} />}
       {inventory.problems.map(problem => (
         <p key={problem.source} className="m-0 break-words text-meta text-warn" data-context-mcp-problem="">
           {problem.message}

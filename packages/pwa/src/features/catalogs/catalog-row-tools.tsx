@@ -7,7 +7,7 @@
  */
 
 import type { CatalogInstall, CatalogItemSource } from '@ferretry/protocol';
-import { FileUp, PackagePlus } from 'lucide-react';
+import { PackagePlus } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
@@ -16,6 +16,8 @@ import { AddToCatalogSheet } from './add-to-catalog-sheet.tsx';
 import { listCatalogInstalls, removeCatalogInstall } from './catalog-installs-api.ts';
 import { installedFromLine, installRefusal, installsFor, REMOVE_NOTE } from './catalog-install-model.ts';
 import { FailureLine } from './catalog-parts.tsx';
+import { AddCatalogFromLink } from './add-from-link.tsx';
+import { CatalogMoreMenu } from './catalog-more-menu.tsx';
 import { InstallFromFileSheet } from './install-from-file-sheet.tsx';
 import type { CatalogClientFactory } from './catalogs-api.ts';
 
@@ -171,14 +173,17 @@ export function CatalogRowTools({ host, kind, name, source, read }: CatalogRowTo
   );
 }
 
-/** "Install from a file…" on a list that has nothing to open it from. */
-export function InstallFromFileButton({ host }: { readonly host: CatalogRowsHost }) {
+/**
+ * The way to add a catalog on a list that has nothing to open it from: a link first, and the file under More.
+ */
+export function AddCatalogEntry({ host }: { readonly host: CatalogRowsHost }) {
   const [open, setOpen] = useState(false);
   return (
-    <>
-      <button className="fy-info-link" type="button" onClick={() => setOpen(true)} data-catalog-install-from-file="">
-        <FileUp aria-hidden="true" size={12} /> Install from a file…
-      </button>
+    <div className="flex min-w-0 flex-col gap-xs" data-catalog-add-entry="">
+      <AddCatalogFromLink />
+      <div>
+        <CatalogMoreMenu onInstallFromFile={() => setOpen(true)} />
+      </div>
       {open ? (
         <InstallFromFileSheet
           connection={host.connection}
@@ -186,6 +191,6 @@ export function InstallFromFileButton({ host }: { readonly host: CatalogRowsHost
           {...(host.createClient === undefined ? {} : { host: { createClient: host.createClient } })}
         />
       ) : null}
-    </>
+    </div>
   );
 }

@@ -26,6 +26,8 @@ import {
   useDaemonClient,
 } from '../../src/lib/store.tsx';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
+import { MemoryMemberKeyStore } from '../support/member-keys.ts';
+import { SEED } from '../support/shared-screens.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import {
   AutoCarrierPreferences,
@@ -656,6 +658,30 @@ const memoryStore = async (): Promise<AppStore> =>
   });
 
 describe('StoreProvider', () => {
+  it('joins a publisher over the carriers it is given, naming this browser by the setting or by its own agent', async () => {
+    const dialled: string[] = [];
+    const dial = (url: string): never => {
+      dialled.push(url);
+      throw new Error('no carrier answers');
+    };
+    const open = async (memberClientName?: string) =>
+      await createAppStore({
+        carrierPreferences: new AutoCarrierPreferences(undefined),
+        repository: new MemoryRepository(),
+        connectClient: async () => client('unused'),
+        fetcher: async () => Response.json({}),
+        memberKeys: new MemoryMemberKeyStore(),
+        relayDial: dial,
+        ...(memberClientName === undefined ? {} : { memberClientName }),
+      });
+
+    for (const name of ['Alice’s phone', undefined]) {
+      const store = await open(name);
+      expect((await store.members.join(SEED)).kind).toBe('unreachable');
+    }
+    expect(dialled.length).toBeGreaterThan(0);
+  });
+
   it('invalidates notification preferences and push devices for only the removed daemon', async () => {
     const store = await memoryStore();
     store.connections.add(alpha);

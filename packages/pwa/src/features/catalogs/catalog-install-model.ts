@@ -14,6 +14,7 @@ import {
   type CatalogSecretBindings,
   isSignInSecretName,
   readSharedCatalogFile,
+  revealHidden,
   SHARED_CATALOG_FILE_MAX_BYTES,
   type SecretList,
   type SharedCatalogFile,
@@ -313,7 +314,7 @@ export function installRefusal(error: unknown): InstallRefusal {
 
 /** "From Team skills (kirin-box)" */
 export function installedFromLine(install: Pick<CatalogInstall, 'provenance'>): string {
-  return `From ${install.provenance.catalogName} (${install.provenance.publisherName})`;
+  return `From ${revealHidden(install.provenance.catalogName)} (${revealHidden(install.provenance.publisherName)})`;
 }
 
 /** The installs that wrote this skill or server by name. A row shows each one it matches. */

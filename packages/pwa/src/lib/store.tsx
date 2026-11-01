@@ -54,10 +54,19 @@ import { browserControlsStorage, DaemonControlsStore } from './controls.ts';
 import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './daemon-connection.ts';
 import { boundDaemonId, daemonRequest } from './daemon-transport.ts';
 import { type DeviceKeyStore, IndexedDbDeviceKeyStore, mintDeviceKey } from './device-keys.ts';
+import { defaultDeviceName, deviceNameSuffix, normalizedDeviceName } from './device-name.ts';
 import { documentDraftStore } from './drafts.ts';
 import { DaemonEventTransport, type DaemonStreamOpener } from './event-transport.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { KeyRotation } from './key-rotation.ts';
+import { openMemberClient } from './member-client.ts';
+import {
+  IndexedDbMemberKeyStore,
+  type MemberKeyStore,
+  mintMemberKeys,
+  webCryptoMemberKeyGenerator,
+} from './member-keys.ts';
+import { joinPublisher } from './relay-join.ts';
 import { boundedReads } from './machine-deadline.ts';
 import { DeviceNotificationFilterStore } from './notification-filter.ts';
 import { browserNotificationFilterMirror } from './notification-filter-mirror.ts';
@@ -92,6 +101,7 @@ import { browserSessionCacheBackend } from './session-cache-storage.ts';
 import { MemoryOutboxBackend, type OutboxBackend, SendOutbox } from './send-outbox.ts';
 import { browserOutboxBackend } from './send-outbox-storage.ts';
 import { type OutboxWatchEnvironment, outboxSender, watchOutbox } from './send-outbox-wiring.ts';
+import { SharedController } from '../features/shared/shared-controller.ts';
 import { sharingIdenticalReads } from './shared-reads.ts';
 import {
   browserCredentials,
@@ -480,6 +490,8 @@ export interface AppStore {
    */
   readonly unlockGate: StepUpGate;
   readonly pair: (seed: PairingSeed, deviceName?: string) => Promise<DaemonConnection>;
+  /** What this browser is, and does, as a member of publishers' catalogs (`/join`, "Shared with me"). */
+  readonly members: SharedController;
   /**
    * Whether Ferretry's default relay is advertising itself right now.
    *
@@ -533,6 +545,10 @@ export interface CreateAppStoreOptions {
   readonly relayCrypto?: WebCryptoRelayCrypto;
   /** IndexedDB by default. Where this browser keeps the device key each pairing proved itself with. */
   readonly deviceKeys?: DeviceKeyStore;
+  /** IndexedDB by default. Where this browser keeps a key per publisher it joined as a catalog member. */
+  readonly memberKeys?: MemberKeyStore;
+  /** Derived from the user agent by default. What this browser calls itself to a publisher it joins. */
+  readonly memberClientName?: string;
   /** The browser WebSocket by default. Injected so no suite opens one. */
   readonly relayDial?: RelayDial;
   /** Carriers that need more than a URL to dial; none by default, so WebRTC is passed over, said. */
@@ -1002,6 +1018,35 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     outbox,
     backgroundFresh,
     scrollMemory,
+    members: new SharedController({
+      keys: options.memberKeys ?? new IndexedDbMemberKeyStore(),
+      mint: async () => await mintMemberKeys(webCryptoMemberKeyGenerator()),
+      join: async ({ seed, clientName, keys }) =>
+        await joinPublisher({
+          crypto: relayCrypto,
+          seed,
+          clientName,
+          keys,
+          hostedRelayUrl: await hostedRelayUrl,
+          ...(options.relayDial === undefined ? {} : { dial: options.relayDial }),
+        }),
+      openClient: async subscription =>
+        openMemberClient({
+          crypto: relayCrypto,
+          subscription,
+          hostedRelayUrl: await hostedRelayUrl,
+          ...(options.relayDial === undefined ? {} : { dial: options.relayDial }),
+        }),
+      credentials: options.passkeyCredentials ?? browserCredentials(),
+      origin: appOrigin,
+      crypto: relayCrypto,
+      now: () => new Date(),
+      clientName: () => {
+        const agent = typeof navigator === 'undefined' ? '' : navigator.userAgent;
+        const suffix = deviceNameSuffix(length => globalThis.crypto.getRandomValues(new Uint8Array(length)));
+        return options.memberClientName ?? normalizedDeviceName(defaultDeviceName(agent, suffix)) ?? 'Browser';
+      },
+    }),
     pair: async (seed, deviceName) => {
       const connection = await exchangePairing(seed, {
         ...(deviceName === undefined ? {} : { deviceName }),

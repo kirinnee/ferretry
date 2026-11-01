@@ -85,6 +85,8 @@ import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
 import { healthOf } from '../support/health.ts';
+import { MemoryMemberKeyStore, testSubscription } from '../support/member-keys.ts';
+import { FAKE_FRAGMENT } from '../support/shared-screens.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 import { fetcherDaemons, newDaemonIdentity, relayCrypto, testDevice } from '../support/relay.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -370,6 +372,8 @@ afterEach(async () => {
 /* ---------- the mounted shell --------------------------------------------- */
 
 interface ShellOptions {
+  /** The keys this browser holds as a catalog member: none unless a case supplies them. */
+  readonly memberKeys?: MemoryMemberKeyStore;
   /** Fleet reads by path, answered as given; any other path answers an empty document. */
   readonly fleet?: Readonly<Record<string, unknown>>;
   /** Where the stub daemon says each session's journal stands, on `get`. Absent: an older daemon. */
@@ -596,6 +600,7 @@ const appStore = async (
   daemonNetwork = network;
   return await createAppStore({
     repository: new MemoryRepository(),
+    memberKeys: options.memberKeys ?? new MemoryMemberKeyStore(),
     // In memory, never this browser's storage: a preference one case picks must not narrow the next one's walk.
     // Every machine is on Auto here, because these cases prove the walk (direct first); Relay is the default elsewhere.
     carrierPreferences: autoCarrierPreferences(),
@@ -1486,6 +1491,91 @@ describe('AppShell', () => {
     expect(view.container.querySelector('h1')?.textContent).toBe('Set up Ferretry');
     expect(must(view.container.querySelector('[data-route]'), 'the route announcer').textContent).toBe('Set up');
     await view.unmount();
+  });
+
+  it('lands a share link on Join by its path, with pairing untouched, and clears the fragment', async () => {
+    const { view } = await renderShell(`/join${FAKE_FRAGMENT}`, [alpha.daemonId]);
+    await settle();
+
+    expect(view.container.querySelector('[data-join-button]')).not.toBeNull();
+    expect(view.container.querySelector('#pairing-link')).toBeNull();
+    expect(view.container.querySelector('[data-onboarding="setup"]')).toBeNull();
+    expect(window.location.pathname).toBe('/join');
+    expect(window.location.hash).toBe('');
+    expect(must(view.container.querySelector('[data-route]'), 'the route announcer').textContent).toBe('Join');
+    await view.unmount();
+  });
+
+  it('reads a second share link opened in the same tab, starts over for it, and clears it from the address', async () => {
+    const { view } = await renderShell(`/join${FAKE_FRAGMENT}`, [alpha.daemonId]);
+    await settle();
+    expect(view.container.querySelector('[data-join-button]')).not.toBeNull();
+    expect(window.location.hash).toBe('');
+
+    window.history.pushState({}, '', '/join#v1;this-is-not-a-share-link');
+    await interact(() => window.dispatchEvent(new HashChangeEvent('hashchange')));
+    await settle();
+
+    expect(window.location.hash).toBe('');
+    expect(view.container.querySelector('[data-join-button]')).toBeNull();
+    expect(view.container.querySelector('[data-join-facts]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('reads a second share link that arrives by navigation, with no hashchange, and clears it from the address', async () => {
+    const { view } = await renderShell(`/join${FAKE_FRAGMENT}`, [alpha.daemonId]);
+    await settle();
+    expect(view.container.querySelector('[data-join-button]')).not.toBeNull();
+
+    await popTo('/join#v1;this-is-not-a-share-link');
+    await settle();
+
+    expect(window.location.hash).toBe('');
+    expect(view.container.querySelector('[data-join-button]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('shows Join, not first-run setup, for a browser with no machine at all', async () => {
+    const { view } = await renderShell(`/join${FAKE_FRAGMENT}`);
+    await settle();
+
+    expect(view.container.querySelector('[data-join-button]')).not.toBeNull();
+    expect(view.container.querySelector('[data-onboarding="setup"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('lists the publishers on Shared with me, and the picker and setup lead there only once a key exists', async () => {
+    const without = await renderShell('/', [alpha.daemonId]);
+    await popTo('/');
+    await settle();
+    expect(without.view.container.querySelector('[data-shared-entry]')).toBeNull();
+    await without.view.unmount();
+
+    const memberKeys = new MemoryMemberKeyStore();
+    await memberKeys.save(await testSubscription(`fy_daemon_${'q'.repeat(43)}`, { ownLabel: 'Studio' }));
+    const picker = await renderShell('/', [alpha.daemonId], { memberKeys });
+    await popTo('/');
+    await settle();
+    await interact(() => {
+      must(picker.view.container.querySelector<HTMLButtonElement>('[data-shared-entry] button'), 'the entry').click();
+    });
+    await settle();
+    expect(window.location.pathname).toBe('/shared');
+    expect(picker.view.container.querySelector('h1')?.textContent).toBe('Shared with me');
+    expect(picker.view.container.querySelector('[data-publisher-label]')?.textContent).toBe('Studio');
+    expect(must(picker.view.container.querySelector('[data-route]'), 'the route announcer').textContent).toBe(
+      'Shared with me',
+    );
+    await interact(() => {
+      must(picker.view.container.querySelector<HTMLButtonElement>('[data-shared-home]'), 'back').click();
+    });
+    expect(window.location.pathname).toBe('/');
+    await picker.view.unmount();
+
+    const setup = await renderShell('/setup', [], { memberKeys });
+    await settle();
+    expect(setup.view.container.querySelector('[data-shared-entry]')).not.toBeNull();
+    await setup.view.unmount();
   });
 
   it('takes a scanned pairing link through setup even when daemons already exist', async () => {

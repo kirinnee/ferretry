@@ -31,6 +31,10 @@ export interface PageHostSlots {
   readonly ConnectionPicker: ComponentType;
   /** First-run setup. Connection-free: it exists precisely because there is none yet. */
   readonly Setup: ComponentType;
+  /** A share link's landing page. Connection-free: the person joining may own no machine. */
+  readonly Join?: ComponentType;
+  /** Shared with me. Connection-free for the same reason. */
+  readonly Shared?: ComponentType;
   readonly Home: ComponentType<DaemonPageProps>;
   readonly Sessions: ComponentType<DaemonPageProps>;
   readonly NewSession: ComponentType<DaemonPageProps>;
@@ -76,6 +80,14 @@ const requireRouteConnection = (
 export function PageHost({ route, connection, slots }: PageHostProps) {
   if (route.kind === 'connection-picker') return <slots.ConnectionPicker />;
   if (route.kind === 'setup') return <slots.Setup />;
+  if (route.kind === 'join') {
+    if (slots.Join === undefined) throw new Error('the join route is not mounted');
+    return <slots.Join />;
+  }
+  if (route.kind === 'shared') {
+    if (slots.Shared === undefined) throw new Error('the shared route is not mounted');
+    return <slots.Shared />;
+  }
 
   const matchedConnection = requireRouteConnection(route.daemonId, connection);
   switch (route.kind) {

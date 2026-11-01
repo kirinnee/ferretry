@@ -280,6 +280,14 @@ describe('installed items', () => {
   it('reads where an install came from', () => {
     should(installedFromLine(installRecord())).equal('From Team skills (kirin-box)');
   });
+  it('marks hidden characters in the names the publisher chose', () => {
+    const base = installRecord();
+    const line = installedFromLine({
+      ...base,
+      provenance: { ...base.provenance, catalogName: 'Team\u202Eskills', publisherName: 'kirin\u202E-box' },
+    });
+    should(line).not.containEql('\u202E');
+  });
   it('matches installs to a row by kind and name', () => {
     const installs = [
       installRecord('skill', 'pdf-tools'),

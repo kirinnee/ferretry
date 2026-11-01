@@ -22,11 +22,14 @@ import {
   daemonSettingsPath,
   daemonWardenPath,
   decodeRouteSegment,
+  isDaemonless,
+  joinPath,
   parseRoute,
   type Route,
   routePageKey,
   routePath,
   setupPath,
+  sharedPath,
 } from '../../../src/lib/pages/routes.ts';
 
 const daemonA = daemonId('daemon/a');
@@ -269,6 +272,30 @@ describe('route parsing', () => {
     // Assert
     should(actual).deepEqual([{ kind: 'setup' }, { kind: 'setup' }, { kind: 'setup' }]);
     should(setupPath()).equal('/setup');
+  });
+
+  it('should route a share link and Shared with me by path, with no machine', () => {
+    // Act — the share fragment also reads as a pairing fragment, so only the path says it is a join.
+    const actual = [parseRoute('/join'), parseRoute('/join/'), parseRoute('/shared'), parseRoute('/shared/x')];
+
+    // Assert
+    should(actual).deepEqual([{ kind: 'join' }, { kind: 'join' }, { kind: 'shared' }, { kind: 'shared' }]);
+    should([joinPath(), sharedPath()]).deepEqual(['/join', '/shared']);
+    should(actual.map(route => routePath(route))).deepEqual(['/join', '/join', '/shared', '/shared']);
+    should(actual.map(route => routePageKey(route))).deepEqual(['join', 'join', 'shared', 'shared']);
+  });
+
+  it('should say which pages name no machine', () => {
+    // Act
+    const actual = ['/', '/setup', '/join', '/shared', '/d/daemon-b'].map(path => {
+      const route = parseRoute(path);
+      return route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect'
+        ? false
+        : isDaemonless(route);
+    });
+
+    // Assert
+    should(actual).deepEqual([true, true, true, true, false]);
   });
 
   it('should never throw when a pathname has malformed percent escapes', () => {

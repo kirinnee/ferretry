@@ -186,7 +186,7 @@ export const RELAY_UNAVAILABLE = 'there is no relay for this machine right now';
 /** Cancels a repeating timer. Injected so no suite depends on wall-clock behaviour. */
 export type RelayHeartbeatSchedule = (tick: () => void, intervalMilliseconds: number) => () => void;
 
-const browserHeartbeat: RelayHeartbeatSchedule = (tick, interval) => {
+export const browserHeartbeat: RelayHeartbeatSchedule = (tick, interval) => {
   const handle = setInterval(tick, interval);
   return () => clearInterval(handle);
 };

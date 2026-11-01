@@ -35,6 +35,19 @@ export interface SetupRoute {
   readonly kind: 'setup';
 }
 
+/**
+ * A share link's landing page. Like setup it has no machine: the person joining a catalog may not own
+ * one. It is routed by PATH, because a share fragment also reads as a pairing fragment.
+ */
+export interface JoinRoute {
+  readonly kind: 'join';
+}
+
+/** Everything shared with this browser. Daemon-less for the same reason as `join`. */
+export interface SharedRoute {
+  readonly kind: 'shared';
+}
+
 /** The machine home: an overview of what one machine is doing and the few ferrets to open first. */
 export interface DaemonHomeRoute {
   readonly kind: 'home';
@@ -162,7 +175,11 @@ export type DaemonPageRoute =
   | DaemonImportedHistoryRoute
   | DaemonMachineSetupRoute;
 
-export type PageRoute = ConnectionPickerRoute | SetupRoute | DaemonPageRoute;
+export type PageRoute = ConnectionPickerRoute | SetupRoute | JoinRoute | SharedRoute | DaemonPageRoute;
+
+/** Pages that name no machine: the picker, first-run setup, and the member's Join and Shared with me. */
+export const isDaemonless = (route: PageRoute): route is ConnectionPickerRoute | SetupRoute | JoinRoute | SharedRoute =>
+  route.kind === 'connection-picker' || route.kind === 'setup' || route.kind === 'join' || route.kind === 'shared';
 
 /** A compatibility result that callers can replace with its canonical target. */
 export interface LegacyTasksRedirectRoute {
@@ -180,6 +197,8 @@ export type Route = PageRoute | LegacyTasksRedirectRoute | LegacyAttentionRedire
 
 const connectionPicker: ConnectionPickerRoute = { kind: 'connection-picker' };
 const setup: SetupRoute = { kind: 'setup' };
+const join: JoinRoute = { kind: 'join' };
+const shared: SharedRoute = { kind: 'shared' };
 
 /** Decodes a single URL pathname segment without allowing malformed input to escape the router. */
 export const decodeRouteSegment = (segment: string): string => {
@@ -211,6 +230,12 @@ export const connectionPickerPath = (): '/' => '/';
 
 /** Builds the canonical setup pathname. The one address a landing page may link to. */
 export const setupPath = (): '/setup' => '/setup';
+
+/** Builds the share-link landing pathname. The fragment is the caller's. */
+export const joinPath = (): '/join' => '/join';
+
+/** Builds the Shared with me pathname. */
+export const sharedPath = (): '/shared' => '/shared';
 
 /** Builds the canonical machine-home pathname for one daemon: the overview a machine opens on. */
 export const daemonHomePath = (id: DaemonId): string => `/d/${encodeURIComponent(id)}`;
@@ -307,6 +332,8 @@ export const daemonMachineSetupPath = (id: DaemonId): string => `${daemonHomePat
 export const parseRoute = (pathname: string): Route => {
   const [first, daemonSegment, destination, sessionSegment, ...remainder] = pathname.split('/').filter(Boolean);
   if (first === 'setup') return setup;
+  if (first === 'join') return join;
+  if (first === 'shared') return shared;
   if (first !== 'd') return connectionPicker;
 
   const id = parsedDaemonId(daemonSegment);
@@ -378,6 +405,10 @@ export const routePath = (route: Route): string => {
       return connectionPickerPath();
     case 'setup':
       return setupPath();
+    case 'join':
+      return joinPath();
+    case 'shared':
+      return sharedPath();
     case 'home':
       return daemonHomePath(route.daemonId);
     case 'sessions':
@@ -425,7 +456,8 @@ export const routePath = (route: Route): string => {
 export const routePageKey = (route: Route): string => {
   if (route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect')
     return routePageKey(route.to);
-  if (route.kind === 'connection-picker' || route.kind === 'setup') return route.kind;
+  if (route.kind === 'connection-picker' || route.kind === 'setup' || route.kind === 'join' || route.kind === 'shared')
+    return route.kind;
   if (route.kind === 'session') return `session:${daemonSessionKey(daemonSessionScope(route, route.sessionId))}`;
   // The two Analytics pages are kept apart, so each keeps its own state while the other is on screen.
   if (route.kind === 'analytics' && route.view === 'query') return `analytics-query:${JSON.stringify(route.daemonId)}`;

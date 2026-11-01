@@ -45,6 +45,8 @@
         "harness/machine-home-screenshot.tsx",
         "harness/sharing-capability-screenshot.tsx",
         "harness/catalogs-screenshot.tsx",
+        "harness/catalogs-share-screenshot.tsx",
+        "harness/shared-screenshot.tsx",
         "harness/screenshot.ts",
         "harness/agenda-question-answer-screenshot.tsx",
         "harness/work-search-screenshot.tsx",

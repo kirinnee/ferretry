@@ -13,7 +13,7 @@ import { Markdown } from '../../components/markdown.tsx';
 import {
   CatalogRowTools,
   type CatalogRowsHost,
-  InstallFromFileButton,
+  AddCatalogEntry,
   useCatalogInstalls,
 } from '../catalogs/catalog-row-tools.tsx';
 import { cn } from '../../lib/class-names.ts';
@@ -121,8 +121,8 @@ export function ContextSkillsPanel({
           {skillHarnessLabel(harness)}
           {load.value.truncated ? ' · the list was cut short' : ''}
         </p>
-        {catalogs === undefined ? null : <InstallFromFileButton host={catalogs} />}
       </div>
+      {catalogs === undefined ? null : <AddCatalogEntry host={catalogs} />}
       {visible.length === 0 ? (
         <ContextNote>{contextEmptyCopy('skills', total, query, chipLabel)}</ContextNote>
       ) : (

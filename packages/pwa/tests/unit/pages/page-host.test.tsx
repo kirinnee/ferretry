@@ -259,4 +259,42 @@ describe('PageHost', () => {
     should(absent).throw('a daemon page requires a runtime connection');
     should(mismatched).throw('the runtime connection does not match the route daemon');
   });
+
+  it('should select the join and shared pages with no connection, and refuse them when unmounted', () => {
+    // Arrange
+    const unused = (): never => {
+      throw new Error('a page must not render');
+    };
+    const base: PageHostSlots = {
+      ConnectionPicker: unused,
+      Setup: unused,
+      Home: unused,
+      Sessions: unused,
+      NewSession: unused,
+      SessionChat: unused,
+      Settings: unused,
+      Warden: unused,
+      Analytics: unused,
+      Learning: unused,
+    };
+    const mounted: PageHostSlots = {
+      ...base,
+      Join: () => <div data-page="join">join</div>,
+      Shared: () => <div data-page="shared">shared</div>,
+    };
+
+    // Act
+    const html = ['/join', '/shared'].map(path =>
+      renderToStaticMarkup(<PageHost route={pageRoute(path)} slots={mounted} />),
+    );
+
+    // Assert
+    should(html).deepEqual(['<div data-page="join">join</div>', '<div data-page="shared">shared</div>']);
+    should(() => renderToStaticMarkup(<PageHost route={pageRoute('/join')} slots={base} />)).throw(
+      'the join route is not mounted',
+    );
+    should(() => renderToStaticMarkup(<PageHost route={pageRoute('/shared')} slots={base} />)).throw(
+      'the shared route is not mounted',
+    );
+  });
 });

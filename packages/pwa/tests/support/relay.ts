@@ -38,9 +38,14 @@ import {
   HEARTBEAT_REQUEST,
   HEARTBEAT_RESPONSE,
   handshakeTranscriptHash,
+  type MemberJoinOutcomeContent,
+  memberAuthMessage,
+  memberJoinMessage,
+  memberRenewMessage,
   NONCE_BYTES,
   openChannel,
   openRecord,
+  padJoinOutcome,
   RELAY_CLOSE_CODES,
   RELAY_LIMITS,
   RELAY_PROTOCOL_ID,
@@ -212,21 +217,32 @@ export class ScriptedDaemon {
    * The daemon's own check, run with the same message builders, so a client that signed the wrong
    * transcript, the wrong kind or the wrong identifiers is caught here rather than only end to end.
    */
-  async proves(record: Readonly<Record<string, unknown>>, publicKey: string, nonce?: string): Promise<boolean> {
+  async proves(
+    record: Readonly<Record<string, unknown>>,
+    publicKey: string,
+    nonce?: string,
+    act: 'device' | 'member' = 'device',
+  ): Promise<boolean> {
     const transcript = this.#transcript;
     if (transcript === undefined) throw new Error('this daemon has not keyed a channel');
     const proof = String(record.proof);
     const message =
-      record.t === 'pair'
-        ? devicePairMessage(transcript, String(record.deviceKey))
-        : record.t === 'renewed'
-          ? deviceRenewMessage(transcript, String(nonce))
-          : deviceAuthMessage(
-              transcript,
-              record.t === 'stream' ? 'stream' : 'auth',
-              String(record.deviceId),
-              String(record.appSession),
-            );
+      record.t === 'join'
+        ? memberJoinMessage(transcript, String(record.memberKey), String(record.boxKey))
+        : record.t === 'member'
+          ? memberAuthMessage(transcript, String(record.keyId), String(record.appSession))
+          : record.t === 'pair'
+            ? devicePairMessage(transcript, String(record.deviceKey))
+            : record.t === 'renewed'
+              ? act === 'member'
+                ? memberRenewMessage(transcript, String(nonce))
+                : deviceRenewMessage(transcript, String(nonce))
+              : deviceAuthMessage(
+                  transcript,
+                  record.t === 'stream' ? 'stream' : 'auth',
+                  String(record.deviceId),
+                  String(record.appSession),
+                );
     return await verifyDeviceProof(relayCrypto, publicKey, proof, message);
   }
 
@@ -294,6 +310,16 @@ export interface AutoDaemonAnswer {
   readonly pairRefused?: boolean;
   /** Take a `pair` record and never answer it: a daemon that may have redeemed the code, unheard. */
   readonly pairSilently?: boolean;
+  /** The `joined` response a `join` record is answered with (a `MemberJoinedResponse`), padded as the daemon pads it. */
+  readonly joined?: unknown;
+  /** Answer a `join` record with the one generic sealed refusal instead. */
+  readonly joinRefused?: boolean;
+  /** Take a `join` record and never answer it: the share may have been spent, unheard. */
+  readonly joinSilently?: boolean;
+  /** When set, every `member` record's proof is checked against this public key and refused if wrong. */
+  readonly memberPublicKey?: string;
+  /** Refuse a member key with `4403`, as a daemon refuses a key it does not hold. */
+  readonly rejectMember?: boolean;
   /** Refuse a `stream` record with the status the direct upgrade would have carried. */
   readonly streamRefused?: { readonly status: number; readonly body: string };
   /** Records to push down an opened stream, in order. */
@@ -400,6 +426,51 @@ export const autoDial = (
               code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
               reason: RELAY_SESSION_CONCLUDED_CLOSE_REASON,
             }),
+          );
+          return;
+        }
+        if (message.t === 'join') {
+          requests.push(message);
+          if (answer.joinSilently === true) return;
+          const outcome =
+            answer.joinRefused === true
+              ? ({ t: 'join-refused', protocol: SESSION_PROTOCOL_ID, reason: 'join_refused' } as const)
+              : ({ t: 'joined', protocol: SESSION_PROTOCOL_ID, response: answer.joined } as const);
+          // The same padding the daemon applies, so the size of the record says nothing about which it is.
+          const padded = padJoinOutcome(outcome as unknown as MemberJoinOutcomeContent);
+          socket.onBinary?.(await daemon.record(outcome, padded ?? undefined));
+          socket.onBinary?.(
+            controlFrame(sessionId, {
+              t: 'closed',
+              code: RELAY_SESSION_CONCLUDED_CLOSE_CODE,
+              reason: RELAY_SESSION_CONCLUDED_CLOSE_REASON,
+            }),
+          );
+          return;
+        }
+        if (message.t === 'member') {
+          if (answer.memberPublicKey !== undefined && !(await daemon.proves(message, answer.memberPublicKey))) {
+            socket.onBinary?.(
+              controlFrame(sessionId, {
+                t: 'closed',
+                code: RELAY_CLOSE_CODES.authRejected,
+                reason: 'unknown device credential',
+              }),
+            );
+            return;
+          }
+          if (answer.rejectMember === true) {
+            socket.onBinary?.(
+              controlFrame(sessionId, {
+                t: 'closed',
+                code: RELAY_CLOSE_CODES.authRejected,
+                reason: 'unknown device credential',
+              }),
+            );
+            return;
+          }
+          socket.onBinary?.(
+            await daemon.record({ t: 'authenticated', protocol: SESSION_PROTOCOL_ID, accessExpiresAt: LEASE_ENDS }),
           );
           return;
         }
