@@ -224,7 +224,10 @@ export class BudgetService {
       return;
     }
     const anchor =
-      stopped[0] ?? relocated[0] ?? failed[0] ?? (await this.ports.recentSession(new Set(state.agents)).catch(() => undefined));
+      stopped[0] ??
+      relocated[0] ??
+      failed[0] ??
+      (await this.ports.recentSession(new Set(state.agents)).catch(() => undefined));
     // No session ever ran on it here, so nobody to tell it on yet: the next tick looks again.
     if (anchor === undefined) return;
     const alternative = await this.ports.alternative(state.id, holds).catch(() => undefined);

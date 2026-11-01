@@ -66,10 +66,7 @@ export function rateLimitedSubjects(
 }
 
 /** A session as a subject, or `undefined` when it records no login or harness to move from. */
-export function subjectOf(
-  view: WardenSessionView,
-  trigger: WardenAutoMigrateTrigger,
-): AutoMigrateSubject | undefined {
+export function subjectOf(view: WardenSessionView, trigger: WardenAutoMigrateTrigger): AutoMigrateSubject | undefined {
   const { agent, harness } = view.config;
   if (agent === undefined || harness === undefined) return undefined;
   return { id: view.config.id, agent, harness, mode: view.config.mode, trigger };
@@ -108,8 +105,7 @@ export interface MoveTargetInput {
   readonly targets: readonly string[];
 }
 
-const named = (runtime: FleetRuntimeView, name: string): boolean =>
-  runtime.name === name || runtime.wrapper === name;
+const named = (runtime: FleetRuntimeView, name: string): boolean => runtime.name === name || runtime.wrapper === name;
 
 /**
  * The login a ferret moves to, or none and why. An owner's list is tried in its order; "any login" takes the
@@ -131,9 +127,7 @@ export function chooseMoveTarget(input: MoveTargetInput): MoveTargetChoice {
   const ready: FleetRuntimeView[] = [];
   const candidates: readonly (FleetRuntimeView | string)[] = explicit
     ? targets.map(name => facts.runtimes.find(runtime => named(runtime, name)) ?? name)
-    : facts.runtimes.filter(
-        runtime => runtime !== own && runtime.agent && runtime.harness === source.harness,
-      );
+    : facts.runtimes.filter(runtime => runtime !== own && runtime.agent && runtime.harness === source.harness);
   for (const candidate of candidates) {
     if (typeof candidate === 'string') {
       tried.push({ runtime: candidate, why: 'there is no runtime by that name on this machine' });
@@ -254,14 +248,15 @@ export function pruneAutoMigrateMemory(
 }
 
 /** Why a ferret was held, as a key: the same trigger, login and reason is one episode, told once. */
-export function autoMigrateHoldKey(
-  subject: Pick<AutoMigrateSubject, 'trigger' | 'agent'>,
-  reason: string,
-): string {
+export function autoMigrateHoldKey(subject: Pick<AutoMigrateSubject, 'trigger' | 'agent'>, reason: string): string {
   return `${subject.trigger}|${subject.agent}|${reason}`;
 }
 
 /** Whether the ferret's ask to stop its jobs has had its time. */
-export function askExpired(asked: NonNullable<AutoMigrateSessionMemory['asked']>, waitMinutes: number, nowMs: number): boolean {
+export function askExpired(
+  asked: NonNullable<AutoMigrateSessionMemory['asked']>,
+  waitMinutes: number,
+  nowMs: number,
+): boolean {
   return nowMs - (instantMs(asked.at) ?? 0) >= waitMinutes * 60_000;
 }

@@ -2052,6 +2052,9 @@ export class WardenSweepService {
         memory: state.autoMigrate ?? EMPTY_AUTO_MIGRATE_MEMORY,
         nowMs,
       });
+      const before = state.autoMigrate ?? EMPTY_AUTO_MIGRATE_MEMORY;
+      if (result.actions.length === 0 && JSON.stringify(result.memory) === JSON.stringify(before))
+        return { state, moved: result.moved };
       let next: WardenRuntimeState = { ...state, autoMigrate: result.memory };
       for (const action of result.actions) next = this.recordAction(next, action);
       await this.ports.state.write(next);
@@ -2088,7 +2091,9 @@ export class WardenSweepService {
       const memory = {
         sessions: {
           ...(latest.autoMigrate ?? EMPTY_AUTO_MIGRATE_MEMORY).sessions,
-          ...(result.memory.sessions[sessionId] === undefined ? {} : { [sessionId]: result.memory.sessions[sessionId] }),
+          ...(result.memory.sessions[sessionId] === undefined
+            ? {}
+            : { [sessionId]: result.memory.sessions[sessionId] }),
         },
       };
       const next: WardenRuntimeState = { ...latest, autoMigrate: memory };

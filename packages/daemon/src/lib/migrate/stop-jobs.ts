@@ -15,7 +15,7 @@
  *
  * CHILDREN FIRST. A shell killed before its children leaves them re-parented to init — out of the pane's tree,
  * where nothing could find them again — so the deepest processes are signalled first. SIGTERM first, then, after
- * a grace period, SIGKILL for whatever is still the same process. What survives even that is reported, and the
+ * a grace period, SIGKILL for whatever is still the same process; what survives even that is reported, and the
  * Warden does not move the ferret.
  */
 
@@ -52,13 +52,11 @@ const ELAPSED_TOLERANCE_SECONDS = 1;
  */
 export function jobProcesses(report: InflightReport): readonly ProcessInfo[] {
   const shells = new Set(
-    report.processes.flatMap(process =>
-      process.toolShell !== undefined && verdictBlocksMigration(process.verdict) ? [process.toolShell] : [],
+    report.processes.flatMap(row =>
+      row.toolShell !== undefined && verdictBlocksMigration(row.verdict) ? [row.toolShell] : [],
     ),
   );
-  return report.processes
-    .filter(process => process.toolShell !== undefined && shells.has(process.toolShell))
-    .toReversed();
+  return report.processes.filter(row => row.toolShell !== undefined && shells.has(row.toolShell)).toReversed();
 }
 
 /** Whether `now` is still the process `seen` was, by the rules in this module's header. */
@@ -70,7 +68,7 @@ export function sameProcess(seen: ProcessInfo, now: ProcessInfo): boolean {
 
 /** The processes of `targets` that are still themselves in `report`. */
 function stillRunning(targets: readonly ProcessInfo[], report: InflightReport): readonly ProcessInfo[] {
-  const byPid = new Map(report.processes.map(process => [process.pid, process]));
+  const byPid = new Map(report.processes.map(row => [row.pid, row]));
   return targets.filter(target => {
     const now = byPid.get(target.pid);
     return now !== undefined && sameProcess(target, now);
@@ -99,8 +97,8 @@ export class AgentJobStopper {
       }
     }
     // A job survives when anything of it — its shell or what the shell started — is still itself.
-    const surviving = new Set(left.map(process => process.toolShell));
-    const shellOf = new Map(first.processes.map(process => [process.pid, process.toolShell]));
+    const surviving = new Set(left.map(row => row.toolShell));
+    const shellOf = new Map(first.processes.map(row => [row.pid, row.toolShell]));
     const survived = (job: AgentJob): boolean => surviving.has(shellOf.get(job.pid));
     return { stopped: jobs.filter(job => !survived(job)), survivors: jobs.filter(survived) };
   }

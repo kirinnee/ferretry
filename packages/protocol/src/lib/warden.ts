@@ -259,7 +259,6 @@ export const DEFAULT_WARDEN_REVIVE = {
   breakerMinutes: 30,
 };
 
-
 /**
  * What can make the Warden move a ferret to another login on its own (`autoMigrate.when`):
  * `rate_limited` its login hit a usage limit and the ferret sits waiting for it to reset;
@@ -290,11 +289,7 @@ export const WardenAutoMigrateConfigSchema = z.object({
   targets: z.array(z.string().trim().min(1)),
   forceStopBackground: z.boolean(),
   waitMinutes: z.number().int().min(WARDEN_AUTO_MIGRATE_WAIT_RANGE.min).max(WARDEN_AUTO_MIGRATE_WAIT_RANGE.max),
-  maxMovesPerHour: z
-    .number()
-    .int()
-    .min(WARDEN_AUTO_MIGRATE_MOVES_RANGE.min)
-    .max(WARDEN_AUTO_MIGRATE_MOVES_RANGE.max),
+  maxMovesPerHour: z.number().int().min(WARDEN_AUTO_MIGRATE_MOVES_RANGE.min).max(WARDEN_AUTO_MIGRATE_MOVES_RANGE.max),
 });
 export type WardenAutoMigrateConfig = z.infer<typeof WardenAutoMigrateConfigSchema>;
 export const DEFAULT_WARDEN_AUTO_MIGRATE: WardenAutoMigrateConfig = {

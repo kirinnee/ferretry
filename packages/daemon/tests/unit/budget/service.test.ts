@@ -377,12 +377,7 @@ describe('budgetNoticeRequest', () => {
   });
 
   it('should name the ferrets the Warden moved, and not tell the owner to move them again', () => {
-    const request = budgetNoticeRequest(
-      { ...notice, stopped: [], relocated: [notice.anchor] },
-      'fy',
-      'box',
-      'now',
-    );
+    const request = budgetNoticeRequest({ ...notice, stopped: [], relocated: [notice.anchor] }, 'fy', 'box', 'now');
     should(request.why).match(/Moved to another login by the Warden: :hadi\./u);
     should(request.why).not.match(/No ferret was running/u);
     should(request.howToResolve).not.match(/fy migrate s1/u);

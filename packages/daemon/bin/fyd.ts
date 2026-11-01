@@ -12750,7 +12750,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               if (!state.success) return 'its state could not be read';
               if (state.data.permissionRequest !== undefined) return 'it is waiting on a permission prompt';
               const dialog = state.data.harnessDialog;
-              if (dialog !== undefined && dialog.kind !== 'usage-limit') return `it is waiting on a dialog: ${dialog.title}`;
+              if (dialog !== undefined && dialog.kind !== 'usage-limit')
+                return `it is waiting on a dialog: ${dialog.title}`;
               return undefined;
             },
           },

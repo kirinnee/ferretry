@@ -21,6 +21,7 @@ import {
   WARDEN_JEV_ACT_THRESHOLD_RANGE,
   WARDEN_SWEEP_INTERVALS,
   type WardenAccount,
+  type WardenAutoMigrateTrigger,
   type WardenConfig,
   type WardenEventTrigger,
   type WardenFailoverPolicy,
@@ -40,6 +41,7 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import {
   type JevKeyStatus,
   movedAccount,
+  toggledMoveTarget,
   WARDEN_FORM_LIMITS,
   type WardenFormErrors,
   wardenEfforts,
@@ -345,6 +347,137 @@ function LayerRow({
       </div>
       {on === true && children}
     </div>
+  );
+}
+
+const MOVE_TRIGGERS: readonly { readonly id: WardenAutoMigrateTrigger; readonly label: string }[] = [
+  { id: 'rate_limited', label: 'It hits a usage limit' },
+  { id: 'budget_exceeded', label: 'Its login passes its hard spend budget' },
+];
+
+/**
+ * Moving a ferret that hit a limit (`autoMigrate`). A rule, not a layer: it needs no AI and spends nothing, so it
+ * is offered whenever the Warden is on. Off is the default; an agent that turns it on waits for the owner.
+ */
+function MoveToAnotherLogin({
+  value,
+  errors,
+  runtimes,
+  onChange,
+}: {
+  readonly value: WardenConfig;
+  readonly errors: WardenFormErrors;
+  readonly runtimes: readonly PickerAccount[];
+  readonly onChange: (next: WardenConfig) => void;
+}) {
+  const name = useId();
+  const moving = value.autoMigrate;
+  const setMoving = (patch: Partial<WardenConfig['autoMigrate']>) =>
+    onChange({ ...value, autoMigrate: { ...moving, ...patch } });
+  const named = moving.targets.length > 0;
+  const agents = runtimes.filter(runtime => runtime.agent);
+  return (
+    <Card
+      title="When a login runs out"
+      note="An agent that turns this on, or lets it stop jobs, waits for you to confirm."
+    >
+      <LayerRow
+        title="Move the ferret to another login"
+        detail="Same chat, same card — only the login changes. It goes to a login of the same kind that is ready, switched on, under its budget and has quota left. Off: the Warden tells you and you move it."
+        on={moving.enabled}
+        onToggle={enabled => setMoving({ enabled })}
+      >
+        <fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" data-warden-move-when="">
+          <legend className="mb-1 text-cell font-medium text-fg">Move it when</legend>
+          {MOVE_TRIGGERS.map(trigger => (
+            <Check
+              key={trigger.id}
+              label={trigger.label}
+              checked={moving.when.includes(trigger.id)}
+              onChange={checked =>
+                setMoving({
+                  when: checked
+                    ? [...moving.when.filter(entry => entry !== trigger.id), trigger.id]
+                    : moving.when.filter(entry => entry !== trigger.id),
+                })
+              }
+            />
+          ))}
+          {moving.when.length === 0 && (
+            <p className="m-0 text-meta leading-base text-warn">Pick at least one, or it never moves anything.</p>
+          )}
+        </fieldset>
+        <Segments
+          label="Where to"
+          name={`${name}-where`}
+          options={['any', 'named'] as const}
+          value={named ? 'named' : 'any'}
+          format={option => (option === 'any' ? 'Any ready login, same provider' : 'Only these, in order')}
+          onChange={option =>
+            setMoving({
+              targets:
+                option === 'any'
+                  ? []
+                  : moving.targets.length > 0
+                    ? moving.targets
+                    : agents.slice(0, 1).map(runtime => runtime.wrapper),
+            })
+          }
+        />
+        {named && (
+          <fieldset className="m-0 flex min-w-0 flex-col border-0 p-0" data-warden-move-targets="">
+            <legend className="mb-1 text-cell font-medium text-fg">Logins, tried in the order you tick them</legend>
+            {agents.map(runtime => (
+              <Check
+                key={runtime.wrapper}
+                label={loginLabel(runtime.wrapper, runtimes)}
+                checked={moving.targets.includes(runtime.wrapper)}
+                onChange={checked => onChange(toggledMoveTarget(value, runtime.wrapper, checked))}
+              />
+            ))}
+            <p className="m-0 text-meta leading-base text-muted">
+              {moving.targets.length === 0
+                ? 'None ticked yet.'
+                : `Tried in this order: ${moving.targets.join(' → ')}. A login of another provider is used only when it is named here; another kind of CLI never is.`}
+            </p>
+          </fieldset>
+        )}
+        <Check
+          label="Stop its background jobs if they are in the way"
+          detail={
+            moving.forceStopBackground
+              ? 'The Warden stops the jobs this ferret started itself — never anything else — tells the ferret which, then moves it.'
+              : 'Off: the Warden asks the ferret to stop them and waits; if they still run, it tells you instead of moving it.'
+          }
+          checked={moving.forceStopBackground}
+          onChange={forceStopBackground => setMoving({ forceStopBackground })}
+        />
+        <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+          {!moving.forceStopBackground && (
+            <NumberField
+              label="Wait for the ferret to stop them (min)"
+              value={moving.waitMinutes}
+              error={errors.moveWaitMinutes}
+              {...WARDEN_FORM_LIMITS.moveWaitMinutes}
+              step={1}
+              onChange={waitMinutes => setMoving({ waitMinutes })}
+            />
+          )}
+          <NumberField
+            label="Moves per ferret per hour"
+            value={moving.maxMovesPerHour}
+            error={errors.movesPerHour}
+            {...WARDEN_FORM_LIMITS.movesPerHour}
+            step={1}
+            onChange={maxMovesPerHour => setMoving({ maxMovesPerHour })}
+          />
+        </div>
+        <p className="m-0 text-meta leading-base text-muted">
+          Never while it has a card open for you, holds a secret, or waits on a prompt. Every move is listed under
+          Recent actions.
+        </p>
+      </LayerRow>
+    </Card>
   );
 }
 
@@ -760,6 +893,8 @@ export function WardenSettingsForm({
             )}
           </Card>
         )}
+
+        <MoveToAnotherLogin value={value} errors={errors} runtimes={runtimes} onChange={onChange} />
       </fieldset>
 
       <p aria-live="polite" className="m-0 text-ui leading-base text-fg-soft" data-warden-summary="">

@@ -1,12 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { InflightReport, ProcessInfo } from '../../../src/lib/migrate/inflight-report.ts';
-import {
-  AgentJobStopper,
-  jobProcesses,
-  type StopSignal,
-  sameProcess,
-} from '../../../src/lib/migrate/stop-jobs.ts';
+import { AgentJobStopper, jobProcesses, type StopSignal, sameProcess } from '../../../src/lib/migrate/stop-jobs.ts';
 
 const CLI = 100;
 

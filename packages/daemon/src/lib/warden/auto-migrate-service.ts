@@ -164,7 +164,9 @@ export class WardenAutoMigrateService {
       const subject = current.get(id);
       const askedStill = session.asked !== undefined && subject !== undefined && session.asked.from === subject.agent;
       const heldStill =
-        session.held !== undefined && subject !== undefined && session.held.startsWith(`${subject.trigger}|${subject.agent}|`);
+        session.held !== undefined &&
+        subject !== undefined &&
+        session.held.startsWith(`${subject.trigger}|${subject.agent}|`);
       if (askedStill === (session.asked !== undefined) && heldStill === (session.held !== undefined)) continue;
       next = withSession(next, id, entry => ({
         moves: entry.moves,
@@ -314,7 +316,6 @@ export class WardenAutoMigrateService {
       actor: 'auto' as const,
       agent: target.wrapper,
       fromAgent: subject.agent,
-      reason: because,
     };
     try {
       // Force only when the owner allowed the Warden to clear the way: then nothing the ferret left running is

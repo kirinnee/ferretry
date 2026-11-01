@@ -88,9 +88,7 @@ describe('providerOf', () => {
     const catalogued = providerOf(runtime('glm', { catalogId: 'zai' }));
     const nativeClaude = providerOf(runtime('claude-a'));
     const nativeCodex = providerOf(runtime('codex-a', { harness: 'codex' }));
-    const handMade = providerOf(
-      runtime('proxy', { credential: { id: 'proxy-login', store: 'environment' } }),
-    );
+    const handMade = providerOf(runtime('proxy', { credential: { id: 'proxy-login', store: 'environment' } }));
 
     // Assert
     should(catalogued).equal('zai');
@@ -133,7 +131,9 @@ describe('chooseMoveTarget', () => {
     // Assert
     should(choice.kind).equal('chosen');
     should(choice.kind === 'chosen' ? choice.runtime.name : undefined).equal('claude-c');
-    should(choice.tried).deepEqual([{ runtime: 'glm', why: 'another provider (zai), which only a named target may reach' }]);
+    should(choice.tried).deepEqual([
+      { runtime: 'glm', why: 'another provider (zai), which only a named target may reach' },
+    ]);
   });
 
   it('should never pick a login that is switched off, over its budget, or out of quota, and say why for each', () => {
@@ -176,7 +176,10 @@ describe('chooseMoveTarget', () => {
   it('should never move a ferret onto another runtime of the same login, which is the one out of quota', () => {
     // Arrange
     const known = facts({
-      runtimes: [runtime('claude-a'), runtime('claude-a2', { credential: { id: 'claude-a-login', store: 'ferretry' } })],
+      runtimes: [
+        runtime('claude-a'),
+        runtime('claude-a2', { credential: { id: 'claude-a-login', store: 'ferretry' } }),
+      ],
       credentials: [credential('claude-a-login')],
       tools: [claudeTool],
     });

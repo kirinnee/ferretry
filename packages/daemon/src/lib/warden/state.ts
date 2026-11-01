@@ -502,9 +502,7 @@ const RuntimeStateSchema = z.object({
         z.string(),
         z.object({
           moves: z.array(Instant).default([]),
-          asked: z
-            .object({ at: Instant, trigger: WardenAutoMigrateTriggerSchema, from: z.string().min(1) })
-            .optional(),
+          asked: z.object({ at: Instant, trigger: WardenAutoMigrateTriggerSchema, from: z.string().min(1) }).optional(),
           held: z.string().min(1).optional(),
         }),
       ),

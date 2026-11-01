@@ -101,7 +101,12 @@ describe('WardenAutoMigrateService.run', () => {
     const { service, recorded } = subject();
 
     // Act
-    const result = await service.run({ fleet: [limited()], config: config(), memory: EMPTY_AUTO_MIGRATE_MEMORY, nowMs: NOW });
+    const result = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: EMPTY_AUTO_MIGRATE_MEMORY,
+      nowMs: NOW,
+    });
 
     // Assert
     should(recorded.migrations).deepEqual([
@@ -122,7 +127,6 @@ describe('WardenAutoMigrateService.run', () => {
         actor: 'auto',
         agent: 'claude-b-wrapper',
         fromAgent: 'claude-a-wrapper',
-        reason: 'claude-a-wrapper hit its usage limit',
         detail: 'Moved it from claude-a-wrapper to claude-b-wrapper because claude-a-wrapper hit its usage limit.',
       },
     ]);
@@ -136,8 +140,18 @@ describe('WardenAutoMigrateService.run', () => {
     const { service, recorded } = subject({ hold: 'it has an input card open' });
 
     // Act
-    const first = await service.run({ fleet: [limited()], config: config(), memory: EMPTY_AUTO_MIGRATE_MEMORY, nowMs: NOW });
-    const second = await service.run({ fleet: [limited()], config: config(), memory: first.memory, nowMs: NOW + MINUTE });
+    const first = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: EMPTY_AUTO_MIGRATE_MEMORY,
+      nowMs: NOW,
+    });
+    const second = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: first.memory,
+      nowMs: NOW + MINUTE,
+    });
 
     // Assert
     should(recorded.migrations).deepEqual([]);
@@ -173,7 +187,12 @@ describe('WardenAutoMigrateService.run', () => {
     const { service, recorded } = subject({ facts: spent });
 
     // Act
-    const result = await service.run({ fleet: [limited()], config: config(), memory: EMPTY_AUTO_MIGRATE_MEMORY, nowMs: NOW });
+    const result = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: EMPTY_AUTO_MIGRATE_MEMORY,
+      nowMs: NOW,
+    });
 
     // Assert
     should(recorded.migrations).deepEqual([]);
@@ -190,10 +209,25 @@ describe('WardenAutoMigrateService.run', () => {
     const { service, recorded } = subject({ jobs: () => running });
 
     // Act
-    const asked = await service.run({ fleet: [limited()], config: config(), memory: EMPTY_AUTO_MIGRATE_MEMORY, nowMs: NOW });
-    const waiting = await service.run({ fleet: [limited()], config: config(), memory: asked.memory, nowMs: NOW + 2 * MINUTE });
+    const asked = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: EMPTY_AUTO_MIGRATE_MEMORY,
+      nowMs: NOW,
+    });
+    const waiting = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: asked.memory,
+      nowMs: NOW + 2 * MINUTE,
+    });
     running = [];
-    const moved = await service.run({ fleet: [limited()], config: config(), memory: waiting.memory, nowMs: NOW + 4 * MINUTE });
+    const moved = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: waiting.memory,
+      nowMs: NOW + 4 * MINUTE,
+    });
 
     // Assert
     should(recorded.asked).deepEqual(['s1']);
@@ -212,9 +246,24 @@ describe('WardenAutoMigrateService.run', () => {
     const { service, recorded } = subject({ jobs: () => [job] });
 
     // Act
-    const asked = await service.run({ fleet: [limited()], config: config(), memory: EMPTY_AUTO_MIGRATE_MEMORY, nowMs: NOW });
-    const expired = await service.run({ fleet: [limited()], config: config(), memory: asked.memory, nowMs: NOW + 10 * MINUTE });
-    const later = await service.run({ fleet: [limited()], config: config(), memory: expired.memory, nowMs: NOW + 12 * MINUTE });
+    const asked = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: EMPTY_AUTO_MIGRATE_MEMORY,
+      nowMs: NOW,
+    });
+    const expired = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: asked.memory,
+      nowMs: NOW + 10 * MINUTE,
+    });
+    const later = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: expired.memory,
+      nowMs: NOW + 12 * MINUTE,
+    });
 
     // Assert
     should(recorded.asked).deepEqual(['s1']);
@@ -287,8 +336,18 @@ describe('WardenAutoMigrateService.run', () => {
     });
 
     // Act
-    const first = await service.run({ fleet: [limited()], config: config(), memory: EMPTY_AUTO_MIGRATE_MEMORY, nowMs: NOW });
-    const second = await service.run({ fleet: [limited()], config: config(), memory: first.memory, nowMs: NOW + MINUTE });
+    const first = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: EMPTY_AUTO_MIGRATE_MEMORY,
+      nowMs: NOW,
+    });
+    const second = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: first.memory,
+      nowMs: NOW + MINUTE,
+    });
 
     // Assert
     should(first.actions.map(action => action.outcome)).deepEqual(['failed']);
@@ -300,11 +359,26 @@ describe('WardenAutoMigrateService.run', () => {
   it('should forget what a ferret was held for once its limit is over, so a new limit is told afresh', async () => {
     // Arrange
     const { service } = subject({ hold: 'it has an input card open' });
-    const held = await service.run({ fleet: [limited()], config: config(), memory: EMPTY_AUTO_MIGRATE_MEMORY, nowMs: NOW });
+    const held = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: EMPTY_AUTO_MIGRATE_MEMORY,
+      nowMs: NOW,
+    });
 
     // Act
-    const reset = await service.run({ fleet: [limited('s1', 'running')], config: config(), memory: held.memory, nowMs: NOW + MINUTE });
-    const again = await service.run({ fleet: [limited()], config: config(), memory: reset.memory, nowMs: NOW + 2 * MINUTE });
+    const reset = await service.run({
+      fleet: [limited('s1', 'running')],
+      config: config(),
+      memory: held.memory,
+      nowMs: NOW + MINUTE,
+    });
+    const again = await service.run({
+      fleet: [limited()],
+      config: config(),
+      memory: reset.memory,
+      nowMs: NOW + 2 * MINUTE,
+    });
 
     // Assert
     should(reset.memory.sessions.s1).be.undefined();
@@ -313,7 +387,13 @@ describe('WardenAutoMigrateService.run', () => {
 });
 
 describe('WardenAutoMigrateService.relocate', () => {
-  const overBudget = { id: 's1', agent: 'claude-a-wrapper', harness: 'claude' as const, mode: 'auto' as const, trigger: 'budget_exceeded' as const };
+  const overBudget = {
+    id: 's1',
+    agent: 'claude-a-wrapper',
+    harness: 'claude' as const,
+    mode: 'auto' as const,
+    trigger: 'budget_exceeded' as const,
+  };
 
   it('should move a ferret whose login passed its hard budget, when that is a trigger', async () => {
     // Arrange
@@ -321,7 +401,12 @@ describe('WardenAutoMigrateService.relocate', () => {
 
     // Act
     const result = await service.relocate(overBudget, config(), EMPTY_AUTO_MIGRATE_MEMORY, NOW);
-    const notTrigger = await service.relocate(overBudget, config({ when: ['rate_limited'] }), EMPTY_AUTO_MIGRATE_MEMORY, NOW);
+    const notTrigger = await service.relocate(
+      overBudget,
+      config({ when: ['rate_limited'] }),
+      EMPTY_AUTO_MIGRATE_MEMORY,
+      NOW,
+    );
 
     // Assert
     should(result.moved).be.true();
