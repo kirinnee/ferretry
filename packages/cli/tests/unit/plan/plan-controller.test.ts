@@ -367,3 +367,85 @@ describe('fy plan ls and revoke', () => {
     should(await failure(controller.revoke('feed', ['9'], {}))).containEql('lines 1 to 3');
   });
 });
+
+describe('fy plan: the less common lines and answers', () => {
+  const planWith = (lines: readonly TaskPlanLine[]): TaskPlan => ({ ...PLAN, lines: [...lines] });
+
+  it('should say what each line is in force for, how many uses are left, and where a paste goes', async () => {
+    const { controller, gateway, said } = rig();
+    gateway.plan = planWith([
+      { ...PASTE, state: 'approved', remaining: 1, to: { kind: 'secret', name: 'VERCEL_TOKEN' } } as TaskPlanLine,
+      {
+        ...PICKER,
+        line: 1,
+        state: 'used-up',
+        approved: { signIn: WORK, totp: false, remaining: 0 },
+      } as TaskPlanLine,
+      { ...SINGLE, line: 2, state: 'unavailable', candidates: [] } as TaskPlanLine,
+      { ...PASTE, line: 3, state: 'approved', remaining: undefined } as TaskPlanLine,
+    ]);
+
+    await controller.list({});
+
+    should(said[0]).containEql('1. [approved, 1 of 1 left] paste command:gh → secret:VERCEL_TOKEN');
+    should(said[0]).containEql('2. [used-up, 0 of 1 left] sign in on a page');
+    should(said[0]).containEql('3. [unavailable] sign in on a page: password — no saved account');
+    should(said[0]).containEql('4. [approved] paste');
+  });
+
+  it('should print the outcome as data with --json once the app has answered', async () => {
+    const { controller, gateway, said } = rig();
+    gateway.views = ['denied'];
+
+    await controller.approve('feed', ['3'], { json: true });
+
+    should(JSON.parse(said.at(-1) as string)).eql({ state: 'denied' });
+  });
+
+  it('should print the revoked plan with --json', async () => {
+    const { controller, said } = rig();
+
+    await controller.revoke('feed', ['1'], { json: true });
+
+    should((JSON.parse(said[0] as string) as TaskPlan).state).equal('revoked');
+  });
+
+  it('should stage nothing for a --totp on a line that was not listed, or that the ferret never asked codes for', async () => {
+    const asked = rig();
+    const unlisted = await failure(asked.controller.approve('feed', ['1'], { totp: ['2'] }));
+    const noCodes = rig();
+    noCodes.gateway.plan = planWith([
+      PASTE,
+      PICKER,
+      { ...SINGLE, candidates: [candidate(ONLY, 'STRIPE', true)] } as TaskPlanLine,
+    ]);
+    const unasked = await failure(noCodes.controller.approve('feed', ['3'], { totp: ['3'] }));
+
+    should(unlisted).containEql('--totp names line 2, which you did not list to allow');
+    should(unasked).containEql('the ferret did not ask for codes');
+    should([asked.gateway.staged, noCodes.gateway.staged]).eql([[], []]);
+  });
+
+  it('should ask for the si_… id when an account handle names two sign-ins on one line', async () => {
+    const { controller, gateway } = rig();
+    gateway.plan = planWith([
+      PASTE,
+      { ...PICKER, candidates: [candidate(WORK, 'GITHUB', true), candidate(HOME, 'GITHUB', true)] } as TaskPlanLine,
+      SINGLE,
+    ]);
+
+    const message = await failure(controller.approve('feed', ['2'], { pick: ['2=GITHUB'] }));
+
+    should(message).containEql('has more than one sign-in here: name one by its si_… id');
+    should(gateway.staged).eql([]);
+  });
+
+  it('should pass on a daemon failure that is not a vanished stage', async () => {
+    const { controller, gateway } = rig();
+    gateway.view = async () => {
+      throw new FyHttpError('down', 500, 'internal');
+    };
+
+    should(await failure(controller.approve('feed', ['3'], {}))).equal('down');
+  });
+});

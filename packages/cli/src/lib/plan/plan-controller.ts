@@ -6,7 +6,6 @@ import {
   type TaskPlan,
   type TaskPlanApproval,
   type TaskPlanLine,
-  type TaskPlanStageView,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { showUntrusted } from '../input/render.ts';
@@ -120,11 +119,7 @@ export class PlanController {
     if (options.open === true && !(await this.ports.open(link)))
       this.ports.out.diagnostic(`could not open a browser; open ${link} yourself`);
     const final = await this.#wait(plan, staged.stage);
-    this.ports.out.success(
-      options.json === true
-        ? JSON.stringify(final, null, 2)
-        : OUTCOME[final.state === 'waiting' ? 'expired' : final.state](plan),
-    );
+    this.ports.out.success(options.json === true ? JSON.stringify(final, null, 2) : OUTCOME[final.state](plan));
   }
 
   /** Ends the numbered lines of a plan (every line when none is named). It only narrows: no passkey. */
@@ -216,7 +211,7 @@ export class PlanController {
     return `Allowed line ${lineList(approval.lines.map(tick => tick.line))} of the plan ${id}: each goes through for the uses it asked, until ${plan.expiresAt}.`;
   }
 
-  async #wait(plan: TaskPlan, stage: string): Promise<TaskPlanStageView | { readonly state: 'expired' }> {
+  async #wait(plan: TaskPlan, stage: string): Promise<{ readonly state: keyof typeof OUTCOME }> {
     const until = this.ports.nowMs() + (TASK_PLAN_STAGE_TTL_SECONDS + 5) * 1_000;
     for (;;) {
       const view = await this.ports.gateway.view(plan.sessionId, plan.id, stage).catch((error: unknown) => {
@@ -224,7 +219,7 @@ export class PlanController {
         throw error;
       });
       if (view === undefined) return { state: 'expired' };
-      if (view.state !== 'waiting') return view;
+      if (view.state !== 'waiting') return { state: view.state };
       if (this.ports.nowMs() >= until) return { state: 'expired' };
       await this.ports.sleep(POLL_MS);
     }
