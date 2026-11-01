@@ -168,7 +168,7 @@ import {
   StorageSessionParents,
   StorageSubFerretDirectory,
 } from '../src/adapters/board/session-board-adapters.ts';
-import { QueueOwnerWords } from '../src/adapters/board/session-owner-words.ts';
+import { SessionOwnerWords } from '../src/adapters/board/session-owner-words.ts';
 import { type LivenessLedgerReader, StorageSessionRoster } from '../src/adapters/board/session-roster.ts';
 import { GhCliRunner, GitWorkingCopies } from '../src/adapters/board-github/index.ts';
 import {
@@ -10113,8 +10113,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.projectRoots ?? [],
         userHome,
         new StoreBoardAttachments(attachmentStore),
-        new QueueOwnerWords(sessionQueue, new StorageSessionParents(storage), taskId =>
-          new FileSessionTaskStore(id => createSessionPaths(paths, id).directory).file(taskId),
+        // The owner's words a card's ask is matched against: the queue, the send ledger (who sent each turn) and
+        // every turn document no send accounts for.
+        new SessionOwnerWords(sessionQueue, sendLedger, new StorageSessionParents(storage), id =>
+          join(createSessionPaths(paths, id).directory, 'turns'),
         ),
         { written: async id => await gateItems?.written(id) },
       );

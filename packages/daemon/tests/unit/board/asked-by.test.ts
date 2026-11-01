@@ -13,6 +13,7 @@ import {
   MIN_OWNER_MATCH,
   type OwnerWords,
   ownerWordsMatch,
+  wordsSessionOf,
 } from '../../../src/lib/board/index.ts';
 import { card, MemoryBoardStore, PROJECT, type ServiceWorld, world } from './support.ts';
 
@@ -45,6 +46,66 @@ describe('ownerWordsMatch', () => {
   it('should not match when the owner said nothing', () => {
     should(ownerWordsMatch(OWNER_ASK, [])).be.false();
     should(ownerWordsMatch('', [''])).be.false();
+  });
+
+  it('should match an ask whose lines a ferret joined with punctuation (&B123)', () => {
+    const said = 'problem -- inbox has TOO much cards\n\ntask cards -- only those that are NON agent created';
+    should(ownerWordsMatch('problem -- inbox has TOO much cards. task cards -- only those', [said])).be.true();
+  });
+
+  it("should match an ask where a ferret mended the owner's split words", () => {
+    const said = "what's happening, why do agents keep dying? can yo uhelp me check and debug?";
+    should(ownerWordsMatch('why do agents keep dying? can you help me check and debug?', [said])).be.true();
+  });
+
+  it("should match an excerpt: the pieces between '...' each the owner's words", () => {
+    const said =
+      "I woke up to a broken ferretry! I can't even scroll. did you pull and run HMS? the top bar is mangled! jump to latest don't work too";
+    should(
+      ownerWordsMatch("I woke up to a broken ferretry! I can't even scroll ... the top bar is mangled!", [said]),
+    ).be.true();
+    should(ownerWordsMatch("I woke up to a broken ferretry! I can't even scroll … jump to latest", [said])).be.true();
+  });
+
+  it("should match pieces of two of the owner's messages joined by '...' or ' / '", () => {
+    const first = 'can you make sure that auto ferrets CANNOT create agenda? i think task movement is the lead job';
+    const answer = '[answer to !A77] Approve as described';
+    should(
+      ownerWordsMatch(
+        'can you make sure that auto ferrets CANNOT create agenda? ... [answer to !A77] Approve as described',
+        [first, answer],
+      ),
+    ).be.true();
+    should(
+      ownerWordsMatch('can you make sure that auto ferrets CANNOT create agenda / Approve as described', [
+        first,
+        answer,
+      ]),
+    ).be.true();
+  });
+
+  it('should not match an excerpt with a piece the owner never said, or with no piece long enough', () => {
+    const said = "I woke up to a broken ferretry! I can't even scroll. the top bar is mangled!";
+    should(ownerWordsMatch("I woke up to a broken ferretry! ... and the lead's own idea here", [said])).be.false();
+    should(ownerWordsMatch('I woke up ... the top bar', [said])).be.false();
+  });
+});
+
+describe('wordsSessionOf', () => {
+  const of = (source: string, createdBy: BoardActor = { kind: 'owner' }) =>
+    wordsSessionOf({ createdBy, ask: { text: OWNER_ASK, source } });
+
+  it('should read the session an ask source names, in any of the ways it is written', () => {
+    should(of('session:mvgt2oz9-04e28935')).equal('mvgt2oz9-04e28935');
+    should(of('session mvgt2oz9-04e28935')).equal('mvgt2oz9-04e28935');
+    should(of('/home/kirin/.ferretry/state/sessions/mvgt2oz9-04e28935/turns/turn-001.md')).equal('mvgt2oz9-04e28935');
+    should(of('lead ferret lizzette (mvgt2oz9-04e28935)')).equal('mvgt2oz9-04e28935');
+  });
+
+  it("should fall back to the recording ferret's own session, and to none for anyone else", () => {
+    should(of('a brief', { kind: 'ferret', sessionId: 'lead' })).equal('lead');
+    should(of('board import', { kind: 'daemon' })).be.undefined();
+    should(of('a brief')).be.undefined();
   });
 });
 
@@ -80,6 +141,22 @@ describe('decideAskedBy', () => {
       return [];
     });
     should(asked).equal('lead');
+  });
+
+  it('should read the words of the session the source names whoever wrote the card down', async () => {
+    const asked: string[] = [];
+    const words = async (id: string) => {
+      asked.push(id);
+      return [OWNER_ASK];
+    };
+    const source = 'session:mvgt2oz9-04e28935';
+    should(await decideAskedBy({ createdBy: { kind: 'owner' }, ask: { text: OWNER_ASK, source } }, false, words)).equal(
+      'person',
+    );
+    should(
+      await decideAskedBy({ createdBy: { kind: 'daemon' }, ask: { text: OWNER_ASK, source } }, false, words),
+    ).equal('person');
+    should(asked).eql(['mvgt2oz9-04e28935', 'mvgt2oz9-04e28935']);
   });
 
   it('should say agent when nothing matches, or the card has no session to look in', async () => {
@@ -207,28 +284,42 @@ describe('backfilling who asked', () => {
   const old = (id: string, source: string, text = OWNER_ASK, createdBy: BoardActor = ferretActor('lead')) =>
     card({ id, createdBy, ask: { text, source } });
 
-  it('should store the answer on each card that lacks one, and leave the rest alone', async () => {
-    const decided = card({ id: 'F9', askedBy: 'agent', ask: { text: OWNER_ASK, source: 'owner (board)' } });
+  it('should store the answer on each card that lacks one', async () => {
     const { ports, service } = serviceWith(
       [
         old('F1', 'session:lead'),
         old('F2', 'session:lead', 'a ferret idea that the owner never voiced out loud'),
         old('F3', 'owner (board)', 'filed by the owner', { kind: 'owner' }),
         old('F4', 'session:lead', OWNER_ASK, { kind: 'owner' }),
-        decided,
+        old('F5', 'session:lead', 'a ferret on the admin token, with an idea of its own', { kind: 'owner' }),
       ],
       new FakeOwnerWords({ lead: [OWNER_ASK] }),
     );
 
-    should(await service.backfillAskedBy()).equal(4);
+    should(await service.backfillAskedBy()).equal(5);
 
-    should(['F1', 'F2', 'F3', 'F4', 'F9'].map(id => stored(ports, id).askedBy)).eql([
+    should(['F1', 'F2', 'F3', 'F4', 'F5'].map(id => stored(ports, id).askedBy)).eql([
       'person',
       'agent',
       'person',
-      'agent',
+      'person',
       'agent',
     ]);
+  });
+
+  it('should decide again a card stored agent from fewer words, and never take back a person', async () => {
+    const was = (id: string, askedBy: 'agent' | 'person', text = OWNER_ASK) =>
+      card({ id, askedBy, createdBy: ferretActor('lead'), ask: { text, source: 'session:lead' } });
+    const { ports, service } = serviceWith(
+      [was('F1', 'agent'), was('F2', 'agent', 'still a ferret idea nobody said'), was('F3', 'person', 'from the app')],
+      new FakeOwnerWords({ lead: [OWNER_ASK] }),
+    );
+    const store = ports.store as MemoryBoardStore;
+
+    should(await service.backfillAskedBy()).equal(1);
+
+    should(['F1', 'F2', 'F3'].map(id => stored(ports, id).askedBy)).eql(['person', 'agent', 'person']);
+    should(store.writes.map(write => write.id)).eql(['F1']);
   });
 
   it('should write no history and change nothing else about the card', async () => {
