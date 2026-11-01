@@ -78,6 +78,22 @@ describe('ProtocolCopyGateway', () => {
     should(calls.every(call => !('x-ferretry-session-id' in call.headers))).be.true();
   });
 
+  it('should read the secure copy settings from their own route, as the person at this machine', async () => {
+    const view = { settings: { allowProfileTargets: true }, profileRules: [RULE.id] };
+    const { calls, copy } = gateway(() => view);
+
+    should(await copy.ruleSettings()).eql(view);
+    should(calls.map(call => `${call.method} ${call.path}`)).eql(['GET /v1/copy-rules/settings']);
+    should(calls.every(call => !('x-ferretry-session-id' in call.headers))).be.true();
+    const { copy: wrong } = gateway(() => ({ settings: { allowProfileTargets: true }, profileRules: ['nope'] }));
+    should(
+      await wrong.ruleSettings().then(
+        () => 'parsed',
+        () => 'refused',
+      ),
+    ).equal('refused');
+  });
+
   it('should refuse a reply that does not match the protocol', async () => {
     const { copy } = gateway(() => ({ rules: [{ ...RULE, value: 'ghp_x' }] }));
 
