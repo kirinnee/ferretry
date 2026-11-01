@@ -78,7 +78,11 @@ export interface BrowserAutomation extends BrowserInputFieldsPort, BrowserCopyPo
   /** The chosen (default: latest) download this page started, as a file the browser staged for the daemon to save. */
   download(pageId: string, downloadId?: string): Promise<BrowserPageActed & { readonly staged: WorkerStagedFile }>;
   /** Runs an agent's own script in an isolated world on the page, and answers what it returned, as text. */
-  evaluate(pageId: string, script: PageScript): Promise<BrowserPageActed & { readonly text: string }>;
+  /** `scriptOrigin`: the origin of the world the script ran in, read before the agent's code; absent when unknown. */
+  evaluate(
+    pageId: string,
+    script: PageScript,
+  ): Promise<BrowserPageActed & { readonly text: string; readonly scriptOrigin?: string }>;
   /** The page printed to PDF and staged for the daemon to save; a visible-window browser refuses. */
   pdf(pageId: string): Promise<BrowserPageActed & { readonly staged: WorkerStagedFile }>;
   back(pageId: string): Promise<BrowserPageActed>;

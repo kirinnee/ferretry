@@ -791,6 +791,7 @@ import {
   CodexPickerCleanup,
   CodexRuntimeCatalogCache,
   CodexTranscriptParser,
+  CombinedSignInGrants,
   type ConversationAdopter,
   type ConversationConvert,
   ConversationDigestError,
@@ -1100,6 +1101,7 @@ import {
   ReviveDedupeConflict,
   type RolloutFormatPort,
   type RoutingCatalogPort,
+  RuleSignInGrants,
   type RunOverrides,
   readDaemonRelayIdentity,
   readDoctorReport,
@@ -1222,6 +1224,7 @@ import {
   type SharingRepairOutcome,
   SignalRefused,
   type SignInChoicePort,
+  SignInGrantLedger,
   type SignInGrantSource,
   SignInRuleDevicePurge,
   SignInRuleService,
@@ -1254,6 +1257,7 @@ import {
   sessionNameClaim,
   sessionScopedAttachments,
   shareLinkTarget,
+  stampedProjectOf,
   suggestedOllamaModel,
   supersededCarrierKeys,
   TaskPlanAgendaAdapter,
@@ -6446,6 +6450,8 @@ function createAgentToolsSubsystem(input: {
   /** A ferret's recipe proposals, and where its acts are told so a steered sign-in fact is not kept. */
   readonly recipes: Pick<LoginRecipeService, 'propose' | 'scrubbedAccounts'>;
   readonly loginActs: Pick<LoginObserver, 'acted'>;
+  /** Told where every page script runs, machine-wide: a standing rule pinned to that host stops filling. */
+  readonly scriptedOrigins?: { scriptedOn(host: string | undefined): void; running?(): () => void };
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(
@@ -6487,6 +6493,7 @@ function createAgentToolsSubsystem(input: {
       signInChoice: input.signInChoice,
       recipes: input.recipes,
       loginActs: input.loginActs,
+      ...(input.scriptedOrigins === undefined ? {} : { scriptedOrigins: input.scriptedOrigins }),
       redactor: input.redactor,
       binaryName: CLIENT_NAME,
       clock,
@@ -6539,8 +6546,13 @@ function createInputRequestService(input: {
   readonly loginFacts: LoginFactSink;
   /** An approve-on-phone card's buzz: at the raise and for each new number, inside the high-priority caps. */
   readonly approvalPush: PhoneApprovalPushPort;
-  /** Sign-ins the owner approved in advance on a task plan: filled only while `task-plan.1` is advertised. */
+  /**
+   * Sign-ins the owner approved in advance, on a task plan or with a standing rule: filled only while `task-plan.1` (or
+   * `sign-in-rules.1`) is advertised.
+   */
   readonly grants?: SignInGrantSource;
+  /** A card raised quiet that a standing rule did not fill buzzes again, with no edit to its words. */
+  readonly rebuzz?: (sessionId: string) => Promise<void>;
 }): {
   readonly service: InputRequestService;
   readonly observer: LoginObserver;
@@ -6648,6 +6660,7 @@ function createInputRequestService(input: {
     sealed: input.sealed,
     rules: input.rules,
     ...(input.grants === undefined ? {} : { grants: input.grants }),
+    ...(input.rebuzz === undefined ? {} : { rebuzz: input.rebuzz }),
     hostName: hostname(),
   });
   // Approve on your phone (docs/input-requests.md): the number is read by the browser from the page only, and the card
@@ -10838,8 +10851,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       setInterval(() => copyPlans.sweep(), INPUT_REQUEST_SWEEP_MS).unref();
       // THE OWNER'S STANDING SIGN-IN RULES (docs/secrets.md, "Standing sign-in rules"): on disk, each carrying the
       // owner's passkey assertion over its own bytes, checked again offline at load and whenever a passkey or device
-      // goes. Every account change is followed: a pinned fact that drifted suspends its rule. Nothing fills under a
-      // rule yet (R3c-4), and `sign-in-rules.1` is not advertised.
+      // goes. Every account change is followed: a pinned fact that drifted suspends its rule. A rule fills only through
+      // the shared grant matcher below, and only once `sign-in-rules.1` is advertised (the app ships first).
       const signInRules = new SignInRuleService({
         store: new FileSignInRuleStore(join(paths.state, 'accounts'), stateFiles),
         accounts: { listing: async () => await accountDirectory.keyedList() },
@@ -10865,6 +10878,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       void asActivity(activities, 'sign-in-rules', async () => await signInRules.load())();
       setInterval(() => void signInRules.sweepRules().catch(() => undefined), INPUT_REQUEST_SWEEP_MS).unref();
+      // ONE ledger for every sign-in grant (docs/input-requests.md, "Standing rule fills"): plan lines and standing rules
+      // share the hourly rate, and neither source forgets the other's attempts or pins.
+      const signInGrantLedger = new SignInGrantLedger();
+      const signInRuleSessions = new StorageSessionFacts(storage);
+      const signInRuleGrants = new RuleSignInGrants({
+        rules: signInRules,
+        ledger: signInGrantLedger,
+        keys: async id => {
+          const key = AccountKeySchema.safeParse((await accountDirectory.seedTarget(id).catch(() => undefined))?.key);
+          return key.success ? key.data : undefined;
+        },
+        advertised: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRules),
+        stampedProject: async sessionId => await stampedProjectOf(signInRuleSessions, sessionId),
+        clock: { now: () => Date.now() },
+        warn: message => void process.stderr.write(`sign-in rules: ${message}\n`),
+      });
       signInChoiceLate.current = new SessionSignInContext({
         defaults: async () => await accountDefaults.current(),
         projectOf: async sessionId => await laneSets.projectOf(sessionId),
@@ -10902,16 +10931,25 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         sealed: secureCopies,
         rules: pasteRules,
-        // A ferret's task plan lines, as grants the shared matcher checks (docs/input-requests.md, "Task plan fills"). Plan
-        // fills close the card themselves, so they run only while the daemon advertises `task-plan.1`.
-        grants: new PlanSignInGrants(
-          copyPlans,
-          async id => {
-            const key = AccountKeySchema.safeParse((await accountDirectory.seedTarget(id).catch(() => undefined))?.key);
-            return key.success ? key.data : undefined;
-          },
-          () => daemonFeatureList().includes(DAEMON_FEATURES.taskPlan),
+        // A ferret's task plan lines and the owner's standing rules, as grants the shared matcher checks
+        // (docs/input-requests.md, "Task plan fills", "Standing rule fills"). Grant fills close the card themselves, so
+        // each source runs only while the daemon advertises its feature (`task-plan.1`, `sign-in-rules.1`).
+        grants: new CombinedSignInGrants(
+          new PlanSignInGrants(
+            copyPlans,
+            async id => {
+              const key = AccountKeySchema.safeParse(
+                (await accountDirectory.seedTarget(id).catch(() => undefined))?.key,
+              );
+              return key.success ? key.data : undefined;
+            },
+            () => daemonFeatureList().includes(DAEMON_FEATURES.taskPlan),
+            signInGrantLedger,
+          ),
+          signInRuleGrants,
+          signInGrantLedger,
         ),
+        rebuzz: async sessionId => await agendaBuzz.unquieted(sessionId),
         secretStore: secretDirectory,
         loginFacts: accountDirectory,
         approvalPush: {
@@ -12241,6 +12279,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         signInChoice,
         recipes: loginRecipes,
         loginActs: loginObserver,
+        // Every page script, in any session, taints its page's host for the owner's standing rules (R3c §7.3).
+        scriptedOrigins: signInRuleGrants,
         files: (() => {
           const agentFiles = new AgentFiles({
             fs: new NodeAgentFilesystem(),

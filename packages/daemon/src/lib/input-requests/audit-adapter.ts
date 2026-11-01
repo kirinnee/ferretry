@@ -10,7 +10,8 @@ import type { InputAudit, InputAuditEntry, InputSaveAuditEntry, InputStoreAuditE
  *
  * An agent has no audit actor kind of its own, so it is recorded as the host the way every agent tool call
  * is, with `by: 'agent'` saying which. The daemon's own act (an expiry) is `cause: 'daemon'`. A fill under a task-plan
- * line is the host's too, with `by: 'plan'`, the plan and its line (0-based) beside the sign-in it filled.
+ * line is the host's too, with `by: 'plan'`, the plan and its line (0-based) beside the sign-in it filled; a fill under a
+ * standing rule is `by: 'rule'` with `signInRule` and its `revision` (not `rule`, which names a paste rule). Never a value.
  */
 export class InputAuditAdapter implements InputAudit {
   constructor(private readonly sink: AuditSink) {}
@@ -23,6 +24,9 @@ export class InputAuditAdapter implements InputAudit {
       ...(entry.actor.kind === 'agent' ? { by: 'agent' } : {}),
       ...(entry.actor.kind === 'rule' ? { by: 'rule', rule: entry.actor.ruleId } : {}),
       ...(entry.actor.kind === 'plan' ? { by: 'plan', plan: entry.actor.planId, line: entry.actor.line } : {}),
+      ...(entry.actor.kind === 'sign-in-rule'
+        ? { by: 'rule', signInRule: entry.actor.rule, revision: entry.actor.revision }
+        : {}),
     };
     await this.sink.record({
       event: entry.event,

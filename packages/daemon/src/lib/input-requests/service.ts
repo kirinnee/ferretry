@@ -61,7 +61,7 @@ import { type ClearJob, type ClearOutcome, clearJobOf } from '../sign-in-grants/
 import type { GrantReservation } from '../sign-in-grants/ledger.ts';
 import { type GrantMatch, type GrantSighting, matchSignInGrant, type SignInGrant } from '../sign-in-grants/matcher.ts';
 import type { SignInGrantSource } from '../sign-in-grants/plans.ts';
-import { GRANT_MISS_CONTEXT_LINE, stopsTheLine } from '../sign-in-grants/reasons.ts';
+import { GRANT_MISS_CONTEXT_LINE, grantStops } from '../sign-in-grants/reasons.ts';
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
@@ -171,6 +171,17 @@ const MAX_STEP = 16;
 
 interface Held {
   request: InputRequest;
+  /**
+   * What the FERRET reads while a grant fills its card on its own (secrev-1282b F1): the request as it stood when the
+   * attempt began. A fill passes through states a card no grant was about never shows (`delivering`, a longer lock)
+   * and may still be refused at its last check, so until the request really ends the ferret reads the card as it was.
+   */
+  agentSees?: InputRequest;
+  /**
+   * The lock the ferret reads after a grant fill that did not happen (delta F4): the one the card was raised with, though
+   * the request keeps the longer lock the attempt worked out (a card never shortens). Gone at the next write or the end.
+   */
+  agentLock?: { readonly lock: InputRequest['lock'] };
   /** Every name the terminal was seen under (its key and its id), so a quarantine on any of them seals it. */
   names: readonly string[];
   checkFailures: number;
@@ -258,6 +269,12 @@ export interface InputRequestServiceDependencies {
    */
   readonly grants?: SignInGrantSource;
   /**
+   * Asks the phone's buzz to look at the session's board again, with no edit to it: a card raised quiet that a standing
+   * rule did not fill after all must buzz like any raise, while its words stay byte-identical to a card no rule was
+   * ever about (a ferret reads its own agenda). Absent: such a card buzzes at the next board change or sweep.
+   */
+  readonly rebuzz?: (sessionId: string) => Promise<void>;
+  /**
    * Told about every value typed into a terminal or a page, once it landed: the facts a saved login keeps
    * (docs/input-requests.md, "Login recipes") come only from here, and so does whether a code Ferretry made went
    * through (`codeTyped`). Absent: no facts are kept.
@@ -288,6 +305,8 @@ export class InputRequestService {
   private readonly raises = new Map<string, number[]>();
   /** Requests being filled under a grant or a rule right now: their cards do not buzz (`quietCard`). */
   private readonly quiet = new Set<string>();
+  /** Quiet requests a PLAN line was likely to fill: only those may say so on the card if it vanishes before the fill. */
+  private readonly quietForPlan = new Set<string>();
   private readonly lock = new SessionLock();
 
   constructor(private readonly deps: InputRequestServiceDependencies) {}
@@ -394,8 +413,9 @@ export class InputRequestService {
     // closed at once, and must not buzz the owner's phone for the moment it was open (`quietCard`).
     const ruleId =
       copy === undefined ? undefined : this.ruleFor(sessionId, copy, seen.facts, fields, seen.profileProgram);
-    if (ruleId !== undefined || (copy === undefined && this.grantLikely(sessionId, target, matchKey, now)))
-      this.quiet.add(requestId);
+    const likely = copy === undefined ? this.likelyGrants(sessionId, target, matchKey, now) : [];
+    if (ruleId !== undefined || likely.length > 0) this.quiet.add(requestId);
+    if (likely.some(grant => grant.source === 'plan')) this.quietForPlan.add(requestId);
     try {
       return await this.present(sessionId, raise, target, {
         requestId,
@@ -417,6 +437,7 @@ export class InputRequestService {
       });
     } finally {
       this.quiet.delete(requestId);
+      this.quietForPlan.delete(requestId);
     }
   }
 
@@ -610,57 +631,73 @@ export class InputRequestService {
   }
 
   /**
-   * Whether a grant is about this target and may fill it: in force, or one whose sign-in attempt is still open (a later
-   * step continues on the use it spent). The card is then raised quiet, and the fill decides after.
+   * The grants about this target that may fill it: in force, or one whose sign-in attempt in this session is still open
+   * (a later step continues on the use it spent). Any: the card is raised quiet, and the fill decides after.
    */
-  private grantLikely(sessionId: string, target: InputTarget, matchKey: string | undefined, now: number): boolean {
-    if (target.kind === 'secret') return false;
+  private likelyGrants(
+    sessionId: string,
+    target: InputTarget,
+    matchKey: string | undefined,
+    now: number,
+  ): readonly SignInGrant[] {
+    if (target.kind === 'secret') return [];
     const ledger = this.deps.grants?.ledger;
-    return this.grantsAt(sessionId, matchKey).some(
+    return this.grantsAt(sessionId, matchKey).filter(
       grant =>
         grant.expiresAt > now &&
-        (grant.state === 'in-force' || (grant.state === 'used-up' && ledger?.joinable(grant.id, now) === true)),
+        (grant.state === 'in-force' ||
+          (grant.state === 'used-up' && ledger?.joinable(grant.id, sessionId, now) === true)),
     );
   }
 
   /**
-   * A SIGN-IN THE OWNER APPROVED IN ADVANCE on a task plan (docs/input-requests.md, "Task plan fills"): filled now,
-   * under the line, as one guarded write with the card raised, audited and closed so it shows in the history. Runs
-   * inside the raise's turn of the session lock, after the card is held.
+   * A SIGN-IN THE OWNER APPROVED IN ADVANCE, on a task plan or with a standing rule (docs/input-requests.md, "Task plan
+   * fills", "Standing rule fills"): filled now, under the grant, as one guarded write with the card raised, audited and
+   * closed so it shows in the history. Runs inside the raise's turn of the session lock, after the card is held.
    *
    * The shared matcher runs here on the raise's facts and again in {@link attempt} on the facts looked at before the
-   * write; every check holds or nothing is typed. A miss leaves the card for the owner with `preapproval` saying which
-   * line did not apply and why (the owner's view only), and stops the line when the miss says the form, the recipe or
-   * the place changed. A use is spent synchronously by the ledger; it is given back only when nothing may have been
-   * typed. Total: a fill that cannot be tried is a normal card.
+   * write (a standing rule's stored proof and pinned facts are checked again first); every check holds or nothing is
+   * typed. A miss leaves the card for the owner with `preapproval` saying which grant did not apply and why (the owner's
+   * view only), and stops a plan line or suspends a rule when the miss says so. A use is spent synchronously by the one
+   * ledger; it is given back only when nothing may have been typed. Total: a fill that cannot be tried is a normal card.
    */
   private async underGrant(held: Held, facts: InputTargetFacts, raise: InputRaise): Promise<void> {
     const grants = this.deps.grants;
     const { sessionId } = held.request;
     const here = this.grantsAt(sessionId, held.matchKey);
-    // A card raised quiet whose line ended (revoked, expired) while it was raised is the owner's again, at once.
-    if (grants === undefined || here.length === 0) return await this.unquiet(held, GRANT_MISS_CONTEXT_LINE);
+    // A card raised quiet whose grant ended (revoked, expired) while it was raised is the owner's again, at once. Only
+    // a card a PLAN line was about says so: a ferret reads its agenda, and must learn nothing about a rule.
+    if (grants === undefined || here.length === 0)
+      return await this.unquiet(held, this.quietForPlan.has(held.request.id) ? GRANT_MISS_CONTEXT_LINE : undefined);
     let chosen: SignInGrant | undefined;
     try {
       const decided = await this.decideGrant(held, facts, here, grants);
       chosen = decided.grant;
-      if (!decided.ok) return await this.grantMissed(held, decided.grant, decided.reason);
-      const { grant, match, reservation } = decided;
-      const actor: InputActor = { kind: 'plan', planId: grant.plan?.id ?? '', line: grant.plan?.line ?? 0 };
+      if (!decided.ok) return await this.grantMissed(held, decided.grant, decided.reason, decided.misses);
+      const { grant, match, reservation, project } = decided;
+      const actor = actorOf(grant);
+      if (actor === undefined) {
+        grants.ledger.release(reservation);
+        return await this.grantMissed(held, grant, undefined);
+      }
       const body: InputDeliverBody = {
         deliveryId: crypto.randomUUID(),
         observedDigest: held.request.observedDigest ?? '',
         entry: match.account,
         signIn: grant.signIn,
         ...(match.factor !== undefined && match.fills.includes('totp') ? { factor: match.factor } : {}),
-        // Under a plan nobody else could press Send: Enter goes after the last value unless the ferret submits itself.
+        // Under a grant nobody else could press Send: Enter goes after the last value unless the ferret submits itself.
         submit: raise.submit !== 'agent',
       };
       let written = false;
-      let identity = match.identity;
+      // The form a fill pins for its field set; a rule's join-only code step pins nothing.
+      let identity: string | undefined = match.joinOnly === true ? undefined : match.identity;
       const settle = (): void => {
-        if (grants.ledger.spent(reservation, identity)) grants.used(grant, this.deps.clock.now());
+        if (grants.ledger.spent(reservation, identity)) grants.used(grant, this.deps.clock.now(), sessionId);
       };
+      // The ferret reads the card as it stood until the request really ends (a fill, or the card back for the owner).
+      held.agentSees = held.request;
+      const raisedLock = held.request.lock;
       try {
         await this.attempt(
           held,
@@ -672,36 +709,58 @@ export class InputRequestService {
           },
           {
             recheck: async seen => {
+              // A standing rule's stored proof and pinned facts, checked again offline (a failure suspends it).
+              const verdict = await grants.verify(grant);
+              if (!verdict.ok)
+                throw verdict.reason === undefined ? new GrantUnchecked() : new GrantMissed(verdict.reason);
               // The grant as it stands NOW (a revoke, an expiry or a stop since the raise counts), on the facts just seen.
               const now = grants.of(sessionId).find(each => each.id === grant.id);
               if (now === undefined) throw new GrantMissed('expired');
               const again = await this.matchAgain(held, seen, now, grants);
               if (!again.ok) throw new GrantMissed(again.reason);
-              identity = again.identity;
+              identity = again.joinOnly === true ? undefined : again.identity;
             },
             held: () => {
+              // Synchronous, with nothing awaited before the write: a revoke, an expiry, a stop or a suspension, a
+              // narrowing that took a role away, or a page script on a rule's places since the last look ends it here.
+              const at = this.deps.clock.now();
               const now = grants.of(sessionId).find(each => each.id === grant.id);
-              return now !== undefined && now.state !== 'stopped' && now.expiresAt > this.deps.clock.now();
+              return (
+                now !== undefined &&
+                now.state !== 'stopped' &&
+                now.expiresAt > at &&
+                grants.holds(now, { sessionId, project, roles: match.fills, now: at })
+              );
             },
             typed: (job, holdMs, names) => this.clearBeforeHoldEnds(held, grant, grants, job, holdMs, names),
+            uncertain: async () => await grants.stopped(grant, 'did-not-move-on').catch(() => undefined),
           },
         );
         settle();
       } catch (error) {
         if (written) settle();
-        else grants.ledger.release(reservation);
+        else {
+          grants.ledger.release(reservation);
+          // Nothing was typed: the ferret goes on reading the lock the card was raised with, as with no grant.
+          if (held.request.state === 'pending') held.agentLock = { lock: raisedLock };
+        }
+        delete held.agentSees;
         await this.grantMissed(held, grant, error instanceof GrantMissed ? error.reason : undefined);
+      } finally {
+        delete held.agentSees;
       }
     } catch {
       // A fill that could not be tried leaves the owner's card as it is.
       if (chosen !== undefined) await this.grantMissed(held, chosen, undefined).catch(() => undefined);
-      else await this.unquiet(held, GRANT_MISS_CONTEXT_LINE);
+      else await this.unquiet(held, this.quietForPlan.has(held.request.id) ? GRANT_MISS_CONTEXT_LINE : undefined);
     }
   }
 
   /**
    * Which grant fills this card: the first in force (soonest to expire) that the matcher passes and the ledger has a use
-   * and room for; else the first miss, in that order, so a line spent or stopped still says why.
+   * and room for; else the misses, in that order, so a grant spent, stopped or suspended still says why. The one the
+   * owner reads is the first PLAN line's when there is one: a ferret that knows its plan sees the plan's words whether
+   * or not a rule was also tried, and learns nothing about the rule.
    */
   private async decideGrant(
     held: Held,
@@ -714,13 +773,26 @@ export class InputRequestService {
         readonly grant: SignInGrant;
         readonly match: Extract<GrantMatch, { readonly ok: true }>;
         readonly reservation: GrantReservation;
+        readonly project: string | undefined;
       }
-    | { readonly ok: false; readonly grant: SignInGrant; readonly reason: GrantMissReason }
+    | {
+        readonly ok: false;
+        readonly grant: SignInGrant;
+        readonly reason: GrantMissReason | undefined;
+        readonly misses: readonly GrantMiss[];
+      }
   > {
     const first = here[0] as SignInGrant;
     const seen = await this.sightingOf(held, facts, held.request.fields, here, grants);
-    if (seen === undefined) return { ok: false, grant: first, reason: 'sign-in-gone' };
-    const misses: { readonly grant: SignInGrant; readonly reason: GrantMissReason }[] = [];
+    // Accounts that can't be read: a plan line says the sign-in is gone (as it always has); a rule says nothing, and
+    // is not suspended for it.
+    if (seen === undefined) {
+      const plan = here.find(grant => grant.source === 'plan');
+      return plan === undefined
+        ? { ok: false, grant: first, reason: undefined, misses: [] }
+        : { ok: false, grant: plan, reason: 'sign-in-gone', misses: [] };
+    }
+    const misses: GrantMiss[] = [];
     for (const grant of here) {
       const match = matchSignInGrant(grant, seen, grants.ledger.pinned(grant.id));
       if (!match.ok) {
@@ -728,17 +800,29 @@ export class InputRequestService {
         continue;
       }
       const reservation = grants.ledger.reserve(
-        { id: grant.id, signIn: grant.signIn, remaining: grant.remaining },
+        {
+          id: grant.id,
+          signIn: grant.signIn,
+          remaining: grant.remaining,
+          ...(grant.source === 'rule' ? { codeJoinsPassword: true } : {}),
+        },
         held.request.sessionId,
         match.fills,
         match.fieldSet,
         seen.now,
+        {
+          place: seen.matchKey,
+          ...(facts.kind === 'browser' ? { pageId: facts.pageId, navigationId: facts.navigationId } : {}),
+          // The ferret did nothing to the session's pages since then (reads and waits are no acts).
+          untouchedSince: (at: number) => !this.tainted(held.request.sessionId, at),
+        },
       );
-      if (typeof reservation !== 'string') return { ok: true, grant, match, reservation };
+      if (typeof reservation !== 'string') return { ok: true, grant, match, reservation, project: seen.project };
       misses.push({ grant, reason: reservation });
     }
-    // `here` is never empty, so every grant that did not fill left its miss: the first is the one the owner reads.
-    return { ok: false, ...(misses[0] as (typeof misses)[number]) };
+    // `here` is never empty, so every grant that did not fill left its miss.
+    const reported = misses.find(each => each.grant.source === 'plan') ?? (misses[0] as GrantMiss);
+    return { ok: false, ...reported, misses };
   }
 
   /** The matcher again at the write, on the facts just looked at, with the accounts read again. */
@@ -762,7 +846,10 @@ export class InputRequestService {
     return matchSignInGrant(grant, seen, grants.ledger.pinned(grant.id));
   }
 
-  /** What the matcher reads: the daemon's facts, the accounts and their keys now, and whether the ferret ran a script. */
+  /**
+   * What the matcher reads: the daemon's facts, the accounts and their keys now, whether the ferret ran a script in this
+   * session, where any session ran one on the machine, and the session's stamped project.
+   */
   private async sightingOf(
     held: Held,
     facts: InputTargetFacts,
@@ -781,6 +868,9 @@ export class InputRequestService {
       if (key !== undefined) keys.set(account, key);
     }
     const { sessionId } = held.request;
+    const project = grants.some(grant => grant.scope?.kind === 'project')
+      ? await source.projectOf(sessionId).catch(() => undefined)
+      : undefined;
     return {
       sessionId,
       facts,
@@ -790,23 +880,38 @@ export class InputRequestService {
       keys,
       // Any page script the ferret EVER ran in this session: stricter than "on this document".
       scripted: this.tainted(sessionId, Number.POSITIVE_INFINITY),
+      scriptedOrigins: source.scriptedOrigins(),
+      ...(project === undefined ? {} : { project }),
       ...(held.hint === undefined ? {} : { hint: held.hint }),
       now: this.deps.clock.now(),
     };
   }
 
   /**
-   * A grant did not fill this card: it stays for the owner, who reads which line did not apply and why (their view
-   * only), and the card is no longer quiet. A miss that says the form, the recipe or the place changed stops the line.
-   * Audited, never a value. A request that already ended (an uncertain write) says nothing more.
+   * A grant did not fill this card: it stays for the owner, who reads which grant did not apply and why (their view
+   * only), and the card is no longer quiet. Every grant tried whose miss stops it (a plan line) or suspends it (a rule)
+   * is stopped. Audited, never a value. A request that already ended (an uncertain write) says nothing more.
+   *
+   * What the FERRET reads stays as it would be without the grant: a plan line's miss adds the one fixed context line to
+   * the card; a rule's adds nothing at all, so its agenda is byte-identical to a sign-in no rule was ever about, and the
+   * card is only made to buzz again.
    */
-  private async grantMissed(held: Held, grant: SignInGrant, reason: GrantMissReason | undefined): Promise<void> {
+  private async grantMissed(
+    held: Held,
+    grant: SignInGrant,
+    reason: GrantMissReason | undefined,
+    misses: readonly GrantMiss[] = [],
+  ): Promise<void> {
     if (held.request.state !== 'pending') {
       this.quiet.delete(held.request.id);
       return;
     }
     held.request = { ...held.request, preapproval: preapprovalOf(grant, 'did-not-apply', reason) };
-    if (reason !== undefined && stopsTheLine(reason)) await this.deps.grants?.stopped(grant, reason);
+    const stopping = [...misses, ...(reason === undefined ? [] : [{ grant, reason }])].filter(
+      (each, index, all) =>
+        grantStops(each.grant, each.reason) && all.findIndex(other => other.grant.id === each.grant.id) === index,
+    );
+    for (const each of stopping) await this.deps.grants?.stopped(each.grant, each.reason);
     await this.record(
       held.request,
       'input.requested',
@@ -815,19 +920,27 @@ export class InputRequestService {
         ...this.auditOf(held.request),
         preapproval: 'did-not-apply',
         ...(grant.plan === undefined ? {} : { plan: grant.plan.id, line: grant.plan.line }),
+        ...(grant.rule === undefined
+          ? {}
+          : { by: 'rule' as const, signInRule: grant.rule.id, revision: grant.rule.revision }),
         ...(reason === undefined ? {} : { because: reason }),
       },
     );
-    await this.unquiet(held, GRANT_MISS_CONTEXT_LINE);
+    await this.unquiet(held, grant.source === 'plan' ? GRANT_MISS_CONTEXT_LINE : undefined);
   }
 
   /**
-   * A card raised quiet is the owner's to answer after all: it buzzes again, and the daemon's line on it (the same words
-   * whatever went wrong: the ferret can read its own agenda) is a daemon edit, which makes the buzz settle at once.
+   * A card raised quiet is the owner's to answer after all: it buzzes again. With a `line` (the same words whatever went
+   * wrong: the ferret can read its own agenda), the daemon's edit to the card makes the buzz settle at once. Without one
+   * (a standing rule's miss), the card is left exactly as raised and the buzz is asked to look again.
    */
-  private async unquiet(held: Held, line: string): Promise<void> {
+  private async unquiet(held: Held, line: string | undefined): Promise<void> {
     const { request } = held;
     if (!this.quiet.delete(request.id) || request.state !== 'pending') return;
+    if (line === undefined) {
+      await this.deps.rebuzz?.(request.sessionId).catch(() => undefined);
+      return;
+    }
     await this.deps.agenda
       .note?.(
         request.sessionId,
@@ -1606,6 +1719,8 @@ export class InputRequestService {
   ): Promise<InputDeliverResult> {
     const { request } = held;
     held.request = { ...request, state: 'delivering' };
+    // A write begins: the lock the ferret reads is the one this write works out (a grant fill's own is hidden by agentSees).
+    delete held.agentLock;
     let hold: QuarantineHold | undefined;
     try {
       const pasted = request.source?.name;
@@ -1674,6 +1789,9 @@ export class InputRequestService {
         });
         const lock = request.lock === undefined ? now : longerLock(request.lock, now);
         held.request = { ...held.request, lock };
+        // A grant fill asks whether it still holds BEFORE the page is held from the ferret (delta F3): a refusal a ferret
+        // can cause (a script it starts, say) lands before anything it can read changes.
+        if (grant !== undefined && !grant.held()) throw new GrantMissed('expired');
         hold = await this.holdFor(request, held.names, lock.seconds * 1000);
       }
       try {
@@ -1733,6 +1851,17 @@ export class InputRequestService {
       if (outcome === 'uncertain') {
         await this.settle(hold);
         hold = undefined;
+        // A grant fill's password may have landed (secrev-1282b F2): it gets the same clear, and the clear's own hold for
+        // the full window, as a typed one, and the grant stops (`did-not-move-on`): the sign-in did not go as approved.
+        if (grant !== undefined) {
+          if (clear !== undefined)
+            grant.typed(
+              clear,
+              (held.request.lock?.seconds ?? INPUT_QUARANTINE_SECONDS) * 1000,
+              holdNames(request, held.names),
+            );
+          await grant.uncertain();
+        }
         await stored(true);
         await this.finish(held, 'refused', 'interrupted', undefined, {
           closeCard: true,
@@ -1795,7 +1924,9 @@ export class InputRequestService {
         ...(body.entry === undefined ? {} : { entry: body.entry }),
         ...(saved === undefined ? {} : { saved: saved.ok }),
         ...(made === undefined ? {} : { factor: made }),
-        ...(by.kind === 'plan' && body.signIn !== undefined ? { signIn: body.signIn } : {}),
+        ...((by.kind === 'plan' || by.kind === 'sign-in-rule') && body.signIn !== undefined
+          ? { signIn: body.signIn }
+          : {}),
       });
       // Not awaited either: whether a code Ferretry made went through is seen after the submit, by the observer.
       if (made !== undefined && submitted)
@@ -2271,6 +2402,9 @@ export class InputRequestService {
       signIn?: SignInId;
     },
   ): Promise<void> {
+    // The request ends here: the ferret reads it as it is from now on.
+    delete held.agentSees;
+    delete held.agentLock;
     const at = instant(this.deps.clock.now());
     const source =
       options.sealed === true
@@ -2328,7 +2462,9 @@ export class InputRequestService {
         request.agendaItemId,
         state === 'delivered' && by?.kind === 'plan'
           ? planFilledNote(by.line, held.matchKey)
-          : noteOf(state, reason, request.target.kind, options.unsettled === true),
+          : state === 'delivered' && by?.kind === 'sign-in-rule'
+            ? ruleFilledNote(held.matchKey)
+            : noteOf(state, reason, request.target.kind, options.unsettled === true),
       );
     if (options.tellAgent)
       await this.deps.notifier.tell(
@@ -2351,7 +2487,11 @@ export class InputRequestService {
     return undefined;
   }
 
-  private view({ request, names }: Held): InputAgentView {
+  private view(held: Held): InputAgentView {
+    const { names } = held;
+    const shown = held.agentSees ?? held.request;
+    const request =
+      held.agentSees === undefined && held.agentLock !== undefined ? { ...shown, lock: held.agentLock.lock } : shown;
     const quarantined = this.quarantined(request.sessionId, names);
     const facts =
       request.observed?.kind === 'terminal' && quarantined ? maskedFacts(request.observed) : request.observed;
@@ -2381,9 +2521,10 @@ export class InputRequestService {
           }
         : pending
           ? {
-              // One sentence for every reason a plan line did not apply: a reason could say which secret fields exist.
+              // One sentence for every reason a plan line did not apply: a reason could say which secret fields exist. A
+              // standing rule's miss says NOTHING: the view is byte-identical to a sign-in no rule was ever about.
               note:
-                request.preapproval?.outcome === 'did-not-apply'
+                request.preapproval?.by === 'plan' && request.preapproval.outcome === 'did-not-apply'
                   ? `${TASK_PLAN_MISS_AGENT_NOTE} Waiting for the owner on ${request.agendaItemId}.`
                   : `Waiting for the owner on ${request.agendaItemId}.`,
             }
@@ -2391,7 +2532,9 @@ export class InputRequestService {
             ? { note: 'Pasted under a rule the owner approved in advance.' }
             : request.outcome?.by.kind === 'plan'
               ? { note: PLAN_FILLED_AGENT_NOTE }
-              : {}),
+              : request.outcome?.by.kind === 'sign-in-rule'
+                ? { note: RULE_FILLED_AGENT_NOTE }
+                : {}),
     };
   }
 
@@ -2865,6 +3008,8 @@ function tellOf(
     return `${request.agendaItemId} was interrupted while the owner's value was going into %${kind}:${key}; it may be partly or fully typed there. Read the ${surface} before you act once its quarantine allows; if you still need a value, raise a fresh ${tool}, or ask the owner to take over the ${surface}.`;
   if (state === 'delivered' && request.outcome?.by.kind === 'plan')
     return `${request.agendaItemId}: Ferretry filled the sign-in on %${kind}:${key} under your task plan. Read the ${surface} to continue once its quarantine allows.`;
+  if (state === 'delivered' && request.outcome?.by.kind === 'sign-in-rule')
+    return `${request.agendaItemId}: Ferretry filled the sign-in on %${kind}:${key} under a rule the owner approved in advance. Read the ${surface} to continue once its quarantine allows.`;
   if (state === 'delivered' && request.source !== undefined)
     return `${request.agendaItemId}: ${copyHandle(request.source.name)} was pasted into %${kind}:${key}. Read the ${surface} to continue once its quarantine allows.`;
   if (state === 'delivered')
@@ -2892,6 +3037,9 @@ function storeTellOf(
 /** What the ferret's view says once a task-plan line filled its card. */
 const PLAN_FILLED_AGENT_NOTE = 'Filled under your task plan.';
 
+/** What the ferret's view says once a standing rule filled its card: never which rule, never the account. */
+const RULE_FILLED_AGENT_NOTE = 'Filled under a rule the owner approved in advance.';
+
 /** The line a paste card that a rule did not fill after all carries: the same words whatever went wrong. */
 const RULE_MISS_CONTEXT_LINE = "A paste rule you approved didn't apply here, so you're asked as usual.";
 
@@ -2900,26 +3048,56 @@ function planFilledNote(line: number, matchKey: string | undefined): string {
   return `Filled under your task plan (line ${String(line + 1)})${matchKey === undefined ? '' : ` on ${matchKey}`}.`;
 }
 
-/** The owner's note on a card about the plan line tried on it: filled, or did not apply (and why, when known). */
+/** How a card a standing rule filled closes, for the agenda history: where, never the rule or the account. */
+function ruleFilledNote(matchKey: string | undefined): string {
+  return `Filled under your standing rule${matchKey === undefined ? '' : ` on ${matchKey}`}.`;
+}
+
+/**
+ * The owner's note on a card about the grant tried on it, by its source: filled, or did not apply (and why, when
+ * known). `undefined` for a grant that names neither a plan line nor a rule (it fills nothing either: `actorOf`).
+ */
 function preapprovalOf(
   grant: SignInGrant,
   outcome: 'filled' | 'did-not-apply',
   reason?: GrantMissReason,
 ): InputRequest['preapproval'] {
-  return {
-    by: 'plan',
-    plan: grant.plan?.id ?? '',
-    line: grant.plan?.line ?? 0,
-    outcome,
-    ...(outcome === 'did-not-apply' && reason !== undefined ? { reason } : {}),
-  };
+  const why = outcome === 'did-not-apply' && reason !== undefined ? { reason } : {};
+  if (grant.source === 'rule')
+    return grant.rule === undefined
+      ? undefined
+      : { by: 'rule', rule: grant.rule.id, revision: grant.rule.revision, outcome, ...why };
+  return { by: 'plan', plan: grant.plan?.id ?? '', line: grant.plan?.line ?? 0, outcome, ...why };
+}
+
+/** Who a grant fill is recorded as: the plan line, or the standing rule at the revision the passkey approved. */
+function actorOf(grant: SignInGrant): InputActor | undefined {
+  if (grant.source === 'rule')
+    return grant.rule === undefined
+      ? undefined
+      : { kind: 'sign-in-rule', rule: grant.rule.id, revision: grant.rule.revision };
+  return grant.plan === undefined ? undefined : { kind: 'plan', planId: grant.plan.id, line: grant.plan.line };
+}
+
+/** One grant that was tried on a card and did not fill it, and why. */
+interface GrantMiss {
+  readonly grant: SignInGrant;
+  readonly reason: GrantMissReason;
 }
 
 /** A grant's second match, at the write, failed: nothing is typed, and the card stays for the owner. */
 class GrantMissed extends Error {
   constructor(readonly reason: GrantMissReason) {
-    super('a task plan line did not cover this card; nothing was typed');
+    super('a pre-approval did not cover this card; nothing was typed');
     this.name = 'GrantMissed';
+  }
+}
+
+/** A grant could not be checked again before the write (its registry or the accounts unreadable): nothing is typed. */
+class GrantUnchecked extends Error {
+  constructor() {
+    super('a pre-approval could not be checked again; nothing was typed');
+    this.name = 'GrantUnchecked';
   }
 }
 
@@ -2929,6 +3107,8 @@ interface GrantWrite {
   recheck(seen: Extract<ObserveResult, { readonly ok: true }>): Promise<void>;
   /** Whether the grant is still held, asked synchronously as the last thing before the write. */
   held(): boolean;
-  /** A page password was typed: what to check and empty before the hold (`holdMs`, on `names`) ends. */
+  /** A page password was typed, or may have been: what to check and empty before the hold (`holdMs`, on `names`) ends. */
   typed(job: ClearJob, holdMs: number, names: readonly string[]): void;
+  /** The write may have typed something and could not say: the grant stops. */
+  uncertain(): Promise<void>;
 }
