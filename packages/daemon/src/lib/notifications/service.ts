@@ -134,7 +134,10 @@ export class NotificationService implements AgendaRaisedObserver {
    * The item a push SHOWS, when its push must be high priority (a one-time code card), or nothing. Only the item the
    * push shows decides, so a code card waiting behind another item never makes that item's push loud.
    */
-  private urgentOf(sessionId: string, shown: AgendaItem): { readonly item: AgendaItem; readonly at: number } | undefined {
+  private urgentOf(
+    sessionId: string,
+    shown: AgendaItem,
+  ): { readonly item: AgendaItem; readonly at: number } | undefined {
     const subjectOf = this.options.subjectOf;
     if (subjectOf === undefined || pushUrgencyFor(subjectOf(sessionId, shown)) !== 'high') return undefined;
     // Both caps: counted and taken in one synchronous step, so two pushes cannot both take the last slot.
