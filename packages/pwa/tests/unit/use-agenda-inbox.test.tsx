@@ -153,6 +153,26 @@ describe('useAgendaInboxModel', () => {
     expect(read.cards).toEqual([]);
   });
 
+  test('names each card to test by the task its ferret was given, from the sessions the fleet holds', async () => {
+    const { client } = fakeClient(new Map());
+    const { timers } = manualTimers();
+    let inbox: AgendaInbox | null = null;
+    const rows = toTestCards(await boardModelOf([card('F1', { laneId: 'tested' })]));
+    const owner = rows[0]?.card.task.owner ?? '';
+    const machines: readonly AgendaInboxMachine[] = [
+      {
+        connection: studio,
+        name: 'Studio',
+        sessions: [sessionView(owner, { config: { name: 'Credentials Build Lead', teammate: 'zoe' } })],
+      },
+    ];
+    view = await mount(
+      <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} toTest={rows} />,
+    );
+    await settle();
+    expect((inbox as unknown as AgendaInbox).toTest.map(row => row.taskName)).toEqual(['Credentials Build Lead']);
+  });
+
   test('reads only unread boards, once per summary, and deals their cards newest first', async () => {
     const boards = new Map([
       ['studio/a', board('a', [item('A1', 1), item('A2', 6)])],

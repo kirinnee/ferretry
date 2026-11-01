@@ -2,8 +2,8 @@
  * THE TASKS TAB'S CARDS VIEW: this ferret's cards one at a time, with `‹ n of N ›` stepping through them.
  *
  * The order is `cardStack`'s: cards waiting for a try, then cards waiting on the owner, then the rest. A card waiting
- * for a try is the Inbox's own row (`ToTestList`): Done and Not good as buttons, and on a touch screen a swipe right or
- * left at once, with the same reason box. Any other card is drawn by the host (`draw`), as in the Kanban and List.
+ * for a try is the Inbox's own row (`ToTestList`): Done, Not good and Skip as buttons, and on a touch screen a swipe
+ * left (Done), right (Not good, with the same reason box) or down (Skip, the next card) at once. Any other card is drawn by the host (`draw`), as in the Kanban and List.
  *
  * The place in the stack is kept as the card the reader was on, so a card that moves on (its verdict) leaves the reader
  * at the same place in the stack rather than jumping to the top.
@@ -15,6 +15,7 @@ import { ToTestList, type ToTestAnswers } from '../agenda/to-test-rows.tsx';
 import { type StackRank, cardStack } from '../../lib/board-card-stack.ts';
 import type { ChatCards } from '../../lib/board-chat.ts';
 import type { BoardCardOf } from '../../lib/board-view.ts';
+import { withTaskName } from '../../lib/to-test-inbox.ts';
 
 const RANK_WORDS: Readonly<Record<StackRank, string>> = {
   'to-test': 'To test',
@@ -32,12 +33,14 @@ export function BoardCardsView({
   draw,
   now,
   onOpenCard,
+  taskNames,
   toTestAnswers,
 }: {
   readonly cards: ChatCards;
   readonly draw: (card: BoardCardOf) => ReactElement;
   readonly now: number;
   readonly onOpenCard: (card: BoardCardOf) => void;
+  readonly taskNames: ReadonlyMap<string, string> | undefined;
   readonly toTestAnswers: ToTestAnswers | undefined;
 }): ReactElement | null {
   const stack = cardStack(cards);
@@ -65,7 +68,13 @@ export function BoardCardsView({
         </div>
       </div>
       {entry.toTest !== null && toTestAnswers !== undefined ? (
-        <ToTestList answers={toTestAnswers} now={now} onNavigate={() => onOpenCard(entry.card)} rows={[entry.toTest]} />
+        <ToTestList
+          answers={toTestAnswers}
+          now={now}
+          onNavigate={() => onOpenCard(entry.card)}
+          onSkip={index < stack.length - 1 ? () => go(index + 1) : undefined}
+          rows={[withTaskName(entry.toTest, taskNames)]}
+        />
       ) : (
         draw(entry.card)
       )}
