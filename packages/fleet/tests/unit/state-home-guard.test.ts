@@ -966,8 +966,9 @@ describe('secrev-1260 L3 — the tree copy writes through the folders it checked
       maxFiles: 5,
     });
 
-    // Assert: refused, and the folder was made where the checked parent really is — not in the home.
-    should(rule(copied)).equal('changed');
+    // Assert: the folder was made where the checked parent really is — through its descriptor, so the copy
+    // goes on there — and nothing reached the home.
+    should(rule(copied)).equal('ok');
     should(disk.entries.has('/fy/state/copy')).be.false();
     should(disk.entries.get('/out-was/copy')).match({ kind: 'directory' });
   });

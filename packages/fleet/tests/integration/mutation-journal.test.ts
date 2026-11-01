@@ -4,7 +4,7 @@
  * directory this test created.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
@@ -58,7 +58,7 @@ describe('FileMutationJournal sealing a directory mode', () => {
     await writeFile(parent, 'a file where a directory was');
 
     // Act / Assert
-    await should(recorder.sealOperation(0)).be.rejectedWith(/ENOTDIR/u);
+    await should(recorder.sealOperation(0)).be.rejectedWith(/is not a folder/u);
   });
 });
 
@@ -169,5 +169,61 @@ describe('FileMutationJournal removing a directory it created', () => {
     should(outcome.unrestored.map(each => each.path)).deepEqual([created]);
     should(outcome.unrestored[0]?.reason).match(/EACCES/u);
     should((await stat(created)).isDirectory()).be.true();
+  });
+});
+
+describe('FileMutationJournal reopening the folder an entry is in', () => {
+  /** A file captured (moved aside) in its own folder, with the operation sealed. */
+  const captured = async () => {
+    const root = await sandbox();
+    const folder = path.join(root, 'skills');
+    await mkdir(folder);
+    const target = path.join(folder, 'item');
+    await writeFile(target, 'original');
+    const recorder = journal();
+    const mark = recorder.beginOperation();
+    await recorder.capture(target);
+    await recorder.sealOperation(mark);
+    return { root, folder, target, recorder, backup: recorder.backupOf(target) as string };
+  };
+
+  it('should refuse to restore into a folder that was replaced since the capture', async () => {
+    // Arrange — another folder now stands at the same name; the original is in the one moved away.
+    const { root, folder, target, recorder } = await captured();
+    await rename(folder, path.join(root, 'moved-away'));
+    await mkdir(folder);
+
+    // Act
+    const outcome = await recorder.rollback();
+
+    // Assert
+    should(outcome.unrestored.map(each => each.path)).deepEqual([target]);
+    should(outcome.unrestored[0]?.reason).match(/the folder it is in was replaced after this apply wrote there/u);
+  });
+
+  it('should name the original when the folder it was moved aside in is gone', async () => {
+    // Arrange
+    const { root, folder, target, recorder, backup } = await captured();
+    await rename(folder, path.join(root, 'moved-away'));
+
+    // Act
+    const outcome = await recorder.rollback();
+
+    // Assert
+    should(outcome.unrestored).match([{ path: target, backup }]);
+    should(outcome.unrestored[0]?.reason).match(/the folder it was in is gone, so the original was left at/u);
+  });
+
+  it('should name a committed backup whose folder was moved away instead of dropping it', async () => {
+    // Arrange
+    const { root, folder, recorder, backup } = await captured();
+    await rename(folder, path.join(root, 'moved-away'));
+
+    // Act
+    const remaining = await recorder.discard();
+
+    // Assert — still on disk where the folder went, and named.
+    should(remaining).deepEqual([backup]);
+    should(await readFile(path.join(root, 'moved-away', path.basename(backup)), 'utf8')).equal('original');
   });
 });

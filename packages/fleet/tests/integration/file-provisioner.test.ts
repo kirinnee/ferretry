@@ -755,7 +755,7 @@ describe('FileFleetProvisioner', () => {
       const subject = new FileFleetProvisioner([root]);
 
       // Act + Assert
-      await should(subject.apply(plan)).be.rejectedWith(/ENOTDIR/u);
+      await should(subject.apply(plan)).be.rejectedWith(/is not a folder/u);
       should(await readFile(home, 'utf8')).equal('a file where the account home should be');
     });
 
@@ -1221,7 +1221,7 @@ describe('FileFleetProvisioner', () => {
       });
 
       // Assert
-      await should(promise).be.rejectedWith(/ENOTDIR/u);
+      await should(promise).be.rejectedWith(/is not a folder/u);
       should(await readFile(directory, 'utf8')).equal('a file where a directory should be');
       should(await Bun.file(path.join(root, 'fleet', 'manifest.json')).exists()).be.false();
     });

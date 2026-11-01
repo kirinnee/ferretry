@@ -1,5 +1,6 @@
 import { basename, dirname, join } from 'node:path';
 import type {
+  DescriptorCalls,
   FileIdentity,
   GuardDirectoryHandle,
   GuardDisk,
@@ -43,7 +44,16 @@ export class FakeGuardDisk implements GuardDisk {
   private nextInode = 2n;
   private readonly folders = new Map<number, bigint>();
 
-  constructor(readonly throughDescriptors = true) {
+  /** Files made through descriptor calls, by the fake descriptor each was handed back as. */
+  private readonly madeFiles = new Map<number, string>();
+  private nextFile = 1000;
+  private readonly handleFds = new WeakMap<GuardDirectoryHandle, number>();
+
+  /**
+   * `true`: a folder's entries are reached through `/@fd/<n>/<leaf>` (Linux). `'calls'`: through descriptor calls on
+   * the handle, with no such path (macOS). `false`: by path only.
+   */
+  constructor(readonly throughDescriptors: boolean | 'calls' = true) {
     this.entries.set('/', { kind: 'directory', inode: 1n, mode: 0o755 });
   }
 
@@ -182,6 +192,16 @@ export class FakeGuardDisk implements GuardDisk {
         this.written.push(key);
         return bytes;
       },
+      copyToDescriptor: async (descriptor, maxBytes) => {
+        const bytes = size(maxBytes);
+        const key = this.madeFiles.get(descriptor);
+        const made = key === undefined ? undefined : this.entries.get(key);
+        if (made?.kind !== 'file') throw errno('EBADF', String(descriptor));
+        made.size = bytes;
+        made.text = node.kind === 'file' ? node.text : '';
+        this.written.push(key as string);
+        return bytes;
+      },
       readText: async maxBytes => {
         size(maxBytes);
         return node.kind === 'file' ? node.text : '';
@@ -190,20 +210,49 @@ export class FakeGuardDisk implements GuardDisk {
     };
   }
 
+  /** The descriptor calls of the folder held as `fd`: every step through `/@fd/<fd>/<leaf>`, which follows the FOLDER. */
+  private calls(fd: number): DescriptorCalls {
+    const at = (leaf: string): string => `/@fd/${String(fd)}/${leaf}`;
+    return {
+      identity: async leaf => await this.identity(at(leaf)),
+      list: async () => await this.list(at('.')),
+      mkdir: async (leaf, mode) => await this.mkdir(at(leaf), mode),
+      openDirectory: async leaf => await this.openDirectory(at(leaf)),
+      unlink: async leaf => await this.unlink(at(leaf)),
+      rmdir: async leaf => await this.rmdir(at(leaf)),
+      rename: async (from, to) => await this.rename(at(from), at(to)),
+      symlink: async (target, leaf) => await this.symlink(target, at(leaf)),
+      link: async (fromLeaf, into, toLeaf) =>
+        await this.linkEntry(at(fromLeaf), `/@fd/${String(this.handleFds.get(into))}/${toLeaf}`),
+      openFile: async (leaf, how, mode) => {
+        const { key, entry } = await this.lookup(at(leaf));
+        if (how === 'read') throw errno('ENOTSUP', at(leaf));
+        if (entry !== undefined) throw errno('EEXIST', at(leaf));
+        this.file(key, 0, '', mode);
+        this.nextFile += 1;
+        this.madeFiles.set(this.nextFile, key);
+        return this.nextFile;
+      },
+    };
+  }
+
   async openDirectory(path: string): Promise<GuardDirectoryHandle> {
     const node = await this.opened(path);
     if (node.kind !== 'directory') throw errno('ENOTDIR', path);
     const fd = this.folders.size + 3;
     this.folders.set(fd, node.inode);
-    return {
+    const handle: GuardDirectoryHandle = {
       identity: this.identityOf(node),
-      entryPath: leaf => (this.throughDescriptors ? `/@fd/${String(fd)}/${leaf}` : undefined),
+      entryPath: leaf => (this.throughDescriptors === true ? `/@fd/${String(fd)}/${leaf}` : undefined),
+      ...(this.throughDescriptors === 'calls' ? { at: this.calls(fd) } : {}),
       chmod: async mode => {
         node.mode = mode;
         this.modes.push([`@fd:${String(fd)}`, mode]);
       },
       close: async () => undefined,
     };
+    this.handleFds.set(handle, fd);
+    return handle;
   }
 
   async openWrite(path: string, how: 'new' | 'existing', mode: number): Promise<GuardWriteHandle | 'taken' | 'absent'> {
@@ -289,8 +338,49 @@ export class FakeGuardDisk implements GuardDisk {
   }
 
   async unlink(path: string): Promise<void> {
-    const { key } = await this.lookup(path);
+    const { key, entry } = await this.lookup(path);
+    if (entry === undefined) throw errno('ENOENT', path);
+    if (entry.kind === 'directory') throw errno('EISDIR', path);
     this.unlinked.push(key);
+    this.entries.delete(key);
+  }
+
+  /** Renames an entry (and everything under it), never following either final step (`rename(2)`). */
+  async rename(from: string, to: string): Promise<void> {
+    const source = await this.lookup(from);
+    if (source.entry === undefined) throw errno('ENOENT', from);
+    const target = await this.lookup(to);
+    this.move(source.key, target.key);
+  }
+
+  /** A symbolic link at `path` to `target`, failing when the name is taken (`symlink(2)`). */
+  async symlink(target: string, path: string): Promise<void> {
+    const { key, entry } = await this.lookup(path);
+    if (entry !== undefined) throw errno('EEXIST', path);
+    this.link(key, target);
+  }
+
+  /** A second name `to` for the entry at `from` (`link(2)`). */
+  async linkEntry(from: string, to: string): Promise<void> {
+    const source = await this.lookup(from);
+    const target = await this.lookup(to);
+    if (source.entry === undefined) throw errno('ENOENT', from);
+    if (target.entry !== undefined) throw errno('EEXIST', to);
+    this.entries.set(target.key, source.entry);
+  }
+
+  /** This disk has no descriptors to hand out. */
+  async openFile(path: string): Promise<number> {
+    throw errno('ENOTSUP', path);
+  }
+
+  /** Removes an EMPTY folder, never following a link (`rmdir(2)`). */
+  async rmdir(path: string): Promise<void> {
+    const { key, entry } = await this.lookup(path);
+    if (entry === undefined) throw errno('ENOENT', path);
+    if (entry.kind !== 'directory') throw errno('ENOTDIR', path);
+    if ([...this.entries.keys()].some(other => other.startsWith(`${key}/`))) throw errno('ENOTEMPTY', path);
+    this.removed.push(key);
     this.entries.delete(key);
   }
 

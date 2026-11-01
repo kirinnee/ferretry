@@ -11338,6 +11338,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clientName: CLIENT_NAME,
           config: configFiles,
           configDirectory: paths.config,
+          pinned: stateHomeKeys(paths),
         }),
         modelCatalogs: async () => await modelCatalogService.sources(),
         publishedManifest: async () => await publishedManifest(),

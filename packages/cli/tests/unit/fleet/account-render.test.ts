@@ -100,6 +100,34 @@ describe('renderChangeOutcome', () => {
     });
   });
 
+  it('should say which operations a committed apply left as they were', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'committed',
+        result: { ...result, skipped: [{ path: '/homes/one/skills', reason: 'not on this platform' }] },
+      },
+    });
+    should(rendered).eql({ ok: true, text: 'Done.\nLeft /homes/one/skills as it was: not on this platform' });
+  });
+
+  it('should say what was left as it was when the shared history failed after the commit', () => {
+    const rendered = renderChangeOutcome({
+      outcome: 'applied',
+      apply: {
+        outcome: 'committed-with-history-failure',
+        failedHarness: 'claude',
+        reason: 'busy',
+        committed: {
+          ...result,
+          manifest: { generatedAt: '2026-10-13T00:00:00.000Z', accounts: [] } as never,
+          skipped: [{ path: '/homes/one/skills', reason: 'not on this platform' }],
+        },
+      },
+    });
+    should(rendered).match({ ok: false, text: /\nLeft \/homes\/one\/skills as it was: not on this platform$/u });
+  });
+
   it('should not trust a commit whose shared history failed', () => {
     const rendered = renderChangeOutcome({
       outcome: 'applied',

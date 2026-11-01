@@ -89,6 +89,10 @@ export function renderChangeOutcome(outcome: FleetAccountChangeOutcome): Rendere
   return { ok: true, text: outcome.summary };
 }
 
+/** What a committed apply left as the disk has it, one line each: an owner who removed a skill must hear it stayed. */
+const leftAsItWas = (skipped: readonly { readonly path: string; readonly reason: string }[] | undefined): string[] =>
+  (skipped ?? []).map(({ path, reason }) => `Left ${path} as it was: ${reason}`);
+
 function renderApply(apply: FleetApplyOutcome): RenderedOutcome {
   switch (apply.outcome) {
     case 'committed': {
@@ -99,12 +103,16 @@ function renderApply(apply: FleetApplyOutcome): RenderedOutcome {
         );
       }
       if (apply.result.lockResidue) lines.push(`Remove ${apply.result.lockResidue} before the next change.`);
+      lines.push(...leftAsItWas(apply.result.skipped));
       return { ok: true, text: lines.join('\n') };
     }
     case 'committed-with-history-failure':
       return {
         ok: false,
-        text: `Saved, but the shared ${apply.failedHarness} history could not be set up: ${apply.reason}`,
+        text: [
+          `Saved, but the shared ${apply.failedHarness} history could not be set up: ${apply.reason}`,
+          ...leftAsItWas(apply.committed.skipped),
+        ].join('\n'),
       };
     case 'rolled-back':
       return { ok: false, text: `Nothing changed. ${apply.failedOperation} failed: ${apply.reason}` };

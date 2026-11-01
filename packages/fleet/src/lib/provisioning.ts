@@ -249,6 +249,8 @@ export interface FleetApplyCommittedState {
   readonly sharedHistory: readonly SharedHistoryPreview[];
   /** Moved-aside evidence left on disk by the committed apply. */
   readonly backupResidue?: readonly string[];
+  /** Operations left as the disk has them (see {@link SkippedDestination}). The rest of the apply landed. */
+  readonly skipped?: readonly SkippedDestination[];
   /**
    * The exclusive claim this apply could not verify releasing. Residue, never a failure — but it
    * blocks the next apply until it is cleared, so it is named rather than swallowed.
@@ -335,6 +337,15 @@ export class FleetApplyFailureError extends Error {
   }
 }
 
+/**
+ * An operation an apply left as the disk has it, and why: on a platform where the destination side cannot reach a
+ * folder through its descriptor (macOS), nothing below a runtime's top folder is moved aside or removed.
+ */
+export interface SkippedDestination {
+  readonly path: string;
+  readonly reason: string;
+}
+
 export interface FleetApplyResult {
   readonly accountCount: number;
   readonly operationCount: number;
@@ -348,6 +359,8 @@ export interface FleetApplyResult {
    * committed apply to tidy up would delete the very state the manifest now describes.
    */
   readonly backupResidue?: readonly string[];
+  /** Operations left as the disk has them (see {@link SkippedDestination}). The rest of the apply landed. */
+  readonly skipped?: readonly SkippedDestination[];
   /**
    * The exclusive claim this apply could not verify releasing. Residue, never a failure — reporting
    * it as one would turn a fleet that fully landed into a fleet the caller believes was refused —

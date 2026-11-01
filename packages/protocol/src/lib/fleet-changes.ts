@@ -241,6 +241,14 @@ const residueShape = {
   backupResidue: z.array(z.string().min(1)).readonly().optional(),
   /** An exclusive claim that could not be cleared. It blocks the next apply until it is removed. */
   lockResidue: z.string().min(1).optional(),
+  /**
+   * Operations left as the disk has them, and why: where the destination side cannot reach a folder through its
+   * descriptor (macOS), nothing below a runtime's top folder is moved aside or removed.
+   */
+  skipped: z
+    .array(z.strictObject({ path: z.string().min(1), reason: z.string().min(1) }))
+    .readonly()
+    .optional(),
 };
 
 /** State a rollback moved out of the way because it was not this apply's to delete. */

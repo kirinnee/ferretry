@@ -189,6 +189,11 @@ export interface FileFleetCatalogOptions {
   readonly config: Pick<ConfigFilesService, 'inEffect' | 'load' | 'acknowledge' | 'acknowledgeRemoval'>;
   /** `<FY_HOME>/config`. */
   readonly configDirectory: string;
+  /**
+   * The state home's key files and folders, known to the provisioner's guard by identity so a bind mount of one of
+   * them into a runtime is refused (docs/agent-tools.md#component-destinations).
+   */
+  readonly pinned?: readonly string[];
 }
 
 /**
@@ -243,7 +248,10 @@ async function wrappersCurrent(binDirectory: string, operations: FleetModelApply
 export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCatalogServiceDeps {
   const { paths, userHome, sessionRecords: records } = options;
   const allowedRoots = [paths.home, userHome];
-  const sourceFence = componentSourceFence(paths);
+  const sourceFence = {
+    ...componentSourceFence(paths),
+    ...(options.pinned === undefined ? {} : { pinned: options.pinned }),
+  };
   const layout: FleetLayout = {
     stateHome: paths.home,
     userHome,

@@ -612,6 +612,57 @@ a loop — and writes through the folders it checked. A LINK (an asset-tree refe
 the folder it points to is not walked then, and the harness resolves it again when it reads, as the agent it runs
 for.
 
+### Component destinations
+
+A runtime's config folder (`<fleet>/homes/<id>`) is written by its harness, so by the agent it runs — any folder
+below it (`skills/`, `commands/`, …) can be swapped for a link into the home the moment after it was checked. The
+provisioner therefore reaches **nothing below a folder by its path**. Every list, read, write, move aside and delete
+goes through a folder it opened and checked (`openFolderOutsideStateHomes`), reaching the entry THROUGH that
+descriptor — on Linux by `/proc/self/fd/N/<leaf>`, on macOS by descriptor calls (below):
+
+- **Inside the home by name** (every fleet runtime), each folder is opened from the home down, one at a time, through
+  the one above, **without following a link**. A link anywhere on the way refuses the apply ("a symbolic link stands
+  where a folder must be") and it rolls back, so the skills sweep never lists the home's files as "stale skills".
+- **Anywhere else** (a host `~/.claude`, which may be a link into a dotfiles checkout) links are followed only to
+  find where the folder lands, which must be outside every home by real path and identity. That real path is then
+  walked from `/` the same way, one folder at a time without following a link, so the handle is on the folder that
+  was checked; a link met on the way (the folder flipped since) refuses the apply.
+- **By identity everywhere:** a folder that is a home's device and inode anywhere but at that home's own place — a
+  bind mount — is refused, and so is one of the home's key files and folders (`fleet/homes`, `state/sessions`, the
+  token and vault files) met anywhere but where it is.
+- **Undo and cleanup reopen the folder and must find the same one.** Each moved-aside entry records its folder's
+  device and inode; restoring it, and deleting the backup once the apply commits, reopens the folder and refuses one
+  that is not that folder. A backup whose folder was swapped is kept and reported (`backupResidue`, or unrestored),
+  never deleted through the link.
+- **Removal never follows a link.** A tree is removed one entry at a time, each sub-folder opened through its parent
+  with no-follow, so a link inside it is unlinked and a sub-folder swapped for a link mid-removal is refused.
+- **Reads never follow a final link** (`O_NOFOLLOW`): a settings file or wrapper swapped for a link after it was
+  looked at is refused rather than merged into what the harness reads.
+
+**On macOS every step goes through the held descriptor too, by descriptor calls.** macOS has no `/proc` and this
+runtime no `openat`, so each step is one bracket (`packages/fleet/src/adapters/descriptor-calls.ts`, the
+mechanism the session-file viewer already proves on macOS): `fchdir` the held folder, prove `lstat('.')` is that
+folder's device and inode (bigint, on every step), make ONE synchronous call on a relative name, and `fchdir` back in
+a synchronous try/finally — nothing in this thread awaits in between, so no other JavaScript runs in the window. Bun's
+I/O threads can still be finishing an asynchronous file call started earlier, and a RELATIVE path there would resolve
+in the held folder; none of this daemon's asynchronous file calls takes one — an audit, not an enforced rule. If the
+working directory cannot be restored, the process falls back to `/` (and stops if even that fails), the step that
+failed reports it, and every later folder step refuses — the provisioner's and the session-file viewer's, which share
+one working directory. The one step across two folders (a publish's hard link) is `linkat` on both descriptors, each
+proven still to be the folder it was opened on. So every macOS step that moves, writes or reads content does what
+Linux does — at a host runtime's own folder (`~/.claude`) and below every runtime's — and a flip of a folder after it
+was opened reaches nothing else. The read-only checks still go by path after a re-proof (a seal's fingerprint, whether
+a displaced tree is exactly this apply's, the names shown in a report): a swap can only make them fail closed.
+
+**If those C calls cannot be loaded**, or a Linux host has no `/proc` (where every apply is refused instead), steps
+fall back to re-proving the folder by path, which a swap timed between the proof and the step could still redirect.
+There the provisioner fails closed: no name is moved aside or removed anywhere but the daemon's own folders and a fleet
+runtime's own folder — replacing an entry that is already there, a copy, and every sweep are **skipped**, and the
+result names each one ("Left … as it was"), with why descriptor reach is missing; a rollback that would have to take
+back something it created there reports it instead. What that fallback still leaves is a NEW name landing in the home
+if a folder is swapped at the exact moment it is created (`O_EXCL`: never over an existing file). The shared-history migration (`file-shared-history.ts`), which moves history folders between runtime homes
+and the shared pool, still works by path and is not covered by this yet.
+
 ## Sub-ferrets and the Ferretry verbs
 
 The same tools server serves a lead and a sub-ferret; the **daemon** tells them apart by session identity

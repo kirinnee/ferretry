@@ -2,7 +2,15 @@ import { afterEach, describe, it } from 'bun:test';
 import { link, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { copyFencedSource, FencedSourceError, readFencedSource, resolveSourceFence } from '@ferretry/fleet/adapters';
+import { openFolderOutsideStateHomes } from '@ferretry/fleet';
+import {
+  copyFencedSource,
+  copyFencedSourceInto,
+  FencedSourceError,
+  NodeGuardDisk,
+  readFencedSource,
+  resolveSourceFence,
+} from '@ferretry/fleet/adapters';
 import should from 'should';
 import { NodeStateHomes } from '../../../src/adapters/system/node-state-homes.ts';
 
@@ -51,6 +59,28 @@ const refusalOf = async (work: Promise<unknown>): Promise<FencedSourceError> => 
 };
 
 describe('the fenced copy on a real disk', () => {
+  it('should copy into a checked folder, and refuse by rule a source in the home', async () => {
+    // Arrange — the provisioner's form: the destination is a folder it opened and checked, written through.
+    const { root, home, outside, fence } = await machine();
+    const into = path.join(root, 'runtime');
+    await mkdir(into);
+    const opened = await openFolderOutsideStateHomes(into, fence.homes, new NodeGuardDisk());
+    if (!opened.ok) throw new Error(`the destination did not open: ${opened.rule}`);
+
+    try {
+      // Act
+      await copyFencedSourceInto(fence, outside, opened.value, 'copy');
+      const refused = await refusalOf(copyFencedSourceInto(fence, path.join(home, 'api-token'), opened.value, 'token'));
+
+      // Assert
+      should(await readFile(path.join(into, 'copy', 'CLAUDE.md'), 'utf8')).eql('Outside guidance.\n');
+      should(refused.rule).equal('state-home');
+      should(await realpath(path.join(into, 'token')).catch(() => 'absent')).equal('absent');
+    } finally {
+      await opened.value.close();
+    }
+  });
+
   it('should copy a folder outside the home, every link followed', async () => {
     // Arrange
     const { root, outside, fence } = await machine();

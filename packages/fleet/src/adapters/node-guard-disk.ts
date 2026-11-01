@@ -1,7 +1,18 @@
-import { type BigIntStats, constants, createReadStream } from 'node:fs';
+import {
+  type BigIntStats,
+  closeSync,
+  constants,
+  createReadStream,
+  existsSync,
+  openSync,
+  rmdirSync,
+  unlinkSync,
+  writeSync,
+} from 'node:fs';
 import {
   access,
   type FileHandle,
+  link,
   lstat,
   mkdir,
   open,
@@ -9,11 +20,16 @@ import {
   readFile,
   readlink,
   realpath,
-  unlink,
+  rename,
+  symlink,
 } from 'node:fs/promises';
 import { userInfo } from 'node:os';
+import { DescriptorBracket, descriptorHandle } from './descriptor-calls.ts';
+import { loadDirectorySyscalls } from './directory-syscalls.ts';
+import { loadLinkSyscall } from './link-syscall.ts';
 import type {
   FileIdentity,
+  FolderDisk,
   GuardDirectoryHandle,
   GuardDisk,
   GuardReadHandle,
@@ -25,11 +41,13 @@ const COPY_CHUNK_BYTES = 64 * 1024;
 const NEW_FILE =
   constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 const EXISTING_FILE = constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+const READ_FILE = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 const codeOf = (error: unknown): string | undefined => (error as NodeJS.ErrnoException).code;
 const isMissing = (error: unknown): boolean => codeOf(error) === 'ENOENT' || codeOf(error) === 'ENOTDIR';
 
-function identityOf(entry: BigIntStats): FileIdentity {
+/** The guard's identity of an entry the runtime described (`lstat`/`fstat`, bigint). */
+export function fileIdentityOf(entry: BigIntStats): FileIdentity {
   return {
     kind: entry.isSymbolicLink() ? 'link' : entry.isFile() ? 'file' : entry.isDirectory() ? 'directory' : 'other',
     device: entry.dev,
@@ -39,8 +57,27 @@ function identityOf(entry: BigIntStats): FileIdentity {
     mode: Number(entry.mode & 0o7777n),
     owner: Number(entry.uid),
     group: Number(entry.gid),
+    modified: entry.mtimeNs,
+    changed: entry.ctimeNs,
   };
 }
+
+/**
+ * How a folder's entries are reached: `true` through its descriptor's path (Linux `/proc`), `'calls'` through
+ * descriptor-relative calls (`./descriptor-calls.ts`, macOS), `false` by its real path, re-proved before each step.
+ */
+export type DescriptorReach = boolean | 'calls';
+
+/**
+ * The process's one bracket, loaded the first time a disk asks for descriptor calls: one load of the C library, and
+ * one held working directory for every bracket to restore — brackets never overlap, being synchronous.
+ */
+let processBracket: DescriptorBracket | undefined;
+const loadProcessBracket = (): DescriptorBracket =>
+  (processBracket ??= new DescriptorBracket(loadDirectorySyscalls(), loadLinkSyscall()));
+
+const platformReach = (): DescriptorReach =>
+  process.platform === 'linux' ? true : process.platform === 'darwin' ? 'calls' : false;
 
 /** Too many bytes for what the caller allowed. */
 export class GuardSizeError extends Error {
@@ -72,7 +109,7 @@ async function opened(path: string, flags: number, mode?: number): Promise<[File
   const handle = await open(path, flags, mode);
   let identity: FileIdentity | undefined;
   try {
-    identity = identityOf(await handle.stat({ bigint: true }));
+    identity = fileIdentityOf(await handle.stat({ bigint: true }));
     return [handle, identity];
   } finally {
     if (identity === undefined) await handle.close();
@@ -84,15 +121,44 @@ async function opened(path: string, flags: number, mode?: number): Promise<[File
  * file is `O_EXCL`; a read never blocks on a pipe. On Linux an open folder's entries are reached through
  * `/proc/self/fd/N/<leaf>`, so a folder swapped after it was checked is never written into.
  */
-export class NodeGuardDisk implements GuardDisk {
+export class NodeGuardDisk implements GuardDisk, FolderDisk {
   /**
-   * `throughDescriptors`: reach a folder's entries through its open descriptor (Linux `/proc`). `groupDatabase`:
-   * the group file read for this user's listed groups — a test names another.
+   * Asked for descriptor paths, but this host has no `descriptorFolder` (a container or sandbox without `/proc`).
+   * Entries are then reached by path, re-proved before each step, and a caller that needs descriptor paths to
+   * act safely can refuse loudly instead of acting on folders that read as empty.
+   */
+  readonly missingDescriptorPaths: boolean;
+  /** Descriptor calls were asked for and could not be loaded: why. Entries are then reached by path, re-proved. */
+  readonly descriptorCallsUnavailable: string | undefined;
+  private readonly throughDescriptors: boolean;
+  private readonly bracket: DescriptorBracket | undefined;
+
+  /**
+   * `reach`: how a folder's entries are reached ({@link DescriptorReach}; the platform's own by default).
+   * `groupDatabase`: the group file read for this user's listed groups — a test names another. `descriptorFolder`:
+   * where an open descriptor is reached by number — a test names one that is not there. `loadCalls`: how the
+   * descriptor calls' C functions are loaded — a test names one that fails.
    */
   constructor(
-    private readonly throughDescriptors: boolean = process.platform === 'linux',
+    reach: DescriptorReach = platformReach(),
     private readonly groupDatabase: string = '/etc/group',
-  ) {}
+    private readonly descriptorFolder: string = '/proc/self/fd',
+    loadCalls: () => DescriptorBracket = loadProcessBracket,
+  ) {
+    this.missingDescriptorPaths = reach === true && !existsSync(descriptorFolder);
+    this.throughDescriptors = reach === true && !this.missingDescriptorPaths;
+    let bracket: DescriptorBracket | undefined;
+    let unavailable: string | undefined;
+    if (reach === 'calls') {
+      try {
+        bracket = loadCalls();
+      } catch (error) {
+        unavailable = error instanceof Error ? error.message : String(error);
+      }
+    }
+    this.bracket = bracket;
+    this.descriptorCallsUnavailable = unavailable;
+  }
 
   async realpath(path: string): Promise<string> {
     return await realpath(path);
@@ -100,7 +166,7 @@ export class NodeGuardDisk implements GuardDisk {
 
   async identity(path: string): Promise<FileIdentity | undefined> {
     try {
-      return identityOf(await lstat(path, { bigint: true }));
+      return fileIdentityOf(await lstat(path, { bigint: true }));
     } catch (error) {
       if (isMissing(error)) return undefined;
       throw error;
@@ -111,6 +177,16 @@ export class NodeGuardDisk implements GuardDisk {
     const [handle, identity] = await opened(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     return {
       identity,
+      copyToDescriptor: async (descriptor, maxBytes) => {
+        try {
+          return await drain(handle, maxBytes, async chunk => {
+            for (let written = 0; written < chunk.byteLength; )
+              written += writeSync(descriptor, chunk, written, chunk.byteLength - written);
+          });
+        } finally {
+          closeSync(descriptor);
+        }
+      },
       copyTo: async (to, maxBytes, mode) => {
         const target = await open(to, NEW_FILE, mode);
         try {
@@ -133,10 +209,18 @@ export class NodeGuardDisk implements GuardDisk {
   }
 
   async openDirectory(path: string): Promise<GuardDirectoryHandle> {
+    if (this.bracket !== undefined) {
+      return descriptorHandle(
+        openSync(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW),
+        this.bracket,
+        fileIdentityOf,
+      );
+    }
     const [handle, identity] = await opened(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     return {
       identity,
-      entryPath: leaf => (this.throughDescriptors ? `/proc/self/fd/${String(handle.fd)}/${leaf}` : undefined),
+      entryPath: leaf =>
+        this.throughDescriptors ? `${this.descriptorFolder}/${String(handle.fd)}/${leaf}` : undefined,
       chmod: async mode => await handle.chmod(mode),
       close: async () => await handle.close(),
     };
@@ -181,8 +265,30 @@ export class NodeGuardDisk implements GuardDisk {
     await mkdir(path, { mode });
   }
 
+  // Synchronous, like a guarded removal's every step: one cheap call each, and a tree is removed one name at a
+  // time (`removeEntryWithin`), where Bun's per-call cost of the asynchronous form made a skills tree slow.
   async unlink(path: string): Promise<void> {
-    await unlink(path);
+    unlinkSync(path);
+  }
+
+  async rmdir(path: string): Promise<void> {
+    rmdirSync(path);
+  }
+
+  async rename(from: string, to: string): Promise<void> {
+    await rename(from, to);
+  }
+
+  async symlink(target: string, path: string): Promise<void> {
+    await symlink(target, path);
+  }
+
+  async linkEntry(from: string, to: string): Promise<void> {
+    await link(from, to);
+  }
+
+  async openFile(path: string, how: 'read' | 'new', mode: number): Promise<number> {
+    return openSync(path, how === 'read' ? READ_FILE : NEW_FILE, mode);
   }
 
   async groups(): Promise<readonly number[]> {

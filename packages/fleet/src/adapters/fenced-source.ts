@@ -1,6 +1,9 @@
 import type { StateHomeFence } from '../lib/state-home-fence.ts';
 import {
+  copyTreeIntoFolder,
   copyTreeOutsideStateHomes,
+  type FolderDisk,
+  type GuardedFolder,
   type GuardDisk,
   type GuardLinkOptions,
   type GuardRule,
@@ -40,13 +43,15 @@ const MAX_SOURCE_ENTRIES = 100_000;
 export interface SourceFence extends StateHomeFence {
   /** Defaults to {@link HARD_LINK_ROOTS}. A root is used only once proven immutable, so naming one grants nothing. */
   readonly hardLinkRoots?: readonly string[];
+  /** The home's key files and folders, judged by identity wherever they are met (`resolveStateHomes`). */
+  readonly pinned?: readonly string[];
 }
 
 /** The fence as the disk has it now. */
 export interface ResolvedSourceFence {
   readonly homes: StateHomes;
   readonly links: GuardLinkOptions;
-  readonly disk: GuardDisk;
+  readonly disk: GuardDisk & FolderDisk;
 }
 
 /** A source the guard refused: the message names the rule and the home, never what the source holds. */
@@ -87,7 +92,7 @@ export class FencedSourceError extends Error {
  */
 export async function resolveSourceFence(
   fence: SourceFence,
-  disk: GuardDisk = new NodeGuardDisk(),
+  disk: GuardDisk & FolderDisk = new NodeGuardDisk(),
 ): Promise<ResolvedSourceFence> {
   const openings: string[] = [];
   for (const directory of fence.open) {
@@ -96,7 +101,10 @@ export async function resolveSourceFence(
   // A store that cannot be proven immutable (absent, or writable by this user) is no exception at all.
   const immutable = await resolveImmutableRoots(fence.hardLinkRoots ?? HARD_LINK_ROOTS, disk).catch(() => undefined);
   return {
-    homes: await resolveStateHomes({ homes: fence.homes, openings }, disk),
+    homes: await resolveStateHomes(
+      { homes: fence.homes, openings, ...(fence.pinned === undefined ? {} : { pinned: fence.pinned }) },
+      disk,
+    ),
     links: { hops: 'every', hardLinks: immutable === undefined ? 'refuse' : { allowUnder: immutable } },
     disk,
   };
@@ -149,6 +157,25 @@ export async function readFencedSource(
  */
 export async function copyFencedSource(resolved: ResolvedSourceFence, source: string, to: string): Promise<void> {
   const copied = await copyTreeOutsideStateHomes(source, to, resolved.homes, resolved.disk, {
+    ...resolved.links,
+    maxFileBytes: MAX_SOURCE_FILE_BYTES,
+    maxTotalBytes: MAX_SOURCE_TOTAL_BYTES,
+    maxFiles: MAX_SOURCE_ENTRIES,
+  });
+  if (!copied.ok) throw new FencedSourceError(source, copied.rule, copied.home);
+}
+
+/**
+ * {@link copyFencedSource} into the new entry `leaf` of a checked destination folder, every entry made through it
+ * (its descriptor where the platform gives one) rather than through whatever a path names by then.
+ */
+export async function copyFencedSourceInto(
+  resolved: ResolvedSourceFence,
+  source: string,
+  folder: GuardedFolder,
+  leaf: string,
+): Promise<void> {
+  const copied = await copyTreeIntoFolder(source, folder, leaf, resolved.homes, resolved.disk, {
     ...resolved.links,
     maxFileBytes: MAX_SOURCE_FILE_BYTES,
     maxTotalBytes: MAX_SOURCE_TOTAL_BYTES,

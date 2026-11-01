@@ -17,12 +17,29 @@
  *   power mid-apply; the backups would simply be left on disk under their reserved prefix.
  * - A restore is refused when the destination has stopped being writable — an entry whose ancestor
  *   became a link out of the allowed roots is reported as unrestored rather than followed.
+ *
+ * **Nothing is reached by path below a folder.** Every capture, restore, displacement and delete opens
+ * the entry's folder through the state-home guard ({@link DestinationFolders}) and reaches the entry
+ * THROUGH that handle. The folder's identity (device and inode) is recorded the first time it is opened
+ * and every later step reopens it and must find the same folder — so a folder a harness swapped for a
+ * link into the state home after the capture is refused, never written through, and a backup is only
+ * ever deleted from the very folder it was moved aside in, re-checked right before, by a removal that
+ * never follows a link.
+ *
+ * That holds where entries are reached through the folder's descriptor (Linux `/proc`, macOS descriptor
+ * calls). Where they cannot be (the C calls would not load), each step re-proves the folder and then
+ * goes by path, so a swap timed between the two could redirect it: there, outside the daemon's own
+ * folders and a fleet runtime's own folder, **nothing is moved aside or removed at all**
+ * (`ConfinedDestinationError`) — the operation that would need it is skipped and reported, and a
+ * rollback that would need it reports the entry instead.
  */
 import { randomUUID } from 'node:crypto';
-import type { Stats } from 'node:fs';
-import { chmod, lstat, readdir, readFile, rename, rm, rmdir } from 'node:fs/promises';
+import { type BigIntStats, lstatSync, readdirSync } from 'node:fs';
+import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import type { DisplacedState, UnrestoredPath } from '../lib/provisioning.ts';
+import type { GuardedFolder } from '../lib/state-home-guard.ts';
+import { DestinationFolders, readRegularFile } from './destination-folders.ts';
 
 /**
  * What a destination looked like immediately after this batch wrote it, or that it was left absent.
@@ -50,15 +67,26 @@ const MAX_SEAL_ENTRIES = 200_000;
 /** How large a file may be before its identity rests on size and timestamps rather than content. */
 const MAX_DIGEST_BYTES = 4 * 1024 * 1024;
 
+/** Which folder an entry is in, whatever path reaches it. */
+interface FolderIdentity {
+  readonly device: bigint;
+  readonly inode: bigint;
+}
+
 interface JournalEntryBase {
   readonly path: string;
+  /**
+   * The folder holding `path`, as first opened. Every later step reopens the folder and refuses one that is not
+   * this — a folder swapped since is not where this entry, or its backup, is.
+   */
+  folder?: FolderIdentity;
   /** Set once the operation that claimed this path has finished writing it. */
   seal?: Seal;
 }
 
 type JournalEntry = JournalEntryBase &
-  (
-    | { readonly kind: 'restore'; readonly backup: string }
+  /** `backup` names the evidence for reports; `backupLeaf` is its name in the entry's own folder. */
+  (| { readonly kind: 'restore'; readonly backup: string; readonly backupLeaf: string }
     | { readonly kind: 'remove' }
     /**
      * `mode` is the prior mode to put back; `left` is the mode this apply set. Only the directory's
@@ -114,7 +142,7 @@ function reasonOf(error: unknown): string {
 }
 
 /** Enough of one entry to notice any edit to it: identity, size, timestamp and permissions. */
-function fingerprintOf(relative: string, information: Stats): string {
+function fingerprintOf(relative: string, information: BigIntStats): string {
   // `ctimeMs` moves on a chmod and a chown as well as on a write, so it catches changes that leave
   // content and timestamps alone — but it also moves when the entry itself is renamed. The root of
   // a summary is exactly the entry rollback renames aside before re-examining it, so its ctime is
@@ -137,7 +165,7 @@ function fingerprintOf(relative: string, information: Stats): string {
  */
 async function contentDigest(target: string, size: number): Promise<string> {
   if (size > MAX_DIGEST_BYTES) return `unhashed:${size}`;
-  return new Bun.CryptoHasher('sha256').update(await readFile(target)).digest('hex');
+  return new Bun.CryptoHasher('sha256').update(await readRegularFile(target)).digest('hex');
 }
 
 /** The running fold of a tree seal, and how much of its work budget has been spent. */
@@ -154,19 +182,25 @@ interface SealWalk {
  * have to agree. Sorting per directory is what replaced sorting every entry at the end — the step
  * that forced the whole summary into an array and capped a sealable tree at a couple of thousand
  * entries.
+ *
+ * Synchronous calls, like `readRegularFile`: one `lstat` per entry of a skills tree, where Bun's asynchronous
+ * form costs many times the call itself.
  */
 async function summarise(directory: string, prefix: string, walk: SealWalk): Promise<boolean> {
-  for (const name of (await readdir(directory)).toSorted()) {
+  for (const name of readdirSync(directory).toSorted()) {
     if (walk.visited >= MAX_SEAL_ENTRIES) return true;
     walk.visited += 1;
     const relative = prefix === '' ? name : `${prefix}/${name}`;
     const child = path.join(directory, name);
-    const information = await lstat(child);
+    const information = lstatSync(child, { bigint: true });
     walk.hasher.update(`${fingerprintOf(relative, information)}\n`);
     if (information.isDirectory() && (await summarise(child, relative, walk))) return true;
   }
   return false;
 }
+
+const sameFolder = (recorded: FolderIdentity, folder: GuardedFolder): boolean =>
+  recorded.device === folder.identity.device && recorded.inode === folder.identity.inode;
 
 export class FileMutationJournal {
   readonly #entries: JournalEntry[] = [];
@@ -176,8 +210,13 @@ export class FileMutationJournal {
   /**
    * @param assertWritable Containment check re-run at restore time. It must not follow the final
    *   component, so an entry replaced by a link is judged on where it sits, not on where it points.
+   * @param folders How every folder is opened and checked before anything in it is touched. The default
+   *   judges no state home, and still reaches every entry through a checked handle.
    */
-  constructor(private readonly assertWritable: (target: string) => Promise<void>) {}
+  constructor(
+    private readonly assertWritable: (target: string) => Promise<void>,
+    readonly folders: DestinationFolders = new DestinationFolders(undefined),
+  ) {}
 
   /** Mark where the next operation's captures begin, so they can be sealed together. */
   beginOperation(): number {
@@ -185,15 +224,52 @@ export class FileMutationJournal {
   }
 
   /**
-   * Where the entry captured from `target` was moved to, or `undefined` when nothing was there.
-   *
-   * This is how a caller inspects what it displaced without racing anybody: the capture already
-   * renamed it out of reach, so the backup cannot change under the inspection.
+   * Where the entry captured from `target` was moved to, or `undefined` when nothing was there. For a
+   * report: to READ the backup, use {@link withBackup}, which reaches it through its re-checked folder.
    */
   backupOf(target: string): string | undefined {
     const resolved = path.resolve(target);
     const entry = this.#entries.findLast(candidate => candidate.path === resolved);
     return entry?.kind === 'restore' ? entry.backup : undefined;
+  }
+
+  /**
+   * Runs `read` with what the capture of `target` moved aside — its re-checked folder and its name there, to read
+   * THROUGH that folder — or answers `undefined` when nothing was there.
+   *
+   * This is how a caller inspects what it displaced without racing anybody: the capture already
+   * renamed it out of reach, so the backup cannot change under the inspection.
+   */
+  async withBackup<T>(
+    target: string,
+    read: (folder: GuardedFolder, backup: string) => Promise<T>,
+  ): Promise<T | undefined> {
+    const resolved = path.resolve(target);
+    const entry = this.#entries.findLast(candidate => candidate.path === resolved);
+    if (entry?.kind !== 'restore') return undefined;
+    return await this.within(entry, async folder => {
+      if (folder === undefined) throw new Error(`the original of ${entry.path} is gone from ${entry.backup}`);
+      return await read(folder, entry.backupLeaf);
+    });
+  }
+
+  /**
+   * The folder holding `entry`, reopened through the guard, for the length of `use` — `undefined` when it is not
+   * there. The first opening records its identity; every later one must find the same folder or throws, so a folder
+   * swapped since (a link into the state home, say) is never written through.
+   */
+  private async within<T>(entry: JournalEntry, use: (folder: GuardedFolder | undefined) => Promise<T>): Promise<T> {
+    return await this.folders.within(path.dirname(entry.path), async folder => {
+      if (folder !== undefined) {
+        if (entry.folder === undefined) entry.folder = { device: folder.identity.device, inode: folder.identity.inode };
+        else if (!sameFolder(entry.folder, folder)) {
+          throw new Error(
+            `refusing to touch ${entry.path}: the folder it is in was replaced after this apply wrote there`,
+          );
+        }
+      }
+      return await use(folder);
+    });
   }
 
   /**
@@ -206,26 +282,29 @@ export class FileMutationJournal {
     for (const entry of this.#entries.slice(from)) {
       if (entry.kind === 'rmdir') continue;
       if (entry.kind === 'mode') {
-        entry.left = await this.modeOf(entry.path);
+        entry.left = await this.modeOf(entry);
         continue;
       }
-      entry.seal = await this.identify(entry.path);
+      entry.seal = await this.within(entry, async folder => await this.identifyIn(folder, entry.path));
     }
   }
 
-  private async modeOf(target: string): Promise<number | undefined> {
-    try {
-      return (await lstat(target)).mode & PERMISSION_BITS;
-    } catch (error) {
-      if (!isMissing(error)) throw error;
-      return undefined;
-    }
+  private async modeOf(entry: JournalEntry): Promise<number | undefined> {
+    return await this.within(entry, async folder => {
+      return folder === undefined ? undefined : (await folder.describe(path.basename(entry.path)))?.mode;
+    });
+  }
+
+  /** What `target` holds, reached through its checked folder (absent when the folder is). */
+  private async identifyIn(folder: GuardedFolder | undefined, target: string): Promise<Seal> {
+    if (folder === undefined) return { present: false };
+    return await this.identify(await folder.entry(path.basename(target)));
   }
 
   private async identify(target: string): Promise<Seal> {
-    let information: Awaited<ReturnType<typeof lstat>>;
+    let information: BigIntStats;
     try {
-      information = await lstat(target);
+      information = await lstat(target, { bigint: true });
     } catch (error) {
       if (!isMissing(error)) throw error;
       return { present: false };
@@ -233,7 +312,7 @@ export class FileMutationJournal {
     if (information.isFile()) {
       return {
         present: true,
-        fingerprint: `${fingerprintOf('', information)}:${await contentDigest(target, information.size)}`,
+        fingerprint: `${fingerprintOf('', information)}:${await contentDigest(target, Number(information.size))}`,
       };
     }
     if (!information.isDirectory()) return { present: true, fingerprint: fingerprintOf('', information) };
@@ -245,8 +324,8 @@ export class FileMutationJournal {
   }
 
   /** Whether a destination still holds exactly what this batch left there. */
-  private async isUnchanged(entry: JournalEntry): Promise<boolean> {
-    const current = await this.identify(entry.path);
+  private async isUnchanged(entry: JournalEntry, folder: GuardedFolder | undefined): Promise<boolean> {
+    const current = await this.identifyIn(folder, entry.path);
     const seal = entry.seal;
     // Unsealed means the operation that claimed this path threw part-way through, so this batch
     // never learned what it left behind. An absent path is unambiguously safe to reclaim; anything
@@ -262,27 +341,40 @@ export class FileMutationJournal {
    * Record what currently occupies `target`, then clear it out of the way. The first capture of a
    * path wins: a later operation in the same batch overwrites something this batch already wrote,
    * and rollback has to reach the state the batch started from, not an intermediate one.
+   *
+   * `folder` is the checked folder holding `target` when the caller already has it open; otherwise it
+   * is opened here. The move aside happens through it, so it stays in that folder whatever its path
+   * names by then.
    */
-  async capture(target: string): Promise<boolean> {
+  async capture(target: string, folder?: GuardedFolder): Promise<boolean> {
     const resolved = path.resolve(target);
     // Already captured by an earlier operation in this batch, so whatever occupies the path now is
     // this batch's own work. The caller is told, because clearing it is then safe and clearing
     // anything else would be destroying a stranger's file.
     if (this.#captured.has(resolved)) return false;
-    this.#captured.add(resolved);
-
-    try {
-      await lstat(resolved);
-    } catch (error) {
-      if (!isMissing(error)) throw error;
-      this.#entries.push({ kind: 'remove', path: resolved });
+    // Marked as this batch's only once it IS recorded: a capture refused part-way (a move this platform will
+    // not make) must not leave a later capture believing the path is already this batch's to clear.
+    const record = (entry: JournalEntry): true => {
+      this.#entries.push(entry);
+      this.#captured.add(resolved);
       return true;
-    }
+    };
 
-    const backup = path.join(path.dirname(resolved), `${BACKUP_PREFIX}${randomUUID()}`);
-    await rename(resolved, backup);
-    this.#entries.push({ kind: 'restore', path: resolved, backup });
-    return true;
+    const leaf = path.basename(resolved);
+    const move = async (holder: GuardedFolder | undefined): Promise<boolean> => {
+      if (holder === undefined) return record({ kind: 'remove', path: resolved });
+      const identity = { device: holder.identity.device, inode: holder.identity.inode };
+      if ((await holder.describe(leaf)) === undefined)
+        return record({ kind: 'remove', path: resolved, folder: identity });
+      // Where a swap could redirect the move (no descriptor reach), nothing is moved.
+      await this.folders.assertMayMove(holder, resolved);
+      const backupLeaf = `${BACKUP_PREFIX}${randomUUID()}`;
+      await holder.rename(leaf, backupLeaf);
+      const backup = path.join(path.dirname(resolved), backupLeaf);
+      return record({ kind: 'restore', path: resolved, backup, backupLeaf, folder: identity });
+    };
+    if (folder !== undefined) return await move(folder);
+    return await this.folders.within(path.dirname(resolved), move);
   }
 
   /**
@@ -362,6 +454,10 @@ export class FileMutationJournal {
   /**
    * Drop the moved-aside evidence, once the batch it protects has committed.
    *
+   * Each backup is removed from the folder it was moved aside in, and only from that one: the folder is
+   * reopened and must still be the folder recorded at the capture, and the removal never follows a link. A
+   * folder swapped since — say for a link into the state home — keeps whatever it holds.
+   *
    * Best-effort by construction: the batch has already succeeded, so a backup that resists removal
    * is an inert file under a reserved prefix, not a reason to report the commit as a failure.
    */
@@ -370,7 +466,11 @@ export class FileMutationJournal {
     for (const entry of this.#entries) {
       if (entry.kind !== 'restore') continue;
       try {
-        await rm(entry.backup, { recursive: true, force: true });
+        await this.within(entry, async folder => {
+          // Its folder is not where it was: the backup went with it, still on disk somewhere, so it is named.
+          if (folder === undefined) throw new Error(`the folder holding ${entry.backup} is gone`);
+          await this.folders.remove(folder, entry.backupLeaf);
+        });
       } catch {
         remaining.push(entry.backup);
       }
@@ -380,36 +480,57 @@ export class FileMutationJournal {
 
   private async undo(entry: JournalEntry): Promise<void> {
     if (entry.kind === 'restore') {
-      if (!(await this.isUnchanged(entry))) {
-        throw new Error(
-          `refusing to overwrite ${entry.path}: it changed after this apply wrote it, so the original was left at ${entry.backup}`,
-        );
-      }
-      await this.clear(entry);
-      await rename(entry.backup, entry.path);
+      await this.within(entry, async folder => {
+        if (folder === undefined) {
+          throw new Error(
+            `refusing to restore ${entry.path}: the folder it was in is gone, so the original was left at ${entry.backup}`,
+          );
+        }
+        if (!(await this.isUnchanged(entry, folder))) {
+          throw new Error(
+            `refusing to overwrite ${entry.path}: it changed after this apply wrote it, so the original was left at ${entry.backup}`,
+          );
+        }
+        await this.clear(entry, folder);
+        await folder.rename(entry.backupLeaf, path.basename(entry.path));
+      });
       return;
     }
     if (entry.kind === 'remove') {
-      if (!(await this.isUnchanged(entry))) {
-        throw new Error(`refusing to remove ${entry.path}: it changed after this apply created it`);
-      }
-      await this.clear(entry);
+      await this.within(entry, async folder => {
+        if (!(await this.isUnchanged(entry, folder))) {
+          throw new Error(`refusing to remove ${entry.path}: it changed after this apply created it`);
+        }
+        if (folder !== undefined) await this.clear(entry, folder);
+      });
       return;
     }
     if (entry.kind === 'mode') {
-      // `chmod` follows a link. If the directory whose mode was captured is now a symlink, applying
-      // the old mode would land on whatever it points at — possibly outside the allowed roots — so
-      // the entry is reported unverified instead.
-      const information = await lstat(entry.path);
-      if (!information.isDirectory()) {
-        throw new Error(`refusing to restore the mode of an entry that is no longer a directory: ${entry.path}`);
-      }
-      // Undoing a mode change is only ours to undo while the mode is still the one this apply set.
-      // Somebody who has since chosen their own is not corrected by a rollback.
-      if (entry.left !== undefined && (information.mode & PERMISSION_BITS) !== entry.left) {
-        throw new Error(`refusing to restore the mode of ${entry.path}: it changed after this apply set it`);
-      }
-      await chmod(entry.path, entry.mode);
+      await this.within(entry, async parent => {
+        const leaf = path.basename(entry.path);
+        // `chmod` follows a link. If the directory whose mode was captured is now a symlink, applying
+        // the old mode would land on whatever it points at — possibly outside the allowed roots — so
+        // the entry is reported unverified instead.
+        const information = parent === undefined ? undefined : await parent.describe(leaf);
+        if (parent !== undefined && information === undefined) {
+          throw Object.assign(new Error(`ENOENT: ${entry.path} is gone`), { code: 'ENOENT' });
+        }
+        if (parent === undefined || information === undefined || information.kind !== 'directory') {
+          throw new Error(`refusing to restore the mode of an entry that is no longer a directory: ${entry.path}`);
+        }
+        // Undoing a mode change is only ours to undo while the mode is still the one this apply set.
+        // Somebody who has since chosen their own is not corrected by a rollback.
+        if (entry.left !== undefined && information.mode !== entry.left) {
+          throw new Error(`refusing to restore the mode of ${entry.path}: it changed after this apply set it`);
+        }
+        // Through the folder's own descriptor, opened without following a link.
+        const folder = await this.folders.child(parent, leaf, entry.path);
+        try {
+          await folder.chmod(entry.mode);
+        } finally {
+          await folder.close();
+        }
+      });
       return;
     }
     await this.removeCreatedDirectory(entry.path);
@@ -430,16 +551,33 @@ export class FileMutationJournal {
    * write through it. Renaming closes the pathname race, which is the one this code creates; it
    * cannot close a handle somebody opened beforehand. No filesystem primitive available here can.
    *
-   * `isOwnWork` is given the new location and answers the only question that licenses removal: is
-   * this still exactly what we put there? A `false` — or a check that cannot tell — keeps the copy
-   * and leaves it named, which is why the record is pushed the instant the rename succeeds and
+   * `isOwnWork` is given a path reaching the new location and answers the only question that licenses
+   * removal: is this still exactly what we put there? A `false` — or a check that cannot tell — keeps
+   * the copy and leaves it named, which is why the record is pushed the instant the rename succeeds and
    * withdrawn only after the removal actually happened. Moved-and-unreported is state nobody can
    * find; reported-and-still-there is merely untidy.
+   *
+   * The rename, the check and the removal all go through one checked handle on the folder, so what is
+   * removed is in the folder the move happened in, and the removal never follows a link.
    */
   async displace(target: string, isOwnWork: (moved: string) => Promise<boolean>): Promise<void> {
-    const displaced = path.join(path.dirname(target), `${DISPLACED_PREFIX}${randomUUID()}`);
+    const resolved = path.resolve(target);
+    await this.folders.within(path.dirname(resolved), async folder => {
+      // Already gone, with its folder, which is the state this was trying to reach.
+      if (folder !== undefined) await this.displaceIn(folder, resolved, isOwnWork);
+    });
+  }
+
+  private async displaceIn(
+    folder: GuardedFolder,
+    target: string,
+    isOwnWork: (moved: string) => Promise<boolean>,
+  ): Promise<void> {
+    const displacedLeaf = `${DISPLACED_PREFIX}${randomUUID()}`;
+    const displaced = path.join(path.dirname(target), displacedLeaf);
+    await this.folders.assertMayMove(folder, target);
     try {
-      await rename(target, displaced);
+      await folder.rename(path.basename(target), displacedLeaf);
     } catch (error) {
       // Already gone, which is the state this was trying to reach.
       if (isMissing(error)) return;
@@ -447,8 +585,8 @@ export class FileMutationJournal {
     }
     this.#displaced.push({ path: target, movedTo: displaced });
 
-    if (!(await isOwnWork(displaced))) return;
-    await rm(displaced, { recursive: true, force: true });
+    if (!(await isOwnWork(await folder.entry(displacedLeaf)))) return;
+    await this.folders.remove(folder, displacedLeaf);
     this.#displaced.splice(
       this.#displaced.findIndex(state => state.movedTo === displaced),
       1,
@@ -463,8 +601,8 @@ export class FileMutationJournal {
    * So this is `displace` with the seal as its evidence: still exactly what this apply wrote, or
    * kept and named.
    */
-  private async clear(entry: JournalEntry): Promise<void> {
-    await this.displace(entry.path, async displaced => {
+  private async clear(entry: JournalEntry, folder: GuardedFolder): Promise<void> {
+    await this.displaceIn(folder, entry.path, async displaced => {
       // No seal, or a seal saying nothing was here, is not evidence that what was just moved is
       // ours — and asking the filesystem about it would not make it any more so.
       const seal = entry.seal;
@@ -489,18 +627,22 @@ export class FileMutationJournal {
    * writer put in it — remains.
    */
   private async removeCreatedDirectory(target: string): Promise<void> {
-    try {
-      await rmdir(target);
-    } catch (error) {
-      if (isMissing(error)) return;
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === 'ENOTEMPTY' || code === 'EEXIST') {
-        throw new Error(`refusing to remove ${target}: this apply created it but it is no longer empty`);
+    await this.folders.within(path.dirname(target), async parent => {
+      // Gone with its parent.
+      if (parent === undefined) return;
+      try {
+        await this.folders.removeEmpty(parent, path.basename(target));
+      } catch (error) {
+        if (isMissing(error)) return;
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOTEMPTY' || code === 'EEXIST') {
+          throw new Error(`refusing to remove ${target}: this apply created it but it is no longer empty`);
+        }
+        if (code === 'ENOTDIR') {
+          throw new Error(`refusing to remove ${target}: this apply created a directory and it is no longer one`);
+        }
+        throw error;
       }
-      if (code === 'ENOTDIR') {
-        throw new Error(`refusing to remove ${target}: this apply created a directory and it is no longer one`);
-      }
-      throw error;
-    }
+    });
   }
 }
