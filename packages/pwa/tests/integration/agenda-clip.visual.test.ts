@@ -19,6 +19,8 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
+import { COMPASS_ROW_PX, COMPASS_SIDE_PX } from '../../src/features/agenda/agenda-compass.ts';
+import { swipeThreshold } from '../../src/lib/agenda-inbox.ts';
 import { sharedChromium } from './support/chromium.ts';
 
 const packageRoot = resolve(import.meta.dir, '../..');
@@ -273,13 +275,13 @@ describe('the Answer-quickly card', () => {
         await tab.waitForSelector('.fy-totest__top');
         await framesSettled(tab);
         const cdp = await context.newCDPSession(tab);
-        const swipe = async (x: number, from: number, to: number): Promise<void> => {
-          const touch = (y: number) => [{ x, y }];
-          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: touch(from) });
+        const swipe = async (x: number, from: number, to: number, toX: number = x): Promise<void> => {
+          const touch = (y: number, step: number) => [{ x: x + ((toX - x) * step) / 10, y }];
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: touch(from, 0) });
           for (let step = 1; step <= 10; step += 1)
             await cdp.send('Input.dispatchTouchEvent', {
               type: 'touchMove',
-              touchPoints: touch(from + ((to - from) * step) / 10),
+              touchPoints: touch(from + ((to - from) * step) / 10, step),
             });
           await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
           await framesSettled(tab);
@@ -296,10 +298,15 @@ describe('the Answer-quickly card', () => {
         await swipe(steps.left + 40, steps.top + steps.height / 2 - 60, steps.top + steps.height / 2 + 100);
         expect(await skipped(), 'a swipe down in the steps skips nothing').toBe(0);
         expect((await scrollBox(tab)).top, 'it scrolled the card').toBeLessThan(before);
-        // Down from the title (the head stays on the box's edge while the card is scrolled): skip.
+        // A pull down from the title (the head stays on the box's edge while the card is scrolled) opens the compass:
+        // letting go in its first row, straight or toward the left, is Skip.
         const stuck = await insideViewport(tab, '[data-to-test-title]');
-        await swipe(x, stuck.top + stuck.height / 2, stuck.top + 260);
-        expect(await skipped(), 'a swipe down from the title skips').toBe(1);
+        const skipRow = swipeThreshold(steps.width) + COMPASS_ROW_PX / 2;
+        await swipe(x, stuck.top + stuck.height / 2, stuck.top + stuck.height / 2 + skipRow);
+        expect(await skipped(), 'a pull down from the title reaches Skip through the compass').toBe(1);
+        const again = await insideViewport(tab, '[data-to-test-title]');
+        await swipe(x, again.top + again.height / 2, again.top + again.height / 2 + skipRow, x - COMPASS_SIDE_PX - 12);
+        expect(await skipped(), 'down and left in the compass is Skip too').toBe(2);
       } finally {
         await close();
       }
