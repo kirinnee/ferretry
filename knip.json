@@ -90,6 +90,8 @@
         "harness/inbox-v2-screenshot.ts",
         "harness/to-test-inbox-screenshot.ts",
         "harness/roomier-inbox-screenshot.ts",
+        "harness/inbox-count-screenshot.ts",
+        "harness/inbox-count-page.tsx",
         "harness/inbox-gates-screenshot.ts",
         "harness/answer-quickly-cards-screenshot.ts",
         "harness/task-panel-cards-screenshot.ts",

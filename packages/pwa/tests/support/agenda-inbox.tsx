@@ -120,6 +120,7 @@ export function InboxHarness({
   fake,
   cards,
   reading = false,
+  unavailable = [],
   resolved = [],
   resolvedReading = false,
   parked = [],
@@ -131,6 +132,7 @@ export function InboxHarness({
   readonly fake: FakeInbox;
   readonly cards: readonly InboxCard[];
   readonly reading?: boolean;
+  readonly unavailable?: AgendaInbox['unavailable'];
   readonly resolved?: AgendaInbox['resolved'];
   readonly resolvedReading?: boolean;
   readonly parked?: AgendaInbox['parked'];
@@ -144,11 +146,16 @@ export function InboxHarness({
   const shown = cards.filter(card => !hidden.has(card.key));
   const inbox: AgendaInbox = {
     unread: [],
-    total: cards.filter(card => isOnOwner(card.item)).length + toTest.length,
+    // As the shell counts: the deck that shows, plus what an unreadable machine holds, plus the cards to test.
+    total:
+      shown.filter(card => isOnOwner(card.item)).length +
+      unavailable.reduce((sum, machine) => sum + machine.items, 0) +
+      toTest.length,
     // Split as the shell splits them: by whose turn the item is on.
     withFerret: shown.filter(card => agendaTurn(card.item) === 'ferret'),
     cards: shown.filter(card => isOnOwner(card.item)),
     reading,
+    unavailable,
     resolved,
     resolvedReading,
     parked: parked.filter(card => !hidden.has(card.key)),
