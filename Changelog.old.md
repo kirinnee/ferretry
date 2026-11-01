@@ -1,3 +1,9 @@
+## [4.212.1](https://github.com/kirinnee/ferretry/compare/v4.212.0...v4.212.1) (2026-11-01)
+
+### Fixes
+
+* **daemon:** bind the step-up witness so device commits stop answering 500 ([#1273](https://github.com/kirinnee/ferretry/issues/1273)) ([d32ba32](https://github.com/kirinnee/ferretry/commit/d32ba327a07e1dbfeea6912b891d6badb237cc56))
+
 ## [4.212.0](https://github.com/kirinnee/ferretry/compare/v4.211.0...v4.212.0) (2026-11-01)
 
 ### Features
