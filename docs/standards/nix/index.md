@@ -91,6 +91,26 @@ hermetic without adding product packages to development-shell package aggregatio
 with the same pinned Bun the shells run: `flake.nix` passes `devPackages.bun` in, and
 `nix/ferretry.nix` never names `pkgs.bun`.
 
+**The dependency derivation's name is a digest of its inputs.** A fixed-output derivation's store
+path is its name plus its `outputHash` and nothing else, so a store that already holds that path
+never re-runs `bun install`. With a hand-bumped name, a lockfile change that kept the old hash
+passed on every warm CI cache volume and failed only on a cold one: an intermittent
+`hash mismatch in fixed-output derivation` that a rerun "fixed". So `ferretry-bun-deps` is built:
+
+- **from only its install inputs** — `bun.lock`, the root `package.json` and each
+  `packages/*/package.json` — so nothing else can move its output;
+- **under a name carrying a digest of those inputs**, the Bun version and the install command, so
+  changing any of them is a path no store holds yet, and the next build re-runs the install. A
+  stale hash fails on the PR that made it stale, on every builder, every time. Each manifest's
+  `version` is left out of the digest, because the release commit restamps it and it never reaches
+  `node_modules`;
+- **with `--production --ignore-scripts`**: the binaries need no devDependency, and the native
+  prebuilds arrive as optional packages, so no lifecycle script runs. A test-only dependency
+  therefore re-runs the install but leaves the hash alone.
+
+When the build reports a mismatch, take the `got:` hash into `outputHash`. Never rerun it away: the
+`got:` hash is the same on every builder, so a rerun that passes only found a stale cache.
+
 ### nix/bun.nix — the pinned Bun
 
 **Purpose**: own the one Bun version every shell, every CI job, the release build and the flake's
@@ -110,11 +130,9 @@ costs one download and a patchelf (about 3 s), not a compile.
 - **Not a second nixpkgs input.** A newer nixpkgs just for Bun would substitute, but only at the
   version that nixpkgs happens to carry, and it adds a whole second nixpkgs to evaluate and to keep
   current.
-- **Bumping it**: change `version` and the three hashes, then prove the dependency tree did not
-  move. `ferretry-bun-deps` is a fixed-output derivation, so a store that already holds its output
-  will NOT re-run `bun install` under the new Bun. Force it:
-  `nix build "$(nix-store -q --references "$(nix eval --raw .#packages.<system>.fy.drvPath)" | grep ferretry-bun-deps)^out" --rebuild`.
-  A hash mismatch there means a new `outputHash` and a new derivation `version`.
+- **Bumping it**: change `version` and the three hashes. The Bun version is part of
+  `ferretry-bun-deps`'s name (above), so the next `nix build .#default` re-runs `bun install` under
+  the new Bun; a hash mismatch there means the dependency tree moved and needs the `got:` hash.
 - **Deleting it**: once `flake.lock`'s nixpkgs carries the pinned version or later, delete the
   file and put `bun` back in the `inherit (pkgs)` block.
 
