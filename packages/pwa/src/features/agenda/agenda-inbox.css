@@ -1159,8 +1159,8 @@
   margin-left: 0;
 }
 .fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__deck--open > .fy-attn-deck {
-  margin-right: 16px;
-  margin-left: 16px;
+  margin-right: 8px;
+  margin-left: 8px;
 }
 /* On a wide screen the open item and its composer share one comfortable measure. */
 @media (min-width: 768px) {

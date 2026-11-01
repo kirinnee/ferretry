@@ -124,18 +124,70 @@ describe('the v6 layout: title, ONE card, history — one column', () => {
     expect(root().querySelectorAll('[data-agenda-quick-replies]')).toHaveLength(1);
   });
 
-  test('says the title, then the item’s ask as its one-line description', async () => {
-    await draw(richItem);
+  test('is ONE row: the title, then the status dot, the pager, the clock, ⓘ and ✕ — nothing under it until ⓘ opens', async () => {
+    await draw(richItem, { onSnooze: () => undefined });
+    const head = one('.fy-item-view__head');
+    expect([...head.children].filter(child => !child.hasAttribute('hidden')).map(child => child.className)).toEqual([
+      'fy-item-view__bar',
+    ]);
+    const bar = one('.fy-item-view__head > .fy-item-view__bar');
+    expect([...bar.children].map(child => child.className.split(' ')[0])).toEqual([
+      'fy-item-view__title',
+      'fy-item-view__pager',
+    ]);
     expect(one('[data-agenda-title]').textContent).toBe('Database for the board');
+    const tools = [...bar.querySelectorAll('.fy-item-view__pager > *')].map(
+      node => node.getAttribute('aria-label') ?? node.getAttribute('data-agenda-where') ?? node.className,
+    );
+    expect(tools).toEqual([
+      expect.stringContaining('fy-item-view__status'),
+      'Previous item',
+      '',
+      'Next item',
+      'fy-snooze',
+      'About this item',
+      'Back to the chat',
+    ]);
+    expect(root().querySelector('[data-agenda-ask]')).toBeNull();
+  });
+
+  test('says the item’s ask behind ⓘ: a tap opens its panel under the row, another closes it', async () => {
+    await draw(richItem);
+    const toggle = one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-info-toggle]');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-controls')).toBe(one('[data-agenda-info-panel]').id);
+    expect(one<HTMLElement>('[data-agenda-info-panel]').hidden).toBe(true);
+    await interact(() => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const panel = one<HTMLElement>('.fy-item-view__head > [data-agenda-info-panel]');
+    expect(panel.hidden).toBe(false);
     expect(one('.fy-item-view__head [data-agenda-ask]').textContent).toBe(
       'Which database should keep the board’s finished items?',
     );
+    await interact(() => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(one<HTMLElement>('[data-agenda-info-panel]').hidden).toBe(true);
   });
 
-  test('falls back to the why for an old item whose title is its ask', async () => {
-    await draw(agendaItem('A3', { subject: 'Ship it?', why: 'The release is due.' } as Partial<AgendaItem>));
-    expect(one('[data-agenda-title]').textContent).toBe('Ship it?');
-    expect(one('[data-agenda-ask]').textContent).toBe('The release is due.');
+  test('a new item opens with its ⓘ closed', async () => {
+    await draw(richItem);
+    await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
+    await view?.unmount();
+    view = null;
+    await draw(agendaItem('A48', { title: 'Another', subject: 'Which?' } as Partial<AgendaItem>));
+    expect(one('[data-agenda-info-toggle]').getAttribute('aria-expanded')).toBe('false');
+  });
+
+  test('draws no ⓘ when there is nothing to say behind it', async () => {
+    await draw(agendaItem('A49', { title: 'Same', subject: 'Same', why: 'Same' } as Partial<AgendaItem>), {}, []);
+    expect(root().querySelector('[data-agenda-info-toggle], [data-agenda-info-panel]')).toBeNull();
+  });
+
+  test('keeps a title that fits as plain text, and marks none as scrolling until the browser says it overflows', async () => {
+    await draw(richItem);
+    const title = one('[data-agenda-title]');
+    expect(title.getAttribute('data-marquee')).toBeNull();
+    expect(title.querySelector('.fy-item-view__title-text')?.textContent).toBe('Database for the board');
   });
 
   test('draws premise and context as ONE panel, labelled Premise and Context — never "Why now"', async () => {
@@ -147,13 +199,13 @@ describe('the v6 layout: title, ONE card, history — one column', () => {
     expect(text).not.toMatch(/why now|what’s going on|what's going on|why it matters/iu);
   });
 
-  test('teaches nothing: no hint line under the type, no ⋯ menu, no ⓘ', async () => {
+  test('teaches nothing: no hint line under the type, no ⋯ menu', async () => {
     await draw(richItem);
     expect(one('.fy-card__top [data-agenda-type]').textContent).toBe('Decision');
     const text = root().textContent ?? '';
     expect(text).not.toContain('it is yours to decide');
     expect(text).not.toContain('⋯');
-    expect(root().querySelector('[data-agenda-info], [aria-haspopup="menu"]:not([data-agenda-snooze])')).toBeNull();
+    expect(root().querySelector('[aria-haspopup="menu"]:not([data-agenda-snooze])')).toBeNull();
   });
 });
 

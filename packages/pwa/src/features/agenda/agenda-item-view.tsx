@@ -5,8 +5,8 @@
  *
  * ONE COLUMN, the composer's own width at every breakpoint, top to bottom:
  *
- *   head     the title and the one-line description (the item's ask), with where it stands, ‹ n of N ›, the snooze
- *            clock and ✕ beside the title
+ *   head     ONE row: the title (one line; it scrolls when too long), where the item stands, ‹ n of N ›, the snooze
+ *            clock, ⓘ and ✕. The item's ask is behind ⓘ, in a panel under the row
  *   card     everything to read and answer (`agenda-item-card.tsx`): premise and context, the question, the options,
  *            whatever sections the ferret added, the version picker, and the ONE answer row
  *   history  the conversation about the item, newest at the bottom, just above the composer
@@ -22,8 +22,8 @@
  */
 
 import type { AgendaCardAnswer, AgendaItem } from '@ferretry/protocol';
-import { X } from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
+import { Info, X } from 'lucide-react';
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { useQuoteMenu } from '../../components/quote-menu.tsx';
 import { useDoneClose } from '../../hooks/use-done-close.ts';
 import { answerAction } from '../../lib/agenda-answers.ts';
@@ -40,6 +40,7 @@ import { AgendaItemCard } from './agenda-item-card.tsx';
 import { AgendaItemHistory } from './agenda-item-history.tsx';
 import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
+import { MarqueeTitle } from './marquee-title.tsx';
 import { StackPager } from './stack-pager.tsx';
 import { useDoneCloseFlow } from './use-done-close-flow.ts';
 
@@ -152,6 +153,9 @@ export function AgendaItemView({
   const body = useRef<HTMLDivElement | null>(null);
   const top = useRef<HTMLElement | null>(null);
   const [dock, setDock] = useState<HTMLDivElement | null>(null);
+  const infoId = useId();
+  const [infoFor, setInfoFor] = useState<string | null>(null);
+  const infoOpen = infoFor === item.id;
   useScrollPadding(body, top, dock);
   const quote = useQuoteMenu(root, quoteScope);
   const model = cardModel(item);
@@ -214,32 +218,49 @@ export function AgendaItemView({
       <div className="fy-item-view__body" data-agenda-body="" ref={body}>
         <div className="fy-item-view__column">
           <header className="fy-item-view__head" data-agenda-top="" ref={top}>
-            <div className="fy-item-view__pager">
-              {status === null ? null : (
-                <span className="fy-item-view__status" title={status.label}>
-                  <AgendaStatusPill status={status} />
-                </span>
-              )}
-              <StackPager index={position.index} onNext={onNext} onPrevious={onPrevious} total={position.total} />
-              {onSnooze === undefined ? null : (
-                <AgendaSnoozeMenu disabled={busy} now={now} onSnooze={onSnooze} triggerClass="fy-item-view__step" />
-              )}
-              <button
-                aria-label={closeLabel}
-                className="fy-item-view__step fy-item-view__close"
-                data-agenda-close=""
-                onClick={onClose}
-                type="button"
-              >
-                <X aria-hidden="true" size={18} />
-              </button>
+            <div className="fy-item-view__bar">
+              <MarqueeTitle title={head.title} />
+              <div className="fy-item-view__pager">
+                {status === null ? null : (
+                  <span className="fy-item-view__status" title={status.label}>
+                    <AgendaStatusPill status={status} />
+                  </span>
+                )}
+                <StackPager index={position.index} onNext={onNext} onPrevious={onPrevious} total={position.total} />
+                {onSnooze === undefined ? null : (
+                  <AgendaSnoozeMenu disabled={busy} now={now} onSnooze={onSnooze} triggerClass="fy-item-view__step" />
+                )}
+                {head.description === null ? null : (
+                  <button
+                    aria-controls={infoId}
+                    aria-expanded={infoOpen}
+                    aria-label="About this item"
+                    className="fy-item-view__step fy-item-view__info-toggle"
+                    data-agenda-info-toggle=""
+                    onClick={() => setInfoFor(infoOpen ? null : item.id)}
+                    type="button"
+                  >
+                    <Info aria-hidden="true" size={18} />
+                  </button>
+                )}
+                <button
+                  aria-label={closeLabel}
+                  className="fy-item-view__step fy-item-view__close"
+                  data-agenda-close=""
+                  onClick={onClose}
+                  type="button"
+                >
+                  <X aria-hidden="true" size={18} />
+                </button>
+              </div>
             </div>
-            <h2 className="fy-item-view__title" data-agenda-title="">
-              {head.title}
-            </h2>
             {head.description === null ? null : (
-              <div className="fy-item-view__desc" data-agenda-ask="">
-                {renderProse(head.description)}
+              <div className="fy-item-view__info" data-agenda-info-panel="" hidden={!infoOpen} id={infoId}>
+                {infoOpen ? (
+                  <div className="fy-item-view__desc" data-agenda-ask="">
+                    {renderProse(head.description)}
+                  </div>
+                ) : null}
               </div>
             )}
           </header>
