@@ -6,6 +6,7 @@ import {
   LOCK_PX,
   LONG_PRESS_MS,
   lockOf,
+  startsAtScrollTop,
   startsInHead,
   startsInSelection,
   startsInSidewaysScroller,
@@ -118,6 +119,32 @@ describe('startsInHead', () => {
   it('is false in the body and for a null target', () => {
     expect(startsInHead(el('<div data-agenda-scroll><p>x</p></div>').lastElementChild)).toBe(false);
     expect(startsInHead(null)).toBe(false);
+  });
+});
+
+describe('startsAtScrollTop', () => {
+  const scroller = (scrollTop: number, tall: boolean) => {
+    const box = el('<div style="overflow-y:auto"><p>x</p></div>');
+    document.body.appendChild(box);
+    for (const [key, value] of Object.entries({ scrollTop, scrollHeight: tall ? 400 : 100, clientHeight: 100 }))
+      Object.defineProperty(box, key, { configurable: true, value });
+    return box;
+  };
+
+  it('is true in a body that does not scroll, or sits at its top', () => {
+    expect(startsAtScrollTop(scroller(0, false).firstElementChild, document.body)).toBe(true);
+    expect(startsAtScrollTop(scroller(0, true).firstElementChild, document.body)).toBe(true);
+    expect(startsAtScrollTop(null, document.body)).toBe(true);
+  });
+
+  it('is false once a scroller between the touch and the boundary has been scrolled down', () => {
+    expect(startsAtScrollTop(scroller(40, true).firstElementChild, document.body)).toBe(false);
+  });
+
+  it('does not count a scroller above the boundary, or one that only looks scrolled but cannot scroll', () => {
+    const box = scroller(40, true);
+    expect(startsAtScrollTop(box.firstElementChild, box)).toBe(true);
+    expect(startsAtScrollTop(scroller(40, false).firstElementChild, document.body)).toBe(true);
   });
 });
 

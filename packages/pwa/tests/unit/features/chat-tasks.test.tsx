@@ -3,13 +3,12 @@ import { boardOk } from '@ferretry/protocol';
 import { ChatTasks, type ChatTasksProps } from '../../../src/features/board/chat-tasks.tsx';
 import { DaemonAgendaStore } from '../../../src/lib/agenda-store.ts';
 import { type BoardChat, chatCards, chatChip } from '../../../src/lib/board-chat.ts';
+import { NO_BOARD_FILTERS } from '../../../src/lib/board-model.ts';
 import { boardSideView } from '../../../src/lib/board-side-view.ts';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { daemonBoardCardPath } from '../../../src/lib/pages/routes.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
-import { fill, submit } from './board-detail-support.tsx';
-import { NO_BOARD_FILTERS } from '../../../src/lib/board-model.ts';
 import {
   boardModelOf,
   card,
@@ -20,6 +19,7 @@ import {
   laptop,
   originCard,
 } from '../board-support.ts';
+import { fill, submit } from './board-detail-support.tsx';
 
 const NOW = Date.parse('2026-08-01T10:04:00.000Z');
 const SELF = 's1';
@@ -533,10 +533,10 @@ describe('ChatTasks — the Cards view', () => {
 
   it('shows one card at a time, the card to test first and then the plan to approve', async () => {
     const { root } = await open({ extraCards: [waiting] });
-    expect(where(root)).toBe('1 of 3');
+    expect(where(root)).toBe('1/3');
     expect(shownTitle(root)).toBe('Try the board');
     expect(root.querySelectorAll('[data-board-cards] [data-task], [data-board-cards] [data-to-test]')).toHaveLength(1);
-    expect(root.querySelector('[data-board-cards-rank]')?.textContent).toBe('To test');
+    expect(root.querySelector('[data-board-cards-rank]')).toBeNull();
     await interact(() => step(root, 'Next card').click());
     expect(where(root)).toBe('2 of 3');
     expect(root.querySelector('[data-board-cards-rank]')?.textContent).toBe('To approve');
@@ -577,7 +577,7 @@ describe('ChatTasks — the Cards view', () => {
     expect(where(root)).toBe('2 of 3');
   });
 
-  it('lays the buttons out as the Inbox gate card does: Not good left, Done right, Skip quiet on its own row', async () => {
+  it('lays the buttons out as the Inbox gate card does: Not good left, Done right, Skip behind (i)', async () => {
     const { root } = await open();
     const answers = must(root.querySelector('.fy-totest__answers'), 'the answer row');
     expect([...answers.querySelectorAll('button')].map(button => button.textContent?.trim())).toEqual([
@@ -586,6 +586,8 @@ describe('ChatTasks — the Cards view', () => {
     ]);
     expect(answers.querySelector('[data-to-test-not-good] svg.lucide-arrow-left')).not.toBeNull();
     expect(answers.querySelector('[data-to-test-done] svg.lucide-arrow-right')).not.toBeNull();
+    expect(root.querySelector('[data-to-test-skip]')).toBeNull();
+    await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
     const quiet = must(root.querySelector('.fy-totest__quiet'), 'the quiet row');
     expect(quiet.querySelector('[data-to-test-skip]')).not.toBeNull();
     expect(answers.contains(quiet)).toBe(false);
@@ -630,11 +632,13 @@ describe('ChatTasks — the Cards view', () => {
 
   it('names the ferret by its task on the card to test, never by its callsign', async () => {
     const { root } = await open({ taskNames: new Map([[SELF, 'Credentials Build Lead']]) });
+    await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
     expect(root.querySelector('[data-board-cards] [data-to-test-ferret]')?.textContent).toBe('Credentials Build Lead');
   });
 
   it('has a Skip button on a card to test that steps to the next card', async () => {
     const { root, acts } = await open({ extraCards: [waiting] });
+    await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
     await interact(() => must(root.querySelector<HTMLElement>('[data-to-test-skip]'), 'Skip').click());
     expect(where(root)).toBe('2 of 3');
     expect(acts).toEqual([]);
@@ -684,7 +688,7 @@ const pointer = (type: string, x: number, init: PointerEventInit = {}): PointerE
   });
 
 const swipe = async (root: HTMLElement, dx: number): Promise<void> => {
-  const grip = must(root.querySelector<HTMLElement>('[data-board-cards] .fy-totest__meta'), 'a place to grab');
+  const grip = must(root.querySelector<HTMLElement>('[data-board-cards] .fy-totest__top'), 'a place to grab');
   await interact(() => grip.dispatchEvent(pointer('pointerdown', 100)));
   await interact(() => grip.dispatchEvent(pointer('pointermove', 100 + dx / 2)));
   await interact(() => grip.dispatchEvent(pointer('pointermove', 100 + dx)));
@@ -711,11 +715,11 @@ describe('ChatTasks — swiping a card to test, at once', () => {
 
   it('a swipe down is Skip: the next card, and nothing moves', async () => {
     const { root, acts } = await open({ extraCards: [waiting] });
-    const grip = must(root.querySelector<HTMLElement>('[data-board-cards] .fy-totest__meta'), 'a place to grab');
+    const grip = must(root.querySelector<HTMLElement>('[data-board-cards] .fy-totest__top'), 'a place to grab');
     await interact(() => grip.dispatchEvent(pointer('pointerdown', 100)));
-    await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 400 })));
-    await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 600 })));
-    await interact(() => grip.dispatchEvent(pointer('pointerup', 100, { clientY: 600 })));
+    await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 340 })));
+    await interact(() => grip.dispatchEvent(pointer('pointermove', 100, { clientY: 430 })));
+    await interact(() => grip.dispatchEvent(pointer('pointerup', 100, { clientY: 430 })));
     await interact(() => flush());
     expect(where(root)).toBe('2 of 3');
     expect(acts).toEqual([]);

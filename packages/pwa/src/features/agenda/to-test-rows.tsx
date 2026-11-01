@@ -3,13 +3,14 @@
  * chat task panel's Cards view draws one at a time; both draw this one row, so the gesture, the buttons and the reason
  * box are the same on both.
  *
- * - SWIPE RIGHT IS DONE, LEFT IS NOT GOOD, DOWN IS SKIP, the same swipe the agenda deck has (touch only, decided after the
- *   same slop, committed past the same threshold, never started on something the reader presses or inside a sideways
- *   scroller). DOWN IS READ ONLY FROM THE ROW'S HEAD (`.fy-totest__top` and `.fy-totest__meta`: the title line, the title link included, and the
- *   who-and-what line), which does not scroll — in the run the title line is sticky at the top of the card's scroll box, so it is always
- *   there to grab — so a drag down anywhere else is still the page (or the card) scrolling. Skip changes nothing: it goes to
- *   the next card.
- *   What letting go would do is kept as `data-swipe-*` and named (icon + word) in the area the row uncovers.
+ * - THE WHOLE CARD IS THE SWIPE SURFACE, AND IT IS THE AGENDA DECK'S: right is Done, left is Not good, and a pull DOWN is the
+ *   compass (↓ and ↓← Skip, ↓↓ the shared snooze list, Custom… included; no Not needed — a card to test is never dismissed). Touch only,
+ *   decided after the same slop, committed past the same threshold, never started on something the reader presses or inside a
+ *   sideways scroller. DOWN IS READ FROM THE HEAD (the title line, the title link included) AND FROM A BODY THAT IS AT THE
+ *   TOP OF ITS SCROLL (`startsAtScrollTop`); a drag down from a body with more above it is still the card scrolling.
+ *   What letting go would do is kept as `data-swipe-*` and named in the area the row uncovers.
+ * - THE HEAD IS THE AGENDA CARD'S (`CardHead`): title · ‹ n/N › · ⓘ · clock · ✕. The quiet facts (who, what, release) and the
+ *   Skip button live under ⓘ, reachable by keyboard and screen reader; Done and Not good stay on the card.
  * - THE BUTTONS ARE THE SAME ANSWERS for a mouse, a keyboard and a screen reader, in the order of the swipes.
  * - NOTHING CLOSES A CARD HERE THAT THE BOARD DOES NOT: both answers go through `useBoardAnswers`, the Board's own flow.
  *   Done moves the card forward at once; Not good opens the Board's reason box and reopens the card with the owner's
@@ -17,27 +18,33 @@
  */
 
 import { ArrowLeft, ArrowRight, Check, SkipForward, X } from 'lucide-react';
-import { type PointerEvent, useRef, useState } from 'react';
+import { type PointerEvent, useEffect, useId, useRef, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
-import { SWIPE_SLOP_PX, swipeIntent, swipeThreshold } from '../../lib/agenda-inbox.ts';
+import { swipeIntent, swipeThreshold } from '../../lib/agenda-inbox.ts';
+import { type SnoozePick, snoozePicks } from '../../lib/agenda-snooze.ts';
 import type { BoardActions } from '../../lib/board-actions.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
-import { daemonBoardCardPath } from '../../lib/pages/routes.ts';
+import { daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { releaseWords, type ToTestCard } from '../../lib/to-test-inbox.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { type BoardAnswers, useBoardAnswers } from '../board/board-answers.tsx';
 import type { SendBackPorts } from '../board/board-send-back.tsx';
 import { cardProse, HowToTest } from '../board/detail/board-detail-sections.tsx';
+import { compassReading } from './agenda-compass.ts';
+import { CustomSnoozeForm } from './agenda-snooze-menu.tsx';
 import {
   isLongPress,
   isTouch,
   lockOf,
+  startsAtScrollTop,
   startsInSelection,
   startsInSidewaysScroller,
   startsOnInteractive,
 } from './agenda-swipe-gesture.ts';
-import { CardHead } from './card-head.tsx';
+import { CardHead, type CardHeadPager } from './card-head.tsx';
+import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
 import { MarqueeTitle } from './marquee-title.tsx';
+import { SwipeCompass } from './swipe-reveal.tsx';
 
 /** What the rows need to move a card: the Board's own verbs, bound to the paired machines. */
 export interface ToTestHost {
@@ -103,50 +110,58 @@ export const toTestAnswersOver = ({
   notGood: row => requestMove(row.card, row.group, row.notGoodLaneId, 'not-good'),
 });
 
-type RowDirection = 'left' | 'right' | 'down';
-
 interface Drag {
   readonly dx: number;
   readonly dy: number;
   readonly width: number;
 }
 
-interface RowIntent {
-  readonly direction: RowDirection | null;
-  readonly committed: boolean;
-}
+/** What the host can do with a pull down: a card to test can be skipped and snoozed, never dismissed. */
+const AVAILABLE = { notNeeded: false, snooze: true } as const;
 
 const SIDEWAYS = { left: true, right: true } as const;
 
-/** What letting go of a drag would do: sideways answers, and DOWN only where it is a skip. */
-const rowIntent = (drag: Drag, down: boolean): RowIntent => {
-  if (down && drag.dy > Math.abs(drag.dx)) {
-    if (drag.dy < SWIPE_SLOP_PX) return { direction: null, committed: false };
-    return { direction: 'down', committed: drag.dy >= swipeThreshold(drag.width) };
-  }
+/** What letting go of a sideways drag would do. */
+const sidewaysIntent = (drag: Drag) => {
   const { direction, committed } = swipeIntent(drag.dx, 0, drag.width, SIDEWAYS);
   return { direction: direction === 'left' || direction === 'right' ? direction : null, committed };
 };
 
-/** The row's head: its title line (the link too: a drag is not a tap) and who-and-what line. It does not scroll, so a drag down there is a swipe. */
+/** The row's head: its title line (the link too: a drag is not a tap) and who-and-what line. It does not scroll, so a drag down there is the compass. */
 const startsInRowHead = (target: EventTarget | null): boolean =>
-  target instanceof Element && target.closest('.fy-totest__top, .fy-totest__meta') !== null;
+  target instanceof Element && target.closest('.fy-totest__top') !== null;
 
 /** The title is a link, but it is most of the head: a drag that starts on it is a swipe, and only a tap follows it. */
 const startsOnTitle = (target: EventTarget | null): boolean =>
   target instanceof Element && target.closest('[data-to-test-title]') !== null;
 
+/** Whether the run's scroll box (when the row sits in one) is at its top: only then is a pull down from the body the compass, not a scroll. */
+const boxAtTop = (row: Element): boolean => {
+  const box = row.closest('.fy-inbox-step');
+  return box !== null && box.scrollTop <= 0;
+};
+
 /** The task name when it adds something: a card titled by its task (any case) would print the same words twice. */
 const sameWords = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** A swipe on one row: left is `onLeft`, right is `onRight`, and down (from the head) is `onDown`. */
-const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void, disabled: boolean) => {
+interface RowSwipeAnswers {
+  readonly onLeft: () => void;
+  readonly onRight: () => void;
+  readonly onSkip: () => void;
+  readonly onSnooze: (pick: SnoozePick['id']) => void;
+}
+
+/**
+ * A swipe on one row, the deck's own: left is `onLeft`, right is `onRight`, and a pull down — from the head, or from a body
+ * at the top of its scroll — is the compass (↓ and ↓← Skip, ↓↓ the shared snooze list). The whole card is the surface.
+ */
+const useRowSwipe = ({ onLeft, onRight, onSkip, onSnooze }: RowSwipeAnswers, disabled: boolean) => {
   const gesture = useRef<{
     readonly pointerId: number;
     readonly startX: number;
     readonly startY: number;
     readonly width: number;
-    readonly head: boolean;
+    readonly down: boolean;
     readonly startedAt: number;
     axis: 'sideways' | 'vertical' | null;
     dx: number;
@@ -170,7 +185,9 @@ const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void
       startX: event.clientX,
       startY: event.clientY,
       width: event.currentTarget.getBoundingClientRect().width,
-      head: startsInRowHead(event.target),
+      down:
+        startsInRowHead(event.target) ||
+        (boxAtTop(event.currentTarget) && startsAtScrollTop(event.target, event.currentTarget)),
       startedAt: event.timeStamp,
       axis: null,
       dx: 0,
@@ -189,8 +206,8 @@ const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void
         gesture.current = null;
         return;
       }
-      // Down belongs to the head; everywhere else a vertical drag is the page scrolling, and up is nothing.
-      if (lock === 'vertical' && !(current.head && dy > 0)) {
+      // Down is the compass where nothing above can scroll; everywhere else a vertical drag is the page scrolling, and up is nothing.
+      if (lock === 'vertical' && !(current.down && dy > 0)) {
         gesture.current = null;
         return;
       }
@@ -201,7 +218,7 @@ const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void
         // A pointer the browser already released cannot be captured; the drag still reads.
       }
     }
-    current.dx = current.axis === 'sideways' ? dx : 0;
+    current.dx = dx;
     current.dy = current.axis === 'vertical' ? Math.max(0, dy) : 0;
     setDrag({ dx: current.dx, dy: current.dy, width: current.width });
   };
@@ -211,12 +228,17 @@ const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void
     gesture.current = null;
     if (current.axis === null) return;
     swallowClick.current = true;
-    const intent = rowIntent({ dx: current.dx, dy: current.dy, width: current.width }, true);
     setDrag(null);
+    if (current.axis === 'vertical') {
+      const { intent } = compassReading(current.dx, current.dy, current.width, AVAILABLE);
+      if (intent.kind === 'skip') onSkip();
+      else if (intent.kind === 'snooze') onSnooze(intent.pick);
+      return;
+    }
+    const intent = sidewaysIntent({ dx: current.dx, dy: 0, width: current.width });
     if (!intent.committed) return;
     if (intent.direction === 'left') onLeft();
     else if (intent.direction === 'right') onRight();
-    else onDown();
   };
   const onPointerCancel = (event: PointerEvent<HTMLElement>): void => {
     if (gesture.current?.pointerId !== event.pointerId) return;
@@ -230,19 +252,39 @@ const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void
     event.stopPropagation();
   };
 
-  const intent = drag === null ? null : rowIntent(drag, true);
+  // A pull down from the body is the compass, not a scroll: keep the browser from taking the touch over (it would cancel the drag).
+  const surface = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = surface.current;
+    if (element === null) return;
+    const hold = (event: TouchEvent): void => {
+      const current = gesture.current;
+      const touch = event.touches[0];
+      if (current === null || !current.down || !event.cancelable || touch === undefined) return;
+      const dy = touch.clientY - current.startY;
+      if (dy > Math.abs(touch.clientX - current.startX)) event.preventDefault();
+    };
+    element.addEventListener('touchmove', hold, { passive: false });
+    return () => element.removeEventListener('touchmove', hold);
+  }, []);
+
+  const compass = drag !== null && drag.dy > 0 ? compassReading(drag.dx, drag.dy, drag.width, AVAILABLE) : null;
+  const intent = drag === null || compass !== null ? null : sidewaysIntent(drag);
   // The row follows the finger, but never further than the commit distance plus a little give.
   const reach = drag === null ? 0 : swipeThreshold(drag.width) * 1.25;
   const clamp = (value: number): number => Math.max(-reach, Math.min(reach, value));
   return {
+    surface,
     handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onClickCapture },
-    offsetX: drag === null ? 0 : clamp(drag.dx),
+    offsetX: drag === null || compass !== null ? 0 : clamp(drag.dx),
     offsetY: drag === null ? 0 : clamp(drag.dy),
     intent,
+    compass,
+    dragging: drag !== null,
   };
 };
 
-const ANSWER_WORD = { left: 'Not good', right: 'Done', down: 'Skip' } as const;
+const ANSWER_WORD = { left: 'Not good', right: 'Done' } as const;
 
 function ToTestRow({
   row,
@@ -251,6 +293,8 @@ function ToTestRow({
   onNavigate,
   onSkip,
   skipButton,
+  pager,
+  onClose,
 }: {
   readonly row: ToTestCard;
   readonly answers: ToTestAnswers;
@@ -258,14 +302,27 @@ function ToTestRow({
   readonly onNavigate: (to: string) => void;
   readonly onSkip: (row: ToTestCard) => void;
   readonly skipButton: boolean;
+  readonly pager?: CardHeadPager | undefined;
+  readonly onClose?: (() => void) | undefined;
 }) {
   const state = answers.answerFor(row.card);
   const busy = state.pressed !== null;
   const { done, notGood, snooze } = answers;
+  const [infoOpen, setInfoOpen] = useState(false);
+  const infoId = useId();
+  const [custom, setCustom] = useState(false);
   const swipe = useRowSwipe(
-    () => notGood(row),
-    () => done(row),
-    () => onSkip(row),
+    {
+      onLeft: () => notGood(row),
+      onRight: () => done(row),
+      onSkip: () => onSkip(row),
+      onSnooze: id => {
+        const pick = snoozePicks(now ?? Date.now()).find(candidate => candidate.id === id);
+        if (pick === undefined) return;
+        if (pick.until === null) setCustom(true);
+        else snooze(row, pick.until);
+      },
+    },
     busy,
   );
   const direction = swipe.intent?.direction ?? null;
@@ -275,7 +332,7 @@ function ToTestRow({
   return (
     <li
       className="fy-totest"
-      data-swipe-direction={direction ?? undefined}
+      data-swipe-direction={swipe.compass?.revealed ? 'down' : (direction ?? undefined)}
       data-swipe-committed={swipe.intent?.committed || undefined}
       data-swipe-answer={direction === null ? undefined : ANSWER_WORD[direction]}
       data-to-test={row.key}
@@ -288,13 +345,13 @@ function ToTestRow({
         Not good
         <X size={16} />
       </span>
-      <span aria-hidden="true" className="fy-totest__reveal" data-side="down" data-to-test-reveal="down">
-        <SkipForward size={16} />
-        Skip
-      </span>
+      {swipe.compass?.revealed ? (
+        <SwipeCompass notNeeded={AVAILABLE.notNeeded} slot={swipe.compass.slot} snooze={AVAILABLE.snooze} />
+      ) : null}
       <div
         className="fy-totest__surface"
-        data-dragging={swipe.intent === null ? undefined : ''}
+        data-dragging={swipe.dragging ? '' : undefined}
+        ref={swipe.surface}
         {...swipe.handlers}
         style={{
           touchAction: 'pan-y',
@@ -306,6 +363,7 @@ function ToTestRow({
       >
         <CardHead
           className="fy-totest__top"
+          info={{ controls: infoId, open: infoOpen, onToggle: () => setInfoOpen(open => !open) }}
           meta={<span className="fy-totest__age">{ageWords(row.since, now)}</span>}
           snooze={{
             onSnooze: until => snooze(row, until),
@@ -328,31 +386,60 @@ function ToTestRow({
               )}
             />
           }
+          {...(pager === undefined ? {} : { pager })}
+          {...(onClose === undefined ? {} : { close: { label: 'Close card', onClick: onClose } })}
         />
-        <p className="fy-totest__meta">
+        {infoOpen ? (
+          <div className="fy-totest__info" data-to-test-info="" id={infoId}>
+            <p className="fy-totest__meta">
+              <span data-to-test-machine="">{row.card.machine}</span>
+              <span aria-hidden="true">·</span>
+              {release === null ? null : (
+                <>
+                  <span data-to-test-release="">{release}</span>
+                  <span aria-hidden="true">·</span>
+                </>
+              )}
+              <span>Ready to test</span>
+            </p>
+            {skipButton ? (
+              <div className="fy-totest__quiet">
+                <button
+                  aria-label={`Skip: ${title}`}
+                  className="kt-btn"
+                  data-to-test-skip=""
+                  data-variant="ghost"
+                  disabled={busy}
+                  onClick={() => onSkip(row)}
+                  type="button"
+                >
+                  <SkipForward aria-hidden="true" size={14} />
+                  Skip
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        <CardMetaLine
+          chat={
+            row.taskSession == null
+              ? undefined
+              : {
+                  to: daemonSessionPath(row.card.daemonId, row.taskSession),
+                  onNavigate,
+                  hooks: { 'data-to-test-open-chat': '' },
+                }
+          }
+          hooks={{ 'data-to-test-who': '' }}
+        >
           {row.taskName === null || sameWords(row.taskName, title) ? null : (
-            <span className="fy-totest__ferret" data-to-test-ferret="">
+            <span className="fy-meta-line__ferret" data-to-test-ferret="">
               {row.taskName}
             </span>
           )}
-          {row.projectName === null ? null : (
-            <>
-              <span className="fy-totest__project" data-to-test-project="">
-                {row.projectName}
-              </span>
-              <span aria-hidden="true">·</span>
-            </>
-          )}
-          <span data-to-test-machine="">{row.card.machine}</span>
-          {release === null ? null : (
-            <>
-              <span aria-hidden="true">·</span>
-              <span data-to-test-release="">{release}</span>
-            </>
-          )}
-          <span aria-hidden="true">·</span>
-          <span>Ready to test</span>
-        </p>
+          {row.taskName === null || sameWords(row.taskName, title) || row.projectName === null ? null : <MetaDot />}
+          {row.projectName === null ? null : <span data-to-test-project="">{row.projectName}</span>}
+        </CardMetaLine>
         {empty ? null : (
           <section aria-label={`How to test ${title}`} className="fy-totest__how" data-to-test-how="">
             <h3 className="fy-totest__how-title">How to test</h3>
@@ -391,24 +478,22 @@ function ToTestRow({
               Done
             </button>
           </div>
-          {skipButton ? (
-            <div className="fy-totest__quiet">
-              <button
-                aria-label={`Skip: ${title}`}
-                className="kt-btn"
-                data-to-test-skip=""
-                data-variant="ghost"
-                disabled={busy}
-                onClick={() => onSkip(row)}
-                type="button"
-              >
-                <SkipForward aria-hidden="true" size={14} />
-                Skip
-              </button>
-            </div>
-          ) : null}
         </div>
       </div>
+      {custom ? (
+        <div aria-label="Snooze until" className="fy-attn-deck__custom" data-to-test-custom="" role="dialog">
+          <CustomSnoozeForm
+            now={Date.now()}
+            onSnooze={until => {
+              setCustom(false);
+              snooze(row, until);
+            }}
+          />
+          <button className="fy-attn-deck__custom-cancel" onClick={() => setCustom(false)} type="button">
+            Cancel
+          </button>
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -434,12 +519,17 @@ export function ToTestList({
   now,
   onNavigate,
   onSkip,
+  pager,
+  onClose,
 }: {
   readonly rows: readonly ToTestCard[];
   readonly answers: ToTestAnswers;
   readonly now: number | undefined;
   readonly onNavigate: (to: string) => void;
   readonly onSkip?: (row: ToTestCard) => void;
+  /** The place in the stack the card steps through, drawn in each row's head. */
+  readonly pager?: CardHeadPager;
+  readonly onClose?: () => void;
 }) {
   const list = useRef<HTMLUListElement>(null);
   const scrollToNext = (row: ToTestCard): void => {
@@ -453,8 +543,10 @@ export function ToTestList({
           answers={answers}
           key={row.key}
           now={now}
+          onClose={onClose}
           onNavigate={onNavigate}
           onSkip={onSkip ?? scrollToNext}
+          pager={pager}
           row={row}
           skipButton={onSkip !== undefined}
         />

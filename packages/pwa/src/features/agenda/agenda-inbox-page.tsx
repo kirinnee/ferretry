@@ -77,34 +77,35 @@ import type { ModeFilter } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../lib/daemon-scope.ts';
 import { escapeCloses } from '../../lib/escape-closes.ts';
-import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
-import { daemonAgendaPath, daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
-import { composerQuoteTarget } from '../../lib/quote.ts';
-import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import {
   choiceLabel,
+  type GateItem,
   gateAnswerAction,
   gateAsksWords,
-  type GateItem,
   gateVerb,
   gateWordsFor,
   isGateItem,
 } from '../../lib/gate-items.ts';
+import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
+import { daemonAgendaPath, daemonBoardCardPath, daemonSessionPath } from '../../lib/pages/routes.ts';
+import { composerQuoteTarget } from '../../lib/quote.ts';
+import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { filterToTest, type ToTestCard } from '../../lib/to-test-inbox.ts';
 import { AgendaCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
+import { BoardSendBack } from '../board/board-send-back.tsx';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
 import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
 import { TaskPlanHost } from '../secure-copy/task-plan-host.tsx';
-import { BoardSendBack } from '../board/board-send-back.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
+import { CardMetaLine, MetaDot } from './card-meta-line.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
@@ -272,49 +273,35 @@ const copyWriter = browserClipboardWriter();
  */
 function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly onNavigate: (to: string) => void }) {
   const who = inboxWho(card);
-  const dot = (
-    <span aria-hidden="true" className="fy-inbox-who__dot">
-      ·
-    </span>
-  );
   return (
-    <div className="fy-inbox-who" data-inbox-who="">
-      {/* WHO and WHAT first, together: the task is what the owner reads, so it is never cut to make room. */}
-      <span className="fy-inbox-who__main" data-inbox-who-main="">
-        <span className="fy-inbox-who__ferret" data-inbox-who-ferret="">
-          {who.ferret}
-        </span>
-        {who.task === null ? null : (
-          <>
-            {dot}
-            <span className="fy-inbox-who__task" data-inbox-who-task="">
-              {who.task}
-            </span>
-          </>
-        )}
+    <CardMetaLine
+      chat={{
+        to: agendaConversationPath(card.daemonId, card.view.config.id, card.item.id),
+        onNavigate,
+        hooks: { 'data-inbox-open-chat': '' },
+      }}
+      hooks={{ 'data-inbox-who': '' }}
+    >
+      <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
+        {who.ferret}
       </span>
-      {/* WHERE: the card and the machine, which move to a second line before the task gives up a letter. */}
-      <span className="fy-inbox-who__meta">
-        {who.card === null ? null : (
-          <>
-            <span className="fy-inbox-who__card" data-inbox-who-card="">
-              {who.card}
-            </span>
-            {dot}
-          </>
-        )}
-        <span className="fy-inbox-who__machine">{who.machine}</span>
-      </span>
-      <RouteLink
-        className="fy-inbox-who__chat"
-        data-inbox-open-chat=""
-        onNavigate={onNavigate}
-        to={agendaConversationPath(card.daemonId, card.view.config.id, card.item.id)}
-      >
-        Open chat
-        <ChevronRight aria-hidden="true" size={13} />
-      </RouteLink>
-    </div>
+      {who.task === null ? null : (
+        <>
+          <MetaDot />
+          <span data-inbox-who-task="">{who.task}</span>
+        </>
+      )}
+      {who.card === null ? null : (
+        <>
+          <MetaDot />
+          <span className="fy-meta-line__card" data-inbox-who-card="">
+            {who.card}
+          </span>
+        </>
+      )}
+      <MetaDot />
+      <span>{who.machine}</span>
+    </CardMetaLine>
   );
 }
 
@@ -369,6 +356,7 @@ function OpenItem({
           ferret={inboxWho(card).ferret}
           formKey={card.key}
           history={history}
+          tools={<CardTools act={act} skip={skip} />}
           item={card.item}
           onAct={act}
           onClose={place.onClose}
@@ -384,7 +372,6 @@ function OpenItem({
           {...(now === undefined ? {} : { now })}
           {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
         />
-        <CardTools act={act} skip={skip} />
       </div>
     </DaemonTaskReferences>
   );
@@ -401,38 +388,30 @@ function GateMeta({
   readonly onNavigate: (to: string) => void;
 }) {
   const { gate } = item;
-  const dot = (
-    <span aria-hidden="true" className="fy-inbox-who__dot">
-      ·
-    </span>
-  );
   return (
-    <div className="fy-inbox-who fy-inbox-who--gate" data-inbox-gate={gate.cardId} data-inbox-who="">
-      <span className="fy-inbox-who__main" data-inbox-who-main="">
-        <span className="fy-inbox-gate__stage" data-inbox-gate-stage="">
-          {gateVerb(item)}
-        </span>
-        {gate.projectName === undefined ? null : (
-          <>
-            {dot}
-            <span data-inbox-gate-project="">{gate.projectName}</span>
-          </>
-        )}
-        {dot}
-        <span className="fy-inbox-who__ferret" data-inbox-who-ferret="">
-          {inboxWho(card).ferret}
-        </span>
+    <CardMetaLine
+      chat={{
+        to: agendaConversationPath(card.daemonId, card.view.config.id, card.item.id),
+        onNavigate,
+        hooks: { 'data-inbox-open-chat': '' },
+      }}
+      className="fy-meta-line--gate"
+      hooks={{ 'data-inbox-gate': gate.cardId, 'data-inbox-who': '' }}
+    >
+      <span className="fy-inbox-gate__stage" data-inbox-gate-stage="">
+        {gateVerb(item)}
       </span>
-      <RouteLink
-        className="fy-inbox-who__chat"
-        data-inbox-open-chat=""
-        onNavigate={onNavigate}
-        to={agendaConversationPath(card.daemonId, card.view.config.id, card.item.id)}
-      >
-        Open chat
-        <ChevronRight aria-hidden="true" size={13} />
-      </RouteLink>
-    </div>
+      {gate.projectName === undefined ? null : (
+        <>
+          <MetaDot />
+          <span data-inbox-gate-project="">{gate.projectName}</span>
+        </>
+      )}
+      <MetaDot />
+      <span className="fy-meta-line__ferret" data-inbox-who-ferret="">
+        {inboxWho(card).ferret}
+      </span>
+    </CardMetaLine>
   );
 }
 
@@ -1515,24 +1494,39 @@ export function AgendaInboxPage({
     const deck = deckSelected === undefined ? [] : deckCards.slice(Math.max(0, deckCards.indexOf(deckSelected)));
     return (
       <main
-        aria-labelledby={headingId}
+        {...(phone ? { 'aria-label': 'Inbox' } : { 'aria-labelledby': headingId })}
         className="fy-attn-inbox"
         data-agenda-inbox="card"
         data-phone={phone || undefined}
       >
-        <header className="fy-attn-inbox__cardbar">
-          <button className="fy-attn-inbox__back" data-agenda-back="" onClick={() => setDeckOpen(false)} type="button">
-            <ArrowLeft aria-hidden="true" size={16} />
-            <span id={headingId}>Inbox</span>
-            <AgendaCountBadge count={count} />
-          </button>
-          {updating ? (
+        {phone ? (
+          updating ? (
+            // The phone has no back row to carry it; the status only takes room while boards are read.
             <span className="fy-attn-inbox__updating" data-agenda-updating="" role="status">
               <Spinner size={12} />
               <span className="fy-attn-inbox__updating-text">Updating</span>
             </span>
-          ) : null}
-        </header>
+          ) : null
+        ) : (
+          <header className="fy-attn-inbox__cardbar">
+            <button
+              className="fy-attn-inbox__back"
+              data-agenda-back=""
+              onClick={() => setDeckOpen(false)}
+              type="button"
+            >
+              <ArrowLeft aria-hidden="true" size={16} />
+              <span id={headingId}>Inbox</span>
+              <AgendaCountBadge count={count} />
+            </button>
+            {updating ? (
+              <span className="fy-attn-inbox__updating" data-agenda-updating="" role="status">
+                <Spinner size={12} />
+                <span className="fy-attn-inbox__updating-text">Updating</span>
+              </span>
+            ) : null}
+          </header>
+        )}
         <OrphanedFailures inbox={inbox} />
         {atEnd ? (
           // The end sits where the card did, at its height: the deck's peek gap and hint line are kept.
@@ -1546,6 +1540,7 @@ export function AgendaInboxPage({
               answers={toTestAnswers}
               index={runOrder.indexOf(stepRow.key)}
               now={now}
+              onClose={() => setDeckOpen(false)}
               onNavigate={onNavigate}
               onNext={() => setDeckAt(skipSelection(runOrder, stepRow.key))}
               onPrevious={

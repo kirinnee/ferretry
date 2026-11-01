@@ -86,6 +86,21 @@ const press = (key: string, init: KeyboardEventInit = {}, target: EventTarget = 
 
 const markdown = (text: string) => <Markdown text={text} />;
 
+describe('the item view tools behind ⓘ', () => {
+  test('draws ⓘ for a host that hands it tools even when the item has no description, and puts them in its panel', async () => {
+    await draw(richItem, {
+      tools: (
+        <button data-test-tool="" type="button">
+          Skip
+        </button>
+      ),
+    });
+    expect(root().querySelector('[data-test-tool]')).toBeNull();
+    await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
+    expect(one('[data-test-tool]').textContent).toBe('Skip');
+  });
+});
+
 describe('the item view snooze control', () => {
   test('draws no clock when it is given nothing to snooze with', async () => {
     await draw(richItem);

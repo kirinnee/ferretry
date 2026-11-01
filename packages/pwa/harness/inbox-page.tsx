@@ -30,7 +30,7 @@ import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/da
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
 import { toTestCards, withProjectName, withTaskName } from '../src/lib/to-test-inbox.ts';
-import { AppTabBar } from '../src/shell/app-bar.tsx';
+import { AppBar, AppTabBar } from '../src/shell/app-bar.tsx';
 import { PageScrollRegion } from '../src/shell/page-scroll-region.tsx';
 import { PullToPaletteRegion } from '../src/shell/pull-to-palette-region.tsx';
 import { healthOf } from '../tests/support/health.ts';
@@ -485,6 +485,18 @@ function Inbox({
   return (
     <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`} data-fixture="">
       <div data-shell-main="" className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {new URLSearchParams(location.search).get('bar') === '1' ? (
+          <AppBar
+            active="attention"
+            agendaCount={inbox.total}
+            crumbs={[{ label: 'Inbox' }]}
+            daemon={STUDIO}
+            onNavigate={() => undefined}
+            onOpenPalette={() => undefined}
+            onOpenSidebar={() => undefined}
+            tabBarShown={phone}
+          />
+        ) : null}
         <PullToPaletteRegion
           className={`relative min-h-0 min-w-0 flex-1 px-1 sm:px-3${phone ? ' overflow-clip' : ''}`}
           enabled={false}

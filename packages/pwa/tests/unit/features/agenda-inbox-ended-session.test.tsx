@@ -176,7 +176,12 @@ describe('an open agenda item on a session that has ended (&B59)', () => {
     await interact(() => (rows[0] as HTMLElement).click());
     await settle();
     const open = must(view.container.querySelector('.fy-attn-deck__top [data-agenda-view]'), 'the open item');
-    await interact(() => must(open.querySelector<HTMLButtonElement>('[data-agenda-dismiss]'), 'Not needed…').click());
+    await interact(() =>
+      must(open.querySelector<HTMLButtonElement>('[data-agenda-info-toggle]'), 'the about button').click(),
+    );
+    await interact(() =>
+      must(open.querySelector<HTMLButtonElement>('[data-inbox-tool="not-needed"]'), 'Not needed…').click(),
+    );
     await interact(() => fire());
     await settle();
 

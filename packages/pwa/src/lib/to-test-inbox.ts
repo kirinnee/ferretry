@@ -27,6 +27,8 @@ export interface ToTestCard {
   readonly howToTest: string;
   /** The task the ferret that worked on it was given ("Credentials Build Lead"), never its callsign; `null` when unknown. */
   readonly taskName: string | null;
+  /** The session of the ferret that name is from (its chat); `null` when the name is not known. */
+  readonly taskSession?: string | null;
   /** The name of the project (the board) the card is on; `null` until the app knows it. */
   readonly projectName: string | null;
   /** When it started waiting for the owner: its release, else when it was last touched. */
@@ -107,8 +109,12 @@ export const sessionTaskNames = (sessions: readonly Pick<SessionView, 'config'>[
 export const withTaskName = (row: ToTestCard, names: ReadonlyMap<string, string> | undefined): ToTestCard => {
   if (names === undefined) return row;
   const { assignee, owner } = row.card.task;
-  const taskName = (assignee === null ? undefined : names.get(assignee)) ?? names.get(owner) ?? null;
-  return taskName === row.taskName ? row : { ...row, taskName };
+  const assigned = assignee === null ? undefined : names.get(assignee);
+  const taskName = assigned ?? names.get(owner) ?? null;
+  const taskSession = taskName === null ? null : assigned === undefined ? owner : assignee;
+  return taskName === row.taskName && taskSession === (row.taskSession ?? null)
+    ? row
+    : { ...row, taskName, taskSession };
 };
 
 /**

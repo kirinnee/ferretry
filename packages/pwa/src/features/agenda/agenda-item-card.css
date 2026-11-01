@@ -173,6 +173,8 @@
   line-height: var(--leading-tight, 1.25);
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* Air before the dot, the age and the buttons, so a long title never touches them. */
+  margin-inline-end: var(--gap-xs);
 }
 .fy-item-view__title[data-marquee] {
   cursor: pointer;
@@ -187,6 +189,9 @@
 @media (prefers-reduced-motion: no-preference) {
   .fy-item-view__title[data-marquee]:not([data-expanded]) {
     text-overflow: clip;
+    /* A scrolling title fades out at its edge rather than ending mid-letter under the dot. */
+    -webkit-mask-image: linear-gradient(to right, var(--fg) calc(100% - 12px), transparent);
+    mask-image: linear-gradient(to right, var(--fg) calc(100% - 12px), transparent);
   }
   .fy-item-view__title[data-marquee]:not([data-expanded]) .fy-item-view__title-text {
     display: inline-block;

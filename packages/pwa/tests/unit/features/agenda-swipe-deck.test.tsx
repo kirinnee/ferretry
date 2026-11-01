@@ -932,6 +932,50 @@ describe('The compass (a long pull down, the pointer kept down)', () => {
     await mounted.unmount();
   });
 
+  it('starts the compass from the body too while it is at its top, and leaves a scrolled body to scroll', async () => {
+    const skipped: string[] = [];
+    const bodyIn = (mounted: Mounted, scrollTop: number): HTMLElement => {
+      const body = document.createElement('div');
+      body.style.overflowY = 'auto';
+      for (const [key, value] of Object.entries({ scrollTop, scrollHeight: 400, clientHeight: 100 }))
+        Object.defineProperty(body, key, { configurable: true, value });
+      deckTop(mounted).appendChild(body);
+      return body;
+    };
+    const mounted = await mount(compassDeck(fakeInbox(), skipped));
+    const top = bodyIn(mounted, 0);
+    await release(await dragBy(mounted, 0, 120, top), 0, 120);
+    expect(skipped).toEqual(['A3']);
+    await mounted.unmount();
+
+    const scrolled = await mount(compassDeck(fakeInbox(), skipped));
+    const body = bodyIn(scrolled, 60);
+    await release(await dragBy(scrolled, 0, 120, body), 0, 120);
+    expect(skipped).toEqual(['A3']);
+    await scrolled.unmount();
+  });
+
+  it('keeps the browser from taking over a pull that began in a body at its top, and from nothing else', async () => {
+    const mounted = await mount(compassDeck(fakeInbox(), []));
+    const move = (y: number, x = 100): Event => {
+      const event = new Event('touchmove', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'touches', { value: [{ clientX: x, clientY: y }] });
+      return event;
+    };
+    await interact(() => deckTop(mounted).dispatchEvent(pointer('pointerdown', 100, 300)));
+    const down = move(340);
+    await interact(() => deckTop(mounted).dispatchEvent(down));
+    expect(down.defaultPrevented).toBe(true);
+    const sideways = move(305, 200);
+    await interact(() => deckTop(mounted).dispatchEvent(sideways));
+    expect(sideways.defaultPrevented).toBe(false);
+    await interact(() => deckTop(mounted).dispatchEvent(pointer('pointerup', 100, 340)));
+    const idle = move(340);
+    await interact(() => deckTop(mounted).dispatchEvent(idle));
+    expect(idle.defaultPrevented).toBe(false);
+    await mounted.unmount();
+  });
+
   it('keeps plain ↓ as Skip where the host offers neither Not needed nor Snooze', async () => {
     const fake = fakeInbox();
     const skipped: string[] = [];

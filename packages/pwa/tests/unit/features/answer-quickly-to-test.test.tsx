@@ -91,6 +91,7 @@ describe('Answer quickly — with the cards waiting for a try', () => {
     const second = must(step(root), 'the first card to test');
     expect(where(root)).toBe('2/3');
     expect(second.textContent).toContain('Try the board');
+    await interact(() => must(second.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
     expect(second.textContent).toContain('Shipped in v1.2.0');
     expect(second.textContent).toContain('How to test');
     expect(second.textContent).toContain('Open the Board');
@@ -160,7 +161,7 @@ describe('Answer quickly — with the cards waiting for a try', () => {
     const { root, actions } = await open({ agendaCards: [] });
     await interact(() => quick(root).click());
     const row = must(root.querySelector<HTMLElement>('[data-to-test]'), 'the row');
-    const grip = must(row.querySelector<HTMLElement>('.fy-totest__meta'), 'grip');
+    const grip = must(row.querySelector<HTMLElement>('.fy-totest__top'), 'grip');
     await interact(() => grip.dispatchEvent(touch('pointerdown', 100)));
     await interact(() => grip.dispatchEvent(touch('pointermove', 200)));
     await interact(() => grip.dispatchEvent(touch('pointermove', 400)));
@@ -175,12 +176,12 @@ describe('Answer quickly — with the cards waiting for a try', () => {
     await interact(() => quick(root).click());
     expect(step(root)?.textContent).toContain('Try the board');
     const row = must(root.querySelector<HTMLElement>('[data-to-test]'), 'the row');
-    const grip = must(row.querySelector<HTMLElement>('.fy-totest__meta'), 'grip');
+    const grip = must(row.querySelector<HTMLElement>('.fy-totest__top'), 'grip');
     await interact(() => grip.dispatchEvent(touch('pointerdown', 100, 300)));
-    await interact(() => grip.dispatchEvent(touch('pointermove', 100, 400)));
-    await interact(() => grip.dispatchEvent(touch('pointermove', 100, 500)));
-    expect(row.getAttribute('data-swipe-answer')).toBe('Skip');
-    await interact(() => grip.dispatchEvent(touch('pointerup', 100, 500)));
+    await interact(() => grip.dispatchEvent(touch('pointermove', 100, 340)));
+    await interact(() => grip.dispatchEvent(touch('pointermove', 100, 430)));
+    expect(row.querySelector('[data-swipe-compass]')?.getAttribute('data-swipe-reveal')).toBe('down');
+    await interact(() => grip.dispatchEvent(touch('pointerup', 100, 430)));
     await interact(() => flush());
     expect(step(root)?.textContent).toContain('Second try');
     expect(where(root)).toBe('2/2');
@@ -190,6 +191,7 @@ describe('Answer quickly — with the cards waiting for a try', () => {
   it('has a Skip button that does the same as the swipe down', async () => {
     const { root, actions } = await open({ agendaCards: [] });
     await interact(() => quick(root).click());
+    await interact(() => must(step(root)?.querySelector<HTMLElement>('[data-agenda-info-toggle]'), 'the (i)').click());
     await interact(() => must(step(root)?.querySelector<HTMLElement>('[data-to-test-skip]'), 'Skip').click());
     expect(step(root)?.textContent).toContain('Second try');
     expect(actions.calls).toEqual([]);

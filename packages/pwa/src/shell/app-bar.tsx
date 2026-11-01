@@ -51,8 +51,8 @@ import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import {
-  daemonAnalyticsPath,
   daemonAgendaPath,
+  daemonAnalyticsPath,
   daemonBoardPath,
   daemonLearningPath,
   daemonProjectsPath,
@@ -63,8 +63,8 @@ import {
   type Route,
 } from '../lib/pages/routes.ts';
 import { BottomSheet } from './bottom-sheet.tsx';
-import { Badge } from './primitives.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
+import { Badge } from './primitives.tsx';
 import { RouteLink } from './route-link.tsx';
 import { UnreadBadge } from './unread-badge.tsx';
 
@@ -260,8 +260,6 @@ export const crumbTrail = (crumbs: readonly Crumb[]): readonly CrumbStep[] =>
 
 export interface SidebarDrawerTriggerProps {
   readonly onOpen: () => void;
-  /** The count the rail and the expanded column also show. */
-  readonly sessionCount: number;
 }
 
 /**
@@ -269,7 +267,7 @@ export interface SidebarDrawerTriggerProps {
  * the expanded column carry their own — which is why the bar can hand it the
  * opener unconditionally.
  */
-export function SidebarDrawerTrigger({ onOpen, sessionCount }: SidebarDrawerTriggerProps) {
+export function SidebarDrawerTrigger({ onOpen }: SidebarDrawerTriggerProps) {
   const layout = useLayoutMode();
   if (layout !== 'drawer') return null;
   return (
@@ -278,10 +276,9 @@ export function SidebarDrawerTrigger({ onOpen, sessionCount }: SidebarDrawerTrig
       onClick={onOpen}
       aria-label="Open the fleet sidebar"
       title="Open the fleet sidebar"
-      className="kt-btn kt-btn--sm fy-drawer-trigger shrink-0 items-center gap-xs text-muted"
+      className="kt-btn kt-btn--sm fy-drawer-trigger size-10 shrink-0 items-center justify-center p-0 text-muted"
     >
-      <Users size={12} aria-hidden="true" />
-      <span className="mono">{sessionCount}</span>
+      <Users size={18} aria-hidden="true" />
     </button>
   );
 }
@@ -396,7 +393,6 @@ export interface AppBarProps {
    * Settings, where the fleet sidebar and its bento do not exist.
    */
   readonly onOpenSidebar?: () => void;
-  readonly sessionCount?: number;
   readonly connectionStatus?: ConnectionStatus;
   /**
    * Non-null when a newer release is installed and waiting, or when this tab
@@ -430,7 +426,6 @@ export function AppBar({
   daemon,
   onOpenPalette,
   onOpenSidebar,
-  sessionCount = 0,
   connectionStatus = 'open',
   updateReady = null,
   onApplyUpdate,
@@ -453,12 +448,12 @@ export function AppBar({
     // and a new stacking context would trap its fixed overlay under page content.
     <header data-density-region="app-bar" className="shrink-0 border-b border-border-strong bg-[var(--bar-bg)]">
       <div
-        className="grid w-full grid-cols-[minmax(44px,1fr)_minmax(8rem,2fr)_minmax(44px,1fr)] items-center gap-sm px-panel py-1.5 font-ui text-ui md:grid-cols-[minmax(0,1fr)_minmax(16rem,34rem)_minmax(0,1fr)] md:gap-md md:py-md"
+        className="grid w-full grid-cols-[minmax(44px,1fr)_minmax(8rem,2fr)_minmax(44px,1fr)] items-center gap-sm px-panel py-0.5 font-ui text-ui md:grid-cols-[minmax(0,1fr)_minmax(16rem,34rem)_minmax(0,1fr)] md:gap-md md:py-md"
         data-app-bar-primary=""
       >
         {/* Identity stays together at the start. */}
         <div className="flex min-w-0 items-center justify-self-start gap-md">
-          {onOpenSidebar && <SidebarDrawerTrigger onOpen={onOpenSidebar} sessionCount={sessionCount} />}
+          {onOpenSidebar && <SidebarDrawerTrigger onOpen={onOpenSidebar} />}
           <nav aria-label="Breadcrumb" className="hidden min-w-0 items-center gap-md text-muted min-[480px]:flex">
             {crumbTrail(crumbs).map(({ crumb, trail, last }) => (
               // Keyed by the trail rather than the index: two crumbs on one
@@ -487,8 +482,12 @@ export function AppBar({
             // Below 480px the breadcrumb is hidden, which left a phone's bar saying nothing but the fleet
             // count. The page's name takes the empty centre there instead; the stylesheet hides it wherever
             // the breadcrumb shows.
-            <span className="truncate font-semibold text-fg min-[480px]:hidden" data-app-bar-title="">
-              {title}
+            <span
+              className="flex min-w-0 items-center gap-xs font-semibold text-fg min-[480px]:hidden"
+              data-app-bar-title=""
+            >
+              <span className="truncate">{title}</span>
+              {active === 'attention' ? <AgendaCountBadge count={agendaCount} /> : null}
             </span>
           ) : null}
         </div>
