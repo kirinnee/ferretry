@@ -1,3 +1,11 @@
+## [4.214.0](https://github.com/kirinnee/ferretry/compare/v4.213.1...v4.214.0) (2026-11-01)
+
+### Features
+
+* **agenda:** every segment keeps its lines, and long paragraphs draw a warning ([#1278](https://github.com/kirinnee/ferretry/issues/1278)) ([fbcd03f](https://github.com/kirinnee/ferretry/commit/fbcd03fac4d8d238cdd8547ebbdf67b59699b57f))
+* **daemon:** standing sign-in rule service, store, routes, suspension and history (R3c-3) ([#1274](https://github.com/kirinnee/ferretry/issues/1274)) ([788bee4](https://github.com/kirinnee/ferretry/commit/788bee486d7c910c4b3cb41b1920136453e3086b)), closes [#write](https://github.com/kirinnee/ferretry/issues/write)
+* **pwa:** inbox lists only person-asked cards to test, with project name ([#1275](https://github.com/kirinnee/ferretry/issues/1275)) ([b7d550d](https://github.com/kirinnee/ferretry/commit/b7d550d1db63a052a4ecf9bcf2739f20217d23ac))
+
 ## [4.213.1](https://github.com/kirinnee/ferretry/compare/v4.213.0...v4.213.1) (2026-11-01)
 
 ### Fixes

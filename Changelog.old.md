@@ -1,3 +1,10 @@
+## [4.213.1](https://github.com/kirinnee/ferretry/compare/v4.213.0...v4.213.1) (2026-11-01)
+
+### Fixes
+
+* **pwa:** route /join and /shared to the app on Pages ([#1231](https://github.com/kirinnee/ferretry/issues/1231)) ([a766bbd](https://github.com/kirinnee/ferretry/commit/a766bbde38c814112c22151086c587af9cd54fad))
+* **pwa:** swipe down is Skip on every card; Not needed is a button only ([#1276](https://github.com/kirinnee/ferretry/issues/1276)) ([d3795a9](https://github.com/kirinnee/ferretry/commit/d3795a993f8c4eded4564ed02299cf5b463e0587))
+
 ## [4.213.0](https://github.com/kirinnee/ferretry/compare/v4.212.1...v4.213.0) (2026-11-01)
 
 ### Features
