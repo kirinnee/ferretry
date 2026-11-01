@@ -224,8 +224,8 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
 - **The secret store is never written by a rule** unless that rule names the exact secret NAME: `secret:<NAME>`
   has no pattern and no wildcard, so a rule for `VERCEL_TOKEN` never writes `VERCEL_TOKEN_2`.
 - **A plan**: `secure.preapprove` raises ONE card listing the pastes the agent plans, each with its route and
-  the agent's reason (shown as its words). The owner allows some or all with `fy copy plan approve <id> 1 3`
-  (none declines), or ticks them on the card, a permission card whose own Allow and Decline answer it (the
+  the agent's reason (shown as its words). The owner allows some or all with `fy plan approve <id> 1 3`
+  (`fy copy plan approve` is the same command; none declines), or ticks them on the card, a permission card whose own Allow and Decline answer it (the
   generic agenda answer is refused). Each allowed item becomes a rule for that session allowing one paste until
   the plan's expiry, which the card states (two hours by default, a day at most: a longer route is the owner's to add as a
   rule). Two answers arriving together make the rules once. Closing the card approves nothing. A paste plan is now a
@@ -243,8 +243,8 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
 > **Not filling yet.** The daemon raises, resolves, stages, approves and revokes plans
 > (`packages/daemon/src/lib/task-plans/`), and an approved paste line pastes as a rule did. An approved sign-in line
 > is pinned and kept, but no sign-in is typed under a plan until the shared matcher lands (R3a-4), and no daemon
-> reports `task-plan.1` until the app draws the plan card (R3a-5). The agent tool `task_plan` is not listed in MCP
-> yet (R3a-3); `secure.preapprove` raises paste-only task plans today.
+> reports `task-plan.1` until the app draws the plan card (R3a-5). The agent tool `task_plan` is listed in MCP
+> and the owner answers with `fy plan` (R3a-3); `secure.preapprove` still raises paste-only task plans.
 
 A task plan widens the paste plan. One card holds up to 10 lines, each with 1–5 uses (1 by default), for 2 hours
 by default (5 minutes to 1 day). A line is one of three kinds:

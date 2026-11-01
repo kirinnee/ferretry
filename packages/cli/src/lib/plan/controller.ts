@@ -1,6 +1,5 @@
 import {
   type CopyMeta,
-  type CopyPlan,
   type CopyRouteFrom,
   CopyRouteFromSchema,
   type CopyRouteTo,
@@ -67,9 +66,9 @@ export function parseTo(text: string): CopyRouteTo {
   return parsed.data;
 }
 
-const fromText = (from: CopyRouteFrom): string =>
+export const fromText = (from: CopyRouteFrom): string =>
   from.kind === 'command' ? `command:${from.program}` : `${from.kind}:${from.origin}`;
-const toText = (to: CopyRouteTo): string =>
+export const toText = (to: CopyRouteTo): string =>
   to.kind === 'terminal'
     ? `terminal:${to.program}`
     : to.kind === 'secret'
@@ -119,20 +118,9 @@ function renderCopy(copy: CopyMeta): string {
   return `${copy.handle}  ${copy.state}  ${String(copy.length)} chars from ${from}  until ${copy.expiresAt}  pasted ${String(copy.uses)}${copy.exposure.transcript === 'found' ? '  [seen by the ferret before it was sealed]' : ''}`;
 }
 
-function renderPlan(plan: CopyPlan): string {
-  const items = plan.items.map(
-    (item, index) =>
-      `   ${String(index + 1)}. ${fromText(item.from)} → ${toText(item.to)}  the agent says: ${item.why}`,
-  );
-  return [
-    `${plan.id.slice(0, 8)}  !${plan.agendaItemId}  session ${plan.sessionId}  until ${plan.expiresAt}`,
-    ...items,
-  ].join('\n');
-}
-
 /**
- * Drives `fy copy`: the owner reads what copies a session holds (descriptions only), approves routes in advance,
- * and answers a ferret's paste plan. Refused inside a ferret's pane, and again by the daemon.
+ * Drives `fy copy`: the owner reads what copies a session holds (descriptions only) and approves routes in advance.
+ * Refused inside a ferret's pane, and again by the daemon.
  */
 export class CopyController {
   constructor(private readonly ports: CopyPorts) {}
@@ -208,63 +196,34 @@ export class CopyController {
     );
   }
 
-  async plans(options: CopyCommandOptions): Promise<void> {
-    this.#refuseFerret();
-    const { plans } = await this.ports.gateway.plans();
-    const shown = options.session === undefined ? plans : plans.filter(plan => plan.sessionId === options.session);
-    this.ports.out.success(
-      options.json === true
-        ? JSON.stringify({ plans: shown }, null, 2)
-        : shown.length === 0
-          ? 'no paste plans are waiting'
-          : shown.map(renderPlan).join('\n'),
-    );
-  }
-
-  /** Allows the numbered items of a plan (1-based, as listed); none declines it. */
-  async approve(reference: string, numbers: readonly string[], options: CopyCommandOptions): Promise<void> {
-    this.#refuseFerret();
-    const { plans } = await this.ports.gateway.plans();
-    const plan = unique(
-      plans.filter(candidate => candidate.id.startsWith(reference.trim())),
-      reference,
-      'plan',
-    );
-    const items = numbers.map(number => {
-      const index = Number(number) - 1;
-      if (!Number.isInteger(index) || index < 0 || index >= plan.items.length)
-        throw new Error(`"${number}" is not one of the plan's items 1 to ${String(plan.items.length)}`);
-      return index;
-    });
-    const settled = await this.ports.gateway.approve(plan.sessionId, plan.id, items);
-    this.ports.out.success(
-      options.json === true
-        ? JSON.stringify(settled, null, 2)
-        : settled.state === 'declined'
-          ? `Declined the plan ${plan.id.slice(0, 8)}.`
-          : `Allowed ${(settled.approved ?? []).map(index => String(index + 1)).join(', ')} of the plan ${plan.id.slice(0, 8)}: each goes through once, until ${settled.expiresAt}.`,
-    );
-  }
-
   async #rule(reference: string): Promise<PasteRule> {
     const { rules } = await this.ports.gateway.rules();
     return unique(
       rules.filter(rule => rule.id.startsWith(reference.trim())),
       reference,
       'rule',
+      'copy rules ls',
     );
   }
 
   #refuseFerret(): void {
-    const credential = this.ports.agentCredential?.trim() ?? '';
-    const own = this.ports.ownSessionId?.trim() ?? '';
-    if (own !== '' || credential !== '') throw new Error(COPY_FERRET_REFUSAL);
+    refuseFerret(this.ports);
   }
 }
 
-function unique<T>(found: readonly T[], reference: string, what: string): T {
-  if (reference.trim() === '')
-    throw new Error(`name the ${what} by its id (see \`copy ${what === 'rule' ? 'rules' : 'plan'} ls\`)`);
+/** Refuses a command run inside a ferret's pane or with an agent's credential: these are the owner's. */
+export function refuseFerret(caller: {
+  readonly ownSessionId: string | undefined;
+  readonly agentCredential: string | undefined;
+}): void {
+  const credential = caller.agentCredential?.trim() ?? '';
+  const own = caller.ownSessionId?.trim() ?? '';
+  if (own !== '' || credential !== '') throw new Error(COPY_FERRET_REFUSAL);
+}
+
+/** The one thing a reference names, by the start of its id; `listing` is the command that shows them. */
+export function unique<T>(found: readonly T[], reference: string, what: string, listing: string): T {
+  if (reference.trim() === '') throw new Error(`name the ${what} by its id (see \`${listing}\`)`);
   if (found.length === 0) throw new Error(`no ${what} starts with "${reference}"`);
   if (found.length > 1) throw new Error(`more than one ${what} starts with "${reference}": give more of its id`);
   return found[0] as T;

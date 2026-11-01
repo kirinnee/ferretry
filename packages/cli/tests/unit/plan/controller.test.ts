@@ -1,12 +1,5 @@
 import { describe, it } from 'bun:test';
-import type {
-  CopyMeta,
-  CopyPlan,
-  PasteRule,
-  PasteRuleCreate,
-  PasteRuleList,
-  PasteRuleSettingsView,
-} from '@ferretry/protocol';
+import type { CopyMeta, PasteRule, PasteRuleCreate, PasteRuleList, PasteRuleSettingsView } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
 import {
@@ -15,8 +8,8 @@ import {
   parseFrom,
   parseLifetime,
   parseTo,
-} from '../../../src/lib/copy/controller';
-import type { CopyPorts, ICopyGateway } from '../../../src/lib/copy/ports';
+} from '../../../src/lib/plan/controller';
+import type { CopyPorts, ICopyGateway } from '../../../src/lib/plan/ports';
 
 const RULE: PasteRule = {
   id: 'a1b2c3d4'.padEnd(32, '0'),
@@ -26,23 +19,6 @@ const RULE: PasteRule = {
   used: 1,
   createdAt: '2026-10-31T12:00:00.000Z',
   createdBy: { kind: 'host' },
-};
-
-const PLAN: CopyPlan = {
-  id: 'feedbeef'.padEnd(32, '0'),
-  sessionId: 's1',
-  agendaItemId: 'A9',
-  items: [
-    { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'deploy token' },
-    {
-      from: { kind: 'browser', origin: 'https://github.com' },
-      to: { kind: 'secret', name: 'GH_TOKEN' },
-      why: 'keep it',
-    },
-  ],
-  state: 'pending',
-  raisedAt: '2026-10-31T12:00:00.000Z',
-  expiresAt: '2026-10-31T14:00:00.000Z',
 };
 
 const COPY: CopyMeta = {
@@ -61,7 +37,6 @@ const COPY: CopyMeta = {
 class FakeGateway implements ICopyGateway {
   readonly added: PasteRuleCreate[] = [];
   readonly removed: string[] = [];
-  readonly approved: { sessionId: string; planId: string; items: readonly number[] }[] = [];
   async copies(): Promise<readonly CopyMeta[]> {
     return [COPY];
   }
@@ -78,13 +53,6 @@ class FakeGateway implements ICopyGateway {
   }
   async removeRule(id: string): Promise<void> {
     this.removed.push(id);
-  }
-  async plans() {
-    return { plans: [PLAN] };
-  }
-  async approve(sessionId: string, planId: string, items: readonly number[]): Promise<CopyPlan> {
-    this.approved.push({ sessionId, planId, items });
-    return items.length === 0 ? { ...PLAN, state: 'declined' } : { ...PLAN, state: 'approved', approved: [...items] };
   }
 }
 
@@ -115,12 +83,12 @@ describe('fy copy', () => {
     const refusals = await Promise.all([
       failure(inPane.controller.rules({})),
       failure(inPane.controller.addRule({ from: 'command:gh', to: 'terminal:vercel' })),
-      failure(withCredential.controller.approve('feed', ['1'], {})),
+      failure(withCredential.controller.removeRule('a1b2', {})),
       failure(withCredential.controller.list({ session: 's1' })),
     ]);
 
     should(new Set(refusals)).eql(new Set([COPY_FERRET_REFUSAL]));
-    should([inPane.gateway.added, withCredential.gateway.approved]).eql([[], []]);
+    should([inPane.gateway.added, withCredential.gateway.removed]).eql([[], []]);
   });
 
   it('should add a rule from the routes written as kind:value, with its count and expiry', async () => {
@@ -237,31 +205,12 @@ describe('fy copy', () => {
     should(gateway.added).have.length(2);
   });
 
-  it('should approve the numbered items of a plan, and decline it with none', async () => {
-    const { controller, gateway, said } = rig();
-
-    await controller.approve('feed', ['2'], {});
-    await controller.approve('feed', [], {});
-
-    should(gateway.approved).eql([
-      { sessionId: 's1', planId: PLAN.id, items: [1] },
-      { sessionId: 's1', planId: PLAN.id, items: [] },
-    ]);
-    should(said).eql([
-      'Allowed 2 of the plan feedbeef: each goes through once, until 2026-10-31T14:00:00.000Z.',
-      'Declined the plan feedbeef.',
-    ]);
-    should(await failure(controller.approve('feed', ['3'], {}))).containEql('items 1 to 2');
-  });
-
-  it("should list plans with the agent's words and copies with no value", async () => {
+  it('should list copies with no value', async () => {
     const { controller, said } = rig();
 
-    await controller.plans({});
     await controller.list({ session: 's1' });
 
-    should(said[0]).containEql('2. browser:https://github.com → secret:GH_TOKEN  the agent says: keep it');
-    should(said[1]).equal(
+    should(said[0]).equal(
       'sealed:vercel  live  24 chars from vercel  until 2026-10-31T13:00:00.000Z  pasted 0  [seen by the ferret before it was sealed]',
     );
     should(await failure(controller.list({}))).containEql('--session');
@@ -292,26 +241,16 @@ describe('fy copy --json and empty listings', () => {
 
     await controller.list({ session: 's1', json: true });
     await controller.rules({ json: true });
-    await controller.plans({ json: true, session: 's1' });
-    await controller.approve('feed', ['1'], { json: true });
     await controller.addRule({ from: 'command:gh', to: 'terminal:vercel', json: true });
     await controller.removeRule('a1b2', { json: true });
 
-    should(said.map(line => Object.keys(JSON.parse(line) as object)[0])).eql([
-      'copies',
-      'rules',
-      'plans',
-      'id',
-      'id',
-      'removed',
-    ]);
+    should(said.map(line => Object.keys(JSON.parse(line) as object)[0])).eql(['copies', 'rules', 'id', 'removed']);
   });
 
   it('should say plainly when there is nothing to list', async () => {
     const gateway = new FakeGateway();
     gateway.copies = async () => [];
     gateway.rules = async () => ({ rules: [] });
-    gateway.plans = async () => ({ plans: [] });
     const said: string[] = [];
     const controller = new CopyController({
       gateway,
@@ -322,9 +261,8 @@ describe('fy copy --json and empty listings', () => {
 
     await controller.list({ session: 's1' });
     await controller.rules({});
-    await controller.plans({ session: 'other' });
 
-    should(said).eql(['s1 holds no secure copies', 'no pastes are approved in advance', 'no paste plans are waiting']);
+    should(said).eql(['s1 holds no secure copies', 'no pastes are approved in advance']);
   });
 });
 
@@ -344,6 +282,5 @@ describe('fy copy: the last words', () => {
 
     should(said[0]).containEql('command:gh → browser:https://vercel.com');
     should(await failure(controller.removeRule(' ', {}))).equal('name the rule by its id (see `copy rules ls`)');
-    should(await failure(controller.approve('', [], {}))).equal('name the plan by its id (see `copy plan ls`)');
   });
 });

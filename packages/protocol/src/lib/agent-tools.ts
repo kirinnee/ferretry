@@ -78,7 +78,12 @@ import {
   CopySourceSchema,
 } from './secure-copy.ts';
 import { SurfaceKeySchema, SurfaceKindSchema, SurfaceNameSchema } from './surface-names.ts';
-import { type TaskPlanCall, TaskPlanAgentViewSchema, taskPlanLinesOfCopyItems } from './task-plan.ts';
+import {
+  type TaskPlanCall,
+  TaskPlanAgentViewSchema,
+  TaskPlanCallSchema,
+  taskPlanLinesOfCopyItems,
+} from './task-plan.ts';
 
 export * from './surface-names.ts';
 
@@ -711,6 +716,8 @@ const AgentToolCallBodySchema = z.discriminatedUnion('tool', [
     items: z.array(CopyPlanItemSchema).min(1).max(COPY_PLAN_MAX_ITEMS),
     expiresInSeconds: z.number().int().min(300).max(COPY_PLAN_MAX_LIFETIME_SECONDS).optional(),
   }),
+  /** The widened plan (docs/agent-tools.md, `task_plan`): sign-ins, terminal sign-ins and pastes on one card. */
+  TaskPlanCallSchema,
 ]);
 
 /** Names an older client still sends, read as the tool they became: every check downstream sees only the new name. */
@@ -819,8 +826,15 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'secure.list',
   'secure.discard',
   'secure.paste',
-  'secure.preapprove',
+  'task.plan',
 ];
+
+/**
+ * Tools the daemon still answers though no agent is shown them: `secure.preapprove` is read as the `task.plan` it
+ * became ({@link taskPlanCallOf}) and answers in its old shape, so a pane running an older `fy mcp serve` keeps working.
+ * `LEGACY_TOOL_NAMES` cannot do this: it renames a tool but can translate neither its body nor its answer.
+ */
+export const ACCEPTED_UNLISTED_TOOLS: readonly AgentToolName[] = ['secure.preapprove'];
 
 /** One surface as a list call shows it. An unnamed surface is still listed, by id. */
 export const AgentSurfaceSchema = z.strictObject({

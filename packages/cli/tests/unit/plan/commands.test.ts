@@ -1,8 +1,9 @@
 import { describe, it } from 'bun:test';
 import { Command } from 'commander';
 import should from 'should';
-import { registerCopyCommands } from '../../../src/lib/copy/commands';
-import type { CopyController } from '../../../src/lib/copy/controller';
+import { registerCopyCommands } from '../../../src/lib/plan/commands';
+import type { CopyController } from '../../../src/lib/plan/controller';
+import type { PlanController } from '../../../src/lib/plan/plan-controller';
 
 /** A controller that records which verb each command line reached, and with what. */
 function run(argv: string[]) {
@@ -16,12 +17,15 @@ function run(argv: string[]) {
     rules: record('rules'),
     addRule: record('addRule'),
     removeRule: record('removeRule'),
-    plans: record('plans'),
-    approve: record('approve'),
   } as unknown as CopyController;
+  const plans = {
+    list: record('plan.list'),
+    approve: record('plan.approve'),
+    revoke: record('plan.revoke'),
+  } as unknown as PlanController;
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  registerCopyCommands(program, controller);
+  registerCopyCommands(program, controller, plans);
   return { reached, parsed: program.parseAsync(['node', 'fy', ...argv]) };
 }
 
@@ -34,6 +38,23 @@ describe('fy copy commands', () => {
       ['copy', 'rules', 'rm', 'a1b2'],
       ['copy', 'plan', 'ls', '--session', 's1'],
       ['copy', 'plan', 'approve', 'feed', '1', '3'],
+      ['plan', 'ls', '--json'],
+      [
+        'plan',
+        'approve',
+        'feed',
+        '1',
+        '3',
+        '--pick',
+        '3=GITHUB_WORK',
+        '--pick',
+        '1=si_0123456789abcdef',
+        '--totp',
+        '1',
+        '--open',
+      ],
+      ['plan', 'revoke', 'feed', '2'],
+      ['plan', 'revoke', 'feed'],
     ];
     const reached: unknown[] = [];
     for (const line of lines) {
@@ -47,8 +68,17 @@ describe('fy copy commands', () => {
       ['rules', {}],
       ['addRule', { from: 'command:gh', to: 'terminal:vercel', count: '2', expires: '2h' }],
       ['removeRule', 'a1b2', {}],
-      ['plans', { session: 's1' }],
-      ['approve', 'feed', ['1', '3'], {}],
+      ['plan.list', { session: 's1' }],
+      ['plan.approve', 'feed', ['1', '3'], { pick: [], totp: [] }],
+      ['plan.list', { json: true }],
+      [
+        'plan.approve',
+        'feed',
+        ['1', '3'],
+        { pick: ['3=GITHUB_WORK', '1=si_0123456789abcdef'], totp: ['1'], open: true },
+      ],
+      ['plan.revoke', 'feed', ['2'], {}],
+      ['plan.revoke', 'feed', [], {}],
     ]);
   });
 

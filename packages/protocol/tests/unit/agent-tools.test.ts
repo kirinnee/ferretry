@@ -164,9 +164,9 @@ describe('agent tool schemas', () => {
       { tool: 'secure.discard', handle: 'sealed:token' },
       { tool: 'secure.paste', handle: 'sealed:token', to: { kind: 'terminal', name: 'dev' }, prompt: 'the token' },
       {
-        tool: 'secure.preapprove',
-        items: [
-          { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'token' },
+        tool: 'task.plan',
+        lines: [
+          { kind: 'sign-in', site: 'github.com', fields: ['password'], uses: 1, why: 'open the Actions settings' },
         ],
       },
     ];
@@ -180,6 +180,45 @@ describe('agent tool schemas', () => {
       'terminal.wait',
       ...tools.AGENT_TOOL_NAMES.slice(5),
     ]);
+  });
+
+  it('should keep secure.preapprove accepted but unlisted, read as the task.plan it became', () => {
+    const call = {
+      tool: 'secure.preapprove',
+      items: [{ from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' }, why: 'token' }],
+    };
+
+    const parsed = tools.AgentToolCallSchema.parse(call);
+
+    should(tools.ACCEPTED_UNLISTED_TOOLS).deepEqual(['secure.preapprove']);
+    should(tools.AGENT_TOOL_NAMES).not.containEql('secure.preapprove');
+    should(tools.AGENT_TOOL_NAMES).containEql('task.plan');
+    should(parsed.tool).equal('secure.preapprove');
+    if (parsed.tool !== 'secure.preapprove') throw new Error('unreachable');
+    should(tools.taskPlanCallOf(parsed)).eql({
+      tool: 'task.plan',
+      lines: [
+        {
+          kind: 'paste',
+          from: { kind: 'command', program: 'gh' },
+          to: { kind: 'terminal', program: 'vercel' },
+          uses: 1,
+          why: 'token',
+        },
+      ],
+    });
+  });
+
+  it('should refuse a task.plan line that carries a place, a value or a second line for one sign-in', () => {
+    const line = { kind: 'sign-in', site: 'github.com', fields: ['password'], uses: 1, why: 'settings' };
+    const refuses = (body: object) => tools.AgentToolCallSchema.safeParse({ tool: 'task.plan', ...body }).success;
+
+    should(refuses({ lines: [line] })).be.true();
+    should(refuses({ lines: [{ ...line, origin: 'https://github.com' }] })).be.false();
+    should(refuses({ lines: [{ ...line, password: 'hunter2' }] })).be.false();
+    should(refuses({ lines: [line, line] })).be.false();
+    should(refuses({ lines: [] })).be.false();
+    should(refuses({ lines: [line], expiresInSeconds: 299 })).be.false();
   });
 
   it('should paste into a terminal by its name, one page field by ref or selector, or the secret store by name', () => {

@@ -148,8 +148,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
   {
     name: 'terminal_wait',
     tool: 'terminal.wait',
-    description:
-      'Wait until text appears in a terminal (give "text"), or until its running command ends (give "exit": true).',
+    description: 'Wait until text appears (give "text"), or its running command ends (give "exit": true).',
     inputSchema: object(
       {
         name: NAME,
@@ -244,7 +243,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_open',
     tool: 'browser.open',
     description:
-      'Open a browser page with a name, optionally at a URL. The person sees it live as %browser:<name>. Pages share this machine’s agent sign-ins; "incognito": true gives a throwaway page.',
+      'Open a browser page with a name, optionally at a URL. The person sees it live as %browser:<name>. Pages share this machine’s agent sign-ins; "incognito": true gives a throwaway one.',
     inputSchema: object(
       {
         name: NEW_NAME,
@@ -341,7 +340,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_dialog',
     tool: 'browser.dialog',
     description:
-      'Answer the dialog (alert, confirm, prompt, beforeunload) a page is waiting on; a browser result says when one is open. Unanswered, it is dismissed after 30 s. promptText answers a prompt.',
+      'Answer the dialog (alert, confirm, prompt, beforeunload) a page waits on; a browser result says when one is open. Unanswered, it is dismissed after 30 s. promptText answers a prompt.',
     inputSchema: object(
       { name: NAME, action: { type: 'string', enum: ['accept', 'dismiss'] }, promptText: { type: 'string' } },
       ['name', 'action'],
@@ -410,7 +409,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_network',
     tool: 'browser.network',
     description:
-      'list: the page’s recent requests, each with an id. get: one request by id, with safe response headers and a text body. Cookies and credentials are never shown.',
+      'list: recent requests, each with an id. get: one by id, with safe response headers and a text body. Cookies and credentials are never shown.',
     inputSchema: object(
       {
         name: NAME,
@@ -442,7 +441,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
           reducedMotion: { type: 'string', enum: ['reduce', 'no-preference'] },
           forcedColors: { type: 'string', enum: ['active', 'none'] },
           contrast: { type: 'string', enum: ['more', 'less', 'custom', 'no-preference'] },
-          print: { type: 'boolean', description: 'Lay out as for print.' },
+          print: { type: 'boolean', description: 'As for print.' },
         }),
         geolocation: object(
           { latitude: { type: 'number' }, longitude: { type: 'number' }, accuracy: { type: 'number' } },
@@ -527,7 +526,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_drag',
     tool: 'browser.drag',
     description:
-      'Drag from one element to another (fromRef/fromSelector to toRef/toSelector), or point to point (fromX, fromY to toX, toY, in steps) for sliders, canvases, maps.',
+      'Drag one element to another (fromRef/fromSelector to toRef/toSelector), or point to point (fromX, fromY to toX, toY, in steps) for sliders, canvases, maps.',
     inputSchema: object(
       {
         name: NAME,
@@ -586,7 +585,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_scroll',
     tool: 'browser.scroll',
     description:
-      'Scroll one way: an element into view (ref or selector), to the first place a text shows, by deltaX/deltaY pixels, or by pages (1 is a screen down, -1 up; up to ±20).',
+      'Scroll: an element into view (ref or selector), to the first place a text shows, by deltaX/deltaY pixels, or by pages (1 is a screen down, -1 up; up to ±20).',
     inputSchema: object(
       {
         name: NAME,
@@ -755,12 +754,18 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     ),
   },
   {
-    name: 'secure_preapprove',
-    tool: 'secure.preapprove',
-    description: 'Ask the owner to approve planned pastes in advance.',
+    name: 'task_plan',
+    tool: 'task.plan',
+    description: 'Before a task, ask the owner once to pre-approve its sign-ins and pastes.',
     inputSchema: object(
-      { items: { type: 'array', description: '[{from:{kind,program|origin},to:{kind,program|origin},why}]' } },
-      ['items'],
+      {
+        lines: {
+          type: 'array',
+          description:
+            '[{kind:"sign-in",signIn|site,fields:[username,password,totp],uses,why}|{kind:"terminal-sign-in",signIn|place,uses,why}|{kind:"paste",from,to,uses,why}]',
+        },
+      },
+      ['lines'],
     ),
   },
 ];

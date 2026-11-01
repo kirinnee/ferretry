@@ -5,14 +5,14 @@ import type {
   CopyCommandReport,
   CopyMeta,
   CopyName,
-  CopyPlan,
-  CopyPlanItem,
   InputAgentView,
   InputRaise,
   PhoneApprovalAgentView,
   PhoneApprovalRaise,
   SurfaceKind,
   SurfaceOpener,
+  TaskPlan,
+  TaskPlanCall,
 } from '@ferretry/protocol';
 
 /**
@@ -153,7 +153,11 @@ export interface AgentPhoneApprovalPort {
   agentView(sessionId: string, id: string, waitMs: number): Promise<PhoneApprovalAgentView>;
 }
 
-/** What `secure.preapprove` asks: raise one card listing the pastes the agent plans. Nothing in it is a value. */
+/**
+ * What `task.plan` asks, and `secure.preapprove` too once its items are read as paste lines: raise one card for the
+ * lines the agent plans. The one path both names take. Nothing in the call is a value, a place or a program; the port
+ * throws `SecureCopyError` for a refusal.
+ */
 export interface AgentPlanPort {
-  propose(sessionId: string, items: readonly CopyPlanItem[], expiresInSeconds?: number): Promise<CopyPlan>;
+  propose(sessionId: string, call: TaskPlanCall): Promise<TaskPlan>;
 }

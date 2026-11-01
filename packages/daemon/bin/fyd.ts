@@ -12370,7 +12370,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             discard: (sessionId, name) => secureCopies.discard(sessionId, name),
           },
           plans: {
-            propose: async (sessionId, items, expires) => await copyPlans.proposePastes(sessionId, items, expires),
+            propose: async (sessionId, call) => await copyPlans.propose(sessionId, call),
           },
           copyPages: copyPageRecords,
           accounts: accountDirectory,

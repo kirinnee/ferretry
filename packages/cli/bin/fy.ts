@@ -114,9 +114,10 @@ import { BrowserController, registerBrowserCommands, registerFirewallCommands } 
 import { registerConfigCommands } from '../src/lib/config/commands';
 import { ConfigController } from '../src/lib/config/controller';
 import { ProtocolConfigGateway } from '../src/lib/config/gateway';
-import { registerCopyCommands } from '../src/lib/copy/commands';
-import { CopyController } from '../src/lib/copy/controller';
-import { ProtocolCopyGateway } from '../src/lib/copy/gateway';
+import { registerCopyCommands } from '../src/lib/plan/commands';
+import { CopyController } from '../src/lib/plan/controller';
+import { ProtocolCopyGateway, ProtocolPlanGateway } from '../src/lib/plan/gateway';
+import { PlanController } from '../src/lib/plan/plan-controller';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
 import {
   AS_OWNER_NOTE,
@@ -924,6 +925,9 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
   });
 }
 
+/** Where the owner's Ferretry app lives: a plan card's deep link is `<this>/#agenda/<card>`. */
+const PLAN_APP_URL = 'https://ferretry.pages.dev';
+
 /** `fy pair`, and the QR `fy setup` offers at a terminal: one construction, so the two cannot differ. */
 function buildPairController(world: CliWorld, client: SharedDaemonClient): PairController {
   const stateHome = resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME);
@@ -1060,6 +1064,19 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         out: world.io,
         ownSessionId,
         agentCredential: paneCredentialValue(world.environment),
+      }),
+      new PlanController({
+        gateway: new ProtocolPlanGateway(client),
+        out: world.io,
+        ownSessionId,
+        agentCredential: paneCredentialValue(world.environment),
+        cardLink: agendaItemId => `${PLAN_APP_URL}/#agenda/${encodeURIComponent(agendaItemId)}`,
+        open: async url =>
+          await desktopBrowserOpener(
+            resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME),
+          ).open(url),
+        sleep: async ms => await Bun.sleep(ms),
+        nowMs: () => Date.now(),
       }),
     ),
   ({ program, world, client, ownSessionId }) =>
