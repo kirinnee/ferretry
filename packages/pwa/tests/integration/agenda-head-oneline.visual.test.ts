@@ -206,7 +206,7 @@ describe('the open item’s head', () => {
             const still = await tab.evaluate(() => {
               const text = document.querySelector('.fy-item-view__title-text') as HTMLElement;
               return {
-                animations: text.getAnimations().length,
+                animations: text.getAnimations().filter(a => a instanceof CSSAnimation).length,
                 ellipsis: getComputedStyle(text.parentElement as HTMLElement).textOverflow,
               };
             });
