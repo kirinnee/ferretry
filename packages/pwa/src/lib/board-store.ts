@@ -97,6 +97,14 @@ export interface BoardProjectsState {
   readonly served: boolean;
 }
 
+/** Every card id one machine holds, for proving a `&F12` reference whatever project the card is on. */
+export interface BoardIdsState {
+  readonly status: BoardLoadStatus;
+  readonly error: string | null;
+  /** `null` until read, and when the machine does not serve the list (an older daemon). */
+  readonly ids: ReadonlySet<BoardTaskId> | null;
+}
+
 /** Timers and the clock, injectable so a suite drives the cadence by hand. */
 export interface BoardEnvironment {
   readonly now: () => number;
@@ -132,6 +140,8 @@ export const IDLE_BOARD_TASK: BoardTaskState = Object.freeze({
   laneSet: null,
   missing: false,
 });
+
+const IDLE_BOARD_IDS: BoardIdsState = Object.freeze({ status: 'idle' as const, error: null, ids: null });
 
 const IDLE_BOARD_PROJECTS: BoardProjectsState = Object.freeze({
   status: 'idle' as const,
@@ -182,6 +192,7 @@ export class DaemonBoardStore {
   readonly #tasks = new Map<string, TaskWatch>();
   readonly #projects = new Map<DaemonId, BoardProjectsState>();
   readonly #projectRefs = new Map<DaemonId, number>();
+  readonly #ids = new Map<DaemonId, BoardIdsState>();
   /** Bumped when a machine is forgotten: a read issued before it publishes nothing. */
   readonly #generations = new Map<DaemonId, number>();
   readonly #connections = new Map<DaemonId, DaemonConnection>();
@@ -415,6 +426,7 @@ export class DaemonBoardStore {
     if (event.type !== BOARD_EVENT_TYPES.changed) return;
     const changed = BoardChangedEventSchema.safeParse(event.data);
     if (!changed.success) return;
+    this.#noteIds(daemonId, changed.data.taskIds);
     void this.reconcile(daemonId, changed.data.taskIds);
   }
 
@@ -584,6 +596,52 @@ export class DaemonBoardStore {
   }
 
   // -------------------------------------------------------------------------------------------------
+  // Card ids
+  // -------------------------------------------------------------------------------------------------
+
+  idsState(daemonId: DaemonId): BoardIdsState {
+    return this.#ids.get(daemonId) ?? IDLE_BOARD_IDS;
+  }
+
+  /**
+   * Joins one machine's card-id list, reading it once. It is the proof behind `&F12` on every project, so it
+   * is never narrowed to a view's query; `board.changed` adds the ids it names, so a card made a moment ago
+   * is proved without a re-read.
+   */
+  watchIds(machine: DaemonConnection): void {
+    this.#connections.set(machine.daemonId, machine);
+    const { status } = this.idsState(machine.daemonId);
+    if (status === 'idle' || status === 'error') void this.refreshIds(machine);
+  }
+
+  async refreshIds(machine: DaemonConnection): Promise<void> {
+    const { daemonId } = machine;
+    const generation = this.#generation(daemonId);
+    const before = this.idsState(daemonId);
+    if (before.status === 'loading') return;
+    this.#setIds(daemonId, { ...before, status: 'loading', error: null });
+    try {
+      const listed = await this.#port.ids(machine);
+      if (this.#generation(daemonId) !== generation) return;
+      this.#setIds(daemonId, { status: 'ready', error: null, ids: listed === null ? null : new Set(listed) });
+    } catch (reason) {
+      if (this.#generation(daemonId) !== generation) return;
+      this.#setIds(daemonId, { ...this.idsState(daemonId), status: 'error', error: failureMessage(reason) });
+    }
+  }
+
+  #noteIds(daemonId: DaemonId, taskIds: readonly BoardTaskId[]): void {
+    const current = this.idsState(daemonId);
+    if (current.ids === null || taskIds.every(id => current.ids?.has(id) === true)) return;
+    this.#setIds(daemonId, { ...current, ids: new Set([...current.ids, ...taskIds]) });
+  }
+
+  #setIds(daemonId: DaemonId, state: BoardIdsState): void {
+    this.#ids.set(daemonId, state);
+    this.#publish();
+  }
+
+  // -------------------------------------------------------------------------------------------------
   // Writes
   // -------------------------------------------------------------------------------------------------
 
@@ -678,6 +736,7 @@ export class DaemonBoardStore {
     this.#generations.set(daemonId, this.#generation(daemonId) + 1);
     this.#connections.delete(daemonId);
     this.#projects.delete(daemonId);
+    this.#ids.delete(daemonId);
     for (const view of this.#views.values()) {
       view.machines.delete(daemonId);
       view.stamps.delete(daemonId);

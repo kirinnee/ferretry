@@ -18,6 +18,7 @@ const refuse = (): Promise<never> => Promise.reject(new Error('this host has no 
 const IDLE_STORE = new DaemonBoardStore({
   board: refuse,
   task: refuse,
+  ids: refuse,
   projects: refuse,
   lanes: refuse,
   create: refuse,

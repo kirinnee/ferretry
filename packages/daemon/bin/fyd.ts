@@ -609,9 +609,9 @@ import {
   AgendaCardLinks,
   AgendaToTestLanes,
   BOARD_SWEEP_INTERVAL_MS,
+  BoardGateCheck,
   BoardService,
   BoardSweep,
-  BoardGateCheck,
   BoardTurnCheck,
   type CardWriteObserver,
   DoneDeliveryLadder,
@@ -12685,6 +12685,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         legacyTasks: { now: () => clock.now() },
         board: {
           board: async query => await boardWorld.board.board(query),
+          ids: async () => await boardWorld.board.ids(),
           task: async id => await boardWorld.board.task(id),
           taskByLegacyRef: async legacyRef => await boardWorld.board.taskByLegacyRef(legacyRef),
           create: async (request, caller) => await boardWorld.board.create(request, caller),

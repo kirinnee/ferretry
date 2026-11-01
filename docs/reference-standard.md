@@ -218,7 +218,7 @@ What "proved" means per kind:
 | ----------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `agent`     | A session in **this daemon's** fleet slice holds that callsign                                                            |
 | `file`      | The session filesystem answers with a canonical, readable path                                                            |
-| `task`      | A card of this ferret on this machine's board, or the old id of one of this session's imported tasks (see the GAPs below) |
+| `task`      | Any card on this machine's board, whatever its project, or the old id of one of this session's imported tasks (see below) |
 | `attention` | The id is in this session's agenda ledger, open or resolved                                                               |
 | `skill`     | The name is in this session's skills catalog                                                                              |
 | `surface`   | The session's owner is holding that terminal or page right now                                                            |
@@ -229,29 +229,43 @@ with no card selected). Chat included: the host's own Tasks destination is only 
 route is unavailable (an older daemon without `/v1/board`, or a host with no router). A card id is unique on
 its machine only, so the destination always carries the daemon the reference was proved against.
 
-> **GAP — task proof reads this project's board, not the whole machine.** The proof set behind `&F12`
-> and the rows of the `&` / `@@@@` Tasks menu are ONE board read, `project = <the session's project>`
-> with `state = all` and agent cards included, made through the PWA's board store (no request per
-> reference). Every open human card on the project is offered whatever its lane or assignee; "human"
-> is the daemon's `origin`, falling back to the older owner/waiting guess only for a card with no
-> `origin`. The menu shows the most relevant 50 and the query (id, title or summary) narrows them. A
-> session with no project, or a daemon that cannot answer that read, falls back to this ferret's own
-> slice (`ferret = <session>`). The chat's task search keeps the ferret slice. A card on another
-> project stays prose, and the detail itself answers "no card" for an id the machine does not have.
+> **Task proof is the whole machine; the menu is the project.** The proof set behind `&F12` is the id of
+> EVERY card on this machine's board — whatever its project, lane, state or assignee, closed and dropped
+> cards included — so a lead that cites cards from many projects gets a link for each real one. It is
+> ONE read per machine, `GET /v1/board/ids` (`{ ids }`, nothing about a card but its id), made through
+> the PWA's board store and shared by every surface that draws a reference: the cost is a request per
+> machine, never one per reference. `board.changed` adds the ids it names, so a card made a moment ago
+> links without a re-read, and the resolver is asked again before a click acts, against the set the feed keeps current. The route is `fleet`
+> _use_ like `GET /v1/board` ([grants.md](grants.md)): a remote caller whose credential cannot read the
+> board gets no list, and the references stay prose. A daemon from before the route answers 404; the
+> proof then falls back to the session's project slice below, so an older machine loses nothing it had.
+> Unknown ids stay prose, and the detail itself answers "no card" for an id the machine does not have.
 >
-> **Old references resolve through the same read.** A card imported from one of this session's old tasks
-> carries `legacyRef = <session>:<oldId>`. `&F12` in the transcript is proved when `F12` is a card on the
+> **The `&` / `@@@@` Tasks menu stays project-scoped; only the proof widens.** The rows it offers are
+> ONE board read, `project = <the session's project>` with `state = all` and agent cards included, made
+> through the same store. Every open human card on the project is offered whatever its lane or
+> assignee; "human" is the daemon's `origin`, falling back to the older owner/waiting guess only for a
+> card with no `origin`. The menu shows the most relevant 50 and the query (id, title or summary)
+> narrows them. A session with no project, or a daemon that cannot answer that read, falls back to this
+> ferret's own slice (`ferret = <session>`). The chat's task search keeps the ferret slice. Offering
+> every card on the machine would drown the menu; proving every card costs one id list.
+>
+> **Surfaces that are not a chat prove the same way.** The Inbox and the Board's card detail have no
+> session, so `DaemonTaskReferences` hands them the same proof (the machine's ids) and the same
+> click (this machine's card route) through the one reference surface — never a second path. A surface
+> already above it wins, so a chat's own is never downgraded.
+>
+> **Old references resolve through the project read.** A card imported from one of this session's old
+> tasks carries `legacyRef = <session>:<oldId>`. `&F12` in the transcript is proved when `F12` is a card on the
 > slice, or when it is the old id of one: it stays written as `&F12` and its click opens the card that
-> replaced it. A card on the slice wins over an old id that spells the same; the two cannot be told
-> apart by their text, which is the GAP — a session whose old `F12` and a new machine-board `F12` both
-> exist always means the new one. Because the lookup is the board read itself, it needs no
-> `GET /v1/board/tasks?legacyRef=` call per reference and nothing to batch or cache beyond the board
-> store's own cache; the project limit above applies to old ids too, so an imported task whose card
-> sits on another project stays prose.
-
-A reader with no resolver for a kind cannot prove it, so that kind stays prose there. A missing
-answer is refusal, never assumption: a fleet that has not been read yet is **not** a fleet with
-nobody in it, and is treated as "cannot prove".
+> replaced it. A card on the slice wins over an old id that spells the same, and so does a card id
+> anywhere on the machine; the two cannot be told apart by their text, which is the GAP — a session
+> whose old `F12` and a new machine-board `F12` both exist always means the new one. Because the lookup
+> is the board read itself, it needs no `GET /v1/board/tasks?legacyRef=` call per reference; the
+> project limit applies to old ids, so an imported task whose card sits on another project stays prose.
+> A reader with no resolver for a kind cannot prove it, so that kind stays prose there. A missing
+> answer is refusal, never assumption: a fleet that has not been read yet is **not** a fleet with
+> nobody in it, and is treated as "cannot prove".
 
 **A proof is read the way every other daemon read is.** The listing a `file` proof asks for travels
 the carrier router, so a session on a daemon that only the relay reaches proves its paths too; and

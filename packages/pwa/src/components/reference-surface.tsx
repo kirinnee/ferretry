@@ -29,12 +29,12 @@ import { createContext, type ReactNode, useContext } from 'react';
 import { createAgentReferenceResolver } from '../lib/agent-references.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
+import { daemonBoardCardPath } from '../lib/pages/routes.ts';
 import type { ResolvedSurfaceReference } from '../lib/references.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
-import { createSurfaceReferenceResolver, terminalIdForSurfaceKey } from '../lib/surface-references.ts';
 import { resolveCardReference } from '../lib/session-cards.ts';
+import { createSurfaceReferenceResolver, terminalIdForSurfaceKey } from '../lib/surface-references.ts';
 import { createTaskReferenceResolver } from '../lib/task-reference-context.tsx';
-import { daemonBoardCardPath } from '../lib/pages/routes.ts';
 import {
   openSidePaneFileTab,
   openSidePaneTab,
@@ -84,6 +84,11 @@ export interface SessionReferenceSurfaceOptions {
   readonly sessions?: readonly SessionView[];
   /** This ferret's slice of the board (its cards, old ids included), when the host already holds it. */
   readonly tasks?: readonly { readonly id: string; readonly legacyId?: string | null }[];
+  /**
+   * Every card id on this machine, whatever its project, lane or state, when the host already holds it. A
+   * reference to any of them opens its card; `tasks` still decides the old ids and the `&` menu.
+   */
+  readonly taskIds?: ReadonlySet<string>;
   /**
    * This session's Agenda LEDGER — open and resolved ids — when the host already holds it. An
    * answered item is still on the record, so its `!A3` stays a link.
@@ -151,6 +156,7 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     cwd,
     sessions,
     tasks,
+    taskIds,
     agendaIds,
     onAgendaOpen,
     skills,
@@ -174,7 +180,9 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     ...(sessions === undefined
       ? {}
       : { agentReferenceResolver: createAgentReferenceResolver(scope.daemonId, sessions) }),
-    ...(tasks === undefined ? {} : { taskReferenceResolver: createTaskReferenceResolver(tasks) }),
+    ...(tasks === undefined && taskIds === undefined
+      ? {}
+      : { taskReferenceResolver: createTaskReferenceResolver(tasks, taskIds) }),
     ...(agenda === undefined ? {} : { agendaReferenceResolver: (id: AgendaId) => agenda.has(id) }),
     ...(skillNames === undefined ? {} : { skillReferenceResolver: (name: string) => skillNames.has(name) }),
     // Always supplied, because this resolver is the only thing that can say

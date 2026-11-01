@@ -23,6 +23,7 @@ import {
 } from '@ferretry/protocol';
 import { ArrowLeft, Check, ChevronDown, Ellipsis, MessageSquare, X } from 'lucide-react';
 import { Component, type ErrorInfo, type FormEvent, type ReactNode, useId, useMemo, useState } from 'react';
+import { DaemonTaskReferences } from '../../../components/daemon-task-references.tsx';
 import { type BoardMachine, useBoardTask } from '../../../hooks/use-board.ts';
 import { useBoardAsks } from '../../../hooks/use-board-asks.ts';
 import type { DaemonAgendaClient } from '../../../lib/agenda-client.ts';
@@ -180,7 +181,9 @@ export function BoardDetail(props: BoardDetailProps) {
         </div>
         {ref.ok ? (
           <CardErrorBoundary key={`${String(machine.connection.daemonId)}/${label}`} label={label}>
-            <LoadedCard {...props} id={ref.value.id} />
+            <DaemonTaskReferences connection={machine.connection} onNavigate={props.onNavigate} store={props.store}>
+              <LoadedCard {...props} id={ref.value.id} />
+            </DaemonTaskReferences>
           </CardErrorBoundary>
         ) : (
           <p className="fy-board-detail__empty" role="status">

@@ -847,6 +847,7 @@ The routes behind them, all needing the `fleet` capability at operator minimum f
 | Route                                           | Does                                                                        |
 | ----------------------------------------------- | --------------------------------------------------------------------------- |
 | `GET /v1/board`                                 | the board view                                                              |
+| `GET /v1/board/ids`                             | every card id on the machine, ids only: what `&F12` is proved against       |
 | `POST /v1/board/tasks`                          | create a card                                                               |
 | `GET /v1/board/tasks?legacyRef=`                | find the card an imported task became                                       |
 | `GET, POST /v1/board/tasks/:taskId`             | read a card, or apply one action to it                                      |
@@ -875,15 +876,16 @@ wherever it appears ([reference-standard.md](reference-standard.md)).
   that lane file as damaged, and a cached older app cannot load the board. No template uses them; add one to a lane
   only once every machine and app runs this release.
 
-- **References in a card's text are not links yet.** The card detail sits outside any session, and the reference
-  surface is assembled per session (`components/reference-surface.tsx`), so `&F412`, `!A48` and `@file` in a
-  card's Markdown stay prose until the Board builds a surface of its own — the same as an agenda card read in the
-  Inbox.
+- **Only `&F412` is a link in a card's text.** The card detail sits outside any session, and the reference
+  surface is assembled per session (`components/reference-surface.tsx`), so `!A48` and `@file` in a card's Markdown
+  stay prose until the Board builds a surface of its own — the same as an agenda card read in the Inbox. A task
+  reference links on both, through `DaemonTaskReferences`: any card on the machine, per
+  [reference-standard.md](reference-standard.md) §6.
 - **Another machine's cards.** The `&F412@mac` spelling for a card on a different machine is not wired. A `parent`
   or `dependsOn` that names a card on another machine resolves to nothing, so it neither blocks nor rolls up.
 - **Some messages bypass the pending-context carrier.** Quiet board events ride the next message, but agenda answer
   batches and Warden nudges are still delivered by their own paths, so they are not held for the next turn.
-- **Old `&F12` references in the PWA resolve through the ferret's board slice.** A chat reads one board query
+- **Old `&F12` references in the PWA resolve through the project or ferret board slice.** A chat reads one board query
   (`ferret = <session>`, `state = all`) and a reference that is the old id of a card whose `legacyRef` names this
   session links to that card, shown as the old text; a card on the slice with the same id wins. It does not call
   `GET /v1/board/tasks?legacyRef=` per reference. The limit is the slice: an imported card this ferret no longer

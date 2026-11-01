@@ -644,3 +644,109 @@ describe('DaemonBoardStore odds and ends', () => {
     expect(store.taskState(laptop.daemonId, 'F1').error).toBeNull();
   });
 });
+
+describe('DaemonBoardStore card ids', () => {
+  it('reads the machine’s ids once, however many surfaces ask', async () => {
+    const port = fakePort({ ids: async () => ['F1', 'F364'] });
+    const { store } = open(port);
+    expect(store.idsState(laptop.daemonId).status).toBe('idle');
+    store.watchIds(laptop);
+    store.watchIds(laptop);
+    await flush();
+    store.watchIds(laptop);
+    expect([...(store.idsState(laptop.daemonId).ids ?? [])]).toEqual(['F1', 'F364']);
+    expect(store.idsState(laptop.daemonId).status).toBe('ready');
+    expect(store.idsState(workstation.daemonId).ids).toBeNull();
+  });
+
+  it('keeps "not served" apart from "no cards", and an old daemon proves nothing', async () => {
+    const { store } = open(fakePort({ ids: async () => null }));
+    store.watchIds(laptop);
+    await flush();
+    expect(store.idsState(laptop.daemonId)).toMatchObject({ status: 'ready', ids: null });
+  });
+
+  it('adds the ids a board.changed names, and tells the page once', async () => {
+    const { store } = open(fakePort({ ids: async () => ['F1'] }));
+    store.watchIds(laptop);
+    await flush();
+    let told = 0;
+    store.subscribe(() => {
+      told += 1;
+    });
+    store.noteEvent(laptop.daemonId, event(['F1']));
+    expect(told).toBe(0);
+    store.noteEvent(laptop.daemonId, event(['F1', 'F2']));
+    expect([...(store.idsState(laptop.daemonId).ids ?? [])]).toEqual(['F1', 'F2']);
+    expect(told).toBe(1);
+  });
+
+  it('adds nothing for a machine whose ids are not known', async () => {
+    const { store } = open(fakePort({ ids: async () => null }));
+    store.noteEvent(laptop.daemonId, event(['F2']));
+    store.watchIds(laptop);
+    await flush();
+    store.noteEvent(laptop.daemonId, event(['F2']));
+    expect(store.idsState(laptop.daemonId).ids).toBeNull();
+  });
+
+  it('says a failed read, and reads again on the next ask', async () => {
+    let answers = 0;
+    const port = fakePort({
+      ids: async () => {
+        answers += 1;
+        if (answers === 1) throw new Error('offline');
+        return ['F1'];
+      },
+    });
+    const { store } = open(port);
+    store.watchIds(laptop);
+    await flush();
+    expect(store.idsState(laptop.daemonId)).toMatchObject({ status: 'error', error: 'offline', ids: null });
+    store.watchIds(laptop);
+    await flush();
+    expect(store.idsState(laptop.daemonId)).toMatchObject({ status: 'ready', error: null });
+    expect(answers).toBe(2);
+  });
+
+  it('keeps the ids it has while it re-reads, and ignores a read that is already running', async () => {
+    const held = deferred<readonly string[]>();
+    let reads = 0;
+    const port = fakePort({
+      ids: async () => {
+        reads += 1;
+        return reads === 1 ? ['F1'] : await held.promise;
+      },
+    });
+    const { store } = open(port);
+    store.watchIds(laptop);
+    await flush();
+    const again = store.refreshIds(laptop);
+    const overlapping = store.refreshIds(laptop);
+    expect([...(store.idsState(laptop.daemonId).ids ?? [])]).toEqual(['F1']);
+    held.resolve(['F1', 'F2']);
+    await Promise.all([again, overlapping]);
+    expect(reads).toBe(2);
+    expect([...(store.idsState(laptop.daemonId).ids ?? [])]).toEqual(['F1', 'F2']);
+  });
+
+  it('forgets a machine’s ids with it, and ignores a read or a failure that lands after', async () => {
+    const held = deferred<readonly string[]>();
+    const { store } = open(fakePort({ ids: async () => await held.promise }));
+    store.watchIds(laptop);
+    await flush();
+    store.clearDaemon(laptop.daemonId);
+    held.resolve(['F1']);
+    await flush();
+    expect(store.idsState(laptop.daemonId).status).toBe('idle');
+
+    const failing = deferred<readonly string[]>();
+    const second = open(fakePort({ ids: async () => await failing.promise })).store;
+    second.watchIds(laptop);
+    await flush();
+    second.clearDaemon(laptop.daemonId);
+    failing.reject(new Error('late'));
+    await flush();
+    expect(second.idsState(laptop.daemonId).error).toBeNull();
+  });
+});
