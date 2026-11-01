@@ -579,6 +579,12 @@ describe('AgendaInboxPage on a phone', () => {
     await mounted.unmount();
   });
 
+  it('says "Updating" in the card bar beside Back to the Inbox on a desktop', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay], { initialOpen: threeWay.key, reading: true }));
+    expect(mounted.container.querySelector('.fy-attn-inbox__cardbar [data-agenda-updating]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
   it('draws no History when the ferret has written nothing, a failed read, or a host that cannot read', async () => {
     const quiet = await mount(
       page(fakeInbox(), [twoWay], { phone: true, initialOpen: twoWay.key, readConversation: async () => [] }),
