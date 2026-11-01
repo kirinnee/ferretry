@@ -1,3 +1,9 @@
+## [4.208.0](https://github.com/kirinnee/ferretry/compare/v4.207.2...v4.208.0) (2026-11-01)
+
+### Features
+
+* **agent-tools:** task_plan tool and fy plan (R3a-3) ([#1265](https://github.com/kirinnee/ferretry/issues/1265)) ([2f127e2](https://github.com/kirinnee/ferretry/commit/2f127e2ce88b76ade1d13034eb4e7f69a5dfd430))
+
 ## [4.207.2](https://github.com/kirinnee/ferretry/compare/v4.207.1...v4.207.2) (2026-11-01)
 
 ### Fixes
