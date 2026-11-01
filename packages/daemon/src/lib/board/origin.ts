@@ -19,6 +19,7 @@
  * as human, which errs toward showing the owner a card.
  */
 import type { BoardTask, BoardTaskAskedBy, BoardTaskId, BoardTaskOrigin, TaskRef } from '@ferretry/protocol';
+import type { CardAudience } from './authority.ts';
 import type { BoardIndex } from './graph.ts';
 
 /** An ask source that names the owner, in any of the ways ferrets write it down. */
@@ -82,21 +83,48 @@ export const cardAskedBy = (card: Pick<BoardTask, 'ask'>): BoardTaskAskedBy =>
 /** The fewest normalized characters a match may rest on: a shorter ask ("fix it") could sit in any message. */
 export const MIN_OWNER_MATCH = 24;
 
-const normalized = (text: string): string => text.replace(/\s+/gu, ' ').trim().toLowerCase();
+/**
+ * The letters and digits alone, case ignored. A ferret that files the owner's message as a card joins its lines
+ * with a full stop, drops a dash or mends a split word ("can yo uhelp"), and that is still the owner's ask.
+ */
+const normalized = (text: string): string => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+
+/** Where an ask leaves some of the owner's words out (`...`, `…`) or joins two of their messages (` / `). */
+const JOINS = /\.{3,}|…|\s\/\s/u;
 
 /**
- * Whether an ask is words the owner said: the ask contains one of `words`, or one of them contains the ask
- * (the first turn wraps the owner's message in text of its own), with whitespace collapsed and case ignored.
- * The shorter side must be at least {@link MIN_OWNER_MATCH} characters. A paraphrase does not match.
+ * Whether an ask is words the owner said, comparing letters and digits alone ({@link normalized}): the ask contains
+ * one of `words`, or one of them contains the ask (the first turn wraps the owner's message in text of its own), each
+ * side at least {@link MIN_OWNER_MATCH} long; or the ask is pieces of the owner's messages joined by `...` or
+ * ` / `, every piece found in one of them and the longest at least that long. A paraphrase does not match.
  */
 export const ownerWordsMatch = (askText: string, words: readonly string[]): boolean => {
+  const said = words.map(normalized).filter(word => word.length >= MIN_OWNER_MATCH);
   const ask = normalized(askText);
-  return words.some(word => {
-    const said = normalized(word);
-    const [short, long] = ask.length <= said.length ? [ask, said] : [said, ask];
-    return short.length >= MIN_OWNER_MATCH && long.includes(short);
-  });
+  if (ask.length >= MIN_OWNER_MATCH && said.some(word => word.includes(ask) || ask.includes(word))) return true;
+  const pieces = askText
+    .split(JOINS)
+    .map(normalized)
+    .filter(piece => piece !== '');
+  return (
+    pieces.length > 1 &&
+    pieces.some(piece => piece.length >= MIN_OWNER_MATCH) &&
+    pieces.every(piece => said.some(word => word.includes(piece)))
+  );
 };
+
+/** A session id written anywhere in an ask's source: `session:<id>`, `session <id>`, a turn document's path. */
+const SESSION_IN_SOURCE = /\b([a-z0-9]{8}-[a-f0-9]{8})\b/u;
+
+/**
+ * The session whose owner's words can prove a card's ask, whoever wrote the card down: the session its source
+ * names, else the recording ferret's own. A ferret on the admin token is stored as the owner and the board
+ * import as the daemon, and both still copy an ask from a session the owner talks in.
+ */
+export const wordsSessionOf = (card: Pick<BoardTask, 'createdBy' | 'ask'>): string | undefined =>
+  SESSION_SOURCE.exec(card.ask.source.trim())?.[1] ??
+  SESSION_IN_SOURCE.exec(card.ask.source)?.[1] ??
+  (card.createdBy.kind === 'ferret' ? card.createdBy.sessionId : undefined);
 
 /**
  * Who asked for a card that is being written, from the facts known once: the owner's own app (an owner caller
@@ -110,6 +138,22 @@ export const decideAskedBy = async (
   said: (sessionId: string) => Promise<readonly string[]>,
 ): Promise<BoardTaskAskedBy> => {
   if (ownerApp || cardAskedBy(card) === 'person') return 'person';
-  const session = askSessionOf(card);
+  const session = wordsSessionOf(card);
   return session !== undefined && ownerWordsMatch(card.ask.text, await said(session)) ? 'person' : 'agent';
+};
+
+/**
+ * Who a card's gates ask: the ONE reading the gates use (docs/board.md § Gates ask the owner), and the CONSERVATIVE
+ * one, because it decides who may pass them. A card is INTERNAL — its owner ferret and leads pass its gates, and the
+ * owner is never asked — only when it is positively a ferret's own errand: the daemon made it, or the session that
+ * REALLY wrote it (`createdBy`, never the ask's source, which the ferret writes) was started by a ferret; AND no
+ * person asked for it (`askedBy`). `startedByFerret` answers for `createdBy`'s session alone. Anything else — a
+ * top-level ferret's card, whatever its ask says; a lineage that could not be read — is EXTERNAL: the owner decides.
+ */
+export const cardAudience = (
+  card: Pick<BoardTask, 'createdBy' | 'ask' | 'askedBy'>,
+  startedByFerret: boolean,
+): CardAudience => {
+  const own = card.createdBy.kind === 'daemon' || (card.createdBy.kind === 'ferret' && startedByFerret);
+  return own && (card.askedBy ?? cardAskedBy(card)) !== 'person' ? 'internal' : 'external';
 };

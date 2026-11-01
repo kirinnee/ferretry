@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgendaId } from '@ferretry/protocol';
 import { Composer } from '../../../src/components/composer.tsx';
+import { DictationControl } from '../../../src/components/dictation-control.tsx';
 import { LiveMarkdownEditor } from '../../../src/components/live-markdown-editor.tsx';
 import { AgendaInboxComposer } from '../../../src/features/agenda/agenda-inbox-composer.tsx';
 import { agendaForms } from '../../../src/lib/agenda-form-state.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { DEFAULT_STT_SETTINGS } from '../../../src/lib/stt/stt-settings.ts';
 import '../../support/dom.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 import { sessionView } from '../../support/sessions.ts';
@@ -127,5 +129,37 @@ describe('the open Inbox item’s composer', () => {
     expect(alerts()).toHaveLength(0);
     run(() => view.unmount());
     agendaForms.forget('form-key');
+  });
+});
+
+describe('the open Inbox item’s voice', () => {
+  const mount = async (dictationSettings?: typeof DEFAULT_STT_SETTINGS) => {
+    const view = render(
+      <AgendaInboxComposer
+        clientFor={async () => ({ send: async () => ({}) as never })}
+        compact
+        connection={daemon}
+        itemId={'A5' as AgendaId}
+        view={sessionView('sess-2', { config: { teammate: 'kai', name: 'Release train' } })}
+        {...(dictationSettings === undefined ? {} : { dictationSettings })}
+      />,
+    );
+    await runAsync(async () => {
+      await Promise.resolve();
+    });
+    return view;
+  };
+
+  test('carries the chat composer’s mic, from the same dictation settings', async () => {
+    const view = await mount(DEFAULT_STT_SETTINGS);
+    expect(view.root.findByType(Composer).props.dictationSettings).toBe(DEFAULT_STT_SETTINGS);
+    expect(view.root.findAllByType(DictationControl)).toHaveLength(1);
+    run(() => view.unmount());
+  });
+
+  test('without dictation settings the box has no mic, as the chat composer does not', async () => {
+    const view = await mount();
+    expect(view.root.findAllByType(DictationControl)).toHaveLength(0);
+    run(() => view.unmount());
   });
 });

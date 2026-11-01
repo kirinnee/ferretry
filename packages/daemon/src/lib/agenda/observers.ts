@@ -1,4 +1,9 @@
-import type { SessionAgendaSummary } from '@ferretry/protocol';
+import {
+  type AgendaItem,
+  parseGateFollowupReference,
+  type ResolvedAgendaItem,
+  type SessionAgendaSummary,
+} from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
 import {
   boardReplyMessage,
@@ -97,6 +102,14 @@ export class SessionAgendaProjection implements AgendaChangeObserver {
 }
 
 /**
+ * Whether an item speaks for the ferret whose board holds it: one it raised, or a gate's follow-up conversation the
+ * daemon opened on its behalf (`gate-followup:`), so the owner's words there reach it as on its own item.
+ */
+const speaksFor = (item: AgendaItem | ResolvedAgendaItem, sessionId: string): boolean =>
+  (item.raisedBy === 'agent' && item.raisedBySession === sessionId) ||
+  (item.raisedBy === 'daemon' && parseGateFollowupReference(item.sourceRef) !== undefined);
+
+/**
  * Tells a ferret the owner's answer to an item IT raised, as an ordinary message naming the item.
  *
  * Every closing the owner makes on the board of an agent-raised item is told — an answer, a done or a
@@ -118,8 +131,8 @@ export class AgendaReplyDelivery implements AgendaChangeObserver {
     if (
       (change.change === 'needs-info' || change.change === 'discussing') &&
       change.actor.kind === 'human' &&
-      item?.raisedBy === 'agent' &&
-      item.raisedBySession === sessionId &&
+      item !== undefined &&
+      speaksFor(item, sessionId) &&
       item.infoRequests !== undefined
     ) {
       // One counter for both: a request for information and a request to discuss are each told once.
@@ -131,7 +144,7 @@ export class AgendaReplyDelivery implements AgendaChangeObserver {
       return;
     }
     if (change.via !== 'board' || change.actor.kind !== 'human' || addressed === undefined) return;
-    if (addressed.raisedBy !== 'agent' || addressed.raisedBySession !== sessionId) return;
+    if (!speaksFor(addressed, sessionId)) return;
     if (isQuietAcknowledgement(addressed)) return;
     await this.replies.add(sessionId, addressed.id, boardReplyMessage(addressed));
   }

@@ -5,6 +5,8 @@
  *
  * - TOUCH ONLY ({@link isTouch}): a mouse drag selects text, a pen is left to the page.
  * - NEVER ON SOMETHING THE READER PRESSES OR TYPES IN ({@link startsOnInteractive}).
+ * - NEVER ON TEXT BEING SELECTED: a touch that goes down inside a selection ({@link startsInSelection}), or is held
+ *   {@link LONG_PRESS_MS} before it moves ({@link isLongPress}), is the reader highlighting, so it is not a swipe.
  * - NEVER INSIDE A SCROLLER THAT SCROLLS SIDEWAYS ({@link startsInSidewaysScroller}): a wide table or rendered box
  *   keeps the drag that began in it.
  * - THE DIRECTION IS DECIDED ONCE, AFTER {@link LOCK_PX} of travel ({@link lockOf}): sideways is a swipe; up or down
@@ -62,3 +64,16 @@ export const lockOf = (dx: number, dy: number): Lock | null => {
   if (Math.hypot(dx, dy) < LOCK_PX) return null;
   return Math.abs(dx) > Math.abs(dy) ? 'sideways' : 'vertical';
 };
+
+/** A touch held this long before it moves is the reader selecting text, never a swipe. */
+export const LONG_PRESS_MS = 400;
+
+/** Whether a touch held for `elapsedMs` before it travelled is a long-press. */
+export const isLongPress = (elapsedMs: number): boolean => elapsedMs >= LONG_PRESS_MS;
+
+/** Whether a touch went down on text the reader already has selected: the drag moves the selection's handles, never the card. */
+export const startsInSelection = (
+  target: EventTarget | null,
+  selection: Pick<Selection, 'isCollapsed' | 'containsNode'> | null = window.getSelection(),
+): boolean =>
+  target instanceof Node && selection !== null && !selection.isCollapsed && selection.containsNode(target, true);

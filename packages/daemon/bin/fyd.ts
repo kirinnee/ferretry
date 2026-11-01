@@ -168,7 +168,7 @@ import {
   StorageSessionParents,
   StorageSubFerretDirectory,
 } from '../src/adapters/board/session-board-adapters.ts';
-import { QueueOwnerWords } from '../src/adapters/board/session-owner-words.ts';
+import { SessionOwnerWords } from '../src/adapters/board/session-owner-words.ts';
 import { type LivenessLedgerReader, StorageSessionRoster } from '../src/adapters/board/session-roster.ts';
 import { GhCliRunner, GitWorkingCopies } from '../src/adapters/board-github/index.ts';
 import {
@@ -613,13 +613,19 @@ import {
   BoardSweep,
   BoardGateCheck,
   BoardTurnCheck,
+  type CardWriteObserver,
   DoneDeliveryLadder,
+  GateItems,
   LivenessActivityDeriver,
   type OwnerWords,
   ReopenDeliveryLadder,
+  rungsOf,
+  stageGateLanes,
   SessionCards,
   type SessionLivenessSource,
+  walkLadder,
 } from '../src/lib/board/index.ts';
+import { BoardGateCards } from '../src/adapters/board/board-gate-cards.ts';
 import { WorkSearchService } from '../src/lib/work-search/index.ts';
 
 /** How long after boot the work search builds its index: after the boot's own reads, before anyone searches. */
@@ -2172,6 +2178,8 @@ function createBoardWorld(
   attachments: StoreBoardAttachments,
   /** What the owner said to a session: a card's ask is a person's when it matches. */
   ownerWords: OwnerWords,
+  /** The gate items, told after every card write; built after the agenda, so read lazily by the caller. */
+  gates: CardWriteObserver,
 ): BoardWorld {
   const diagnostics = boardDiagnostics;
   const parents = new StorageSessionParents(storage);
@@ -2218,6 +2226,7 @@ function createBoardWorld(
     adoption,
     subFerrets: new StorageSubFerretDirectory(storage),
     ownerWords,
+    gates,
   });
   // Whether each project uses the board: one document beside the lane sets. Its one-time pass reads every card
   // and every board, so it switches on exactly the boards the owner worked on lately.
@@ -10096,6 +10105,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // ledger is published when the Warden builds its monitor, further down, and reads nothing until then.
       const wardenLedgers: { read: LivenessLedgerReader } = { read: () => undefined };
       const boardSessions = new StorageSessionRoster(storage, sessionId => wardenLedgers.read(sessionId));
+      // The gate items (docs/board.md § Gates ask the owner) are built with the agenda, further down: a card written
+      // before then (a boot migration) is caught up by their boot backfill instead.
+      let gateItems: GateItems | undefined;
       const boardWorld = createBoardWorld(
         paths,
         stateFiles,
@@ -10116,9 +10128,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.projectRoots ?? [],
         userHome,
         new StoreBoardAttachments(attachmentStore),
-        new QueueOwnerWords(sessionQueue, new StorageSessionParents(storage), taskId =>
-          new FileSessionTaskStore(id => createSessionPaths(paths, id).directory).file(taskId),
+        // The owner's words a card's ask is matched against: the queue, the send ledger (who sent each turn) and
+        // every turn document no send accounts for.
+        new SessionOwnerWords(sessionQueue, sendLedger, new StorageSessionParents(storage), id =>
+          join(createSessionPaths(paths, id).directory, 'turns'),
         ),
+        { written: async id => await gateItems?.written(id) },
       );
       // The GitHub watcher that moves the board's cards on PR facts (board-design.md §3.1): it runs the host's
       // own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. Armed after
@@ -10698,6 +10713,28 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           () => attachmentDaemonId,
         ),
       );
+      // A card that enters a gate lane asks the owner ONE agenda item; answering it moves the card as the owner, and
+      // "Not yet" words reach the card's ferret through the reopen ladder. Cards already waiting at a gate when this
+      // daemon starts get theirs once, in the background (docs/board.md § Gates ask the owner).
+      const gateWordsMessenger = new SendReopenMessenger(boardOwnerSends);
+      gateItems = new GateItems({
+        agenda,
+        board: new BoardGateCards(boardWorld.board, laneSets),
+        lanes: stageGateLanes,
+        words: {
+          told: async (task, message, key) => {
+            await walkLadder(gateWordsMessenger, boardDiagnostics, rungsOf(task), message, key);
+          },
+        },
+        diagnostics: boardDiagnostics,
+      });
+      void gateItems
+        .backfill()
+        .then(raised => {
+          if (raised > 0)
+            process.stderr.write(`board: raised ${String(raised)} gate item(s) for cards already waiting\n`);
+        })
+        .catch((error: unknown) => boardDiagnostics.warn(`the gate items' boot pass failed: ${String(error)}`));
       // Off unless `attention.resurfaceAfterMinutes` is set: asks left in discussion that long surface themselves.
       if (agendaConfig.resurfaceAfterMinutes !== undefined) {
         new AgendaResurfacer(
@@ -12399,6 +12436,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         notifications,
         attention: agenda,
+        gateItems,
         agendaReplies,
         agendaClearer: new AgendaAgentClearer(new StorageAgentSessions(storage), agendaBoards, agenda),
         pins: new PinService(

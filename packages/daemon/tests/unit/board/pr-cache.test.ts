@@ -182,7 +182,8 @@ describe('applyPrUpdate', () => {
     ]);
   });
 
-  it('should pull a shipped card back to review for an open PR, and write it down as the facts', () => {
+  it('should keep a card waiting at the To test gate for an open PR, and write down only the facts', () => {
+    // A gate is passed only by the owner (docs/board.md § Gates ask the owner): the open PR is told on its gate item.
     const shipped = link({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, releasedIn: RELEASE, polledAt: NOW });
     const second = 'https://github.com/kirinnee/ferretry/pull/941';
     const subject = card({
@@ -193,18 +194,9 @@ describe('applyPrUpdate', () => {
     const { task } = apply(subject, {
       observed: [observed({ url: second, createdAt: '2026-10-30T10:00:00Z', checks: 'failing' })],
     });
-    should(task?.laneId).equal('review');
+    should(task?.laneId).equal('tested');
     should(task?.links.prs[1]).match({ state: 'open', createdAt: '2026-10-30T10:00:00Z' });
-    const [back] = (task?.history ?? []).filter(event => event.type === 'moved');
-    should(back).match({
-      from: 'tested',
-      to: 'review',
-      backward: true,
-      auto: true,
-      trigger: 'pr.ready',
-      actor: { kind: 'daemon' },
-      reason: 'moved back to Review/CI: PR #941 ready for review',
-    });
+    should(moves(task)).be.empty();
     // The next poll agrees with the card: nothing more to write.
     should(
       applyPrUpdate(
@@ -215,17 +207,18 @@ describe('applyPrUpdate', () => {
     ).be.null();
   });
 
-  it('should pull a shipped card back for a parallel PR opened before the merge, and cache when it was opened', () => {
-    const shipped = link({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, releasedIn: RELEASE, polledAt: NOW });
+  it('should still pull a merged card back to review for an open PR where no gate holds it', () => {
+    const shipped = link({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, polledAt: NOW });
     const second = 'https://github.com/kirinnee/ferretry/pull/939';
     const subject = card({
-      laneId: 'tested',
+      laneId: 'merged',
       workflow: 'quick',
       links: { prs: [shipped, link({ url: second, number: 939 })], branch: null, commits: [], docs: [] },
     });
     const { task } = apply(subject, { observed: [observed({ url: second, createdAt: '2026-10-30T08:00:00Z' })] });
     should(task?.laneId).equal('review');
     should(task?.links.prs[1]?.createdAt).equal('2026-10-30T08:00:00Z');
+    should(moves(task)).deepEqual([['review', 'pr.ready', 'moved back to Review/CI: PR #939 ready for review']]);
   });
 
   it('should learn when a cached PR was opened without changing anything else, and keep it when GitHub says nothing', () => {
@@ -325,9 +318,30 @@ describe('applyPrUpdate', () => {
     should(moves(apply(open, {}).task)).deepEqual([['review', 'pr.ready', 'PR #940 ready for review']]);
   });
 
-  it('should pass a Plan or Design gate on a fact, which no ferret could', () => {
+  it('should never move a card out of the Plan or Design gate on a fact: only the owner passes it', () => {
     const planning = withPr({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, polledAt: NOW }, { laneId: 'plan' });
-    should(apply(planning, {}).task?.laneId).equal('merged');
+    const { task } = apply(planning, {});
+    should(task === null || task.laneId === 'plan').be.true();
+    should(moves(task)).be.empty();
+  });
+
+  it('should stop a fact at a gate on the way, and say so', () => {
+    // A merged and released PR on a card still building: Released · to test is past nothing, but a gated lane
+    // between the two stops it.
+    const gated = lanes(PROJECT);
+    const withReviewGate = {
+      ...gated,
+      lanes: gated.lanes.map(lane => (lane.id === 'review' ? { ...lane, ownerGate: true } : lane)),
+    };
+    const building = withPr(
+      { state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, polledAt: NOW },
+      { laneId: 'implement' },
+    );
+    const { task } = applyPrUpdate(building, update(), context(building, {}, withReviewGate));
+    should(task?.laneId).equal('review');
+    should(moves(task)).deepEqual([
+      ['review', 'pr.merged', 'PR #940 merged; stopped at Review/CI, which waits for the owner'],
+    ]);
   });
 
   it('should enter a closing lane on a fact only in a lane set with no To test lane', () => {

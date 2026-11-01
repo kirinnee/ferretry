@@ -27,6 +27,7 @@ import {
   type RaiseAgendaRequest,
 } from '../../agenda/index.ts';
 import { type AgendaConfigPort, answerConfirmation, raiseRequestOf } from './agenda-confirms.ts';
+import { type AgendaGatePort, answerGate, refuseGateDismissal } from './agenda-gates.ts';
 
 /**
  * The attention board's HTTP surface: what a session is blocked on, and the human's answer to it.
@@ -163,11 +164,27 @@ async function apply(
   notifications: Pick<DirectNotificationSubsystem, 'enrolledDevices'>,
   replies: HeldReplies,
   config: AgendaConfigPort | undefined,
+  gates: AgendaGatePort | undefined,
   context: RouteContext,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const request = await parseBody(context.request, AgendaActionRequestSchema);
   const actor = agendaActor(context.actor);
+  // An answer to a card's gate moves the card first; only a move that went through answers the item.
+  const gated =
+    request.action === 'resolve' && request.response !== undefined && gates !== undefined
+      ? await answerGate(gates, context, {
+          sessionId,
+          id: request.id,
+          response: request.response,
+          note: request.note,
+          actor,
+        })
+      : undefined;
+  // Not needed on a gate item asks the same grant an answer does.
+  if (request.action === 'dismiss' && gates !== undefined) {
+    await refuseGateDismissal(gates, context, { sessionId, id: request.id, actor });
+  }
   // An answer to an item that confirms a held configuration change acts on the change first.
   const confirmed =
     request.action === 'resolve' && request.response !== undefined && config !== undefined
@@ -180,27 +197,35 @@ async function apply(
         })
       : undefined;
   if (confirmed?.proceed === false) return confirmed.response;
-  const mutation = await (request.action === 'add'
-    ? agenda.raise(sessionId, await raiseRequestOf(request, config), actor)
-    : request.action === 'edit'
-      ? agenda.edit(sessionId, request.id, editPatch(request), actor, request.now === true)
-      : request.action === 'progress'
-        ? agenda.progress(sessionId, request.id, request.step, request.done, actor)
-        : request.action === 'needs-info'
-          ? agenda.needsInfo(sessionId, request.id, actor, request.note)
-          : request.action === 'discuss'
-            ? agenda.discuss(sessionId, request.id, actor, request.note)
-            : request.action === 'surface'
-              ? agenda.surface(sessionId, request.id, actor, request.why, request.now === true)
-              : request.action === 'snooze'
-                ? agenda.snooze(sessionId, request.id, request.until, actor)
-                : request.action === 'unsnooze'
-                  ? agenda.unsnooze(sessionId, request.id, actor)
-                  : request.action === 'dismiss'
-                    ? agenda.dismiss(sessionId, request.id, actor, request.note)
-                    : request.response === undefined
-                      ? agenda.resolve(sessionId, request.id, actor, request.note)
-                      : agenda.answer(sessionId, request.id, request.response, actor, confirmed?.note ?? request.note));
+  const mutation = await (gated !== undefined
+    ? gated
+    : request.action === 'add'
+      ? agenda.raise(sessionId, await raiseRequestOf(request, config), actor)
+      : request.action === 'edit'
+        ? agenda.edit(sessionId, request.id, editPatch(request), actor, request.now === true)
+        : request.action === 'progress'
+          ? agenda.progress(sessionId, request.id, request.step, request.done, actor)
+          : request.action === 'needs-info'
+            ? agenda.needsInfo(sessionId, request.id, actor, request.note)
+            : request.action === 'discuss'
+              ? agenda.discuss(sessionId, request.id, actor, request.note)
+              : request.action === 'surface'
+                ? agenda.surface(sessionId, request.id, actor, request.why, request.now === true)
+                : request.action === 'snooze'
+                  ? agenda.snooze(sessionId, request.id, request.until, actor)
+                  : request.action === 'unsnooze'
+                    ? agenda.unsnooze(sessionId, request.id, actor)
+                    : request.action === 'dismiss'
+                      ? agenda.dismiss(sessionId, request.id, actor, request.note)
+                      : request.response === undefined
+                        ? agenda.resolve(sessionId, request.id, actor, request.note)
+                        : agenda.answer(
+                            sessionId,
+                            request.id,
+                            request.response,
+                            actor,
+                            confirmed?.note ?? request.note,
+                          ));
   if (!mutation.ok) return refusal(mutation.error);
   const written = mutation.change === 'created' || mutation.change === 'refreshed' || mutation.change === 'info-added';
   const warnings = written && mutation.item !== undefined ? lintAgendaWriting(mutation.item) : [];
@@ -282,11 +307,14 @@ export function agendaRoutes(
   replies: AgendaRepliesSubsystem,
   /** The held configuration edits an item may confirm; absent, `--confirms` is refused. */
   config?: AgendaConfigPort,
+  /** The card gates an item may ask about; absent, a gate item is answered like any other choice. */
+  gates?: AgendaGatePort,
 ): readonly ApiRoute[] {
   // One handler per verb, shared by the agenda route and its older `attention` twin, so the two cannot
   // answer differently or declare different grants (`agenda.wire.1`, docs/agenda.md § Compatibility).
   const handleList: ApiRoute['handle'] = async context => await list(agenda, replies, context);
-  const handleApply: ApiRoute['handle'] = async context => await apply(agenda, notifications, replies, config, context);
+  const handleApply: ApiRoute['handle'] = async context =>
+    await apply(agenda, notifications, replies, config, gates, context);
   const handleReplies: ApiRoute['handle'] = async context => await sendReplies(agenda, replies, context);
   return [
     {

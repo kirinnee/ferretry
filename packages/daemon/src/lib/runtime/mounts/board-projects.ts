@@ -44,6 +44,7 @@ const FAILURE_STATUS: Readonly<Record<LaneSetFailure['code'], number>> = {
   'not-found': 404,
   'unknown-lane': 400,
   'relocation-missing': 400,
+  'owner-gate': 403,
   'version-conflict': 409,
   'already-confirmed': 409,
   'no-lane-set': 409,

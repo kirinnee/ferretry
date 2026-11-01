@@ -51,14 +51,16 @@ import {
   swipeThreshold,
 } from '../../lib/agenda-inbox.ts';
 import { usePrefersReducedMotion } from '../../shell/bottom-sheet.tsx';
-import { SwipeReveal } from './swipe-reveal.tsx';
 import {
+  isLongPress,
   isTouch,
   lockOf,
   startsInHead,
+  startsInSelection,
   startsInSidewaysScroller,
   startsOnInteractive,
 } from './agenda-swipe-gesture.ts';
+import { SwipeReveal } from './swipe-reveal.tsx';
 
 /** How long a committed card takes to leave. The answer is handed over at once; this is only the look. */
 const FLY_MS = 220;
@@ -254,6 +256,7 @@ interface Gesture {
   readonly startY: number;
   readonly width: number;
   readonly head: boolean;
+  readonly startedAt: number;
   moved: boolean;
   dx: number;
   dy: number;
@@ -383,6 +386,7 @@ export function AgendaSwipeDeck({
       top === undefined ||
       !isTouch(event) ||
       startsOnInteractive(event.target) ||
+      startsInSelection(event.target) ||
       startsInSidewaysScroller(event.target, event.currentTarget) ||
       (ownGesturesIn !== undefined && event.target instanceof Element && event.target.closest(ownGesturesIn) !== null)
     )
@@ -393,6 +397,7 @@ export function AgendaSwipeDeck({
       startY: event.clientY,
       width: event.currentTarget.getBoundingClientRect().width,
       head: startsInHead(event.target),
+      startedAt: event.timeStamp,
       moved: false,
       dx: 0,
       dy: 0,
@@ -407,6 +412,11 @@ export function AgendaSwipeDeck({
     if (!current.moved) {
       const lock = lockOf(current.dx, current.dy);
       if (lock === null) return;
+      if (isLongPress(event.timeStamp - current.startedAt)) {
+        // Held before it moved: the reader is selecting text, and the browser has this touch.
+        gesture.current = null;
+        return;
+      }
       if (lock === 'vertical' && !current.head) {
         // The body scrolls: the browser has this touch now, and it is never a swipe.
         gesture.current = null;

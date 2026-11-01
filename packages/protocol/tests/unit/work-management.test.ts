@@ -284,6 +284,25 @@ const agendaCases: SchemaCase[] = [
   { name: 'attention actor', schema: agenda.AgendaBySchema, value: 'agent' },
   { name: 'attention item', schema: agenda.AgendaItemSchema, value: agendaItem },
   { name: 'attention input pointer', schema: agenda.AgendaInputRefSchema, value: { requestId: 'a'.repeat(32) } },
+  { name: 'gate outcome', schema: agenda.AgendaGateOutcomeSchema, value: 'reopen-with-agenda' },
+  {
+    name: 'gate option',
+    schema: agenda.AgendaGateOptionSchema,
+    value: { id: 'done', label: 'Done', outcome: 'close' },
+  },
+  {
+    name: 'gate',
+    schema: agenda.AgendaGateSchema,
+    value: {
+      cardId: 'F412',
+      laneId: 'released',
+      laneName: 'Released · to test',
+      entry: 7,
+      projectId: 'p-1',
+      projectName: 'Ferretry',
+      options: [{ id: 'done', label: 'Done', outcome: 'close' }],
+    },
+  },
   { name: 'attention paste plan pointer', schema: agenda.AgendaCopyPlanRefSchema, value: { planId: 'b'.repeat(32) } },
   { name: 'attention task plan pointer', schema: agenda.AgendaTaskPlanRefSchema, value: { planId: 'c'.repeat(32) } },
   {

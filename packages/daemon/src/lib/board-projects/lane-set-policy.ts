@@ -15,6 +15,9 @@
  * - **add quick's To test lane** ({@link addQuickToTestLane}) at boot, to a `quick` set from before it.
  * - **stage the lanes** ({@link stageLanes}) at boot: every lane stored without a stage gets the one its
  *   compatibility fields already describe, written out.
+ * - **a gate is the owner's** ({@link laneGateProblems}): a ferret's edit or proposal that would remove, disarm, move
+ *   or skip a gate, or send cards into a closed lane or past a gate, is refused `owner-gate` (docs/board.md § Gates
+ *   ask the owner). Interim: a ferret's edit still goes live (making it a proposal is its own follow-up).
  */
 import {
   type BoardResult,
@@ -33,7 +36,9 @@ import {
   laneStage,
   laneTargets,
   QUICK_TO_TEST_LANE,
+  TaskWorkflowSchema,
   UNFILED_PROJECT_ID,
+  variantLanes,
 } from '@ferretry/protocol';
 
 /** Who is changing the lanes. */
@@ -48,7 +53,116 @@ export type LaneSetProblem =
   | { readonly code: 'no-lane-set' }
   | { readonly code: 'owner-only' }
   | { readonly code: 'already-confirmed'; readonly version: number }
-  | { readonly code: 'relocation-missing'; readonly laneIds: readonly string[] };
+  | { readonly code: 'relocation-missing'; readonly laneIds: readonly string[] }
+  | { readonly code: 'owner-gate'; readonly problems: readonly LaneGateProblem[] };
+
+/** One way a lane change would take a gate from the owner: the lane it is about, and what it would do, in words. */
+export interface LaneGateProblem {
+  readonly laneId: string;
+  readonly why: string;
+}
+
+const isGate = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
+
+/**
+ * Everything a change from `current` to `next` (moving `relocate`'s cards: removed lane → kept lane) would do to a
+ * gate that only the owner may: remove a gate lane, make it automatic, drop its `ownerGate`, move it among the lanes
+ * a variant walks, stop a variant walking it, and send cards into a closed lane or past a gate. Empty when it touches
+ * none. Pure and total; whoever is asking decides whether that refuses the change or is shown to the owner.
+ */
+export const laneGateProblems = (
+  current: Pick<LaneSet, 'lanes' | 'variants'>,
+  next: Pick<LaneLayoutValue, 'lanes' | 'variants'>,
+  relocate: Readonly<Record<string, string>> = {},
+): readonly LaneGateProblem[] => {
+  const problems: LaneGateProblem[] = [];
+  for (const gate of current.lanes.filter(isGate)) {
+    const kept = next.lanes.find(lane => lane.id === gate.id);
+    if (kept === undefined) {
+      problems.push({ laneId: gate.id, why: `removes ${gate.name}, which waits for the owner` });
+      continue;
+    }
+    if (!isGate(kept))
+      problems.push({ laneId: gate.id, why: `makes ${gate.name} automatic: it would stop waiting for the owner` });
+    else if (gate.ownerGate === true && kept.ownerGate !== true) {
+      problems.push({ laneId: gate.id, why: `drops the owner gate of ${gate.name}` });
+    }
+    for (const workflow of TaskWorkflowSchema.options) {
+      const was = walk(current, workflow);
+      if (!was.includes(gate.id)) continue;
+      const now = walk(next, workflow);
+      if (!now.includes(gate.id)) {
+        problems.push({ laneId: gate.id, why: `lets ${workflow} work skip ${gate.name}` });
+      } else if (!sameBefore(gate.id, was, now)) {
+        problems.push({ laneId: gate.id, why: `moves ${gate.name} among the lanes ${workflow} work walks` });
+      }
+    }
+  }
+  for (const [from, to] of Object.entries(relocate)) {
+    const target = next.lanes.find(lane => lane.id === to);
+    if (target?.category === 'closed') {
+      problems.push({ laneId: to, why: `sends the cards of ${from} into ${target.name}, which only the owner closes` });
+      continue;
+    }
+    // Judged where the cards end up: the new layout. A lane that is new gives no account of what it passed.
+    if (!current.lanes.some(lane => lane.id === to)) {
+      problems.push({ laneId: to, why: `sends the cards of ${from} into ${target?.name ?? to}, a lane that is new` });
+      continue;
+    }
+    const passed = passedGate(current, next, from, to);
+    if (passed !== undefined) {
+      problems.push({
+        laneId: passed.id,
+        why: `sends the cards of ${from} past ${passed.name}, which waits for the owner`,
+      });
+    }
+  }
+  return problems;
+};
+
+/**
+ * The first gate of the NEW layout a relocation `from` → `to` would put cards past, in any variant's walk: a gate that
+ * comes before `to` there, and that came after `from` before (or is new).
+ */
+const passedGate = (
+  current: Pick<LaneSet, 'lanes' | 'variants'>,
+  next: Pick<LaneLayoutValue, 'lanes' | 'variants'>,
+  from: string,
+  to: string,
+): Lane | undefined => {
+  for (const workflow of TaskWorkflowSchema.options) {
+    const was = walk(current, workflow);
+    const now = walk(next, workflow);
+    if (!was.includes(from) || !now.includes(to)) continue;
+    const passed = now
+      .slice(0, now.indexOf(to))
+      .map(id => next.lanes.find(lane => lane.id === id))
+      .find(
+        lane =>
+          lane !== undefined && isGate(lane) && (!was.includes(lane.id) || was.indexOf(lane.id) > was.indexOf(from)),
+      );
+    if (passed !== undefined) return passed;
+  }
+  return undefined;
+};
+
+/** The lanes a workflow walks, in the set's order (whatever order its variant names them in). */
+const walk = (
+  set: Pick<LaneSet, 'lanes' | 'variants'>,
+  workflow: (typeof TaskWorkflowSchema.options)[number],
+): readonly string[] => {
+  const walked = variantLanes(set, workflow);
+  const named = new Set((walked.ok ? walked.value : set.lanes).map(lane => lane.id));
+  return set.lanes.filter(lane => named.has(lane.id)).map(lane => lane.id);
+};
+
+/** Whether the same lanes come before `gate` in both walks, counting only the lanes both walk. */
+const sameBefore = (gate: string, was: readonly string[], now: readonly string[]): boolean => {
+  const both = (id: string): boolean => was.includes(id) && now.includes(id);
+  const left = was.slice(0, was.indexOf(gate)).filter(both);
+  const right = now.slice(0, now.indexOf(gate)).filter(both);
+  return left.length === right.length && left.every(id => right.includes(id));
+};
 
 export const actorName = (actor: LaneActor): string => (actor.kind === 'owner' ? 'owner' : actor.name);
 
@@ -67,10 +181,15 @@ export const proposeLaneSet = (
   template: LaneTemplateName,
   renames: LaneRenames,
   proposedBy: string,
+  /** The proposer may not take a gate away (anyone but the owner). */
+  guarded = false,
 ): BoardResult<LaneSet, LaneSetProblem> => {
   if (current?.confirmedBy === 'owner') return boardErr({ code: 'already-confirmed', version: current.version });
   const layout = laneLayoutFromTemplate(template, renames);
   if (!layout.ok) return layout;
+  // A ferret's proposal over a live set never takes one of its gates away: that is the owner's to say.
+  const problems = guarded && current !== null ? laneGateProblems(current, layout.value) : [];
+  if (problems.length > 0) return boardErr({ code: 'owner-gate', problems });
   return boardOk({ projectId, version: (current?.version ?? 0) + 1, confirmedBy: null, proposedBy, ...layout.value });
 };
 
@@ -87,6 +206,13 @@ export const editLaneSet = (
   if (edit.version !== current.version) return boardErr({ code: 'version-conflict', current: current.version });
   const unplaced = laneEditProblems(current, edit);
   if (unplaced.length > 0) return boardErr({ code: 'relocation-missing', laneIds: unplaced });
+  if (actor.kind !== 'owner') {
+    const relocate = Object.fromEntries(
+      Object.entries(edit.relocate).filter((entry): entry is [string, string] => entry[1] !== undefined),
+    );
+    const problems = laneGateProblems(current, edit.layout, relocate);
+    if (problems.length > 0) return boardErr({ code: 'owner-gate', problems });
+  }
   // A layout always has a closed and a backlog lane by now (the schema refused it otherwise), so it has targets.
   const targets = laneTargets(edit.layout, current) ?? { doneLane: current.doneLane, notGoodLane: current.notGoodLane };
   return boardOk({
@@ -135,6 +261,8 @@ export const describeLaneSetFailure = (
       return 'this project has no lanes yet; propose them first';
     case 'owner-only':
       return 'only the owner confirms lanes';
+    case 'owner-gate':
+      return `only the owner may change these gates: this change ${failure.problems.map(problem => problem.why).join('; ')}`;
   }
 };
 

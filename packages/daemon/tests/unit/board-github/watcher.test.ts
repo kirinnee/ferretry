@@ -549,13 +549,14 @@ describe('GitHubWatcher: releases', () => {
     });
     await subject.watcher.tick();
     should(subject.stored().laneId).equal('released');
-    should(subject.stored('F2').laneId).equal('released');
+    // A card waiting at the Plan gate stays there: only the owner passes a gate (docs/board.md § Gates ask the owner).
+    should(subject.stored('F2').laneId).equal('plan');
     should(subject.gh.calls).be.empty();
     // The release reaches this machine: the next tick finds it, with nothing new from GitHub.
     const running = rig({ cards: [subject.stored(), subject.stored('F2')], version: '4.110.0' });
     await running.watcher.tick();
     should(running.stored().laneId).equal('tested');
-    should(running.stored('F2').laneId).equal('tested');
+    should(running.stored('F2').laneId).equal('plan');
   });
 
   it('should leave a card the owner sent back after its PR merged where it was sent', async () => {
@@ -610,7 +611,7 @@ describe('GitHubWatcher: releases', () => {
     should((await subject.watcher.tick()).polled).be.empty();
   });
 
-  it('should pull a card in To test back to Review/CI on the next poll when an open PR sits beside the shipped one', async () => {
+  it('should keep a card at the To test gate when an open PR sits beside the shipped one, and only cache the PR', async () => {
     const shipped = link(1008, {
       state: 'merged',
       mergedAt: '2026-10-30T09:00:00Z',
@@ -632,24 +633,17 @@ describe('GitHubWatcher: releases', () => {
       version: '4.110.0',
     });
     should((await subject.watcher.tick()).written).deepEqual(['F1']);
-    should(subject.stored().laneId).equal('review');
+    should(subject.stored().laneId).equal('tested');
+    should(subject.stored().links.prs[1]).match({ state: 'open', createdAt: '2026-10-30T10:00:00Z' });
     const moved = subject.stored().history.filter(entry => entry.type === 'moved');
-    should(moved.at(-1)).match({
-      from: 'tested',
-      to: 'review',
-      backward: true,
-      auto: true,
-      trigger: 'pr.ready',
-      reason: 'moved back to Review/CI: PR #1013 ready for review',
-    });
-    // Settled: a later tick does not move it again, and does not fight it.
+    // Settled: a later tick does not move it either.
     subject.clock.ms += POLL_OPEN_MS * 2;
     await subject.watcher.tick();
-    should(subject.stored().laneId).equal('review');
+    should(subject.stored().laneId).equal('tested');
     should(subject.stored().history.filter(entry => entry.type === 'moved')).have.length(moved.length);
   });
 
-  it('should pull a card in To test back for a parallel PR opened before the merge, and for one with no open time', async () => {
+  it('should keep a card at the To test gate for a parallel PR opened before the merge, and for one with no open time', async () => {
     const shipped = link(1008, {
       state: 'merged',
       mergedAt: '2026-10-30T09:00:00Z',
@@ -665,7 +659,7 @@ describe('GitHubWatcher: releases', () => {
       version: '4.110.0',
     });
     await stale.watcher.tick();
-    should(stale.stored().laneId).equal('review');
+    should(stale.stored().laneId).equal('tested');
     const unsaid = rig({
       cards: [withLinks([shipped, link(1013)], { laneId: 'tested' })],
       gh: new FakeGh(
@@ -677,7 +671,7 @@ describe('GitHubWatcher: releases', () => {
       version: '4.110.0',
     });
     await unsaid.watcher.tick();
-    should(unsaid.stored().laneId).equal('review');
+    should(unsaid.stored().laneId).equal('tested');
   });
 
   it('should move a released card to To test without asking GitHub anything', async () => {

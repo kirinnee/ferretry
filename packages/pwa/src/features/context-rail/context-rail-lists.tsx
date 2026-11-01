@@ -10,15 +10,9 @@
 import type { SessionSkillsInventory, SkillEntry, SkillFile } from '@ferretry/protocol';
 import { useCallback, useId, useState } from 'react';
 import { Markdown } from '../../components/markdown.tsx';
-import {
-  CatalogRowTools,
-  type CatalogRowsHost,
-  AddCatalogEntry,
-  useCatalogInstalls,
-} from '../catalogs/catalog-row-tools.tsx';
-import { cn } from '../../lib/class-names.ts';
+import { CatalogItemRow } from '../catalogs/catalog-item-row.tsx';
+import { AddCatalogEntry, type CatalogRowsHost, useCatalogRows } from '../catalogs/catalog-row-tools.tsx';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
-import { Button } from '../../shell/primitives.tsx';
 import { SKILL_SCOPE_LABEL, SKILL_SCOPE_TITLE, skillOverride, sortedSkills } from '../mcp/mcp-model.ts';
 import { skillHarnessLabel, skillInsertText } from '../skills/skills-catalog.ts';
 import {
@@ -65,7 +59,7 @@ export interface ContextSkillsPanelProps extends ListPanelProps<SessionSkillsInv
   readonly loadSkillFile?: SkillFileLoader;
   /** The machine's own name, for a failure said in words. */
   readonly machineName: string;
-  /** Lets rows offer "Add to catalog…", say where an installed skill came from, and install from a file. */
+  /** Lets rows offer Share and Add, say where an installed skill came from, and install from a file. */
   readonly catalogs?: CatalogRowsHost;
 }
 
@@ -82,7 +76,7 @@ export function ContextSkillsPanel({
   catalogs,
 }: ContextSkillsPanelProps) {
   const [opened, setOpened] = useState<SkillEntry | null>(null);
-  const installed = useCatalogInstalls(catalogs);
+  const rows = useCatalogRows(catalogs);
   const { load, reload } = read;
   if (load.kind === 'failed')
     return (
@@ -131,61 +125,24 @@ export function ContextSkillsPanel({
             const invocation = skillInsertText(harness, skill.name);
             const override = skillOverride(skill);
             return (
-              <li
-                key={skill.path}
-                className={cn('flex min-w-0 flex-col', override !== undefined && 'opacity-70')}
-                data-context-skill-scope={skill.scope}
-              >
-                <div className="flex min-w-0 items-start gap-xs">
-                  <button
-                    type="button"
-                    className={ROW}
-                    aria-label={`Use ${invocation} in chat`}
-                    onClick={() => onInsertSkill(invocation)}
-                    data-context-skill={skill.name}
-                  >
-                    <span className="flex max-w-full min-w-0 flex-wrap items-center gap-x-xs gap-y-0.5">
-                      <span className="min-w-0 truncate font-mono text-cell text-fg">{invocation}</span>
-                      <span
-                        className="fy-info-chip"
-                        data-tone={skill.scope === 'project' ? 'accent' : 'muted'}
-                        title={SKILL_SCOPE_TITLE[skill.scope]}
-                      >
-                        {SKILL_SCOPE_LABEL[skill.scope]}
-                      </span>
-                    </span>
-                    <span className="line-clamp-2 text-meta text-muted">{skill.description}</span>
-                    {override === undefined ? null : (
-                      <span className="text-meta text-faint" data-context-skill-override="">
-                        {override}
-                      </span>
-                    )}
-                  </button>
-                  {loadSkillFile === undefined ? null : (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      className="mt-xs shrink-0"
-                      aria-label={`Open ${skill.name}’s SKILL.md`}
-                      onClick={() => setOpened(skill)}
-                      data-context-skill-open={skill.name}
-                    >
-                      Open
-                    </Button>
-                  )}
-                </div>
-                {catalogs === undefined ? null : (
-                  <div className="px-xs pb-xs">
-                    <CatalogRowTools
-                      host={catalogs}
-                      kind="skill"
-                      name={skill.name}
-                      source={{ kind: 'skill', skill: skill.path }}
-                      read={installed}
-                    />
-                  </div>
-                )}
+              <li key={skill.path} data-context-skill-scope={skill.scope}>
+                <CatalogItemRow
+                  {...(catalogs === undefined ? {} : { host: catalogs, read: rows })}
+                  kind="skill"
+                  itemName={skill.name}
+                  label={invocation}
+                  source={{ kind: 'skill', skill: skill.path }}
+                  scope={{
+                    label: SKILL_SCOPE_LABEL[skill.scope],
+                    title: SKILL_SCOPE_TITLE[skill.scope],
+                    tone: skill.scope === 'project' ? 'accent' : 'muted',
+                  }}
+                  description={skill.description}
+                  {...(override === undefined ? {} : { note: override })}
+                  onUse={() => onInsertSkill(invocation)}
+                  {...(loadSkillFile === undefined ? {} : { onOpen: () => setOpened(skill) })}
+                  dimmed={override !== undefined}
+                />
               </li>
             );
           })}

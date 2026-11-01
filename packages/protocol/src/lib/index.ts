@@ -4,6 +4,7 @@ export * from './advertisement.ts';
 export * from './agenda.ts';
 export * from './agenda-card.ts';
 export * from './agenda-form.ts';
+export * from './agenda-gate.ts';
 export * from './agenda-message.ts';
 export * from './agenda-mode.ts';
 export * from './agenda-shape.ts';
