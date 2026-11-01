@@ -164,6 +164,91 @@ describe('openFolderOutsideStateHomes — a folder to write below', () => {
   });
 });
 
+describe('openFolderOutsideStateHomes — the edges of opening and making', () => {
+  it('should reach a folder itself by its real path where there are no descriptor paths, once proven there', async () => {
+    // Arrange
+    const { disk, homes } = await world(false);
+    const folder = await opened(openFolderOutsideStateHomes(SKILLS, homes, disk));
+
+    // Act + Assert
+    should(await folder.self()).equal(SKILLS);
+    should(await disk.list(await folder.self())).deepEqual(['stale']);
+  });
+
+  it('should refuse a child of a folder whose path was swapped, where there are no descriptor paths', async () => {
+    // Arrange
+    const { disk, homes } = await world(false);
+    const folder = await opened(openFolderOutsideStateHomes(SKILLS, homes, disk));
+    disk.move(SKILLS, '/fy/fleet/homes/one/elsewhere');
+    disk.link(SKILLS, '/fy/state');
+
+    // Act + Assert
+    should(await rule(openFolderBelow(folder, 'stale', homes, disk))).equal('changed');
+  });
+
+  it('should throw for a child named by a path rather than one entry', async () => {
+    // Arrange
+    const { disk, homes } = await world();
+    const folder = await opened(openFolderOutsideStateHomes(SKILLS, homes, disk));
+
+    // Act + Assert
+    await should(openFolderBelow(folder, 'stale/deeper', homes, disk)).be.rejectedWith(TypeError);
+  });
+
+  it('should surface a folder it cannot make for any reason but somebody else having made it first', async () => {
+    // Arrange
+    const { disk, homes } = await world();
+    disk.mkdir = async path => {
+      throw Object.assign(new Error(`EACCES ${path}`), { code: 'EACCES' });
+    };
+
+    // Act + Assert
+    await should(openFolderOutsideStateHomes('/fy/fleet/homes/two', homes, disk, { make: 0o700 })).be.rejectedWith(
+      /EACCES/u,
+    );
+  });
+
+  it('should open a folder somebody else made between its look and its make', async () => {
+    // Arrange — the make loses the race (`EEXIST`); the folder that won is opened and checked like any other.
+    const { disk, homes } = await world();
+    disk.mkdir = async path => {
+      disk.dir('/fy/fleet/homes/two');
+      throw Object.assign(new Error(`EEXIST ${path}`), { code: 'EEXIST' });
+    };
+
+    // Act
+    const folder = await opened(openFolderOutsideStateHomes('/fy/fleet/homes/two', homes, disk, { make: 0o700 }));
+
+    // Assert
+    should(folder.path).equal('/fy/fleet/homes/two');
+  });
+
+  it('should make missing folders below a folder outside the homes, through its checked parent', async () => {
+    // Arrange — a host config folder, reached through its dotfiles link, that lacks two folders.
+    const { disk, homes } = await world();
+
+    // Act
+    const folder = await opened(
+      openFolderOutsideStateHomes('/host/.claude/commands/team', homes, disk, { make: 0o750 }),
+    );
+
+    // Assert
+    should(folder.path).equal('/dotfiles/claude/commands/team');
+    should((await disk.identity('/dotfiles/claude/commands'))?.mode).equal(0o750);
+  });
+
+  it('should refuse a home that is no longer the folder it was resolved as', async () => {
+    // Arrange — the home is moved away after it was resolved and another folder takes its name.
+    const { disk, homes } = await world();
+    disk.move('/fy', '/fy-old');
+    disk.dir('/fy');
+    disk.dir('/fy/fleet');
+
+    // Act + Assert
+    should(await rule(openFolderOutsideStateHomes('/fy/fleet', homes, disk))).equal('changed');
+  });
+});
+
 describe('removeEntryWithin — a removal that never follows a link', () => {
   it('should remove a whole tree, unlinking a link inside it rather than what it points at', async () => {
     // Arrange
