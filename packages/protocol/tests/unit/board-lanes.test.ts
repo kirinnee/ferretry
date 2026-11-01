@@ -25,6 +25,7 @@ import {
   LaneSetSchema,
   closedLaneProblems,
   gateOptions,
+  laneChangeLines,
   laneGateProblems,
   type PendingLaneSet,
   PendingLaneSetSchema,
@@ -234,6 +235,8 @@ describe('laneGateProblems', () => {
     ),
   });
   const whys = (problems: readonly { readonly why: string }[]): string[] => problems.map(problem => problem.why);
+  const plain = (problems: readonly { readonly laneId: string; readonly why: string }[]) =>
+    problems.map(({ laneId, why }) => ({ laneId, why }));
 
   it('should find nothing in a change that only renames', () => {
     const renamed = { lanes: lanes.map(each => ({ ...each, name: `${each.name}!` })), variants };
@@ -250,7 +253,7 @@ describe('laneGateProblems', () => {
     };
 
     // Act + Assert
-    should(laneGateProblems(FERRETRY, disguised, { released: 'closed' })).deepEqual([
+    should(plain(laneGateProblems(FERRETRY, disguised, { released: 'closed' }))).deepEqual([
       {
         laneId: 'closed',
         why: 'removes Released · to test, which waits for the owner, and sends its cards into the closed lane, which closes them',
@@ -275,7 +278,7 @@ describe('laneGateProblems', () => {
         laneGateProblems(FERRETRY, { ...intoNew, doneLane: 'closed', notGoodLane: 'implement' }, { merged: 'later' }),
       ),
     ).deepEqual(['removes Merged, and sends its cards into Later, a lane that is new']);
-    should(laneGateProblems(FERRETRY, without('todo'), { todo: 'implement' })).deepEqual([
+    should(plain(laneGateProblems(FERRETRY, without('todo'), { todo: 'implement' }))).deepEqual([
       {
         laneId: 'plan',
         why: 'removes Todo, and sends its cards to In progress, past Plan/Design, which waits for the owner',
@@ -406,6 +409,43 @@ describe('laneGateProblems', () => {
       `removes the answer "${gateOptions(plan)[0]?.label ?? ''}" from Plan/Design`,
       'adds the answer "Stop" to Plan/Design, which sends cards to the closed lane, which closes them',
     ]);
+  });
+});
+
+/** What the owner reads: like removals told once, everything else line by line (laneChangeLines). */
+describe('laneChangeLines', () => {
+  const gate = (index: number): Lane => ({
+    id: `g${String(index)}`,
+    name: `Owner review ${String(index)}`,
+    category: 'active',
+    ownerGate: true,
+  });
+  const todo: Lane = { id: 'todo', name: 'Todo', category: 'backlog' };
+  const doing: Lane = { id: 'doing', name: 'Doing', category: 'active' };
+  const closed: Lane = { id: 'closed', name: 'Closed', category: 'closed', ownerGate: true };
+
+  it('should tell lanes removed the same way once, naming the first and last of many', () => {
+    // Arrange: five gates removed with their cards closed, and one plain lane removed apart.
+    const gates = [0, 1, 2, 3, 4].map(gate);
+    const live = { lanes: [todo, ...gates, doing, closed], variants: {} };
+    const next = { lanes: [todo, closed], variants: {} };
+    const relocate = { ...Object.fromEntries(gates.map(each => [each.id, 'closed'])), doing: 'todo' };
+
+    // Act + Assert
+    should(laneChangeLines(live, next, relocate)).deepEqual([
+      'removes 5 lanes that wait for the owner (Owner review 0 … Owner review 4), and sends their cards into the closed lane, which closes them',
+      'removes Doing, and moves its cards to Todo',
+    ]);
+  });
+
+  it('should name every lane of a short run, and leave lanes removed with nowhere said alone', () => {
+    const gates = [0, 1].map(gate);
+    const live = { lanes: [todo, ...gates, closed], variants: {} };
+
+    should(laneChangeLines(live, { lanes: [todo, closed], variants: {} })).deepEqual([
+      'removes 2 lanes that wait for the owner (Owner review 0, Owner review 1)',
+    ]);
+    should(laneChangeLines(FERRETRY, FERRETRY)).deepEqual([]);
   });
 });
 

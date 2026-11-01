@@ -539,6 +539,12 @@ export type PendingLaneSet = z.infer<typeof PendingLaneSetSchema>;
 export interface LaneGateProblem {
   readonly laneId: string;
   readonly why: string;
+  /** For a lane it removes: the lane, whether it was a gate, and where its cards go — so like removals group. */
+  readonly removed?: {
+    readonly name: string;
+    readonly gate: boolean;
+    readonly cards?: { readonly verb: 'moves' | 'sends'; readonly where: string };
+  };
 }
 
 const isGateLane = (lane: Pick<Lane, 'category' | 'enterOn' | 'ownerGate' | 'stage'>): boolean =>
@@ -720,23 +726,67 @@ const removal = (
   to: string | undefined,
   known: (id: string) => string,
 ): LaneGateProblem => {
-  const removed = `removes ${lane.name}${gate ? ', which waits for the owner' : ''}`;
+  const said = (
+    laneId: string,
+    cards?: { readonly verb: 'moves' | 'sends'; readonly where: string },
+  ): LaneGateProblem => ({
+    laneId,
+    why: `removes ${lane.name}${gate ? ', which waits for the owner' : ''}${cards === undefined ? '' : `, and ${cards.verb} its cards ${cards.where}`}`,
+    removed: { name: lane.name, gate, ...(cards === undefined ? {} : { cards }) },
+  });
   const target = to === undefined ? undefined : next.lanes.find(candidate => candidate.id === to);
-  if (to === undefined || target === undefined) return { laneId: lane.id, why: removed };
-  if (target.category === 'closed') {
-    return { laneId: to, why: `${removed}, and sends its cards into the closed lane, which closes them` };
-  }
+  if (to === undefined || target === undefined) return said(lane.id);
+  if (target.category === 'closed')
+    return said(to, { verb: 'sends', where: 'into the closed lane, which closes them' });
   // Judged where the cards end up: the new layout. A lane that is new gives no account of what it passed.
   if (!current.lanes.some(candidate => candidate.id === to)) {
-    return { laneId: to, why: `${removed}, and sends its cards into ${target.name}, a lane that is new` };
+    return said(to, { verb: 'sends', where: `into ${target.name}, a lane that is new` });
   }
   const passed = passedGate(current, next, lane.id, to);
   return passed === undefined
-    ? { laneId: lane.id, why: `${removed}, and moves its cards to ${known(to)}` }
-    : {
-        laneId: passed.id,
-        why: `${removed}, and sends its cards to ${known(to)}, past ${known(passed.id)}, which waits for the owner`,
-      };
+    ? said(lane.id, { verb: 'moves', where: `to ${known(to)}` })
+    : said(passed.id, { verb: 'sends', where: `to ${known(to)}, past ${known(passed.id)}, which waits for the owner` });
+};
+
+/** A run of names in a line: all of a few, the first and last of many. */
+const nameRun = (names: readonly string[]): string =>
+  names.length <= 3 ? names.join(', ') : `${names[0] ?? ''} … ${names.at(-1) ?? ''}`;
+
+/**
+ * What a change would do, as the owner reads it: {@link laneGateProblems}' lines, with lanes removed the same way
+ * told ONCE — "removes 13 lanes that wait for the owner (Owner review 00 … Owner review 12), and sends their cards
+ * into the closed lane, which closes them" — in the place the first of them stood. One line per thing to decide.
+ */
+export const laneChangeLines = (
+  current: Walkable,
+  next: Walkable,
+  relocate: Readonly<Partial<Record<string, string>>> = {},
+): readonly string[] => {
+  const problems = laneGateProblems(current, next, relocate);
+  const keyOf = (problem: LaneGateProblem): string | undefined =>
+    problem.removed === undefined
+      ? undefined
+      : JSON.stringify([problem.removed.gate, problem.removed.cards?.verb, problem.removed.cards?.where]);
+  const groups = new Map<string, LaneGateProblem[]>();
+  for (const problem of problems) {
+    const key = keyOf(problem);
+    if (key !== undefined) groups.set(key, [...(groups.get(key) ?? []), problem]);
+  }
+  const lines: string[] = [];
+  for (const problem of problems) {
+    const key = keyOf(problem);
+    const group = key === undefined ? undefined : groups.get(key);
+    if (group === undefined || group.length === 1) {
+      lines.push(problem.why);
+      continue;
+    }
+    if (group[0] !== problem) continue;
+    const { gate, cards } = problem.removed ?? { gate: false };
+    const names = nameRun(group.map(each => each.removed?.name ?? each.laneId));
+    const lanes = `removes ${String(group.length)} lanes${gate ? ' that wait for the owner' : ''} (${names})`;
+    lines.push(cards === undefined ? lanes : `${lanes}, and ${cards.verb} their cards ${cards.where}`);
+  }
+  return lines;
 };
 
 /**

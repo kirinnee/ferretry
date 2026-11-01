@@ -105,3 +105,26 @@ describe('the ⋯ menu', () => {
     await view.unmount();
   });
 });
+
+describe('AgendaActions highlights one answer', () => {
+  const answers: AgendaActionsProps['answers'] = [
+    { direction: 'left', does: 'choose', label: 'Edit' },
+    { direction: 'right', does: 'choose', label: 'Accept' },
+  ];
+  const highlighted = (container: HTMLElement): string[] =>
+    [...container.querySelectorAll<HTMLElement>('[data-agenda-answer][data-variant="primary"]')].map(
+      node => node.dataset['agendaOption'] ?? '',
+    );
+
+  it('highlights → (yes) when the card recommends none of its answers', async () => {
+    const view = await mount(<AgendaActions {...props({ answers })} />);
+    expect(highlighted(view.container)).toEqual(['Accept']);
+    await view.unmount();
+  });
+
+  it('highlights the recommended answer instead, wherever it sits, and leaves → plain', async () => {
+    const view = await mount(<AgendaActions {...props({ answers, recommended: 'Edit' })} />);
+    expect(highlighted(view.container)).toEqual(['Edit']);
+    await view.unmount();
+  });
+});

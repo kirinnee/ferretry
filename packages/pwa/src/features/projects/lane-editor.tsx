@@ -3,7 +3,7 @@ import {
   LANE_CATEGORIES,
   LANE_TEMPLATES,
   type LaneCategory,
-  laneGateProblems,
+  laneChangeLines,
   type LaneTemplateName,
   type LaneTrigger,
   LaneTriggerSchema,
@@ -363,8 +363,7 @@ function LaneSetEditor({
   // A ferret's change to these lanes, waiting for the owner: not the board's lanes until it is accepted.
   const { pending } = laneSet;
   // What accepting it would do that is the owner's to decide: the agenda card's words, from the same function.
-  const warnings =
-    pending === undefined ? [] : laneGateProblems(laneSet, pending, pending.relocate).map(problem => problem.why);
+  const warnings = pending === undefined ? [] : laneChangeLines(laneSet, pending, pending.relocate);
   // An Accept that would change a gate or move cards takes a second, deliberate tap.
   const [confirming, setConfirming] = useState(false);
 

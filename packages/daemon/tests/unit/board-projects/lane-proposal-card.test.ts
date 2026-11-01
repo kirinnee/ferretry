@@ -5,6 +5,7 @@ import {
   type LaneSet,
   laneGateProblems,
   MAX_AGENDA_DETAIL_LENGTH,
+  TaskWorkflowSchema,
   laneProposalReference,
   type PendingLaneSet,
   type ResolvedAgendaItem,
@@ -17,6 +18,7 @@ import {
   acceptedProposal,
   LaneProposalAcceptance,
   LANE_CHANGE_LATER,
+  LANE_CHANGE_READ_FIRST,
   laneChangeCard,
   laneProposalCard,
 } from '../../../src/lib/board-projects/index.ts';
@@ -52,9 +54,14 @@ describe('laneProposalReference and laneProposalCard', () => {
     should(card.title).equal('Lanes for Ferretry');
     should(card.kind).equal('choice');
     should(card.ask.kind).equal('multiple-choice');
-    should(card.answers.map(answer => answer.label)).deepEqual([
-      LANE_PROPOSAL_ANSWERS.accept,
+    // → is yes: Accept on the right, Edit on the left.
+    should(card.answers.map(answer => [answer.direction, answer.label])).deepEqual([
+      ['left', LANE_PROPOSAL_ANSWERS.edit],
+      ['right', LANE_PROPOSAL_ANSWERS.accept],
+    ]);
+    should(card.ask.kind === 'multiple-choice' && card.ask.options.map(option => option.label)).deepEqual([
       LANE_PROPOSAL_ANSWERS.edit,
+      LANE_PROPOSAL_ANSWERS.accept,
     ]);
     should(card.why).containEql('koen proposed');
   });
@@ -88,26 +95,29 @@ describe('laneChangeCard', () => {
     const card = laneChangeCard('Ferretry', live, risky);
 
     should(card.subject).equal('Lanes for Ferretry: Todo → Plan/Design → In progress → Merged → Closed');
-    should(card.why).containEql('koen proposes new lanes for Ferretry');
-    should(card.why).containEql('keeps its lanes until you accept');
-    should(card.why).containEql('Accepting it makes Plan/Design automatic: it would stop waiting for the owner');
-    should(card.why).containEql(
-      'removes Released · to test, which waits for the owner, and sends its cards into the closed lane, which closes them',
+    // One line of intro, then one bullet per thing to decide.
+    should(card.why).equal(
+      'koen proposes new lanes for Ferretry. The board keeps its lanes until you accept. Accepting it:',
     );
-    should(card.why).not.containEql('live already');
-    should(card.why).not.containEql('more, all in the Board lane editor');
-    should(card.answers.map(answer => answer.label)).deepEqual([
-      LANE_PROPOSAL_ANSWERS.accept,
-      LANE_PROPOSAL_ANSWERS.edit,
+    should(card.context).equal(
+      [
+        '- makes Plan/Design automatic: it would stop waiting for the owner',
+        '- removes Released · to test, which waits for the owner, and sends its cards into the closed lane, which closes them',
+      ].join('\n'),
+    );
+    // Accept → stays plain; Edit ← is recommended, so it is the highlighted one.
+    should(card.answers.map(answer => [answer.direction, answer.label])).deepEqual([
+      ['left', LANE_PROPOSAL_ANSWERS.edit],
+      ['right', LANE_PROPOSAL_ANSWERS.accept],
     ]);
+    should(card.recommendation).deepEqual({ decision: LANE_PROPOSAL_ANSWERS.edit, why: LANE_CHANGE_READ_FIRST });
   });
 
-  it('should never cut a warning short: the ones that do not fit are counted and pointed at', () => {
-    // Arrange: fourteen long-named gates, every one removed with its cards closed — far more than a card holds.
-    const name = (index: number) => `Owner review stage number ${String(index).padStart(2, '0')} of the many`;
+  it('should tell lanes removed the same way as one bullet', () => {
+    // Arrange: fourteen gates removed with their cards closed.
     const gates = Array.from({ length: 14 }, (_, index) => ({
       id: `gate-${String(index)}`,
-      name: name(index),
+      name: `Owner review ${String(index).padStart(2, '0')}`,
       category: 'active' as const,
       ownerGate: true,
     }));
@@ -121,16 +131,43 @@ describe('laneChangeCard', () => {
       relocate: Object.fromEntries(gates.map(gate => [gate.id, 'closed'])),
     };
 
+    // Act + Assert
+    should(laneChangeCard('Ferretry', crowded, emptied).context).equal(
+      '- removes 14 lanes that wait for the owner (Owner review 00 … Owner review 13), and sends their cards into the closed lane, which closes them',
+    );
+  });
+
+  it('should never cut a warning short: the ones that do not fit are counted, and the card has no Accept', () => {
+    // Arrange: fourteen long-named gates, each made automatic and skipped by every workflow — no two alike.
+    const name = (index: number) => `Owner review stage number ${String(index).padStart(2, '0')} of the many`;
+    const gates = Array.from({ length: 14 }, (_, index) => ({
+      id: `gate-${String(index)}`,
+      name: name(index),
+      category: 'active' as const,
+      ownerGate: true,
+    }));
+    const todo = { id: 'todo', name: 'Todo', category: 'backlog' as const };
+    const closed = { id: 'closed', name: 'Closed', category: 'closed' as const, ownerGate: true };
+    const every = (ids: readonly string[]) =>
+      Object.fromEntries(TaskWorkflowSchema.options.map(workflow => [workflow, [...ids]]));
+    const all = ['todo', ...gates.map(gate => gate.id), 'closed'];
+    const crowded: LaneSet = { ...live, lanes: [todo, ...gates, closed], variants: every(all) };
+    const disarmed: PendingLaneSet = {
+      ...risky,
+      lanes: [todo, ...gates.map(gate => ({ ...gate, ownerGate: false })), closed],
+      variants: every(['todo', 'closed']),
+      relocate: {},
+    };
+
     // Act
-    const card = laneChangeCard('The project with the longest name a registry would ever hold', crowded, emptied);
+    const card = laneChangeCard('Ferretry', crowded, disarmed);
 
     // Assert
-    should(card.why.length).be.belowOrEqual(MAX_AGENDA_DETAIL_LENGTH);
-    should(card.why).match(/; and \d+ more, all in the Board lane editor\.$/u);
-    should(card.why).containEql(
-      `removes ${name(0)}, which waits for the owner, and sends its cards into the closed lane`,
-    );
-    should(card.why).not.match(/closes the cards… |closes th$/u);
+    should(card.context?.length).be.belowOrEqual(MAX_AGENDA_DETAIL_LENGTH);
+    should(card.context).match(/\n- and \d+ more, all in the Board lane editor$/u);
+    should(card.context).containEql(`- makes ${name(0)} automatic: it would stop waiting for the owner\n`);
+    should(card.context?.split('\n').every(line => line.startsWith('- '))).be.true();
+    should(card.recommendation).be.undefined();
     // A change the card cannot show in full is accepted only in the lane editor.
     should(card.ask).deepEqual({
       kind: 'multiple-choice',
@@ -149,7 +186,7 @@ describe('laneChangeCard', () => {
   it('should cap a long proposer name so it never crowds out the warnings', () => {
     const card = laneChangeCard('Ferretry', live, { ...risky, proposedBy: 'x'.repeat(500) });
 
-    should(card.why).containEql('Accepting it makes Plan/Design automatic');
+    should(card.context).containEql('- makes Plan/Design automatic');
     should(card.why.startsWith('x'.repeat(61))).be.false();
   });
 
@@ -162,7 +199,14 @@ describe('laneChangeCard', () => {
     };
 
     should(laneGateProblems(live, renamed, renamed.relocate)).deepEqual([]);
-    should(laneChangeCard('Ferretry', live, renamed).why).not.containEql('Accepting it');
+    const card = laneChangeCard('Ferretry', live, renamed);
+    should(card.why).not.containEql('Accepting it');
+    should(card).not.have.property('context');
+    should(card).not.have.property('recommendation');
+    should(card.answers.map(answer => [answer.direction, answer.label])).deepEqual([
+      ['left', LANE_PROPOSAL_ANSWERS.edit],
+      ['right', LANE_PROPOSAL_ANSWERS.accept],
+    ]);
   });
 });
 
