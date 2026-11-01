@@ -716,6 +716,14 @@ reach that is there anyway is refused, not read as absent). Every folder is sync
 Where descriptor reach cannot be loaded at all, the migration is **not made** rather than made by path: the apply goes
 on without it and its result names the pool as skipped, with the reason.
 
+The **conversation lease store** (`FileConversationLeaseStore`, the same file), whose `.leases` folder lives in that
+pool, goes through the same checked folders: the lock (`flock` on `.leases/.lock`), every lease read, write, rename
+and unlink is made through the folder the guard opened, with the state home's key files fenced, so no swapped folder
+can land a lease on `api-token`. Where that folder cannot be reached through its descriptor, or the lock's C call
+cannot be loaded, the lease is refused (`ConversationLeaseUnavailableError`): the launch that named the conversation
+fails with that reason, and nothing else does. See [account-model.md §9.3](design/account-model.md#93-one-live-writer-per-conversation)
+for the one-update gap while the lock changes from SQLite to `flock`.
+
 ## Sub-ferrets and the Ferretry verbs
 
 The same tools server serves a lead and a sub-ferret; the **daemon** tells them apart by session identity

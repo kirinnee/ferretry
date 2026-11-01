@@ -8578,7 +8578,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   };
   /** One live writer per harness conversation (account model §9.3), over the shared pool's lease files. */
   const conversationLeases = (storage: DaemonStorage): ConversationLeases =>
-    new ConversationLeases(new FileConversationLeaseStore(paths.fleet, processIncarnationFor()), storage, process.pid);
+    new ConversationLeases(
+      new FileConversationLeaseStore(paths.fleet, processIncarnationFor(), {
+        // The pool is the agents' to write: a lease is never read or written in a state home (docs/secrets.md).
+        fence: { ...componentSourceFence(paths), pinned: stateHomeKeys(paths) },
+      }),
+      storage,
+      process.pid,
+    );
   /** The board a new session works on: its parent's, its repository's, its folder's, else Unfiled. */
   const sessionBoards = (storage: DaemonStorage): SessionProjects =>
     new SessionProjects(

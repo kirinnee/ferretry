@@ -8,7 +8,7 @@ const ERRNO = process.platform === 'darwin' ? '__error' : '__errno_location';
 /**
  * The calls a folder step needs across TWO open folders — a hard link, and a rename, from a name in one to a name in
  * the other (`linkat`, `renameat`) — which no working directory can express. Integers and strings only, as
- * `directory-syscalls.ts` holds itself to — no struct.
+ * `directory-syscalls.ts` holds itself to — no struct. And the lock a conversation lease is decided under (`flock`).
  */
 export interface LinkSyscall {
   /** Links `fromName` in the folder `fromFd` as `toName` in the folder `toFd`; throws with the errno's code. */
@@ -41,6 +41,49 @@ export function loadLinkSyscall(): LinkSyscall {
     },
     renameat: (fromFd, fromName, toFd, toName) => {
       if (symbols.renameat(fromFd, cString(fromName), toFd, cString(toName)) !== 0) refused('rename', fromName, toName);
+    },
+  };
+}
+
+/** `flock(2)`'s operations, the same on Linux and macOS. */
+const LOCK_EX = 2;
+const LOCK_NB = 4;
+
+/**
+ * An exclusive lock held on an open file (`flock(2)`): one per open file, so two opens of one file exclude each
+ * other even in one process, and the kernel drops it when that open is closed or its process dies — nobody has to
+ * remove anything after a crash.
+ */
+export interface FileLock {
+  /** Takes the lock on `fd` when nobody else holds it: `true`, or `false` while another holds it. Throws on anything else. */
+  tryLock(fd: number): boolean;
+}
+
+/**
+ * What a refused `flock` on `fd` means: `again` when a signal interrupted it (it took nothing, so it is asked again),
+ * `held` while another open holds the lock; anything else throws with the errno's code.
+ */
+export function flockRefusal(errno: number, fd: number): 'again' | 'held' {
+  if (errno === osConstants.errno.EINTR) return 'again';
+  if (errno === osConstants.errno.EWOULDBLOCK) return 'held';
+  const code = errnoNames.get(errno) ?? `errno ${String(errno)}`;
+  throw Object.assign(new Error(`${code}: flock ${String(fd)}`), { code, errno });
+}
+
+/** Loads `flock` and the errno it sets, or throws (see `loadDirectorySyscalls`). Integers only. */
+export function loadFileLock(): FileLock {
+  const { symbols } = dlopen(LIBC, {
+    flock: { args: [FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+    [ERRNO]: { args: [], returns: FFIType.ptr },
+  });
+  const errnoOf = symbols[ERRNO] as () => Pointer | null;
+  return {
+    tryLock: fd => {
+      for (;;) {
+        if (symbols.flock(fd, LOCK_EX | LOCK_NB) === 0) return true;
+        const at = errnoOf();
+        if (flockRefusal(at === null ? 0 : read.i32(at, 0), fd) === 'held') return false;
+      }
     },
   };
 }

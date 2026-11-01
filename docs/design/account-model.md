@@ -896,7 +896,16 @@ Pooling makes two writers on one conversation more likely, so H2 is enforced:
 
 - **Lease:** `<FY_HOME>/fleet/shared/<harness>/.leases/<conversation-id>` records the holder's pid
   and process start time. A lease whose holder is dead (or whose pid now has a different start time)
-  is stale and may be taken. It reuses the daemon's existing state-home lock primitive.
+  is stale and may be taken. Every read-decide-write runs under an exclusive `flock(2)` on
+  `.leases/.lock`, which the kernel drops when its holder closes it or dies. The pool is the agents' to
+  write, so `.leases` is opened through the state-home guard and the lock and every lease are reached
+  through that held folder, never by path ([secrets.md](../secrets.md#what-the-state-home-fence-refuses));
+  where that is not possible the lease is refused, not made by path.
+- **Declared one-update gap:** the lock was an exclusive SQLite transaction on the same `.lock` file
+  before this release. While an update is under way, an older `fy` (SQLite's lock) and a newer one
+  (`flock`) do not exclude each other, so two claims that race at that moment can both be granted.
+  Every lease is still written whole by rename in its held folder, so a lease file is never corrupted:
+  at worst one conversation is briefly double-assigned, until the older process is gone.
 - **Daemon:** every session start, resume and fork claims the lease for the harness conversation id
   it launches with. A held lease refuses with the holder named ("being written by session _X_ on
   _claude-review_ since 14:02").

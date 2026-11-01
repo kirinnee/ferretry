@@ -1,14 +1,15 @@
 import { describe, it } from 'bun:test';
-import type {
-  ConversationHolderStanding,
-  ConversationLeaseClaim,
-  ConversationLeaseRecord,
-  ConversationLeaseStore,
+import {
+  type ConversationHolderStanding,
+  ConversationIdSchema,
+  type ConversationLeaseClaim,
+  type ConversationLeaseRecord,
+  type ConversationLeaseStore,
 } from '@ferretry/fleet';
 import should from 'should';
 import { HistoryController, type IHistoryIo } from '../../../src/lib/history/controller.ts';
 
-const CONVERSATION = '0b7e4c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21';
+const CONVERSATION = ConversationIdSchema.parse('0b7e4c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21');
 
 const HELD: ConversationLeaseRecord = {
   v: 1,
