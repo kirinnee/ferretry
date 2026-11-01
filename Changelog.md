@@ -1,3 +1,9 @@
+## [4.202.1](https://github.com/kirinnee/ferretry/compare/v4.202.0...v4.202.1) (2026-11-01)
+
+### Fixes
+
+* **daemon:** let the owner answer a config-confirm agenda card ([#1245](https://github.com/kirinnee/ferretry/issues/1245)) ([69f9d49](https://github.com/kirinnee/ferretry/commit/69f9d495330005b32efca591f80f05de9639fc7f))
+
 ## [4.202.0](https://github.com/kirinnee/ferretry/compare/v4.201.0...v4.202.0) (2026-11-01)
 
 ### Features
