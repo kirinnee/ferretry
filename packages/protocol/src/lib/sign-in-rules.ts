@@ -81,6 +81,11 @@ export const SIGN_IN_RULE_DEFAULT_SECONDS = SIGN_IN_RULE_DEFAULT_DAYS * DAY_SECO
 export const SIGN_IN_RULE_MAX_SECONDS = SIGN_IN_RULE_MAX_DAYS * DAY_SECONDS;
 /** The shortest a rule may last. */
 export const SIGN_IN_RULE_MIN_SECONDS = 3_600;
+/**
+ * How far ahead of this machine's clock a rule may say it was created: clock skew between the stage and the parse.
+ * Further ahead would let a rule reach past 90 days from now, the bound a rolled-back file relies on.
+ */
+export const SIGN_IN_RULE_CLOCK_SKEW_SECONDS = 300;
 /** The optional use cap's ceiling. Absent: no count (the expiry, the hourly rate and the log still bound it). */
 export const SIGN_IN_RULE_MAX_USES = 1_000;
 /** How long a staged rule waits for its passkey: as long as the challenge it is answered with. */
@@ -157,9 +162,15 @@ interface SignInRuleBodyFacts {
   readonly expiresAt: string;
 }
 
-/** What a rule body may not be: the one check behind the schema, the canonical bytes and the tests. */
-export const signInRuleBodyProblems = (body: SignInRuleBodyFacts): readonly string[] => {
+/**
+ * What a rule body may not be: the one check behind the schema, the canonical bytes and the tests. `now` is this
+ * machine's clock: a body created further ahead of it than {@link SIGN_IN_RULE_CLOCK_SKEW_SECONDS} is refused, so the
+ * schema reads the clock. A stored rule only grows older, so it keeps parsing; a clock set back further than the skew
+ * fails closed (the document reads as no rules) until the clock is right again.
+ */
+export const signInRuleBodyProblems = (body: SignInRuleBodyFacts, now: number = Date.now()): readonly string[] => {
   const lifetime = (Date.parse(body.expiresAt) - Date.parse(body.createdAt)) / 1_000;
+  const ahead = (Date.parse(body.createdAt) - now) / 1_000;
   const totp = body.fields.includes('totp');
   return [
     ...(unique(body.fields) ? [] : ['a rule names each field once']),
@@ -175,6 +186,9 @@ export const signInRuleBodyProblems = (body: SignInRuleBodyFacts): readonly stri
     ...(Number.isFinite(lifetime) && lifetime <= SIGN_IN_RULE_MAX_SECONDS
       ? []
       : [`a rule lasts at most ${String(SIGN_IN_RULE_MAX_DAYS)} days`]),
+    ...(Number.isFinite(ahead) && ahead <= SIGN_IN_RULE_CLOCK_SKEW_SECONDS
+      ? []
+      : ['a rule is never created in the future']),
   ];
 };
 
@@ -205,6 +219,12 @@ export const SignInRuleBodySchema = z
 export type SignInRuleBody = z.infer<typeof SignInRuleBodySchema>;
 
 /**
+ * 32 bytes as canonical unpadded base64url: 43 characters, the last carrying only its top 4 bits (so one byte string
+ * has exactly one spelling).
+ */
+const NONCE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u;
+
+/**
  * THE OWNER'S PASSKEY ASSERTION a rule carries: the stored proof (step-up.ts), the stage it was bound to, and the
  * 32-byte nonce the daemon drew for that stage. Re-deriving {@link signInRuleChallenge} from these and the body's
  * canonical bytes must give the challenge inside `clientDataJSON`, or the rule never fills (`proof-invalid`).
@@ -212,7 +232,7 @@ export type SignInRuleBody = z.infer<typeof SignInRuleBodySchema>;
 export const SignInRuleProofSchema = z.strictObject({
   ...StoredStepUpProofSchema.shape,
   stage: SignInRuleStageIdSchema,
-  nonce: z.string().regex(/^[A-Za-z0-9_-]{43}$/u, 'a nonce is 32 bytes of unpadded base64url'),
+  nonce: z.string().regex(NONCE, 'a nonce is 32 bytes of unpadded base64url'),
 });
 export type SignInRuleProof = z.infer<typeof SignInRuleProofSchema>;
 
@@ -345,7 +365,8 @@ const earlier = (left: string, right: string | undefined): string =>
 
 /**
  * THE ONE READING of a record's overlay: the overlay only ever takes away. A suspended rule reads `suspended` whatever
- * else is true, so its reason stays on screen; then `expired` at or after its end; then `used-up`.
+ * else is true, so its reason stays on screen; then `expired` at or after its end, and also BEFORE its start (a clock
+ * that ran back: never in force outside its signed window, which is never longer than 90 days); then `used-up`.
  */
 export function signInRuleEffective(record: SignInRuleRecord, now: number): SignInRuleEffective {
   const narrowed = record.narrowed;
@@ -357,7 +378,7 @@ export function signInRuleEffective(record: SignInRuleRecord, now: number): Sign
   const status: SignInRuleStatus =
     record.suspended !== undefined
       ? 'suspended'
-      : now >= Date.parse(expiresAt)
+      : now >= Date.parse(expiresAt) || now < Date.parse(record.body.createdAt)
         ? 'expired'
         : remaining === 0
           ? 'used-up'
@@ -466,10 +487,21 @@ export const SignInRuleDraftSchema = z
   });
 export type SignInRuleDraft = z.infer<typeof SignInRuleDraftSchema>;
 
+/** What a staged rule may not be: its code flags agree, and it is for a page sign-in. */
+const stagedProblems = (staged: {
+  readonly fields: readonly SignInField[];
+  readonly totp: boolean;
+  readonly place: { readonly kind: string };
+}): readonly string[] => [
+  ...codeTickProblems(staged),
+  ...(staged.place.kind === 'site' ? [] : ['a standing rule is for a page sign-in']),
+];
+
 /**
  * A RULE WAITING FOR ITS PASSKEY: the stage the `approve-sign-in-rule` proof is bound to, the rule it makes, and the
  * daemon's own words for it, which the passkey dialog shows. Every red and amber warning comes from the STRUCTURED
- * fields (`totp`: one factor; `autoRecipe`), never from the summary's words, which may be clipped (secrev-1268 N1).
+ * fields (`totp`: one factor; `autoRecipe`), never from the summary's words, which may be clipped (secrev-1268 N1);
+ * so does WHICH sign-in it is for (`account`, `place`: secrev-1271 L3), since a clip cuts the host first.
  * `machine` is set when it was staged at the machine (`fy rules add`) and waits in the app. Never a value.
  */
 export const SignInRuleStagedSchema = z
@@ -478,6 +510,9 @@ export const SignInRuleStagedSchema = z
     rule: SignInRuleIdSchema,
     revision: SignInRuleRevisionSchema,
     signIn: SignInIdSchema,
+    /** The account and the place the rule is for, as fields: the dialog draws them from here, never from `summary`. */
+    account: AccountRefSchema,
+    place: PlaceSchema,
     summary: z.array(oneLine(TASK_PLAN_SUMMARY_LINE_MAX_CHARS)).min(1).max(SIGN_IN_RULE_SUMMARY_MAX_LINES),
     fields: z.array(SignInFieldSchema).min(1).max(3),
     totp: z.boolean(),
@@ -491,7 +526,7 @@ export const SignInRuleStagedSchema = z
     machine: z.strictObject({ askedAt: InstantSchema }).optional(),
   })
   .superRefine((staged, context) => {
-    for (const message of codeTickProblems(staged)) context.addIssue({ code: 'custom', message });
+    for (const message of stagedProblems(staged)) context.addIssue({ code: 'custom', message });
   });
 export type SignInRuleStaged = z.infer<typeof SignInRuleStagedSchema>;
 
@@ -502,7 +537,7 @@ export type SignInRuleStageState = z.infer<typeof SignInRuleStageStateSchema>;
 export const SignInRuleStageViewSchema = z
   .strictObject({ ...SignInRuleStagedSchema.shape, state: SignInRuleStageStateSchema })
   .superRefine((staged, context) => {
-    for (const message of codeTickProblems(staged)) context.addIssue({ code: 'custom', message });
+    for (const message of stagedProblems(staged)) context.addIssue({ code: 'custom', message });
   });
 export type SignInRuleStageView = z.infer<typeof SignInRuleStageViewSchema>;
 
@@ -596,10 +631,14 @@ const SIGN_IN_RULE_FACTORS_DOMAIN = 'ferretry.sign-in-rule.factors.v1';
 /**
  * What an `approve-sign-in-rule` proof is bound to: `sha256("ferretry.sign-in-rule.v1\0" + stage + "\0" +
  * sha256(canonical))`. The domain keeps it apart from every other bound act's subject (a task plan's, a 2FA seed's),
- * and the stage keeps one proof from committing another staging of the same body.
+ * and the stage keeps one proof from committing another staging of the same body. Throws `RangeError` for a stage that
+ * is not an `srs_` id or empty canonical text: nothing is ever bound to a malformed stage or to no bytes.
  */
-export const signInRuleSubject = (stage: SignInRuleStageId, canonical: string): string =>
-  sha256Hex(`${SIGN_IN_RULE_DOMAIN}\0${stage}\0${sha256Hex(canonical)}`);
+export const signInRuleSubject = (stage: SignInRuleStageId, canonical: string): string => {
+  if (!SignInRuleStageIdSchema.safeParse(stage).success) throw new RangeError('a rule subject needs an srs_ stage');
+  if (canonical.length === 0) throw new RangeError("a rule subject needs the rule's canonical bytes");
+  return sha256Hex(`${SIGN_IN_RULE_DOMAIN}\0${stage}\0${sha256Hex(canonical)}`);
+};
 
 const bytesOfHex = (hex: string): Uint8Array =>
   Uint8Array.from({ length: hex.length / 2 }, (_, index) => Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16));
@@ -607,10 +646,16 @@ const bytesOfHex = (hex: string): Uint8Array =>
 /**
  * THE WEBAUTHN CHALLENGE for a staged rule (32 bytes): `sha256("ferretry.sign-in-rule.challenge.v1\0" + nonce + "\0" +
  * subject)`. DERIVED, never random, so the daemon can re-derive it from the stored record and check the kept assertion
- * offline. The stage's random nonce keeps two stagings of one body from sharing a challenge.
+ * offline. The stage's random nonce keeps two stagings of one body from sharing a challenge. Throws `RangeError` for a
+ * nonce that is not 32 bytes of canonical unpadded base64url, or a subject that is not a sha-256 hex digest, so no
+ * challenge is ever derived from a nonce not yet drawn. (Whether the nonce is RANDOM no check can see: the daemon draws
+ * it from the system CSPRNG.)
  */
-export const signInRuleChallenge = (nonce: string, subject: string): Uint8Array =>
-  bytesOfHex(sha256Hex(`${SIGN_IN_RULE_CHALLENGE_DOMAIN}\0${nonce}\0${subject}`));
+export const signInRuleChallenge = (nonce: string, subject: string): Uint8Array => {
+  if (!NONCE.test(nonce)) throw new RangeError('a rule challenge needs a 32-byte base64url nonce');
+  if (!/^[0-9a-f]{64}$/u.test(subject)) throw new RangeError('a rule challenge needs a rule subject');
+  return bytesOfHex(sha256Hex(`${SIGN_IN_RULE_CHALLENGE_DOMAIN}\0${nonce}\0${subject}`));
+};
 
 /**
  * A FINGERPRINT OF AN ACCOUNT'S 2FA KEYS, pinned by a rule: each key's id, kind and whether Ferretry makes its codes,

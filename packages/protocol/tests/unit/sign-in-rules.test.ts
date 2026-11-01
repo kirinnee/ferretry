@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { addTwoFactorKeySubject, type TwoFactorKeySummary } from '../../src/lib/accounts.ts';
 import { sha256Hex } from '../../src/lib/mcp-oauth.ts';
+import { SignInRuleStageIdSchema } from '../../src/lib/account-ids.ts';
 import * as rules from '../../src/lib/sign-in-rules.ts';
 import {
   canonicalSignInRule,
@@ -38,7 +39,7 @@ import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCa
 const DEVICE = `fy_device_id_${'d'.repeat(22)}`;
 const OTHER_DEVICE = `fy_device_id_${'e'.repeat(22)}`;
 const RULE = `sr_${'1'.repeat(24)}`;
-const STAGE = `srs_${'2'.repeat(24)}`;
+const STAGE = SignInRuleStageIdSchema.parse(`srs_${'2'.repeat(24)}`);
 const SIGN_IN = 'si_000000000000000a';
 const KEY = `L${'A'.repeat(24)}`;
 const FACTOR = 'tf_0123456789ab';
@@ -119,6 +120,8 @@ const staged = {
   rule: RULE,
   revision: 1,
   signIn: SIGN_IN,
+  account: { id: 'GITHUB_KIRINNEE', label: 'GitHub' },
+  place: { kind: 'site', domains: ['github.com'], match: [] },
   summary: ['Username and password and codes for GitHub · kirinnee on github.com'],
   fields: ['username', 'password', 'totp'],
   totp: true,
@@ -133,6 +136,32 @@ const canonicalOf = (value: SignInRuleBody): string => {
   if (!canonical.ok) throw new Error(canonical.reason);
   return canonical.text;
 };
+
+/** The full rule with each part changed on its own: the subject-change test, and its coverage check. */
+const bodyChanges = (base: SignInRuleBody): Readonly<Record<string, SignInRuleBody>> => ({
+  id: { ...base, id: `sr_${'9'.repeat(24)}` },
+  revision: { ...base, revision: 2 },
+  signIn: { ...base, signIn: 'si_000000000000000b' },
+  'fields: no username': { ...base, fields: ['password', 'totp'] },
+  'fields: no code': { ...base, fields: ['username', 'password'], pins: { ...base.pins, factor: undefined } },
+  'pins.accountKey': { ...base, pins: { ...base.pins, accountKey: `L${'B'.repeat(24)}` } },
+  'pins.account': { ...base, pins: { ...base.pins, account: 'GITHUB_WORK' } },
+  'pins.username': { ...base, pins: { ...base.pins, username: 'kirin' } },
+  'pins.username absent': { ...base, pins: { ...base.pins, username: undefined } },
+  'pins.placeKeys': { ...base, pins: { ...base.pins, placeKeys: ['github.com', 'api.github.com'] } },
+  'pins.recipeVersion': { ...base, pins: { ...base.pins, recipeVersion: 3 } },
+  'pins.recipeVersion absent': { ...base, pins: { ...base.pins, recipeVersion: undefined } },
+  'pins.identities': { ...base, pins: { ...base.pins, identities: ['0123456789abcdef', '1111111111111111'] } },
+  'pins.factors': { ...base, pins: { ...base.pins, factors: 'e'.repeat(64) } },
+  'pins.factor': { ...base, pins: { ...base.pins, factor: 'tf_ba9876543210' } },
+  'scope: project': { ...base, scope: { kind: 'project', project: PROJECT } },
+  'scope: session': { ...base, scope: { kind: 'session', session: 'mvx-1' } },
+  createdAt: { ...base, createdAt: '2026-11-01T15:00:00.000Z' },
+  expiresAt: { ...base, expiresAt: '2026-11-30T14:00:00.000Z' },
+  uses: { ...base, uses: 21 },
+  'uses absent': { ...base, uses: undefined },
+  approvedBy: { ...base, approvedBy: { deviceId: OTHER_DEVICE } },
+});
 
 const hex = (bytes: Uint8Array): string => [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
 
@@ -383,30 +412,7 @@ describe('standing sign-in rules: the bytes the passkey is bound to', () => {
   it('should change the subject and the challenge when any one part of the body changes', () => {
     // Arrange — the full rule, every optional part present, and each part changed on its own
     const base = totpBody({ uses: 20 });
-    const changes: Readonly<Record<string, SignInRuleBody>> = {
-      id: { ...base, id: `sr_${'9'.repeat(24)}` },
-      revision: { ...base, revision: 2 },
-      signIn: { ...base, signIn: 'si_000000000000000b' },
-      'fields: no username': { ...base, fields: ['password', 'totp'] },
-      'fields: no code': { ...base, fields: ['username', 'password'], pins: { ...base.pins, factor: undefined } },
-      'pins.accountKey': { ...base, pins: { ...base.pins, accountKey: `L${'B'.repeat(24)}` } },
-      'pins.account': { ...base, pins: { ...base.pins, account: 'GITHUB_WORK' } },
-      'pins.username': { ...base, pins: { ...base.pins, username: 'kirin' } },
-      'pins.username absent': { ...base, pins: { ...base.pins, username: undefined } },
-      'pins.placeKeys': { ...base, pins: { ...base.pins, placeKeys: ['github.com', 'api.github.com'] } },
-      'pins.recipeVersion': { ...base, pins: { ...base.pins, recipeVersion: 3 } },
-      'pins.recipeVersion absent': { ...base, pins: { ...base.pins, recipeVersion: undefined } },
-      'pins.identities': { ...base, pins: { ...base.pins, identities: ['0123456789abcdef', '1111111111111111'] } },
-      'pins.factors': { ...base, pins: { ...base.pins, factors: 'e'.repeat(64) } },
-      'pins.factor': { ...base, pins: { ...base.pins, factor: 'tf_ba9876543210' } },
-      'scope: project': { ...base, scope: { kind: 'project', project: PROJECT } },
-      'scope: session': { ...base, scope: { kind: 'session', session: 'mvx-1' } },
-      createdAt: { ...base, createdAt: '2026-11-01T15:00:00.000Z' },
-      expiresAt: { ...base, expiresAt: '2026-11-30T14:00:00.000Z' },
-      uses: { ...base, uses: 21 },
-      'uses absent': { ...base, uses: undefined },
-      approvedBy: { ...base, approvedBy: { deviceId: OTHER_DEVICE } },
-    };
+    const changes = bodyChanges(base);
     const subject = signInRuleSubject(STAGE, canonicalOf(base));
     const challenge = hex(signInRuleChallenge(NONCE, subject));
 
@@ -418,6 +424,25 @@ describe('standing sign-in rules: the bytes the passkey is bound to', () => {
 
     // Assert
     should(changed).deepEqual(Object.keys(changes).map(name => ({ name, subject: true, challenge: true })));
+  });
+
+  it('should cover every body and pins key in that table, so a field added later fails until it is covered', () => {
+    // Arrange — the table's own names: `key`, `key: variant`, `pins.key` or `pins.key variant`
+    const names = Object.keys(bodyChanges(totpBody({ uses: 20 })));
+    const keyOf = (name: string): string => (name.split(' ')[0] ?? name).replace(/:$/u, '');
+
+    // Act
+    const top = new Set(names.map(keyOf).map(key => key.split('.')[0]));
+    const pinned = new Set(
+      names
+        .map(keyOf)
+        .filter(key => key.startsWith('pins.'))
+        .map(key => key.slice(5)),
+    );
+
+    // Assert — `v` and `surface` are literals: they have nothing to change to
+    should(Object.keys(SignInRuleBodySchema.shape).filter(key => !top.has(key))).deepEqual(['v', 'surface']);
+    should(Object.keys(rules.SignInRulePinsSchema.shape).filter(key => !pinned.has(key))).deepEqual([]);
   });
 
   it('should sign every key of the body, so a field added later is never left out', () => {
@@ -438,8 +463,8 @@ describe('standing sign-in rules: the bytes the passkey is bound to', () => {
     const subject = signInRuleSubject(STAGE, canonical);
 
     // Act / Assert
-    should(signInRuleSubject(`srs_${'3'.repeat(24)}`, canonical)).not.equal(subject);
-    should(hex(signInRuleChallenge('B'.repeat(43), subject))).not.equal(hex(signInRuleChallenge(NONCE, subject)));
+    should(signInRuleSubject(SignInRuleStageIdSchema.parse(`srs_${'3'.repeat(24)}`), canonical)).not.equal(subject);
+    should(hex(signInRuleChallenge(`${'B'.repeat(42)}A`, subject))).not.equal(hex(signInRuleChallenge(NONCE, subject)));
     should(signInRuleChallenge(NONCE, subject)).have.length(32);
     should(hex(signInRuleChallenge(NONCE, subject))).equal(
       sha256Hex(`ferretry.sign-in-rule.challenge.v1\0${NONCE}\0${subject}`),
@@ -526,7 +551,7 @@ describe('standing sign-in rules: the record on disk', () => {
       {
         name: 'a proof for no stage',
         schema: SignInRuleRecordSchema,
-        value: record({ proof: { ...proof, stage: RULE } }),
+        value: record({ proof: { ...proof, stage: RULE as never } }),
       },
       {
         name: 'a short nonce',
@@ -804,5 +829,108 @@ describe('standing sign-in rules: what the owner sees and sends', () => {
         value: { signIn: SIGN_IN, fields: ['password'], replaces: STAGE },
       },
     ]);
+  });
+});
+
+describe('standing sign-in rules: review fixes (secrev-1271)', () => {
+  // L3: which sign-in a staged rule is for is a field, never only words a clip can cut.
+  it('should name the staged rule’s account and page sign-in as fields', () => {
+    // Arrange
+    const { account: _account, ...noAccount } = staged;
+    const { place: _place, ...noPlace } = staged;
+    const longLabel = { ...staged, summary: [`Username and password and codes for ${'G'.repeat(200)}`] };
+
+    // Act / Assert — the host survives a summary clipped before it
+    should(SignInRuleStagedSchema.parse(longLabel).place).deepEqual({
+      kind: 'site',
+      domains: ['github.com'],
+      match: [],
+    });
+    assertRejects([
+      { name: 'a staged rule with no account', schema: SignInRuleStagedSchema, value: noAccount },
+      { name: 'a staged rule with no place', schema: SignInRuleStagedSchema, value: noPlace },
+      {
+        name: 'a staged rule for a terminal',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' } },
+      },
+      {
+        name: 'a stage view for a terminal',
+        schema: rules.SignInRuleStageViewSchema,
+        value: { ...staged, place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' }, state: 'waiting' },
+      },
+      {
+        name: 'an account with no label',
+        schema: SignInRuleStagedSchema,
+        value: { ...staged, account: { id: 'GITHUB_KIRINNEE' } },
+      },
+    ]);
+  });
+
+  // L4: a rule is never in force outside its signed window, so it never reaches past 90 days from now.
+  it('should refuse a rule created in the future, beyond a small clock skew', () => {
+    // Arrange
+    const at = (seconds: number): string => new Date(Date.now() + seconds * 1_000).toISOString();
+    const startingIn = (seconds: number): SignInRuleBody =>
+      body({ createdAt: at(seconds), expiresAt: at(seconds + 30 * 86_400) });
+
+    // Act / Assert
+    should(rules.SIGN_IN_RULE_CLOCK_SKEW_SECONDS).equal(300);
+    should(SignInRuleBodySchema.safeParse(startingIn(-60)).success).be.true();
+    should(SignInRuleBodySchema.safeParse(startingIn(60)).success).be.true();
+    should(SignInRuleBodySchema.safeParse(startingIn(rules.SIGN_IN_RULE_CLOCK_SKEW_SECONDS + 60)).success).be.false();
+    should(SignInRuleBodySchema.safeParse(startingIn(86_400)).success).be.false();
+    should(canonicalSignInRule(startingIn(86_400)).ok).be.false();
+    should(SignInRuleRecordSchema.safeParse(record({ body: startingIn(86_400) })).success).be.false();
+    // The check reads the clock it is given, so the same body is judged the same way at the same moment.
+    const later = Date.parse(CREATED) - 3_600_000;
+    should(rules.signInRuleBodyProblems(body(), later)).containEql('a rule is never created in the future');
+    should(rules.signInRuleBodyProblems(body(), Date.parse(CREATED))).deepEqual([]);
+  });
+
+  it('should read a rule as not in force before its own start', () => {
+    // Act / Assert — a clock that ran back is treated as outside the signed window, never as active
+    should(signInRuleEffective(record(), Date.parse(CREATED) - 1).status).equal('expired');
+    should(signInRuleEffective(record(), Date.parse(CREATED)).status).equal('active');
+  });
+
+  // L5: nothing is ever bound to a malformed stage, empty bytes, or a nonce not yet drawn.
+  it('should refuse to derive a subject or a challenge from malformed inputs', () => {
+    // Arrange
+    const canonical = canonicalOf(body());
+    const subject = signInRuleSubject(STAGE, canonical);
+
+    // Act / Assert
+    should(() => signInRuleSubject(`tps_${'2'.repeat(24)}` as never, canonical)).throw(RangeError);
+    should(() => signInRuleSubject('' as never, canonical)).throw(RangeError);
+    should(() => signInRuleSubject(STAGE, '')).throw(RangeError);
+    for (const nonce of [
+      '',
+      'A'.repeat(42),
+      'A'.repeat(44),
+      `${'A'.repeat(42)}B`,
+      `${'A'.repeat(42)}=`,
+      `${'A'.repeat(42)}+`,
+    ])
+      should(() => signInRuleChallenge(nonce, subject)).throw(RangeError);
+    for (const bad of ['', 'f'.repeat(63), 'F'.repeat(64), STAGE])
+      should(() => signInRuleChallenge(NONCE, bad)).throw(RangeError);
+    should(rules.SignInRuleProofSchema.safeParse({ ...proof, nonce: `${'A'.repeat(42)}B` }).success).be.false();
+  });
+
+  it('should take any 32 random bytes as a nonce, and only those', () => {
+    // Arrange
+    const subject = signInRuleSubject(STAGE, canonicalOf(body()));
+    const nonces = Array.from({ length: 64 }, () =>
+      Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url'),
+    );
+
+    // Act / Assert — every one is accepted, and each spells exactly 32 bytes
+    for (const nonce of nonces) {
+      should(signInRuleChallenge(nonce, subject)).have.length(32);
+      should(Buffer.from(nonce, 'base64url').toString('base64url')).equal(nonce);
+      should(Buffer.from(nonce, 'base64url')).have.length(32);
+    }
+    should(() => signInRuleChallenge(Buffer.alloc(31).toString('base64url'), subject)).throw(RangeError);
   });
 });

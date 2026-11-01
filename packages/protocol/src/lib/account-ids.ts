@@ -71,9 +71,11 @@ export type SignInRuleId = z.infer<typeof SignInRuleIdSchema>;
  * only. A passkey proof for `approve-sign-in-rule` is bound to exactly one (`signInRuleSubject`), so it cannot be spent
  * on another body. Here beside the other stages for the same reason: a step-up names it.
  */
-export const SignInRuleStageIdSchema = z
-  .string()
-  .regex(/^srs_[0-9a-f]{24}$/u, 'a staged standing rule is srs_ and 24 hex digits');
+export const SignInRuleStageIdSchema = z.custom<`srs_${string}`>(
+  value => typeof value === 'string' && /^srs_[0-9a-f]{24}$/u.test(value),
+  'a staged standing rule is srs_ and 24 hex digits',
+);
+/** Typed by its prefix, so a claim for a rule's stored proof can't be handed another act's stage at compile time. */
 export type SignInRuleStageId = z.infer<typeof SignInRuleStageIdSchema>;
 
 /**

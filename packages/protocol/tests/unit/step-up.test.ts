@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { SignInRuleStageIdSchema } from '../../src/lib/account-ids.ts';
 import * as stepUp from '../../src/lib/step-up.ts';
 import { INSTANT, LATER_INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
@@ -430,10 +431,16 @@ describe('the passkey step-up wire', () => {
   it('should let a stored proof be claimed only for a stored-proof act and its own subject (type test)', () => {
     // Arrange — a claim that hands back nothing: only its TYPE is under test
     const claim: stepUp.ClaimStoredProof = () => undefined;
-    const ruleStage = `srs_${'c'.repeat(24)}`;
+    const ruleStage = SignInRuleStageIdSchema.parse(`srs_${'c'.repeat(24)}`);
+    const planStage: string = `tps_${'b'.repeat(24)}`;
 
     // Act / Assert
     should(claim('approve-sign-in-rule', ruleStage)).be.undefined();
+    should(claim('approve-sign-in-rule', 'srs_cccccccccccccccccccccccc')).be.undefined();
+    // @ts-expect-error — the subject is typed as a rule's stage: another act's stage does not compile
+    should(claim('approve-sign-in-rule', 'tps_bbbbbbbbbbbbbbbbbbbbbbbb')).be.undefined();
+    // @ts-expect-error — nor does a string nobody parsed as one
+    should(claim('approve-sign-in-rule', planStage)).be.undefined();
     // @ts-expect-error — a task plan's proof is never stored, so it can't be claimed as one
     should(claim('approve-task-plan', `tps_${'b'.repeat(24)}`)).be.undefined();
     // @ts-expect-error — nor a 2FA seed's
