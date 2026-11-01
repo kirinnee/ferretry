@@ -106,8 +106,9 @@ export interface RouteContext {
   /**
    * Where this caller stands relative to the OPERATOR's gate — server-derived exactly like `actor`.
    *
-   * PRESENT ON EVERY ROUTE THAT DECLARES A {@link ScopedRoute.capability}, and absent on every route
-   * that does not, because a route the operator was never asked about has no answer here to give.
+   * PRESENT ON EVERY ROUTE THAT DECLARES A {@link ScopedRoute.capability} OR
+   * {@link ScopedRoute.consultsGrants}, and absent on every other, because a route the operator was never
+   * asked about has no answer here to give.
    *
    * A HANDLER CANNOT MINT ONE, and that is why it travels here rather than being re-derived. Both
    * facts it carries — whether the grants govern this caller, and whether its device holds a live
@@ -217,6 +218,19 @@ export interface ScopedRoute extends RoutePattern {
    * answer: a route that names a capability cannot be served by a dispatcher with no guard.
    */
   readonly capability?: CapabilityDemand;
+  /**
+   * The handler asks the operator's grants a question of its OWN, on a route that demands no capability.
+   *
+   * For a route that is ungoverned as a whole but has ONE act that is governed: the agenda's answer route
+   * serves every caller, and only an answer that confirms a held configuration change asks that file's
+   * grant (docs/agenda.md § Confirming a configuration change). The boundary then derives
+   * {@link RouteContext.governance} for it exactly as it does after a demand, from the same presentation.
+   *
+   * IT ADDS A QUESTION AND NEVER ANSWERS ONE. Nothing is decided here: the route is served on the same
+   * terms as without it, and the handler reads a standing it could not have minted. Without it, such a
+   * handler has no standing to read and must refuse every caller, which is what it did (&B115).
+   */
+  readonly consultsGrants?: true;
   /**
    * The remedy a WARDEN may exercise by reaching this route — the ADMINISTRATOR's answer, and a
    * question none of the three declarations above can be made to carry: the credential minimum is

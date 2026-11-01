@@ -641,6 +641,54 @@ describe('the operator grant layer', () => {
     should(asked).be.empty();
   });
 
+  it('should hand a route that consults the grants itself the caller’s standing, without deciding anything', async () => {
+    // An ungoverned route with ONE governed act (the agenda's Allow on a held configuration change) asks
+    // its own question; without a standing to read, it could only refuse everyone (&B115).
+    // Arrange
+    const decided: string[] = [];
+    const standing: CapabilityGuard = {
+      decide: demand => {
+        decided.push(demand.capability);
+        return { allowed: false, refusal: 'not-granted' };
+      },
+      governance: presentation => ({
+        governed: !presentation.loopback,
+        decide: () => ({ allowed: true, refusal: 'granted' }),
+      }),
+      explain: () => undefined,
+    };
+    const reporting = (path: string, consultsGrants: boolean): ApiRoute => ({
+      method: 'POST',
+      path,
+      minimum: 'operator',
+      caller: 'any',
+      ...(consultsGrants ? { consultsGrants: true as const } : {}),
+      handle: async context => jsonResponse({ governed: context.governance?.governed ?? null }),
+    });
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter([reporting('/v1/asks', true), reporting('/v1/silent', false)]),
+      credentials,
+      standing,
+    );
+
+    // Act
+    const fromDevice = await dispatcher.dispatch(request({ method: 'POST', path: '/v1/asks', device: DEVICE }));
+    const atMachine = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/asks', loopback: true, headers: { authorization: 'Bearer admin-secret' } }),
+    );
+    const silent = await dispatcher.dispatch(request({ method: 'POST', path: '/v1/silent', device: DEVICE }));
+
+    // Assert
+    should(fromDevice.status).equal(200);
+    should(jsonBody(fromDevice).governed).be.true();
+    should(atMachine.status).equal(200);
+    should(jsonBody(atMachine).governed).be.false();
+    should(silent.status).equal(200);
+    should(jsonBody(silent).governed).be.null();
+    // No demand was asked: the flag adds a question for the handler and refuses nobody.
+    should(decided).be.empty();
+  });
+
   it('should refuse a governed route with the guard’s own sentence and a reason code', async () => {
     // A denial that says only "forbidden" is the dead end this exists to remove: the reason code lets
     // a client tell "the operator said no" from "confirm with your passkey" without parsing prose.

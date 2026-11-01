@@ -372,6 +372,9 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
     // serve. A handler is given where the caller stands so it can ask for one more thing; it is
     // never given a way to conclude that a refused caller was allowed.
     governance = guard.governance(presentation);
+  } else if (lookup.route.consultsGrants === true) {
+    // No demand to pass, so nothing was refused: the handler asks its own question of the same standing.
+    governance = guard.governance(presentation);
   }
   const remedy = wardenRemedyOutcome(lookup.route, authentication.tokenClass, request, lookup.params, actor, remedies);
   if (remedy.kind === 'refused') return { kind: 'refused', response: remedy.response };
@@ -386,8 +389,8 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       // Present only when a warden was allowed one, so its ABSENCE means "not acting as a warden"
       // rather than "acting as one, unrecorded".
       ...(remedy.kind === 'granted' ? { wardenRemedy: remedy.grant } : {}),
-      // Present only where the route named a capability, so its ABSENCE means "the operator was never
-      // asked about this route" rather than "asked, and the answer was mislaid".
+      // Present only where the route named a capability or consults the grants itself, so its ABSENCE
+      // means "the operator was never asked about this route" rather than "asked, and the answer was mislaid".
       ...(governance === undefined ? {} : { governance }),
       presentation,
       spendStepUp: () => {

@@ -3,6 +3,7 @@ import type { AuditRecord, DaemonId, PairingCode, PushDeliveryResult, PushDevice
 import { toBase64Url } from '@ferretry/relay';
 import should from 'should';
 import { ApiDispatcher, ApiError, type ApiRoute, ApiRouter, jsonResponse } from '../../../src/lib/api/index.ts';
+import type { RouteContext } from '../../../src/lib/api/route.ts';
 import type { SocketDownstream, SocketFrame, SocketRoute } from '../../../src/lib/api/socket.ts';
 import {
   AUDIT_FOLD_WINDOW_MS,
@@ -29,6 +30,7 @@ import {
   newDeviceAlert,
   type PairedDeviceNotice,
   PushNewDeviceAlert,
+  recordHandlerAct,
   withinAuditBounds,
 } from '../../../src/lib/audit/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../src/lib/grants/index.ts';
@@ -236,6 +238,100 @@ describe('AuditLog', () => {
     should(failures).have.length(3);
     should(failures[0]).match(/device\.revoked event, so it has a gap: disk full/u);
     should(failures[2]).match(/gap: gone$/u);
+  });
+});
+
+describe('recordHandlerAct', () => {
+  /** A sink that keeps what it is told, or refuses every write with `failure`. */
+  function subsystem(failure?: unknown) {
+    const recorded: AuditEntry[] = [];
+    const failures: string[] = [];
+    return {
+      recorded,
+      failures,
+      sink: {
+        log: {
+          record: async (entry: AuditEntry) => {
+            if (failure !== undefined) throw failure;
+            recorded.push(entry);
+          },
+        },
+        failures: { auditWriteFailed: (message: string) => failures.push(message) },
+        deviceName: async () => 'Owner’s phone',
+      },
+    };
+  }
+
+  const context = (credential: RouteContext['credential']): RouteContext => ({
+    request: request({ method: 'POST', path: '/v1/sessions/s1/agenda' }),
+    params: new Map(),
+    ...(credential === undefined ? {} : { credential }),
+  });
+
+  it('should record the act as the boundary proved the caller, a paired device by its name', async () => {
+    // Arrange
+    const { recorded, failures, sink } = subsystem();
+
+    // Act
+    await recordHandlerAct(sink, context({ kind: 'authenticated', tokenClass: 'device', deviceId: 'phone' }), {
+      event: 'fleet.configured',
+      outcome: 'succeeded',
+      detail: { action: 'config-confirm', via: 'agenda' },
+    });
+
+    // Assert
+    should(recorded).deepEqual([
+      {
+        event: 'fleet.configured',
+        actor: { kind: 'device', deviceId: 'phone', deviceName: 'Owner’s phone' },
+        outcome: 'succeeded',
+        detail: { action: 'config-confirm', via: 'agenda' },
+      },
+    ]);
+    should(failures).be.empty();
+  });
+
+  it('should name a ferret’s session in the detail, and write no detail when there is none', async () => {
+    // Arrange
+    const { recorded, sink } = subsystem();
+
+    // Act
+    await recordHandlerAct(sink, context({ kind: 'authenticated', tokenClass: 'session', sessionId: 's1' }), {
+      event: 'fleet.configured',
+      outcome: 'refused',
+    });
+    await recordHandlerAct(sink, context({ kind: 'authenticated', tokenClass: 'admin' }), {
+      event: 'fleet.configured',
+      outcome: 'refused',
+    });
+
+    // Assert
+    should(recorded).deepEqual([
+      {
+        event: 'fleet.configured',
+        actor: { kind: 'host' },
+        outcome: 'refused',
+        detail: { by: 'agent', session: 's1' },
+      },
+      { event: 'fleet.configured', actor: { kind: 'host' }, outcome: 'refused' },
+    ]);
+  });
+
+  it('should say a write it could not make out loud rather than fail the request', async () => {
+    // Arrange
+    const { recorded, failures, sink } = subsystem(new Error('disk full'));
+
+    // Act
+    await recordHandlerAct(sink, context({ kind: 'authenticated', tokenClass: 'admin' }), {
+      event: 'fleet.configured',
+      outcome: 'succeeded',
+    });
+
+    // Assert
+    should(recorded).be.empty();
+    should(failures).deepEqual([
+      'the security log could not record a fleet.configured event, so it has a gap: disk full',
+    ]);
   });
 });
 
@@ -1568,7 +1664,13 @@ function socketTable(accept: SocketRoute['accept']) {
   const { journal, log, failures } = auditLog();
   const received: SocketFrame[] = [];
   const routes = AUDITED_SOCKET_ROUTES.map(
-    (rule): SocketRoute => ({ method: 'GET', path: rule.path, minimum: 'operator', caller: 'any', accept }),
+    (rule): SocketRoute => ({
+      method: 'GET',
+      path: rule.path,
+      minimum: 'operator',
+      caller: 'any',
+      accept,
+    }),
   );
   const fleetFeed: SocketRoute = {
     method: 'GET',

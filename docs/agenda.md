@@ -262,7 +262,11 @@ fy agenda add "Allow the Jev price correction?" --title "Jev price correction" \
 | an agent token (a warden, any `peer:`/`warden:` caller)      | refused `403`                                                                                                                  |
 | a caller nothing can say the grants of                       | refused `403`                                                                                                                  |
 
-The rule is the config files' own (`heldEditRefusal`, shared with `POST /v1/config/confirm`), and the state
+The rule is the config files' own (`heldEditRefusal`, shared with `POST /v1/config/confirm`): the fleet's `use`
+grant, the file's grant on `configure`, and for Allow from a governed device the passkey. Allow and Discard
+change are written to the security log as `fleet.configured` (`config-confirm` / `config-discard`,
+`via: agenda`) naming the caller — a paired device by its id — exactly as a confirmation in Settings is
+([audit.md](audit.md)); Deny changes nothing and is not recorded. The state
 machine refuses any non-owner answer to such an item a second time. A ferret may still close its own card
 unanswered (`fy agenda dismiss`). A ferret on its own session credential is always itself here, whatever
 header it sends. As for every admin-token caller WITHOUT one, telling the owner's shell from a ferret's

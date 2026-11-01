@@ -635,7 +635,11 @@ describe('the configuration files mount', () => {
       // Assert
       should(answer.status).equal(200);
       should(answer.body).deepEqual({ path: 'warden.yaml', confirmed: true });
-      should(answer.demands).deepEqual([{ capability: 'warden', axis: 'configure' }]);
+      // The fleet's `use` too, which every door on a held edit asks (heldEditRefusal).
+      should(answer.demands).deepEqual([
+        { capability: 'warden', axis: 'configure' },
+        { capability: 'fleet', axis: 'use' },
+      ]);
       should(await wardenInEffect(subject)).be.true();
       should(answer.spent).equal(1);
     });

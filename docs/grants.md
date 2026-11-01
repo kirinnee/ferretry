@@ -182,6 +182,11 @@ second copy of the route table, and a second copy is how the two stop agreeing.
 
 One consequence: agenda actions are gated by **who acts** (the human or a ferret), never by a capability.
 `POST /v1/agenda/clear-agents` is owner-only on that axis — an agent credential gets 403 — and has no grant.
+The one governed act inside the agenda is an answer that **confirms a held configuration change**
+([agenda.md](agenda.md#confirming-a-configuration-change)): it asks that file's grant, exactly as
+`POST /v1/config/confirm` does. The answer route therefore declares `consultsGrants` — no demand of its own,
+but the boundary hands the handler the caller's grant standing, so the question can be asked. A route that
+asks a grant question without one can only refuse every caller.
 
 ## Permissive by default; LOCALITY is the layer
 

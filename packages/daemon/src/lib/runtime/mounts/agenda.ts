@@ -302,6 +302,9 @@ export function agendaRoutes(
       path: '/v1/sessions/:sessionId/agenda',
       minimum: 'operator',
       caller: 'any',
+      // No capability: the board is gated by who acts (docs/grants.md). But an answer that confirms a held
+      // configuration change asks that file's grant, so the boundary hands the handler the caller's standing.
+      consultsGrants: true,
       noStore: true,
       handle: handleApply,
     },
@@ -327,6 +330,7 @@ export function agendaRoutes(
       path: '/v1/sessions/:sessionId/attention',
       minimum: 'operator',
       caller: 'any',
+      consultsGrants: true,
       noStore: true,
       legacy: true,
       handle: handleApply,

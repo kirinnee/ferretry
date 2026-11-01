@@ -15,6 +15,7 @@ import {
   AGENDA_CONFIG_CHANGED_CODE,
   type AgendaItem,
   type AgendaSnapshot,
+  type CapabilityGrants,
   type GrantRefusal,
   STEP_UP_REQUIRED_CODE,
 } from '@ferretry/protocol';
@@ -23,6 +24,13 @@ import type { AuthenticatedCredential } from '../../../../src/lib/api/authentica
 import type { CallerGovernance, CapabilityDemand } from '../../../../src/lib/api/capability.ts';
 import { ApiError } from '../../../../src/lib/api/error.ts';
 import type { ApiResponse } from '../../../../src/lib/api/http.ts';
+import {
+  ApiDispatcher,
+  ApiRouter,
+  CLIENT_HEADER,
+  SESSION_ID_HEADER,
+  type StepUpWitness,
+} from '../../../../src/lib/api/index.ts';
 import type { RouteContext } from '../../../../src/lib/api/route.ts';
 import type { AgendaService } from '../../../../src/lib/agenda/index.ts';
 import {
@@ -30,6 +38,8 @@ import {
   type ConfigDirectoryPort,
   ConfigFilesService,
 } from '../../../../src/lib/config-files/index.ts';
+import { CapabilityGrantService, DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
+import type { AuditEntry } from '../../../../src/lib/audit/index.ts';
 import { agendaRoutes } from '../../../../src/lib/runtime/mounts/agenda.ts';
 import { type AgendaConfigPort, configFilesConfirmations } from '../../../../src/lib/runtime/mounts/agenda-confirms.ts';
 import { jsonBody, request } from '../../api/support.ts';
@@ -367,7 +377,10 @@ describe('Allow on an agenda card that confirms a held configuration change', ()
 
       // Assert
       should(answer.status).equal(200);
-      should(answer.demands).deepEqual([{ capability: 'warden', axis: 'configure' }]);
+      should(answer.demands).deepEqual([
+        { capability: 'warden', axis: 'configure' },
+        { capability: 'fleet', axis: 'use' },
+      ]);
       should(answer.spent).equal(1);
       should(await investigationsOn(subject)).be.true();
       should((await board(subject)).resolved[0]?.resolutionNote).equal(
@@ -453,7 +466,7 @@ describe('Allow on an agenda card that confirms a held configuration change', ()
       should(await openItem(subject)).not.be.undefined();
     });
 
-    it('should refuse when nothing can say what the caller may do', async () => {
+    it('should refuse when nothing can say what the caller may do, naming the way to confirm it meanwhile', async () => {
       // Arrange
       const { subject } = await raised();
       const { governed: _governed, ...ungoverned } = HOST;
@@ -463,7 +476,11 @@ describe('Allow on an agenda card that confirms a held configuration change', ()
 
       // Assert
       should(answer.status).equal(403);
-      should(answer.body.code).equal('forbidden');
+      should(answer.body).deepEqual({
+        error:
+          'nothing was changed: this daemon could not check what this caller may do with warden.yaml on this route, which is a daemon bug (update it: fy daemon update); meanwhile, at the machine, fy config confirm warden.yaml confirms it',
+        code: 'forbidden',
+      });
       should(await investigationsOn(subject)).be.false();
     });
 
@@ -572,7 +589,10 @@ describe('Allow on an agenda card that confirms a held configuration change', ()
 
       // Assert
       should(answer.status).equal(200);
-      should(answer.demands).deepEqual([{ capability: 'warden', axis: 'configure' }]);
+      should(answer.demands).deepEqual([
+        { capability: 'warden', axis: 'configure' },
+        { capability: 'fleet', axis: 'use' },
+      ]);
       should(answer.spent).equal(0);
       should(subject.directory.texts.get('warden.yaml')).equal(WARDEN_OFF);
       should((await subject.config.status()).pending).be.empty();
@@ -674,6 +694,327 @@ describe('Allow on an agenda card that confirms a held configuration change', ()
 
       // Assert
       should(answer.status).equal(404);
+    });
+  });
+});
+
+/**
+ * The same answers, sent through the REAL authorization boundary with the REAL grant layer, exactly as the
+ * app (a paired device's session), `fy` (the admin token at the machine), a ferret (its own session credential)
+ * and a warden reach them.
+ *
+ * WHY THIS TIER EXISTS. Every case above hands the handler a context it built itself, so it cannot see what
+ * the boundary actually gives the agenda's routes. The agenda declares no capability of its own
+ * (docs/grants.md), and a boundary that derived the caller's grant standing only for a route that does left
+ * these answers with none: every Allow, from every caller, was refused "cannot say whether this caller may
+ * change its configuration" (&B115).
+ */
+describe('answering a confirmation card through the authorization boundary', () => {
+  const ADMIN = 'admin-secret';
+  const WARDEN = 'warden-secret';
+  /** A ferret's own session credential, as Ferretry hands one to the pane of session `s1`. */
+  const FERRET_BEARER = `fys_${'a'.repeat(43)}`;
+  const PHONE = { deviceId: 'phone', appSession: 'app-one' } as const;
+
+  interface Boundary {
+    readonly dispatcher: ApiDispatcher;
+    /** Spends recorded by the step-up witness, so a case sees one proof buy one act. */
+    readonly spentFresh: string[];
+    /** What the security log was told. */
+    readonly logged: AuditEntry[];
+  }
+
+  interface BoundaryOptions {
+    /** Whether the phone holds a passkey proved for this act. */
+    readonly fresh?: boolean;
+    /** The phone's OWN grants, as its device record holds them. */
+    readonly phoneGrants?: CapabilityGrants;
+    /** The operator's grants document cannot be read. */
+    readonly unreadableGrants?: true;
+  }
+
+  /** The production pieces: the dispatcher, the operator's grants, a step-up witness and a security log. */
+  async function boundary(subject: World, options: BoundaryOptions = {}): Promise<Boundary> {
+    const grants = new CapabilityGrantService({
+      document: {
+        read: async () => {
+          if (options.unreadableGrants === true) throw new Error('grants.json is not valid JSON');
+          return DEFAULT_CAPABILITY_GRANTS;
+        },
+        written: async () => [],
+        write: async () => undefined,
+      },
+      clock: { nowMs: () => Date.parse('2026-10-30T09:00:00.000Z') },
+      audit: { record: async () => undefined, recent: async () => ({ entries: [], unreadable: 0, truncated: false }) },
+      clientName: 'fy',
+    });
+    // A refresh that fails leaves the grants undetermined, exactly as at boot.
+    await grants.refresh().catch(() => undefined);
+    let fresh = options.fresh === true;
+    const spentFresh: string[] = [];
+    const stepUps: StepUpWitness = {
+      held: () => true,
+      freshlyHeld: () => fresh,
+      spendFresh: device => {
+        spentFresh.push(device.deviceId);
+        fresh = false;
+      },
+    };
+    const logged: AuditEntry[] = [];
+    const audit = {
+      log: {
+        record: async (entry: AuditEntry) => {
+          logged.push(entry);
+        },
+      },
+      failures: { auditWriteFailed: () => undefined },
+      deviceName: async () => 'Owner’s phone',
+    };
+    const routes = agendaRoutes(
+      subject.attention,
+      { agendaDelivered: async () => 0, enrolledDevices: async () => 1 },
+      NO_HELD_REPLIES,
+      configFilesConfirmations(subject.config, audit),
+    );
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter(routes),
+      {
+        admin: ADMIN,
+        warden: WARDEN,
+        sessions: {
+          resolve: async capability => (capability === FERRET_BEARER ? { sessionId: 's1' } : undefined),
+        },
+        devices: {
+          has: deviceId => deviceId === PHONE.deviceId,
+          grants: () => options.phoneGrants ?? DEFAULT_CAPABILITY_GRANTS,
+        },
+      },
+      grants,
+      undefined,
+      stepUps,
+    );
+    return { dispatcher, spentFresh, logged };
+  }
+
+  type Sender = 'owner-at-machine' | 'paired-phone' | 'ferret-cli' | 'ferret-session' | 'warden';
+
+  async function send(on: Boundary, sender: Sender, body: unknown, path = '/v1/sessions/s1/agenda') {
+    const base = { method: 'POST', path, body: JSON.stringify(body) } as const;
+    const json = { 'content-type': 'application/json' };
+    const onHost = (bearer: string, more: Readonly<Record<string, string>> = {}) =>
+      request({
+        ...base,
+        loopback: true,
+        privilegedLoopback: true,
+        headers: { ...json, authorization: `Bearer ${bearer}`, ...more },
+      });
+    const asked =
+      sender === 'paired-phone'
+        ? request({ ...base, headers: json, device: PHONE })
+        : sender === 'owner-at-machine'
+          ? onHost(ADMIN, { [CLIENT_HEADER]: 'cli' })
+          : sender === 'ferret-cli'
+            ? onHost(ADMIN, { [CLIENT_HEADER]: 'cli', [SESSION_ID_HEADER]: 's1' })
+            : sender === 'ferret-session'
+              ? onHost(FERRET_BEARER)
+              : onHost(WARDEN);
+    const response = await on.dispatcher.dispatch(asked);
+    return { status: response.status, body: jsonBody(response) };
+  }
+
+  /** A held loosening of warden.yaml and the ferret's card for it, raised through the boundary. */
+  async function raisedThrough(
+    options: BoundaryOptions = {},
+  ): Promise<{ readonly subject: World; readonly on: Boundary }> {
+    const subject = await world();
+    await holdLoosening(subject);
+    const on = await boundary(subject, options);
+    should((await send(on, 'ferret-session', RAISE)).status).equal(200);
+    return { subject, on };
+  }
+
+  describe('the owner', () => {
+    it('should put the held change into effect on Allow at the machine, and record it as the host', async () => {
+      // Arrange
+      const { subject, on } = await raisedThrough();
+
+      // Act
+      const answer = await send(on, 'owner-at-machine', choose('Allow'));
+
+      // Assert
+      should(answer.status).equal(200);
+      should(await investigationsOn(subject)).be.true();
+      should((await board(subject)).resolved[0]?.resolutionNote).equal(
+        'confirmed warden.yaml: the change is in effect',
+      );
+      should(on.logged).deepEqual([
+        {
+          event: 'fleet.configured',
+          actor: { kind: 'host' },
+          outcome: 'succeeded',
+          detail: { action: 'config-confirm', via: 'agenda' },
+        },
+      ]);
+    });
+
+    it('should put it into effect on Allow from a paired phone that proved its passkey, spend that proof, and log the phone', async () => {
+      // Arrange
+      const { subject, on } = await raisedThrough({ fresh: true });
+
+      // Act
+      const answer = await send(on, 'paired-phone', choose('Allow'));
+
+      // Assert
+      should(answer.status).equal(200);
+      should(await investigationsOn(subject)).be.true();
+      should(on.spentFresh).deepEqual(['phone']);
+      should(on.logged).deepEqual([
+        {
+          event: 'fleet.configured',
+          actor: { kind: 'device', deviceId: 'phone', deviceName: 'Owner’s phone' },
+          outcome: 'succeeded',
+          detail: { action: 'config-confirm', via: 'agenda' },
+        },
+      ]);
+    });
+
+    it('should ask a paired phone for its passkey for this act, so the app can prompt and resend, and log the refusal', async () => {
+      // Arrange
+      const { subject, on } = await raisedThrough();
+
+      // Act
+      const answer = await send(on, 'paired-phone', choose('Allow'), '/v1/sessions/s1/attention');
+
+      // Assert
+      should(answer.status).equal(403);
+      should(answer.body).deepEqual({
+        error: 'putting this change to warden.yaml into effect needs a passkey confirmation for it',
+        code: STEP_UP_REQUIRED_CODE,
+        demand: { capability: 'warden', axis: 'configure', act: 'loosen-config' },
+      });
+      should(await investigationsOn(subject)).be.false();
+      should(await openItem(subject)).not.be.undefined();
+      should(on.logged.map(entry => [entry.outcome, entry.detail?.action])).deepEqual([['refused', 'config-confirm']]);
+    });
+
+    it('should put the file back on Discard change from a paired phone, asking no passkey for the act, and log it', async () => {
+      // Arrange
+      const { subject, on } = await raisedThrough();
+
+      // Act
+      const answer = await send(on, 'paired-phone', choose('Discard change'));
+
+      // Assert
+      should(answer.status).equal(200);
+      should(subject.directory.texts.get('warden.yaml')).equal(WARDEN_OFF);
+      should(await investigationsOn(subject)).be.false();
+      should(on.logged.map(entry => [entry.outcome, entry.detail?.action])).deepEqual([
+        ['succeeded', 'config-discard'],
+      ]);
+    });
+
+    it('should log nothing for Deny, which changes nothing', async () => {
+      // Arrange
+      const { subject, on } = await raisedThrough({ fresh: true });
+
+      // Act
+      const answer = await send(on, 'paired-phone', choose('Deny'));
+
+      // Assert
+      should(answer.status).equal(200);
+      should(await investigationsOn(subject)).be.false();
+      should(on.logged).be.empty();
+    });
+  });
+
+  describe('a phone the grants narrow', () => {
+    it('should refuse a phone whose own grants keep it from configuring the Warden, even with a passkey', async () => {
+      // Arrange
+      const { subject, on } = await raisedThrough({
+        fresh: true,
+        phoneGrants: { ...DEFAULT_CAPABILITY_GRANTS, warden: { use: true, configure: false } },
+      });
+
+      // Act
+      const answer = await send(on, 'paired-phone', choose('Allow'));
+
+      // Assert
+      should(answer.status).equal(403);
+      should(answer.body).deepEqual({
+        error: 'this device may not change warden.yaml',
+        code: 'grant_device_not_granted',
+      });
+      should(await investigationsOn(subject)).be.false();
+      should(on.spentFresh).be.empty();
+    });
+
+    it('should refuse a phone kept off the agent fleet, as POST /v1/config/confirm does', async () => {
+      // Arrange — warden.yaml asks the Warden's grant, which this phone holds; the fleet's is what it lacks.
+      const { subject, on } = await raisedThrough({
+        fresh: true,
+        phoneGrants: { ...DEFAULT_CAPABILITY_GRANTS, fleet: { use: false, configure: false } },
+      });
+
+      // Act
+      const answer = await send(on, 'paired-phone', choose('Allow'));
+
+      // Assert
+      should(answer.status).equal(403);
+      should(answer.body).deepEqual({
+        error: 'this device may not use the agent fleet, so it may not change warden.yaml',
+        code: 'grant_device_not_granted',
+      });
+      should(await investigationsOn(subject)).be.false();
+    });
+
+    it('should refuse a phone when the grants document cannot be read', async () => {
+      // Arrange
+      const { subject, on } = await raisedThrough({ fresh: true, unreadableGrants: true });
+
+      // Act
+      const answer = await send(on, 'paired-phone', choose('Allow'));
+
+      // Assert
+      should(answer.status).equal(403);
+      should(answer.body.code).equal('grant_undetermined');
+      should(await investigationsOn(subject)).be.false();
+      should(await openItem(subject)).not.be.undefined();
+    });
+  });
+
+  describe('a ferret or a warden can never confirm', () => {
+    for (const sender of ['ferret-cli', 'ferret-session'] as const) {
+      it(`should refuse the ferret’s own Allow (${sender}), touching neither the file nor the card`, async () => {
+        // Arrange
+        const { subject, on } = await raisedThrough();
+
+        // Act
+        const answer = await send(on, sender, choose('Allow'));
+
+        // Assert
+        should(answer.status).equal(403);
+        should(answer.body).deepEqual({
+          error: 'only the owner answers A1: it decides a change to warden.yaml, and a ferret never confirms one',
+          code: 'forbidden',
+        });
+        should(await investigationsOn(subject)).be.false();
+        should(await openItem(subject)).not.be.undefined();
+        should(on.logged).be.empty();
+      });
+    }
+
+    it('should refuse a warden’s Allow, touching neither the file nor the card', async () => {
+      // Arrange
+      const { subject, on } = await raisedThrough();
+
+      // Act
+      const answer = await send(on, 'warden', choose('Allow'));
+
+      // Assert
+      should(answer.status).equal(403);
+      should(await investigationsOn(subject)).be.false();
+      should(await openItem(subject)).not.be.undefined();
+      should(on.logged).be.empty();
     });
   });
 });

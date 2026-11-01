@@ -674,7 +674,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
           subsystems.attention,
           subsystems.notifications,
           subsystems.agendaReplies,
-          configFilesConfirmations(subsystems.configFiles.service),
+          configFilesConfirmations(subsystems.configFiles.service, subsystems.audit),
         ),
         ...agendaClearRoutes(subsystems.agendaClearer),
         ...pinRoutes(subsystems.pins),

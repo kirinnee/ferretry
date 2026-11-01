@@ -106,8 +106,16 @@ function refusedFor(context: RouteContext, path: string, axis: 'use' | 'configur
   const capability = configFileCapability(addressOf(path));
   const governance = context.governance;
   if (governance === undefined) {
+    // A wiring mistake, never the caller's: the route that reached here has no grant standing to read
+    // (`ScopedRoute.consultsGrants`). Refused, and the person is told what still works.
     return jsonResponse(
-      { error: 'this daemon cannot say whether this caller may change its configuration', code: 'forbidden' },
+      {
+        error:
+          axis === 'use'
+            ? `this daemon could not check whether this caller may read ${path} on this route, which is a daemon bug (update it: fy daemon update)`
+            : `nothing was changed: this daemon could not check what this caller may do with ${path} on this route, which is a daemon bug (update it: fy daemon update); meanwhile, at the machine, fy config confirm ${path} confirms it`,
+        code: 'forbidden',
+      },
       403,
     );
   }
@@ -119,6 +127,23 @@ function refusedFor(context: RouteContext, path: string, axis: 'use' | 'configur
   return jsonResponse(
     {
       error: `this device may not ${axis === 'use' ? 'read' : 'change'} ${path}`,
+      code: grantRefusalCode(decision.refusal),
+    },
+    403,
+  );
+}
+
+/**
+ * The fleet's `use` grant, which every configuration route demands at the boundary. For a fleet file the file's own
+ * `configure` question already implies it; for `warden.yaml` it does not, so a device the owner kept off the fleet is
+ * refused at every door. Asked only after `refusedFor`, which has refused a caller with no standing.
+ */
+function refusedFleetUse(context: RouteContext, path: string): ApiResponse | undefined {
+  const decision = context.governance?.decide(USE);
+  if (decision === undefined || decision.allowed) return undefined;
+  return jsonResponse(
+    {
+      error: `this device may not use the agent fleet, so it may not change ${path}`,
       code: grantRefusalCode(decision.refusal),
     },
     403,
@@ -176,8 +201,9 @@ async function put(subsystem: ConfigFilesSubsystem, context: RouteContext): Prom
 }
 
 /**
- * Whether this caller may act on a HELD edit to `path` as the owner (docs/config-files.md): the file's
- * capability on `configure`, never an agent, and — to put the edit into effect (`act: 'confirm'`) — from a
+ * Whether this caller may act on a HELD edit to `path` as the owner (docs/config-files.md): the fleet on `use`
+ * (what `POST /v1/config/confirm` demands at the boundary, asked here too so a door that demands nothing of its
+ * own asks it as well), the file's capability on `configure`, never an agent, and — to put the edit into effect (`act: 'confirm'`) — from a
  * governed device a passkey proved for this act (`loosen-config`). Dropping a held edit (`act: 'discard'`)
  * only tightens, so it asks no more than `configure`. Answers a refusal, or `undefined` when allowed; an
  * agent is refused by throwing. Shared by `POST /v1/config/confirm` and the agenda's Allow
@@ -188,7 +214,7 @@ export function heldEditRefusal(
   path: string,
   act: 'confirm' | 'discard',
 ): ApiResponse | undefined {
-  const refused = refusedFor(context, path, 'configure');
+  const refused = refusedFor(context, path, 'configure') ?? refusedFleetUse(context, path);
   if (refused !== undefined) return refused;
   if (isAgentCaller(context)) {
     throw new ApiError(403, 'an agent cannot confirm a configuration change; the owner confirms it', 'forbidden');
