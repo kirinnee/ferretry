@@ -231,6 +231,36 @@ describe('rendering lanes', () => {
     should(renderLaneChange({ ...base, agenda: 'failed' }, 'Ferretry')).match(/tell the owner yourself/u);
   });
 
+  it('should say a ferret’s waiting change is not the board’s lanes yet, and that nothing changed', () => {
+    // Arrange
+    const live = laneSet({ confirmedBy: 'owner' });
+    const waiting = {
+      ...live,
+      pending: {
+        version: live.version + 1,
+        baseVersion: live.version,
+        proposedBy: 'koen',
+        lanes: live.lanes.filter(lane => lane.id !== 'plan'),
+        variants: {},
+        doneLane: live.doneLane,
+        notGoodLane: live.notGoodLane,
+        relocate: { plan: 'todo' },
+      },
+    };
+
+    // Act
+    const shown = renderLaneSet(waiting, 'Ferretry');
+    const raised = renderLaneChange({ laneSet: waiting, agenda: 'raised' }, 'Ferretry');
+
+    // Assert
+    should(shown)
+      .match(/plan\tPlan\/Design/u)
+      .and.match(/Proposed by koen, waiting for the owner \(version 4\): Todo → /u)
+      .and.match(/The lanes above stay until the owner accepts/u);
+    should(raised).match(/Nothing on the board changed: your lanes wait for the owner/u);
+    should(renderLaneSet(live, 'Ferretry')).not.match(/waiting for the owner/u);
+  });
+
   it('should render a board that has lanes', () => {
     should(renderBoardLanes(project(), 'fy')).match(/Ferretry lanes, version 3/u);
   });

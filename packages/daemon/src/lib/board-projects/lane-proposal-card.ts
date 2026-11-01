@@ -12,8 +12,12 @@ import {
   type BoardProjectId,
   clipAtWord,
   LANE_PROPOSAL_ANSWERS,
+  type Lane,
+  laneStage,
   type LaneSet,
+  MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_SUBJECT_LENGTH,
+  type PendingLaneSet,
   parseLaneProposalReference,
   type ResolvedAgendaItem,
 } from '@ferretry/protocol';
@@ -48,6 +52,59 @@ export const laneProposalCard = (projectName: string, laneSet: LaneSet): LanePro
     howToResolve:
       'Choose Accept to keep the lanes. Choose Edit to change them in the Board lane editor, which confirms them when you save.',
   };
+};
+
+/**
+ * The card a ferret's change to lanes the project already has raises (`docs/board.md` § A ferret's lane change
+ * waits for the owner): the proposed lanes, what they would do that only the owner may decide
+ * ({@link laneChangeWarnings}), and that NOTHING changes until the owner accepts.
+ */
+export const laneChangeCard = (projectName: string, live: LaneSet, pending: PendingLaneSet): LaneProposalCard => {
+  const accept = { label: LANE_PROPOSAL_ANSWERS.accept, description: 'Switch the board to these lanes' };
+  const edit = {
+    label: LANE_PROPOSAL_ANSWERS.edit,
+    description: 'Change them in the Board lane editor (Board, then this project, then Lanes)',
+  };
+  const path = pending.lanes.map(lane => lane.name).join(' → ');
+  const warnings = laneChangeWarnings(live, pending);
+  const said = warnings.length === 0 ? '' : ` It would: ${warnings.join('; ')}.`;
+  return {
+    subject: clipAtWord(`Lanes for ${projectName}: ${path}`, MAX_AGENDA_SUBJECT_LENGTH),
+    title: clipAtWord(`Lanes for ${projectName}`, 60),
+    kind: 'choice',
+    ask: { kind: 'multiple-choice', options: [accept, edit] },
+    answers: [
+      { direction: 'right', does: 'choose', ...accept },
+      { direction: 'left', does: 'choose', ...edit },
+    ],
+    why: clipAtWord(
+      `${pending.proposedBy} proposes new lanes for ${projectName}. The board keeps its lanes until you accept.${said}`,
+      MAX_AGENDA_DETAIL_LENGTH,
+    ),
+    howToResolve:
+      'Choose Accept to switch the board to these lanes; any cards they move, move then. Choose Edit to change them in the Board lane editor; the board keeps its lanes until you save.',
+  };
+};
+
+const isGate = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
+
+/**
+ * What a proposal would do that is the owner's to decide, in the owner's words: each lane it removes and where
+ * that lane's cards go, and each gate that would stop waiting for the owner. Empty when it does neither.
+ */
+export const laneChangeWarnings = (live: Pick<LaneSet, 'lanes'>, pending: PendingLaneSet): readonly string[] => {
+  const name = (id: string): string => pending.lanes.find(lane => lane.id === id)?.name ?? id;
+  const warnings: string[] = [];
+  for (const lane of live.lanes) {
+    const kept = pending.lanes.find(candidate => candidate.id === lane.id);
+    const to = pending.relocate[lane.id];
+    if (kept === undefined) {
+      warnings.push(to === undefined ? `remove ${lane.name}` : `remove ${lane.name} and move its cards to ${name(to)}`);
+    } else if (isGate(lane) && !isGate(kept)) {
+      warnings.push(`make ${lane.name} stop waiting for you`);
+    }
+  }
+  return warnings;
 };
 
 /**

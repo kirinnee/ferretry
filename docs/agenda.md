@@ -248,8 +248,11 @@ A ferret that works in a project with no lanes runs `fy board lanes propose --te
 The daemon stores the set at once (unconfirmed, live) and raises **one** choice on the proposer's agenda,
 `Lanes for <project>: A → B → … · Accept / Edit`, with `source: 'task'` and the stable `sourceRef`
 `lanes:<projectId>:<version>`, so proposing the same version twice is one card. **Accept** confirms the set
-as the owner; **Edit** points at the Board lane editor. A ferret's own edit leaves a set unconfirmed, an
-owner's edit confirms it. The routes are `GET /v1/board/projects` and `GET|POST /v1/board/projects/:projectId/lanes`.
+as the owner; **Edit** points at the Board lane editor. A ferret's change to lanes a project already has is NOT
+live: it waits beside them as the set's pending proposal, and its card, keyed by the proposal's own version, says
+the board keeps its lanes until the owner accepts and what the change would do (lanes removed and where their
+cards go, gates that stop waiting). Only a person's Accept takes it live, and only then do its cards move, as the
+owner's ([board.md](board.md#a-ferrets-lane-change-waits-for-the-owner)). An owner's edit confirms at once. The routes are `GET /v1/board/projects` and `GET|POST /v1/board/projects/:projectId/lanes`.
 If the card cannot be raised the set stays live and the response says `agenda: "failed"`.
 
 ## Reserved sourceRefs

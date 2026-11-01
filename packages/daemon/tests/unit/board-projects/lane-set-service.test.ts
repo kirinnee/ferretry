@@ -18,6 +18,7 @@ import {
   type LaneSetStore,
   mergeReleaseLanes,
   RELEASE_MERGE_REASON,
+  type RelocationAuthority,
   UNFILED_PROJECT_NAME,
 } from '../../../src/lib/board-projects/index.ts';
 import { lanes, oldQuickLanes, templateLanes } from '../board/support.ts';
@@ -50,8 +51,15 @@ class Agenda implements LaneProposalAgenda {
 class Relocator implements CardRelocator {
   readonly moves: Array<readonly [string, Readonly<Record<string, string>>]> = [];
   readonly reasons: Array<string | undefined> = [];
-  async relocate(projectId: BoardProjectId, moves: Readonly<Record<string, string>>, reason?: string): Promise<void> {
+  readonly authorities: RelocationAuthority[] = [];
+  async relocate(
+    projectId: BoardProjectId,
+    moves: Readonly<Record<string, string>>,
+    by: RelocationAuthority,
+    reason?: string,
+  ): Promise<void> {
     this.moves.push([projectId, moves]);
+    this.authorities.push(by);
     this.reasons.push(reason);
   }
 }
@@ -179,6 +187,19 @@ describe('LaneSetService.apply', () => {
       laneSet: { version: 2, confirmedBy: 'owner' },
     });
     should(relocator.moves).deepEqual([[UNFILED_PROJECT_ID, { doing: 'todo' }]]);
+    should(relocator.authorities).deepEqual([{ kind: 'owner' }]);
+  });
+
+  it('should move the cards of an owner edit on the admin token as the token', async () => {
+    const { service, relocator } = world();
+
+    await service.apply(
+      UNFILED_PROJECT_ID,
+      { action: 'edit', version: 1, layout: withoutDoing(), relocate: { doing: 'todo' } },
+      { kind: 'owner', via: 'admin-token' },
+    );
+
+    should(relocator.authorities).deepEqual([{ kind: 'owner', via: 'admin-token' }]);
   });
 
   it('should not call the relocator when an edit removes nothing', async () => {
@@ -193,8 +214,8 @@ describe('LaneSetService.apply', () => {
     should(relocator.moves).deepEqual([]);
   });
 
-  it('should raise a choice for a ferret edit, which leaves the set unconfirmed', async () => {
-    const { service, agenda } = world();
+  it('should raise a choice for a ferret edit, which waits for the owner while the lanes stay', async () => {
+    const { service, agenda, store } = world();
 
     const actual = await service.apply(
       UNFILED_PROJECT_ID,
@@ -203,7 +224,44 @@ describe('LaneSetService.apply', () => {
     );
 
     should(actual.ok && actual.value.agenda).equal('raised');
-    should(agenda.raised.length).equal(1);
+    should(agenda.raised.map(([, reference]) => reference)).deepEqual([`lanes:${UNFILED_PROJECT_ID}:2`]);
+    should(store.sets.get(UNFILED_PROJECT_ID)).containDeep({
+      version: 1,
+      confirmedBy: 'owner',
+      pending: { version: 2 },
+    });
+  });
+
+  it('should store a ferret’s edit of lanes the project has as a proposal: no lane changes and no card moves', async () => {
+    // Arrange: Released · to test removed and its cards sent to Closed (exploit b).
+    const { service, agenda, store, relocator } = world();
+    const live: LaneSet = { ...templateLanes(FERRETRY_ID), version: 3 };
+    store.sets.set(FERRETRY_ID, live);
+    const layout: LaneLayoutValue = {
+      lanes: live.lanes.filter(lane => lane.id !== 'released'),
+      variants: Object.fromEntries(
+        Object.entries(live.variants).map(([workflow, ids]) => [workflow, (ids ?? []).filter(id => id !== 'released')]),
+      ),
+    };
+
+    // Act
+    const actual = await service.apply(
+      FERRETRY_ID,
+      { action: 'edit', version: 3, layout, relocate: { released: 'closed' } },
+      FERRET,
+    );
+
+    // Assert
+    should(actual.ok && actual.value.agenda).equal('raised');
+    should(relocator.moves).deepEqual([]);
+    const { pending, ...stored } = store.sets.get(FERRETRY_ID) ?? live;
+    should(stored).deepEqual(live);
+    should(pending).containDeep({ version: 4, baseVersion: 3, proposedBy: 'koen', relocate: { released: 'closed' } });
+    should(agenda.raised.map(([session, reference]) => [session, reference])).deepEqual([
+      ['ms8-abcd1234', `lanes:${FERRETRY_ID}:4`],
+    ]);
+    should(agenda.raised[0]?.[2].why).containEql('move its cards to Closed');
+    should(agenda.raised[0]?.[2].why).containEql('keeps its lanes until you accept');
   });
 
   it('should refuse a confirm by a ferret and accept one by the owner', async () => {
@@ -222,6 +280,69 @@ describe('LaneSetService.apply', () => {
 });
 
 describe('LaneSetService.acceptProposal', () => {
+  /** A ferret's waiting proposal on Ferretry's live lanes: Released · to test removed, its cards to Merged. */
+  const waiting = async () => {
+    const parts = world();
+    const live: LaneSet = { ...templateLanes(FERRETRY_ID), version: 3 };
+    parts.store.sets.set(FERRETRY_ID, live);
+    const layout: LaneLayoutValue = {
+      lanes: live.lanes.filter(lane => lane.id !== 'released'),
+      variants: Object.fromEntries(
+        Object.entries(live.variants).map(([workflow, ids]) => [workflow, (ids ?? []).filter(id => id !== 'released')]),
+      ),
+    };
+    await parts.service.apply(
+      FERRETRY_ID,
+      { action: 'edit', version: 3, layout, relocate: { released: 'merged' } },
+      FERRET,
+    );
+    return { ...parts, live, layout };
+  };
+
+  it('should make the waiting proposal live and only then move its cards, as the owner', async () => {
+    const { service, store, relocator } = await waiting();
+
+    should(await service.acceptProposal(FERRETRY_ID, 4)).be.true();
+
+    should(store.sets.get(FERRETRY_ID)).containDeep({ version: 4, confirmedBy: 'owner', proposedBy: 'koen' });
+    should(store.sets.get(FERRETRY_ID)?.pending).be.undefined();
+    should(store.sets.get(FERRETRY_ID)?.lanes.some(lane => lane.id === 'released')).be.false();
+    should(relocator.moves).deepEqual([[FERRETRY_ID, { released: 'merged' }]]);
+    should(relocator.authorities).deepEqual([{ kind: 'owner' }]);
+  });
+
+  it('should take the owner’s confirm from the lane editor the same way', async () => {
+    const { service, store, relocator } = await waiting();
+
+    const actual = await service.apply(FERRETRY_ID, { action: 'confirm', version: 4 }, OWNER);
+
+    should(actual.ok && actual.value).containDeep({
+      agenda: 'not-needed',
+      laneSet: { version: 4, confirmedBy: 'owner' },
+    });
+    should(store.sets.get(FERRETRY_ID)?.pending).be.undefined();
+    should(relocator.authorities).deepEqual([{ kind: 'owner' }]);
+  });
+
+  it('should accept nothing for the card of a proposal a newer one replaced, or one the owner’s edit dropped', async () => {
+    // Arrange
+    const { service, store, relocator, live, layout } = await waiting();
+    await service.apply(
+      FERRETRY_ID,
+      { action: 'edit', version: 3, layout, relocate: { released: 'implement' } },
+      FERRET,
+    );
+
+    // Act + Assert: the first card (4) names nothing now; the second (5) is waiting.
+    should(await service.acceptProposal(FERRETRY_ID, 4)).be.false();
+    should(store.sets.get(FERRETRY_ID)?.pending?.version).equal(5);
+    await service.apply(FERRETRY_ID, { action: 'edit', version: 3, layout: live, relocate: {} }, OWNER);
+    should(await service.acceptProposal(FERRETRY_ID, 5)).be.false();
+    should(store.sets.get(FERRETRY_ID)).containDeep({ version: 6, confirmedBy: 'owner' });
+    should(store.sets.get(FERRETRY_ID)?.lanes.some(lane => lane.id === 'released')).be.true();
+    should(relocator.moves).deepEqual([]);
+  });
+
   it('should confirm the proposed version', async () => {
     const { service, store } = world();
     await service.apply(FERRETRY_ID, propose(), FERRET);
@@ -260,6 +381,7 @@ describe('LaneSetService merges Released and To test at boot', () => {
     should(RELEASE_MERGE_REASON).equal('Released and To test are one lane now: Released · to test');
     should(store.sets.get(FERRETRY_ID)?.lanes.some(lane => lane.id === 'tested')).be.false();
     should(store.sets.get(FERRETRY_ID)?.confirmedBy).equal('owner');
+    should(relocator.authorities).deepEqual([{ kind: 'daemon' }, { kind: 'daemon' }]);
     should(store.sets.get(DOCS_ID)?.version).equal(1);
   });
 

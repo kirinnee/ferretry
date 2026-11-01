@@ -461,6 +461,48 @@ describe('an unconfirmed set', () => {
   });
 });
 
+describe('a ferret’s change waiting for the owner', () => {
+  const waiting = (): LaneSet => {
+    const live = laneSetFor();
+    return {
+      ...live,
+      pending: {
+        version: live.version + 1,
+        baseVersion: live.version,
+        proposedBy: 'mvuc7tsf-0c3d50df',
+        lanes: live.lanes.map(lane => (lane.id === 'implement' ? { ...lane, name: 'Build' } : lane)),
+        variants: live.variants,
+        doneLane: live.doneLane,
+        notGoodLane: live.notGoodLane,
+        relocate: {},
+      },
+    };
+  };
+
+  it('says who proposed it, that the board keeps its lanes, and accepts the proposal by its own version', async () => {
+    // Arrange
+    const actions = recorder();
+    const view = await show(editor(waiting(), actions));
+
+    // Act
+    const banner = must(view.container.querySelector('[data-lane-banner="pending"]'), 'the banner');
+    await click(must(banner.querySelector('button'), 'Accept'));
+
+    // Assert
+    expect(banner.textContent).toContain('Proposed by Denisha, waiting for you');
+    expect(banner.textContent).toContain('Build');
+    expect(banner.textContent).toContain('the board keeps the lanes below until you accept');
+    expect(view.container.querySelector('[data-lane-banner="unconfirmed"]')).toBeNull();
+    expect(actions.calls).toEqual([{ accept: 2, projectId: PROJECT }]);
+  });
+
+  it('shows no banner when nothing waits', async () => {
+    const view = await show(editor(laneSetFor()));
+
+    expect(view.container.querySelector('[data-lane-banner="pending"]')).toBeNull();
+  });
+});
+
 describe('a refused write', () => {
   it('says what happened and offers Reload when the lanes moved on', async () => {
     // Arrange

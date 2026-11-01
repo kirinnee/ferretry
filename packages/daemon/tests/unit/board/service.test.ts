@@ -1821,6 +1821,37 @@ describe("relocating a removed lane's cards", () => {
     should(store.writes).eql([]);
   });
 
+  it('should never close a card on the daemon’s relocation, and say so', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ id: 'F1', laneId: 'tested' }), card({ id: 'F2', laneId: 'plan' })]);
+
+    // Act
+    const moved = await service.relocate(PROJECT, { tested: 'closed', plan: 'implement' });
+
+    // Assert
+    should(moved).eql(['F2']);
+    should(stored(ports, 'F1').laneId).equal('tested');
+    should(
+      ports.warnings.some(warning => warning.includes('F1 in tested') && warning.includes('only the owner')),
+    ).be.true();
+  });
+
+  it('should move the cards of the owner’s relocation as the owner’s, closing them when it says so', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ id: 'F1', laneId: 'tested' }), card({ id: 'F2', laneId: 'plan' })]);
+
+    // Act
+    const moved = await service.relocate(PROJECT, { tested: 'closed' }, undefined, { kind: 'owner' });
+    await service.relocate(PROJECT, { plan: 'implement' }, undefined, { kind: 'owner', via: 'admin-token' });
+
+    // Assert
+    should(moved).eql(['F1']);
+    should(stored(ports, 'F1').laneId).equal('closed');
+    should(lastEvent(ports, 'F1')).match({ type: 'moved', to: 'closed', actor: { kind: 'owner' } });
+    should(lastEvent(ports, 'F1')).not.have.property('actorVia');
+    should(lastEvent(ports, 'F2')).match({ actor: { kind: 'owner' }, actorVia: 'admin-token' });
+  });
+
   it('should skip a card that vanished and a relocation onto its own lane', async () => {
     // Arrange
     const store = new MemoryBoardStore([card({ id: 'F1', laneId: 'plan' }), card({ id: 'F2', laneId: 'review' })]);

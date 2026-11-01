@@ -487,9 +487,37 @@ const withDerivedTargets = (value: unknown): unknown => {
 };
 
 /**
+ * A ferret's lanes WAITING FOR THE OWNER (`docs/board.md` § A ferret's lane change waits for the owner): stored
+ * beside the live set and never read as the board's lanes, so no card moves and no gate changes until the owner
+ * accepts it. `version` is the number the set takes when it is accepted and the key of its agenda card; it is
+ * above every number the set has had, so an Accept of an older card never names it. `baseVersion` is the live
+ * set it was made against: an accept once the live set moved on is a version conflict. `relocate` is where the
+ * cards of the lanes it removes go, moved only when it goes live, as the owner.
+ */
+export const PendingLaneSetSchema = z
+  .object({
+    version: PositiveIntegerSchema,
+    baseVersion: PositiveIntegerSchema,
+    proposedBy: z.string().min(1),
+    lanes: LaneLayoutShape.lanes,
+    variants: LaneLayoutShape.variants,
+    ...LaneTargetsShape,
+    relocate: z.partialRecord(LaneIdSchema, LaneIdSchema),
+  })
+  .superRefine((value, context) => {
+    refineLaneLayout(value, context);
+    if (value.version <= value.baseVersion) {
+      context.addIssue({ code: 'custom', message: 'a proposal is numbered above its live set', path: ['version'] });
+    }
+  });
+export type PendingLaneSet = z.infer<typeof PendingLaneSetSchema>;
+
+/**
  * A project's lanes. `version` rises with every edit, so an edit can say which set it was made against.
  * `confirmedBy` is `null` while the set is a proposal: live, but not yet accepted by the owner. `doneLane`
  * and `notGoodLane` are always there once parsed: a set from before them gets {@link defaultLaneTargets}.
+ * `pending` is a ferret's change to it, waiting for the owner ({@link PendingLaneSetSchema}); an app or a
+ * daemon that predates it reads the live set and drops it.
  */
 export const LaneSetSchema = z.preprocess(
   withDerivedTargets,
@@ -503,8 +531,18 @@ export const LaneSetSchema = z.preprocess(
       proposedBy: z.string().min(1),
       ...LaneLayoutShape,
       ...LaneTargetsShape,
+      pending: PendingLaneSetSchema.optional(),
     })
-    .superRefine(refineLaneLayout),
+    .superRefine((value, context) => {
+      refineLaneLayout(value, context);
+      if (value.pending !== undefined && value.pending.version <= value.version) {
+        context.addIssue({
+          code: 'custom',
+          message: 'a waiting proposal is numbered above the live set',
+          path: ['pending', 'version'],
+        });
+      }
+    }),
 );
 export type LaneSet = z.infer<typeof LaneSetSchema>;
 

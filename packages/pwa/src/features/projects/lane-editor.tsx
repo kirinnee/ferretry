@@ -359,6 +359,8 @@ function LaneSetEditor({
   const problems = useMemo(() => draftProblems(laneSet, draft), [laneSet, draft]);
   const changed = draftChanged(laneSet, draft);
   const proposed = laneSet.confirmedBy === null;
+  // A ferret's change to these lanes, waiting for the owner: not the board's lanes until it is accepted.
+  const { pending } = laneSet;
 
   const change = (next: LaneDraft) => {
     setFailure(null);
@@ -388,6 +390,31 @@ function LaneSetEditor({
             disabled={busy || changed}
             title={changed ? 'Save or discard your edits first' : undefined}
             onClick={() => void run(() => actions.acceptLanes(daemonId, project.id, laneSet.version))}
+          >
+            Accept
+          </button>
+        </section>
+      )}
+
+      {pending !== undefined && (
+        <section
+          className="flex flex-wrap items-center justify-between gap-sm rounded-control border border-border-strong bg-surface-2 p-control-x"
+          role="status"
+          data-lane-banner="pending"
+        >
+          <span className="grid gap-xs">
+            <span className="text-ui text-fg">Proposed by {names(pending.proposedBy)}, waiting for you</span>
+            <span className="text-meta text-muted">
+              {pending.lanes.map(lane => lane.name).join(' → ')} · the board keeps the lanes below until you accept
+            </span>
+          </span>
+          <button
+            className="kt-btn kt-btn--sm"
+            data-variant="primary"
+            type="button"
+            disabled={busy || changed}
+            title={changed ? 'Save or discard your edits first' : undefined}
+            onClick={() => void run(() => actions.acceptLanes(daemonId, project.id, pending.version))}
           >
             Accept
           </button>
@@ -523,7 +550,7 @@ export function LaneEditor({
   }
   return (
     <LaneSetEditor
-      key={`${project.id}:${String(project.laneSet.version)}:${String(project.laneSet.confirmedBy)}`}
+      key={`${project.id}:${String(project.laneSet.version)}:${String(project.laneSet.confirmedBy)}:${String(project.laneSet.pending?.version ?? 0)}`}
       project={project}
       laneSet={project.laneSet}
       daemonId={daemonId}

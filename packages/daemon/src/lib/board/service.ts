@@ -592,17 +592,28 @@ export class BoardService {
    * Moves the cards of the lanes a lane edit removed to the lanes it named (`moves`: removed → kept),
    * after the edited set is stored (U3's `CardRelocator`). Safe to repeat: a card no longer in a removed
    * lane of this project is left alone. The direction of such a move is not defined — its lane is gone —
-   * so it is recorded as a daemon move that says why: `reason`, else that the lane was removed. Returns the
-   * cards it moved.
+   * so it is recorded as `by`'s move that says why: `reason`, else that the lane was removed. `by` is the
+   * owner for their own edit or their Accept of a proposal; anyone else is the daemon, which never closes a
+   * card here: a move into a closed lane is left undone and said in the diagnostics (the lane service already
+   * refused any gate it would pass). Returns the cards it moved.
    */
   async relocate(
     projectId: BoardProjectId,
     moves: Readonly<Record<string, string>>,
     reason?: string,
+    by: BoardCaller = { kind: 'daemon' },
   ): Promise<readonly BoardTaskId[]> {
-    const pending = (await this.ports.store.read()).cards.filter(
-      card => card.projectId === projectId && moves[card.laneId] !== undefined,
-    );
+    const laneSet = by.kind === 'owner' ? null : await this.ports.lanes.laneSet(projectId);
+    const closes = (laneId: string): boolean =>
+      laneSet !== null && laneSet.lanes.some(lane => lane.id === laneId && lane.category === 'closed');
+    const pending = (await this.ports.store.read()).cards.filter(card => {
+      if (card.projectId !== projectId || moves[card.laneId] === undefined) return false;
+      if (!closes(moves[card.laneId] ?? '')) return true;
+      this.ports.diagnostics.warn(
+        `board: left ${formatTaskRef(card)} in ${card.laneId}: only the owner moves a card into ${moves[card.laneId] ?? ''}, a closed lane`,
+      );
+      return false;
+    });
     const moved: BoardTaskId[] = [];
     for (const { id } of pending) {
       const task = await this.ports.store.write(id, async current => {
@@ -617,14 +628,14 @@ export class BoardService {
             backward: false,
             reason: reason ?? `lane ${current.laneId} was removed from the board`,
           },
-          { now: this.ports.clock.now(), actor: { kind: 'daemon' } },
+          { now: this.ports.clock.now(), actor: actorOf(by), ...viaOf(by) },
         );
         const valid = requireValidCard({ ...next, laneId: to });
         return { task: valid, result: valid };
       });
       if (task === null) continue;
       moved.push(task.id);
-      await this.afterWrite({ kind: 'daemon' }, task, [projectId]);
+      await this.afterWrite(by, task, [projectId]);
     }
     return moved;
   }

@@ -129,7 +129,8 @@ belongs to (worktrees included), else the registered folder that contains it, el
    or the card `fy start` / `fy new` makes) while it stands in a **git repository** whose main checkout is inside
    one of the daemon's `projectRoots` (`config/daemon.json`; default `~/Workspace` and `~/.config`), the daemon
    registers that repository, moves the ferret onto its board, and proposes the project's lanes from what the folder
-   suggests. The proposal is live at once; the owner gets one agenda choice to accept or edit it. A linked
+   suggests. A project with no lanes has nothing to protect, so that first proposal is live at once; the owner gets
+   one agenda choice to accept or edit it. A linked
    worktree registers the checkout it was made from. This is `ProjectAdoption`
    (`packages/daemon/src/lib/board-projects/project-adoption.ts`).
 2. **By hand, with `fy project add <path> [--name <name>]`.** It registers a folder (`fy project add .` for the one
@@ -289,11 +290,51 @@ where it walked Doing or Closed, the version rises, the confirmation stands and 
 moves in the migration itself; the cards whose PRs merged then move to To test on their facts, each with its own
 history ("PR #985 merged"). It is idempotent. The Unfiled board with no stored set reads the new template directly.
 
-A proposal is live at once but unconfirmed. The owner gets one agenda choice, Accept or Edit
-([agenda.md](agenda.md)); accepting confirms the set. Edits are version-checked (a stale edit is a
+A FIRST proposal, on a project with no lanes, is live at once but unconfirmed. The owner gets one agenda choice,
+Accept or Edit ([agenda.md](agenda.md)); accepting confirms the set. Any later change a ferret makes waits for the
+owner instead ([below](#a-ferrets-lane-change-waits-for-the-owner)). Edits are version-checked (a stale edit is a
 `version-conflict`), and a lane cannot be removed without naming where its cards go. A project with no lane set
 gets an inferred proposal: a repository with `v*` tags gets `pr-release-verify`, one
 without gets `pr`, a folder with no repository gets `quick`.
+
+### A ferret's lane change waits for the owner
+
+Lanes are where the owner's gates live, so changing them is the owner's to decide. **A ferret's `propose` or
+`edit` of a project that already HAS lanes never goes live.** The daemon stores it beside the live set as the
+set's `pending` proposal (`LaneSet.pending`, `decideLaneChange` in
+`packages/daemon/src/lib/board-projects/lane-set-policy.ts`), and the live set stays in force: no gate changes, no
+card moves, nothing the board decides is different. A ferret could otherwise make Plan/Design or Released · to
+test an automatic step and watch its card move on, or remove Released · to test with its cards sent to Closed.
+
+- **What the owner sees.** One Accept / Edit choice on the proposing ferret's agenda, "Lanes for <project>: A →
+  B → …", which says the board keeps its lanes until the owner accepts and names what the change would do that is
+  the owner's to decide: each lane it removes and where that lane's cards go, and each gate that would stop waiting
+  for them. `fy board lanes show` adds one line, "Proposed by <ferret>, waiting for the owner", and the lane
+  editor a banner with its own Accept.
+- **Accept makes it live, as the owner.** The owner's Accept on that card (only a person's answer counts: a lead
+  may answer the daemon's items on its sub-ferret's agenda, and the daemon its own, but neither accepts lanes), or a
+  `confirm` of the proposal's version from the lane editor, makes the proposal the live set, confirmed, and only
+  THEN moves the cards of the lanes it removes. Those moves are recorded as the owner's, so they may close a card.
+- **One proposal waits at a time.** A ferret's next change replaces it. Every proposal is numbered above the live
+  set and every earlier proposal, so the Accept on an older card never takes a newer one: it names a version that
+  is gone, and confirms nothing. A proposal also carries the live version it was made against: once the live set
+  moves on, accepting it is a `version-conflict`.
+- **The owner's own edit stays immediate** and drops a waiting proposal (its card then confirms nothing). The
+  owner confirming the live set itself leaves the proposal waiting, for its own answer.
+- **A ferret's propose on unconfirmed lanes** waits too, and is refused `relocation-missing` when the template
+  drops a lane: a template cannot say where that lane's cards go, so the ferret edits instead. Once the owner has
+  confirmed a set, `propose` is refused `already-confirmed` as before.
+- **Nothing flips at boot.** A set a ferret proposed before this, unconfirmed and live, stays live; only a change
+  made from now on waits. A boot migration that rewrites a set's lanes (the release merge, quick's To test) drops a
+  waiting proposal, since it was made against the lanes before.
+
+**No relocation but the owner's closes a card or passes a gate.** Every move of a removed lane's cards runs the
+checks an owner-less move does (`relocationProblems`): a relocation that is not the owner's never puts a card in
+a closed lane, never takes it forward out of a gate (even into another gate: that skips the owner's answer) and
+never carries it forward past one; a move back is allowed. A ferret's change moves no card at all (it waits, or it
+is a first proposal on a board with no cards), a boot migration that would need such a move is reported and left
+undone, and `BoardService.relocate` itself never closes a card on the daemon's move: that card stays put and the
+diagnostics say why.
 
 ## Workflows: gate and automatic stages
 
@@ -550,12 +591,13 @@ grant. This replaced the old `task-boards` access list. The code is `packages/da
 |               |                                                            | and, on an INTERNAL card, passing its gates                                      |
 | `ancestor`    | a ferret above the owner in the `parent` chain of sessions | the same as the owner                                                            |
 | `assignee`    | the ferret doing it                                        | move, note, link, block, edit files, clarify, reopen, report an external trigger |
-| `daemon`      | the daemon's own automation                                | trigger moves, link cache, refile                                                |
+| `daemon`      | the daemon's own automation                                | trigger moves, link cache, refile, relocate a removed lane's cards (never closed) |
 | `reader`      | any other ferret                                           | read; depend, but only from its own card                                         |
 
 Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a card on out of a gate
 or past one (a lane whose stage is a gate, owner-gated or a `verify` lane), and only the owner closes — except on an internal card, whose owner ferret and its leads pass its gates
-and close it ([Gates ask the owner](#gates-ask-the-owner)). Reaching the routes at all is a `fleet` capability matter for a caller
+and close it ([Gates ask the owner](#gates-ask-the-owner)). A ferret's change to a project's lanes waits for the owner
+([above](#a-ferrets-lane-change-waits-for-the-owner)). Reaching the routes at all is a `fleet` capability matter for a caller
 who is not on this host ([grants.md](grants.md)).
 
 ## Done and Not good
@@ -637,12 +679,11 @@ and a card waiting at a gate lands at a gate of the same stage or earlier, never
 (`laneStage`), so a `verify` lane with no `ownerGate` is a gate too. A ferret may still move a card back out of a
 gate, with a reason. A card's workflow never changes, so no variant can skip one.
 
-**Lane changes.** A ferret's lane edit or proposal over a live set may not take a gate from the owner
-(`laneGateProblems`, `lane-set-policy.ts`): remove a gate lane, make it automatic, drop its `ownerGate`, move it
-among the lanes a variant walks, let a variant skip it, or send cards into a closed lane, into a new lane, or past a gate
-of the new layout. It is refused
-`403 owner-gate`, naming the lane. Interim: a ferret's allowed edit still goes live; making every ferret edit a
-proposal the owner accepts is its own follow-up.
+**Lane changes.** A ferret's lane edit or proposal over a live set never goes live: it waits for the owner
+([A ferret's lane change waits for the owner](#a-ferrets-lane-change-waits-for-the-owner)), and what it would do to a
+gate (`laneGateProblems`, `@ferretry/protocol`) is what its Accept card and the lane editor say: remove a gate lane,
+make it automatic, drop its `ownerGate`, move it among the lanes a variant walks, let a variant skip it, rewire its
+options, or send cards into a closed lane, into a new lane, or past a gate of the new layout.
 
 **Answers, one at a time.** Answers to one card's gate take turns, and each move is written only if the card still sits
 in that gate by the entry the item asked about; anything else is `409 gate_not_moved` and the item stays open. A

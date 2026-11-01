@@ -2,11 +2,17 @@
  * HOW A PROJECT'S LANE SET CHANGES (`board-design.md` §2.3). Pure and total: every function returns a
  * {@link BoardResult}, and the storage and the agenda are somebody else's.
  *
- * - **propose** stores an UNCONFIRMED set that is live at once. It is refused once the owner has confirmed a
- *   set: from then on lanes change by an edit against the version the editor saw.
+ * - **propose** stores an UNCONFIRMED set that is live at once on a project with no lanes. It is refused once
+ *   the owner has confirmed a set: from then on lanes change by an edit against the version the editor saw.
  * - **edit** is checked against that version. Lanes it removes must say where their cards go, and a lane
- *   that stays keeps its id however it is renamed. An edit by the owner confirms the set; an edit by a
- *   ferret leaves it a proposal for the owner to look at again.
+ *   that stays keeps its id however it is renamed. An edit by the owner confirms the set.
+ * - **A ferret's change waits for the owner** ({@link decideLaneChange}): a ferret's propose or edit of a project
+ *   that HAS lanes is stored as the set's `pending` proposal, and the live set stays in force, so no gate
+ *   changes and no card moves. The owner's confirm of that proposal's version makes it live, and only then do
+ *   its cards move, as the owner's. Only a project with no lanes takes a ferret's proposal live: there is
+ *   nothing on it to protect yet, and no card to move.
+ * - **A relocation that is not the owner's** ({@link relocationProblems}) never closes a card, never lets one
+ *   out of a gate and never carries one past a gate.
  * - An edit keeps the set's Done and Not good lanes while they still fit, unless it names its own
  *   (`laneTargets`); an app that predates them never resets them.
  * - **confirm** is the owner's accept: the lanes and the version stay as they are.
@@ -15,9 +21,9 @@
  * - **add quick's To test lane** ({@link addQuickToTestLane}) at boot, to a `quick` set from before it.
  * - **stage the lanes** ({@link stageLanes}) at boot: every lane stored without a stage gets the one its
  *   compatibility fields already describe, written out.
- * - **a gate is the owner's** ({@link laneGateProblems}): a ferret's edit or proposal that would remove, disarm, move
- *   or skip a gate, or send cards into a closed lane or past a gate, is refused `owner-gate` (docs/board.md § Gates
- *   ask the owner). Interim: a ferret's edit still goes live (making it a proposal is its own follow-up).
+ * - **what a change does to the gates** ({@link laneGateProblems}): removing, disarming, moving or skipping a gate,
+ *   or sending cards into a closed lane, a new lane or past a gate. A ferret's change never goes live on a set
+ *   that exists, so these are not refused: they are what the owner's Accept card says the proposal would do.
  */
 import {
   type BoardResult,
@@ -25,13 +31,15 @@ import {
   boardOk,
   LANE_TEMPLATES,
   type Lane,
+  laneEditProblems,
+  type LaneSetActionRequest,
+  type PendingLaneSet,
   type LaneLayoutValue,
   type LaneRenames,
   type BoardActorVia,
   type LaneSet,
   type LaneTemplateError,
   type LaneTemplateName,
-  laneEditProblems,
   laneLayoutFromTemplate,
   laneStage,
   laneTargets,
@@ -120,6 +128,161 @@ export const laneGateProblems = (
   return problems;
 };
 
+/** What a lane change decided ({@link decideLaneChange}): the set to store, and the cards that move. */
+export interface LaneSetDecision {
+  readonly next: LaneSet;
+  /** `live`: the board's lanes are `next`'s now. `pending`: a proposal waits for the owner; the board is unchanged. */
+  readonly change: 'live' | 'pending';
+  /** Removed lane → kept lane, moved after `next` is stored. Always empty for a pending proposal. */
+  readonly relocate: Readonly<Record<string, string>>;
+}
+
+/**
+ * The number a set's next version takes: above the live set AND any proposal waiting on it, so a number is
+ * never used twice and the Accept of an older card can never name a newer proposal.
+ */
+export const nextLaneSetVersion = (current: Pick<LaneSet, 'version' | 'pending'> | null): number =>
+  Math.max(current?.version ?? 0, current?.pending?.version ?? 0) + 1;
+
+/**
+ * Decides a propose, edit or confirm (`docs/board.md` § A ferret's lane change waits for the owner). The owner's
+ * own propose and edit are live at once, as before; a ferret's on a project that has lanes waits as the set's
+ * `pending` proposal; a confirm of the waiting proposal's version is the owner accepting it.
+ */
+export const decideLaneChange = (
+  projectId: LaneSet['projectId'],
+  current: LaneSet | null,
+  request: LaneSetActionRequest,
+  actor: LaneActor,
+): BoardResult<LaneSetDecision, LaneSetProblem> => {
+  switch (request.action) {
+    case 'propose': {
+      const built = proposeLaneSet(projectId, current, request.template, request.renames, actorName(actor));
+      if (!built.ok) return built;
+      return actor.kind === 'ferret' && current !== null
+        ? waitForOwner(current, built.value, {})
+        : boardOk({ next: built.value, change: 'live', relocate: {} });
+    }
+    case 'edit': {
+      const built = editLaneSet(current, request, actor);
+      if (!built.ok) return built;
+      const relocate = definedMoves(request.relocate);
+      return actor.kind === 'ferret' && current !== null
+        ? waitForOwner(current, built.value, relocate)
+        : boardOk({ next: built.value, change: 'live', relocate });
+    }
+    case 'confirm': {
+      if (actor.kind !== 'owner') return boardErr({ code: 'owner-only' });
+      if (current?.pending !== undefined && current.pending.version === request.version) {
+        return acceptPendingLaneSet(current, actor.via);
+      }
+      const confirmed = confirmLaneSet(current, request.version, actor.via);
+      return confirmed.ok ? boardOk({ next: confirmed.value, change: 'live', relocate: {} }) : confirmed;
+    }
+  }
+};
+
+const definedMoves = (relocate: Partial<Record<string, string>>): Record<string, string> =>
+  Object.fromEntries(Object.entries(relocate).filter((entry): entry is [string, string] => entry[1] !== undefined));
+
+/** A ferret's change, kept beside the live set for the owner: the live set itself is untouched. */
+const waitForOwner = (
+  current: LaneSet,
+  built: LaneSet,
+  relocate: Readonly<Record<string, string>>,
+): BoardResult<LaneSetDecision, LaneSetProblem> => {
+  // A proposal that drops a lane says where its cards go, or the owner's Accept would strand them.
+  const unplaced = laneEditProblems(current, { layout: built, relocate });
+  if (unplaced.length > 0) return boardErr({ code: 'relocation-missing', laneIds: unplaced });
+  const pending: PendingLaneSet = {
+    version: built.version,
+    baseVersion: current.version,
+    proposedBy: built.proposedBy,
+    lanes: built.lanes,
+    variants: built.variants,
+    doneLane: built.doneLane,
+    notGoodLane: built.notGoodLane,
+    relocate,
+  };
+  return boardOk({ next: { ...current, pending }, change: 'pending', relocate: {} });
+};
+
+/**
+ * The owner's Accept of the waiting proposal: it becomes the live set, confirmed, at its own version, and its
+ * relocation is handed back to run as the owner's. A proposal made against a live set that has moved on since
+ * (an owner's edit clears it; a boot migration drops it) is a version conflict.
+ */
+export const acceptPendingLaneSet = (
+  current: LaneSet,
+  via?: BoardActorVia,
+): BoardResult<LaneSetDecision, LaneSetProblem> => {
+  const { pending } = current;
+  if (pending === undefined) return boardErr({ code: 'no-lane-set' });
+  if (pending.baseVersion !== current.version) return boardErr({ code: 'version-conflict', current: current.version });
+  const unplaced = laneEditProblems(current, { layout: pending, relocate: pending.relocate });
+  if (unplaced.length > 0) return boardErr({ code: 'relocation-missing', laneIds: unplaced });
+  const { version, proposedBy, lanes, variants, doneLane, notGoodLane, relocate } = pending;
+  const next: LaneSet = {
+    projectId: current.projectId,
+    version,
+    confirmedBy: 'owner',
+    ...(via === undefined ? {} : { confirmedVia: via }),
+    proposedBy,
+    lanes,
+    variants,
+    doneLane,
+    notGoodLane,
+  };
+  return boardOk({ next, change: 'live', relocate: definedMoves(relocate) });
+};
+
+/** Why a relocation is the owner's alone: it closes the cards, lets them out of a gate, or carries them past one. */
+export interface RelocationProblem {
+  readonly from: string;
+  readonly to: string;
+  readonly why: 'closes' | 'leaves-gate' | 'passes-gate';
+  /** The gate it leaves or passes; absent for `closes`. */
+  readonly gate?: string;
+}
+
+type Layout = Pick<LaneSet, 'lanes'>;
+
+/**
+ * What a relocation that is NOT the owner's may not do, as one owner-less move may not: put a card in a closed
+ * lane, take it forward out of a gate (even into another gate: that skips the owner's answer), or carry it forward
+ * past a gate. A
+ * removed lane has no place in `after`, so it is placed before the first lane that followed it in `before` and
+ * survives; a target before that place is a move back. Every lane counts, whatever a card's variant walks: a
+ * relocation moves a lane's cards, not one card. Empty when every move is one the daemon may make.
+ */
+export const relocationProblems = (
+  before: Layout,
+  after: Layout,
+  moves: Readonly<Record<string, string>>,
+): readonly RelocationProblem[] => {
+  const isGate = (lane: Lane | undefined): boolean => lane !== undefined && laneStage(lane).kind === 'gate';
+  const problems: RelocationProblem[] = [];
+  for (const [from, to] of Object.entries(moves)) {
+    const target = after.lanes.find(lane => lane.id === to);
+    if (target === undefined || from === to) continue;
+    if (target.category === 'closed') {
+      problems.push({ from, to, why: 'closes' });
+      continue;
+    }
+    const at = before.lanes.findIndex(lane => lane.id === from);
+    const anchor = placeOf(before, after, at);
+    const targetAt = after.lanes.indexOf(target);
+    if (targetAt < anchor) continue;
+    if (isGate(before.lanes[at])) {
+      problems.push({ from, to, why: 'leaves-gate', gate: from });
+      continue;
+    }
+    const passed = after.lanes.slice(anchor, targetAt).find(isGate);
+    if (passed !== undefined) problems.push({ from, to, why: 'passes-gate', gate: passed.id });
+  }
+  return problems;
+};
+
 /**
  * The first gate of the NEW layout a relocation `from` → `to` would put cards past, in any variant's walk: a gate that
  * comes before `to` there, and that came after `from` before (or is new).
@@ -164,6 +327,29 @@ const sameBefore = (gate: string, was: readonly string[], now: readonly string[]
   return left.length === right.length && left.every(id => right.includes(id));
 };
 
+/** Where lane `at` of `before` would sit in `after`: the index of the first later lane of `before` that survives. */
+const placeOf = (before: Layout, after: Layout, at: number): number => {
+  if (at === -1) return 0;
+  const ids = after.lanes.map(lane => lane.id);
+  for (const lane of before.lanes.slice(at)) {
+    const found = ids.indexOf(lane.id);
+    if (found !== -1) return found;
+  }
+  return after.lanes.length;
+};
+
+/** A relocation problem in words a person or a ferret can act on. */
+export const describeRelocationProblem = (problem: RelocationProblem): string => {
+  switch (problem.why) {
+    case 'closes':
+      return `would close the cards of ${problem.from} in ${problem.to}, which only the owner does`;
+    case 'leaves-gate':
+      return `would take the cards of ${problem.from} out of a gate the owner has not answered, into ${problem.to}`;
+    case 'passes-gate':
+      return `would carry the cards of ${problem.from} past ${problem.gate ?? 'a gate'}, which waits for the owner, into ${problem.to}`;
+  }
+};
+
 export const actorName = (actor: LaneActor): string => (actor.kind === 'owner' ? 'owner' : actor.name);
 
 /** The Unfiled board's lanes until the owner edits them: the `quick` template, already confirmed. */
@@ -181,16 +367,11 @@ export const proposeLaneSet = (
   template: LaneTemplateName,
   renames: LaneRenames,
   proposedBy: string,
-  /** The proposer may not take a gate away (anyone but the owner). */
-  guarded = false,
 ): BoardResult<LaneSet, LaneSetProblem> => {
   if (current?.confirmedBy === 'owner') return boardErr({ code: 'already-confirmed', version: current.version });
   const layout = laneLayoutFromTemplate(template, renames);
   if (!layout.ok) return layout;
-  // A ferret's proposal over a live set never takes one of its gates away: that is the owner's to say.
-  const problems = guarded && current !== null ? laneGateProblems(current, layout.value) : [];
-  if (problems.length > 0) return boardErr({ code: 'owner-gate', problems });
-  return boardOk({ projectId, version: (current?.version ?? 0) + 1, confirmedBy: null, proposedBy, ...layout.value });
+  return boardOk({ projectId, version: nextLaneSetVersion(current), confirmedBy: null, proposedBy, ...layout.value });
 };
 
 export const editLaneSet = (
@@ -206,22 +387,17 @@ export const editLaneSet = (
   if (edit.version !== current.version) return boardErr({ code: 'version-conflict', current: current.version });
   const unplaced = laneEditProblems(current, edit);
   if (unplaced.length > 0) return boardErr({ code: 'relocation-missing', laneIds: unplaced });
-  if (actor.kind !== 'owner') {
-    const relocate = Object.fromEntries(
-      Object.entries(edit.relocate).filter((entry): entry is [string, string] => entry[1] !== undefined),
-    );
-    const problems = laneGateProblems(current, edit.layout, relocate);
-    if (problems.length > 0) return boardErr({ code: 'owner-gate', problems });
-  }
   // A layout always has a closed and a backlog lane by now (the schema refused it otherwise), so it has targets.
   const targets = laneTargets(edit.layout, current) ?? { doneLane: current.doneLane, notGoodLane: current.notGoodLane };
   return boardOk({
     projectId: current.projectId,
-    version: current.version + 1,
+    version: nextLaneSetVersion(current),
     confirmedBy: actor.kind === 'owner' ? 'owner' : null,
     ...(actor.kind === 'owner' && actor.via !== undefined ? { confirmedVia: actor.via } : {}),
     proposedBy: actor.kind === 'owner' ? current.proposedBy : actor.name,
-    ...edit.layout,
+    // Picked, never spread: nothing a layout carries besides its lanes may stand in for the set's own fields.
+    lanes: edit.layout.lanes,
+    variants: edit.layout.variants,
     ...targets,
   });
 };
@@ -322,8 +498,9 @@ export const mergeReleaseLanes = (current: LaneSet): ReleaseLaneMerge | null => 
   );
   const layout = { lanes, variants };
   const targets = laneTargets(layout, current) ?? { doneLane: current.doneLane, notGoodLane: current.notGoodLane };
+  const { pending: _stale, ...live } = current;
   return {
-    next: { ...current, version: current.version + 1, ...layout, ...targets },
+    next: { ...live, version: nextLaneSetVersion(current), ...layout, ...targets },
     from: tested.id,
     into: released.id,
   };
@@ -370,7 +547,8 @@ export const addQuickToTestLane = (current: LaneSet): LaneSet | null => {
   );
   const layout = { lanes, variants };
   const targets = laneTargets(layout, current) ?? { doneLane: current.doneLane, notGoodLane: current.notGoodLane };
-  return { ...current, version: current.version + 1, ...layout, ...targets };
+  const { pending: _stale, ...live } = current;
+  return { ...live, version: nextLaneSetVersion(current), ...layout, ...targets };
 };
 
 /**

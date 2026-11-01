@@ -23,6 +23,8 @@ import {
   LaneSchema,
   type LaneSet,
   LaneSetSchema,
+  type PendingLaneSet,
+  PendingLaneSetSchema,
   LaneStageSchema,
   LaneTemplateNameSchema,
   LaneTriggerSchema,
@@ -83,6 +85,15 @@ const CLASSIC: LaneSet = {
   notGoodLane: 'implement',
 };
 
+/** A ferret's change to FERRETRY, waiting for the owner: Released · to test goes, its cards to Merged. */
+const WAITING: PendingLaneSet = {
+  version: 2,
+  baseVersion: 1,
+  proposedBy: 'session-2',
+  ...LANE_TEMPLATES.pr,
+  relocate: { released: 'merged' },
+};
+
 const lane = (id: string, category: Lane['category'], extra: Partial<Lane> = {}): Lane => ({
   id,
   name: id,
@@ -106,6 +117,8 @@ const VALID: readonly SchemaCase[] = [
   { name: 'layout', schema: LaneLayoutSchema, value: layout(SOUND) },
   { name: 'lane set', schema: LaneSetSchema, value: FERRETRY },
   { name: 'confirmed lane set', schema: LaneSetSchema, value: { ...FERRETRY, confirmedBy: 'owner', version: 3 } },
+  { name: 'waiting proposal', schema: PendingLaneSetSchema, value: WAITING },
+  { name: 'lane set with a waiting proposal', schema: LaneSetSchema, value: { ...FERRETRY, pending: WAITING } },
   { name: 'template name', schema: LaneTemplateNameSchema, value: 'ops' },
   { name: 'renames', schema: LaneRenamesSchema, value: { plan: 'Investigate' } },
   { name: 'until', schema: DependencyUntilSchema, value: 'released' },
@@ -132,6 +145,18 @@ const INVALID: readonly SchemaCase[] = [
   { name: 'empty variant', schema: LaneVariantsSchema, value: { quick: [] } },
   { name: 'proposed by nobody', schema: LaneSetSchema, value: { ...FERRETRY, proposedBy: '' } },
   { name: 'confirmed by a ferret', schema: LaneSetSchema, value: { ...FERRETRY, confirmedBy: 'session-1' } },
+  { name: 'proposal numbered at its base', schema: PendingLaneSetSchema, value: { ...WAITING, version: 1 } },
+  {
+    name: 'proposal with an unsound layout',
+    schema: PendingLaneSetSchema,
+    value: { ...WAITING, lanes: SOUND.slice(0, 2) },
+  },
+  { name: 'proposal with no targets', schema: PendingLaneSetSchema, value: { ...WAITING, doneLane: undefined } },
+  {
+    name: 'proposal numbered at or below the live set',
+    schema: LaneSetSchema,
+    value: { ...FERRETRY, version: 2, pending: WAITING },
+  },
   { name: 'no lanes', schema: LaneLayoutSchema, value: layout([]) },
   { name: 'unknown template', schema: LaneTemplateNameSchema, value: 'kanban' },
   { name: 'rename to blank', schema: LaneRenamesSchema, value: { plan: '' } },

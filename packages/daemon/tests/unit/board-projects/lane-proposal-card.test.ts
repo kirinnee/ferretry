@@ -4,13 +4,20 @@ import {
   LANE_TEMPLATES,
   type LaneSet,
   laneProposalReference,
+  type PendingLaneSet,
   type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 import should from 'should';
 import { AgendaService, type AgendaLedger } from '../../../src/lib/agenda/index.ts';
 import { harnessQuestionRequest } from '../../../src/lib/agenda/harness-prompt.ts';
 import type { AgendaBoardChange } from '../../../src/lib/agenda/service.ts';
-import { acceptedProposal, LaneProposalAcceptance, laneProposalCard } from '../../../src/lib/board-projects/index.ts';
+import {
+  acceptedProposal,
+  LaneProposalAcceptance,
+  laneChangeCard,
+  laneChangeWarnings,
+  laneProposalCard,
+} from '../../../src/lib/board-projects/index.ts';
 import { FERRETRY_ID } from './support.ts';
 
 const LANES: LaneSet = {
@@ -48,6 +55,58 @@ describe('laneProposalReference and laneProposalCard', () => {
       LANE_PROPOSAL_ANSWERS.edit,
     ]);
     should(card.why).containEql('koen proposed');
+  });
+});
+
+describe('laneChangeCard', () => {
+  const live: LaneSet = { ...LANES, ...LANE_TEMPLATES['pr-release-verify'], confirmedBy: 'owner' };
+  /** Plan/Design made automatic, and Released · to test gone with its cards closed. */
+  const risky: PendingLaneSet = {
+    version: 3,
+    baseVersion: 2,
+    proposedBy: 'koen',
+    ...LANE_TEMPLATES['pr-release-verify'],
+    lanes: LANE_TEMPLATES['pr-release-verify'].lanes
+      .filter(lane => lane.id !== 'released')
+      .map(lane =>
+        lane.id === 'plan'
+          ? { ...lane, ownerGate: false, stage: { kind: 'auto' as const, triggers: ['work.started' as const] } }
+          : lane,
+      ),
+    variants: Object.fromEntries(
+      Object.entries(LANE_TEMPLATES['pr-release-verify'].variants).map(([workflow, ids]) => [
+        workflow,
+        (ids ?? []).filter(id => id !== 'released'),
+      ]),
+    ),
+    relocate: { released: 'closed' },
+  };
+
+  it('should say the board keeps its lanes until the owner accepts, and what the change would do', () => {
+    const card = laneChangeCard('Ferretry', live, risky);
+
+    should(card.subject).equal('Lanes for Ferretry: Todo → Plan/Design → In progress → Merged → Closed');
+    should(card.why).containEql('koen proposes new lanes for Ferretry');
+    should(card.why).containEql('keeps its lanes until you accept');
+    should(card.why).containEql('make Plan/Design stop waiting for you');
+    should(card.why).containEql('remove Released · to test and move its cards to Closed');
+    should(card.why).not.containEql('live already');
+    should(card.answers.map(answer => answer.label)).deepEqual([
+      LANE_PROPOSAL_ANSWERS.accept,
+      LANE_PROPOSAL_ANSWERS.edit,
+    ]);
+  });
+
+  it('should warn of nothing for a change that only renames', () => {
+    const renamed: PendingLaneSet = {
+      ...risky,
+      ...LANE_TEMPLATES['pr-release-verify'],
+      lanes: LANE_TEMPLATES['pr-release-verify'].lanes.map(lane => ({ ...lane, name: `${lane.name}!` })),
+      relocate: {},
+    };
+
+    should(laneChangeWarnings(live, renamed)).deepEqual([]);
+    should(laneChangeCard('Ferretry', live, renamed).why).not.containEql('It would');
   });
 });
 
@@ -135,7 +194,7 @@ describe('acceptedProposal binds to the lane producer (docs/agenda.md § Reserve
 
 describe('LaneProposalAcceptance', () => {
   const change = (overrides: Partial<AgendaBoardChange>): AgendaBoardChange =>
-    ({ change: 'answered', ...overrides }) as AgendaBoardChange;
+    ({ change: 'answered', actor: { kind: 'human' }, ...overrides }) as AgendaBoardChange;
 
   it('should confirm the proposal when the owner accepts', async () => {
     const accepted: Array<readonly [string, number]> = [];
@@ -167,6 +226,29 @@ describe('LaneProposalAcceptance', () => {
     await subject.changed('s1', change({}));
     await subject.changed('s1', change({ addressed: item('task:F1', accept) }));
 
+    should(calls).equal(0);
+  });
+
+  it('should never take an Accept a lead or the daemon gave for the owner’s', async () => {
+    // Arrange: a lead may answer the daemon's items on its sub-ferret's agenda, and the daemon its own.
+    let calls = 0;
+    const subject = new LaneProposalAcceptance({
+      acceptProposal: async () => {
+        calls += 1;
+        return true;
+      },
+    });
+    const addressed = item(laneProposalReference(FERRETRY_ID, 2), accept);
+
+    // Act
+    await subject.changed(
+      's1',
+      change({ addressed, actor: { kind: 'agent', sessionId: 'lead', name: 'lead', overSubFerret: true } }),
+    );
+    await subject.changed('s1', change({ addressed, actor: { kind: 'agent', sessionId: 's1', name: 'koen' } }));
+    await subject.changed('s1', change({ addressed, actor: { kind: 'daemon', cause: 'system' } }));
+
+    // Assert
     should(calls).equal(0);
   });
 

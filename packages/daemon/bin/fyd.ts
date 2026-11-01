@@ -10050,10 +10050,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           [...COMMON_SCRATCH_ROOTS, tmpdir()],
         ),
         new AgendaLaneAgenda({ raise: async (...parameters) => await agenda.raise(...parameters) }),
-        // A lane edit that removed lanes moves their cards to the lanes it named, in the board store.
+        // A lane change that went live moves the cards of the lanes it removed, as whoever made it live.
         {
-          relocate: async (projectId, moves, reason) => {
-            await boardWorld.board.relocate(projectId, moves, reason);
+          relocate: async (projectId, moves, by, reason) => {
+            await boardWorld.board.relocate(projectId, moves, reason, by);
           },
         },
       );

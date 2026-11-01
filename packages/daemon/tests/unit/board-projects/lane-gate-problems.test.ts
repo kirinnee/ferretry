@@ -2,18 +2,19 @@ import { describe, it } from 'bun:test';
 import type { Lane, LaneSet } from '@ferretry/protocol';
 import should from 'should';
 import {
+  decideLaneChange,
   describeLaneSetFailure,
   editLaneSet,
   type LaneActor,
   laneGateProblems,
-  proposeLaneSet as propose,
 } from '../../../src/lib/board-projects/index.ts';
 import { lanes, PROJECT } from '../board/support.ts';
 
 /**
- * A GATE IS THE OWNER'S, ON THE LANES TOO (docs/board.md § Gates ask the owner): until a ferret's lane edit is only a
- * proposal, it may not remove, disarm, move or skip a gate, nor send cards into a closed lane or past a gate. The
- * classic lanes: Todo, Plan/Design*, Implement, Review/CI, Merged, Released, To test*, Closed (* a gate).
+ * A GATE IS THE OWNER'S, ON THE LANES TOO (docs/board.md § Gates ask the owner): what a lane change would do to a gate
+ * — remove, disarm, move or skip it, or send cards into a closed lane or past it. A ferret's change of lanes that exist
+ * waits for the owner, who is told exactly this. The classic lanes: Todo, Plan/Design*, Implement, Review/CI, Merged,
+ * Released, To test*, Closed (* a gate).
  */
 
 const FERRET: LaneActor = { kind: 'ferret', name: 'Ada', sessionId: 'lead' };
@@ -106,22 +107,21 @@ describe('a lane change that takes a gate from the owner', () => {
     relocate: { plan: 'implement' },
   });
 
-  it('is refused for a ferret, naming the gate', () => {
-    const refused = editLaneSet(current(), removePlan(), FERRET);
-    should(refused).match({ ok: false, error: { code: 'owner-gate' } });
-    const problems = !refused.ok && refused.error.code === 'owner-gate' ? refused.error.problems : [];
-    should(problems.map(problem => problem.laneId)).containEql('plan');
+  it('waits for the owner when a ferret makes it, and the live set keeps its gate', () => {
+    const waiting = decideLaneChange(PROJECT, current(), { action: 'edit', ...removePlan() }, FERRET);
+    should(waiting).match({ ok: true, value: { change: 'pending', relocate: {} } });
+    should(waiting.ok && waiting.value.next.lanes.some(lane => lane.id === 'plan')).be.true();
   });
 
   it('is the owner’s to make', () => {
     should(editLaneSet(current(), removePlan(), OWNER)).match({ ok: true });
   });
 
-  it('is refused in a ferret’s proposal over a set it would disarm, and a first proposal is free', () => {
+  it('waits in a ferret’s proposal over a set it would disarm, and a first proposal is free', () => {
     const live: LaneSet = { ...current(), confirmedBy: null };
-    should(propose(PROJECT, live, 'quick', {}, 'Ada', true)).match({ ok: false, error: { code: 'owner-gate' } });
-    should(propose(PROJECT, null, 'quick', {}, 'Ada', true)).match({ ok: true });
-    should(propose(PROJECT, live, 'quick', {}, 'owner', false)).match({ ok: true });
+    const propose = { action: 'propose', template: 'pr-release-verify', renames: {} } as const;
+    should(decideLaneChange(PROJECT, live, propose, FERRET)).match({ ok: false, error: { code: 'relocation-missing' } });
+    should(decideLaneChange(PROJECT, null, propose, FERRET)).match({ ok: true, value: { change: 'live' } });
   });
 });
 
@@ -158,9 +158,9 @@ describe('a relocation judged where the cards end up (kyan R3)', () => {
 
     // Assert
     should(problems.map(problem => problem.laneId)).containEql('after');
-    should(editLaneSet(set, { version: 1, layout: next, relocate: { review: 'after' } }, FERRET)).match({
-      ok: false,
-      error: { code: 'owner-gate' },
+    should(decideLaneChange(PROJECT, set, { action: 'edit', version: 1, layout: next, relocate: { review: 'after' } }, FERRET)).match({
+      ok: true,
+      value: { change: 'pending', relocate: {} },
     });
   });
 

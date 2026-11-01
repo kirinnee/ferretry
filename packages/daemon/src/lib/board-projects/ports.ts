@@ -1,4 +1,4 @@
-import type { BoardProjectId, LaneSet } from '@ferretry/protocol';
+import type { BoardActorVia, BoardProjectId, LaneSet } from '@ferretry/protocol';
 import type { ProjectGitFacts } from './template-inference.ts';
 import type { LaneProposalCard } from './lane-proposal-card.ts';
 
@@ -31,13 +31,26 @@ export interface LaneProposalAgenda {
 }
 
 /**
+ * Whose a relocation is: the OWNER's (their own edit, or their Accept of a ferret's proposal), recorded as theirs
+ * and free to close a card; or the DAEMON's (a boot migration), which never moves a card into a closed lane.
+ */
+export type RelocationAuthority =
+  | { readonly kind: 'owner'; readonly via?: BoardActorVia }
+  | { readonly kind: 'daemon' };
+
+/**
  * Moves the cards of a deleted lane to the lane the edit named, in the board store (U2). Called after the
  * edited set is stored, with the new set already readable; it must be safe to repeat, because a failure here
- * leaves the set edited and the cards where they were. `reason` is what each card's history says about the
- * move; absent, it says the lane was removed.
+ * leaves the set edited and the cards where they were. `by` is whose move it is, and what each card's history
+ * records; `reason` is what that history says about it; absent, it says the lane was removed.
  */
 export interface CardRelocator {
-  relocate(projectId: BoardProjectId, moves: Readonly<Record<string, string>>, reason?: string): Promise<void>;
+  relocate(
+    projectId: BoardProjectId,
+    moves: Readonly<Record<string, string>>,
+    by: RelocationAuthority,
+    reason?: string,
+  ): Promise<void>;
 }
 
 /** Reads {@link ProjectGitFacts} for a folder. Never rejects: a folder it cannot read is a folder with no repository. */
