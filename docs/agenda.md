@@ -265,7 +265,7 @@ fy agenda add "Allow the Jev price correction?" --title "Jev price correction" \
 The rule is the config files' own (`heldEditRefusal`, shared with `POST /v1/config/confirm`): the fleet's `use`
 grant, the file's grant on `configure`, and for Allow from a governed device the passkey. Allow and Discard
 change are written to the security log as `fleet.configured` (`config-confirm` / `config-discard`,
-`via: agenda`) naming the caller — a paired device by its id — exactly as a confirmation in Settings is
+`via: agenda`) naming the caller — a paired device by its id — and the file's `kind` (`warden`, `pack`, `accountDefaults` …; never its name or path), exactly as a confirmation in Settings is
 ([audit.md](audit.md)); Deny changes nothing and is not recorded. The state
 machine refuses any non-owner answer to such an item a second time. A ferret may still close its own card
 unanswered (`fy agenda dismiss`). A ferret on its own session credential is always itself here, whatever

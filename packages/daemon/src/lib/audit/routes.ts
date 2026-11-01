@@ -1,4 +1,4 @@
-import type { AuditDetail, AuditEvent, AuditOutcome } from '@ferretry/protocol';
+import { type AuditDetail, type AuditEvent, type AuditOutcome, classifyConfigPath } from '@ferretry/protocol';
 import { ApiError } from '../api/error.ts';
 import { decodeParameter } from '../api/http.ts';
 import type { ApiRoute, RouteContext } from '../api/route.ts';
@@ -58,6 +58,12 @@ export interface AuditedRouteRule {
    * finite number is taken, so nothing a person typed can come along.
    */
   readonly responseFields?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * A top-level field of a successful JSON response holding a configuration file PATH, copied into `detail.kind`
+   * as the file's KIND only (`warden`, `login`, `accountDefaults` …) — never the path or the name in it, which a
+   * person chose. A path that is not one the daemon classifies adds nothing.
+   */
+  readonly responseConfigKind?: string;
 }
 
 export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
@@ -747,7 +753,13 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   // Each rewrites models-guide.yaml, as an edit through the configuration routes would.
   { method: 'POST', path: '/v1/pack/routing/accept', event: 'fleet.configured', detail: { action: 'routing-accept' } },
   { method: 'POST', path: '/v1/pack/routing/undo', event: 'fleet.configured', detail: { action: 'routing-undo' } },
-  { method: 'POST', path: '/v1/config/confirm', event: 'fleet.configured', detail: { action: 'config-confirm' } },
+  {
+    method: 'POST',
+    path: '/v1/config/confirm',
+    event: 'fleet.configured',
+    detail: { action: 'config-confirm' },
+    responseConfigKind: 'path',
+  },
   { method: 'POST', path: '/v1/agent/config', event: 'fleet.configured', detail: { action: 'agent-config' } },
   // Lessons (docs/learning.md): the machine default written into `learning.yaml`, and an Apply — the one
   // write outside the state home, into the global instructions or a project's AGENTS.md / CLAUDE.md.
@@ -842,11 +854,16 @@ async function record(
     outcome === 'succeeded' && rule.responseFields !== undefined
       ? fieldsIn(answer.body, rule.responseFields)
       : undefined;
+  const configKind =
+    outcome === 'succeeded' && rule.responseConfigKind !== undefined
+      ? configKindIn(answer.body, rule.responseConfigKind)
+      : undefined;
   const detail: AuditDetail = {
     ...rule.detail,
     ...agentAuditDetail(credential),
     ...settings,
     ...fields,
+    ...(configKind === undefined ? {} : { kind: configKind }),
     ...(answer.subjectName === undefined ? {} : { deviceName: answer.subjectName }),
     ...(names === undefined ? {} : { [(rule.responseNames ?? 'names').split('.').at(-1) as string]: names }),
     ...(rule.refusalCode === true && outcome !== 'succeeded' && answer.code !== undefined ? { code: answer.code } : {}),
@@ -961,6 +978,17 @@ function fieldsIn(
       else if (texts.length > 0 && texts.length === found.length) detail[key] = joinedWithin(texts, AUDIT_TEXT_MAX);
     }
     return Object.keys(detail).length === 0 ? undefined : detail;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The kind of the configuration file whose path is the response's `field`, or `undefined` when it names none. */
+function configKindIn(body: string | undefined, field: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(body ?? '');
+    const path = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>)[field] : undefined;
+    return typeof path === 'string' ? classifyConfigPath(path)?.kind : undefined;
   } catch {
     return undefined;
   }
