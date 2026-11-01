@@ -96,6 +96,7 @@ import { AgendaSwipeDeck } from './agenda-swipe-deck.tsx';
 import { AgendaUndoToast } from './agenda-undo-toast.tsx';
 import { ClearAgentsControl } from './clear-agents.tsx';
 import { type ToTestHost, ToTestList, useToTestAnswers } from './to-test-rows.tsx';
+import { ToTestStep } from './to-test-step.tsx';
 
 /**
  * Where a card came from: the FERRET that asked (its callsign, else the row's title), what it is working
@@ -1057,23 +1058,25 @@ export function AgendaInboxPage({
   const replied = parkedBy(inbox.parked, 'replied');
   const parkedCounts = { snoozed: snoozed.length, replied: replied.length };
 
-  // The deck deals what waits on the owner, in the order the page lists it.
+  // The deck deals what waits on the owner, in the order the page lists it: the agenda items, then the cards to test.
   const deckCards = groupCards([...sections.stopped, ...sections.needsYou]);
   const order = deckCards.map(card => card.key);
+  const runOrder = [...order, ...toTestRows.map(row => row.key)];
   // j/k walk the rows that are showing: the owner's sections, and With ferrets only once it is open.
   const navigable = [...order, ...(withFerretsShown ? groupCards(sections.withFerrets).map(card => card.key) : [])];
   const selectedKey = cursor !== null && navigable.includes(cursor) ? cursor : null;
 
   // The deck follows the reader's place while it is listed, and the card after it once it leaves.
-  const lastOrder = useRef<readonly string[]>(order);
-  const deckPlace = nextSelection(lastOrder.current, deckAt, order);
-  const orderKey = order.join('\u0001');
+  const lastOrder = useRef<readonly string[]>(runOrder);
+  const deckPlace = nextSelection(lastOrder.current, deckAt, runOrder);
+  const orderKey = runOrder.join('\u0001');
   useEffect(() => {
     lastOrder.current = orderKey === '' ? [] : orderKey.split('\u0001');
     if (deckPlace !== deckAt) setDeckAt(deckPlace);
     if (orderKey === '') setDeckOpen(false);
   }, [orderKey, deckPlace, deckAt]);
   const deckSelected = deckCards.find(card => card.key === deckPlace);
+  const stepRow = toTestRows.find(row => row.key === deckPlace);
 
   const choose = (next: InboxFilter): void => {
     setFilter(next);
@@ -1127,9 +1130,9 @@ export function AgendaInboxPage({
     setDeckAt(key);
     setDeckOpen(true);
   };
-  const review = (): void => setDeckAt(order[0] ?? null);
+  const review = (): void => setDeckAt(runOrder[0] ?? null);
   const startDeck = (): void => {
-    setDeckAt(order[0] ?? null);
+    setDeckAt(runOrder[0] ?? null);
     setDeckOpen(true);
   };
   // A tapped notification's item opens as a card once it is among the open ones; a few seconds without it
@@ -1167,7 +1170,7 @@ export function AgendaInboxPage({
   }, [wantedKey, openCardKey, openSettled, inbox.reading]);
 
   // An open item is the deck's top card, on a phone and a wide screen alike.
-  const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || atEnd);
+  const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || stepRow !== undefined || atEnd);
 
   const env: RowEnv = {
     inbox,
@@ -1232,11 +1235,11 @@ export function AgendaInboxPage({
       <NothingMatches onClear={clearFilters} />
     ) : (
       <div className="fy-inbox-body" data-agenda-lists="">
-        {phone && order.length > 0 ? (
+        {phone && runOrder.length > 0 ? (
           <button className="kt-btn fy-inbox-quick" data-agenda-quick="" onClick={startDeck} type="button">
             <Zap aria-hidden="true" size={15} />
             Answer quickly
-            <span className="fy-inbox-quick__count">{order.length}</span>
+            <span className="fy-inbox-quick__count">{runOrder.length}</span>
           </button>
         ) : null}
         {nothingForYou && !filtered ? (
@@ -1301,15 +1304,32 @@ export function AgendaInboxPage({
         {atEnd ? (
           // The end sits where the card did, at its height: the deck's peek gap and hint line are kept.
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--end">
-            <QueueEnd onReview={review} remaining={deckCards.length} />
+            <QueueEnd onReview={review} remaining={runOrder.length} />
             <p aria-hidden="true" className="fy-attn-inbox__hint" />
+          </div>
+        ) : stepRow !== undefined ? (
+          <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open" data-agenda-deck-host="">
+            <ToTestStep
+              answers={toTestAnswers}
+              index={runOrder.indexOf(stepRow.key)}
+              now={now}
+              onNavigate={onNavigate}
+              onNext={() => setDeckAt(skipSelection(runOrder, stepRow.key))}
+              onPrevious={
+                runOrder.indexOf(stepRow.key) > 0
+                  ? () => setDeckAt(runOrder[runOrder.indexOf(stepRow.key) - 1] ?? null)
+                  : undefined
+              }
+              row={stepRow}
+              total={runOrder.length}
+            />
           </div>
         ) : (
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open" data-agenda-deck-host="">
             <AgendaSwipeDeck
               cards={deck}
               onAct={(card, action) => answerWithDraft(host, card, action)}
-              onSkip={card => setDeckAt(skipSelection(order, card.key))}
+              onSkip={card => setDeckAt(skipSelection(runOrder, card.key))}
               {...(phone ? { ownGesturesIn: VIEW_GESTURES } : {})}
               {...(reducedMotion === undefined ? {} : { reducedMotion })}
               renderCard={(card, act, skipCard) => {
@@ -1323,7 +1343,7 @@ export function AgendaInboxPage({
                     key={card.key}
                     place={{
                       index: Math.max(0, index),
-                      total: order.length,
+                      total: runOrder.length,
                       onClose: () => setDeckOpen(false),
                       swipeable: phone,
                       ...(previous === undefined ? {} : { onPrevious: () => setDeckAt(previous) }),
@@ -1347,6 +1367,7 @@ export function AgendaInboxPage({
             </div>
           </div>
         )}
+        {toTestAnswers.composer}
         <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
       </main>
     );

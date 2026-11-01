@@ -8,6 +8,7 @@
  *                         under it (`inbox-v2-screenshot.ts` drags it mid-swipe up and down)
  *   ?view=open-long       a LONG item open (premise, context, options, terms, a picture): one scroll for all of it
  *   ?view=to-test         the Needs you section with cards waiting for the owner's try among the agenda items
+ *   ?view=quick-to-test   the quick-answer run already on the first card waiting for a try (a wide screen has no button)
  *   ?view=open-5|open-7   an item with five or seven options: the row of three, the rest in full-width rows
  *
  * The REAL `AgendaInboxPage` and `Composer`; only the data is invented and nothing is sent anywhere.
@@ -293,7 +294,7 @@ const CLEAR_PORT: ClearPort = {
     }),
 };
 /** Cards waiting for the owner's try, from a real board model; nothing is sent, a move is only noted on the window. */
-const TO_TEST_VIEW = new URLSearchParams(location.search).get('view') === 'to-test';
+const TO_TEST_VIEW = ['to-test', 'quick-to-test'].includes(new URLSearchParams(location.search).get('view') ?? '');
 const TO_TEST = TO_TEST_VIEW
   ? toTestCards(
       await boardModelOf([
@@ -416,7 +417,7 @@ createRoot(root).render(
     from={view === 'warden' ? 'warden' : null}
     phone={window.innerWidth < 768}
     withFerretsOpen={view === 'sections-open'}
-    openAt={view === 'open' ? OWNER[0]?.key : OPENED[view]?.key}
+    openAt={view === 'open' ? OWNER[0]?.key : view === 'quick-to-test' ? TO_TEST[0]?.key : OPENED[view]?.key}
     extra={OPENED[view]}
   />,
 );
