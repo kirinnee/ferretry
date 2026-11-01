@@ -1,3 +1,11 @@
+## [4.219.0](https://github.com/kirinnee/ferretry/compare/v4.218.0...v4.219.0) (2026-11-01)
+
+### Features
+
+* **daemon:** catalogs store v2 with a shared item table, migrated from v1 (catalogs 3c-1) ([#1293](https://github.com/kirinnee/ferretry/issues/1293)) ([4c013cd](https://github.com/kirinnee/ferretry/commit/4c013cd0b5ec468fa3d214397e2938b1206e5dc3))
+* **daemon:** fill sign-ins under standing rules through the shared matcher (R3c-4) ([#1282](https://github.com/kirinnee/ferretry/issues/1282)) ([105701f](https://github.com/kirinnee/ferretry/commit/105701fa80ae42bd86e90030d5e246eaa4827371))
+* **pwa:** inbox gate items, the swipe-down compass and the owner-only Cards view ([#1283](https://github.com/kirinnee/ferretry/issues/1283)) ([5cdc716](https://github.com/kirinnee/ferretry/commit/5cdc716584a819cc2ae3897a32566d14b0342051))
+
 ## [4.218.0](https://github.com/kirinnee/ferretry/compare/v4.217.1...v4.218.0) (2026-11-01)
 
 ### Features
