@@ -102,6 +102,8 @@ interface Options {
   written?: TypeResult;
   clear?: ClearOutcome;
   session?: string;
+  /** Runs at each look at the target, numbered from 1 (the raise's look, then the write's). */
+  onLook?: (look: number, h: { setScripted(next: boolean): void }) => void;
 }
 
 function harness(options: Options = {}) {
@@ -119,6 +121,7 @@ function harness(options: Options = {}) {
   let facts = options.facts ?? loginPage();
   let scripted = options.scripted === true;
   let enabled = options.enabled ?? true;
+  let looks = 0;
   let card = 1;
   let id = 1;
   const clock = { now: () => NOW };
@@ -152,7 +155,15 @@ function harness(options: Options = {}) {
   let service: InputRequestService;
   service = new InputRequestService({
     target: {
-      observe: async () => ({ ok: true, facts }),
+      observe: async () => {
+        looks += 1;
+        options.onLook?.(looks, {
+          setScripted: next => {
+            scripted = next;
+          },
+        });
+        return { ok: true, facts };
+      },
       type: async (_session, _target, typed, _submit, _expected, more) => {
         typeOptions.push(more);
         if ((options.written ?? 'typed') === 'typed') writes.push(...typed.map(value => value.text));
@@ -208,6 +219,7 @@ function harness(options: Options = {}) {
     [...sinks, JSON.stringify(await service.list(HOST)), JSON.stringify(lines)].join('\n');
   return {
     service,
+    grants,
     writes,
     typeOptions,
     sinks,
@@ -690,5 +702,51 @@ describe('a terminal line is for sudo, su or doas running setuid root', () => {
     should(h.writes).deepEqual([]);
     should(view.state).equal('pending');
     should(request?.preapproval).be.undefined();
+  });
+});
+
+describe('the second match, at the write, holds or nothing is typed', () => {
+  it('should type nothing when the ferret ran a page script between the raise and the write, and leave the owner’s card', async () => {
+    // The raise's look passes every check; by the write's look the ferret has run a script in this session.
+    const h = harness({ onLook: (look, at) => look === 2 && at.setScripted(true) });
+    await approve(h, await github(h));
+
+    const { view, request } = await raised(h);
+
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(request?.preapproval).match({ outcome: 'did-not-apply', reason: 'scripted' });
+    should(view.note).equal(`${TASK_PLAN_MISS_AGENT_NOTE} Waiting for the owner on ${view.id}.`);
+    // Nothing was typed, so the use was given back.
+    should(h.used).deepEqual([]);
+    should(h.lines[0]?.state).equal('approved');
+    should(h.sinks).containEql(`noted ${view.id}: A task plan line didn't apply here, so you're asked as usual.`);
+  });
+});
+
+describe('the rate limit is the ledger’s, after the matcher', () => {
+  it('should type nothing once the sign-in was filled ten times this hour, and say why to the owner only', async () => {
+    const h = harness();
+    const signIn = await github(h);
+    await approve(h, signIn);
+    // Ten fills of this very sign-in this hour, under other grants and sessions.
+    for (let index = 0; index < 10; index++) {
+      const earlier = h.grants.ledger.reserve(
+        { id: `plan:${'cd'.repeat(16)}:${String(index)}`, signIn, remaining: 1 },
+        `session-${String(index)}`,
+        'password+username',
+        NOW - 60_000,
+      );
+      if (typeof earlier === 'string') throw new Error(earlier);
+      h.grants.ledger.spent(earlier, 'x');
+    }
+
+    const { view, request } = await raised(h);
+
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(request?.preapproval).match({ outcome: 'did-not-apply', reason: 'rate' });
+    should(view.note).equal(`${TASK_PLAN_MISS_AGENT_NOTE} Waiting for the owner on ${view.id}.`);
+    should(h.used).deepEqual([]);
   });
 });

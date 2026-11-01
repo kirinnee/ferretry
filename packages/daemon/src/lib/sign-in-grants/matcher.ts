@@ -215,8 +215,13 @@ export function matchSignInGrant(
   // 4. The recipe as pinned.
   if (signIn.recipeVersion !== grant.pins.recipeVersion) return miss('recipe-changed');
   // 5. This target is one of the pinned keys, exactly, on the surface the grant is for.
-  const surface = seen.facts.kind === 'browser' ? 'page' : seen.facts.kind === 'terminal' ? 'terminal' : undefined;
-  if (seen.matchKey === undefined || surface !== grant.surface || !grant.pins.placeKeys.includes(seen.matchKey))
+  const { facts } = seen;
+  if (
+    facts.kind === 'secret' ||
+    (facts.kind === 'browser' ? 'page' : 'terminal') !== grant.surface ||
+    seen.matchKey === undefined ||
+    !grant.pins.placeKeys.includes(seen.matchKey)
+  )
     return miss('not-here');
   // 6. Every field is a role the grant covers.
   const roles = rolesUnder(grant, seen.fields);
@@ -233,13 +238,8 @@ export function matchSignInGrant(
   )
     return miss('account-lacks-field');
   // 10–16 / 10t–12t. The surface's own checks.
-  const { facts } = seen;
   const problem =
-    facts.kind === 'browser'
-      ? pageProblem(facts, seen.fields, roles, seen.scripted)
-      : facts.kind === 'terminal'
-        ? terminalProblem(facts, roles)
-        : 'not-here';
+    facts.kind === 'browser' ? pageProblem(facts, seen.fields, roles, seen.scripted) : terminalProblem(facts, roles);
   if (problem !== undefined) return miss(problem);
   // 17 / 13t. The form is one the sign-in has history with (for a password), and the one first filled for this field set.
   const identity = identityOf(facts, seen.matchKey);

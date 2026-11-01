@@ -189,6 +189,12 @@ describe('a paste a rule fills is raised quiet', () => {
   });
 });
 
+let grantWorld: (
+  facts: InputTargetFacts,
+  source?: Partial<SignInGrantSource>,
+  pins?: Partial<SignInGrant>,
+) => ReturnType<typeof board> & { service: InputRequestService; writes: string[] };
+
 describe('a sign-in a task-plan line fills is raised quiet', () => {
   const KEY = `L${'c'.repeat(31)}` as AccountKey;
   const SIGN_IN = 'si_0123456789abcdef01234567' as SignInId;
@@ -200,7 +206,8 @@ describe('a sign-in a task-plan line fills is raised quiet', () => {
     submit: 'owner-default',
   };
 
-  function world(facts: InputTargetFacts) {
+  function world(facts: InputTargetFacts, source: Partial<SignInGrantSource> = {}, pins: Partial<SignInGrant> = {}) {
+    const writes: string[] = [];
     const clock = { now: () => NOW };
     const values = new EphemeralValues(clock);
     const b = board();
@@ -244,6 +251,7 @@ describe('a sign-in a task-plan line fills is raised quiet', () => {
       expiresAt: NOW + 3_600_000,
       state: 'in-force',
       remaining: 1,
+      ...pins,
     };
     const grants: SignInGrantSource = {
       enabled: () => true,
@@ -252,10 +260,17 @@ describe('a sign-in a task-plan line fills is raised quiet', () => {
       ledger: new SignInGrantLedger(),
       used: () => undefined,
       stopped: async () => undefined,
+      ...source,
     };
     const service = new InputRequestService({
       ...common(clock, values),
-      target: { observe: async () => ({ ok: true, facts }), type: async () => 'typed' },
+      target: {
+        observe: async () => ({ ok: true, facts }),
+        type: async (_session, _target, typed) => {
+          writes.push(...typed.map(value => value.text));
+          return 'typed';
+        },
+      },
       agenda: b.agenda,
       logins,
       grants,
@@ -263,8 +278,9 @@ describe('a sign-in a task-plan line fills is raised quiet', () => {
       observer: { delivered: async () => undefined, tainted: () => false },
     });
     b.bind(service);
-    return { ...b, service };
+    return { ...b, service, writes };
   }
+  grantWorld = world;
 
   it('should not buzz the phone for a sign-in the line fills at once', async () => {
     const w = world({ ...FACTS, trustedProgram: true });
@@ -284,5 +300,49 @@ describe('a sign-in a task-plan line fills is raised quiet', () => {
     should(card?.context).endWith('The agent says: sudo wants your password');
     should(JSON.stringify(card)).not.containEql('not-system');
     should(JSON.stringify(card)).not.containEql('setuid');
+  });
+});
+
+describe('a sign-in fill that cannot even be tried is the usual card', () => {
+  const KEY = `L${'c'.repeat(31)}` as AccountKey;
+  const SUDO: InputRaise = {
+    target: { kind: 'terminal', key: 'dev' },
+    prompt: 'sudo wants your password',
+    sensitivity: 'secret',
+    submit: 'owner-default',
+  };
+  // The grant world above, reused through its own describe: the same account, sign-in and grant.
+  const sudo = { ...FACTS, trustedProgram: true as const };
+
+  it('should type nothing and hand the card back when the account keys cannot be read', async () => {
+    const w = grantWorld(sudo, {
+      keyOf: async () => {
+        throw new Error('the account store fell over');
+      },
+    });
+    const view = await w.service.raise(SESSION, SUDO);
+    should(w.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(w.sink.deadlines).have.length(1);
+    should(w.open()[0]?.context).startWith("A task plan line didn't apply here, so you're asked as usual.");
+  });
+
+  it('should type nothing and hand the card back when stopping a changed line fails', async () => {
+    // The recipe moved since approval (`recipe-changed` stops the line), and recording the stop throws.
+    const w = grantWorld(
+      sudo,
+      {
+        stopped: async () => {
+          throw new Error('the plan service fell over');
+        },
+      },
+      { pins: { placeKeys: ['sudo@kirin-box'], recipeVersion: 3, identities: undefined }, accountKey: KEY },
+    );
+    const view = await w.service.raise(SESSION, SUDO);
+    should(w.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    const listed = await w.service.list({ kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' });
+    should(listed[0]?.preapproval).match({ outcome: 'did-not-apply' });
+    should(w.sink.deadlines).have.length(1);
   });
 });

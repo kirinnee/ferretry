@@ -1954,3 +1954,30 @@ describe('a grant fill’s pagehide clear and its check when the hold ends (R3a-
     should(await clearInputFields(world.subject, job)).equal('unknown');
   });
 });
+
+describe('the clear check fails closed (R3a-4)', () => {
+  const salted = (frameId: string, backendNodeId: number): BrowserInputClearJob => ({
+    navigationId: 'loader-1',
+    fields: [{ frameId, backendNodeId, salt: 'a'.repeat(32), digest: 'b'.repeat(64) }],
+  });
+
+  it('should answer moved, and empty nothing, for a field whose node is gone from the page', async () => {
+    const { world } = loginWorld();
+    const facts = await observed(world, ['#user', '#pw']);
+    const frame = facts.fields.find(each => each.fieldId === '#pw')?.frameId as string;
+    world.session('page-target').values.set(12, SECRET);
+    // Node 99 is in no frame of the session: the browser cannot resolve it.
+    should(await clearInputFields(world.subject, salted(frame, 99))).equal('moved');
+    should(world.session('page-target').values.get(12)).equal(SECRET);
+    should(world.session('page-target').count('Runtime.callFunctionOn')).equal(0);
+  });
+
+  it('should answer unknown, so the line stops, when the browser cannot say which document it shows', async () => {
+    const { world } = loginWorld();
+    const facts = await observed(world, ['#user', '#pw']);
+    const frame = facts.fields.find(each => each.fieldId === '#pw')?.frameId as string;
+    world.session('page-target').failOn = method =>
+      method === 'Page.getFrameTree' ? new Error('Target closed') : undefined;
+    should(await clearInputFields(world.subject, salted(frame, 12))).equal('unknown');
+  });
+});

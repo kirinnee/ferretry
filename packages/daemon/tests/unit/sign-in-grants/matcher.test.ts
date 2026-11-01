@@ -120,7 +120,8 @@ function sighting(over: Partial<GrantSighting> = {}, listing?: Partial<GrantSigh
   return {
     sessionId: SESSION,
     facts,
-    matchKey: facts.kind === 'browser' ? new URL(facts.origin).host : 'sudo@kirin-box',
+    matchKey:
+      'matchKey' in over ? over.matchKey : facts.kind === 'browser' ? new URL(facts.origin).host : 'sudo@kirin-box',
     fields: LOGIN_FIELDS,
     listing: { accounts: [account()], signIns: [site()], ...listing },
     keys: new Map([['GITHUB' as AccountId, KEY]]),
@@ -249,6 +250,17 @@ describe('matchSignInGrant: every check holds or nothing is typed (one row per c
         facts: page({ origin: 'http://localhost:8080', secure: true }, [
           pageField('user', { frameOrigin: 'http://localhost:8080' }),
           pageField('pass', { frameOrigin: 'http://localhost:8080' }),
+        ]),
+        matchKey: 'github.com',
+      },
+      reason: 'not-https',
+    },
+    {
+      check: '10 an origin that does not parse',
+      seen: {
+        facts: page({ origin: 'not a url' }, [
+          pageField('user', { frameOrigin: 'not a url' }),
+          pageField('pass', { frameOrigin: 'not a url' }),
         ]),
         matchKey: 'github.com',
       },

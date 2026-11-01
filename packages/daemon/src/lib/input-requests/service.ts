@@ -694,11 +694,11 @@ export class InputRequestService {
     const first = here[0] as SignInGrant;
     const seen = await this.sightingOf(held, facts, held.request.fields, here, grants);
     if (seen === undefined) return { ok: false, grant: first, reason: 'sign-in-gone' };
-    let missed: { readonly grant: SignInGrant; readonly reason: GrantMissReason } | undefined;
+    const misses: { readonly grant: SignInGrant; readonly reason: GrantMissReason }[] = [];
     for (const grant of here) {
       const match = matchSignInGrant(grant, seen, grants.ledger.pinned(grant.id));
       if (!match.ok) {
-        missed ??= { grant, reason: match.reason };
+        misses.push({ grant, reason: match.reason });
         continue;
       }
       const reservation = grants.ledger.reserve(
@@ -708,9 +708,10 @@ export class InputRequestService {
         seen.now,
       );
       if (typeof reservation !== 'string') return { ok: true, grant, match, reservation };
-      missed ??= { grant, reason: reservation };
+      misses.push({ grant, reason: reservation });
     }
-    return { ok: false, ...(missed ?? { grant: first, reason: 'not-here' }) };
+    // `here` is never empty, so every grant that did not fill left its miss: the first is the one the owner reads.
+    return { ok: false, ...(misses[0] as (typeof misses)[number]) };
   }
 
   /** The matcher again at the write, on the facts just looked at, with the accounts read again. */
