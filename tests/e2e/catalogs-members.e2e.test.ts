@@ -535,7 +535,12 @@ async function backToShared(person: Person, world: World, publisherId: string, v
       `(document.body.textContent ?? '').includes('Member project')`,
       30_000,
       "the member machine's registered project on its Projects page",
-    );
+    ).catch(async (error: unknown) => {
+      const daemonSays = JSON.stringify(await owner(world.b, 'GET', '/v1/projects', undefined, [200])).slice(0, 400);
+      throw new Error(
+        `${(error as Error).message}. The page says: ${String(await textNow(person.page, 'main'))}. The machine lists: ${daemonSays}`,
+      );
+    });
     await inApp(person, '/shared');
   }
   const seen = await reachAny(
