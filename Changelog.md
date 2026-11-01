@@ -1,3 +1,9 @@
+## [4.202.0](https://github.com/kirinnee/ferretry/compare/v4.201.0...v4.202.0) (2026-11-01)
+
+### Features
+
+* **accounts:** order sign-in cards by the owner's defaults and say why ([#1247](https://github.com/kirinnee/ferretry/issues/1247)) ([035030a](https://github.com/kirinnee/ferretry/commit/035030a809cdcbaf9267c6207731ac3f48f61f9e))
+
 ## [4.201.0](https://github.com/kirinnee/ferretry/compare/v4.200.0...v4.201.0) (2026-11-01)
 
 ### Features

@@ -1,3 +1,10 @@
+## [4.201.0](https://github.com/kirinnee/ferretry/compare/v4.200.0...v4.201.0) (2026-11-01)
+
+### Features
+
+* **daemon:** sequence one shared composer draft across the owner's devices ([#1233](https://github.com/kirinnee/ferretry/issues/1233)) ([2e73ca4](https://github.com/kirinnee/ferretry/commit/2e73ca4dd205de640aeb3eeef1e6b12f0f1c996a))
+* **pwa:** snooze cards waiting for a try ([#1246](https://github.com/kirinnee/ferretry/issues/1246)) ([f835359](https://github.com/kirinnee/ferretry/commit/f835359a1cd03759840a511412f680f46727d393))
+
 ## [4.200.0](https://github.com/kirinnee/ferretry/compare/v4.199.1...v4.200.0) (2026-11-01)
 
 ### Features
