@@ -833,10 +833,7 @@ function WorkOption({
         data-work-muted={entry.muted ? 'true' : undefined}
       >
         <span className="flex min-w-0 items-baseline gap-sm">
-          <Badge tone="accent" className="shrink-0">
-            {entry.kindLabel}
-          </Badge>
-          <span className="mono shrink-0 text-meta text-faint">{entry.hit.id}</span>
+          <span className="mono shrink-0 text-meta text-faint">{entry.reference}</span>
           <span className="min-w-0 flex-1 truncate font-semibold text-fg">{entry.title}</span>
           <Badge tone={entry.muted ? 'pend' : 'ok'} className="shrink-0">
             {entry.stateLabel}

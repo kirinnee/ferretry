@@ -27,6 +27,7 @@ import type { DaemonId } from '../lib/daemon-connection.ts';
 // same folder name the group header shows it under.
 import { baseName } from '../lib/fleet-grouping.ts';
 import { daemonBoardCardPath, daemonSettingsPath } from '../lib/pages/routes.ts';
+import { formatReference } from '../lib/references.ts';
 import { workHitDescription, workHitKey, workProjectLabel } from '../lib/work-search.ts';
 import {
   type AppBarDestinationLike,
@@ -117,7 +118,8 @@ export interface PaletteSettingsEntry {
 export interface PaletteWork {
   readonly hit: WorkHit;
   readonly key: string;
-  readonly kindLabel: 'Card' | 'Agenda';
+  /** The id the reference way: `&F412` for a card, `!A23` for an agenda item. */
+  readonly reference: string;
   readonly stateLabel: string;
   readonly muted: boolean;
   readonly title: string;
@@ -285,14 +287,14 @@ export const paletteWorkRows = (
     if (hit.kind === 'task') {
       cards.push({
         ...common,
-        kindLabel: 'Card',
+        reference: formatReference({ kind: 'task', id: hit.id }),
         context: workProjectLabel(hit.projectId, projectNames),
         href: daemonBoardCardPath(daemon, hit.id),
       });
     } else {
       agenda.push({
         ...common,
-        kindLabel: 'Agenda',
+        reference: formatReference({ kind: 'attention', id: hit.id }),
         context: ownerName(daemon, hit.sessionId, sessions),
         href: agendaConversationPath(daemon, hit.sessionId, hit.id),
       });

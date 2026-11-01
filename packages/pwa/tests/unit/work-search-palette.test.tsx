@@ -139,6 +139,24 @@ describe('the finder over the daemon work search', () => {
     );
   });
 
+  it('writes each id the reference way, and leaves the kind to the group heading instead of a pill on every row', async () => {
+    const { port } = fakePort();
+    await open({ workSearch: port });
+    await type('relay');
+    await settle();
+
+    const rows = optionText();
+    const cardRow = rows.find(row => row.includes('Harden the relay'));
+    const agendaRow = rows.find(row => row.includes('Pick a relay region'));
+    expect(cardRow).toContain('&F10');
+    expect(agendaRow).toContain('!A3');
+    for (const row of rows) {
+      expect(row).not.toMatch(/(^|\s)(Card|Agenda)(?=[&!])/u);
+      expect(row.startsWith('Card')).toBe(false);
+      expect(row.startsWith('Agenda')).toBe(false);
+    }
+  });
+
   it("names a card's project under it, says Unfiled for the unfiled board, and never shows an id", async () => {
     const stranger = '11111111-2222-4333-8444-555555555555';
     const { port } = fakePort([
