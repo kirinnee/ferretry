@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
 import { type Marquee, marqueeOf } from '../../lib/title-marquee.ts';
 
 /**
@@ -6,7 +6,14 @@ import { type Marquee, marqueeOf } from '../../lib/title-marquee.ts';
  * (`fy-item-view__title[data-marquee]`). Under `prefers-reduced-motion` it does not move: it ends in an ellipsis, and a
  * tap shows the whole title (and a second tap folds it again).
  */
-export function MarqueeTitle({ title }: { readonly title: string }) {
+export function MarqueeTitle({
+  title,
+  wrap,
+}: {
+  readonly title: string;
+  /** Draws the words as something else (a link). A tap then belongs to that, so the title cannot be tapped open. */
+  readonly wrap?: (text: string) => ReactNode;
+}) {
   const box = useRef<HTMLHeadingElement | null>(null);
   const text = useRef<HTMLSpanElement | null>(null);
   const [marquee, setMarquee] = useState<Marquee | null>(null);
@@ -50,12 +57,12 @@ export function MarqueeTitle({ title }: { readonly title: string }) {
       data-agenda-title=""
       {...(marquee === null ? {} : { 'data-marquee': '' })}
       {...(expanded ? { 'data-expanded': '' } : {})}
-      onClick={marquee === null && !expanded ? undefined : () => setExpanded(open => !open)}
+      onClick={wrap !== undefined || (marquee === null && !expanded) ? undefined : () => setExpanded(open => !open)}
       ref={box}
       style={style}
     >
       <span className="fy-item-view__title-text" ref={text}>
-        {title}
+        {wrap === undefined ? title : wrap(title)}
       </span>
     </h2>
   );

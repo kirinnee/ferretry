@@ -92,21 +92,37 @@ describe('the item view snooze control', () => {
     expect(root().querySelector('[data-agenda-snooze]')).toBeNull();
   });
 
-  test('keeps the clock out of the row — it is in the ⓘ panel — and snoozes from there; off while busy', async () => {
+  test('puts the clock in the head’s one row, after ⓘ and before ✕ — never in the ⓘ panel — and snoozes from there; off while busy', async () => {
     const snoozed: string[] = [];
     await draw(richItem, { onSnooze: until => snoozed.push(until) });
-    expect(root().querySelector('.fy-item-view__bar [data-agenda-snooze]')).toBeNull();
+    const clock = one<HTMLButtonElement>('.fy-item-view__bar [data-agenda-snooze]');
+    expect(clock.className).toBe('fy-item-view__step fy-item-view__step--tight fy-card-head__snooze');
     await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
-    const clock = one<HTMLButtonElement>('[data-agenda-top] [data-agenda-info-panel] [data-agenda-snooze]');
-    expect(clock.className).toBe('fy-item-view__step');
+    expect(root().querySelectorAll('[data-agenda-snooze]')).toHaveLength(1);
+    expect(root().querySelector('[data-agenda-info-panel] [data-agenda-snooze]')).toBeNull();
     await interact(() => clock.click());
     await interact(() => must(root().querySelector<HTMLElement>('[role="menuitem"]'), '1 hour').click());
     expect(snoozed).toEqual([new Date(NOW + 3_600_000).toISOString()]);
     await view?.unmount();
     view = null;
     await draw(richItem, { onSnooze: () => undefined, busy: true });
-    await interact(() => one<HTMLButtonElement>('[data-agenda-info-toggle]').click());
     expect(one<HTMLButtonElement>('[data-agenda-snooze]').disabled).toBe(true);
+  });
+
+  test('has no ⓘ for an item with nothing to say under its title, but still has its clock', async () => {
+    await draw(
+      agendaItem('A48', {
+        title: 'Same',
+        subject: 'Same',
+        why: 'Same',
+        ask: choices('Yes', 'No'),
+      } as unknown as Partial<AgendaItem>),
+      {
+        onSnooze: () => undefined,
+      },
+    );
+    expect(root().querySelector('[data-agenda-info-toggle]')).toBeNull();
+    expect(root().querySelectorAll('.fy-item-view__bar [data-agenda-snooze]')).toHaveLength(1);
   });
 });
 
@@ -127,11 +143,11 @@ describe('the v6 layout: title, ONE card, history — one column', () => {
     expect(root().querySelectorAll('[data-agenda-quick-replies]')).toHaveLength(1);
   });
 
-  test('is ONE row: the title, then the status dot, the pager, ⓘ and ✕ — nothing under it until ⓘ opens', async () => {
+  test('is ONE row: the title, then the status dot, the pager, ⓘ, the clock and ✕ — nothing under it until ⓘ opens', async () => {
     await draw(richItem, { onSnooze: () => undefined });
     const head = one('.fy-item-view__head');
     expect([...head.children].filter(child => !child.hasAttribute('hidden')).map(child => child.className)).toEqual([
-      'fy-item-view__bar',
+      'fy-item-view__bar fy-card-head',
     ]);
     const bar = one('.fy-item-view__head > .fy-item-view__bar');
     expect([...bar.children].map(child => child.className.split(' ')[0])).toEqual([
@@ -149,6 +165,7 @@ describe('the v6 layout: title, ONE card, history — one column', () => {
       '2 of 3',
       'Next item',
       'About this item',
+      'fy-snooze',
       'Back to the chat',
     ]);
     expect(root().querySelector('[data-agenda-ask]')).toBeNull();

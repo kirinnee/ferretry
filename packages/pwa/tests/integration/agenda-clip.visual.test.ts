@@ -138,8 +138,7 @@ describe('the snooze menu in the open item', () => {
       it(`opens with every edge on screen (${name}, ${theme})`, async () => {
         const { tab, close } = await open('item', name, theme);
         try {
-          await tab.click('[data-agenda-info-toggle]');
-          await tab.click('.fy-item-view__snooze [data-agenda-snooze]');
+          await tab.click('.fy-item-view__bar [data-agenda-snooze]');
           await tab.waitForSelector('.fy-snooze__popover');
           await framesSettled(tab);
           expectOnScreen(await insideViewport(tab, '.fy-snooze__popover'), 'the menu');
@@ -238,7 +237,7 @@ describe('the Answer-quickly card', () => {
           await framesSettled(tab);
           const first = await scrollBox(tab);
           await scrollTo(tab, (first.scroll - first.client) / 2);
-          await tab.click('.fy-totest__actions [data-agenda-snooze]');
+          await tab.click('.fy-totest__top [data-agenda-snooze]');
           await tab.waitForSelector('.fy-snooze__popover');
           await framesSettled(tab);
           expectOnScreen(await insideViewport(tab, '.fy-snooze__popover'), 'the menu');

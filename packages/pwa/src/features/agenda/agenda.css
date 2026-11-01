@@ -408,7 +408,3 @@
   top: auto;
   bottom: calc(100% + 4px);
 }
-.fy-totest__actions .fy-snooze__popover[data-flip] {
-  top: calc(100% + 4px);
-  bottom: auto;
-}
