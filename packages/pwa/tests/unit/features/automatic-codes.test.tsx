@@ -5,17 +5,20 @@ import {
   DAEMON_FEATURES,
   LOGIN_ONE_FACTOR_WARNING,
   LOGIN_TOTP_WARNING,
+  TWO_FACTOR_ERROR_CODES,
+  type InputRequest,
   type TwoFactorStageId,
 } from '@ferretry/protocol';
 import { InputCard } from '../../../src/features/input-request/input-card.tsx';
 import { InputCardHost } from '../../../src/features/input-request/input-card-host.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { seedFailureWords, savedSeedWords } from '../../../src/lib/automatic-codes.ts';
 import { fieldsOf } from '../../../src/lib/input-card.ts';
-import { DaemonClientProvider } from '../../../src/lib/store.tsx';
-import { type Mounted, mount } from '../../support/dom.ts';
+import { createAppStore, DaemonClientProvider, StoreProvider } from '../../../src/lib/store.tsx';
+import { interact, type Mounted, mount } from '../../support/dom.ts';
 import { click, settle, typeInto } from '../../support/dom-form.ts';
 import { healthOf } from '../../support/health.ts';
-import { type Call, fakeClient, NOW, offer, requestOf, saved } from '../../support/input-fixtures.ts';
+import { type Call, fakeClient, field, NOW, offer, requestOf, saved } from '../../support/input-fixtures.ts';
 
 const mounted: Mounted[] = [];
 afterEach(async () => {
@@ -115,11 +118,24 @@ const answers = (call: Call): unknown => {
   return {};
 };
 
-const draw = async (over: { addKey?: (stage: TwoFactorStageId) => Promise<boolean>; accounts?: AccountList } = {}) => {
+const draw = async (
+  over: {
+    addKey?: (stage: TwoFactorStageId, words: string) => Promise<boolean>;
+    accounts?: AccountList;
+    request?: InputRequest;
+  } = {},
+) => {
   const machine = fakeClient(answers);
   const asked: TwoFactorStageId[] = [];
-  const addKey = over.addKey ?? (async (stage: TwoFactorStageId) => void asked.push(stage) === undefined);
-  const request = codeCard();
+  const words: string[] = [];
+  const addKey =
+    over.addKey ??
+    (async (stage: TwoFactorStageId, said: string) => {
+      asked.push(stage);
+      words.push(said);
+      return true;
+    });
+  const request = over.request ?? codeCard();
   const view = await mount(
     <InputCard
       accounts={over.accounts ?? accountList()}
@@ -133,7 +149,15 @@ const draw = async (over: { addKey?: (stage: TwoFactorStageId) => Promise<boolea
   );
   mounted.push(view);
   const q = (selector: string) => view.container.querySelector<HTMLElement>(selector);
-  return { view, q, calls: machine.calls, asked };
+  return { view, q, calls: machine.calls, asked, words };
+};
+
+const interactSelect = async (element: Element | null, value: string): Promise<void> => {
+  const select = element as HTMLSelectElement;
+  await interact(() => {
+    select.value = value;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
 };
 
 const seedCalls = (calls: readonly Call[]) => calls.filter(call => call.path.includes('/factors/seed'));
@@ -262,6 +286,224 @@ describe('"Set up automatic codes" under a code card', () => {
   });
 });
 
+describe('the setup panel, from the fields and the sign-in the daemon matched', () => {
+  const secretFieldOnCodeCard = (): InputRequest => ({ ...codeCard(), fields: [field('secret')] });
+  const seedless = (): InputRequest => ({ ...codeCard(), saved: saved({ match: 'github.com', offers: [] }) });
+
+  it('should give a card with a secret field no panel and no code title, whatever the card says it is', async () => {
+    const card = await draw({ request: secretFieldOnCodeCard() });
+
+    expect(card.q('[data-codes-panel]')).toBeNull();
+    expect(card.q('[data-input-title]')?.textContent).not.toContain('One-time code');
+  });
+
+  it('should offer the panel and the code title to an account with no key yet, matched by the card’s own key', async () => {
+    const card = await draw({ request: seedless() });
+
+    expect(card.q('[data-codes-panel]')).not.toBeNull();
+    expect(card.q('[data-input-title]')?.textContent).toContain('Code sent to ••42 (SMS)');
+    expect(card.q('[data-input-code-key]')).toBeNull();
+    expect(card.q('[data-input-use-saved]')).toBeNull();
+  });
+
+  it('should offer no panel when no account has a sign-in at the card’s key', async () => {
+    const elsewhere = { ...seedless(), saved: saved({ match: 'gitlab.com', offers: [] }) };
+    const card = await draw({ request: elsewhere });
+
+    expect(card.q('[data-codes-panel]')).toBeNull();
+  });
+
+  it('should keep the seed field out of password managers', async () => {
+    const card = await draw();
+
+    await click(card.q('[data-codes-panel] summary'));
+    const seed = card.q('[data-codes-seed]');
+    expect(seed?.getAttribute('autocomplete')).toBe('new-password');
+    expect(seed?.getAttribute('data-1p-ignore')).toBe('');
+    expect(seed?.getAttribute('data-lpignore')).toBe('true');
+    expect(seed?.hasAttribute('data-bwignore')).toBe(true);
+  });
+
+  it('should start with both ticks off and Save disabled, for a key that matches and for one that does not', async () => {
+    const card = await draw();
+
+    await click(card.q('[data-codes-panel] summary'));
+    await typeInto(card.q('[data-codes-seed]'), OTHER_KEY);
+
+    expect((card.q('[data-codes-warning-tick]') as HTMLInputElement).checked).toBe(false);
+    expect((card.q('[data-codes-mismatch-tick]') as HTMLInputElement).checked).toBe(false);
+    expect((card.q('[data-codes-save]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('should wipe the key from the field the moment the page is hidden', async () => {
+    const card = await draw();
+
+    await click(card.q('[data-codes-panel] summary'));
+    await typeInto(card.q('[data-codes-seed]'), KEY);
+    const original = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    try {
+      await interact(() => document.dispatchEvent(new Event('visibilitychange')));
+    } finally {
+      delete (document as { visibilityState?: unknown }).visibilityState;
+      if (original !== undefined) Object.defineProperty(Document.prototype, 'visibilityState', original);
+    }
+
+    expect((card.q('[data-codes-seed]') as HTMLInputElement).value).toBe('');
+  });
+
+  it('should take the second tick back when the key changes', async () => {
+    const card = await draw();
+
+    await click(card.q('[data-codes-panel] summary'));
+    await typeInto(card.q('[data-codes-seed]'), OTHER_KEY);
+    await click(card.q('[data-codes-warning-tick]'));
+    await click(card.q('[data-codes-mismatch-tick]'));
+    expect((card.q('[data-codes-save]') as HTMLButtonElement).disabled).toBe(false);
+
+    await typeInto(card.q('[data-codes-seed]'), OTHER_KEY.replaceAll('Slack', 'Linear'));
+
+    expect((card.q('[data-codes-mismatch-tick]') as HTMLInputElement).checked).toBe(false);
+    expect((card.q('[data-codes-save]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('should take the second tick back when the account changes', async () => {
+    const two = accountList();
+    const both = AccountListSchema.parse({
+      ...two,
+      accounts: [
+        ...two.accounts,
+        { ...two.accounts[0], id: 'GITHUB2', username: 'second', signIns: ['si_fedcba9876543210'] },
+      ],
+      signIns: [...two.signIns, { ...two.signIns[0], id: 'si_fedcba9876543210', account: 'GITHUB2' }],
+    });
+    const card = await draw({ accounts: both, request: seedless() });
+
+    await click(card.q('[data-codes-panel] summary'));
+    await typeInto(card.q('[data-codes-seed]'), KEY);
+    expect(card.q('[data-codes-reads]')).not.toBeNull();
+    expect(card.q('[data-codes-mismatch]')).toBeNull();
+    await interactSelect(card.q('[data-codes-account]'), 'GITHUB');
+    await typeInto(card.q('[data-codes-seed]'), OTHER_KEY);
+    await click(card.q('[data-codes-warning-tick]'));
+    await click(card.q('[data-codes-mismatch-tick]'));
+    expect((card.q('[data-codes-save]') as HTMLButtonElement).disabled).toBe(false);
+
+    await interactSelect(card.q('[data-codes-account]'), 'GITHUB2');
+
+    expect((card.q('[data-codes-mismatch-tick]') as HTMLInputElement | null)?.checked ?? false).toBe(false);
+    expect((card.q('[data-codes-save]') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('should name the account in the passkey prompt from the daemon’s own list, never from a ferret', async () => {
+    const card = await draw();
+
+    await click(card.q('[data-codes-panel] summary'));
+    await typeInto(card.q('[data-codes-seed]'), KEY);
+    await click(card.q('[data-codes-warning-tick]'));
+    await click(card.q('[data-codes-save]'));
+    await settle();
+    await settle();
+
+    expect(card.words).toEqual(['save automatic codes to GitHub · kirinnee']);
+  });
+
+  it('should say a stage the daemon refused, clear the key, and let the owner try again', async () => {
+    const machine = fakeClient(call => {
+      if (call.path.endsWith('/factors/seed'))
+        throw Object.assign(new Error('no'), { status: 403, code: 'passkey_required' });
+      return answers(call);
+    });
+    const request = codeCard();
+    const view = await mount(
+      <InputCard
+        accounts={accountList()}
+        addKey={async () => true}
+        client={machine.client}
+        fields={fieldsOf(request)}
+        now={NOW}
+        onDone={() => undefined}
+        request={request}
+      />,
+    );
+    mounted.push(view);
+    const q = (selector: string) => view.container.querySelector<HTMLElement>(selector);
+
+    await click(q('[data-codes-panel] summary'));
+    await typeInto(q('[data-codes-seed]'), KEY);
+    await click(q('[data-codes-warning-tick]'));
+    await click(q('[data-codes-save]'));
+    await settle();
+    await settle();
+
+    expect(q('[data-codes-failed]')?.textContent).toContain('Needs a passkey');
+    await click(q('[data-codes-again]'));
+    expect(q('[data-codes-seed]')).not.toBeNull();
+    expect((q('[data-codes-warning-tick]') as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('should drop the staged key when the commit fails', async () => {
+    const machine = fakeClient(call => {
+      if (call.path.endsWith('/commit'))
+        throw Object.assign(new Error('gone'), { status: 410, code: 'stage_not_found' });
+      return answers(call);
+    });
+    const request = codeCard();
+    const view = await mount(
+      <InputCard
+        accounts={accountList()}
+        addKey={async () => true}
+        client={machine.client}
+        fields={fieldsOf(request)}
+        now={NOW}
+        onDone={() => undefined}
+        request={request}
+      />,
+    );
+    mounted.push(view);
+    const q = (selector: string) => view.container.querySelector<HTMLElement>(selector);
+
+    await click(q('[data-codes-panel] summary'));
+    await typeInto(q('[data-codes-seed]'), KEY);
+    await click(q('[data-codes-warning-tick]'));
+    await click(q('[data-codes-save]'));
+    await settle();
+    await settle();
+
+    expect(seedCalls(machine.calls).map(call => call.method)).toEqual(['POST', 'POST', 'DELETE']);
+    expect(q('[data-codes-failed]')?.textContent).toContain('timed out');
+  });
+});
+
+describe('what a failed save says, in the owner’s words', () => {
+  const refused = (code: string, status = 409, message = '') => ({
+    status,
+    code,
+    ...(message === '' ? {} : { message }),
+  });
+
+  it('should name each refusal the daemon gives, and never repeat anything pasted', () => {
+    expect(seedFailureWords(refused(TWO_FACTOR_ERROR_CODES.notThisCardsAccount))).toContain('another account now');
+    expect(seedFailureWords(refused(TWO_FACTOR_ERROR_CODES.mismatch))).toContain('tick the second box');
+    expect(seedFailureWords(refused(TWO_FACTOR_ERROR_CODES.notAKey))).toContain('not a 2FA key');
+    expect(seedFailureWords(refused(TWO_FACTOR_ERROR_CODES.tooManyStages))).toContain('Too many keys');
+  });
+
+  it('should explain a grant refusal, and fall back to the daemon’s message, then to a plain line', () => {
+    expect(seedFailureWords(refused('grant_not_granted', 403))).not.toBe('');
+    expect(seedFailureWords(refused('grant_not_granted', 403, 'No.'))).toContain('No.');
+    expect(seedFailureWords(refused('other', 500, 'Broke.'))).toBe('Broke.');
+    expect(seedFailureWords(refused('other', 500))).toBe('The daemon refused this.');
+    expect(seedFailureWords(new Error('offline'))).toBe('Could not reach the machine. Nothing was saved.');
+    expect(seedFailureWords(null)).toBe('Could not reach the machine. Nothing was saved.');
+  });
+
+  it('should say a first code was typed into the card when the daemon did that', () => {
+    expect(savedSeedWords({ typed: true, mismatch: false }, 'GitHub')).toContain('typed the first code');
+    expect(savedSeedWords({ mismatch: false }, 'GitHub')).toContain('will make GitHub’s codes');
+  });
+});
+
 describe('a code card with keys Ferretry makes codes from', () => {
   const withKeys = async (codes: readonly object[]) => {
     const machine = fakeClient(() => ({ outcome: 'typed' }));
@@ -304,17 +546,70 @@ describe('a code card with keys Ferretry makes codes from', () => {
     await settle();
     expect(calls.at(-1)?.body).toMatchObject({ entry: 'GITHUB', signIn: SIGN_IN, factor: SMS });
   });
+
+  it('should draw the code buttons for another account in “Choose another account” too, with its own sign-in', async () => {
+    const machine = fakeClient(() => ({ outcome: 'typed' }));
+    const base = codeCard([{ factor: APP, label: 'Authenticator app' }]);
+    const request: InputRequest = {
+      ...base,
+      saved: saved({
+        match: 'github.com',
+        offers: [
+          offer({
+            id: 'WORK',
+            label: 'GitHub (work)',
+            fills: 'totp',
+            matched: true,
+            primary: true,
+            why: 'only',
+            signIn: SIGN_IN,
+            codes: [{ factor: APP, label: 'Authenticator app' }] as never,
+          }),
+          offer({
+            id: 'GITHUB',
+            label: 'GitHub (kirinnee)',
+            fills: 'totp',
+            matched: true,
+            signIn: 'si_fedcba9876543210',
+            codes: [{ factor: APP, label: 'Backup app' }] as never,
+          }),
+        ],
+      }),
+    };
+    const view = await mount(
+      <InputCard
+        accounts={accountList([sms(SMS), totp(APP, 'Authenticator app')])}
+        client={machine.client}
+        fields={fieldsOf(request)}
+        now={NOW}
+        onDone={() => undefined}
+        request={request}
+      />,
+    );
+    mounted.push(view);
+
+    const buttons = [...view.container.querySelectorAll<HTMLElement>('[data-input-code-key]')];
+    expect(buttons.map(button => button.textContent).join('|')).toContain('Use code from Ferretry · Backup app');
+    await click(buttons.find(button => button.textContent?.includes('Backup app')) ?? null);
+    await settle();
+    expect(machine.calls.at(-1)?.body).toMatchObject({ entry: 'GITHUB', signIn: 'si_fedcba9876543210', factor: APP });
+  });
 });
 
 describe('the code card host', () => {
-  const served = (features: string[] | undefined) => {
+  const served = (
+    features: string[] | undefined,
+    card: InputRequest = codeCard([{ factor: APP, label: 'Authenticator app' }]),
+  ) => {
     const paths: string[] = [];
     const client = {
-      request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
+      request: async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) => {
         paths.push(path);
+        if (path.includes('/factors/seed'))
+          return schema.parse(answers({ path, method: init?.method ?? 'GET', body: undefined }));
         if (path === '/v1/health') return schema.parse(healthOf('9.9.9', features));
         if (path === '/v1/accounts') return schema.parse(accountList([totp(APP, 'Authenticator app')]));
-        return schema.parse({ requests: [codeCard([{ factor: APP, label: 'Authenticator app' }])] });
+        return schema.parse({ requests: [card] });
       },
     };
     return { paths, factory: async () => client as never };
@@ -347,6 +642,67 @@ describe('the code card host', () => {
     expect(machine.paths).not.toContain('/v1/accounts');
     expect(view.container.querySelector('[data-input-title]')).toBeNull();
     expect(view.container.querySelector('[data-codes-panel]')).toBeNull();
+  });
+
+  it('should not read accounts for a card whose field the daemon made a secret, even if the card says code', async () => {
+    const machine = served([DAEMON_FEATURES.twoFactorKeys], { ...codeCard(), fields: [field('secret')] });
+
+    const view = await host(machine);
+
+    expect(machine.paths).not.toContain('/v1/accounts');
+    expect(view.container.querySelector('[data-codes-panel]')).toBeNull();
+  });
+
+  it('should draw the plain card, no panel, when the accounts cannot be read', async () => {
+    const client = {
+      request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
+        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.twoFactorKeys]));
+        if (path === '/v1/accounts') throw new Error('unreachable');
+        return schema.parse({ requests: [codeCard([{ factor: APP, label: 'Authenticator app' }])] });
+      },
+    };
+
+    const view = await host({ paths: [], factory: async () => client as never });
+
+    expect(view.container.querySelector('[data-input-code-key]')).not.toBeNull();
+    expect(view.container.querySelector('[data-codes-panel]')).toBeNull();
+  });
+
+  it('should ask the app’s own passkey prompt, naming the account, when a key is saved inside the app', async () => {
+    const machine = served([DAEMON_FEATURES.twoFactorKeys]);
+    const store = await createAppStore({
+      repository: { load: async () => null, save: async () => undefined },
+      connectClient: async () => ({}) as never,
+      fetcher: async () => Response.json({}),
+    });
+    const view = await mount(
+      <StoreProvider store={store}>
+        <DaemonClientProvider client={machine.factory}>
+          <InputCardHost
+            connection={daemonConnection({
+              daemonId: 'workshop',
+              baseUrl: 'https://workshop.example.test',
+              deviceId: 't1',
+            })}
+            item={{ input: { requestId: 'ab'.repeat(16) } }}
+            sessionId="sess-1"
+          />
+        </DaemonClientProvider>
+      </StoreProvider>,
+    );
+    mounted.push(view);
+    for (let tries = 0; tries < 6; tries += 1) await settle();
+
+    await click(view.container.querySelector('[data-codes-panel] summary'));
+    await typeInto(view.container.querySelector('[data-codes-seed]'), KEY);
+    await click(view.container.querySelector('[data-codes-warning-tick]'));
+    await click(view.container.querySelector('[data-codes-save]'));
+    for (let tries = 0; tries < 4; tries += 1) await settle();
+
+    expect(store.stepUp.snapshot()?.acts).toEqual(['save automatic codes to GitHub · kirinnee']);
+    store.stepUp.dismiss();
+    for (let tries = 0; tries < 4; tries += 1) await settle();
+    expect(view.container.querySelector('[data-codes-failed]')?.textContent).toContain('did not confirm');
   });
 
   it('should read accounts and title the card from the keys where the daemon reports 2FA keys', async () => {

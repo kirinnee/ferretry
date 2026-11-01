@@ -1772,6 +1772,7 @@ export class InputRequestService {
       ...(lock === undefined ? {} : { lock }),
       state: 'pending',
       fields,
+      sensitivity: strongestSensitivity(fields),
       observed: await this.project(request.sessionId, seen.facts, held.names),
       risk: pasteRisk(worstRisk(fields.map(field => field.risk)), copy),
       observedDigest: digestFacts(seen.facts),

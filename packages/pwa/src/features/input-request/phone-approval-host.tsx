@@ -30,6 +30,7 @@ export function PhoneApprovalHost({ connection, approvalId, sessionId, onViewPag
   const [found, setFound] = useState<{ readonly client: InputClient; readonly approval: PhoneApproval } | null>(null);
 
   useEffect(() => {
+    setFound(null);
     if (!offered) return undefined;
     let current = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -41,7 +42,9 @@ export function PhoneApprovalHost({ connection, approvalId, sessionId, onViewPag
         setFound(approval === undefined ? null : { client, approval });
         if (approval?.state === 'waiting') timer = setTimeout(() => void read(client), POLL_MS);
       } catch {
-        if (current) timer = setTimeout(() => void read(client), POLL_MS * 3);
+        if (!current) return;
+        setFound(null);
+        timer = setTimeout(() => void read(client), POLL_MS * 3);
       }
     };
     void createClient(connection)

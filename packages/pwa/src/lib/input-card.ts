@@ -563,14 +563,8 @@ export const codeCheckedWords = (key: InputCodeKey): string | undefined =>
  * A code card's title, from the account's keys (`factorAskWords`): the OWNER's words about where the code goes, never
  * a ferret's. With no account to read (an older daemon, an unreadable list) the plain title stands.
  */
-export const codeTitleWords = (
-  request: InputRequest,
-  agentName: string,
-  account: AccountSummary | undefined,
-): string =>
-  account === undefined
-    ? titleWords(request, agentName)
-    : `!${request.agendaItemId} · ${agentName} · ${factorAskWords(account.factors, account)}`;
+export const codeTitleWords = (request: InputRequest, agentName: string, account: AccountSummary): string =>
+  `!${request.agendaItemId} · ${agentName} · ${factorAskWords(account.factors, account)}`;
 
 /** The line under every "Use code from Ferretry" button: the password and the code both come from this machine. */
 export const oneFactorLine = (offer: InputSavedOffer | undefined): string | undefined =>

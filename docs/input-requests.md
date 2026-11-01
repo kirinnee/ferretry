@@ -875,10 +875,17 @@ machine holds. The tap is the permission, as for a password; what follows is whe
 
 **In the app.** A code card's title is the daemon's `factorAskWords` text, not the ferret's. Each key with a seed
 is its own "Use code from Ferretry · <label>" button, with the one-factor line under them; a tap sends the entry, its
-sign-in and the key. A card that matched an account offers **"Set up automatic codes"** (collapsed): a masked field
-for the seed or `otpauth://` link, what the app read from it, the `LOGIN_TOTP_WARNING` tick, a second tick when
+sign-in and the key; the same buttons draw for an account under "Choose another account". The title and the panel
+follow the card's FIELDS (a field the daemon upgraded to a secret gets neither, whatever the card says it is). A card
+whose page matches an account's sign-in offers **"Set up automatic codes"** (collapsed), also for an account with no
+key yet, which gets no offer: the app matches the card's `saved.match` against the account's sign-ins the way the
+daemon checks a stage. The panel has a masked field
+for the seed or `otpauth://` link (`autocomplete="new-password"` and the password-manager ignore attributes, so a
+browser never offers to save it), what the app read from it, the `LOGIN_TOTP_WARNING` tick, a second tick when
 the keys disagree with a code already shown, and a passkey bound to the staged key (`add-2fa-key`, the stage id is
-the step-up subject). The seed is staged once, the field is emptied the moment it is sent (and when the page is
+the step-up subject; the prompt names the account from the daemon's own list: "save automatic codes to GitHub ·
+kirinnee"). Both ticks start off and Save stays disabled until they are ticked; the second tick is taken back whenever
+the key or the account changes. The seed is staged once, the field is emptied the moment it is sent (and when the page is
 hidden or the panel closes), and the commit carries no body. A dismissed passkey drops the stage and saves nothing.
 The panel needs a daemon that reports `accounts.2fa-keys.1` and `accounts.signins.1` (not reported until R2-6, so the panel ships dark).
 
@@ -1113,6 +1120,10 @@ the agenda subject and the push from the approval's own fields, and from nothing
   a@gmail.com". With no number, it ends "— open for the number".
 - **Agenda subject:** never the number. It is a plain `info` item with a `phoneApproval` ref, so an older app
   shows it as an info card.
+- **Asked:** "Asked 14:02 by lizzette", from the approval's own `raisedAt` and `agentName`.
+- **A number is the daemon's read, nothing else:** a number marked as pointed at by a ferret draws as no number, and
+  the number is dropped when the approval can no longer be read, after it expires, and the moment the card shows a
+  different approval.
 - **No number:** the card says why ("A ferret scripted this page, so Ferretry won't read a number from it.").
 - **A sign-in Ferretry does not know:** the card says so, and where ("a sign-in Ferretry doesn't know, on
   login.microsoftonline.com"), so an unexpected push is easy to refuse.

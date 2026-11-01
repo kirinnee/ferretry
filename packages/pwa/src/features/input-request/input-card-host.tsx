@@ -13,6 +13,7 @@ import {
   type AgendaItem,
   DAEMON_FEATURES,
   type InputRequest,
+  strongestSensitivity,
   type TwoFactorStageId,
 } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -101,7 +102,10 @@ export function InputCardHost({
   }, [refresh]);
 
   const wantsAccounts =
-    offersKeys && read.kind === 'open' && read.request.sensitivity === 'code' && read.request.saved !== undefined;
+    offersKeys &&
+    read.kind === 'open' &&
+    strongestSensitivity(read.request.fields) === 'code' &&
+    read.request.saved !== undefined;
   useEffect(() => {
     if (!wantsAccounts || client === null) {
       setAccounts(undefined);
@@ -157,7 +161,7 @@ export function InputCardHost({
       {...(accounts === undefined ? {} : { accounts })}
       {...(accounts === undefined || requireAddKey === undefined
         ? {}
-        : { addKey: (stage: TwoFactorStageId) => requireAddKey(connection, stage) })}
+        : { addKey: (stage: TwoFactorStageId, words: string) => requireAddKey(connection, stage, words) })}
       {...(agentName === undefined ? {} : { agentName })}
     />
   );

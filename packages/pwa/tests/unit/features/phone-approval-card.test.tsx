@@ -35,7 +35,7 @@ const BASE = {
   username: 'a@gmail.com',
   via: { id: 'OKTA', label: 'Okta' },
   raisedAt: AT,
-  expiresAt: '2026-10-31T14:04:00.000Z',
+  expiresAt: '2099-10-31T14:04:00.000Z',
   state: 'waiting',
 };
 const approval = (over: Record<string, unknown> = {}): PhoneApproval =>
@@ -121,12 +121,34 @@ describe('the approve-on-phone card', () => {
     expect(card.q('[data-phone-approval-number]')).toBeNull();
   });
 
-  it('has no way to be handed a number or words by a ferret: the card renders only the approval’s own fields', async () => {
-    const card = await draw(noNumber('none-found', { agentName: 'lizzette' }));
+  it('says when it was asked and by which ferret, from the daemon’s own fields', async () => {
+    const card = await draw(approval());
 
-    // A ferret's name is the one thing it supplies, and the card does not print it as a number or a prompt.
-    expect(card.text()).not.toMatch(/[0-9]{2,}/u);
-    expect(card.text()).not.toContain('lizzette');
+    expect(card.q('[data-phone-approval-asked]')?.textContent).toMatch(/^Asked \d{1,2}:\d{2}.* by lizzette$/u);
+  });
+
+  it('never draws a number a ferret pointed at, as if none had been read', async () => {
+    const card = await draw(
+      approval({ number: { value: '77', from: 'pointed', direction: 'tap-on-phone', readAt: AT } }),
+    );
+
+    expect(card.q('[data-phone-approval-number]')).toBeNull();
+    expect(card.text()).not.toContain('77');
+    expect(card.q('[data-phone-approval-no-number]')?.textContent).toContain("Ferretry couldn't read a number");
+  });
+
+  it('drops the number once the approval has expired, even before the daemon settles it', async () => {
+    const view = await mount(
+      <PhoneApprovalCard
+        approval={approval({ expiresAt: '2026-10-31T14:04:00.000Z' })}
+        now={Date.parse('2026-10-31T14:04:01.000Z')}
+        onRefuse={async () => undefined}
+      />,
+    );
+    mounted.push(view);
+
+    expect(view.container.querySelector('[data-phone-approval-number]')).toBeNull();
+    expect(view.container.textContent).not.toContain('42');
   });
 
   it('is answered only by "Not me — stop": no button says the owner approved', async () => {
@@ -200,6 +222,77 @@ describe('the approve-on-phone host', () => {
 
     expect(view.container.querySelector('[data-phone-approval-number]')?.textContent).toBe('42');
     expect(machine.paths).toContain('/v1/phone-approvals');
+  });
+
+  it('draws no number when reading the approvals fails', async () => {
+    const client = {
+      request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
+        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.phoneApproval]));
+        throw new Error('unreachable');
+      },
+    };
+
+    const view = await host({ paths: [], factory: async () => client as never });
+
+    expect(view.container.querySelector('[data-phone-approval-number]')).toBeNull();
+  });
+
+  it('drops the last approval’s number the moment the approval it shows changes', async () => {
+    const machine = served([DAEMON_FEATURES.phoneApproval], [approval()]);
+    const view = await host(machine);
+    expect(view.container.querySelector('[data-phone-approval-number]')?.textContent).toBe('42');
+    const stuck = {
+      request: async (path: string, schema: { parse: (value: unknown) => unknown }) => {
+        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.phoneApproval]));
+        return await new Promise(() => undefined);
+      },
+    };
+
+    await view.render(
+      <DaemonClientProvider client={async () => stuck as never}>
+        <PhoneApprovalHost approvalId={`pa_${'0'.repeat(23)}2`} connection={CONNECTION} sessionId={SESSION} />
+      </DaemonClientProvider>,
+    );
+    await settle();
+
+    expect(view.container.querySelector('[data-phone-approval]')).toBeNull();
+  });
+
+  it('sends the refusal to this approval’s own route, then shows it settled and tells the page', async () => {
+    const sent: string[] = [];
+    const client = {
+      request: async (path: string, schema: { parse: (value: unknown) => unknown }, init?: RequestInit) => {
+        if (path === '/v1/health') return schema.parse(healthOf('9.9.9', [DAEMON_FEATURES.phoneApproval]));
+        if (init?.method === 'POST') {
+          sent.push(path);
+          return schema.parse({});
+        }
+        return schema.parse({ approvals: [approval()] });
+      },
+    };
+    let done = 0;
+    const view = await mount(
+      <DaemonClientProvider client={async () => client as never}>
+        <PhoneApprovalHost
+          approvalId={ID}
+          connection={CONNECTION}
+          onDone={() => {
+            done += 1;
+          }}
+          sessionId={SESSION}
+        />
+      </DaemonClientProvider>,
+    );
+    mounted.push(view);
+    for (let tries = 0; tries < 5; tries += 1) await settle();
+
+    await click(view.container.querySelector('[data-phone-approval-refuse]'));
+    await settle();
+
+    expect(sent).toEqual([`/v1/sessions/${SESSION}/phone-approvals/${ID}/refuse`]);
+    expect(done).toBe(1);
+    expect(view.container.querySelector('[data-phone-approval-refuse]')).toBeNull();
+    expect(view.container.querySelector('[data-phone-approval-number]')).toBeNull();
   });
 
   it('draws nothing for an approval the daemon does not list for this session', async () => {

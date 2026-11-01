@@ -28,6 +28,8 @@ const SETTLED_WORDS: Readonly<Record<Exclude<PhoneApprovalState, 'waiting'>, str
 
 export interface PhoneApprovalCardModel {
   readonly words: PhoneApprovalWords;
+  /** "Asked 14:02 by lizzette", from the daemon's own raise time and the session's name. */
+  readonly asked: string;
   /** The number, large, only when the daemon read one. */
   readonly number?: string;
   /** "steered" gets a line of its own; a plain no-number card does not. */
@@ -40,17 +42,32 @@ export interface PhoneApprovalCardModel {
   readonly canRefuse: boolean;
 }
 
-export function phoneApprovalCardModel(approval: PhoneApproval): PhoneApprovalCardModel {
-  const words = phoneApprovalWords(approval);
+const askedWords = (approval: PhoneApproval): string =>
+  `Asked ${new Date(approval.raisedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })} by ${approval.agentName}`;
+
+/**
+ * A number is drawn only while the approval waits, has not expired and was read by the daemon itself: one a ferret
+ * pointed at (`from: 'pointed'`, which no daemon of today sends) is treated as no number at all.
+ */
+const readNumber = (approval: PhoneApproval, now: number): PhoneApproval['number'] =>
+  approval.state === 'waiting' && now < Date.parse(approval.expiresAt) && approval.number?.from !== 'pointed'
+    ? approval.number
+    : undefined;
+
+export function phoneApprovalCardModel(approval: PhoneApproval, now: number = Date.now()): PhoneApprovalCardModel {
+  const number = readNumber(approval, now);
+  const { number: _wire, ...rest } = approval;
+  const words = phoneApprovalWords(number === undefined ? rest : approval);
   const waiting = approval.state === 'waiting';
   const terminal = approval.surface === 'terminal';
   const settled = approval.state === 'waiting' ? undefined : SETTLED_WORDS[approval.state];
   return {
     words,
-    ...(waiting && approval.number !== undefined ? { number: approval.number.value } : {}),
+    asked: askedWords(approval),
+    ...(number === undefined ? {} : { number: number.value }),
     steered: approval.numberMissing === 'steered',
     terminal,
-    canViewPage: waiting && !terminal && approval.number === undefined,
+    canViewPage: waiting && !terminal && number === undefined,
     ...(settled === undefined ? {} : { settled }),
     canRefuse: waiting,
   };

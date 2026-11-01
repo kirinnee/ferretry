@@ -16,14 +16,16 @@ import {
 
 export interface PhoneApprovalCardProps {
   readonly approval: PhoneApproval;
+  /** The clock the number's expiry is read against; the real one unless a test sets it. */
+  readonly now?: number;
   /** Sends "Not me — stop". Rejects with why. */
   readonly onRefuse: () => Promise<void>;
   /** Shows the page the approval waits on; absent where the app cannot (the link is then not drawn). */
   readonly onViewPage?: () => void;
 }
 
-export function PhoneApprovalCard({ approval, onRefuse, onViewPage }: PhoneApprovalCardProps) {
-  const model = phoneApprovalCardModel(approval);
+export function PhoneApprovalCard({ approval, now, onRefuse, onViewPage }: PhoneApprovalCardProps) {
+  const model = phoneApprovalCardModel(approval, now);
   const { words } = model;
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -56,6 +58,9 @@ export function PhoneApprovalCard({ approval, onRefuse, onViewPage }: PhoneAppro
       <p className="m-0 min-w-0 break-words text-cell text-muted" data-phone-approval-where="">
         {words.where}
       </p>
+      <p className="m-0 text-meta text-faint" data-phone-approval-asked="">
+        {model.asked}
+      </p>
       {model.number === undefined ? null : (
         <div className="flex flex-col gap-1 rounded-control border border-border bg-surface-2 p-4 text-center">
           <span
@@ -69,11 +74,6 @@ export function PhoneApprovalCard({ approval, onRefuse, onViewPage }: PhoneAppro
           <span className="text-ui text-fg" data-phone-approval-direction="">
             {words.numberLine}
           </span>
-          {words.numberSource === undefined ? null : (
-            <span className="text-meta text-faint" data-phone-approval-source="">
-              {words.numberSource}
-            </span>
-          )}
         </div>
       )}
       {model.number !== undefined || words.noNumber === undefined ? null : (

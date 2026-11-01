@@ -30,6 +30,7 @@ import {
   type InputShot,
   lockWords,
   pickOneWords,
+  strongestSensitivity,
   type TwoFactorId,
   type TwoFactorStageId,
 } from '@ferretry/protocol';
@@ -107,7 +108,7 @@ export interface InputCardProps {
    */
   readonly accounts?: AccountList;
   /** Asks for the passkey that saves a staged key (bound to that stage); absent: the setup panel is not offered. */
-  readonly addKey?: (stage: TwoFactorStageId) => Promise<boolean>;
+  readonly addKey?: (stage: TwoFactorStageId, words: string) => Promise<boolean>;
 }
 
 const RISK_ICON = { green: ShieldCheck, neutral: Shield, amber: ShieldQuestion, red: ShieldAlert } as const;
@@ -143,20 +144,20 @@ export function InputCard({
   const [always, setAlways] = useState<AlwaysUse | undefined>(undefined);
   const facts = observedWords(request);
   const blocked = sendBlock(request, now);
-  const codeAccounts =
-    request.sensitivity === 'code' && accounts !== undefined ? codesAccounts(request.saved, accounts) : [];
-  const codeFor = accounts?.accounts.find(each => each.id === splitOffers(request.saved).primary?.id);
+  // The FIELDS decide, never the card's own word: a field the daemon upgraded to a secret gets no code title and no panel.
+  const asksCode = strongestSensitivity(request.fields) === 'code';
+  const codeAccounts = asksCode && accounts !== undefined ? codesAccounts(request.saved, accounts) : [];
+  const startAt = startingAccount(request.saved, codeAccounts);
+  const codeFor = accounts?.accounts.find(each => each.id === startAt?.id);
   const title =
-    request.sensitivity === 'code' && codeFor !== undefined
-      ? codeTitleWords(request, agentName, codeFor)
-      : titleWords(request, agentName);
+    asksCode && codeFor !== undefined ? codeTitleWords(request, agentName, codeFor) : titleWords(request, agentName);
   const setup =
     addKey !== undefined && codeAccounts.length > 0 && request.state === 'pending' ? (
       <AutomaticCodesPanel
         accounts={codeAccounts}
         addKey={addKey}
         client={client}
-        initial={startingAccount(request.saved, codeAccounts)}
+        initial={startAt}
         onSaved={() => onRefresh?.()}
         requestId={request.id}
       />
@@ -663,7 +664,7 @@ function FieldSummary({
 const SENSITIVITY_WORDS = {
   secret: 'secret',
   private: 'private',
-  code: 'one-time code, the ferret can see it',
+  code: 'one-time code',
   plain: 'not secret',
 } as const;
 

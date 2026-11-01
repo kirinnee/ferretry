@@ -86,19 +86,24 @@ const codeCard = codes =>
     },
     saved: saved({
       match: 'github.com',
-      offers: [
-        offer({
-          id: 'GITHUB',
-          label: 'GitHub (kirinnee)',
-          username: 'kirinnee',
-          fills: 'totp',
-          matched: true,
-          primary: true,
-          why: 'only',
-          signIn: SIGN_IN,
-          ...(codes === undefined ? {} : { codes }),
-        }),
-      ],
+      saves: undefined,
+      suggest: undefined,
+      offers:
+        codes === undefined
+          ? []
+          : [
+              offer({
+                id: 'GITHUB',
+                label: 'GitHub (kirinnee)',
+                username: 'kirinnee',
+                fills: 'totp',
+                matched: true,
+                primary: true,
+                why: 'only',
+                signIn: SIGN_IN,
+                codes,
+              }),
+            ],
     }),
   });
 
@@ -114,7 +119,7 @@ const answers = call => {
 const BASE = {
   id: 'pa_' + '0'.repeat(23) + '1',
   sessionId: 'mvwxxxhv-11b529cb',
-  agentName: 'lizzette',
+  agentName: 'Hadi',
   surface: 'browser',
   origin: 'https://company.okta.com',
   signIn: SIGN_IN,
@@ -171,6 +176,7 @@ if (view in APPROVALS) {
       <div data-harness-surface="">
         <InputCard
           accounts={accountList(factors)}
+          agentName="Hadi"
           addKey={addKey}
           client={machine.client}
           fields={fieldsOf(request)}

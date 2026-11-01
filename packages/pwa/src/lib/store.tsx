@@ -116,7 +116,6 @@ import {
   unlockCeremony,
 } from './step-up-ceremony.ts';
 import { StepUpGate } from './step-up-gate.ts';
-import { ADD_KEY_ACT_WORDS } from './grants.ts';
 import { DictationDebugLog, type DictationDebugSnapshot } from './stt/dictation-debug.ts';
 import {
   browserOnDeviceVoices,
@@ -1303,19 +1302,19 @@ export function useStepUpRequest(): ((daemon: DaemonConnection, act?: string) =>
 /**
  * The passkey for ONE save of a staged 2FA seed, asked BEFORE the save is sent: the proof is bound to this stage, so
  * the daemon takes it for that save and no other (`docs/input-requests.md`, "Set up automatic codes"). The words on the
- * prompt are the app's own fixed words for the act; nothing a ferret wrote reaches it. Outside a provider there is no
+ * prompt name the account from the daemon's own list; nothing a ferret wrote reaches it. Outside a provider there is no
  * prompt and the answer is `undefined`.
  */
 export function useAddKeyStepUp():
-  | ((daemon: DaemonConnection, stage: TwoFactorStageId) => Promise<boolean>)
+  | ((daemon: DaemonConnection, stage: TwoFactorStageId, words: string) => Promise<boolean>)
   | undefined {
   const store = useContext(StoreContext);
   return useMemo(
     () =>
       store === null
         ? undefined
-        : async (daemon: DaemonConnection, stage: TwoFactorStageId) =>
-            await store.stepUp.require(daemon, ADD_KEY_ACT_WORDS, 'explicit', 'add-2fa-key', stage),
+        : async (daemon: DaemonConnection, stage: TwoFactorStageId, words: string) =>
+            await store.stepUp.require(daemon, words, 'explicit', 'add-2fa-key', stage),
     [store],
   );
 }

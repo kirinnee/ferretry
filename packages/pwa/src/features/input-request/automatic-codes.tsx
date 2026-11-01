@@ -14,6 +14,7 @@
 import { LOGIN_TOTP_WARNING, padInputValue, type TwoFactorStageId } from '@ferretry/protocol';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import {
+  addKeyActWords,
   type CodesAccount,
   accountWords,
   DISMISSED_WORDS,
@@ -41,7 +42,7 @@ export interface AutomaticCodesPanelProps {
   readonly accounts: readonly CodesAccount[];
   readonly initial: CodesAccount | undefined;
   /** Asks for the passkey bound to this stage; `true` only when it was given. */
-  readonly addKey: (stage: TwoFactorStageId) => Promise<boolean>;
+  readonly addKey: (stage: TwoFactorStageId, words: string) => Promise<boolean>;
   /** The key is saved: the host reads the card and the accounts again (the daemon may have typed the first code). */
   readonly onSaved: () => void;
 }
@@ -102,7 +103,7 @@ export function AutomaticCodesPanel({
     }
     setPhase({ kind: 'passkey' });
     try {
-      if (!(await addKey(staged))) {
+      if (!(await addKey(staged, addKeyActWords(account)))) {
         await dropSeed(client, account.id, staged).catch(() => undefined);
         setPhase({ kind: 'failed', words: DISMISSED_WORDS });
         return;
@@ -167,7 +168,10 @@ export function AutomaticCodesPanel({
                   className="kt-input min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
                   data-codes-account=""
                   disabled={busy}
-                  onChange={event => setAccountId(accounts.find(each => each.id === event.target.value)?.id)}
+                  onChange={event => {
+                    setAccountId(accounts.find(each => each.id === event.target.value)?.id);
+                    setMismatchTick(false);
+                  }}
                   value={accountId ?? ''}
                 >
                   <option value="">Pick one</option>
@@ -184,11 +188,17 @@ export function AutomaticCodesPanel({
               2FA key or otpauth:// link
               <input
                 autoCapitalize="off"
-                autoComplete="off"
+                autoComplete="new-password"
                 className="kt-input mono min-h-[44px] rounded-control border border-border bg-surface-2 px-2 text-fg"
+                data-1p-ignore=""
+                data-bwignore=""
                 data-codes-seed=""
+                data-lpignore="true"
                 disabled={busy}
-                onChange={event => setText(event.target.value)}
+                onChange={event => {
+                  setText(event.target.value);
+                  setMismatchTick(false);
+                }}
                 ref={field}
                 spellCheck={false}
                 type="password"
