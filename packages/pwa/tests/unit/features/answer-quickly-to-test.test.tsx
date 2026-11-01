@@ -183,7 +183,7 @@ describe('Answer quickly — with the cards waiting for a try', () => {
     await interact(() => grip.dispatchEvent(touch('pointerup', 100, 500)));
     await interact(() => flush());
     expect(step(root)?.textContent).toContain('Second try');
-    expect(where(root)).toBe('2 of 2');
+    expect(where(root)).toBe('2/2');
     expect(actions.calls).toEqual([]);
   });
 
