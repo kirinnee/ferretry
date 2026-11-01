@@ -496,6 +496,29 @@ describe('the next time: the card offers the saved login, and the owner taps Use
     should(h.writes).deepEqual([PASSWORD]);
   });
 
+  it('should type nothing when the accounts cannot be read to check the sign-in', async () => {
+    let broken = false;
+    const h = harness({
+      logins: port => ({
+        ...port,
+        listing: async () => (broken ? await Promise.reject(new Error('damaged')) : await port.listing()),
+      }),
+    });
+    await savedOnce(h);
+    const own = await signInOf(h, 'SUDO_KIRIN_BOX');
+    const { request } = await raised(h);
+    broken = true;
+
+    const refused = await refusal(
+      h.service.deliver(SESSION, request.id, saved(request.observedDigest as string, 'SUDO_KIRIN_BOX', own), HOST),
+    );
+
+    should(refused.code).equal('unavailable');
+    should(refused.message).equal('Ferretry could not read the saved accounts, so nothing was typed');
+    should(h.fills).deepEqual([]);
+    should(h.writes).deepEqual([]);
+  });
+
   it("should make the ferret's matched choice the primary, and still type nothing until the owner taps (invariant 12)", async () => {
     const h = harness();
     await savedOnce(h);
