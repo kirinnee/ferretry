@@ -1,3 +1,9 @@
+## [4.217.0](https://github.com/kirinnee/ferretry/compare/v4.216.0...v4.217.0) (2026-11-01)
+
+### Features
+
+* **board:** gate line, turn-end gate check, fy board workflow show|edit ([#1279](https://github.com/kirinnee/ferretry/issues/1279)) ([c95ffa5](https://github.com/kirinnee/ferretry/commit/c95ffa5910106837c01a423eb432e149a24bacb4))
+
 ## [4.216.0](https://github.com/kirinnee/ferretry/compare/v4.215.0...v4.216.0) (2026-11-01)
 
 ### Features

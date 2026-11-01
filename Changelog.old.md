@@ -1,3 +1,10 @@
+## [4.216.0](https://github.com/kirinnee/ferretry/compare/v4.215.0...v4.216.0) (2026-11-01)
+
+### Features
+
+* **board:** workflow stages — gates and automatic steps, stage migration, reported triggers ([#1281](https://github.com/kirinnee/ferretry/issues/1281)) ([db5e987](https://github.com/kirinnee/ferretry/commit/db5e987a8edf5c683e66c0bd4c94f86e93706745))
+* **pwa:** put the snooze clock back in the card's one-row head ([#1284](https://github.com/kirinnee/ferretry/issues/1284)) ([326afb2](https://github.com/kirinnee/ferretry/commit/326afb2553fdc157b3dcb9234b6a12af6c1197b3))
+
 ## [4.215.0](https://github.com/kirinnee/ferretry/compare/v4.214.0...v4.215.0) (2026-11-01)
 
 ### Features
