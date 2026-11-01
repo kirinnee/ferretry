@@ -1,6 +1,6 @@
 {
   "name": "fy",
-  "version": "4.199.1",
+  "version": "4.200.0",
   "private": true,
   "description": "Command-line client for the per-host agent daemon",
   "type": "module",
