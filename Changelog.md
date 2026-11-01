@@ -1,3 +1,9 @@
+## [4.207.1](https://github.com/kirinnee/ferretry/compare/v4.207.0...v4.207.1) (2026-11-01)
+
+### Fixes
+
+* **daemon:** keep full ctime precision and make the ABA rename test deterministic ([#1264](https://github.com/kirinnee/ferretry/issues/1264)) ([197dc8f](https://github.com/kirinnee/ferretry/commit/197dc8f78dc292cbf93edaefa67697adda4e15ee))
+
 ## [4.207.0](https://github.com/kirinnee/ferretry/compare/v4.206.1...v4.207.0) (2026-11-01)
 
 ### Features
