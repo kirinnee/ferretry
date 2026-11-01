@@ -1,3 +1,10 @@
+## [4.194.0](https://github.com/kirinnee/ferretry/compare/v4.193.0...v4.194.0) (2026-11-01)
+
+### Features
+
+* **pwa:** one-row agenda card head with marquee title and ⓘ ([#1229](https://github.com/kirinnee/ferretry/issues/1229)) ([2df6343](https://github.com/kirinnee/ferretry/commit/2df6343256f2b9dbf26ad2d9108975aac4ba23d5))
+* **pwa:** swipe to-test cards left=Done, right=Not good, down=Skip; name the task ([#1230](https://github.com/kirinnee/ferretry/issues/1230)) ([a2ab0c8](https://github.com/kirinnee/ferretry/commit/a2ab0c833b57c37fc5e7ed66b9739db4843b73e7))
+
 ## [4.193.0](https://github.com/kirinnee/ferretry/compare/v4.192.0...v4.193.0) (2026-11-01)
 
 ### Features

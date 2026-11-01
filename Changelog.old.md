@@ -1,3 +1,14 @@
+## [4.193.0](https://github.com/kirinnee/ferretry/compare/v4.192.0...v4.193.0) (2026-11-01)
+
+### Features
+
+* **agenda:** form items answered with one Send ([#1199](https://github.com/kirinnee/ferretry/issues/1199)) ([567025b](https://github.com/kirinnee/ferretry/commit/567025bd55307707693cde230f4a1a14f6cbc6aa))
+* **cli:** search cards and agenda items, and check for related work before filing ([#1197](https://github.com/kirinnee/ferretry/issues/1197)) ([1ba2331](https://github.com/kirinnee/ferretry/commit/1ba2331119df994e72a4cd35a9257f2e5c71c84d))
+
+### Fixes
+
+* **fleet:** tighten pack wording so the prompt fits its cap again ([#1232](https://github.com/kirinnee/ferretry/issues/1232)) ([3845722](https://github.com/kirinnee/ferretry/commit/3845722639a4376f3af6a87e83e386ea4fdf12f5)), closes [#1197](https://github.com/kirinnee/ferretry/issues/1197) [#1199](https://github.com/kirinnee/ferretry/issues/1199)
+
 ## [4.192.0](https://github.com/kirinnee/ferretry/compare/v4.191.1...v4.192.0) (2026-11-01)
 
 ### Features
