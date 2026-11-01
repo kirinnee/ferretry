@@ -1,22 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
-import { constants, type Stats } from 'node:fs';
-import {
-  type FileHandle,
-  link,
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  readdir,
-  readlink,
-  realpath,
-  rename,
-  rm,
-  rmdir,
-  stat,
-  symlink,
-} from 'node:fs/promises';
+import { closeSync, constants, fsyncSync, openSync, readSync, writeSync } from 'node:fs';
+import { type FileHandle, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { HarnessKind } from '../lib/manifest.ts';
 import {
@@ -33,6 +18,10 @@ import {
   type SharedHistoryNode,
   type SharedHistorySymbolicLinkNode,
 } from '../lib/shared-history.ts';
+import type { FileIdentity, FolderDisk, GuardDisk, GuardedFolder } from '../lib/state-home-guard.ts';
+import { DestinationFolders, readFolderFile } from './destination-folders.ts';
+import { resolveSourceFence, type SourceFence } from './fenced-source.ts';
+import { NodeGuardDisk } from './node-guard-disk.ts';
 
 function isMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException).code === 'ENOENT';
@@ -114,15 +103,6 @@ async function writeAllBytes(handle: FileHandle, bytes: Uint8Array): Promise<voi
   }
 }
 
-/** Append every byte at the file's end; O_APPEND makes each write land past any concurrent growth. */
-async function appendAllBytes(handle: FileHandle, bytes: Uint8Array): Promise<void> {
-  let written = 0;
-  while (written < bytes.byteLength) {
-    const result = await handle.write(bytes, written, bytes.byteLength - written, null);
-    written += result.bytesWritten;
-  }
-}
-
 /** Sync the containing directory so a create, a rename or an unlink survives a crash, not only bytes. */
 async function syncDirectory(directory: string): Promise<void> {
   const handle = await open(directory, constants.O_RDONLY);
@@ -153,6 +133,25 @@ async function makeDirectoryDurable(target: string): Promise<void> {
   await syncDirectory(path.dirname(created));
 }
 
+/** Every folder the migration makes, as private to the account as the pool. */
+const FOLDER_MODE = 0o700;
+
+/** Make a folder's new, renamed or removed names durable: sync it, reached through its checked handle. */
+async function syncFolder(folder: GuardedFolder): Promise<void> {
+  const descriptor = openSync(await folder.self(), constants.O_RDONLY | constants.O_DIRECTORY);
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+/** Write every byte to a raw descriptor (at its offset, or at its end when opened to append). */
+function writeAll(descriptor: number, bytes: Uint8Array): void {
+  for (let written = 0; written < bytes.byteLength; )
+    written += writeSync(descriptor, bytes, written, bytes.byteLength - written);
+}
+
 /**
  * Real filesystem primitives for the shared-history planner.
  *
@@ -163,6 +162,17 @@ async function makeDirectoryDurable(target: string): Promise<void> {
  * directory to replace. Only ENOENT means absent; permission, truncation and type failures refuse
  * the migration.
  *
+ * **Nothing below a folder is reached by path.** The trees this moves — an account's history folders and the pool its
+ * links lead into — are written by the harnesses, so by the agents they run: any folder in them can be swapped for a
+ * link into the state home the moment after it was looked at. So every read, write, rename, unlink, rmdir and link is
+ * made through a folder opened and checked by the state-home guard (`./destination-folders.ts`): inside a home each
+ * folder is walked from the home down without following a link, anywhere else the real path is walked from `/` the
+ * same way, a folder that is a home or one of its key files by identity is refused, and the step reaches its entry
+ * THROUGH the held descriptor (Linux `/proc`, macOS descriptor calls). A swapped folder is refused, never followed, so
+ * nothing in the home is moved, read into the pool, or removed. Where descriptor reach cannot be loaded at all, the
+ * migration is refused rather than made by path. `deviceIdOf` and `canonicalDirectoryOf` stay path reads: they only
+ * inform the plan, and every step it then takes is made as above.
+ *
  * Every mutation is durable before it returns — the bytes, and the directory entry that names them,
  * including both parents of a rename. That is what lets the caller's progress cursor mean something
  * after a crash: an action the cursor counts really did survive.
@@ -170,7 +180,15 @@ async function makeDirectoryDurable(target: string): Promise<void> {
 export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
   private readonly allowedRoots: readonly string[];
 
-  constructor(allowedRoots: readonly string[]) {
+  /**
+   * `fence`: the daemon's state homes (and their key files), which no step may reach into — absent, no home is judged
+   * and every step still goes through a checked folder. `disk`: how folders are reached; a test names one.
+   */
+  constructor(
+    allowedRoots: readonly string[],
+    private readonly fence?: SourceFence,
+    private readonly disk: GuardDisk & FolderDisk = new NodeGuardDisk(),
+  ) {
     if (allowedRoots.length === 0) throw new Error('at least one allowed shared-history root is required');
     this.allowedRoots = allowedRoots.map(root => path.resolve(root));
   }
@@ -180,7 +198,10 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
     options: { readonly readText?: boolean; readonly recursive?: boolean } = {},
   ): Promise<SharedHistoryNode | undefined> {
     await this.assertAllowedPath(target);
-    return await this.observe(target, options);
+    const folders = await this.folders();
+    return await this.within(folders, path.dirname(target), async folder =>
+      folder === undefined ? undefined : await this.observe(folders, folder, path.basename(target), options),
+    );
   }
 
   /**
@@ -231,41 +252,44 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
 
   async ensureDirectory(target: string): Promise<void> {
     await this.assertAllowedPath(target);
-    const existing = await this.observe(target);
-    if (existing !== undefined) {
-      if (existing.kind !== 'directory') {
-        throw new Error(`shared-history directory path is ${existing.kind}: ${target}`);
-      }
-      return;
+    const folders = await this.folders();
+    const existing = await this.within(folders, path.dirname(target), async folder =>
+      folder === undefined ? undefined : await folder.describe(path.basename(target)),
+    );
+    if (existing !== undefined && existing.kind !== 'directory') {
+      throw new Error(`shared-history directory path is ${kindOf(existing)}: ${target}`);
     }
-    await makeDirectoryDurable(target);
-    const created = await this.observe(target);
-    if (created?.kind !== 'directory') throw new Error(`could not create shared-history directory: ${target}`);
+    await (await this.durable(folders, target)).close();
   }
 
   async ensureFile(target: string): Promise<void> {
     await this.assertAllowedPath(target);
-    const directory = path.dirname(target);
-    await makeDirectoryDurable(directory);
-    let handle: FileHandle;
+    const folders = await this.folders();
+    const folder = await this.durable(folders, path.dirname(target));
+    const leaf = path.basename(target);
     try {
-      handle = await open(target, 'wx', 0o600);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      const existing = await this.observe(target);
-      if (existing?.kind !== 'file') {
-        throw new Error(`shared-history file path is ${existing?.kind ?? 'absent'}: ${target}`);
+      let descriptor: number;
+      try {
+        descriptor = await folder.openFile(leaf, 'new', 0o600);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        const existing = await folder.describe(leaf);
+        if (existing?.kind !== 'file') {
+          throw new Error(`shared-history file path is ${kindOf(existing)}: ${target}`);
+        }
+        return;
       }
-      return;
-    }
-    // The empty file is itself the durable fact an ensure-entry action claims, so it is synced like
-    // any other write before the caller's cursor is allowed to count it.
-    try {
-      await handle.sync();
+      // The empty file is itself the durable fact an ensure-entry action claims, so it is synced like
+      // any other write before the caller's cursor is allowed to count it.
+      try {
+        fsyncSync(descriptor);
+      } finally {
+        closeSync(descriptor);
+      }
+      await syncFolder(folder);
     } finally {
-      await handle.close();
+      await folder.close();
     }
-    await syncDirectory(directory);
   }
 
   /**
@@ -289,63 +313,74 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
    * unlink leaves the inode under both names. Nothing is lost or overwritten by that, the cursor has
    * not advanced past the action, and recovery reports it as possibly half applied — which is what it
    * is. That is a better failure than a file quietly replaced.
+   *
+   * Both names are reached through their checked folders, so the move happens between the two folders that were
+   * checked, whatever their paths name by then.
    */
   async move(source: string, destination: string): Promise<void> {
     await this.assertAllowedPath(source);
     await this.assertAllowedPath(destination);
-    const existing = await this.observe(source);
-    if (existing === undefined) throw new Error(`shared-history move source is absent: ${source}`);
-    if ((await this.observe(destination)) !== undefined) {
-      throw new Error(`shared-history move destination already exists: ${destination}`);
-    }
-    const from = path.dirname(source);
-    const into = path.dirname(destination);
-    await makeDirectoryDurable(into);
-    if (existing.kind === 'file') return await this.relinkFile(source, destination, from, into);
+    const folders = await this.folders();
+    const from = await this.reach(folders, path.dirname(source));
+    if (from === undefined) throw new Error(`shared-history move source is absent: ${source}`);
     try {
-      await rename(source, destination);
-    } catch (error) {
-      throw sharedHistoryMoveRefusal(error, source, destination);
+      const leaf = path.basename(source);
+      const existing = await from.describe(leaf);
+      if (existing === undefined) throw new Error(`shared-history move source is absent: ${source}`);
+      const into = await this.durable(folders, path.dirname(destination));
+      try {
+        const name = path.basename(destination);
+        if ((await into.describe(name)) !== undefined) {
+          throw new Error(`shared-history move destination already exists: ${destination}`);
+        }
+        if (existing.kind === 'file') {
+          // Give a regular file its new name atomically, then take the old one away, syncing both parents.
+          await into.link(from, leaf, name).catch((error: unknown) => {
+            throw sharedHistoryMoveRefusal(error, source, destination);
+          });
+          await syncFolder(into);
+          await from.unlink(leaf);
+          await syncFolder(from);
+          return;
+        }
+        await from.renameInto(leaf, into, name).catch((error: unknown) => {
+          throw sharedHistoryMoveRefusal(error, source, destination);
+        });
+        // A rename changes two directories, and the old name is as important as the new one: syncing
+        // only the destination can leave a crash with the same inode reachable from both places.
+        await syncFolder(into);
+        if (from.path !== into.path) await syncFolder(from);
+      } finally {
+        await into.close();
+      }
+    } finally {
+      await from.close();
     }
-    // A rename changes two directories, and the old name is as important as the new one: syncing
-    // only the destination can leave a crash with the same inode reachable from both places.
-    await syncDirectory(into);
-    if (from !== into) await syncDirectory(from);
-  }
-
-  /** Give a regular file its new name atomically, then take the old one away, syncing both parents. */
-  private async relinkFile(source: string, destination: string, from: string, into: string): Promise<void> {
-    try {
-      await link(source, destination);
-    } catch (error) {
-      throw sharedHistoryMoveRefusal(error, source, destination);
-    }
-    await syncDirectory(into);
-    await rm(source);
-    await syncDirectory(from);
   }
 
   async writeTextAtomic(target: string, text: string): Promise<void> {
     await this.assertAllowedPath(target);
-    const existing = await this.observe(target);
-    if (existing !== undefined && existing.kind !== 'file') {
-      throw new Error(`shared-history text path is ${existing.kind}: ${target}`);
-    }
-    const directory = path.dirname(target);
-    await makeDirectoryDurable(directory);
-    const temporary = path.join(directory, `.${path.basename(target)}.${randomUUID()}.tmp`);
+    const folders = await this.folders();
+    const folder = await this.durable(folders, path.dirname(target));
+    const leaf = path.basename(target);
+    const temporary = `.${leaf}.${randomUUID()}.tmp`;
     try {
-      const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
-      try {
-        await writeAllBytes(handle, new TextEncoder().encode(text));
-        await handle.sync();
-      } finally {
-        await handle.close();
+      const existing = await folder.describe(leaf);
+      if (existing !== undefined && existing.kind !== 'file') {
+        throw new Error(`shared-history text path is ${kindOf(existing)}: ${target}`);
       }
-      await rename(temporary, target);
-      await syncDirectory(directory);
+      const descriptor = await folder.openFile(temporary, 'new', 0o600);
+      try {
+        writeAll(descriptor, new TextEncoder().encode(text));
+        fsyncSync(descriptor);
+      } finally {
+        closeSync(descriptor);
+      }
+      await folder.rename(temporary, leaf);
+      await syncFolder(folder);
     } finally {
-      await rm(temporary, { force: true });
+      await folder.unlink(temporary).catch(() => undefined);
+      await folder.close();
     }
   }
 
@@ -359,21 +394,22 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
    */
   async writeTextExclusive(target: string, text: string): Promise<void> {
     await this.assertAllowedPath(target);
-    const directory = path.dirname(target);
-    await makeDirectoryDurable(directory);
-    let handle: FileHandle;
+    const folders = await this.folders();
+    const folder = await this.durable(folders, path.dirname(target));
     try {
-      handle = await open(target, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
-    } catch (error) {
-      throw exclusiveRefusal(error, target);
-    }
-    try {
-      await writeAllBytes(handle, new TextEncoder().encode(text));
-      await handle.sync();
+      const descriptor = await folder.openFile(path.basename(target), 'new', 0o600).catch((error: unknown) => {
+        throw exclusiveRefusal(error, target);
+      });
+      try {
+        writeAll(descriptor, new TextEncoder().encode(text));
+        fsyncSync(descriptor);
+      } finally {
+        closeSync(descriptor);
+      }
+      await syncFolder(folder);
     } finally {
-      await handle.close();
+      await folder.close();
     }
-    await syncDirectory(directory);
   }
 
   /**
@@ -389,122 +425,210 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
    */
   async appendTextIfPrefix(target: string, expected: string, addition: string): Promise<boolean> {
     await this.assertAllowedPath(target);
-    const existing = await this.observe(target);
-    if (existing?.kind !== 'file') {
-      throw new Error(`shared-history append expected a file, found ${existing?.kind ?? 'absent'}: ${target}`);
-    }
-    // O_NOFOLLOW closes the gap between the check above and this open: a symbolic link swapped in
-    // after the lstat fails the open instead of being written through.
-    const handle = await open(target, constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW);
-    try {
-      const prefix = new TextEncoder().encode(expected);
-      const seen = new Uint8Array(prefix.byteLength);
-      const { bytesRead } = await handle.read(seen, 0, seen.byteLength, 0);
-      if (bytesRead !== prefix.byteLength || !prefix.every((byte, index) => byte === seen[index])) return false;
-      await appendAllBytes(handle, new TextEncoder().encode(addition));
-      await handle.sync();
-      return true;
-    } finally {
-      await handle.close();
-    }
+    const folders = await this.folders();
+    return await this.within(folders, path.dirname(target), async folder => {
+      const leaf = path.basename(target);
+      const existing = folder === undefined ? undefined : await folder.describe(leaf);
+      if (folder === undefined || existing?.kind !== 'file') {
+        throw new Error(`shared-history append expected a file, found ${kindOf(existing)}: ${target}`);
+      }
+      // Opened through the folder without following a link: a link swapped in after the look above fails the open
+      // instead of being written through.
+      const descriptor = await folder.openFile(leaf, 'append');
+      try {
+        const prefix = new TextEncoder().encode(expected);
+        const seen = new Uint8Array(prefix.byteLength);
+        const read = readSync(descriptor, seen, 0, seen.byteLength, 0);
+        if (read !== prefix.byteLength || !prefix.every((byte, index) => byte === seen[index])) return false;
+        writeAll(descriptor, new TextEncoder().encode(addition));
+        fsyncSync(descriptor);
+        return true;
+      } finally {
+        closeSync(descriptor);
+      }
+    });
   }
 
   async createSymbolicLink(target: string, destination: string): Promise<void> {
     await this.assertAllowedPath(target);
     await this.assertAllowedPath(destination);
-    if ((await this.observe(target)) === undefined) {
+    if ((await this.snapshot(target, { recursive: false })) === undefined) {
       throw new Error(`refusing to create a dangling shared-history link: ${destination} -> ${target}`);
     }
-    if ((await this.observe(destination)) !== undefined) {
-      throw new Error(`shared-history link destination already exists: ${destination}`);
+    const folders = await this.folders();
+    const folder = await this.durable(folders, path.dirname(destination));
+    try {
+      const leaf = path.basename(destination);
+      if ((await folder.describe(leaf)) !== undefined) {
+        throw new Error(`shared-history link destination already exists: ${destination}`);
+      }
+      await folder.symlink(target, leaf);
+      await syncFolder(folder);
+    } finally {
+      await folder.close();
     }
-    const directory = path.dirname(destination);
-    await makeDirectoryDurable(directory);
-    await symlink(target, destination);
-    await syncDirectory(directory);
   }
 
   async removeSymbolicLink(target: string, expectedTarget: string): Promise<void> {
     await this.assertAllowedPath(target);
-    const existing = await this.observe(target);
-    if (existing?.kind !== 'symbolic-link') {
-      throw new Error(`shared-history rollback expected a symbolic link: ${target}`);
-    }
-    if (path.resolve(path.dirname(target), existing.target) !== path.resolve(expectedTarget)) {
-      throw new Error(`shared-history rollback refused a replaced symbolic link: ${target}`);
-    }
-    await rm(target);
-    await syncDirectory(path.dirname(target));
+    await this.removeFrom(target, 'symbolic-link', 'rollback expected a symbolic link', async (folder, leaf) => {
+      if (path.resolve(path.dirname(target), await folder.readlink(leaf)) !== path.resolve(expectedTarget)) {
+        throw new Error(`shared-history rollback refused a replaced symbolic link: ${target}`);
+      }
+      await folder.unlink(leaf);
+    });
   }
 
   async removeEmptyDirectory(target: string): Promise<void> {
     await this.assertAllowedPath(target);
-    const existing = await this.observe(target);
-    if (existing?.kind !== 'directory') {
-      throw new Error(`shared-history cleanup expected a directory: ${target}`);
-    }
-    await rmdir(target);
-    await syncDirectory(path.dirname(target));
+    await this.removeFrom(target, 'directory', 'cleanup expected a directory', async (folder, leaf) => {
+      await folder.rmdir(leaf);
+    });
   }
 
   async removeFile(target: string): Promise<void> {
     await this.assertAllowedPath(target);
-    const existing = await this.observe(target);
-    if (existing?.kind !== 'file') throw new Error(`shared-history cleanup expected a file: ${target}`);
-    await rm(target);
-    await syncDirectory(path.dirname(target));
+    await this.removeFrom(target, 'file', 'cleanup expected a file', async (folder, leaf) => {
+      await folder.unlink(leaf);
+    });
+  }
+
+  /** Removes `target` through its checked folder, once it is the kind expected, and makes the removal durable. */
+  private async removeFrom(
+    target: string,
+    kind: SharedHistoryNode['kind'],
+    expectation: string,
+    remove: (folder: GuardedFolder, leaf: string) => Promise<void>,
+  ): Promise<void> {
+    const folders = await this.folders();
+    await this.within(folders, path.dirname(target), async folder => {
+      const leaf = path.basename(target);
+      const existing = folder === undefined ? undefined : await folder.describe(leaf);
+      if (folder === undefined || existing === undefined || kindOf(existing) !== kind) {
+        throw new Error(`shared-history ${expectation}: ${target}`);
+      }
+      await remove(folder, leaf);
+      await syncFolder(folder);
+    });
   }
 
   /**
-   * Read one entry, and its children when it is a directory, without following any symbolic link.
+   * Read one entry of a checked folder, and its children when it is a directory, without following any symbolic link.
    *
-   * Children are reached through a path whose ancestors are already confined and through names a
-   * directory listing produced, so they are inside the allowed roots by construction: re-deciding
-   * containment for every entry of a large transcript tree would buy nothing.
+   * A child folder is opened THROUGH its parent without following a link, so a folder swapped for a link into the
+   * home while the tree is read is refused rather than listed, and a file's text is read through its folder, never
+   * through a link put in its place — so nothing of the home's is read into a plan. Children are reached through
+   * names a directory listing produced, inside a folder already confined, so they are inside the allowed roots by
+   * construction: re-deciding containment for every entry of a large transcript tree would buy nothing.
    */
   private async observe(
-    target: string,
+    folders: DestinationFolders,
+    folder: GuardedFolder,
+    leaf: string,
     options: { readonly readText?: boolean; readonly recursive?: boolean } = {},
   ): Promise<SharedHistoryNode | undefined> {
-    let information: Stats;
-    try {
-      information = await lstat(target);
-    } catch (error) {
-      if (isMissing(error)) return undefined;
-      throw error;
-    }
-    const deviceId = information.dev;
-    if (information.isSymbolicLink()) {
+    const information = await folder.describe(leaf);
+    if (information === undefined) return undefined;
+    const deviceId = Number(information.device);
+    const modifiedAtMs = Number(information.modified ?? 0n) / 1e6;
+    if (information.kind === 'link') {
       return {
         kind: 'symbolic-link',
-        modifiedAtMs: information.mtimeMs,
+        modifiedAtMs,
         deviceId,
-        target: await readlink(target),
+        target: await folder.readlink(leaf),
       } satisfies SharedHistorySymbolicLinkNode;
     }
-    if (information.isFile()) {
+    if (information.kind === 'file') {
       return {
         kind: 'file',
-        modifiedAtMs: information.mtimeMs,
+        modifiedAtMs,
         deviceId,
         size: information.size,
-        ...(options.readText ? { text: await readFile(target, 'utf8') } : {}),
+        ...(options.readText ? { text: (await readFolderFile(folder, leaf)).toString('utf8') } : {}),
       };
     }
-    if (!information.isDirectory()) return { kind: 'other', modifiedAtMs: information.mtimeMs, deviceId };
+    if (information.kind !== 'directory') return { kind: 'other', modifiedAtMs, deviceId };
 
     const children: Record<string, SharedHistoryNode> = {};
-    if (options.recursive === false)
-      return { kind: 'directory', modifiedAtMs: information.mtimeMs, deviceId, children };
-    for (const name of (await readdir(target)).toSorted()) {
-      const childPath = path.join(target, name);
-      const child = await this.observe(childPath);
-      if (child === undefined) {
-        throw new Error(`shared-history entry disappeared while it was being read: ${childPath}`);
+    if (options.recursive === false) return { kind: 'directory', modifiedAtMs, deviceId, children };
+    const child = await folders.child(folder, leaf, path.join(folder.path, leaf));
+    try {
+      for (const name of (await child.list()).toSorted()) {
+        const node = await this.observe(folders, child, name);
+        if (node === undefined) {
+          throw new Error(`shared-history entry disappeared while it was being read: ${path.join(child.path, name)}`);
+        }
+        children[name] = node;
       }
-      children[name] = child;
+    } finally {
+      await child.close();
     }
-    return { kind: 'directory', modifiedAtMs: information.mtimeMs, deviceId, children };
+    return { kind: 'directory', modifiedAtMs, deviceId, children };
+  }
+
+  /** This call's way to the folders, judged against the fence as the disk has it now. */
+  private async folders(): Promise<DestinationFolders> {
+    const homes = this.fence === undefined ? undefined : (await resolveSourceFence(this.fence, this.disk)).homes;
+    return new DestinationFolders(homes, this.disk);
+  }
+
+  /**
+   * The checked folder at `directory`, or `undefined` when it is not there; refused where it is not anchored. Only
+   * ENOENT means not there: a folder that cannot be reached for another reason — an ancestor that is a file, one this
+   * process may not search — surfaces that reason, as every read of this migration does.
+   */
+  private async reach(folders: DestinationFolders, directory: string): Promise<GuardedFolder | undefined> {
+    const folder = await folders.existing(directory);
+    if (folder === undefined) {
+      await lstat(directory).catch((error: unknown) => {
+        if (!isMissing(error)) throw error;
+      });
+      return undefined;
+    }
+    if (folder.anchored) return folder;
+    await folder.close();
+    throw new Error(
+      `refusing to migrate shared history in ${directory}: its folders cannot be reached through their descriptors here, so a step could be redirected into the state home${folders.unavailable === undefined ? '' : ` (${folders.unavailable})`}`,
+    );
+  }
+
+  private async within<T>(
+    folders: DestinationFolders,
+    directory: string,
+    use: (folder: GuardedFolder | undefined) => Promise<T>,
+  ): Promise<T> {
+    const folder = await this.reach(folders, directory);
+    try {
+      return await use(folder);
+    } finally {
+      await folder?.close();
+    }
+  }
+
+  /**
+   * The checked folder at `directory`, made first when it is not there: each missing folder is made THROUGH its
+   * checked parent, and the parent synced so the new name is durable. The caller closes it.
+   */
+  private async durable(folders: DestinationFolders, directory: string): Promise<GuardedFolder> {
+    const missing: string[] = [];
+    let at = path.resolve(directory);
+    let folder = await this.reach(folders, at);
+    while (folder === undefined) {
+      missing.unshift(path.basename(at));
+      at = path.dirname(at);
+      folder = await this.reach(folders, at);
+    }
+    for (const segment of missing) {
+      const parent: GuardedFolder = folder;
+      try {
+        folder = await folders.child(parent, segment, path.join(parent.path, segment), FOLDER_MODE);
+        await syncFolder(parent);
+      } finally {
+        await parent.close();
+      }
+    }
+    return folder;
   }
 
   private async assertAllowedPath(target: string): Promise<void> {
@@ -518,6 +642,12 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
       throw new SharedHistoryAccessRefusedError(target, roots);
     }
   }
+}
+
+/** A guard identity's kind as the planner names it, or `absent`. */
+function kindOf(information: FileIdentity | undefined): SharedHistoryNode['kind'] | 'absent' {
+  if (information === undefined) return 'absent';
+  return information.kind === 'link' ? 'symbolic-link' : information.kind;
 }
 
 /** Tells one run of a pid apart from a later process that reuses the number. */

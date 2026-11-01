@@ -556,3 +556,26 @@ describe('a folder reached through descriptor paths (Linux) or by path', () => {
     should((refused as NodeJS.ErrnoException).code).equal('EEXIST');
   });
 });
+
+describe('renameInto — a rename from one held folder into another', () => {
+  it.each([
+    ['through descriptor paths', true],
+    ['through descriptor calls', 'calls'],
+  ] as const)('should move an entry into another held folder %s', async (_label, reach) => {
+    // Arrange
+    const { disk, homes } = await world(reach);
+    disk.dir(`${SKILLS}/into`);
+    disk.link(`${SKILLS}/pointer`, '/nowhere');
+    const folder = await opened(openFolderOutsideStateHomes(SKILLS, homes, disk));
+    const into = await opened(openFolderBelow(folder, 'into', homes, disk));
+
+    // Act
+    await folder.renameInto('stale', into, 'moved');
+    const target = await folder.readlink('pointer');
+
+    // Assert
+    should(disk.entries.get(`${SKILLS}/into/moved`)).match({ kind: 'directory' });
+    should(disk.entries.has(`${SKILLS}/stale`)).be.false();
+    should(target).equal('/nowhere');
+  });
+});

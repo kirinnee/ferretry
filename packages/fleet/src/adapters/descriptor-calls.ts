@@ -8,12 +8,13 @@ import {
   mkdirSync,
   openSync,
   readdirSync,
+  readlinkSync,
   renameSync,
   rmdirSync,
   symlinkSync,
   unlinkSync,
 } from 'node:fs';
-import type { DescriptorCalls, FileIdentity, GuardDirectoryHandle } from '../lib/state-home-guard.ts';
+import type { DescriptorCalls, FileIdentity, FileOpening, GuardDirectoryHandle } from '../lib/state-home-guard.ts';
 import type { DirectorySyscalls } from './directory-syscalls.ts';
 import type { LinkSyscall } from './link-syscall.ts';
 import { PROCESS_WORKING_DIRECTORY, type WorkingDirectory } from './working-directory.ts';
@@ -39,7 +40,8 @@ import { PROCESS_WORKING_DIRECTORY, type WorkingDirectory } from './working-dire
  * step 4 fails, the process falls back to `/` (or stops, `./working-directory.ts`), the step that failed reports it,
  * and every later bracket — this one's and the session-file pinner's — refuses.
  *
- * The one step across TWO folders — a hard link from one into the other — is `linkat` on both descriptors, which
+ * The steps across TWO folders — a hard link or a rename from one into the other — are `linkat` and `renameat` on both
+ * descriptors, each folder proven first, which
  * needs no bracket. Integers and strings only, as `directory-syscalls.ts` holds itself to: no struct is decoded.
  */
 export class DescriptorBracket {
@@ -87,15 +89,25 @@ export class DescriptorBracket {
    * number closed and reused by another folder would otherwise link somewhere else.
    */
   linkat(from: HeldFolder, fromName: string, to: HeldFolder, toName: string): void {
-    for (const held of [from, to]) {
-      const now = fstatSync(held.fd, { bigint: true });
-      if (now.dev !== held.identity.device || now.ino !== held.identity.inode) {
-        throw Object.assign(new Error('refusing to link: a held folder is no longer the one it was opened on'), {
+    this.proveHeld('link', from, to);
+    this.links.linkat(from.fd, fromName, to.fd, toName);
+  }
+
+  /** Renames across two held folders, each proven first like {@link linkat}. */
+  renameat(from: HeldFolder, fromName: string, to: HeldFolder, toName: string): void {
+    this.proveHeld('rename', from, to);
+    this.links.renameat(from.fd, fromName, to.fd, toName);
+  }
+
+  private proveHeld(verb: string, ...held: readonly HeldFolder[]): void {
+    for (const folder of held) {
+      const now = fstatSync(folder.fd, { bigint: true });
+      if (now.dev !== folder.identity.device || now.ino !== folder.identity.inode) {
+        throw Object.assign(new Error(`refusing to ${verb}: a held folder is no longer the one it was opened on`), {
           code: 'EBADF',
         });
       }
     }
-    this.links.linkat(from.fd, fromName, to.fd, toName);
   }
 }
 
@@ -110,12 +122,23 @@ const isMissing = (error: unknown): boolean => {
   return code === 'ENOENT' || code === 'ENOTDIR';
 };
 
-const READ_FILE = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-const NEW_FILE =
-  constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+/** The open flags of each way a folder step opens a file — the same everywhere (`node-guard-disk.ts` too). */
+export const FILE_OPENINGS: Readonly<Record<FileOpening, number>> = {
+  read: constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  new: constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  append: constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+};
 
 /** Which folder each handle holds, for the step that needs two of them. */
 const descriptors = new WeakMap<GuardDirectoryHandle, HeldFolder>();
+
+/** The folder `into` holds — refused as the kernel would (`EBADF`) when it holds none here. */
+const held = (verb: string, into: GuardDirectoryHandle): HeldFolder => {
+  const target = descriptors.get(into);
+  if (target === undefined)
+    throw Object.assign(new Error(`refusing to ${verb}: that folder is not held`), { code: 'EBADF' });
+  return target;
+};
 
 /**
  * A folder handle on the open descriptor `fd`, whose every step goes through `bracket`. Takes ownership of `fd`.
@@ -158,14 +181,11 @@ export function descriptorHandle(
     rmdir: async leaf => await step(() => rmdirSync(leaf)),
     rename: async (from, to) => await step(() => renameSync(from, to)),
     symlink: async (target, leaf) => await step(() => symlinkSync(target, leaf)),
-    link: async (fromLeaf, into, toLeaf) => {
-      // A folder not held by a descriptor here has none to link into: refused as the kernel would (`EBADF`).
-      const target = descriptors.get(into);
-      if (target === undefined)
-        throw Object.assign(new Error('refusing to link: that folder is not held'), { code: 'EBADF' });
-      bracket.linkat({ fd, identity }, fromLeaf, target, toLeaf);
-    },
-    openFile: async (leaf, how, mode) => await step(() => openSync(leaf, how === 'read' ? READ_FILE : NEW_FILE, mode)),
+    readlink: async leaf => await step(() => readlinkSync(leaf)),
+    link: async (fromLeaf, into, toLeaf) => bracket.linkat({ fd, identity }, fromLeaf, held('link', into), toLeaf),
+    renameInto: async (fromLeaf, into, toLeaf) =>
+      bracket.renameat({ fd, identity }, fromLeaf, held('rename', into), toLeaf),
+    openFile: async (leaf, how, mode) => await step(() => openSync(leaf, FILE_OPENINGS[how], mode)),
   };
   const handle: GuardDirectoryHandle = {
     identity,

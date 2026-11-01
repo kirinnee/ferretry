@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import { FileSharedHistoryFileSystem, sharedHistoryMoveRefusal } from '../../src/adapters/file-shared-history.ts';
+import { NodeGuardDisk } from '../../src/adapters/node-guard-disk.ts';
 import { SharedHistoryMigration, type SharedHistoryRequest } from '../../src/lib/shared-history.ts';
 
 const temporaryDirectories: string[] = [];
@@ -556,7 +557,9 @@ describe('FileSharedHistoryFileSystem', () => {
     const listing = fs.readdir;
     const spy = spyOn(fs, 'readdir').mockImplementation((async (target: string, ...rest: unknown[]) => {
       const names = await (listing as (...args: unknown[]) => Promise<string[]>)(target, ...rest);
-      return target === directory ? [...names, 'vanished'] : names;
+      // The folder is listed through its descriptor, so it is recognised by where that leads.
+      const listed = await fs.realpath(String(target)).catch(() => String(target));
+      return listed === directory ? [...names, 'vanished'] : names;
     }) as unknown as typeof fs.readdir);
     const subject = new FileSharedHistoryFileSystem([root]);
 
@@ -844,5 +847,77 @@ describe('shared-history migration with the real filesystem', () => {
     } finally {
       await writer.close();
     }
+  });
+});
+
+describe('shared-history migration through checked folder handles, with the state home fenced', () => {
+  /** Two Claude runtimes under a state home, each with a project transcript and a prompt history. */
+  const fleet = async () => {
+    const machine = await realpath(await temporaryDirectory());
+    const home = path.join(machine, '.ferretry');
+    const homeA = path.join(home, 'fleet', 'homes', 'a');
+    const homeB = path.join(home, 'fleet', 'homes', 'b');
+    const poolRoot = path.join(home, 'fleet', 'shared');
+    await write(path.join(home, 'state', 'secrets.key'), 'vault-key\n');
+    await mkdir(path.join(home, 'config'), { recursive: true });
+    await write(path.join(homeA, 'projects', 'alpha', 'one.jsonl'), 'a1\n');
+    await write(path.join(homeB, 'projects', 'beta', 'two.jsonl'), 'b1\n');
+    await write(path.join(homeA, 'history.jsonl'), '{"display":"from a"}\n');
+    await write(path.join(homeB, 'history.jsonl'), '{"display":"from b"}\n');
+    const fence = { homes: [home, path.join(home, 'state'), path.join(home, 'config')], open: [] };
+    const request: SharedHistoryRequest = {
+      kind: 'claude',
+      poolRoot,
+      homes: [
+        { account: 'a', path: homeA },
+        { account: 'b', path: homeB },
+      ],
+    };
+    return { home, homeA, homeB, poolRoot, fence, request };
+  };
+
+  it.each([
+    ['through descriptor paths (Linux)', undefined],
+    ['through descriptor calls (macOS)', 'calls' as const],
+  ])('should migrate both runtimes into the pool %s', async (_label, reach) => {
+    // Arrange
+    const { home, homeA, homeB, poolRoot, fence, request } = await fleet();
+    const disk = reach === undefined ? undefined : new NodeGuardDisk(reach);
+    const subject = new SharedHistoryMigration(new FileSharedHistoryFileSystem([home], fence, disk));
+
+    // Act
+    const actual = await subject.materialize(request);
+
+    // Assert — every transcript is in the pool, each runtime's folders lead there, the histories are merged, and the
+    // state home is as it was.
+    should(actual.migrated).be.greaterThan(0);
+    const pool = path.join(poolRoot, 'claude');
+    should(await readFile(path.join(pool, 'projects', 'alpha', 'one.jsonl'), 'utf8')).equal('a1\n');
+    should(await readFile(path.join(pool, 'projects', 'beta', 'two.jsonl'), 'utf8')).equal('b1\n');
+    for (const runtime of [homeA, homeB]) {
+      should((await lstat(path.join(runtime, 'projects'))).isSymbolicLink()).be.true();
+      should(await realpath(path.join(runtime, 'projects'))).equal(path.join(pool, 'projects'));
+    }
+    const history = await readFile(path.join(pool, 'history.jsonl'), 'utf8');
+    should(history).containEql('from a');
+    should(history).containEql('from b');
+    should(await readdir(path.join(home, 'state'))).deepEqual(['secrets.key']);
+    should(await readFile(path.join(home, 'state', 'secrets.key'), 'utf8')).equal('vault-key\n');
+  });
+
+  it('should refuse the migration, changing nothing, where folders cannot be reached through their descriptors', async () => {
+    // Arrange — a disk reached by path only (the C calls could not be loaded).
+    const { home, homeA, fence, request } = await fleet();
+    const subject = new SharedHistoryMigration(
+      new FileSharedHistoryFileSystem([home], fence, new NodeGuardDisk(false)),
+    );
+
+    // Act
+    const refused = await subject.materialize(request).catch((error: unknown) => error);
+
+    // Assert
+    should((refused as Error).message).match(/cannot be reached through their descriptors here/u);
+    should((await lstat(path.join(homeA, 'projects'))).isDirectory()).be.true();
+    should(await readFile(path.join(homeA, 'projects', 'alpha', 'one.jsonl'), 'utf8')).equal('a1\n');
   });
 });

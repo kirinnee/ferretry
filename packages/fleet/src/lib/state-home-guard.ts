@@ -93,12 +93,22 @@ export interface DescriptorCalls {
   unlink(leaf: string): Promise<void>;
   rmdir(leaf: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
+  /** Renames `fromLeaf` here to `toLeaf` in the folder `into` (which must have descriptor calls too). */
+  renameInto(fromLeaf: string, into: GuardDirectoryHandle, toLeaf: string): Promise<void>;
   symlink(target: string, leaf: string): Promise<void>;
+  /** Where the symbolic link `leaf` points, as written. */
+  readlink(leaf: string): Promise<string>;
   /** Hard-links `fromLeaf` here as `toLeaf` in the folder `into` (which must have descriptor calls too). */
   link(fromLeaf: string, into: GuardDirectoryHandle, toLeaf: string): Promise<void>;
-  /** A raw descriptor on the file `leaf`: `read`, or `new` (created exclusively with `mode`); never through a link. */
-  openFile(leaf: string, how: 'read' | 'new', mode: number): Promise<number>;
+  /** A raw descriptor on the file `leaf` ({@link FileOpening}); never through a link. */
+  openFile(leaf: string, how: FileOpening, mode: number): Promise<number>;
 }
+
+/**
+ * How a folder step opens a file, never through a link and never blocking on a pipe: `read`; `new`, created
+ * exclusively with its mode; `append`, an existing file opened to read and to add at its end only.
+ */
+export type FileOpening = 'read' | 'new' | 'append';
 
 /** What the guard asks of the disk. Every open refuses a link at its last step. */
 export interface GuardDisk {
@@ -693,7 +703,10 @@ async function placedFolderProblem(
 }
 
 /** What the folder primitives ask of the disk: the guard's own calls by path, plus the writes a folder step makes. */
-export type FolderDisk = Pick<GuardDisk, 'realpath' | 'identity' | 'openDirectory' | 'mkdir' | 'list' | 'unlink'> & {
+export type FolderDisk = Pick<
+  GuardDisk,
+  'realpath' | 'identity' | 'openDirectory' | 'mkdir' | 'list' | 'unlink' | 'readlink'
+> & {
   /** Removes the EMPTY folder at `path` (`rmdir`), which never follows a link. */
   rmdir(path: string): Promise<void>;
   /** Renames `from` to `to` (neither final step is followed). */
@@ -702,11 +715,8 @@ export type FolderDisk = Pick<GuardDisk, 'realpath' | 'identity' | 'openDirector
   symlink(target: string, path: string): Promise<void>;
   /** Gives the entry at `from` a second name `to` (a hard link), failing when `to` is taken. */
   linkEntry(from: string, to: string): Promise<void>;
-  /**
-   * Opens the file at `path` and hands back its raw descriptor, never following a link and never blocking on a pipe.
-   * `read`: to read. `new`: created, failing when anything is there, with `mode`.
-   */
-  openFile(path: string, how: 'read' | 'new', mode: number): Promise<number>;
+  /** Opens the file at `path` ({@link FileOpening}) and hands back its raw descriptor. */
+  openFile(path: string, how: FileOpening, mode: number): Promise<number>;
   /** Descriptor paths were asked for and this host has none (Linux without `/proc`). */
   readonly missingDescriptorPaths?: boolean;
   /** Descriptor calls were asked for and could not be loaded (macOS without its C calls): why. */
@@ -755,11 +765,15 @@ export interface GuardedFolder {
   rmdir(leaf: string): Promise<void>;
   /** Renames `from` to `to`, both in this folder. */
   rename(from: string, to: string): Promise<void>;
+  /** Renames `fromLeaf` here to `toLeaf` in the folder `into` (which may be this one). */
+  renameInto(fromLeaf: string, into: GuardedFolder, toLeaf: string): Promise<void>;
   symlink(target: string, leaf: string): Promise<void>;
+  /** Where the symbolic link `leaf` points, as written. */
+  readlink(leaf: string): Promise<string>;
   /** Hard-links `fromLeaf` in `from` as `leaf` here; a name already taken fails with `EEXIST`. */
   link(from: GuardedFolder, fromLeaf: string, leaf: string): Promise<void>;
   /** A raw descriptor on the file `leaf` (see {@link FolderDisk.openFile}); the caller closes it. */
-  openFile(leaf: string, how: 'read' | 'new', mode?: number): Promise<number>;
+  openFile(leaf: string, how: FileOpening, mode?: number): Promise<number>;
   /** Sets its permission bits through the descriptor (`fchmod`). */
   chmod(mode: number): Promise<void>;
   close(): Promise<void>;
@@ -812,8 +826,15 @@ function checkedFolder(handle: GuardDirectoryHandle, place: string, disk: Folder
     rmdir: async leaf => (at ? await at.rmdir(leafOf(leaf)) : await disk.rmdir(await entry(leaf))),
     rename: async (from, to) =>
       at ? await at.rename(leafOf(from), leafOf(to)) : await disk.rename(await entry(from), await entry(to)),
+    renameInto: async (fromLeaf, into, toLeaf) => {
+      const target = handles.get(into);
+      if (at !== undefined && target?.at !== undefined)
+        return await at.renameInto(leafOf(fromLeaf), target, leafOf(toLeaf));
+      await disk.rename(await entry(fromLeaf), await into.entry(toLeaf));
+    },
     symlink: async (target, leaf) =>
       at ? await at.symlink(target, leafOf(leaf)) : await disk.symlink(target, await entry(leaf)),
+    readlink: async leaf => (at ? await at.readlink(leafOf(leaf)) : await disk.readlink(await entry(leaf))),
     link: async (from, fromLeaf, leaf) => {
       const source = handles.get(from);
       if (at !== undefined && source?.at !== undefined)

@@ -222,11 +222,14 @@ export class FakeGuardDisk implements GuardDisk {
       rmdir: async leaf => await this.rmdir(at(leaf)),
       rename: async (from, to) => await this.rename(at(from), at(to)),
       symlink: async (target, leaf) => await this.symlink(target, at(leaf)),
+      readlink: async leaf => await this.readlink(at(leaf)),
       link: async (fromLeaf, into, toLeaf) =>
         await this.linkEntry(at(fromLeaf), `/@fd/${String(this.handleFds.get(into))}/${toLeaf}`),
+      renameInto: async (fromLeaf, into, toLeaf) =>
+        await this.rename(at(fromLeaf), `/@fd/${String(this.handleFds.get(into))}/${toLeaf}`),
       openFile: async (leaf, how, mode) => {
         const { key, entry } = await this.lookup(at(leaf));
-        if (how === 'read') throw errno('ENOTSUP', at(leaf));
+        if (how !== 'new') throw errno('ENOTSUP', at(leaf));
         if (entry !== undefined) throw errno('EEXIST', at(leaf));
         this.file(key, 0, '', mode);
         this.nextFile += 1;
