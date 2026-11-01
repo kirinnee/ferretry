@@ -11,8 +11,11 @@
  */
 
 import {
+  type AccountSummary,
+  factorAskWords,
   INPUT_ERROR_CODES,
   type InputBrowserFieldFacts,
+  type InputCodeKey,
   type InputDeliverBody,
   type InputDeliverResult,
   type InputRequest,
@@ -23,6 +26,7 @@ import {
   type InputShot,
   inputValueProblem,
   LOGIN_LABEL_MAX_LENGTH,
+  LOGIN_ONE_FACTOR_WARNING,
   LOGIN_PASSWORD_MIN_LENGTH,
   LoginEntryIdSchema,
   loginMethodSentence,
@@ -30,6 +34,8 @@ import {
   type PutAccountDefaultRequest,
   padInputValue,
   signInChoiceWords,
+  type SignInId,
+  type TwoFactorId,
 } from '@ferretry/protocol';
 import { grantRefusalNotice } from './grants.ts';
 
@@ -525,13 +531,50 @@ export const typedFieldsBody = ({ request, fields, values, submit, deliveryId, s
 };
 
 /** What tapping a saved login sends: its handle, and nothing else about it. */
-export const savedBody = (request: InputRequest, entry: string, submit: boolean, deliveryId: string): BuiltBody =>
+export const savedBody = (
+  request: InputRequest,
+  entry: string,
+  submit: boolean,
+  deliveryId: string,
+  use: { readonly signIn?: SignInId; readonly factor?: TwoFactorId } = {},
+): BuiltBody =>
   request.observedDigest === undefined
     ? { ok: false, problem: REOBSERVING }
     : {
         ok: true,
-        body: { deliveryId, observedDigest: request.observedDigest, entry, submit: enterFor(request, submit) },
+        body: {
+          deliveryId,
+          observedDigest: request.observedDigest,
+          entry,
+          ...(use.signIn === undefined ? {} : { signIn: use.signIn }),
+          ...(use.factor === undefined ? {} : { factor: use.factor }),
+          submit: enterFor(request, submit),
+        },
       };
+
+/** One "Use code from Ferretry" button: the key is the OWNER's label for it, and a past result is a plain badge. */
+export const codeButtonWords = (key: InputCodeKey): string => `Use code from Ferretry · ${key.label}`;
+
+/** What the last code made from a key came to, as the daemon saw it; `undefined` when it was never tried. */
+export const codeCheckedWords = (key: InputCodeKey): string | undefined =>
+  key.checked === 'worked' ? 'worked last time' : key.checked === 'failed' ? 'did not work last time' : undefined;
+
+/**
+ * A code card's title, from the account's keys (`factorAskWords`): the OWNER's words about where the code goes, never
+ * a ferret's. With no account to read (an older daemon, an unreadable list) the plain title stands.
+ */
+export const codeTitleWords = (
+  request: InputRequest,
+  agentName: string,
+  account: AccountSummary | undefined,
+): string =>
+  account === undefined
+    ? titleWords(request, agentName)
+    : `!${request.agendaItemId} · ${agentName} · ${factorAskWords(account.factors, account)}`;
+
+/** The line under every "Use code from Ferretry" button: the password and the code both come from this machine. */
+export const oneFactorLine = (offer: InputSavedOffer | undefined): string | undefined =>
+  offer?.codes === undefined ? undefined : LOGIN_ONE_FACTOR_WARNING;
 
 /** What allowing a paste sends: no value, only that the owner allows the copy the REQUEST names (docs/secure-copy.md). */
 export const sealedBody = (request: InputRequest, submit: boolean, deliveryId: string): BuiltBody =>

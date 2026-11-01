@@ -46,6 +46,7 @@ import { useOptionalRouter } from '../../lib/router.tsx';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
+import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
 import { agendaReference } from './agenda-board.tsx';
 import { AgendaDeliveryContext, agendaHeading, deliveringIds } from './agenda-delivery.tsx';
@@ -390,6 +391,17 @@ export const useAgenda = ({
                     agentName={ferret}
                     connection={connection}
                     item={cardItem}
+                    sessionId={scope.sessionId}
+                  />
+                ),
+              }
+            : {})}
+          {...(cardItem.phoneApproval !== undefined
+            ? {
+                planForm: (
+                  <PhoneApprovalHost
+                    approvalId={cardItem.phoneApproval.id}
+                    connection={connection}
                     sessionId={scope.sessionId}
                   />
                 ),

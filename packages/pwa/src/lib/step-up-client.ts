@@ -27,6 +27,7 @@ import {
   StepUpGrantedSchema,
   type StepUpOptions,
   StepUpOptionsSchema,
+  type TwoFactorStageId,
 } from '@ferretry/protocol';
 
 /** The only client capability this surface uses. */
@@ -54,11 +55,16 @@ export async function registerPasskey(client: StepUpClient, registration: Passke
   return await client.request('/v1/passkeys', PasskeyViewSchema, json(registration));
 }
 
-export async function stepUpOptions(client: StepUpClient, origin: string, act?: StepUpAct): Promise<StepUpOptions> {
+export async function stepUpOptions(
+  client: StepUpClient,
+  origin: string,
+  act?: StepUpAct,
+  subject?: TwoFactorStageId,
+): Promise<StepUpOptions> {
   return await client.request(
     '/v1/step-up/options',
     StepUpOptionsSchema,
-    json(act === undefined ? { origin } : { origin, act }),
+    json({ origin, ...(act === undefined ? {} : { act }), ...(subject === undefined ? {} : { subject }) }),
   );
 }
 

@@ -119,6 +119,10 @@ every priority, so a new number replaces the last one on the lock screen; its TT
 never more than 600; and it pushes once per new number, not once per card. It spends the same per-ferret and
 daemon-wide high slots as a code card.
 
+The app's service worker reads the `pa-` tag (`fy-push:<daemonId>:pa-pa_…`): it shows the push on its own, never
+grouped into the ferret's summary, with `renotify` and `requireInteraction` so a new number sounds again and stays on
+a desktop screen. The daemon sends no `urgency` for it; the app decides from the tag alone.
+
 What a high push does, and who honours it:
 
 | Part                                               | Set by         | Honoured by                                                                                                                                                                                      |

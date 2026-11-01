@@ -87,6 +87,7 @@ import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
+import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
@@ -181,6 +182,16 @@ const inputFormFor = (
           agentName={inboxWho(card).ferret}
           connection={connection}
           item={card.item}
+          sessionId={card.view.config.id}
+        />
+      ),
+    };
+  if (connection !== undefined && card.item.phoneApproval !== undefined)
+    return {
+      planForm: (
+        <PhoneApprovalHost
+          approvalId={card.item.phoneApproval.id}
+          connection={connection}
           sessionId={card.view.config.id}
         />
       ),

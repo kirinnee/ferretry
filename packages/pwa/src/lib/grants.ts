@@ -129,6 +129,9 @@ export const stepUpAct = (demand: StepUpDemand): string => {
     : `change the settings for ${capabilityNoun(demand.capability)}`;
 };
 
+/** What a person confirms with the passkey that saves a staged 2FA seed: the app's own words, never a ferret's. */
+export const ADD_KEY_ACT_WORDS = ACCESS_ACTS['add-2fa-key'];
+
 /** What a prompt says when the daemon named no act: the machine is still named, and the act is "this change". */
 export const STEP_UP_FALLBACK_ACT = 'make this change';
 

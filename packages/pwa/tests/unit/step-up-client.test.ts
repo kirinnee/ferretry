@@ -162,6 +162,23 @@ describe('the passkey routes', () => {
     should(options.allowCredentials).have.length(1);
   });
 
+  it('should name the staged key in the step-up options request when the proof is bound to one', async () => {
+    // Arrange
+    const client = clientAnswering({
+      challenge: 'BQYH',
+      rpId: 'ferretry.pages.dev',
+      allowCredentials: [{ type: 'public-key', id: 'qrs' }],
+      timeout: 60_000,
+    });
+    const stage = `st_${'a'.repeat(24)}` as never;
+
+    // Act
+    await stepUpOptions(client, ORIGIN, 'add-2fa-key', stage);
+
+    // Assert
+    should(bodyOf(client.calls[0])).eql({ origin: ORIGIN, act: 'add-2fa-key', subject: stage });
+  });
+
   it('should name the act in the step-up options request when it is for one', async () => {
     // Arrange
     const client = clientAnswering({

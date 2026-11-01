@@ -84,8 +84,22 @@ export interface UrgentNotificationOptions {
   readonly vibrate?: readonly number[];
 }
 
-export const urgentNotificationOptions = (payload: Pick<NotificationPayload, 'urgency'>): UrgentNotificationOptions =>
-  payload.urgency === 'high'
+/**
+ * An approve-on-phone push's tag: `pa-<id>`, as the machine's worker namespaces it (`fy-push:<machine>:pa-<id>`). The
+ * daemon sends no `urgency` for it, so the tag is what says it is one.
+ */
+const PHONE_APPROVAL_TAG = /(?:^|:)pa-pa_[0-9a-f]{24}$/u;
+
+export const isPhoneApprovalTag = (tag: string): boolean => PHONE_APPROVAL_TAG.test(tag);
+
+/**
+ * What a push asks the platform for beyond an ordinary one: a HIGH push, and every approve-on-phone push, stay on
+ * screen until the reader acts and sound again under a tag already showing (a number that was re-read is a new push).
+ */
+export const urgentNotificationOptions = (
+  payload: Pick<NotificationPayload, 'urgency'> & Partial<Pick<NotificationPayload, 'tag'>>,
+): UrgentNotificationOptions =>
+  payload.urgency === 'high' || (payload.tag !== undefined && isPhoneApprovalTag(payload.tag))
     ? { requireInteraction: true, renotify: true, silent: false, vibrate: [200, 100, 200] }
     : {};
 
@@ -110,6 +124,7 @@ export const groupedNotificationBody = (latest: string, count: number): string =
 export interface NotificationDataLike {
   readonly eventKey?: unknown;
   readonly count?: unknown;
+  readonly latestBody?: unknown;
 }
 
 export interface NotificationPresentationData {
@@ -153,6 +168,7 @@ export const planNotificationPresentation = (
   payload: NotificationPayload,
   existing: readonly NotificationDataLike[],
 ): NotificationPresentation => {
+  if (isPhoneApprovalTag(payload.tag)) return planPhoneApprovalPresentation(payload, existing);
   if (existing.some(item => item.eventKey === payload.eventKey)) return { action: 'skip' };
   const active = payload.sessionId === undefined ? 0 : activeCount(existing);
   const count = active > 0 ? Math.max(payload.count, Math.min(MAX_GROUP_COUNT, active + 1)) : payload.count;
@@ -164,6 +180,32 @@ export const planNotificationPresentation = (
       url: payload.url,
       eventKey: payload.eventKey,
       count,
+      latestBody: payload.body,
+      ...(payload.daemonId === undefined ? {} : { daemonId: payload.daemonId }),
+      ...(payload.sessionId === undefined ? {} : { sessionId: payload.sessionId }),
+    },
+  };
+};
+
+/**
+ * An approve-on-phone push is never grouped and never deduplicated by its `eventKey`: the key is the same for every
+ * push of one approval, so a number the daemon re-read would otherwise be dropped as a twin, and "+N more" would
+ * hide the digits a lock screen is there to show. Only the same body is a transport twin; a changed body replaces
+ * the entry and sounds again.
+ */
+const planPhoneApprovalPresentation = (
+  payload: NotificationPayload,
+  existing: readonly NotificationDataLike[],
+): NotificationPresentation => {
+  if (existing.some(item => item.latestBody === payload.body)) return { action: 'skip' };
+  return {
+    action: 'show',
+    body: payload.body,
+    count: 1,
+    data: {
+      url: payload.url,
+      eventKey: payload.eventKey,
+      count: 1,
       latestBody: payload.body,
       ...(payload.daemonId === undefined ? {} : { daemonId: payload.daemonId }),
       ...(payload.sessionId === undefined ? {} : { sessionId: payload.sessionId }),
@@ -266,9 +308,9 @@ export const showNotification = async (
   try {
     const notification = showOnPage(payload.title, {
       ...notificationBrand(),
-      body: groupedNotificationBody(payload.body, payload.count),
+      body: isPhoneApprovalTag(payload.tag) ? payload.body : groupedNotificationBody(payload.body, payload.count),
       tag: payload.tag,
-      renotify: false,
+      renotify: isPhoneApprovalTag(payload.tag),
     });
     // A pageless click cannot reach this handler, which is exactly why the
     // registration path above is the real one; a page-level notification has to

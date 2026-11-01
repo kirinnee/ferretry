@@ -20,7 +20,7 @@
  * the app; the browser holds nothing it could lose, replay or leak.
  */
 
-import type { StepUpAct } from '@ferretry/protocol';
+import { type StepUpAct, stepUpSkippableAtMachine, type TwoFactorStageId } from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { STEP_UP_FALLBACK_ACT } from './grants.ts';
 
@@ -50,7 +50,7 @@ export type PromptOrigin = 'explicit' | 'background';
 
 export interface StepUpGateDependencies {
   /** Runs the whole ceremony for one machine: options, the passkey sheet, and the daemon's verdict. */
-  readonly ceremony: (daemon: DaemonConnection, act?: StepUpAct) => Promise<void>;
+  readonly ceremony: (daemon: DaemonConnection, act?: StepUpAct, subject?: TwoFactorStageId) => Promise<void>;
   /** The sentence a person is shown for a ceremony that failed. Never a raw exception. */
   readonly describe: (reason: unknown) => string;
   /**
@@ -71,6 +71,8 @@ interface Waiting {
   readonly resolvers: ((stepped: boolean) => void)[];
   /** The ids of the acts the daemon named, and whether any waiting request named none. */
   readonly actIds: Set<StepUpAct>;
+  /** The staged seeds waiting requests named (`add-2fa-key` is bound to one). */
+  readonly subjects: Set<TwoFactorStageId>;
   unnamed: boolean;
   /** A person started at least one of these requests, so it may ask from off screen. */
   explicit: boolean;
@@ -117,12 +119,16 @@ export class StepUpGate {
    *
    * A `background` request for a machine that is not on screen raises nothing: it waits until that
    * machine is {@link focus}ed. Absent, the request is a person's own and asks wherever it came from.
+   *
+   * `subject` is the staged 2FA seed a save of it (`add-2fa-key`) is for: the passkey is bound to it, so the proof
+   * can be spent on that one save and no other.
    */
   require(
     daemon: DaemonConnection,
     act: string = STEP_UP_FALLBACK_ACT,
     origin: PromptOrigin = 'explicit',
     actId?: StepUpAct,
+    subject?: TwoFactorStageId,
   ): Promise<boolean> {
     return new Promise(resolve => {
       const explicit = origin === 'explicit';
@@ -132,6 +138,7 @@ export class StepUpGate {
         waiting.explicit ||= explicit;
         if (actId === undefined) waiting.unnamed = true;
         else waiting.actIds.add(actId);
+        if (subject !== undefined) waiting.subjects.add(subject);
         if (!waiting.acts.includes(act)) {
           waiting.acts.push(act);
           this.#refreshActs(daemon.daemonId);
@@ -144,6 +151,7 @@ export class StepUpGate {
         acts: [act],
         resolvers: [resolve],
         actIds: new Set(actId === undefined ? [] : [actId]),
+        subjects: new Set(subject === undefined ? [] : [subject]),
         unnamed: actId === undefined,
         explicit,
       };
@@ -174,7 +182,8 @@ export class StepUpGate {
     const { failure: _cleared, ...kept } = prompt;
     this.#set({ ...kept, busy: true });
     try {
-      await this.deps.ceremony(prompt.daemon, this.#soleAct(prompt.daemon.daemonId));
+      const proof = this.#soleProof(prompt.daemon.daemonId);
+      await this.deps.ceremony(prompt.daemon, proof?.act, proof?.subject);
     } catch (reason) {
       this.#set({ ...kept, busy: false, failure: this.deps.describe(reason) });
       return;
@@ -190,13 +199,19 @@ export class StepUpGate {
   }
 
   /**
-   * The ONE act this confirmation is for, or nothing. A prompt that several different acts share proves
-   * none of them in particular, so the proof is unstamped and an act that wants its own asks again.
+   * The ONE act this confirmation is for (and, for a save of a staged 2FA seed, the ONE stage), or nothing. A prompt
+   * that several different acts share proves none of them in particular, so the proof is unstamped and an act that
+   * wants its own asks again. An act bound to a subject is stamped only with exactly one subject: a request that
+   * named none (the router's answer to a refusal) or two different ones is left unstamped, which the save refuses.
    */
-  #soleAct(daemonId: DaemonId): StepUpAct | undefined {
+  #soleProof(daemonId: DaemonId): { readonly act: StepUpAct; readonly subject?: TwoFactorStageId } | undefined {
     const waiting = this.#waiting.get(daemonId);
     if (waiting === undefined || waiting.unnamed || waiting.actIds.size !== 1) return undefined;
-    return [...waiting.actIds][0];
+    const act = [...waiting.actIds][0];
+    if (act === undefined) return undefined;
+    if (stepUpSkippableAtMachine(act)) return { act };
+    const subject = waiting.subjects.size === 1 ? [...waiting.subjects][0] : undefined;
+    return subject === undefined ? undefined : { act, subject };
   }
 
   #mayShow(waiting: Waiting): boolean {

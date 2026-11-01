@@ -1,4 +1,9 @@
-import { type ConfigChangeKind, DaemonCarriersViewSchema, type PairingResponse } from '@ferretry/protocol';
+import {
+  type ConfigChangeKind,
+  DaemonCarriersViewSchema,
+  type PairingResponse,
+  type TwoFactorStageId,
+} from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { publishedConnectionMethods } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
@@ -111,6 +116,7 @@ import {
   unlockCeremony,
 } from './step-up-ceremony.ts';
 import { StepUpGate } from './step-up-gate.ts';
+import { ADD_KEY_ACT_WORDS } from './grants.ts';
 import { DictationDebugLog, type DictationDebugSnapshot } from './stt/dictation-debug.ts';
 import {
   browserOnDeviceVoices,
@@ -1290,6 +1296,26 @@ export function useStepUpRequest(): ((daemon: DaemonConnection, act?: string) =>
       store === null
         ? undefined
         : async (daemon: DaemonConnection, act?: string) => await store.stepUp.require(daemon, act),
+    [store],
+  );
+}
+
+/**
+ * The passkey for ONE save of a staged 2FA seed, asked BEFORE the save is sent: the proof is bound to this stage, so
+ * the daemon takes it for that save and no other (`docs/input-requests.md`, "Set up automatic codes"). The words on the
+ * prompt are the app's own fixed words for the act; nothing a ferret wrote reaches it. Outside a provider there is no
+ * prompt and the answer is `undefined`.
+ */
+export function useAddKeyStepUp():
+  | ((daemon: DaemonConnection, stage: TwoFactorStageId) => Promise<boolean>)
+  | undefined {
+  const store = useContext(StoreContext);
+  return useMemo(
+    () =>
+      store === null
+        ? undefined
+        : async (daemon: DaemonConnection, stage: TwoFactorStageId) =>
+            await store.stepUp.require(daemon, ADD_KEY_ACT_WORDS, 'explicit', 'add-2fa-key', stage),
     [store],
   );
 }

@@ -8,13 +8,21 @@
  * happened rather than vanish.
  */
 
-import type { AgendaItem, InputRequest } from '@ferretry/protocol';
+import {
+  type AccountList,
+  type AgendaItem,
+  DAEMON_FEATURES,
+  type InputRequest,
+  type TwoFactorStageId,
+} from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { machineOffers } from '../../lib/daemon-health.ts';
 import type { InputClient } from '../../lib/input-api.ts';
-import { readInputRequest } from '../../lib/input-api.ts';
+import { readAccounts, readInputRequest } from '../../lib/input-api.ts';
 import { fieldsOf } from '../../lib/input-card.ts';
-import { useDaemonClient } from '../../lib/store.tsx';
+import { useAddKeyStepUp, useDaemonClient } from '../../lib/store.tsx';
+import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { InputCard } from './input-card.tsx';
 
 const INPUT_REFRESH_MS = 3_000;
@@ -49,6 +57,11 @@ export function InputCardHost({
   const [client, setClient] = useState<InputClient | null>(null);
   const [read, setRead] = useState<Read>({ kind: 'loading' });
   const settled = useRef(false);
+  const health = useDaemonHealth(connection);
+  const offersKeys = machineOffers(health, DAEMON_FEATURES.twoFactorKeys);
+  const requireAddKey = useAddKeyStepUp();
+  const [accounts, setAccounts] = useState<AccountList | undefined>(undefined);
+  const [accountsTick, setAccountsTick] = useState(0);
 
   useEffect(() => {
     let current = true;
@@ -87,6 +100,27 @@ export function InputCardHost({
     return () => clearInterval(timer);
   }, [refresh]);
 
+  const wantsAccounts =
+    offersKeys && read.kind === 'open' && read.request.sensitivity === 'code' && read.request.saved !== undefined;
+  useEffect(() => {
+    if (!wantsAccounts || client === null) {
+      setAccounts(undefined);
+      return;
+    }
+    let current = true;
+    void accountsTick;
+    readAccounts(client)
+      .then(list => {
+        if (current) setAccounts(list);
+      })
+      .catch(() => {
+        if (current) setAccounts(undefined);
+      });
+    return () => {
+      current = false;
+    };
+  }, [wantsAccounts, client, accountsTick]);
+
   if (requestId === undefined) return null;
   if (read.kind === 'failed')
     return (
@@ -115,8 +149,15 @@ export function InputCardHost({
         settled.current = true;
         onDone?.();
       }}
-      onRefresh={() => void refresh()}
+      onRefresh={() => {
+        void refresh();
+        setAccountsTick(tick => tick + 1);
+      }}
       request={read.request}
+      {...(accounts === undefined ? {} : { accounts })}
+      {...(accounts === undefined || requireAddKey === undefined
+        ? {}
+        : { addKey: (stage: TwoFactorStageId) => requireAddKey(connection, stage) })}
       {...(agentName === undefined ? {} : { agentName })}
     />
   );

@@ -4,7 +4,7 @@
  */
 
 import { describe, it } from 'bun:test';
-import type { StepUpAct } from '@ferretry/protocol';
+import type { StepUpAct, TwoFactorStageId } from '@ferretry/protocol';
 import should from 'should';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { STEP_UP_FALLBACK_ACT as FALLBACK } from '../../src/lib/grants.ts';
@@ -120,6 +120,48 @@ describe('stamping the proof with the act', () => {
     // Assert
     should(unnamed.stamped).eql([undefined]);
     should(mixed.stamped).eql([undefined]);
+  });
+});
+
+describe('binding the proof to one staged key', () => {
+  const STAGE_ONE = `st_${'1'.repeat(24)}` as TwoFactorStageId;
+  const STAGE_TWO = `st_${'2'.repeat(24)}` as TwoFactorStageId;
+  const subjects = () => {
+    const stamped: { act?: StepUpAct; subject?: TwoFactorStageId }[] = [];
+    const gate = new StepUpGate({
+      ceremony: async (_daemon, act, subject) => {
+        stamped.push({ act, subject });
+      },
+      describe: reason => `described: ${String(reason)}`,
+    });
+    return { gate, stamped };
+  };
+
+  it('should run the ceremony for the one staged key every waiting request named', async () => {
+    // Arrange
+    const { gate, stamped } = subjects();
+    const waiting = gate.require(first, 'save codes', 'explicit', 'add-2fa-key', STAGE_ONE);
+
+    // Act
+    await gate.confirm();
+    await waiting;
+
+    // Assert
+    should(stamped).eql([{ act: 'add-2fa-key', subject: STAGE_ONE }]);
+  });
+
+  it('should leave the proof unstamped when two staged keys share the prompt, so neither is saved by it', async () => {
+    // Arrange
+    const { gate, stamped } = subjects();
+    const one = gate.require(first, 'save codes', 'explicit', 'add-2fa-key', STAGE_ONE);
+    const two = gate.require(first, 'save codes', 'explicit', 'add-2fa-key', STAGE_TWO);
+
+    // Act
+    await gate.confirm();
+    await Promise.all([one, two]);
+
+    // Assert
+    should(stamped).eql([{ act: undefined, subject: undefined }]);
   });
 });
 

@@ -111,7 +111,8 @@ export const DAEMON_FEATURES = {
    * Approve on your phone (docs/input-requests.md, "Approve on your phone"): `push: true` on a request tool, an
    * `info` card with a `phoneApproval` ref, and `input_wait` on its `pa_` id. A daemon without this name refuses
    * `push: true`, and an app without the card shows the item as a plain info card with the daemon's subject.
-   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the card ships in the app first.
+   * REPORTED SINCE THE APP DRAWS THE CARD (the agenda's approve-on-phone card, the push, and "Not me — stop"): the daemon
+   * offers `push: true` only while this name is in {@link daemonFeatureList}.
    */
   phoneApproval: 'input.phone-approval.1',
   /**
@@ -137,7 +138,6 @@ export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURE
 const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([
   DAEMON_FEATURES.accountsSignIns,
   DAEMON_FEATURES.twoFactorKeys,
-  DAEMON_FEATURES.phoneApproval,
 ]);
 
 /** The names a daemon of this build reports, in a stable order. */
