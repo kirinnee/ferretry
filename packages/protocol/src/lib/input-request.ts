@@ -5,8 +5,9 @@ import { BrowserChallengeProviderSchema, BrowserRefSchema } from './browser-targ
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { InputSavedSchema, LOGIN_LABEL_MAX_LENGTH, LoginEntryIdSchema } from './login-entries.ts';
 import { SecretNameSchema } from './secrets.ts';
-import { CopyNameSchema, CopyOriginSchema } from './secure-copy.ts';
+import { CopyNameSchema, CopyOriginSchema, CopyPlanIdSchema } from './secure-copy.ts';
 import { SurfaceKeySchema } from './surface-names.ts';
+import { GrantMissReasonSchema, TaskPlanLineNumberSchema } from './task-plan.ts';
 
 /**
  * THE INPUT REQUEST: the contract between an agent stuck at a password, sudo, one-time-code or 2FA prompt
@@ -454,6 +455,8 @@ export const InputActorSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('device'), deviceId: boundedLine(128) }),
   /** A paste the owner approved IN ADVANCE: the daemon delivered it under this pre-approval rule (docs/secure-copy.md). */
   z.strictObject({ kind: z.literal('rule'), ruleId: z.string().regex(/^[0-9a-f]{32}$/u) }),
+  /** A sign-in the owner approved IN ADVANCE on a task plan: the daemon filled it under this plan line (task-plan.ts). */
+  z.strictObject({ kind: z.literal('plan'), planId: CopyPlanIdSchema, line: TaskPlanLineNumberSchema }),
 ]);
 export type InputActor = z.infer<typeof InputActorSchema>;
 
@@ -551,6 +554,24 @@ export const InputRequestSchema = z.strictObject({
   lock: InputLockSchema.optional(),
   state: InputRequestStateSchema,
   outcome: InputOutcomeSchema.optional(),
+  /**
+   * The task plan line that filled this card, or that was tried and did not apply (task-plan.ts). The owner's view
+   * only: the card draws one line from `grantMissLine(line, reason)`, and none for `not-here`. The ferret is told one
+   * sentence for every reason, so a reason never says which secret fields an account holds.
+   */
+  preapproval: z
+    .strictObject({
+      by: z.literal('plan'),
+      plan: CopyPlanIdSchema,
+      line: TaskPlanLineNumberSchema,
+      outcome: z.enum(['filled', 'did-not-apply']),
+      reason: GrantMissReasonSchema.optional(),
+    })
+    .refine(note => note.outcome === 'did-not-apply' || note.reason === undefined, {
+      path: ['reason'],
+      message: 'only a line that did not apply says why',
+    })
+    .optional(),
 });
 export type InputRequest = z.infer<typeof InputRequestSchema>;
 
@@ -866,6 +887,13 @@ export const InputAuditDetailSchema = z.strictObject({
     .string()
     .regex(/^[0-9a-f]{32}$/u)
     .optional(),
+  /** A sign-in the owner approved in advance on a task plan: the plan, its line and the sign-in it filled. */
+  plan: CopyPlanIdSchema.optional(),
+  line: TaskPlanLineNumberSchema.optional(),
+  signIn: SignInIdSchema.optional(),
+  /** A task plan line was tried on this card and did not apply, and why: the card was raised as usual. */
+  preapproval: z.literal('did-not-apply').optional(),
+  because: GrantMissReasonSchema.optional(),
   consumer: boundedLine(160).optional(),
   /**
    * The store file of a program proved only through the owner's own profile, when that is what read the terminal:

@@ -802,6 +802,14 @@ export const AgendaCopyPlanRefSchema = z.strictObject({ planId: z.string().regex
 export type AgendaCopyPlanRef = z.infer<typeof AgendaCopyPlanRefSchema>;
 
 /**
+ * The task plan a card presents (task-plan.ts, docs/secure-copy.md): a ferret's planned sign-ins and pastes, answered
+ * by the plan's own ticks, picks and passkey, which only the owner's plan routes carry. Only the daemon raises one. An
+ * app from before task plans drops the ref and reads the card's `copyPlan`, or the daemon's words, instead.
+ */
+export const AgendaTaskPlanRefSchema = z.strictObject({ planId: z.string().regex(/^[0-9a-f]{32}$/u) });
+export type AgendaTaskPlanRef = z.infer<typeof AgendaTaskPlanRefSchema>;
+
+/**
  * The approve-on-phone card an `info` item presents (phone-approval.ts): nothing typed, nothing of the ferret's shown,
  * answered by the owner's phone and settled only by what the daemon sees. Only the daemon raises one. An app from
  * before these cards drops the ref and shows a plain info card with the daemon's subject, which holds no number.
@@ -917,6 +925,8 @@ const AgendaItemBaseShape = {
   input: AgendaInputRefSchema.optional(),
   /** The paste plan a card presents: the plan's own form answers it, never the generic answer. */
   copyPlan: AgendaCopyPlanRefSchema.optional(),
+  /** The task plan a card presents: the plan's own form and passkey answer it, never the generic answer. */
+  taskPlan: AgendaTaskPlanRefSchema.optional(),
   /** The approve-on-phone card an `info` item presents; only an `info` item carries one. */
   phoneApproval: AgendaPhoneApprovalRefSchema.optional(),
   /** The staged 2FA seed a card asks the owner to save with a passkey; answered by that ceremony, never the generic answer. */

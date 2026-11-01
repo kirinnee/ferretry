@@ -240,10 +240,11 @@ describe('the passkey step-up wire', () => {
 
     // Act / Assert — the act every caller is asked, the machine included, and the stage its proof is bound to
     should(stepUp.STEP_UP_ACTS.addTwoFactorKey).equal('add-2fa-key');
-    should(stepUp.STEP_UP_ACTS_EVERY_CALLER).deepEqual(['add-2fa-key']);
-    // Every other act is one the machine itself is never asked to prove; this one, every caller is.
+    should(stepUp.STEP_UP_ACTS_EVERY_CALLER).deepEqual(['add-2fa-key', 'approve-task-plan']);
+    // Every other act is one the machine itself is never asked to prove; these, every caller is.
     should(stepUp.StepUpActSchema.options.filter(act => !stepUp.stepUpSkippableAtMachine(act))).deepEqual([
       'add-2fa-key',
+      'approve-task-plan',
     ]);
     should(
       stepUp.StepUpOptionsRequestSchema.safeParse({ origin: ORIGIN, act: 'add-2fa-key', subject: stage }).success,
@@ -270,6 +271,54 @@ describe('the passkey step-up wire', () => {
         value: { origin: ORIGIN, act: 'add-2fa-key', subject: 'tf_000000000001' },
       },
     ]);
+  });
+
+  it('should bind an approve-task-plan step-up to one staged selection, never to a 2FA stage', () => {
+    // Arrange
+    const planStage = `tps_${'b'.repeat(24)}`;
+    const seedStage = `st_${'a'.repeat(24)}`;
+
+    // Act / Assert — asked of every caller, the machine included, like saving a 2FA key
+    should(stepUp.STEP_UP_ACTS.approveTaskPlan).equal('approve-task-plan');
+    should(stepUp.stepUpSkippableAtMachine('approve-task-plan')).be.false();
+    should(
+      stepUp.StepUpOptionsRequestSchema.safeParse({ origin: ORIGIN, act: 'approve-task-plan', subject: planStage })
+        .success,
+    ).be.true();
+    assertRejects([
+      {
+        name: 'approving a plan with no stage',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-task-plan' },
+      },
+      {
+        name: "a 2FA seed's stage on a plan approval",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-task-plan', subject: seedStage },
+      },
+      {
+        name: "a plan's stage on a 2FA save",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'add-2fa-key', subject: planStage },
+      },
+      {
+        name: "a plan's stage on an act the machine may skip",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'loosen-config', subject: planStage },
+      },
+      {
+        name: "a plan's stage with no act",
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, subject: planStage },
+      },
+      {
+        name: 'a plan stage that is not one',
+        schema: stepUp.StepUpOptionsRequestSchema,
+        value: { origin: ORIGIN, act: 'approve-task-plan', subject: `tps_${'b'.repeat(23)}` },
+      },
+    ]);
+    // Each bound act names the one kind of stage it is bound to.
+    should(Object.keys(stepUp.STEP_UP_SUBJECTS).sort()).deepEqual([...stepUp.STEP_UP_ACTS_EVERY_CALLER].sort());
   });
 
   it('should refuse a step-up options request naming an act that does not exist', () => {

@@ -32,6 +32,7 @@ import {
   type StepUpRefusal,
   StepUpOptionsRequestSchema,
   stepUpRefusalCode,
+  TASK_PLAN_ERROR_CODES,
   TWO_FACTOR_ERROR_CODES,
   type TwoFactorStageId,
 } from '@ferretry/protocol';
@@ -159,6 +160,14 @@ export function stepUpRoutes(service: StepUpService, seeds?: StagedSeedBinding):
             StepUpOptionsSchema.parse(value),
           );
         }
+        // Approving a task plan's sign-in lines binds its proof to one staged selection. No selection is ever staged
+        // until the task-plan service lands, so every such ask is refused and no challenge for the act is minted.
+        if (body.act === STEP_UP_ACTS.approveTaskPlan)
+          return errorResponse(
+            404,
+            'that task plan selection is not waiting for a passkey: stage it again from the plan card',
+            TASK_PLAN_ERROR_CODES.stageNotFound,
+          );
         return answer(await service.stepUpOptions(caller(context), body.origin, body.act), value =>
           StepUpOptionsSchema.parse(value),
         );

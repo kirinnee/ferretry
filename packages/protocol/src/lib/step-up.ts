@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TwoFactorStageIdSchema } from './account-ids.ts';
+import { TaskPlanStageIdSchema, TwoFactorStageIdSchema } from './account-ids.ts';
 import { ApiErrorResponseSchema, InstantSchema } from './common.ts';
 import { CapabilityAxisSchema, DaemonCapabilitySchema } from './grants.ts';
 import { PairedDeviceIdSchema } from './pairing.ts';
@@ -76,16 +76,17 @@ export const StepUpActSchema = z.enum([
   'share-catalog',
   'add-2fa-key',
   'allow-profile-targets',
+  'approve-task-plan',
 ]);
 export type StepUpAct = z.infer<typeof StepUpActSchema>;
 
 /**
  * THE ACTS ASKED OF EVERY CALLER, the machine itself included: no "governed" or loopback check may skip them, a
  * window grant, an unlock or `stepUpOnActions` never stands in for one, and each proof is bound to ONE thing
- * (`subject`, the staged 2FA seed) so it cannot be spent on another. The daemon's claim takes that subject as a
- * required argument for these acts, so a route cannot ask for one the short way.
+ * (`subject`: the staged 2FA seed, or the staged task-plan selection) so it cannot be spent on another. The daemon's
+ * claim takes that subject as a required argument for these acts, so a route cannot ask for one the short way.
  */
-export const STEP_UP_ACTS_EVERY_CALLER = ['add-2fa-key'] as const satisfies readonly StepUpAct[];
+export const STEP_UP_ACTS_EVERY_CALLER = ['add-2fa-key', 'approve-task-plan'] as const satisfies readonly StepUpAct[];
 export type EveryCallerStepUpAct = (typeof STEP_UP_ACTS_EVERY_CALLER)[number];
 /** An act the machine itself (its admin token, on loopback) is never asked to prove. */
 export type MachineSkippableStepUpAct = Exclude<StepUpAct, EveryCallerStepUpAct>;
@@ -95,20 +96,34 @@ export const stepUpSkippableAtMachine = (act: StepUpAct): act is MachineSkippabl
   !(STEP_UP_ACTS_EVERY_CALLER as readonly StepUpAct[]).includes(act);
 
 /**
+ * The kind of staged thing each every-caller act is bound to: a 2FA seed's stage for `add-2fa-key`, a task-plan
+ * selection's stage for `approve-task-plan`. A proof asked with the other act's stage is refused before any challenge
+ * is minted, so one ceremony can never be dressed up as the other.
+ */
+export const STEP_UP_SUBJECTS = {
+  'add-2fa-key': TwoFactorStageIdSchema,
+  'approve-task-plan': TaskPlanStageIdSchema,
+} as const satisfies Record<EveryCallerStepUpAct, z.ZodType<string>>;
+
+/**
  * Options for a step-up. `act` is the one act the person is about to confirm: the daemon stamps the
  * proof with it, and an act that asks for its own proof (a catalog install) takes only a proof stamped
  * for it. Absent, the proof is unstamped and no such act takes it.
  *
- * `subject` is the one thing a {@link STEP_UP_ACTS_EVERY_CALLER} act is for (the staged seed, `st_…`): the daemon binds the
- * challenge, and so the proof, to it, and the save takes only a proof for that act AND that subject. Sent exactly with
- * such an act, and never with another.
+ * `subject` is the one thing a {@link STEP_UP_ACTS_EVERY_CALLER} act is for (the staged seed, `st_…`; the staged task-plan
+ * selection, `tps_…`): the daemon binds the challenge, and so the proof, to it, and the commit takes only a proof for
+ * that act AND that subject. Sent exactly with such an act, of that act's own kind ({@link STEP_UP_SUBJECTS}), and never
+ * with another.
  */
 export const StepUpOptionsRequestSchema = PasskeyOptionsRequestSchema.extend({
   act: StepUpActSchema.optional(),
-  subject: TwoFactorStageIdSchema.optional(),
+  subject: z.union([TwoFactorStageIdSchema, TaskPlanStageIdSchema]).optional(),
 }).refine(
-  request => (request.subject !== undefined) === (request.act !== undefined && !stepUpSkippableAtMachine(request.act)),
-  { path: ['subject'], message: 'name the staged 2FA key exactly when adding one' },
+  request =>
+    request.act === undefined || stepUpSkippableAtMachine(request.act)
+      ? request.subject === undefined
+      : STEP_UP_SUBJECTS[request.act].safeParse(request.subject).success,
+  { path: ['subject'], message: "name the act's own staged subject exactly when the act is bound to one" },
 );
 export type StepUpOptionsRequest = z.infer<typeof StepUpOptionsRequestSchema>;
 
@@ -335,6 +350,14 @@ export const STEP_UP_ACTS = {
    * never asks.
    */
   allowProfileTargets: 'allow-profile-targets',
+  /**
+   * Approving the SIGN-IN lines of a ferret's task plan (task-plan.ts, docs/secure-copy.md): Ferretry then types an
+   * account's password, and maybe its code, with no tap. The admin token every ferret holds could otherwise approve a
+   * ferret's own plan, so this is asked of EVERY caller, the machine itself included, and its proof is bound to the one
+   * staged selection it commits (`taskPlanApprovalSubject`). A selection of paste lines only never asks; revoking never
+   * asks.
+   */
+  approveTaskPlan: 'approve-task-plan',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**

@@ -128,6 +128,14 @@ export const DAEMON_FEATURES = {
    * anything is read.
    */
   sessionCredential: 'session.credential.1',
+  /**
+   * Task plans (docs/secure-copy.md, "Task plans"): `task.plan`, a plan card with sign-in, terminal sign-in and paste
+   * lines, approving a sign-in line with an `approve-task-plan` passkey bound to its staged selection, and Ferretry
+   * filling a covered sign-in itself. The input request and its outcome carry a `plan` actor and a `preapproval` note,
+   * which an older app's strict parse refuses, so the daemon fills under a plan only while it reports this name.
+   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the app's plan card ships first.
+   */
+  taskPlan: 'task-plan.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];
@@ -136,7 +144,7 @@ export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURE
  * Names whose app-side half may land first: the app can already gate on them, but no daemon of this build reports
  * them, because the daemon-side half is not built yet. Removing a name from here is how the daemon starts to offer it.
  */
-const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([]);
+const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([DAEMON_FEATURES.taskPlan]);
 
 /** The names a daemon of this build reports, in a stable order. */
 export const daemonFeatureList = (): readonly DaemonFeature[] =>
