@@ -412,7 +412,8 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
  */
 function claimFreshStepUp(device: RouteContext['request']['device'], stepUps: StepUpWitness): ClaimFreshStepUp {
   return ((act?: StepUpAct, subject?: string): boolean => {
-    const claim = stepUps.claimFresh;
+    // Bound to the witness: the mounted one is the step-up service itself, whose claim reads its own state.
+    const claim = stepUps.claimFresh?.bind(stepUps);
     if (device === undefined || claim === undefined) return false;
     if (act !== undefined && !stepUpSkippableAtMachine(act))
       return subject !== undefined && subject !== '' && claim(device, act, subject);

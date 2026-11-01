@@ -1859,6 +1859,31 @@ describe('spending a single-use step-up', () => {
       should(claimed).deepEqual([true, false, false, false, false, false]);
       should(asked).deepEqual([['add-2fa-key', stage]]);
     });
+
+    it('should claim on the witness itself, so a step-up service reading its own state answers', async () => {
+      // Arrange — a witness built as the mounted one is: a class whose claim reads its own fields through `this`
+      class Witness implements StepUpWitness {
+        readonly #proofs = { left: 1 };
+        held(): boolean {
+          return true;
+        }
+        claimFresh(): boolean {
+          if (this.#proofs.left <= 0) return false;
+          this.#proofs.left -= 1;
+          return true;
+        }
+      }
+      const claimed: boolean[] = [];
+      const dispatcher = dispatcherFor(claimed, new Witness());
+
+      // Act
+      const first = await dispatcher.dispatch(request({ method: 'POST', path: '/v1/claims', device: DEVICE }));
+      await dispatcher.dispatch(request({ method: 'POST', path: '/v1/claims', device: DEVICE }));
+
+      // Assert
+      should(first.status).equal(200);
+      should(claimed).deepEqual([true, false]);
+    });
   });
 
   it('should serve an allowed stepped-up act when the witness has nothing to spend', async () => {
