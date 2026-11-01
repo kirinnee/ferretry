@@ -85,8 +85,7 @@ export const isDefaultAnswerLabel = (does: AgendaAnswerEffect, label: string): b
 
 /**
  * The fixed answer EVERY card a ferret raised carries besides its own (at most three): talk it through
- * before answering. It never takes one of the three direction slots — the app gives it the downward swipe
- * and its own button (docs/agenda.md, "Discuss").
+ * before answering. It never takes one of the three direction slots — the app gives it its own button (docs/agenda.md, "Discuss").
  */
 export const DISCUSS_LABEL = 'Discuss';
 

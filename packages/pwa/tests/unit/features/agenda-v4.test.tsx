@@ -120,7 +120,7 @@ describe('the quick replies, lettered', () => {
         map={swipeMap(item)}
         model={cardModel(item)}
         onAct={() => {}}
-        onDown={() => {}}
+        onSkip={() => {}}
         options={itemOptions(item)}
         swipeable
       />,

@@ -6,13 +6,12 @@ import {
   agendaKeyDirection,
   bodyTargets,
   deckRoom,
-  downAction,
   dragOffset,
   swipeKeyHint,
 } from '../../../src/features/agenda/agenda-swipe-deck.tsx';
 import { AgendaUndoToast } from '../../../src/features/agenda/agenda-undo-toast.tsx';
 import { swipeTargets } from '../../../src/lib/agenda-answers.ts';
-import { DISMISS_ACTION, type InboxCard, swipeIntent, swipeMap } from '../../../src/lib/agenda-inbox.ts';
+import { type InboxCard, swipeIntent, swipeMap } from '../../../src/lib/agenda-inbox.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   agendaItem,
@@ -61,7 +60,11 @@ const page = (fake: FakeInbox, cards: readonly InboxCard[], props: Partial<Agend
 );
 
 /** The deck with the real card in it: the minimal card on each. */
-const deckPage = (fake: FakeInbox, cards: readonly InboxCard[], props: { reducedMotion?: boolean } = {}) => (
+const deckPage = (
+  fake: FakeInbox,
+  cards: readonly InboxCard[],
+  props: { reducedMotion?: boolean; onSkip?: (card: InboxCard) => void } = {},
+) => (
   <InboxHarness
     cards={cards}
     fake={fake}
@@ -72,6 +75,7 @@ const deckPage = (fake: FakeInbox, cards: readonly InboxCard[], props: { reduced
           cards={inbox.cards}
           onAct={(card, action) => inbox.deferred.schedule(card, action)}
           reducedMotion={props.reducedMotion ?? true}
+          {...(props.onSkip === undefined ? {} : { onSkip: props.onSkip })}
           renderCard={(card, act) => <AgendaCard item={card.item} onAct={act} swipeHints />}
         />
         <AgendaUndoToast clock={fake.clock.now} inbox={inbox} />
@@ -212,8 +216,8 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     expect(stamp(mounted)?.getAttribute('data-swipe-direction')).toBe('right');
     expect(stamp(mounted)?.hasAttribute('data-swipe-committed')).toBe(false);
     expect(stamp(mounted)?.hasAttribute('data-swipe-empty')).toBe(false);
-    // The head follows down too now: ↓ means something there (Not needed).
-    expect(deckTop(mounted).style.transform).toContain('translate3d(60px, 4px, 0)');
+    // This deck cannot skip, so the card follows the finger sideways only.
+    expect(deckTop(mounted).style.transform).toContain('translate3d(60px, 0px, 0)');
 
     await release(target, 60, 4);
     expect(pending(fake)).toEqual([]);
@@ -266,7 +270,7 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     await mounted.unmount();
   });
 
-  it('never commits a direction with no answer, says so, and reads a drag down as Not needed', async () => {
+  it('never commits a direction with no answer, says so, and reads a drag down as nothing where the deck cannot skip', async () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [bare]));
     expect(deckTop(mounted).style.touchAction).toBe('pan-y');
@@ -278,7 +282,8 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     await release(target, 0, -300);
 
     await swipe(mounted, 0, 300);
-    expect(pending(fake)).toEqual(['Dismiss']);
+    expect(pending(fake)).toEqual([]);
+    expect(topId(mounted)).toBe('A1');
     expect(fake.commits).toEqual([]);
     await mounted.unmount();
   });
@@ -404,7 +409,7 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     await mounted.unmount();
   });
 
-  it('keeps Not needed… in the ⋯ menu, since it is no longer a swipe', async () => {
+  it('keeps Not needed… in the ⋯ menu, a button only (no swipe); it goes into the undo window and Undo brings the card back', async () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [twoWay]));
     await interact(() =>
@@ -414,6 +419,11 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
       must(deckTop(mounted).querySelector<HTMLButtonElement>('[data-agenda-dismiss]'), 'Dismiss').click(),
     );
     expect(pendingActions(fake).map(action => action.kind)).toEqual(['dismiss']);
+    expect(fake.commits).toEqual([]);
+    expect(mounted.container.querySelector('.fy-attn-deck__top')).toBeNull();
+    await interact(() => undoButton(mounted).click());
+    expect(pendingActions(fake)).toEqual([]);
+    expect(topId(mounted)).toBe('A2');
     await mounted.unmount();
   });
 
@@ -429,11 +439,11 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
 
   it('answers the top card from the keyboard, described in an sr-only hint, and hands focus on', async () => {
     const fake = fakeInbox();
-    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay], { onSkip: () => undefined }));
     const card = frame(mounted, 'A3');
     expect(card.tabIndex).toBe(0);
     const hint = must(document.getElementById(must(card.getAttribute('aria-describedby'), 'hint id')), 'the hint');
-    expect(hint.textContent).toBe('Arrow left: Rebase now. Arrow up: Wait. Arrow right: Skip. Arrow down: not needed.');
+    expect(hint.textContent).toBe('Arrow left: Rebase now. Arrow up: Wait. Arrow right: Skip. Arrow down: skip.');
     card.focus();
     await interact(() => pressKey(card, 'ArrowUp'));
     expect(pending(fake)).toEqual(['Wait']);
@@ -486,33 +496,47 @@ describe('the room the top card is given', () => {
   });
 });
 
-describe('Down is Not needed', () => {
+describe('Down is Skip', () => {
   it('reads a downward drag as no direction at all, and commits nothing', () => {
     expect(swipeIntent(0, 300, 360, swipeMap(threeWay.item)).committed).toBe(false);
     expect(swipeIntent(0, 4, 360, swipeMap(threeWay.item)).direction).toBeNull();
   });
 
-  it('sends Not needed for a long drag down, into the undo window, and moves on', async () => {
+  it('skips on a long drag down: nothing is sent to the undo window, nothing committed, and the stamp says Skip', async () => {
     const fake = fakeInbox();
-    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    const skipped: string[] = [];
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay], { onSkip: card => skipped.push(card.item.id) }));
     const target = await dragBy(mounted, 0, 200);
-    expect(stamp(mounted)?.getAttribute('data-swipe-answer')).toBe('Not needed');
+    expect(stamp(mounted)?.getAttribute('data-swipe-answer')).toBe('Skip');
     expect(stamp(mounted)?.hasAttribute('data-swipe-committed')).toBe(true);
     await release(target, 0, 200);
-    expect(pendingActions(fake)).toEqual([DISMISS_ACTION]);
+    expect(skipped).toEqual(['A3']);
+    expect(pendingActions(fake)).toEqual([]);
     expect(fake.commits).toEqual([]);
-    expect(topId(mounted)).toBe('A2');
+    await advance(fake, 10_000);
+    expect(fake.commits).toEqual([]);
+    await mounted.unmount();
   });
 
-  it('reads a drag down on a notice as nothing: a notice is cleared, never dismissed', async () => {
+  it('never dismisses on a drag down where the deck cannot skip, and the card does not follow it', async () => {
     const fake = fakeInbox();
-    const notice = inboxCard(agendaItem('A9', { subject: 'Shipped', notice: true, kind: 'info' } as never));
-    const mounted = await mount(deckPage(fake, [notice]));
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
     const target = await dragBy(mounted, 0, 200);
     expect(stamp(mounted)?.hasAttribute('data-swipe-committed') ?? false).toBe(false);
     await release(target, 0, 200);
     expect(pendingActions(fake)).toEqual([]);
-    expect(topId(mounted)).toBe('A9');
+    expect(topId(mounted)).toBe('A3');
+    await mounted.unmount();
+  });
+
+  it('skips a notice too: a down drag changes nothing on it', async () => {
+    const fake = fakeInbox();
+    const skipped: string[] = [];
+    const notice = inboxCard(agendaItem('A9', { subject: 'Shipped', notice: true, kind: 'info' } as never));
+    const mounted = await mount(deckPage(fake, [notice], { onSkip: card => skipped.push(card.item.id) }));
+    await swipe(mounted, 0, 200);
+    expect(skipped).toEqual(['A9']);
+    expect(pendingActions(fake)).toEqual([]);
     await mounted.unmount();
   });
 
@@ -523,13 +547,25 @@ describe('Down is Not needed', () => {
     await mounted.unmount();
   });
 
-  it('says Not needed on ArrowDown on the focused card, into the undo window', async () => {
+  it('skips on ArrowDown on the focused card, and dismisses nothing', async () => {
+    const fake = fakeInbox();
+    const skipped: string[] = [];
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay], { onSkip: card => skipped.push(card.item.id) }));
+    const card = frame(mounted, 'A3');
+    card.focus();
+    await interact(() => pressKey(card, 'ArrowDown'));
+    expect(skipped).toEqual(['A3']);
+    expect(pendingActions(fake)).toEqual([]);
+    await mounted.unmount();
+  });
+
+  it('does nothing on ArrowDown where the deck cannot skip', async () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
     const card = frame(mounted, 'A3');
     card.focus();
     await interact(() => pressKey(card, 'ArrowDown'));
-    expect(pendingActions(fake)).toEqual([DISMISS_ACTION]);
+    expect(pendingActions(fake)).toEqual([]);
     await mounted.unmount();
   });
 
@@ -664,24 +700,5 @@ describe('a swipe from anywhere on the card', () => {
     await touch(fits, 'pointermove', 220, 300);
     expect(stamp(mounted)?.getAttribute('data-swipe-direction')).toBe('right');
     await mounted.unmount();
-  });
-});
-
-describe('what ↓ sends', () => {
-  it('is Not needed: the card’s own dismissing answer when it has one, else the plain dismiss, and nothing on a notice', () => {
-    expect(downAction(threeWay)).toEqual(DISMISS_ACTION);
-    const own = inboxCard(
-      agendaItem('A7', {
-        kind: 'task',
-        ask: { kind: 'task' },
-        answers: [
-          { direction: 'left', does: 'needs-info', label: 'Need more info' },
-          { direction: 'up', does: 'dismiss', label: 'Not this week' },
-          { direction: 'right', does: 'done', label: 'Done' },
-        ],
-      } as never),
-    );
-    expect(downAction(own)).toMatchObject({ kind: 'dismiss', label: 'Not this week' });
-    expect(downAction(inboxCard(agendaItem('A9', { notice: true, kind: 'info' } as never)))).toBeNull();
   });
 });

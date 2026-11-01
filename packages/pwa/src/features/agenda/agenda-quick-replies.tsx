@@ -4,10 +4,10 @@
  * there share the width, never a hole. Each is SHORT: the option's one-word name or its letter (`cardLettered`), one
  * way per row, never wrapped; the full label is its accessible name and its title. The recommended one is in the
  * accent. A tap answers at once. Options past the three are chosen from the card's options list, never a second row.
- * "Not needed" is the ↓ swipe and the pill in the card's top bar, not a button here. Answering is replying, so there
+ * "Not needed" is the pill in the card's top bar (a button only, never a swipe), not a button here. Answering is replying, so there
  * is no text field: the composer below the card is the one box, and what is typed in it rides an answer as its note.
  *
- * On touch the row swipes (← ↑ →) exactly as the Inbox deck does (`swipeIntent`), and ↓ is `onDown` — Not needed.
+ * On touch the row swipes (← ↑ →) exactly as the Inbox deck does (`swipeIntent`), and ↓ is `onSkip` — Skip, never a dismiss.
  * An item linked to a card the owner may close also draws "Done · closes &F12" in the → slot when it is free; with
  * all three taken it is the one button under the row, tap only — a swipe never closes a card.
  * A card answered in words (an open question, several questions, a mix) draws NO buttons here: the composer is the
@@ -64,8 +64,8 @@ export interface AgendaQuickRepliesProps {
   readonly doneClose?: DoneCloseView;
   /** One answer; the host adds the composer's text as its note. */
   readonly onAct: (action: InboxAction) => void;
-  /** The ↓ swipe: Not needed (the host dismisses), or nothing where the item cannot be dismissed. */
-  readonly onDown?: (() => void) | undefined;
+  /** The ↓ swipe: Skip (the host moves to the next item, changing nothing), or nothing where there is none. */
+  readonly onSkip?: (() => void) | undefined;
 }
 
 interface Drag {
@@ -168,7 +168,7 @@ export function AgendaQuickReplies({
   requestChanges,
   doneClose,
   onAct,
-  onDown,
+  onSkip,
 }: AgendaQuickRepliesProps) {
   const gesture = useRef<Drag | null>(null);
   const swallow = useRef(false);
@@ -206,7 +206,7 @@ export function AgendaQuickReplies({
     if (!current.moved) return;
     swallow.current = true;
     if (isDownSwipe(current.dx, current.dy, current.width)) {
-      onDown?.();
+      onSkip?.();
       return;
     }
     const intent = swipeIntent(current.dx, current.dy, current.width, map);

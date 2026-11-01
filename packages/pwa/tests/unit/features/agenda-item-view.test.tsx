@@ -307,16 +307,23 @@ describe('the question and its options', () => {
 });
 
 describe('Not needed', () => {
-  test('is a small pill in the card’s top bar, never a button in the answer row', async () => {
+  test('is a small pill in the card’s top bar — a button only, saying no swipe and no arrow', async () => {
     const spy = await draw(richItem);
     const pill = one<HTMLButtonElement>('.fy-card__top [data-agenda-dismiss]');
-    expect(pill.textContent).toBe('↓Not needed');
+    expect(pill.textContent).toBe('Not needed');
+    expect(pill.getAttribute('aria-label')).toBe('Not needed');
+    expect(pill.querySelector('.fy-card__arrow')).toBeNull();
     expect(root().querySelector('.fy-qr [data-agenda-dismiss]')).toBeNull();
     await interact(() => pill.click());
     expect(spy.acted).toEqual([DISMISS_ACTION]);
   });
 
-  test('is the ↓ key and the ↓ swipe on the answer row; ‹ › still leave without dismissing', async () => {
+  test('stays a button on a phone too: still no swipe wording', async () => {
+    await draw(richItem, { swipeable: true });
+    expect(one('.fy-card__top [data-agenda-dismiss]').getAttribute('aria-label')).toBe('Not needed');
+  });
+
+  test('is never the ↓ key or the ↓ swipe on the answer row: those skip to the next item and answer nothing', async () => {
     const spy = await draw(richItem);
     await press('ArrowDown');
     const row = one<HTMLElement>('[data-agenda-quick-replies]');
@@ -325,9 +332,18 @@ describe('Not needed', () => {
     await interact(() => row.dispatchEvent(touch('pointerdown', 100)));
     await interact(() => row.dispatchEvent(touch('pointermove', 300)));
     await interact(() => row.dispatchEvent(touch('pointerup', 300)));
-    expect(spy.acted.map(action => action.kind)).toEqual(['dismiss', 'dismiss']);
-    await interact(() => one<HTMLButtonElement>('[aria-label="Next item"]').click());
-    expect([spy.next, spy.acted.length]).toEqual([1, 2]);
+    expect([spy.next, spy.acted]).toEqual([2, []]);
+  });
+
+  test('has no ↓ key or swipe at all where there is no next item to skip to, and still dismisses nothing', async () => {
+    const spy = await draw(richItem, { onNext: undefined });
+    await press('ArrowDown');
+    const row = one<HTMLElement>('[data-agenda-quick-replies]');
+    const touch = (type: string, y: number): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, clientX: 200, clientY: y, pointerId: 5, pointerType: 'touch' });
+    await interact(() => row.dispatchEvent(touch('pointerdown', 100)));
+    await interact(() => row.dispatchEvent(touch('pointerup', 300)));
+    expect([spy.next, spy.acted]).toEqual([0, []]);
   });
 
   describe('the pull down over the card’s top bar', () => {
@@ -339,11 +355,10 @@ describe('Not needed', () => {
       await interact(() => top.dispatchEvent(pointer('pointerup', to, init)));
     };
 
-    test('a clear pull down on touch is Not needed', async () => {
+    test('a clear pull down on touch is Skip: the next item, and nothing dismissed or answered', async () => {
       const spy = await draw(richItem);
       await pull(300);
-      expect(spy.acted).toEqual([DISMISS_ACTION]);
-      expect([spy.next, spy.closed]).toEqual([0, 0]);
+      expect([spy.next, spy.acted, spy.closed]).toEqual([1, [], 0]);
     });
 
     test('a short pull, a mouse, a bar that does not swipe and a pointer it never saw do nothing', async () => {
@@ -355,11 +370,11 @@ describe('Not needed', () => {
       await interact(() => top.dispatchEvent(pointer('pointerup', 300, { pointerId: 9 })));
       await interact(() => top.dispatchEvent(pointer('pointercancel', 300)));
       await interact(() => top.dispatchEvent(pointer('pointerup', 300)));
-      expect(spy.acted).toEqual([]);
+      expect([spy.next, spy.acted]).toEqual([0, []]);
       await view?.unmount();
       const still = await draw(richItem, { swipeable: false });
       await pull(300);
-      expect(still.acted).toEqual([]);
+      expect([still.next, still.acted]).toEqual([0, []]);
     });
   });
 

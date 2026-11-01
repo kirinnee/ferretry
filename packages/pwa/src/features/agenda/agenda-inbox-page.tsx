@@ -15,8 +15,8 @@
  *   modified click opens the chat, and the open item has "Open chat". A tapped notification opens the chat and
  *   clears itself.
  * - THE OPEN ITEMS ARE A DECK, on a phone and a wide screen alike: SWIPE (or press) in the direction of an answer —
- *   the card's own row, in the options list's order: ← the first, ↑ the second, → the third — and ↓ is Not needed,
- *   as everywhere. SKIP is a tap (the item's ›), never a swipe; the skipped item stays open. On touch the card's top bar and answer row swipe on their own,
+ *   the card's own row, in the options list's order: ← the first, ↑ the second, → the third — and ↓ is Skip,
+ *   as everywhere: the next item, nothing sent, the skipped item stays open. "Not needed" is its own button, never a swipe. On touch the card's top bar and answer row swipe on their own,
  *   exactly as in the chat; the item's head and the who-and-what line are the deck's. A swipe goes into the same
  *   undo window as a tap; reduced motion drops the fly-off. NO TEACHING TEXT: no hint line, no banner naming the
  *   answer mid-drag, no key caption. A phone also gets "Answer quickly", the deck from the top; a wide screen walks
@@ -304,7 +304,7 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
   );
 }
 
-/** Where a touch item view swipes on its own: its card's top bar (↓ Not needed) and its answer row (← ↑ → ↓). */
+/** Where a touch item view swipes on its own: its card's top bar (↓ Skip) and its answer row (← ↑ → ↓). */
 const VIEW_GESTURES = '[data-agenda-card-top], [data-agenda-quick-replies]';
 
 interface OpenItemPlace {

@@ -11,14 +11,14 @@
  * - IT COMMITS ONLY PAST THE THRESHOLD (`swipeIntent(...).committed`). Short of it the card springs back
  *   and nothing is sent; past it the card flies off and the answer is handed to `onAct` — which, in the
  *   inbox, holds it for the undo window (`DeferredAgendaActions`) rather than posting it.
- * - DOWN IS NOT NEEDED, as on every card (`downAction`): a drag down past the threshold sends the card's dismiss to
- *   `onAct` — into the same undo window as any answer — and the card follows it down. On a card with nothing to
- *   dismiss (a notice) the card does not follow a downward drag and the browser keeps it as a scroll. SKIP is never a
- *   swipe: it is a tap (`onSkip`, the item's › and the queue's own buttons).
+ * - DOWN IS SKIP, as on every swipeable card: a drag down past the threshold moves to the next card (`onSkip`) and the card
+ *   follows it down. Nothing is answered, dismissed or sent to `onAct`. "Not needed" is only its own button, and it is
+ *   never a swipe. Where the deck cannot skip (`onSkip` absent) the card does not follow a downward drag and the
+ *   browser keeps it as a scroll.
  * - THE WHOLE CARD SWIPES, BY TOUCH ONLY. A touch may start anywhere on the card ({@link ./agenda-swipe-gesture.ts}):
  *   the direction is decided after 10px and kept. Sideways is a swipe (left and right answers). Up or down from the
  *   body is the reader scrolling and is handed to the browser (`touch-action: pan-y`); only the card's head, which
- *   does not scroll, keeps the up answer and Not needed. A mouse drag is the reader selecting text, never a swipe; a
+ *   does not scroll, keeps the up answer and Skip. A mouse drag is the reader selecting text, never a swipe; a
  *   touch that starts on a link, a button or a field, or inside something that scrolls sideways (a table), is that
  *   element's, never the deck's.
  * - A SCROLL IS NEVER A SWIPE. A drag that moved swallows the click it ends in, so a swipe that ends over a button
@@ -40,10 +40,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { answerAction, type SwipeTarget, type SwipeTargets, swipeTargets } from '../../lib/agenda-answers.ts';
-import { cardModel } from '../../lib/agenda-card-model.ts';
+import { type SwipeTarget, type SwipeTargets, swipeTargets } from '../../lib/agenda-answers.ts';
 import {
-  DISMISS_ACTION,
   type InboxAction,
   type InboxCard,
   SWIPE_SLOP_PX,
@@ -160,24 +158,12 @@ const useReducedMotion = (override?: boolean): boolean => {
   return prefers || (typeof document !== 'undefined' && document.documentElement.dataset.motion === 'reduced');
 };
 
-/** A way a card can leave the deck: one of its answers' directions, or down — Not needed. */
+/** A way a card can leave the deck: one of its answers' directions, or down — Skip. */
 export type DeckDirection = SwipeDirection | 'down';
 
 /**
- * What ↓ sends for a card, as everywhere else: Not needed — the card's own dismissing answer when it has one, else
- * the plain dismiss. A notice (cleared, not dismissed) has none: ↓ means nothing on it.
- */
-export const downAction = (card: InboxCard): InboxAction | null => {
-  const model = cardModel(card.item);
-  if (model.notice) return null;
-  if (model.dismissInMenu) return DISMISS_ACTION;
-  const own = model.answers.find(answer => answer.does === 'dismiss');
-  return own === undefined ? null : answerAction(own, '');
-};
-
-/**
- * Reads a drag on a card that ↓ can dismiss: a mostly-downward drag is Not needed (`down`), committed past the same
- * threshold an answer needs; every other drag reads as `swipeIntent` does. Where ↓ means nothing, down is nothing.
+ * Reads a drag on a deck that can skip: a mostly-downward drag is Skip (`down`), committed past the same threshold an
+ * answer needs; every other drag reads as `swipeIntent` does. Where the deck cannot skip, down is nothing.
  */
 export const deckIntent = (
   dx: number,
@@ -206,7 +192,7 @@ interface AgendaCardFrameProps {
   readonly card: InboxCard;
   readonly targets: SwipeTargets;
   readonly onArrow: (direction: SwipeDirection) => void;
-  /** ↓ on the focused card: Not needed. Absent: ↓ is the page's. */
+  /** ↓ on the focused card: Skip. Absent: ↓ is the page's. */
   readonly onDown?: (() => void) | undefined;
   readonly children: ReactNode;
 }
@@ -243,7 +229,7 @@ function AgendaCardFrame({ card, targets, onArrow, onDown, children }: AgendaCar
       {children}
       <span className="sr-only" id={hintId}>
         {swipeKeyHint(targets)}
-        {onDown === undefined ? '' : ' Arrow down: not needed.'}
+        {onDown === undefined ? '' : ' Arrow down: skip.'}
       </span>
     </section>
   );
@@ -302,9 +288,9 @@ export interface AgendaSwipeDeckProps {
    * Skip tap moves past it (and flies it down) when the deck can skip.
    */
   readonly renderCard: (card: InboxCard, act: (action: InboxAction) => void, skip: () => void) => ReactNode;
-  /** An answer the reader gave, by swipe, arrow key or button — ↓'s Not needed included. */
+  /** An answer the reader gave, by swipe, arrow key or button (↓ is Skip, never an answer). */
   readonly onAct: (card: InboxCard, action: InboxAction) => void;
-  /** The reader moved on from the card on top without answering it, by a tap. Absent: the deck cannot skip. */
+  /** The reader moved on from the card on top without answering it, by a ↓ swipe, the ↓ key or a tap. Absent: the deck cannot skip. */
   readonly onSkip?: (card: InboxCard) => void;
   /**
    * Regions of the card that answer their own swipes (a touch item view's head and quick-reply row): a drag that
@@ -335,9 +321,8 @@ export function AgendaSwipeDeck({
   const swallowClick = useRef(false);
   const top = cards[0];
   const targets: SwipeTargets = top === undefined ? {} : swipeTargets(top.item);
-  /** What ↓ sends for the card on top: Not needed, or nothing (a notice). */
-  const down = top === undefined ? null : downAction(top);
-  const canDown = down !== null;
+  /** ↓ is Skip, and only where the deck can skip. */
+  const canDown = onSkip !== undefined;
 
   const topKey = top?.key;
   const room = useDeckRoom(deck, topKey);
@@ -369,16 +354,7 @@ export function AgendaSwipeDeck({
     onAct(card, action);
   };
 
-  /** ↓: Not needed — it goes to `onAct` like any answer (the Inbox holds it for the undo window), and flies down. */
-  const dismiss = (card: InboxCard, action: InboxAction, from: Drag): void => {
-    refocus.current = deck.current?.contains(document.activeElement) === true;
-    gesture.current = null;
-    setDrag(null);
-    if (!reduced) setLeaving({ card, direction: 'down', from });
-    onAct(card, action);
-  };
-
-  /** Skip, by a tap (never a swipe): the card goes and the next one comes on top; nothing is answered. */
+  /** Skip, by a ↓ swipe, the ↓ key or a tap: the card goes and the next one comes on top; nothing is answered. */
   const skip = (card: InboxCard, from: Drag): void => {
     if (onSkip === undefined) return;
     refocus.current = deck.current?.contains(document.activeElement) === true;
@@ -456,8 +432,7 @@ export function AgendaSwipeDeck({
     const intent = deckIntent(current.dx, current.dy, current.width, live, downs);
     const from = dragOffset(current.dx, current.dy, live, downs);
     const direction = intent.committed ? intent.direction : null;
-    // A committed ↓ is only ever read where `down` is an action (`deckIntent` is told `canDown`).
-    if (direction === 'down') dismiss(top, down ?? DISMISS_ACTION, from);
+    if (direction === 'down') skip(top, from);
     else if (direction !== null) give(top, direction, from);
     else setDrag(null);
   };
@@ -478,7 +453,7 @@ export function AgendaSwipeDeck({
     intent?.direction == null
       ? undefined
       : intent.direction === 'down'
-        ? { label: 'Not needed', action: down }
+        ? { label: 'Skip', action: null }
         : live[intent.direction];
   const peeks = cards.slice(1, 1 + PEEKS);
 
@@ -532,7 +507,7 @@ export function AgendaSwipeDeck({
           <AgendaCardFrame
             card={top}
             onArrow={direction => give(top, direction, { dx: 0, dy: 0 })}
-            onDown={down === null ? undefined : () => dismiss(top, down, { dx: 0, dy: 0 })}
+            onDown={canDown ? () => skip(top, { dx: 0, dy: 0 }) : undefined}
             targets={targets}
           >
             {renderCard(
