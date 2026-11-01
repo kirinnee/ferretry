@@ -234,7 +234,7 @@ Where each fact comes from:
 | Is the agent program running? (`running`)             | the daemon holds a live monitor on its pane, and its status is neither finished nor a turn the harness cut off (`interrupted`, `rate_limited`) |
 | Out of quota or provider down? (`quota_or_provider`)  | `rate_limited`, a recorded quota reset, a quota-reset or provider flag; a reset that has passed means **resume**, otherwise **failover**       |
 | Has its output changed lately? (`output_changed`)     | the transcript, the token counter or the meaningful pane moved within `susThinkingSeconds`                                                     |
-| Already nudged about this? (`already_nudged`)         | a nudge that took — Jev's or an investigation's — on this ferret for this kind of flag in the last day (the Warden's Recent actions)           |
+| Already nudged about this? (`already_nudged`)         | a nudge that took — Jev's or an investigation's — on this ferret for this kind of flag in the last day (the Warden's Recent triggers)          |
 | Is a prompt or dialog on screen? (`dialog_on_screen`) | the ferret is parked on a question or permission prompt (`needs-input`, or an `awaiting_*` status)                                             |
 
 "Is it waiting on something real?" is Jev's, but it is shown the facts that bear on it — how long a
@@ -325,7 +325,7 @@ touches the ferret — see below.)
 pane that still looks alive — when the report recommends `RESTART`; a file that names `resume` but not
 `restart` gives `restart` the same answer. An act it may not
 do alone is held, and a Warden notification tells you what it recommends. Every act, every hold and every Jev leave is
-listed under Recent actions and in the journal with who decided it — Jev's with how sure it was and why.
+listed under Recent triggers and in the journal with who decided it — Jev's with how sure it was and why.
 
 **Which login investigates.** `accounts` is the order of logins, head first, and `failover.policy` says how
 they share the work: `fallback` uses the first and moves on only when it is unhealthy, `round_robin` takes
@@ -381,8 +381,8 @@ made (a back-off, a snapshot that could not be masked) is no check. The day coun
 (= healthy + acted + handed on), each verdict, and `skippedForCap`; the status carries the newest 50 as
 `jevChecks`. The Warden page reads them: the Flagged tile says _Jev checked N_, Jev's line spells out the
 checks (_6 checks: 1 healthy · 0 acted · 5 handed on_) and says **Jev paused: daily cap reached** while it is,
-the chart draws Jev's bar as its checks, and Recent actions lists every check that settled nothing as a
-_Handed on_ or _Skipped_ row of Jev's. A day from before this has no `jev` and reads as it did.
+the chart draws Jev's bar as its checks, and Recent triggers lists every check that settled nothing as a
+_Handed to LLM_ or _Skipped_ row of Jev's. A day from before this has no `jev` and reads as it did.
 
 **Beside every LLM result, what Jev did first.** Jev being on does not mean Jev ran: its cap may be spent,
 the flag may be one it never judges, the run may be forced. So the Warden keeps Jev's last word on each
@@ -393,11 +393,31 @@ names its line in the check record), **skipped** (the cap), **not asked** (the o
 run, a kind Jev never judges, a back-off, a snapshot that could not be masked, Jev's own earlier act on the
 same trouble) or **off**. An investigation queued before this was kept says **no record**; a fleet triage
 carries one answer only when Jev said the same about every flag it covers. Still no text. The Warden page
-puts it as one line under every LLM row in Recent actions, every investigation and the report —
+puts it as one line in the timeline of every trigger Jev handed on, every investigation and the report —
 _Jev: not sure (21%) · $0.0041 → investigated_, _Jev: skipped — daily cap spent → investigated_, _Jev: off_ —
 and says today's spend at a glance (_Today: Jev $0.0055 · LLM $1.20 · together $1.21_; an amount under a
 cent is shown to four places, never rounded to $0.00), what one Jev check costs, and each day's Jev and LLM
 spend in the chart.
+
+**Recent triggers: one row per trigger.** The Warden page lists a TRIGGER, not a record: one flag on one
+ferret together with everything that followed — Jev's check, the investigation Jev handed it to and the final
+act are ONE row. A row says **when** (time and "1h ago"), **which ferret** (callsign · task, opening its
+chat), **what flagged it** (_stuck 20m_, _usage limit_, _ferret died_ …), **who** handled it (_Rule_, _Jev_,
+_Jev → LLM_, _LLM_), **the runtime** of the investigation (its login and model, only when an LLM ran) and
+**the result** (_Left alone_, _Nudged_, _Resumed_, _Restarted_, _Moved login a → b_, _Stopped_, _Asked you_,
+_Held: reason_, _Failed: reason_; _Queued_ and _Investigating_ while an investigation is open). _Handed to LLM_ appears only for a check no investigation ever followed, and a check the cap or the hourly share skipped reads _Skipped: daily cap_ or _Skipped: hourly share_. Opening a row
+shows only that trigger's timeline: flag → Jev's verdict and cost → the LLM's report → the act. Identical
+repeats on one ferret fold into _3×_ only when every column is the same. The list filters by **Who** and by
+**Result**, and by machine as before; it keeps the 20 newest and reveals more on request.
+
+There is no new record on the wire. The page joins what the daemon already wrote, by the links it already
+keeps: an act's `reportPath` and `investigator` name its investigation's `reportPath` and `wardenName`, and the
+`jev` block on both names Jev's check by its time (`jev.at` = the check's `at`, on the same ferret and flag). An
+act Jev took itself belongs to the check of the same sweep on the same ferret and flag. A record from before
+those links existed falls back to the same ferret within a two-hour window, and is never joined to a report
+that names a different investigation. An investigation that is only queued or still running joins the check that
+handed it on the same way: by the time its `jev` names, else by the nearest handed-on check on that ferret and
+flag before it (two-hour window), so a Jev check and the investigation it started are never two rows. The runtime is the investigation's `agent` and `model`.
 
 **Investigators are named `warden-000001` … `warden-FFFFFF`**, from a counter in `warden/state.json`
 (`investigatorSequence`) that wraps to 1 and skips a name a live session still holds — never from the first-name
@@ -473,7 +493,7 @@ writing about what it is doing all count as moving. Climbing tokens still exempt
 with no command of its own running, whose pane has had a browser it launched for 10 minutes since the turn
 ended, gets that browser closed — the browser only, never the ferret, and the pane's processes are read again at the moment
 of closing. No Jev, no investigation, nothing spent. It is `mayActAlone.closeLeftovers` (default **on**);
-with it off the Warden lists the recommendation once under Recent actions instead. Every close is listed
+with it off the Warden lists the recommendation once under Recent triggers instead. Every close is listed
 there too, and journalled as `fleet.warden_leftover_closed`.
 
 ### Moving a ferret that hit a limit
@@ -523,14 +543,14 @@ autoMigrate:
   job that survives keeps the ferret where it is. **The move is never forced**: after the jobs are stopped the
   migration's safety check reads the pane afresh, and anything else in the way — work it cannot see, a blocker
   that is not one of the ferret's jobs — still keeps the ferret where it is. The ferret is told the stopped jobs'
-  commands; your notice and Recent actions name only their pids and programs, since a command line can carry a
+  commands; your notice and Recent triggers name only their pids and programs, since a command line can carry a
   credential. **A command you run yourself in the ferret's pane with the harness's `!` shell escape looks exactly
   like one of the ferret's jobs, and is stopped too.**
 - **Held for the owner:** switching it on, switching `forceStopBackground` on, adding a trigger or a target
   (including a named target where any login was allowed, or going back from a list to any login), raising
   `maxMovesPerHour`, and lowering `minHeadroomPercent`.
 
-Every move, hold and failure is a `failover` under Recent actions by `auto`, with the login it left and the one
+Every move, hold and failure is a `failover` under Recent triggers by `auto`, with the login it left and the one
 it went to, and is counted in Insights › Warden. The moves are kept in the Warden's own `auto-migrate.json`, which the sweep and the budget stop
 share under one lock, so the hourly limit counts every move however the two meet. The ferret's own log gets `warden.auto_migrated`,
 `warden.auto_migrate_asked` or `warden.auto_migrate_stopped_jobs`.
@@ -558,7 +578,7 @@ revive, one that exited 0, a Warden investigator, or a ferret whose lead was sto
 continue. An interactive one gets only a notice ("Ferretry started your terminal again: it ended because ...") and
 its turn, with no instruction to act. Each ferret's own log gets `warden.revive_planned`, `warden.revived` or
 `warden.revive_refused` (`stopped`, `cooldown`, `breaker_open`, `too_old`, `parent_stopped`, `refused:<reason>`);
-each revive is a row under Recent actions and a `fleet.warden_revived` line.
+each revive is a row under Recent triggers and a `fleet.warden_revived` line.
 
 **GAP — no out-of-memory data.** Nothing records whether the kernel's OOM killer ended a process, so the Warden
 never says "out of memory"; an OOM kill shows as a signal (SIGKILL). Archived ferrets are not yet excluded by a

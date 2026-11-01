@@ -481,7 +481,7 @@ function MoveToAnotherLogin({
         </div>
         <p className="m-0 text-meta leading-base text-muted">
           Never while it has a card open for you, holds a secret, or waits on a prompt. Every move is listed under
-          Recent actions.
+          Recent triggers.
         </p>
       </LayerRow>
     </Card>
