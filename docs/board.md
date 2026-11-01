@@ -76,7 +76,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in; most work needs no card. Make one only if the owner asked, your lead gave one, or `fy board status` says on; else ask: `fy agenda add -k yesno` "Track this on the board?". Search first (`fy search`); update or link a match instead of adding a duplicate. Make: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`. A card (&F412; agenda !A48): before To test `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`; lane by the work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy agenda add --task <id>` (owner), `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move; owner closes.
+Board: opt-in; most work needs no card. Make one only if the owner asked, your lead gave one, or `fy board status` says on; else ask: `fy agenda add -k yesno` "Track this on the board?". First `fy search`; link a match, no duplicate. Make: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`. A card (&F412; agenda !A48): before To test `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`; lane by the work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy agenda add --task <id>` (owner), `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move; owner closes. Gate? The daemon asks; raise nothing.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -97,6 +97,7 @@ session identity — in `BoardService` (`create`, `act`) and on the lane route �
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | read the board, `fy task note` on a card                  | `fy task create`, `move`, `drop`, `reopen`, `assign`, `depend` / `undepend`, `block` / `unblock`, |
 | `fy task link --pr <url>` / `--branch <branch>` on a card | `reparent`, `focus`, `edit`, `file`, `order`, `refile`, `clarify`, `link --commit` / `--doc`      |
+| `fy task trigger` (`deploy.done`) on its card             |                                                                                                   |
 | `fy send` its lead (and peers the lead names)             | editing a project's lanes (`PATCH` of the lane list: `403 sub-ferret`)                            |
 
 The refusal is `forbidden` and names the way out, e.g. `Sub-ferrets don't move cards; tell your lead: fy send <lead-callsign> "…"`.
@@ -219,7 +220,8 @@ Each lane has an `id`, a `name`, a `category`, and optionally:
 
 | Field        | Meaning                                                                                                                                                                                                                                                                                                                                                     |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enterOn`    | triggers that move a card here: `work.started`, `pr.opened`, `pr.ready`, `ci.green`, `pr.merged`, `release.published`, `release.running`, `signal.done`                                                                                                                                                                                                     |
+| `enterOn`    | triggers that move a card here ([the table](#workflows-gate-and-automatic-stages)): `work.started`, `pr.opened`, `pr.ready`, `ci.green`, `pr.review_approved`, `pr.merged`, `release.published`, `release.running`, `signal.done`, `deploy.done`                                                                                                            |
+| `stage`      | the lane's stage in the workflow: a gate the owner answers, or automatic ([Workflows](#workflows-gate-and-automatic-stages)); absent, it is read from `enterOn` and `ownerGate`                                                                                                                                                                             |
 | `ownerGate`  | only the owner moves a card into this lane (`owner-gate` for a ferret)                                                                                                                                                                                                                                                                                      |
 | `staleAfter` | how long a card may sit untouched here before it counts as stale                                                                                                                                                                                                                                                                                            |
 | `emphasis`   | how the Board draws it: `action` (the owner acts here: prominent), `progress` (work moving: ordinary) or `info` (information only: compact). Absent, it follows the category: `verify` and an owner-gated lane are `action`, `shipped` and `closed` are `info`, the rest `progress`. A `verify` lane is always `action` and the `closed` lane always `info` |
@@ -292,6 +294,101 @@ A proposal is live at once but unconfirmed. The owner gets one agenda choice, Ac
 `version-conflict`), and a lane cannot be removed without naming where its cards go. A project with no lane set
 gets an inferred proposal: a repository with `v*` tags gets `pr-release-verify`, one
 without gets `pr`, a folder with no repository gets `quick`.
+
+## Workflows: gate and automatic stages
+
+A project's lanes are its workflow, and each lane is one **stage** of it, of one of two kinds:
+
+- A **gate** asks the owner. It has one to three options, and each option has an outcome: `next` (the next lane of
+  the card's variant), `lane` (a lane of the set, by id), `reopen-with-agenda` (back to the set's `notGoodLane`,
+  with the owner's words, which a conversation about them follows) or `close` (the set's `doneLane`). The Inbox
+  draws the options as →, ← and a button, so their ids are unique, at most one reopens with an agenda conversation,
+  and a label is one line of at most 24 characters. A gate lane is still entered the way any lane is, on its
+  `enterOn` triggers: its stage says how a card leaves it.
+- An **automatic** stage moves a card in on its triggers. With none, the ferret moves it there.
+
+Ferretry's own workflow is build → merge → release → **try it** (Done / Not good). A labelling project's is prepare
+the PRs → **send for review?** → wait for approval (`pr.review_approved`) → merge and deploy (`deploy.done`) →
+**confirm deployed?**. Raising one agenda item when a card reaches a gate, and answering it, is work in flight
+([below](#gaps-and-work-in-flight)); this section is the model it is built on.
+
+**A stage is optional, and `enterOn` and `ownerGate` stay its compatibility mirror.** `stage` is optional on the
+wire and in storage. A lane without one reads the stage its other fields describe (`laneStage`, in
+`@ferretry/protocol`, pure and total):
+
+| A lane with no `stage`                        | Reads as                                                          |
+| --------------------------------------------- | ----------------------------------------------------------------- |
+| a `verify` lane, owner-gated or not           | a gate: Done (`close`), Not good (`reopen-with-agenda`)           |
+| any other owner-gated lane but the closed one | a gate: OK to build (`next`), as Plan/Design                      |
+| the `closed` lane                             | automatic on its own `enterOn`; only the owner enters a gated one |
+| anything else                                 | automatic on its `enterOn`, or on nothing when it has none        |
+
+A lane that states a stage keeps its mirror agreeing with it, settled where a lane is parsed (`LaneSchema`), so
+either spelling round-trips. A gate is owner-gated: a lane that leaves `ownerGate` out gets `true` (a `verify` lane is
+the owner's by its category, so its `ownerGate` is left as it is). An automatic stage enters on its triggers: a lane
+that leaves `enterOn` out gets them. A field that disagrees is refused: a gate on the closed lane, a gate with
+`ownerGate: false`, an automatic stage whose triggers are not its `enterOn`, an automatic lane that is owner-gated. So
+an app that predates stages reads every lane right, and the helpers that read the mirror (`laneForTrigger`,
+`laneUse`) answer as they did. `needsOwner` reads the stage as well as `ownerGate`: a move forward out of any gate
+is the owner's, so a ferret's move out of a `verify` lane is refused `owner-gate` even where the lane is not
+owner-gated (before stages it went through), and a move and a report agree on every gate. An app that predates stages drops the field when it saves a set,
+and the lanes then read their derived stages again: only options the owner had changed are lost. The lane editor
+drops a lane's stored stage when its category or its gate changes, or the triggers of an automatic one, so a saved
+lane is never refused for a stage its fields no longer describe.
+
+`gateOptions(lane)` lists a lane's options, none for an automatic stage. `gateOutcomeLane(laneSet, workflow,
+laneId, optionId)` says where an option sends a card: `{ option, lane }`, or `not-a-gate`, `unknown-option`,
+`no-next-lane` (a `next` from the variant's last lane) or `unknown-lane`. Who may answer a gate is the daemon's to
+decide, not this function's.
+
+**Triggers.** What moves a card into a lane by itself. Most are facts Ferretry sees; the **external** ones happen
+where it cannot look, and somebody reports them (`EXTERNAL_LANE_TRIGGERS`).
+
+| Trigger              | When                             | Who knows                                                                       |
+| -------------------- | -------------------------------- | ------------------------------------------------------------------------------- |
+| `work.started`       | a session starts on the card     | the daemon                                                                      |
+| `pr.opened`          | a linked PR opens                | the GitHub watcher                                                              |
+| `pr.ready`           | it is out of draft               | the watcher                                                                     |
+| `ci.green`           | its checks pass                  | the watcher                                                                     |
+| `pr.review_approved` | a reviewer approves it           | **reported**: the watcher reads a PR's state, checks and merge, not its reviews |
+| `pr.merged`          | it merges                        | the watcher                                                                     |
+| `release.published`  | a release contains its merge     | the watcher                                                                     |
+| `release.running`    | this machine runs that release   | the daemon                                                                      |
+| `signal.done`        | the ferret runs `fy signal done` | the daemon                                                                      |
+| `deploy.done`        | a deploy finished                | **reported**: it happens where Ferretry does not run                            |
+
+**Reporting an external trigger.** `POST /v1/board/tasks/:taskId` with
+`{ "action": "trigger", "event": "deploy.done", "reason": "deployed to production" }` (`reason` optional). Only an
+external trigger is taken: any other is `400 invalid` before it reaches the board, because a merge or a release is
+read from GitHub, never taken on a caller's word. The owner, the card's owner ferret, its leads and its assignee may
+report one, and so may a sub-ferret on the card it is doing, since it is the one that saw the deploy; anyone else is
+`403 forbidden`. The move is the daemon's, through the same `triggerMove` every fact uses: into the first lane of
+the card's variant that enters on the trigger, recorded `auto` with the trigger and with `reportedBy` naming who
+reported it (and `reportedVia: "admin-token"` beside it, as `actorVia` is beside an actor). It never goes back: a
+card already there or past it is unchanged, and the answer is the card as it is. A dependency holds it as it holds a
+move: a blocked card is not moved on to a later category (`409 blocked-by`, naming the blockers); sideways it moves,
+and says what blocked it, and the owner's report moves it on as a fact would. A sub-ferret reports only on the card it
+is doing (its assignee, else its owner): on any other card its standing reaches it is told to tell its lead. In the
+card's history the move reads as by whoever reported it, never as Ferretry's own ("denisha · reported deploy.done →
+moved In progress → Deployed"; the admin token is said for what it is), in the app and in `fy task show` alike
+(`boardEventActor`). It is `400 invalid` for a dropped card or a board with no lane for the event. It is
+`403 owner-gate` for a move into an owner-gated closed lane, whoever reports it, and, unless the owner is the one
+reporting, for a move into any closed lane (a fact may close a set with no verify lane, a caller's word may not) or
+past a gate the owner has not answered: the card's own lane, or one its variant walks between that lane and the
+target. Entering a gate is not passing it.
+
+So a report never takes a card anywhere the owner decides. A report after the owner's Not good may move the card on
+again, and that is accepted: with every gate, every closed lane and every unshipped dependency out of its reach, it
+only reaches a lane its lead could `fy task move` it to anyway, and the history says who reported what.
+
+**Every lane's stage is written out at boot.** Every template lane states its stage. A set stored before stages has
+none, so at every boot, after the two migrations above, the daemon gives each lane without one the stage it already
+reads as (`stageLanes`): nothing a reader decides changes and no card moves, a lane that has a stage keeps it, the
+confirmation stands and the owner is asked nothing. The VERSION STAYS, unlike the migrations above, because the set
+means what it meant: an edit made against it still applies, and the Accept on a pending proposal's card still
+confirms it. A damaged set is refused by the store, as on any read, reported, and the other projects go on, and a
+staged set the next read would refuse is never written. It is idempotent: a set whose every lane has a stage does
+not match.
 
 ## Cards and their fields
 
@@ -426,15 +523,15 @@ its project beside its machine.
 Who may write a card follows from the card itself and from the lineage of the session asking; there are no roles to
 grant. This replaced the old `task-boards` access list. The code is `packages/daemon/src/lib/board/authority.ts`.
 
-| Standing      | Who                                                        | May                                                        |
-| ------------- | ---------------------------------------------------------- | ---------------------------------------------------------- |
-| `owner-human` | the owner: loopback, or a device the `fleet` grant let in  | everything, including owner gates and dependency overrides |
-|               | (on the admin token it is recorded as `admin-token`)       |                                                            |
-| `owner`       | the card's owner ferret                                    | the assignee's writes, plus re-plan                        |
-| `ancestor`    | a ferret above the owner in the `parent` chain of sessions | the same as the owner                                      |
-| `assignee`    | the ferret doing it                                        | move, note, link, block, edit files, clarify, reopen       |
-| `daemon`      | the daemon's own automation                                | trigger moves, link cache, refile                          |
-| `reader`      | any other ferret                                           | read; depend, but only from its own card                   |
+| Standing      | Who                                                        | May                                                                              |
+| ------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `owner-human` | the owner: loopback, or a device the `fleet` grant let in  | everything, including owner gates and dependency overrides                       |
+|               | (on the admin token it is recorded as `admin-token`)       |                                                                                  |
+| `owner`       | the card's owner ferret                                    | the assignee's writes, plus re-plan                                              |
+| `ancestor`    | a ferret above the owner in the `parent` chain of sessions | the same as the owner                                                            |
+| `assignee`    | the ferret doing it                                        | move, note, link, block, edit files, clarify, reopen, report an external trigger |
+| `daemon`      | the daemon's own automation                                | trigger moves, link cache, refile                                                |
+| `reader`      | any other ferret                                           | read; depend, but only from its own card                                         |
 
 Re-plan means retitle, rewrite the brief, reassign, drop and reorder. A ferret never moves a card into a lane with
 an owner gate, and only the owner closes. Reaching the routes at all is a `fleet` capability matter for a caller
@@ -555,6 +652,26 @@ You changed code this turn without a card. Create one (fy task create …) or re
 
 The check is a queued nudge, not a refusal to end the turn (`board-design.md` §7, decision 2).
 
+### The gate check
+
+A card that reaches a gate stage raises **one** agenda item for the owner itself — the daemon does, so there is never
+a task notice and an agenda notice for the same thing. A ferret that also raises its own item on that card makes the
+owner answer twice, so a second check reads the same turn end
+(`packages/daemon/src/lib/board/gate-check.ts`, `BoardGateCheck`). If the turn raised an agenda item (`fy agenda add`,
+or an `*_ask_owner` tool) that is open on a card **currently** in a gate lane, and the daemon's own gate item for that
+card (`sourceRef` `gate:<card>:…`) is open too, the ferret gets one queued message per item:
+
+```text
+&F412 is at a gate; the daemon already asked the owner (!A31). Drop yours: fy agenda dismiss !A44
+```
+
+- **Once per item.** The send id carries the item, so a turn end seen twice is one message.
+- **A turn the check started is never checked**, so answering it cannot loop.
+- **Only on a board that is on**, and never for a sub-ferret (it raises no agenda items).
+- **When in doubt it says nothing**: no gate item to point to, a card or session it cannot read, or a turn whose start
+  time is unknown sends no message.
+- Each nudge is journalled on the session as `board.gate-nudged`, with the items it named and their cards.
+
 ## `fy task skip "<why>"`
 
 Records that this session's work needs no card — chit-chat, or the owner said not to track it — as
@@ -577,6 +694,7 @@ Every `fy task` verb takes `--session <id>` (act as that session instead of the 
 | `fy search <words>`                               | find cards and agenda items by what they say; `--kind`, `--open`, `--project`, `--limit`, `--json`                                                                                                                                                                                                                                                                                                                                                             |
 | `fy task show <id>`                               | print one card                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `fy task move <id> <lane>`                        | move it; `--reason` is required for a move back                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `fy task trigger <id> <event>`                    | report an external event for a card (`pr.review_approved`, `deploy.done`); the daemon moves it if a lane waits on it. A sub-ferret may run it                                                                                                                                                                                                                                                                                                                  |
 | `fy task focus <id>`                              | attribute this session's work to the card                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `fy task skip "<why>"`                            | record that this work needs no card                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `fy task block` / `unblock`                       | mark or clear an external block                                                                                                                                                                                                                                                                                                                                                                                                                                |
@@ -589,6 +707,8 @@ Every `fy task` verb takes `--session <id>` (act as that session instead of the 
 | `fy task refile <id> --project`                   | move a card to another project's board; `--lane`, `--reason`                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `fy board`                                        | the board; `--project <name\|all>`, `--ferret`, `--mine`, `--kind`, `--pr`, `--activity`, `--state`, `--closed`, `--query`, `--json`, `--md`                                                                                                                                                                                                                                                                                                                   |
 | `fy board lanes propose\|show\|edit`              | read or change a project's lane set; `--project`, `--rename`, `--remove`, `--into`                                                                                                                                                                                                                                                                                                                                                                             |
+| `fy board workflow show`                          | each lane in order as a GATE (its options and where each sends the card) or AUTO (what moves a card in); `--project`, `--json`                                                                                                                                                                                                                                                                                                                                 |
+| `fy board workflow edit --lane <id>`              | make a lane a gate (`--gate "<Label>=<next\|close\|reopen\|lane:<id>>"`, up to 3) or automatic (`--auto <trigger,...>\|none`); version-checked through the lanes edit route, so a sub-ferret is refused as for `lanes edit`                                                                                                                                                                                                                                    |
 | `fy board status`, `fy board on\|off`             | whether the project uses the board; switching it is the owner's ([The board is opt-in](#the-board-is-opt-in)); `--project`, `--json`                                                                                                                                                                                                                                                                                                                           |
 | `fy board import`                                 | import the old task files ([board-import.md](board-import.md))                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `fy project add <path>` / `ls`                    | register a folder as a project; list projects                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -620,6 +740,17 @@ The PWA shows the board as kanban, list, tree, dependencies and archive views, a
 wherever it appears ([reference-standard.md](reference-standard.md)).
 
 ## Gaps and work in flight
+
+- **Gates do not raise agenda items yet.** A card that reaches a gate lane is still the owner's to move on the board
+  (Done / Not good, or a move out of Plan/Design); the one Inbox item per gate, and answering it with an option, come
+  next on top of [the model](#workflows-gate-and-automatic-stages). Nor can the lane editor set a gate's options or a
+  stage yet, nor `fy` report a trigger.
+- **`pr.review_approved` is reported, not watched.** The watcher asks GitHub for a PR's state, checks and merge,
+  not its review decision, so for now an approval is reported (`{ "action": "trigger" }`).
+- **A daemon or an app that predates the two new triggers cannot read a lane that uses one.** Its trigger list is
+  closed, so a lane set naming `deploy.done` or `pr.review_approved` fails to parse there: an older daemon reads
+  that lane file as damaged, and a cached older app cannot load the board. No template uses them; add one to a lane
+  only once every machine and app runs this release.
 
 - **References in a card's text are not links yet.** The card detail sits outside any session, and the reference
   surface is assembled per session (`components/reference-surface.tsx`), so `&F412`, `!A48` and `@file` in a

@@ -19,6 +19,7 @@ import {
   type TaskKind,
   TaskKindSchema,
   type TaskRef,
+  ExternalLaneTriggerSchema,
   TaskWorkflowSchema,
   stripListMarker,
   toBullets,
@@ -188,6 +189,18 @@ const words = (value: readonly string[]): string => value.join(' ').trim();
 
 export const buildMoveAction = (to: string, reason: string | undefined): BoardTaskActionRequest =>
   action({ action: 'move', to, ...(present(reason) === undefined ? {} : { reason: present(reason) }) }, 'cannot move');
+
+/** An external event (a deploy finished, a review approved) reported for a card; the daemon moves the card if a lane waits on it. */
+export function buildTriggerAction(event: string, reason?: string): BoardTaskActionRequest {
+  const parsed = ExternalLaneTriggerSchema.safeParse(event.trim());
+  if (!parsed.success) {
+    refuse(`"${event}" is not an event you can report; one of ${ExternalLaneTriggerSchema.options.join(' | ')}`);
+  }
+  return action(
+    { action: 'trigger', event: parsed.data, ...(present(reason) === undefined ? {} : { reason: present(reason) }) },
+    'cannot report this event',
+  );
+}
 
 export const buildFocusAction = (): BoardTaskActionRequest => ({ action: 'focus' });
 

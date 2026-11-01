@@ -4,8 +4,17 @@ import {
   type LaneLayoutValue,
   type LaneSet,
   LaneSetSchema,
+  type LaneStage,
+  LaneTemplateNameSchema,
+  type LaneTrigger,
+  LaneTriggerSchema,
+  laneForTrigger,
+  laneStage,
+  needsOwner,
   QUICK_TO_TEST_LANE,
+  TaskWorkflowSchema,
   UNFILED_PROJECT_ID,
+  VERIFY_GATE,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -19,6 +28,7 @@ import {
   noLaneSetMessage,
   proposeLaneSet,
   RELEASED_TO_TEST_NAME,
+  stageLanes,
   unfiledLaneSet,
 } from '../../../src/lib/board-projects/index.ts';
 import { lanes, oldQuickLanes, templateLanes } from '../board/support.ts';
@@ -407,5 +417,160 @@ describe('addQuickToTestLane', () => {
     should(addQuickToTestLane(lanes(UNFILED_PROJECT_ID, 'ops'))).be.null();
     const [todo, doing, closed] = old.lanes;
     should(addQuickToTestLane({ ...old, lanes: [todo!, { ...doing!, id: 'busy' }, closed!], variants: {} })).be.null();
+  });
+});
+
+describe('stageLanes', () => {
+  const unstaged = (set: LaneSet): LaneSet => ({
+    ...set,
+    lanes: set.lanes.map(({ stage: _stage, ...lane }) => lane),
+  });
+  const confirmed = (set: LaneSet): LaneSet => ({ ...set, version: 6, confirmedBy: 'owner', proposedBy: 'koen' });
+  /** Every stored shape a boot can find: the pre-v3 PR sets, quick from before To test, and every template. */
+  const storedShapes = (): readonly (readonly [string, LaneSet])[] => [
+    ...(['pr-release-verify', 'pr-release', 'pr'] as const).map(
+      name => [`classic ${name}`, lanes(FERRETRY_ID, name)] as const,
+    ),
+    ['quick before To test', oldQuickLanes(UNFILED_PROJECT_ID)],
+    ...LaneTemplateNameSchema.options.map(
+      name => [`template ${name}`, unstaged(templateLanes(FERRETRY_ID, name))] as const,
+    ),
+  ];
+
+  it('should write out on every lane the stage it already reads, and change nothing else, its version included', () => {
+    for (const [, stored] of storedShapes()) {
+      // Act
+      const next = stageLanes(confirmed(stored));
+
+      // Assert
+      should(next?.lanes.map(lane => lane.stage)).deepEqual(stored.lanes.map(lane => laneStage(lane)));
+      should(next === null ? null : unstaged(next)).deepEqual(confirmed(stored));
+      should(next?.confirmedBy).equal('owner');
+      should(LaneSetSchema.safeParse(next).success).be.true();
+    }
+  });
+
+  it('should state the templates’ own stages for a set proposed before them', () => {
+    for (const name of LaneTemplateNameSchema.options) {
+      should(stageLanes(unstaged(templateLanes(FERRETRY_ID, name)))?.lanes).deepEqual(LANE_TEMPLATES[name].lanes);
+    }
+  });
+
+  it('should gate Plan/Design and the lanes the owner tests, and nothing the ferret moves', () => {
+    // Act
+    const next = stageLanes(lanes(FERRETRY_ID));
+
+    // Assert
+    should(next?.lanes.map(lane => `${lane.id}:${lane.stage?.kind ?? '-'}`)).deepEqual([
+      'todo:auto',
+      'plan:gate',
+      'implement:auto',
+      'review:auto',
+      'merged:auto',
+      'released:auto',
+      'tested:gate',
+      'closed:auto',
+    ]);
+    should(next?.lanes.find(lane => lane.id === 'review')?.stage).deepEqual({
+      kind: 'auto',
+      triggers: ['pr.opened', 'pr.ready', 'signal.done'],
+    });
+  });
+
+  it('should make a verify lane that is not owner-gated a gate, and leave it ungated', () => {
+    // Arrange
+    const stored = oldQuickLanes(UNFILED_PROJECT_ID);
+    const handMade: LaneSet = {
+      ...stored,
+      lanes: [
+        ...stored.lanes.slice(0, 2),
+        { id: 'check', name: 'Check', category: 'verify' },
+        { id: 'closed', name: 'Closed', category: 'closed', ownerGate: true },
+      ],
+      variants: {},
+    };
+
+    // Act
+    const next = stageLanes(handMade);
+
+    // Assert
+    should(next?.lanes[2]).deepEqual({ id: 'check', name: 'Check', category: 'verify', stage: VERIFY_GATE });
+    should(LaneSetSchema.safeParse(next).success).be.true();
+  });
+
+  it('should answer every move and every trigger the way the set did before', () => {
+    for (const [, stored] of storedShapes()) {
+      // Act
+      const next = stageLanes(stored) as LaneSet;
+
+      // Assert
+      for (const from of stored.lanes) {
+        for (const to of stored.lanes)
+          should(needsOwner(next, from.id, to.id)).deepEqual(needsOwner(stored, from.id, to.id));
+      }
+      const entered = (set: LaneSet, workflow: (typeof TaskWorkflowSchema.options)[number], trigger: LaneTrigger) => {
+        const lane = laneForTrigger(set, workflow, trigger);
+        return lane.ok ? (lane.value?.id ?? null) : lane.error;
+      };
+      for (const workflow of TaskWorkflowSchema.options) {
+        for (const trigger of LaneTriggerSchema.options) {
+          should(entered(next, workflow, trigger)).deepEqual(entered(stored, workflow, trigger));
+        }
+      }
+    }
+  });
+
+  it('should keep a stage a lane already has', () => {
+    // Arrange
+    const ask: LaneStage = { kind: 'gate', options: [{ id: 'go', label: 'Go', outcome: { kind: 'next' } }] };
+    const stored = lanes(FERRETRY_ID);
+    const partly: LaneSet = {
+      ...stored,
+      lanes: stored.lanes.map(lane => (lane.id === 'plan' ? { ...lane, stage: ask } : lane)),
+    };
+
+    // Act
+    const next = stageLanes(partly);
+
+    // Assert
+    should(next?.lanes.find(lane => lane.id === 'plan')?.stage).deepEqual(ask);
+    should(next?.lanes.every(lane => lane.stage !== undefined)).be.true();
+  });
+
+  it('should stage what the earlier boot migrations leave', () => {
+    // Act
+    const merged = mergeReleaseLanes(lanes(FERRETRY_ID))?.next;
+    const quick = addQuickToTestLane(oldQuickLanes(UNFILED_PROJECT_ID));
+
+    // Assert
+    for (const set of [merged, quick]) {
+      const next = set === undefined || set === null ? null : stageLanes(set);
+      should(LaneSetSchema.safeParse(next).success).be.true();
+      should(next?.lanes.every(lane => lane.stage !== undefined)).be.true();
+    }
+  });
+
+  it('should do nothing to a set whose every lane has a stage', () => {
+    for (const [, stored] of storedShapes()) {
+      const once = stageLanes(stored);
+      should(once === null ? 'unstaged' : stageLanes(once)).be.null();
+    }
+    should(stageLanes(templateLanes(FERRETRY_ID))).be.null();
+    should(stageLanes(unfiledLaneSet())).be.null();
+  });
+});
+
+describe('addQuickToTestLane over staged lanes', () => {
+  it('should let Closed read the stage its new fields describe', () => {
+    // Arrange: a quick set from before To test whose lanes were staged by hand.
+    const old = oldQuickLanes(UNFILED_PROJECT_ID);
+    const staged = { ...old, lanes: old.lanes.map(lane => ({ ...lane, stage: laneStage(lane) })) };
+
+    // Act
+    const next = addQuickToTestLane(staged);
+
+    // Assert
+    should(next?.lanes[3]?.stage).be.undefined();
+    should(LaneSetSchema.safeParse(next).success).be.true();
   });
 });

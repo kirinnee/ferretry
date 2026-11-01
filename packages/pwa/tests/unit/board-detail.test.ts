@@ -198,6 +198,30 @@ describe('history', () => {
     ]);
   });
 
+  it('names a reported trigger as by its reporter, never as Ferretry, with the token said for what it is', () => {
+    const moved = { from: 'a', to: 'b', backward: false, reason: 'deployed', auto: true, trigger: 'deploy.done' };
+    const daemon = { kind: 'daemon' };
+    const rows = historyRows(
+      [
+        event(2, 'moved', { ...moved, reportedBy: { kind: 'owner' }, reportedVia: 'admin-token' }, daemon),
+        event(1, 'moved', { ...moved, reportedBy: ferret }, daemon),
+      ],
+      context,
+    );
+    expect(rows.map(row => [row.actor, row.actorNote, row.text, row.detail])).toEqual([
+      [
+        'Admin token',
+        'the owner at this machine, or a ferret without its own credential',
+        'reported deploy.done → moved A → B',
+        'deployed',
+      ],
+      ['ferret abc', null, 'reported deploy.done → moved A → B', 'deployed'],
+    ]);
+    expect(rowOf('moved', { ...moved, trigger: undefined, reportedBy: ferret }).text).toBe(
+      'reported a trigger → moved A → B',
+    );
+  });
+
   it('does not reorder the history it is given', () => {
     const given = [event(1, 'note', { text: 'a' }), event(2, 'note', { text: 'b' })];
     historyRows(given, context);

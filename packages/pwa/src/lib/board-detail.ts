@@ -14,6 +14,7 @@ import {
   type AgendaSnapshot,
   ADMIN_TOKEN_ACTOR_NOTE,
   ADMIN_TOKEN_ACTOR_WORDS,
+  boardEventActor,
   type BoardActor,
   type BoardActorVia,
   type BoardEditableField,
@@ -157,12 +158,22 @@ const describe = (event: BoardTaskEvent, context: HistoryContext): Pick<HistoryR
   switch (event.type) {
     case 'created':
       return { text: `opened it in ${lane(event.laneId)}`, detail: null, minor: false };
-    case 'moved':
+    case 'moved': {
+      const moved = `${lane(event.from)} → ${lane(event.to)}`;
+      if (event.reportedBy !== undefined) {
+        // Somebody's word, carried out by Ferretry: it reads as theirs, never as a fact Ferretry saw.
+        return {
+          text: `reported ${event.trigger ?? 'a trigger'} → moved ${moved}`,
+          detail: event.reason,
+          minor: false,
+        };
+      }
       return {
-        text: `${event.auto === true ? 'moved automatically' : event.backward ? 'moved back' : 'moved'} ${lane(event.from)} → ${lane(event.to)}`,
+        text: `${event.auto === true ? 'moved automatically' : event.backward ? 'moved back' : 'moved'} ${moved}`,
         detail: event.reason,
         minor: false,
       };
+    }
     case 'reopened':
       return {
         // The files the owner sent with it are part of what happened: "reopened To test → Implement with 2 images".
@@ -235,14 +246,17 @@ const describe = (event: BoardTaskEvent, context: HistoryContext): Pick<HistoryR
 export const historyRows = (history: readonly BoardTaskEvent[], context: HistoryContext): readonly HistoryRow[] =>
   [...history]
     .sort((a, b) => b.seq - a.seq)
-    .map(event => ({
-      seq: event.seq,
-      at: event.at,
-      actor: actorName(event.actor, event.actorVia, context.names),
-      actorNote: event.actor.kind === 'owner' && event.actorVia === 'admin-token' ? ADMIN_TOKEN_ACTOR_NOTE : null,
-      type: event.type,
-      ...describe(event, context),
-    }));
+    .map(event => {
+      const { actor, via } = boardEventActor(event);
+      return {
+        seq: event.seq,
+        at: event.at,
+        actor: actorName(actor, via, context.names),
+        actorNote: actor.kind === 'owner' && via === 'admin-token' ? ADMIN_TOKEN_ACTOR_NOTE : null,
+        type: event.type,
+        ...describe(event, context),
+      };
+    });
 
 // ---------------------------------------------------------------------------------------------------
 // Asks

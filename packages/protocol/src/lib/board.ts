@@ -21,7 +21,9 @@ import { z } from 'zod';
 import { AgendaIdSchema, unnestBullets } from './agenda.ts';
 import {
   DependencyUntilSchema,
+  ExternalLaneTriggerSchema,
   isBackwardMove,
+  isExternalTrigger,
   type LaneCategory,
   LaneIdSchema,
   LaneLayoutSchema,
@@ -307,7 +309,9 @@ const EventBase = {
 
 /**
  * A lane move. `backward` is recorded by the writer, which had the lane set in hand, so the event can
- * enforce on its own that a move back says why. A daemon move is `auto` and names its trigger.
+ * enforce on its own that a move back says why. A daemon move is `auto` and names its trigger. A move on an
+ * external trigger somebody reported (the task action `trigger`) is still the daemon's, and `reportedBy`
+ * says who reported it (`reportedVia` beside it, as `actorVia` is beside the actor).
  */
 const MovedEventSchema = z
   .object({
@@ -319,6 +323,8 @@ const MovedEventSchema = z
     reason: reason.nullable(),
     auto: z.literal(true).optional(),
     trigger: LaneTriggerSchema.optional(),
+    reportedBy: BoardActorSchema.optional(),
+    reportedVia: BoardActorViaSchema.optional(),
   })
   .superRefine((value, context) => {
     if (value.from === value.to) context.addIssue({ code: 'custom', message: 'a move changes lane', path: ['to'] });
@@ -330,6 +336,12 @@ const MovedEventSchema = z
     }
     if (value.auto === true && value.actor.kind !== 'daemon') {
       context.addIssue({ code: 'custom', message: 'only the daemon moves a card automatically', path: ['auto'] });
+    }
+    if (value.reportedBy !== undefined && (value.trigger === undefined || !isExternalTrigger(value.trigger))) {
+      context.addIssue({ code: 'custom', message: 'only an external trigger is reported', path: ['reportedBy'] });
+    }
+    if (value.reportedVia !== undefined && value.reportedBy === undefined) {
+      context.addIssue({ code: 'custom', message: 'how it was reported needs who reported it', path: ['reportedVia'] });
     }
   });
 
@@ -767,6 +779,12 @@ export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
     /** Files for the card's ferret: only an owner's move back (a reopen) carries them. */
     attachments: BoardReopenAttachmentsSchema.optional(),
   }),
+  /**
+   * Report an external trigger (`deploy.done`, `pr.review_approved`): something Ferretry cannot see
+   * happened, so the card moves the way that trigger moves it, as the daemon would — forward only, never into
+   * an owner-gated closed lane, and never out of a gate the owner has not answered. `reason` is what happened.
+   */
+  z.strictObject({ action: z.literal('trigger'), event: ExternalLaneTriggerSchema, reason: reason.optional() }),
   /** Make this the card the calling session's activity is attributed to. */
   z.strictObject({ action: z.literal('focus') }),
   z.strictObject({ action: z.literal('block'), reason }),

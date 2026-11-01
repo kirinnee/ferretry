@@ -10,7 +10,7 @@
  * | `owner-human` | the owner: loopback, or a device the `fleet` grant let in | everything, incl. gates and overrides |
  * | `owner`       | the card's owner ferret                                | the assignee's writes, plus re-plan   |
  * | `ancestor`    | a ferret above the card's owner                        | the same as the owner                |
- * | `assignee`    | the ferret doing it (`assignee`, else the owner)       | move, note, link, block, files, …    |
+ * | `assignee`    | the ferret doing it (`assignee`, else the owner)       | move, note, link, report, files, …   |
  * | `daemon`      | the daemon's own automation                            | trigger moves, link cache, refile    |
  * | `reader`      | any other ferret                                       | read; depend from ITS OWN card only   |
  *
@@ -56,7 +56,8 @@ export type BoardOperation =
   | 'adopt'
   | 'override'
   | 'pass-gate'
-  | 'trigger';
+  | 'trigger'
+  | 'report';
 
 const WORKERS: readonly BoardStanding[] = ['owner-human', 'owner', 'ancestor', 'assignee'];
 const PLANNERS: readonly BoardStanding[] = ['owner-human', 'owner', 'ancestor'];
@@ -64,7 +65,8 @@ const HUMAN: readonly BoardStanding[] = ['owner-human'];
 
 /**
  * The standings each operation admits. `replan` is a retitle or a brief rewrite inside an `edit`;
- * `adopt` is naming a card as the parent of a new one; `pass-gate` and `override` are the owner's.
+ * `adopt` is naming a card as the parent of a new one; `pass-gate` and `override` are the owner's. `trigger`
+ * is the daemon's move on what it observes; `report` is a card's own people telling it what it cannot see.
  */
 export const OPERATION_STANDINGS: Readonly<Record<BoardOperation, readonly BoardStanding[]>> = {
   move: WORKERS,
@@ -90,6 +92,7 @@ export const OPERATION_STANDINGS: Readonly<Record<BoardOperation, readonly Board
   override: HUMAN,
   'pass-gate': HUMAN,
   trigger: ['daemon'],
+  report: WORKERS,
 };
 
 /** The ferret doing the card now: its assignee, which reads as the owner when unset. */
@@ -149,6 +152,7 @@ const OPERATION_WORDS: Readonly<Record<BoardOperation, string>> = {
   override: 'override a dependency of',
   'pass-gate': 'pass the owner gate of',
   trigger: 'trigger a move of',
+  report: 'report an event on',
 };
 
 /**
