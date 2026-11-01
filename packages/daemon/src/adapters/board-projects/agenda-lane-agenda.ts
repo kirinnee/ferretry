@@ -41,7 +41,6 @@ export class AgendaLaneAgenda implements LaneProposalAgenda {
         ask: card.ask,
         answers: card.answers,
         why: card.why,
-        ...(card.context === undefined ? {} : { context: card.context }),
         ...(card.recommendation === undefined ? {} : { recommendation: card.recommendation }),
         howToResolve: card.howToResolve,
       },

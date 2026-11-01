@@ -3,7 +3,7 @@
  * and a 1440px desktop, light and dark:
  *
  *   task / choice / yesno / permission / review / info / reply   <state>-<phone|desktop>.png
- *   lane-change / lane-change-hidden                              a ferret's lane proposal; the second has no Accept
+ *   lane-change / -grouped / -hidden                             a ferret's lane proposal; the last has no Accept
  *   swipe-up                                                     the to-do dragged up toward its Skip
  *
  *   bun scripts/build-fy-render-libs.ts           # once: the Mermaid sandbox some cards render
@@ -111,6 +111,7 @@ const KINDS = [
   'info',
   'reply',
   'lane-change',
+  'lane-change-grouped',
   'lane-change-hidden',
 ] as const;
 // The Discuss states: the in-discussion card, and the replies notice counting down and held for a turn.
@@ -129,7 +130,7 @@ try {
         for (const kind of [...KINDS, ...DISCUSS_VIEWS]) {
           const page = await open(context, theme, kind);
           await shot(page, scheme, `${kind}-${label}`);
-          if (kind === 'lane-change-hidden') {
+          if (kind.startsWith('lane-change')) {
             // Its answers sit below a long list of warnings: scrolled to them, they are Edit and Later, never Accept.
             await page.evaluate(() => {
               for (const node of document.querySelectorAll<HTMLElement>('*')) {

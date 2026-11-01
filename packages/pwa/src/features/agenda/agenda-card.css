@@ -930,6 +930,17 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   background: linear-gradient(to bottom, transparent, var(--surface));
   pointer-events: none;
 }
+/* A long why — a lane proposal's list of what accepting it does — shrinks and scrolls inside the card rather than
+   spilling past it, so the answer bar stays where it was. */
+.fy-attn-card[data-pinned] > .fy-attn-card__why,
+.fy-attn-deck__top .fy-attn-card > .fy-attn-card__why,
+.fy-attn-card[data-capped] > .fy-attn-card__why {
+  min-height: 0;
+  flex: 0 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+}
 .fy-attn-deck__top .fy-attn-card > .fy-attn-card__scroll > *,
 .fy-attn-card[data-capped] > .fy-attn-card__scroll > * {
   flex-shrink: 0;

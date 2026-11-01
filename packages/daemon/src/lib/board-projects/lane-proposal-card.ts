@@ -27,10 +27,11 @@ export interface LaneProposalCard {
   readonly kind: 'choice';
   readonly ask: AgendaAsk;
   readonly answers: AgendaCardAnswer[];
-  /** One line: who proposes what, and that the board waits for the owner. */
+  /**
+   * One line — who proposes what, and that the board waits for the owner — then, on a change that decides
+   * something, a Markdown list of what accepting it would do, one bullet per thing: the card draws its why.
+   */
   readonly why: string;
-  /** What accepting it would do, one bullet per thing to decide; absent when it decides nothing. */
-  readonly context?: string;
   /** Edit, on a card whose change does something the owner decides: read it before accepting it. */
   readonly recommendation?: { readonly decision: string; readonly why: string };
   readonly howToResolve: string;
@@ -82,7 +83,8 @@ export const LANE_CHANGE_READ_FIRST = 'It changes what only you decide: read it 
 /**
  * The card a ferret's change to lanes the project already has raises (`docs/board.md` § A ferret's lane change
  * waits for the owner): one line saying who proposes it and that NOTHING changes until the owner accepts, then
- * everything it would do that only the owner decides as a bullet list (`laneChangeLines`: like removals told once).
+ * everything it would do that only the owner decides as a bullet list under it (`laneChangeLines`: like removals
+ * told once).
  * Then Edit is recommended. A bullet is never cut short: the ones that do not fit are counted — and then the card has
  * no Accept, so a change the owner has not read in full is accepted only in the lane editor, which lists it all.
  */
@@ -93,14 +95,13 @@ export const laneChangeCard = (projectName: string, live: LaneSet, pending: Pend
   const lines = laneChangeLines(live, pending, pending.relocate);
   const proposer = clipAtWord(pending.proposedBy, MAX_PROPOSER_NAME);
   const opening = `${proposer} proposes new lanes for ${clipAtWord(projectName, MAX_PROPOSER_NAME)}. The board keeps its lanes until you accept.`;
-  const { context, hidden } = bullets(lines);
+  const { why, hidden } = bullets(`${opening} Accepting it:`, lines);
   return {
     subject: clipAtWord(`Lanes for ${projectName}: ${path}`, MAX_AGENDA_SUBJECT_LENGTH),
     title: clipAtWord(`Lanes for ${projectName}`, 60),
     kind: 'choice',
     ...(hidden ? answered(later, EDIT) : answered(EDIT, accept)),
-    why: lines.length === 0 ? opening : `${opening} Accepting it:`,
-    ...(context === undefined ? {} : { context }),
+    why: lines.length === 0 ? opening : why,
     ...(lines.length === 0 || hidden ? {} : { recommendation: { decision: EDIT.label, why: LANE_CHANGE_READ_FIRST } }),
     howToResolve: hidden
       ? 'It does more than a card can show, so it is accepted in the Board lane editor, where every part of it is listed. Choose Edit to go there; the board keeps its lanes until you accept.'
@@ -109,19 +110,18 @@ export const laneChangeCard = (projectName: string, live: LaneSet, pending: Pend
 };
 
 /**
- * The bullets that fit a card, WHOLE, and a last one counting the rest; `hidden`: some did not fit. One always fits:
- * a lane's name is at most 40 characters, so a line is a few hundred at most.
+ * The intro and, under it, the bullets that fit a card, WHOLE, and a last one counting the rest; `hidden`: some did
+ * not fit. One always fits: a lane's name is at most 40 characters, so a line is a few hundred at most.
  */
-const bullets = (lines: readonly string[]): { readonly context?: string; readonly hidden: boolean } => {
-  if (lines.length === 0) return { hidden: false };
+const bullets = (intro: string, lines: readonly string[]): { readonly why: string; readonly hidden: boolean } => {
   const say = (shown: readonly string[]): string => {
     const hidden = lines.length - shown.length;
     const more = hidden === 0 ? [] : [`and ${String(hidden)} more, all in the Board lane editor`];
-    return [...shown, ...more].map(line => `- ${line}`).join('\n');
+    return `${intro}\n\n${[...shown, ...more].map(line => `- ${line}`).join('\n')}`;
   };
   let shown = [...lines];
   while (shown.length > 1 && say(shown).length > MAX_AGENDA_DETAIL_LENGTH) shown = shown.slice(0, -1);
-  return { context: say(shown), hidden: shown.length < lines.length };
+  return { why: say(shown), hidden: shown.length < lines.length };
 };
 
 /**

@@ -270,7 +270,7 @@ describe('LaneSetService.apply', () => {
     should(agenda.raised.map(([session, reference]) => [session, reference])).deepEqual([
       ['ms8-abcd1234', `lanes:${FERRETRY_ID}:4`],
     ]);
-    should(agenda.raised[0]?.[2].context).containEql(
+    should(agenda.raised[0]?.[2].why).containEql(
       'removes Released · to test, which waits for the owner, and sends its cards into the closed lane, which closes them',
     );
     should(agenda.raised[0]?.[2].why).containEql('keeps its lanes until you accept');
