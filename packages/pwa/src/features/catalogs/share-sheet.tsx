@@ -19,7 +19,12 @@
  * so this sheet only offers the button and renders whatever the machine answers.
  */
 
-import type { CatalogMemberView, CatalogShareMintResponse, OwnedCatalog } from '@ferretry/protocol';
+import {
+  type CatalogMemberView,
+  type CatalogShareMintResponse,
+  type OwnedCatalog,
+  shareLinkNotice,
+} from '@ferretry/protocol';
 import { CircleAlert, Copy, Fingerprint, TriangleAlert } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useState } from 'react';
 import { QrSymbol } from '../../components/qr-symbol.tsx';
@@ -437,6 +442,8 @@ function ShareResult({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<OwnerRefusal | null>(null);
   const countdown = shareCountdown(response.share.expiresAt, nowMs);
+  // Read from the minted link, never from the one in state: an ended or expired link still told the truth.
+  const relayed = shareLinkNotice(response.link);
 
   useEffect(() => {
     if (link === null) return;
@@ -492,6 +499,11 @@ function ShareResult({
           <p className="m-0 text-cell text-muted" data-share-countdown="">
             {expiryLine(countdown, response.share.uses)}
           </p>
+          {relayed === undefined ? null : (
+            <p className="m-0 text-meta text-muted" data-share-relayed="">
+              {relayed}
+            </p>
+          )}
           <div className="flex min-w-0 flex-wrap gap-xs">
             <Button type="button" variant="primary" onClick={() => void copy()} data-share-copy="">
               <Copy size={16} aria-hidden="true" />

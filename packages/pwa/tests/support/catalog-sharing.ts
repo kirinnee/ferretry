@@ -17,6 +17,8 @@ export const SHARE_2 = `shr_${'t'.repeat(22)}` as const;
 /** A made-up code. It is not a credential of anything. */
 export const FAKE_CODE = 'fy_share_FAKEFAKEFAKEFAKEFAKEFA' as const;
 export const FAKE_LINK = `https://app.example.test/join#v1;url=https%3A%2F%2Fbox.example.test;fp=fy_daemon_${'q'.repeat(43)};share=${FAKE_CODE}`;
+/** The same fake share, minted by a machine that answers only on loopback and is reached through its relay. */
+export const FAKE_RELAYED_LINK = `https://app.example.test/join#v1;url=http%3A%2F%2F127.0.0.1%3A7077;fp=fy_daemon_${'q'.repeat(43)};share=${FAKE_CODE}`;
 
 export const T0 = '2026-10-31T09:00:00.000Z';
 export const T0_MS = Date.parse(T0);

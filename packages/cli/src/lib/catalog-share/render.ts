@@ -1,13 +1,14 @@
-import type {
-  CatalogMemberCatalogRemoved,
-  CatalogMemberKeyRemoved,
-  CatalogMemberList,
-  CatalogMemberRevoked,
-  CatalogMemberView,
-  CatalogShareList,
-  CatalogShareMintResponse,
-  CatalogShareView,
-  OwnedCatalog,
+import {
+  type CatalogMemberCatalogRemoved,
+  type CatalogMemberKeyRemoved,
+  type CatalogMemberList,
+  type CatalogMemberRevoked,
+  type CatalogMemberView,
+  type CatalogShareList,
+  type CatalogShareMintResponse,
+  type CatalogShareView,
+  type OwnedCatalog,
+  shareLinkNotice,
 } from '@ferretry/protocol';
 import { QR_INDENT, qrColumns, qrFitsTerminal } from '../pair/qr.ts';
 
@@ -125,6 +126,7 @@ function qrBlock(qr: string, columns: number | undefined): string {
 export function renderMint(screen: MintScreen): string {
   const { mint } = screen;
   const share = mint.share;
+  const relayed = shareLinkNotice(mint.link);
   return [
     `Share link for ${share.memberLabel}: ${catalogNames(share.catalogIds, screen.catalogs)}`,
     `${stateText(share)} · ${usesText(share)}`,
@@ -132,6 +134,7 @@ export function renderMint(screen: MintScreen): string {
     ...(screen.qr === undefined ? [] : ['', qrBlock(screen.qr, screen.columns)]),
     '',
     mint.link,
+    ...(relayed === undefined ? [] : [relayed]),
     '',
     `This is the only time the link is shown. Lost it? End the share with \`${screen.binaryName} catalog unshare ${share.shareId}\` and make a new one.`,
   ].join('\n');

@@ -7478,6 +7478,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // What a share link points at: read from the same advertisement pairing mints from, kept here for the same
   // reason as the id above. Unset until pairing opens, which no request can precede.
   let shareAdvertisement: Advertisement | undefined;
+  // The rendezvous another person's browser can find for itself, the value pairing's QR is drawn from: beside a
+  // loopback advertisement it is what makes a share link openable at all.
+  let shareDiscoveredRelayUrl: string | undefined;
   // The name pairing gave this machine, stamped on analytics rows as the `machine` label.
   let analyticsMachineName: string | undefined;
   const clock = new SystemClock();
@@ -9294,6 +9297,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const state = await repository.open(hostname());
       attachmentDaemonId = state.daemonId;
       shareAdvertisement = config.advertisement;
+      shareDiscoveredRelayUrl = discoveredRelayUrl;
       memberFacts = {
         daemonName: state.daemonName,
         carriers,
@@ -13165,7 +13169,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           knownIds: async () => new Set((await sharedCatalogs.list()).catalogs.map(catalog => catalog.id)),
         },
         links: {
-          target: () => shareLinkTarget(shareAdvertisement, attachmentDaemonId, HOSTED_APP_ORIGIN),
+          target: () =>
+            shareLinkTarget(shareAdvertisement, attachmentDaemonId, HOSTED_APP_ORIGIN, shareDiscoveredRelayUrl),
         },
         // A revoke writes first, drops the grants, then ends this member's live sessions (and forgets a removed
         // browser's passkeys, so a key id that is reused can never inherit them).

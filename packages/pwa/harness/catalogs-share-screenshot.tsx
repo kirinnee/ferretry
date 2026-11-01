@@ -5,7 +5,8 @@
  *
  *   bun harness/catalogs-share-screenshot.tsx      # writes harness/out/catalogs-share-*.png
  *
- * Scenes: share-new, share-existing, share-link, members, members-revoke, plus the way IN for a member: paste-link
+ * Scenes: share-new, share-existing, share-link, share-link-relayed (a loopback-only machine on its relay),
+ * share-unreachable (no address and no relay), members, members-revoke, plus the way IN for a member: paste-link
  * (Settings › Sharing › Catalogs with a share link pasted), paste-link-other (a link that is not a share link) and
  * skills-entry (the same field and the More menu where the Skills tab shows them).
  *
@@ -35,6 +36,7 @@ const run = (command: string, args: readonly string[]): void => {
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { CatalogMembersPanel } from '../../src/features/catalogs/catalog-members.tsx';
 import { AddCatalogEntry } from '../../src/features/catalogs/catalog-row-tools.tsx';
 import { CatalogsSurface } from '../../src/features/catalogs/catalogs-surface.tsx';
@@ -52,6 +54,8 @@ const SHARE_1 = 'shr_' + 's'.repeat(22);
 const SHARE_2 = 'shr_' + 't'.repeat(22);
 const FAKE_CODE = 'fy_share_FAKEFAKEFAKEFAKEFAKEFA';
 const FAKE_LINK = 'https://app.example.test/join#v1;url=https%3A%2F%2Fstudio.example.test;fp=fy_daemon_' + 'q'.repeat(43) + ';share=' + FAKE_CODE;
+// The same fake share minted by a machine that answers only on loopback and is reached through its relay.
+const FAKE_RELAYED_LINK = 'https://app.example.test/join#v1;url=http%3A%2F%2F127.0.0.1%3A7077;fp=fy_daemon_' + 'q'.repeat(43) + ';share=' + FAKE_CODE;
 
 const owned = (id, name) => ({
   id, name, description: '', publisherName: 'studio-mac', visibility: 'members', revision: 4,
@@ -98,7 +102,11 @@ const client = {
     if (method === 'GET' && path.startsWith('/v1/catalogs')) return { catalogs: CATALOGS };
     if (method === 'GET' && path === '/v1/catalog-members') return { members: MEMBERS };
     if (method === 'GET' && path === '/v1/catalog-shares') return { shares: SHARES };
-    if (method === 'POST' && path === '/v1/catalog-shares') return MINTED;
+    if (method === 'POST' && path === '/v1/catalog-shares') {
+      if (view === 'share-unreachable')
+        throw new FyHttpError('no carrier', 503, 'share_link_unavailable');
+      return view === 'share-link-relayed' ? { ...MINTED, link: FAKE_RELAYED_LINK } : MINTED;
+    }
     throw new Error('the harness has no answer for ' + method + ' ' + path);
   },
 };
@@ -250,6 +258,20 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
   await page.locator('[data-share-confirm]').click();
   await page.locator('[data-share-qr]').waitFor({ state: 'visible' });
   await shot(page, 'share-link', theme, vp);
+
+  // A machine on 127.0.0.1 reached through the hosted relay: the link is made, and the relay is named beside it.
+  await open(page, theme, 'share-link-relayed');
+  await page.locator('[data-share-name]').fill('Carol');
+  await page.locator('[data-share-confirm]').click();
+  await page.locator('[data-share-relayed]').waitFor({ state: 'visible' });
+  await shot(page, 'share-link-relayed', theme, vp);
+
+  // No address and no relay: nothing is made, and the sentence says what to set.
+  await open(page, theme, 'share-unreachable');
+  await page.locator('[data-share-name]').fill('Carol');
+  await page.locator('[data-share-confirm]').click();
+  await page.locator('[data-catalog-failure]').waitFor({ state: 'visible' });
+  await shot(page, 'share-unreachable', theme, vp);
 
   await open(page, theme, 'paste-link');
   await page
