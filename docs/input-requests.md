@@ -909,8 +909,9 @@ place by `--domain`/`--for`, or `--tool`/`--host`/`--dest`; the method by `--met
 `site recipe show|set|clear|approve|decline`; `default set|rm` pick the account for a site, project or folder; and
 `factor ls|add|rm` the 2FA keys (`add --totp` stages a seed and waits for the passkey in the app; `--authenticator`,
 `--sms`, `--email`, `--push`, `--security-key` hold no value). Values are typed into a masked field or read from the TTY with
-echo off; never a flag. **Every write is a person route**: a ferret's call is answered `403 forbidden`, `fy` says so and tries
-no other credential. A daemon without the `/v1/accounts*` routes answers a bare 404 and `fy` says to run `fy daemon update`.
+echo off; never a flag. **Every write is a person route**: a ferret's call is answered `403 owner_only`, `fy` says so and tries
+no other credential. A daemon without the `/v1/accounts*` routes answers `404 unknown_route` and `fy` says to run `fy daemon update`.
+`fy account factor add --totp` makes the same owner-only read (`GET /v1/accounts`) before it shows the warning or asks for the key, so a refused caller never gets a seed prompt, and the typed key is dropped as soon as the stage request is answered, not held through the passkey wait.
 Routes: `GET /v1/secrets/logins`, `GET /v1/secrets/logins/hint?site=`, `PUT /v1/secrets/logins/:id` (create or change; an omitted field is kept,
 `null` removes it), `POST /v1/secrets/logins/:id/rename`, `DELETE /v1/secrets/logins/:id`, `POST /v1/secrets/logins/:id/recipe/proposals/:proposalId`, all `secrets`
 capability (`use` to list, `configure` to change) and each change a kept `secrets.changed` record.

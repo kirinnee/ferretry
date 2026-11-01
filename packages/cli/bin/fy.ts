@@ -1083,8 +1083,9 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         process.cwd(),
       ),
       (() => {
+        const accountGateway = new ProtocolSecretAccountGateway(client);
         const ports = {
-          gateway: new ProtocolSecretAccountGateway(client),
+          gateway: accountGateway,
           out: world.io,
           prompt: world.prompt,
           interactive: world.interactive,
@@ -1099,6 +1100,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
           factorKeys: new FactorKeyController(ports),
           seeds: new TwoFactorSeedController({
             gateway: new ProtocolTwoFactorSeedGateway(client),
+            accounts: accountGateway,
             out: world.io,
             prompt: world.prompt,
             interactive: world.interactive,

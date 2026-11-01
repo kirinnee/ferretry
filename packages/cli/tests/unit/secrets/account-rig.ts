@@ -98,7 +98,7 @@ export const LIST: AccountList = {
 } as AccountList;
 
 /** An in-memory account gateway: records each call, answers from the list, and can be told to fail one verb. */
-class FakeAccountGateway implements IAccountGateway {
+export class FakeAccountGateway implements IAccountGateway {
   readonly calls: { readonly op: string; readonly args: readonly unknown[] }[] = [];
   readonly failures = new Map<string, unknown>();
   constructor(private readonly list_: AccountList = LIST) {}
@@ -271,6 +271,7 @@ export function rig(
     factorKeys: new FactorKeyController(ports),
     seeds: new TwoFactorSeedController({
       gateway: seeds,
+      accounts: gateway,
       out,
       prompt: new FakePrompt(['JBSWY3DPEHPK3PXP'], ['yes']),
       interactive: true,

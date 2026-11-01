@@ -45,33 +45,27 @@ const signInPath = (id: string): string => `${ACCOUNTS_PATH}/sign-ins/${encodeUR
 
 const JSON_HEADERS = { 'content-type': 'application/json' };
 
-/** A daemon that has no accounts routes at all: told apart from "no such account", which carries a code. */
+/** A daemon that has no accounts routes at all: its `404 unknown_route`, told apart from "no such account" (`not_found`). */
 export const OLD_DAEMON_MESSAGE =
   'this daemon is older than accounts and sign-ins and has no /v1/accounts routes: update it (fy daemon update), then run this again';
 
-/** What the daemon says to a ferret on a person route, in the owner's words. No other credential is tried. */
+/** What the daemon's `403 owner_only` means for a ferret on a person route, in the owner's words. No other credential is tried. */
 export const OWNER_ONLY_MESSAGE =
   "the daemon refused this: changing accounts is the OWNER's, not a ferret's. Run it yourself at your own shell (or in the Ferretry app). Nothing was changed, and no other credential was tried";
 
 /** The two answers every account route can give regardless of what was asked, said once. */
-function accountRefusal(error: unknown): unknown {
+export function accountRefusal(error: unknown): unknown {
   if (!(error instanceof FyHttpError)) return error;
-  if (error.status === 404 && error.code === undefined) return new Error(OLD_DAEMON_MESSAGE);
-  if (error.status === 403 && error.code === 'forbidden') return new Error(`${OWNER_ONLY_MESSAGE} (${error.message})`);
+  if (error.status === 404 && error.code === 'unknown_route') return new Error(OLD_DAEMON_MESSAGE);
+  if (error.status === 403 && error.code === 'owner_only') return new Error(`${OWNER_ONLY_MESSAGE} (${error.message})`);
   return error;
 }
 
 /**
  * Speaks the account routes through the protocol client. Bodies are parsed against the protocol schemas in both
- * directions; nothing here logs one, and no reply carries a value. A 404 with no code (the routes are missing) and a
- * 403 (a ferret on a person route) are turned into their one clear sentence here; every other refusal reaches the
- * controller as the daemon's {@link FyHttpError}, code and all.
- */
-/**
- * Speaks the account routes through the protocol client. Bodies are parsed against the protocol schemas in both
- * directions; nothing here logs one, and no reply carries a value. A 404 with no code (the routes are missing) and a
- * 403 (a ferret on a person route) are turned into their one clear sentence here; every other refusal reaches the
- * controller as the daemon's {@link FyHttpError}, code and all.
+ * directions; nothing here logs one, and no reply carries a value. A 404 `unknown_route` (the routes are missing) and a
+ * 403 `owner_only` (a ferret on a person route) are turned into their one clear sentence here; every other refusal,
+ * a different 403 included, reaches the controller as the daemon's {@link FyHttpError}, code and all.
  */
 export class ProtocolAccountGateway implements IAccountGateway {
   constructor(private readonly client: AccountApiClient) {}

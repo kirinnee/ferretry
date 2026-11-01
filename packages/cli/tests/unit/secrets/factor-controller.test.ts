@@ -18,6 +18,8 @@ import { FactorKeyController } from '../../../src/lib/secrets/factor-keys-contro
 import { SignInController } from '../../../src/lib/secrets/sign-in-controller';
 import { TwoFactorSeedController } from '../../../src/lib/secrets/factor-controller';
 import type { ITwoFactorSeedGateway } from '../../../src/lib/secrets/factor-gateway';
+import { OLD_DAEMON_MESSAGE, OWNER_ONLY_MESSAGE } from '../../../src/lib/secrets/account-gateway';
+import { FakeAccountGateway, LIST } from './account-rig';
 
 /**
  * `fy account factor add --totp` (docs/secrets.md, "2FA keys"): the key is typed at a hidden prompt, STAGED, and put
@@ -97,13 +99,23 @@ class FakeSeeds implements ITwoFactorSeedGateway {
   }
 }
 
-function rig(options: { seeds?: FakeSeeds; prompt?: FakePrompt; session?: string; interactive?: boolean } = {}) {
+function rig(
+  options: {
+    seeds?: FakeSeeds;
+    prompt?: FakePrompt;
+    session?: string;
+    interactive?: boolean;
+    accounts?: FakeAccountGateway;
+  } = {},
+) {
   const seeds = options.seeds ?? new FakeSeeds();
+  const accounts = options.accounts ?? new FakeAccountGateway();
   const prompt = options.prompt ?? new FakePrompt([URI]);
   const messages: string[] = [];
   let now = 0;
   const controller = new TwoFactorSeedController({
     gateway: seeds,
+    accounts,
     out: { success: message => void messages.push(message) },
     prompt,
     interactive: options.interactive ?? true,
@@ -113,7 +125,7 @@ function rig(options: { seeds?: FakeSeeds; prompt?: FakePrompt; session?: string
     },
     nowMs: () => now,
   });
-  return { controller, seeds, prompt, messages };
+  return { controller, seeds, prompt, messages, accounts };
 }
 
 const fails = async (run: () => Promise<unknown>): Promise<string> => {
@@ -239,12 +251,67 @@ describe('fy account factor add --totp', () => {
   });
 });
 
+describe('fy account factor add --totp, before anything is typed', () => {
+  const http = (status: number, code?: string) => new FyHttpError('the daemon says no', status, code);
+
+  it('should read the person-only account list first, so a refused caller never sees the warning or the prompt', async () => {
+    // Arrange
+    const accounts = new FakeAccountGateway();
+    accounts.failures.set('list', http(403, 'owner_only'));
+    const { controller, prompt, seeds, messages } = rig({ session: 's', accounts });
+
+    // Act
+    const message = await fails(() => controller.add('GITHUB', { totp: true }));
+
+    // Assert
+    should(message).containEql(OWNER_ONLY_MESSAGE);
+    should(accounts.ops()).deepEqual(['list']);
+    should(messages).deepEqual([]);
+    should(prompt.asked).deepEqual([]);
+    should(prompt.hidden).deepEqual([]);
+    should(seeds.calls).deepEqual([]);
+  });
+
+  it('should name an older daemon before asking for the key', async () => {
+    // Arrange
+    const accounts = new FakeAccountGateway();
+    accounts.failures.set('list', http(404, 'unknown_route'));
+    const { controller, prompt } = rig({ session: 's', accounts });
+
+    // Act
+    const message = await fails(() => controller.add('GITHUB', { totp: true }));
+
+    // Assert
+    should(message).equal(OLD_DAEMON_MESSAGE);
+    should(prompt.hidden).deepEqual([]);
+  });
+
+  it('should refuse an account that does not exist, and a store that cannot be read, before asking for the key', async () => {
+    // Arrange
+    const damaged = rig({
+      session: 's',
+      accounts: new FakeAccountGateway({ ...LIST, health: 'damaged', diagnosis: 'the seal key is gone' }),
+    });
+    const missing = rig({ session: 's' });
+
+    // Act
+    const damagedMessage = await fails(() => damaged.controller.add('GITHUB', { totp: true }));
+    const missingMessage = await fails(() => missing.controller.add('NOPE', { totp: true }));
+
+    // Assert
+    should(damagedMessage).containEql('NOT gone');
+    should(damagedMessage).containEql('the seal key is gone');
+    should(missingMessage).containEql('no account NOPE');
+    for (const prompt of [damaged.prompt, missing.prompt]) should(prompt.hidden).deepEqual([]);
+  });
+});
+
 describe('fy account factor add --totp, when things go wrong', () => {
   const http = (status: number, code?: string) => new FyHttpError('the daemon says no', status, code);
 
   it('should name an older daemon, carry the daemon’s own words, and pass anything else through', async () => {
     // Arrange
-    const old = rig({ session: 's', seeds: new FakeSeeds([], false, { stage: [http(404)] }) });
+    const old = rig({ session: 's', seeds: new FakeSeeds([], false, { stage: [http(404, 'unknown_route')] }) });
     const refused = rig({ session: 's', seeds: new FakeSeeds([], false, { stage: [http(409, 'passkey_required')] }) });
     const broken = rig({ session: 's', seeds: new FakeSeeds([], false, { stage: [new TypeError('socket')] }) });
 

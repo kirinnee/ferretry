@@ -133,7 +133,7 @@ describe('ProtocolAccountGateway', () => {
 
   it('should name an older daemon when the account routes are missing', async () => {
     // Arrange
-    const { client: api } = client([new FyHttpError('not found', 404, undefined)]);
+    const { client: api } = client([new FyHttpError('no route GET /v1/accounts', 404, 'unknown_route')]);
 
     // Act
     const message = await refusal(() => new ProtocolAccountGateway(api).list());
@@ -157,7 +157,9 @@ describe('ProtocolAccountGateway', () => {
 
   it('should say a ferret’s write is the owner’s, and try nothing else', async () => {
     // Arrange
-    const { client: api, sent } = client([new FyHttpError('this is a person route', 403, 'forbidden')]);
+    const { client: api, sent } = client([
+      new FyHttpError('only a person may use PUT /v1/accounts/GITHUB', 403, 'owner_only'),
+    ]);
 
     // Act
     const message = await refusal(() => new ProtocolAccountGateway(api).putAccount('GITHUB', { label: 'x' }));
@@ -168,19 +170,27 @@ describe('ProtocolAccountGateway', () => {
     should(sent).have.length(1);
   });
 
-  it('should pass any other refusal through untouched', async () => {
+  it('should pass any other refusal through untouched, a different 403 and a code-less 404 included', async () => {
     // Arrange
     const conflict = new FyHttpError('already there', 409, 'conflict');
     const broken = new TypeError('socket');
+    const belowMinimum = new FyHttpError('this credential may not configure accounts', 403, 'forbidden');
+    const bare = new FyHttpError('not found', 404, undefined);
     const first = client([conflict]);
     const second = client([broken]);
+    const third = client([belowMinimum]);
+    const fourth = client([bare]);
 
     // Act
     const a = await new ProtocolAccountGateway(first.client).merge('A', 'B').catch((thrown: unknown) => thrown);
     const b = await new ProtocolAccountGateway(second.client).list().catch((thrown: unknown) => thrown);
+    const c = await new ProtocolAccountGateway(third.client).apart('A', 'B').catch((thrown: unknown) => thrown);
+    const d = await new ProtocolAccountGateway(fourth.client).list().catch((thrown: unknown) => thrown);
 
     // Assert
     should(a).equal(conflict);
     should(b).equal(broken);
+    should(c).equal(belowMinimum);
+    should(d).equal(bare);
   });
 });

@@ -7,6 +7,7 @@ import {
   type SecretUseRequest,
   type SecretUseResult,
 } from '@ferretry/protocol';
+import { rig } from './account-rig';
 import { registerSecretCommands } from '../../../src/lib/secrets/commands';
 import { SECRET_USE_UNFINISHED_EXIT, SecretController } from '../../../src/lib/secrets/controller';
 import { ProtocolSecretGateway, SECRETS_PATH } from '../../../src/lib/secrets/gateway';
@@ -384,6 +385,20 @@ describe('the command surface', () => {
     // Assert — `get`, `show`, `cat`, `reveal`: none of them, and none of them can be added, because
     // the daemon serves no route that could answer one.
     expect(verbs).toEqual(['ls', 'rm', 'set', 'use']);
+  });
+
+  it('should mount the account verbs, and the older secret entry alias, only when account controllers are given', () => {
+    // Arrange
+    const program = new Command();
+    const accounts = rig().controllers;
+
+    // Act
+    registerSecretCommands(program, controller(new FakeGateway(), new RecordingOutput()), accounts);
+
+    // Assert
+    const secret = program.commands.find(command => command.name() === 'secret');
+    expect(program.commands.map(command => command.name())).toContain('account');
+    expect((secret?.commands ?? []).map(command => command.name())).toContain('entry');
   });
 
   it('should take NO value argument on set', () => {

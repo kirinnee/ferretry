@@ -11,7 +11,8 @@ import {
   type TwoFactorSeedStaged,
   type TwoFactorSeedStageView,
 } from '@ferretry/protocol';
-import type { IAccountPrompt } from './account-ports.ts';
+import { accountRefusal } from './account-gateway.ts';
+import type { IAccountGateway, IAccountPrompt } from './account-ports.ts';
 import type { ITwoFactorSeedGateway } from './factor-gateway.ts';
 
 /** `fy account factor add <id> --totp`. The key is typed at a hidden prompt; there is no flag that carries one. */
@@ -25,6 +26,8 @@ export interface TwoFactorAddOptions {
 
 export interface TwoFactorSeedPorts {
   readonly gateway: ITwoFactorSeedGateway;
+  /** The person-only account read that runs before anything is typed, so a caller who may not stage is refused first. */
+  readonly accounts: Pick<IAccountGateway, 'list'>;
   readonly out: { success(message: string): void };
   readonly prompt: IAccountPrompt;
   readonly interactive: boolean;
@@ -57,14 +60,33 @@ export class TwoFactorSeedController {
         'name the agenda board the confirm card goes on with --session <id> (fy session ls): a seed is saved only with your passkey, in the app',
       );
     const label = options.label === undefined ? undefined : this.#label(options.label);
-    const text = await this.#askKey(options.iUnderstandTotp === true);
-    const staged = await this.#stage(account.data, text, label);
+    await this.#preflight(account.data);
+    const staged = await this.#askAndStage(account.data, options.iUnderstandTotp === true, label);
     const card = await this.ports.gateway.confirmInApp(account.data, staged.stage, { session });
     this.ports.out.success(
       `Confirm it with your passkey on the card !${card.agendaItemId} in the Ferretry app (agenda of ${session}). Nothing is saved until you do; waiting up to ${String(TWO_FACTOR_STAGE_TTL_SECONDS / 60)} minutes…`,
     );
     const final = await this.#wait(account.data, staged.stage);
     this.ports.out.success(OUTCOME[final.state](account.data));
+  }
+
+  /** Owner-only read first: a refused caller never sees the warning or the seed prompt, and an older daemon is named before typing. */
+  async #preflight(account: string): Promise<void> {
+    const list = await this.ports.accounts.list().catch((error: unknown) => {
+      throw accountRefusal(error);
+    });
+    if (list.health === 'damaged')
+      throw new Error(
+        `this daemon cannot read its secret store (${list.diagnosis ?? 'no diagnosis was given'}): its accounts are NOT gone, so nothing was changed`,
+      );
+    if (!list.accounts.some(candidate => candidate.id === account))
+      throw new Error(`no account ${account} (see \`account ls\`)`);
+  }
+
+  /** The typed key lives only in this call: it is unreachable once the stage request has been answered. */
+  async #askAndStage(account: string, understood: boolean, label: string | undefined): Promise<TwoFactorSeedStaged> {
+    const text = await this.#askKey(understood);
+    return await this.#stage(account, text, label);
   }
 
   async #stage(account: string, text: string, label: string | undefined): Promise<TwoFactorSeedStaged> {
@@ -138,7 +160,6 @@ const OUTCOME: Readonly<Record<TwoFactorSeedStageView['state'], (account: string
 /** The owner's words for what the daemon refused about a seed, by its code. */
 function seedRefusal(error: unknown): unknown {
   if (!(error instanceof FyHttpError)) return error;
-  if (error.status === 404 && error.code === undefined)
-    return new Error('this daemon cannot save 2FA keys yet: update it (fy daemon update)');
-  return new Error(error.message);
+  const known = accountRefusal(error);
+  return known === error ? new Error(error.message) : known;
 }
