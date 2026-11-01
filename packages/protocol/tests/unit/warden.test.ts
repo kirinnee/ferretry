@@ -636,3 +636,30 @@ describe('warden investigator names', () => {
     should(warden.nextWardenInvestigatorSequence(-5, new Set())).equal(1);
   });
 });
+
+describe('the autoMigrate patch', () => {
+  it('should leave the headroom floor out of a change that does not name it', () => {
+    // Act
+    const parsed = warden.WardenConfigPatchSchema.parse({ autoMigrate: { waitMinutes: 5 } });
+
+    // Assert — a default belongs to a whole document, never to a patch over a saved one
+    should(parsed.autoMigrate).deepEqual({ waitMinutes: 5 });
+  });
+
+  it('should carry a floor the change names, zero included', () => {
+    // Act + Assert
+    should(warden.WardenConfigPatchSchema.parse({ autoMigrate: { minHeadroomPercent: 0 } }).autoMigrate).deepEqual({
+      minHeadroomPercent: 0,
+    });
+  });
+
+  it('should still read a whole document without a floor as the default', () => {
+    // Arrange
+    const { minHeadroomPercent: _floor, ...legacy } = wardenConfig.autoMigrate;
+
+    // Act + Assert
+    should(warden.WardenAutoMigrateConfigSchema.parse(legacy).minHeadroomPercent).equal(
+      warden.DEFAULT_WARDEN_MIN_HEADROOM_PERCENT,
+    );
+  });
+});

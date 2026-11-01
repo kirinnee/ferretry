@@ -15,12 +15,14 @@ import {
   sessionRestartRoutes,
 } from '../../../../src/lib/runtime/mounts/session-restart.ts';
 import { request } from '../../api/support.ts';
-import { CREDENTIALS, human } from './support.ts';
+import { CREDENTIALS, agentIn, human } from './support.ts';
 
 class FakeRestart implements SessionRestartSubsystem {
   readonly calls: Array<readonly [RestartRequest, string | undefined]> = [];
-  async restart(body: RestartRequest, requestId?: string) {
+  readonly movers: Array<string | undefined> = [];
+  async restart(body: RestartRequest, requestId?: string, requestedBy?: string) {
     this.calls.push([body, requestId]);
+    this.movers.push(requestedBy);
     return { restarted: [{ id: 'a' }], queued: [{ id: 'b', reason: 'mid-turn' as const }], skipped: [], failed: [] };
   }
   async status() {
@@ -60,6 +62,13 @@ describe('the restart mount', () => {
     should(answer.status).equal(200);
     should(RestartResultSchema.parse(JSON.parse(answer.body)).queued).have.length(1);
     should(subsystem.calls).eql([[{ scope: 'outdated' }, 'r-1']]);
+  });
+
+  it('should name who asked: the owner from a person, the session from an agent in its pane', async () => {
+    const subsystem = new FakeRestart();
+    await dispatch(subsystem, 'POST', human, '{"scope":"all"}');
+    await dispatch(subsystem, 'POST', agentIn('s-7'), '{"scope":"all"}');
+    should(subsystem.movers).eql(['owner', 'session:s-7']);
   });
 
   it('should run without a request id', async () => {

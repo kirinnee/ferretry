@@ -20,10 +20,21 @@ cross-harness move is still refused (`409 harness_mismatch`), and the refusal na
 - **Who.** `session.migrating` and `session.migrated` (and `session.migrate_failed`) carry `by`: `owner` (the CLI
   or the app), `session:<id>` (a ferret that called the move, by its session id) or `warden` (the Warden's own
   move). The Warden's token cannot call the route; its moves are labelled by the Warden itself.
-- **A failed relaunch.** The record is restamped onto the new login before the harness is relaunched. If the
-  relaunch fails and the old harness is still the one serving the session, the record is put back, so it never
-  names a login the move did not reach, and the failure says so. If an automatic retry was scheduled instead,
-  the record keeps the new login because that retry needs it.
+- **A restart** is the same move onto the same login, so it carries `by` too: the person who asked
+  (`owner`) or the ferret that ran `fy restart` (`session:<id>`). A restart that has to wait for a busy
+  ferret keeps who asked in the queue and names them when it finally runs.
+- **A failed relaunch.** The record is restamped onto the new login before the harness is relaunched, and the
+  old pane is stopped before the new one starts, so a harness that is alive after a failed relaunch is usually
+  the NEW one. The record is put back only when the pane registered for the session is provably the same one
+  that served before the move (same pane id, pid and process start): then no replacement was ever started and
+  the old login is still serving. Only the fields the move restamped are put back (login, harness, model,
+  command, conversation lineage, migration history); a rename, the session credential or any other write made
+  since stays. If the pane changed, the new harness started but its hand-over message was not delivered: the
+  record keeps the new login and the failure says so. If the pane cannot be identified, the record is left and
+  the failure says to restart the session. If an automatic retry was scheduled instead, the record keeps the
+  new login because that retry needs it.
+  GAP: a relaunch that rotated the session credential and then failed before a new pane was registered leaves
+  an old pane holding the credential it was launched with; restart that session.
 
 ## What stays the same
 

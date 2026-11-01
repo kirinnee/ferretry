@@ -73,6 +73,8 @@ export const RestartQueueEntrySchema = z.strictObject({
   since: InstantSchema,
   reason: RestartQueueReasonSchema,
   onlyIfOutdated: z.boolean(),
+  /** Who asked, as a migration's `by` names them: `owner`, or `session:<id>`. Absent on a request queued before it was kept. */
+  requestedBy: z.string().min(1).optional(),
 });
 export type RestartQueueEntry = z.infer<typeof RestartQueueEntrySchema>;
 

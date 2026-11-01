@@ -509,7 +509,8 @@ autoMigrate:
   reason, so a ferret is never moved onto a login that is about to run out too. A login whose usage is unknown
   is not refused on this rule. The same check applies to a login the Warden's Jev names for a move.
 - **Jev's `MIGRATE`.** When the Warden's Jev decides a ferret should move, the login it names goes through the
-  same rules as a rule-made move: ready, same harness, enough headroom. A named login that fails them is
+  same rules as a rule-made move: ready, same harness, enough headroom, and inside `targets` when the owner
+  listed any (a login outside a non-empty list is refused, same provider or not). A named login that fails them is
   replaced by the best candidate, and the action says so; with no candidate, the move is refused with the
   reason. The sweep prompt lists every candidate with the reason it was or was not usable. When no
   mover is wired in, the move is refused, never done unchecked.

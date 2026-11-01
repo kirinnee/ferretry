@@ -2330,8 +2330,19 @@ export class WardenSweepService {
         ...(base.confidence === undefined ? {} : { confidence: base.confidence }),
         ...(base.reason === undefined ? {} : { reason: base.reason }),
       });
+      // A failover that was re-routed failed on the login it was routed TO, not the one the verdict named.
+      const rerouted = act.action === 'failover' && routed !== undefined ? { ...act, agent: routed.agent } : undefined;
+      const detail =
+        rerouted === undefined
+          ? words.detail('failed', message)
+          : `${wardenActDetail(rerouted, 'failed', message)}${routed?.note === undefined ? '' : ` ${routed.note}`}`;
       return {
-        state: this.recordAction(state, { ...base, outcome: 'failed', detail: words.detail('failed', message) }),
+        state: this.recordAction(state, {
+          ...base,
+          ...(rerouted === undefined ? {} : { agent: rerouted.agent }),
+          outcome: 'failed',
+          detail,
+        }),
         done: false,
       };
     }

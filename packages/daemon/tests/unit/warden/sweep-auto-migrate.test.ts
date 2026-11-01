@@ -289,6 +289,29 @@ describe('a MIGRATE verdict, in the sweep', () => {
     });
   });
 
+  it('should name the login it was routed to, and why, when that move is refused', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled(),
+      fleet: [stuck()],
+      reports: reports('claude-b-wrapper'),
+      state: verdict(),
+      autoMigrate: mover([], three),
+      remedyFails: 'failover',
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.state().actions?.[0]).match({
+      action: 'failover',
+      outcome: 'failed',
+      agent: 'claude-c-wrapper',
+      detail: /\(claude-c-wrapper\) did not take: failover refused\. claude-b-wrapper was turned down/,
+    });
+  });
+
   it('should refuse a ferret that records no login to move from', async () => {
     // Arrange
     const nameless = stuck();

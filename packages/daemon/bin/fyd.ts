@@ -1391,7 +1391,7 @@ import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/se
 import { dropFerretIdentity, sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
 import { cutOffResume } from '../src/lib/session/resume/cut-off.ts';
-import { settleUnrevivedRelaunch } from '../src/lib/session/resume/unrevived-relaunch.ts';
+import { restoreRestamped, settleUnrevivedRelaunch } from '../src/lib/session/resume/unrevived-relaunch.ts';
 import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {
   AttachmentFacetContributor,
@@ -5046,6 +5046,8 @@ interface SessionMigrateParts {
   readonly sessionDirectory: (id: SessionId) => string;
   /** The folders the agent is pointed into to read what it was sent (`handoffFolders`). */
   readonly readableHandoffs: (id: SessionId) => readonly string[];
+  /** The registered pane's identity (pane id, pid, process start), or nothing when none can be read. */
+  readonly paneIdentity: (id: SessionId) => Promise<string | undefined>;
   /** Serializes whole migrations of one session, so two cannot restamp the same document. */
   readonly serial: KeyedSerialExecutor;
   /** The SAME rebuild a revive runs, asked whether it would change anything. */
@@ -5637,9 +5639,9 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         );
       });
     // The record as it stood, to put back if the old harness is still the one serving after a failed relaunch.
-    let recordBefore: unknown;
+    let recordBefore: Readonly<Record<string, unknown>> = {};
     await parts.storage.updateConfig(id, current => {
-      recordBefore = current;
+      recordBefore = jsonObject(current) ?? {};
       // The previous account's transcript record is REMOVED rather than merged over: a target that
       // declares no resolvable home must leave the session with no transcript, and a merge would
       // silently keep the old harness's file under the new harness's name.
@@ -5739,6 +5741,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         ...(detail === undefined ? {} : { detail }),
       });
     };
+    const paneBefore = await parts.paneIdentity(id);
     const outcome = await parts.resume
       .resume({
         id,
@@ -5760,8 +5763,11 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       const detail = await settleUnrevivedRelaunch({
         disposition: outcome.disposition,
         from,
+        to: account.agent,
+        paneBefore,
+        paneNow: await parts.paneIdentity(id),
         rollBack: async () => {
-          await parts.storage.updateConfig(id, () => recordBefore);
+          await parts.storage.updateConfig(id, current => restoreRestamped(recordBefore, jsonObject(current) ?? {}));
         },
       });
       await settle(false, detail);
@@ -11243,6 +11249,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         conversationId: () => crypto.randomUUID(),
         sessionDirectory: id => createSessionPaths(paths, id).directory,
         readableHandoffs: id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
+        paneIdentity: async id => {
+          const pane = await new DurableTerminalPaneStore(storage, stateFiles, paths)
+            .registration(paths.home, id)
+            .catch(() => undefined);
+          return pane === undefined ? undefined : `${pane.paneId}:${pane.pid}:${pane.processStartTicks}`;
+        },
         // Its own queue: a migration holds its lock across a pane kill and a relaunch, and must not
         // make every unrelated document write in the process wait behind it.
         serial: new KeyedSerialExecutor(),
@@ -11286,7 +11298,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return view === undefined ? undefined : restartSubject(view);
         },
         outdated: outdatedFor,
-        restart: async id => {
+        restart: async (id, requestedBy) => {
           const view = await sessions.get(id);
           if (view === undefined) throw new Error(`no session ${id}`);
           await sessionMigrate
@@ -11294,7 +11306,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               agent: view.config.agent,
               allowContextDowngrade: false,
               forceInflight: false,
-              movedBy: 'owner',
+              movedBy: requestedBy ?? 'unknown',
             })
             .catch((error: unknown) => {
               if (error instanceof SessionMigrateError && error.failure === 'refused')

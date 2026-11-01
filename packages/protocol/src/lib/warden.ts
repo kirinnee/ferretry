@@ -288,7 +288,12 @@ export const DEFAULT_WARDEN_MIN_HEADROOM_PERCENT = 20;
  * switching force-stop on, adding a trigger or a target, raising `maxMovesPerHour` or lowering
  * `minHeadroomPercent` waits for the owner.
  */
-export const WardenAutoMigrateConfigSchema = z.object({
+const WardenAutoMigrateHeadroomSchema = z
+  .number()
+  .int()
+  .min(WARDEN_AUTO_MIGRATE_HEADROOM_RANGE.min)
+  .max(WARDEN_AUTO_MIGRATE_HEADROOM_RANGE.max);
+const WardenAutoMigrateShape = {
   enabled: z.boolean(),
   when: z.array(WardenAutoMigrateTriggerSchema),
   /** Runtime names, in the owner's order. Empty: any ready login of the same harness and provider. */
@@ -296,14 +301,16 @@ export const WardenAutoMigrateConfigSchema = z.object({
   forceStopBackground: z.boolean(),
   waitMinutes: z.number().int().min(WARDEN_AUTO_MIGRATE_WAIT_RANGE.min).max(WARDEN_AUTO_MIGRATE_WAIT_RANGE.max),
   maxMovesPerHour: z.number().int().min(WARDEN_AUTO_MIGRATE_MOVES_RANGE.min).max(WARDEN_AUTO_MIGRATE_MOVES_RANGE.max),
+};
+export const WardenAutoMigrateConfigSchema = z.object({
+  ...WardenAutoMigrateShape,
   /** The share of its tightest window a target login must have left. A document written before this existed reads as the default. */
-  minHeadroomPercent: z
-    .number()
-    .int()
-    .min(WARDEN_AUTO_MIGRATE_HEADROOM_RANGE.min)
-    .max(WARDEN_AUTO_MIGRATE_HEADROOM_RANGE.max)
-    .default(DEFAULT_WARDEN_MIN_HEADROOM_PERCENT),
+  minHeadroomPercent: WardenAutoMigrateHeadroomSchema.default(DEFAULT_WARDEN_MIN_HEADROOM_PERCENT),
 });
+/** A change to the document. The default belongs to a whole document: a patch that omits the floor leaves the saved one alone. */
+const WardenAutoMigratePatchSchema = z
+  .strictObject({ ...WardenAutoMigrateShape, minHeadroomPercent: WardenAutoMigrateHeadroomSchema })
+  .partial();
 export type WardenAutoMigrateConfig = z.infer<typeof WardenAutoMigrateConfigSchema>;
 export const DEFAULT_WARDEN_AUTO_MIGRATE: WardenAutoMigrateConfig = {
   enabled: false,
@@ -355,7 +362,7 @@ export const WARDEN_BLESSING_CEILING_MINUTES = 240;
 export const WardenConfigPatchSchema = z.strictObject({
   enabled: z.boolean().optional(),
   revive: WardenReviveConfigSchema.strict().partial().optional(),
-  autoMigrate: WardenAutoMigrateConfigSchema.strict().partial().optional(),
+  autoMigrate: WardenAutoMigratePatchSchema.optional(),
   layers: WardenLayersSchema.strict().partial().optional(),
   guard: WardenGuardConfigSchema.strict().partial().optional(),
   caps: WardenCapsSchema.strict().partial().optional(),

@@ -376,6 +376,19 @@ describe('chooseFailoverTarget', () => {
     should(allowed.kind === 'chosen' ? allowed.runtime.name : undefined).equal('glm');
   });
 
+  it('should keep a verdict inside the list the owner set, same provider or not', () => {
+    // Act
+    const unlisted = choose('claude-c', ['claude-b']);
+    const listed = choose('claude-b', ['claude-b']);
+
+    // Assert
+    should(unlisted.kind === 'chosen' ? unlisted.runtime.name : undefined).equal('claude-b');
+    should(unlisted.kind === 'chosen' ? unlisted.refusedNamed?.why : undefined).equal(
+      'it is not in the autoMigrate.targets the owner set',
+    );
+    should(listed.kind === 'chosen' ? listed.refusedNamed : 'none').equal(undefined);
+  });
+
   it('should refuse with every reason when nothing qualifies, and when the ferret is on no known login', () => {
     // Arrange
     const bare = facts({

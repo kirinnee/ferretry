@@ -187,16 +187,19 @@ export function chooseFailoverTarget(input: MoveTargetInput & { readonly named: 
   const own = rest.facts.runtimes.find(runtime => named(runtime, rest.source.agent));
   if (own === undefined) return fallback;
   const runtime = rest.facts.runtimes.find(candidate => named(candidate, name));
+  const listed = runtime !== undefined && rest.targets.some(target => named(runtime, target));
   const why =
     runtime === undefined
       ? 'there is no runtime by that name on this machine'
-      : moveRefusal(runtime, {
-          own,
-          harness: rest.source.harness,
-          explicit: rest.targets.some(target => named(runtime, target)),
-          facts: rest.facts,
-          minHeadroomPercent: rest.minHeadroomPercent,
-        });
+      : rest.targets.length > 0 && !listed
+        ? 'it is not in the autoMigrate.targets the owner set'
+        : moveRefusal(runtime, {
+            own,
+            harness: rest.source.harness,
+            explicit: listed,
+            facts: rest.facts,
+            minHeadroomPercent: rest.minHeadroomPercent,
+          });
   if (why === undefined) return { kind: 'chosen', runtime: runtime as FleetRuntimeView, tried: fallback.tried };
   const refused = { runtime: runtime?.name ?? name, why };
   const tried = [refused, ...fallback.tried.filter(entry => entry.runtime !== refused.runtime)];
