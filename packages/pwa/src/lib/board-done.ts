@@ -47,7 +47,7 @@ export const notGoodLaneOf = (laneSet: DeclaredLanes | null): string | null => {
  * so nothing moves under the next tap) and every answer on the card is disabled until the move settles; a
  * refusal is said on the card. `null` pressed and `null` error is a card at rest.
  */
-export type BoardAnswer = 'done' | 'reopen' | 'works' | 'not-good' | 'move';
+export type BoardAnswer = 'done' | 'reopen' | 'works' | 'not-good' | 'send-back' | 'move';
 
 export interface BoardAnswerState {
   /** The control whose move is in flight; every answer on the card is disabled while it is not `null`. */

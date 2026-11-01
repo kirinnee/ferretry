@@ -107,7 +107,8 @@ export const toTestAnswersOver = ({
   answerFor,
   snooze,
   done: row => requestMove(row.card, row.group, row.doneLaneId, 'done'),
-  notGood: row => requestMove(row.card, row.group, row.notGoodLaneId, 'not-good'),
+  notGood: row =>
+    requestMove(row.card, row.group, row.notGoodLaneId, row.stage === 'approve' ? 'send-back' : 'not-good'),
 });
 
 interface Drag {
@@ -284,7 +285,11 @@ const useRowSwipe = ({ onLeft, onRight, onSkip, onSnooze }: RowSwipeAnswers, dis
   };
 };
 
-const ANSWER_WORD = { left: 'Not good', right: 'Done' } as const;
+const TRY_WORDS = { left: 'Not good', right: 'Done', what: 'Ready to test', section: 'How to test' } as const;
+const APPROVE_WORDS = { left: 'Send back', right: 'Approve', what: 'Plan to approve', section: 'The plan' } as const;
+
+/** The words on a row: a card to try is Done or Not good; a plan to approve is Approve or Send back. */
+const wordsOf = (row: Pick<ToTestCard, 'stage'>) => (row.stage === 'approve' ? APPROVE_WORDS : TRY_WORDS);
 
 function ToTestRow({
   row,
@@ -308,6 +313,7 @@ function ToTestRow({
   const state = answers.answerFor(row.card);
   const busy = state.pressed !== null;
   const { done, notGood, snooze } = answers;
+  const words = wordsOf(row);
   const [infoOpen, setInfoOpen] = useState(false);
   const infoId = useId();
   const [custom, setCustom] = useState(false);
@@ -334,15 +340,15 @@ function ToTestRow({
       className="fy-totest"
       data-swipe-direction={swipe.compass?.revealed ? 'down' : (direction ?? undefined)}
       data-swipe-committed={swipe.intent?.committed || undefined}
-      data-swipe-answer={direction === null ? undefined : ANSWER_WORD[direction]}
+      data-swipe-answer={direction === null ? undefined : words[direction]}
       data-to-test={row.key}
     >
       <span aria-hidden="true" className="fy-totest__reveal" data-side="right" data-to-test-reveal="right">
         <Check size={16} />
-        Done
+        {words.right}
       </span>
       <span aria-hidden="true" className="fy-totest__reveal" data-side="left" data-to-test-reveal="left">
-        Not good
+        {words.left}
         <X size={16} />
       </span>
       {swipe.compass?.revealed ? (
@@ -400,7 +406,7 @@ function ToTestRow({
                   <span aria-hidden="true">·</span>
                 </>
               )}
-              <span>Ready to test</span>
+              <span>{words.what}</span>
             </p>
             {skipButton ? (
               <div className="fy-totest__quiet">
@@ -441,8 +447,8 @@ function ToTestRow({
           {row.projectName === null ? null : <span data-to-test-project="">{row.projectName}</span>}
         </CardMetaLine>
         {empty ? null : (
-          <section aria-label={`How to test ${title}`} className="fy-totest__how" data-to-test-how="">
-            <h3 className="fy-totest__how-title">How to test</h3>
+          <section aria-label={`${words.section} ${title}`} className="fy-totest__how" data-to-test-how="">
+            <h3 className="fy-totest__how-title">{words.section}</h3>
             <HowToTest renderProse={cardProse} text={row.howToTest} />
           </section>
         )}
@@ -454,7 +460,7 @@ function ToTestRow({
         <div className="fy-totest__actions">
           <div className="fy-totest__answers">
             <button
-              aria-label={`Not good: ${title}`}
+              aria-label={`${words.left}: ${title}`}
               className="kt-btn"
               data-to-test-not-good=""
               data-variant="ghost"
@@ -462,11 +468,15 @@ function ToTestRow({
               onClick={() => notGood(row)}
               type="button"
             >
-              {state.pressed === 'not-good' ? <Spinner size={14} /> : <ArrowLeft aria-hidden="true" size={14} />}
-              Not good
+              {state.pressed === 'not-good' || state.pressed === 'send-back' ? (
+                <Spinner size={14} />
+              ) : (
+                <ArrowLeft aria-hidden="true" size={14} />
+              )}
+              {words.left}
             </button>
             <button
-              aria-label={`Done: ${title}`}
+              aria-label={`${words.right}: ${title}`}
               className="kt-btn"
               data-to-test-done=""
               data-variant="primary"
@@ -475,7 +485,7 @@ function ToTestRow({
               type="button"
             >
               {state.pressed === 'done' ? <Spinner size={14} /> : <ArrowRight aria-hidden="true" size={14} />}
-              Done
+              {words.right}
             </button>
           </div>
         </div>

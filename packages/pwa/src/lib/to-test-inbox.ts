@@ -10,7 +10,7 @@
 import type { ReleasedIn, SessionView } from '@ferretry/protocol';
 import { sessionTask } from '../shell/session-title.ts';
 import { doneLaneOf, notGoodLaneOf } from './board-done.ts';
-import { awaitingOwner } from './awaiting-owner.ts';
+import { awaitingOwner, type GateStage } from './awaiting-owner.ts';
 import type { BoardModel } from './board-model.ts';
 import type { BoardCardOf, BoardGroupOf } from './board-view.ts';
 import { displayCallsign } from './callsign.ts';
@@ -24,7 +24,10 @@ export interface ToTestCard {
   readonly doneLaneId: string;
   /** Where Not good sends it back. */
   readonly notGoodLaneId: string;
+  /** How to test it; for a plan to approve (`stage: 'approve'`), the plan. */
   readonly howToTest: string;
+  /** The gate the owner answers: to try (Done / Not good, the default) or a plan to approve (Approve / Send back). */
+  readonly stage?: GateStage;
   /** The task the ferret that worked on it was given ("Credentials Build Lead"), never its callsign; `null` when unknown. */
   readonly taskName: string | null;
   /** The session of the ferret that name is from (its chat); `null` when the name is not known. */
@@ -87,6 +90,32 @@ export const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | n
     doneLaneId,
     notGoodLaneId,
     howToTest: card.task.howToTest,
+    taskName: null,
+    projectName: null,
+    since: sinceOf(card),
+    snoozedUntil: snoozedUntilOf(card),
+  };
+};
+
+/**
+ * One card waiting on a plan as a row the same shell draws: Approve moves it to the lane after the gate, Send back (with
+ * the owner's words) to the lane before it. `null` when it is not a plan to approve or the gate has no lane on one side.
+ */
+export const toApproveOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | null => {
+  if (awaitingOwner(card, group.laneSet) !== 'approve' || group.laneSet === null) return null;
+  const lanes = group.laneSet.lanes;
+  const at = lanes.findIndex(lane => lane.id === card.task.laneId);
+  const forward = lanes[at + 1];
+  const back = at > 0 ? lanes[at - 1] : undefined;
+  if (forward === undefined || back === undefined) return null;
+  return {
+    key: toTestKey(card),
+    card,
+    group,
+    doneLaneId: forward.id,
+    notGoodLaneId: back.id,
+    howToTest: card.task.brief,
+    stage: 'approve',
     taskName: null,
     projectName: null,
     since: sinceOf(card),

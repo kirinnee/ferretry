@@ -55,6 +55,12 @@ const sendBackWords = (pending: PendingMove) => {
   switch (pending.answer) {
     case 'not-good':
       return { heading: `Not good: send ${title} back to ${pending.toName}`, submitLabel: 'Send back' };
+    case 'send-back':
+      return {
+        heading: `Send ${title} back to ${pending.toName}`,
+        placeholder: 'What should change in the plan? The ferret reads this.',
+        submitLabel: 'Send back',
+      };
     case 'reopen':
       return {
         heading: `Reopen ${title}: back to ${pending.toName}`,

@@ -10,7 +10,7 @@
 import { awaitingOwner } from './awaiting-owner.ts';
 import { type ChatCards, chatDrawn } from './board-chat.ts';
 import type { BoardCardOf, BoardCardPlace } from './board-view.ts';
-import { isSnoozed, type ToTestCard, toTestOf } from './to-test-inbox.ts';
+import { isSnoozed, type ToTestCard, toApproveOf, toTestOf } from './to-test-inbox.ts';
 
 export type StackRank = 'to-test' | 'approve';
 
@@ -18,7 +18,7 @@ export interface StackCard {
   readonly card: BoardCardOf;
   readonly place: BoardCardPlace | undefined;
   readonly rank: StackRank;
-  /** The card as the shared answer row draws it; `null` for a card to approve. */
+  /** The card as the shared answer row draws it; `null` for a plan the lanes give no Approve and Send back for. */
   readonly toTest: ToTestCard | null;
 }
 
@@ -27,7 +27,12 @@ const RANKS: readonly StackRank[] = ['to-test', 'approve'];
 const entryOf = (card: BoardCardOf, place: BoardCardPlace | undefined, now: number): StackCard | null => {
   const stage = place === undefined ? null : awaitingOwner(card, place.group.laneSet);
   if (place === undefined || stage === null) return null;
-  if (stage === 'approve') return { card, place, rank: 'approve', toTest: null };
+  if (stage === 'approve') {
+    const plan = toApproveOf(card, place.group);
+    // A snoozed plan is put aside like a snoozed card to test; one the lanes give no Approve / Send back for is drawn by the host.
+    if (plan !== null && isSnoozed(plan, now)) return null;
+    return { card, place, rank: 'approve', toTest: plan };
+  }
   const row = toTestOf(card, place.group);
   // A snoozed card is put aside: it is not waiting for a try until its time is up.
   if (row === null || isSnoozed(row, now)) return null;
