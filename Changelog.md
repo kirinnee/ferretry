@@ -1,3 +1,9 @@
+## [4.204.1](https://github.com/kirinnee/ferretry/compare/v4.204.0...v4.204.1) (2026-11-01)
+
+### Fixes
+
+* **nix:** make a stale bun-deps hash fail every build, not only cold caches ([#1251](https://github.com/kirinnee/ferretry/issues/1251)) ([7d3dc75](https://github.com/kirinnee/ferretry/commit/7d3dc752e44d04dfc3abc5027eb86c56bf51f6c0)), closes [#1244](https://github.com/kirinnee/ferretry/issues/1244)
+
 ## [4.204.0](https://github.com/kirinnee/ferretry/compare/v4.203.0...v4.204.0) (2026-11-01)
 
 ### Features
