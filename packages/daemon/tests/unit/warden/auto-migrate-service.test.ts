@@ -493,3 +493,100 @@ describe('WardenAutoMigrateService: what the owner’s words carry about a job',
     should(String(forced.recorded.migrations[0]?.note)).containEql('sk-live-123');
   });
 });
+
+describe('WardenAutoMigrateService.failoverTarget', () => {
+  const source = { agent: 'claude-a-wrapper', harness: 'claude' as const };
+
+  it('should answer the wrapper of the login the verdict named when it is ready, with no note', async () => {
+    // Arrange
+    const { service } = subject();
+
+    // Act
+    const target = await service.failoverTarget(source, 'claude-b', config());
+
+    // Assert
+    should(target).deepEqual({ agent: 'claude-b-wrapper' });
+  });
+
+  it('should answer the best ready login and why, when the named one is below the headroom floor', async () => {
+    // Arrange
+    const tight = facts({
+      runtimes: [runtime('claude-a'), runtime('claude-b'), runtime('claude-c')],
+      credentials: [
+        credential('claude-a-login'),
+        credential('claude-b-login', { usage: { fiveHour: { usedPercent: 90 }, weekly: {} } }),
+        credential('claude-c-login'),
+      ],
+      tools: [tool('claude', true)],
+    });
+    const { service } = subject({ facts: async () => tight });
+
+    // Act
+    const target = await service.failoverTarget(source, 'claude-b', config({ minHeadroomPercent: 20 }));
+    const lowered = await service.failoverTarget(source, 'claude-b', config({ minHeadroomPercent: 5 }));
+
+    // Assert
+    should(target.agent).equal('claude-c-wrapper');
+    should(target.note).match(/^claude-b was turned down \(only 10% is left/);
+    should(lowered).deepEqual({ agent: 'claude-b-wrapper' });
+  });
+
+  it('should refuse, naming every login tried, when none can take it', async () => {
+    // Arrange
+    const none = facts({
+      runtimes: [runtime('claude-a'), runtime('claude-b')],
+      credentials: [
+        credential('claude-a-login'),
+        credential('claude-b-login', { usage: { fiveHour: { usedPercent: 100 }, weekly: {} } }),
+      ],
+      tools: [tool('claude', true)],
+    });
+    const { service } = subject({ facts: async () => none });
+
+    // Act
+    const refused = service.failoverTarget(source, 'claude-b', config());
+
+    // Assert
+    await refused.then(
+      () => should.fail('it was moved', 'it was refused'),
+      (error: Error) => should(error.message).match(/^no login could take it\. Tried claude-b/),
+    );
+  });
+});
+
+describe('WardenAutoMigrateService.migrateCandidates', () => {
+  it('should list the ready logins for each ferret, most headroom first', async () => {
+    // Arrange
+    const { service } = subject();
+
+    // Act
+    const listed = await service.migrateCandidates(
+      [limited('s1'), limited('s2', 'rate_limited', 'claude-b-wrapper')],
+      config(),
+    );
+
+    // Assert
+    should(listed).deepEqual([
+      { sessionId: 's1', currentAgent: 'claude-a-wrapper', candidates: ['claude-b-wrapper', 'claude-c-wrapper'] },
+      { sessionId: 's2', currentAgent: 'claude-b-wrapper', candidates: ['claude-a-wrapper', 'claude-c-wrapper'] },
+    ]);
+  });
+
+  it('should list no candidates when the fleet cannot be read, and skip a ferret with no recorded login', async () => {
+    // Arrange
+    const broken = subject({
+      facts: async () => {
+        throw new Error('no facts');
+      },
+    });
+    const nameless = { ...limited('s3'), config: { ...limited('s3').config, agent: undefined } } as WardenSessionView;
+
+    // Act
+    const unread = await broken.service.migrateCandidates([limited('s1')], config());
+    const skipped = await subject().service.migrateCandidates([nameless], config());
+
+    // Assert
+    should(unread).deepEqual([{ sessionId: 's1', currentAgent: 'claude-a-wrapper', candidates: [] }]);
+    should(skipped).deepEqual([]);
+  });
+});

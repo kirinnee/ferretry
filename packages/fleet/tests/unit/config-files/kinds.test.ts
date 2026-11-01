@@ -514,6 +514,12 @@ describe('configLoosening: warden', () => {
         moving({ enabled: true, maxMovesPerHour: 3 }),
         ['the moves one ferret may get in an hour goes up from 1 to 3'],
       ],
+      [
+        'lowering the headroom floor',
+        on,
+        moving({ enabled: true, minHeadroomPercent: 5 }),
+        ['the share a login must have left to be moved onto goes down from 20 to 5'],
+      ],
     ] as const)('should hold %s', (_name, before, after, expected) => {
       // Act
       const actual = configLoosening('warden', before, after);
@@ -532,6 +538,7 @@ describe('configLoosening: warden', () => {
         moving({ enabled: true, targets: ['claude-b'] }),
       ],
       ['lowering the moves an hour', moving({ enabled: true, maxMovesPerHour: 3 }), on],
+      ['raising the headroom floor', on, moving({ enabled: true, minHeadroomPercent: 50 })],
       ['changing the wait', on, moving({ enabled: true, waitMinutes: 2 })],
     ] as const)('should apply %s at once', (_name, before, after) => {
       // Act

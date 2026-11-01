@@ -707,6 +707,21 @@ describe('WardenSettingsForm: moving a ferret that hit a limit', () => {
     run(() => renderer.unmount());
   });
 
+  it('should offer the least quota a target must have left, and keep what is typed', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(<Harness initial={moving()} changes={changes} />);
+    const field = () => renderer.root.findByProps({ type: 'number', value: 20 });
+
+    // Act
+    run(() => field().props.onChange({ target: { value: '35' } }));
+
+    // Assert
+    expect(text(renderer)).toContain('Least quota left on the login it moves to (%)');
+    expect(last(changes).autoMigrate.minHeadroomPercent).toBe(35);
+    run(() => renderer.unmount());
+  });
+
   it('should hide the wait once the Warden may stop the jobs itself, and say what it stops', () => {
     // Arrange
     const changes: WardenConfig[] = [];

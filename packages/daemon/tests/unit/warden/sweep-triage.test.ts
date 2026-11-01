@@ -508,7 +508,7 @@ describe('what a verdict does', () => {
     should(held.state().actions?.[0]).match({ action: 'restart', outcome: 'held' });
   });
 
-  it('should resume on RESUME and fail over on a MIGRATE that names the login', async () => {
+  it('should resume on RESUME, and refuse a MIGRATE when nothing can say the login is ready', async () => {
     // Arrange
     const resumed = harness({
       config: enabled(),
@@ -529,8 +529,13 @@ describe('what a verdict does', () => {
 
     // Assert
     should(resumed.remedies.map(entry => entry.action)).deepEqual(['resume']);
-    should(moved.remedies).deepEqual([{ action: 'failover', sessionId: 's1', detail: 'claude-work' }]);
-    should(moved.state().actions?.[0]).match({ action: 'failover', agent: 'claude-work' });
+    should(moved.remedies).deepEqual([]);
+    should(moved.state().actions?.[0]).match({
+      action: 'failover',
+      outcome: 'failed',
+      agent: 'claude-work',
+      detail: /nothing can check that claude-work is ready/,
+    });
   });
 
   it('should record an act that did not take', async () => {

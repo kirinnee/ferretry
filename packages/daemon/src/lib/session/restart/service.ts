@@ -58,7 +58,7 @@ export interface RestartPorts {
   /** The sections a launch now would change for this ferret, read fresh — empty when it is current. */
   outdated(id: string): Promise<readonly LaunchInstructionSectionId[]>;
   /** The same-login resume migrate, without force. Throws {@link RestartBusy} when the inventory refuses. */
-  restart(id: string): Promise<void>;
+  restart(id: string, requestedBy?: string): Promise<void>;
   /** Journals that a queued restart gave up, so the ferret's history says why. */
   gaveUp(id: string, reason: string): Promise<void>;
   readonly queue: {
@@ -141,10 +141,10 @@ export class RestartService {
   }
 
   /** Restarts what can be restarted now and queues the rest; the same request id answers the same result. */
-  async restart(request: RestartRequest, requestId?: string): Promise<RestartResult> {
+  async restart(request: RestartRequest, requestId?: string, requestedBy?: string): Promise<RestartResult> {
     const known = requestId === undefined ? undefined : this.#remembered.get(requestId);
     if (known !== undefined) return known;
-    const result = await this.#locked(async () => await this.#run(request));
+    const result = await this.#locked(async () => await this.#run(request, requestedBy));
     if (requestId !== undefined) {
       this.#remembered.set(requestId, result);
       const oldest = this.#remembered.keys().next();
@@ -153,7 +153,7 @@ export class RestartService {
     return result;
   }
 
-  async #run(request: RestartRequest): Promise<RestartResult> {
+  async #run(request: RestartRequest, requestedBy?: string): Promise<RestartResult> {
     const subjects = await this.ports.subjects();
     const byId = new Map(subjects.map(subject => [subject.id, subject]));
     const restarted: RestartResult['restarted'][number][] = [];
@@ -188,13 +188,14 @@ export class RestartService {
           since: waiting.get(subject.id)?.since ?? this.ports.now(),
           reason,
           onlyIfOutdated: request.scope === 'outdated',
+          ...(requestedBy === undefined ? {} : { requestedBy }),
         });
       };
       if (subject.id === request.caller) wait('own-session');
       else if (!subject.idle) wait('mid-turn');
       else {
         try {
-          await this.ports.restart(subject.id);
+          await this.ports.restart(subject.id, requestedBy);
           restarted.push({ id: subject.id, ...named(subject) });
           waiting.delete(subject.id);
         } catch (error) {
@@ -241,7 +242,7 @@ export class RestartService {
       if (entry.onlyIfOutdated && (await this.ports.outdated(entry.id).catch(() => ['tools' as const])).length === 0)
         continue;
       try {
-        await this.ports.restart(entry.id);
+        await this.ports.restart(entry.id, entry.requestedBy);
         this.#retries.delete(entry.id);
       } catch (error) {
         if (error instanceof RestartBusy) {

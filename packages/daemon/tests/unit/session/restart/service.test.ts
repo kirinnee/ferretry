@@ -18,6 +18,8 @@ interface World {
   busy: Set<string>;
   broken: Map<string, string>;
   restarted: string[];
+  /** Who each restart was asked by, in the order they ran. */
+  askedBy: Array<string | undefined>;
   gaveUp: Array<[string, string]>;
   queue: RestartQueueEntry[];
   saves: number;
@@ -35,6 +37,7 @@ const world = (subjects: RestartSubject[], stale: World['stale'] = {}): World =>
   busy: new Set(),
   broken: new Map(),
   restarted: [],
+  askedBy: [],
   gaveUp: [],
   queue: [],
   saves: 0,
@@ -59,7 +62,8 @@ const make = (w: World): RestartService => {
       if (id === 'throws') throw new Error('unreadable');
       return w.stale[id] ?? [];
     },
-    restart: async id => {
+    restart: async (id, requestedBy) => {
+      w.askedBy.push(requestedBy);
       w.attempts.push(w.clock.now - Date.parse(AT));
       if (w.busy.has(id)) throw new RestartBusy('a test run is open');
       const broken = w.broken.get(id);
@@ -220,6 +224,30 @@ describe('RestartService.status and cancel', () => {
     w.queue = [{ id: 'b', since: AT, reason: 'mid-turn', onlyIfOutdated: true }];
     should(await make(w).cancel()).eql({ cancelled: 1 });
     should(w.queue).eql([]);
+  });
+});
+
+describe('RestartService requester', () => {
+  it('should hand the requester to an immediate restart', async () => {
+    const w = world([idle('a')]);
+    await make(w).restart({ scope: 'ids', ids: ['a'] }, undefined, 'session:s-7');
+    should(w.askedBy).eql(['session:s-7']);
+  });
+
+  it('should keep the requester on a queued restart and name it when the drain runs it', async () => {
+    const w = world([working('a')]);
+    const service = make(w);
+    await service.restart({ scope: 'ids', ids: ['a'] }, undefined, 'session:s-7');
+    should(w.queue[0]?.requestedBy).equal('session:s-7');
+    w.subjects = [idle('a')];
+    await service.drain();
+    should(w.askedBy).eql(['session:s-7']);
+  });
+
+  it('should leave the requester out when nobody named one', async () => {
+    const w = world([working('a')]);
+    await make(w).restart({ scope: 'ids', ids: ['a'] });
+    should('requestedBy' in (w.queue[0] ?? {})).be.false();
   });
 });
 

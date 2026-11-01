@@ -1395,6 +1395,11 @@ import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/se
 import { dropFerretIdentity, sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
 import { cutOffResume } from '../src/lib/session/resume/cut-off.ts';
+import {
+  restoreRestamped,
+  settleRejectedRelaunch,
+  settleUnrevivedRelaunch,
+} from '../src/lib/session/resume/unrevived-relaunch.ts';
 import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {
   AttachmentFacetContributor,
@@ -4553,6 +4558,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         forceInflight: false,
         note: request.note,
         actor: 'warden',
+        movedBy: 'warden',
       });
     },
     agentOf: async sessionId => (await parts.sessions.get(sessionId).catch(() => undefined))?.config.agent,
@@ -4643,7 +4649,12 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
           await parts.control.stop(sessionId, reason);
         },
         failover: async (sessionId, agent) => {
-          await parts.migrate.migrate(sessionId, { agent, allowContextDowngrade: false, forceInflight: false });
+          await parts.migrate.migrate(sessionId, {
+            agent,
+            allowContextDowngrade: false,
+            forceInflight: false,
+            movedBy: 'warden',
+          });
         },
         closeLeftoverBrowsers: async sessionId => await parts.closeLeftoverBrowsers(sessionId),
       },
@@ -5043,6 +5054,8 @@ interface SessionMigrateParts {
   readonly sessionDirectory: (id: SessionId) => string;
   /** The folders the agent is pointed into to read what it was sent (`handoffFolders`). */
   readonly readableHandoffs: (id: SessionId) => readonly string[];
+  /** The registered pane's identity (pane id, pid, process start), or nothing when none can be read. */
+  readonly paneIdentity: (id: SessionId) => Promise<string | undefined>;
   /** Serializes whole migrations of one session, so two cannot restamp the same document. */
   readonly serial: KeyedSerialExecutor;
   /** The SAME rebuild a revive runs, asked whether it would change anything. */
@@ -5633,7 +5646,10 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
             (error instanceof Error ? error.message : String(error)),
         );
       });
+    // The record as it stood, to put back if the old harness is still the one serving after a failed relaunch.
+    let recordBefore: Readonly<Record<string, unknown>> = {};
     await parts.storage.updateConfig(id, current => {
+      recordBefore = jsonObject(current) ?? {};
       // The previous account's transcript record is REMOVED rather than merged over: a target that
       // declares no resolvable home must leave the session with no transcript, and a merge would
       // silently keep the old harness's file under the new harness's name.
@@ -5684,9 +5700,11 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         updatedAt: at,
       };
     });
+    const by = request.movedBy ?? 'owner';
     await parts.storage.append(id, 'session.migrating', {
       from,
       to: account.agent,
+      by,
       model: plan.model,
       conversation:
         relaunchConversation.kind === 'fresh'
@@ -5727,8 +5745,13 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       await parts.storage.append(id, ok ? 'session.migrated' : 'session.migrate_failed', {
         from,
         to: account.agent,
+        by,
         ...(detail === undefined ? {} : { detail }),
       });
+    };
+    const paneBefore = await parts.paneIdentity(id);
+    const rollBack = async (): Promise<void> => {
+      await parts.storage.updateConfig(id, current => restoreRestamped(recordBefore, jsonObject(current) ?? {}));
     };
     const outcome = await parts.resume
       .resume({
@@ -5744,15 +5767,24 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
             : `${request.note}\n\n${parts.preflight.handoff(report, reportPath, config.mode)}`,
       })
       .catch(async (error: unknown) => {
-        await settle(false, error instanceof Error ? error.message : String(error));
+        const rolledBack = await settleRejectedRelaunch({
+          from,
+          paneBefore,
+          paneNow: await parts.paneIdentity(id),
+          rollBack,
+        });
+        await settle(false, (error instanceof Error ? error.message : String(error)) + rolledBack);
         migrateRelaunchRefusal(error);
       });
     if (outcome.disposition !== 'revived') {
-      const detail =
-        outcome.disposition === 'preserved'
-          ? `the relaunch failed and the previous harness was still at a prompt, so ${from} is still serving ` +
-            `this session while its record already names ${account.agent}`
-          : `the relaunch failed and an automatic retry was scheduled; the session is still on ${from}`;
+      const detail = await settleUnrevivedRelaunch({
+        disposition: outcome.disposition,
+        from,
+        to: account.agent,
+        paneBefore,
+        paneNow: await parts.paneIdentity(id),
+        rollBack,
+      });
       await settle(false, detail);
       throw new SessionMigrateError('failed', detail);
     }
@@ -11268,6 +11300,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         conversationId: () => crypto.randomUUID(),
         sessionDirectory: id => createSessionPaths(paths, id).directory,
         readableHandoffs: id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
+        paneIdentity: async id => {
+          // Only a LIVE pane that still is exactly the registered one counts: a registration alone can name a
+          // pane that is dead, or one a failed relaunch replaced before it could register the replacement.
+          const pane = await new DurableTerminalPaneStore(storage, stateFiles, paths)
+            .registration(paths.home, id)
+            .catch(() => undefined);
+          if (pane === undefined) return undefined;
+          const live = await new ExactTmuxPaneReaper(launchTmux).observe(pane).catch(() => undefined);
+          return live?.paneId === pane.paneId &&
+            live.pid === pane.pid &&
+            live.processStartTicks === pane.processStartTicks
+            ? `${pane.paneId}:${pane.pid}:${pane.processStartTicks}`
+            : undefined;
+        },
         // Its own queue: a migration holds its lock across a pane kill and a relaunch, and must not
         // make every unrelated document write in the process wait behind it.
         serial: new KeyedSerialExecutor(),
@@ -11311,11 +11357,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return view === undefined ? undefined : restartSubject(view);
         },
         outdated: outdatedFor,
-        restart: async id => {
+        restart: async (id, requestedBy) => {
           const view = await sessions.get(id);
           if (view === undefined) throw new Error(`no session ${id}`);
           await sessionMigrate
-            .migrate(id, { agent: view.config.agent, allowContextDowngrade: false, forceInflight: false })
+            .migrate(id, {
+              agent: view.config.agent,
+              allowContextDowngrade: false,
+              forceInflight: false,
+              movedBy: requestedBy ?? 'unknown',
+            })
             .catch((error: unknown) => {
               if (error instanceof SessionMigrateError && error.failure === 'refused')
                 throw new RestartBusy(error.message);
