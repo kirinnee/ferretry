@@ -29,7 +29,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
-import type { AgendaId } from '@ferretry/protocol';
+import { type AgendaId, formatTaskRef } from '@ferretry/protocol';
 import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, Search, SkipForward, X, Zap } from 'lucide-react';
 import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
@@ -682,7 +682,9 @@ function SnoozedToTestRow({
   readonly onNavigate: (to: string) => void;
 }) {
   const wakes = row.snoozedUntil === null ? null : clockWords(row.snoozedUntil, now ?? Date.now());
-  const more = [row.taskName, row.card.machine, row.card.task.id].filter((text): text is string => text !== null);
+  const more = [row.taskName, row.card.machine, formatTaskRef({ id: row.card.task.id })].filter(
+    (text): text is string => text !== null,
+  );
   return (
     <li className="fy-parked-row" data-to-test-snoozed={row.key}>
       <RouteLink

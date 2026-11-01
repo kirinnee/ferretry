@@ -264,6 +264,7 @@ describe('Inbox — snoozing a card waiting for a try', () => {
     const row = must(root.querySelector<HTMLElement>('[data-to-test-snoozed]'), 'the snoozed card');
     expect(row.querySelector('[data-to-test-snoozed-title]')?.textContent).toBe('Parked try');
     expect(row.querySelector('[data-to-test-wakes]')?.textContent).toMatch(/^Snoozed until /u);
+    expect(row.textContent).toContain('&F25');
     await interact(() => must(row.querySelector<HTMLElement>('[data-to-test-unsnooze]'), 'Unsnooze').click());
     await interact(() => flush());
     expect(actions.calls).toEqual(['snoozeTask:[null]']);
