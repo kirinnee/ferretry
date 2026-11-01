@@ -5,8 +5,10 @@
  *
  * - SWIPE LEFT IS DONE, RIGHT IS NOT GOOD, DOWN IS SKIP, the same swipe the agenda deck has (touch only, decided after the
  *   same slop, committed past the same threshold, never started on something the reader presses or inside a sideways
- *   scroller). DOWN is read only from the row's head (its title line and who-and-what line), the part that does not
- *   scroll, so a drag down anywhere else is still the page scrolling. Skip changes nothing: it goes to the next card.
+ *   scroller). DOWN IS READ ONLY FROM THE ROW'S HEAD (`.fy-totest__top` and `.fy-totest__meta`: the title line, the title link included, and the
+ *   who-and-what line), which does not scroll — in the run the title line is sticky at the top of the card's scroll box, so it is always
+ *   there to grab — so a drag down anywhere else is still the page (or the card) scrolling. Skip changes nothing: it goes to
+ *   the next card.
  *   What letting go would do is kept as `data-swipe-*` and named (icon + word) in the area the row uncovers.
  * - THE BUTTONS ARE THE SAME ANSWERS for a mouse, a keyboard and a screen reader, in the order of the swipes.
  * - NOTHING CLOSES A CARD HERE THAT THE BOARD DOES NOT: both answers go through `useBoardAnswers`, the Board's own flow.
@@ -118,9 +120,16 @@ const rowIntent = (drag: Drag, down: boolean): RowIntent => {
   return { direction: direction === 'left' || direction === 'right' ? direction : null, committed };
 };
 
-/** The row's head: its title line and who-and-what line. It does not scroll, so a drag down there is a swipe. */
+/** The row's head: its title line (the link too: a drag is not a tap) and who-and-what line. It does not scroll, so a drag down there is a swipe. */
 const startsInRowHead = (target: EventTarget | null): boolean =>
   target instanceof Element && target.closest('.fy-totest__top, .fy-totest__meta') !== null;
+
+/** The title is a link, but it is most of the head: a drag that starts on it is a swipe, and only a tap follows it. */
+const startsOnTitle = (target: EventTarget | null): boolean =>
+  target instanceof Element && target.closest('[data-to-test-title]') !== null;
+
+/** The task name when it adds something: a card titled by its task (any case) would print the same words twice. */
+const sameWords = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** A swipe on one row: left is `onLeft`, right is `onRight`, and down (from the head) is `onDown`. */
 const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void, disabled: boolean) => {
@@ -142,7 +151,7 @@ const useRowSwipe = (onLeft: () => void, onRight: () => void, onDown: () => void
     if (
       disabled ||
       !isTouch(event) ||
-      startsOnInteractive(event.target) ||
+      (startsOnInteractive(event.target) && !startsOnTitle(event.target)) ||
       startsInSidewaysScroller(event.target, event.currentTarget)
     )
       return;
@@ -292,7 +301,7 @@ function ToTestRow({
           <span className="fy-totest__age">{ageWords(row.since, now)}</span>
         </div>
         <p className="fy-totest__meta">
-          {row.taskName === null ? null : (
+          {row.taskName === null || sameWords(row.taskName, title) ? null : (
             <span className="fy-totest__ferret" data-to-test-ferret="">
               {row.taskName}
             </span>

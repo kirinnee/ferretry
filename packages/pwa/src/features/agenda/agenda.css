@@ -401,3 +401,14 @@
     min-height: 36px;
   }
 }
+
+/* The menu is turned over to the other side of its button when the viewport has no room on its own side (see
+   `snooze-placement.ts`); sideways it is slid inline. */
+.fy-snooze__popover[data-flip] {
+  top: auto;
+  bottom: calc(100% + 4px);
+}
+.fy-totest__actions .fy-snooze__popover[data-flip] {
+  top: calc(100% + 4px);
+  bottom: auto;
+}

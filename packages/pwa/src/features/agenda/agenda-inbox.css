@@ -1389,3 +1389,34 @@
   min-height: 0;
   min-width: 0;
 }
+
+/* ---- the quick-answer run: ONE card that is as long as it is, in a box of fixed height --------------------------------
+   The list's row clips itself (overflow hidden, for the swipe) and an overflow-hidden flex item may shrink to nothing, so
+   in the run's fixed-height column the row was squeezed to the box and cut off mid-step. Here the row keeps its own
+   height, the box scrolls, and the title line and the answer row stay on the box's edges the way the agenda item's do.
+   `overflow: clip` clips the same but is not a scroll container, which sticky needs to see the box. */
+.fy-inbox-step > .fy-totest-list,
+.fy-inbox-step .fy-totest {
+  flex: 0 0 auto;
+}
+.fy-inbox-step .fy-totest {
+  overflow: clip;
+}
+.fy-inbox-step .fy-totest__top {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+  padding-block: var(--gap-xs);
+}
+.fy-inbox-step .fy-totest__actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: var(--surface);
+  padding-block: var(--gap-sm);
+  border-top: var(--stroke) solid var(--divider-color);
+}
+.fy-inbox-step .fy-totest:has(.fy-snooze__popover) {
+  overflow: visible;
+}
