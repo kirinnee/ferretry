@@ -216,17 +216,6 @@
 .fy-item-view__info-toggle[aria-expanded='true'] {
   background: var(--accent-soft);
 }
-/* Snooze lives in the panel, not the row: the title keeps the row. */
-.fy-item-view__snooze {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-xs);
-  margin-top: var(--gap-xs);
-}
-.fy-item-view__snooze-label {
-  color: var(--muted);
-  font-size: var(--text-sm);
-}
 /* Tight hit areas for the row's own controls (‹ › ⓘ ✕): it is height, not width, that a thumb needs. The global
    coarse-pointer floor is (0,1,1); `:root` here wins it. */
 :root .fy-item-view__step--tight {
@@ -235,6 +224,10 @@
 :root .fy-item-view__info-toggle,
 :root .fy-item-view__close {
   min-width: 32px;
+}
+/* The clock is the head's own control (`CardHead`), as tight as the pager's arrows. */
+:root .fy-card-head__snooze {
+  min-width: 30px;
 }
 .fy-item-view__desc {
   margin: 0;

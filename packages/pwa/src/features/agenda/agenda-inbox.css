@@ -1295,18 +1295,13 @@
 .fy-totest__meta {
   touch-action: none;
 }
+/* The head is `CardHead`: the title (one line, a marquee when too long) and the card's controls share the row. */
 .fy-totest__top {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--gap-md);
+  gap: var(--gap-xs);
 }
 .fy-totest__title {
-  min-width: 0;
   color: var(--fg);
   font-weight: var(--weight-strong);
-  overflow-wrap: anywhere;
   text-decoration: none;
 }
 .fy-totest__title:hover {
@@ -1365,20 +1360,6 @@
 }
 .fy-totest__actions .kt-btn {
   min-height: 44px;
-}
-/* The clock sits apart from the answers, at the left; its menu opens upward so it is never under the card below. */
-.fy-totest__actions > .fy-snooze {
-  margin-right: auto;
-}
-.fy-totest__actions .fy-totest__snooze {
-  min-width: 44px;
-  padding-inline: var(--gap-sm);
-}
-.fy-totest__actions .fy-snooze__popover {
-  top: auto;
-  right: auto;
-  bottom: calc(100% + 4px);
-  left: 0;
 }
 /* A row with its menu open lets the menu out; a swipe (which needs the clip) cannot start while the menu is open. */
 .fy-totest:has(.fy-snooze__popover) {

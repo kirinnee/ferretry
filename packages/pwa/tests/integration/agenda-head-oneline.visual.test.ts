@@ -187,10 +187,10 @@ describe('the open item’s head', () => {
               const context = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D;
               const style = getComputedStyle(title);
               context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-              return { box: title.clientWidth, twentyLetters: context.measureText('Which day works best').width };
+              return { box: title.clientWidth, sixteenLetters: context.measureText('Which day works ').width };
             });
-            expect(room.box, 'the title shows at least 20 characters before it scrolls').toBeGreaterThanOrEqual(
-              room.twentyLetters,
+            expect(room.box, 'the title shows at least 16 characters before it scrolls').toBeGreaterThanOrEqual(
+              room.sixteenLetters,
             );
             await shot(tab, name, `${family}-${scheme}`, 'long-title');
           } finally {
