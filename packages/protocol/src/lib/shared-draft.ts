@@ -164,10 +164,13 @@ export const applyTextOp = (text: string, op: TextOp): string => {
 
 /** A cursor over an operation that can hand out part of a step and keep the rest for later. */
 class TextOpCursor {
+  readonly #op: TextOp;
   #index = 0;
   #current: TextOpComponent | undefined;
 
-  constructor(private readonly op: TextOp) {
+  // No parameter property: this package is also loaded in Node's strip-only TypeScript mode.
+  constructor(op: TextOp) {
+    this.#op = op;
     this.#current = op[0];
   }
 
@@ -178,7 +181,7 @@ class TextOpCursor {
   /** Consumes the whole current step. */
   next(): void {
     this.#index += 1;
-    this.#current = this.op[this.#index];
+    this.#current = this.#op[this.#index];
   }
 
   /** Consumes `count` characters of the current retain, delete or insert. */
