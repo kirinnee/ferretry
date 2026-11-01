@@ -826,32 +826,6 @@ export const AgendaPhoneApprovalRefSchema = z.strictObject({
 });
 export type AgendaPhoneApprovalRef = z.infer<typeof AgendaPhoneApprovalRefSchema>;
 
-/** What choosing a gate option does to its card (`gate` below): move on, reopen with the owner's words, or close. */
-export const AgendaGateOutcomeSchema = z.enum(['next', 'lane', 'reopen-with-agenda', 'close']);
-export type AgendaGateOutcome = z.infer<typeof AgendaGateOutcomeSchema>;
-
-export const AgendaGateOptionSchema = z.strictObject({
-  id: z.string().min(1).max(24),
-  label: singleLine(24),
-  outcome: AgendaGateOutcomeSchema,
-});
-export type AgendaGateOption = z.infer<typeof AgendaGateOptionSchema>;
-
-/**
- * The gate of a board card this item stands for ("Try it", "OK to build?"): present on a daemon-raised choice item
- * whose answer moves the card. An app from before the field drops it and shows a plain choice card, answered by label.
- */
-export const AgendaGateSchema = z.strictObject({
-  cardId: z.string().min(1).max(64),
-  laneId: z.string().min(1).max(64),
-  laneName: z.string().min(1).max(80),
-  entry: PositiveIntegerSchema,
-  projectId: z.string().min(1).max(128),
-  projectName: z.string().min(1).max(120).optional(),
-  options: z.array(AgendaGateOptionSchema).min(1).max(3),
-});
-export type AgendaGate = z.infer<typeof AgendaGateSchema>;
-
 /**
  * A 2FA seed staged at the machine and waiting for the owner's passkey (docs/secrets.md, "2FA keys"): the card's
  * Allow runs the `add-2fa-key` ceremony bound to `stage` and saves it to `account`, and Deny drops it. The generic
@@ -907,6 +881,42 @@ export const agendaInputProblems = (value: {
 
 /** The `409` code of an Allow or Discard that found the held change moved on: the card shows the new one. */
 export const AGENDA_CONFIG_CHANGED_CODE = 'config_changed';
+
+/** The longest gate option label, as the lane's own gate options are written (`board-lanes.ts`). */
+export const MAX_AGENDA_GATE_OPTION_LENGTH = 24;
+
+/**
+ * Where a gate option sends the card, as the daemon applies the owner's answer (docs/board.md § Gates ask the
+ * owner): on to the next lane of its workflow, to a named lane, back to rework with the owner's words and a
+ * follow-up conversation, or to the board's closed lane.
+ */
+export const AgendaGateOutcomeSchema = z.enum(['next', 'lane', 'reopen-with-agenda', 'close']);
+export type AgendaGateOutcome = z.infer<typeof AgendaGateOutcomeSchema>;
+
+/** One of the gate's options: its label is the ask option the owner chooses. */
+export const AgendaGateOptionSchema = z.strictObject({
+  id: z.string().min(1).max(MAX_AGENDA_GATE_OPTION_LENGTH),
+  label: singleLine(MAX_AGENDA_GATE_OPTION_LENGTH),
+  outcome: AgendaGateOutcomeSchema,
+});
+export type AgendaGateOption = z.infer<typeof AgendaGateOptionSchema>;
+
+/**
+ * THE GATE AN ITEM ASKS ABOUT: the daemon raised it because an owner-asked card entered a lane whose stage is a
+ * gate, and answering it moves the card (docs/board.md § Gates ask the owner). Only the daemon writes one; an app
+ * that predates the field reads an ordinary choice card and answers it by label.
+ */
+export const AgendaGateSchema = z.strictObject({
+  cardId: z.string().min(1).max(64),
+  laneId: z.string().min(1).max(64),
+  laneName: z.string().min(1).max(80),
+  /** The card history's `seq` of the event that put the card in the lane: one item per entry. */
+  entry: PositiveIntegerSchema,
+  projectId: z.string().min(1).max(128),
+  projectName: z.string().min(1).max(120).optional(),
+  options: z.array(AgendaGateOptionSchema).min(1).max(MAX_AGENDA_CARD_ANSWERS),
+});
+export type AgendaGate = z.infer<typeof AgendaGateSchema>;
 
 const AgendaItemBaseShape = {
   id: AgendaIdSchema,
@@ -965,8 +975,6 @@ const AgendaItemBaseShape = {
    * that named none. An older app reading a newer board drops the field.
    */
   task: TaskRefSchema.nullable().optional(),
-  /** The board gate this item stands for (`AgendaGate`); only a daemon-raised choice item carries one. */
-  gate: AgendaGateSchema.optional(),
   /**
    * The owner's one tap may close the linked card too: the answer row offers "Done · closes &F12". Set by
    * `fy agenda add --offer-close`, and by the daemon for a to-do or review on a card in the to-test lane.
@@ -986,6 +994,8 @@ const AgendaItemBaseShape = {
   signInRuleSuggestion: AgendaSignInRuleSuggestionRefSchema.optional(),
   /** A standing rule a fill suspended; only an `info` item carries one, and no answer resumes it. */
   signInRuleSuspended: AgendaSignInRuleSuspendedRefSchema.optional(),
+  /** The card gate this item asks about (`AgendaGate`); only the daemon raises one, and only the owner answers it. */
+  gate: AgendaGateSchema.optional(),
 };
 
 export const AgendaItemSchema = z
@@ -1032,6 +1042,9 @@ export const AgendaItemSchema = z
         message: 'only an info card says a standing rule was suspended',
         path: ['signInRuleSuspended'],
       });
+    }
+    if (value.gate !== undefined && value.raisedBy !== 'daemon') {
+      context.addIssue({ code: 'custom', message: 'only the daemon raises a gate item', path: ['gate'] });
     }
     for (const problem of agendaFormProblems(value)) {
       context.addIssue({ code: 'custom', message: problem, path: ['fields'] });

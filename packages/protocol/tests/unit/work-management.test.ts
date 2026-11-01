@@ -284,6 +284,25 @@ const agendaCases: SchemaCase[] = [
   { name: 'attention actor', schema: agenda.AgendaBySchema, value: 'agent' },
   { name: 'attention item', schema: agenda.AgendaItemSchema, value: agendaItem },
   { name: 'attention input pointer', schema: agenda.AgendaInputRefSchema, value: { requestId: 'a'.repeat(32) } },
+  { name: 'gate outcome', schema: agenda.AgendaGateOutcomeSchema, value: 'reopen-with-agenda' },
+  {
+    name: 'gate option',
+    schema: agenda.AgendaGateOptionSchema,
+    value: { id: 'done', label: 'Done', outcome: 'close' },
+  },
+  {
+    name: 'gate',
+    schema: agenda.AgendaGateSchema,
+    value: {
+      cardId: 'F412',
+      laneId: 'released',
+      laneName: 'Released · to test',
+      entry: 7,
+      projectId: 'p-1',
+      projectName: 'Ferretry',
+      options: [{ id: 'done', label: 'Done', outcome: 'close' }],
+    },
+  },
   { name: 'attention paste plan pointer', schema: agenda.AgendaCopyPlanRefSchema, value: { planId: 'b'.repeat(32) } },
   { name: 'attention task plan pointer', schema: agenda.AgendaTaskPlanRefSchema, value: { planId: 'c'.repeat(32) } },
   {
@@ -1000,6 +1019,44 @@ describe('attention schemas', () => {
         value: { rule: suggestion.suggestion },
       },
       { name: 'empty suspended pointer', schema: agenda.AgendaSignInRuleSuspendedRefSchema, value: {} },
+    ];
+
+    // Act + Assert
+    assertRejects(cases);
+  });
+
+  it('should refuse a malformed gate, and a gate on an item the daemon did not raise', () => {
+    // Arrange
+    const option = { id: 'done', label: 'Done', outcome: 'close' };
+    const gate = {
+      cardId: 'F412',
+      laneId: 'released',
+      laneName: 'Released',
+      entry: 7,
+      projectId: 'p-1',
+      options: [option],
+    };
+    const cases: SchemaCase[] = [
+      { name: 'unknown outcome', schema: agenda.AgendaGateOutcomeSchema, value: 'archive' },
+      { name: 'option with an extra key', schema: agenda.AgendaGateOptionSchema, value: { ...option, hint: 'x' } },
+      {
+        name: 'option label too long',
+        schema: agenda.AgendaGateOptionSchema,
+        value: { ...option, label: 'x'.repeat(25) },
+      },
+      {
+        name: 'option label over two lines',
+        schema: agenda.AgendaGateOptionSchema,
+        value: { ...option, label: 'a\nb' },
+      },
+      { name: 'gate without options', schema: agenda.AgendaGateSchema, value: { ...gate, options: [] } },
+      { name: 'gate with a zero entry', schema: agenda.AgendaGateSchema, value: { ...gate, entry: 0 } },
+      { name: 'gate with an extra key', schema: agenda.AgendaGateSchema, value: { ...gate, owner: 'x' } },
+      {
+        name: 'gate raised by an agent',
+        schema: agenda.AgendaItemSchema,
+        value: { ...agendaItem, raisedBy: 'agent', gate },
+      },
     ];
 
     // Act + Assert
