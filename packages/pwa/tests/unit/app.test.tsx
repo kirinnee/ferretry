@@ -2532,27 +2532,45 @@ describe('AppShell', () => {
     }
   });
 
+  it("titles the machine home with the machine's name, and falls back to its address only when unnamed", async () => {
+    const named = await renderShell(`/d/${ALPHA}`, [daemonConnection({ ...alpha, daemonName: 'Liftoff EC2' })]);
+    try {
+      await settle();
+      expect(named.view.container.querySelector('#machine-home-title')?.textContent).toBe('Liftoff EC2');
+    } finally {
+      await named.view.unmount();
+    }
+
+    const unnamed = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
+    try {
+      await settle();
+      expect(unnamed.view.container.querySelector('#machine-home-title')?.textContent).toBe(alpha.baseUrl);
+    } finally {
+      await unnamed.view.unmount();
+    }
+  });
+
   it('mounts every daemon-qualified destination through its own slot', async () => {
     const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { sessions: ['one'] });
     await settle();
     const announced = () => must(view.container.querySelector('[data-route]'), 'the route announcer').textContent;
 
-    expect(announced()).toBe('Sessions');
+    expect(announced()).toBe('Home');
 
     for (const [path, expected] of [
-      [`/d/${ALPHA}/new`, 'Sessions, New'],
-      [`/d/${ALPHA}/settings`, 'Sessions, Settings'],
+      [`/d/${ALPHA}/new`, 'Home, New'],
+      [`/d/${ALPHA}/settings`, 'Home, Settings'],
       // No `/d/${ALPHA}/accounts` row: Accounts is Fleet's child panel inside Settings now, so it has no
       // address and no crumb of its own. The scope comes from the path taken to it, which is the
       // defect this replaced — the crumb it used to have named the page and never the machine.
-      [`/d/${ALPHA}/warden`, 'Sessions, Warden'],
-      [`/d/${ALPHA}/analytics`, 'Sessions, Analytics'],
-      [`/d/${ALPHA}/learning`, 'Sessions, Learning'],
-      [`/d/${ALPHA}/inbox`, 'Sessions, Inbox'],
-      [`/d/${ALPHA}/board`, 'Sessions, Board'],
-      [`/d/${ALPHA}/queue`, 'Sessions, Queue'],
-      [`/d/${ALPHA}/history`, 'Sessions, Imported history'],
-      [`/d/${ALPHA}/session/one`, 'Sessions, one'],
+      [`/d/${ALPHA}/warden`, 'Home, Warden'],
+      [`/d/${ALPHA}/analytics`, 'Home, Analytics'],
+      [`/d/${ALPHA}/learning`, 'Home, Learning'],
+      [`/d/${ALPHA}/inbox`, 'Home, Inbox'],
+      [`/d/${ALPHA}/board`, 'Home, Board'],
+      [`/d/${ALPHA}/queue`, 'Home, Queue'],
+      [`/d/${ALPHA}/history`, 'Home, Imported history'],
+      [`/d/${ALPHA}/session/one`, 'Home, one'],
     ] as const) {
       await popTo(path);
       await settle();
@@ -2629,7 +2647,7 @@ describe('AppShell', () => {
       try {
         await settle();
         expect(chosenRuntime(view.container)).toBe('claude-auto-named');
-        expect(view.container.querySelector('[data-route]')?.textContent).toBe('Sessions, New');
+        expect(view.container.querySelector('[data-route]')?.textContent).toBe('Home, New');
       } finally {
         await view.unmount();
       }
@@ -2739,7 +2757,7 @@ describe('route change accessibility', () => {
     const announcer = must(view.container.querySelector('[data-route]'), 'the route announcer');
     expect(announcer.getAttribute('role')).toBe('status');
     expect(announcer.getAttribute('aria-live')).toBe('polite');
-    expect(announcer.textContent).toBe('Sessions');
+    expect(announcer.textContent).toBe('Home');
     // A page LOAD is not a navigation: the browser has already placed focus.
     expect(document.activeElement).not.toBe(announcer);
 
@@ -2780,7 +2798,7 @@ describe('route change accessibility', () => {
     await settle();
 
     expect(document.activeElement).toBe(announcer);
-    expect(announcer.textContent).toBe('Sessions, Settings');
+    expect(announcer.textContent).toBe('Home, Settings');
     // The SAME node, renamed: a live region replaced wholesale announces nothing.
     expect(view.container.querySelector('[data-route]')).toBe(announcer);
     expect(announcer.getAttribute('tabindex')).toBe('-1');
@@ -2794,6 +2812,7 @@ describe('route change accessibility', () => {
       [
         { kind: 'connection-picker' },
         { kind: 'setup' },
+        { kind: 'home', daemonId: id },
         { kind: 'sessions', daemonId: id },
         { kind: 'new-session', daemonId: id },
         { kind: 'projects', daemonId: id },
@@ -2810,16 +2829,17 @@ describe('route change accessibility', () => {
     expect(announcements).toEqual([
       'Daemons',
       'Set up',
-      'Sessions',
-      'Sessions, New',
-      'Sessions, Projects',
-      'Sessions, Projects, Project',
-      'Sessions, Projects, Project, Lanes',
-      'Sessions, shared',
-      'Sessions, Settings',
-      'Sessions, Warden',
-      'Sessions, Analytics',
-      'Sessions, Learning',
+      'Home',
+      'Home, Sessions',
+      'Home, New',
+      'Home, Projects',
+      'Home, Projects, Project',
+      'Home, Projects, Project, Lanes',
+      'Home, shared',
+      'Home, Settings',
+      'Home, Warden',
+      'Home, Analytics',
+      'Home, Learning',
     ]);
     // The daemon fingerprint is a credential-adjacent identifier, not a place.
     for (const announcement of announcements) expect(announcement).not.toContain('alpha');
@@ -3289,7 +3309,7 @@ describe('the global destination and settings finder', () => {
   it('opens from a pull on an opted-in page scroller, and leaves an ordinary scroll alone', async () => {
     // The harness reports no fine pointer, so `useInputModality` resolves to the
     // conservative touch-affected state a phone gets.
-    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { sessions: ['s1'] });
+    const { view } = await renderShell(`/d/${ALPHA}/sessions`, [alpha.daemonId], { sessions: ['s1'] });
     await settle();
     const scroller = must(
       view.container.querySelector<HTMLElement>(`[${PULL_TO_PALETTE_ATTR}]`),
@@ -5005,7 +5025,7 @@ describe('the navigation cache', () => {
     // Arrange
     let live = 'assistant/message: First read of the conversation.';
     const valve = transcriptValve();
-    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], {
+    const { view } = await renderShell(`/d/${ALPHA}/sessions`, [alpha.daemonId], {
       sessions: ['shared'],
       transcript: () => live,
       transcriptGate: valve.gate,
@@ -5027,7 +5047,7 @@ describe('the navigation cache', () => {
       expect(transcriptText(view.container)).toContain('First read of the conversation.');
 
       // Act — Back to the list, then Forward into the chat while the daemon has not answered yet.
-      await returnTo(sessionsEntry, `/d/${ALPHA}`);
+      await returnTo(sessionsEntry, `/d/${ALPHA}/sessions`);
       const shellAfterBack = view.container.firstElementChild;
       const regionAfterBack = view.container.querySelector('[data-page-scroll-region]');
       valve.shut();
@@ -5127,18 +5147,18 @@ describe('the navigation cache', () => {
     }
   });
 
-  it('steps back to the sessions list from a failed session reached from it', async () => {
+  it('steps back to the home from a failed session reached from it', async () => {
     // Arrange
     const backs: string[] = [];
     const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { sessionFailure: 'daemon refused the read' });
     const restoreBack = patchGlobal(window.history, 'back', () => backs.push(window.location.pathname));
     try {
       await settle();
-      // Reached FROM the list (a notification tap, a link), so the list is the entry behind it.
+      // Reached FROM the home (a link), so the home is the entry behind it.
       await popTo(`/d/${ALPHA}/session/shared`);
       await settle();
       const sessions = must(
-        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Home'),
         'the error page’s way back',
       );
 
@@ -5153,7 +5173,7 @@ describe('the navigation cache', () => {
     }
   });
 
-  it('pushes the sessions list from a failed session opened by a deep link', async () => {
+  it('pushes the home from a failed session opened by a deep link', async () => {
     // Arrange
     const backs: string[] = [];
     const { view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
@@ -5163,7 +5183,7 @@ describe('the navigation cache', () => {
     try {
       await settle();
       const sessions = must(
-        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Home'),
         'the error page’s way back',
       );
 
@@ -5224,7 +5244,7 @@ describe('the navigation cache', () => {
     }
   });
 
-  it('steps back to the sessions list from New session opened from it', async () => {
+  it('steps back to the home from New session opened from it', async () => {
     // Arrange
     const backs: string[] = [];
     const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
@@ -5236,8 +5256,35 @@ describe('the navigation cache', () => {
       );
       await settle();
       const sessions = must(
-        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Home'),
         'the New session page’s way back',
+      );
+
+      // Act
+      await interact(() => sessions.click());
+
+      // Assert
+      expect(backs).toEqual([`/d/${ALPHA}/new`]);
+    } finally {
+      restoreBack();
+      await view.unmount();
+    }
+  });
+
+  it('names the way back from New session after the sessions list it was opened from', async () => {
+    // Arrange
+    const backs: string[] = [];
+    const { view } = await renderShell(`/d/${ALPHA}/sessions`, [alpha.daemonId]);
+    const restoreBack = patchGlobal(window.history, 'back', () => backs.push(window.location.pathname));
+    try {
+      await settle();
+      await interact(() =>
+        must(view.container.querySelector<HTMLAnchorElement>('main a[href$="/new"]'), 'the New session link').click(),
+      );
+      await settle();
+      const sessions = must(
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        'the New session page’s way back to the list',
       );
 
       // Act

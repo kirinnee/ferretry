@@ -16,8 +16,14 @@ export const NOW = Date.parse('2026-08-05T10:00:00.000Z');
 const AT = '2026-08-01T09:00:00.000Z';
 const DIGEST = 'a'.repeat(64);
 
-const LABEL: Readonly<Record<InputSensitivity, string>> = { secret: 'Password', private: 'Code', plain: 'Value' };
+const LABEL: Readonly<Record<InputSensitivity, string>> = {
+  secret: 'Password',
+  private: 'Code',
+  code: 'Code',
+  plain: 'Value',
+};
 const PLAIN_RISK: InputRisk = { level: 'red', reason: 'Not secret: the ferret can see this value.' };
+const CODE_RISK: InputRisk = { level: 'neutral', reason: 'One-time code: the ferret can see it.' };
 const SUDO_RISK: InputRisk = { level: 'green', reason: 'sudo is a recognised password prompt and typing is hidden.' };
 
 /** One field of a card, with the label and risk its sensitivity gets unless the test says otherwise. */
@@ -28,7 +34,7 @@ export const field = (
   id: 'value',
   label: LABEL[sensitivity],
   sensitivity,
-  risk: sensitivity === 'plain' ? PLAIN_RISK : SUDO_RISK,
+  risk: sensitivity === 'plain' ? PLAIN_RISK : sensitivity === 'code' ? CODE_RISK : SUDO_RISK,
   ...overrides,
 });
 
@@ -79,7 +85,14 @@ export const request = (overrides: Partial<InputRequest> = {}): InputRequest => 
  * sensitivity and risk and the field's own agree unless a test gives `fields` itself.
  */
 export const requestOf = (sensitivity: InputSensitivity, overrides: Partial<InputRequest> = {}): InputRequest => {
-  const risk = 'risk' in overrides ? overrides.risk : sensitivity === 'plain' ? PLAIN_RISK : SUDO_RISK;
+  const risk =
+    'risk' in overrides
+      ? overrides.risk
+      : sensitivity === 'plain'
+        ? PLAIN_RISK
+        : sensitivity === 'code'
+          ? CODE_RISK
+          : SUDO_RISK;
   return request({
     sensitivity,
     fields: [field(sensitivity, risk === undefined ? { risk: undefined } : { risk })],

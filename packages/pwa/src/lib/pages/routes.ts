@@ -48,6 +48,12 @@ export interface SharedRoute {
   readonly kind: 'shared';
 }
 
+/** The machine home: an overview of what one machine is doing and the few ferrets to open first. */
+export interface DaemonHomeRoute {
+  readonly kind: 'home';
+  readonly daemonId: DaemonId;
+}
+
 export interface DaemonSessionsRoute {
   readonly kind: 'sessions';
   readonly daemonId: DaemonId;
@@ -152,6 +158,7 @@ export interface DaemonMachineSetupRoute {
 }
 
 export type DaemonPageRoute =
+  | DaemonHomeRoute
   | DaemonSessionsRoute
   | DaemonNewSessionRoute
   | DaemonProjectsRoute
@@ -230,14 +237,26 @@ export const joinPath = (): '/join' => '/join';
 /** Builds the Shared with me pathname. */
 export const sharedPath = (): '/shared' => '/shared';
 
-/** Builds the canonical sessions pathname for one daemon. */
-export const daemonSessionsPath = (id: DaemonId): string => `/d/${encodeURIComponent(id)}`;
+/** Builds the canonical machine-home pathname for one daemon: the overview a machine opens on. */
+export const daemonHomePath = (id: DaemonId): string => `/d/${encodeURIComponent(id)}`;
+
+/** Builds the canonical sessions-list pathname for one daemon: every session, one tap from the home. */
+export const daemonSessionsPath = (id: DaemonId): string => `${daemonHomePath(id)}/sessions`;
+
+/** Where an in-app "back" from a page opened off this machine goes: the list when the reader came from it, otherwise the home. */
+export const daemonBackPlace = (
+  id: DaemonId,
+  previousPath: string | undefined,
+): { readonly path: string; readonly label: string } =>
+  previousPath === daemonSessionsPath(id)
+    ? { path: daemonSessionsPath(id), label: '← Sessions' }
+    : { path: daemonHomePath(id), label: '← Home' };
 
 /** Builds the canonical new-session pathname for one daemon. */
-export const daemonNewSessionPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/new`;
+export const daemonNewSessionPath = (id: DaemonId): string => `${daemonHomePath(id)}/new`;
 
 /** Builds the canonical durable-project hub pathname for one daemon. */
-export const daemonProjectsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/projects`;
+export const daemonProjectsPath = (id: DaemonId): string => `${daemonHomePath(id)}/projects`;
 
 /** Builds the canonical UUID-addressed project detail pathname for one daemon. */
 export const daemonProjectPath = (id: DaemonId, projectId: string): string => {
@@ -260,14 +279,14 @@ export const daemonProjectLanesPath = (id: DaemonId, projectId: string): string 
 /** Builds the canonical session pathname for one daemon and session. */
 export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
   const scope = daemonSessionScope({ daemonId: id }, sessionId);
-  return `${daemonSessionsPath(id)}/session/${encodeURIComponent(scope.sessionId)}`;
+  return `${daemonHomePath(id)}/session/${encodeURIComponent(scope.sessionId)}`;
 };
 
 /** Builds the Inbox pathname, under the machine on screen. `/attention` is the old spelling and redirects here. */
-export const daemonAgendaPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/inbox`;
+export const daemonAgendaPath = (id: DaemonId): string => `${daemonHomePath(id)}/inbox`;
 
 /** Builds the Board pathname, under the machine on screen. */
-export const daemonBoardPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/board`;
+export const daemonBoardPath = (id: DaemonId): string => `${daemonHomePath(id)}/board`;
 
 /** Builds one card's address on the Board: `/d/<id>/board/<taskId>`. */
 export const daemonBoardCardPath = (id: DaemonId, taskId: string): string =>
@@ -282,16 +301,16 @@ export const daemonBoardForFerretPath = (id: DaemonId, sessionId: string, highli
 
 /** Builds the message-queue pathname: `/d/<id>/queue`, or one ferret's `/d/<id>/queue/<sessionId>`. */
 export const daemonQueuePath = (id: DaemonId, sessionId?: string): string =>
-  `${daemonSessionsPath(id)}/queue${sessionId === undefined ? '' : `/${encodeURIComponent(sessionId)}`}`;
+  `${daemonHomePath(id)}/queue${sessionId === undefined ? '' : `/${encodeURIComponent(sessionId)}`}`;
 
 /** Builds the canonical settings pathname for one daemon. */
-export const daemonSettingsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/settings`;
+export const daemonSettingsPath = (id: DaemonId): string => `${daemonHomePath(id)}/settings`;
 
 /** Builds the canonical Warden pathname for one daemon. */
-export const daemonWardenPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/warden`;
+export const daemonWardenPath = (id: DaemonId): string => `${daemonHomePath(id)}/warden`;
 
 /** Builds the canonical analytics pathname for one daemon. */
-export const daemonAnalyticsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/analytics`;
+export const daemonAnalyticsPath = (id: DaemonId): string => `${daemonHomePath(id)}/analytics`;
 
 /**
  * Builds the Analytics › Query pathname for one daemon, with the query as `?q=` when there is one. The
@@ -301,13 +320,13 @@ export const daemonAnalyticsQueryPath = (id: DaemonId, query?: string | null): s
   `${daemonAnalyticsPath(id)}/query${query?.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''}`;
 
 /** Builds the canonical learning pathname for one daemon. */
-export const daemonLearningPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/learning`;
+export const daemonLearningPath = (id: DaemonId): string => `${daemonHomePath(id)}/learning`;
 
 /** Builds the canonical history-import pathname for one daemon. */
-export const daemonImportedHistoryPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/history`;
+export const daemonImportedHistoryPath = (id: DaemonId): string => `${daemonHomePath(id)}/history`;
 
 /** Builds one machine's full-screen first run: `/d/<id>/setup`. */
-export const daemonMachineSetupPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/setup`;
+export const daemonMachineSetupPath = (id: DaemonId): string => `${daemonHomePath(id)}/setup`;
 
 /** Resolves a browser pathname to the page model, without consulting browser globals. */
 export const parseRoute = (pathname: string): Route => {
@@ -321,6 +340,7 @@ export const parseRoute = (pathname: string): Route => {
   if (id === undefined) return connectionPicker;
 
   if (sessionSegment === undefined && remainder.length === 0) {
+    if (destination === 'sessions') return { kind: 'sessions', daemonId: id };
     if (destination === 'new') return { kind: 'new-session', daemonId: id };
     if (destination === 'projects') return { kind: 'projects', daemonId: id };
     if (destination === 'settings') return { kind: 'settings', daemonId: id };
@@ -375,7 +395,7 @@ export const parseRoute = (pathname: string): Route => {
     if (sessionId !== undefined) return { kind: 'session', daemonId: id, sessionId };
   }
 
-  return { kind: 'sessions', daemonId: id };
+  return { kind: 'home', daemonId: id };
 };
 
 /** Returns the canonical pathname for a parsed page or compatibility redirect. */
@@ -389,6 +409,8 @@ export const routePath = (route: Route): string => {
       return joinPath();
     case 'shared':
       return sharedPath();
+    case 'home':
+      return daemonHomePath(route.daemonId);
     case 'sessions':
       return daemonSessionsPath(route.daemonId);
     case 'new-session':

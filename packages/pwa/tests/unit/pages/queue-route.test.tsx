@@ -13,6 +13,7 @@ const unused = (): never => {
 const slots: PageHostSlots = {
   ConnectionPicker: unused,
   Setup: unused,
+  Home: unused,
   Sessions: unused,
   NewSession: unused,
   SessionChat: unused,

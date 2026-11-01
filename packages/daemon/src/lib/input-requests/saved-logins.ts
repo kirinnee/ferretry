@@ -86,7 +86,8 @@ export function shortHost(hostName: string): string | undefined {
 
 /** Which field a typed value is saved as. A one-time code is never saved: its seed is, from Settings. */
 export function savedFieldFor(sensitivity: InputSensitivity): Exclude<LoginFieldRole, 'totp'> | undefined {
-  return sensitivity === 'private' ? undefined : sensitivity === 'secret' ? 'password' : 'username';
+  if (sensitivity === 'private' || sensitivity === 'code') return undefined;
+  return sensitivity === 'secret' ? 'password' : 'username';
 }
 
 /** Whether an entry is for this target's key: a terminal by `match`, a page by its login domains. Exact. */

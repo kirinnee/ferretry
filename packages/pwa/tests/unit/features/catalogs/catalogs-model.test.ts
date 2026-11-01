@@ -18,10 +18,11 @@ import {
 import { itemPreview, ownedCatalog } from '../../../support/catalog-views.ts';
 
 describe('sharing', () => {
-  it('names the host command and explains who starts with it off', () => {
+  it('names the in-app way first, then the host command', () => {
     should(SHARING_GRANT_COMMAND).match(/sharing/u);
     should(SHARING_GRANT_COMMAND).match(/--use/u);
-    should(SHARING_OFF_LINES.join(' ')).match(/before this release/u);
+    should(SHARING_OFF_LINES.join(' ')).match(/Settings › Devices/u);
+    should(SHARING_OFF_LINES.at(-1)).match(/machine itself/u);
   });
 });
 

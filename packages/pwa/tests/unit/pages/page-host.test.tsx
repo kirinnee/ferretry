@@ -50,6 +50,7 @@ describe('PageHost', () => {
     const slots: PageHostSlots = {
       ConnectionPicker: () => <div data-page="connections">connections</div>,
       Setup: () => <div data-page="setup">setup</div>,
+      Home: daemonPage('home'),
       Sessions: daemonPage('sessions'),
       NewSession: daemonPage('new-session'),
       Projects: daemonPage('projects'),
@@ -64,6 +65,7 @@ describe('PageHost', () => {
     };
     const paths = [
       '/d/daemon-a',
+      '/d/daemon-a/sessions',
       '/d/daemon-a/new',
       '/d/daemon-a/projects',
       '/d/daemon-a/projects/11111111-1111-4111-8111-111111111111',
@@ -83,6 +85,7 @@ describe('PageHost', () => {
 
     // Assert
     should(html).deepEqual([
+      '<div data-page="home">home</div>',
       '<div data-page="sessions">sessions</div>',
       '<div data-page="new-session">new-session</div>',
       '<div data-page="projects">projects</div>',
@@ -115,6 +118,7 @@ describe('PageHost', () => {
     const slots: PageHostSlots = {
       ConnectionPicker: unusedDaemonPage,
       Setup: unusedDaemonPage,
+      Home: unusedDaemonPage,
       Sessions: unusedDaemonPage,
       NewSession: unusedDaemonPage,
       SessionChat: unusedDaemonPage,
@@ -154,6 +158,7 @@ describe('PageHost', () => {
     const slots: PageHostSlots = {
       ConnectionPicker: unusedDaemonPage,
       Setup: unusedDaemonPage,
+      Home: unusedDaemonPage,
       Sessions: unusedDaemonPage,
       NewSession: unusedDaemonPage,
       Projects: unusedDaemonPage,
@@ -198,6 +203,7 @@ describe('PageHost', () => {
     const slots: PageHostSlots = {
       ConnectionPicker: () => <p>Pair a daemon</p>,
       Setup: () => <p>Set up Ferretry</p>,
+      Home: unusedDaemonPage,
       Sessions: unusedDaemonPage,
       NewSession: unusedDaemonPage,
       Projects: unusedDaemonPage,
@@ -232,6 +238,7 @@ describe('PageHost', () => {
     const slots: PageHostSlots = {
       ConnectionPicker: daemonPage,
       Setup: daemonPage,
+      Home: daemonPage,
       Sessions: daemonPage,
       NewSession: daemonPage,
       Projects: daemonPage,
@@ -261,6 +268,7 @@ describe('PageHost', () => {
     const base: PageHostSlots = {
       ConnectionPicker: unused,
       Setup: unused,
+      Home: unused,
       Sessions: unused,
       NewSession: unused,
       SessionChat: unused,

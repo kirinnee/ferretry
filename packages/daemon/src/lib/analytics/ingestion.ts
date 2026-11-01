@@ -2,6 +2,7 @@ import type { AnalyticsIndexStatus, AnalyticsRawSession } from '@ferretry/protoc
 import type { PassTrigger } from '../runtime/pass-trigger.ts';
 import type { TranscriptHarness } from '../transcript/types.ts';
 import { type AnalyticsIngestRefusal, analyticsStateEnded, gateAnalyticsIngest } from './ingest.ts';
+import { withCostEvidence } from './cost-evidence.ts';
 import { type AnalyticsPricingRate, analyticsCatalogAliasGroups } from './pricing.ts';
 import { deriveAnalyticsSessionRecord, type FinishedAnalyticsSession } from './session-record.ts';
 import {
@@ -255,6 +256,8 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
   private chain: Promise<void> = Promise.resolve();
   /** The sessions the last pass admitted: every one the index holds a row for, or is about to. */
   private admitted: ReadonlySet<string> = new Set();
+  /** The catalog the last pass priced with: what "today's rates" means to a read between passes. */
+  private catalog: readonly AnalyticsPricingRate[] | undefined;
 
   constructor(private readonly parts: AnalyticsIngestionParts) {}
 
@@ -343,9 +346,10 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
   /** The stored rows and an honest account of what they are. */
   read(): AnalyticsIndexRead {
     const status = this.parts.store.status();
+    const now = this.parts.clock.now();
     return {
-      now: this.parts.clock.now(),
-      rows: this.parts.store.rows().map(row => row.raw),
+      now,
+      rows: this.parts.store.rows().map(row => withCostEvidence(row, this.catalog, now)),
       status: {
         schemaVersion: status.schemaVersion,
         sessions: status.sessions,
@@ -364,6 +368,7 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
 
   private async sweep(): Promise<AnalyticsIngestSummary> {
     const catalog = await this.parts.pricing();
+    this.catalog = catalog;
     const pricingFingerprint = analyticsPricingCatalogFingerprint(catalog);
     const candidates = await this.parts.candidates.listCandidates();
     const stored = this.parts.store.ingested();

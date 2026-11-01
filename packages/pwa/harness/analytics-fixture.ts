@@ -91,7 +91,7 @@ const MODELS = [
   { model: 'claude-sonnet-5-5', harness: 'claude', rates: [3, 15, 0.3, 3.75] },
   { model: 'claude-haiku-5-5', harness: 'claude', rates: [1, 5, 0.1, 1.25] },
   { model: 'gpt-5.6-sol', harness: 'codex', rates: [1.25, 10, 0.125, 0] },
-  { model: 'gpt-6-astra', harness: 'codex', rates: null },
+  { model: 'acme-unpriced-1', harness: 'codex', rates: null },
 ] as const;
 
 /** A small deterministic generator, so every capture draws the same fleet. */
@@ -251,7 +251,23 @@ export const ANALYTICS_FIXTURE_ROWS: readonly AnalyticsRawSession[] = (() => {
       scale: 0.6,
     }),
   );
-  return rows;
+  return rows.map((row, at) => {
+    const gap =
+      row.model === 'claude-opus-5-5' && at % 11 === 0
+        ? 'transcript_unresolved'
+        : row.model === 'claude-sonnet-5-5' && at % 17 === 0
+          ? 'transcript_unreadable'
+          : row.model === 'acme-unpriced-1'
+            ? 'unknown_pricing_model'
+            : null;
+    const cost = gap === null ? row.equivalentApiCostUsdMicros : null;
+    return {
+      ...row,
+      equivalentApiCostUsdMicros: cost,
+      equivalentApiCostCurrentUsdMicros: cost === null ? null : Math.round(cost * 1.0),
+      costGap: gap,
+    };
+  });
 })();
 
 const index = (rows: readonly AnalyticsRawSession[]) => ({
@@ -311,6 +327,7 @@ const MEASURES = {
   cacheWrite1hInputTokens: row => row.cacheWrite1hInputTokens,
   reasoningTokens: row => row.reasoningTokens,
   equivalentApiCostUsdMicros: row => row.equivalentApiCostUsdMicros,
+  equivalentApiCostCurrentUsdMicros: row => row.equivalentApiCostCurrentUsdMicros ?? null,
   turns: row => row.turns,
   durationMs: row => row.durationMs,
   activeDurationMs: row => row.activeDurationMs,
@@ -327,6 +344,7 @@ const measure = (
   const total = rows.length;
   if (aggregation === 'count') return { value: known.length, known: known.length, total };
   if (known.length === 0) return { value: null, known: 0, total };
+  const partialSum = known.length < total && aggregation === 'sum';
   const value =
     aggregation === 'min'
       ? Math.min(...known)
@@ -337,7 +355,15 @@ const measure = (
           : known.length < total
             ? null
             : known.reduce((sum, item) => sum + item, 0);
-  return { value, known: known.length, total };
+  return partialSum
+    ? { value, known: known.length, total, knownSum: known.reduce((sum, item) => sum + item, 0) }
+    : { value, known: known.length, total };
+};
+
+const gapsOf = (rows: readonly AnalyticsRawSession[]): Record<string, number> => {
+  const gaps: Record<string, number> = {};
+  for (const row of rows) if (row.costGap) gaps[row.costGap] = (gaps[row.costGap] ?? 0) + 1;
+  return gaps;
 };
 
 const aggregateRow = (
@@ -350,6 +376,7 @@ const aggregateRow = (
   return {
     labels,
     sessions: rows.length,
+    ...(Object.keys(gapsOf(rows)).length > 0 ? { costGaps: gapsOf(rows) } : {}),
     rates: {
       stall: percent(row => row.stalled),
       failure: percent(row => row.failed),

@@ -47,6 +47,7 @@ export function aggregate(overrides: Partial<AnalyticsAggregateResult> = {}): An
     cacheWrite1hInputTokens: known(20_000),
     reasoningTokens: unknown(),
     equivalentApiCostUsdMicros: known(12_500_000),
+    equivalentApiCostCurrentUsdMicros: known(13_000_000),
     turns: known(48),
     durationMs: known(3_725_000),
     activeDurationMs: known(1_800_000),

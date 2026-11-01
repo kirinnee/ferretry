@@ -26,6 +26,7 @@ import {
   renderAgendaList,
   renderAgendaMutation,
   renderRepliesSent,
+  wasWithdrawn,
 } from './render.ts';
 import { parseNeededBy } from './when.ts';
 
@@ -84,6 +85,8 @@ export interface AgendaStepOptions extends AgendaCommandOptions {
 /** Flags that resolve an item. */
 export interface AgendaResolveOptions extends AgendaCommandOptions, AnswerFlags {
   readonly note?: string;
+  /** `done --reason`: why a question the owner has not answered is closed (recorded as the note). */
+  readonly reason?: string;
 }
 
 /** Flags that surface an item. */
@@ -234,14 +237,16 @@ export class AgendaController {
   async resolve(reference: string, options: AgendaResolveOptions): Promise<void> {
     const id = parseAgendaReference(reference);
     const response = parseAnswer(options);
-    const note = text(options.note);
+    const note = text(options.reason) ?? text(options.note);
     const snapshot = await this.gateway.apply(this.#target(options), {
       action: 'resolve',
       id,
       ...(note === undefined ? {} : { note }),
       ...(response === undefined ? {} : { response }),
     });
-    this.#report(snapshot, options, () => renderAgendaMutation('resolved', agendaReference(id), snapshot));
+    const closed = snapshot.resolved.find(item => item.id === id);
+    const verb = closed !== undefined && wasWithdrawn(closed) ? 'withdrew the unanswered question' : 'resolved';
+    this.#report(snapshot, options, () => renderAgendaMutation(verb, agendaReference(id), snapshot));
   }
 
   /** The owner asks the ferret that raised an item for more information. The item stays open, waiting on it. */

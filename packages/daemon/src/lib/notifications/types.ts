@@ -155,9 +155,26 @@ export interface NotificationClock {
   now(): string;
 }
 
-/** Where the notification service says what it could not do. */
+/**
+ * Where the notification service says what became of each push it tried. Announcing is total, so this is
+ * the only trace a push that could not be made leaves outside the ledger.
+ */
 export interface NotificationDiagnostics {
-  warn(message: string): void;
+  /** The push was not made, or the push fan-out refused it. */
+  failed(key: string, reason: string): void;
+  /** The push reached the push fan-out, which reported this. */
+  made(key: string, result: PushDeliveryResult): void;
 }
+
+/** How the delivery ledger reads now. */
+export type NotificationLedgerHealth =
+  | {
+      readonly readable: true;
+      /** Complete lines this daemon cannot read, skipped so the rest still decide. */
+      readonly skipped: number;
+      /** The newest outcome the ledger records, when it records one. */
+      readonly latestOutcome?: NotificationOutcomeRecord;
+    }
+  | { readonly readable: false; readonly reason: string };
 
 export type NotificationSerialExecutor = Pick<SerialExecutor, 'run'>;

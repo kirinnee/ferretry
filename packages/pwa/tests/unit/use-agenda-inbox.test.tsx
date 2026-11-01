@@ -13,8 +13,10 @@ import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-co
 import type { DaemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { DaemonFleetStore, FleetSnapshot } from '../../src/lib/fleet-store.ts';
 import '../support/dom.ts';
+import { toTestCards } from '../../src/lib/to-test-inbox.ts';
 import { interact, type Mounted, mount } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
+import { boardModelOf, card } from './board-support.ts';
 
 const studio = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'd-studio' });
 const laptop = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'd-laptop' });
@@ -115,14 +117,16 @@ function Probe({
   client,
   machines,
   timers,
+  toTest,
   onInbox,
 }: {
   readonly client: DaemonAgendaClient;
   readonly machines: readonly AgendaInboxMachine[];
   readonly timers: DeferredTimers;
+  readonly toTest?: AgendaInbox['toTest'];
   readonly onInbox: (inbox: AgendaInbox) => void;
 }) {
-  onInbox(useAgendaInboxModel(client, machines, timers));
+  onInbox(useAgendaInboxModel(client, machines, timers, toTest));
   return null;
 }
 
@@ -134,6 +138,21 @@ const settle = async (): Promise<void> => {
 };
 
 describe('useAgendaInboxModel', () => {
+  test('counts the cards waiting for a try with the unread agenda items, and holds them apart', async () => {
+    const { client } = fakeClient(new Map());
+    const { timers } = manualTimers();
+    let inbox: AgendaInbox | null = null;
+    const rows = toTestCards(await boardModelOf([card('F1', { laneId: 'tested' }), card('F2', { laneId: 'tested' })]));
+    view = await mount(
+      <Probe client={client} machines={[]} onInbox={value => (inbox = value)} timers={timers} toTest={rows} />,
+    );
+    await settle();
+    const read = inbox as unknown as AgendaInbox;
+    expect(read.total).toBe(2);
+    expect(read.toTest.map(row => row.card.task.id).sort()).toEqual(['F1', 'F2']);
+    expect(read.cards).toEqual([]);
+  });
+
   test('reads only unread boards, once per summary, and deals their cards newest first', async () => {
     const boards = new Map([
       ['studio/a', board('a', [item('A1', 1), item('A2', 6)])],

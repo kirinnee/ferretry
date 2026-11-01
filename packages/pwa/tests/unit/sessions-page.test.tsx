@@ -65,7 +65,7 @@ interface FakeNavigation extends ScopeNavigation {
   readonly notified: () => number;
 }
 
-const navigation = (path = '/d/alpha'): FakeNavigation => {
+const navigation = (path = '/d/alpha/sessions'): FakeNavigation => {
   let current = new URL(path, 'https://pwa.invalid');
   let state: unknown = null;
   let notifications = 0;
@@ -317,7 +317,7 @@ describe('SessionsPage', () => {
         must(page.container.querySelector('[aria-label="Focus folder alpha repo"]'), 'project heading') as HTMLElement
       ).click(),
     );
-    expect(nav.pushes).toEqual(['/d/alpha?project=%2Falpha%2Frepo']);
+    expect(nav.pushes).toEqual(['/d/alpha/sessions?project=%2Falpha%2Frepo']);
     expect(props.controls.controls(alpha.daemonId).projectScope).toBe('/alpha/repo');
     await page.unmount();
   });
@@ -443,6 +443,7 @@ describe('SessionsPage', () => {
         slots={{
           ConnectionPicker: Empty,
           Setup: Empty,
+          Home: () => <p>home</p>,
           Sessions: connection => <SessionsPage {...props} connection={connection.connection} />,
           NewSession: Empty,
           SessionChat: Session,

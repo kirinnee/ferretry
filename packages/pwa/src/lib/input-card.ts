@@ -58,7 +58,8 @@ export const fieldsOf = (request: InputRequest): readonly InputCardField[] =>
 
 const NEEDS: Readonly<Record<InputSensitivity, string>> = {
   secret: 'a password',
-  private: 'a code',
+  private: 'a private value',
+  code: 'a code',
   plain: 'an answer',
 };
 
@@ -262,8 +263,14 @@ export const fieldAttributes = (sensitivity: InputSensitivity, revealed: boolean
   if (sensitivity === 'secret') return { type: revealed ? 'text' : 'password', autoComplete: 'current-password' };
   if (sensitivity === 'private')
     return { type: revealed ? 'text' : 'password', autoComplete: 'one-time-code', inputMode: 'numeric' };
+  // A one-time code is not secret: it shows as it is typed, and may hold letters (a device code), so no numeric pad.
+  if (sensitivity === 'code') return { type: 'text', autoComplete: 'one-time-code' };
   return { type: 'text', autoComplete: 'off' };
 };
+
+/** Whether a field hides what is typed behind a Show toggle: not a plain value, and not a one-time code. */
+export const revealable = (sensitivity: InputSensitivity): boolean =>
+  sensitivity === 'secret' || sensitivity === 'private';
 
 export const PLAIN_NOTICE = 'Not secret: the ferret can see this value.';
 

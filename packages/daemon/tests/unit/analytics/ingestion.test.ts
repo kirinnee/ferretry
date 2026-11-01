@@ -744,6 +744,43 @@ describe('AnalyticsIngestionService.read', () => {
     });
   });
 
+  it('should say why an unreadable session has no cost, and price a readable one at the rates of its day and of today', async () => {
+    // Arrange: the rate fell on 2026-09-01, after the session ran and before the read.
+    const [base] = RATES as [AnalyticsPricingRate];
+    const dated: readonly AnalyticsPricingRate[] = [
+      { ...base, validThrough: '2026-08-31T23:59:59.999Z' },
+      {
+        ...base,
+        pricingKey: 'operator:claude-opus-5:2026-09',
+        validFrom: '2026-09-01T00:00:00.000Z',
+        rates: { ...base.rates, input: 1_000_000, output: 5_000_000 },
+      },
+    ];
+    const test = harness(
+      [candidate({ id: 'ok' }), candidate({ id: 'lost' })],
+      async id =>
+        id === 'ok' ? readEvidence([usageEvent('claude-opus-5', 1_000_000, 1_000_000)]) : { kind: 'unresolved' },
+      { clock: { now: () => '2026-11-01T00:00:00.000Z' } },
+    );
+    test.setPricing(dated);
+
+    // Act
+    await test.service.ingest();
+    const rows = new Map(test.service.read().rows.map(row => [row.id, row]));
+
+    // Assert: 1M in × $15 + 1M out × $75 then; × $1 + × $5 today.
+    should(rows.get('ok')).match({
+      equivalentApiCostUsdMicros: 90_000_000,
+      equivalentApiCostCurrentUsdMicros: 6_000_000,
+      costGap: null,
+    });
+    should(rows.get('lost')).match({
+      equivalentApiCostUsdMicros: null,
+      equivalentApiCostCurrentUsdMicros: null,
+      costGap: 'transcript_unresolved',
+    });
+  });
+
   it('should say a pass is in flight while one is running', async () => {
     // An index that is mid-refresh and one that has nothing to say look identical from the outside and
     // are completely different states.

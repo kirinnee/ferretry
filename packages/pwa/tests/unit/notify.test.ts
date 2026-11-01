@@ -18,6 +18,7 @@ import {
   planNotificationPresentation,
   showGroupedNotification,
   showNotification,
+  urgentNotificationOptions,
 } from '../../src/lib/notify.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -262,5 +263,23 @@ describe('showNotification', () => {
     });
 
     should(await showNotification(refusing, payload())).equal('unavailable');
+  });
+});
+
+describe('a high-priority push', () => {
+  it('asks the platform to keep it on screen and to sound again, and asks nothing new of any other push', async () => {
+    const urgent = payload({ urgency: 'high', tag: 'fy-push:a:attention-ses-1:A2' });
+    const target = registration([]);
+
+    await showGroupedNotification(target, urgent);
+
+    should(target.shown[0]?.options).containDeep({
+      requireInteraction: true,
+      renotify: true,
+      silent: false,
+      vibrate: [200, 100, 200],
+      tag: 'fy-push:a:attention-ses-1:A2',
+    });
+    should(urgentNotificationOptions(payload())).eql({});
   });
 });

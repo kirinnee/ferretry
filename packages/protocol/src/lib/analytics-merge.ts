@@ -24,10 +24,19 @@ export class AnalyticsMergeError extends Error {
  * Every measure field of an aggregate row, DERIVED from the schema rather than listed: a measure the
  * protocol grows is merged the day it lands, instead of being silently dropped from a fleet view.
  */
-const NOT_MEASURES = new Set(['labels', 'sessions', 'rates']);
+const NOT_MEASURES = new Set(['labels', 'sessions', 'rates', 'costGaps']);
 const MEASURE_KEYS = Object.keys(AnalyticsAggregateResultSchema.shape).filter(
   key => !NOT_MEASURES.has(key),
 ) as AnalyticsMeasureKey[];
+
+/** What a part of a sum stated: its whole value when complete, else its lower bound, else nothing. */
+const statedSum = (part: AnalyticsMeasure): number | undefined => part.value ?? part.knownSum;
+
+function addKnownSums(left: AnalyticsMeasure, right: AnalyticsMeasure): number | undefined {
+  const a = statedSum(left);
+  const b = statedSum(right);
+  return a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
+}
 
 /**
  * Two parts of one measure, as one.
@@ -46,7 +55,12 @@ function mergeMeasure(
   if (left.total === 0) return right;
   const known = left.known + right.known;
   const total = left.total + right.total;
-  if (aggregation === 'count' || left.value === null || right.value === null) return { value: null, known, total };
+  if (aggregation === 'count') return { value: null, known, total };
+  if (left.value === null || right.value === null) {
+    // A sum keeps its lower bound across the merge: what each part stated, added.
+    const bound = aggregation === 'sum' ? addKnownSums(left, right) : undefined;
+    return bound === undefined ? { value: null, known, total } : { value: null, known, total, knownSum: bound };
+  }
   const value =
     aggregation === 'sum'
       ? left.value + right.value
@@ -77,6 +91,17 @@ function partOf(
     : measure;
 }
 
+/** Reason counts add; absent on both sides stays absent. */
+function mergeCostGaps(
+  left: Readonly<Record<string, number>> | undefined,
+  right: Readonly<Record<string, number>> | undefined,
+): Record<string, number> | undefined {
+  if (left === undefined && right === undefined) return undefined;
+  const merged: Record<string, number> = { ...left };
+  for (const [reason, count] of Object.entries(right ?? {})) merged[reason] = (merged[reason] ?? 0) + count;
+  return merged;
+}
+
 function mergeRow(
   left: AnalyticsAggregateResult,
   right: AnalyticsAggregateResult,
@@ -92,11 +117,13 @@ function mergeRow(
       mergeMeasure(partOf(left, key, aggregation), partOf(right, key, aggregation), aggregation),
     ]),
   ) as { [K in AnalyticsMeasureKey]: AnalyticsMeasure };
+  const costGaps = mergeCostGaps(left.costGaps, right.costGaps);
   return {
     labels: left.labels,
     sessions,
     rates: { stall: rate('stall'), failure: rate('failure'), completion: rate('completion') },
     ...measures,
+    ...(costGaps === undefined ? {} : { costGaps }),
   };
 }
 

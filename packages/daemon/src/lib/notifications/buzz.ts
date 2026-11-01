@@ -24,11 +24,20 @@ export interface BuzzSink {
 export const DEFAULT_DEADLINE_WARN_HOURS = 3;
 
 /**
+ * Whether an item's deadline push is due by `horizon`. An INPUT card (the input bridge's own, `item.input`) always
+ * is: its deadline is its request's expiry, minutes away, and the owner must hear about it the moment it is raised
+ * whatever `deadlineWarnHours` says. It is still the one deadline push per card (the same ledger key).
+ */
+const deadlineDue = (item: AgendaItem, horizon: number): boolean =>
+  item.input !== undefined || (item.neededBy !== undefined && Date.parse(item.neededBy) <= horizon);
+
+/**
  * WHEN THE PHONE BUZZES — the only three times, and nothing else is a push (docs/notifications.md):
  *
  *  1. the ferret is STOPPED on the owner: idle with an agenda item on the owner's turn — ONE grouped push
  *     per stop;
- *  2. an item's `neededBy` is within the warning window — ONE push per item;
+ *  2. an item's `neededBy` is within the warning window — ONE push per item (an input card always is, so it
+ *     pushes the moment it is raised);
  *  3. a notice with `ping`;
  *  4. a SNOOZED item woke and it blocks the ferret or has a deadline — ONE push per wake (an item already
  *     inside its deadline's window gets the deadline's push instead, never both).
@@ -66,7 +75,7 @@ export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
   /** A woken item buzzes only when it blocks or has a deadline, and not when the deadline's own push will. */
   private async woke(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
     const horizon = Date.parse(this.clock.now()) + this.warnHours * 3_600_000;
-    if (item.neededBy !== undefined && Date.parse(item.neededBy) <= horizon) return;
+    if (deadlineDue(item, horizon)) return;
     if (item.blockingNow !== true && item.neededBy === undefined) return;
     await this.sink.woke(sessionId, item, snapshot).catch(() => undefined);
   }
@@ -92,8 +101,7 @@ export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
       if (owner.length === 0) return;
       const horizon = Date.parse(this.clock.now()) + this.warnHours * 3_600_000;
       for (const item of owner) {
-        if (item.neededBy !== undefined && Date.parse(item.neededBy) <= horizon)
-          await this.sink.deadline(sessionId, item, snapshot).catch(() => undefined);
+        if (deadlineDue(item, horizon)) await this.sink.deadline(sessionId, item, snapshot).catch(() => undefined);
       }
       if (!stop) return;
       const stopId = await this.stops.current(sessionId);

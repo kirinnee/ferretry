@@ -290,6 +290,19 @@ describe('PushService.notify', () => {
     should(JSON.parse(transport.sent[0]?.payload ?? '{}')).match({ sessionId: 's1' });
   });
 
+  it('should ask for high urgency and a short life for a high push, and nothing new for any other', async () => {
+    // Arrange
+    const { service, transport } = world({ records: [record()] });
+
+    // Act
+    await service.notify({ payload: { ...agenda, urgency: 'high' }, urgency: 'high' });
+    await service.notify({ payload: agenda });
+
+    // Assert — a code card waits minutes, so a push held longer than its life is not worth delivering.
+    should(transport.sent[0]).containDeep({ urgency: 'high', ttlSeconds: 600 });
+    should(transport.sent[1]).not.have.property('urgency');
+    should(transport.sent[1]).not.have.property('ttlSeconds');
+  });
   it('should address only the enrolments it was asked to', async () => {
     const one = record();
     const two = record({ id: 'push-77777777-7777-4777-8777-777777777777' });

@@ -36,6 +36,7 @@ import {
   type DocumentFacts,
   documentFacts,
   type Form,
+  homePathOf,
   listRow,
   markDocument,
   type NavCacheRig,
@@ -122,7 +123,7 @@ describe('navigation without reloads, and the session cache, in the real shell',
 
           // Act: a reload of the chat, held the same way.
           await nextBoot(tab, { hold: true, renamed: true });
-          await tab.goto(`${rig.origin}${sessionsPathOf(daemon)}/session/s-03`);
+          await tab.goto(`${rig.origin}${homePathOf(daemon)}/session/s-03`);
           await tab.waitForSelector('.fy-transcript :text("Live tail of s-03.")');
           const chatPillWhileHeld = await tab.$$eval(PILL, nodes => nodes.length);
           await release(tab);
@@ -153,7 +154,7 @@ describe('navigation without reloads, and the session cache, in the real shell',
           const daemon = await boot(rig, tab);
           await cacheSaved(tab, []);
           await nextBoot(tab, {});
-          await tab.goto(`${rig.origin}${sessionsPathOf(daemon)}/settings#device`);
+          await tab.goto(`${rig.origin}${homePathOf(daemon)}/settings#device`);
           await tab.waitForSelector('[data-clear-cached-data="idle"]');
           // The section as drawn in light and in dark: the theme follows the OS answer live, so the same
           // profile shows both without a second boot.
@@ -226,7 +227,7 @@ describe('navigation without reloads, and the session cache, in the real shell',
           // Act: the in-app "← Sessions", from New session opened off the reloaded list.
           const reloadedIndex = (await documentFacts(tab)).index;
           await markDocument(tab);
-          await tab.click(`a[href="${sessionsPathOf(daemon)}/new"]`);
+          await tab.click(`a[href="${homePathOf(daemon)}/new"]`);
           await tab.waitForSelector('#new-session-heading');
           await tab.click('button:has-text("← Sessions")');
           await tab.waitForSelector(listRow('s-03'));
@@ -236,7 +237,7 @@ describe('navigation without reloads, and the session cache, in the real shell',
           // Act: Settings, out to the sessions list and Back, then reloaded.
           // Settings is under More on a phone and in the sidebar on a desktop.
           if (form === 'phone') await tab.click('[data-app-tab="more"]');
-          await tab.click(`a[href="${sessionsPathOf(daemon)}/settings"]:visible`);
+          await tab.click(`a[href="${homePathOf(daemon)}/settings"]:visible`);
           await tab.waitForSelector(settings);
           // Behaviour is the longest section at either width.
           await tab.click('[data-settings-section-choice="behaviour"]:visible');
@@ -273,6 +274,65 @@ describe('navigation without reloads, and the session cache, in the real shell',
           expect(settingsTop).toBe(500);
           expect(Math.abs(settingsAfterBack - settingsTop)).toBeLessThanOrEqual(1);
           expect(Math.abs(settingsAfterReload - settingsTop)).toBeLessThanOrEqual(1);
+        } finally {
+          await context.close();
+        }
+      }),
+    120_000,
+  );
+
+  it(
+    'goes Back from a chat to whichever of the home or the list the reader came from, and draws the home from the cache on reload, on a desktop and a phone',
+    async () =>
+      await eachForm(async form => {
+        // Arrange: the front door's home, taken to the list, with the list saved to this profile's cache.
+        const { context, tab } = await rig.open(form);
+        try {
+          const daemon = await boot(rig, tab);
+          await cacheSaved(tab, []);
+          await markDocument(tab);
+          const pathOf = (): string => new URL(tab.url()).pathname;
+
+          // Act: a chat opened off the list, and Back.
+          await tab.click(listRow('s-03'));
+          await tab.waitForSelector('.fy-transcript');
+          await tab.goBack();
+          await tab.waitForSelector(listRow('s-03'));
+          const backToList = pathOf();
+
+          // Act: a chat opened off the home, Back, then New session off the home and its way back.
+          await tab.goBack();
+          await tab.waitForSelector('[data-home-ferret="s-00"]');
+          await tab.click('[data-home-ferret="s-00"]');
+          await tab.waitForSelector('.fy-transcript');
+          await tab.goBack();
+          await tab.waitForSelector('[data-home-ferret="s-00"]');
+          const backToHome = pathOf();
+          await tab.click('main a[href$="/new"]');
+          await tab.waitForSelector('#new-session-heading');
+          const homeWayBack = await tab.$$eval('button', nodes => nodes.some(node => node.textContent === '← Home'));
+          await tab.click('button:has-text("← Home")');
+          await tab.waitForSelector('[data-home-ferret="s-00"]');
+          const afterWayBack = pathOf();
+          const sameDocument = await documentFacts(tab);
+
+          // Act: the home reloaded with the daemon's first answer held.
+          await nextBoot(tab, { hold: true, renamed: true });
+          await tab.goto(`${rig.origin}${homePathOf(daemon)}`);
+          await tab.waitForSelector('[data-home-ferret="s-00"]');
+          const homeWhileHeld = await tab.$eval('[data-home-ferret="s-00"]', node => (node as HTMLElement).innerText);
+          await release(tab);
+          await tab.waitForSelector('[data-home-ferret="s-00"] :text("Renamed by the live read")');
+
+          // Assert: Back returns to whichever of the two the reader came from, in the same document, and the
+          // home paints the cached ferrets at once, then the live answer.
+          expect(backToList).toBe(sessionsPathOf(daemon));
+          expect(backToHome).toBe(homePathOf(daemon));
+          expect(homeWayBack).toBe(true);
+          expect(afterWayBack).toBe(homePathOf(daemon));
+          expect(sameDocument).toMatchObject({ marker: 'same-document', navigations: 1, shellConnected: true });
+          expect(homeWhileHeld).toContain('Cached relay bench');
+          expect(homeWhileHeld).not.toContain('Renamed by the live read');
         } finally {
           await context.close();
         }

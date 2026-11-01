@@ -16,6 +16,8 @@ export interface RouterController {
    * while opening the same page afresh starts at the top — the browser's own contract for a document.
    */
   readonly entryKey: string;
+  /** The pathname of the entry behind this one in the trail, or undefined for a deep link, a fresh tab or the first entry. */
+  readonly previousPath: string | undefined;
   /**
    * An in-app "← back to `to`". When the entry before this one IS `to`, it is a real history step —
    * the same transition the browser's Back makes, so the page returns exactly as it was left and the
@@ -179,8 +181,14 @@ export function RouterProvider({
   );
 
   const value = useMemo<RouterController>(
-    () => ({ route, navigate, back, entryKey: entry.fyEntry }),
-    [back, entry.fyEntry, navigate, route],
+    () => ({
+      route,
+      navigate,
+      back,
+      entryKey: entry.fyEntry,
+      previousPath: trail.current?.[entry.fyIndex - 1]?.path,
+    }),
+    [back, entry.fyEntry, entry.fyIndex, navigate, route],
   );
   return <RouterContext.Provider value={value}>{children}</RouterContext.Provider>;
 }

@@ -74,6 +74,11 @@ export interface MetricChartProps {
    * dimmed, so nothing looks selected until it is hovered.
    */
   readonly resting?: 'peak' | 'last';
+  /**
+   * Name every bar, upright reading turned on its side and ended in an ellipsis. For long category
+   * names (a model id), which a flat label can only fit by running into its neighbours.
+   */
+  readonly rotateLabels?: boolean;
 }
 
 const HATCH = 'repeating-linear-gradient(135deg, var(--warn) 0 2px, transparent 2px 4px)';
@@ -91,10 +96,12 @@ function XLabels({
   points,
   every,
   className,
+  rotated = false,
 }: {
   readonly points: readonly MetricChartPoint[];
   readonly every: number;
   readonly className: string;
+  readonly rotated?: boolean;
 }) {
   const shown = chartLabelKeys(points, every);
   return (
@@ -105,7 +112,9 @@ function XLabels({
         // labels align inward either way, so the last never pushes the page sideways.
         <span
           key={point.key}
-          className={`mono min-w-0 flex-1 ${every === 1 ? 'truncate' : 'flex whitespace-nowrap'} ${index === 0 ? 'justify-start text-left' : index === points.length - 1 ? 'justify-end text-right' : 'justify-center text-center'}`}
+          data-chart-xlabel={point.key}
+          title={rotated ? point.label : undefined}
+          className={`mono min-w-0 flex-1 ${rotated ? 'h-24 rotate-180 truncate text-left [writing-mode:vertical-rl]' : every === 1 ? 'truncate' : 'flex whitespace-nowrap'} ${index === 0 ? 'justify-start text-left' : index === points.length - 1 ? 'justify-end text-right' : 'justify-center text-center'}`}
         >
           {shown.has(point.key) ? point.label : ''}
         </span>
@@ -125,6 +134,7 @@ export function AnalyticsMetricChart({
   axisTicks = analyticsAxisTicks,
   plotClassName = 'h-40 sm:h-48',
   resting = 'peak',
+  rotateLabels = false,
 }: MetricChartProps) {
   const [hovered, setHovered] = useState<string | null>(null);
   const totals = new Map(points.map(point => [point.key, pointTotal(point)]));
@@ -232,16 +242,22 @@ export function AnalyticsMetricChart({
           </div>
         </div>
         <span />
-        <XLabels
-          points={points}
-          every={Math.max(1, Math.ceil(points.length / 5))}
-          className="mt-xs flex gap-[2px] text-2xs text-muted sm:hidden"
-        />
-        <XLabels
-          points={points}
-          every={Math.max(1, Math.ceil(points.length / 10))}
-          className="mt-xs hidden gap-[2px] text-2xs text-muted sm:flex"
-        />
+        {rotateLabels ? (
+          <XLabels points={points} every={1} rotated className="mt-xs flex gap-[2px] text-2xs text-muted" />
+        ) : (
+          <>
+            <XLabels
+              points={points}
+              every={Math.max(1, Math.ceil(points.length / 5))}
+              className="mt-xs flex gap-[2px] text-2xs text-muted sm:hidden"
+            />
+            <XLabels
+              points={points}
+              every={Math.max(1, Math.ceil(points.length / 10))}
+              className="mt-xs hidden gap-[2px] text-2xs text-muted sm:flex"
+            />
+          </>
+        )}
       </div>
       <table className="sr-only">
         <caption>{title}</caption>

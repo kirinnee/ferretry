@@ -384,7 +384,7 @@ import {
 import { FileConversationFiles } from '../src/adapters/migrate/file-conversation-files.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { AutoTitlingSendChannel, FileNameClaimStore, FileSystemCallsignCounters } from '../src/adapters/names/index.ts';
-import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
+import { FileNotificationDeliveryLedger, NotificationHealthMonitor } from '../src/adapters/notifications/index.ts';
 import {
   bunProbeSpawn,
   CliPackProbe,
@@ -960,6 +960,7 @@ import {
   NO_IO_PRESSURE,
   NO_STACK_SAMPLER,
   NO_WATCHDOG,
+  type NotificationHealthReading,
   NotificationService,
   needsRolloutFormatProbe,
   type ObservedSession,
@@ -1282,6 +1283,8 @@ import {
   withOutdated,
   withRevive,
   xvfbMissingMessage,
+  repairSharingFromPairing,
+  type SharingRepairOutcome,
 } from '../src/lib/index.ts';
 import {
   admitChild,
@@ -1729,6 +1732,12 @@ export interface DaemonWorld {
     readonly unlockNotice?: string | undefined;
     /** Bearer-token grants a pre-device-key `devices.json` held and this boot dropped. */
     readonly droppedBearerGrants: number;
+    /**
+     * The one-time Sharing repair for old full devices (docs/grants.md). A FUNCTION, not a result: it needs the
+     * daemon-wide grants, which are read later in the boot, so `start` runs it right after they are and before
+     * anything is served. It never throws: a failure is an outcome, said at boot.
+     */
+    readonly repairSharing?: () => Promise<SharingRepairOutcome>;
   }>;
   /**
    * The DIRECT carrier: the socket route a browser that can reach this address opens its sessions on.
@@ -7156,6 +7165,37 @@ export interface WorldSeams {
  */
 const STARTED_SAMPLE_INTERVAL = process.env.BUN_JSC_sampleInterval;
 
+/** The boot sentences for what the one-time Sharing repair did (docs/grants.md), one per outcome. */
+export function sharingRepairNotices(repair: SharingRepairOutcome | undefined): readonly string[] {
+  if (repair === undefined) return [];
+  const turnOn = `Turn it on per device in the app (Settings › Devices) or with \`${CLIENT_NAME} device grant <device> sharing --use\``;
+  if (repair.kind === 'skipped') {
+    const why: Readonly<Record<typeof repair.reason, string>> = {
+      'grants-undetermined': 'the capability grants could not be read',
+      'journal-too-large': 'the grant journal is too large to read whole',
+      'journal-unreadable': 'the grant journal could not be read whole',
+      failed: 'the repair failed before it changed anything',
+    };
+    return [`Sharing was not turned on for devices paired before it existed: ${why[repair.reason]}. ${turnOn}`];
+  }
+  const plural = (count: number) => (count === 1 ? 'device' : 'devices');
+  return [
+    ...(repair.deviceIds.length === 0
+      ? []
+      : [
+          `Sharing was turned on for ${repair.deviceIds.length} paired ${plural(repair.deviceIds.length)} that held every other capability from before Sharing existed; recorded in \`${CLIENT_NAME} daemon config history\``,
+        ]),
+    ...(repair.unrecorded.length === 0
+      ? []
+      : [`Sharing was turned on for ${repair.unrecorded.join(', ')}, but the grant journal could not record it`]),
+    ...(repair.failed.length === 0
+      ? []
+      : [
+          `Sharing could not be turned on for ${repair.failed.join(', ')}: the device record could not be written. ${turnOn}`,
+        ]),
+  ];
+}
+
 export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWorld {
   const userHome = seams.userHome;
   if (typeof userHome !== 'string' || !isAbsolute(userHome))
@@ -8971,7 +9011,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // Read back before anything is served, so a device unlocked before the restart is not asked again.
       const unlockNotice = await stepUp.restore();
+      // The one-time Sharing repair for old full devices (docs/grants.md), run by `start` once the daemon-wide
+      // grants are read. A repair must never stop the daemon starting: a failure is an outcome, said at boot.
+      // `grants` is the one daemon-wide grant service `start` refreshes before calling this (`subsystems.grants`).
+      const repairSharing = async (): Promise<SharingRepairOutcome> =>
+        await repairSharingFromPairing({
+          devices: pairingService,
+          daemonWide: () => grants.enforced(),
+          journal: new JournalGrantAudit(paths.grantAudit, stateFiles),
+          audit: new JournalGrantAudit(paths.grantAudit, stateFiles),
+          clock: new SystemGrantClock(),
+        }).catch((): SharingRepairOutcome => ({ kind: 'skipped', reason: 'failed' }));
       return {
+        repairSharing,
         credentials,
         push,
         stepUp,
@@ -9906,8 +9958,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new AccountModelConversationListPolicy(declaredAccountModel),
       );
       const wardenPaths = createWardenPaths(paths.home);
+      // Built after the agenda it reads and writes; an owner's dismissal heard before then has nothing to cancel, and a
+      // push composed before then is a normal one.
+      let inputRequests: InputRequestService | undefined;
+      // A push that cannot be made says so in this log and in `fy doctor`: until v4.116.0's silent outage,
+      // nothing anywhere said that no push had been made for days.
+      const notificationLedger = new FileNotificationDeliveryLedger(paths, stateFiles, {
+        warn: message => void process.stderr.write(`notifications: ${message}\n`),
+      });
+      const notificationHealth = new NotificationHealthMonitor(clock, line => void process.stderr.write(`${line}\n`));
       const notifications = new NotificationService({
-        ledger: new FileNotificationDeliveryLedger(paths, stateFiles),
+        ledger: notificationLedger,
         sessions: {
           describe: async id => {
             const view = await sessions.get(id);
@@ -9923,7 +9984,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         push,
         serial: new KeyedSerialExecutor(),
         clock,
-        diagnostics: { warn: message => void process.stderr.write(`notifications: ${message}\n`) },
+        diagnostics: notificationHealth,
+        // An input card asking for a one-time code is pushed at high priority (pushUrgencyFor).
+        subjectOf: (sessionId, item) =>
+          item.input === undefined
+            ? 'other'
+            : (inputRequests?.pushSubjectOf(sessionId, item.input.requestId) ?? 'other'),
       });
       // ONE agenda service for this opened store, shared by the route a person answers on and by
       // the warden sweep that raises and clears its own escalations. Two would each hold their own
@@ -10128,8 +10194,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Read lazily: the service is built just below, and this is only called after it commits.
         { raise: async (...parameters) => await agenda.raise(...parameters) },
       );
-      // Built after the agenda it reads and writes; an owner's dismissal heard before then has nothing to cancel.
-      let inputRequests: InputRequestService | undefined;
       const agenda = new AgendaService(
         agendaBoards,
         clock,
@@ -11577,6 +11641,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               tmuxRelease: await new TmuxReleaseReader(tmuxExecutable, tmux).read(),
               loopbackFirewall: await loopbackFirewall(),
               userSlice: await userSlice(),
+              notifications: {
+                enrolled: await notifications.enrolledDevices().catch(() => 0),
+                ledger: await notificationLedger.inspect(),
+                ...notificationHealth.snapshot(),
+              },
             });
           },
         },
@@ -13090,6 +13159,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   progress.enter('reading capability grants');
   await subsystems.grants.refresh();
   world.notices.step('capability grants read');
+  // Now that the daemon-wide grants are known, and before anything is served (the surface still answers 503).
+  const repair = await pairing.repairSharing?.();
+  for (const notice of sharingRepairNotices(repair)) world.notices.state(notice);
   // The operator password is gone; a passkey step-up from the paired device replaced it. A verifier an
   // older daemon left behind gates nothing now, so it is deleted rather than left looking like a lock —
   // and said ONCE, so an operator who remembers setting a password learns where it went.
@@ -13692,6 +13764,27 @@ export function discoverableRelayUrl(sources: readonly RelayCarrierSource[]): st
  * its own and "another daemon is already serving that address" and "something unidentified holds it"
  * need different things done about them.
  */
+/**
+ * What `fy doctor` can tell about this host's pushes WITHOUT a running daemon: the ledger as it reads
+ * and the devices enrolled. What only a running daemon knows (a push that failed since it started) is
+ * on its `GET /v1/doctor`, the app's doctor page. Absent when even that cannot be read.
+ */
+async function offlineNotificationHealth(
+  stateHome: string,
+  userHome: string,
+): Promise<NotificationHealthReading | undefined> {
+  try {
+    const paths = createFoundationPaths(resolveStateHome({ fyHome: stateHome, homeDirectory: userHome }));
+    const files = new StateFileSystem(paths);
+    return {
+      enrolled: (await new StatePushRepository(paths, files).list()).length,
+      ledger: await new FileNotificationDeliveryLedger(paths, files).inspect(),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 export async function checkConfiguration(
   world: DaemonWorld,
   say: (text: string) => void = text => void writeSync(1, `${text}\n`),
@@ -13737,6 +13830,7 @@ export async function checkConfiguration(
         return undefined;
       }
     })(),
+    notifications: await offlineNotificationHealth(world.stateHome.path, world.userHome),
   });
   for (const line of renderDoctorReport(doctor)) say(line);
   /**

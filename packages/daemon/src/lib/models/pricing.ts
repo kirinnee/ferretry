@@ -17,10 +17,17 @@
  * Vertex AI's) takes its MAKER's catalog's price — `anthropic` for an Anthropic-billed model, `openai`
  * for OpenAI's — and otherwise the first catalog by id, so the answer never depends on file order.
  *
+ * SHORT TIER NAMES ARE ALIASES OF THE MAKER'S MODEL. Claude Code records `opus`, `sonnet` or `haiku` when
+ * that is what a session was started with, and Anthropic's catalog pins each to a model (`tiers`). Those
+ * names alias that model, so one model is one row and one price. Only the MAKER's catalog may do it: a
+ * gateway re-pins the same slot names to its own models (Z.ai's `opus` is a GLM), and a catalog that
+ * lists a model literally called `opus` (a Foundry deployment alias) is that tier name, not a second
+ * model, so it adds no rate of its own.
+ *
  * Pure.
  */
 import { createHash } from 'node:crypto';
-import { type ModelCatalog, SIGN_IN_MODEL_CATALOGS } from '@ferretry/fleet';
+import { type ModelCatalog, SIGN_IN_MODEL_CATALOGS, slotModelId } from '@ferretry/fleet';
 import {
   type AnalyticsPricingProvider,
   type AnalyticsPricingRate,
@@ -113,10 +120,28 @@ export function modelCatalogPricingRates(
       }
     }
   }
-  return [...byIdentity.values()].map(candidates => {
-    const maker = candidates.find(candidate => candidate.catalog === MAKER_CATALOGS[candidate.rate.provider]);
-    return (maker ?? (candidates[0] as Candidate)).rate;
-  });
+  const tierAliases = anthropicTierAliases(catalogs);
+  return [...byIdentity.entries()]
+    .filter(([identity]) => !tierAliases.has(identity))
+    .map(([identity, candidates]) => {
+      const maker = candidates.find(candidate => candidate.catalog === MAKER_CATALOGS[candidate.rate.provider]);
+      const rate = (maker ?? (candidates[0] as Candidate)).rate;
+      const aliases = [...tierAliases.entries()].filter(([, target]) => target === identity).map(([name]) => name);
+      return maker !== undefined && aliases.length > 0 ? { ...rate, aliases } : rate;
+    });
+}
+
+const TIER_NAMES = ['opus', 'sonnet', 'haiku'] as const;
+
+/** Each tier name Anthropic's own catalog pins, mapped to the identity of the model it pins it to. */
+function anthropicTierAliases(catalogs: Readonly<Record<string, ModelCatalog>>): ReadonlyMap<string, string> {
+  const tiers = catalogs[MAKER_CATALOGS.anthropic]?.claude?.tiers;
+  const aliases = new Map<string, string>();
+  for (const name of TIER_NAMES) {
+    const pinned = tiers?.[name];
+    if (pinned !== undefined) aliases.set(name, identityOf(slotModelId(pinned)));
+  }
+  return aliases;
 }
 
 /**

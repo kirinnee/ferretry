@@ -27,6 +27,7 @@ import {
   agendaNoticeProblems,
   agendaOfferCloseProblems,
   agendaOptionDetailProblems,
+  agendaShape,
   agendaShapeProblems,
   agendaWakeAt,
   MAX_AGENDA_DETAIL_LENGTH,
@@ -708,6 +709,7 @@ function refreshStable(
     links: request.links,
     steps: request.steps,
     body: request.body,
+    questionAnswer: request.questionAnswer,
     // Ticks belong to the steps they were made on: the same steps keep them, new steps start clean.
     stepsDone: sameSteps(existing.item.steps, request.steps) ? existing.item.stepsDone : undefined,
   };
@@ -740,6 +742,14 @@ function addressById(
     }
   } else if (!canAddressAgenda(command.actor, target)) {
     return failure('forbidden', 'an agent or daemon may resolve only an agenda item it raised');
+  }
+  if (command.action === 'resolve' && command.actor.kind === 'agent' && isQuestionShape(target.item)) {
+    if ((command.note ?? '').trim() === '') {
+      return failure(
+        'invalid',
+        `${command.id} is a question the owner has not answered: closing it withdraws the question, so say why with --reason (the owner sees "withdrawn"); to answer the owner's own question, \`edit ${command.id} --question-answer\` instead and keep the options`,
+      );
+    }
   }
   if (command.action === 'answer') {
     // The input form answers an input card, because the value never travels as an agenda answer.
@@ -776,6 +786,11 @@ function addressById(
   // whatever is in the composer with Resolve or Dismiss. Only the daemon's own status words are kept.
   const note = target.item.kind === 'input' && command.actor.kind !== 'daemon' ? null : (command.note ?? null);
   return addressed(ledger, target, command.actor, note, command.at, disposition, change, response);
+}
+
+function isQuestionShape(item: AgendaItem): boolean {
+  const shape = agendaShape(item);
+  return shape !== 'info' && shape !== 'input';
 }
 
 function resolveSource(ledger: AgendaLedger, command: ResolveSourceCommand): AgendaMutation {
@@ -1007,6 +1022,7 @@ const EDITABLE_FIELDS = [
   'links',
   'steps',
   'body',
+  'questionAnswer',
 ] as const satisfies readonly AgendaRevisableField[];
 
 /** The option labels of each question, in order — what an edit must leave alone to keep the ask true. */
@@ -1318,6 +1334,8 @@ function wake(ledger: AgendaLedger, command: WakeCommand): AgendaMutation {
  * reply changed what the ask is, so the card must be written again whole — the ask (`subject`), the `premise`
  * and the `context` — to stay an isolated, self-contained statement of what is going on. Restating a field
  * unchanged counts; leaving one out does not. `patch` is `null` for a bare `surface`. Owner and daemon are exempt.
+ * An ANSWER TO THE OWNER'S QUESTION (`questionAnswer`) is the exception: the ask has not changed, so the item comes
+ * back as it was, with that answer above its own options.
  */
 function repliedRefreshProblem(actor: AgendaActor, id: AgendaId, patch: EditAgendaPatch | null): string | null {
   if (actor.kind !== 'agent') return null;
@@ -1325,6 +1343,7 @@ function repliedRefreshProblem(actor: AgendaActor, id: AgendaId, patch: EditAgen
     return `${id} was replied to: bring it back with the whole card refreshed — \`fy agenda edit ${id} --summary … --premise … --context …\`, not surface`;
   }
   const blank = (field: string | null | undefined): boolean => (field ?? '').trim() === '';
+  if (!blank(patch.questionAnswer)) return null;
   const missing = [
     ...(blank(patch.subject) ? ['--summary'] : []),
     ...(blank(patch.premise) ? ['--premise'] : []),

@@ -3,7 +3,7 @@
  * day or week is a series in time order; any other grouping is a set of bars, biggest first.
  */
 
-import { type AnalyticsMetric, analyticsMetricValue } from '@ferretry/protocol';
+import type { AnalyticsMetric } from '@ferretry/protocol';
 import { AnalyticsMetricChart, type MetricChartPoint } from './analytics-metric-chart.tsx';
 import { durationAxisTicks, formatAxisDuration } from './analytics-overview.ts';
 import {
@@ -39,7 +39,8 @@ export const queryChartPoints = (response: AnalyticsAggregateResponse, metric: A
   const timeGrouped = isTimeGrouped(response);
   const points = response.results.map((result, index): MetricChartPoint & { readonly sortKey: string } => {
     const measure = analyticsMetricMeasure(result, metric);
-    const value = analyticsMetricValue(result, metric) ?? 0;
+    // A group some sessions could not state still draws what the others did, hatched as a lower bound.
+    const value = measure.value ?? measure.knownSum ?? 0;
     const label = pointLabel(result.labels, timeGrouped);
     return {
       key: `${index}:${label}`,
@@ -61,6 +62,8 @@ export function AnalyticsQueryChart({ response }: { readonly response: Analytics
   const metric = queryChartMetric(response);
   const points = queryChartPoints(response, metric);
   if (points.length === 0) return null;
+  // Model ids and the like are too long to sit flat under a bar; a date is short and stays flat.
+  const rotateLabels = !isTimeGrouped(response) && points.some(point => point.label.length > 6);
   const isDuration = metric.startsWith('duration_');
   const format = (value: number) => formatMetricMeasure(metric, { value, known: 1, total: 1 });
   return (
@@ -68,10 +71,13 @@ export function AnalyticsQueryChart({ response }: { readonly response: Analytics
       title={ANALYTICS_METRIC_LABELS[metric]}
       series={[{ key: metric, label: ANALYTICS_METRIC_LABELS[metric], tone: 'accent' }]}
       points={points}
+      rotateLabels={rotateLabels}
       format={format}
       {...(isDuration ? { formatAxis: formatAxisDuration, axisTicks: durationAxisTicks } : {})}
       flagNote={
-        metric === 'cost_usd' ? 'at least — some sessions are unpriced' : 'at least — some sessions are unknown'
+        metric === 'cost_usd' || metric === 'cost_now_usd'
+          ? 'at least — some sessions are unpriced'
+          : 'at least — some sessions are unknown'
       }
       emptyText="Nothing to draw: every value is zero."
     />

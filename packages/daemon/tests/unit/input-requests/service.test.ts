@@ -2196,3 +2196,163 @@ describe('when the terminal changes under the card (#B100)', () => {
     should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
   });
 });
+
+describe('a one-time code (`code`): visible, never locked, never masked when the owner typed it', () => {
+  const CODE: InputRaise = { ...RAISE, prompt: 'The bastion wants the 2FA code', sensitivity: 'code' };
+  /** An OTP prompt that shows what is typed: ssh's keyboard-interactive "Verification code:" with echo on. */
+  const OTP: InputTargetFacts = {
+    ...FACTS,
+    foreground: { ...FACTS.foreground, comm: 'ssh', argv: 'ssh bastion' },
+    echo: 'on',
+    promptLine: 'Verification code:',
+  } as InputTargetFacts;
+
+  it('should raise a card that says the ferret can see the code, flagged neutral, with no lock and no ping', async () => {
+    // Act
+    const { w, view, request } = await raised({ facts: OTP }, CODE);
+
+    // Assert
+    should(request.sensitivity).equal('code');
+    should(request.risk).eql({ level: 'neutral', reason: 'One-time code: the ferret can see it.' });
+    should(request.fields[0]).containDeep({ label: 'Code', sensitivity: 'code' });
+    should(request.lock).be.undefined();
+    should(view.lockSeconds).be.undefined();
+    should(w.cards[0]?.title).equal('Needs a code');
+    should(w.cards[0]?.ask).equal('Type it into the terminal. One-time code: the ferret can see this value.');
+    should(w.cards[0]?.blocking).be.false();
+  });
+
+  it('should type the code with no quarantine and keep it out of the redaction window', async () => {
+    // Arrange
+    const { w, service, values, id, digest } = await raised({ facts: OTP }, CODE);
+
+    // Act
+    const done = await service.deliver(SESSION, id, bodyFor(digest), HOST);
+
+    // Assert — the ferret may read it straight away, as the card said.
+    should(done.state).equal('delivered');
+    should(w.writes).eql([{ text: VALUE, submit: true }]);
+    should(values.scrub(SESSION, `screen: ${VALUE}`)).equal(`screen: ${VALUE}`);
+    should(w.quarantineEvents.length).equal(0);
+    should(service.quarantinedUntil(SESSION, ['dev'])).be.undefined();
+  });
+
+  it('should still refuse a code that would press keys', async () => {
+    // Arrange
+    const { service, id, digest } = await raised({ facts: OTP }, CODE);
+
+    // Act
+    const error = await refused(service.deliver(SESSION, id, bodyFor(digest, {}, '12\n34'), HOST));
+
+    // Assert
+    should(error.code).equal('bad_request');
+  });
+
+  it('should leave the typing gate open for a card of codes only, and closed for any other card', async () => {
+    // Arrange
+    const code = await raised({ facts: OTP }, CODE);
+    const secret = await raised({}, RAISE);
+    const at = { kind: 'terminal', key: 'dev' } as const;
+
+    // Act / Assert — the ferret may type a code it read itself; the card stays findable for input.wait.
+    should(code.service.pendingOn(SESSION, at, { typing: true })).be.undefined();
+    should(code.service.pendingOn(SESSION, at)).equal('A1');
+    should(secret.service.pendingOn(SESSION, at, { typing: true })).equal('A1');
+  });
+
+  // Review M1: the ferret's word "code" never makes a password visible to it.
+  for (const [what, facts] of [
+    ['a sudo prompt with typing hidden', FACTS],
+    [
+      'a shell faking a sudo prompt with typing shown',
+      {
+        ...FACTS,
+        foreground: { ...FACTS.foreground, comm: 'bash', argv: 'bash' },
+        echo: 'on',
+        recognisedConsumer: false,
+      } as InputTargetFacts,
+    ],
+    ['a PIN prompt with typing hidden', { ...OTP, echo: 'off', promptLine: 'Enter PIN:' } as InputTargetFacts],
+  ] as const)
+    it(`should handle a code aimed at ${what} as a secret, end to end`, async () => {
+      // Arrange
+      const { w, service, values, view, request, id, digest } = await raised({ facts }, CODE);
+
+      // Act
+      const gate = service.pendingOn(SESSION, { kind: 'terminal', key: 'dev' }, { typing: true });
+      await service.deliver(SESSION, id, bodyFor(digest), HOST);
+
+      // Assert — hidden on the card, said so, locked, blocking, masked, and journalled as a secret.
+      should(request.sensitivity).equal('secret');
+      should(request.fields[0]?.sensitivity).equal('secret');
+      should(request.risk).eql({ level: 'amber', reason: 'Treated as a secret: this is a password field.' });
+      should(view.lockSeconds).be.above(0);
+      should(w.cards[0]?.title).equal('Needs a secret');
+      should(w.cards[0]?.blocking).be.true();
+      should(gate).equal('A1');
+      should(values.scrub(SESSION, VALUE)).equal('[redacted:input A1]');
+      should(w.quarantineEvents.length).be.above(0);
+      should(w.events.map(event => event.sensitivity)).containEql('secret');
+      should(w.events.map(event => event.sensitivity)).not.containEql('code');
+      should(w.audits.map(entry => entry.detail.sensitivity)).not.containEql('code');
+    });
+
+  it('should treat a code as a secret when the ferret itself says password or PIN: its words may only raise', async () => {
+    // Act
+    const prompt = await raised({ facts: OTP }, { ...CODE, prompt: 'sudo needs your password' });
+    const label = await raised(
+      { facts: OTP },
+      { ...RAISE, prompt: 'the card wants it', fields: [{ id: 'value', label: 'Card PIN', sensitivity: 'code' }] },
+    );
+
+    // Assert
+    should(prompt.request.sensitivity).equal('secret');
+    should(label.request.sensitivity).equal('secret');
+  });
+
+  it('should keep a code at an OTP prompt with typing hidden: the pane asks for a code', async () => {
+    // Act
+    const { request } = await raised({ facts: { ...OTP, echo: 'off' } as InputTargetFacts }, CODE);
+
+    // Assert
+    should(request.sensitivity).equal('code');
+    should(request.lock).be.undefined();
+  });
+
+  it('should check again when a restarted daemon finds the terminal now asking for a password, never back', async () => {
+    // Arrange — raised at an OTP prompt; the daemon restarts and the pane now shows a sudo prompt.
+    const first = await raised({ facts: OTP }, CODE);
+    const second = build({ history: [...first.w.events], facts: FACTS });
+
+    // Act
+    await second.service.restore();
+    const [back] = await second.service.list(HOST);
+    await second.service.deliver(SESSION, back?.id ?? '', bodyFor(back?.observedDigest ?? ''), HOST);
+
+    // Assert
+    should(back?.sensitivity).equal('secret');
+    should(back?.fields[0]?.risk?.reason).equal('Treated as a secret: this is a password field.');
+    should(second.w.quarantineEvents.length).be.above(0);
+  });
+});
+
+describe('what a request push is about', () => {
+  it('should call a pending code card a one-time code, and every other card, or a settled one, other', async () => {
+    // Arrange
+    const otp = {
+      ...FACTS,
+      foreground: { ...FACTS.foreground, comm: 'ssh' },
+      echo: 'on',
+      promptLine: 'Verification code:',
+    } as InputTargetFacts;
+    const code = await raised({ facts: otp }, { ...RAISE, prompt: 'the 2FA code', sensitivity: 'code' });
+    const secret = await raised({}, RAISE);
+
+    // Act / Assert
+    should(code.service.pushSubjectOf(SESSION, code.id)).equal('one-time-code');
+    should(code.service.pushSubjectOf('another-session', code.id)).equal('other');
+    should(secret.service.pushSubjectOf(SESSION, secret.id)).equal('other');
+    await code.service.cancel(SESSION, code.id, HOST);
+    should(code.service.pushSubjectOf(SESSION, code.id)).equal('other');
+  });
+});

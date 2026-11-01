@@ -464,6 +464,22 @@ describe('McpServer — the tools', () => {
     should(tool?.description.length).belowOrEqual(300);
   });
 
+  it('should offer code for one-time codes on both input tools, and keep private for echoing values', () => {
+    // Arrange
+    const named = (name: string) => MCP_TOOLS.find(tool => tool.name === name);
+    const terminal = named('terminal_request_input');
+    const browser = named('browser_request_input');
+
+    // Act
+    const schemas = JSON.stringify([terminal?.inputSchema, browser?.inputSchema]);
+
+    // Assert
+    should(schemas.split('"enum":["secret","code","private","plain"]').length - 1).equal(2);
+    should(terminal?.description).containEql('code (a 2FA, email, SMS or device code; you see it)');
+    should(terminal?.description).containEql('private (shows, not one-time)');
+    should(browser?.description).containEql('code (a 2FA, email or SMS code)');
+    for (const tool of [terminal, browser]) should(tool?.description.length).belowOrEqual(300);
+  });
   it('should map each page-lifecycle tool to its wire call', async () => {
     // Arrange
     const { calls, request } = harness();

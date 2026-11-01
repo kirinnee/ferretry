@@ -538,6 +538,8 @@ export interface EditFlags {
   readonly step?: readonly string[];
   /** The text of `--body-file`: replaces the body. */
   readonly body?: string;
+  /** `--question-answer`: the answer to the owner's question about the item, shown above its options. */
+  readonly questionAnswer?: string;
   readonly blocking?: boolean;
   readonly notBlocking?: boolean;
   readonly willBlock?: string;
@@ -577,6 +579,7 @@ export function composeEditRequest(
   const stepProblem = current === undefined ? undefined : agendaEditShapeProblems(current, { steps })[0];
   if (stepProblem !== undefined) throw new Error(stepProblem);
   const body = text(flags.body);
+  const questionAnswer = text(flags.questionAnswer);
   const willBlock = text(flags.willBlock);
   const neededBy = text(flags.neededBy);
   const optionDetails = optionDetailsFrom(
@@ -630,6 +633,7 @@ export function composeEditRequest(
     ...(links === undefined ? {} : { links }),
     ...(steps === undefined ? {} : { steps }),
     ...(body === undefined ? {} : { body }),
+    ...(questionAnswer === undefined ? {} : { questionAnswer }),
     ...(flags.blocking === true ? { blockingNow: true as const } : {}),
     ...(willBlock === undefined ? {} : { willBlock }),
     ...(neededBy === undefined ? {} : { neededBy }),
