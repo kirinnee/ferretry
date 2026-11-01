@@ -7,7 +7,8 @@
         "packages/pwa/tests/unit/features/",
         "packages/pwa/tests/unit/stt/",
         "packages/pwa/tests/unit/dictation-control.test.tsx"
-      ]
+      ],
+      "leakGuard": true
     },
     { "name": "pwa", "prefixes": ["packages/pwa/"] },
     { "name": "everything-else", "prefixes": ["packages/"] }

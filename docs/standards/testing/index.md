@@ -569,6 +569,14 @@ tmux sockets in their own home, so the processes share nothing. Files are split 
 passes a source file only when ONE run covers it to 100%: a split by test directory was measured and failed
 that. `scripts/validate/test-tiers.sh` holds the bounds.
 
+### A group that fails leaks (`leakGuard`)
+
+Every unit test is cleaned up after: roots that `mount` / `render` made are unmounted and `document.body` is swept
+(`packages/pwa/tests/support/dom-leak-guard.ts`), because a group runs hundreds of files in ONE process and a
+leftover screen fails some later file. A group that sets `"leakGuard": true` in `config/test-groups.json` also
+**fails** the test that still leaves nodes in the body or an interval of ours running. `pwa-features` has it; turn
+it on for another group once its leaks are fixed. Outside `test.sh` set `FY_DOM_LEAK_GUARD=enforce`.
+
 ## Test Organization
 
 The real layout:

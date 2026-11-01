@@ -39,6 +39,7 @@
         "src/main.tsx",
         "vite.config.ts",
         "tests/**/*.test.{ts,tsx}",
+        "tests/support/dom-leak-guard.ts",
         "tests/integration/support/happy-dom-gc-probe.ts",
         "tests/integration/support/browser-tab-resolved-probe.tsx",
         "harness/machine-home-screenshot.tsx",
