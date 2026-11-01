@@ -23,6 +23,8 @@ import {
   PasteRuleSchema,
   type PasteRuleSettings,
   PasteRuleSettingsSchema,
+  type PasteRuleSettingsView,
+  PasteRuleSettingsViewSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import { targetRef } from './input-card.ts';
@@ -42,6 +44,15 @@ export async function addRule(client: CopyClient, rule: PasteRuleCreate): Promis
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(PasteRuleCreateSchema.parse(rule)),
   });
+}
+
+/**
+ * The owner's secure-copy settings and the rules a program from their profile could satisfy. A route of its own: an
+ * older daemon has none, and its rules list stays as it was. `undefined` when it cannot be read, so the screen shows
+ * no setting and no badge rather than guess.
+ */
+export async function readCopySettings(client: CopyClient): Promise<PasteRuleSettingsView | undefined> {
+  return await client.request(`${RULES_PATH}/settings`, PasteRuleSettingsViewSchema).catch(() => undefined);
 }
 
 /**

@@ -296,27 +296,71 @@ export type PasteRuleSettings = z.infer<typeof PasteRuleSettingsSchema>;
 export const DEFAULT_PASTE_RULE_SETTINGS: PasteRuleSettings = { allowProfileTargets: false };
 
 /** `GET /v1/copy-rules`. */
-export const PasteRuleListSchema = z.strictObject({
-  rules: z.array(PasteRuleSchema).max(COPY_MAX_RULES),
-  settings: PasteRuleSettingsSchema.optional(),
-  /**
-   * The rules whose terminal program this machine finds only in the owner's own profile, never in a system folder:
-   * each is shown as "your profile — a ferret could swap this program". Worked out when listed, never stored.
-   */
-  profileRules: z.array(RuleIdSchema).max(COPY_MAX_RULES).optional(),
-});
+export const PasteRuleListSchema = z.strictObject({ rules: z.array(PasteRuleSchema).max(COPY_MAX_RULES) });
 export type PasteRuleList = z.infer<typeof PasteRuleListSchema>;
+
+/**
+ * `GET /v1/copy-rules/settings`: the settings and the rules a program from the owner's profile could stand for. A route
+ * of its own, so the rules list an older app parses strictly is unchanged; an app that gets no answer from an older
+ * daemon shows no setting and no badge.
+ */
+export const PasteRuleSettingsViewSchema = z.strictObject({
+  settings: PasteRuleSettingsSchema,
+  /**
+   * The terminal rules a program from the owner's own profile COULD satisfy: no root-controlled folder holds that
+   * program, and it is no password or code program. Each is shown as "your profile — a ferret could swap this
+   * program". Worked out when asked, never stored.
+   */
+  profileRules: z.array(RuleIdSchema).max(COPY_MAX_RULES),
+});
+export type PasteRuleSettingsView = z.infer<typeof PasteRuleSettingsViewSchema>;
 
 /**
  * Programs that run whatever they read: a shell or an interpreter. A rule that pastes into one hands the value to
  * whatever the ferret typed before it, so the rule editor and `fy copy rules add` warn about it.
  */
-const RUNS_WHAT_IT_READS = new Set(['bash', 'sh', 'dash', 'ksh', 'zsh', 'fish', 'node', 'bun', 'deno', 'perl', 'ruby']);
+const RUNS_WHAT_IT_READS = new Set([
+  'bash',
+  'sh',
+  'ash',
+  'dash',
+  'ksh',
+  'mksh',
+  'csh',
+  'tcsh',
+  'zsh',
+  'fish',
+  'nu',
+  'xonsh',
+  'elvish',
+  'pwsh',
+  'powershell',
+  'busybox',
+  'node',
+  'bun',
+  'deno',
+  'perl',
+  'ruby',
+  'irb',
+  'php',
+  'lua',
+  'luajit',
+  'tclsh',
+  'wish',
+  'expect',
+  'awk',
+  'gawk',
+  'R',
+  'julia',
+  'ghci',
+  'osascript',
+]);
 
-/** Whether a rule's terminal program is a shell or an interpreter (`python`, `python3.12` too). */
+/** Whether a rule's terminal program is a shell or an interpreter (`python`, `python3.12`, `pypy3` too). */
 export const runsWhatItReads = (program: string): boolean => {
-  const name = program.trim().toLowerCase();
-  return RUNS_WHAT_IT_READS.has(name) || /^python[0-9.]*$/u.test(name);
+  const trimmed = program.trim();
+  const name = trimmed.toLowerCase();
+  return RUNS_WHAT_IT_READS.has(trimmed) || RUNS_WHAT_IT_READS.has(name) || /^(?:python|pypy)[0-9.]*$/u.test(name);
 };
 
 /** What the rule editor and the CLI say about such a rule. */

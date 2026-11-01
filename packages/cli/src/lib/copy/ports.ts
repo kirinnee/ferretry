@@ -6,6 +6,7 @@ import type {
   PasteRule,
   PasteRuleCreate,
   PasteRuleList,
+  PasteRuleSettingsView,
 } from '@ferretry/protocol';
 
 /** Presentation port for `fy copy`. */
@@ -18,6 +19,8 @@ interface ICopyOutput {
 export interface ICopyGateway {
   copies(sessionId: string): Promise<readonly CopyMeta[]>;
   rules(): Promise<PasteRuleList>;
+  /** The secure-copy settings and the rules a profile program could satisfy; rejects on a daemon without them. */
+  ruleSettings(): Promise<PasteRuleSettingsView>;
   addRule(rule: PasteRuleCreate): Promise<PasteRule>;
   removeRule(id: string): Promise<void>;
   plans(): Promise<CopyPlanList>;

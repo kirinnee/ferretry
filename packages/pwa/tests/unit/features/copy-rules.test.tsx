@@ -153,6 +153,16 @@ describe('the pre-approval rules card', () => {
     expect((await card()).q('[data-copy-profile-targets]')).toBeNull();
   });
 
+  it('warns on an existing rule into a shell or an interpreter, and only there', async () => {
+    const shell = { ...RULE, id: 'c'.repeat(32), to: { kind: 'terminal', program: 'pwsh' } } as PasteRule;
+    const { q } = await card({ rules: [RULE, shell] });
+
+    expect(q(`[data-copy-rule="${shell.id}"] [data-copy-rule-row-runs-anything]`)?.textContent).toContain(
+      'runs whatever it reads',
+    );
+    expect(q(`[data-copy-rule="${RULE.id}"] [data-copy-rule-row-runs-anything]`)).toBeNull();
+  });
+
   it('warns that a shell or an interpreter runs whatever it reads', async () => {
     const { q } = await card();
     await click(q('[data-copy-rule-add-open]'));
@@ -211,8 +221,10 @@ describe('the pre-approval rules surface', () => {
 
     expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
       'GET /v1/copy-rules',
+      'GET /v1/copy-rules/settings',
       'POST /v1/copy-rules',
       'GET /v1/copy-rules',
+      'GET /v1/copy-rules/settings',
     ]);
     expect(q(`[data-copy-rule="${RULE.id}"]`)).not.toBeNull();
   });
@@ -233,14 +245,16 @@ describe('the pre-approval rules surface', () => {
     expect(text()).toContain('the daemon is gone');
   });
 
-  it('reads the setting and the profile rules, and changes the setting through its own route', async () => {
+  it('reads the setting and the badges from their own route, and changes the setting through it', async () => {
     let allowed = false;
     const { calls, q } = await surface(call => {
       if (call.method === 'PUT') {
         allowed = true;
         return { allowProfileTargets: true };
       }
-      return { rules: [RULE], settings: { allowProfileTargets: allowed }, profileRules: [RULE.id] };
+      if (call.path === '/v1/copy-rules/settings')
+        return { settings: { allowProfileTargets: allowed }, profileRules: [RULE.id] };
+      return { rules: [RULE] };
     });
     expect(q('[data-copy-rule-profile]')).not.toBeNull();
     await click(q('[data-copy-profile-targets]'));
@@ -248,10 +262,23 @@ describe('the pre-approval rules surface', () => {
 
     expect(calls.map(call => `${call.method} ${call.path}`)).toEqual([
       'GET /v1/copy-rules',
+      'GET /v1/copy-rules/settings',
       'PUT /v1/copy-rules/settings',
       'GET /v1/copy-rules',
+      'GET /v1/copy-rules/settings',
     ]);
     expect((q('[data-copy-profile-targets]') as HTMLInputElement | null)?.checked).toBe(true);
+  });
+
+  it('shows no setting and no badge for a daemon too old to have them, and still lists its rules', async () => {
+    const { q } = await surface(call => {
+      if (call.path === '/v1/copy-rules/settings') throw new Error('404 not found');
+      return { rules: [RULE] };
+    });
+
+    expect(q(`[data-copy-rule="${RULE.id}"]`)).not.toBeNull();
+    expect(q('[data-copy-profile-targets]')).toBeNull();
+    expect(q('[data-copy-rule-profile]')).toBeNull();
   });
 
   it('says a failed read is a failed read, never "no rules"', async () => {

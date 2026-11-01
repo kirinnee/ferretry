@@ -61,6 +61,7 @@ import type {
   InputIds,
   InputJournal,
   InputLoginPort,
+  ProfileProgram,
   InputPasteRules,
   InputSealedPort,
   InputSessionDirectory,
@@ -174,6 +175,8 @@ interface Held {
   probed?: boolean;
   /** The `code` fields the daemon saw going into a password (`observedAs`): handled as `secret` from then on. */
   readonly upgraded: Set<string>;
+  /** A rule matched this card only through a program from the owner's profile: what the write and the log name. */
+  pastedInto?: ProfileProgram;
 }
 
 /**
@@ -392,7 +395,7 @@ export class InputRequestService {
     this.held.set(requestId, held);
     this.noteRaise(sessionId, now);
     await this.record(request, 'input.requested', { kind: 'agent' }, this.auditOf(request));
-    if (copy !== undefined) await this.underRule(held, copy, seen.facts, raise.submit);
+    if (copy !== undefined) await this.underRule(held, copy, seen.facts, raise.submit, seen.profileProgram);
     return this.view(held);
   }
 
@@ -407,10 +410,13 @@ export class InputRequestService {
     copy: CopyMeta,
     facts: InputTargetFacts,
     submit: InputRaise['submit'],
+    profile?: ProfileProgram,
   ): Promise<void> {
     if (!hidesTyping(facts) || !ruleMayPaste(copy, facts, held.request.fields)) return;
-    const ruleId = this.deps.rules?.reserve(held.request.sessionId, copy.from, facts);
+    const ruleId = this.deps.rules?.reserve(held.request.sessionId, copy.from, facts, profile?.name);
     if (ruleId === undefined) return;
+    // With no proved program, only the owner's profile could have matched: the write and the log name it.
+    if (facts.kind === 'terminal' && facts.program === undefined && profile !== undefined) held.pastedInto = profile;
     const body: InputDeliverBody = {
       deliveryId: crypto.randomUUID(),
       observedDigest: held.request.observedDigest ?? '',
@@ -1023,6 +1029,7 @@ export class InputRequestService {
         .type(request.sessionId, request.target, values, submitted, seen.facts, {
           // A code left visible on the strength of a proven code program is typed only while one still holds it.
           codeProgram: seen.codeProgram === true && fields.some(field => field.sensitivity === 'code'),
+          ...(by.kind === 'rule' && held.pastedInto !== undefined ? { profileProgram: held.pastedInto.name } : {}),
         })
         .catch((): TypeResult => 'uncertain');
       wrote?.(outcome);
@@ -1556,6 +1563,7 @@ export class InputRequestService {
             submitted: options.submitted ?? false,
             ...(options.entry === undefined ? {} : { entry: options.entry }),
             ...(options.saved === undefined ? {} : { saved: options.saved }),
+            ...(held.pastedInto === undefined ? {} : { profileProgram: held.pastedInto.path }),
           }
         : {}),
     });
@@ -1973,9 +1981,6 @@ function auditDetail(request: InputRequest): InputAuditDetail {
     targetKind: request.target.kind,
     sensitivity: request.sensitivity,
     ...(facts?.kind === 'terminal' ? { recognised: facts.recognisedConsumer } : {}),
-    ...(facts?.kind === 'terminal' && facts.program === undefined && facts.profileProgram !== undefined
-      ? { profileProgram: facts.profileProgram.path }
-      : {}),
     ...(request.source === undefined ? {} : { copy: request.source.name }),
   };
 }

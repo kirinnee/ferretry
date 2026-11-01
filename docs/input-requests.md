@@ -1065,9 +1065,11 @@ So the daemon proves the GROUP or nothing:
    of the [secure-copy rule](secure-copy.md#pasting)). The exe proof says WHICH system program runs, bash included;
    what the name is worth is each decision's own. A process root runs outright (`sudo -n bash -c 'read -s X'` leaves
    one) is never proved: its executable cannot be read, and it is whatever a ferret with a cached sudo started.
-   Separately, `profileProgram` names a program every member runs that is proved only through the owner's OWN Nix
-   profile (`~/.nix-profile`); it earns no green, no short lock and no one-tap, and only a secure-copy rule the owner
-   allowed for it ([secure copy](secure-copy.md#programs-in-your-own-profile)) reads it.
+   Separately, the daemon may note a program every member runs that is proved only through the owner's OWN Nix
+   profile (`~/.nix-profile`), and only under a name no root-controlled folder holds that is no password or code
+   program. That note is the daemon's own, never on the card's facts; it earns no green, no short lock and no one-tap,
+   and only a secure-copy rule the owner allowed for it ([secure copy](secure-copy.md#programs-in-your-own-profile))
+   reads it.
 2. No process whose controlling terminal is another (or none) holds the TTY open: on Linux every `/proc/<pid>/fd`,
    each descriptor matched by the DEVICE it reaches, not by how its path is spelled; on macOS `lsof` and `ps`. A
    process of this account whose descriptors cannot be read (one can make itself not dumpable) makes the answer

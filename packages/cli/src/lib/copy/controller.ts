@@ -8,6 +8,7 @@ import {
   type PasteRule,
   type PasteRuleCreate,
   type PasteRuleList,
+  type PasteRuleSettingsView,
   RUNS_WHAT_IT_READS_WARNING,
   runsWhatItReads,
 } from '@ferretry/protocol';
@@ -77,6 +78,9 @@ const toText = (to: CopyRouteTo): string =>
 /** What a rule into a program from the owner's own profile is labelled with (docs/secure-copy.md). */
 const PROFILE_RULE_BADGE = '[your profile — a ferret could swap this program]';
 
+/** What a rule into a shell or an interpreter is marked with. */
+const RUNS_ANYTHING_MARK = '[runs whatever it reads]';
+
 function renderRule(rule: PasteRule, inProfile = false): string {
   return [
     rule.id.slice(0, 8),
@@ -85,18 +89,22 @@ function renderRule(rule: PasteRule, inProfile = false): string {
     rule.remaining === undefined ? 'no count' : `${String(rule.remaining)} left`,
     rule.expiresAt === undefined ? 'no expiry' : `until ${rule.expiresAt}`,
     `used ${String(rule.used)}`,
+    ...(rule.to.kind === 'terminal' && runsWhatItReads(rule.to.program) ? [RUNS_ANYTHING_MARK] : []),
     ...(inProfile ? [PROFILE_RULE_BADGE] : []),
   ].join('  ');
 }
 
-/** The rules as `fy copy rules ls` prints them: whether profile programs are allowed, then one rule a line. */
-function renderRules(list: PasteRuleList): string {
-  const profile = new Set(list.profileRules ?? []);
+/**
+ * The rules as `fy copy rules ls` prints them: whether profile programs are allowed, then one rule a line. `view` is
+ * absent from a daemon too old to have the setting: then nothing is said about it.
+ */
+function renderRules(list: PasteRuleList, view: PasteRuleSettingsView | undefined): string {
+  const profile = new Set(view?.profileRules ?? []);
   const setting =
-    list.settings === undefined
+    view === undefined
       ? []
       : [
-          `programs in your own profile: ${list.settings.allowProfileTargets ? 'allowed' : 'not allowed (they ask you)'}`,
+          `programs in your own profile: ${view.settings.allowProfileTargets ? 'allowed' : 'not allowed (they ask you)'}`,
         ];
   const rules =
     list.rules.length === 0
@@ -144,8 +152,15 @@ export class CopyController {
 
   async rules(options: CopyCommandOptions): Promise<void> {
     this.#refuseFerret();
-    const list = await this.ports.gateway.rules();
-    this.ports.out.success(options.json === true ? JSON.stringify(list, null, 2) : renderRules(list));
+    const [list, view] = await Promise.all([
+      this.ports.gateway.rules(),
+      this.ports.gateway.ruleSettings().catch(() => undefined),
+    ]);
+    this.ports.out.success(
+      options.json === true
+        ? JSON.stringify(view === undefined ? list : { ...list, ...view }, null, 2)
+        : renderRules(list, view),
+    );
   }
 
   async addRule(options: CopyRuleOptions): Promise<void> {

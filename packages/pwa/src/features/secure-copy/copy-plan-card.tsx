@@ -5,7 +5,8 @@
  * Allowing none declines the plan. Nothing here is a value.
  */
 
-import type { CopyPlan } from '@ferretry/protocol';
+import { type CopyPlan, RUNS_WHAT_IT_READS_WARNING, runsWhatItReads } from '@ferretry/protocol';
+import { TriangleAlert } from 'lucide-react';
 import { useState } from 'react';
 import { fromWords, toWords } from '../../lib/secure-copy.ts';
 
@@ -77,6 +78,15 @@ export function CopyPlanCard({ plan, agentName, onAnswer }: CopyPlanCardProps) {
                   {'\u00a0→ '}
                   <span className="font-medium">{toWords(item.to)}</span>
                 </span>
+                {item.to.kind === 'terminal' && runsWhatItReads(item.to.program) && (
+                  <span
+                    className="flex items-start gap-1.5 text-meta font-medium text-warn"
+                    data-copy-plan-runs-anything=""
+                  >
+                    <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                    {RUNS_WHAT_IT_READS_WARNING}
+                  </span>
+                )}
                 <span className="text-meta text-faint" data-copy-plan-why="">
                   {agentName} says: “{item.why}”
                 </span>

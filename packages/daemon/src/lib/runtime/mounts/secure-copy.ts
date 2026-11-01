@@ -5,6 +5,7 @@ import {
   PasteRuleCreateSchema,
   type PasteRuleList,
   PasteRuleSettingsSchema,
+  type PasteRuleSettingsView,
   STEP_UP_ACTS,
   STEP_UP_REQUIRED_CODE,
   type StepUpRequiredBody,
@@ -71,17 +72,22 @@ export interface CopyListing {
   list(sessionId: string): readonly CopyMeta[];
 }
 
-/** Where this machine finds a terminal rule's program: only in the owner's own profile, or not. */
+/** Whether a program from the owner's own profile could satisfy a terminal rule for `program` (profile-program.ts). */
 export interface RuleProgramHomes {
-  profileOnly(program: string): Promise<boolean>;
+  profileCouldStandFor(program: string): Promise<boolean>;
 }
 
-/** The rules whose terminal program lives only in the owner's profile. A look that fails says nothing about it. */
+/**
+ * The terminal rules a program from the owner's profile could satisfy: the same check the profile proof makes, so the
+ * badge holds whatever the profile holds today. A look that fails marks the rule, since it cannot be ruled out.
+ */
 async function profileRulesOf(homes: RuleProgramHomes | undefined, list: PasteRuleList['rules']): Promise<string[]> {
   if (homes === undefined) return [];
   const found = await Promise.all(
     list.map(async rule =>
-      rule.to.kind === 'terminal' && (await homes.profileOnly(rule.to.program).catch(() => false)) ? [rule.id] : [],
+      rule.to.kind === 'terminal' && (await homes.profileCouldStandFor(rule.to.program).catch(() => true))
+        ? [rule.id]
+        : [],
     ),
   );
   return found.flat();
@@ -100,7 +106,9 @@ function profileTargetsRefusal(context: RouteContext): ReturnType<typeof jsonRes
       { error: 'this device may not let copy rules paste into your profile', code: grantRefusalCode(decision.refusal) },
       403,
     );
-  if (decision === undefined || context.presentation?.freshStepUp !== true)
+  // Claimed, not read: a proof stamped for THIS act, taken in one step, so a proof for another act or a second request
+  // racing on the same one never turns this on.
+  if (decision === undefined || context.claimFreshStepUp?.(STEP_UP_ACTS.allowProfileTargets) !== true)
     return jsonResponse(
       {
         error:
@@ -139,11 +147,21 @@ export function secureCopyRoutes(
       noStore: true,
       handle: async context => {
         const caller = ruleOwner(context);
-        const listed = [...rules.list(caller)];
-        const body: PasteRuleList = {
-          rules: listed,
+        const body: PasteRuleList = { rules: [...rules.list(caller)] };
+        return jsonResponse(body);
+      },
+    },
+    {
+      method: 'GET',
+      path: '/v1/copy-rules/settings',
+      minimum: 'operator',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: async context => {
+        const caller = ruleOwner(context);
+        const body: PasteRuleSettingsView = {
           settings: rules.currentSettings(caller),
-          profileRules: await profileRulesOf(homes, listed),
+          profileRules: await profileRulesOf(homes, [...rules.list(caller)]),
         };
         return jsonResponse(body);
       },
@@ -160,9 +178,7 @@ export function secureCopyRoutes(
         const loosens = settings.allowProfileTargets && !rules.currentSettings(caller).allowProfileTargets;
         const refused = loosens ? profileTargetsRefusal(context) : undefined;
         if (refused !== undefined) return refused;
-        const changed = await rules.changeSettings(caller, settings).catch(answered);
-        if (loosens && context.governance?.governed !== false) context.spendFreshStepUp?.();
-        return jsonResponse(changed);
+        return jsonResponse(await rules.changeSettings(caller, settings).catch(answered));
       },
     },
     {

@@ -11,6 +11,8 @@ import {
   PasteRuleCreateSchema,
   type PasteRuleList,
   PasteRuleListSchema,
+  type PasteRuleSettingsView,
+  PasteRuleSettingsViewSchema,
   PasteRuleSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
@@ -39,6 +41,12 @@ export class ProtocolCopyGateway implements ICopyGateway {
 
   async rules(): Promise<PasteRuleList> {
     return await this.client.request('/v1/copy-rules', PasteRuleListSchema, { headers: this.#headers });
+  }
+
+  async ruleSettings(): Promise<PasteRuleSettingsView> {
+    return await this.client.request('/v1/copy-rules/settings', PasteRuleSettingsViewSchema, {
+      headers: this.#headers,
+    });
   }
 
   async addRule(rule: PasteRuleCreate): Promise<PasteRule> {

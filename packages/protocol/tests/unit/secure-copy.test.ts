@@ -282,20 +282,18 @@ describe('a plan the agent asks for', () => {
 });
 
 describe('the secure copy settings and the rule warnings', () => {
-  it('should keep profile targets off by default, and list the setting and the profile rules optionally', async () => {
-    const { DEFAULT_PASTE_RULE_SETTINGS, PasteRuleListSchema, PasteRuleSettingsSchema } =
+  it('should keep profile targets off by default, and leave the rules list exactly as an older app parses it', async () => {
+    const { DEFAULT_PASTE_RULE_SETTINGS, PasteRuleListSchema, PasteRuleSettingsSchema, PasteRuleSettingsViewSchema } =
       await import('../../src/lib/secure-copy.ts');
     should(DEFAULT_PASTE_RULE_SETTINGS).eql({ allowProfileTargets: false });
     should(PasteRuleSettingsSchema.safeParse({ allowProfileTargets: true, more: 1 }).success).be.false();
     should(PasteRuleListSchema.safeParse({ rules: [] }).success).be.true();
-    should(
-      PasteRuleListSchema.safeParse({
-        rules: [],
-        settings: { allowProfileTargets: true },
-        profileRules: ['a'.repeat(32)],
-      }).success,
-    ).be.true();
-    should(PasteRuleListSchema.safeParse({ rules: [], profileRules: ['not-an-id'] }).success).be.false();
+    // The settings live on their own route: the rules list takes no new key.
+    should(PasteRuleListSchema.safeParse({ rules: [], settings: { allowProfileTargets: true } }).success).be.false();
+    const view = (profileRules: string[]) =>
+      PasteRuleSettingsViewSchema.safeParse({ settings: { allowProfileTargets: true }, profileRules }).success;
+    should(view(['a'.repeat(32)])).be.true();
+    should(view(['not-an-id'])).be.false();
   });
 
   it('should call a shell or an interpreter a program that runs whatever it reads, and nothing else', async () => {
@@ -305,6 +303,16 @@ describe('the secure copy settings and the rule warnings', () => {
       'sh',
       'zsh',
       'fish',
+      'tcsh',
+      'csh',
+      'mksh',
+      'busybox',
+      'nu',
+      'xonsh',
+      'pwsh',
+      'php',
+      'lua',
+      'pypy3',
       'python',
       'python3',
       'python3.12',

@@ -60,7 +60,7 @@ async function served(guard: CapabilityGuard = GRANTED) {
     { from: RULE.from, to: INTO_PAGE, why: 'the env page' },
   ]);
   const routes = secureCopyRoutes({ list: sessionId => copies.list(sessionId) }, rules, plans, {
-    profileOnly: async program => {
+    profileCouldStandFor: async program => {
       if (program === 'broken') throw new Error('cannot look');
       return program === 'vercel';
     },
@@ -168,6 +168,7 @@ describe('the secure copy routes', () => {
     should(routes.map(route => `${route.method} ${route.path} ${route.capability?.axis ?? 'none'}`)).eql([
       'GET /v1/sessions/:sessionId/copies use',
       'GET /v1/copy-rules use',
+      'GET /v1/copy-rules/settings use',
       // Turning profile targets ON demands terminal.configure and a passkey inside the route; OFF only narrows.
       'PUT /v1/copy-rules/settings use',
       'POST /v1/copy-rules configure',
@@ -274,14 +275,24 @@ describe('approving pastes into a page', () => {
   });
 });
 
-type SettingsCaller = 'host' | 'device' | 'fresh-device' | 'device-without-configure';
+type SettingsCaller = 'host' | 'device' | 'fresh-device' | 'device-proved-other' | 'device-without-configure';
 
-/** `PUT /v1/copy-rules/settings`, driven as one caller through the route alone, as the boundary would hand it over. */
-async function putSettings(routes: readonly ApiRoute[], body: unknown, caller: SettingsCaller) {
+/**
+ * `PUT /v1/copy-rules/settings`, driven as one caller through the route alone, as the boundary would hand it over. A
+ * device's fresh proof is stamped for one act and claimed once (`step-up/registry.ts`): `fresh-device` proved
+ * `allow-profile-targets`, `device-proved-other` proved another act (`loosen-config`).
+ */
+async function putSettings(routes: readonly ApiRoute[], body: unknown, caller: SettingsCaller, proof = { held: true }) {
   const found = new ApiRouter(routes).lookup('PUT', '/v1/copy-rules/settings');
   if (found.kind !== 'matched') throw new Error('no settings route');
   const device = caller !== 'host';
-  let spent = 0;
+  const stamped =
+    caller === 'fresh-device'
+      ? STEP_UP_ACTS.allowProfileTargets
+      : caller === 'device-proved-other'
+        ? STEP_UP_ACTS.loosenConfig
+        : undefined;
+  let claimed = 0;
   const governance: CallerGovernance = {
     governed: device,
     decide: () =>
@@ -306,19 +317,23 @@ async function putSettings(routes: readonly ApiRoute[], body: unknown, caller: S
       loopback: !device,
       adminToken: !device,
       actor: device ? 'device:d1' : 'admin-cli',
-      stepUp: caller === 'fresh-device',
-      freshStepUp: caller === 'fresh-device',
+      stepUp: stamped !== undefined,
+      // Any fresh proof reads as fresh here: only the claim says which act it was for.
+      freshStepUp: stamped !== undefined,
     },
-    spendFreshStepUp: () => {
-      spent += 1;
-    },
+    claimFreshStepUp: ((act?: string) => {
+      if (stamped === undefined || act !== stamped || !proof.held) return false;
+      proof.held = false;
+      claimed += 1;
+      return true;
+    }) as RouteContext['claimFreshStepUp'],
   };
   const response = await found.route.handle(context);
-  return { status: response.status, body: jsonBody(response) as Record<string, unknown>, spent };
+  return { status: response.status, body: jsonBody(response) as Record<string, unknown>, claimed };
 }
 
 describe('the secure copy settings: profile targets', () => {
-  it('should list the settings, off by default, and which rules point into the owner profile', async () => {
+  it('should leave the rules list as an older app parses it, and say the settings on their own route', async () => {
     const { dispatch } = await served();
     await dispatch.dispatch(post('/v1/copy-rules', RULE));
     await dispatch.dispatch(post('/v1/copy-rules', { ...RULE, to: { kind: 'terminal', program: 'psql' } }));
@@ -328,24 +343,39 @@ describe('the secure copy settings: profile targets', () => {
     const listed = jsonBody(
       await dispatch.dispatch(request({ method: 'GET', path: '/v1/copy-rules', headers: human })),
     );
+    const view = jsonBody(
+      await dispatch.dispatch(request({ method: 'GET', path: '/v1/copy-rules/settings', headers: human })),
+    );
     const rules = listed.rules as { id: string; to: { program?: string } }[];
 
-    should(listed.settings).eql({ allowProfileTargets: false });
-    should(listed.profileRules).eql(rules.filter(rule => rule.to.program === 'vercel').map(rule => rule.id));
+    should(Object.keys(listed)).eql(['rules']);
+    should(view.settings).eql({ allowProfileTargets: false });
+    // A rule a profile program could satisfy is marked, and so is one the look failed for: it cannot be ruled out.
+    should(view.profileRules).eql(
+      rules.filter(rule => rule.to.program === 'vercel' || rule.to.program === 'broken').map(rule => rule.id),
+    );
+  });
+
+  it('should refuse an agent the settings read', async () => {
+    const { dispatch } = await served();
+    const answer = await dispatch.dispatch(
+      request({ method: 'GET', path: '/v1/copy-rules/settings', headers: agentIn(SESSION) }),
+    );
+    should(answer.status).equal(403);
   });
 
   it('should let the owner at the machine turn it on and off, with no passkey', async () => {
     const { routes, stored } = await served();
 
     const on = await putSettings(routes, { allowProfileTargets: true }, 'host');
-    should([on.status, on.body, on.spent]).eql([200, { allowProfileTargets: true }, 0]);
+    should([on.status, on.body, on.claimed]).eql([200, { allowProfileTargets: true }, 0]);
     should(stored.settings).eql({ allowProfileTargets: true });
     const off = await putSettings(routes, { allowProfileTargets: false }, 'host');
-    should([off.status, off.spent]).eql([200, 0]);
+    should([off.status, off.claimed]).eql([200, 0]);
     should(stored.settings).eql({ allowProfileTargets: false });
   });
 
-  it('should hold turning it on from a device for a passkey proved for that act, and spend it', async () => {
+  it('should hold turning it on from a device for a passkey proved for that act, and claim it', async () => {
     const { routes, stored } = await served();
 
     const held = await putSettings(routes, { allowProfileTargets: true }, 'device');
@@ -362,8 +392,25 @@ describe('the secure copy settings: profile targets', () => {
     should(stored.settings).eql({ allowProfileTargets: false });
 
     const confirmed = await putSettings(routes, { allowProfileTargets: true }, 'fresh-device');
-    should([confirmed.status, confirmed.spent]).eql([200, 1]);
+    should([confirmed.status, confirmed.claimed]).eql([200, 1]);
     should(stored.settings).eql({ allowProfileTargets: true });
+  });
+
+  it('should refuse a fresh proof minted for another act, and let one proof turn it on only once (L1)', async () => {
+    const { routes, stored } = await served();
+
+    const other = await putSettings(routes, { allowProfileTargets: true }, 'device-proved-other');
+    should(other.status).equal(403);
+    should(other.body.code).equal(STEP_UP_REQUIRED_CODE);
+    should(stored.settings).eql({ allowProfileTargets: false });
+
+    // One proof, two requests racing: the second finds it claimed.
+    const proof = { held: true };
+    const [first, second] = await Promise.all([
+      putSettings(routes, { allowProfileTargets: true }, 'fresh-device', proof),
+      putSettings(routes, { allowProfileTargets: true }, 'fresh-device', proof),
+    ]);
+    should([first.status, second.status].sort()).eql([200, 403]);
   });
 
   it('should let a device turn it off, or leave it on, with no passkey at all', async () => {
@@ -373,7 +420,7 @@ describe('the secure copy settings: profile targets', () => {
     const again = await putSettings(routes, { allowProfileTargets: true }, 'device');
     const off = await putSettings(routes, { allowProfileTargets: false }, 'device-without-configure');
 
-    should([again.status, again.spent, off.status, off.spent]).eql([200, 0, 200, 0]);
+    should([again.status, again.claimed, off.status, off.claimed]).eql([200, 0, 200, 0]);
     should(stored.settings).eql({ allowProfileTargets: false });
   });
 });

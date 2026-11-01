@@ -292,7 +292,7 @@ export function linuxHost(account: number | undefined): ProcessHost {
         accountName(() => userInfo().username),
       );
       const runs = await readlink(`/proc/${String(pid)}/exe`);
-      return chain === undefined ? undefined : await profileProgramOf(runs, chain, { lstat, readlink });
+      return chain === undefined ? undefined : await profileProgramOf(runs, chain, account, { lstat, readlink });
     },
   };
 }

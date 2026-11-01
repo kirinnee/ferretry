@@ -1,5 +1,12 @@
 import { describe, it } from 'bun:test';
-import type { CopyMeta, CopyPlan, PasteRule, PasteRuleCreate } from '@ferretry/protocol';
+import type {
+  CopyMeta,
+  CopyPlan,
+  PasteRule,
+  PasteRuleCreate,
+  PasteRuleList,
+  PasteRuleSettingsView,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   COPY_FERRET_REFUSAL,
@@ -57,8 +64,12 @@ class FakeGateway implements ICopyGateway {
   async copies(): Promise<readonly CopyMeta[]> {
     return [COPY];
   }
-  async rules() {
+  async rules(): Promise<PasteRuleList> {
     return { rules: [RULE] };
+  }
+  /** An older daemon has no settings route: the fake answers like one unless a test says otherwise. */
+  async ruleSettings(): Promise<PasteRuleSettingsView> {
+    throw new Error('404 not found');
   }
   async addRule(rule: PasteRuleCreate): Promise<PasteRule> {
     this.added.push(rule);
@@ -160,9 +171,9 @@ describe('fy copy', () => {
     should(await failure(controller.removeRule('zzz', {}))).equal('no rule starts with "zzz"');
   });
 
-  it('should say whether profile programs are allowed, and mark a rule into one', async () => {
+  it('should say whether profile programs are allowed, and mark a rule one could satisfy', async () => {
     const { controller, gateway, said } = rig();
-    gateway.rules = async () => ({ rules: [RULE], settings: { allowProfileTargets: false }, profileRules: [RULE.id] });
+    gateway.ruleSettings = async () => ({ settings: { allowProfileTargets: false }, profileRules: [RULE.id] });
 
     await controller.rules({});
 
@@ -172,9 +183,21 @@ describe('fy copy', () => {
         'a1b2c3d4  command:gh → terminal:vercel  any session  2 left  no expiry  used 1  [your profile — a ferret could swap this program]',
       ].join('\n'),
     );
-    gateway.rules = async () => ({ rules: [], settings: { allowProfileTargets: true }, profileRules: [] });
+    gateway.rules = async () => ({ rules: [] });
+    gateway.ruleSettings = async () => ({ settings: { allowProfileTargets: true }, profileRules: [] });
     await controller.rules({});
     should(said[1]).equal('programs in your own profile: allowed\nno pastes are approved in advance');
+  });
+
+  it('should say nothing of the setting to a daemon too old to have it, and mark a rule into a shell', async () => {
+    const { controller, gateway, said } = rig();
+    gateway.rules = async () => ({ rules: [{ ...RULE, to: { kind: 'terminal', program: 'bash' } }] });
+
+    await controller.rules({});
+
+    should(said[0]).equal(
+      'a1b2c3d4  command:gh → terminal:bash  any session  2 left  no expiry  used 1  [runs whatever it reads]',
+    );
   });
 
   it('should warn, and still add, a rule into a shell or an interpreter', async () => {

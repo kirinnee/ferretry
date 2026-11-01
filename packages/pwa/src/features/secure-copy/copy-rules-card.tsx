@@ -284,6 +284,15 @@ function RuleRow({
           {ruleLimits(rule)}
           {rule.plan === undefined ? '' : ' · from a ferret’s plan'}
         </p>
+        {rule.to.kind === 'terminal' && runsWhatItReads(rule.to.program) && (
+          <p
+            className="m-0 flex items-start gap-1.5 text-meta font-medium text-warn"
+            data-copy-rule-row-runs-anything=""
+          >
+            <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+            {RUNS_WHAT_IT_READS_WARNING}
+          </p>
+        )}
         {inProfile && (
           <p className="m-0 flex items-start gap-1.5 text-meta text-warn" data-copy-rule-profile="">
             <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />

@@ -239,27 +239,40 @@ Settings › Secure copy › "Copy rules may target programs in my own profile" 
 
 - **The risk, plainly:** every process running as you, so every ferret, can change your profile. `~/.nix-profile`
   and the generations behind it are links your account owns, and anyone may add a path to the Nix store. A ferret can
-  therefore point `gh` in your profile at a program of its own, and a rule for `gh` would then paste into that
-  program without asking you. A system program (`/usr/bin/gh`) cannot be swapped that way, which is why it is the
-  default.
-- **What it allows:** a `terminal:<program>` rule also matches a program proved only through your profile: the
-  entry `~/.nix-profile/bin/<program>` is walked one part at a time, every link on the way must stay inside the
-  profile chain (`~/.nix-profile`, `~/.local/state/nix/profiles`, `/nix/var/nix/profiles/per-user/<you>`, the
-  store), and the walk must end at the very store file every process reading the terminal runs. Everything else still
-  holds: every process of the foreground group proved, line mode, no process of another session holding the
-  terminal. A program in `~/bin`, any other path, or a store path your profile does not name is never matched.
+  therefore put a program of its own in your profile under ANY name a rule of yours could name, and a rule for that
+  name would then paste into it without asking you. That covers every rule marked "your profile" below, including
+  one whose program is not in your profile yet.
+- **Which rules it can reach, and which never:** only a `terminal:<program>` rule whose program **no
+  root-controlled folder holds** (`/usr/bin`, `/bin`, a system profile, …; an entry your account could replace does
+  not count), and never one for a password or code program (sudo, sudoedit, su, doas, passwd, ssh, scp, sftp, mosh,
+  and the aws, gcloud, az and vault CLIs). So a rule for `/usr/bin/gh`, `sudo` or `ssh` is still met only by the
+  root-placed program, setting on or off: a fake `sudo` in your profile is never proved. This is checked when the
+  terminal is looked at, with the same check the badge uses.
+- **How the program is proved:** the entry `~/.nix-profile/bin/<program>` is walked one part at a time, every link on
+  the way must stay inside the profile chain (`~/.nix-profile`, `~/.local/state/nix/profiles`,
+  `/nix/var/nix/profiles/per-user/<you>`, the store), and the walk must end at the very store file every process
+  reading the terminal runs. Everything else still holds: every process of the foreground group proved, line mode,
+  no process of another session holding the terminal. A program in `~/bin`, any other path, or a store path your
+  profile does not name is never matched. The write itself checks again that the same profile program still holds
+  the terminal, or nothing is typed.
 - **What it never allows:** a program proved through your profile earns no green card, no short lock and no one-tap
-  saved login; it only lets a rule you wrote match.
+  saved login; it only lets a rule you wrote match. The proof is the daemon's own and is never sent to the app.
 - **Who may turn it on:** the owner only. A ferret is refused before its request is read
   (`PUT /v1/copy-rules/settings`). At the machine it takes effect at once; from a paired device it needs
-  `terminal.configure` and a passkey proved for this one act (`allow-profile-targets`). Turning it off never asks.
-  It is kept beside the rules in `<state>/secure-copy/rules.json`; a file that cannot be read holds it off.
-- **What you see:** a rule whose program this machine finds only in your profile is marked "your profile — a ferret
-  could swap this program" (Settings, and `fy copy rules ls`), and "asks you" while the setting is off.
+  `terminal.configure` and a passkey proved for this one act (`allow-profile-targets`), claimed in one step, so a
+  passkey proved for something else never turns it on. Turning it off never asks. It is kept beside the rules in
+  `<state>/secure-copy/rules.json`; a file that cannot be read holds it off. "The owner only" is the honest-client
+  boundary in [honest limits](#honest-limits): a ferret that reads the admin token is taken for the owner here too.
+- **What you see:** while the setting is on or off, every terminal rule a program from your profile could satisfy
+  is marked "your profile — a ferret could swap this program" (Settings, and `fy copy rules ls`), with "asks you"
+  while the setting is off. The settings and these marks come from `GET /v1/copy-rules/settings`, a route of its own;
+  an app or CLI talking to an older daemon shows neither, and the rules list itself is unchanged.
 - **What is logged:** a paste under a rule into such a program is audited as every rule paste is (`by: rule`, the
-  rule), with the store file it pasted into (`profileProgram`); never the value.
-- **A rule into a shell or an interpreter** (bash, sh, zsh, fish, python, node, bun, perl, ruby, …) is warned about
-  when you add it, in Settings and by `fy copy rules add`: such a program runs whatever it reads.
+  rule), with the store file it pasted into (`profileProgram`); never the value. Turning the setting on or off is
+  kept as `security.changed` (`copy-rule-settings`).
+- **A rule into a shell or an interpreter** (bash, sh, zsh, fish, csh, tcsh, busybox, nu, pwsh, python, pypy, node,
+  bun, perl, ruby, php, lua, …) is warned about when you add it (Settings, `fy copy rules add`), on the rule's row,
+  in `fy copy rules ls`, and on a ferret's paste plan card: such a program runs whatever it reads.
 - **GAP: Linux only.** No reading of a macOS process's executable is wired, so nothing is proved through a profile
   there.
 

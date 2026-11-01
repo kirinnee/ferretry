@@ -9,6 +9,7 @@ import {
   type PasteRuleCreate,
   type PasteRuleSettings,
 } from '@ferretry/protocol';
+import { CODE_PROGRAMS, GETPASS_PROGRAMS } from '../input-requests/lock.ts';
 import type { InputPasteRules } from '../input-requests/ports.ts';
 import { SecureCopyError } from './errors.ts';
 
@@ -190,7 +191,7 @@ export class PasteRuleService implements InputPasteRules {
    * The rule that allows this paste, with one use TAKEN, or nothing. Synchronous, so two pastes can never both
    * spend a rule's last use. Before the store has been read nothing matches.
    */
-  reserve(sessionId: string, from: CopyOrigin, facts: InputTargetFacts): string | undefined {
+  reserve(sessionId: string, from: CopyOrigin, facts: InputTargetFacts, profile?: string): string | undefined {
     if (!this.loaded) return undefined;
     this.purge();
     const rule = this.rules.find(
@@ -198,7 +199,7 @@ export class PasteRuleService implements InputPasteRules {
         (candidate.sessionId === undefined || candidate.sessionId === sessionId) &&
         (candidate.remaining === undefined || candidate.remaining - this.taken(candidate.id) > 0) &&
         fromMatches(candidate, from) &&
-        toMatches(candidate, facts, this.settings),
+        toMatches(candidate, facts, this.settings, profile),
     );
     if (rule === undefined) return undefined;
     this.reserved.set(rule.id, this.taken(rule.id) + 1);
@@ -296,7 +297,15 @@ function fromMatches(rule: PasteRule, from: CopyOrigin): boolean {
   }
 }
 
-function toMatches(rule: PasteRule, facts: InputTargetFacts, settings: PasteRuleSettings): boolean {
+/**
+ * Whether a program proved only through the owner's own profile may stand for a rule's program: the owner allowed
+ * profile targets, and the name is no password or code program. (The proof itself already refused a name a
+ * root-controlled folder holds: a rule for a system program is never met by the profile.)
+ */
+const profileMayStandFor = (settings: PasteRuleSettings, program: string): boolean =>
+  settings.allowProfileTargets && !GETPASS_PROGRAMS.has(program) && !CODE_PROGRAMS.has(program);
+
+function toMatches(rule: PasteRule, facts: InputTargetFacts, settings: PasteRuleSettings, profile?: string): boolean {
   switch (rule.to.kind) {
     case 'terminal':
       // The PROVED program (every process of the foreground group, by the kernel), never the name ps shows: a ferret's
@@ -307,9 +316,7 @@ function toMatches(rule: PasteRule, facts: InputTargetFacts, settings: PasteRule
         facts.kind === 'terminal' &&
         facts.canonical === true &&
         (facts.program === rule.to.program ||
-          (settings.allowProfileTargets &&
-            facts.program === undefined &&
-            facts.profileProgram?.name === rule.to.program))
+          (facts.program === undefined && profile === rule.to.program && profileMayStandFor(settings, profile)))
       );
     case 'browser':
       return facts.kind === 'browser' && facts.origin === rule.to.origin;

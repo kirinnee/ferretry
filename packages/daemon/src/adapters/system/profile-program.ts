@@ -1,5 +1,6 @@
 import { lstat, readlink } from 'node:fs/promises';
 import { basename, isAbsolute } from 'node:path';
+import { CODE_PROGRAMS, GETPASS_PROGRAMS } from '../../lib/input-requests/index.ts';
 import { ROOT_PROGRAM_FOLDERS, type ReplaceableDisk, replaceableBy } from './replaceable-file.ts';
 
 /**
@@ -88,48 +89,54 @@ export async function walkProfileEntry(
   return done === '' ? '/' : done;
 }
 
-/** The program a process running `executable` is, proved through the profile chain, or `undefined`. */
-export async function profileProgramOf(
-  executable: string,
-  chain: ProfileChain,
-  disk: ReplaceableDisk,
-): Promise<{ readonly name: string; readonly path: string } | undefined> {
-  if (!executable.startsWith(NIX_STORE) || executable.endsWith(' (deleted)')) return undefined;
-  const name = basename(executable);
-  if (!NAME.test(name)) return undefined;
-  for (const bin of chain.bins)
-    if ((await walkProfileEntry(`${bin}/${name}`, chain, disk)) === executable) return { name, path: executable };
-  return undefined;
-}
-
 /**
- * Whether this machine finds `program` ONLY in the owner's profile: no root-controlled folder holds it (one this account
- * cannot replace), and the profile's entry walks into the store. What a rule into it is labelled with.
+ * Whether a program from the owner's profile may stand for `program` at all: no root-controlled folder holds that name
+ * (an entry this account cannot replace), and it is no password or code program (sudo, su, ssh, …), which only a
+ * root-placed program may ever be. ONE check for two uses: the profile proof refuses any other name, and the rules list
+ * marks every terminal rule it holds for, so a badge cannot go stale while the profile changes.
  */
-export async function onlyInProfile(
+export async function profileCouldStandFor(
   program: string,
   chain: ProfileChain | undefined,
   account: number | undefined,
   disk: ReplaceableDisk = { lstat, readlink },
   folders: readonly string[] = ROOT_PROGRAM_FOLDERS,
 ): Promise<boolean> {
-  if (chain === undefined || !NAME.test(program)) return false;
+  if (chain === undefined || !NAME.test(program) || GETPASS_PROGRAMS.has(program) || CODE_PROGRAMS.has(program))
+    return false;
   for (const folder of folders) {
     const entry = `${folder}/${program}`;
     if ((await disk.lstat(entry).catch(() => undefined)) === undefined) continue;
     if (!(await replaceableBy(account, entry, disk, folders))) return false;
   }
-  for (const bin of chain.bins)
-    if ((await walkProfileEntry(`${bin}/${program}`, chain, disk))?.startsWith(NIX_STORE) === true) return true;
-  return false;
+  return true;
 }
 
-/** This machine's account: where a terminal rule's program lives, for the rules list. */
+/**
+ * The program a process running `executable` is, proved through the profile chain, or `undefined`. Only a name
+ * {@link profileCouldStandFor} allows: a fake `sudo` in the profile is never proved, while the real one is root's.
+ */
+export async function profileProgramOf(
+  executable: string,
+  chain: ProfileChain,
+  account: number | undefined,
+  disk: ReplaceableDisk = { lstat, readlink },
+  folders: readonly string[] = ROOT_PROGRAM_FOLDERS,
+): Promise<{ readonly name: string; readonly path: string } | undefined> {
+  if (!executable.startsWith(NIX_STORE) || executable.endsWith(' (deleted)')) return undefined;
+  const name = basename(executable);
+  if (!(await profileCouldStandFor(name, chain, account, disk, folders))) return undefined;
+  for (const bin of chain.bins)
+    if ((await walkProfileEntry(`${bin}/${name}`, chain, disk)) === executable) return { name, path: executable };
+  return undefined;
+}
+
+/** This machine's account: which terminal rules a program from the owner's profile could satisfy, for the badge. */
 export function machineProgramHomes(
   home: string | undefined,
   account: string | undefined,
   uid: number | undefined,
-): { profileOnly(program: string): Promise<boolean> } {
+): { profileCouldStandFor(program: string): Promise<boolean> } {
   const chain = profileChainOf(home, account);
-  return { profileOnly: async program => await onlyInProfile(program, chain, uid) };
+  return { profileCouldStandFor: async program => await profileCouldStandFor(program, chain, uid) };
 }

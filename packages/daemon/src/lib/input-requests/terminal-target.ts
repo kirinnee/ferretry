@@ -54,6 +54,7 @@ type Sight =
       readonly guard: WriteGuard;
       readonly names: readonly string[];
       readonly codeProgram?: boolean;
+      readonly profileProgram?: ProfileProgram;
     }
   | { readonly ok: false; readonly reason: 'target_gone' };
 
@@ -169,6 +170,7 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
           facts: sight.facts,
           names: sight.names,
           ...(sight.codeProgram ? { codeProgram: true as const } : {}),
+          ...(sight.profileProgram === undefined ? {} : { profileProgram: sight.profileProgram }),
         }
       : sight;
   }
@@ -255,7 +257,6 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
       promptLine,
       promptLineDigest: digestLine(promptLine),
       ...(group === undefined ? {} : { program: group.program }),
-      ...(profile === undefined ? {} : { profileProgram: profile }),
       recognisedConsumer: group?.recognised === true,
       ...(canonical === undefined ? {} : { canonical }),
       ...(group?.setuidRoot === true ? { trustedProgram: true as const } : {}),
@@ -265,6 +266,7 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
       facts,
       guard: { panePid: sighting.pid, command: last.command, cursorRow },
       codeProgram,
+      ...(profile === undefined ? {} : { profileProgram: profile }),
       names: [...new Set([key, located.name, located.id].filter((name): name is string => name !== undefined))],
     };
   }
@@ -334,6 +336,9 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     // A code kept visible because a code program held the terminal: another member joining the foreground group (a
     // reader the ferret started) is no change to the facts, so the program is proved again here.
     if (options?.codeProgram === true && fresh.codeProgram !== true) return 'target_changed';
+    // A rule that pasted on the strength of a program from the owner's profile types only while that program holds it.
+    if (options?.profileProgram !== undefined && fresh.profileProgram?.name !== options.profileProgram)
+      return 'target_changed';
     const { guard } = fresh;
     if (!PINNABLE_COMMAND.test(guard.command)) return 'target_changed';
     const paneId = fresh.facts.paneProof.paneId;

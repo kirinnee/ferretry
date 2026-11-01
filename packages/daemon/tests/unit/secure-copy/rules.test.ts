@@ -530,11 +530,8 @@ describe('PasteRuleService and plans: what the security review found', () => {
 });
 
 describe('PasteRuleService: the owner settings (profile targets)', () => {
-  const IN_PROFILE = {
-    ...AT_VERCEL,
-    program: undefined,
-    profileProgram: { name: 'vercel', path: '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-vercel/bin/vercel' },
-  } as InputTargetFacts;
+  /** No proved program: only the daemon's own profile reading (`ObserveResult.profileProgram`) names one. */
+  const IN_PROFILE = { ...AT_VERCEL, program: undefined } as InputTargetFacts;
 
   it('should hold profile targets off by default, and off again when the store cannot be read', async () => {
     const fresh = rules();
@@ -563,13 +560,25 @@ describe('PasteRuleService: the owner settings (profile targets)', () => {
     await service.load();
     await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL });
 
-    should(service.reserve('s1', GH_COPY, IN_PROFILE)).be.undefined();
+    should(service.reserve('s1', GH_COPY, IN_PROFILE, 'vercel')).be.undefined();
     await service.changeSettings(OWNER, { allowProfileTargets: true });
-    should(service.reserve('s1', GH_COPY, IN_PROFILE)).not.be.undefined();
-    // Still in line mode only, and never another program's profile entry.
-    should(service.reserve('s1', GH_COPY, { ...IN_PROFILE, canonical: false } as InputTargetFacts)).be.undefined();
-    const other = { ...IN_PROFILE, profileProgram: { name: 'gh', path: '/nix/store/x-gh/bin/gh' } } as InputTargetFacts;
-    should(service.reserve('s1', GH_COPY, other)).be.undefined();
+    should(service.reserve('s1', GH_COPY, IN_PROFILE, 'vercel')).not.be.undefined();
+    // Still in line mode only, never another program's profile entry, and never with no profile reading at all.
+    should(
+      service.reserve('s1', GH_COPY, { ...IN_PROFILE, canonical: false } as InputTargetFacts, 'vercel'),
+    ).be.undefined();
+    should(service.reserve('s1', GH_COPY, IN_PROFILE, 'gh')).be.undefined();
+    should(service.reserve('s1', GH_COPY, IN_PROFILE)).be.undefined();
+  });
+
+  it('should never let a profile program meet a rule for a password or code program, setting on or not (M1)', async () => {
+    const { service } = rules();
+    await service.load();
+    await service.changeSettings(OWNER, { allowProfileTargets: true });
+    for (const program of ['sudo', 'su', 'doas', 'passwd', 'sudoedit', 'ssh', 'scp', 'vault']) {
+      await service.create(OWNER, { from: GH, to: { kind: 'terminal', program } });
+      should(service.reserve('s1', GH_COPY, IN_PROFILE, program)).be.undefined();
+    }
   });
 
   it('should leave the setting as it was when the store cannot save the change', async () => {

@@ -4,7 +4,7 @@ import should from 'should';
 import { KernelProgramProof, linuxHost, type ProcessHost } from '../../../src/adapters/system/kernel-program-proof.ts';
 import {
   machineProgramHomes,
-  onlyInProfile,
+  profileCouldStandFor,
   type ProfileChain,
   profileChainOf,
   profileProgramOf,
@@ -108,33 +108,52 @@ describe('the owner profile chain', () => {
   });
 
   it('should prove the store file the profile names, and nothing else', async () => {
-    should(await profileProgramOf(STORE_GH, CHAIN, disk(PROFILE))).eql({ name: 'gh', path: STORE_GH });
+    const proved = async (executable: string, nodes: Record<string, Node> = PROFILE) =>
+      await profileProgramOf(executable, CHAIN, ME, disk(nodes), ['/usr/bin']);
+    should(await proved(STORE_GH)).eql({ name: 'gh', path: STORE_GH });
     // A store copy the profile does not name (nix-store --add), a home copy, a deleted file, a bad name.
-    should(await profileProgramOf(FORGED_GH, CHAIN, disk(PROFILE))).be.undefined();
-    should(await profileProgramOf(`${HOME}/bin/gh`, CHAIN, disk(PROFILE))).be.undefined();
-    should(await profileProgramOf(`${STORE_GH} (deleted)`, CHAIN, disk(PROFILE))).be.undefined();
-    should(await profileProgramOf('/nix/store/x-y/bin/g h', CHAIN, disk(PROFILE))).be.undefined();
+    should(await proved(FORGED_GH)).be.undefined();
+    should(await proved(`${HOME}/bin/gh`)).be.undefined();
+    should(await proved(`${STORE_GH} (deleted)`)).be.undefined();
+    should(await proved('/nix/store/x-y/bin/g h')).be.undefined();
+    // The profile can never stand for a program a system folder holds: /usr/bin/gh is root's.
+    should(await proved(STORE_GH, { ...PROFILE, '/usr/bin/gh': {} })).be.undefined();
   });
 
-  it('should say a program lives only in the profile when no system folder holds one it cannot replace', async () => {
-    const only = async (program: string, nodes: Record<string, Node> = PROFILE) =>
-      await onlyInProfile(program, CHAIN, ME, disk(nodes), ['/usr/bin']);
-    should(await only('gh')).be.true();
-    should(await only('gh', { ...PROFILE, '/usr/bin/gh': {} })).be.false();
-    // A "system" entry this account could replace proves nothing: the profile entry still decides.
-    should(await only('gh', { ...PROFILE, '/usr/bin/gh': { uid: ME } })).be.true();
-    should(await only('jq')).be.false();
-    should(await only('g h')).be.false();
-    should(await onlyInProfile('gh', undefined, ME, disk(PROFILE), ['/usr/bin'])).be.false();
-    should(
-      await onlyInProfile('nonexistent-fy-program', profileChainOf(homedir(), userInfo().username), ME),
-    ).be.false();
+  it('should never prove a password or code program through the profile, though the profile names it (M1)', async () => {
+    // A ferret's own non-setuid "sudo" in the store, linked from the profile: the walk holds, the name never does.
+    const SUDO = '/nix/store/ffffffffffffffffffffffffffffffff-sudo/bin/sudo';
+    const faked: Record<string, Node> = {
+      ...PROFILE,
+      '/nix/store/eeee-user-environment/bin/sudo': { to: SUDO },
+      '/nix/store/ffffffffffffffffffffffffffffffff-sudo': {},
+      '/nix/store/ffffffffffffffffffffffffffffffff-sudo/bin': {},
+      [SUDO]: {},
+    };
+    should(await walkProfileEntry(`${HOME}/.nix-profile/bin/sudo`, CHAIN, disk(faked))).equal(SUDO);
+    should(await profileProgramOf(SUDO, CHAIN, ME, disk(faked), ['/usr/bin'])).be.undefined();
+  });
+
+  it('should say a profile program could stand for a name only when no system folder holds it unreplaceably', async () => {
+    const could = async (program: string, nodes: Record<string, Node> = PROFILE) =>
+      await profileCouldStandFor(program, CHAIN, ME, disk(nodes), ['/usr/bin']);
+    should(await could('gh')).be.true();
+    // Not in the profile today, but a ferret could add it: the badge says so before it happens.
+    should(await could('vercel')).be.true();
+    should(await could('gh', { ...PROFILE, '/usr/bin/gh': {} })).be.false();
+    // A "system" entry this account could replace proves nothing.
+    should(await could('gh', { ...PROFILE, '/usr/bin/gh': { uid: ME } })).be.true();
+    for (const program of ['sudo', 'su', 'doas', 'passwd', 'sudoedit', 'ssh', 'scp', 'aws', 'g h'])
+      should(await could(program)).be.false();
+    should(await profileCouldStandFor('gh', undefined, ME, disk(PROFILE), ['/usr/bin'])).be.false();
+    should(await profileCouldStandFor('env', profileChainOf(homedir(), userInfo().username), ME)).be.false();
   });
 
   it("should give the rules list this machine's own answer", async () => {
     const homes = machineProgramHomes(homedir(), userInfo().username, ME);
-    should(await homes.profileOnly('nonexistent-fy-program')).be.false();
-    should(await machineProgramHomes(undefined, undefined, ME).profileOnly('gh')).be.false();
+    should(await homes.profileCouldStandFor('nonexistent-fy-program')).be.true();
+    should(await homes.profileCouldStandFor('sudo')).be.false();
+    should(await machineProgramHomes(undefined, undefined, ME).profileCouldStandFor('gh')).be.false();
   });
 });
 

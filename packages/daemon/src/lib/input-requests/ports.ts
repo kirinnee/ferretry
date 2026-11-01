@@ -82,6 +82,12 @@ export type ObserveResult =
        * replace: the only way an echo-off prompt may stay a one-time code. The daemon's own, never on the wire.
        */
       readonly codeProgram?: true;
+      /**
+       * A program every process of the foreground group runs, proved ONLY through the owner's own Nix profile, and
+       * one no root-controlled folder holds and no password or code program. The daemon's own, never on the wire:
+       * only a secure-copy rule the owner allowed for it reads it (`allowProfileTargets`).
+       */
+      readonly profileProgram?: ProfileProgram;
     }
   | { readonly ok: false; readonly reason: 'target_gone' | 'unsupported' };
 
@@ -179,6 +185,8 @@ export interface TerminalInputTargetPort {
 export interface TypeOptions {
   /** A code program (`ObserveResult.codeProgram`) must still hold the terminal, or nothing is typed. */
   readonly codeProgram?: boolean;
+  /** A rule pasted into this profile program (`ObserveResult.profileProgram`): it must still hold the terminal. */
+  readonly profileProgram?: string;
 }
 
 /** The card the owner answers. The daemon words the title and ask; the agent's prompt rides as `prompt` only. */
@@ -331,7 +339,8 @@ export interface InputSealedPort {
  * taken) synchronously, so two pastes can never both spend a rule's last use. Matched on what the daemon saw.
  */
 export interface InputPasteRules {
-  reserve(sessionId: string, from: CopyOrigin, facts: InputTargetFacts): string | undefined;
+  /** `profile`: the name of a program proved only through the owner's profile (`ObserveResult.profileProgram`). */
+  reserve(sessionId: string, from: CopyOrigin, facts: InputTargetFacts, profile?: string): string | undefined;
   /** The paste a rule was reserved for was not typed: its use is given back. */
   release(ruleId: string): void;
   /** It was typed. */

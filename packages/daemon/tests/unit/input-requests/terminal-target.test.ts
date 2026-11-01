@@ -802,20 +802,27 @@ describe('the program a secret card names is proved for every reader of the term
 describe('a program proved only through the owner profile', () => {
   const GH_PS = ' 4242  4242  4300 bash -bash\n 4300  4300  4300 gh gh auth login\n 4301  4300  4300 gh gh helper\n';
   const GH = { name: 'gh', path: '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-gh/bin/gh' };
+  /** The daemon's own reading beside the facts: never on the facts an app parses. */
+  const seen = async (w: World) => {
+    const result = await target(w).observe('s1', dev);
+    if (!result.ok || result.facts.kind !== 'terminal') throw new Error('expected facts');
+    return result;
+  };
 
-  it('should name it as profileProgram, never as program, and earn nothing else for it', async () => {
+  it('should say it beside the facts, never in them, and earn nothing else for it', async () => {
     const w = world();
     w.ps = GH_PS;
     w.proved = {};
     w.profiled = { 4300: GH, 4301: GH };
     w.canonical = true;
 
-    const facts = await observed(w);
+    const result = await seen(w);
 
-    should(facts).not.have.property('program');
-    should(facts.profileProgram).eql(GH);
-    should(facts.recognisedConsumer).be.false();
-    should(facts).not.have.property('trustedProgram');
+    should(result.profileProgram).eql(GH);
+    should(result.facts).not.have.property('profileProgram');
+    should(result.facts).not.have.property('program');
+    should(result.facts.kind === 'terminal' && result.facts.recognisedConsumer).be.false();
+    should(result.facts).not.have.property('trustedProgram');
   });
 
   it('should take a group where some members are proved by a system folder and the rest by the profile', async () => {
@@ -824,7 +831,7 @@ describe('a program proved only through the owner profile', () => {
     w.proved = { 4301: { name: 'gh', setuidRoot: false } };
     w.profiled = { 4300: GH };
 
-    should((await observed(w)).profileProgram).eql(GH);
+    should((await seen(w)).profileProgram).eql(GH);
   });
 
   it('should name nothing when a member is proved neither way, runs another program, or a stranger holds the TTY', async () => {
@@ -848,7 +855,7 @@ describe('a program proved only through the owner profile', () => {
       w.ps = GH_PS;
       w.proved = {};
       change(w);
-      should(await observed(w)).not.have.property('profileProgram');
+      should(await seen(w)).not.have.property('profileProgram');
     }
   });
 
@@ -856,6 +863,24 @@ describe('a program proved only through the owner profile', () => {
     const w = world();
     w.ps = GH_PS;
     w.proved = {};
-    should(await observed(w)).not.have.property('profileProgram');
+    should(await seen(w)).not.have.property('profileProgram');
+  });
+
+  it('should type a rule paste only while the same profile program still holds the terminal', async () => {
+    const w = world();
+    w.ps = GH_PS;
+    w.proved = {};
+    w.profiled = { 4300: GH, 4301: GH };
+    const port = target(w);
+    const result = await port.observe('s1', dev);
+    if (!result.ok) throw new Error('not seen');
+
+    w.profiled = {};
+    const gone = await port.type('s1', dev, SECRET, true, result.facts, { profileProgram: 'gh' });
+    should(gone).equal('target_changed');
+    should(w.typed).be.empty();
+
+    w.profiled = { 4300: GH, 4301: GH };
+    should(await port.type('s1', dev, SECRET, true, result.facts, { profileProgram: 'gh' })).equal('typed');
   });
 });
