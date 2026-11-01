@@ -178,7 +178,7 @@ const EARLIER_DAYS: readonly WardenDayStats[] = [
   }),
 ].map(withActions);
 
-/** Jev's checks that settled nothing: what Recent actions lists for Jev beside its actions. */
+/** Jev's checks that settled nothing: what Recent triggers lists for Jev beside its actions. */
 const JEV_CHECKS: readonly WardenJevCheck[] = [
   {
     at: at(2),
@@ -203,7 +203,7 @@ const JEV_CHECKS: readonly WardenJevCheck[] = [
   {
     at: at(12),
     sessionId: 'harness-jaylynn',
-    anomalyKind: 'sus_subprocess',
+    anomalyKind: 'dead_monitor',
     verdict: 'handed_on',
     why: 'never_alone',
     act: 'stop',
@@ -475,6 +475,7 @@ const STATUS_WITHOUT_JEV: WardenStatusView = {
       confidence: 0.91,
       agent: 'claude-spare',
       reason: 'The account is rate-limited; the same task will run on the spare one.',
+      fromAgent: 'claude-default',
     },
     {
       at: at(47),
@@ -623,6 +624,7 @@ const STATUS_WITHOUT_JEV: WardenStatusView = {
       detail: 'Moved it to another account because claude-default hit its usage limit.',
       reportPath: 'warden/reports/fleet.md',
       investigator: 'warden-000024',
+      fromAgent: 'claude-default',
       agent: 'claude-spare',
     },
     {
@@ -698,15 +700,15 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
           ...entry,
           jev:
             entry.state === 'queued'
-              ? {
+              ? { verdict: 'handed_on', why: 'unsure', at: at(4), confidence: 0.21, costUsd: 0.0041 }
+              : {
                   verdict: 'handed_on',
-                  why: 'not_sure_enough',
-                  act: 'restart',
-                  at: at(2),
-                  confidence: 0.62,
+                  why: 'never_alone',
+                  act: 'stop',
+                  at: at(12),
+                  confidence: 0.99,
                   costUsd: 0.0038,
-                }
-              : { verdict: 'not_asked', why: 'not_judgeable' },
+                },
         },
   ),
   actions: STATUS_WITHOUT_JEV.actions.map(action =>
