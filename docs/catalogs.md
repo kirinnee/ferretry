@@ -361,8 +361,8 @@ the daemon decides.
 - Every write, and every manifest or export that signs, runs in the one write queue, so a manifest read and an Undo cannot
   interleave. **Member manifest reads and exports now wait in that queue** behind a write in flight, instead of reading
   alongside it.
-- Declared gap: **the undo record is in memory.** A restart forgets every token, so Undo then answers 410 and the item is
-  withdrawn the ordinary way; it also forgets which revisions were signed, which is why no add survives a restart as
+- Declared gap: **the undo record is in memory.** A restart forgets every token, so Undo then answers 410 and the person
+  must withdraw the item the ordinary way (nothing does it for them); it also forgets which revisions were signed, which is why no add survives a restart as
   retractable. The feature flag is `catalogs.quick-add.1`. Audit: `catalog.changed`, `publish` or `undo`, ids only
   ([audit.md](audit.md)); a `review` or `already` answer changed nothing and is not recorded.
 

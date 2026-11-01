@@ -59,9 +59,9 @@ export interface AuditedRouteRule {
    */
   readonly responseFields?: Readonly<Record<string, readonly string[]>>;
   /**
-   * A success is recorded only when this top-level field of the JSON answer holds this word: one-tap Add answers
-   * `review` or `already` with a 2xx and changed nothing, so there is nothing to record. A refusal or an error is
-   * always recorded.
+   * A success is not recorded when this top-level field of the JSON answer names another value (one-tap Add answers
+   * `review` or `already` with a 2xx and changed nothing); it is recorded when the field holds this word, or is absent
+   * or unreadable. A refusal or an error is always recorded.
    */
   readonly recordOnlyWhen?: { readonly field: string; readonly equals: string };
   /**
