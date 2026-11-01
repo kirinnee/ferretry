@@ -849,8 +849,11 @@ export const TwoFactorSeedStageViewSchema = z.strictObject({
   expiresAt: InstantSchema,
   factor: TwoFactorIdSchema.optional(),
   agendaItemId: AgendaIdSchema.optional(),
-  /** Present, `true`, only when the key was staged with "save it here anyway": the card asks the owner for a second tick. */
-  mismatch: z.literal(true).optional(),
+  /**
+   * Whether the key was staged with "save it here anyway": the card asks the owner for a second tick. Always sent;
+   * a daemon from before it existed omits it, and the card then goes by the sentence the card's context carries.
+   */
+  mismatch: z.boolean().optional(),
 });
 export type TwoFactorSeedStageView = z.infer<typeof TwoFactorSeedStageViewSchema>;
 

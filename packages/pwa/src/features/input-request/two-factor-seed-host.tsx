@@ -24,7 +24,7 @@ import {
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { commitSeed, dropSeed, type InputClient, readAccounts, readSeedStage } from '../../lib/input-api.ts';
 import { useAddKeyStepUp, useDaemonClient } from '../../lib/store.tsx';
-import { SEED_DENIED_WORDS, SEED_GONE_WORDS, seedCardFacts } from '../../lib/two-factor-seed-card.ts';
+import { SEED_DENIED_WORDS, SEED_GONE_WORDS, type SeedCheck, seedCardFacts } from '../../lib/two-factor-seed-card.ts';
 import { type SeedCardPhase, TwoFactorSeedCard } from './two-factor-seed-card.tsx';
 
 export interface TwoFactorSeedHostProps {
@@ -72,11 +72,15 @@ export function TwoFactorSeedHost({
   const [accounts, setAccounts] = useState<AccountList | undefined>(undefined);
   const [phase, setPhase] = useState<SeedCardPhase>({ kind: 'waiting' });
   const [flagged, setFlagged] = useState(false);
+  const [check, setCheck] = useState<SeedCheck>('checking');
+  const [reads, setReads] = useState(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `reads` only re-runs the read when the owner presses Try again
   useEffect(() => {
     if (ref === undefined) return undefined;
     let current = true;
     setClient(null);
+    setCheck('checking');
     void createClient(connection)
       .then(async next => {
         if (!current) return;
@@ -91,16 +95,20 @@ export function TwoFactorSeedHost({
           // A stage the daemon does not know for this caller is gone: saved, denied elsewhere, timed out, or staged
           // by someone this app cannot see. Any other failed read leaves the card as the daemon worded it.
           if (isStageGone(stage)) setPhase(FINISHED.expired);
+          setCheck('failed');
           return;
         }
+        setCheck('ok');
         setFlagged(stage.mismatch === true);
         if (stage.state !== 'waiting') setPhase(FINISHED[stage.state]);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (current) setCheck('failed');
+      });
     return () => {
       current = false;
     };
-  }, [connection, createClient, ref]);
+  }, [connection, createClient, ref, reads]);
 
   const account = accounts?.accounts.find(each => each.id === ref?.account);
   const named = account === undefined ? 'this account' : accountWords(account);
@@ -140,7 +148,9 @@ export function TwoFactorSeedHost({
   if (ref === undefined || client === null) return null;
   return (
     <TwoFactorSeedCard
+      check={check}
       facts={seedCardFacts(item.context ?? undefined, flagged)}
+      onRetry={() => setReads(count => count + 1)}
       onAllow={() => void allow()}
       onDeny={() => void deny()}
       phase={phase}

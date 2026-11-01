@@ -60,10 +60,23 @@ interface Served {
   readonly failCommit?: unknown;
   readonly failDrop?: unknown;
   readonly failRead?: unknown;
+  /** Fail only the first reads of the stage, then answer. */
+  readonly failReads?: number;
   readonly flag?: boolean;
+  /** A daemon from before the flag existed: the view carries no `mismatch`. */
+  readonly omitFlag?: boolean;
 }
 
-const served = ({ state = 'waiting', failCommit, failDrop, failRead, flag = false }: Served = {}) => {
+const served = ({
+  state = 'waiting',
+  failCommit,
+  failDrop,
+  failRead,
+  failReads = 0,
+  flag = false,
+  omitFlag = false,
+}: Served = {}) => {
+  let failed = 0;
   const machine = fakeClient((call: Call) => {
     if (call.path === '/v1/accounts') return accountList();
     if (call.method === 'DELETE') {
@@ -87,13 +100,17 @@ const served = ({ state = 'waiting', failCommit, failDrop, failRead, flag = fals
       };
     }
     if (failRead !== undefined) throw failRead;
+    if (failed < failReads) {
+      failed += 1;
+      throw new Error('offline');
+    }
     return {
       stage: STAGE,
       account: 'GITHUB',
       label: 'Authenticator app',
       state,
       expiresAt: AT,
-      ...(flag ? { mismatch: true } : {}),
+      ...(omitFlag ? {} : { mismatch: flag }),
     };
   });
   return machine;
@@ -271,6 +288,35 @@ describe('the seed card’s failure and flag paths', () => {
     expect(gone.q('[data-seed-allow]')).toBeNull();
     expect(broken.q('[data-seed-allow]')).not.toBeNull();
     expect(broken.q('[data-seed-done]')).toBeNull();
+  });
+
+  it('should keep Allow off while it is not known whether the key was staged as a mismatch, until a read succeeds', async () => {
+    const card = await draw({ failReads: 1, flag: true });
+
+    await click(card.q('[data-seed-warning-tick]'));
+    expect(card.q('[data-seed-unchecked]')?.textContent).toContain('Could not check this key');
+    expect((card.q('[data-seed-allow]') as HTMLButtonElement).disabled).toBe(true);
+    expect(card.q('[data-seed-mismatch]')).toBeNull();
+
+    await click(card.q('[data-seed-retry]'));
+    for (let tries = 0; tries < 3; tries += 1) await settle();
+
+    expect(card.q('[data-seed-unchecked]')).toBeNull();
+    expect(card.q('[data-seed-mismatch]')).not.toBeNull();
+    expect((card.q('[data-seed-allow]') as HTMLButtonElement).disabled).toBe(true);
+    await click(card.q('[data-seed-mismatch-tick]'));
+    expect((card.q('[data-seed-allow]') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('should allow a key the daemon says is no mismatch, and an older daemon that sends no flag, going by its sentence', async () => {
+    const plain = await draw({ flag: false });
+    const older = await draw({ omitFlag: true, mismatch: true });
+
+    await click(plain.q('[data-seed-warning-tick]'));
+    expect((plain.q('[data-seed-allow]') as HTMLButtonElement).disabled).toBe(false);
+    expect(plain.q('[data-seed-mismatch]')).toBeNull();
+    expect(older.q('[data-seed-mismatch]')).not.toBeNull();
+    expect(older.q('[data-seed-unchecked]')).toBeNull();
   });
 
   it('should say a device without passkeys cannot save it, and keep the card', async () => {

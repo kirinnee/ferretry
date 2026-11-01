@@ -317,7 +317,7 @@ export class TwoFactorSeedStages implements RedactionValueSource {
       expiresAt: new Date(held.expiresAtMs).toISOString(),
       ...(held.factor === undefined ? {} : { factor: held.factor }),
       ...(held.card === undefined ? {} : { agendaItemId: held.card.id }),
-      ...(held.mismatch ? { mismatch: true as const } : {}),
+      mismatch: held.mismatch,
     };
   }
 

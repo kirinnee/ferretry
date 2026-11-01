@@ -357,7 +357,7 @@ describe('a staged seed', () => {
     should(refused.body).match({ code: 'factor_mismatch', error: /Okta · bob@x\.com.*GitHub · kirinnee/u });
     should(allowed.mismatch).match({ issuer: 'Okta', accountName: 'bob@x.com' });
     should(flagged.body).match({ mismatch: true });
-    should(unflagged.body).not.have.property('mismatch');
+    should(unflagged.body).match({ mismatch: false });
   });
 
   it('should refuse without a passkey anywhere, without the warning tick, and on an account with four seeds', async () => {

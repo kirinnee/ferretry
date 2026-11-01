@@ -38,6 +38,11 @@ export const seedAllowBlocked = (gate: {
   return undefined;
 };
 
+/** Whether the daemon has said if this key was staged as a mismatch: until a read succeeds, Allow stays off. */
+export type SeedCheck = 'checking' | 'ok' | 'failed';
+
+export const SEED_UNCHECKED_WORDS = 'Could not check this key. Try again.';
+
 export const SEED_DENIED_WORDS = 'Denied. Nothing was saved and the key is gone.';
 export const SEED_GONE_WORDS =
   'This save is no longer waiting: it was saved, denied or timed out. If you still expect it, confirm it from a paired device.';

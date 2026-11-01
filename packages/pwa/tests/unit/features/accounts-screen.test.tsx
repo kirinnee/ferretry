@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { AccountListSchema, DAEMON_FEATURES, LOGIN_TOTP_WARNING, type TwoFactorStageId } from '@ferretry/protocol';
+import {
+  type AccountList,
+  AccountListSchema,
+  DAEMON_FEATURES,
+  LOGIN_TOTP_WARNING,
+  type TwoFactorStageId,
+} from '@ferretry/protocol';
 import { AccountsSurface } from '../../../src/features/accounts/accounts-surface.tsx';
 import { DaemonSettingsFrame } from '../../../src/features/settings/daemon-settings-frame.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
@@ -676,5 +682,137 @@ describe('what the add form and an empty recipe say', () => {
     await screen.tab('recipe');
 
     expect(screen.q('[data-accounts-recipe-empty]')).not.toBeNull();
+  });
+});
+
+const richWorld = (): AccountList => {
+  const base = JSON.parse(JSON.stringify(list())) as {
+    accounts: { id: string; factors: object[]; signIns: string[] }[];
+    signIns: Record<string, unknown>[];
+  };
+  const at = '2026-10-31T10:00:00.000Z';
+  const key = (n: number, over: object) => ({
+    id: `tf_00000000010${n}`,
+    label: `Key ${n}`,
+    addedAt: at,
+    addedBy: 'owner',
+    automatic: false,
+    ...over,
+  });
+  const params = { algorithm: 'SHA1', digits: 6, period: 30 };
+  const github = must(
+    base.accounts.find(each => each.id === 'GITHUB'),
+    'GITHUB',
+  );
+  github.factors = [
+    key(1, { kind: 'sms' }),
+    key(2, { kind: 'email' }),
+    key(3, { kind: 'email', to: 'me@work.test' }),
+    key(4, { kind: 'push' }),
+    key(5, { kind: 'push', app: 'okta-verify' }),
+    key(6, { kind: 'security-key' }),
+    key(7, { kind: 'totp', params, automatic: true, verified: { worked: false, at } }),
+    key(8, { kind: 'totp', params, automatic: true }),
+  ];
+  github.signIns = [...github.signIns, 'si_0000000000000004', 'si_0000000000000005'];
+  const first = must(base.signIns[0], 'a sign-in');
+  base.signIns.push(
+    {
+      ...first,
+      id: 'si_0000000000000004',
+      place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
+      observed: [],
+      proposals: [],
+    },
+    { ...first, id: 'si_0000000000000005', recipeBy: undefined, observed: [], proposals: [] },
+  );
+  return AccountListSchema.parse(base);
+};
+
+describe('the rest of what a key, a place and a recipe say', () => {
+  const siteOf = async (account: string, id: string, world: World = {}) => {
+    const screen = await open(world);
+    await screen.openAccount(account);
+    await screen.tab('sites');
+    await click(screen.q(`[data-accounts-signin="${id}"] button`));
+    return screen;
+  };
+
+  it('should say where each kind of code goes and how the last one fared', async () => {
+    const screen = await open({ accounts: richWorld() });
+    await screen.openAccount('GITHUB');
+    await screen.tab('keys');
+
+    const text = screen.text();
+    expect(text).toContain('Code sent by text');
+    expect(text).toContain('Code sent by email');
+    expect(text).toContain('Code sent to me@work.test');
+    expect(text).toContain('You approve it on your phone');
+    expect(text).toContain('Approve in Okta Verify');
+    expect(text).toContain('You tap it yourself');
+    expect(text).toContain('Last code did not work on 2026-10-31');
+    expect(text).toContain('Not used yet');
+  });
+
+  it('should name a terminal place by its host and call a recipe a person wrote reviewed', async () => {
+    const screen = await open({ accounts: richWorld() });
+    await screen.openAccount('GITHUB');
+    await screen.tab('sites');
+
+    expect(screen.q('[data-accounts-signin="si_0000000000000004"]')?.textContent).toContain('kirin-box');
+    await click(screen.q('[data-accounts-signin="si_0000000000000005"] button'));
+    await screen.tab('recipe');
+    expect(screen.q('[data-accounts-recipe-body]')).not.toBeNull();
+    expect(screen.q('[data-accounts-recipe-unreviewed]')).toBeNull();
+  });
+
+  it('should add a security key and a push key with no app as just a kind and a name', async () => {
+    const screen = await open();
+    await screen.openAccount('GITHUB');
+    await screen.tab('keys');
+
+    await click(screen.q('[data-accounts-key-add-open]'));
+    await choose(screen.q('[data-accounts-key-kind]'), 'security-key');
+    await typeInto(screen.q('[data-accounts-key-label]'), 'YubiKey');
+    await click(screen.q('[data-accounts-key-add]'));
+    await settle();
+    await click(screen.q('[data-accounts-key-add-open]'));
+    await choose(screen.q('[data-accounts-key-kind]'), 'push');
+    await typeInto(screen.q('[data-accounts-key-label]'), 'Phone');
+    await click(screen.q('[data-accounts-key-add]'));
+    await settle();
+
+    expect(screen.writes().map(call => call.body)).toEqual([
+      { kind: 'security-key', label: 'YubiKey' },
+      { kind: 'push', label: 'Phone' },
+    ]);
+  });
+
+  it('should clear a username with null when it is emptied', async () => {
+    const screen = await open();
+    await screen.openAccount('GITHUB');
+
+    await typeInto(screen.q('[data-accounts-username]'), '');
+    await click(screen.q('[data-accounts-save]'));
+    await settle();
+
+    expect(screen.writes()[0]?.body).toEqual({ username: null });
+  });
+
+  it('should name another account when it is the one listed first for a site', async () => {
+    const screen = await siteOf('VERCEL', SI_VERCEL, { defaults: 'sites:\n  vercel.com: GOOGLE\n' });
+    await screen.tab('defaults');
+
+    expect(screen.q('[data-accounts-default-current]')?.textContent).toContain('is listed first');
+  });
+
+  it('should say the defaults cannot be read when the daemon will not show the file or the file is not defaults', async () => {
+    const refused = await siteOf('VERCEL', SI_VERCEL, { defaults: 'error' });
+    await refused.tab('defaults');
+    expect(refused.q('[data-accounts-defaults-unreadable]')?.textContent).toContain('would not show');
+
+    const odd = await siteOf('VERCEL', SI_VERCEL, { defaults: 'sites: 5\n' });
+    await odd.tab('defaults');
+    expect(odd.q('[data-accounts-defaults-unreadable]')?.textContent).toContain('does not say what');
   });
 });

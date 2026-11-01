@@ -7,7 +7,12 @@
 import { LOGIN_TOTP_WARNING } from '@ferretry/protocol';
 import { type ReactNode, useState } from 'react';
 import { DISMISSED_WORDS } from '../../lib/automatic-codes.ts';
-import { type SeedCardFacts, seedAllowBlocked } from '../../lib/two-factor-seed-card.ts';
+import {
+  SEED_UNCHECKED_WORDS,
+  type SeedCardFacts,
+  type SeedCheck,
+  seedAllowBlocked,
+} from '../../lib/two-factor-seed-card.ts';
 
 export type SeedCardPhase =
   | { readonly kind: 'waiting' }
@@ -20,11 +25,22 @@ export interface TwoFactorSeedCardProps {
   readonly subject: string;
   readonly facts: SeedCardFacts;
   readonly phase: SeedCardPhase;
+  /** Whether the daemon has said if this key was staged as a mismatch; Allow stays off until it has. */
+  readonly check?: SeedCheck;
+  readonly onRetry?: () => void;
   readonly onAllow: () => void;
   readonly onDeny: () => void;
 }
 
-export function TwoFactorSeedCard({ subject, facts, phase, onAllow, onDeny }: TwoFactorSeedCardProps): ReactNode {
+export function TwoFactorSeedCard({
+  subject,
+  facts,
+  phase,
+  check = 'ok',
+  onRetry,
+  onAllow,
+  onDeny,
+}: TwoFactorSeedCardProps): ReactNode {
   const [warningTick, setWarningTick] = useState(false);
   const [mismatchTick, setMismatchTick] = useState(false);
   const busy = phase.kind === 'passkey' || phase.kind === 'saving';
@@ -89,6 +105,20 @@ export function TwoFactorSeedCard({ subject, facts, phase, onAllow, onDeny }: Tw
               {phase.words === DISMISSED_WORDS ? `${phase.words} Allow to try again, or Deny.` : phase.words}
             </p>
           ) : null}
+          {check === 'failed' ? (
+            <p
+              className="m-0 flex flex-wrap items-center gap-2 text-cell text-warn"
+              data-seed-unchecked=""
+              role="status"
+            >
+              {SEED_UNCHECKED_WORDS}
+              {onRetry === undefined ? null : (
+                <button className="kt-btn min-h-[44px]" data-seed-retry="" onClick={onRetry} type="button">
+                  Try again
+                </button>
+              )}
+            </p>
+          ) : null}
           {blocked !== undefined && !busy ? (
             <p className="m-0 text-meta text-muted" data-seed-blocked="">
               {blocked}
@@ -103,7 +133,7 @@ export function TwoFactorSeedCard({ subject, facts, phase, onAllow, onDeny }: Tw
               className="kt-btn min-h-[44px] justify-center"
               data-seed-allow=""
               data-variant="primary"
-              disabled={blocked !== undefined || busy}
+              disabled={blocked !== undefined || busy || check !== 'ok'}
               onClick={onAllow}
               type="button"
             >
