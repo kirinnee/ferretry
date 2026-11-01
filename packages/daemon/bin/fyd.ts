@@ -11261,10 +11261,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionDirectory: id => createSessionPaths(paths, id).directory,
         readableHandoffs: id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
         paneIdentity: async id => {
+          // Only a LIVE pane that still is exactly the registered one counts: a registration alone can name a
+          // pane that is dead, or one a failed relaunch replaced before it could register the replacement.
           const pane = await new DurableTerminalPaneStore(storage, stateFiles, paths)
             .registration(paths.home, id)
             .catch(() => undefined);
-          return pane === undefined ? undefined : `${pane.paneId}:${pane.pid}:${pane.processStartTicks}`;
+          if (pane === undefined) return undefined;
+          const live = await new ExactTmuxPaneReaper(launchTmux).observe(pane).catch(() => undefined);
+          return live?.paneId === pane.paneId &&
+            live.pid === pane.pid &&
+            live.processStartTicks === pane.processStartTicks
+            ? `${pane.paneId}:${pane.pid}:${pane.processStartTicks}`
+            : undefined;
         },
         // Its own queue: a migration holds its lock across a pane kill and a relaunch, and must not
         // make every unrelated document write in the process wait behind it.

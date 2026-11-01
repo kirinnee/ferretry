@@ -26,7 +26,8 @@ cross-harness move is still refused (`409 harness_mismatch`), and the refusal na
 - **A failed relaunch.** The record is restamped onto the new login before the harness is relaunched, and the
   old pane is stopped before the new one starts, so a harness that is alive after a failed relaunch is usually
   the NEW one. The record is put back only when the pane registered for the session is provably the same one
-  that served before the move (same pane id, pid and process start): then no replacement was ever started and
+  that served before the move (same pane id, pid and process start, and that pane is alive now: a registration that names a dead pane, or a
+  replacement that started but never registered, proves nothing): then no replacement was ever started and
   the old login is still serving. Only the fields the move restamped are put back (login, harness, model,
   command, conversation lineage, migration history); a rename, the session credential or any other write made
   since stays. If the pane changed, the new harness started but its hand-over message was not delivered: the
