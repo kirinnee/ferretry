@@ -469,6 +469,7 @@
   color: var(--nav-sel-fg, var(--accent));
 }
 .fy-sbar__foot {
+  container-type: inline-size;
   display: flex;
   justify-content: space-between;
   gap: 2px;
@@ -496,6 +497,13 @@
   font-weight: var(--weight-medium);
   text-decoration: none;
   text-transform: var(--control-transform, none);
+}
+/* Four places and their icons do not fit a default-width column: the icons would be squeezed to specks.
+   Narrow, the labels carry it alone; a column the reader widened gets its icons back. The rail has no labels. */
+@container (max-width: 359px) {
+  .fy-sbar__foot:not(.fy-sbar__foot--rail) .fy-sbar__place svg {
+    display: none;
+  }
 }
 .fy-sbar__place:hover {
   background: var(--nav-hover, var(--surface-2));

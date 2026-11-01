@@ -154,19 +154,27 @@ const sessions = [
 
 if (['catalogs', 'shared', 'people', 'skills'].includes(view)) {
   createRoot(root).render(page(view));
-} else if (view === 'topbar') {
+} else if (view === 'full') {
   createRoot(root).render(
-    <div className="kt-shell flex flex-col overflow-hidden" data-shot="">
-      <AppBar crumbs={[{ label: 'Home', href: '/d/studio/sessions' }, { label: 'Sharing' }]} daemon="studio" onOpenPalette={noop} active="sharing" themeToggle={<ThemeToggle />} />
-    </div>,
-  );
-} else if (view === 'sidebar') {
-  createRoot(root).render(
-    <div className="bg-bg text-fg" data-shot="" style={{ width: 340, height: 640 }}>
+    <div className="kt-shell flex flex-row overflow-hidden" data-shot="" style={{ height: 900, width: window.innerWidth }}>
       <SessionsBar
         active="sharing" activeSessionId={null} daemonId="studio" machineName="studio-mac" machines={[]} onAddMachine={noop} onClose={noop}
         onCollapse={noop} onNavigate={noop} onOpenPalette={noop} presentation="column" projects={[]} sessions={sessions}
       />
+      <div data-shell-main="" className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <AppBar crumbs={[{ label: 'Home', href: '/d/studio/sessions' }, { label: 'Sharing' }]} daemon="studio" onOpenPalette={noop} active="sharing" themeToggle={<ThemeToggle />} />
+        <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
+          <SharingPage
+            connection={CONNECTION}
+            tab="catalogs"
+            onNavigate={noop}
+            members={members}
+            machines={[{ connection: CONNECTION, name: 'studio-mac' }]}
+            createClient={createClient}
+            loadSkills={loadSkills}
+          />
+        </div>
+      </div>
     </div>,
   );
 } else if (view === 'rail') {
@@ -291,10 +299,11 @@ const walk = async (page: Page, theme: string, vp: string): Promise<void> => {
     await page.locator('[data-app-more="sharing"]').waitFor({ state: 'visible' });
     await shot(page, 'phone-more-sheet', theme, vp, '[role="dialog"]');
   } else {
-    await open(page, theme, 'topbar');
-    await shot(page, 'desktop-top-bar', theme, vp, '[data-shot]');
-    await open(page, theme, 'sidebar');
-    await shot(page, 'desktop-sidebar-footer', theme, vp, '[data-shot]');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await open(page, theme, 'full');
+    await page.locator('[data-catalogs-list]').waitFor({ state: 'visible' });
+    await shot(page, 'desktop-full-page', theme, vp, '[data-shot]');
+    await shot(page, 'desktop-sidebar-footer', theme, vp, '[data-sessions-bar="column"]');
     await open(page, theme, 'rail');
     await shot(page, 'desktop-narrow-rail', theme, vp, '[data-shot]');
   }
