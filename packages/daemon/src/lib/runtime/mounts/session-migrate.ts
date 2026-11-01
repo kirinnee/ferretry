@@ -43,7 +43,10 @@ import {
  * request with the flag after an explicit confirm. A forced move is journalled
  * (`session.migrate_forced`) with the inventory it went past, and the forensic report says FORCED.
  * The unattended callers — the warden's failover and the quota loop — send `false` and cannot
- * choose otherwise: a loop with no human watching may not decide that work is expendable.
+ * choose otherwise: a loop with no human watching may not decide that work is expendable. The one
+ * exception is the OWNER's decision, made ahead of time: with `autoMigrate.forceStopBackground` in
+ * `warden.yaml` (held for the owner's confirmation like every loosening), the Warden stops the ferret's
+ * own background jobs and then forces its move — journalled exactly like a person's forced move.
  *
  * A MIGRATION IS SAME-KIND, and `harness_mismatch` is the refusal that makes that true. The CLI has
  * always described this operation as continuing a session on another same-kind account while the
@@ -131,6 +134,10 @@ export interface SessionMigrateSubsystem {
       readonly forceInflight: boolean;
       /** Omitted, the bound conversation is resumed or the migration refused. */
       readonly conversation?: MigrationConversation;
+      /** Words that open the turn the relaunched agent is handed — why it was moved. Never set by the route. */
+      readonly note?: string;
+      /** Who moved it, so that turn is drawn as theirs. Never set by the route: the Warden's own moves only. */
+      readonly actor?: 'warden';
     },
   ): Promise<SessionView>;
   /**

@@ -1,5 +1,7 @@
 export * from './action-tally.ts';
 export * from './agenda.ts';
+export * from './auto-migrate.ts';
+export * from './auto-migrate-service.ts';
 export * from './backoff.ts';
 export * from './bless.ts';
 export * from './concurrency.ts';

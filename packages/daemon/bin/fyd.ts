@@ -43,9 +43,9 @@ import {
 import {
   claudeKeychainAccount,
   credentialFileStamp,
-  fencedConversationLeaseStore,
   FilePassiveUsageStore,
   type FleetBinaryLookup,
+  fencedConversationLeaseStore,
   PlatformFleetCredentialStore,
   ProcessFleetTokenRefreshPort,
   resolveUserHome,
@@ -53,21 +53,21 @@ import {
   spawnFleetTokenRefreshProcess,
 } from '@ferretry/fleet/adapters';
 import {
+  AccountKeySchema,
   type Advertisement,
   type AgendaItem,
   type AnalyticsPricingRate,
   type AskToStopJobsResult,
   type AutoResumeSummary,
-  AccountKeySchema,
   CatalogMemberKeyIdSchema,
   CONFIG_ACCEPTED_FILE,
   type ConversionPreview,
-  DAEMON_FEATURES,
-  daemonFeatureList,
   type ConversionSummary as ConversionSummaryView,
   commandLabel,
   configFilePath,
+  DAEMON_FEATURES,
   DORMANT_AGENT_STATUSES,
+  daemonFeatureList,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
@@ -228,6 +228,7 @@ import {
   AnalyticsTranscriptSpend,
   AsyncActivityScope,
   AuthorizedProviderProbe,
+  accountName,
   afterAsActivity,
   asActivity,
   type BrowserDisplayPort,
@@ -252,14 +253,19 @@ import {
   DaemonSecretsLoader,
   DaemonStorageFactory,
   daemonSecretSourceProgram,
+  deliverStopSignal,
   describeWorkerProbes,
   ExplicitDaemonConfig,
   FetchEnhancementTransport,
   FileAuditJournal,
+  FileBoardSwitchStore,
+  FileCatalogBlobStore,
+  FileCatalogDocumentStore,
+  FileCatalogMembersStore,
+  FileCatalogSharesStore,
   FileCgroupApplyStatusStore,
   FileCgroupConfigStore,
   FileDaemonConfig,
-  FileBoardSwitchStore,
   FileLaneSetStore,
   FileLegacyWireUseStore,
   FileLoginIndexStore,
@@ -272,14 +278,6 @@ import {
   FileQuotaFailoverStateStore,
   FileRestartQueue,
   FileRoutingCatalog,
-  FileCatalogBlobStore,
-  FileCatalogDocumentStore,
-  FileCatalogMembersStore,
-  FileCatalogSharesStore,
-  MemberSweepTimer,
-  NodeShareCodeHasher,
-  systemSweepClock,
-  NodeSkillFolder,
   FileScratchCollector,
   FileSecretDocumentStore,
   FileSecretKey,
@@ -305,10 +303,10 @@ import {
   JscStackSampler,
   KeyedSerialExecutor,
   LOGIN_SECRETS_DOCUMENT,
-  SECRETS_DOCUMENT,
   LoadSafeWorker,
   ManifestAccountInventory,
   MCP_OAUTH_SECRETS_DOCUMENT,
+  MemberSweepTimer,
   NodeAgentFilesystem,
   NodeBrowserLoginRuntime,
   NodeCatalog,
@@ -319,7 +317,9 @@ import {
   NodeGzip,
   NodePairingCryptography,
   NodeSessionBrowserLauncher,
+  NodeShareCodeHasher,
   NodeSkillFiles,
+  NodeSkillFolder,
   NpmHarnessLatest,
   type OpenedDaemonStorage,
   PaneProcessInventory,
@@ -330,6 +330,7 @@ import {
   quotaFailoverRoot,
   RegisteredCgroupPaneLedger,
   RuntimeEnvironment,
+  SECRETS_DOCUMENT,
   SocketViewerDownstream,
   SpawnCgroupCommands,
   SqliteHomeLockFactory,
@@ -353,6 +354,7 @@ import {
   SystemGrantClock,
   stackSamplerEnabled,
   systemLegacyWireTimers,
+  systemSweepClock,
   TmuxPaneSnapshot,
   TranscriptFileExposure,
   TunnelProxyProbe,
@@ -366,7 +368,6 @@ import {
   WorkerLoopWatchdog,
   type WorkerProbeReport,
   XvfbDisplay,
-  accountName,
 } from '../src/adapters/index.ts';
 import {
   CatalogPrices,
@@ -404,7 +405,6 @@ import {
   readSessionResult,
 } from '../src/adapters/pack/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
-import { FileSharedDraftRepository } from '../src/adapters/shared-drafts/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
 import { releaseAcquired, terminationGate } from '../src/adapters/runtime/termination-gate.ts';
@@ -528,14 +528,14 @@ import {
 } from '../src/adapters/session/transcript/index.ts';
 import { StorageTurnPorts, storagePaneLimits } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
+import { FileSharedDraftRepository } from '../src/adapters/shared-drafts/index.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import { ExecutableCodePrograms } from '../src/adapters/system/executable-code-programs.ts';
 import { KernelProgramProof } from '../src/adapters/system/kernel-program-proof.ts';
 import { NodeStateHomes } from '../src/adapters/system/node-state-homes.ts';
-import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts';
-import { machineProgramHomes } from '../src/adapters/system/profile-program.ts';
 import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
+import { machineProgramHomes } from '../src/adapters/system/profile-program.ts';
 import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader.ts';
 import {
   ManagedTerminalService,
@@ -597,11 +597,13 @@ import {
   SystemWorktreeClock,
   WorktreeOperationQueue,
 } from '../src/adapters/worktrees/index.ts';
+import { isAgendaSessionId } from '../src/lib/agenda/index.ts';
 import { snapshotAnalyticsUsagePricing } from '../src/lib/analytics/pricing.ts';
 import {
   type AnalyticsPricingConfigurationPort,
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
+import { DAEMON_START, type StateHomeReach } from '../src/lib/api/state-homes.ts';
 import {
   AgendaCardLinks,
   AgendaToTestLanes,
@@ -616,11 +618,11 @@ import {
   SessionCards,
   type SessionLivenessSource,
 } from '../src/lib/board/index.ts';
-import { isAgendaSessionId } from '../src/lib/agenda/index.ts';
 import { WorkSearchService } from '../src/lib/work-search/index.ts';
 
 /** How long after boot the work search builds its index: after the boot's own reads, before anyone searches. */
 const WORK_SEARCH_WARM_DELAY_MS = 5_000;
+
 import { GitHubWatcher, UnfiledRefiler } from '../src/lib/board-github/index.ts';
 import { BoardImporter, LaneSetImportProjects, type TaskAssigneeCandidate } from '../src/lib/board-import/index.ts';
 import { type MeteredFile, SpendMeter } from '../src/lib/budget/meter.ts';
@@ -662,11 +664,16 @@ interface AutoResumeBoot {
   run(): Promise<AutoResumeSummary | undefined>;
 }
 
+import { FileCatalogInstallStore } from '../src/adapters/catalog-installs/file-store.ts';
+import { FileProjectSkillFiles } from '../src/adapters/catalog-installs/project-skill-files.ts';
+import { FileRuntimeSkillAssets } from '../src/adapters/catalog-installs/runtime-skill-assets.ts';
 import {
   countedFileOperations,
   instrumentChildProcesses,
   ProcessGauges,
 } from '../src/adapters/runtime/performance-instruments.ts';
+import { forgetFerretIdentity } from '../src/adapters/tmux/forget-ferret-identity.ts';
+import { CatalogInstallService } from '../src/lib/catalog-installs/service.ts';
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import {
@@ -681,8 +688,11 @@ import {
   isReadableHandoff,
 } from '../src/lib/imports/conversation-text.ts';
 import {
+  AccountDefaults,
+  type AccountDirectory,
   type AccountInventoryPort,
   AccountModelConversationListPolicy,
+  type AccountsBoot,
   ActivityLedger,
   type AgendaActor,
   AgendaAgentClearer,
@@ -700,6 +710,8 @@ import {
   type AgentCopyPort,
   AgentFiles,
   type AgentInputPort,
+  type AgentJobControl,
+  AgentJobStopper,
   type AgentPhoneApprovalPort,
   type AgentPlanPort,
   AgentSendFailureNotifier,
@@ -742,8 +754,8 @@ import {
   authorizeSessionCommand,
   BACKGROUND_DELAY_VARIABLE,
   BackgroundLane,
-  type BootNoticePort,
   BoardSwitchService,
+  type BootNoticePort,
   BootProgress,
   type BootRefusal,
   BrowserCopyPages,
@@ -756,6 +768,8 @@ import {
   type BrowserWorkerProgram,
   buildLaunchArgv,
   CapabilityGrantService,
+  type CatalogIdentitySource,
+  CatalogMemberService,
   type CatalogSubsystem,
   CgroupLaunchPlanner,
   CgroupService,
@@ -817,6 +831,7 @@ import {
   DEFAULT_EVENT_LOOP_LAG_POLICY,
   DEFAULT_HANDOVER_SETTINGS,
   type DecodedInitialAttachment,
+  DeferredMemberSessions,
   type DeliveredAttachment,
   DeviceGrantService,
   DirectSession,
@@ -907,12 +922,6 @@ import {
   InputCardClosedObserver,
   InputLoginAdapter,
   InputLoginProbe,
-  PhoneApprovalAgendaAdapter,
-  PhoneApprovalAuditAdapter,
-  type PhoneApprovalPushPort,
-  PhoneApprovalService,
-  type LoginFactSink,
-  LoginObserver,
   type InputPasteRules,
   InputRequestService,
   type InputSealedPort,
@@ -939,27 +948,21 @@ import {
   LegacyWireUseCounter,
   LessonsService,
   LiveDeviceConnections,
+  LiveMemberSessions,
   type LivenessSample,
   type LivenessTarget,
   LOOPBACK_FIREWALL_CHECK_MS,
   LocalModelsService,
-  AccountDefaults,
-  type AccountDirectory,
-  type AccountsBoot,
   LoginDirectory,
+  type LoginFactSink,
+  LoginObserver,
   LoginRecipeService,
-  narrowAccountVault,
-  RecipeAgendaAdapter,
-  TwoFactorSeedAgendaAdapter,
-  type TwoFactorSeedAgendaPort,
-  type TwoFactorSeedCardPort,
-  TwoFactorSeedStages,
-  lateSeedCards,
   LoginVault,
   type LogLevel,
   type LoopBlockedClockPort,
   LoopbackFirewallWatch,
   type LoopWatchdogPort,
+  lateSeedCards,
   launchGuardActive,
   launchReasoningEffort,
   limitedCredentials,
@@ -973,6 +976,11 @@ import {
   type McpInventoryFolder,
   McpInventoryService,
   McpOAuthService,
+  type McpSourceServer,
+  MemberDispatcher,
+  MemberGateway,
+  MemberJoinGate,
+  MemberPasskeyService,
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
@@ -997,6 +1005,7 @@ import {
   NO_WATCHDOG,
   type NotificationHealthReading,
   NotificationService,
+  narrowAccountVault,
   needsRolloutFormatProbe,
   type ObservedSession,
   type OpenedAnalyticsIndexStore,
@@ -1017,10 +1026,14 @@ import {
   PassTrigger,
   type PassTriggerTimers,
   PasteRuleService,
+  PhoneApprovalAgendaAdapter,
+  PhoneApprovalAuditAdapter,
+  type PhoneApprovalPushPort,
+  PhoneApprovalService,
   PinService,
-  SharedDraftService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
+  PlanSignInGrants,
   ProjectAdoption,
   ProjectMcpLaunch,
   ProjectMcpOAuthServers,
@@ -1049,6 +1062,7 @@ import {
   portCandidates,
   previousConversation,
   publishableDirectCarrier,
+  publisherLabel,
   QUEUE_ANSWER_WAIT_MS,
   QuarantineRegistry,
   QueueDeliverer,
@@ -1061,6 +1075,7 @@ import {
   RETIRED_ACCOUNT_MODEL_NOTICE,
   RETIRED_FLEET_BLOCK_NOTICE,
   RETIRED_SESSION_WORKERS_SWITCH_NOTICE,
+  RecipeAgendaAdapter,
   RecommendError,
   type RecommendSubsystem,
   type RelayApiDispatch,
@@ -1090,6 +1105,7 @@ import {
   refuseExhaustedCandidates,
   refuseHeldStateHome,
   refuseOccupiedAddress,
+  refuseStateHomeStart,
   refuseUnbindableAddress,
   relaunchCommand,
   relayCarrierRemedy,
@@ -1100,6 +1116,7 @@ import {
   renderDoctorReport,
   renderHarnessPreflight,
   renderInitialAttachmentSection,
+  repairSharingFromPairing,
   resolveBrowserProxy,
   resolveResumePolicy,
   resolveStateHome,
@@ -1109,18 +1126,6 @@ import {
   SESSION_ROSTER_MAX_AGE_MS,
   SESSION_STATUS_TALLY_MAX_AGE_MS,
   SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
-  type CatalogIdentitySource,
-  type McpSourceServer,
-  SharedCatalogService,
-  CatalogMemberService,
-  DeferredMemberSessions,
-  LiveMemberSessions,
-  MemberDispatcher,
-  MemberGateway,
-  MemberJoinGate,
-  MemberPasskeyService,
-  shareLinkTarget,
-  publisherLabel,
   type SecretCloneIdentitySource,
   SecretDirectory,
   SecretExportService,
@@ -1152,7 +1157,6 @@ import {
   SessionAttachService,
   SessionBoardResolver,
   SessionConsoleService,
-  refuseStateHomeStart,
   SessionControlError,
   type SessionControlFailure,
   type SessionControlSubsystem,
@@ -1197,8 +1201,8 @@ import {
   type SessionSendSubsystem,
   SessionSignalError,
   SessionSignalService,
-  SessionSignInContext,
   type SessionSignalSubsystem,
+  SessionSignInContext,
   SessionStatusTally,
   SessionStopPending,
   type SessionTranscriptMessageTokenCodec,
@@ -1207,9 +1211,13 @@ import {
   SessionTranscriptResolver,
   type SessionTranscriptSearch,
   type SessionTranscriptTail,
+  SharedCatalogService,
+  SharedDraftService,
   SharedFleetBacklog,
+  type SharingRepairOutcome,
   SignalRefused,
   type SignInChoicePort,
+  type SignInGrantSource,
   type SkillRuntimeHome,
   SkillsInventoryService,
   type SocketRoute,
@@ -1238,8 +1246,11 @@ import {
   sessionHealthSettingsAt,
   sessionNameClaim,
   sessionScopedAttachments,
+  shareLinkTarget,
   suggestedOllamaModel,
   supersededCarrierKeys,
+  TaskPlanAgendaAdapter,
+  TaskPlanService,
   TERMINAL_ANALYTICS_STATUSES,
   TEST_MODE_VARIABLE,
   TEST_TIMINGS_VARIABLE,
@@ -1273,6 +1284,10 @@ import {
   type TunnelServicePort,
   type TunnelSwitchPort,
   TurnChanges,
+  TwoFactorSeedAgendaAdapter,
+  type TwoFactorSeedAgendaPort,
+  type TwoFactorSeedCardPort,
+  TwoFactorSeedStages,
   tailPage,
   tailTranscriptEvents,
   temporaryFilePath,
@@ -1295,6 +1310,8 @@ import {
   WARDEN_ESCALATION_SOURCE,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
+  type WardenAutoMigratePorts,
+  WardenAutoMigrateService,
   type WardenBoardPort,
   WardenCallsignTakenError,
   type WardenExchangeReader,
@@ -1324,8 +1341,6 @@ import {
   withOutdated,
   withRevive,
   xvfbMissingMessage,
-  repairSharingFromPairing,
-  type SharingRepairOutcome,
 } from '../src/lib/index.ts';
 import {
   admitChild,
@@ -1336,6 +1351,7 @@ import {
   isScratchPath,
   JevPackRanker,
   PACK_ROUTING_MAX_AGE_MS,
+  type PackFleetFacts,
   type PackParent,
   type PackProbeRequest,
   PackRoutingKeep,
@@ -1352,15 +1368,11 @@ import { PerformanceProfiler, sampleIntervalMs } from '../src/lib/performance/pr
 import { NO_PERFORMANCE_PROBE, PerformanceRecorder } from '../src/lib/performance/recorder.ts';
 import { teeStackSampler } from '../src/lib/performance/sampler-tee.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
-import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import {
   SessionCredentialError,
   type SessionCredentialSubsystem,
 } from '../src/lib/runtime/mounts/session-credential.ts';
-import { FileCatalogInstallStore } from '../src/adapters/catalog-installs/file-store.ts';
-import { FileProjectSkillFiles } from '../src/adapters/catalog-installs/project-skill-files.ts';
-import { FileRuntimeSkillAssets } from '../src/adapters/catalog-installs/runtime-skill-assets.ts';
-import { CatalogInstallService } from '../src/lib/catalog-installs/service.ts';
+import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
 import {
   ConversationLeases,
@@ -1370,9 +1382,8 @@ import {
 import { SessionCredentialRotation } from '../src/lib/session/lifecycle/credential-rotation.ts';
 import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/session/lifecycle/launch-environment.ts';
 import { dropFerretIdentity, sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
-import { forgetFerretIdentity } from '../src/adapters/tmux/forget-ferret-identity.ts';
-import { cutOffResume } from '../src/lib/session/resume/cut-off.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
+import { cutOffResume } from '../src/lib/session/resume/cut-off.ts';
 import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {
   AttachmentFacetContributor,
@@ -4386,7 +4397,7 @@ interface WardenParts {
   /** The send ledgers, read-only: who last messaged whom (`warden/report-overdue.ts`). */
   readonly exchanges: WardenExchangeReader;
   readonly resume: Pick<SessionResumeService, 'resume'>;
-  readonly migrate: SessionMigrateSubsystem;
+  readonly migrate: SessionMigrateSubsystem & AgentJobControl;
   /** Analytics, for pricing a finished warden from its own transcript. */
   readonly analytics: Pick<AnalyticsIngestionService, 'read'>;
   /** The live journal append edge, for the events that bring a sweep forward. */
@@ -4409,6 +4420,16 @@ interface WardenParts {
   readonly revive: Pick<WardenRevivePorts, 'events' | 'resume' | 'tmuxReady' | 'sleep'>;
   /** The project boards: the cards the Warden reports orphaned, and the card a ferret it starts again carries on. */
   readonly board: WardenBoardPort;
+  /**
+   * What moving a ferret that hit a limit reads beyond the migration: the logins as `fy recommend` sees them, and
+   * whether anything of the owner's is open on the ferret (`warden/auto-migrate-service.ts`).
+   */
+  readonly autoMigrate: Pick<WardenAutoMigratePorts, 'facts' | 'ownerHold'>;
+  /**
+   * Where the budget stop finds the Warden's move: filled in here, because the service is built here. Until then,
+   * and while moving is off, a ferret past its hard budget is stopped as it always was.
+   */
+  readonly budgetMover: { relocate?: (sessionId: string) => Promise<boolean> };
 }
 
 /**
@@ -4492,9 +4513,57 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         .catch(() => undefined);
     },
   });
+  // The move is the migration every other caller makes — same session, same conversation, same card — drawn as
+  // Ferretry · Warden on the turn it hands over. Never a context downgrade, and forced only when the owner set
+  // `forceStopBackground`, after the ferret's own jobs were stopped.
+  const autoMigrate = new WardenAutoMigrateService({
+    ...parts.autoMigrate,
+    blockingJobs: async sessionId => await parts.migrate.blockingJobs(sessionId),
+    askToStopJobs: async sessionId => {
+      await parts.migrate.askToStopJobs(sessionId).catch((error: unknown) => {
+        // The jobs finished between the look and the ask: there is nothing to ask about, and the next sweep moves it.
+        if (!(error instanceof SessionMigrateError && error.failure === 'no_jobs')) throw error;
+      });
+    },
+    stopJobs: async sessionId => await parts.migrate.stopAgentJobs(sessionId),
+    migrate: async (sessionId, request) => {
+      await parts.migrate.migrate(sessionId, {
+        agent: request.agent,
+        allowContextDowngrade: false,
+        forceInflight: request.force,
+        note: request.note,
+        actor: 'warden',
+      });
+    },
+    emit: async (sessionId, type, data) => await parts.revive.events.emit(sessionId, type, data),
+    journal: wardenJournal,
+    notifyOwner: async notice => {
+      await parts.attention
+        .raise(
+          notice.sessionId,
+          {
+            source: 'agent-raised',
+            sourceRef: 'warden-auto-migrate',
+            subject: notice.subject,
+            why: notice.why,
+            context: 'The Warden moves a ferret whose login hit a limit, as warden.yaml (autoMigrate) allows.',
+            waitingSince: new Date().toISOString(),
+            howToResolve: 'Move it yourself with fy migrate, or wait for its login to reset.',
+            notice: true,
+            ping: true,
+            title: notice.title,
+            kind: 'info',
+            premise: 'The owner let the Warden move ferrets that hit a limit to another login.',
+          },
+          WARDEN_ESCALATION_ACTOR,
+        )
+        .catch(() => undefined);
+    },
+  });
   const service = new WardenSweepService(
     {
       revive,
+      autoMigrate,
       board: parts.board,
       exchanges: parts.exchanges,
       guard: parts.guard,
@@ -4757,6 +4826,8 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       nowMs: () => Date.now(),
     },
   );
+  // A ferret past its hard budget is offered to the Warden before it is stopped (see the budget tick).
+  parts.budgetMover.relocate = async sessionId => await service.relocate(sessionId, 'budget_exceeded');
   const nextSweepAt = (): string | undefined => {
     const due = loop.nextDueAtMs();
     return due === undefined ? undefined : new Date(due).toISOString();
@@ -4876,6 +4947,8 @@ async function wardenFleetSession(
       // A person cut it off: the Warden never brings it back (`fy session revoke-credential`).
       ...(view.config.credentialRevoked === true ? { credentialRevoked: true } : {}),
       agent: view.config.agent,
+      // What a move must stay on (`warden/auto-migrate.ts`).
+      harness: view.config.harness,
       ...(view.config.model === undefined ? {} : { model: view.config.model }),
       // The start's own resolution, carried beside the configured value rather than folded into it —
       // an escalation naming this node's model wants what actually ran, and a session whose account
@@ -5278,7 +5351,7 @@ async function decideRelaunchConversation(
  * this very document. Reporting "left staged on the target" is a fact; reporting a rollback that was
  * attempted and not verified would not be.
  */
-function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigrateSubsystem {
+function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigrateSubsystem & AgentJobControl {
   /** The preflight's look at a session, shared by the move and by the ask that clears its way. */
   const inspect = async (id: SessionId, { config, state, tmuxSession }: MigrateSubject) =>
     await parts.preflight.inspect(
@@ -5639,7 +5712,12 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         // Neither an expected status nor the dedupe heuristic: an operator asked for THIS session by
         // id, and the preflight above is the guard a migration has.
         policy: { automatic: false, dedupeSharedRecoveryScope: false, replaceLiveTerminal: true },
-        message: parts.preflight.handoff(report, reportPath, config.mode),
+        // A move the Warden made is drawn as Ferretry · Warden on the turn it hands over, and opens with why.
+        ...(request.actor === undefined ? {} : { actor: request.actor }),
+        message:
+          request.note === undefined
+            ? parts.preflight.handoff(report, reportPath, config.mode)
+            : `${request.note}\n\n${parts.preflight.handoff(report, reportPath, config.mode)}`,
       })
       .catch(async (error: unknown) => {
         await settle(false, error instanceof Error ? error.message : String(error));
@@ -5727,6 +5805,25 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
   };
 
   return {
+    // The Warden's own reach into a move's way (`warden/auto-migrate-service.ts`); no route serves either.
+    blockingJobs: async reference => {
+      const id = existing(reference);
+      return parts.preflight.agentJobs(await inspect(id, await subject(id)));
+    },
+    // Serialized with migrations of the same session, so a move never reads the tree while it is being cleared.
+    stopAgentJobs: async reference => {
+      const id = existing(reference);
+      const target = await subject(id);
+      return await parts.serial.run(
+        id,
+        async () =>
+          await new AgentJobStopper({
+            inspect: async () => await inspect(id, target),
+            signal: deliverStopSignal,
+            sleep: async milliseconds => await Bun.sleep(milliseconds),
+          }).stop(),
+      );
+    },
     askToStopJobs: async reference => await askToStopJobs(existing(reference)),
     conversionPreview: async (reference, request) => await conversionPreview(existing(reference), request),
     migrate: async (reference, request) => {
@@ -11353,6 +11450,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       providerQuota = quotaReader;
       /** Spend budgets (docs/budgets.md): made below, once the fleet catalogue it republishes exists. */
+      // Filled in once the Warden is built: a ferret past its hard budget is offered to its move before it is stopped.
+      const wardenBudgetMover: { relocate?: (sessionId: string) => Promise<boolean> } = {};
       let budgets: BudgetService | undefined;
       const fleetCredentials = createFleetCredentialsSubsystem({
         catalog: fleetCredentialCatalog,
@@ -11649,6 +11748,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const budgetSessions = new StorageBudgetSessions(storage);
       const budgetResolver = createTranscriptFileResolver(storage);
       const budgetHoldsPath = join(paths.state, 'budget-holds.json');
+      /**
+       * Interrupt first, so the turn in flight ends at a request boundary and its transcript is whole; a session with
+       * no turn to interrupt (idle, or its pane already gone) refuses, which is fine. Then wait for it to settle.
+       */
+      const settleBudgetSession = async (id: SessionId): Promise<void> => {
+        await sends.interrupt(id).catch(() => undefined);
+        for (let waited = 0; waited < 15_000; waited += 500) {
+          const status = sessionStatusOf(await storage.readState(id).catch(() => undefined));
+          if (status === undefined || !['running', 'thinking', 'tool_running', 'retrying'].includes(status)) break;
+          await Bun.sleep(500);
+        }
+      };
       budgets = new BudgetService(
         {
           config: async () => {
@@ -11703,16 +11814,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           liveSessions: async agents => await budgetSessions.live(agents),
           recentSession: async agents => await budgetSessions.recent(agents),
+          // The Warden moves it only when the owner switched `autoMigrate` on for budgets; it answers `false` otherwise.
+          relocate: async session => {
+            const relocate = wardenBudgetMover.relocate;
+            if (relocate === undefined) return false;
+            await settleBudgetSession(parseSessionId(session.id));
+            return await relocate(session.id);
+          },
           stop: async (session, reason) => {
-            const id = parseSessionId(session.id);
-            // Interrupt first, so the turn in flight ends at a request boundary and its transcript is whole;
-            // a session with no turn to interrupt (idle, or its pane already gone) refuses, which is fine.
-            await sends.interrupt(id).catch(() => undefined);
-            for (let waited = 0; waited < 15_000; waited += 500) {
-              const status = sessionStatusOf(await storage.readState(id).catch(() => undefined));
-              if (status === undefined || !['running', 'thinking', 'tool_running', 'retrying'].includes(status)) break;
-              await Bun.sleep(500);
-            }
+            await settleBudgetSession(parseSessionId(session.id));
             await sessionControl.stop(session.id, reason);
           },
           alternative: async (login, holds) =>
@@ -11771,6 +11881,44 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           enabled: publishedModelCatalog.enabled,
           ...(await publishedModelCatalog.status()),
         }).catalogs;
+      /**
+       * The runtimes, logins, tools and pane limits `fy recommend` judges readiness from — one reader, so the Warden's
+       * move (`warden/auto-migrate.ts`) never calls a login ready that a Pack start would refuse.
+       */
+      const packFleetFacts = async (): Promise<PackFleetFacts> => {
+        const [runtimes, credentials, machine] = await Promise.all([
+          fleetCatalog.runtimes(),
+          fleetCredentials.list(),
+          fleetCatalog.machine(undefined),
+        ]);
+        // The start's own launcher resolution, per agent runtime: a runtime it would refuse is not ready.
+        const unlaunchable = Object.fromEntries(
+          (
+            await Promise.all(
+              runtimes.runtimes
+                .filter(runtime => runtime.agent)
+                .map(
+                  async runtime =>
+                    await resolveStartAccount(accounts, runtime.wrapper, executables, CLIENT_NAME).then(
+                      () => [],
+                      (error: unknown) => [[runtime.wrapper, error instanceof Error ? error.message : String(error)]],
+                    ),
+                ),
+            )
+          ).flat(),
+        );
+        return {
+          runtimes: runtimes.runtimes,
+          credentials: credentials.credentials,
+          tools: machine.tools,
+          unlaunchable,
+          paneLimits: limitedCredentials(
+            await storagePaneLimits(storage, Date.now()),
+            runtimes.runtimes.map(runtime => ({ agent: runtime.wrapper, credential: runtime.credential.id })),
+          ),
+          now: clock.now(),
+        };
+      };
       const packService = new PackService({
         settings: async () => {
           const effective = (await configFiles.inEffect()).evaluation.effective;
@@ -11781,40 +11929,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           };
         },
         catalogs: packCatalogs,
-        facts: async () => {
-          const [runtimes, credentials, machine] = await Promise.all([
-            fleetCatalog.runtimes(),
-            fleetCredentials.list(),
-            fleetCatalog.machine(undefined),
-          ]);
-          // The start's own launcher resolution, per agent runtime: a runtime it would refuse is not ready.
-          const unlaunchable = Object.fromEntries(
-            (
-              await Promise.all(
-                runtimes.runtimes
-                  .filter(runtime => runtime.agent)
-                  .map(
-                    async runtime =>
-                      await resolveStartAccount(accounts, runtime.wrapper, executables, CLIENT_NAME).then(
-                        () => [],
-                        (error: unknown) => [[runtime.wrapper, error instanceof Error ? error.message : String(error)]],
-                      ),
-                  ),
-              )
-            ).flat(),
-          );
-          return {
-            runtimes: runtimes.runtimes,
-            credentials: credentials.credentials,
-            tools: machine.tools,
-            unlaunchable,
-            paneLimits: limitedCredentials(
-              await storagePaneLimits(storage, Date.now()),
-              runtimes.runtimes.map(runtime => ({ agent: runtime.wrapper, credential: runtime.credential.id })),
-            ),
-            now: clock.now(),
-          };
-        },
+        facts: packFleetFacts,
         parent: async id => await packTree.parent(id),
         // A named folder is judged where it really is: `/tmp` is `/private/tmp` on macOS, and a link into a
         // temporary folder is still one. This machine's own TMPDIR and the runtime's temp folder count too.
@@ -11959,6 +12074,54 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // A message held while this session could not take input is delivered now that it is back.
         sends,
       );
+      // Built before the mounts so the Warden can read whether a ferret handed a surface to the owner.
+      const agentToolsMounted = createAgentToolsSubsystem({
+        storage,
+        terminals: terminalSubsystem,
+        browser: browserHost,
+        audit: auditLog,
+        policy: agentControl,
+        input: inputRequestService,
+        phoneApprovals,
+        scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
+        quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
+        copy: {
+          capture: async (sessionId, request, context) => await secureCopies.capture(sessionId, request, context),
+          list: sessionId => secureCopies.list(sessionId),
+          discard: (sessionId, name) => secureCopies.discard(sessionId, name),
+        },
+        plans: {
+          propose: async (sessionId, call) => await copyPlans.propose(sessionId, call),
+        },
+        copyPages: copyPageRecords,
+        accounts: accountDirectory,
+        signInChoice,
+        recipes: loginRecipes,
+        loginActs: loginObserver,
+        files: (() => {
+          const agentFiles = new AgentFiles({
+            fs: new NodeAgentFilesystem(),
+            folderOf: async sessionId => await sessionFolder(storage, sessionId),
+            readAttachment: async (sessionId, attachmentId) => {
+              const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
+              return { filename: attachment.filename, bytes };
+            },
+            uploadDirectory: join(paths.temporary, 'browser-upload'),
+            // Every file tool stays out of these however a path reaches them (docs/agent-tools.md#files).
+            stateHomes: [paths.home, paths.state, paths.config],
+            // Its key files and folders by identity too, so a bind mount of one of them alone is still refused.
+            pinned: stateHomeKeys(paths),
+            token: () => crypto.randomUUID().replaceAll('-', ''),
+            now: () => Date.now(),
+          });
+          // Upload copies outlive their call by the staging time; swept at boot and on a timer, not only by the next upload.
+          const sweep = asActivity(activities, 'browser-upload sweep', async () => await agentFiles.sweep());
+          setInterval(sweep, STAGED_FILE_TTL_MS).unref();
+          setTimeout(sweep, 30_000).unref();
+          return agentFiles;
+        })(),
+        redactor: secretRedactor,
+      });
       const mounted: Omit<
         MountedSubsystems,
         'sessionMcp' | 'catalogInstalls' | 'mcpInventory' | 'sharedCatalogs' | 'catalogMembers'
@@ -12430,53 +12593,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           state: () => browserService.overview(),
           firewall: loopbackFirewall,
         },
-        agentTools: createAgentToolsSubsystem({
-          storage,
-          terminals: terminalSubsystem,
-          browser: browserHost,
-          audit: auditLog,
-          policy: agentControl,
-          input: inputRequestService,
-          phoneApprovals,
-          scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
-          quarantinedUntil: (sessionId, names) => inputRequestService.quarantinedUntil(sessionId, names),
-          copy: {
-            capture: async (sessionId, request, context) => await secureCopies.capture(sessionId, request, context),
-            list: sessionId => secureCopies.list(sessionId),
-            discard: (sessionId, name) => secureCopies.discard(sessionId, name),
-          },
-          plans: {
-            propose: async (sessionId, call) => await copyPlans.propose(sessionId, call),
-          },
-          copyPages: copyPageRecords,
-          accounts: accountDirectory,
-          signInChoice,
-          recipes: loginRecipes,
-          loginActs: loginObserver,
-          files: (() => {
-            const agentFiles = new AgentFiles({
-              fs: new NodeAgentFilesystem(),
-              folderOf: async sessionId => await sessionFolder(storage, sessionId),
-              readAttachment: async (sessionId, attachmentId) => {
-                const { attachment, bytes } = await attachmentStore.download(sessionId, attachmentId);
-                return { filename: attachment.filename, bytes };
-              },
-              uploadDirectory: join(paths.temporary, 'browser-upload'),
-              // Every file tool stays out of these however a path reaches them (docs/agent-tools.md#files).
-              stateHomes: [paths.home, paths.state, paths.config],
-              // Its key files and folders by identity too, so a bind mount of one of them alone is still refused.
-              pinned: stateHomeKeys(paths),
-              token: () => crypto.randomUUID().replaceAll('-', ''),
-              now: () => Date.now(),
-            });
-            // Upload copies outlive their call by the staging time; swept at boot and on a timer, not only by the next upload.
-            const sweep = asActivity(activities, 'browser-upload sweep', async () => await agentFiles.sweep());
-            setInterval(sweep, STAGED_FILE_TTL_MS).unref();
-            setTimeout(sweep, 30_000).unref();
-            return agentFiles;
-          })(),
-          redactor: secretRedactor,
-        }),
+        agentTools: agentToolsMounted,
         configFiles: createConfigFilesSubsystem({
           activities,
           service: configFiles,
@@ -12614,6 +12731,29 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         warden: createWardenSubsystem({
           machineName: () => analyticsMachineName ?? hostname(),
           ledgers: wardenLedgers,
+          budgetMover: wardenBudgetMover,
+          autoMigrate: {
+            facts: packFleetFacts,
+            // Anything of the owner's open on the ferret keeps it where it is: a move would kill the pane the owner
+            // is about to type into, or drop a value it holds. A check that cannot be made is a reason too.
+            ownerHold: async sessionId => {
+              if (inputRequestService.hasOpen(sessionId)) return 'it has an input card open for the owner';
+              if (secureCopies.heldCount(sessionId) > 0) return 'it holds a secret it copied, which a move would drop';
+              for (const surface of ['terminal', 'browser'] as const) {
+                const view = await agentToolsMounted.service.controlView(sessionId, surface).catch(() => undefined);
+                if (view === undefined) return `whether it handed its ${surface} to the owner could not be read`;
+                if (view.asked.length > 0) return `it handed its ${surface} to the owner, who has not given it back`;
+              }
+              const state = SessionStateSchema.safeParse(
+                await storage.readState(parseSessionId(sessionId)).catch(() => undefined),
+              );
+              if (!state.success) return 'its state could not be read';
+              if (state.data.permissionRequest !== undefined) return 'it is waiting on a permission prompt';
+              const dialog = state.data.harnessDialog;
+              if (dialog !== undefined && dialog.kind !== 'usage-limit') return `it is waiting on a dialog: ${dialog.title}`;
+              return undefined;
+            },
+          },
           // The board as the Warden reads it: every card with its derived activity (the orphans), and the card
           // a session works on (what a ferret it starts again carries on). Each read is total.
           board: {

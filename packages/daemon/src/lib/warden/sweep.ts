@@ -60,6 +60,7 @@
 import type {
   AgendaSource,
   WardenAction,
+  WardenAutoMigrateTrigger,
   WardenCap,
   WardenConfigView,
   WardenFailoverStatus,
@@ -90,6 +91,8 @@ import { displayAgentName } from '../names/session-names.ts';
 import type { JevJudgement, TriageGuardPort } from '../speedups/jev.ts';
 import { sumActionTallies, sumReviveResults } from './action-tally.ts';
 import { type AgendaBoardInput, buildWardenAgendaView } from './agenda.ts';
+import { EMPTY_AUTO_MIGRATE_MEMORY, moveTriggers, subjectOf } from './auto-migrate.ts';
+import type { WardenAutoMigrateService } from './auto-migrate-service.ts';
 import {
   BACKOFF_CEILING_MS,
   backoffHold,
@@ -453,6 +456,8 @@ export interface WardenSweepPorts {
   readonly journal: WardenJournal;
   /** Auto-revive of sessions that died abnormally (`revive-service.ts`). Absent: nothing is revived. */
   readonly revive?: WardenReviveService;
+  /** Moving a ferret whose login hit a limit to another login (`auto-migrate-service.ts`). Absent: nothing is moved. */
+  readonly autoMigrate?: WardenAutoMigrateService;
   /** The project boards. Absent: no card is reported orphaned, and a resumed ferret is told no card. */
   readonly board?: WardenBoardPort;
   /** The send ledgers. Absent: no sub-ferret is reported overdue. */
@@ -1075,7 +1080,11 @@ export class WardenSweepService {
     state = resolveReviveWatch(state, fleet, nowMs);
     const reviveRun = await this.reviveDead(state, fleet, config, nowMs);
     state = reviveRun.state;
-    const anomalies = detected.anomalies.filter(anomaly => !reviveRun.revived.has(anomaly.sessionId));
+    const moveRun = await this.moveLimited(state, fleet, config, nowMs);
+    state = moveRun.state;
+    const anomalies = detected.anomalies.filter(
+      anomaly => !reviveRun.revived.has(anomaly.sessionId) && !moveRun.moved.has(anomaly.sessionId),
+    );
     // A card whose ferret was just started again has a ferret on it.
     const orphaned = orphans.filter(anomaly => !reviveRun.revived.has(anomaly.sessionId));
 
@@ -2020,6 +2029,74 @@ export class WardenSweepService {
     } catch (error) {
       this.ports.journal.record('fleet.warden_revive_failed', { message: failureMessage(error) });
       return { state: next, revived: new Set() };
+    }
+  }
+
+  /**
+   * Move the ferrets whose login hit a limit, by rule (`auto-migrate-service.ts`): no Jev, no investigation, no
+   * spend, and only as far as the owner's `autoMigrate` setting allows. A ferret moved here is not flagged on this
+   * same pass: the caller drops it from the anomalies.
+   */
+  private async moveLimited(
+    state: WardenRuntimeState,
+    fleet: readonly WardenFleetSession[],
+    config: WardenConfig,
+    nowMs: number,
+  ): Promise<{ readonly state: WardenRuntimeState; readonly moved: ReadonlySet<string> }> {
+    const service = this.ports.autoMigrate;
+    if (service === undefined) return { state, moved: new Set() };
+    try {
+      const result = await service.run({
+        fleet,
+        config,
+        memory: state.autoMigrate ?? EMPTY_AUTO_MIGRATE_MEMORY,
+        nowMs,
+      });
+      let next: WardenRuntimeState = { ...state, autoMigrate: result.memory };
+      for (const action of result.actions) next = this.recordAction(next, action);
+      await this.ports.state.write(next);
+      return { state: next, moved: result.moved };
+    } catch (error) {
+      this.ports.journal.record('fleet.warden_auto_migrate_failed', { message: failureMessage(error) });
+      return { state, moved: new Set() };
+    }
+  }
+
+  /**
+   * Move one ferret now, for a trigger outside the sweep: its login passed its hard budget and it is about to be
+   * stopped. Answers whether it moved — when it did, the stop that was coming has nothing left to stop. Total.
+   */
+  async relocate(sessionId: string, trigger: WardenAutoMigrateTrigger): Promise<boolean> {
+    const service = this.ports.autoMigrate;
+    if (service === undefined) return false;
+    try {
+      const config = parseStoredWardenConfig(await this.ports.config.read()).config;
+      if (!moveTriggers(config).has(trigger)) return false;
+      const view = (await this.ports.fleet.fleet()).find(session => session.config.id === sessionId);
+      const subject = view === undefined ? undefined : subjectOf(view, trigger);
+      if (view === undefined || subject === undefined || isTerminalStatus(view.state.status)) return false;
+      if (view.config.label?.trim() === WARDEN_LABEL || view.config.wardenLineage === true) return false;
+      const state = parseWardenRuntimeState(await this.ports.state.read());
+      const result = await service.relocate(
+        subject,
+        config,
+        state.autoMigrate ?? EMPTY_AUTO_MIGRATE_MEMORY,
+        this.ports.nowMs(),
+      );
+      // Read again: a sweep may have written while the move ran, and its record must survive this one.
+      const latest = parseWardenRuntimeState(await this.ports.state.read());
+      const memory = {
+        sessions: {
+          ...(latest.autoMigrate ?? EMPTY_AUTO_MIGRATE_MEMORY).sessions,
+          ...(result.memory.sessions[sessionId] === undefined ? {} : { [sessionId]: result.memory.sessions[sessionId] }),
+        },
+      };
+      const next: WardenRuntimeState = { ...latest, autoMigrate: memory };
+      await this.ports.state.write(result.action === undefined ? next : this.recordAction(next, result.action));
+      return result.moved;
+    } catch (error) {
+      this.ports.journal.record('fleet.warden_auto_migrate_failed', { sessionId, message: failureMessage(error) });
+      return false;
     }
   }
 

@@ -465,6 +465,83 @@ describe('configLoosening: warden', () => {
     should(free).deepEqual([]);
   });
 
+  describe('moving a ferret that hit a limit', () => {
+    const moving = (changes: Partial<WardenConfig['autoMigrate']>): WardenConfig =>
+      wardenWith({ autoMigrate: { ...DEFAULT_WARDEN_CONFIG.autoMigrate, ...changes } });
+    const on = moving({ enabled: true });
+
+    it.each([
+      [
+        'switching it on',
+        DEFAULT_WARDEN_CONFIG,
+        on,
+        ['the Warden may now move a ferret that hit a limit to another login on its own'],
+      ],
+      [
+        'switching force-stop on',
+        on,
+        moving({ enabled: true, forceStopBackground: true }),
+        ["the Warden may now stop a ferret's own background jobs to move it"],
+      ],
+      [
+        'adding a trigger',
+        moving({ enabled: true, when: ['rate_limited'] }),
+        moving({ enabled: true, when: ['rate_limited', 'budget_exceeded'] }),
+        ['the Warden now also moves a ferret whose login passed its hard spend budget'],
+      ],
+      [
+        'naming a new target',
+        moving({ enabled: true, targets: ['claude-b'] }),
+        moving({ enabled: true, targets: ['claude-b', 'glm-a'] }),
+        ['the Warden may now move ferrets onto glm-a'],
+      ],
+      [
+        'going from a list to any ready login',
+        moving({ enabled: true, targets: ['claude-b'] }),
+        moving({ enabled: true, targets: [] }),
+        ['the Warden may now move ferrets onto any ready login of the same harness and provider'],
+      ],
+      [
+        // A named login may be another provider's, which "any ready login" never reaches.
+        'naming a login where any ready one was allowed',
+        on,
+        moving({ enabled: true, targets: ['glm-a'] }),
+        ['the Warden may now move ferrets onto glm-a'],
+      ],
+      [
+        'raising the moves an hour',
+        on,
+        moving({ enabled: true, maxMovesPerHour: 3 }),
+        ['the moves one ferret may get in an hour goes up from 1 to 3'],
+      ],
+    ] as const)('should hold %s', (_name, before, after, expected) => {
+      // Act
+      const actual = configLoosening('warden', before, after);
+
+      // Assert
+      should(actual).deepEqual(expected);
+    });
+
+    it.each([
+      ['switching it off', on, DEFAULT_WARDEN_CONFIG],
+      ['switching force-stop off', moving({ enabled: true, forceStopBackground: true }), on],
+      ['dropping a trigger', on, moving({ enabled: true, when: ['rate_limited'] })],
+      [
+        'dropping a named login',
+        moving({ enabled: true, targets: ['claude-b', 'glm-a'] }),
+        moving({ enabled: true, targets: ['claude-b'] }),
+      ],
+      ['lowering the moves an hour', moving({ enabled: true, maxMovesPerHour: 3 }), on],
+      ['changing the wait', on, moving({ enabled: true, waitMinutes: 2 })],
+    ] as const)('should apply %s at once', (_name, before, after) => {
+      // Act
+      const actual = configLoosening('warden', before, after);
+
+      // Assert
+      should(actual).deepEqual([]);
+    });
+  });
+
   it('should not hold a setting that does not spend: the accounts, thresholds and failover', () => {
     // Act
     const actual = configLoosening(

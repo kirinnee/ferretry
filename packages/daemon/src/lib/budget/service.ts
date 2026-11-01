@@ -10,7 +10,8 @@
  * 3. STOPS every live session on a login past its hard limit — interrupted first, then stopped with its
  *    turn saved, so it can be resumed after the reset or moved with `fy migrate` — and tells the owner ONCE
  *    per login per period, with a ping, which ferrets it stopped and where they could go. It never moves a
- *    ferret itself.
+ *    ferret itself — but before stopping one it offers it to the Warden (`relocate`), which moves it to another
+ *    login when, and only when, the owner switched `autoMigrate` on for `budget_exceeded` in warden.yaml.
  *
  * IDEMPOTENT. A session already stopped is not stopped again; one that keeps running (a stop that failed)
  * is tried again next tick. Which (login, period) the owner was told about is kept in the state home, so a
@@ -65,6 +66,8 @@ export interface BudgetNotice {
   readonly resetsAtMs: number;
   readonly timeZone: string;
   readonly stopped: readonly BudgetSession[];
+  /** Sessions the Warden moved to another login instead (`autoMigrate`). Absent: none were. */
+  readonly relocated?: readonly BudgetSession[];
   /** Sessions it could not stop this tick: tried again at the next one. */
   readonly failed: readonly BudgetSession[];
   /** A runtime of the same kind on a login within its budget, to suggest for `fy migrate`, when there is one. */
@@ -88,6 +91,11 @@ export interface BudgetServicePorts {
   liveSessions(agents: ReadonlySet<string>): Promise<readonly BudgetSession[]>;
   /** Interrupt a session's turn, wait for it to settle, then stop it with its turn saved. */
   stop(session: BudgetSession, reason: string): Promise<void>;
+  /**
+   * Offer the session to the Warden before it is stopped: answers whether it was moved to another login — then
+   * there is nothing left to stop. Absent, or answering `false`, the session is stopped as always.
+   */
+  readonly relocate?: (session: BudgetSession, reason: string) => Promise<boolean>;
   /** The session most recently active on `agents`, to carry a notice when no ferret was running to stop. */
   recentSession(agents: ReadonlySet<string>): Promise<BudgetSession | undefined>;
   /** A runtime of the same kind as one on `login` whose login nothing holds, for the notice. */
@@ -196,7 +204,13 @@ export class BudgetService {
     const reason = `its login "${state.id}" spent ${usdWords(over.spentUsd)} this ${period === 'daily' ? 'day' : 'week'} on this machine, past its ${usdWords(over.limit.hard)} hard limit`;
     const stopped: BudgetSession[] = [];
     const failed: BudgetSession[] = [];
+    const relocated: BudgetSession[] = [];
     for (const session of live) {
+      const moved = (await this.ports.relocate?.(session, reason).catch(() => false)) === true;
+      if (moved) {
+        relocated.push(session);
+        continue;
+      }
       await this.ports.stop(session, reason).then(
         () => stopped.push(session),
         () => failed.push(session),
@@ -210,7 +224,7 @@ export class BudgetService {
       return;
     }
     const anchor =
-      stopped[0] ?? failed[0] ?? (await this.ports.recentSession(new Set(state.agents)).catch(() => undefined));
+      stopped[0] ?? relocated[0] ?? failed[0] ?? (await this.ports.recentSession(new Set(state.agents)).catch(() => undefined));
     // No session ever ran on it here, so nobody to tell it on yet: the next tick looks again.
     if (anchor === undefined) return;
     const alternative = await this.ports.alternative(state.id, holds).catch(() => undefined);
@@ -224,6 +238,7 @@ export class BudgetService {
       timeZone: state.timeZone,
       stopped,
       failed,
+      ...(relocated.length === 0 ? {} : { relocated }),
       ...(alternative === undefined ? {} : { alternative }),
     });
     // Keys for periods long gone are let go, so the record stays a handful of lines.

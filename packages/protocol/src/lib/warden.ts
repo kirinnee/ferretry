@@ -259,9 +259,57 @@ export const DEFAULT_WARDEN_REVIVE = {
   breakerMinutes: 30,
 };
 
+
+/**
+ * What can make the Warden move a ferret to another login on its own (`autoMigrate.when`):
+ * `rate_limited` its login hit a usage limit and the ferret sits waiting for it to reset;
+ * `budget_exceeded` its login passed its hard spend budget on this machine, which would otherwise stop it.
+ */
+export const WARDEN_AUTO_MIGRATE_TRIGGERS = ['rate_limited', 'budget_exceeded'] as const;
+export const WardenAutoMigrateTriggerSchema = z.enum(WARDEN_AUTO_MIGRATE_TRIGGERS);
+export type WardenAutoMigrateTrigger = z.infer<typeof WardenAutoMigrateTriggerSchema>;
+
+/** How long the Warden waits for a ferret to stop its own background jobs, in minutes. */
+export const WARDEN_AUTO_MIGRATE_WAIT_RANGE = { min: 1, max: 60 } as const;
+/** How many times one ferret may be moved in an hour. */
+export const WARDEN_AUTO_MIGRATE_MOVES_RANGE = { min: 1, max: 6 } as const;
+
+/**
+ * MOVING A FERRET THAT HIT A LIMIT. Off by default. When on, a ferret whose login is out of quota (or past its
+ * hard budget) is moved — same session, same chat, same card — to another login of the SAME harness that is
+ * ready, signed in, not switched off and under its own quota and budget. `targets` empty means "any such login
+ * of the same provider, most headroom first"; a list is the owner's order, and the only way a move crosses to
+ * another provider. A ferret with background jobs is asked to stop them and given `waitMinutes`; with
+ * `forceStopBackground` the Warden stops the jobs under that ferret's own pane itself instead. Switching it on,
+ * switching force-stop on, adding a trigger or a target, or raising `maxMovesPerHour` waits for the owner.
+ */
+export const WardenAutoMigrateConfigSchema = z.object({
+  enabled: z.boolean(),
+  when: z.array(WardenAutoMigrateTriggerSchema),
+  /** Runtime names, in the owner's order. Empty: any ready login of the same harness and provider. */
+  targets: z.array(z.string().trim().min(1)),
+  forceStopBackground: z.boolean(),
+  waitMinutes: z.number().int().min(WARDEN_AUTO_MIGRATE_WAIT_RANGE.min).max(WARDEN_AUTO_MIGRATE_WAIT_RANGE.max),
+  maxMovesPerHour: z
+    .number()
+    .int()
+    .min(WARDEN_AUTO_MIGRATE_MOVES_RANGE.min)
+    .max(WARDEN_AUTO_MIGRATE_MOVES_RANGE.max),
+});
+export type WardenAutoMigrateConfig = z.infer<typeof WardenAutoMigrateConfigSchema>;
+export const DEFAULT_WARDEN_AUTO_MIGRATE: WardenAutoMigrateConfig = {
+  enabled: false,
+  when: ['rate_limited', 'budget_exceeded'],
+  targets: [],
+  forceStopBackground: false,
+  waitMinutes: 10,
+  maxMovesPerHour: 1,
+};
 const WardenConfigShape = z.object({
   enabled: z.boolean(),
   revive: WardenReviveConfigSchema.default(DEFAULT_WARDEN_REVIVE),
+  /** Moving a ferret that hit a limit to another login ({@link WardenAutoMigrateConfigSchema}). */
+  autoMigrate: WardenAutoMigrateConfigSchema.default(DEFAULT_WARDEN_AUTO_MIGRATE),
   layers: WardenLayersSchema,
   guard: WardenGuardConfigSchema,
   caps: WardenCapsSchema,
@@ -298,6 +346,7 @@ export const WARDEN_BLESSING_CEILING_MINUTES = 240;
 export const WardenConfigPatchSchema = z.strictObject({
   enabled: z.boolean().optional(),
   revive: WardenReviveConfigSchema.strict().partial().optional(),
+  autoMigrate: WardenAutoMigrateConfigSchema.strict().partial().optional(),
   layers: WardenLayersSchema.strict().partial().optional(),
   guard: WardenGuardConfigSchema.strict().partial().optional(),
   caps: WardenCapsSchema.strict().partial().optional(),
@@ -323,6 +372,7 @@ export type WardenConfigPatch = z.infer<typeof WardenConfigPatchSchema>;
 /** The nested sections a patch merges into rather than replaces. */
 export const WARDEN_CONFIG_SECTIONS = [
   'revive',
+  'autoMigrate',
   'layers',
   'guard',
   'caps',
@@ -761,6 +811,8 @@ export const WardenActionSchema = z.object({
   reason: z.string().min(1).max(500).optional(),
   /** The account a failover moved to. */
   agent: z.string().min(1).optional(),
+  /** The account a move left: a failover the Warden made on its own because a login hit a limit (`autoMigrate`). */
+  fromAgent: z.string().min(1).optional(),
   /** Who acted (`WardenActorSchema`). Absent from an older daemon: read it through {@link wardenActionActor}. */
   actor: WardenActorSchema.optional(),
   /** The investigator (`warden-0007`) whose verdict this carried out. Investigation actions only. */

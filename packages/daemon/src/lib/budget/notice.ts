@@ -29,10 +29,16 @@ export function budgetNoticeRequest(
 ): RaiseAgendaRequest {
   const span = notice.period === 'daily' ? 'today' : 'this week';
   const spent = `${usdWords(notice.spentUsd)} ${span} on ${machine}, past its ${usdWords(notice.hardUsd)} hard limit`;
-  const stoppedWords =
-    notice.stopped.length === 0
-      ? 'No ferret was running on it.'
-      : `Stopped, with their turns saved: ${notice.stopped.map(session => `:${session.name}`).join(', ')}.`;
+  const relocated = notice.relocated ?? [];
+  const ran = [
+    ...(notice.stopped.length === 0
+      ? []
+      : [`Stopped, with their turns saved: ${notice.stopped.map(session => `:${session.name}`).join(', ')}.`]),
+    ...(relocated.length === 0
+      ? []
+      : [`Moved to another login by the Warden: ${relocated.map(session => `:${session.name}`).join(', ')}.`]),
+  ];
+  const stoppedWords = ran.length === 0 ? 'No ferret was running on it.' : ran.join(' ');
   const failedWords =
     notice.failed.length === 0
       ? []

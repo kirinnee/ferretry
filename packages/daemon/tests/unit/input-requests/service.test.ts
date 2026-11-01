@@ -898,6 +898,15 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
     should(service.pendingOn(SESSION, { kind: 'terminal', key: 'dev' })).be.undefined();
   });
 
+  it('should say whether a session has a card open, and no after the end', async () => {
+    const { service, id } = await raised();
+
+    should(service.hasOpen(SESSION)).be.true();
+    should(service.hasOpen('x-1')).be.false();
+    await service.cancel(SESSION, id, HOST);
+    should(service.hasOpen(SESSION)).be.false();
+  });
+
   it('should mask a delivered value from an agent read for the redaction window', async () => {
     const { service, id, digest } = await raised();
     await service.deliver(SESSION, id, bodyFor(digest), HOST);

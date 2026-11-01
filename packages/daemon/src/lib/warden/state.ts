@@ -26,6 +26,7 @@ import {
   type WardenAction,
   WardenActionSchema,
   WardenActorSchema,
+  WardenAutoMigrateTriggerSchema,
   WardenClearedBySchema,
   type WardenDayStats,
   WardenDayStatsSchema,
@@ -40,6 +41,7 @@ import {
   WardenVerdictKindSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import type { AutoMigrateMemory } from './auto-migrate.ts';
 import type { BackoffStore, InvestigationBackoff } from './backoff.ts';
 import type { Blessing, BlessingStore, ClearStreak, ClearStreakStore } from './bless.ts';
 import type { WardenAnomaly, WardenAnomalyKind } from './detect.ts';
@@ -415,6 +417,12 @@ export interface WardenRuntimeState {
    * (`report-overdue.ts`), keyed by session id, kept while each lives: what stops it repeating either.
    */
   readonly overdue?: OverdueMemory;
+  /**
+   * The ferrets the Warden moved to another login because theirs hit a limit (`auto-migrate.ts`): when, what it
+   * asked them, and the reason it last held each for the owner — what keeps it from moving one too often or
+   * telling the owner the same thing every sweep.
+   */
+  readonly autoMigrate?: AutoMigrateMemory;
 }
 
 /**
@@ -487,6 +495,20 @@ const RuntimeStateSchema = z.object({
     .optional(),
   overdue: z
     .record(z.string(), z.object({ asked: Instant, nudgedAt: Instant.optional(), toldParentAt: Instant.optional() }))
+    .optional(),
+  autoMigrate: z
+    .object({
+      sessions: z.record(
+        z.string(),
+        z.object({
+          moves: z.array(Instant).default([]),
+          asked: z
+            .object({ at: Instant, trigger: WardenAutoMigrateTriggerSchema, from: z.string().min(1) })
+            .optional(),
+          held: z.string().min(1).optional(),
+        }),
+      ),
+    })
     .optional(),
 });
 
