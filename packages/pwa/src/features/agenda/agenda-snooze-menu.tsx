@@ -6,8 +6,9 @@
  */
 
 import { Clock } from 'lucide-react';
-import { type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
+import { type FormEvent, type KeyboardEvent, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { customSnooze, localInputValue, snoozeChoices } from '../../lib/agenda-snooze.ts';
+import { placeWithin } from './snooze-placement.ts';
 
 export interface AgendaSnoozeMenuProps {
   /** Snooze until this instant. */
@@ -21,6 +22,7 @@ export interface AgendaSnoozeMenuProps {
 }
 
 const HOUR_MS = 3_600_000;
+const VIEWPORT_MARGIN_PX = 8;
 
 interface CustomFormProps {
   readonly now: number;
@@ -82,7 +84,27 @@ export function AgendaSnoozeMenu({
   const root = useRef<HTMLDivElement | null>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const list = useRef<HTMLDivElement | null>(null);
+  const popover = useRef<HTMLDivElement | null>(null);
   const menuId = useId();
+
+  // Measured where the stylesheet puts the menu, then slid (or turned over) until it is all on screen; the custom
+  // form makes the menu taller, so that is measured again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `custom` changes the menu's height
+  useLayoutEffect(() => {
+    const menu = popover.current;
+    const anchor = trigger.current;
+    if (!open || menu === null || anchor === null) return;
+    menu.style.transform = '';
+    menu.removeAttribute('data-flip');
+    const placed = placeWithin(
+      menu.getBoundingClientRect(),
+      anchor.getBoundingClientRect(),
+      { width: document.documentElement.clientWidth, height: window.innerHeight },
+      VIEWPORT_MARGIN_PX,
+    );
+    if (placed.flip) menu.setAttribute('data-flip', '');
+    if (placed.dx !== 0) menu.style.transform = `translateX(${placed.dx}px)`;
+  }, [open, custom]);
 
   const close = (refocus: boolean): void => {
     setOpen(false);
@@ -144,7 +166,7 @@ export function AgendaSnoozeMenu({
         <Clock aria-hidden="true" size={18} />
       </button>
       {open ? (
-        <div className="fy-snooze__popover" id={menuId}>
+        <div className="fy-snooze__popover" id={menuId} ref={popover}>
           <div aria-label="Snooze for" className="fy-snooze__list" ref={list} role="menu">
             {snoozeChoices(at).map(choice => (
               <button
