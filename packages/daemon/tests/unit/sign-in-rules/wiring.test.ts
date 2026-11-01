@@ -120,7 +120,7 @@ describe('the composition root makes every connection', () => {
   });
 });
 
-// secrev-1301 / lizzette (a): the terminal gate is the protocol's compile-time list, read nowhere else.
+// secrev-1301 / lizzette (a), on since !A226: the terminal gate is the protocol's compile-time list, read nowhere else.
 describe('terminal standing rules are switched by the build alone', () => {
   it('should read sign-in-rules-terminal.1 only through daemonFeatureList, for the rule service and the fills', async () => {
     const fyd = await Bun.file(new URL('../../../bin/fyd.ts', import.meta.url)).text();
@@ -141,6 +141,7 @@ describe('terminal standing rules are switched by the build alone', () => {
           holding.push(file);
     should(holding).eql([]);
     const features = await Bun.file(new URL('../../../../protocol/src/lib/daemon-features.ts', import.meta.url)).text();
-    should(features).match(/const NOT_YET_REPORTED[^;]*DAEMON_FEATURES\.signInRulesTerminal[^;]*;/u);
+    // Reported by this build (owner decision !A226): the name is no longer held back.
+    should(features).not.match(/const NOT_YET_REPORTED[^;]*DAEMON_FEATURES\.signInRulesTerminal[^;]*;/u);
   });
 });
