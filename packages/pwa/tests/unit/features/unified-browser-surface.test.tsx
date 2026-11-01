@@ -684,6 +684,48 @@ describe('the unified browser surface', () => {
       await stopped.view.unmount();
     });
 
+    it('keeps a held error alone when the page has none of its own', async () => {
+      const { view } = await hosted(control(), runningStatus(), { error: 'The action failed.' });
+
+      expect(chipOf(view.container).getAttribute('data-browser-chip')).toBe('error');
+      const detail = await openDetail(view.container);
+      expect(detail.textContent).toContain('Dismiss');
+      await view.unmount();
+    });
+
+    it('reads the governor, the last input and the proxy in the menu, and fills the desktop and full-screen icons', async () => {
+      rememberBrowserEngine(scopeA, 'remote');
+      const toggled: string[] = [];
+      const { remote, dependencies } = engines();
+      const view = await mount(
+        surface({
+          dependencies,
+          host: {
+            name: 'app',
+            control: control(),
+            fullscreen: { active: true, toggle: () => toggled.push('fullscreen') },
+          },
+        }),
+      );
+      await remote.publish(
+        withPage({
+          lastActor: { kind: 'human', at: '2026-10-30T22:00:00.000Z', action: 'click' },
+          proxy: { url: 'http://proxy.invalid:8080', authenticated: false, bypassCount: 0 },
+        }),
+        false,
+        { viewportMode: 'desktop' },
+      );
+
+      const menu = await openMenu(view.container);
+      expect(menu.querySelector('[data-browser-governor]')?.textContent).toContain('last input you (click)');
+      expect(menu.querySelector('[data-browser-proxy-chip]')?.textContent).toContain(
+        'Via proxy http://proxy.invalid:8080',
+      );
+      await click(labelled(menu, 'Exit full screen'));
+      expect(toggled).toEqual(['fullscreen']);
+      await view.unmount();
+    });
+
     it('opens a detail only from its chip, and closes it again', async () => {
       const { view } = await hosted(control());
 
