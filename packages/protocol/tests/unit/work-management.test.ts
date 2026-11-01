@@ -1025,6 +1025,44 @@ describe('attention schemas', () => {
     assertRejects(cases);
   });
 
+  it('should refuse a malformed gate, and a gate on an item the daemon did not raise', () => {
+    // Arrange
+    const option = { id: 'done', label: 'Done', outcome: 'close' };
+    const gate = {
+      cardId: 'F412',
+      laneId: 'released',
+      laneName: 'Released',
+      entry: 7,
+      projectId: 'p-1',
+      options: [option],
+    };
+    const cases: SchemaCase[] = [
+      { name: 'unknown outcome', schema: agenda.AgendaGateOutcomeSchema, value: 'archive' },
+      { name: 'option with an extra key', schema: agenda.AgendaGateOptionSchema, value: { ...option, hint: 'x' } },
+      {
+        name: 'option label too long',
+        schema: agenda.AgendaGateOptionSchema,
+        value: { ...option, label: 'x'.repeat(25) },
+      },
+      {
+        name: 'option label over two lines',
+        schema: agenda.AgendaGateOptionSchema,
+        value: { ...option, label: 'a\nb' },
+      },
+      { name: 'gate without options', schema: agenda.AgendaGateSchema, value: { ...gate, options: [] } },
+      { name: 'gate with a zero entry', schema: agenda.AgendaGateSchema, value: { ...gate, entry: 0 } },
+      { name: 'gate with an extra key', schema: agenda.AgendaGateSchema, value: { ...gate, owner: 'x' } },
+      {
+        name: 'gate raised by an agent',
+        schema: agenda.AgendaItemSchema,
+        value: { ...agendaItem, raisedBy: 'agent', gate },
+      },
+    ];
+
+    // Act + Assert
+    assertRejects(cases);
+  });
+
   it('should resolve every ask, response, provenance, and action member', () => {
     // Arrange
     const asks = [

@@ -170,13 +170,20 @@ class FakeBrowserPages implements Pick<
   readText: string | undefined;
   /** Where every act reports the page to be, when a case wants an address other than the page's own. */
   actedUrl: string | undefined;
+  /** The origin of the world a script runs in, as the worker reports it; `undefined`: an older worker reports none. */
+  scriptOrigin: string | undefined = 'https://github.com';
   /** Whether every act reports that it put text in a password field. */
   passwordField = false;
   /** The document every page shows, as an act's in-queue guard reads it: a navigation changes it. */
   document: string | undefined = 'loader-1';
   /** Runs, oldest first, just before each act reaches its in-queue guard: something landing while the act waited. */
   readonly beforeGuard: (() => void | Promise<void>)[] = [];
-  private readonly guardPage = { document: async (): Promise<string | undefined> => this.document };
+  /** The host every page is on, as an act's in-queue guard reads it from the live page; `undefined`: unreadable. */
+  host: string | undefined = 'github.com';
+  private readonly guardPage = {
+    document: async (): Promise<string | undefined> => this.document,
+    host: async (): Promise<string | undefined> => this.host,
+  };
 
   /** An act's in-queue guard, after whatever a case lets land while the act waited in the queue. */
   private async guarded(guard: BrowserActGuard | undefined): Promise<void> {
@@ -349,7 +356,12 @@ class FakeBrowserPages implements Pick<
       ...(this.pendingDialog === undefined ? {} : { dialog: this.pendingDialog }),
       actedPageId: page.id,
     };
-    return { status, result, text: this.scriptAnswer };
+    return {
+      status,
+      result,
+      text: this.scriptAnswer,
+      ...(this.scriptOrigin === undefined ? {} : { scriptOrigin: this.scriptOrigin }),
+    };
   }
 
   async closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void> {
@@ -462,6 +474,7 @@ export function agentToolWorld(
     | 'accounts'
     | 'recipes'
     | 'loginActs'
+    | 'scriptedOrigins'
   > &
     Partial<Pick<AgentToolPorts, 'redactor'>> = {},
 ) {

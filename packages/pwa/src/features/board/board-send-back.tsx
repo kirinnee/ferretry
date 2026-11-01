@@ -108,6 +108,8 @@ export interface BoardSendBackProps {
   readonly files: SendBackFiles | null;
   readonly placeholder?: string;
   readonly submitLabel?: string;
+  /** The words may be left empty: the answer goes without them (a "Not yet"). */
+  readonly wordsOptional?: boolean;
   readonly busyLabel?: string;
 }
 
@@ -121,6 +123,7 @@ export function BoardSendBack({
   placeholder = 'What is not good? The ferret reads this.',
   submitLabel = 'Send back',
   busyLabel = 'Sending…',
+  wordsOptional = false,
 }: BoardSendBackProps) {
   const [reason, setReason] = useState('');
   const input = useRef<HTMLTextAreaElement>(null);
@@ -138,7 +141,7 @@ export function BoardSendBack({
     : attachments.failed.length > 0
       ? 'Remove or retry the file that did not upload.'
       : null;
-  const canSend = trimmed !== '' && !busy && hold === null;
+  const canSend = (trimmed !== '' || wordsOptional) && !busy && hold === null;
 
   const add = (picked: readonly File[]): void => {
     if (!attachable || picked.length === 0) return;
@@ -192,7 +195,7 @@ export function BoardSendBack({
         onPaste={onPaste}
         placeholder={placeholder}
         ref={input}
-        required
+        required={!wordsOptional}
         rows={3}
         value={reason}
       />

@@ -1,5 +1,13 @@
 import { describe, it } from 'bun:test';
-import type { AccountId, AccountKey, AgendaItem, InputRaise, InputTargetFacts, SignInId } from '@ferretry/protocol';
+import {
+  type AccountId,
+  type AccountKey,
+  type AgendaItem,
+  factorFingerprint,
+  type InputRaise,
+  type InputTargetFacts,
+  type SignInId,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   type AgendaLedger,
@@ -10,15 +18,16 @@ import {
 import {
   EphemeralValues,
   InputAgendaAdapter,
-  InputRequestService,
   type InputLoginPort,
+  InputRequestService,
   PasteRuleService,
   QuarantineRegistry,
   SecureCopyService,
 } from '../../../src/lib/index.ts';
+import { identityOf } from '../../../src/lib/input-requests/login-observer.ts';
 import { AgendaBuzz, type BuzzSink } from '../../../src/lib/notifications/buzz.ts';
 import { SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
-import type { SignInGrant } from '../../../src/lib/sign-in-grants/matcher.ts';
+import { NO_SCRIPTED_ORIGINS, type SignInGrant } from '../../../src/lib/sign-in-grants/matcher.ts';
 import type { SignInGrantSource } from '../../../src/lib/sign-in-grants/plans.ts';
 import { FACTS, SESSION } from './support.ts';
 
@@ -193,6 +202,7 @@ let grantWorld: (
   facts: InputTargetFacts,
   source?: Partial<SignInGrantSource>,
   pins?: Partial<SignInGrant>,
+  listingBroken?: boolean,
 ) => ReturnType<typeof board> & { service: InputRequestService; writes: string[] };
 
 describe('a sign-in a task-plan line fills is raised quiet', () => {
@@ -206,35 +216,43 @@ describe('a sign-in a task-plan line fills is raised quiet', () => {
     submit: 'owner-default',
   };
 
-  function world(facts: InputTargetFacts, source: Partial<SignInGrantSource> = {}, pins: Partial<SignInGrant> = {}) {
+  function world(
+    facts: InputTargetFacts,
+    source: Partial<SignInGrantSource> = {},
+    pins: Partial<SignInGrant> = {},
+    listingBroken = false,
+  ) {
     const writes: string[] = [];
     const clock = { now: () => NOW };
     const values = new EphemeralValues(clock);
     const b = board();
     const logins: InputLoginPort = {
-      listing: async () => ({
-        accounts: [
-          {
-            id: 'KIRIN' as AccountId,
-            label: 'Kirin',
-            fields: { password: true, totp: false },
-            factors: [],
-            signIns: [SIGN_IN],
-            createdAt: AT,
-            updatedAt: AT,
-          },
-        ],
-        signIns: [
-          {
-            id: SIGN_IN,
-            account: 'KIRIN' as AccountId,
-            place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
-            method: { kind: 'password' },
-            createdAt: AT,
-            updatedAt: AT,
-          },
-        ],
-      }),
+      listing: async () => {
+        if (listingBroken) throw new Error('the accounts cannot be read');
+        return {
+          accounts: [
+            {
+              id: 'KIRIN' as AccountId,
+              label: 'Kirin',
+              fields: { password: true, totp: false },
+              factors: [],
+              signIns: [SIGN_IN],
+              createdAt: AT,
+              updatedAt: AT,
+            },
+          ],
+          signIns: [
+            {
+              id: SIGN_IN,
+              account: 'KIRIN' as AccountId,
+              place: { kind: 'terminal', tool: 'sudo', host: 'kirin-box' },
+              method: { kind: 'password' },
+              createdAt: AT,
+              updatedAt: AT,
+            },
+          ],
+        };
+      },
       fill: async () => PASSWORD,
       save: async () => undefined,
     };
@@ -260,6 +278,10 @@ describe('a sign-in a task-plan line fills is raised quiet', () => {
       ledger: new SignInGrantLedger(),
       used: () => undefined,
       stopped: async () => undefined,
+      verify: async () => ({ ok: true }),
+      holds: () => true,
+      projectOf: async () => undefined,
+      scriptedOrigins: () => NO_SCRIPTED_ORIGINS,
       ...source,
     };
     const service = new InputRequestService({
@@ -344,5 +366,103 @@ describe('a sign-in fill that cannot even be tried is the usual card', () => {
     const listed = await w.service.list({ kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' });
     should(listed[0]?.preapproval).match({ outcome: 'did-not-apply' });
     should(w.sink.deadlines).have.length(1);
+  });
+});
+
+describe('a standing rule that cannot be tried is the usual card, and says nothing it cannot know (R3c-4)', () => {
+  const SUDO: InputRaise = {
+    target: { kind: 'terminal', key: 'dev' },
+    prompt: 'sudo wants your password',
+    sensitivity: 'secret',
+    submit: 'owner-default',
+  };
+  const sudo = { ...FACTS, trustedProgram: true as const };
+  const HOST = { kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' } as const;
+  /** A rule for the sign-in that passes every check, by the matcher's own lights. */
+  const rule = (over: Partial<SignInGrant> = {}): Partial<SignInGrant> => ({
+    id: 'rule:sr_000000000000000000000001:1',
+    source: 'rule',
+    plan: undefined,
+    sessionId: undefined,
+    rule: { id: 'sr_000000000000000000000001' as never, revision: 1 },
+    scope: { kind: 'any' },
+    accountPins: { id: 'KIRIN' as AccountId, username: undefined, factors: factorFingerprint([]) },
+    pins: {
+      placeKeys: ['sudo@kirin-box'],
+      recipeVersion: undefined,
+      identities: [identityOf(sudo, 'sudo@kirin-box') as string],
+    },
+    remaining: Number.POSITIVE_INFINITY,
+    ...over,
+  });
+
+  it('should type nothing, record no actor and no reason, for a rule grant that names no rule', async () => {
+    const stopped: string[] = [];
+    const w = grantWorld(
+      sudo,
+      { stopped: async (_grant, because) => void stopped.push(because) },
+      rule({ rule: undefined }),
+    );
+    const view = await w.service.raise(SESSION, SUDO);
+    should(w.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    const [request] = await w.service.list(HOST);
+    should(request?.preapproval).be.undefined();
+    should(stopped).deepEqual([]);
+    // A rule's miss adds no line to the card the ferret reads.
+    should(w.open()[0]?.context).not.containEql("didn't apply");
+  });
+
+  it('should fill under a rule that names itself (the same grant, with its id)', async () => {
+    const w = grantWorld(sudo, {}, rule());
+    const view = await w.service.raise(SESSION, SUDO);
+    should(view.state).equal('delivered');
+    should(w.writes).deepEqual([PASSWORD]);
+  });
+
+  it('should ask, with no reason and no suspension, under a rule while the accounts cannot be read', async () => {
+    const stopped: string[] = [];
+    const w = grantWorld(sudo, { stopped: async (_grant, because) => void stopped.push(because) }, rule(), true);
+    const view = await w.service.raise(SESSION, SUDO);
+    should(w.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    const [request] = await w.service.list(HOST);
+    should(request?.preapproval).match({ by: 'rule', outcome: 'did-not-apply' });
+    should(request?.preapproval?.reason).be.undefined();
+    should(stopped).deepEqual([]);
+  });
+
+  it('should say a plan line’s sign-in is gone while the accounts cannot be read, even beside a rule', async () => {
+    const planOnly = grantWorld(sudo, {}, {}, true);
+    await planOnly.service.raise(SESSION, SUDO);
+    should((await planOnly.service.list(HOST))[0]?.preapproval).match({ by: 'plan', reason: 'sign-in-gone' });
+    // A rule that expires first is tried first; the plan line is still the one the owner and the ferret read.
+    const ruleGrant = { ...(rule({ expiresAt: NOW + 60_000 }) as SignInGrant) };
+    let plan: SignInGrant | undefined;
+    const both = grantWorld(
+      sudo,
+      {
+        of: () => [ruleGrant, ...(plan === undefined ? [] : [plan])],
+      },
+      {},
+      true,
+    );
+    plan = {
+      id: `plan:${'ab'.repeat(16)}:0`,
+      source: 'plan',
+      plan: { id: 'ab'.repeat(16), line: 0 },
+      sessionId: SESSION,
+      surface: 'terminal',
+      signIn: ruleGrant.signIn,
+      accountKey: ruleGrant.accountKey,
+      fields: new Set(['password']),
+      pins: { placeKeys: ['sudo@kirin-box'], recipeVersion: undefined, identities: undefined },
+      expiresAt: NOW + 3_600_000,
+      state: 'in-force',
+      remaining: 1,
+    };
+    await both.service.raise(SESSION, SUDO);
+    should((await both.service.list(HOST))[0]?.preapproval).match({ by: 'plan', reason: 'sign-in-gone' });
+    should(both.writes).deepEqual([]);
   });
 });

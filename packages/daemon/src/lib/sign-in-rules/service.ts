@@ -29,8 +29,8 @@ import {
   type SignInRuleStageState,
   type SignInRuleStageView,
   type SignInRuleSuspension,
-  type SignInRuleView,
   type SignInRulesDocument,
+  type SignInRuleView,
   type StoredStepUpProof,
   signInRuleBodyProblems,
   signInRuleClockProblems,
@@ -65,7 +65,7 @@ import { auditText, ruleFieldWords, stagedSummary } from './words.ts';
  *
  * Rules live in `<state>/accounts/sign-in-rules.json`. A file that does not parse means ZERO rules (`health:
  * damaged`): every sign-in asks, the owner is warned, and it is audited; the owner's next write moves it aside, never
- * deletes it. Every record's proof is checked again, offline, at load, whenever a passkey or device goes, and (R3c-4)
+ * deletes it. Every record's proof is checked again, offline, at load, whenever a passkey or device goes, and
  * before every fill. A record whose proof does not verify, or whose pinned facts drifted, is SUSPENDED.
  *
  * ## SUSPENSION IS STICKY AND NEVER SILENT
@@ -74,10 +74,10 @@ import { auditText, ruleFieldWords, stagedSummary } from './words.ts';
  * Changing the fact back resumes nothing: only a new stage and passkey does (`revision` + 1). No card is raised in a
  * ferret's session for it (R3c §18): a ferret learns nothing about rules.
  *
- * ## NO FILLS HERE
+ * ## IT DECIDES WHAT A RULE IS, NOT WHETHER ONE FILLS
  *
- * This service decides what a rule IS; the matcher (R3c-4) decides whether one fills. `sign-in-rules.1` stays
- * unadvertised until the app ships.
+ * The shared matcher decides that (`sign-in-grants/rules.ts` reads {@link fillable}, {@link verified} and
+ * {@link fillCheck}). `sign-in-rules.1` stays unadvertised until the app ships, and until then no rule fills.
  */
 
 /** The rules file. `read` rejects when the file cannot be read or does not parse: that is damage, never "no rules". */
@@ -222,6 +222,12 @@ export class SignInRuleService {
    * makes it, the rules it covers are not `verified`, so none fills (secrev-1274a L4, secrev-1274b L1, N3).
    */
   #unsettled = false;
+  /**
+   * Re-checks asked for and not finished: a passkey or device change from the moment it is signalled, and every settle
+   * while it reads. While any is pending no rule is `verified` (secrev-1282b F3), so a fill can't pass on the answer of
+   * a check that is being taken again.
+   */
+  #checking = 0;
   /** The answer of the last proof check `#recheckProof` made, for the set its caller builds. */
   #lastProof: 'ok' | 'passkey-removed' | 'proof-invalid' | 'unknown' = 'unknown';
   /**
@@ -279,6 +285,15 @@ export class SignInRuleService {
    * until a later sweep settles it, so none fills while it cannot be checked.
    */
   async #settle(): Promise<void> {
+    this.#checking += 1;
+    try {
+      await this.#settleChecked();
+    } finally {
+      this.#checking -= 1;
+    }
+  }
+
+  async #settleChecked(): Promise<void> {
     this.#unsettled = false;
     const listing = await this.ports.accounts.listing().catch(() => undefined);
     if (listing === undefined && this.#records.length > 0) {
@@ -694,7 +709,7 @@ export class SignInRuleService {
     const checked = SignInRuleNarrowSchema.safeParse(narrow);
     if (!checked.success)
       throw new SignInRuleError(400, 'bad_request', checked.error.issues[0]?.message ?? 'not a narrowing');
-    const next = await this.#serial(async () => {
+    const next = await this.#checked(async () => {
       const record = this.#rule(id);
       const narrowed = signInRuleNarrowed(record, checked.data, this.ports.clock.now());
       if (!narrowed.ok) throw new SignInRuleError(400, 'bad_request', narrowed.reason);
@@ -719,7 +734,7 @@ export class SignInRuleService {
   async revoke(caller: PasteRuleCaller, id: SignInRuleId): Promise<void> {
     const owner = requireOwner(caller);
     this.#ready();
-    await this.#serial(async () => {
+    await this.#checked(async () => {
       const record = this.#rule(id);
       await this.#write(this.#records.filter(each => each.body.id !== id)).catch(this.#unsaved);
       this.#unverify(record);
@@ -732,7 +747,7 @@ export class SignInRuleService {
     const owner = requireOwner(caller);
     this.#ready();
     const listing = await this.ports.accounts.listing().catch(() => undefined);
-    return await this.#serial(async () => {
+    return await this.#checked(async () => {
       const held = new Set(listing?.signIns.filter(each => each.account === account).map(each => each.id) ?? []);
       const ending = this.#records.filter(each => each.body.pins.account === account || held.has(each.body.signIn));
       if (ending.length === 0) return { revoked: 0 };
@@ -758,7 +773,7 @@ export class SignInRuleService {
     because: SignInRuleSuspension,
     context: { readonly revision?: number; readonly sessionId?: string } = {},
   ): Promise<void> {
-    await this.#serial(async () => {
+    await this.#checked(async () => {
       await this.#suspendAll([{ id, because, revision: context.revision, sessionId: context.sessionId }]);
     });
   }
@@ -770,7 +785,7 @@ export class SignInRuleService {
    */
   async accountsChanged(listing: RuleListing): Promise<void> {
     // Queued behind a load still reading the file, so a change made meanwhile is checked against what it reads.
-    await this.#serial(async () => {
+    await this.#checked(async () => {
       if (this.#health !== 'ok') return;
       const suspending: Suspending[] = [];
       for (const record of this.#records) {
@@ -789,6 +804,8 @@ export class SignInRuleService {
    */
   async passkeysChanged(change?: PasskeysChange): Promise<void> {
     if (change?.cause === 'device-forgotten') this.#dropStagesOf(change.deviceId);
+    // Unverified from the moment it is signalled, while it waits its turn and while it checks.
+    this.#checking += 1;
     // Queued behind a load still reading the file, so a change made meanwhile is checked against what it reads.
     await this.#serial(async () => {
       if (this.#health !== 'ok') return;
@@ -802,6 +819,8 @@ export class SignInRuleService {
       }
       this.#verified = verified;
       await this.#suspendAll(suspending);
+    }).finally(() => {
+      this.#checking -= 1;
     });
   }
 
@@ -811,6 +830,7 @@ export class SignInRuleService {
    */
   async forgetDevice(deviceId: string): Promise<void> {
     this.#dropStagesOf(deviceId);
+    this.#checking += 1;
     // Queued behind a load still reading the file, so a change made meanwhile is checked against what it reads.
     await this.#serial(async () => {
       if (this.#health !== 'ok') return;
@@ -819,12 +839,14 @@ export class SignInRuleService {
         .map(record => ({ id: record.body.id, because: 'passkey-removed' as const, revision: record.body.revision }));
       for (const record of this.#records) if (record.body.approvedBy.deviceId === deviceId) this.#unverify(record);
       await this.#suspendAll(suspending);
+    }).finally(() => {
+      this.#checking -= 1;
     });
   }
 
   /**
    * A PAGE SCRIPT RAN ON `host` (any session): every rule pinned to that login domain is suspended (`scripted-origin`),
-   * persisted, so a planted service worker or storage can't wait out a restart. Wired to the browser tools in R3c-4.
+   * persisted, so a planted service worker or storage can't wait out a restart. Told by the browser tools (`browser.eval`).
    */
   async scriptedOn(host: string): Promise<void> {
     // Queued behind a load still reading the file, so a change made meanwhile is checked against what it reads.
@@ -836,6 +858,59 @@ export class SignInRuleService {
           .map(record => ({ id: record.body.id, because: 'scripted-origin' as const, revision: record.body.revision })),
       );
     });
+  }
+
+  /**
+   * A PAGE SCRIPT RAN WHERE ITS ORIGIN COULD NOT BE READ (R3c-4): it may have run on any login domain, so every rule is
+   * suspended (`scripted-origin`). Fails closed: denial of service at most, never a fill.
+   */
+  async scriptedEverywhere(): Promise<void> {
+    await this.#serial(async () => {
+      if (this.#health !== 'ok') return;
+      await this.#suspendAll(
+        this.#records
+          .filter(record => record.suspended === undefined)
+          .map(record => ({ id: record.body.id, because: 'scripted-origin' as const, revision: record.body.revision })),
+      );
+    });
+  }
+
+  /**
+   * THE RULES A FILL READS, as they stand in memory now (R3c-4, `RuleSignInGrants`). Synchronous, so the input
+   * service's last check before typing asks it with nothing awaited. None while the file is loading or damaged.
+   */
+  fillable(): readonly SignInRuleRecord[] {
+    return this.#health === 'ok' ? this.#records : [];
+  }
+
+  /**
+   * ONE RULE CHECKED AGAIN FOR A FILL, offline, right before it types (R3c-4; secrev-1274b L1 and N3): its signed
+   * window against the clock, its proof against the registry, and its pinned facts against the accounts now. A proof or
+   * a fact that no longer holds suspends it here with its own reason. `gone`: revoked or approved again since;
+   * `unknown`: the registry or the accounts could not be read, so nothing fills and nothing is suspended.
+   */
+  async fillCheck(
+    id: SignInRuleId,
+    revision: number,
+  ): Promise<'ok' | 'gone' | 'unknown' | 'suspended' | SignInRuleSuspension> {
+    const record = this.fillable().find(each => each.body.id === id && each.body.revision === revision);
+    if (record === undefined) return 'gone';
+    if (record.suspended !== undefined) return 'suspended';
+    let because: SignInRuleSuspension | undefined;
+    if (signInRuleClockProblems(record.body, this.ports.clock.now()).length > 0) because = 'proof-invalid';
+    else {
+      const proof = await checkRuleProof(record, this.ports.proofs);
+      if (proof === 'unknown') return this.#owed(record);
+      if (proof !== 'ok') because = proof;
+      else {
+        const listing = await this.ports.accounts.listing().catch(() => undefined);
+        if (listing === undefined) return this.#owed(record);
+        because = ruleDrift(record.body, listing);
+      }
+    }
+    if (because === undefined) return 'ok';
+    await this.suspend(id, because, { revision });
+    return because;
   }
 
   /**
@@ -887,11 +962,16 @@ export class SignInRuleService {
 
   /**
    * Whether a rule's proof AND its pinned facts checked out at the last look (R3c-4's fill reads it before every write).
-   * `false` while any check is still owed — the accounts or the passkeys could not be read, or the file is still being
-   * read — so a passkey change can't re-verify a rule whose facts were never checked (secrev-1274-delta F1).
+   * `false` while any check is still owed or still running — the accounts or the passkeys could not be read, a passkey
+   * or device change is being checked, or the file is still being read — so a passkey change can't re-verify a rule whose facts were never checked (secrev-1274-delta F1).
    */
   verified(id: SignInRuleId, revision: number): boolean {
-    return this.#health === 'ok' && !this.#unsettled && this.#verified.has(`${id}:${String(revision)}`);
+    return (
+      this.#health === 'ok' &&
+      !this.#unsettled &&
+      this.#checking === 0 &&
+      this.#verified.has(`${id}:${String(revision)}`)
+    );
   }
 
   // ── Internals ─────────────────────────────────────────────────────────────────────────────────────
@@ -962,6 +1042,16 @@ export class SignInRuleService {
     }
   }
 
+  /**
+   * A fill's re-check could not be made (the registry or the accounts unreadable): the rule is no longer `verified`, and
+   * a check is owed, so no other fill passes on the older answer until a sweep settles it (secrev-1282a M1).
+   */
+  #owed(record: Pick<SignInRuleRecord, 'body'>): 'unknown' {
+    this.#unverify(record);
+    this.#unsettled = true;
+    return 'unknown';
+  }
+
   #unverify(record: Pick<SignInRuleRecord, 'body'>): void {
     this.#verified = new Set([...this.#verified].filter(key => key !== recordKey(record)));
   }
@@ -987,6 +1077,19 @@ export class SignInRuleService {
   readonly #unsaved = (): never => {
     throw new SignInRuleError(503, 'unavailable', 'the standing rules could not be saved; nothing changed');
   };
+
+  /**
+   * {@link #serial}, counted as a check in flight from the moment it is asked for (delta F5): an account change, a
+   * suspension, a revoke or a narrowing waiting its turn already makes no rule read `verified`.
+   */
+  async #checked<T>(work: () => Promise<T>): Promise<T> {
+    this.#checking += 1;
+    try {
+      return await this.#serial(work);
+    } finally {
+      this.#checking -= 1;
+    }
+  }
 
   async #serial<T>(work: () => Promise<T>): Promise<T> {
     const run = this.#queue.then(work, work);

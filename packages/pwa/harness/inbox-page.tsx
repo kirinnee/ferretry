@@ -10,6 +10,8 @@
  *   ?view=to-test         the Needs you section with cards waiting for the owner's try among the agenda items
  *   ?view=quick-to-test   the quick-answer run already on the first card waiting for a try (a wide screen has no button)
  *   ?view=open-5|open-7   an item with five or seven options: the row of three, the rest in full-width rows
+ *   ?view=gate            a GATE item open ("Try it", the card's How to test as its body, Done / Not good)
+ *   ?view=gate-list       the list with that gate item first among the question items (one stream)
  *   ?view=form            a FORM item open: radios, checkboxes, Yes/No and a text field, the composer its one Send
  *
  * The REAL `AgendaInboxPage` and `Composer`; only the data is invented and nothing is sent anywhere.
@@ -251,12 +253,40 @@ const FORM = item('A43', 5, 'ottilie', {
     { id: '4', type: 'text', label: 'Anything else I should know?', name: 'Notes', required: false },
   ],
 } as unknown as Partial<AgendaItem>);
+/** A board card waiting at the "Try it" gate, as the daemon raises it: an ordinary choice item plus `gate`. */
+const GATE = item('G61', 3, 'daemon', {
+  title: 'Pairing a second phone',
+  subject: 'Try it: open Settings and choose Pair a device',
+  why: 'Pairing a second phone is in To test.',
+  premise: 'Pairing a second phone',
+  body: '1. Open Settings and choose **Pair a device**.\n2. Scan the code from a second phone.\n3. Check both phones show in Devices.',
+  kind: 'choice',
+  raisedBy: 'daemon',
+  raisedBySession: null,
+  raisedByName: null,
+  ask: { kind: 'multiple-choice', options: [{ label: 'Done' }, { label: 'Not good' }] },
+  gate: {
+    cardId: 'F61',
+    laneId: 'tested',
+    laneName: 'To test',
+    entry: 1,
+    projectId: 'p1',
+    projectName: 'ferretry',
+    options: [
+      { id: 'o0', label: 'Done', outcome: 'close' },
+      { id: 'o1', label: 'Not good', outcome: 'reopen-with-agenda' },
+    ],
+  },
+} as Partial<AgendaItem>);
+const GATE_CARD = card(GATE, chat(ferret('gt', 'judson', 'Pairing a second phone')), 'studio');
 /** The items the open-* views open: drawn first, so each is the top card. */
 const OPENED: Readonly<Record<string, InboxCard>> = {
   'open-long': card(LONG, LEDGER, 'studio'),
   'open-5': card(FIVE, RELAY, 'studio'),
   'open-7': card(SEVEN, RELEASE, 'studio'),
   form: card(FORM, RELAY, 'studio'),
+  gate: GATE_CARD,
+  'gate-list': GATE_CARD,
 };
 
 const OWNER: readonly InboxCard[] = [
@@ -304,27 +334,30 @@ const MACHINE: DaemonConnection = daemonConnection({
   baseUrl: 'https://studio.example.test',
   deviceId: 'harness',
 });
-/** What the conversation holds about the open item: the ferret's question, the owner's reply, the ferret's answer. */
-const conversationAbout = async (open: InboxCard): Promise<readonly TranscriptEntry[]> => [
-  {
-    id: 'c1',
-    kind: 'assistant',
-    text: `I need a call on !${open.item.id}: **SQLite** is quick to ship, Postgres is safer long term.`,
-    at: NOW - 50 * 60_000,
-  },
-  {
-    id: 'c2',
-    kind: 'user',
-    text: `Is Postgres overkill for !${open.item.id}? Lean toward SQLite.`,
-    at: NOW - 30 * 60_000,
-  },
-  {
-    id: 'c3',
-    kind: 'assistant',
-    text: `Not overkill, but the ledger is read in full once a day, so SQLite fits !${open.item.id}. I will wait for your answer.`,
-    at: NOW - 20 * 60_000,
-  },
-];
+/** What the conversation holds about the open item (a daemon-raised gate item is mentioned by nobody: none). */
+const conversationAbout = async (open: InboxCard): Promise<readonly TranscriptEntry[]> =>
+  open.item.gate !== undefined
+    ? []
+    : [
+        {
+          id: 'c1',
+          kind: 'assistant',
+          text: `I need a call on !${open.item.id}: **SQLite** is quick to ship, Postgres is safer long term.`,
+          at: NOW - 50 * 60_000,
+        },
+        {
+          id: 'c2',
+          kind: 'user',
+          text: `Is Postgres overkill for !${open.item.id}? Lean toward SQLite.`,
+          at: NOW - 30 * 60_000,
+        },
+        {
+          id: 'c3',
+          kind: 'assistant',
+          text: `Not overkill, but the ledger is read in full once a day, so SQLite fits !${open.item.id}. I will wait for your answer.`,
+          at: NOW - 20 * 60_000,
+        },
+      ];
 /** Studio offers clearing; the laptop's daemon is older and does not — so the dialog shows both cases. */
 const CLEAR_PORT: ClearPort = {
   readHealth: async connection => ({
@@ -508,7 +541,15 @@ createRoot(root).render(
     from={view === 'warden' ? 'warden' : null}
     phone={window.innerWidth < 768}
     withFerretsOpen={view === 'sections-open'}
-    openAt={view === 'open' ? OWNER[0]?.key : view === 'quick-to-test' ? TO_TEST[0]?.key : OPENED[view]?.key}
+    openAt={
+      view === 'open'
+        ? OWNER[0]?.key
+        : view === 'quick-to-test'
+          ? TO_TEST[0]?.key
+          : view === 'gate-list'
+            ? undefined
+            : OPENED[view]?.key
+    }
     extra={OPENED[view]}
   />,
 );

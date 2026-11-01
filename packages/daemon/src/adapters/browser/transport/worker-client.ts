@@ -20,14 +20,14 @@ import {
   type BrowserClickOptions,
   type BrowserCopyRead,
   BrowserFrameGovernor,
+  type BrowserInputClearJob,
+  type BrowserInputClearOutcome,
   type BrowserInputDocument,
   type BrowserInputFacts,
   type BrowserInputFieldPointer,
   type BrowserInputObservation,
   type BrowserInputOutcome,
   type BrowserInputShot,
-  type BrowserInputClearJob,
-  type BrowserInputClearOutcome,
   type BrowserInputValue,
   type BrowserPageActed,
   type BrowserPushNumberRead,
@@ -45,6 +45,7 @@ import {
   normalizeWorkerDialog,
   normalizeWorkerSnapshot,
   normalizeWorkerStaged,
+  PAGE_SCRIPT_ORIGIN_MAX_CHARS,
   type PageScript,
   type PointerAct,
   parseWorkerLine,
@@ -409,14 +410,23 @@ export class BrowserWorkerClient implements BrowserAutomation {
     };
   }
 
-  async evaluate(pageId: string, script: PageScript): Promise<BrowserPageActed & { readonly text: string }> {
+  async evaluate(
+    pageId: string,
+    script: PageScript,
+  ): Promise<BrowserPageActed & { readonly text: string; readonly scriptOrigin?: string }> {
     const raw = await this.request('evaluate', {
       pageId,
       source: script.source,
       ...(script.target === undefined ? {} : { target: script.target }),
       ...(script.timeoutMs === undefined ? {} : { timeoutMs: script.timeoutMs }),
     });
-    return { ...acted(raw), text: boundedReadText(raw) };
+    // The origin of the world the script ran in, as the worker read it; an older worker sends none (read as unknown).
+    const origin = (raw as { scriptOrigin?: unknown }).scriptOrigin;
+    return {
+      ...acted(raw),
+      text: boundedReadText(raw),
+      ...(typeof origin === 'string' && origin.length <= PAGE_SCRIPT_ORIGIN_MAX_CHARS ? { scriptOrigin: origin } : {}),
+    };
   }
 
   upload(

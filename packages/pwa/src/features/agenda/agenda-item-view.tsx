@@ -224,7 +224,7 @@ export function AgendaItemView({
                   </span>
                 )
               }
-              title={<MarqueeTitle title={head.title} />}
+              title={<MarqueeTitle title={head.title} twoLines={item.gate !== undefined} />}
               {...(hasInfo
                 ? { info: { controls: infoId, open: infoOpen, onToggle: () => setInfoFor(infoOpen ? null : item.id) } }
                 : {})}

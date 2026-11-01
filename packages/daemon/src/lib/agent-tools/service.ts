@@ -25,6 +25,7 @@ import {
   COPY_HANDLE_PREFIX,
   type CopyMeta,
   copyHandle,
+  copyPlanOf,
   INPUT_SINGLE_FIELD_ID,
   type InputAgentView,
   type LoginRecipeProposed,
@@ -38,7 +39,6 @@ import {
   type SurfaceKind,
   type SurfaceOpener,
   strongestSensitivity,
-  copyPlanOf,
   taskPlanAgentView,
   taskPlanCallOf,
 } from '@ferretry/protocol';
@@ -177,6 +177,17 @@ export interface AgentToolPorts {
    * submit (the page moving on, the screen not echoing) is only kept as a fact when the ferret did nothing meanwhile.
    */
   readonly loginActs?: { acted(sessionId: string, kind: SurfaceKind, script: boolean): void };
+  /**
+   * Told the host of every page a script runs on, from ANY caller, right before it runs (read inside the page's queue)
+   * and again where it ended: a standing rule fills for every ferret in one shared browser profile, so a script on its
+   * login domain suspends it (docs/input-requests.md, "Standing rule fills"). `undefined`: the host couldn't be read, so
+   * it may have been any.
+   */
+  readonly scriptedOrigins?: {
+    scriptedOn(host: string | undefined): void;
+    /** A script is about to run: no standing rule fills anywhere until the returned function says it ended. */
+    running?(): () => void;
+  };
   readonly recipes?: {
     /** Files a proposal on ONE sign-in: `{ login }` is resolved to the account's only sign-in first. */
     propose(
@@ -1024,16 +1035,41 @@ export class AgentToolService {
     facts: CallFacts,
   ): Promise<AgentToolResult> {
     const target = call.ref !== undefined || call.selector !== undefined ? elementTargetOf(call) : undefined;
-    const answer = await this.ports.browser.scriptOnPage(
-      caller.sessionId,
-      surface.id,
-      {
-        source: call.function,
-        ...(target === undefined ? {} : { target }),
-        ...(call.timeoutMs === undefined ? {} : { timeoutMs: call.timeoutMs }),
-      },
-      this.browserGuard(caller, surface, call.tool),
-    );
+    const guard = this.browserGuard(caller, surface, call.tool);
+    const scripts = this.ports.scriptedOrigins;
+    let ran = false;
+    let finished: (() => void) | undefined;
+    let answer: Awaited<ReturnType<AgentToolPorts['browser']['scriptOnPage']>>;
+    try {
+      answer = await this.ports.browser.scriptOnPage(
+        caller.sessionId,
+        surface.id,
+        {
+          source: call.function,
+          ...(target === undefined ? {} : { target }),
+          ...(call.timeoutMs === undefined ? {} : { timeoutMs: call.timeoutMs }),
+        },
+        async page => {
+          await guard?.(page);
+          // The LAST thing before the script runs, inside the page's queue. While it runs, no standing rule fills
+          // anywhere (the page may still move before its world is made, so the origin it really runs in is known only
+          // after: secrev-1282a M2), and the host it is about to run on is tainted for the rules at once.
+          finished = scripts?.running?.();
+          scripts?.scriptedOn(await page.host?.().catch(() => undefined));
+          ran = true;
+        },
+      );
+      // The origin of the world the script ACTUALLY ran in, read before its code ran (unknown: it may have been any
+      // host), and where it left the page: each is tainted too, before the rules may fill again.
+      scripts?.scriptedOn(hostOf(answer.scriptOrigin));
+      scripts?.scriptedOn(hostOf(answer.result.url));
+    } catch (error) {
+      // The script may have run and moved the page, and where it ran or ended can't be read: it may have been any host.
+      if (ran) scripts?.scriptedOn(undefined);
+      throw error;
+    } finally {
+      finished?.();
+    }
     facts.detail = { resultLength: answer.text.length };
     const dialog = pendingDialogOf(answer.result);
     const read = await this.scrubbed({ url: answer.result.url, text: answer.text, ...dialogOf(dialog) });
@@ -2374,4 +2410,17 @@ function masked(value: unknown, scrub: (text: string) => string): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, item]) => [key, key === 'screenshotBase64' ? item : masked(item, scrub)]),
   );
+}
+
+/**
+ * The host a page is on, as a standing rule's login domains name it (`github.com`, a port when there is one), or
+ * `undefined` when there is none to read (`about:blank` inherits its opener's origin, so it may be any).
+ */
+function hostOf(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  try {
+    return new URL(url).host.toLowerCase() || undefined;
+  } catch {
+    return undefined;
+  }
 }

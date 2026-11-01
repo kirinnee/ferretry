@@ -10,7 +10,7 @@
 import type { ReleasedIn, SessionView } from '@ferretry/protocol';
 import { sessionTask } from '../shell/session-title.ts';
 import { doneLaneOf, notGoodLaneOf } from './board-done.ts';
-import { askedByPerson } from './board-human.ts';
+import { awaitingOwner } from './awaiting-owner.ts';
 import type { BoardModel } from './board-model.ts';
 import type { BoardCardOf, BoardGroupOf } from './board-view.ts';
 import { displayCallsign } from './callsign.ts';
@@ -74,7 +74,7 @@ export const nextWake = (rows: readonly ToTestCard[], now: number): number | nul
 
 /** One card as a card to test: `null` when it is dropped, a person did not ask for it, or its project's lanes do not name where Done and Not good go. */
 export const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | null => {
-  if (card.task.dropped !== null || !askedByPerson(card.task)) return null;
+  if (awaitingOwner(card, group.laneSet) !== 'try') return null;
   const doneLaneId = doneLaneOf(group.laneSet);
   const notGoodLaneId = notGoodLaneOf(group.laneSet);
   if (doneLaneId === null || notGoodLaneId === null) return null;

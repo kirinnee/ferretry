@@ -60,8 +60,6 @@ import {
   armInputFields,
   clearInputFields,
   describeInputDocument,
-  probeInputFields,
-  readInputText,
   type InputablePage,
   type InputCdpSession,
   InputFrameSessions,
@@ -69,8 +67,10 @@ import {
   type InputLocator,
   type InputSubject,
   observeInputFields,
-  refindInputFields,
   playwrightNodeOf,
+  probeInputFields,
+  readInputText,
+  refindInputFields,
   shootInputFields,
   typeInputFields,
 } from '../src/lib/browser/transport/input-fields.ts';
@@ -1092,7 +1092,7 @@ async function act(request: Request): Promise<Record<string, unknown>> {
         },
         () => crypto.randomUUID(),
       );
-      return await acted(page, { text: ran.text });
+      return await acted(page, { text: ran.text, ...(ran.origin === undefined ? {} : { scriptOrigin: ran.origin }) });
     }
     case 'download': {
       const page = targetPage(params.pageId);

@@ -17,6 +17,7 @@ import { QuarantineRegistry } from '../../../src/lib/input-requests/quarantine.t
 import { InputRequestService } from '../../../src/lib/input-requests/service.ts';
 import { LoginDirectory, LoginVault, totpCode } from '../../../src/lib/secrets/index.ts';
 import type { ClearJob, ClearOutcome } from '../../../src/lib/sign-in-grants/clear.ts';
+import { SignInGrantLedger } from '../../../src/lib/sign-in-grants/ledger.ts';
 import { type PlanGrantLines, PlanSignInGrants } from '../../../src/lib/sign-in-grants/plans.ts';
 import type { ApprovedSignInLine } from '../../../src/lib/task-plans/service.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments, plantSeed } from '../runtime/mounts/support.ts';
@@ -161,6 +162,7 @@ function harness(options: Options = {}) {
     plans,
     async account => (await directory.accounts.seedTarget(account).catch(() => undefined))?.key,
     () => enabled,
+    new SignInGrantLedger(),
   );
   let service: InputRequestService;
   service = new InputRequestService({
@@ -974,5 +976,24 @@ describe('the rate limit is the ledger’s, after the matcher', () => {
     should(request?.preapproval).match({ outcome: 'did-not-apply', reason: 'rate' });
     should(view.note).equal(`${TASK_PLAN_MISS_AGENT_NOTE} Waiting for the owner on ${view.id}.`);
     should(h.used).deepEqual([]);
+  });
+});
+
+describe('a write that could not say whether it typed is cleared, held and stops the line (secrev-1282b F2)', () => {
+  it('should keep the page held past the write’s own hold, ask the browser about the typed nodes, and stop the line', async () => {
+    const h = harness({ written: 'uncertain', clear: 'moved' });
+    await approve(h, await github(h), { remaining: 2 });
+    await raised(h).catch(() => undefined);
+    await settled();
+    should(h.used).deepEqual([`${PLAN}:0`]);
+    should(h.stopped).deepEqual(['0:did-not-move-on']);
+    should(h.timers).have.length(1);
+    h.advance(600_000);
+    should(h.service.pageHeld(SESSION, ['app'])).not.be.undefined();
+    h.timers[0]?.fire();
+    await settled();
+    should(h.clears.map(job => job.fields.map(field => field.backendNodeId))).deepEqual([[12]]);
+    should(h.heldDuringClear).deepEqual([true]);
+    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
   });
 });

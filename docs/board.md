@@ -448,7 +448,7 @@ as an agenda card does, with nothing folded:
 3. the owner's **ask**, verbatim, with its clarifications;
 4. **How to test**: a list is drawn as numbered steps, each with a box the owner ticks as they go (on that screen
    only — a tick is a reminder, never a verdict); text that is not a list is drawn whole. On a card waiting to be
-   tested, **Done** and **Not good** sit right under it;
+   tested, **Not good** (left) and **Done** (right) sit right under it, and a swipe right is Done, left is Not good;
 5. the **brief**, then the **terms** — and each term is also a dotted tap tip where the card's text first uses it.
 
 A good How to test says where to go, what to do and what the owner should see, on which machine and version:

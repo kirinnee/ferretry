@@ -91,6 +91,14 @@ export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
     await this.sink.woke(sessionId, item, snapshot).catch(() => undefined);
   }
 
+  /**
+   * A card raised quiet is the owner's after all, and nothing on the board changed (a standing rule did not fill it, and
+   * its words must stay as a card no rule was about): it is looked at again as the daemon's own edit would make it.
+   */
+  async unquieted(sessionId: string): Promise<void> {
+    await this.settle(sessionId, true);
+  }
+
   /** The session's turn moved: if it just went idle on the owner, this is the stop. */
   async turnChanged(sessionId: string): Promise<void> {
     await this.settle(sessionId, true);

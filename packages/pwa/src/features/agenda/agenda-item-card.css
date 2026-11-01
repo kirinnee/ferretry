@@ -905,3 +905,15 @@
 .md.fy-seg strong {
   font-weight: var(--weight-strong);
 }
+
+/* A GATE ITEM's title wraps to two lines instead of scrolling: the head row's chevrons already take the width. */
+.fy-item-view__title[data-wrap] {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+/* The card's summary, one line under the gate item's title. */

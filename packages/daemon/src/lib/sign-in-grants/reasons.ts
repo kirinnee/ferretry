@@ -4,18 +4,23 @@ import {
   type GrantMissReason,
   grantMissLine,
   grantMissWords,
+  ruleMissSuspends,
+  signInRuleSuspensionOf,
   TASK_PLAN_MISS_AGENT_NOTE,
 } from '@ferretry/protocol';
+import type { SignInGrant } from './matcher.ts';
 
 /**
- * WHY A PRE-APPROVAL DID NOT FILL (docs/input-requests.md, "Task plan fills"). The closed list and its sentences are the
- * protocol's (`GRANT_MISS_REASONS`, `grantMissWords`), so the app, the daemon and the tests read one owner; this module
- * only says what a reason DOES here.
+ * WHY A PRE-APPROVAL DID NOT FILL (docs/input-requests.md, "Task plan fills", "Standing rule fills"). The closed list and
+ * its sentences are the protocol's (`GRANT_MISS_REASONS`, `grantMissWords`, `grantMissLineFor`), so the app, the daemon
+ * and the tests read one owner; this module only says what a reason DOES here.
  *
  * - A reason reaches the OWNER only: `InputRequest.preapproval` on the owner's list. The ferret is told
- *   {@link TASK_PLAN_MISS_AGENT_NOTE}, one sentence for every reason, because `account-lacks-field` or `code-not-ticked`
- *   would say which secret fields an account holds.
- * - A {@link stopsTheLine} reason ends the line: every later fill under it asks, and there is no resume.
+ *   {@link TASK_PLAN_MISS_AGENT_NOTE} for a plan line, one sentence for every reason, because `account-lacks-field` or
+ *   `code-not-ticked` would say which secret fields an account holds; for a standing rule it is told NOTHING (its view
+ *   and its agenda are byte-identical to a sign-in with no rule), so it can't probe which sign-ins have rules.
+ * - A {@link stopsTheLine} reason ends a plan line; a reason {@link grantStops} names suspends a standing rule. Neither
+ *   resumes.
  */
 
 export { GRANT_MISS_REASONS, type GrantMissReason, grantMissLine, grantMissWords, TASK_PLAN_MISS_AGENT_NOTE };
@@ -26,8 +31,17 @@ const STOPPING: ReadonlySet<GrantMissReason> = new Set(GRANT_STOPPING_REASONS);
 export const stopsTheLine = (reason: GrantMissReason): boolean => STOPPING.has(reason);
 
 /**
- * The line an input card's agenda context carries when a plan line did not apply. The REASON is not in it: a ferret can
+ * Whether a miss stops `grant`: a plan line by {@link stopsTheLine}; a standing rule when the miss is one the owner's
+ * line says suspends it AND is a suspension a rule can carry (so the line never claims a suspension that didn't happen).
+ */
+export const grantStops = (grant: Pick<SignInGrant, 'source'>, reason: GrantMissReason): boolean =>
+  grant.source === 'rule'
+    ? ruleMissSuspends(reason) && signInRuleSuspensionOf(reason) !== undefined
+    : stopsTheLine(reason);
+
+/**
+ * The line an input card's agenda context carries when a PLAN line did not apply. The REASON is not in it: a ferret can
  * read its own session's agenda, so the card's words are the same whatever the reason; the owner reads the reason on
- * the input card itself, from the owner-only request.
+ * the input card itself, from the owner-only request. A standing rule's miss adds no line at all.
  */
 export const GRANT_MISS_CONTEXT_LINE = "A task plan line didn't apply here, so you're asked as usual.";

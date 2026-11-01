@@ -79,6 +79,43 @@ describe('InputAuditAdapter', () => {
     should(record.actor).eql({ kind: 'device', deviceId: 'phone-1' });
   });
 
+  it("should record a fill under a standing rule as the host's: by rule, the rule and its revision, never a value (R3c-4)", async () => {
+    const record = await written({
+      actor: { kind: 'sign-in-rule', rule: 'sr_0123456789abcdef01234567', revision: 2 },
+      detail: {
+        targetKind: 'browser',
+        sensitivity: 'secret',
+        submitted: true,
+        signIn: 'si_0123456789abcdef01234567',
+        source: 'saved',
+        entry: 'GITHUB',
+        factor: 'tf_00000000000b',
+      },
+    });
+
+    should(record).eql({
+      event: 'input.delivered',
+      actor: { kind: 'host' },
+      subject: 's1',
+      outcome: 'succeeded',
+      detail: {
+        targetKind: 'browser',
+        sensitivity: 'secret',
+        submitted: true,
+        signIn: 'si_0123456789abcdef01234567',
+        source: 'saved',
+        entry: 'GITHUB',
+        factor: 'tf_00000000000b',
+        requestId: 'r'.repeat(32),
+        by: 'rule',
+        signInRule: 'sr_0123456789abcdef01234567',
+        revision: 2,
+      },
+    });
+    // Not `rule`: that names a paste rule.
+    should(record.detail).not.have.property('rule');
+  });
+
   it('should record an agent as the host and say it was an agent', async () => {
     const record = await written({ event: 'input.cancelled', actor: { kind: 'agent' } });
 
