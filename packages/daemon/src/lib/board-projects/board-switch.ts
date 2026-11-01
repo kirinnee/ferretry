@@ -6,10 +6,12 @@
  *
  * - **One document** for every board (`<home>/board/switch.json`): its `migratedAt` is the marker that the
  *   one-time pass below ran, so a board with no entry after it is simply off.
- * - **The one-time pass** switches ON exactly the boards the OWNER (a person, never a ferret or the daemon)
- *   worked on in the last {@link MIGRATION_WINDOW_MS}: made, moved (Done is a move), reopened (Not good) or
- *   dropped a card. Everything else, Unfiled always, is OFF. It runs on the first read, under the store's lock,
- *   so nothing ever reads a board before it is decided.
+ * - **The one-time pass** switches ON exactly the boards where the owner sent a card back (Not good, a
+ *   `reopened` event by the owner) in the last {@link MIGRATION_WINDOW_MS}. Everything else, Unfiled always, is
+ *   OFF. Only Not good counts because it is the one act no ferret makes: a ferret that runs the CLI without
+ *   `FY_SESSION_ID` is recorded as the owner, so "the owner made or moved a card" cannot tell a person from a
+ *   ferret (docs/board.md § The board is opt-in, GAP). It runs on the first read, under the store's lock, so
+ *   nothing ever reads a board before it is decided.
  * - **Only the owner switches it.** The route refuses a ferret; this service only records what it is told.
  *
  * Pure except {@link BoardSwitchService}, which reads and writes through its ports.
@@ -26,8 +28,8 @@ import { z } from 'zod';
 /** How far back the one-time pass looks for the owner's own work on a board. */
 export const MIGRATION_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 
-/** The history events that are the owner working a board: made, moved, reopened, dropped. */
-const OWNER_WORK: ReadonlySet<string> = new Set(['created', 'moved', 'reopened', 'dropped']);
+/** The history event only a person makes: the owner's Not good, a reopen. */
+const OWNER_WORK: ReadonlySet<string> = new Set(['reopened']);
 
 const BoardSwitchEntrySchema = z.strictObject({
   on: z.boolean(),
@@ -67,8 +69,8 @@ export interface BoardSwitchReader {
 }
 
 /**
- * The boards the owner worked on since `since`: a card's history event by the owner that made, moved, reopened
- * or dropped it. Unfiled is never one of them. Pure and total.
+ * The boards the owner worked on since `since`: a card the owner sent back (Not good). Unfiled is never one of
+ * them. Pure and total.
  */
 export function ownerWorkedBoards(
   cards: readonly Pick<BoardTask, 'projectId' | 'history'>[],

@@ -63,29 +63,32 @@ const service = (cards: readonly Card[], store = new MemoryStore(), now = NOW) =
 });
 
 describe('ownerWorkedBoards', () => {
-  it('should count what the owner made, moved, reopened or dropped in the window', () => {
+  it("should count only the owner's Not good in the window", () => {
     // Arrange
     const since = Date.parse(NOW) - MIGRATION_WINDOW_MS;
-    const cards = [
-      worked(FERRETRY_ID, 'moved', 'owner', 2 * DAY),
-      worked(DOCS_ID, 'reopened', 'owner', 13 * DAY),
-      worked(RATCHET_ID, 'dropped', 'owner', DAY),
-    ];
+    const cards = [worked(FERRETRY_ID, 'reopened', 'owner', 2 * DAY), worked(DOCS_ID, 'reopened', 'owner', 13 * DAY)];
 
     // Act + Assert
-    should([...ownerWorkedBoards(cards, since)]).deepEqual([FERRETRY_ID, DOCS_ID, RATCHET_ID]);
-    should([...ownerWorkedBoards([worked(DOCS_ID, 'created', 'owner', DAY)], since)]).deepEqual([DOCS_ID]);
+    should([...ownerWorkedBoards(cards, since)]).deepEqual([FERRETRY_ID, DOCS_ID]);
   });
 
-  it("should not count a ferret's or the daemon's work, a note, an old act, or the Unfiled board", () => {
+  it('should not count what a session-less ferret can also do as the owner: make, move, Done or drop', () => {
+    // Arrange
+    const since = Date.parse(NOW) - MIGRATION_WINDOW_MS;
+    const cards = ['created', 'moved', 'dropped', 'note'].map(type => worked(RATCHET_ID, type, 'owner', DAY));
+
+    // Act + Assert
+    should([...ownerWorkedBoards(cards, since)]).deepEqual([]);
+  });
+
+  it("should not count a ferret's or the daemon's reopen, an old one, or the Unfiled board", () => {
     // Arrange
     const since = Date.parse(NOW) - MIGRATION_WINDOW_MS;
     const cards = [
-      worked(FERRETRY_ID, 'moved', 'ferret', DAY),
-      worked(FERRETRY_ID, 'moved', 'daemon', DAY),
-      worked(DOCS_ID, 'note', 'owner', DAY),
-      worked(RATCHET_ID, 'moved', 'owner', 15 * DAY),
-      worked(UNFILED_PROJECT_ID, 'moved', 'owner', DAY),
+      worked(FERRETRY_ID, 'reopened', 'ferret', DAY),
+      worked(FERRETRY_ID, 'reopened', 'daemon', DAY),
+      worked(RATCHET_ID, 'reopened', 'owner', 15 * DAY),
+      worked(UNFILED_PROJECT_ID, 'reopened', 'owner', DAY),
     ];
 
     // Act + Assert
@@ -124,7 +127,7 @@ describe('the switch document', () => {
 describe('BoardSwitchService', () => {
   it('should run the one-time pass on the first read, and never again', async () => {
     // Arrange
-    const { subject, store } = service([worked(FERRETRY_ID, 'moved', 'owner', DAY)]);
+    const { subject, store } = service([worked(FERRETRY_ID, 'reopened', 'owner', DAY)]);
 
     // Act
     const ferretry = await subject.isOn(FERRETRY_ID);
@@ -198,7 +201,7 @@ describe('BoardSwitchService', () => {
     const empty: BoardSwitchStore = { read: async () => null, transact: async decide => decide(null).result };
     const subject = new BoardSwitchService(
       empty,
-      { cards: async () => [worked(DOCS_ID, 'moved', 'owner', DAY)], projects: async () => [DOCS_ID] },
+      { cards: async () => [worked(DOCS_ID, 'reopened', 'owner', DAY)], projects: async () => [DOCS_ID] },
       { now: () => NOW },
     );
 

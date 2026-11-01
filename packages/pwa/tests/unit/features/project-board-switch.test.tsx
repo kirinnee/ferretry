@@ -86,8 +86,10 @@ describe('BoardSwitchView', () => {
 
   it('should say who decided', () => {
     expect(switchProvenance(state(true, 'owner'))).toBe('You set this.');
-    expect(switchProvenance(state(true, 'migration'))).toContain('because you used it in the last 14 days');
-    expect(switchProvenance(state(false, 'migration'))).toContain('you had not used it in the last 14 days');
+    expect(switchProvenance(state(true, 'migration'))).toContain(
+      'because you sent a card back (Not good) in the last 14 days',
+    );
+    expect(switchProvenance(state(false, 'migration'))).toContain('you had sent no card back in the last 14 days');
     expect(switchProvenance(state(false, 'default'))).toBe('Off by default.');
   });
 });

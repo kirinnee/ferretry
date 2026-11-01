@@ -44,10 +44,16 @@ it runs in rides on every call. The switch lives in `<home>/board/switch.json`
 board whose switch cannot be read is treated as off.
 
 **Migration.** The first daemon with the switch decides every existing board once, at boot: **on** exactly where the
-owner (a person — never a ferret or the daemon) worked a card in the last 14 days — made, moved (Done is a move),
-reopened (Not good) or dropped one — and **off** everywhere else. Unfiled is always off. The boot log says which
+owner sent a card back (**Not good**, a `reopened` event by the owner) in the last 14 days, and **off** everywhere
+else. Unfiled is always off. Only Not good counts, because it is the one act no ferret makes (see the GAP below); on
+the machine this was built on that switched on Ferretry alone. The boot log says which
 boards it switched on and off (`board switch: on for …; off for …`); the owner flips any of them afterwards. A board
 registered later starts off.
+
+**GAP: a ferret without `FY_SESSION_ID` is the owner.** A ferret that runs `fy` with no session id (an older
+harness, a tool outside Ferretry) is recorded as actor `owner`, so it passes every owner-only board gate — the
+switch included — and its creates and moves read as the owner's in a card's history. That is why the migration
+counts only Not good. The real fix is per-session credentials (RF-2, &F291).
 
 ## Boards, cards and lanes at a glance
 
