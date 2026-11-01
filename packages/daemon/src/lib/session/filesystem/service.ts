@@ -1,3 +1,5 @@
+import { isAbsolute, posix, relative, sep } from 'node:path';
+import { type StateHomes, stateHomeByName } from '@ferretry/fleet';
 import {
   type SessionFileIndex,
   type SessionFileIndexCoverage,
@@ -12,6 +14,7 @@ import type {
   AfterValidationHook,
   ComponentIdentity,
   PinnedFileKind,
+  PinnedMetadata,
   PinnedOpenOptions,
   PinnedRoot,
   PinnedTarget,
@@ -52,6 +55,155 @@ export interface IndexBounds {
   readonly budgetMs?: number;
   /** The caller's cancellation. A client that hung up is work nobody will read. */
   readonly signal?: AbortSignal;
+  /** The state-home fence an agent caller reads behind; see {@link FencedRead}. */
+  readonly fence?: SessionReadFence;
+}
+
+/** Whether `path` is `directory` or inside it, as paths (a child named `..x` is inside). */
+export function withinFolder(directory: string, path: string): boolean {
+  const from = relative(directory, path);
+  return from === '' || (from !== '..' && !from.startsWith(`..${sep}`) && !isAbsolute(from));
+}
+
+/**
+ * What a read for an AGENT sits behind: the daemon's state homes as the one guard resolved them
+ * (`@ferretry/fleet`'s `StateHomes`), and the folders inside them it may read all the same — a session's
+ * own media folder, with `scope=media`.
+ */
+export interface SessionReadFence {
+  readonly homes: StateHomes;
+  readonly opening: readonly string[];
+}
+
+/**
+ * The state-home fence ({@link SessionReadFence}), for a read made on an AGENT's behalf.
+ *
+ * Absent for a person, whose reads are unchanged. Present, nothing whose real path is inside the daemon's
+ * state home is opened, listed into or diffed — whatever the session's folder is, including a folder that
+ * holds the home or one that IS it. The check is made inside the same pin as the read: the walk never
+ * follows a link, so the pinned root's real path joined to the walked name IS the real path of what is
+ * read, and a root swapped for a link into the home shows as a pinned root inside it.
+ */
+export interface FencedRead {
+  readonly fence?: SessionReadFence;
+}
+
+/**
+ * The refusal of a read that would reach the state home, or `undefined`. `rel` is root-relative. Judged by
+ * name (the guard's `stateHomeByName`): the pinned walk follows no link, so this name IS the real path.
+ */
+function fenceRefusal(fence: SessionReadFence | undefined, rootReal: string, rel: string): FsError | undefined {
+  if (fence === undefined) return undefined;
+  const target = rel === '' ? rootReal : posix.join(rootReal, rel);
+  if (fence.opening.some(opening => withinFolder(opening, target))) return undefined;
+  const verdict = stateHomeByName(fence.homes, target);
+  return verdict.inside ? homeRefusal(verdict.home) : undefined;
+}
+
+const homeRefusal = (home: string): FsError =>
+  new FsError(
+    'denied',
+    `that path is inside this daemon's state home (${home}), which holds this machine's credentials, so it is not read for an agent`,
+  );
+
+/**
+ * The home a walk passed through BY IDENTITY, or `undefined`. A name is not enough: a case-insensitive disk
+ * (macOS) opens `.FERRETRY` as `.ferretry`, and a bind mount gives the home another name entirely. The pinned walk
+ * records the device and inode of every folder it opened and of what it opened last, so each is compared with
+ * every home and every pinned key file.
+ */
+function identityHome(fence: SessionReadFence, identities: readonly ComponentIdentity[]): string | undefined {
+  const keys = [...fence.homes.homes, ...fence.homes.pinned];
+  const hit = identities.some(identity => keys.some(key => key.device === identity.dev && key.inode === identity.ino));
+  return hit ? (fence.homes.homes[0]?.named ?? 'FY_HOME') : undefined;
+}
+
+/**
+ * The refusal of a file with more than one name, for a read behind the fence: its other name could be inside
+ * the state home (a hard link to `api-token` left in the session's folder), and nothing about the inode says
+ * where. Asked of the OPENED descriptor's own `fstat`, so the file judged is the file read.
+ */
+function hardLinkRefusal(
+  fence: SessionReadFence | undefined,
+  rel: string,
+  metadata: PinnedMetadata,
+): FsError | undefined {
+  if (fence === undefined || metadata.type !== 'file' || (metadata.links ?? 1) <= 1) return undefined;
+  return new FsError(
+    'denied',
+    `${rel} is a hard link (the file has ${String(metadata.links)} names), and another of its names could be inside this daemon's state home, so it is not read for an agent`,
+  );
+}
+
+/**
+ * A pinned root that refuses every name inside the fence: the walk to it, and the probe's verdict on it,
+ * which reads as a name no read would serve. Closing it closes the pin.
+ */
+function fencedRoot(pinned: PinnedRoot, fence: SessionReadFence): PinnedRoot {
+  const named = (rel: string): FsError | undefined => fenceRefusal(fence, pinned.rootReal, rel);
+  const open = async (rel: string, options?: PinnedOpenOptions): Promise<PinnedTarget> => {
+    const refusal = named(rel);
+    if (refusal !== undefined) throw refusal;
+    const target = await pinned.open(rel, options);
+    const home = identityHome(fence, target.identities);
+    if (home === undefined) return target;
+    await target.close();
+    throw homeRefusal(home);
+  };
+  // The probe answers from names, so each FOLDER a name sits in is walked once, by identity, and remembered.
+  const folders = new Map<string, Promise<boolean>>();
+  const inHome = async (rel: string): Promise<boolean> => {
+    const folder = posix.dirname(rel);
+    if (folder === '.') return false;
+    let known = folders.get(folder);
+    if (known === undefined) {
+      known = open(folder, { wantDirectory: true }).then(
+        async target => {
+          await target.close();
+          return false;
+        },
+        () => true,
+      );
+      folders.set(folder, known);
+    }
+    return await known;
+  };
+  return {
+    rootReal: pinned.rootReal,
+    policyCwd: pinned.policyCwd,
+    open,
+    probe: () => {
+      const inner = pinned.probe();
+      return {
+        classify: async (rels, budget) => {
+          const fenced = new Set<string>();
+          for (const rel of rels) if (named(rel) !== undefined || (await inHome(rel))) fenced.add(rel);
+          const refused = (rel: string): boolean => fenced.has(rel);
+          const kinds = await inner.classify(
+            rels.filter(rel => !refused(rel)),
+            budget,
+          );
+          // The same prefix the inner probe answered: a fenced name is `unsupported`, and the answer stops
+          // at the first name the inner probe did not reach.
+          const answered: PinnedFileKind[] = [];
+          let next = 0;
+          for (const rel of rels) {
+            if (refused(rel)) {
+              answered.push('unsupported');
+              continue;
+            }
+            const kind = kinds[next];
+            if (kind === undefined) break;
+            answered.push(kind);
+            next += 1;
+          }
+          return answered;
+        },
+        close: async () => await inner.close(),
+      };
+    },
+    close: async () => await pinned.close(),
+  };
 }
 
 /**
@@ -227,6 +379,29 @@ export class SessionFilesystem {
     private readonly nowMs: () => number = () => Date.now(),
   ) {}
 
+  /**
+   * Pins `cwd`, behind the fence when there is one: a root inside the state home is refused here, before
+   * anything under it is asked. The caller closes what this returns.
+   */
+  private async pin(cwd: string, fence: SessionReadFence | undefined): Promise<PinnedRoot> {
+    const pinned = await this.pinner.pin(cwd);
+    if (fence === undefined) return pinned;
+    const refusal = fenceRefusal(fence, pinned.rootReal, '');
+    if (refusal !== undefined) {
+      await pinned.close();
+      throw refusal;
+    }
+    const fenced = fencedRoot(pinned, fence);
+    // The root by identity too: a folder bound to the home has a name outside it.
+    try {
+      await (await fenced.open('', { wantDirectory: true })).close();
+    } catch (error) {
+      await pinned.close();
+      throw error;
+    }
+    return fenced;
+  }
+
   /** The session root, freshly resolved. A since-deleted worktree is a clean `not_found`. */
   async resolveRoot(cwd: string): Promise<string> {
     const pinned = await this.pinner.pin(cwd);
@@ -248,10 +423,16 @@ export class SessionFilesystem {
   }
 
   /** Changes under the session cwd, reported against the PINNED tree. Non-Git cwd gives `repo: false`. */
-  async changes(cwd: string): Promise<SessionChangesView> {
-    const pinned = await this.pinner.pin(cwd);
+  async changes(cwd: string, options: FencedRead = {}): Promise<SessionChangesView> {
+    const pinned = await this.pin(cwd, options.fence);
     try {
-      return await this.git.changes(pinned.policyCwd);
+      const view = await this.git.changes(pinned.policyCwd);
+      if (options.fence === undefined) return view;
+      // Git names paths, and a repository that holds the state home would name what is in it.
+      const fence = options.fence;
+      const outside = (rel: string | undefined): boolean =>
+        rel === undefined || fenceRefusal(fence, pinned.rootReal, rel) === undefined;
+      return { ...view, changes: view.changes.filter(change => outside(change.path) && outside(change.from)) };
     } finally {
       await pinned.close();
     }
@@ -282,7 +463,7 @@ export class SessionFilesystem {
     const maxDirectories = indexLimit(bounds.maxDirectories, MAX_INDEX_DIRECTORIES, 'index directory limit');
     const budgetMs = indexLimit(bounds.budgetMs, MAX_INDEX_WALL_MS, 'index time budget');
     const budget = new IndexBudget(this.nowMs, budgetMs, bounds.signal);
-    const pinned = await this.pinner.pin(cwd);
+    const pinned = await this.pin(cwd, bounds.fence);
     try {
       const skips: SkipTally = new Map();
       // A caller who has already gone away gets the shape of an answer and none of the work. The pin is
@@ -305,7 +486,7 @@ export class SessionFilesystem {
       }
       const files = repo.repo
         ? await this.indexTracked(pinned, maxFiles, maxCandidates, skips, budget)
-        : await this.indexWalk(pinned, maxFiles, maxCandidates, maxDirectories, skips, budget);
+        : await this.indexWalk(pinned, maxFiles, maxCandidates, maxDirectories, skips, budget, bounds.fence);
       return { root: pinned.rootReal, files, coverage: coverageOf(skips), skipped: skipRecord(skips) };
     } finally {
       await pinned.close();
@@ -430,6 +611,7 @@ export class SessionFilesystem {
     maxDirectories: number,
     skips: SkipTally,
     budget: WorkBudget,
+    fence?: SessionReadFence,
   ): Promise<SessionFileIndexEntry[]> {
     const files: SessionFileIndexEntry[] = [];
     const queue: string[] = [''];
@@ -476,7 +658,7 @@ export class SessionFilesystem {
             excluded += 1;
             continue;
           }
-          if (isDeniedPath(childRel)) {
+          if (isDeniedPath(childRel) || fenceRefusal(fence, pinned.rootReal, childRel) !== undefined) {
             denied += 1;
             continue;
           }
@@ -540,9 +722,9 @@ export class SessionFilesystem {
   async list(
     cwd: string,
     relativePath?: string,
-    options: { readonly afterValidation?: AfterValidationHook } = {},
+    options: FencedRead & { readonly afterValidation?: AfterValidationHook } = {},
   ): Promise<FsListing> {
-    const pinned = await this.pinner.pin(cwd);
+    const pinned = await this.pin(cwd, options.fence);
     try {
       return await this.listPinned(pinned, relativePath, options);
     } finally {
@@ -568,16 +750,20 @@ export class SessionFilesystem {
       readonly maxBytes?: number;
       /** @internal Test-only barrier; see {@link AfterValidationHook}. */
       readonly afterValidation?: AfterValidationHook;
+      readonly fence?: SessionReadFence;
     } = {},
   ): Promise<FsFileView> {
     const maxBytes = options.maxBytes ?? MAX_FILE_BYTES;
-    const pinned = await this.pinner.pin(cwd);
+    const pinned = await this.pin(cwd, options.fence);
     try {
       const rel = normalizeRelativePath(relativePath);
       if (rel === '') throw new FsError('invalid_path', 'a file path is required');
+      // Asked of the name before either branch: a `HEAD` read walks nothing, so the pinned walk cannot ask it.
+      const fenced = fenceRefusal(options.fence, pinned.rootReal, rel);
+      if (fenced !== undefined) throw fenced;
       return options.rev === 'head'
         ? await this.readHead(pinned, rel, maxBytes, options.base64)
-        : await this.readWorking(pinned, rel, maxBytes, options.afterValidation, options.base64);
+        : await this.readWorking(pinned, rel, maxBytes, options.afterValidation, options.base64, options.fence);
     } finally {
       await pinned.close();
     }
@@ -598,18 +784,27 @@ export class SessionFilesystem {
     options: {
       /** @internal Test-only barrier; see {@link AfterValidationHook}. */
       readonly afterValidation?: AfterValidationHook;
+      readonly fence?: SessionReadFence;
     } = {},
   ): Promise<FsDiffView> {
-    const pinned = await this.pinner.pin(cwd);
+    const pinned = await this.pin(cwd, options.fence);
     try {
       const rel = normalizeRelativePath(relativePath);
       if (rel === '') throw new FsError('invalid_path', 'a file path is required');
+      // A deleted file's diff is read from `HEAD` without a walk, so the name is asked here.
+      const fenced = fenceRefusal(options.fence, pinned.rootReal, rel);
+      if (fenced !== undefined) throw fenced;
 
       // The same two-sided policy binding as readFile. Do not return early on a refusal yet: retaining
       // the pre-walk verdict while the deterministic hook swaps the parent is what proves an ignored
       // original cannot be laundered by an unignored replacement.
       const refusalBeforeOpen = await this.refusalFor(pinned, rel);
       const opened = await this.openForDiff(pinned, rel);
+      const linked = opened === undefined ? undefined : hardLinkRefusal(options.fence, rel, opened.metadata);
+      if (linked !== undefined) {
+        await opened?.close();
+        throw linked;
+      }
       try {
         return await this.renderDiff(pinned, rel, opened, refusalBeforeOpen, options.afterValidation);
       } finally {
@@ -725,6 +920,7 @@ export class SessionFilesystem {
     maxBytes: number,
     afterValidation: AfterValidationHook | undefined,
     base64 = false,
+    fence?: SessionReadFence,
   ): Promise<FsFileView> {
     // Evaluate policy before the walk and again after it. Retaining both verdicts is what prevents a
     // rename or replacement from evaluating the gate on one tree while the pinned descriptor supplies
@@ -738,6 +934,8 @@ export class SessionFilesystem {
     try {
       const metadata = opened.metadata;
       if (metadata.type !== 'file') throw new FsError('not_a_file', `not a regular file: ${rel}`);
+      const linked = hardLinkRefusal(fence, rel, metadata);
+      if (linked !== undefined) throw linked;
 
       // Validated, not yet read — the window. See AfterValidationHook.
       await afterValidation?.();
@@ -762,7 +960,7 @@ export class SessionFilesystem {
   private async listPinned(
     pinned: PinnedRoot,
     relativePath: string | undefined,
-    options: { readonly afterValidation?: AfterValidationHook },
+    options: FencedRead & { readonly afterValidation?: AfterValidationHook },
   ): Promise<FsListing> {
     const rel = normalizeRelativePath(relativePath);
 
@@ -793,13 +991,18 @@ export class SessionFilesystem {
         throw changedDuringPolicy(rel);
       }
 
-      return await this.enumerate(pinned, rel, target);
+      return await this.enumerate(pinned, rel, target, options.fence);
     } finally {
       await target.close();
     }
   }
 
-  private async enumerate(pinned: PinnedRoot, rel: string, target: PinnedTarget): Promise<FsListing> {
+  private async enumerate(
+    pinned: PinnedRoot,
+    rel: string,
+    target: PinnedTarget,
+    fence?: SessionReadFence,
+  ): Promise<FsListing> {
     const listing = await target.list(MAX_LISTING_ENTRIES);
 
     // Each entry is judged on every path that names its bytes: the child path itself, and — for a
@@ -816,7 +1019,10 @@ export class SessionFilesystem {
         ...(child.size === undefined ? {} : { size: child.size }),
         ...(child.mtime === undefined ? {} : { mtime: child.mtime }),
         ...(child.escapes ? { escapes: true } : {}),
-        ...(candidates.some(candidate => isDeniedPath(candidate)) ? { denied: true } : {}),
+        ...(candidates.some(candidate => isDeniedPath(candidate)) ||
+        fenceRefusal(fence, pinned.rootReal, childRel) !== undefined
+          ? { denied: true }
+          : {}),
       };
       // A denied entry is still classified: the badges are about serving bytes, not about what may be
       // said of a path. An escaping symlink is excluded because its in-root name tells Git nothing.

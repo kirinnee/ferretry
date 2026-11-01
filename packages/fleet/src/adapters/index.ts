@@ -2,6 +2,7 @@ export * from './anthropic-usage-probe.ts';
 export * from './apply-lock.ts';
 export * from './codex-usage-probe.ts';
 export * from './credential-store.ts';
+export * from './fenced-source.ts';
 export * from './file-provisioner.ts';
 export {
   FileConversationLeaseStore,

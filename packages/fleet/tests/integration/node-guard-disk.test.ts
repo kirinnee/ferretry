@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { access, chmod, link, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { tmpdir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { GuardSizeError, NodeGuardDisk } from '../../src/adapters/node-guard-disk.ts';
@@ -43,7 +43,6 @@ afterEach(async () => {
 });
 
 /** This process's group ids, as `resolveImmutableRoots` takes them. */
-const processGroups = (): number[] => [...(process.getgroups?.() ?? []), process.getegid?.() ?? -1];
 
 const failure = async (work: Promise<unknown>): Promise<unknown> =>
   await work.then(
@@ -221,6 +220,7 @@ describe('copyTreeOutsideStateHomes — on a real disk', () => {
     // Act
     const result = await copyTreeOutsideStateHomes(source, join(work, 'copy'), homes, disk, {
       maxFileBytes: 1000,
+      maxTotalBytes: 10_000,
       maxFiles: 10,
     });
 
@@ -254,13 +254,50 @@ describe('the guard on a real disk — folders, owners and immutable roots', () 
   });
 
   it('should refuse a folder this user owns, and one anyone may write, as an immutable root', async () => {
-    const groups = processGroups();
-
-    const mine = await resolveImmutableRoots([work], disk, groups).catch((error: unknown) => error);
-    const shared = await resolveImmutableRoots([tmpdir()], disk, groups).catch((error: unknown) => error);
+    const mine = await resolveImmutableRoots([work], disk).catch((error: unknown) => error);
+    const shared = await resolveImmutableRoots([tmpdir()], disk).catch((error: unknown) => error);
 
     should(mine).be.instanceOf(MutableRootError);
     should(shared).be.instanceOf(MutableRootError);
+  });
+
+  it('should read this process’s own groups, and answer a write the kernel would allow or refuse', async () => {
+    const groups = await disk.groups();
+
+    should(groups).containEql(process.getegid?.() ?? -1);
+    should(await disk.writable(work)).be.true();
+    should(await disk.writable('/')).equal(process.getuid?.() === 0);
+  });
+
+  it('should read the groups a group file lists this user in, none when there is no file, and throw when it cannot read one', async () => {
+    // Arrange
+    const user = userInfo().username;
+    const listed = join(work, 'group');
+    await writeFile(listed, `wheel:x:4242:${user},other\nnobody:x:4243:other\n`);
+
+    // Act
+    const groups = await new NodeGuardDisk(true, listed).groups();
+    const absent = await new NodeGuardDisk(true, join(work, 'no-group-file')).groups();
+    const unreadable = await new NodeGuardDisk(true, work).groups().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert: a folder in the file's place is not "no groups"; it refuses the proof.
+    should(groups).containEql(4242);
+    should(groups).not.containEql(4243);
+    should(absent).not.containEql(4242);
+    should((unreadable as NodeJS.ErrnoException | undefined)?.code).equal('EISDIR');
+  });
+
+  it('should throw, not answer, when it cannot ask about a path that is not there', async () => {
+    // Fail closed: a caller that cannot tell must not read "not writable" as "closed".
+    const failed = await disk.writable(join(work, 'nowhere')).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    should((failed as NodeJS.ErrnoException | undefined)?.code).equal('ENOENT');
   });
 
   it('should accept a multi-user Nix store where there is one', async () => {
@@ -270,14 +307,15 @@ describe('the guard on a real disk — folders, owners and immutable roots', () 
     );
     const info = present ? await stat('/nix/store') : undefined;
     // Only a root-owned store this user's groups cannot write qualifies; anything else is refused, which is right too.
-    const groups = processGroups();
+    const groups = await disk.groups();
     const qualifies =
       info !== undefined &&
       info.uid === 0 &&
       (info.mode & 0o002) === 0 &&
-      ((info.mode & 0o020) === 0 || !groups.includes(info.gid));
+      ((info.mode & 0o020) === 0 || !groups.includes(info.gid)) &&
+      !(await disk.writable('/nix/store'));
 
-    const roots = await resolveImmutableRoots(['/nix/store'], disk, groups).then(
+    const roots = await resolveImmutableRoots(['/nix/store'], disk).then(
       result => result.roots,
       () => undefined,
     );

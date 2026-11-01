@@ -10,6 +10,7 @@ import {
   ConfigFileConflictError,
   ConfigFileInvalidError,
   ConfigFilesService,
+  type ConfigFilesServiceDeps,
 } from '../../../src/lib/config-files/index.ts';
 
 const digest = (text: string): string => createHash('sha256').update(text).digest('hex');
@@ -89,7 +90,11 @@ class FakeLog {
   }
 }
 
-const setup = (files: Record<string, string> = {}, accepted: AcceptedConfigFiles = {}) => {
+const setup = (
+  files: Record<string, string> = {},
+  accepted: AcceptedConfigFiles = {},
+  checkContext?: ConfigFilesServiceDeps['checkContext'],
+) => {
   const directory = new FakeDirectory(files);
   const store = new FakeAccepted(accepted);
   const log = new FakeLog();
@@ -101,6 +106,7 @@ const setup = (files: Record<string, string> = {}, accepted: AcceptedConfigFiles
     log: { issue: issue => log.issue(issue), pending: pending => log.pending(pending) },
     digest,
     now: () => clock.now,
+    ...(checkContext === undefined ? {} : { checkContext }),
   });
   /** Move the service's clock forward. */
   const advance = (ms: number): void => {
@@ -389,6 +395,31 @@ describe('ConfigFilesService.file', () => {
 });
 
 describe('ConfigFilesService.validate', () => {
+  it('should refuse a component whose source is inside the state home, the check an agent config.write meets', async () => {
+    // Arrange
+    const home = '/home/me/.ferretry';
+    const { service, directory } = setup(
+      {},
+      {},
+      {
+        componentSources: {
+          fence: { homes: [home, `${home}/state`, `${home}/config`], open: [`${home}/fleet/assets`] },
+          userHome: '/home/me',
+          assetsDirectory: `${home}/fleet/assets`,
+        },
+      },
+    );
+
+    // Act
+    const token = await service.validate('components/instructions/main.yaml', 'file: ~/.ferretry/api-token\n');
+    const asset = await service.validate('components/instructions/main.yaml', 'file: instructions/main.md\n');
+
+    // Assert
+    should(token.some(issue => issue.severity === 'error' && issue.message.includes("daemon's state home"))).be.true();
+    should(asset.filter(issue => issue.severity === 'error')).eql([]);
+    should(directory.writes).equal(0);
+  });
+
   it('should report only the target file`s issues, never another broken file`s', async () => {
     // Arrange
     const { service, directory } = setup({ 'warden.yaml': WARDEN_BROKEN });

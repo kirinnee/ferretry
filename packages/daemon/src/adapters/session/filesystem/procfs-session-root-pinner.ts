@@ -316,7 +316,7 @@ class ProcfsPinnedRoot implements PinnedRoot {
   async open(rel: string, options: PinnedOpenOptions = {}): Promise<PinnedTarget> {
     const segments = rel === '' ? [] : rel.split('/');
     let current = await open(this.policyCwd, constants.O_RDONLY | constants.O_DIRECTORY);
-    let metadata = await current.stat();
+    let metadata = await current.stat({ bigint: true });
     const identities: ComponentIdentity[] = [componentIdentity(metadata)];
     const walked: string[] = [];
 
@@ -329,7 +329,7 @@ class ProcfsPinnedRoot implements PinnedRoot {
         // failing `fstat` needs no error path of its own and cannot leak a descriptor.
         await current.close().catch(() => undefined);
         current = next;
-        metadata = await current.stat();
+        metadata = await current.stat({ bigint: true });
         walked.push(segment);
         identities.push(componentIdentity(metadata));
       }

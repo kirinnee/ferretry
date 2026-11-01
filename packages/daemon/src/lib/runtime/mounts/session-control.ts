@@ -13,6 +13,13 @@ import { ApiError } from '../../api/error.ts';
 import { decodeParameter, headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
 import { isAgentCaller, OWNER_ONLY_CODE } from '../../api/agent-caller.ts';
 import { lineageOf } from '../../api/lineage.ts';
+import {
+  type StartCaller,
+  type StateHomeReach,
+  stateHomeHoldingCwd,
+  stateHomeLaunchRefusal,
+  stateHomeStartMessage,
+} from '../../api/state-homes.ts';
 import { WARDEN_LABEL } from '../../warden/types.ts';
 import { errorResponse, jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
@@ -81,7 +88,9 @@ export type SessionControlFailure =
   /** The parent already runs as many sub-ferrets as Pack mode's limit allows (docs/pack-mode.md). */
   | 'limit_reached'
   /** A sub-ferret this deep may not start its own (docs/pack-mode.md). */
-  | 'depth_exceeded';
+  | 'depth_exceeded'
+  /** A session a session starts may not run inside the daemon's state home (docs/agent-tools.md § The state home). */
+  | 'state_home';
 
 /** A refusal raised by the composition root's session control, in a taxonomy `src/lib` may name. */
 export class SessionControlError extends Error {
@@ -113,7 +122,12 @@ export interface SessionControlSubsystem {
     request: StartSessionRequest,
     requestId: string,
     payload: string,
-    delegation?: Delegation,
+    delegation: Delegation | undefined,
+    /**
+     * Who asked: an agent's start is held out of the state home (`refuseStateHomeStart`). REQUIRED, so every start
+     * — a route's or the daemon's own (`{ agent: false }`) — has said; a forgotten one cannot read as "not an agent".
+     */
+    caller: StartCaller,
   ): Promise<SessionView>;
   stop(sessionId: string, reason: string | undefined): Promise<SessionView>;
   /**
@@ -146,7 +160,31 @@ const REFUSALS: Readonly<Record<SessionControlFailure, { readonly status: number
   // or by a shallower ferret — not by retrying it as it is.
   limit_reached: { status: 409, code: 'limit_reached' },
   depth_exceeded: { status: 409, code: 'depth_exceeded' },
+  state_home: { status: 403, code: 'state_home' },
 };
+
+/**
+ * The FINAL working folder of an AGENT's start (its own `POST /v1/sessions`, or `fy new` — whose folder may be its
+ * parent's, inherited), judged by identity once it is the canonical folder that will be recorded and spawned. The
+ * route refused the folder as named; a folder flipped between a real one and a link to the home after that check is
+ * caught here, on what the start actually uses. A person's start, and the daemon's own (the Warden's, Pack
+ * clean-up's), are not asked: the owner may start a session anywhere. Throws {@link SessionControlError}
+ * `state_home`, and refuses when the homes cannot be resolved.
+ */
+export async function refuseStateHomeStart(
+  reach: StateHomeReach | undefined,
+  caller: StartCaller,
+  cwd: string,
+): Promise<void> {
+  if (!caller.agent) return;
+  const home = await stateHomeHoldingCwd(reach, cwd).catch(() => {
+    throw new SessionControlError(
+      'unavailable',
+      "this daemon cannot resolve its own state home, so a ferret's start is refused",
+    );
+  });
+  if (home !== undefined) throw new SessionControlError('state_home', stateHomeStartMessage(home));
+}
 
 /** Restates a control refusal in the HTTP vocabulary; anything else is not ours to translate. */
 function refuse(error: unknown): never {
@@ -231,6 +269,8 @@ export interface SessionLaunchGate {
   readonly guard: CapabilityGuard;
   /** The folders a session may start in as an ordinary act: registered projects and the worktree root. */
   readonly knownRoots: () => Promise<readonly string[]>;
+  /** The daemon's own directories: a ferret starts no session in them. Absent: a ferret names no cwd. */
+  readonly stateHomes?: StateHomeReach;
 }
 
 const TERMINAL_USE: CapabilityDemand = { capability: 'terminal', axis: 'use' };
@@ -304,10 +344,13 @@ async function start(
   // and supervision. Only the daemon's own Warden spawner sets it; a ferret asking for it is refused.
   if (request.label?.trim() === WARDEN_LABEL && isAgentCaller(context))
     throw new ApiError(403, 'only the Warden starts a session under its own label; leave --label out', OWNER_ONLY_CODE);
+  // Before the terminal gate, which a loopback caller skips: a ferret is on loopback, and its child in the
+  // state home would read the tokens with its own tools.
+  await stateHomeLaunchRefusal(context, gate.stateHomes, request.cwd);
   const refused = await launchRefusal(gate, context, request);
   if (refused !== undefined) return refused;
   const id = requestId(context.request);
-  const view = await subsystem.start(request, id, payload).catch(refuse);
+  const view = await subsystem.start(request, id, payload, undefined, { agent: isAgentCaller(context) }).catch(refuse);
   return jsonResponse(view, 201);
 }
 

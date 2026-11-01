@@ -166,6 +166,30 @@ caches them between reads, so plaintext lives no longer than the read that neede
 Say the narrow version wherever this is described. Someone who believes the wide one will hand an
 untrusted agent a production credential.
 
+### What the state-home fence refuses
+
+Two routes let a ferret read a file **with its own session credential**, no token stolen, and both used to reach
+into the state home. They are closed by one rule, the state-home fence (`StateHomeFence` in `@ferretry/fleet`):
+nothing the daemon reads, copies or starts for a ferret has a real path inside `FY_HOME` or the daemon's state and
+config directories, wherever those are configured. Every check is made on the real path — and, where a file is
+read, on the descriptor that was opened — so a symlink, a `..` or a folder that holds the home does not get past.
+Each surface has exactly one opening, the one place it has a reason to read inside the home.
+
+| Surface                                                          | What a ferret could do                                                                                                                                 | What is refused now                                                                                                                                                                     | The opening                                          |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Fleet component sources (`config.write`, the `settings` control) | `file: ~/.ferretry/api-token` copied the admin token into a runtime's `CLAUDE.md` — the model's context; `directory: ~/.ferretry` copied `secrets.key` | an **error** in the configuration check (never in effect; an older accepted version is retired), and refused again by the provisioner on every link hop and the real path at apply time | the fleet asset tree, `<fleet>/assets`, by real path |
+| Session files (`/v1/sessions/:id/fs/*`)                          | read any session's tree, and `~/.ferretry/*` through a session started in `~`                                                                          | another session (only its own and its sub-ferrets'), every path inside the home, and a hard-linked file, for an **agent**; a person is unchanged                                        | that session's media folder (`scope=media`)          |
+| Starting a session (`POST /v1/sessions`, `fy new --cwd`)         | start a child whose working folder is `~/.ferretry`                                                                                                    | a `cwd` inside the home, named or through a link, for an agent                                                                                                                          | none                                                 |
+
+**What it does not change.** It is the daemon's fence, not the disk's: a ferret's own shell runs as the same user and
+can still open `~/.ferretry` directly, which is the limit stated [above](#what-this-does-not-protect-against). What the
+fence closes is the route where Ferretry itself does the reading — copying, linking, serving or starting — on a
+ferret's word. **Hard links** are refused as a component source (another name of the file could be the admin token)
+except inside the Nix store, which is root-owned and immutable and hard-links identical files by design. A home the
+daemon cannot resolve refuses rather than guesses. The rules for each surface are in
+[agent-tools.md](agent-tools.md#the-state-home); the agent file tools (`browser_upload` and friends) apply the
+same guard ([agent-tools.md](agent-tools.md#files)).
+
 ### What a ferret's `fy` presents
 
 A ferret's `fy` and its MCP server (`fy mcp serve`) present the **ferret's own credential**, not the host

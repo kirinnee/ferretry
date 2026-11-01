@@ -1,4 +1,5 @@
 import {
+  type BigIntStats,
   closeSync,
   constants,
   type Dir,
@@ -102,8 +103,10 @@ import {
 export interface PinFileCalls {
   open(name: string, flags: number): number;
   close(fd: number): void;
-  fstat(fd: number): Stats;
-  lstat(name: string): Stats;
+  /** `bigint`, so a component's device and inode are exact. */
+  fstat(fd: number): BigIntStats;
+  /** `bigint` like `fstat`, because the working-directory proof compares the two by device and inode. */
+  lstat(name: string): BigIntStats;
   stat(name: string): Stats;
   realpath(name: string): string;
   opendir(name: string): Dir;
@@ -113,8 +116,8 @@ export interface PinFileCalls {
 export const NODE_PIN_FILE_CALLS: PinFileCalls = {
   open: (name, flags) => openSync(name, flags),
   close: fd => closeSync(fd),
-  fstat: fd => fstatSync(fd),
-  lstat: name => lstatSync(name),
+  fstat: fd => fstatSync(fd, { bigint: true }),
+  lstat: name => lstatSync(name, { bigint: true }),
   stat: name => statSync(name),
   realpath: name => realpathSync(name),
   opendir: name => opendirSync(name),
@@ -150,7 +153,7 @@ class InstalledDirectory {
    * `identity` is the installed descriptor's own `fstat`, when the caller already holds it — an open
    * descriptor's device and inode cannot change, so asking again would be a call that proves nothing.
    */
-  install(fd: number, proof: Proof = 'open', identity?: Stats): () => void {
+  install(fd: number, proof: Proof = 'open', identity?: BigIntStats): () => void {
     this.home ??= this.fs.open('.', constants.O_RDONLY | constants.O_DIRECTORY);
     const home = this.home;
     if (this.syscalls.fchdir(fd) !== 0) throw new FsError('denied', 'the session folder could not be held open');
@@ -167,7 +170,7 @@ class InstalledDirectory {
   }
 
   /** Runs `act` with `fd` installed. `act` MUST NOT await — see this file's header. */
-  enter<Result>(fd: number, act: () => Result, proof: Proof = 'open', identity?: Stats): Result {
+  enter<Result>(fd: number, act: () => Result, proof: Proof = 'open', identity?: BigIntStats): Result {
     const release = this.install(fd, proof, identity);
     try {
       return act();
@@ -196,13 +199,13 @@ class InstalledDirectory {
    * directory, so every relative call in the bracket would land somewhere unintended. There is no
    * degraded mode to fall back to, and a pathname fallback is the hole this class exists to close.
    */
-  private prove(fd: number, proof: Proof, identity: Stats | undefined): void {
+  private prove(fd: number, proof: Proof, identity: BigIntStats | undefined): void {
     const installed = identity ?? this.fs.fstat(fd);
     const reached = proof === 'describe' ? this.fs.lstat('.') : this.reachedByOpen();
     if (reached.dev !== installed.dev || reached.ino !== installed.ino) throw unsupportedPlatform(process.platform);
   }
 
-  private reachedByOpen(): Stats {
+  private reachedByOpen(): BigIntStats {
     const here = this.fs.open('.', constants.O_RDONLY | constants.O_DIRECTORY);
     try {
       return this.fs.fstat(here);
@@ -321,7 +324,7 @@ class PosixPinnedTarget implements PinnedTarget {
     if (type !== 'symlink') {
       try {
         const metadata = fs.lstat(name);
-        return { name, type, size: metadata.size, mtime: metadata.mtime.toISOString() };
+        return { name, type, size: Number(metadata.size), mtime: metadata.mtime.toISOString() };
       } catch (error) {
         if (!isMissing(error)) throw error;
         return { name, type };
@@ -344,7 +347,7 @@ class PosixPinnedTarget implements PinnedTarget {
 interface HeldDirectory {
   readonly name: string;
   readonly fd: number;
-  readonly identity: Stats;
+  readonly identity: BigIntStats;
 }
 
 /** Opens ONE directory component from its already-open parent, refusing a link: the walk's own step. */
@@ -372,7 +375,7 @@ class PosixFileProbe implements PinnedFileProbe {
   private readonly chain: HeldDirectory[] = [];
   /** The last directory that refused, so its remaining children cost no second walk. */
   private refused: { readonly directory: string; readonly kind: PinnedFileKind } | undefined;
-  private rootIdentity: Stats | undefined;
+  private rootIdentity: BigIntStats | undefined;
   private closed = false;
 
   constructor(

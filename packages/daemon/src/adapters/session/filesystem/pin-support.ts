@@ -1,4 +1,4 @@
-import type { Stats } from 'node:fs';
+import type { BigIntStats, Stats } from 'node:fs';
 import path from 'node:path';
 import {
   type ComponentIdentity,
@@ -31,13 +31,20 @@ export function isMissing(error: unknown): boolean {
   return code === 'ENOENT' || code === 'ENOTDIR' || code === 'ELOOP' || code === 'ENAMETOOLONG';
 }
 
-export function componentIdentity(metadata: Stats): ComponentIdentity {
-  return { dev: metadata.dev, ino: metadata.ino, ctimeMs: metadata.ctimeMs, mode: metadata.mode };
+/** A walked component's identity, from a `bigint` `fstat` so its device and inode are exact. */
+export function componentIdentity(metadata: BigIntStats): ComponentIdentity {
+  return { dev: metadata.dev, ino: metadata.ino, ctimeMs: Number(metadata.ctimeMs), mode: Number(metadata.mode) };
 }
 
-export function pinnedMetadata(metadata: Stats): PinnedMetadata {
+export function pinnedMetadata(metadata: BigIntStats): PinnedMetadata {
   const type = metadata.isDirectory() ? 'dir' : metadata.isFile() ? 'file' : 'other';
-  return { type, size: metadata.size, mtime: metadata.mtime.toISOString(), mode: metadata.mode };
+  return {
+    type,
+    size: Number(metadata.size),
+    mtime: metadata.mtime.toISOString(),
+    mode: Number(metadata.mode),
+    links: Number(metadata.nlink),
+  };
 }
 
 export function contains(rootReal: string, targetReal: string): boolean {
@@ -107,7 +114,7 @@ export function refusedKind(error: unknown): PinnedFileKind {
 }
 
 /** A probe's verdict on a leaf from its OWN metadata, so a link is a link and never its target. */
-export function leafKind(metadata: Stats): PinnedFileKind {
+export function leafKind(metadata: Stats | BigIntStats): PinnedFileKind {
   return metadata.isFile() ? 'file' : 'unsupported';
 }
 

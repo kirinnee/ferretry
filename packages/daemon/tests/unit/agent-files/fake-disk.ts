@@ -189,6 +189,9 @@ export class FakeAgentDisk implements AgentFilesystem {
     return {
       identity: this.identityOf(node),
       entryPath: leaf => (this.throughDescriptors ? `/@fd/${String(fd)}/${leaf}` : undefined),
+      chmod: async mode => {
+        node.mode = mode;
+      },
       close: async () => undefined,
     };
   }
@@ -243,12 +246,6 @@ export class FakeAgentDisk implements AgentFilesystem {
     this.afterMkdirp?.(key);
   }
 
-  async chmod(path: string, mode: number): Promise<void> {
-    const { entry } = await this.lookup(path);
-    if (entry === undefined || entry.kind === 'link') throw errno('ENOENT', path);
-    entry.mode = mode;
-  }
-
   async mkdirp(path: string, mode: number): Promise<void> {
     let current = '/';
     for (const segment of path.split('/').filter(part => part !== '')) {
@@ -262,6 +259,20 @@ export class FakeAgentDisk implements AgentFilesystem {
   async writeNew(path: string, bytes: Uint8Array, mode: number): Promise<void> {
     this.file(path, bytes.byteLength, '', mode);
     this.modes.push([path, mode]);
+  }
+
+  async groups(): Promise<readonly number[]> {
+    return [1000, 100];
+  }
+
+  /** As `access(W_OK)` answers for uid 1000 in groups 1000 and 100. */
+  async writable(path: string): Promise<boolean> {
+    const entry = this.entries.get(await this.realpath(path));
+    if (entry === undefined || entry.kind === 'link') throw errno('ENOENT', path);
+    const owner = entry.owner ?? 1000;
+    if (owner === 1000) return (entry.mode & 0o200) !== 0;
+    if ([1000, 100].includes(entry.group ?? 100)) return (entry.mode & 0o020) !== 0;
+    return (entry.mode & 0o002) !== 0;
   }
 
   async unlink(path: string): Promise<void> {

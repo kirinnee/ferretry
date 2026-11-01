@@ -64,6 +64,8 @@ import {
 import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../../src/lib/analytics/store.ts';
 import type { CapabilityDemand, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
+import type { StartCaller } from '../../../../src/lib/api/state-homes.ts';
+import type { Delegation } from '../../../../src/lib/board/index.ts';
 import { BoardError } from '../../../../src/lib/board/index.ts';
 import type {
   BrowserControlError,
@@ -1049,7 +1051,17 @@ export class FakeSessionControl implements SessionControlSubsystem {
     private readonly unknownAgents: readonly string[] = [],
   ) {}
 
-  async start(request: StartSessionRequest, requestId: string, payload: string): Promise<SessionView> {
+  /** Who each start was asked by, as the route said it (`caller`). */
+  readonly callers: Array<StartCaller | undefined> = [];
+
+  async start(
+    request: StartSessionRequest,
+    requestId: string,
+    payload: string,
+    _delegation?: Delegation,
+    caller?: StartCaller,
+  ): Promise<SessionView> {
+    this.callers.push(caller);
     this.starts.push([requestId, request.agent]);
     this.attached.push(request.initialAttachments);
     this.parents.push(request.parent);

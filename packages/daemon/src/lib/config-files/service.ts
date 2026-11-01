@@ -43,6 +43,7 @@ import {
   ABSENT_CONFIG_ETAG,
   type AcceptedConfigFiles,
   CONFIG_FILE_STARTERS,
+  type ConfigCheckContext,
   type ConfigEvaluation,
   type ConfigFileText,
   type Credential,
@@ -111,6 +112,11 @@ export interface ConfigFilesServiceDeps {
   now(): Date;
   /** Told the kinds a load found changed since the last load. Absent, nobody is told. */
   readonly changes?: ConfigChangeSink;
+  /**
+   * What the check knows about this machine: its state home, so a component source naming it is an error
+   * and never in effect (docs/secrets.md#what-the-state-home-fence-refuses). Absent, only the files decide.
+   */
+  readonly checkContext?: ConfigCheckContext;
 }
 
 /** A refused edit, with every located reason. */
@@ -271,7 +277,13 @@ export class ConfigFilesService {
         this.#acknowledgedRemovals.delete(path);
       } else if (now - at > ACKNOWLEDGEMENT_TTL_MS) this.#acknowledgedRemovals.delete(path);
     }
-    const evaluation = evaluateConfigFiles({ files, unreadable, accepted, digest: text => this.deps.digest(text) });
+    const evaluation = evaluateConfigFiles({
+      files,
+      unreadable,
+      accepted,
+      digest: text => this.deps.digest(text),
+      ...(this.deps.checkContext === undefined ? {} : { context: this.deps.checkContext }),
+    });
     if (JSON.stringify(evaluation.accepted) !== JSON.stringify(stored)) {
       await this.deps.accepted.write(evaluation.accepted);
     }
@@ -390,6 +402,7 @@ export class ConfigFilesService {
       ],
       unreadable: unreadable.filter(name => name !== path),
       accepted: evaluation.accepted,
+      ...(this.deps.checkContext === undefined ? {} : { context: this.deps.checkContext }),
       digest: candidate => this.deps.digest(candidate),
     });
     // Only this file's own issues: a write is never blocked by a different file that is broken now.

@@ -28,8 +28,9 @@ import type { FsEntryType } from './types.ts';
  * inode. `mode` catches a type change that preserved the inode.
  */
 export interface ComponentIdentity {
-  readonly dev: number;
-  readonly ino: number;
+  /** Exact, as a `bigint` stat gives it: an inode past 2^53 rounded to a number could match another, or miss. */
+  readonly dev: bigint;
+  readonly ino: bigint;
   readonly ctimeMs: number;
   readonly mode: number;
 }
@@ -42,6 +43,11 @@ export interface PinnedMetadata {
   readonly mtime: string;
   /** POSIX mode bits. Only the executable bit is used, to keep a diff's file mode honest. */
   readonly mode: number;
+  /**
+   * How many names (hard links) the object has, from the same `fstat`. Absent where the platform did not
+   * say. A read for an agent refuses a file with more than one: another name could be inside the state home.
+   */
+  readonly links?: number;
 }
 
 /**

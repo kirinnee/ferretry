@@ -36,6 +36,10 @@ export class FakeGuardDisk implements GuardDisk {
   afterMkdirp: ((path: string) => void) | undefined;
   failRemove = false;
   failList = false;
+  /** This process's group ids, as `groups()` answers them. */
+  groupIds: readonly number[] = [1000, 100];
+  /** Real paths `access(W_OK)` allows beyond what the mode bits say — an ACL, say. */
+  readonly writableAt = new Set<string>();
   private nextInode = 2n;
   private readonly folders = new Map<number, bigint>();
 
@@ -194,6 +198,10 @@ export class FakeGuardDisk implements GuardDisk {
     return {
       identity: this.identityOf(node),
       entryPath: leaf => (this.throughDescriptors ? `/@fd/${String(fd)}/${leaf}` : undefined),
+      chmod: async mode => {
+        node.mode = mode;
+        this.modes.push([`@fd:${String(fd)}`, mode]);
+      },
       close: async () => undefined,
     };
   }
@@ -248,12 +256,6 @@ export class FakeGuardDisk implements GuardDisk {
     this.afterMkdirp?.(key);
   }
 
-  async chmod(path: string, mode: number): Promise<void> {
-    const { entry } = await this.lookup(path);
-    if (entry === undefined || entry.kind === 'link') throw errno('ENOENT', path);
-    entry.mode = mode;
-  }
-
   async mkdirp(path: string, mode: number): Promise<void> {
     let current = '/';
     for (const segment of path.split('/').filter(part => part !== '')) {
@@ -267,6 +269,23 @@ export class FakeGuardDisk implements GuardDisk {
   async writeNew(path: string, bytes: Uint8Array, mode: number): Promise<void> {
     this.file(path, bytes.byteLength, '', mode);
     this.modes.push([path, mode]);
+  }
+
+  async groups(): Promise<readonly number[]> {
+    return this.groupIds;
+  }
+
+  /** As `access(W_OK)` answers for uid 1000: owner bits for its own entries, group bits for its groups, other bits, or an ACL. */
+  async writable(path: string): Promise<boolean> {
+    const real = await this.realpath(path);
+    const entry = this.entries.get(real);
+    if (entry === undefined || entry.kind === 'link') throw errno('ENOENT', path);
+    if (this.writableAt.has(real)) return true;
+    const owner = entry.owner ?? 1000;
+    const group = entry.group ?? 100;
+    if (owner === 1000) return (entry.mode & 0o200) !== 0;
+    if (this.groupIds.includes(group)) return (entry.mode & 0o020) !== 0;
+    return (entry.mode & 0o002) !== 0;
   }
 
   async unlink(path: string): Promise<void> {

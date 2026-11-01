@@ -20,11 +20,13 @@ import {
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import type { StateHomeReach } from '../../../../src/lib/api/state-homes.ts';
 import { type PackSubsystem, packRoutes } from '../../../../src/lib/runtime/mounts/pack.ts';
 import { SessionPackError } from '../../../../src/lib/session/pack/service.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { packConfig } from '../../pack/support.ts';
 import { agentIn, CREDENTIALS, FERRET_SESSION, fromFerret, GRANTED, human, sessionView } from './support.ts';
+import { homesOf } from './state-homes-support.ts';
 
 /** The Pack mode routes, over the real dispatcher: what each status and body is made of. */
 
@@ -565,5 +567,45 @@ describe('the Pack route table', () => {
       ['GET', '/v1/sessions/:sessionId/result', 'operator', true, undefined, undefined],
       ['PATCH', '/v1/sessions/:sessionId/pack', 'operator', true, undefined, undefined],
     ]);
+  });
+});
+
+describe('POST /v1/pack/new in the state home', () => {
+  const HOME = '/home/me/.ferretry';
+  const stateHomes: StateHomeReach = {
+    resolve: async () => homesOf(HOME),
+    holding: async path => (path.startsWith(HOME) ? HOME : undefined),
+  };
+  const gated = (subsystem: PackSubsystem): ApiDispatcher =>
+    new ApiDispatcher(new ApiRouter(packRoutes(subsystem, stateHomes)), CREDENTIALS, GRANTED);
+
+  it('should refuse a ferret naming a --cwd inside the state home, and start nothing', async () => {
+    // Arrange
+    const subsystem = new FakePack();
+
+    // Act
+    const answer = await gated(subsystem).dispatch(
+      fromFerret(call('POST', '/v1/pack/new', { task: 'fix', runtime: 'claude-main', cwd: `${HOME}/config` })),
+    );
+
+    // Assert
+    should([answer.status, jsonBody(answer).code]).deepEqual([403, 'state_home']);
+    should(subsystem.started).be.empty();
+  });
+
+  it('should start a ferret’s sub-ferret in its own folder, and in a named folder outside the home', async () => {
+    // Arrange
+    const subsystem = new FakePack();
+
+    // Act
+    const inherited = await gated(subsystem).dispatch(
+      fromFerret(call('POST', '/v1/pack/new', { task: 'fix', runtime: 'claude-main' })),
+    );
+    const named = await gated(subsystem).dispatch(
+      fromFerret(call('POST', '/v1/pack/new', { task: 'fix', runtime: 'claude-main', cwd: '/work/app' })),
+    );
+
+    // Assert
+    should([inherited.status, named.status]).deepEqual([201, 201]);
   });
 });

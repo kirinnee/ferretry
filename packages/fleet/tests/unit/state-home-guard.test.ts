@@ -197,9 +197,10 @@ describe('openOutsideStateHomes', () => {
     disk.dir('/nix');
     disk.own('/nix', 0, 0o755);
     disk.file('/nix/store-file', 2);
+    disk.own('/nix/store-file', 0, 0o444);
     disk.hardLink('/nix/second-name', '/nix/store-file');
     disk.hardLink('/work/token-too', '/fy/api-token');
-    const nixRoot = await resolveImmutableRoots(['/nix'], disk, [1000]);
+    const nixRoot = await resolveImmutableRoots(['/nix'], disk);
 
     // Act
     const refused = await openOutsideStateHomes('/work/token-too', homes, disk);
@@ -454,6 +455,7 @@ describe('copyTreeOutsideStateHomes', () => {
         extra(disk);
         return await copyTreeOutsideStateHomes(source, '/out/copy', homes, disk, {
           maxFileBytes: 100,
+          maxTotalBytes: 1000,
           maxFiles: 10,
           ...options,
         });
@@ -577,7 +579,7 @@ describe('resolveImmutableRoots — what may hold a tolerated hard link', () => 
   const refusal = async (work: Promise<unknown>) => await work.catch((error: unknown) => error);
 
   it('should accept a root-owned store whose group writes are not this process’s', async () => {
-    const roots = await resolveImmutableRoots(['/nix/store'], chain(), [1000, 100]);
+    const roots = await resolveImmutableRoots(['/nix/store'], chain());
 
     should(roots.roots).deepEqual(['/nix/store']);
   });
@@ -589,14 +591,15 @@ describe('resolveImmutableRoots — what may hold a tolerated hard link', () => 
     const open = chain();
     open.own('/nix', 0, 0o1777);
     const grouped = chain();
+    grouped.groupIds = [1000, 30_000];
 
     // Act
     const errors = [
-      await refusal(resolveImmutableRoots(['/nix/store'], single, [1000])),
-      await refusal(resolveImmutableRoots(['/nix/store'], open, [1000])),
-      await refusal(resolveImmutableRoots(['/nix/store'], grouped, [1000, 30_000])),
-      await refusal(resolveImmutableRoots(['/nix/missing'], chain(), [1000])),
-      await refusal(resolveImmutableRoots(['nix/store'], chain(), [1000])),
+      await refusal(resolveImmutableRoots(['/nix/store'], single)),
+      await refusal(resolveImmutableRoots(['/nix/store'], open)),
+      await refusal(resolveImmutableRoots(['/nix/store'], grouped)),
+      await refusal(resolveImmutableRoots(['/nix/missing'], chain())),
+      await refusal(resolveImmutableRoots(['nix/store'], chain())),
     ];
 
     // Assert
@@ -724,5 +727,320 @@ describe('createOutsideStateHomes — making missing folders', () => {
 
     // Assert
     should(results.map(rule)).deepEqual(['changed', 'changed', 'outside']);
+  });
+});
+
+describe('secrev-1255 F1 — the immutability proof reads this process, not its caller', () => {
+  const chain = () => {
+    const disk = new FakeGuardDisk();
+    disk.own('/', 0, 0o755);
+    disk.dir('/nix');
+    disk.own('/nix', 0, 0o755);
+    disk.dir('/nix/store');
+    disk.own('/nix/store', 0, 0o1775, 30_000);
+    return disk;
+  };
+
+  it('should refuse a store its group can write once the disk says this process is in that group', async () => {
+    // Arrange: the same store, before and after the user is listed in its group.
+    const before = chain();
+    const after = chain();
+    after.groupIds = [1000, 100, 30_000];
+
+    // Act
+    const accepted = await resolveImmutableRoots(['/nix/store'], before);
+    const refusedNow = await resolveImmutableRoots(['/nix/store'], after).catch((error: unknown) => error);
+
+    // Assert
+    should(accepted.roots).deepEqual(['/nix/store']);
+    should(refusedNow).be.instanceOf(MutableRootError);
+  });
+
+  it('should refuse a folder the kernel lets this process write though its mode bits say no, as an ACL does', async () => {
+    // Arrange
+    const store = chain();
+    store.writableAt.add('/nix/store');
+    const parent = chain();
+    parent.writableAt.add('/nix');
+
+    // Act
+    const errors = [
+      await resolveImmutableRoots(['/nix/store'], store).catch((error: unknown) => error),
+      await resolveImmutableRoots(['/nix/store'], parent).catch((error: unknown) => error),
+    ];
+
+    // Assert
+    should(errors.every(error => error instanceof MutableRootError)).be.true();
+  });
+});
+
+describe('secrev-1255 F2 — a multi-named file must be root-owned all the way to its immutable root', () => {
+  /** A root-owned `/usr/local` holding a user-owned `bin` — Intel Homebrew's layout — and a root-owned `share`. */
+  const local = async () => {
+    const { disk, homes } = await world();
+    disk.own('/', 0, 0o755);
+    disk.dir('/usr');
+    disk.own('/usr', 0, 0o755);
+    disk.dir('/usr/local');
+    disk.own('/usr/local', 0, 0o755);
+    disk.dir('/usr/local/bin');
+    disk.dir('/usr/local/share');
+    disk.own('/usr/local/share', 0, 0o755);
+    disk.file('/usr/local/share/tool.md', 4, 'tool');
+    disk.own('/usr/local/share/tool.md', 0, 0o444);
+    disk.hardLink('/usr/local/share/same.md', '/usr/local/share/tool.md');
+    const roots = await resolveImmutableRoots(['/usr/local'], disk);
+    return { disk, homes, links: { hardLinks: { allowUnder: roots } } as const };
+  };
+
+  it('should refuse a hard link to a secret put in a user-owned folder under the root, opened or judged', async () => {
+    // Arrange: the user links the state home's secret into its own /usr/local/bin.
+    const { disk, homes, links } = await local();
+    disk.hardLink('/usr/local/bin/x', '/fy/state/secrets.key');
+    disk.file('/usr/local/bin/root-file', 1);
+    disk.own('/usr/local/bin/root-file', 0, 0o444);
+    disk.hardLink('/usr/local/bin/root-twin', '/usr/local/bin/root-file');
+
+    // Act
+    const results = [
+      await openOutsideStateHomes('/usr/local/bin/x', homes, disk, links),
+      await judgeOutsideStateHomes('/usr/local/bin/x', homes, disk, links),
+      await openOutsideStateHomes('/usr/local/bin/root-file', homes, disk, links),
+    ];
+
+    // Assert: the secret's second name is the user's (an unpinned file, so no identity says "home"); a root-owned
+    // file in a user-owned folder is refused too, since that folder is where such a name could be put.
+    should(results.map(rule)).deepEqual(['hard-link', 'hard-link', 'hard-link']);
+  });
+
+  it('should refuse a user-owned multi-named file in a root-owned folder, and allow a root-owned one', async () => {
+    // Arrange
+    const { disk, homes, links } = await local();
+    disk.file('/usr/local/share/mine.md', 4);
+    disk.hardLink('/usr/local/share/mine-too.md', '/usr/local/share/mine.md');
+
+    // Act
+    const results = [
+      await openOutsideStateHomes('/usr/local/share/mine.md', homes, disk, links),
+      await openOutsideStateHomes('/usr/local/share/same.md', homes, disk, links),
+      await judgeOutsideStateHomes('/usr/local/share/mine.md', homes, disk, links),
+      await judgeOutsideStateHomes('/usr/local/share/same.md', homes, disk, links),
+    ];
+
+    // Assert
+    should(results.map(rule)).deepEqual(['hard-link', 'ok', 'hard-link', 'ok']);
+  });
+
+  it('should refuse a multi-named file when judged without opening it, as the open does', async () => {
+    // Arrange
+    const { disk, homes } = await world();
+    disk.hardLink('/work/twin.txt', '/work/a.txt');
+
+    // Act
+    const judged = await judgeOutsideStateHomes('/work/twin.txt', homes, disk);
+
+    // Assert
+    should(rule(judged)).equal('hard-link');
+  });
+});
+
+describe('secrev-1255 F3 — the tree copy sets a folder mode through its descriptor', () => {
+  it('should refuse, and chmod nothing, when a made folder is swapped for a link to a secret', async () => {
+    // Arrange: the copy's folder, once made, is replaced by a link to the admin token.
+    const { disk, homes } = await world();
+    disk.dir('/src', 0o555);
+    disk.file('/src/a.md', 1);
+    disk.dir('/out');
+    disk.afterMkdirp = path => {
+      if (path !== '/out/copy') return;
+      disk.entries.delete(path);
+      disk.link(path, '/fy/api-token');
+    };
+    const tokenMode = disk.entries.get('/fy/api-token')?.kind === 'file' ? 0o644 : -1;
+
+    // Act
+    const copied = await copyTreeOutsideStateHomes('/src', '/out/copy', homes, disk, {
+      maxFileBytes: 10,
+      maxTotalBytes: 100,
+      maxFiles: 5,
+    });
+
+    // Assert
+    should(rule(copied)).equal('changed');
+    should(disk.entries.get('/fy/api-token')).match({ kind: 'file', mode: tokenMode });
+    should(disk.written).deepEqual([]);
+  });
+
+  it('should give a copied folder its own mode through the descriptor, not by its path', async () => {
+    // Arrange
+    const { disk, homes } = await world();
+    disk.dir('/src', 0o555);
+    disk.file('/src/a.md', 1);
+    disk.dir('/out');
+
+    // Act
+    const copied = await copyTreeOutsideStateHomes('/src', '/out/copy', homes, disk, {
+      maxFileBytes: 10,
+      maxTotalBytes: 100,
+      maxFiles: 5,
+    });
+
+    // Assert
+    should(copied.ok).be.true();
+    should(disk.entries.get('/out/copy')).match({ kind: 'directory', mode: 0o555 });
+    should(disk.modes.some(([at, mode]) => at.startsWith('@fd:') && mode === 0o555)).be.true();
+  });
+});
+
+describe('secrev-1255 F4 — a missing folder made by PATH (no /proc) is checked once made', () => {
+  it('should write nothing in the home when the checked folder is swapped for a link to it during the mkdir', async () => {
+    // Arrange: macOS-like — folders are made by path, so only the new-folder check can see the swap.
+    const { disk, homes } = await world(false);
+    disk.dir('/work/dl');
+    const racing = Object.create(disk) as FakeGuardDisk;
+    racing.mkdir = async (at: string, mode: number) => {
+      disk.move('/work/dl', '/work/dl-was');
+      disk.link('/work/dl', '/fy/state');
+      await disk.mkdir(at, mode);
+    };
+
+    // Act
+    const result = await createOutsideStateHomes('/work/dl/new/passkeys.json', homes, racing, {
+      overwrite: false,
+      mode: 0o644,
+      makeFolders: 0o755,
+    });
+
+    // Assert: the folder made through the link is the declared empty residue; no file is ever written there.
+    should(rule(result)).equal('changed');
+    should(disk.entries.has('/fy/state/new/passkeys.json')).be.false();
+    should(disk.written).deepEqual([]);
+  });
+});
+
+describe('secrev-1260 L2 — an opening may not be, or hold, a home', () => {
+  it('should refuse to resolve when the asset tree is a link to the home, or to the folder above it', async () => {
+    // Arrange
+    const { disk } = await world();
+    disk.dir('/fy/fleet/other');
+    disk.link('/fy/fleet/to-home', '/fy');
+    disk.link('/fy/fleet/to-root', '/');
+
+    // Act
+    const results = await Promise.all(
+      ['/fy/fleet/to-home', '/fy/fleet/to-root', '/fy/fleet/other'].map(async opening =>
+        resolveStateHomes({ homes: ['/fy'], openings: [opening] }, disk).then(
+          () => 'resolved',
+          (error: unknown) => (error instanceof StateHomeUnresolvedError ? 'refused' : String(error)),
+        ),
+      ),
+    );
+
+    // Assert
+    should(results).deepEqual(['refused', 'refused', 'resolved']);
+  });
+});
+
+describe('secrev-1260 L3 — the tree copy writes through the folders it checked', () => {
+  it('should make the copy root through its checked parent, so a parent swapped for a link receives nothing', async () => {
+    // Arrange: just before the root folder is made, \`/out\` is renamed away and a link to the home's state put there.
+    const { disk, homes } = await world();
+    disk.dir('/src');
+    disk.file('/src/a.md', 1);
+    disk.dir('/out');
+    const racing = Object.create(disk) as FakeGuardDisk;
+    let swapped = false;
+    racing.mkdir = async (at: string, mode: number) => {
+      if (!swapped) {
+        swapped = true;
+        disk.move('/out', '/out-was');
+        disk.link('/out', '/fy/state');
+      }
+      await disk.mkdir(at, mode);
+    };
+
+    // Act
+    const copied = await copyTreeOutsideStateHomes('/src', '/out/copy', homes, racing, {
+      maxFileBytes: 10,
+      maxTotalBytes: 100,
+      maxFiles: 5,
+    });
+
+    // Assert: refused, and the folder was made where the checked parent really is — not in the home.
+    should(rule(copied)).equal('changed');
+    should(disk.entries.has('/fy/state/copy')).be.false();
+    should(disk.entries.get('/out-was/copy')).match({ kind: 'directory' });
+  });
+
+  it('should write each entry through the made folder, so that folder swapped after its check receives nothing new by path', async () => {
+    // Arrange: the copy's folder is checked; then, as its first file is read, it is renamed away and a link to the
+    // home's state put in its place.
+    const { disk, homes } = await world();
+    disk.dir('/src');
+    disk.file('/src/a.md', 1, 'a');
+    disk.dir('/out');
+    disk.afterOpen = path => {
+      if (path !== '/src/a.md' || !disk.entries.has('/out/copy')) return;
+      disk.move('/out/copy', '/out/copy-was');
+      disk.link('/out/copy', '/fy/state');
+    };
+
+    // Act
+    await copyTreeOutsideStateHomes('/src', '/out/copy', homes, disk, {
+      maxFileBytes: 10,
+      maxTotalBytes: 100,
+      maxFiles: 5,
+    });
+
+    // Assert
+    should(disk.written.filter(path => path.startsWith('/fy'))).deepEqual([]);
+    should(disk.entries.get('/out/copy-was/a.md')).match({ kind: 'file', text: 'a' });
+  });
+});
+
+describe('secrev-1260 L4 — the tree copy is bounded', () => {
+  const copyOf = async (
+    build: (disk: FakeGuardDisk) => void,
+    limits: { maxFiles?: number; maxTotalBytes?: number },
+  ) => {
+    const { disk, homes } = await world();
+    disk.dir('/src');
+    disk.dir('/out');
+    build(disk);
+    return await copyTreeOutsideStateHomes('/src', '/out/copy', homes, disk, {
+      maxFileBytes: 100,
+      maxTotalBytes: limits.maxTotalBytes ?? 1000,
+      maxFiles: limits.maxFiles ?? 100,
+    });
+  };
+
+  it('should refuse a folder reached twice on different branches, which a link graph can multiply without end', async () => {
+    const result = await copyOf(disk => {
+      disk.dir('/d1');
+      disk.link('/src/a', '/d1');
+      disk.link('/src/b', '/d1');
+    }, {});
+
+    should(rule(result)).equal('loop');
+  });
+
+  it('should count folders toward the entry limit, and refuse past the total-bytes cap', async () => {
+    const folders = await copyOf(
+      disk => {
+        disk.dir('/src/a');
+        disk.dir('/src/b');
+        disk.dir('/src/c');
+      },
+      { maxFiles: 3 },
+    );
+    const bytes = await copyOf(
+      disk => {
+        disk.file('/src/one.md', 60);
+        disk.file('/src/two.md', 60);
+      },
+      { maxTotalBytes: 100 },
+    );
+
+    should([folders, bytes].map(rule)).deepEqual(['too-many', 'too-many']);
   });
 });

@@ -1,9 +1,20 @@
+import { join, relative } from 'node:path';
 import { SESSION_FILE_INDEX_VERSION, type SessionFileIndexResponse } from '@ferretry/protocol';
+import { agentSessionOf, isAgentCaller } from '../../api/agent-caller.ts';
 import { ApiError } from '../../api/error.ts';
+import { resolvedStateHomes, type StateHomeReach } from '../../api/state-homes.ts';
 import { type ApiResponse, decodeParameter, queryValue } from '../../api/http.ts';
 import { jsonResponse, textResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { FsError, type FsErrorCode, MAX_FILE_BYTES, type SessionFilesystem } from '../../session/filesystem/index.ts';
+import {
+  FsError,
+  type FsErrorCode,
+  withinFolder,
+  MAX_FILE_BYTES,
+  type SessionFilesystem,
+  type SessionReadFence,
+} from '../../session/filesystem/index.ts';
+import { isAncestorOf, sessionSubFerretDirectory } from '../../sub-ferret/index.ts';
 import type { SessionDirectorySubsystem } from './sessions.ts';
 
 /**
@@ -19,6 +30,13 @@ import type { SessionDirectorySubsystem } from './sessions.ts';
  * may never name a directory. The root is the one the session was started in, read from the document the
  * daemon owns, so no request can point this surface at a tree the human never opened. And the session id
  * itself is percent-decoded and refused if it regains a separator, so it cannot become a path either.
+ *
+ * AN AGENT READS ONLY ITS OWN TREE, AND NEVER THE STATE HOME. A ferret (its session credential, or the admin
+ * token naming its session) may read its own session and the sub-ferrets it started — a lead reviews its
+ * sub-ferret's work — and no other: the owner's sessions, a sibling's, the Warden's. Whatever session it reads,
+ * nothing inside the daemon's state home is read for it, so a session started in `~` or in the home itself
+ * hands it no token. A person (a paired device, the owner at the machine) is unchanged, so the owner's viewer
+ * still opens any session's files (docs/agent-tools.md § "Reading a session's files").
  *
  * WHAT IS DELIBERATELY NOT SERVED. There is no write surface — no upload, no rename, no delete — and no
  * `?force` override for either secrets gate. The gitignore gate over-blocks build output, and that is the
@@ -39,6 +57,52 @@ const FS_ERROR_STATUS: Readonly<Record<FsErrorCode, number>> = {
   // daemon rather than about the caller's authority or the path they asked for.
   unsupported: 501,
 };
+
+/** The code an agent asking for a session that is not its own, or its sub-ferret's, is refused with. */
+const NOT_OWN_SESSION_CODE = 'not_own_session';
+
+/**
+ * The fence a read for this caller sits behind, or `undefined` for a person. An agent is refused here when
+ * `id` is neither its own session nor one it started, and when the state home cannot be resolved.
+ *
+ * `media`: the session's media folder, the fence's one opening — it lives in the daemon's own session state,
+ * and it is where the agent puts what it made to show. Mapped onto each home's real path by the home's own
+ * prefix, never by resolving the folder itself, so a media folder swapped for a link into the home is not
+ * opened by the resolution of that link.
+ */
+async function agentFence(
+  context: RouteContext,
+  sessions: SessionDirectorySubsystem,
+  stateHomes: StateHomeReach | undefined,
+  id: string,
+  media?: string,
+): Promise<SessionReadFence | undefined> {
+  if (!isAgentCaller(context)) return undefined;
+  const own = agentSessionOf(context);
+  if (own === undefined)
+    throw new ApiError(
+      403,
+      'an agent reads only its own session’s files, and this request names no session of its own',
+      NOT_OWN_SESSION_CODE,
+    );
+  if (own !== id && !(await isAncestorOf(sessionSubFerretDirectory(sessions), own, id)))
+    throw new ApiError(
+      403,
+      `an agent reads only its own session’s files and its sub-ferrets’, and ${id} is neither`,
+      NOT_OWN_SESSION_CODE,
+    );
+  const homes = await resolvedStateHomes(stateHomes);
+  const opening =
+    media === undefined
+      ? []
+      : [
+          media,
+          ...homes.homes.flatMap(home =>
+            withinFolder(home.named, media) ? [join(home.real, relative(home.named, media))] : [],
+          ),
+        ];
+  return { homes, opening };
+}
 
 /** The path parameter, decoded. A parameter that regains a separator never reaches the pinner. */
 function sessionId(context: RouteContext): string {
@@ -72,11 +136,16 @@ function requiredPath(context: RouteContext): string {
 async function list(
   filesystem: SessionFilesystem,
   sessions: SessionDirectorySubsystem,
+  stateHomes: StateHomeReach | undefined,
   context: RouteContext,
 ): Promise<ApiResponse> {
-  const cwd = await sessionCwd(sessions, sessionId(context));
+  const id = sessionId(context);
+  const fence = await agentFence(context, sessions, stateHomes, id);
+  const cwd = await sessionCwd(sessions, id);
   try {
-    return jsonResponse(await filesystem.list(cwd, queryValue(context.request, 'path')));
+    return jsonResponse(
+      await filesystem.list(cwd, queryValue(context.request, 'path'), fence === undefined ? {} : { fence }),
+    );
   } catch (error) {
     return refuse(error);
   }
@@ -98,26 +167,33 @@ export type SessionMediaRoot = (sessionId: string) => string;
 async function fileRoot(
   sessions: SessionDirectorySubsystem,
   mediaRoot: SessionMediaRoot | undefined,
+  stateHomes: StateHomeReach | undefined,
   context: RouteContext,
-): Promise<string> {
+): Promise<{ readonly root: string; readonly fence: SessionReadFence | undefined }> {
   const id = sessionId(context);
-  const cwd = await sessionCwd(sessions, id);
   const scope = queryValue(context.request, 'scope');
-  if (scope === undefined) return cwd;
+  if (scope === undefined) {
+    const fence = await agentFence(context, sessions, stateHomes, id);
+    return { root: await sessionCwd(sessions, id), fence };
+  }
   if (scope !== 'media') throw new ApiError(400, 'query parameter "scope" must be "media"', 'invalid_scope');
   if (queryValue(context.request, 'rev') !== undefined)
     throw new ApiError(400, 'the media folder has no history, so "rev" does not apply', 'invalid_rev');
   if (mediaRoot === undefined) throw new ApiError(404, 'this daemon keeps no session media folder', 'not_found');
-  return mediaRoot(id);
+  const media = mediaRoot(id);
+  const fence = await agentFence(context, sessions, stateHomes, id, media);
+  await sessionCwd(sessions, id);
+  return { root: media, fence };
 }
 
 async function file(
   filesystem: SessionFilesystem,
   sessions: SessionDirectorySubsystem,
   mediaRoot: SessionMediaRoot | undefined,
+  stateHomes: StateHomeReach | undefined,
   context: RouteContext,
 ): Promise<ApiResponse> {
-  const cwd = await fileRoot(sessions, mediaRoot, context);
+  const { root: cwd, fence } = await fileRoot(sessions, mediaRoot, stateHomes, context);
   const target = requiredPath(context);
   // `rev` is an enumeration of exactly one member, so anything else is a client mistake rather than a
   // silent fall back to the working tree — which would serve different bytes than the caller asked for.
@@ -132,6 +208,7 @@ async function file(
       await filesystem.readFile(cwd, target, {
         ...(rev === 'head' ? { rev: 'head' as const } : {}),
         ...(format === 'base64' ? { base64: true } : {}),
+        ...(fence === undefined ? {} : { fence }),
       }),
     );
   } catch (error) {
@@ -154,14 +231,19 @@ async function file(
 async function index(
   filesystem: SessionFilesystem,
   sessions: SessionDirectorySubsystem,
+  stateHomes: StateHomeReach | undefined,
   context: RouteContext,
 ): Promise<ApiResponse> {
   const id = sessionId(context);
+  const fence = await agentFence(context, sessions, stateHomes, id);
   const cwd = await sessionCwd(sessions, id);
   try {
     // Bounds are the domain's own; the only thing a route contributes is the caller's cancellation,
     // because the transport is the only layer that knows the caller stopped waiting.
-    const view = await filesystem.index(cwd, { signal: context.request.signal });
+    const view = await filesystem.index(cwd, {
+      signal: context.request.signal,
+      ...(fence === undefined ? {} : { fence }),
+    });
     const response: SessionFileIndexResponse = { v: SESSION_FILE_INDEX_VERSION, sessionId: id, ...view };
     return jsonResponse(response);
   } catch (error) {
@@ -172,11 +254,14 @@ async function index(
 async function changes(
   filesystem: SessionFilesystem,
   sessions: SessionDirectorySubsystem,
+  stateHomes: StateHomeReach | undefined,
   context: RouteContext,
 ): Promise<ApiResponse> {
-  const cwd = await sessionCwd(sessions, sessionId(context));
+  const id = sessionId(context);
+  const fence = await agentFence(context, sessions, stateHomes, id);
+  const cwd = await sessionCwd(sessions, id);
   try {
-    return jsonResponse(await filesystem.changes(cwd));
+    return jsonResponse(await filesystem.changes(cwd, fence === undefined ? {} : { fence }));
   } catch (error) {
     return refuse(error);
   }
@@ -192,13 +277,16 @@ async function changes(
 async function diff(
   filesystem: SessionFilesystem,
   sessions: SessionDirectorySubsystem,
+  stateHomes: StateHomeReach | undefined,
   context: RouteContext,
 ): Promise<ApiResponse> {
-  const cwd = await sessionCwd(sessions, sessionId(context));
+  const id = sessionId(context);
+  const fence = await agentFence(context, sessions, stateHomes, id);
+  const cwd = await sessionCwd(sessions, id);
   const target = requiredPath(context);
   let view: Awaited<ReturnType<SessionFilesystem['diff']>>;
   try {
-    view = await filesystem.diff(cwd, target);
+    view = await filesystem.diff(cwd, target, fence === undefined ? {} : { fence });
   } catch (error) {
     return refuse(error);
   }
@@ -223,6 +311,8 @@ export function sessionFilesystemRoutes(
   filesystem: SessionFilesystem,
   sessions: SessionDirectorySubsystem,
   mediaRoot?: SessionMediaRoot,
+  /** The daemon's own directories, which no read for an agent reaches. Absent: an agent reads nothing here. */
+  stateHomes?: StateHomeReach,
 ): readonly ApiRoute[] {
   return [
     {
@@ -232,7 +322,7 @@ export function sessionFilesystemRoutes(
       caller: 'any',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
-      handle: async context => await file(filesystem, sessions, mediaRoot, context),
+      handle: async context => await file(filesystem, sessions, mediaRoot, stateHomes, context),
     },
     {
       method: 'GET',
@@ -241,7 +331,7 @@ export function sessionFilesystemRoutes(
       caller: 'any',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
-      handle: async context => await index(filesystem, sessions, context),
+      handle: async context => await index(filesystem, sessions, stateHomes, context),
     },
     {
       method: 'GET',
@@ -250,7 +340,7 @@ export function sessionFilesystemRoutes(
       caller: 'any',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
-      handle: async context => await changes(filesystem, sessions, context),
+      handle: async context => await changes(filesystem, sessions, stateHomes, context),
     },
     {
       method: 'GET',
@@ -259,7 +349,7 @@ export function sessionFilesystemRoutes(
       caller: 'any',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
-      handle: async context => await diff(filesystem, sessions, context),
+      handle: async context => await diff(filesystem, sessions, stateHomes, context),
     },
     {
       method: 'GET',
@@ -268,7 +358,7 @@ export function sessionFilesystemRoutes(
       caller: 'any',
       capability: { capability: 'filesystem', axis: 'use' },
       noStore: true,
-      handle: async context => await list(filesystem, sessions, context),
+      handle: async context => await list(filesystem, sessions, stateHomes, context),
     },
   ];
 }

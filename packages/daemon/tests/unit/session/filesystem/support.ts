@@ -43,6 +43,8 @@ export interface FakeNode {
   readonly size?: number;
   readonly mtime?: string;
   readonly mode?: number;
+  /** How many names the file has; absent is one. */
+  readonly links?: number;
   /** The canonical path the walk reports, when it must differ from the requested one. */
   readonly canonical?: string;
   readonly identities?: readonly ComponentIdentity[];
@@ -60,8 +62,8 @@ export type FakeTree = Map<string, FakeNode>;
 function identitiesFor(rel: string): readonly ComponentIdentity[] {
   const depth = rel === '' ? 0 : rel.split('/').length;
   return Array.from({ length: depth + 1 }, (_unused, index) => ({
-    dev: 1,
-    ino: 100 + index,
+    dev: 1n,
+    ino: BigInt(100 + index),
     ctimeMs: 1000,
     mode: 0o40755,
   }));
@@ -157,6 +159,7 @@ class FakePinnedRoot implements PinnedRoot {
         size: node.size ?? bytes.byteLength,
         mtime: node.mtime ?? FAKE_MTIME,
         mode: node.mode ?? 0o100644,
+        ...(node.links === undefined ? {} : { links: node.links }),
       },
       node.canonical ?? rel,
       node.identities ?? identitiesFor(rel),

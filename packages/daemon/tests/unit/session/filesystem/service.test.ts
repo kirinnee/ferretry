@@ -362,7 +362,7 @@ describe('SessionFilesystem.list', () => {
           staged.set('src', {
             type: 'dir',
             entries: [],
-            identities: [{ dev: 1, ino: 999, ctimeMs: 5, mode: 0o40755 }],
+            identities: [{ dev: 1n, ino: 999n, ctimeMs: 5, mode: 0o40755 }],
           });
         }
       },
@@ -594,7 +594,7 @@ describe('SessionFilesystem.readFile from the working tree', () => {
       tree,
       onOpen: (rel, attempt, staged) => {
         if (rel === 'a.ts' && attempt === 2) {
-          staged.set('a.ts', textFile('hello', { identities: [{ dev: 1, ino: 7, ctimeMs: 9, mode: 0o100644 }] }));
+          staged.set('a.ts', textFile('hello', { identities: [{ dev: 1n, ino: 7n, ctimeMs: 9, mode: 0o100644 }] }));
         }
       },
     });
@@ -977,7 +977,7 @@ describe('SessionFilesystem.diff', () => {
         tree,
         onOpen: (rel, attempt, staged) => {
           if (rel === 'a.ts' && attempt === 2) {
-            staged.set('a.ts', textFile('x', { identities: [{ dev: 2, ino: 2, ctimeMs: 2, mode: 0o100644 }] }));
+            staged.set('a.ts', textFile('x', { identities: [{ dev: 2n, ino: 2n, ctimeMs: 2, mode: 0o100644 }] }));
           }
         },
       },
