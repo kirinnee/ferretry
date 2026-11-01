@@ -182,10 +182,11 @@ import { useTheme } from './hooks/use-theme.ts';
 import { useToTestCards } from './hooks/use-to-test-cards.ts';
 import { useWardenDaemonScope } from './hooks/use-warden-daemon-scope.ts';
 import { useWardenStatus } from './hooks/use-warden-status.ts';
+import { useWorkProjectNames } from './hooks/use-work-project-names.ts';
 import { agendaClearPort } from './lib/agenda-clear-agents.ts';
-import { agendaTargetFromSearch } from './lib/agenda-inbox.ts';
+import { agendaConversationPath, agendaTargetFromSearch, inboxTargetFromSearch } from './lib/agenda-inbox.ts';
 import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
-import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
+import { AgendaWireProbes, useWorkSearchOffered } from './lib/agenda-wire-react.tsx';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import { transcriptIsCurrent } from './lib/background-fresh.ts';
 import { NO_BOARD_FILTERS } from './lib/board-model.ts';
@@ -274,6 +275,7 @@ import type { SpeechAssets } from './lib/stt/on-device-voices.ts';
 import { createSurfaceEventHub } from './lib/surface-control.ts';
 import type { TranscriptHistoryStatus } from './lib/transcript-history.ts';
 import { tunnelNote } from './lib/tunnel-service.ts';
+import { workSearchPortFor } from './lib/work-search.ts';
 import {
   AppBar,
   AppTabBar,
@@ -2209,8 +2211,33 @@ function AgendaRoute({ connection }: DaemonPageProps) {
     }),
     [boardActions, store.clients, daemonFetch, pairings],
   );
+  const fleet = useSyncExternalStore(
+    listener => store.fleet.subscribe(listener),
+    () => store.fleet.getSnapshot(),
+  );
+  // A tapped Agenda notification lands here (`/inbox?session=…&agenda=A3`): its card opens when the item is
+  // still open, and the reader goes on to its conversation when it is not.
+  const wanted = inboxTargetFromSearch(window.location.search);
+  const openItem =
+    wanted === null
+      ? null
+      : {
+          daemonId: connection.daemonId,
+          sessionId: wanted.sessionId,
+          id: wanted.id,
+          settled: fleet.daemons.get(connection.daemonId)?.sessions != null,
+        };
   return inbox === null ? null : (
     <AgendaInboxPage
+      open={openItem}
+      onOpenSettled={opened =>
+        navigate(
+          opened || wanted === null
+            ? daemonAgendaPath(connection.daemonId)
+            : agendaConversationPath(connection.daemonId, wanted.sessionId, wanted.id),
+          { replace: true },
+        )
+      }
       clearPort={clearPort}
       toTestHost={toTestHost}
       banner={
@@ -2744,6 +2771,14 @@ export function AppShell() {
   const fleetSnapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
   const fleet = useSyncExternalStore(subscribeFleet, fleetSnapshot);
   const [palette, setPalette] = useState({ open: false, focusSignal: 0 });
+  // The finder searches card and agenda words only on a machine whose health (already read for the app) says it can.
+  const finderFetch = useDaemonFetch();
+  const finderOffered = useWorkSearchOffered(connection?.daemonId);
+  const finderWorkSearch = useMemo(
+    () => (connection === undefined ? undefined : workSearchPortFor(finderOffered, connection, finderFetch)),
+    [finderOffered, connection, finderFetch],
+  );
+  const finderProjectNames = useWorkProjectNames(connection, palette.open && finderWorkSearch !== undefined);
   const openPalette = useCallback(
     () => setPalette(current => ({ open: true, focusSignal: current.focusSignal + 1 })),
     [],
@@ -3039,6 +3074,9 @@ export function AppShell() {
                     focusSignal={palette.focusSignal}
                     onClose={closePalette}
                     daemon={connection.daemonId}
+                    {...(finderWorkSearch === undefined
+                      ? {}
+                      : { workSearch: finderWorkSearch, workProjectNames: finderProjectNames })}
                     sessions={paletteSearch.sessions}
                     sessionsNote={paletteSearch.note}
                     onNavigate={navigate}

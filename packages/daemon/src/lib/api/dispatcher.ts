@@ -3,7 +3,9 @@ import {
   OLDER_APP_SENTENCE,
   UNLOCK_REQUIRED_CODE,
   STEP_UP_REQUIRED_CODE,
+  type StepUpAct,
   type StepUpRequiredBody,
+  stepUpSkippableAtMachine,
 } from '@ferretry/protocol';
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
 import {
@@ -35,6 +37,7 @@ import { compressed, type ResponseCompressor } from './compression.ts';
 import { errorResponse, jsonResponse, methodNotAllowedResponse, noStore, unknownRouteResponse } from './responses.ts';
 import type {
   ApiRoute,
+  ClaimFreshStepUp,
   RouteContext,
   ScopedRoute,
   WardenRemedyAuthorizer,
@@ -325,8 +328,21 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
       spendFreshStepUp: () => {
         if (request.device !== undefined) stepUps.spendFresh?.(request.device);
       },
-      claimFreshStepUp: act => request.device !== undefined && stepUps.claimFresh?.(request.device, act) === true,
+      claimFreshStepUp: claimFreshStepUp(request.device, stepUps),
     },
+  };
+}
+
+/**
+ * A route's claim on the caller's fresh proof. An act asked of EVERY caller binds its proof to one subject, and this
+ * daemon mints no such proof yet (step-up options for one are refused), so nothing satisfies it, whoever asks, the
+ * machine included, and a proof minted for anything else is never spent on it. The subject-bound claim lands with the
+ * staged save.
+ */
+function claimFreshStepUp(device: RouteContext['request']['device'], stepUps: StepUpWitness): ClaimFreshStepUp {
+  return (act?: StepUpAct, _subject?: string): boolean => {
+    if (act !== undefined && !stepUpSkippableAtMachine(act)) return false;
+    return device !== undefined && stepUps.claimFresh?.(device, act) === true;
   };
 }
 

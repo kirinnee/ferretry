@@ -96,6 +96,12 @@ render logomark-maskable.svg 180 '#0b0b0d' "${out_dir}/apple-touch-icon.png"
 render logomark-maskable.svg 192 '#0b0b0d' "${out_dir}/icon-192.png"
 render logomark-maskable.svg 512 '#0b0b0d' "${out_dir}/icon-512.png"
 
+# The manifest's `any` icons: the SAME mark at full size, no safe-zone padding. They are separate files
+# from the maskable ones above on purpose — one entry declared `any maskable` is cropped to a circle where
+# it should show whole (a notification's large icon, an install dialog) and padded where it should fill.
+render logomark-dark.svg 192 '#0b0b0d' "${out_dir}/icon-any-192.png"
+render logomark-dark.svg 512 '#0b0b0d' "${out_dir}/icon-any-512.png"
+
 # The notification BADGE: the small mark Android shows in the status bar and beside a notification's
 # title. Android paints a badge from its ALPHA alone — any colour in it is discarded — so it is the
 # mono logomark on a transparent page; an opaque tile would read as a plain white square. 96px is the

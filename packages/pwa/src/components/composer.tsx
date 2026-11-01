@@ -41,6 +41,7 @@ import { canSubmitComposer } from '../lib/session-screens.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import { REINSERT_TRANSCRIPTION_EVENT, reinsertTranscriptionText } from '../lib/stt/reinsert-transcription.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
+import type { WorkSearchPort } from '../lib/work-search.ts';
 import { addMenuActions, ComposerAddMenu } from './composer-add-menu.tsx';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
 import {
@@ -150,6 +151,10 @@ export interface ComposerProps {
   readonly autocompleteAgenda?: readonly ComposerAgendaItem[];
   /** The session's tasks, shared with reference proof and offered by the `@@@@` and `&` menus. */
   readonly autocompleteTasks?: readonly ComposerReferenceTask[];
+  /** The daemon's work search; absent on a machine that cannot search, which keeps both menus local-only. */
+  readonly autocompleteWorkSearch?: WorkSearchPort;
+  /** Project id to name for the cards that search finds. */
+  readonly autocompleteProjectNames?: ReadonlyMap<string, string>;
   /** The session's already-read skills catalog, shared with reference proof. */
   readonly autocompleteSkills?: ComposerSkillsCatalog;
   /**
@@ -381,6 +386,8 @@ export function Composer({
   autocompleteSessions,
   autocompleteAgenda,
   autocompleteTasks,
+  autocompleteWorkSearch,
+  autocompleteProjectNames,
   autocompleteSkills,
   autocompleteReady,
   autocompleteFetcher,
@@ -489,6 +496,8 @@ export function Composer({
     tasks: autocompleteTasks,
     skills: autocompleteSkills,
     ready: autocompleteReady,
+    workSearch: autocompleteWorkSearch,
+    projectNames: autocompleteProjectNames,
   });
   hostRef.current = {
     sessions: autocompleteSessions,
@@ -496,6 +505,8 @@ export function Composer({
     tasks: autocompleteTasks,
     skills: autocompleteSkills,
     ready: autocompleteReady,
+    workSearch: autocompleteWorkSearch,
+    projectNames: autocompleteProjectNames,
   };
   /**
    * THE COMMIT HANDSHAKE, owned by `useComposerHostWarmup`.
@@ -527,6 +538,8 @@ export function Composer({
               getSkills: () => hostRef.current.skills,
               getTasks: () => hostRef.current.tasks ?? EMPTY_TASKS,
               getIncludeAgentTasks: () => includeAgentTasksRef.current,
+              getWorkSearch: () => hostRef.current.workSearch,
+              getProjectNames: () => hostRef.current.projectNames,
               waitForAgendaItems: hostWarmup,
               waitForTasks: hostWarmup,
               waitForSkills: hostWarmup,

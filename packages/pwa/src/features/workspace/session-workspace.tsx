@@ -248,24 +248,11 @@ export function SessionWorkspace({
     // A page's tab shows that page in the session's real browser, never the preview reader.
     if (page !== undefined) rememberBrowserEngine(scope, 'remote');
     return (
-      <SurfaceFrame dataBrowser={tab.key} hostsControls={browserPages !== undefined} marker={marker(tab)}>
-        {controls => (
+      <SurfaceFrame dataBrowser={tab.key}>
+        {fullscreen => (
           <>
             {browserPages !== undefined && (
-              <>
-                <BrowserSurfaceList
-                  driverFor={candidate => driving.driverFor(pageTabId(candidate.id))}
-                  onClosePage={candidate => void browserPages.act({ action: 'close-page', pageId: candidate.id })}
-                  onNewPage={() => newPage(browserPages)}
-                  onOpenPage={openPage}
-                  sessionName={agentName}
-                  status={status}
-                  takenOver={candidate => driving.takenOver(pageTabId(candidate.id))}
-                  trailing={controls}
-                  {...(page === undefined ? {} : { selectedPageId: page.id })}
-                />
-                <BrowserPageFocus active={active} activate={browserPages.activatePage} pageId={page?.id} />
-              </>
+              <BrowserPageFocus active={active} activate={browserPages.activatePage} pageId={page?.id} />
             )}
             <UnifiedBrowserSurface
               daemon={connection}
@@ -274,8 +261,37 @@ export function SessionWorkspace({
               onClose={() => undefined}
               presentation={formFactor === 'phone' ? 'sheet' : 'pane'}
               scope={scope}
-              showPageTabs={browserPages === undefined}
               titleId={`${titleId}-${tab.key}`}
+              host={{
+                name: page === undefined ? 'Browser' : browserPageLabel(page),
+                fullscreen,
+                control: {
+                  driver: driving.driverFor(tab.id),
+                  ask: agentSurfaces.askFor(tab.id),
+                  takenOver: driving.takenOver(tab.id),
+                  onTakeOver: () => driving.takeOver(tab.id),
+                  onHandBack: () => driving.handBack(tab.id),
+                  onDismissAsk: () => agentSurfaces.dismissAsk(tab.id),
+                },
+                ...(browserPages === undefined
+                  ? {}
+                  : {
+                      pages: (
+                        <BrowserSurfaceList
+                          driverFor={candidate => driving.driverFor(pageTabId(candidate.id))}
+                          onClosePage={candidate =>
+                            void browserPages.act({ action: 'close-page', pageId: candidate.id })
+                          }
+                          onNewPage={() => newPage(browserPages)}
+                          onOpenPage={openPage}
+                          sessionName={agentName}
+                          status={status}
+                          takenOver={candidate => driving.takenOver(pageTabId(candidate.id))}
+                          {...(page === undefined ? {} : { selectedPageId: page.id })}
+                        />
+                      ),
+                    }),
+              }}
               {...(browser === undefined ? {} : { dependencies: browser })}
               {...(onOpenLoginWindow === undefined ? {} : { onOpenLoginWindow })}
             />

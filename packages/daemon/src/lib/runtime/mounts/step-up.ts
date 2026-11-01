@@ -25,6 +25,7 @@ import {
   UnlockGrantedSchema,
   PasskeyWindowOpenedSchema,
   PasskeyWindowRequestSchema,
+  STEP_UP_ACTS,
   StepUpAssertionSchema,
   StepUpGrantedSchema,
   StepUpOptionsSchema,
@@ -130,6 +131,10 @@ export function stepUpRoutes(service: StepUpService): readonly ApiRoute[] {
       noStore: true,
       handle: async context => {
         const body = await parseBody(context.request, StepUpOptionsRequestSchema);
+        // Saving a 2FA seed binds its proof to the staged save, and this daemon stages none yet: an unbound proof
+        // stamped for the act is never minted, so the save, when it lands, can only take one bound to its own stage.
+        if (body.act === STEP_UP_ACTS.addTwoFactorKey)
+          return errorResponse(400, 'this machine does not save 2FA keys yet; update it first', 'bad_request');
         return answer(await service.stepUpOptions(caller(context), body.origin, body.act), value =>
           StepUpOptionsSchema.parse(value),
         );

@@ -28,6 +28,7 @@ import {
   type AgendaSnapshot,
   CONVERSATION_IMPORT_PATH,
   DAEMON_CAPABILITIES,
+  DAEMON_FEATURES,
   DoctorReportSchema,
   type FyEvent,
   type FyEventStreamIdle,
@@ -40,6 +41,7 @@ import {
   type TunnelStatusView,
   type WardenAgendaView,
   type WardenStatusView,
+  type WorkHit,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 // `chooseConnection` is aliased so the relay's carrier choice reads as what it is here: a
@@ -82,6 +84,7 @@ import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.t
 import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
+import { healthOf } from '../support/health.ts';
 import { MemoryMemberKeyStore, testSubscription } from '../support/member-keys.ts';
 import { FAKE_FRAGMENT } from '../support/shared-screens.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
@@ -425,6 +428,8 @@ interface ShellOptions {
   readonly webrtcRttMs?: (daemonId: DaemonId) => Promise<number | undefined>;
   /** Attention actions a daemon was sent (POSTs to a session's board), as `sessionId:body`. */
   readonly agendaPosts?: string[];
+  /** The hits `GET /v1/search` answers; its health also lists `work.search.1`. Absent: a machine without the search. */
+  readonly workHits?: readonly WorkHit[];
   /** Each session's conversation as the messages route serves it, in one page; absent: an empty one. */
   readonly messages?: (sessionId: string) => readonly { readonly role: 'user' | 'assistant'; readonly text: string }[];
   /** The Warden status this daemon answers; the default is a quiet, freshly swept one. */
@@ -564,6 +569,11 @@ const appStore = async (
           setBy: 'owner',
         })),
       );
+    if (options.workHits !== undefined && new URL(url).pathname === '/v1/search') {
+      const kind = new URL(url).searchParams.get('kind');
+      const hits = options.workHits.filter(hit => kind === null || hit.kind === kind);
+      return Response.json({ hits, total: hits.length, indexed: { tasks: 1, agenda: 1 } });
+    }
     // Tasks search and its file index travel the carrier now, so they are answered here too.
     return sessionSearchFixture(new URL(url)) ?? Response.json({});
   };
@@ -740,6 +750,8 @@ const appStore = async (
           if (path === '/v1/fleet/runtimes' && options.accounts !== undefined)
             return { format: 'version-2', runtimes: options.accounts };
           if (options.fleet?.[path] !== undefined) return options.fleet[path];
+          if (path === '/v1/health' && options.workHits !== undefined)
+            return healthOf('4.130.0', [DAEMON_FEATURES.workSearch]);
           // Settings › Machine › Conversations reads machine.yaml; an empty file is a valid answer.
           if (path.startsWith('/v1/config/file?')) return { text: '', etag: 'fixture' };
           return path === '/v1/doctor' ? doctorReport : {};
@@ -2478,6 +2490,36 @@ describe('AppShell', () => {
     }
   });
 
+  it('opens the tapped notification’s item as a card in the Inbox and settles the address on the Inbox', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/inbox?session=shared&agenda=A3`, [alpha.daemonId], {
+      sessions: ['shared'],
+      listedAgenda: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
+      sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
+      attention: sessionId => agendaSnapshot(sessionId, [externalAgendaItem]),
+    });
+    try {
+      for (let turn = 0; turn < 8; turn += 1) await settle();
+      expect(view.container.querySelector('[data-agenda-view]')?.getAttribute('data-agenda-view')).toBe('A3');
+      expect(window.location.pathname).toBe(`/d/${ALPHA}/inbox`);
+      expect(window.location.search).toBe('');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('sends a tapped notification’s reader to its chat when the item is no longer open', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/inbox?session=shared&agenda=A9`, [alpha.daemonId], {
+      sessions: ['shared'],
+    });
+    try {
+      for (let turn = 0; turn < 8; turn += 1) await settle();
+      expect(window.location.pathname).toBe(`/d/${ALPHA}/session/shared`);
+      expect(window.location.search).toBe('?agenda=A9');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('draws the Board for a machine and keeps the view in the address, replacing the entry', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/board`, [alpha.daemonId], { sessions: ['shared'] });
     try {
@@ -2951,6 +2993,53 @@ const paletteOpen = (container: HTMLElement): boolean =>
   container.querySelector('[role="dialog"], [data-command-palette]') !== null;
 
 describe('the command palette shortcut', () => {
+  it('searches the daemon’s cards and agenda from the finder on a machine whose health offers work.search.1', async () => {
+    const project = '6f1c2f0e-3a4b-4c55-9d1e-0a7b8c9d1e2f';
+    const hits: WorkHit[] = [
+      {
+        kind: 'task',
+        id: 'F412',
+        projectId: project,
+        sessionId: null,
+        title: 'Harden the relay handshake',
+        state: 'open',
+        standing: 'Doing',
+        updatedAt: '2026-10-30T10:00:00.000Z',
+        match: { field: 'brief', line: 'the relay handshake drops' },
+        score: 3,
+      },
+      {
+        kind: 'agenda',
+        id: 'A3',
+        sessionId: 's1',
+        title: 'Which relay region should we pick?',
+        state: 'open',
+        standing: 'open',
+        updatedAt: '2026-10-30T10:00:00.000Z',
+        match: { field: 'body', line: 'frankfurt or virginia' },
+        score: 2,
+      },
+    ];
+    const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId], { workHits: hits });
+    await settle();
+    await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+    const input = must(document.getElementById('fy-palette-input'), 'the finder input') as HTMLInputElement;
+    await interact(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, 'relay handshake');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await settleUntil(
+      () => view.container.ownerDocument.body.textContent?.includes('Harden the relay handshake') === true,
+      'the finder to show the card the daemon found',
+      interact,
+    );
+
+    const text = view.container.ownerDocument.body.textContent ?? '';
+    expect(text).toContain('Which relay region should we pick?');
+    expect(text).not.toContain(project);
+    await view.unmount();
+  });
+
   it('opens the global finder with Cmd/Ctrl+K on a session route, not the session search', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();

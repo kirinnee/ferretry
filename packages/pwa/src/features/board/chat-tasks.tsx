@@ -2,7 +2,7 @@
  * THE TASKS TAB, WIRED: `BoardSideTab` plus everything that needs the network and the screen.
  *
  * The tab itself only draws. This host owns what the Board page owns for the same cards, scaled down to one
- * ferret's: the view the reader picked (kept on this device), the card detail drawer that opens OVER the chat
+ * ferret's: the view the reader picked (kept on this device; Cards until one is), the card detail drawer that opens OVER the chat
  * (portalled to the body, so the Info panel's own scrolling and stacking cannot clip it), and the move flow
  * behind Done ✓, Not good and the ⋯ menu, which is the Board's own (`useBoardAnswers`): a move back opens the same
  * composer, the pressed answer spins and the card's others wait, and a refusal is said on the card.
@@ -25,6 +25,7 @@ import type { BoardCardOf, BoardCardPlace } from '../../lib/board-view.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonBoardCardPath, daemonBoardPath } from '../../lib/pages/routes.ts';
+import { toTestAnswersOver } from '../agenda/to-test-rows.tsx';
 import { useBoardAnswers } from './board-answers.tsx';
 import type { BoardCardMoves } from './board-card.tsx';
 import { BoardSideTab } from './board-side-tab.tsx';
@@ -99,6 +100,8 @@ export function ChatTasks({
     // The Info panel scrolls and stacks on its own; the composer goes over the whole page.
     portal: true,
   });
+
+  const toTestAnswers = useMemo(() => toTestAnswersOver({ requestMove, answerFor }), [requestMove, answerFor]);
 
   const movesFor = useCallback(
     (card: BoardCardOf, place: BoardCardPlace): BoardCardMoves | undefined => {
@@ -209,6 +212,7 @@ export function ChatTasks({
         onOpenCard={openCard}
         onView={next => boardSideView.set(next)}
         scope={scope}
+        toTestAnswers={toTestAnswers}
         view={view}
       />
       {composer}

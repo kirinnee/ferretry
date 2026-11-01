@@ -165,35 +165,25 @@ describe('FullscreenToggle', () => {
 });
 
 describe('SurfaceFrame', () => {
-  it('hands the host the controls, and fills the screen when asked', async () => {
+  it('hands the host the fullscreen controls, and fills the screen when asked', async () => {
     const view = await mount(
-      <SurfaceFrame dataBrowser="app" hostsControls marker={<i data-marker="" />}>
-        {controls => <div data-host="">{controls}</div>}
+      <SurfaceFrame dataBrowser="app">
+        {fullscreen => (
+          <button type="button" data-host="" onClick={fullscreen.toggle}>
+            {fullscreen.active ? 'exit' : 'enter'}
+          </button>
+        )}
       </SurfaceFrame>,
     );
     const frame = must(view.container.querySelector('.fy-ws-frame'), 'frame');
     expect(frame.getAttribute('data-workspace-browser')).toBe('app');
     expect(view.container.querySelector('.fy-ws-bar')).toBeNull();
-    expect(frame.querySelector('[data-host] [data-marker]')).not.toBeNull();
     expect(frame.hasAttribute('data-fullscreen')).toBe(false);
-    await interact(() => must(frame.querySelector<HTMLElement>('button[aria-label="Full screen"]'), 'toggle').click());
+    await interact(() => must(frame.querySelector<HTMLElement>('[data-host]'), 'toggle').click());
     await interact(async () => undefined);
     expect(frame.hasAttribute('data-fullscreen')).toBe(true);
     await interact(() => pressKey(document.body, 'Escape'));
     expect(frame.hasAttribute('data-fullscreen')).toBe(false);
-    await view.unmount();
-  });
-
-  it('draws one slim bar of its own only when the host has no row to put the controls in', async () => {
-    const view = await mount(
-      <SurfaceFrame dataBrowser="b1" hostsControls={false} marker={<i data-marker="" />}>
-        {controls => <div data-host="">{controls === null ? 'nothing' : 'controls'}</div>}
-      </SurfaceFrame>,
-    );
-    const bar = must(view.container.querySelector('.fy-ws-bar'), 'bar');
-    expect(bar.querySelector('[data-marker]')).not.toBeNull();
-    expect(bar.querySelector('button[aria-label="Full screen"]')).not.toBeNull();
-    expect(must(view.container.querySelector('[data-host]'), 'host').textContent).toBe('nothing');
     await view.unmount();
   });
 });

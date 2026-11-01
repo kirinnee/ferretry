@@ -29,6 +29,7 @@
  * about an open item (its History) is the host's (`readConversation`).
  */
 
+import type { AgendaId } from '@ferretry/protocol';
 import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, Search, SkipForward, X, Zap } from 'lucide-react';
 import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
@@ -727,6 +728,18 @@ export interface AgendaInboxPageProps {
   readonly from?: InboxSource | null;
   /** Lifts the source filter: the host drops `?from=` from the address. */
   readonly onClearFrom?: () => void;
+  /**
+   * An item a notification tap asked for: its card opens as soon as it is among the open ones. `settled` says the
+   * machine's conversations have been read, so a missing card means the item is no longer open — and then
+   * `onOpenSettled(false)` lets the host send the reader to the conversation instead.
+   */
+  readonly open?: {
+    readonly daemonId: DaemonId;
+    readonly sessionId: string;
+    readonly id: AgendaId;
+    readonly settled: boolean;
+  } | null;
+  readonly onOpenSettled?: (opened: boolean) => void;
   /** Starts the "With ferrets" section open (a harness). */
   readonly withFerretsOpen?: boolean;
   /**
@@ -739,6 +752,9 @@ export interface AgendaInboxPageProps {
   /** How the "Ready to test" items move their cards (the Board's own verbs). Absent: they list, and refuse to move. */
   readonly toTestHost?: ToTestHost;
 }
+
+/** How long a tapped notification's item may take to appear among the open ones before its chat opens instead. */
+const OPEN_WAIT_MS = 5_000;
 
 /** Everything a row needs besides the card itself. */
 interface RowEnv {
@@ -1001,6 +1017,8 @@ export function AgendaInboxPage({
   readConversation,
   reducedMotion,
   initialOpen,
+  open = null,
+  onOpenSettled,
   from = null,
   onClearFrom,
   withFerretsOpen = false,
@@ -1114,6 +1132,40 @@ export function AgendaInboxPage({
     setDeckAt(order[0] ?? null);
     setDeckOpen(true);
   };
+  // A tapped notification's item opens as a card once it is among the open ones; a few seconds without it
+  // (or a settled read that lacks it) mean it is no longer open, and the host takes the reader to its chat.
+  const openedFor = useRef<string | null>(null);
+  const wantedKey = open === null ? null : `${open.daemonId}\u0000${open.sessionId}\u0000${open.id}`;
+  const openSettled = open?.settled === true;
+  const openCard =
+    open === null
+      ? undefined
+      : inbox.cards.find(
+          card => card.daemonId === open.daemonId && card.view.config.id === open.sessionId && card.item.id === open.id,
+        );
+  const openCardKey = openCard?.key;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `openAt` and the host callback are re-made every render; the target and what it resolves to are the inputs
+  useEffect(() => {
+    if (wantedKey === null || openedFor.current === wantedKey) return;
+    if (openCardKey !== undefined) {
+      openedFor.current = wantedKey;
+      setFilter('open');
+      openAt(openCardKey);
+      onOpenSettled?.(true);
+      return;
+    }
+    const giveUp = (): void => {
+      openedFor.current = wantedKey;
+      onOpenSettled?.(false);
+    };
+    if (openSettled && !inbox.reading) {
+      giveUp();
+      return;
+    }
+    const timer = setTimeout(giveUp, OPEN_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [wantedKey, openCardKey, openSettled, inbox.reading]);
+
   // An open item is the deck's top card, on a phone and a wide screen alike.
   const cardOpen = deckOpen && filter === 'open' && (deckSelected !== undefined || atEnd);
 

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SignInIdSchema } from './account-ids.ts';
+import { SignInIdSchema, TwoFactorIdSchema } from './account-ids.ts';
 import { AgendaIdSchema } from './agenda.ts';
 import { BrowserChallengeProviderSchema, BrowserRefSchema } from './browser-target.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
@@ -233,6 +233,12 @@ export const InputRaiseSchema = z
      * itself matched (accounts.ts `chosenSignIn`).
      */
     secretHint: z.union([LoginEntryIdSchema, SignInIdSchema]).optional(),
+    /**
+     * The 2FA key the code is from, as `account_hint` listed it: names the card ("Code sent to ••42 (SMS)"). A HINT
+     * like `secretHint`: used only if it is a key of the account of a sign-in the daemon matched, otherwise ignored,
+     * never an error that would say whether such a key exists. A daemon from before 2FA keys ignores it.
+     */
+    factor: TwoFactorIdSchema.optional(),
     /**
      * The value comes from a secure copy the agent holds (`sealed:<name>`, docs/secure-copy.md), not from the
      * owner's keyboard: the owner only allows it. The daemon treats every field as `secret` whatever it says.
@@ -596,6 +602,12 @@ export const InputDeliverBodySchema = z
       .optional(),
     /** A saved login, by its handle: the daemon types the fields the request needs from it. */
     entry: LoginEntryIdSchema.optional(),
+    /**
+     * The saved account's 2FA key whose code the daemon makes ("Use code from Ferretry · Authy backup"), with `entry`.
+     * NOT YET TAKEN: a daemon of this build refuses a deliver that names one, until the code-card change checks that
+     * the key is the matched account's and holds a seed; absent, the account's first key in offer order is used.
+     */
+    factor: TwoFactorIdSchema.optional(),
     /** Allow a paste: the daemon types the secure copy the request names (`request.source`), never one the body names. */
     sealed: z.literal(true).optional(),
     /** Press Enter / submit after typing. */
@@ -619,6 +631,13 @@ export const InputDeliverBodySchema = z
   .superRefine((body, context) => {
     if (body.padded !== undefined && (body.entry !== undefined || body.fields !== undefined)) {
       context.addIssue({ code: 'custom', message: 'padded is the one value of a one-field card: send it alone' });
+    }
+    if (body.factor !== undefined && body.entry === undefined) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a 2FA key is one of a saved account: send it with entry',
+        path: ['factor'],
+      });
     }
     if (body.sealed === true && (body.padded !== undefined || body.entry !== undefined || body.fields !== undefined)) {
       context.addIssue({ code: 'custom', message: 'sealed allows a paste: send it alone, with no value' });

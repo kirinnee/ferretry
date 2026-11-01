@@ -1,3 +1,9 @@
+## [4.189.0](https://github.com/kirinnee/ferretry/compare/v4.188.0...v4.189.0) (2026-10-31)
+
+### Features
+
+* **input:** the code sensitivity for one-time codes, and high-priority code pushes (R0b) ([#1206](https://github.com/kirinnee/ferretry/issues/1206)) ([3e32166](https://github.com/kirinnee/ferretry/commit/3e32166dbf306fe56387ff73ccad074c05122af4))
+
 ## [4.188.0](https://github.com/kirinnee/ferretry/compare/v4.187.1...v4.188.0) (2026-10-31)
 
 ### Features

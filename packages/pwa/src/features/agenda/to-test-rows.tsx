@@ -1,5 +1,7 @@
 /**
- * THE INBOX'S "READY TO TEST" ITEMS: cards in a verify lane, waiting for the owner's Done or Not good.
+ * "READY TO TEST" ITEMS: cards in a verify lane, waiting for the owner's Done or Not good. The Inbox lists them and the
+ * chat task panel's Cards view draws one at a time; both draw this one row, so the gesture, the buttons and the reason
+ * box are the same on both.
  *
  * - SWIPE RIGHT IS DONE, LEFT IS NOT GOOD, the same sideways swipe the agenda deck has (touch only, decided after the
  *   same slop, committed past the same threshold, never started on something the reader presses or inside a sideways
@@ -19,7 +21,7 @@ import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts'
 import { daemonBoardCardPath } from '../../lib/pages/routes.ts';
 import { releaseWords, type ToTestCard } from '../../lib/to-test-inbox.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
-import { useBoardAnswers } from '../board/board-answers.tsx';
+import { type BoardAnswers, useBoardAnswers } from '../board/board-answers.tsx';
 import type { SendBackPorts } from '../board/board-send-back.tsx';
 import { cardProse, HowToTest } from '../board/detail/board-detail-sections.tsx';
 import { isTouch, lockOf, startsInSidewaysScroller, startsOnInteractive } from './agenda-swipe-gesture.ts';
@@ -51,16 +53,24 @@ export const useToTestAnswers = (host: ToTestHost | undefined, phone: boolean) =
     onNotice: setNotice,
     portal: true,
   });
-  return {
-    notice,
-    composer,
-    answerFor,
-    done: (row: ToTestCard): void => requestMove(row.card, row.group, row.doneLaneId, 'done'),
-    notGood: (row: ToTestCard): void => requestMove(row.card, row.group, row.notGoodLaneId, 'not-good'),
-  };
+  return { notice, composer, ...toTestAnswersOver({ requestMove, answerFor }) };
 };
 
-export type ToTestAnswers = ReturnType<typeof useToTestAnswers>;
+/** What a row needs to answer a card: any surface holding the Board's own `useBoardAnswers` flow can hand these over. */
+export interface ToTestAnswers {
+  readonly answerFor: BoardAnswers['answerFor'];
+  readonly done: (row: ToTestCard) => void;
+  readonly notGood: (row: ToTestCard) => void;
+}
+
+export const toTestAnswersOver = ({
+  requestMove,
+  answerFor,
+}: Pick<BoardAnswers, 'requestMove' | 'answerFor'>): ToTestAnswers => ({
+  answerFor,
+  done: row => requestMove(row.card, row.group, row.doneLaneId, 'done'),
+  notGood: row => requestMove(row.card, row.group, row.notGoodLaneId, 'not-good'),
+});
 
 interface Drag {
   readonly dx: number;

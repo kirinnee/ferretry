@@ -5,7 +5,9 @@ import { SecretNameSchema } from './secrets.ts';
  * THE NAMES OF AN ACCOUNT AND OF A SIGN-IN (docs/input-requests.md, "Accounts and sign-ins").
  *
  * Their own file, apart from `accounts.ts`, only so `login-entries.ts` (the card's offers) and `input-request.ts`
- * (a raise's hint, a deliver's sign-in) can name a sign-in without importing the module that imports them.
+ * (a raise's hint, a deliver's sign-in) can name a sign-in without importing the module that imports them. The ids of
+ * a 2FA key and of a staged seed live here for the same reason (a raise and a deliver name a key; a step-up names a
+ * stage).
  *
  * - An ACCOUNT's id is the handle people and recipes read (`GITHUB_KIRINNEE`, `[[GITHUB_KIRINNEE]]`): today's saved
  *   login handle, the same shape, and renameable. Behind it sits an immutable KEY (`L…`) that never changes, so a
@@ -28,3 +30,19 @@ export type SignInId = z.infer<typeof SignInIdSchema>;
 
 /** Whether a ferret's `secretHint` names a sign-in (`si_…`) rather than an account handle. */
 export const namesSignIn = (hint: string): hint is SignInId => SignInIdSchema.safeParse(hint).success;
+
+/**
+ * A 2FA key's id: `tf_` and 12 lowercase hex digits. Immutable and never shown to people (the CLI and plan lines
+ * only): a card names a key by its owner-written label. Random on add; derived on migration (accounts.ts).
+ */
+export const TwoFactorIdSchema = z.string().regex(/^tf_[0-9a-f]{12}$/u, 'a 2FA key id is tf_ and 12 hex digits');
+export type TwoFactorId = z.infer<typeof TwoFactorIdSchema>;
+
+/**
+ * A STAGED 2FA seed (`st_` and 24 hex digits): one save waiting for its passkey, held in the daemon's memory only.
+ * A passkey proof for `add-2fa-key` is bound to exactly one, so it cannot be spent on another save.
+ */
+export const TwoFactorStageIdSchema = z
+  .string()
+  .regex(/^st_[0-9a-f]{24}$/u, 'a staged 2FA key is st_ and 24 hex digits');
+export type TwoFactorStageId = z.infer<typeof TwoFactorStageIdSchema>;

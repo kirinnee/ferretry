@@ -118,6 +118,11 @@ done < <(jq -r 'to_entries[] | select(.key != "schemaVersion") | .key as $tier |
   then "int group \"\(.name)\" has processes \(.processes); it must be an integer from 2 to 4"
   else empty end' "${groups}")
 
+# A group's "leakGuard" makes the DOM leak guard fail a test that leaves nodes or intervals behind; it is a boolean.
+while IFS= read -r problem; do
+  [[ -n ${problem} ]] && refuse "${groups}: ${problem}"
+done < <(jq -r 'to_entries[] | select(.key != "schemaVersion") | .value[] | select(has("leakGuard") and (.leakGuard | type) != "boolean") | "group \"\(.name)\" has a leakGuard that is not true or false"' "${groups}")
+
 # ─── 4. no guessed ports ────────────────────────────────────────────────────────────────────────
 
 # Binding port 0, reading the number and closing the socket leaves a window in which another process

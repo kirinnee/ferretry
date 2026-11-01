@@ -36,32 +36,35 @@ const instantMs = (since: string | null): number => (since === null ? 0 : Date.p
 
 const sinceOf = (card: BoardCardOf): string | null => card.task.shippedIn?.at ?? card.task.lastTouchedAt;
 
+/** One card as a card to test: `null` when it is dropped or its project's lanes do not name where Done and Not good go. */
+export const toTestOf = (card: BoardCardOf, group: BoardGroupOf): ToTestCard | null => {
+  if (card.task.dropped !== null) return null;
+  const doneLaneId = doneLaneOf(group.laneSet);
+  const notGoodLaneId = notGoodLaneOf(group.laneSet);
+  if (doneLaneId === null || notGoodLaneId === null) return null;
+  return {
+    key: toTestKey(card),
+    card,
+    group,
+    doneLaneId,
+    notGoodLaneId,
+    howToTest: card.task.howToTest,
+    since: sinceOf(card),
+  };
+};
+
 /**
  * Every card in a verify lane that the owner can answer: not dropped, and in a project whose lanes name both where
  * Done and where Not good go. Newest release first; a card with no release after those that have one.
  */
 export const toTestCards = (model: BoardModel): readonly ToTestCard[] =>
   model.groups
-    .flatMap(group => {
-      const doneLaneId = doneLaneOf(group.laneSet);
-      const notGoodLaneId = notGoodLaneOf(group.laneSet);
-      if (doneLaneId === null || notGoodLaneId === null) return [];
-      return group.lanes
+    .flatMap(group =>
+      group.lanes
         .filter(lane => lane.category === 'verify')
         .flatMap(lane => lane.cards)
-        .filter(card => card.task.dropped === null)
-        .map(
-          (card): ToTestCard => ({
-            key: toTestKey(card),
-            card,
-            group,
-            doneLaneId,
-            notGoodLaneId,
-            howToTest: card.task.howToTest,
-            since: sinceOf(card),
-          }),
-        );
-    })
+        .flatMap(card => toTestOf(card, group) ?? []),
+    )
     .sort((a, b) => {
       const released = (row: ToTestCard): number => (row.card.task.shippedIn === null ? 0 : 1);
       if (released(a) !== released(b)) return released(b) - released(a);

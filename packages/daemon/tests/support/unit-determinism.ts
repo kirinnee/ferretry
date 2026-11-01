@@ -554,6 +554,13 @@ export const unitClock = {
   get pending(): number {
     return scheduled.size;
   },
+  /** Where each interval that code of ours set still runs (`file:line, every Nms`) — a library's own bookkeeping is left out. */
+  get ownIntervals(): readonly string[] {
+    return [...scheduled.values()].flatMap(timer => {
+      const ours = timer.every === null ? undefined : framesOf(timer.stack).find(isOurs);
+      return ours === undefined ? [] : [`${relative(ours)}, every ${timer.every}ms`];
+    });
+  },
   /** `auto`, `held` or `real` — see the comment above. */
   get mode(): ClockMode {
     return clockMode;

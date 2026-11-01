@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import {
+  ACCOUNT_HINT_FACTOR_NEXT,
+  accountSeedFields,
+  addTwoFactorKeySubject,
+  automaticKeysInOfferOrder,
+  MAX_FACTORS_PER_ACCOUNT,
+  SealedNameSchema,
+  sealedNamesOf,
+  TwoFactorKeyHintSchema,
+  TwoFactorKeyRecordSchema,
+  twoFactorKeySummaryOf,
+  TwoFactorKeySummarySchema,
+  TwoFactorStageIdSchema,
   AccountDefaultsFileSchema,
   type AccountDefaultsFile,
   AccountHintListSchema,
@@ -118,6 +131,24 @@ const signIn = (n: number, place: Place, extra: object = {}) => ({
   updatedAt: AT,
   ...extra,
 });
+const TF = (n: number): string => `tf_${n.toString(16).padStart(12, '0')}`;
+const PARAMS = { algorithm: 'SHA1', digits: 6, period: 30 } as const;
+const totpKey = (id: string, extra: object = {}) => ({
+  id,
+  kind: 'totp',
+  label: 'Authenticator app',
+  addedAt: AT,
+  addedBy: 'owner',
+  ...extra,
+});
+const otherKey = (id: string, kind: string, label: string, extra: object = {}) => ({
+  id,
+  kind,
+  label,
+  addedAt: AT,
+  addedBy: 'owner',
+  ...extra,
+});
 const index = (accounts: Record<string, object | undefined>, signIns: Record<string, object>) => ({
   v: 2,
   accounts,
@@ -200,21 +231,114 @@ describe('the version 2 index and the store’s rules', () => {
   });
 
   it('should refuse a seal that is not the account’s own, for its own field, or that two accounts share (L6)', () => {
-    const own = (n: number, field: string) => `${KEY(n)}_${field}_00000001`;
-    const totp = { algorithm: 'SHA1', digits: 6, period: 30 };
+    const own = (n: number, field: string, suffix = '00000001') => `${KEY(n)}_${field}_${suffix}`;
+    const seeded = (n: number, seal: string, id = TF(n)) =>
+      totpKey(id, { label: `App ${String(n)}`, seal, params: PARAMS });
     for (const accounts of [
       { A: account(1, { seals: { password: own(2, 'PASSWORD') } }), B: account(2) },
       { A: account(1, { seals: { password: own(1, 'TOTP') } }) },
-      { A: account(1, { seals: { totp: own(1, 'PASSWORD') }, totp }) },
+      // A 2FA key's seed is the account's own TOTP seal: not another account's, never a password.
+      { A: account(1, { factors: [seeded(1, own(2, 'TOTP'))] }), B: account(2) },
+      { A: account(1, { factors: [seeded(1, own(1, 'PASSWORD'))] }) },
+      // One seal named twice: by two accounts' keys, by two keys of one account, or by a password and a key.
+      {
+        A: account(1, { factors: [seeded(1, own(1, 'TOTP'))] }),
+        B: account(2, { factors: [seeded(2, own(1, 'TOTP'))] }),
+      },
+      { A: account(1, { factors: [seeded(1, own(1, 'TOTP')), seeded(2, own(1, 'TOTP'))] }) },
+      // The old single-seed fields are gone from the index.
       { A: account(1, { seals: { totp: own(1, 'TOTP') } }) },
-      { A: account(1, { totp }) },
+      { A: account(1, { totp: PARAMS }) },
     ])
       expect(AccountIndexDocumentSchema.safeParse(index(accounts, {})).success).toBe(false);
     expect(
       AccountIndexDocumentSchema.safeParse(
-        index({ A: account(1, { seals: { password: own(1, 'PASSWORD'), totp: own(1, 'TOTP') }, totp }) }, {}),
+        index(
+          {
+            A: account(1, {
+              seals: { password: own(1, 'PASSWORD') },
+              factors: [seeded(1, own(1, 'TOTP')), seeded(2, own(1, 'TOTP', '00000002'))],
+            }),
+          },
+          {},
+        ),
       ).success,
     ).toBe(true);
+  });
+
+  it('should keep a 2FA key’s code parameters exactly with its seed, and check by use only a key with one', () => {
+    const seal = `${KEY(1)}_TOTP_00000001`;
+    for (const key of [
+      totpKey(TF(1), { seal }),
+      totpKey(TF(1), { params: PARAMS }),
+      totpKey(TF(1), { verified: { worked: true, at: AT } }),
+    ])
+      expect(AccountIndexDocumentSchema.safeParse(index({ A: account(1, { factors: [key] }) }, {})).success).toBe(
+        false,
+      );
+    for (const key of [
+      totpKey(TF(1)),
+      totpKey(TF(1), { seal, params: PARAMS, verified: { worked: false, at: AT }, issuer: 'GitHub' }),
+    ])
+      expect(AccountIndexDocumentSchema.safeParse(index({ A: account(1, { factors: [key] }) }, {})).success).toBe(true);
+  });
+
+  it('should refuse a 2FA key id two keys share anywhere in the index, and two labels one account would read alike', () => {
+    for (const accounts of [
+      {
+        A: account(1, { factors: [otherKey(TF(1), 'sms', 'Phone')] }),
+        B: account(2, { factors: [otherKey(TF(1), 'push', 'Okta')] }),
+      },
+      { A: account(1, { factors: [otherKey(TF(1), 'sms', 'Phone'), otherKey(TF(2), 'email', ' PHONE ')] }) },
+    ])
+      expect(AccountIndexDocumentSchema.safeParse(index(accounts, {})).success).toBe(false);
+    // The same label on two accounts is fine: a card names the key within its own account.
+    expect(
+      AccountIndexDocumentSchema.safeParse(
+        index(
+          {
+            A: account(1, { factors: [otherKey(TF(1), 'sms', 'Phone')] }),
+            B: account(2, { factors: [otherKey(TF(2), 'sms', 'Phone')] }),
+          },
+          {},
+        ),
+      ).success,
+    ).toBe(true);
+  });
+
+  it('should keep at most 8 2FA keys on an account, and at most 4 of them with a seed', () => {
+    const seeds = (count: number) =>
+      Array.from({ length: count }, (_, n) =>
+        totpKey(TF(n + 1), { label: `App ${String(n)}`, seal: `${KEY(1)}_TOTP_0000000${String(n)}`, params: PARAMS }),
+      );
+    const many = Array.from({ length: MAX_FACTORS_PER_ACCOUNT + 1 }, (_, n) =>
+      otherKey(TF(n + 1), 'sms', `Phone ${String(n)}`),
+    );
+    expect(AccountIndexDocumentSchema.safeParse(index({ A: account(1, { factors: seeds(4) }) }, {})).success).toBe(
+      true,
+    );
+    expect(AccountIndexDocumentSchema.safeParse(index({ A: account(1, { factors: seeds(5) }) }, {})).success).toBe(
+      false,
+    );
+    expect(
+      AccountIndexDocumentSchema.safeParse(index({ A: account(1, { factors: many.slice(0, 8) }) }, {})).success,
+    ).toBe(true);
+    expect(AccountIndexDocumentSchema.safeParse(index({ A: account(1, { factors: many }) }, {})).success).toBe(false);
+  });
+
+  it('should refuse a key of a kind it does not know, a value where none may be, and a whole phone number', () => {
+    for (const key of [
+      otherKey(TF(1), 'voice', 'Phone'),
+      { ...otherKey(TF(1), 'sms', 'Phone'), seal: `${KEY(1)}_TOTP_00000001` },
+      { ...otherKey(TF(1), 'sms', 'Phone'), endsWith: '+15551234567' },
+      { ...otherKey(TF(1), 'push', 'Okta'), app: 'authy' },
+      { ...otherKey(TF(1), 'sms', 'Phone'), addedBy: 'ferret' },
+      { ...otherKey(TF(1), 'sms', 'Phone'), id: 'tf_XYZ' },
+      { ...otherKey(TF(1), 'sms', 'Phone'), label: 'Phone‮' },
+    ])
+      expect(AccountIndexDocumentSchema.safeParse(index({ A: account(1, { factors: [key] }) }, {})).success).toBe(
+        false,
+      );
   });
 
   it('should refuse a stored recipe a recipe may not be (L6)', () => {
@@ -433,6 +557,7 @@ const summary = (id: string, label: string, signIns: string[], fields = { passwo
   label,
   username: 'kirin@example.com',
   fields,
+  factors: [],
   signIns,
   createdAt: AT,
   updatedAt: AT,
@@ -497,18 +622,26 @@ describe('what a ferret may learn about signing in (account.hint)', () => {
 
   it('should never say which secret fields an account holds (invariant 2)', () => {
     // Arrange — the same account twice, once with a password and a 2FA seed, once with nothing sealed
+    const key = { id: TF(1), kind: 'totp', label: 'Authenticator app', addedAt: AT, addedBy: 'owner' };
     const withSecrets = AccountListSchema.parse({
       ...LIST,
       accounts: LIST.accounts.map(account =>
         account.id === 'VERCEL_WORK'
-          ? { ...account, fields: { password: true, totp: true }, totp: { algorithm: 'SHA1', digits: 6, period: 30 } }
+          ? {
+              ...account,
+              fields: { password: true, totp: true },
+              totp: PARAMS,
+              factors: [{ ...key, automatic: true, params: PARAMS, verified: { worked: true, at: AT } }],
+            }
           : account,
       ),
     });
     const withNothing = AccountListSchema.parse({
       ...LIST,
       accounts: LIST.accounts.map(account =>
-        account.id === 'VERCEL_WORK' ? { ...account, fields: { password: false, totp: false } } : account,
+        account.id === 'VERCEL_WORK'
+          ? { ...account, fields: { password: false, totp: false }, factors: [{ ...key, automatic: false }] }
+          : account,
       ),
     });
 
@@ -516,9 +649,82 @@ describe('what a ferret may learn about signing in (account.hint)', () => {
     const one = accountHintsFor('vercel.com', withSecrets);
     const other = accountHintsFor('vercel.com', withNothing);
 
-    // Assert
+    // Assert — and a TOTP key reads the same whether Ferretry holds its seed or the owner does (invariant 13)
     expect(JSON.stringify(one)).toBe(JSON.stringify(other));
     expect(accountHintSummary('vercel.com', one)).toBe(accountHintSummary('vercel.com', other));
+    expect(one.find(hint => hint.account.id === 'VERCEL_WORK')?.factors).toEqual([
+      { id: TF(1), kind: 'totp', label: 'Authenticator app' },
+    ]);
+  });
+
+  it('should list an account’s 2FA keys by id, kind and label only, and nothing more of them', () => {
+    // Arrange
+    const keys = [
+      {
+        id: TF(1),
+        kind: 'push',
+        label: 'Okta Verify on Pixel',
+        addedAt: AT,
+        addedBy: 'owner',
+        automatic: false,
+        app: 'okta-verify',
+      },
+      { id: TF(2), kind: 'sms', label: 'Phone ••42', addedAt: AT, addedBy: 'owner', automatic: false, endsWith: '42' },
+      {
+        id: TF(3),
+        kind: 'email',
+        label: 'Work inbox',
+        addedAt: AT,
+        addedBy: 'owner',
+        automatic: false,
+        to: 'kirin@example.com',
+      },
+      {
+        id: TF(4),
+        kind: 'totp',
+        label: 'Authy',
+        addedAt: AT,
+        addedBy: 'migration',
+        automatic: true,
+        params: PARAMS,
+        issuer: 'Vercel',
+        accountName: 'kirin',
+      },
+    ];
+    const list = AccountListSchema.parse({
+      ...LIST,
+      accounts: LIST.accounts.map(account =>
+        account.id === 'VERCEL_WORK'
+          ? { ...account, fields: { password: true, totp: true }, totp: PARAMS, factors: keys }
+          : account,
+      ),
+    });
+
+    // Act
+    const hint = accountHintsFor('vercel.com', list).find(candidate => candidate.account.id === 'VERCEL_WORK');
+    const line = accountHintSummary('vercel.com', hint === undefined ? [] : [hint]);
+
+    // Assert
+    expect(hint?.factors).toEqual(keys.map(({ id, kind, label }) => ({ id, kind, label })) as never);
+    expect(line).toContain(
+      `2FA: 'Okta Verify on Pixel' (push) [${TF(1)}], 'Phone ••42' (sms) [${TF(2)}], 'Work inbox' (email) [${TF(3)}], 'Authy' (totp) [${TF(4)}].`,
+    );
+    for (const secretish of ['okta-verify', 'kirin@example.com', 'Vercel', 'SHA1', 'automatic', 'migration'])
+      expect(JSON.stringify(hint?.factors)).not.toContain(secretish);
+    // How to use a key is not said until the request tools take `factor` and `push`.
+    expect(line).not.toContain(ACCOUNT_HINT_FACTOR_NEXT);
+    // An account with no keys has no list, rather than an empty one.
+    expect(accountHintsFor('vercel.com', LIST).every(other => other.factors === undefined)).toBe(true);
+    // A hint's key is strict: a seal, parameters or `automatic` cannot ride along.
+    for (const extra of [
+      { automatic: true },
+      { params: PARAMS },
+      { seal: `${KEY(1)}_TOTP_00000001` },
+      { endsWith: '42' },
+    ])
+      expect(TwoFactorKeyHintSchema.safeParse({ id: TF(1), kind: 'totp', label: 'Authy', ...extra }).success).toBe(
+        false,
+      );
   });
 
   it('should carry no fields, 2FA parameters, seals, keep-apart pairs, auto-apply, proposals or times', () => {
@@ -645,6 +851,197 @@ function propertyNames(schema: z.ZodType, text = false): string[] {
   return names;
 }
 
+describe('2FA keys as the owner reads them', () => {
+  const record = TwoFactorKeyRecordSchema.parse(
+    totpKey(TF(1), { seal: `${KEY(1)}_TOTP_00000001`, params: PARAMS, issuer: 'GitHub', accountName: 'kirinnee' }),
+  );
+
+  it('should drop the seal and say only whether Ferretry makes the codes', () => {
+    // Act
+    const summary = twoFactorKeySummaryOf(record);
+    const typed = twoFactorKeySummaryOf(TwoFactorKeyRecordSchema.parse(totpKey(TF(2))));
+    const sms = twoFactorKeySummaryOf(
+      TwoFactorKeyRecordSchema.parse(otherKey(TF(3), 'sms', 'Phone', { endsWith: '42' })),
+    );
+
+    // Assert
+    expect(summary).toEqual({
+      id: TF(1),
+      kind: 'totp',
+      label: 'Authenticator app',
+      addedAt: AT,
+      addedBy: 'owner',
+      params: PARAMS,
+      issuer: 'GitHub',
+      accountName: 'kirinnee',
+      automatic: true,
+    });
+    expect(JSON.stringify(summary)).not.toContain('_TOTP_');
+    expect(typed.automatic).toBe(false);
+    expect(sms).toEqual({
+      id: TF(3),
+      kind: 'sms',
+      label: 'Phone',
+      addedAt: AT,
+      addedBy: 'owner',
+      endsWith: '42',
+      automatic: false,
+    });
+    for (const parsed of [summary, typed, sms]) expect(TwoFactorKeySummarySchema.safeParse(parsed).success).toBe(true);
+  });
+
+  it('should refuse a summary that carries a seal, or says automatic of a key that cannot be', () => {
+    for (const bad of [
+      { ...twoFactorKeySummaryOf(record), seal: `${KEY(1)}_TOTP_00000001` },
+      { ...twoFactorKeySummaryOf(record), automatic: false },
+      { ...otherKey(TF(3), 'sms', 'Phone'), automatic: true },
+      { ...otherKey(TF(3), 'push', 'Okta'), automatic: false, addedAt: 'yesterday' },
+    ])
+      expect(TwoFactorKeySummarySchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('should keep the owner view’s compatibility fields in step with its keys', () => {
+    // Arrange
+    const owner = (fields: { password: boolean; totp: boolean }, factors: object[]) => ({
+      id: 'GITHUB',
+      label: 'GitHub',
+      fields,
+      factors,
+      signIns: [],
+      createdAt: AT,
+      updatedAt: AT,
+    });
+    const automatic = twoFactorKeySummaryOf(record);
+
+    // Act / Assert
+    expect(AccountSummarySchema.safeParse(owner({ password: true, totp: true }, [automatic])).success).toBe(true);
+    expect(AccountSummarySchema.safeParse(owner({ password: true, totp: false }, [automatic])).success).toBe(false);
+    expect(AccountSummarySchema.safeParse(owner({ password: true, totp: true }, [])).success).toBe(false);
+    expect(accountSeedFields([automatic])).toEqual({ totp: true, params: PARAMS });
+    expect(accountSeedFields([twoFactorKeySummaryOf(TwoFactorKeyRecordSchema.parse(totpKey(TF(2))))])).toEqual({
+      totp: false,
+    });
+  });
+
+  it('should offer the automatic keys that worked first, then the untried, then the failed, newest first in each', () => {
+    // Arrange
+    const key = (n: number, addedAt: string, worked?: boolean) =>
+      TwoFactorKeySummarySchema.parse({
+        ...totpKey(TF(n), { label: `App ${String(n)}`, addedAt }),
+        params: PARAMS,
+        automatic: true,
+        ...(worked === undefined ? {} : { verified: { worked, at: AT } }),
+      });
+    const keys = [
+      key(1, '2026-10-01T00:00:00.000Z', false),
+      key(2, '2026-10-02T00:00:00.000Z'),
+      key(3, '2026-10-03T00:00:00.000Z', true),
+      key(4, '2026-10-04T00:00:00.000Z'),
+      key(5, '2026-10-05T00:00:00.000Z', true),
+      TwoFactorKeySummarySchema.parse({ ...otherKey(TF(6), 'sms', 'Phone'), automatic: false }),
+      TwoFactorKeySummarySchema.parse({ ...totpKey(TF(7), { label: 'Typed' }), automatic: false }),
+    ];
+
+    // Act
+    const order = automaticKeysInOfferOrder(keys).map(each => each.id);
+
+    // Assert
+    expect(order).toEqual([TF(5), TF(3), TF(4), TF(2), TF(1)]);
+    // Two keys alike in all but their id keep one order, whichever way they were listed.
+    const twin = (n: number) => key(n, '2026-10-06T00:00:00.000Z', true);
+    expect(automaticKeysInOfferOrder([twin(9), twin(8)]).map(each => each.id)).toEqual([TF(8), TF(9)]);
+    expect(automaticKeysInOfferOrder([twin(8), twin(9)]).map(each => each.id)).toEqual([TF(8), TF(9)]);
+  });
+
+  it('should bind an add-2fa-key proof to one account and one staged seed', () => {
+    // Arrange
+    const stage = `st_${'a'.repeat(24)}`;
+    const expected = createHash('sha256')
+      .update(`ferretry.add-2fa-key.v1\0${KEY(1)}\0${stage}`)
+      .digest('hex');
+
+    // Act / Assert
+    expect(addTwoFactorKeySubject(KEY(1), stage)).toBe(expected);
+    expect(addTwoFactorKeySubject(KEY(2), stage)).not.toBe(expected);
+    expect(addTwoFactorKeySubject(KEY(1), `st_${'b'.repeat(24)}`)).not.toBe(expected);
+    expect(TwoFactorStageIdSchema.safeParse(stage).success).toBe(true);
+    for (const bad of ['st_short', `st_${'A'.repeat(24)}`, `tf_${'a'.repeat(24)}`])
+      expect(TwoFactorStageIdSchema.safeParse(bad).success).toBe(false);
+  });
+
+  it('should list every sealed name an account points at: the password and each key’s seed', () => {
+    const parsed = AccountIndexDocumentSchema.parse(
+      index(
+        {
+          A: account(1, {
+            seals: { password: `${KEY(1)}_PASSWORD_00000001` },
+            factors: [
+              record,
+              totpKey(TF(2), { label: 'Typed' }),
+              otherKey(TF(3), 'sms', 'Phone'),
+              totpKey(TF(4), { label: 'Backup', seal: `${KEY(1)}_TOTP_00000002`, params: PARAMS }),
+            ],
+          }),
+        },
+        {},
+      ),
+    );
+    expect(sealedNamesOf(parsed.accounts.A ?? { seals: {} })).toEqual([
+      `${KEY(1)}_PASSWORD_00000001`,
+      `${KEY(1)}_TOTP_00000001`,
+      `${KEY(1)}_TOTP_00000002`,
+    ]);
+  });
+
+  it('should list, and check, every field of an account that holds a seal: one walk cannot miss what the other sees (L5)', () => {
+    // Arrange — an account with every kind of key and every field filled, its seals found by shape, not by name
+    const full = account(1, {
+      username: 'kirin',
+      seals: { password: `${KEY(1)}_PASSWORD_00000001` },
+      factors: [
+        totpKey(TF(1), {
+          label: 'App',
+          seal: `${KEY(1)}_TOTP_00000001`,
+          params: PARAMS,
+          issuer: 'GitHub',
+          accountName: 'kirin',
+          verified: { worked: true, at: AT },
+        }),
+        totpKey(TF(2), { label: 'Backup', seal: `${KEY(1)}_TOTP_00000002`, params: PARAMS }),
+        totpKey(TF(3), { label: 'Typed' }),
+        otherKey(TF(4), 'sms', 'Phone', { endsWith: '42' }),
+        otherKey(TF(5), 'email', 'Inbox', { to: 'kirin@example.com' }),
+        otherKey(TF(6), 'push', 'Okta', { app: 'okta-verify' }),
+        otherKey(TF(7), 'security-key', 'YubiKey'),
+      ],
+      apartFrom: [KEY(2)],
+    });
+    const parsed = AccountIndexDocumentSchema.parse(index({ A: full, B: account(2) }, {}));
+    const sealShaped: { path: (string | number)[]; seal: string }[] = [];
+    const walk = (node: unknown, path: (string | number)[]): void => {
+      if (typeof node === 'string' && SealedNameSchema.safeParse(node).success) sealShaped.push({ path, seal: node });
+      else if (node !== null && typeof node === 'object')
+        for (const [key, child] of Object.entries(node))
+          walk(child, [...path, Array.isArray(node) ? Number(key) : key]);
+    };
+    walk(parsed.accounts.A, []);
+
+    // Act / Assert — the sweep's list is exactly the seals there are
+    expect(sealedNamesOf(parsed.accounts.A ?? { seals: {} }).toSorted()).toEqual(
+      sealShaped.map(({ seal }) => seal).toSorted(),
+    );
+    expect(sealShaped).toHaveLength(3);
+    // ...and each of them is checked: pointed at another account's secret, the index is damaged
+    for (const { path, seal } of sealShaped) {
+      const moved = structuredClone(full) as Record<string, unknown>;
+      let at: Record<string | number, unknown> = moved;
+      for (const step of path.slice(0, -1)) at = at[step] as Record<string | number, unknown>;
+      at[path.at(-1) as string | number] = seal.replace(KEY(1), KEY(2));
+      expect(AccountIndexDocumentSchema.safeParse(index({ A: moved, B: account(2) }, {})).success).toBe(false);
+    }
+  });
+});
+
 describe('the account wire shapes (invariant 1, the protocol half)', () => {
   it('should have no field named or shaped like a value', () => {
     const VALUE_LIKE =
@@ -655,6 +1052,8 @@ describe('the account wire shapes (invariant 1, the protocol half)', () => {
       AccountListSchema,
       AccountHintSchema,
       AccountHintListSchema,
+      TwoFactorKeySummarySchema,
+      TwoFactorKeyHintSchema,
     ])
       expect(propertyNames(schema, true).filter(name => VALUE_LIKE.test(name))).toEqual([]);
     // `fields.password` on the owner's summary says only whether one exists.

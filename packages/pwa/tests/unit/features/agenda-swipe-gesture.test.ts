@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import {
   isTouch,
   LOCK_PX,
@@ -62,6 +62,10 @@ describe('startsOnInteractive', () => {
 });
 
 describe('startsInSidewaysScroller', () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
   const scroller = (scrollWidth: number, overflowX: string): HTMLElement => {
     const box = document.createElement('div');
     box.style.overflowX = overflowX;

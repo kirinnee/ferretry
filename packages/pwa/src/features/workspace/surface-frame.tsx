@@ -1,37 +1,26 @@
 /**
  * THE FRAME AROUND A SURFACE THAT CAN FILL THE SCREEN (a browser page).
  *
- * It owns the full-screen state and hands the host one node, `controls`: the agent-control
- * marker followed by the Full screen button. The host puts that in the row it already has —
- * the browser's page strip — so full screen costs a button, not a bar. A host with no row
- * of its own gets one slim bar here instead, the only case where the frame adds
- * height, and then only the ~32px the controls need.
- *
- * Full screen is the frame's whole element, so everything inside — the strip, the page —
- * comes with it; the stylesheet then folds the strip down to its controls row.
+ * It owns the full-screen state and hands the host the toggle, which the browser bar carries in its ⋯
+ * menu — so full screen costs a menu entry, not a bar. Full screen is the frame's whole element, so
+ * everything inside — the bar, the page — comes with it.
  */
 
 import type { ReactNode } from 'react';
-import { FullscreenToggle } from '../../components/fullscreen-toggle.tsx';
 import { useFullscreen } from '../../hooks/use-fullscreen.ts';
 
-export interface SurfaceFrameProps {
-  /** The agent-control marker for this surface; renders nothing while nobody drives it. */
-  readonly marker: ReactNode;
-  /** The host draws `controls` itself. Otherwise the frame draws them in a slim bar of its own. */
-  readonly hostsControls: boolean;
-  readonly dataBrowser: string;
-  readonly children: (controls: ReactNode) => ReactNode;
+export interface SurfaceFullscreen {
+  readonly active: boolean;
+  readonly toggle: () => void;
 }
 
-export function SurfaceFrame({ marker, hostsControls, dataBrowser, children }: SurfaceFrameProps) {
+export interface SurfaceFrameProps {
+  readonly dataBrowser: string;
+  readonly children: (fullscreen: SurfaceFullscreen) => ReactNode;
+}
+
+export function SurfaceFrame({ dataBrowser, children }: SurfaceFrameProps) {
   const fullscreen = useFullscreen<HTMLDivElement>();
-  const controls = (
-    <>
-      {marker}
-      <FullscreenToggle active={fullscreen.active} onToggle={fullscreen.toggle} />
-    </>
-  );
   return (
     <div
       className="fy-ws-frame relative flex min-h-0 flex-1 flex-col"
@@ -39,8 +28,7 @@ export function SurfaceFrame({ marker, hostsControls, dataBrowser, children }: S
       data-workspace-browser={dataBrowser}
       ref={fullscreen.ref}
     >
-      {hostsControls ? null : <div className="fy-ws-bar">{controls}</div>}
-      {children(hostsControls ? controls : null)}
+      {children({ active: fullscreen.active, toggle: fullscreen.toggle })}
     </div>
   );
 }

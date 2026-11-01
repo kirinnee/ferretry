@@ -284,6 +284,19 @@ describe('RemoteBrowserPane composition', () => {
     expect(transport.reads).toEqual([scopeA]);
   });
 
+  it('hosted by a workspace tab, drops the legacy chrome and keeps the text field in its own row', async () => {
+    const transport = new FakeTransport(runningStatus());
+    const renderer = await mountPane(
+      <RemoteBrowserPane daemon={daemonA} scope={scopeA} transport={transport} schedule={pollSeam().schedule} hosted />,
+    );
+    const markup = json(renderer);
+
+    expect(markup).toContain('data-browser-type-row');
+    expect(markup).toContain('Type into remote browser');
+    expect(markup).not.toContain('Chrome pages');
+    expect(markup).not.toContain('10m idle stop');
+  });
+
   it('dispatches every chrome action through the scoped hook', async () => {
     const transport = new FakeTransport(runningStatus());
     const poll = pollSeam();
