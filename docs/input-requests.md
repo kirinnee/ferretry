@@ -1385,9 +1385,17 @@ in the table above holds for a rule too, plus these:
   the account handle and the 2FA key id; a miss is `input.requested` with `preapproval: 'did-not-apply'`, the rule and
   `because`. Each suspension is `sign-in-rule-suspended` with its reason.
 
-What it does NOT do, said plainly: a rule checks where the password goes, not why. A two-step sign-in fills only the
-steps whose forms the owner's own taps have history with, and today the owner's history counts only masked forms, so a
-username-only or code-only page asks the owner. And every ferret is honest-client (`SIGN_IN_RULE_HONEST_LIMIT`):
+What it does NOT do, said plainly:
+
+- **A rule checks where the password goes, not why.**
+- **A two-step sign-in fills the password page; a separate code page (or a username-only page) asks you, even with the
+  code ticked.** Row 17 fills only forms in the owner's own history, pinned when the rule was approved, and that
+  history counts a form only when its secret went into a password box (`masked`). A code box or a username box never
+  is one, so tapping that page yourself does not change it. The same holds for a form that asks for the password and
+  the code together when the code box is a plain text box. So today a rule types a code only into a form whose every
+  secret box, the code's included, is a password box: in practice, rarely. Fails closed: the page asks, and the rule is
+  not suspended.
+- **Every ferret is honest-client** (`SIGN_IN_RULE_HONEST_LIMIT`):
 
 > This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop a
 > ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
