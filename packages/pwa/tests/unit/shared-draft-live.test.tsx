@@ -1131,6 +1131,30 @@ describe('the send mark (rose N1, N3) and kept copies (N2)', () => {
     run(() => root.unmount());
   });
 
+  test('N3: a mark already given up, or a stream starting afresh, gets no clear and no wait', async () => {
+    // Arrange
+    const daemonSide = new FakeDaemon();
+    const devices = mountDevices(daemonSide, { laptop: '' });
+    await settle();
+    devices.type('laptop', 'words');
+    await settle();
+    const hook = devices.hooks.laptop as SharedDraft;
+
+    // Act — one mark abandoned (its send refused); another pressed while the stream starts afresh.
+    const abandoned = hook.markSend();
+    hook.abandonSend(abandoned);
+    const first = daemonSide.streams[0] as FakeStream;
+    daemonSide.drop(first);
+    for (const closer of first.closers) closer({ code: SHARED_DRAFT_STREAM_RESYNC_CLOSE, reason: 'too large' });
+    await settle();
+    const resyncing = (devices.hooks.laptop as SharedDraft).markSend();
+
+    // Assert — both answered at once, with nothing.
+    expect(hook.sendClear(abandoned)).toBeUndefined();
+    expect((devices.hooks.laptop as SharedDraft).sendClear(resyncing)).toBeUndefined();
+    devices.unmount();
+  });
+
   test('N2: a second set of words waiting to be restored never costs the first, however long, across a reload', async () => {
     // Arrange — two conflicts, long enough together to pass one draft's bound.
     const daemonSide = new FakeDaemon();
