@@ -1,3 +1,9 @@
+## [4.217.1](https://github.com/kirinnee/ferretry/compare/v4.217.0...v4.217.1) (2026-11-01)
+
+### Fixes
+
+* **board:** let a card's assignee hand it down to its own sub-ferret ([#1286](https://github.com/kirinnee/ferretry/issues/1286)) ([72459e6](https://github.com/kirinnee/ferretry/commit/72459e6b54639f702cfbe57842f8df9045d0b32a))
+
 ## [4.217.0](https://github.com/kirinnee/ferretry/compare/v4.216.0...v4.217.0) (2026-11-01)
 
 ### Features
