@@ -641,14 +641,32 @@ Every terminal rule card, sheet and Settings row carries two more lines beside t
 
 > This gives every ferret on this machine root whenever it asks, while the rule lasts. (`SIGN_IN_RULE_ROOT_WARNING`)
 
-> Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a
-> program's name. A ferret starts that program, so it could start another program root installed under the name sudo.
+> Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a
+> process gave itself. A ferret starts that program, so it could start another program root installed under the name
+> sudo.
 > (`SIGN_IN_RULE_TERMINAL_HONEST_LIMIT`)
 
 So, said plainly: **a sudo rule gives every ferret root on demand while it lasts**, and **the program is proved by the
 kernel, not by its name**: what reads the password is a setuid program root installed, but the ferret chooses which one
 it starts as `sudo` (`passwd` started under that name would get it). With full sudo that gives nothing beyond the rule
 itself; under a restricted sudoers it could set a password the ferret then knows.
+
+**The race that remains, and how a rule bounds it** (secrev-1301 M1). Between the daemon's last kernel look and tmux's
+guarded write, the reader is checked only by facts a process of this account can reproduce: the pane, the name of its
+foreground command and the cursor row. A ferret that kills the real sudo in that window and puts its own reader there
+under the name `sudo` could pass that guard. A standing rule therefore:
+
+1. types the password **without Enter**, then has the kernel prove again that the **same setuid process still leads the
+   foreground group** (same pid and group, still sudo, su or doas setuid root, echo off, line mode) before it sends
+   Enter. A line-mode reader can't read the password before Enter, so the real sudo is always still there; if it is not,
+   the line is erased, the request ends and the rule is suspended;
+2. treats a write **tmux's guard refused**, after a look that matched the card, the same way: nothing is typed and the
+   rule is suspended. A screen that merely changed before the write still just redraws the card.
+
+Both suspend with `program-changed` ("the program reading the terminal changed while Ferretry was typing"), sticky and
+audited, shown to the owner only. So a ferret gets **one try per owner approval**, never ten an hour for a week. What
+remains: a reader that swapped in during that window and reads key by key may have read the password before the
+suspension.
 
 ### Strict, and fails closed
 

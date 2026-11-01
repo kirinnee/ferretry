@@ -515,7 +515,7 @@ describe('standing sign-in rules: the wire', () => {
       'This gives every ferret on this machine root whenever it asks, while the rule lasts.',
     );
     should(SIGN_IN_RULE_TERMINAL_HONEST_LIMIT).equal(
-      "Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a program's name. A ferret starts that program, so it could start another program root installed under the name sudo.",
+      'Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a process gave itself. A ferret starts that program, so it could start another program root installed under the name sudo.',
     );
   });
 

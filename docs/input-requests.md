@@ -1397,7 +1397,10 @@ in the table above holds for a rule too, plus these:
   mode, echo off, a known secret reader, the proved tool and this machine exactly the pinned key, one password field;
   and row 17, the prompt the owner's own taps have history with. Then the guarded write: `proceed()` is asked right
   before the tmux `if-shell` guard (pane pid, foreground command, cursor row, pane alive), so a revoke landing there
-  types nothing. A program the kernel did not prove has no key at all: a shell that renamed itself `sudo` makes no rule
+  types nothing. Under a rule the password goes in without Enter, and Enter follows only once the kernel proves again
+  that the same setuid process leads the foreground group; a reader that changed, or a write the guard refused after a
+  matching look, types nothing more and suspends the rule (`program-changed`), so the race between the look and the
+  write gets one try per approval ([secrets › Terminal rules](secrets.md#terminal-rules-sudo-su-or-doas)). A program the kernel did not prove has no key at all: a shell that renamed itself `sudo` makes no rule
   even be tried, and the card is a plain one. A setuid sudo with echo on, a prompt not proved to ask for secrets, or a
   sudo not running setuid root (`not-proved`, `not-system`) types nothing and suspends nothing. Any other program
   (ssh, npm, passwd) can never have a rule (`tool-not-covered`). Its history is the owner's own taps into a proved
@@ -1440,8 +1443,9 @@ What it does NOT do, said plainly:
 
 > This gives every ferret on this machine root whenever it asks, while the rule lasts.
 
-> Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a
-> program's name. A ferret starts that program, so it could start another program root installed under the name sudo.
+> Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a
+> process gave itself. A ferret starts that program, so it could start another program root installed under the name
+> sudo.
 
 ## Who reads the terminal
 

@@ -128,11 +128,18 @@ export const SIGN_IN_RULE_ROOT_WARNING =
 
 /**
  * What a terminal rule's program proof is worth, beside {@link SIGN_IN_RULE_ROOT_WARNING}, verbatim: the kernel proves a
- * program root installed is reading the terminal setuid root, never by the name a process shows; but whoever starts it
- * picks the name it starts under (secrev-1266a L4).
+ * program root installed is reading the terminal setuid root, never by a name a process gave itself; but whoever starts
+ * it picks the name it starts under (secrev-1266a L4).
+ *
+ * THE RACE THAT REMAINS (secrev-1301 M1): between the daemon's last kernel look and tmux's guarded write, the reader is
+ * checked only by facts a process of this account can reproduce (the pane, its foreground command's name, the cursor
+ * row). A standing rule bounds it: the password goes in without Enter, the same setuid process must still lead the
+ * foreground group (proved again by the kernel) before Enter is sent, and a guard that refuses or a reader that changed
+ * SUSPENDS the rule (`program-changed`), so a ferret gets one try per owner approval, never ten an hour for a week. A
+ * reader that swapped in during that window and reads key by key may still have read the password before the suspension.
  */
 export const SIGN_IN_RULE_TERMINAL_HONEST_LIMIT =
-  "Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a program's name. A ferret starts that program, so it could start another program root installed under the name sudo.";
+  'Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a process gave itself. A ferret starts that program, so it could start another program root installed under the name sudo.';
 
 /** Whether a rule is for a page sign-in or a terminal one (sudo, su, doas). */
 export const SignInRuleSurfaceSchema = z.enum(['page', 'terminal']);
@@ -314,7 +321,7 @@ export type SignInRuleProof = z.infer<typeof SignInRuleProofSchema>;
 
 /**
  * WHY A RULE WAS SUSPENDED. Sticky: changing the pinned fact back does not resume it; only a new passkey does. The
- * first nine are also grant misses (a fill found them); `passkey-removed` follows the registry, and `store-write-failed`
+ * first ten are also grant misses (a fill found them); `passkey-removed` follows the registry, and `store-write-failed`
  * keeps a rule suspended in memory when its file could not be written.
  */
 export const SIGN_IN_RULE_SUSPENSIONS = [
@@ -327,6 +334,7 @@ export const SIGN_IN_RULE_SUSPENSIONS = [
   'sign-in-gone',
   'proof-invalid',
   'scripted-origin',
+  'program-changed',
   'passkey-removed',
   'store-write-failed',
 ] as const;
