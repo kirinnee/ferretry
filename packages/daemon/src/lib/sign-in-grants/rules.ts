@@ -50,6 +50,11 @@ export interface RuleGrantPorts {
   readonly keys: (account: AccountId) => Promise<AccountKey | undefined>;
   /** Whether the daemon advertises `sign-in-rules.1`: until the app ships, no rule fills (every raise is a normal card). */
   readonly advertised: () => boolean;
+  /**
+   * Whether the daemon reports `sign-in-rules-terminal.1`: until it does, no terminal rule (sudo, su, doas) is offered
+   * to the matcher or holds at the write, whatever the rules file says. Absent: none is.
+   */
+  readonly terminal?: () => boolean;
   /** The session's STAMPED board project, never one resolved from its folder, never Unfiled. */
   readonly stampedProject: (sessionId: string) => Promise<string | undefined>;
   readonly clock: { now(): number };
@@ -99,7 +104,7 @@ export class RuleSignInGrants implements SignInGrantSource {
    */
   of(_sessionId: string): readonly SignInGrant[] {
     const now = this.ports.clock.now();
-    const records = this.ports.rules.fillable();
+    const records = this.#offered();
     const held = new Set(records.map(record => grantIdOf(record.body.id, record.body.revision)));
     this.ports.ledger.retain(id => !id.startsWith('rule:') || held.has(id));
     return records
@@ -171,9 +176,7 @@ export class RuleSignInGrants implements SignInGrantSource {
   holds(grant: SignInGrant, at: GrantFillAt): boolean {
     const rule = grant.rule;
     if (rule === undefined) return false;
-    const record = this.ports.rules
-      .fillable()
-      .find(each => each.body.id === rule.id && each.body.revision === rule.revision);
+    const record = this.#offered().find(each => each.body.id === rule.id && each.body.revision === rule.revision);
     if (record === undefined || record.suspended !== undefined) return false;
     if (this.#running > 0) return false;
     const page = record.body.surface === 'page';
@@ -230,6 +233,12 @@ export class RuleSignInGrants implements SignInGrantSource {
     void (host === undefined ? this.ports.rules.scriptedEverywhere() : this.ports.rules.scriptedOn(host)).catch(() =>
       this.ports.warn?.('a page script’s taint could not be saved; the rules it covers stay refused until a restart'),
     );
+  }
+
+  /** The rules a fill may read: every page rule, and terminal ones only while `sign-in-rules-terminal.1` is reported. */
+  #offered(): readonly SignInRuleRecord[] {
+    const terminal = this.ports.terminal?.() === true;
+    return this.ports.rules.fillable().filter(record => terminal || record.body.surface !== 'terminal');
   }
 
   /** One rule as the matcher reads it: what is in force after the owner's narrowing, and what the passkey approved. */

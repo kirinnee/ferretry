@@ -131,12 +131,13 @@ export const SIGN_IN_RULE_ROOT_WARNING =
  * program root installed is reading the terminal setuid root, never by a name a process gave itself; but whoever starts
  * it picks the name it starts under (secrev-1266a L4).
  *
- * THE RACE THAT REMAINS (secrev-1301 M1): between the daemon's last kernel look and tmux's guarded write, the reader is
- * checked only by facts a process of this account can reproduce (the pane, its foreground command's name, the cursor
- * row). A standing rule bounds it: the password goes in without Enter, the same setuid process must still lead the
- * foreground group (proved again by the kernel) before Enter is sent, and a guard that refuses or a reader that changed
- * SUSPENDS the rule (`program-changed`), so a ferret gets one try per owner approval, never ten an hour for a week. A
- * reader that swapped in during that window and reads key by key may still have read the password before the suspension.
+ * THE RACE THAT REMAINS (secrev-1301 M1, said exactly): between the daemon's last kernel look and tmux's guarded write,
+ * the reader is checked only by facts a process of this account can reproduce (the pane, its foreground command's name,
+ * the cursor row). A program swapped in between the last kernel check and the typing can still read the password ONCE:
+ * holding Enter back does not stop a reader that takes bytes as they arrive. The rule is then suspended
+ * (`program-changed`: the kernel's check before Enter, or tmux's guard, saw the change), so it cannot be retried under
+ * that approval. Nothing more is claimed. Terminal rules fill only while the daemon reports
+ * `sign-in-rules-terminal.1` (daemon-features.ts).
  */
 export const SIGN_IN_RULE_TERMINAL_HONEST_LIMIT =
   'Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a name a process gave itself. A ferret starts that program, so it could start another program root installed under the name sudo.';

@@ -138,6 +138,8 @@ interface Options {
   actDuringRaise?: boolean;
   /** The daemon's dummy probe finds the password field hiding what is typed, so the raise's lock is the short one. */
   probes?: boolean;
+  /** Whether the fills read terminal rules (`sign-in-rules-terminal.1` reported); the rule service may still stage them. */
+  terminal?: boolean;
 }
 
 async function harness(options: Options = {}) {
@@ -200,6 +202,7 @@ async function harness(options: Options = {}) {
     audit: { record: async entry => void ruleAudits.push(entry) },
     clock: { now: () => clock.now },
     warn: () => undefined,
+    terminalRules: () => true,
   });
   await rules.load();
   const keyOf = async (account: string) =>
@@ -210,6 +213,7 @@ async function harness(options: Options = {}) {
     ledger,
     keys: keyOf,
     advertised: () => options.advertised ?? true,
+    terminal: () => options.terminal ?? true,
     stampedProject: async () => options.project,
     clock: { now: () => clock.now },
   });
@@ -1138,6 +1142,41 @@ describe('a terminal rule types the password into a proved setuid sudo, and nowh
     should(h.writes).deepEqual([PASSWORD]);
     should(view.state).equal('delivered');
     should(ruleOnDisk(h)?.suspended).be.undefined();
+  });
+
+  // secrev-1301 / lizzette (b): a terminal rule on disk never fills while `sign-in-rules-terminal.1` is not reported.
+  it('should leave sudo a plain card, typing nothing, while terminal rules are not reported', async () => {
+    // Arrange — the rule is on disk; the fills don't read terminal rules
+    const h = await harness({ terminal: false });
+    h.setFacts(sudoPrompt());
+    await sudoRule(h);
+    const noRule = await harness({ terminal: false });
+    noRule.setFacts(sudoPrompt());
+    await sudoSignIn(noRule);
+
+    // Act
+    const { view, request } = await raised(h, SUDO_RAISE);
+    const plain = await raised(noRule, SUDO_RAISE);
+    await settled();
+
+    // Assert — no grant reached the matcher (no preapproval, not quiet), nothing typed, nothing suspended
+    should(h.ruleGrants.of(SESSION).some(grant => grant.surface === 'terminal')).be.false();
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(h.quietAtRaise).deepEqual([false]);
+    should(request?.preapproval).be.undefined();
+    should(h.typeOptions).deepEqual([]);
+    should(ruleOnDisk(h)?.suspended).be.undefined();
+    should(JSON.stringify(view)).equal(JSON.stringify(plain.view));
+    should(JSON.stringify(h.cards)).equal(JSON.stringify(noRule.cards));
+  });
+
+  it('should still fill a page rule while terminal rules are not reported', async () => {
+    const h = await harness({ terminal: false });
+    await ruleFor(h, await github(h));
+    const { view } = await raised(h);
+    should(view.state).equal('delivered');
+    should(h.writes).deepEqual([USERNAME, PASSWORD]);
   });
 
   it('should ask the target to prove the reader again before Enter, for a terminal rule only (secrev-1301 M1)', async () => {

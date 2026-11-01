@@ -10,6 +10,7 @@ import {
   GITHUB,
   KEY,
   NOW,
+  SUDO,
   totpKey,
   type World,
   world,
@@ -26,13 +27,14 @@ const OTHER = 'mvv6b4qw-49d0158e';
 const PROJECT = '0b4cbd4a-6f1c-4d3c-9d55-2a3f5f1c9e01';
 const LOGIN = { sessionId: SESSION, project: undefined, roles: ['username', 'password'] as const, now: NOW };
 
-function grants(w: World, options: { advertised?: boolean; project?: string } = {}) {
+function grants(w: World, options: { advertised?: boolean; project?: string; terminal?: boolean | 'absent' } = {}) {
   const ledger = new SignInGrantLedger();
   const source = new RuleSignInGrants({
     rules: w.service,
     ledger,
     keys: async () => KEY as AccountKey,
     advertised: () => options.advertised ?? true,
+    ...(options.terminal === 'absent' ? {} : { terminal: () => options.terminal !== false }),
     stampedProject: async () => options.project,
     clock: { now: () => w.clock.now },
   });
@@ -512,5 +514,32 @@ describe('SignInRuleService.fillCheck: a check that cannot be made drops the old
     w.state.listingBroken = true;
     should(await w.service.fillCheck(rule, 1)).equal('unknown');
     should(w.service.verified(rule, 1)).be.false();
+  });
+});
+
+// secrev-1301 / lizzette (b): with `sign-in-rules-terminal.1` off, no terminal rule reaches a fill.
+describe('RuleSignInGrants: terminal rules only while sign-in-rules-terminal.1 is reported', () => {
+  const PASSWORD_ONLY = { ...LOGIN, roles: ['password'] as const };
+
+  it('should offer a terminal rule on disk to no fill, and hold it at no write, while the gate is off or not wired', async () => {
+    // Arrange — a sudo rule approved and on disk, beside a page rule
+    const w = await world();
+    await approved(w, { signIn: SUDO, fields: ['password'] });
+    await approved(w);
+    const on = grants(w).source;
+    const sudo = on.of(SESSION).find(grant => grant.surface === 'terminal');
+    if (sudo === undefined) throw new Error('the gate on offers the sudo rule');
+
+    for (const terminal of [false, 'absent'] as const) {
+      // Act
+      const off = grants(w, { terminal }).source;
+      const offered = off.of(SESSION);
+
+      // Assert — the page rule still fills; the terminal one is no grant, and holds nowhere
+      should(offered.map(grant => grant.surface)).eql(['page']);
+      should(off.holds(sudo, PASSWORD_ONLY)).be.false();
+    }
+    should(on.holds(sudo, PASSWORD_ONLY)).be.true();
+    should(w.store.document?.rules.map(rule => rule.body.surface).sort()).eql(['page', 'terminal']);
   });
 });

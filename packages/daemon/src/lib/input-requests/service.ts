@@ -1889,7 +1889,7 @@ export class InputRequestService {
       if (outcome === 'guard_refused' && grant !== undefined) {
         // tmux's own guard refused a standing rule's terminal write after a look that matched (secrev-1301 M1): the
         // reader changed in the race between the kernel's look and the write. Nothing was typed, and the rule is
-        // suspended, so a ferret gets one try per owner approval; the card is the owner's.
+        // suspended, so it cannot be retried under that approval; the card is the owner's.
         await this.letGo(hold);
         hold = undefined;
         await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');

@@ -823,3 +823,26 @@ describe('a terminal rule: sudo, su or doas, the password only, root (invariants
     should(listed.find(rule => rule.signIn === SUDO)).containDeep({ status: 'active' });
   });
 });
+
+// secrev-1301 / lizzette (b): with `sign-in-rules-terminal.1` off, no terminal rule can be made.
+describe('terminal rules stay off until sign-in-rules-terminal.1 is reported', () => {
+  for (const [name, terminalRules] of [
+    ['the gate off', false],
+    ['no gate wired at all', 'absent'],
+  ] as const)
+    it(`should refuse to stage sudo and say it is not covered, with ${name}, before any passkey`, async () => {
+      // Arrange
+      const w = await world({ terminalRules });
+
+      // Act
+      const refused = await refusal(w.service.stage(deviceOwner(), { signIn: SUDO, fields: ['password'] }));
+      const eligible = await w.service.eligibility(deviceOwner(), SUDO);
+      const page = await w.service.stage(deviceOwner(), DRAFT);
+
+      // Assert
+      should([refused.status, refused.code]).eql([409, 'tool_not_covered']);
+      should(eligible).eql({ signIn: SUDO, eligible: false, because: 'tool-not-covered' });
+      should(page.root).be.false();
+      should(w.service.challengeOf(`srs_${'0'.repeat(24)}` as SignInRuleStageId, DEVICE)).be.undefined();
+    });
+});

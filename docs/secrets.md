@@ -651,22 +651,26 @@ kernel, not by its name**: what reads the password is a setuid program root inst
 it starts as `sudo` (`passwd` started under that name would get it). With full sudo that gives nothing beyond the rule
 itself; under a restricted sudoers it could set a password the ferret then knows.
 
-**The race that remains, and how a rule bounds it** (secrev-1301 M1). Between the daemon's last kernel look and tmux's
-guarded write, the reader is checked only by facts a process of this account can reproduce: the pane, the name of its
-foreground command and the cursor row. A ferret that kills the real sudo in that window and puts its own reader there
-under the name `sudo` could pass that guard. A standing rule therefore:
+**Off until it is reported.** Terminal rules are their own feature, `sign-in-rules-terminal.1`, a compile-time name in
+the protocol's daemon features that this build does not report, even once `sign-in-rules.1` is. Nothing reads it from
+config, the environment, a route or a file. Until a build reports it, staging a sudo, su or doas rule answers `409
+tool_not_covered`, the eligibility says the same, and the fills offer no terminal rule to the matcher, so a terminal rule
+already in the file never fills.
 
-1. types the password **without Enter**, then has the kernel prove again that the **same setuid process still leads the
-   foreground group** (same pid and group, still sudo, su or doas setuid root, echo off, line mode) before it sends
-   Enter. A line-mode reader can't read the password before Enter, so the real sudo is always still there; if it is not,
-   the line is erased, the request ends and the rule is suspended;
-2. treats a write **tmux's guard refused**, after a look that matched the card, the same way: nothing is typed and the
-   rule is suspended. A screen that merely changed before the write still just redraws the card.
+**The race that remains, said exactly** (secrev-1301 M1). Between the daemon's last kernel look and tmux's guarded
+write, the reader is checked only by facts a process of this account can reproduce: the pane, the name of its
+foreground command and the cursor row. **A program swapped in between the last kernel check and the typing can still
+read the password once.** Holding Enter back does not stop that: a reader that takes the bytes as they arrive has them
+before anything is checked again. What a rule adds is that the swap is SEEN and the rule then stops:
 
-Both suspend with `program-changed` ("the program reading the terminal changed while Ferretry was typing"), sticky and
-audited, shown to the owner only. So a ferret gets **one try per owner approval**, never ten an hour for a week. What
-remains: a reader that swapped in during that window and reads key by key may have read the password before the
-suspension.
+1. it types the password **without Enter**, then has the kernel prove again that the **same setuid process still leads
+   the foreground group** (same pid and group, still sudo, su or doas setuid root, echo off, line mode) before it sends
+   Enter; if it does not, the line is erased, the request ends and the rule is suspended;
+2. a write **tmux's guard refused**, after a look that matched the card, types nothing and suspends the rule too. A
+   screen that merely changed before the write still just redraws the card.
+
+Both suspend with `program-changed` ("the program reading the terminal changed while Ferretry was typing"), sticky,
+audited and shown to the owner only, so the rule **cannot be retried under that approval**. Nothing more is claimed.
 
 ### Strict, and fails closed
 

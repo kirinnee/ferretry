@@ -1399,8 +1399,10 @@ in the table above holds for a rule too, plus these:
   before the tmux `if-shell` guard (pane pid, foreground command, cursor row, pane alive), so a revoke landing there
   types nothing. Under a rule the password goes in without Enter, and Enter follows only once the kernel proves again
   that the same setuid process leads the foreground group; a reader that changed, or a write the guard refused after a
-  matching look, types nothing more and suspends the rule (`program-changed`), so the race between the look and the
-  write gets one try per approval ([secrets › Terminal rules](secrets.md#terminal-rules-sudo-su-or-doas)). A program the kernel did not prove has no key at all: a shell that renamed itself `sudo` makes no rule
+  matching look, types nothing more and suspends the rule (`program-changed`). A program swapped in between the last
+  kernel check and the typing can still read the password once; the rule then suspends, so it cannot be retried under
+  that approval ([secrets › Terminal rules](secrets.md#terminal-rules-sudo-su-or-doas)). Terminal rules fill only while
+  the daemon reports `sign-in-rules-terminal.1`, which this build does not: until then sudo is always a plain card. A program the kernel did not prove has no key at all: a shell that renamed itself `sudo` makes no rule
   even be tried, and the card is a plain one. A setuid sudo with echo on, a prompt not proved to ask for secrets, or a
   sudo not running setuid root (`not-proved`, `not-system`) types nothing and suspends nothing. Any other program
   (ssh, npm, passwd) can never have a rule (`tool-not-covered`). Its history is the owner's own taps into a proved

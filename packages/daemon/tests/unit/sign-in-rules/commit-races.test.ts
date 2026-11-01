@@ -206,6 +206,8 @@ describe('a suspension raises nothing in a ferret’s session (R3c §18, secrev-
       'clock',
       'ids',
       'warn',
+      // A yes-or-no the build answers (`sign-in-rules-terminal.1`), never a way to reach a session.
+      'terminalRules',
     ];
     const every: Record<keyof SignInRulePorts, true> = {
       store: true,
@@ -217,6 +219,7 @@ describe('a suspension raises nothing in a ferret’s session (R3c §18, secrev-
       clock: true,
       ids: true,
       warn: true,
+      terminalRules: true,
     };
     should(Object.keys(every)).eql([...ports]);
   });

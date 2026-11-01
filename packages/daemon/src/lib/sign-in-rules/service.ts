@@ -117,6 +117,11 @@ export interface SignInRulePorts {
   readonly ids?: { ruleId?(): SignInRuleId; stageId?(): SignInRuleStageId; nonce?(): string };
   /** Said to the operator (stderr): a damaged file, a write that failed. Never a value or a name. */
   readonly warn: (message: string) => void;
+  /**
+   * Whether the daemon reports `sign-in-rules-terminal.1`: until it does, a sudo, su or doas sign-in can't have a rule
+   * (`tool_not_covered`, at the stage and in the eligibility). Absent: it can't.
+   */
+  readonly terminalRules?: () => boolean;
 }
 
 /** A refusal with a next step of its own: the route answers `status` and `code` in these words. */
@@ -382,7 +387,10 @@ export class SignInRuleService {
     const found = listing.signIns.find(each => each.id === signIn);
     if (found === undefined) throw new SignInRuleError(404, 'not_found', `there is no sign-in ${signIn}`);
     const rule = this.#records.find(record => record.body.signIn === signIn)?.body.id;
-    const because = ineligibleBecause(found) ?? ((await this.#passkeyFor(owner)) ? undefined : 'no-passkey');
+    const because =
+      (ruleSurfaceOf(found) === 'terminal' && !this.#terminalRules() ? 'tool-not-covered' : undefined) ??
+      ineligibleBecause(found) ??
+      ((await this.#passkeyFor(owner)) ? undefined : 'no-passkey');
     return because === undefined
       ? { signIn, eligible: true, ...(rule === undefined ? {} : { rule }) }
       : { signIn, eligible: false, because, ...(rule === undefined ? {} : { rule }) };
@@ -409,6 +417,13 @@ export class SignInRuleService {
     const listing = await this.#listing();
     const target = listing.signIns.find(each => each.id === ask.signIn);
     const surface = target === undefined ? 'page' : ruleSurfaceOf(target);
+    // Terminal rules are their own feature (`sign-in-rules-terminal.1`): until it is reported, none can be made.
+    if (surface === 'terminal' && !this.#terminalRules())
+      throw new SignInRuleError(
+        409,
+        SIGN_IN_RULE_INELIGIBLE_CODES['tool-not-covered'],
+        SIGN_IN_RULE_INELIGIBLE_WORDS['tool-not-covered'],
+      );
     // sudo, su and doas ask for the password alone: a username or a code ticked for one is refused before anything else.
     if (surface === 'terminal' && (totp || ask.fields.length !== 1 || ask.fields[0] !== 'password'))
       throw new SignInRuleError(400, 'bad_request', 'a terminal rule types the password only');
@@ -499,6 +514,11 @@ export class SignInRuleService {
       throw new SignInRuleError(400, 'bad_request', 'the rule could not be built for this device');
     this.#stages.set(stage.id, stage);
     return this.#staged(stage);
+  }
+
+  /** Whether terminal rules are on (`sign-in-rules-terminal.1` reported). Off unless the composition root says so. */
+  #terminalRules(): boolean {
+    return this.ports.terminalRules?.() === true;
   }
 
   /**
