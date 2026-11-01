@@ -949,6 +949,25 @@ describe('a paste plan card', () => {
   });
 });
 
+describe('a task plan card', () => {
+  const offered = (extra: Partial<AgendaItem>) => {
+    const view = mount({
+      snapshot: board([item('A1', { kind: 'permission', raisedBy: 'daemon', ...extra } as Partial<AgendaItem>)]),
+      focus: { target: 'A1' as AgendaId, seq: 1 },
+    });
+    const form = view.root.findByType(AgendaItemView).props.planForm;
+    run(() => view.unmount());
+    return form;
+  };
+
+  test('is offered to the item view for the daemon’s own task plan reference, over a paste plan, and to no plain card', () => {
+    const taskPlan = { planId: 'c'.repeat(32) };
+    expect(offered({ taskPlan } as Partial<AgendaItem>)).toBeDefined();
+    expect(offered({ taskPlan, copyPlan: { planId: 'b'.repeat(32) } } as Partial<AgendaItem>)).toBeDefined();
+    expect(offered({})).toBeUndefined();
+  });
+});
+
 describe('an approve-on-phone card', () => {
   test('is offered to the item view only for the daemon’s own reference, not for words that copy its title', async () => {
     const REF = { id: `pa_${'0'.repeat(23)}1` };

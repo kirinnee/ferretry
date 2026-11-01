@@ -129,6 +129,44 @@ export function formatPairingFragment(seed: PairingLinkSeed): string {
   return `v1;url=${encodeURIComponent(seed.daemonUrl)};code=${code};fp=${encodeURIComponent(daemonId)}`;
 }
 
+/** The hosted app's origin: where a pairing link, a catalog and a plan's card link point unless a machine serves its own. */
+export const HOSTED_APP_ORIGIN = 'https://ferretry.pages.dev';
+
+export interface AppOriginChoice {
+  /** The address to build links on: the machine's own, or the hosted app when it set none or set one that is refused. */
+  readonly origin: string;
+  /** Why a set address was not used, in a sentence; absent when none was set or it was used. */
+  readonly refused?: string;
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * The address links to the app are built on, from the machine's own setting (`FY_APP_URL`). A link is handed to a
+ * browser launcher, so the setting must be an absolute `https` address (`http` only on this machine), with no
+ * credentials and no leading "-" that a launcher would read as an option. It is parsed, and only its origin and path
+ * are kept. Anything else is refused and the hosted app stands.
+ */
+export function appOriginChoice(setting: string | undefined): AppOriginChoice {
+  const text = setting?.trim() ?? '';
+  if (text === '') return { origin: HOSTED_APP_ORIGIN };
+  const refuse = (why: string): AppOriginChoice => ({
+    origin: HOSTED_APP_ORIGIN,
+    refused: `FY_APP_URL is not used (${why}); links point at ${HOSTED_APP_ORIGIN}.`,
+  });
+  if (text.startsWith('-')) return refuse('it starts with "-"');
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return refuse('it is not an absolute address');
+  }
+  const local = url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname);
+  if (url.protocol !== 'https:' && !local) return refuse('it is not an https address');
+  if (url.username !== '' || url.password !== '') return refuse('it carries a user name or password');
+  return { origin: `${url.origin}${url.pathname.replace(/\/+$/u, '')}` };
+}
+
 /** The full link a mint hands out: the pairing app's URL with the fragment where a code may live. */
 export function pairingLinkUrl(appUrl: string, seed: PairingLinkSeed): string {
   const url = new URL(appUrl);

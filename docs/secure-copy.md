@@ -240,13 +240,13 @@ On screen: Settings › this machine › **Secure copy** › Pastes approved in 
 
 ### Task plans
 
-> **Not filling yet.** The daemon raises, resolves, stages, approves and revokes plans
-> (`packages/daemon/src/lib/task-plans/`), and an approved paste line pastes as a rule did. An approved sign-in line
-> is pinned and kept, and the shared matcher that fills under it is built
-> ([input requests › Task plan fills](input-requests.md#task-plan-fills-a-sign-in-the-owner-approved-in-advance)), but
-> it fills only while the daemon reports `task-plan.1`, and no daemon reports it until the app draws the plan card
-> (R3a-5). The agent tool `task_plan` is listed in MCP and the owner answers with `fy plan` (R3a-3);
-> `secure.preapprove` still raises paste-only task plans.
+> **The app draws the plan card, and the daemon reports `task-plan.1`.** The daemon raises, resolves, stages,
+> approves and revokes plans (`packages/daemon/src/lib/task-plans/`); the app shows the card
+> (`packages/pwa/src/features/secure-copy/task-plan-card.tsx`) and the shared matcher fills under an approved line
+> ([input requests › Task plan fills](input-requests.md#task-plan-fills-a-sign-in-the-owner-approved-in-advance)).
+> The agent tool `task_plan` is listed in MCP and the owner answers with `fy plan` (R3a-3) or on the card.
+> `secure.preapprove` still raises paste-only task plans. An app that doesn't know `task-plan.1` draws a plan with
+> paste lines as the old copy-plan card, as it always did.
 
 A task plan widens the paste plan. One card holds up to 10 lines, each with 1–5 uses (1 by default), for 2 hours
 by default (5 minutes to 1 day). A line is one of three kinds:
@@ -283,7 +283,44 @@ The rules the contract fixes:
   (`taskPlanCallOf`). Its answer is projected back to the old plan shape (`copyPlanOf`). An old item number is
   never a line number: `taskPlanLineOfCopyItem` maps it back, so "approve item 0" can't land on a sign-in line.
 - **The app ships first.** An input card a plan fills carries a `plan` actor and a `preapproval` note, and an
-  older app's strict parse refuses them. So `task-plan.1` stays unreported until the app draws the plan card.
+  older app's strict parse refuses them. So the daemon reports `task-plan.1` only because the app draws the plan
+  card; a machine whose daemon doesn't report it gets today's copy-plan card and no fills.
+
+#### The plan card in the app
+
+The card is drawn only from the `taskPlan` ref the daemon sets on the agenda item (`AgendaItem.taskPlan`), never from
+a ferret's words: a plain item with the same text is a plain item.
+
+- **Lines, grouped by account.** Each line says what it does and for how many uses, with the ferret's reason small
+  beneath. **No line starts ticked**, and a line with several accounts can't be ticked until one is picked.
+- **Colour means a risk.** A `sudo`, `su` or `doas` line is red ("root on <host>"); an account with no history here is
+  amber. Ticking the automatic 2FA code is red with the login-code warning; the tick is hidden when the ferret didn't
+  ask for a code, hidden until an account is picked on a picker line, and disabled ("No automatic codes for this
+  account") when the picked account can't make them. A disabled Allow says why ("Tick at least one line…").
+- **"You'll still be asked."** Every plan card lists what a plan never covers: push approvals, security keys and
+  passkeys, captchas, sign-ins not in Accounts or through another account, ssh, npm, docker, gh and any program but
+  `sudo`, `su` and `doas`, SMS and email codes, and anything after a line stopped.
+- **The honest-client line**, on every plan card: "This stops misuse through a ferret's tools and page text; it can't
+  stop a ferret that reads Ferretry's own files."
+- **The passkey.** A sign-in tick asks the daemon to stage the selection, then runs the `approve-task-plan` passkey bound
+  to that stage. The dialog lists the DAEMON's `summary` lines under "This approves exactly:", never text a ferret
+  wrote. Dismissing the passkey drops the stage (`DELETE …/approval/:stage`); nothing is approved.
+- **Staged at the machine.** A selection `fy plan approve` made shows on the same card as "Asked at the machine by
+  `fy` at HH:MM: lines 1, 3. If you didn't just run this, Deny." with _Confirm with passkey_ and _Deny_, and every warning the
+  ticked lines would carry (root, no history, a code). The list is the daemon's own summary of that stage. Only a stage
+  the machine made is shown this way. A merged passkey prompt (several acts at once) never claims to cover "exactly
+  what is listed, once": only a prompt bound to one act says so.
+- **Approved, settled, stopped.** An approved line shows its uses left and when it ends, with _Revoke_ per line and
+  for the plan. A plan that is declined, expired, revoked or ended says so in one line. The approved card and Settings name the account
+  each line was approved for and flag a ticked code; every settled card keeps the honest-client line, and "Answered at"
+  is the time the owner answered.
+- **A device without `secrets.use`** can't read the plan: the card says so once, stops retrying, and keeps the paste-plan
+  card for the item's `copyPlan`.
+- **Settings › Secure copy › Task plans** lists the live plans with the same revoke. **A link opens a card:**
+  `<app>/#agenda/<id>?session=<sid>` (printed by `fy plan approve`, and opened by `--open`) goes to that agenda item on
+  the machine that runs the session. The fragment never reaches a daemon; it only picks the card.
+- **Names come from the secrets-gated routes only.** Account labels and usernames reach the app through the plan
+  routes, which also need `secrets.use`; a device denied the accounts sees none of them.
 
 #### How a plan is raised and answered
 
@@ -300,8 +337,8 @@ The rules the contract fixes:
 - **One card, raised only by the daemon.** The card carries the `taskPlan` ref (and the paste-plan ref when the plan
   has paste lines, so an older app answers those as it always did). A ferret's agenda add has no field for either,
   and the agenda refuses a plain answer to the card (`use_input_form`): only the plan routes answer it. Every card
-  says: "Ferrets here can read Ferretry's own files, so this stops misuse through their tools and page text, not a
-  ferret that goes around Ferretry."
+  says: "This stops misuse through a ferret's tools and page text; it can't stop a ferret
+  that reads Ferretry's own files."
 - **Stage, passkey, commit.** `POST /v1/sessions/:sid/task-plans/:pid/approval` with the ticks and picks. Nothing
   ticked declines the plan; paste lines only are approved at once, with no passkey. Any ticked sign-in line is
   STAGED (`201`, `{ stage: "tps_…", summary, expiresAt }`): the daemon snapshots its pins from Accounts now (a
@@ -317,7 +354,8 @@ passkey_required` ("Add a passkey in Settings › Security first"); paste lines 
 - **At the machine.** `fy` stages the same way, then `POST …/approval/:stage/confirm-in-app` shows the selection on
   the plan's OWN card (`machineStage`) for the passkey in the app; no second card is raised. Only a stage the machine
   made can be shown this way, so "Asked at the machine" is always true; a paired device commits its own stage directly. `GET …/approval/:stage`
-  answers `waiting`, `approved`, `denied` or `expired`. The machine reads and drops only the stages it made; a
+  answers `waiting`, `approved`, `denied` or `expired`, and carries `codes`: the staged lines that also type the
+  6-digit code, so the app's red code warning never depends on the (clipped) summary text. The machine reads and drops only the stages it made; a
   paired device, where the passkey lives, answers any. `DELETE …/approval/:stage` drops one, approving nothing.
 - **Revoke, one tap, no passkey.** `POST …/task-plans/:pid/revoke` with `{ lines }` ends those lines, or every line
   with none; a plan still waiting is declined whole. Its pastes and grants go at once. A plan also ends at its

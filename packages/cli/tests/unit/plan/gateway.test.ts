@@ -98,6 +98,7 @@ describe('ProtocolPlanGateway', () => {
     stage: STAGE,
     plan: PLAN_ID,
     lines: [1],
+    codes: [],
     summary: ['Sign in'],
     expiresAt: '2026-11-01T12:02:00.000Z',
     state: 'waiting',
@@ -148,7 +149,14 @@ describe('ProtocolPlanGateway', () => {
       if (path.endsWith('/approval'))
         return {
           outcome: 'staged',
-          staged: { stage: STAGE, plan: PLAN_ID, lines: [1], summary: ['Sign in'], expiresAt: view.expiresAt },
+          staged: {
+            stage: STAGE,
+            plan: PLAN_ID,
+            lines: [1],
+            codes: [],
+            summary: ['Sign in'],
+            expiresAt: view.expiresAt,
+          },
         };
       return view;
     });

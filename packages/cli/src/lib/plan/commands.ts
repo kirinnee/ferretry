@@ -21,7 +21,7 @@ Every paste a rule allows is still raised, audited and shown in the log. A ferre
 const PLAN_HELP = `The owner's command for a ferret's plan: the sign-ins and pastes it asked you to approve before it starts.
 
   ls [--session <id>]                           the plans ferrets asked you about, line by line
-  approve <id> [1 2 ...] [--pick 2=GITHUB_WORK] [--totp 1]
+  approve <id> [1 2 ...] [--pick 2=GITHUB_WORK] [--totp 1] [--open]
                                                 allow those lines; no numbers declines the plan
   revoke <id> [1 2 ...]                         end those lines (all of them with no numbers)
 
@@ -95,6 +95,7 @@ function mountPlanCommands(plan: Command, controller: PlanController): void {
     .argument('[lines...]', 'the line numbers to allow, as listed')
     .option('--pick <line=account>', 'which account signs in on a line with several (a handle or si_…)', collect, [])
     .option('--totp <line>', 'also let Ferretry type the 2FA code on this line', collect, [])
+    .option('--open', "open the plan's card in this machine's browser to confirm with your passkey")
     .option(JSON_FLAG, JSON_HELP)
     .action(
       async (id: string, lines: string[], options: PlanApproveOptions) => await controller.approve(id, lines, options),

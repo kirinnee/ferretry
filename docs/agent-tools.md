@@ -325,20 +325,18 @@ same call, and answers the old `plan` shape. It is no longer listed in MCP.
 
 **The owner answers at the machine with `fy plan`** (`fy copy plan` is the same command), or on the plan's card:
 
-| Command                                                           | Does                                            |
-| ----------------------------------------------------------------- | ----------------------------------------------- |
-| `fy plan ls [--session <id>] [--json]`                            | lists the waiting plans, line by line (1-based) |
-| `fy plan approve <id> [lines…] [--pick 3=GITHUB_WORK] [--totp 1]` | allows those lines; none declines the plan      |
-| `fy plan revoke <id> [lines…]`                                    | ends those lines, or every line                 |
+| Command                                                                    | Does                                            |
+| -------------------------------------------------------------------------- | ----------------------------------------------- |
+| `fy plan ls [--session <id>] [--json]`                                     | lists the waiting plans, line by line (1-based) |
+| `fy plan approve <id> [lines…] [--pick 3=GITHUB_WORK] [--totp 1] [--open]` | allows those lines; none declines the plan      |
+| `fy plan revoke <id> [lines…]`                                             | ends those lines, or every line                 |
 
 A paste-only selection is approved at once. A selection with a sign-in line is only **staged**: the command asks the
 daemon to show the stage on the plan's card, and waits up to 125 seconds for the owner's passkey in the app. It then
 reads the plan back and prints what is really in force: Approved (also when the owner ticked other lines in the app
 meanwhile), Denied or Timed out. With `--json` the output is one JSON document and the prose goes to stderr. The CLI
 has no commit call: the machine's token cannot make the passkey proof, so no sign-in line is ever approved from the
-terminal alone. Until the daemon reports that the app shows plan cards (`task-plan.1` in its health), a selection with
-a sign-in line is refused up front and nothing is staged; paste lines still work. There is no deep link to the card
-yet: the command names it as `!A<n>` on the Agenda (a GAP until R3a-5).
+terminal alone. A daemon that doesn't report `task-plan.1` (an older one) is refused up front for a sign-in line and nothing is staged; paste lines still work. The command prints a link to the plan's card (`<app>/#agenda/<id>?session=<sid>`, the app at `FY_APP_URL` or the hosted default; `FY_APP_URL` must be an absolute `https` address (`http` only on this machine), with no user name or password, or it is refused out loud and the hosted default stands), and `--open` hands it to this machine's browser.
 `--pick` takes an account handle or a `si_…` id and must be one of the line's candidates, or nothing is staged;
 a line with several candidates needs one. `--totp` ticks a code only where the ferret asked for it and the account
 can make them. A ferret's pane (and any command carrying an agent credential) is refused: these routes are the owner's.

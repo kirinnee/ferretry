@@ -52,6 +52,7 @@ import { CatalogsSurface } from '../catalogs/catalogs-surface.tsx';
 import { LoginsSurface } from '../secrets/logins-surface.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { CopyRulesSurface } from '../secure-copy/copy-rules-surface.tsx';
+import { TaskPlansSurface } from '../secure-copy/task-plans-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
 import { DaemonHostChecks, type DaemonReachabilityProbe, daemonDisplayName } from './daemon-settings.tsx';
@@ -221,7 +222,16 @@ function AccountsPanel({ connection }: DaemonSettingsTabProps) {
 function SecureCopyPanel({ connection }: DaemonSettingsTabProps) {
   const { createSecretClient } = useFrameLive();
   const routed = useDaemonClient();
-  return <CopyRulesSurface connection={connection} createClient={createSecretClient ?? routed} />;
+  const health = useDaemonHealth(connection);
+  const createClient = createSecretClient ?? routed;
+  return (
+    <div className="flex min-w-0 flex-col gap-4">
+      <CopyRulesSurface connection={connection} createClient={createClient} />
+      {machineOffers(health, DAEMON_FEATURES.taskPlan) ? (
+        <TaskPlansSurface connection={connection} createClient={createClient} />
+      ) : null}
+    </div>
+  );
 }
 
 function CatalogsPanel({ connection }: DaemonSettingsTabProps) {

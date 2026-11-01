@@ -6,8 +6,8 @@ import {
   type AuditDetail,
   type CopyPlan,
   type CopyPlanItem,
-  type GrantMissReason,
   copyPlanOf,
+  type GrantMissReason,
   type SignInChoiceContext,
   type SignInId,
   TASK_PLAN_DEFAULT_LIFETIME_SECONDS,
@@ -26,8 +26,8 @@ import {
   type TaskPlanLine,
   type TaskPlanLineAsk,
   type TaskPlanLinePins,
-  type TaskPlanSelectedLine,
   TaskPlanSchema,
+  type TaskPlanSelectedLine,
   type TaskPlanStaged,
   type TaskPlanStageId,
   type TaskPlanStageState,
@@ -42,7 +42,7 @@ import {
 import type { AuditSink } from '../audit/types.ts';
 import { SecureCopyError } from '../secure-copy/errors.ts';
 import type { PasteRuleCaller, PasteRuleService } from '../secure-copy/rules.ts';
-import { boundSelection, type PlanListing, PlanAskMismatch, pinsOf, repeatedSignIn, resolveLine } from './resolve.ts';
+import { boundSelection, PlanAskMismatch, type PlanListing, pinsOf, repeatedSignIn, resolveLine } from './resolve.ts';
 import {
   answeredNote,
   answeredTell,
@@ -964,6 +964,7 @@ export class TaskPlanService {
       stage: stage.id,
       plan: stage.planId,
       lines: stage.lines.map(line => line.line),
+      codes: stage.lines.flatMap(line => (line.kind !== 'paste' && line.fields.includes('totp') ? [line.line] : [])),
       summary: [...stage.summary],
       expiresAt: new Date(stage.expiresAtMs).toISOString(),
     };

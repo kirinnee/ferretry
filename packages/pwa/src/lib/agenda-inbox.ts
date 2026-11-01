@@ -640,3 +640,40 @@ export class DeferredAgendaActions {
     for (const listener of this.#listeners) listener();
   }
 }
+
+/** The card a link names: `#agenda/A3?session=<id>`. The session is optional only because an id alone is per-session. */
+export interface AgendaDeepLink {
+  readonly id: AgendaId;
+  readonly sessionId?: string;
+}
+
+/** The card a location hash names, or `null` for any other hash (the join fragment among them). */
+export const agendaDeepLinkFromHash = (hash: string): AgendaDeepLink | null => {
+  const match = /^#agenda\/([^?]+)(?:\?(.*))?$/u.exec(hash);
+  if (match === null) return null;
+  const raw = ((): string => {
+    try {
+      return decodeURIComponent(match[1] ?? '');
+    } catch {
+      return '';
+    }
+  })();
+  const id = AgendaIdSchema.safeParse(raw);
+  if (!id.success) return null;
+  const session = new URLSearchParams(match[2] ?? '').get(INBOX_SESSION_PARAMETER);
+  return session === null || session.trim() === '' ? { id: id.data } : { id: id.data, sessionId: session };
+};
+
+/**
+ * Which paired machine runs the linked session: the one whose session list holds it. `'wait'` while a machine that might
+ * hold it has not been read yet; `undefined` when no machine does (or the link names no session).
+ */
+export const machineForAgendaLink = (
+  link: AgendaDeepLink,
+  machines: readonly { readonly daemonId: DaemonId; readonly sessionIds: readonly string[] | null }[],
+): DaemonId | 'wait' | undefined => {
+  if (link.sessionId === undefined) return undefined;
+  const held = machines.find(machine => machine.sessionIds?.includes(link.sessionId ?? '') === true);
+  if (held !== undefined) return held.daemonId;
+  return machines.some(machine => machine.sessionIds === null) ? 'wait' : undefined;
+};

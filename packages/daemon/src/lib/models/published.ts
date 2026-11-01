@@ -32,11 +32,8 @@ import type { ModelCatalogRefreshResult } from '@ferretry/protocol';
 export const RELEASE_LIST_FILE = 'release-manifest.json';
 export const RELEASE_SIGNATURE_FILE = 'release-manifest.sig';
 
-/**
- * The hosted app's origin, which serves the published catalog beside the app itself. The same address
- * the pairing link and the default browser origin name.
- */
-export const HOSTED_APP_ORIGIN = 'https://ferretry.pages.dev';
+/** The hosted app's origin, which serves the published catalog beside the app itself (one address, owned by the protocol). */
+export { HOSTED_APP_ORIGIN } from '@ferretry/protocol';
 
 /** Bytes as the hosted app answered them, over a plain buffer WebCrypto accepts. */
 export type Bytes = Uint8Array<ArrayBuffer>;

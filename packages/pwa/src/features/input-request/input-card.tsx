@@ -24,6 +24,7 @@
 
 import {
   type AccountList,
+  grantMissLine,
   INPUT_LOCK_WORDS,
   type InputRequest,
   type InputSavedOffer,
@@ -144,6 +145,15 @@ export function InputCard({
   const [always, setAlways] = useState<AlwaysUse | undefined>(undefined);
   const facts = observedWords(request);
   const blocked = sendBlock(request, now);
+  // Why the task plan did not fill this card: the owner's view only, one fixed sentence, and none for `not-here`.
+  const planMissLine =
+    request.preapproval?.outcome === 'did-not-apply' && request.preapproval.reason !== undefined
+      ? grantMissLine(request.preapproval.line, request.preapproval.reason)
+      : undefined;
+  const planFilledLine =
+    request.preapproval?.by === 'plan' && request.preapproval.outcome === 'filled'
+      ? `Filled under your task plan (line ${String(request.preapproval.line + 1)}).`
+      : undefined;
   // The FIELDS decide, never the card's own word: a field the daemon upgraded to a secret gets no code title and no panel.
   const asksCode = strongestSensitivity(request.fields) === 'code';
   const codeAccounts = asksCode && accounts !== undefined ? codesAccounts(request.saved, accounts) : [];
@@ -282,6 +292,19 @@ export function InputCard({
           {agentName} says: “{request.prompt}”
         </p>
       </div>
+
+      {planMissLine === undefined ? null : (
+        <p className="m-0 flex items-start gap-2 text-cell text-muted" data-input-plan-miss="">
+          <ShieldQuestion aria-hidden="true" className="mt-0.5 shrink-0" size={16} />
+          <span>{planMissLine}</span>
+        </p>
+      )}
+
+      {planFilledLine === undefined ? null : (
+        <p className="m-0 text-cell text-muted" data-input-plan-filled="">
+          {planFilledLine}
+        </p>
+      )}
 
       {request.pictured === true ? <FieldShot client={client} fields={fields} request={request} /> : null}
 

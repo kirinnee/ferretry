@@ -93,6 +93,46 @@ describe('a paste plan card in the Inbox', () => {
   });
 });
 
+describe('a task plan card in the Inbox', () => {
+  const REF = { planId: 'c'.repeat(32) };
+  const COPY = { planId: 'b'.repeat(32) };
+  const notice = (extra: Record<string, unknown>) =>
+    inboxCard(agendaItem('A10', { kind: 'permission', ask: undefined, raisedBy: 'daemon', ...extra } as never));
+
+  const draw = async (extra: Record<string, unknown>, connected = true) => {
+    const fake = fakeInbox();
+    const view = await mount(
+      <InboxHarness
+        cards={[notice(extra)]}
+        fake={fake}
+        render={inbox => (
+          <AgendaNeedsYou
+            clock={fake.clock.now}
+            daemonId={WORKSHOP.daemonId}
+            inbox={{ ...inbox, connectionFor: id => (connected && id === WORKSHOP.daemonId ? WORKSHOP : undefined) }}
+            now={NOW}
+            onNavigate={() => undefined}
+          />
+        )}
+      />,
+    );
+    mounted.push(view);
+    await settle();
+    return view;
+  };
+
+  it('is answered by the plan form for the daemon’s own task plan reference, and for nothing else', async () => {
+    expect((await draw({ taskPlan: REF })).container.querySelector('[data-agenda-plan-form]')).not.toBeNull();
+    expect((await draw({ taskPlan: REF }, false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+    expect((await draw({})).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+  });
+
+  it('prefers the task plan over a paste plan on the same card', async () => {
+    const view = await draw({ taskPlan: REF, copyPlan: COPY });
+    expect(view.container.querySelectorAll('[data-agenda-plan-form]')).toHaveLength(1);
+  });
+});
+
 describe('an approve-on-phone card in the Inbox', () => {
   const REF = { id: `pa_${'0'.repeat(23)}1` };
   const info = (ref: boolean) =>

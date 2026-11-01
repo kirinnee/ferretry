@@ -34,8 +34,8 @@ import {
 } from './secure-copy.ts';
 import { PASSKEY_CHALLENGE_TTL_SECONDS } from './step-up.ts';
 
-export { TaskPlanStageIdSchema };
 export type { TaskPlanStageId };
+export { TaskPlanStageIdSchema };
 
 /**
  * THE TASK PLAN: one card on which a ferret asks, before a task, for the owner to pre-approve its sign-ins and its
@@ -205,6 +205,13 @@ export const grantMissLine = (line: number, reason: GrantMissReason): string | u
 
 /** What the FERRET is told when a plan did not fill a card: the same sentence for every reason. */
 export const TASK_PLAN_MISS_AGENT_NOTE = "Your task plan didn't cover this, so the owner was asked.";
+
+/**
+ * The one line every plan card carries while no ferret on this machine can be walled off from Ferretry's own files
+ * (RF-5): what a plan does and does not protect against. The daemon's card text and the app's card say it in these words.
+ */
+export const TASK_PLAN_HONEST_LIMIT =
+  "This stops misuse through a ferret's tools and page text; it can't stop a ferret that reads Ferretry's own files.";
 
 // ── What the ferret sends (`task.plan`) ──────────────────────────────────────────────────────────────
 
@@ -826,6 +833,8 @@ export const TaskPlanStagedSchema = z.strictObject({
   stage: TaskPlanStageIdSchema,
   plan: CopyPlanIdSchema,
   lines: z.array(TaskPlanLineNumberSchema).min(1).max(TASK_PLAN_MAX_LINES),
+  /** The staged lines (a subset of `lines`) that also type the 6-digit code: said here, so a clipped summary never hides it. */
+  codes: z.array(TaskPlanLineNumberSchema).max(TASK_PLAN_MAX_LINES),
   summary: z.array(oneLine(TASK_PLAN_SUMMARY_LINE_MAX_CHARS)).min(1).max(TASK_PLAN_MAX_LINES),
   expiresAt: InstantSchema,
 });
@@ -877,3 +886,7 @@ export const TASK_PLAN_ERROR_CODES = {
   /** The paste-plan approve route was asked to tick a sign-in line: that needs the passkey, in the app. */
   needsPasskey: 'needs_passkey',
 } as const;
+
+/** The fragment that opens one agenda card in the app (`<app>/#agenda/<id>?session=<sessionId>`), printed by `fy plan approve`. */
+export const agendaDeepLinkFragment = (id: string, sessionId?: string): string =>
+  `#agenda/${encodeURIComponent(id)}${sessionId === undefined ? '' : `?session=${encodeURIComponent(sessionId)}`}`;

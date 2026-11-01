@@ -27,8 +27,8 @@ import {
   StepUpGrantedSchema,
   type StepUpOptions,
   StepUpOptionsSchema,
-  type TwoFactorStageId,
 } from '@ferretry/protocol';
+import type { StepUpSubject } from './step-up-gate.ts';
 
 /** The only client capability this surface uses. */
 export type StepUpClient = Pick<IFyApiClient, 'request'>;
@@ -59,7 +59,7 @@ export async function stepUpOptions(
   client: StepUpClient,
   origin: string,
   act?: StepUpAct,
-  subject?: TwoFactorStageId,
+  subject?: StepUpSubject,
 ): Promise<StepUpOptions> {
   return await client.request(
     '/v1/step-up/options',

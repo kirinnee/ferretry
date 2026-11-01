@@ -94,6 +94,7 @@ class SpyGateway implements IPlanGateway {
         stage: STAGE,
         plan: this.plan.id,
         lines: approval.lines.map(tick => tick.line),
+        codes: [],
         summary: ['Sign in as GITHUB_WORK on github.com'],
         expiresAt: '2026-11-01T12:02:00.000Z',
       },
@@ -115,6 +116,7 @@ class SpyGateway implements IPlanGateway {
       stage: STAGE,
       plan: this.plan.id,
       lines: [1],
+      codes: [],
       summary: ['Sign in'],
       expiresAt: '2026-11-01T12:02:00.000Z',
       state,
@@ -223,6 +225,55 @@ describe('fy plan approve: a sign-in line is never approved without the app', ()
     should(gone.said.at(-1)).startWith('Timed out.');
     should(silent.said.at(-1)).startWith('Timed out.');
     should(silent.slept.length).be.within(120, 126);
+  });
+});
+
+describe('fy plan approve: the link to the card of the plan', () => {
+  const LINK = 'https://app.example/#agenda/A9?session=s1';
+
+  it('should print the card link, and open nothing without --open', async () => {
+    const opened: string[] = [];
+    const { controller, said } = rig({
+      appOrigin: 'https://app.example/',
+      openLink: async url => void opened.push(url) === undefined,
+    });
+
+    await controller.approve('feed', ['3'], {});
+
+    should(said).containEql(`Open the card: ${LINK}`);
+    should(opened).eql([]);
+  });
+
+  it('should open the link with --open, and say so when no browser can be launched', async () => {
+    const opened: string[] = [];
+    const ok = rig({ appOrigin: 'https://app.example', openLink: async url => void opened.push(url) === undefined });
+    await ok.controller.approve('feed', ['3'], { open: true });
+    const headless = rig({ appOrigin: 'https://app.example', openLink: async () => false });
+    await headless.controller.approve('feed', ['3'], { open: true });
+
+    should(opened).eql([LINK]);
+    should(ok.said).containEql('Opened it in your browser.');
+    should(headless.said).containEql('Could not open a browser here; use the link above.');
+  });
+
+  it('should say why the hosted address stands when a set one was refused', async () => {
+    const { controller, said } = rig({
+      appOrigin: 'https://ferretry.pages.dev',
+      appOriginNote: 'FY_APP_URL is not used (it starts with "-").',
+    });
+
+    await controller.approve('feed', ['3'], {});
+
+    should(said).containEql('FY_APP_URL is not used (it starts with "-").');
+  });
+
+  it('should carry nothing but the card and the session in the link', async () => {
+    const { controller, said } = rig({ appOrigin: 'https://app.example' });
+
+    await controller.approve('feed', ['3'], {});
+
+    const link = said.find(line => line.startsWith('Open the card: '));
+    should(link).equal(`Open the card: ${LINK}`);
   });
 });
 

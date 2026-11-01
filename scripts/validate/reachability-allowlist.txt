@@ -279,6 +279,9 @@ packages/pwa/src/hooks/use-work-project-names.ts # the project names a work-sear
 packages/pwa/src/lib/board-chat-url.ts # the Tasks tab address grammar (tasks=full, agents=1), used by use-chat-tasks-url.ts ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/chat-search.ts # search within a conversation: used by components/chat-search.tsx ← SessionChatPage ← App.tsx ← main.tsx; the gate ignores .tsx roots
 
+packages/pwa/src/hooks/use-agenda-deep-link.ts # resolves a #agenda/<id> link to its machine, used by App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/lib/agenda-deep-link.ts # captures the #agenda/<id> fragment once, used by App.tsx and use-agenda-deep-link.ts ← main.tsx; the gate ignores .tsx roots
+
 # The project board's data layer (board U10) lands before the pages that read it (board U11–U15).
 
 # The lane editor (board U15), imported only from the .tsx app tree that the gate does not root.

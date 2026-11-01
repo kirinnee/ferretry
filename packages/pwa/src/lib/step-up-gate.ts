@@ -20,9 +20,12 @@
  * the app; the browser holds nothing it could lose, replay or leak.
  */
 
-import { type StepUpAct, stepUpSkippableAtMachine, type TwoFactorStageId } from '@ferretry/protocol';
+import { type StepUpAct, type StepUpOptionsRequest, stepUpSkippableAtMachine } from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { STEP_UP_FALLBACK_ACT } from './grants.ts';
+
+/** The staged thing a bound passkey is for: a 2FA seed (`add-2fa-key`) or a task-plan selection (`approve-task-plan`). */
+export type StepUpSubject = NonNullable<StepUpOptionsRequest['subject']>;
 
 /** What the prompt shows: which machine is asking, which acts, and whether the last attempt failed and why. */
 export interface StepUpPrompt {
@@ -30,6 +33,10 @@ export interface StepUpPrompt {
   /** The acts waiting on this machine, distinct and in the order they asked; never empty. */
   readonly acts: readonly string[];
   readonly busy: boolean;
+  /** The confirmation is bound to one staged thing (a seed, a task-plan selection) and nothing else waits on it: it covers exactly that. */
+  readonly bound?: true;
+  /** A bound request is waiting WITH other requests: the one proof is stamped for none of them, so a bound approval asks again. */
+  readonly shared?: true;
   /** One plain sentence for the person, or nothing. */
   readonly failure?: string;
   /** What this confirmation buys, once the machine has said; until then the prompt's own words stand. */
@@ -50,7 +57,7 @@ export type PromptOrigin = 'explicit' | 'background';
 
 export interface StepUpGateDependencies {
   /** Runs the whole ceremony for one machine: options, the passkey sheet, and the daemon's verdict. */
-  readonly ceremony: (daemon: DaemonConnection, act?: StepUpAct, subject?: TwoFactorStageId) => Promise<void>;
+  readonly ceremony: (daemon: DaemonConnection, act?: StepUpAct, subject?: StepUpSubject) => Promise<void>;
   /** The sentence a person is shown for a ceremony that failed. Never a raw exception. */
   readonly describe: (reason: unknown) => string;
   /**
@@ -72,7 +79,7 @@ interface Waiting {
   /** The ids of the acts the daemon named, and whether any waiting request named none. */
   readonly actIds: Set<StepUpAct>;
   /** The staged seeds waiting requests named (`add-2fa-key` is bound to one). */
-  readonly subjects: Set<TwoFactorStageId>;
+  readonly subjects: Set<StepUpSubject>;
   unnamed: boolean;
   /** A person started at least one of these requests, so it may ask from off screen. */
   explicit: boolean;
@@ -128,7 +135,7 @@ export class StepUpGate {
     act: string = STEP_UP_FALLBACK_ACT,
     origin: PromptOrigin = 'explicit',
     actId?: StepUpAct,
-    subject?: TwoFactorStageId,
+    subject?: StepUpSubject,
   ): Promise<boolean> {
     return new Promise(resolve => {
       const explicit = origin === 'explicit';
@@ -136,13 +143,15 @@ export class StepUpGate {
       if (waiting !== undefined) {
         waiting.resolvers.push(resolve);
         waiting.explicit ||= explicit;
+        const covered = this.#boundness(waiting);
         if (actId === undefined) waiting.unnamed = true;
         else waiting.actIds.add(actId);
         if (subject !== undefined) waiting.subjects.add(subject);
-        if (!waiting.acts.includes(act)) {
-          waiting.acts.push(act);
-          this.#refreshActs(daemon.daemonId);
-        }
+        const named = !waiting.acts.includes(act);
+        if (named) waiting.acts.push(act);
+        // Every join re-checks what the prompt covers: the same words with a second stage is no longer one bound act.
+        const now = this.#boundness(waiting);
+        if (named || now.bound !== covered.bound || now.shared !== covered.shared) this.#refreshActs(daemon.daemonId);
         if (this.#prompt === null && this.#mayShow(waiting)) this.#show(waiting);
         return;
       }
@@ -204,7 +213,7 @@ export class StepUpGate {
    * wants its own asks again. An act bound to a subject is stamped only with exactly one subject: a request that
    * named none (the router's answer to a refusal) or two different ones is left unstamped, which the save refuses.
    */
-  #soleProof(daemonId: DaemonId): { readonly act: StepUpAct; readonly subject?: TwoFactorStageId } | undefined {
+  #soleProof(daemonId: DaemonId): { readonly act: StepUpAct; readonly subject?: StepUpSubject } | undefined {
     const waiting = this.#waiting.get(daemonId);
     if (waiting === undefined || waiting.unnamed || waiting.actIds.size !== 1) return undefined;
     const act = [...waiting.actIds][0];
@@ -237,7 +246,7 @@ export class StepUpGate {
   }
 
   #show(waiting: Waiting): void {
-    this.#set({ daemon: waiting.daemon, acts: [...waiting.acts], busy: false });
+    this.#set({ daemon: waiting.daemon, acts: [...waiting.acts], busy: false, ...this.#boundness(waiting) });
     const read = this.deps.scope;
     if (read !== undefined)
       void read(waiting.daemon).then(
@@ -264,7 +273,21 @@ export class StepUpGate {
   #refreshActs(daemonId: DaemonId): void {
     const prompt = this.#prompt;
     if (prompt === null || prompt.daemon.daemonId !== daemonId) return;
-    this.#set({ ...prompt, acts: [...(this.#waiting.get(daemonId)?.acts ?? [])] });
+    const waiting = this.#waiting.get(daemonId);
+    const { bound: _bound, shared: _shared, ...rest } = prompt;
+    this.#set({
+      ...rest,
+      acts: [...(waiting?.acts ?? [])],
+      ...(waiting === undefined ? {} : this.#boundness(waiting)),
+    });
+  }
+
+  /** `bound` only while exactly one bound request is waiting; `shared` once anything else has joined it. */
+  #boundness(waiting: Waiting): Pick<StepUpPrompt, 'bound' | 'shared'> {
+    if (waiting.subjects.size === 0) return {};
+    const sole =
+      !waiting.unnamed && waiting.actIds.size === 1 && waiting.subjects.size === 1 && waiting.acts.length === 1;
+    return sole ? { bound: true } : { shared: true };
   }
 
   #set(prompt: StepUpPrompt | null): void {

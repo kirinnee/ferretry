@@ -1243,9 +1243,9 @@ While it waits, the ferret is told only the state and, once the sign-in moved on
 
 ### Task plan fills: a sign-in the owner approved in advance
 
-> **Waits for the app.** The daemon fills under a plan line only while it reports `task-plan.1`, and it reports it
-> only once the app draws the plan card (R3a-5). Until then every approved line is ignored and every raise is the
-> usual card. The plan itself (lines, ticks, the passkey, revoke) is [secure copy › Task plans](secure-copy.md#task-plans).
+> **Needs `task-plan.1`.** The daemon fills under a plan line only while it reports `task-plan.1`, which it does now
+> that the app draws the plan card (R3a-5). The plan itself (lines, ticks, the passkey, revoke) is
+> [secure copy › Task plans](secure-copy.md#task-plans).
 
 A ferret's [task plan](secure-copy.md#task-plans) line that the owner ticked, with a passkey, is a **grant**: a
 permission to fill ONE sign-in without a tap. The ferret still raises `browser_request_input` or
@@ -1294,6 +1294,9 @@ or nothing is typed:
   told one sentence for every reason (`TASK_PLAN_MISS_AGENT_NOTE`), and the agenda card's context gets one line in
   the same words whatever the reason, because a ferret can read its own session's agenda: a reason like
   `account-lacks-field` would say which secret fields an account holds.
+- **The input card says so.** The owner's card carries the miss line above its fields (`data-input-plan-miss`), and
+  `not-here` has none. A card a line filled shows "Filled under your task plan (line 2)." from the same `preapproval`
+  note.
 - **A filled card closes at once**, so the agenda history shows "Filled under your task plan (line 2) on
   github.com." It is raised **quiet**: it does not buzz the owner's phone ([notifications](notifications.md)).
 - **A password left in a field is emptied, and the line stops.** Before a grant types a password into a page, the

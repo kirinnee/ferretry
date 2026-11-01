@@ -10654,7 +10654,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sealed: secureCopies,
         rules: pasteRules,
         // A ferret's task plan lines, as grants the shared matcher checks (docs/input-requests.md, "Task plan fills"). Plan
-        // fills close the card themselves, so they run only once the daemon advertises `task-plan.1` (the app ships first).
+        // fills close the card themselves, so they run only while the daemon advertises `task-plan.1`.
         grants: new PlanSignInGrants(
           copyPlans,
           async id => {

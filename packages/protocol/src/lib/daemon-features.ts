@@ -133,24 +133,15 @@ export const DAEMON_FEATURES = {
    * lines, approving a sign-in line with an `approve-task-plan` passkey bound to its staged selection, and Ferretry
    * filling a covered sign-in itself. The input request and its outcome carry a `plan` actor and a `preapproval` note,
    * which an older app's strict parse refuses, so the daemon fills under a plan only while it reports this name.
-   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the app's plan card ships first.
+   * REPORTED SINCE THE APP SHOWS THE PLAN CARD: an app that cannot show it keeps the copy-plan card.
    */
   taskPlan: 'task-plan.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];
 
-/**
- * Names whose app-side half may land first: the app can already gate on them, but no daemon of this build reports
- * them, because the daemon-side half is not built yet. Removing a name from here is how the daemon starts to offer it.
- */
-const NOT_YET_REPORTED: ReadonlySet<DaemonFeature> = new Set<DaemonFeature>([DAEMON_FEATURES.taskPlan]);
-
 /** The names a daemon of this build reports, in a stable order. */
-export const daemonFeatureList = (): readonly DaemonFeature[] =>
-  Object.values(DAEMON_FEATURES)
-    .filter(feature => !NOT_YET_REPORTED.has(feature))
-    .sort();
+export const daemonFeatureList = (): readonly DaemonFeature[] => Object.values(DAEMON_FEATURES).sort();
 
 /**
  * Whether a daemon's health report offers a feature. A report with no list at all — a daemon from

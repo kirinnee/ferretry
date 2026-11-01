@@ -3,8 +3,8 @@ import {
   type AccountId,
   type AccountKey,
   type AccountSummary,
-  canonicalTaskPlanApproval,
   CopyPlanSchema,
+  canonicalTaskPlanApproval,
   type LoginObserved,
   type Place,
   type SignInId,
@@ -12,14 +12,15 @@ import {
   TASK_PLAN_MAX_PROPOSALS_PER_HOUR,
   type TaskPlan,
   type TaskPlanApproval,
-  taskPlanApprovalSubject,
   TaskPlanSchema,
   type TaskPlanStageId,
+  taskPlanApprovalSubject,
 } from '@ferretry/protocol';
 import should from 'should';
 import { type AgendaLedger, AgendaService } from '../../../src/lib/agenda/index.ts';
 import type { AuditEntry } from '../../../src/lib/audit/types.ts';
 import {
+  boundSelection,
   type PasteRuleCaller,
   PasteRuleService,
   SecureCopyError,
@@ -29,7 +30,6 @@ import {
   TaskPlanError,
   TaskPlanProofMissing,
   TaskPlanService,
-  boundSelection,
 } from '../../../src/lib/index.ts';
 import { FACTS } from '../input-requests/support.ts';
 
@@ -279,6 +279,7 @@ describe('TaskPlanService: the ferret asks', () => {
       ['unavailable', 'via-provider'],
       ['unavailable', 'tool-not-covered'],
     ]);
+    should(plan.lines[2]).match({ flags: [] });
     should(
       (await refused(w.service.stage(PHONE, SESSION, plan.id, { lines: [{ line: 2, signIn: SI.ssh }] }))).message,
     ).match(/can't be ticked/u);
@@ -443,7 +444,7 @@ describe('TaskPlanService: approving', () => {
     ]);
     const canonical = canonicalTaskPlanApproval(plan, approval, pins);
 
-    should(stage).match({ plan: plan.id, lines: [0, 2], expiresAt: '2026-11-01T12:02:00.000Z' });
+    should(stage).match({ plan: plan.id, lines: [0, 2], codes: [0], expiresAt: '2026-11-01T12:02:00.000Z' });
     should(stage.summary[0]).equal(
       'Line 1: sign in as GitHub work · kirin-work on github.com with its password, codes and username, 1 use',
     );
@@ -864,6 +865,7 @@ describe('TaskPlanService: the edges of each step', () => {
 
     const stage = await staged(w, plan, { lines: [{ line: 0 }] });
 
+    should(stage.codes).eql([]);
     should(stage.summary).eql([
       'Line 1: type the password of kirin · kirin on sudo@kirin-box; this gives the ferret root there, 1 use',
     ]);

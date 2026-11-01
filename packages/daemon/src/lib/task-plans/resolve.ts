@@ -1,7 +1,7 @@
 import {
   type AccountKey,
-  type AccountSummary,
   type AccountList,
+  type AccountSummary,
   canonicalTaskPlanApproval,
   chosenSignIn,
   type GrantMissReason,
@@ -167,7 +167,7 @@ export function resolveLine(
   const candidates = shown.map(signIn => candidateOf(signIn, accountOf(listing, signIn) as AccountSummary));
   const fields: SignInField[] = ask.kind === 'sign-in' ? [...ask.fields] : ['password'];
   const flags: TaskPlanLineFlag[] = [
-    ...(ask.kind === 'terminal-sign-in' ? (['root'] as const) : []),
+    ...(ask.kind === 'terminal-sign-in' && because === undefined ? (['root'] as const) : []),
     ...(fields.includes('totp') ? (['one-factor'] as const) : []),
     ...(because === undefined && candidates.some(candidate => !candidate.history) ? (['no-history'] as const) : []),
   ];

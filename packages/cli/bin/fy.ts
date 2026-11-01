@@ -5,6 +5,7 @@ import { TOOLS_SERVER_INSTRUCTIONS } from '@ferretry/fleet';
 import { FileConversationLeaseStore, HostProcessStarts, resolveUserHome } from '@ferretry/fleet/adapters';
 import {
   type AnalyticsResponse,
+  appOriginChoice,
   CONFIG_DIRECTORY_NAME,
   DAEMON_RESTART_PATIENCE_MS,
   type DaemonRestartPatience,
@@ -27,13 +28,14 @@ import { AgendaBriefInput } from '../src/adapters/agenda/brief-input';
 import { SessionCredentialGateway } from '../src/adapters/agent-tools/session-credential-gateway';
 import { registerBoardCommands } from '../src/adapters/board/board-commands';
 import { FyBoardGateway } from '../src/adapters/board/fy-board-gateway';
-import { FyWorkSearchGateway } from '../src/adapters/work-search/fy-work-search-gateway';
 import { registerBoardImportCommand } from '../src/adapters/board-import/board-import-command';
 import { FyBoardImportGateway } from '../src/adapters/board-import/fy-board-import-gateway';
 import { FyLaneGateway } from '../src/adapters/board-lanes/fy-lane-gateway';
 import { registerLaneCommands } from '../src/adapters/board-lanes/lane-commands';
 import { BUNDLED_FIREWALL_FILES } from '../src/adapters/browser/firewall-files';
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
+import { FileCatalogWriter } from '../src/adapters/catalog/export-file';
+import { FsCatalogFileReader } from '../src/adapters/catalog-install/fs-catalog-file-reader';
 import { FileConfigFiles } from '../src/adapters/config/files';
 import { StdinConfigText } from '../src/adapters/config/stdin';
 import { readDaemonToken } from '../src/adapters/daemon/api-token';
@@ -48,12 +50,6 @@ import {
   type LoopbackListenerGuardPorts,
 } from '../src/adapters/daemon/loopback-listener-guard';
 import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
-import {
-  DaemonInstanceCache,
-  HealthInstanceReader,
-  RevisitedConnection,
-  SessionBearerTransport,
-} from '../src/adapters/daemon/session-credential';
 import { BunDaemonProcess } from '../src/adapters/daemon/process';
 import { HostProcessIncarnations } from '../src/adapters/daemon/process-incarnation';
 import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
@@ -62,6 +58,12 @@ import { FileDaemonRestartMarker, restartMarkerPath } from '../src/adapters/daem
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { privateRuntimeDirectory } from '../src/adapters/daemon/runtime-directory';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
+import {
+  DaemonInstanceCache,
+  HealthInstanceReader,
+  RevisitedConnection,
+  SessionBearerTransport,
+} from '../src/adapters/daemon/session-credential';
 import { TmuxSessionTerminalServer } from '../src/adapters/daemon/session-terminals';
 import { bunTracerHost, PlatformSyscallTracer } from '../src/adapters/daemon/syscall-tracer';
 import { serveMcpOverStdio } from '../src/adapters/mcp/stdio';
@@ -69,6 +71,7 @@ import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
 import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
 import { IntlLocalTime } from '../src/adapters/passkey/local-time';
+import { openInBrowser } from '../src/adapters/plan/open-link';
 import { FyProjectGateway } from '../src/adapters/projects/fy-project-gateway';
 import { registerProjectCommands } from '../src/adapters/projects/project-commands';
 import { FileMarkerProbe, SystemPollClock } from '../src/adapters/reads/system-poller';
@@ -91,11 +94,9 @@ import { GitHubLatestRelease } from '../src/adapters/update/latest-release';
 import { CommandPackageManagers } from '../src/adapters/update/package-managers';
 import { StandaloneRelease } from '../src/adapters/update/standalone-release';
 import { ProtocolDaemonUpdateView } from '../src/adapters/update/update-view';
+import { FyWorkSearchGateway } from '../src/adapters/work-search/fy-work-search-gateway';
 import { registerAgendaCommands } from '../src/lib/agenda/commands';
 import { AgendaController } from '../src/lib/agenda/controller';
-import { registerWorkSearchCommands } from '../src/lib/work-search/commands';
-import { WorkSearchController } from '../src/lib/work-search/controller';
-import { RelatedCheck } from '../src/lib/work-search/related';
 import { ProtocolAgendaGateway } from '../src/lib/agenda/gateway';
 import {
   AgentToolsClient,
@@ -111,14 +112,21 @@ import { AuditController } from '../src/lib/audit/controller';
 import { ProtocolAuditGateway } from '../src/lib/audit/gateway';
 import { BoardController } from '../src/lib/board/board-controllers';
 import { BrowserController, registerBrowserCommands, registerFirewallCommands } from '../src/lib/browser';
+import { registerCatalogCommands } from '../src/lib/catalog/commands';
+import { CatalogController } from '../src/lib/catalog/controller';
+import { ProtocolCatalogGateway } from '../src/lib/catalog/gateway';
+import { registerCatalogInstallCommands } from '../src/lib/catalog-install/commands';
+import { CatalogInstallController } from '../src/lib/catalog-install/controller';
+import { registerShareCommands } from '../src/lib/catalog-share/commands';
+import { ShareController } from '../src/lib/catalog-share/controller';
+import { ProtocolSharingGateway } from '../src/lib/catalog-share/gateway';
 import { registerConfigCommands } from '../src/lib/config/commands';
 import { ConfigController } from '../src/lib/config/controller';
 import { ProtocolConfigGateway } from '../src/lib/config/gateway';
-import { registerCopyCommands } from '../src/lib/plan/commands';
-import { CopyController } from '../src/lib/plan/controller';
-import { ProtocolCopyGateway, ProtocolPlanGateway } from '../src/lib/plan/gateway';
-import { PlanController } from '../src/lib/plan/plan-controller';
 import { isLocalDaemonUrl, resolveDaemonUrl } from '../src/lib/daemon/address';
+import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
+import { registerDaemonCommands } from '../src/lib/daemon/commands';
+import { DaemonController } from '../src/lib/daemon/controller';
 import {
   AS_OWNER_NOTE,
   type CredentialPlan,
@@ -127,9 +135,6 @@ import {
   paneCredentialWarnings,
   presentsSessionBearer,
 } from '../src/lib/daemon/credential';
-import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/daemon/binary';
-import { registerDaemonCommands } from '../src/lib/daemon/commands';
-import { DaemonController } from '../src/lib/daemon/controller';
 import { ProtocolFirewallStatusReader } from '../src/lib/daemon/firewall-status';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
 import { legacyWireReport } from '../src/lib/daemon/legacy-wire';
@@ -154,9 +159,6 @@ import { RecommendController } from '../src/lib/fleet/recommend';
 import { registerGrantCommands } from '../src/lib/grants/commands';
 import { GrantController } from '../src/lib/grants/controller';
 import { ProtocolGrantGateway } from '../src/lib/grants/gateway';
-import { FsCatalogFileReader } from '../src/adapters/catalog-install/fs-catalog-file-reader';
-import { registerCatalogInstallCommands } from '../src/lib/catalog-install/commands';
-import { CatalogInstallController } from '../src/lib/catalog-install/controller';
 import { registerHarnessCommands } from '../src/lib/harness/commands';
 import { HarnessController } from '../src/lib/harness/controller';
 import { registerHistoryCommands } from '../src/lib/history/commands';
@@ -203,6 +205,10 @@ import { ProtocolPasskeyGateway } from '../src/lib/passkey/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
+import { registerCopyCommands } from '../src/lib/plan/commands';
+import { CopyController } from '../src/lib/plan/controller';
+import { ProtocolCopyGateway, ProtocolPlanGateway } from '../src/lib/plan/gateway';
+import { PlanController } from '../src/lib/plan/plan-controller';
 import type { IProgress } from '../src/lib/progress/index';
 import { registerQueueCommands } from '../src/lib/queue/commands';
 import { ProtocolQueueGateway } from '../src/lib/queue/gateway';
@@ -215,22 +221,17 @@ import { registerRestartCommands } from '../src/lib/restart/commands';
 import { RestartController } from '../src/lib/restart/controller';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
-import { ProtocolAccountGateway as ProtocolSecretAccountGateway } from '../src/lib/secrets/account-gateway';
 import { AccountController } from '../src/lib/secrets/account-controller';
+import { ProtocolAccountGateway as ProtocolSecretAccountGateway } from '../src/lib/secrets/account-gateway';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
-import { FactorKeyController } from '../src/lib/secrets/factor-keys-controller';
-import { SignInController } from '../src/lib/secrets/sign-in-controller';
 import { SecretController } from '../src/lib/secrets/controller';
 import { TwoFactorSeedController } from '../src/lib/secrets/factor-controller';
 import { ProtocolTwoFactorSeedGateway } from '../src/lib/secrets/factor-gateway';
+import { FactorKeyController } from '../src/lib/secrets/factor-keys-controller';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
+import { SignInController } from '../src/lib/secrets/sign-in-controller';
 import { registerSecurityCommands } from '../src/lib/security/commands';
 import { SecurityController } from '../src/lib/security/controller';
-import {
-  ProtocolSessionCredentialGateway,
-  RevokeCredentialController,
-  registerSessionCredentialCommands,
-} from '../src/lib/session/revoke-credential.ts';
 import { ProtocolSecurityGateway } from '../src/lib/security/gateway';
 import {
   AnswerQuestionController,
@@ -251,6 +252,11 @@ import {
   StartSessionController,
   SuggestNamesController,
 } from '../src/lib/session/index.ts';
+import {
+  ProtocolSessionCredentialGateway,
+  RevokeCredentialController,
+  registerSessionCredentialCommands,
+} from '../src/lib/session/revoke-credential.ts';
 import { registerSetupCommands } from '../src/lib/setup/commands';
 import { type IStateHomeClaimNotices, StateHomeClaimService } from '../src/lib/state-home/claim';
 import { StateHomeController } from '../src/lib/state-home/controller';
@@ -267,13 +273,9 @@ import { DAEMON_RELEASE_KEYS } from '../src/lib/update/release-keys';
 import { DaemonUpdateStatusReader } from '../src/lib/update/status';
 import { DaemonUpdater } from '../src/lib/update/updater';
 import { assertSemver } from '../src/lib/version';
-import { registerCatalogCommands } from '../src/lib/catalog/commands';
-import { CatalogController } from '../src/lib/catalog/controller';
-import { ProtocolCatalogGateway } from '../src/lib/catalog/gateway';
-import { registerShareCommands } from '../src/lib/catalog-share/commands';
-import { ShareController } from '../src/lib/catalog-share/controller';
-import { ProtocolSharingGateway } from '../src/lib/catalog-share/gateway';
-import { FileCatalogWriter } from '../src/adapters/catalog/export-file';
+import { registerWorkSearchCommands } from '../src/lib/work-search/commands';
+import { WorkSearchController } from '../src/lib/work-search/controller';
+import { RelatedCheck } from '../src/lib/work-search/related';
 import { registerWorktreeCommands } from '../src/lib/worktrees/commands';
 import { WorktreeController } from '../src/lib/worktrees/controller';
 import { ProtocolWorktreeGateway } from '../src/lib/worktrees/gateway';
@@ -654,6 +656,12 @@ const UNAUTHENTICATED_PROBE_TOKEN = 'unauthenticated';
  * report "did not become ready" against a daemon that came up perfectly. The connection is rebuilt
  * only when the answer actually changes, and building one costs nothing but an object.
  */
+/** The app address a plan's card link is built on, and why a set `FY_APP_URL` was not used. */
+function planApp(setting: string | undefined): { readonly appOrigin: string; readonly appOriginNote?: string } {
+  const { origin, refused } = appOriginChoice(setting);
+  return { appOrigin: origin, ...(refused === undefined ? {} : { appOriginNote: refused }) };
+}
+
 function lazyHealthClient(environment: Record<string, string | undefined>, stateHome: string): HealthApiClient {
   let connected: { readonly url: string; readonly client: Promise<FyApiClient> } | undefined;
   const token = environment.FY_TOKEN?.trim() ?? '';
@@ -1071,6 +1079,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         agentCredential: paneCredentialValue(world.environment),
         sleep: async ms => await Bun.sleep(ms),
         nowMs: () => Date.now(),
+        ...planApp(world.environment.FY_APP_URL),
+        openLink: async url => openInBrowser(url),
       }),
     ),
   ({ program, world, client, ownSessionId }) =>
