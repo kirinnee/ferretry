@@ -327,7 +327,6 @@
 .fy-card__dismiss:hover:not(:disabled) {
   color: var(--fg);
 }
-.fy-card__arrow,
 .fy-qr__arrow {
   margin-right: 5px;
   opacity: 0.55;

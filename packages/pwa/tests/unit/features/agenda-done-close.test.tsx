@@ -247,7 +247,7 @@ const hostFlow = (
         map={swipeMap(item)}
         model={cardModel(item)}
         onAct={() => undefined}
-        onDown={() => undefined}
+        onSkip={() => undefined}
         options={itemOptions(item)}
         swipeable
         {...(flow === undefined ? {} : { doneClose: flow })}
@@ -358,7 +358,7 @@ describe('where Done · closes sits among the answers', () => {
           map={swipeMap(item)}
           model={cardModel(item)}
           onAct={() => undefined}
-          onDown={() => undefined}
+          onSkip={() => undefined}
           options={itemOptions(item)}
           swipeable
           {...(flow === undefined ? {} : { doneClose: flow })}

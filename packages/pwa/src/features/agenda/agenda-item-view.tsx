@@ -17,7 +17,7 @@
  * (`scroll-padding`), so a focused field never lands behind one.
  *
  * The body is the ONE scroller (`overscroll-behavior: contain`). ✕ and Esc go back to the chat; ‹ › page through the
- * items without answering; ← ↑ → answer on a keyboard and ↓ is Not needed, exactly as the swipes (a field or a button
+ * items without answering; ← ↑ → answer on a keyboard and ↓ is Skip (the next item, nothing changed), exactly as the swipes (a field or a button
  * keeps its own keys). Everything typed goes through the composer: this view has no text field of its own.
  */
 
@@ -28,9 +28,8 @@ import { useQuoteMenu } from '../../components/quote-menu.tsx';
 import { useDoneClose } from '../../hooks/use-done-close.ts';
 import { answerAction } from '../../lib/agenda-answers.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
-import { cardModel } from '../../lib/agenda-card-model.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
-import { DISMISS_ACTION, type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import { type InboxAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
@@ -158,14 +157,12 @@ export function AgendaItemView({
   const infoOpen = infoFor === item.id;
   useScrollPadding(body, top, dock);
   const quote = useQuoteMenu(root, quoteScope);
-  const model = cardModel(item);
   const map = swipeMap(item);
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
   const hasInfo = head.description !== null || onSnooze !== undefined;
   const doneClose = useDoneCloseFlow(useDoneClose(daemonId, item), label => onAct({ kind: 'resolve', label }));
   const answerable = settled === undefined && !(inputForm !== undefined && item.kind === 'input');
-  const canDismiss = answerable && model.dismissInMenu && !model.notice;
   // Request changes IS the owner's words: sent with what the composer holds, or the owner is put in the composer first.
   const requestChanges = (answer: AgendaCardAnswer): void => {
     const composer = quoteScope === null ? null : composerQuoteTarget(quoteScope);
@@ -192,9 +189,9 @@ export function AgendaItemView({
     }
     if (busy || !answerable) return;
     if (event.key === 'ArrowDown') {
-      if (!canDismiss) return;
+      if (onNext === undefined) return;
       event.preventDefault();
-      onAct(DISMISS_ACTION);
+      onNext();
       return;
     }
     const direction = KEY_DIRECTION[event.key];
@@ -293,6 +290,7 @@ export function AgendaItemView({
             renderProse={renderProse}
             swipeable={swipeable}
             answerDock={dock}
+            {...(onNext === undefined ? {} : { onSkip: onNext })}
             {...(onProgress === undefined ? {} : { onProgress })}
             {...(doneClose === undefined ? {} : { doneClose })}
             {...(settled === undefined ? {} : { settled })}

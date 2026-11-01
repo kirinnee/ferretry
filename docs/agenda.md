@@ -368,7 +368,7 @@ ends with one plain instruction, so the owner always knows what to do:
 - **Request changes** is a button, never a swipe: it sends what the composer holds as the change asked for, or puts
   the owner in the composer when it is empty. Where no composer is at hand (the Sessions page's compact card), the
   card says to type the changes in the message box instead.
-- **Swipes are the visible buttons only.** A card answered in words swipes nowhere except ↓ Not needed.
+- **Swipes are the visible buttons only.** A card answered in words swipes nowhere except ↓ Skip.
 - **It is enforced where an item is raised.** `fy agenda add` refuses a raise that mixes shapes before anything is
   sent, and the daemon refuses the same raise from a ferret (`invalid`), each naming the shape to write instead —
   "several questions → write them as a numbered list for the owner to answer in the reply: one --question each,
@@ -407,7 +407,7 @@ the whole list.
   picked is a list), so the ferret reads `fy agenda show <id> --json` instead of parsing prose.
 - **Empty required fields are asked about once.** The first Send says which fields are unanswered and that Send again sends
   it as it is; the next Send goes through. Nothing filled in at all is not sent.
-- **No swipes** except ↓ Not needed. Recommended values start picked and say "Recommended".
+- **No swipes** except ↓ Skip. Recommended values start picked and say "Recommended".
 - **In the chat** (the Sessions page's compact card) the fields are drawn read-only with "Open this in the Inbox to fill it
   in, or answer in the reply box, numbered."
 - **Stored `ask` is still `open-question`**, so an app that predates forms still reads the item as an open-question reply item;
@@ -446,11 +446,14 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   - **← ↑ →** send the card's answers, which mean the same everywhere (the deck, the card, the item view, what the
     CLI prints): a row of options is in the **options list's order** — the first ←, the second ↑, the third →
     (two options: ← and →) — wherever the recommendation sits;
-  - **↓ is Not needed**, everywhere — the deck, the card's top bar and answer row, the ↓ key — into the same undo
-    window as any answer. A notice has no ↓ (it is cleared, not dismissed).
-  - **Skip is a tap, never a swipe**: the item's › moves on to the next one; nothing is sent and the item stays open.
+  - **↓ is Skip**, everywhere a card swipes (the deck, the chat dock, the card's top bar and answer row, the ↓ key,
+    and the to-test and task-panel cards): it moves on to the next one; nothing is sent, nothing is dismissed and
+    the item stays open. A single mis-swipe can therefore never close a card.
+  - **Not needed is a button only**, the pill in the card's top bar (no arrow, no swipe), into the same undo window
+    as any answer. A notice has no Not needed (it is cleared, not dismissed). The item's › also skips.
 
-  A held drag is stamped with what letting go would do (there is no hint line under the card). Every answer
+  A held drag is stamped with what letting go would do (there is no hint line under the card); a card pulled down shows
+  "Skip" on the ground it uncovers, in the to-test rows' style. Every answer
   goes into the same undo window as a tap. Reduced motion (the OS preference or Settings › Appearance › Motion) drops
   the fly-off and the spring.
 

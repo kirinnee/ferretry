@@ -1,6 +1,6 @@
 /**
  * THE ↓ SWIPE, on touch: drag down from the agenda card's top bar or its answer row, past the distance an answer
- * swipe needs (`swipeThreshold`), mostly straight. On the card it is Not needed; the ↓ key does the same.
+ * swipe needs (`swipeThreshold`), mostly straight. On the card it is Skip (the next item, nothing changed); the ↓ key does the same.
  */
 
 import { type PointerEvent, useRef } from 'react';

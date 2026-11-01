@@ -37,7 +37,7 @@ const draw = async (item: AgendaItem, extra: Partial<AgendaQuickRepliesProps> = 
       model={cardModel(item)}
       onAct={action => spy.acted.push(action)}
       options={itemOptions(item)}
-      onDown={() => {
+      onSkip={() => {
         spy.skipped += 1;
       }}
       swipeable
@@ -152,7 +152,7 @@ describe('the quick replies', () => {
     expect(root().querySelector('[aria-haspopup="menu"]')).toBeNull();
   });
 
-  test('has no Not needed of its own: that is the card’s top-bar pill and the ↓ swipe', async () => {
+  test('has no Not needed of its own: that is the card’s top-bar pill, a button only', async () => {
     await draw(agendaItem('A9', { ask: choices('Now', 'Later', 'Never') } as Partial<AgendaItem>));
     expect(root().querySelector('[data-agenda-dismiss]')).toBeNull();
   });
@@ -321,14 +321,15 @@ describe('the swipe over the chips', () => {
   });
 });
 
-describe('the pull down over the chips: Not needed', () => {
-  test('a clear pull down is Not needed, and does nothing where the host offers none', async () => {
-    await draw(chosen, { onDown: undefined });
+describe('the pull down over the chips: Skip', () => {
+  test('a clear pull down never answers, and does nothing where the host offers no Skip', async () => {
+    const spy = await draw(chosen, { onSkip: undefined });
     await drag({ x: 200, y: 400 });
+    expect(spy.acted).toEqual([]);
     expect(root().querySelector('[role="alert"]')).toBeNull();
   });
 
-  test('a clear pull down calls onDown', async () => {
+  test('a clear pull down calls onSkip', async () => {
     const spy = await draw(chosen);
     await drag({ x: 200, y: 400 });
     expect(spy.skipped).toBe(1);
@@ -352,7 +353,7 @@ describe('the pull down over the chips: Not needed', () => {
     expect(spy.skipped).toBe(1);
   });
 
-  test('a row that does not swipe, or a mouse, does not call onDown on a pull down', async () => {
+  test('a row that does not swipe, or a mouse, does not call onSkip on a pull down', async () => {
     const still = await draw(chosen, { swipeable: false });
     await drag({ x: 200, y: 400 });
     expect(still.skipped).toBe(0);

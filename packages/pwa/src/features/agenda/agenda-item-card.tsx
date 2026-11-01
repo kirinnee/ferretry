@@ -50,6 +50,8 @@ export interface AgendaItemCardProps {
   readonly error: string | null;
   readonly swipeable: boolean;
   readonly renderProse: Prose;
+  /** The ↓ swipe: Skip (the host moves to the next item, changing nothing), or absent where there is no next item. */
+  readonly onSkip?: (() => void) | undefined;
   readonly onAct: (action: InboxAction) => void;
   readonly onProgress?: ((step: number, done: boolean) => Promise<void>) | undefined;
   readonly doneClose?: DoneCloseView | undefined;
@@ -260,6 +262,7 @@ export function AgendaItemCard({
   busy,
   error,
   swipeable,
+  onSkip,
   renderProse,
   onAct,
   onProgress,
@@ -299,7 +302,7 @@ export function AgendaItemCard({
   const dismiss = (): void => {
     if (!busy) onAct(DISMISS_ACTION);
   };
-  const pull = useDownSwipe(dismiss, swipeable && canDismiss);
+  const pull = useDownSwipe(() => onSkip?.(), swipeable && onSkip !== undefined);
 
   // A choice (one question): its options are listed with what each means, and answered on the row. Any other shape
   // offers none, whatever options an item raised before the rule still carries.
@@ -350,7 +353,7 @@ export function AgendaItemCard({
       onAct={onAct}
       options={options}
       swipeable={swipeable}
-      {...(canDismiss ? { onDown: dismiss } : {})}
+      {...(onSkip === undefined ? {} : { onSkip })}
       {...(doneClose === undefined ? {} : { doneClose })}
       {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
       {...(requestChanges === undefined ? {} : { requestChanges })}
@@ -380,16 +383,13 @@ export function AgendaItemCard({
         <span className="fy-card__tools">
           {canDismiss ? (
             <button
-              aria-label={swipeable ? 'Not needed, or swipe down' : 'Not needed'}
+              aria-label="Not needed"
               className="fy-card__dismiss"
               data-agenda-dismiss=""
               disabled={busy}
               onClick={dismiss}
               type="button"
             >
-              <span aria-hidden="true" className="fy-card__arrow">
-                ↓
-              </span>
               Not needed
             </button>
           ) : null}
