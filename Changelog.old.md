@@ -1,3 +1,15 @@
+## [4.206.0](https://github.com/kirinnee/ferretry/compare/v4.205.1...v4.206.0) (2026-11-01)
+
+### Features
+
+* **protocol:** task plan wire contract and the approve-task-plan act (R3a-1) ([#1258](https://github.com/kirinnee/ferretry/issues/1258)) ([431a601](https://github.com/kirinnee/ferretry/commit/431a601d71cb26c040b87a86cd0bead5b629914a))
+* **pwa:** Accounts screen and the staged 2FA seed card (R1-7) ([#1256](https://github.com/kirinnee/ferretry/issues/1256)) ([a07abf3](https://github.com/kirinnee/ferretry/commit/a07abf34c71510af07faccee5f1788f98daa5913))
+
+### Fixes
+
+* **daemon:** keep the agent file tools out of the state home ([#1255](https://github.com/kirinnee/ferretry/issues/1255)) ([85f4e39](https://github.com/kirinnee/ferretry/commit/85f4e39522f3db9a1088b56336cb4be9014a0452))
+* **pwa:** run card fills its box; option labels show no literal Markdown ([#1259](https://github.com/kirinnee/ferretry/issues/1259)) ([4301068](https://github.com/kirinnee/ferretry/commit/430106816bb3ea913e0299f6951503954e9d5fb1))
+
 ## [4.205.1](https://github.com/kirinnee/ferretry/compare/v4.205.0...v4.205.1) (2026-11-01)
 
 ### Fixes
