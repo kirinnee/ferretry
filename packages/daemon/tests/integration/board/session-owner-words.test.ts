@@ -51,7 +51,8 @@ async function fixture() {
     serial: new KeyedSerialExecutor(),
   });
   const firstTurn = (id: string) => join(sessions, id, 'turns', 'turn-001.md');
-  const words = new QueueOwnerWords(queue, new StorageSessionParents(storage), id => firstTurn(id));
+  const parents = new StorageSessionParents(storage);
+  const words = new QueueOwnerWords(queue, parents, id => firstTurn(id));
   const open = async (id: string, parent?: string) => {
     await storage.writeConfig(parseSessionId(id), {
       id,
@@ -73,7 +74,7 @@ async function fixture() {
   };
   const say = async (id: string, key: string, text: string, sender: 'human' | 'agent' = 'human', by?: object) =>
     await queue.enqueue(parseSessionId(id), { id: key, sender, text, ...(by === undefined ? {} : { by }) } as never);
-  return { words, open, turnOne, say };
+  return { words, open, turnOne, say, parents, firstTurn: (id: string) => firstTurn(id) };
 }
 
 afterEach(async () => {
@@ -110,6 +111,23 @@ describe('QueueOwnerWords over a real state home', () => {
 
     should(await words.said('ghost')).eql([]);
     should(await words.said('')).eql([]);
+  });
+
+  it('should still read the first turn when the queue cannot be read', async () => {
+    const { open, turnOne, parents, firstTurn } = await fixture();
+    await open('lead');
+    await turnOne('lead', 'the owner started this');
+    const torn = new QueueOwnerWords(
+      {
+        list: async () => {
+          throw new Error('queue.jsonl unreadable');
+        },
+      },
+      parents,
+      firstTurn,
+    );
+
+    should(await torn.said('lead')).eql(['the owner started this']);
   });
 
   it('should decide a lead-relayed card is a person ask only when the owner said it verbatim', async () => {
