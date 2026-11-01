@@ -82,7 +82,7 @@ describe('queryAnalyticsRecords', () => {
     should(actual.results).have.length(2);
     should(actual.results[0]).match({ labels: { day: '2026-07-30' }, sessions: 2 });
     should(actual.results[0]!.rates).deepEqual({ stall: 50, failure: 50, completion: 50 });
-    should(actual.results[0]!.tokens).deepEqual({ value: null, known: 1, total: 2 });
+    should(actual.results[0]!.tokens).deepEqual({ value: null, known: 1, total: 2, knownSum: 100 });
     should(actual.results[1]!.tokens).deepEqual({ value: 100, known: 1, total: 1 });
   });
 
@@ -168,7 +168,7 @@ describe('queryAnalyticsRecords', () => {
     }
     should(partial).have.property('kind', 'aggregate');
     if (partial.kind === 'aggregate') {
-      should(partial.results[0]!.reasoningTokens).deepEqual({ value: null, known: 1, total: 2 });
+      should(partial.results[0]!.reasoningTokens).deepEqual({ value: null, known: 1, total: 2, knownSum: 12 });
     }
   });
 

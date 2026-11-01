@@ -89,6 +89,7 @@ export const dayAggregate = (day: string, sessions: number, known: number): Anal
       cacheWrite1hInputTokens: measure(1, sessions, sessions),
       reasoningTokens: measure(null, 0, sessions),
       equivalentApiCostUsdMicros: measure(known === sessions ? 1 : null, known, sessions),
+      equivalentApiCostCurrentUsdMicros: measure(known === sessions ? 1 : null, known, sessions),
       turns: measure(1, sessions, sessions),
       durationMs: measure(1, sessions, sessions),
       activeDurationMs: measure(1, sessions, sessions),

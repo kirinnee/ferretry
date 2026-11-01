@@ -54,6 +54,7 @@ const aggregateResult = {
   cacheWrite1hInputTokens: unknownMeasure,
   reasoningTokens: unknownMeasure,
   equivalentApiCostUsdMicros: measure,
+  equivalentApiCostCurrentUsdMicros: measure,
   turns: measure,
   durationMs: measure,
   activeDurationMs: measure,

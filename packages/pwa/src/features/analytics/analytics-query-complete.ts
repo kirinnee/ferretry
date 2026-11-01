@@ -114,6 +114,7 @@ const metricDetail: Record<(typeof metrics)[number], string> = {
   tokens_cache_write: 'cached input written',
   tokens_reasoning: 'reasoning tokens',
   cost_usd: 'equivalent API cost in USD',
+  cost_now_usd: "the same tokens at today's rates, in USD",
   turns: 'prompts answered',
   sessions: 'number of sessions',
   duration_active_seconds: 'time spent working a turn',

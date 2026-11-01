@@ -46,6 +46,7 @@ const metrics = {
   cacheWrite1hInputTokens: 'cacheWrite1hInputTokens',
   reasoningTokens: 'reasoningTokens',
   equivalentApiCostUsdMicros: 'equivalentApiCostUsdMicros',
+  equivalentApiCostCurrentUsdMicros: 'equivalentApiCostCurrentUsdMicros',
   turns: 'turns',
   durationMs: 'durationMs',
   activeDurationMs: 'activeDurationMs',
@@ -106,8 +107,17 @@ function measure(
 ): AnalyticsMeasure {
   if (operation === 'count') return { value: null, known: 0, total: 0 };
   const known = values.filter((value): value is number => value !== null);
-  if (known.length !== values.length || known.length === 0)
-    return { value: null, known: known.length, total: values.length };
+  if (known.length !== values.length || known.length === 0) {
+    // A sum of the sessions that stated a figure is a lower bound, and is said as one; a partial mean,
+    // minimum or maximum is not a bound on anything, so it stays unknown.
+    const lowerBound = operation === 'sum' && known.length > 0 ? known.reduce((total, next) => total + next, 0) : null;
+    return {
+      value: null,
+      known: known.length,
+      total: values.length,
+      ...(lowerBound === null ? {} : { knownSum: lowerBound }),
+    };
+  }
   const value =
     operation === 'sum'
       ? known.reduce((total, next) => total + next, 0)
@@ -153,6 +163,7 @@ function aggregate(
         ),
       ]),
     ) as { readonly [K in AnalyticsMeasureKey]: AnalyticsMeasure };
+    const costGaps = costGapCounts(group.rows);
     return {
       labels: group.labels,
       sessions,
@@ -162,8 +173,20 @@ function aggregate(
         completion: (100 * group.rows.filter(row => row.status === 'completed').length) / sessions,
       },
       ...measures,
+      ...(costGaps === undefined ? {} : { costGaps }),
     };
   });
+}
+
+/** Why each session without a cost has none, counted per reason; undefined when every session priced. */
+function costGapCounts(rows: readonly AnalyticsRawSession[]): Record<string, number> | undefined {
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    if (row.equivalentApiCostUsdMicros !== null) continue;
+    const reason = row.costGap ?? 'unknown';
+    counts[reason] = (counts[reason] ?? 0) + 1;
+  }
+  return Object.keys(counts).length === 0 ? undefined : counts;
 }
 
 /**

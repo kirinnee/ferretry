@@ -76,3 +76,63 @@ describe('AnalyticsQueryChart durations', () => {
     expect(JSON.stringify(rendered.toJSON())).toContain('Active time');
   });
 });
+
+describe('a bar for a group some sessions could not price', () => {
+  it('draws the part that was priced, flagged as a lower bound, instead of an empty bar', () => {
+    const partial = group(
+      { model: 'claude-opus-5-5' },
+      { equivalentApiCostUsdMicros: { value: null, known: 320, total: 330, knownSum: 412_500_000 } },
+    );
+    const nothing = group({ model: 'mystery' }, { equivalentApiCostUsdMicros: measure(null, 0, 5) });
+    const points = queryChartPoints(
+      agg(aggregateResponse('q', [nothing, partial], { groupBy: ['model'] })),
+      'cost_usd',
+    );
+    expect(points.map(point => [point.label, point.values[0], point.flagged])).toEqual([
+      ['claude-opus-5-5', 412.5, true],
+      ['mystery', 0, true],
+    ]);
+  });
+});
+
+describe('the names under a by-model chart', () => {
+  const byModel = (names: readonly string[]) =>
+    agg(
+      aggregateResponse(
+        'q',
+        names.map(model => group({ model })),
+        { groupBy: ['model'] },
+      ),
+    );
+  const labelsOf = (rendered: ReturnType<typeof render>) =>
+    rendered.root.findAll(node => node.props['data-chart-xlabel'] !== undefined);
+
+  it('rotates long names so every bar keeps a readable one under it', () => {
+    const rendered = render(
+      <AnalyticsQueryChart
+        response={byModel([
+          'claude-opus-5-5',
+          'claude-sonnet-5-5',
+          'glm-5.3',
+          'gpt-6-astra',
+          'deepseek-flash',
+          'gpt-6.1-sol',
+          'minimax-m3.1-flash-preview',
+        ])}
+      />,
+    );
+    const labels = labelsOf(rendered);
+    expect(labels.length).toBeGreaterThanOrEqual(7);
+    expect(new Set(labels.map(node => node.props['data-chart-xlabel'])).size).toBeGreaterThanOrEqual(7);
+    expect(labels.every(node => String(node.props.className).includes('[writing-mode:vertical-rl]'))).toBe(true);
+    expect(labels.every(node => String(node.props.className).includes('truncate'))).toBe(true);
+  });
+
+  it('keeps dates flat, thinned the way they were', () => {
+    const response = agg(
+      aggregateResponse('q', [group({ day: '2026-10-13' }), group({ day: '2026-10-14' })], { groupBy: ['day'] }),
+    );
+    const labels = labelsOf(render(<AnalyticsQueryChart response={response} />));
+    expect(labels.every(node => !String(node.props.className).includes('vertical-rl'))).toBe(true);
+  });
+});
