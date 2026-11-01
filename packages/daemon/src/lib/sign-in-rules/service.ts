@@ -153,7 +153,13 @@ interface Stage {
    * passkey the owner gave without its reason in front of them (secrev-1274a L2).
    */
   readonly replaces?:
-    | { readonly id: SignInRuleId; readonly revision: number; readonly suspended?: SignInRuleSuspension | undefined }
+    | {
+        readonly id: SignInRuleId;
+        readonly revision: number;
+        readonly suspended?: SignInRuleSuspension | undefined;
+        /** The owner's narrowing as it stood (canonical JSON), so one made after the stage is never undone unseen. */
+        readonly narrowed: string;
+      }
     | undefined;
   readonly account: AccountRef;
   readonly username?: string | undefined;
@@ -210,12 +216,14 @@ export class SignInRuleService {
   #health: 'loading' | 'ok' | 'damaged' = 'loading';
   readonly #stages = new Map<SignInRuleStageId, Stage>();
   /** Records whose proof checked out against the registry as it stood at the last look, by `id:revision`. */
-  readonly #verified = new Set<string>();
+  #verified: ReadonlySet<string> = new Set<string>();
   /**
    * A check that could not be made yet: the accounts or the passkeys could not be read at load or after. Until a sweep
    * makes it, the rules it covers are not `verified`, so none fills (secrev-1274a L4, secrev-1274b L1, N3).
    */
   #unsettled = false;
+  /** The answer of the last proof check `#recheckProof` made, for the set its caller builds. */
+  #lastProof: 'ok' | 'passkey-removed' | 'proof-invalid' | 'unknown' = 'unknown';
   /**
    * Memory holds a suspension or a use the file does not: its write failed. Every later write carries it, and the sweep
    * and {@link flush} retry until one lands (secrev-1274b L3).
@@ -279,13 +287,18 @@ export class SignInRuleService {
         'the accounts could not be read, so the standing rules were not checked against them: none fills',
       );
     }
+    // The verified set is BUILT APART and swapped in before any suspension is written, so no rule reads verified while
+    // its re-check runs or while its suspension is being saved (secrev-1274-delta F2). A rule whose drift could not be
+    // checked is never in it.
     const suspending: Suspending[] = [];
+    const verified = new Set<string>();
     for (const record of this.#records) {
       if (record.suspended !== undefined) continue;
       const because = await this.#recheck(record, listing);
       if (because !== undefined) suspending.push({ id: record.body.id, because });
+      else if (listing !== undefined && this.#lastProof === 'ok') verified.add(recordKey(record));
     }
-    if (listing === undefined) this.#verified.clear();
+    this.#verified = verified;
     await this.#suspendAll(suspending);
   }
 
@@ -446,6 +459,7 @@ export class SignInRuleService {
               id: existing.body.id,
               revision: existing.body.revision,
               ...(existing.suspended === undefined ? {} : { suspended: existing.suspended.because }),
+              narrowed: narrowingOf(existing),
             },
           }),
       account: { id: snap.account.id, label: snap.account.label },
@@ -633,6 +647,12 @@ export class SignInRuleService {
           SIGN_IN_RULE_ERROR_CODES.conflict,
           `the standing rule was suspended after this approval was staged (${signInRuleSuspensionWords(suspendedNow ?? 'proof-invalid')}); nothing was approved: look at it again`,
         );
+      if (held.replaces !== undefined && existing !== undefined && narrowingOf(existing) !== held.replaces.narrowed)
+        throw new SignInRuleError(
+          409,
+          SIGN_IN_RULE_ERROR_CODES.conflict,
+          'the standing rule was narrowed after this approval was staged; nothing was approved: look at it again',
+        );
       if (existing === undefined && this.#records.length >= SIGN_IN_RULE_MAX)
         throw new SignInRuleError(
           429,
@@ -657,7 +677,7 @@ export class SignInRuleService {
       await this.#write([...this.#records.filter(each => each.body.id !== body.id), record.data]).catch(() => {
         throw new SignInRuleError(503, 'unavailable', 'the standing rules could not be saved; nothing was approved');
       });
-      this.#verified.add(recordKey(record.data));
+      this.#verified = new Set([...this.#verified, recordKey(record.data)]);
       const action = existing === undefined ? 'sign-in-rule-created' : againAction(existing, this.ports.clock.now());
       await this.#auditRule(record.data, action, { proof: 'passkey' }, auditActor(owner));
       return { made: record.data, listing };
@@ -702,7 +722,7 @@ export class SignInRuleService {
     await this.#serial(async () => {
       const record = this.#rule(id);
       await this.#write(this.#records.filter(each => each.body.id !== id)).catch(this.#unsaved);
-      this.#verified.delete(recordKey(record));
+      this.#unverify(record);
       await this.#auditRule(record, 'sign-in-rule-revoked', {}, auditActor(owner));
     });
   }
@@ -719,7 +739,7 @@ export class SignInRuleService {
       const ids = new Set(ending.map(each => each.body.id));
       await this.#write(this.#records.filter(each => !ids.has(each.body.id))).catch(this.#unsaved);
       for (const record of ending) {
-        this.#verified.delete(recordKey(record));
+        this.#unverify(record);
         await this.#auditRule(record, 'sign-in-rule-revoked', { wholeAccount: true }, auditActor(owner));
       }
       return { revoked: ending.length };
@@ -773,11 +793,14 @@ export class SignInRuleService {
     await this.#serial(async () => {
       if (this.#health !== 'ok') return;
       const suspending: Suspending[] = [];
+      const verified = new Set<string>();
       for (const record of this.#records) {
         if (record.suspended !== undefined) continue;
         const because = await this.#recheckProof(record);
         if (because !== undefined) suspending.push({ id: record.body.id, because, revision: record.body.revision });
+        else if (this.#lastProof === 'ok') verified.add(recordKey(record));
       }
+      this.#verified = verified;
       await this.#suspendAll(suspending);
     });
   }
@@ -794,8 +817,7 @@ export class SignInRuleService {
       const suspending = this.#records
         .filter(record => record.suspended === undefined && record.body.approvedBy.deviceId === deviceId)
         .map(record => ({ id: record.body.id, because: 'passkey-removed' as const, revision: record.body.revision }));
-      for (const record of this.#records)
-        if (record.body.approvedBy.deviceId === deviceId) this.#verified.delete(recordKey(record));
+      for (const record of this.#records) if (record.body.approvedBy.deviceId === deviceId) this.#unverify(record);
       await this.#suspendAll(suspending);
     });
   }
@@ -837,6 +859,7 @@ export class SignInRuleService {
         this.ports.warn(
           'a standing rule’s use could not be saved, so the rule is suspended until you approve it again',
         );
+        this.#unverify(record);
         this.#records = this.#records.map(each =>
           each === record ? { ...next, suspended: this.#suspension('store-write-failed') } : each,
         );
@@ -862,9 +885,13 @@ export class SignInRuleService {
     });
   }
 
-  /** Whether a rule's proof checked out at the last look (R3c-4's fill reads it before every write). */
+  /**
+   * Whether a rule's proof AND its pinned facts checked out at the last look (R3c-4's fill reads it before every write).
+   * `false` while any check is still owed — the accounts or the passkeys could not be read, or the file is still being
+   * read — so a passkey change can't re-verify a rule whose facts were never checked (secrev-1274-delta F1).
+   */
   verified(id: SignInRuleId, revision: number): boolean {
-    return this.#verified.has(`${id}:${String(revision)}`);
+    return this.#health === 'ok' && !this.#unsettled && this.#verified.has(`${id}:${String(revision)}`);
   }
 
   // ── Internals ─────────────────────────────────────────────────────────────────────────────────────
@@ -874,7 +901,10 @@ export class SignInRuleService {
     record: SignInRuleRecord,
     listing: RuleListing | undefined,
   ): Promise<SignInRuleSuspension | undefined> {
-    if (signInRuleClockProblems(record.body, this.ports.clock.now()).length > 0) return 'proof-invalid';
+    if (signInRuleClockProblems(record.body, this.ports.clock.now()).length > 0) {
+      this.#lastProof = 'proof-invalid';
+      return 'proof-invalid';
+    }
     const proof = await this.#recheckProof(record);
     if (proof !== undefined) return proof;
     return listing === undefined ? undefined : ruleDrift(record.body, listing);
@@ -883,8 +913,7 @@ export class SignInRuleService {
   /** One record's proof now: `passkey-removed` or `proof-invalid`, or nothing (checked out, or nobody could tell). */
   async #recheckProof(record: SignInRuleRecord): Promise<SignInRuleSuspension | undefined> {
     const check = await checkRuleProof(record, this.ports.proofs);
-    if (check === 'ok') this.#verified.add(recordKey(record));
-    else this.#verified.delete(recordKey(record));
+    this.#lastProof = check;
     if (check === 'unknown') this.#unsettled = true;
     return check === 'passkey-removed' || check === 'proof-invalid' ? check : undefined;
   }
@@ -899,6 +928,10 @@ export class SignInRuleService {
       if (!wanted.has(change.id)) wanted.set(change.id, change);
     }
     if (wanted.size === 0) return;
+    // Out of the verified set BEFORE the write, so nothing reads it verified while its suspension is being saved.
+    this.#verified = new Set(
+      [...this.#verified].filter(key => ![...wanted.keys()].some(id => key.startsWith(`${id}:`))),
+    );
     const suspended = (because: (change: Suspending) => SignInRuleSuspension) =>
       this.#records.map(record => {
         const change = wanted.get(record.body.id);
@@ -916,7 +949,6 @@ export class SignInRuleService {
     for (const record of this.#records) {
       const change = wanted.get(record.body.id);
       if (change === undefined) continue;
-      this.#verified.delete(recordKey(record));
       await this.#auditRule(
         record,
         'sign-in-rule-suspended',
@@ -928,6 +960,10 @@ export class SignInRuleService {
         'daemon',
       );
     }
+  }
+
+  #unverify(record: Pick<SignInRuleRecord, 'body'>): void {
+    this.#verified = new Set([...this.#verified].filter(key => key !== recordKey(record)));
   }
 
   #suspension(because: SignInRuleSuspension): { readonly at: string; readonly because: SignInRuleSuspension } {
@@ -1108,7 +1144,9 @@ export class SignInRuleService {
       expiresAt: effective.expiresAt,
       ...(effective.uses === undefined ? {} : { uses: effective.uses, remaining: effective.remaining ?? 0 }),
       status: effective.status,
-      ...(record.suspended === undefined && !this.#verified.has(recordKey(record)) ? { unverified: true } : {}),
+      ...(record.suspended === undefined && !this.verified(record.body.id, record.body.revision)
+        ? { unverified: true }
+        : {}),
       ...(record.suspended === undefined ? {} : { suspended: record.suspended }),
       usage: record.usage,
       flags,
@@ -1170,6 +1208,14 @@ export class SignInRuleService {
       .catch(() => undefined);
   }
 }
+
+/** A record's narrowing as one comparable string: the same three facts, in a fixed order. */
+const narrowingOf = (record: Pick<SignInRuleRecord, 'narrowed'>): string =>
+  JSON.stringify([
+    record.narrowed?.dropTotp ?? null,
+    record.narrowed?.expiresAt ?? null,
+    record.narrowed?.uses ?? null,
+  ]);
 
 /** What approving a rule again was: a resume (it was suspended), a renew (it ended or was used up), or a widen. */
 function againAction(previous: SignInRuleRecord, now: number): string {

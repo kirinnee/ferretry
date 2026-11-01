@@ -231,3 +231,107 @@ describe('a suspension raises nothing in a ferret’s session (R3c §18, secrev-
     should(GITHUB).equal(view.signIn);
   });
 });
+
+/** Holds the store's next write until the test releases it; `entered` resolves once a write is waiting. */
+function holdWrites(w: World) {
+  let release: () => void = () => undefined;
+  let entered: () => void = () => undefined;
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  const inside = new Promise<void>(resolve => {
+    entered = resolve;
+  });
+  w.store.beforeWrite = async () => {
+    entered();
+    await gate;
+  };
+  return { release: () => release(), inside };
+}
+
+describe('verified() never reads true while a check is owed (secrev-1274-delta F1, F2)', () => {
+  it('should not re-verify a rule on a passkey change while its pinned facts are unchecked', async () => {
+    // Arrange — the accounts can't be read at load, so drift is owed
+    const first = await world();
+    const { view } = await approved(first);
+    const again = await world({ store: first.store, load: false });
+    again.state.listingBroken = true;
+    await again.service.load();
+
+    // Act — a passkey change re-checks every proof, and they all pass
+    await again.service.passkeysChanged({ cause: 'member-key-forgotten', keyId: 'k' });
+    const afterPasskeys = again.service.verified(view.id, 1);
+    again.state.listingBroken = false;
+    await again.service.sweepRules();
+
+    // Assert — still owed until the sweep checked the facts
+    should(afterPasskeys).be.false();
+    should(again.service.verified(view.id, 1)).be.true();
+  });
+
+  it('should read false while a suspension is being written', async () => {
+    // Arrange
+    const w = await world();
+    const { view } = await approved(w);
+    const held = holdWrites(w);
+
+    // Act
+    const suspending = w.service.scriptedOn('github.com');
+    await held.inside;
+    const during = w.service.verified(view.id, 1);
+    held.release();
+    await suspending;
+
+    // Assert
+    should(during).be.false();
+    should(w.service.verified(view.id, 1)).be.false();
+  });
+
+  it('should read false while a re-check that will suspend the rule is still running', async () => {
+    // Arrange — drift owed at load, then the accounts come back with the domains changed
+    const first = await world();
+    const { view } = await approved(first);
+    const again = await world({ store: first.store, load: false });
+    again.state.listingBroken = true;
+    await again.service.load();
+    const base = listing();
+    again.state.listingBroken = false;
+    again.state.listing = {
+      ...base,
+      signIns: base.signIns.map(each =>
+        each.id === GITHUB ? { ...each, place: { kind: 'site', domains: ['gh.io'], match: [] } } : each,
+      ),
+    } as never;
+    const held = holdWrites(again);
+
+    // Act — the sweep's re-check passes the proof, finds the drift, and writes the suspension
+    const sweeping = again.service.sweepRules();
+    await held.inside;
+    const during = again.service.verified(view.id, 1);
+    held.release();
+    await sweeping;
+
+    // Assert
+    should(during).be.false();
+    should((await again.service.list(HOST_OWNER)).rules[0]?.suspended?.because).equal('place-changed');
+  });
+});
+
+describe('a narrowing made after the stage is never undone unseen (secrev-1274-delta N1)', () => {
+  it('should refuse a widen whose rule the owner narrowed while it waited', async () => {
+    // Arrange
+    const w = await world();
+    const { view } = await approved(w, { ...DRAFT, uses: 5 });
+    const widen = await w.service.stage(deviceOwner(), { ...DRAFT, uses: 10, replaces: view.id });
+    const challenge = w.service.challengeOf(widen.stage, DEVICE) ?? new Uint8Array();
+
+    // Act
+    await w.service.narrow(HOST_OWNER, view.id, { uses: 2 });
+    const refused = await refusal(w.service.commit(deviceOwner(), widen.stage, () => evidenceFor(challenge)));
+
+    // Assert
+    should([refused.status, refused.code]).eql([409, 'conflict']);
+    should(refused.message).containEql('narrowed after this approval was staged');
+    should((await w.service.list(HOST_OWNER)).rules[0]).containDeep({ revision: 1, uses: 2 });
+  });
+});

@@ -153,7 +153,11 @@ export class MemoryRuleStore implements SignInRuleStore {
     return this.document === undefined ? undefined : structuredClone(this.document);
   }
 
+  /** Run before each write lands: a test may hold the write there to look at the service meanwhile. */
+  beforeWrite: (() => Promise<void>) | undefined;
+
   async write(document: SignInRulesDocument): Promise<void> {
+    await this.beforeWrite?.();
     if (this.failWrites) throw new Error('disk full');
     this.writes += 1;
     this.damaged = undefined;
