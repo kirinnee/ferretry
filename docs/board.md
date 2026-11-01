@@ -501,19 +501,38 @@ the request (the create body has no such field, so a caller cannot claim it). `d
 
 1. the owner's own app made it (an owner caller that is not on the admin token, which a ferret can hold too);
 2. the ask's source names the owner (`owner (board)`, "owner via lead jaeda");
-3. the ask's text matches words the OWNER said to the session it came from (`askSessionOf`: the `session:<id>` in
-   the source, else the recording ferret).
+3. the ask's text matches words the OWNER said to the session it came from (`wordsSessionOf`: the session id the
+   source names, in any form — `session:<id>`, `session <id>`, a turn document's path — else the recording ferret),
+   whoever wrote the card down: a ferret on the admin token is stored as `owner` and the board import as `daemon`.
 
-Anything else is `agent`, including every card whose session is unknown. The owner's words are the messages the owner
-sent that session's queue (a person's own, never a ferret's or Ferretry's, in any delivery state) and, when no ferret
-started the session, its first turn document. Two texts match when one contains the other after collapsing whitespace
-and ignoring case, and the shorter has at least 24 characters. **A paraphrase does not match**: a ferret that rewrites
-the owner's ask in its own words gets an `agent` card, which is still on the Board.
+Anything else is `agent`, including every card whose session is unknown. The owner's words
+(`adapters/board/session-owner-words.ts`) come from three records of that session:
 
-A card made before the field existed gets it once at boot (`BoardService.backfillAskedBy`), by the same rule except
-that a stored creator of `owner` proves nothing (it reads that way for a ferret on the admin token), so it is the
-source and the owner's messages that decide. The pass writes no history event and does not touch the card's last-touched
-time, is idempotent, and a card it cannot settle is reported and tried again next boot. A view reads the stored value,
+- its queue, in any delivery state, whose messages say who sent them;
+- its send ledger (`channel/sends.jsonl`), which records every send's sender (`senderKind`, `by`) and the turn it
+  started, back to before the queue existed;
+- every turn document (`turns/turn-NNN.md`) no send accounts for — a revive's, or one older than the ledger. One with
+  an author file (`turn-NNN.by.json`) is the owner's only when that file says so. The first turn of a session a ferret
+  started is that ferret's brief and is left out.
+
+A message with no recorded author is the owner's unless it is wrapped as a ferret's (`[message from ferret …`), less
+any paragraph that is Ferretry's own notice (a board or Warden notice, "CI is red", "has had no activity", a turn-end
+check): a busy session is handed those in the same delivery as the owner's next message. An agenda answer
+(`[answer to !A…`, `[re !A…`) is the owner's. What was read is kept per session and read again only when the
+turns directory changes, so a lead with thousands of turns is not re-read for every card.
+
+Two texts match on their letters and digits alone (case, spaces and punctuation ignored, so a full stop joining two
+lines or a mended "yo uhelp" still matches) when one contains the other and the shorter has at least 24 characters, or
+when the ask is pieces of the owner's messages joined by `...`, `…` or `/`, each piece found in one of them and the
+longest at least 24 characters. **A paraphrase does not match**: a ferret that rewrites the owner's ask in its own words
+gets an `agent` card, which is still on the Board.
+
+Every boot decides again each card not already `person` (`BoardService.backfillAskedBy`): a card from before the
+field, and a card stored `agent` from fewer of the owner's words than are read now. It uses the same rule except that a
+stored creator of `owner` proves nothing (it reads that way for a ferret on the admin token), so it is the source and
+the owner's messages that decide. It only ever adds `person` — a stored `person` may rest on a fact it cannot see again
+(the owner's own app made the card) — and writes only a card it changes. The pass writes no history event and does not
+touch the card's last-touched time, is idempotent, and a card it cannot settle is reported and tried again next boot. A view reads the stored value,
 and falls back to the ask's source (`cardAskedBy`) only for a card not yet backfilled. A daemon older than the field
 sends nothing and the app reads that as `agent`. The cards left out are still on the Board, and each card shown names
 its project beside its machine.

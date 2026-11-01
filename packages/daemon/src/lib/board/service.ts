@@ -259,21 +259,25 @@ export class BoardService {
   }
 
   /**
-   * Stores who asked for every card that lacks it (a card from before it was stored), by the same rule a new card
-   * is decided by, except that a stored creator of kind `owner` proves nothing (a ferret holding the admin token
-   * wrote that too). Idempotent; writes no history and does not touch the card's last-touched time. A card that
-   * cannot be decided or written is reported and left for the next boot.
+   * Decides again who asked for every card not already a person's, by the same rule a new card is decided by,
+   * except that a stored creator of kind `owner` proves nothing (a ferret holding the admin token wrote that too):
+   * a card from before the field, and a card stored `agent` from fewer of the owner's words than are read now.
+   * It only ever ADDS `person`: a stored `person` may rest on a fact this cannot see again (the owner's own app
+   * made it), so it is never taken back. Idempotent, and a card it would not change is not written; writes no
+   * history and does not touch the card's last-touched time. A card that cannot be decided or written is reported
+   * and left for the next boot. Answers how many cards it stored.
    */
   async backfillAskedBy(): Promise<number> {
     const { cards } = await this.ports.store.read();
     let stored = 0;
     for (const { id, askedBy } of cards) {
-      if (askedBy !== undefined) continue;
+      if (askedBy === 'person') continue;
       try {
         const done = await this.ports.store.write(id, async current => {
-          if (current === undefined || current.askedBy !== undefined) return { task: null, result: false };
-          const next = requireValidCard({ ...current, askedBy: await this.askedByOf(current, false) });
-          return { task: next, result: true };
+          if (current === undefined || current.askedBy === 'person') return { task: null, result: false };
+          const decided = await this.askedByOf(current, false);
+          if (decided === current.askedBy) return { task: null, result: false };
+          return { task: requireValidCard({ ...current, askedBy: decided }), result: true };
         });
         if (done) stored += 1;
       } catch (error) {
