@@ -243,7 +243,9 @@ page this machine.
 **One guard, shared.** The checks live in `@ferretry/fleet` (`state-home-guard.ts`, with the real disk in
 `NodeGuardDisk`) so every surface that reads or writes a file for an agent uses the same ones:
 `openOutsideStateHomes` to read, `createOutsideStateHomes` to write, `copyTreeOutsideStateHomes` for a
-folder, and `stateHomeByName` for a surface that reaches its bytes another safe way. Each answers
+folder (a read-only one stays writable only while it is filled), `judgeOutsideStateHomes` to judge a file or a
+folder without opening it (before linking to it), and `stateHomeByName` for a surface that reaches its bytes
+another safe way. Each answers
 `{ ok: true, value }` or `{ ok: false, rule }`, and only an `ok` answer carries a handle that can read or
 write.
 

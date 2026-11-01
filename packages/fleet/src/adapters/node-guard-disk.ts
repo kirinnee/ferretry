@@ -1,5 +1,5 @@
 import { type BigIntStats, constants, createReadStream } from 'node:fs';
-import { type FileHandle, lstat, mkdir, open, readdir, readlink, realpath, unlink } from 'node:fs/promises';
+import { chmod, type FileHandle, lstat, mkdir, open, readdir, readlink, realpath, unlink } from 'node:fs/promises';
 import type {
   FileIdentity,
   GuardDirectoryHandle,
@@ -158,6 +158,10 @@ export class NodeGuardDisk implements GuardDisk {
 
   async mkdir(path: string, mode: number): Promise<void> {
     await mkdir(path, { mode });
+  }
+
+  async chmod(path: string, mode: number): Promise<void> {
+    await chmod(path, mode);
   }
 
   async unlink(path: string): Promise<void> {

@@ -76,6 +76,7 @@ export interface GuardDisk {
   readlink(path: string): Promise<string>;
   list(path: string): Promise<readonly string[]>;
   mkdir(path: string, mode: number): Promise<void>;
+  chmod(path: string, mode: number): Promise<void>;
   unlink(path: string): Promise<void>;
 }
 
@@ -270,6 +271,38 @@ const hardLinkAllowed = (options: GuardLinkOptions, real: string): boolean =>
   typeof options.hardLinks === 'object' &&
   options.hardLinks.allowUnder.some(root => within(absolute(root, 'allowUnder'), real));
 
+/** Where a path really is and what is there, once judged outside every home. */
+export interface JudgedPath {
+  readonly real: string;
+  readonly identity: FileIdentity;
+}
+
+/**
+ * Judges the absolute `path` WITHOUT opening it — for a file or a folder, e.g. before linking to it or before a
+ * copy's first write: by name, hop by hop when `hops: 'every'`, by real path, and by identity up to `/`. What it
+ * answers can change the moment after, so a caller that then READS must still go through
+ * {@link openOutsideStateHomes}.
+ */
+export async function judgeOutsideStateHomes(
+  path: string,
+  homes: StateHomes,
+  disk: GuardDisk,
+  options: GuardLinkOptions = {},
+): Promise<Guarded<JudgedPath>> {
+  const named = stateHomeByName(homes, path);
+  if (named.inside) return refused('state-home', named.home);
+  if (options.hops === 'every') {
+    const hop = await hopInsideHome(homes, path, disk);
+    if (hop.inside) return refused('state-home', hop.home);
+  }
+  const real = await disk.realpath(path).catch(() => undefined);
+  if (real === undefined) return refused('not-found');
+  const verdict = await stateHomeOf(homes, real, disk);
+  if (verdict.inside) return refused('state-home', verdict.home);
+  const identity = await disk.identity(real);
+  return identity === undefined ? refused('not-found') : { ok: true, value: { real, identity } };
+}
+
 /**
  * Opens the file at the absolute `path` to read, if — and only if — it is a regular file outside every home
  * (and under `inside`), by name, by real path and by identity, and still the file that was checked once open.
@@ -280,20 +313,11 @@ export async function openOutsideStateHomes(
   disk: GuardDisk,
   options: GuardReadOptions = {},
 ): Promise<Guarded<GuardedFile>> {
-  const named = stateHomeByName(homes, path);
-  if (named.inside) return refused('state-home', named.home);
-  if (options.hops === 'every') {
-    const hop = await hopInsideHome(homes, path, disk);
-    if (hop.inside) return refused('state-home', hop.home);
-  }
-  const real = await disk.realpath(path).catch(() => undefined);
-  if (real === undefined) return refused('not-found');
+  const judged = await judgeOutsideStateHomes(path, homes, disk, options);
+  if (!judged.ok) return judged;
+  const { real, identity: before } = judged.value;
   if (options.inside !== undefined && !within(absolute(options.inside, 'inside'), real)) return refused('outside');
-  const resolved = stateHomeByName(homes, real);
-  if (resolved.inside) return refused('state-home', resolved.home);
   // Known to be a regular file BEFORE the open, so a device is never opened at all.
-  const before = await disk.identity(real);
-  if (before === undefined) return refused('not-found');
   if (before.kind !== 'file') return refused('not-a-file');
   const handle = await disk.openRead(real).catch(() => undefined);
   if (handle === undefined) return refused('changed');
@@ -500,12 +524,14 @@ export async function copyTreeOutsideStateHomes(
     if (verdict.inside) return refused('state-home', verdict.home);
     const key = `${String(entry.device)}:${String(entry.inode)}`;
     if (branch.has(key)) return refused('loop');
-    await disk.mkdir(to, entry.mode);
+    // Writable while it is filled (a Nix store folder is 0555), then given its own mode, as `cp` does.
+    await disk.mkdir(to, entry.mode | 0o700);
     const below = new Set([...branch, key]);
     for (const name of await disk.list(real)) {
       const problem = await copy(join(real, name), join(to, name), below);
       if (problem !== undefined) return problem;
     }
+    await disk.chmod(to, entry.mode);
     return undefined;
   };
   const problem = await copy(absolute(source, 'the source'), absolute(destination, 'the destination'), new Set());

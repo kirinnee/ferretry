@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { link, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { GuardSizeError, NodeGuardDisk } from '../../src/adapters/node-guard-disk.ts';
 import {
+  copyTreeOutsideStateHomes,
   createOutsideStateHomes,
   openOutsideStateHomes,
   resolveStateHomes,
@@ -200,4 +201,31 @@ describe('NodeGuardDisk — writing', () => {
       should(await disk.list(join(work, 'downloads-was'))).deepEqual([]);
     },
   );
+});
+
+describe('copyTreeOutsideStateHomes — on a real disk', () => {
+  it('should copy a read-only folder (as the Nix store keeps them) and give the copy its modes', async () => {
+    // Arrange
+    const source = join(root, 'store');
+    await mkdir(join(source, 'skills'), { recursive: true });
+    await writeFile(join(source, 'skills', 'SKILL.md'), 'skill');
+    await chmod(join(source, 'skills', 'SKILL.md'), 0o444);
+    await chmod(join(source, 'skills'), 0o555);
+    await chmod(source, 0o555);
+
+    // Act
+    const result = await copyTreeOutsideStateHomes(source, join(work, 'copy'), homes, disk, {
+      maxFileBytes: 1000,
+      maxFiles: 10,
+    });
+
+    // Assert
+    should(result).deepEqual({ ok: true, value: { files: 1, bytes: 5 } });
+    should((await stat(join(work, 'copy', 'skills'))).mode & 0o777).equal(0o555);
+    should((await stat(join(work, 'copy', 'skills', 'SKILL.md'))).mode & 0o777).equal(0o444);
+    await chmod(join(work, 'copy', 'skills'), 0o755);
+    await chmod(join(work, 'copy'), 0o755);
+    await chmod(join(source, 'skills'), 0o755);
+    await chmod(source, 0o755);
+  });
 });

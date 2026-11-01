@@ -228,6 +228,12 @@ export class FakeAgentDisk implements AgentFilesystem {
     this.modes.push([key, mode]);
   }
 
+  async chmod(path: string, mode: number): Promise<void> {
+    const { entry } = await this.lookup(path);
+    if (entry === undefined || entry.kind === 'link') throw errno('ENOENT', path);
+    entry.mode = mode;
+  }
+
   async mkdirp(path: string, mode: number): Promise<void> {
     let current = '/';
     for (const segment of path.split('/').filter(part => part !== '')) {

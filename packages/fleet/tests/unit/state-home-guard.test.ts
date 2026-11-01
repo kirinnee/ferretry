@@ -4,6 +4,7 @@ import {
   copyTreeOutsideStateHomes,
   createOutsideStateHomes,
   type FileIdentity,
+  judgeOutsideStateHomes,
   openOutsideStateHomes,
   resolveStateHomes,
   type StateHomes,
@@ -253,12 +254,12 @@ describe('openOutsideStateHomes', () => {
     );
   });
 
-  it('should refuse when the real path vanishes before its kind is read', async () => {
+  it('should fail closed when the real path vanishes while it is judged', async () => {
     const { disk, homes } = await world();
     const racing = Object.create(disk) as FakeGuardDisk;
     racing.identity = async () => undefined;
 
-    should(rule(await openOutsideStateHomes('/work/a.txt', homes, racing))).equal('not-found');
+    should(rule(await openOutsideStateHomes('/work/a.txt', homes, racing))).equal('state-home');
   });
 });
 
@@ -472,6 +473,19 @@ describe('copyTreeOutsideStateHomes', () => {
     should(one).deepEqual({ ok: true, value: { files: 1, bytes: 4 } });
   });
 
+  it('should make a read-only folder writable while it is filled, then give it its own mode', async () => {
+    const folder = await tree('/src');
+
+    const copied = await folder.run(disk => {
+      disk.dir('/src/sealed', 0o555);
+      disk.file('/src/sealed/c.md', 1);
+    });
+
+    should(copied.ok).be.true();
+    should(folder.disk.modes).containDeep([['/out/copy/sealed', 0o755]]);
+    should(folder.disk.entries.get('/out/copy/sealed')).match({ mode: 0o555 });
+  });
+
   it('should stop at a file or folder in the home, however it is reached', async () => {
     const byLink = await (await tree('/src')).run(disk => disk.link('/src/token', '/fy/api-token'));
     const byFolder = await (await tree('/src')).run(disk => disk.link('/src/state', '/fy/state'));
@@ -501,5 +515,45 @@ describe('copyTreeOutsideStateHomes', () => {
     ).run(disk => disk.hardLink('/src/again.md', '/src/a.md'));
 
     should([loop, many, dangling, linked].map(rule)).deepEqual(['loop', 'too-many', 'not-found', 'hard-link']);
+  });
+});
+
+describe('judgeOutsideStateHomes — a path judged without opening it', () => {
+  it('should answer where a file or a folder really is, and what is there', async () => {
+    const { disk, homes } = await world();
+    disk.link('/work/to-assets', '/fy/fleet/assets');
+
+    const folder = await judgeOutsideStateHomes('/work/to-assets', homes, disk, { hops: 'every' });
+    const file = await judgeOutsideStateHomes('/work/a.txt', homes, disk);
+
+    should(folder).match({ ok: true, value: { real: '/fy/fleet/assets', identity: { kind: 'directory' } } });
+    should(file).match({ ok: true, value: { real: '/work/a.txt', identity: { kind: 'file' } } });
+  });
+
+  it('should refuse by name, by hop, by real path, by identity, and what is not there', async () => {
+    // Arrange
+    const { disk, homes } = await world();
+    disk.link('/fy/state/out', '/work');
+    disk.link('/work/through', '/fy/state/out/a.txt');
+    disk.link('/work/state', '/fy/state');
+    disk.bind('/work/mnt', '/fy');
+
+    // Act
+    const results = await Promise.all(
+      [
+        ['/fy/api-token', {}],
+        ['/work/through', { hops: 'every' }],
+        ['/work/state', {}],
+        ['/work/mnt/state', {}],
+        ['/work/nope', {}],
+      ].map(async ([path, options]) => await judgeOutsideStateHomes(path as string, homes, disk, options as object)),
+    );
+    const racing = Object.create(disk) as FakeGuardDisk;
+    racing.identity = async (path: string) => (path === '/work/a.txt' ? undefined : await disk.identity(path));
+    const vanished = await judgeOutsideStateHomes('/work/a.txt', homes, racing);
+
+    // Assert
+    should(results.map(rule)).deepEqual(['state-home', 'state-home', 'state-home', 'state-home', 'not-found']);
+    should(rule(vanished)).equal('state-home');
   });
 });
