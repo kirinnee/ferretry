@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { FileConversationLeaseStore } from '../../src/adapters/file-shared-history.ts';
+import { FileConversationLeaseStore, fencedConversationLeaseStore } from '../../src/adapters/file-shared-history.ts';
 import {
   ConversationIdSchema,
   type ConversationLeaseClaim,
@@ -132,5 +132,45 @@ describe('FileConversationLeaseStore — the lease folder through the state-home
     should(refused).be.instanceOf(ConversationLeaseUnavailableError);
     should(refused.message).match(/cannot be reached through its descriptor here/u);
     should([...disk.entries.keys()].toSorted()).deepEqual(before);
+  });
+});
+
+describe('fencedConversationLeaseStore — the store `fy history claim` claims through', () => {
+  /** The lease folder is, by identity, the daemon's sessions folder: not a home, but one of its pinned key folders. */
+  const pinnedWorld = () => {
+    const { disk } = world();
+    disk.dir('/fy/state/sessions');
+    disk.bind(LEASES, '/fy/state/sessions');
+    return disk;
+  };
+  const options = (disk: FakeGuardDisk) => ({ disk, loadLock: () => ({ tryLock: () => true }) });
+
+  it("should judge the home's pinned key folders, as the daemon does, refusing a lease folder that is one", async () => {
+    // Arrange
+    const disk = pinnedWorld();
+    const store = fencedConversationLeaseStore(
+      { stateHome: '/fy', fleetDirectory: FLEET },
+      { startOf: async () => undefined },
+      options(disk),
+    );
+
+    // Act
+    const refused = await refusalOf(store.claim(CLAIM, unknown));
+
+    // Assert
+    should(refused.message).match(/inside this daemon's state home/u);
+    should(disk.written).deepEqual([]);
+  });
+
+  it('should be what refuses it: a store given no fence goes on to the lock', async () => {
+    // Arrange
+    const disk = pinnedWorld();
+    const store = new FileConversationLeaseStore(FLEET, { startOf: async () => undefined }, options(disk));
+
+    // Act
+    const refused = await refusalOf(store.claim(CLAIM, unknown));
+
+    // Assert — not refused by the guard; it reached the lock file, which this in-memory disk cannot hand over.
+    should(refused.message).not.match(/state home/u);
   });
 });

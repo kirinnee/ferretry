@@ -123,11 +123,18 @@ const isMissing = (error: unknown): boolean => {
   return code === 'ENOENT' || code === 'ENOTDIR';
 };
 
+/**
+ * `O_CLOEXEC`, which this runtime neither exports nor adds to an open given numeric flags: without it a child spawned
+ * while a step holds a descriptor would keep it — and with it, a lease lock held on that open file.
+ */
+export const O_CLOEXEC = process.platform === 'darwin' ? 0x1000000 : 0o2000000;
+
 /** The open flags of each way a folder step opens a file — the same everywhere (`node-guard-disk.ts` too). */
 export const FILE_OPENINGS: Readonly<Record<FileOpening, number>> = {
-  read: constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-  new: constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-  append: constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  read: constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | O_CLOEXEC,
+  new:
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK | O_CLOEXEC,
+  append: constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK | O_CLOEXEC,
 };
 
 /** Which folder each handle holds, for the step that needs two of them. */

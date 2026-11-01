@@ -3,6 +3,7 @@ import { closeSync, fstatSync, fsyncSync, readSync, writeSync } from 'node:fs';
 import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { HarnessKind } from '../lib/manifest.ts';
+import type { FleetLayout } from '../lib/provisioning.ts';
 import {
   type ConversationHolderStanding,
   type ConversationId,
@@ -20,10 +21,11 @@ import {
   type SharedHistoryNode,
   type SharedHistorySymbolicLinkNode,
 } from '../lib/shared-history.ts';
+import { stateHomeFence } from '../lib/state-home-fence.ts';
 import type { FileIdentity, FolderDisk, GuardDisk, GuardedFolder } from '../lib/state-home-guard.ts';
 import { DestinationFolders, readFolderFile } from './destination-folders.ts';
 import { resolveSourceFence, type SourceFence } from './fenced-source.ts';
-import { type FileLock, loadFileLock } from './link-syscall.ts';
+import { type FileLock, processFileLock } from './link-syscall.ts';
 import { NodeGuardDisk } from './node-guard-disk.ts';
 
 function isMissing(error: unknown): boolean {
@@ -145,8 +147,12 @@ async function madeFolder(
   for (const segment of missing) {
     const parent: GuardedFolder = folder;
     try {
-      folder = await folders.child(parent, segment, path.join(parent.path, segment), FOLDER_MODE);
-      await syncFolder(parent);
+      const child = await folders.child(parent, segment, path.join(parent.path, segment), FOLDER_MODE);
+      await syncFolder(parent).catch(async (error: unknown) => {
+        await child.close();
+        throw error;
+      });
+      folder = child;
     } finally {
       await parent.close();
     }
@@ -700,27 +706,42 @@ export class HostProcessStarts implements ProcessStartSource {
 /** The file in each pool's `.leases` folder that its claimants are decided under, one at a time. */
 const LEASE_LOCK = '.lock';
 
+/** The most a lease can be: it is a few hundred bytes, and anything larger is not one, whatever it holds. */
+const MAX_LEASE_BYTES = 64 * 1024;
+
 /** How often a claimant tries for the lock file when another claimant's open makes it in between. */
 const LOCK_OPEN_ATTEMPTS = 3;
 
 /**
  * A lease as stored, or `undefined` when there is none or it is not a lease (which proves no holder). Read THROUGH the
  * held folder, a regular file only and never through a link or a pipe; only ENOENT means none, so a name that is
- * something else refuses the claim rather than being written over.
+ * something else refuses the claim rather than being written over. At most {@link MAX_LEASE_BYTES} are read: a larger
+ * file (a sparse one costs its writer nothing) is not a lease, and is never read whole.
  */
 async function readLease(
   folder: GuardedFolder,
   conversation: ConversationId,
 ): Promise<ConversationLeaseRecord | undefined> {
-  let bytes: Buffer;
+  let descriptor: number;
   try {
-    bytes = await readFolderFile(folder, conversation);
+    descriptor = await folder.openFile(conversation, 'read');
   } catch (error) {
     if (isMissing(error)) return undefined;
     throw error;
   }
+  const bytes = Buffer.alloc(MAX_LEASE_BYTES + 1);
+  let length = 0;
   try {
-    const parsed = ConversationLeaseRecordSchema.safeParse(JSON.parse(bytes.toString('utf8')));
+    if (!fstatSync(descriptor).isFile())
+      throw new Error(`${path.join(folder.path, conversation)} is not a regular file`);
+    for (let read = -1; read !== 0 && length < bytes.length; length += read)
+      read = readSync(descriptor, bytes, length, bytes.length - length, null);
+  } finally {
+    closeSync(descriptor);
+  }
+  if (length > MAX_LEASE_BYTES) return undefined;
+  try {
+    const parsed = ConversationLeaseRecordSchema.safeParse(JSON.parse(bytes.toString('utf8', 0, length)));
     return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;
@@ -824,7 +845,7 @@ export class FileConversationLeaseStore implements ConversationLeaseStore {
     this.now = options.now ?? (() => new Date());
     this.fence = options.fence;
     this.disk = options.disk ?? new NodeGuardDisk();
-    this.loadLock = options.loadLock ?? loadFileLock;
+    this.loadLock = options.loadLock ?? processFileLock;
   }
 
   async claim(
@@ -943,4 +964,20 @@ export class FileConversationLeaseStore implements ConversationLeaseStore {
       closeSync(descriptor);
     }
   }
+}
+
+/**
+ * The lease store over the fleet that the state home `layout.stateHome` holds, fenced by that home: its state and
+ * config directories and its key files ({@link stateHomeFence}). What the daemon claims through, and what
+ * `fy history claim` — the wrapper's claim before it `exec`s the harness, with no daemon to ask — claims through too.
+ */
+export function fencedConversationLeaseStore(
+  layout: Pick<FleetLayout, 'stateHome' | 'fleetDirectory'>,
+  processes: ProcessStartSource,
+  options: Omit<FileConversationLeaseStoreOptions, 'fence'> = {},
+): FileConversationLeaseStore {
+  return new FileConversationLeaseStore(layout.fleetDirectory, processes, {
+    ...options,
+    fence: stateHomeFence(layout.stateHome),
+  });
 }

@@ -7,6 +7,7 @@ export * from './file-provisioner.ts';
 export {
   FileConversationLeaseStore,
   type FileConversationLeaseStoreOptions,
+  fencedConversationLeaseStore,
   FileSharedHistoryFileSystem,
   HostProcessStarts,
   type ProcessStartSource,

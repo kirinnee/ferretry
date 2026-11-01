@@ -1,4 +1,5 @@
 import { afterEach, describe, it, spyOn } from 'bun:test';
+import { dlopen, FFIType } from 'bun:ffi';
 import * as fsSync from 'node:fs';
 import { closeSync, constants, openSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
@@ -8,17 +9,20 @@ import path from 'node:path';
 import should from 'should';
 import {
   FileConversationLeaseStore,
+  fencedConversationLeaseStore,
   HostProcessStarts,
   type ProcessStartSource,
 } from '../../src/adapters/file-shared-history.ts';
-import { flockRefusal, loadFileLock } from '../../src/adapters/link-syscall.ts';
+import { FILE_OPENINGS, O_CLOEXEC } from '../../src/adapters/descriptor-calls.ts';
+import { LIBC } from '../../src/adapters/directory-syscalls.ts';
+import { flockRefusal, loadedOnce, loadFileLock, processFileLock } from '../../src/adapters/link-syscall.ts';
 import { NodeGuardDisk } from '../../src/adapters/node-guard-disk.ts';
 import {
   type ConversationId,
   ConversationIdSchema,
   type ConversationLeaseClaim,
 } from '../../src/lib/shared-history.ts';
-import type { FileOpening } from '../../src/lib/state-home-guard.ts';
+import type { FileOpening, GuardDirectoryHandle } from '../../src/lib/state-home-guard.ts';
 
 const CONVERSATION = ConversationIdSchema.parse('0b7e4c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21');
 const temporaryDirectories: string[] = [];
@@ -381,21 +385,18 @@ describe('FileConversationLeaseStore through checked folder handles, with the st
     ['through descriptor paths (Linux)', undefined],
     ['through descriptor calls (macOS)', 'calls' as const],
   ])('should claim, refuse a second writer, and release a lease %s', async (_label, reach) => {
-    // Arrange
-    const { home, fleet, fence } = await world();
+    // Arrange — the store as the daemon and `fy history claim` build it, fenced by the home that holds the fleet.
+    const { home, fleet } = await world();
     const disk = reach === undefined ? undefined : new NodeGuardDisk(reach);
-    const store = new FileConversationLeaseStore(
-      fleet,
+    const store = fencedConversationLeaseStore(
+      { stateHome: home, fleetDirectory: fleet },
       new FakeStarts(
         new Map([
           [10, 5],
           [11, 6],
         ]),
       ),
-      {
-        fence,
-        ...(disk === undefined ? {} : { disk }),
-      },
+      disk === undefined ? {} : { disk },
     );
     const before = await homeNames(home);
 
@@ -644,6 +645,109 @@ describe('FileConversationLeaseStore through checked folder handles, with the st
     },
   );
 
+  it('should fail rather than guess when a lease cannot be opened', async () => {
+    // Arrange — a lease this user may not read.
+    const { fleet, fence } = await world();
+    const store = new FileConversationLeaseStore(fleet, new FakeStarts(new Map()), { fence });
+    await store.claim(claim({ pid: 10, session: 's-1' }), unknown);
+    await chmod(leaseFile(fleet), 0o000);
+
+    // Act + Assert
+    await should(store.claim(claim({ pid: 11, session: 's-2' }), unknown)).be.rejectedWith({ code: 'EACCES' });
+  });
+
+  it('should read a lease file larger than any lease as none, never reading it whole', async () => {
+    // Arrange — a sparse 1 GiB file under the conversation's name, which costs its writer nothing.
+    const { fleet, fence } = await world();
+    const store = new FileConversationLeaseStore(fleet, new FakeStarts(new Map()), { fence });
+    await store.claim(claim({ pid: 10, session: 's-1' }), unknown);
+    await fs.truncate(leaseFile(fleet), 1024 * 1024 * 1024);
+    const reads: number[] = [];
+    const original = Reflect.get(fsSync, 'readSync') as (...args: unknown[]) => number;
+    const spy = spyOn(
+      fsSync as unknown as Record<string, (...args: unknown[]) => unknown>,
+      'readSync',
+    ).mockImplementation((...args: unknown[]) => {
+      const read = original(...args);
+      reads.push(read);
+      return read;
+    });
+
+    try {
+      // Act — a release reads it as no lease and leaves it; a claim then creates over it.
+      const released = await store.releaseSession('s-1');
+      const claimed = await store.claim(claim({ pid: 10, session: 's-2' }), unknown);
+
+      // Assert
+      should(released).eql([]);
+      should(claimed).match({ kind: 'claimed', decision: 'create' });
+      should(Math.max(...reads)).be.belowOrEqual(64 * 1024 + 1);
+      should((await stat(leaseFile(fleet))).size).be.below(1024);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  // Hooks the disk's by-path `openDirectory`, which descriptor paths use: Linux only.
+  it.skipIf(process.platform !== 'linux')(
+    'should close every folder it opened when making the lease folder fails',
+    async () => {
+      // Arrange — a disk whose folders cannot be synced, counting every folder it opens and closes.
+      const { fleet, fence } = await world();
+      let opened = 0;
+      let closed = 0;
+      class UnsyncedDisk extends NodeGuardDisk {
+        override async openDirectory(at: string): Promise<GuardDirectoryHandle> {
+          const handle = await super.openDirectory(at);
+          opened += 1;
+          return {
+            ...handle,
+            sync: async () => {
+              throw Object.assign(new Error(`EIO: ${at}`), { code: 'EIO' });
+            },
+            close: async () => {
+              closed += 1;
+              await handle.close();
+            },
+          };
+        }
+      }
+      const store = new FileConversationLeaseStore(fleet, new FakeStarts(new Map()), {
+        fence,
+        disk: new UnsyncedDisk(),
+      });
+
+      // Act + Assert — the first folder it makes cannot be made durable; nothing it opened is left open.
+      await should(store.claim(claim({ pid: 10 }), unknown)).be.rejectedWith({ code: 'EIO' });
+      should(opened).be.above(0);
+      should(closed).equal(opened);
+    },
+  );
+
+  it.skipIf(process.platform !== 'linux')('should hold its lock on a descriptor no child inherits', async () => {
+    // Arrange — the lock's open flags, as the kernel reports them while the store holds it.
+    const { fleet, fence } = await world();
+    const flags: number[] = [];
+    class LookingDisk extends NodeGuardDisk {
+      override async openFile(at: string, how: FileOpening, mode: number): Promise<number> {
+        const descriptor = await super.openFile(at, how, mode);
+        if (at.endsWith('/.lock')) {
+          const fdinfo = fsSync.readFileSync(`/proc/self/fdinfo/${String(descriptor)}`, 'utf8');
+          flags.push(Number.parseInt(/^flags:\s+(\d+)/mu.exec(fdinfo)?.[1] ?? '0', 8));
+        }
+        return descriptor;
+      }
+    }
+    const store = new FileConversationLeaseStore(fleet, new FakeStarts(new Map()), { fence, disk: new LookingDisk() });
+
+    // Act
+    await store.claim(claim({ pid: 10 }), unknown);
+
+    // Assert — O_CLOEXEC, 0o2000000 on Linux.
+    should(flags).not.be.empty();
+    for (const flag of flags) should(flag & 0o2000000).equal(0o2000000);
+  });
+
   it('should release past an entry it cannot read as a lease, leaving it', async () => {
     // Arrange — a folder under a conversation id's name, beside a lease the session holds.
     const { fleet, fence } = await world();
@@ -660,7 +764,95 @@ describe('FileConversationLeaseStore through checked folder handles, with the st
   });
 });
 
+describe('the descriptors a folder step opens', () => {
+  /** `fcntl(F_GETFD)` and a raw `open` — both constants are 1 on Linux and macOS, and `open` is given no mode. */
+  const libc = () =>
+    dlopen(LIBC, {
+      fcntl: { args: [FFIType.i32, FFIType.i32, FFIType.i32], returns: FFIType.i32 },
+      open: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
+    });
+
+  it("should name this kernel's close-on-exec flag", async () => {
+    // Arrange — opened by the C library itself, so the runtime cannot add the flag on its own.
+    const file = path.join(await temporaryDirectory(), 'file');
+    await writeFile(file, '');
+    const { symbols, close } = libc();
+    const name = new TextEncoder().encode(`${file}\0`);
+    const plain = symbols.open(name, constants.O_RDONLY);
+    const closing = symbols.open(name, constants.O_RDONLY | O_CLOEXEC);
+
+    try {
+      // Act + Assert
+      should(symbols.fcntl(plain, 1, 0) & 1).equal(0);
+      should(symbols.fcntl(closing, 1, 0) & 1).equal(1);
+    } finally {
+      closeSync(plain);
+      closeSync(closing);
+      close();
+    }
+  });
+
+  it.each(Object.keys(FILE_OPENINGS) as FileOpening[])('should open %s close-on-exec', async how => {
+    // Arrange — the descriptor-flag read (`fcntl(F_GETFD)`; both constants are 1 on Linux and macOS).
+    const directory = await temporaryDirectory();
+    const file = path.join(directory, 'file');
+    if (how !== 'new') await writeFile(file, '');
+    const { symbols, close } = libc();
+    const descriptor = openSync(file, FILE_OPENINGS[how], 0o600);
+
+    try {
+      // Act
+      const flags = symbols.fcntl(descriptor, 1, 0);
+
+      // Assert — asked for, whatever this runtime adds on its own, and held.
+      should(FILE_OPENINGS[how] & O_CLOEXEC).equal(O_CLOEXEC);
+      should(flags & 1).equal(1);
+    } finally {
+      closeSync(descriptor);
+      close();
+    }
+  });
+});
+
 describe('the lease lock (flock)', () => {
+  it('should be loaded once for the process', () => {
+    // Act + Assert
+    should(processFileLock()).equal(processFileLock());
+  });
+
+  it('should call a loader once, and answer its value or its failure ever after', () => {
+    // Arrange
+    let calls = 0;
+    const value = loadedOnce(() => {
+      calls += 1;
+      return { lock: calls };
+    });
+    let failures = 0;
+    const failure = new Error('no flock here');
+    const failing = loadedOnce((): never => {
+      failures += 1;
+      throw failure;
+    });
+
+    // Act
+    const first = value();
+    const second = value();
+    const thrown = [0, 1].map(() => {
+      try {
+        failing();
+        return undefined;
+      } catch (error) {
+        return error;
+      }
+    });
+
+    // Assert
+    should(first).equal(second);
+    should(calls).equal(1);
+    should(thrown).eql([failure, failure]);
+    should(failures).equal(1);
+  });
+
   it('should let one holder at a time hold it, and the next once the first lets go', async () => {
     // Arrange — two opens of one lock file, as two claimants make.
     const lock = path.join(await temporaryDirectory(), '.lock');

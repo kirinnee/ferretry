@@ -37,12 +37,13 @@ import {
   SUB_FERRET_ENV,
   sanitizeHarnessEnv,
   sharedHistoryPoolDirectory,
+  stateHomeFence,
   wrapperNameOf,
 } from '@ferretry/fleet';
 import {
   claudeKeychainAccount,
   credentialFileStamp,
-  FileConversationLeaseStore,
+  fencedConversationLeaseStore,
   FilePassiveUsageStore,
   type FleetBinaryLookup,
   PlatformFleetCredentialStore,
@@ -303,7 +304,6 @@ import {
   KeyedSerialExecutor,
   LOGIN_SECRETS_DOCUMENT,
   SECRETS_DOCUMENT,
-  SECRETS_KEY,
   LoadSafeWorker,
   ManifestAccountInventory,
   MCP_OAUTH_SECRETS_DOCUMENT,
@@ -2514,22 +2514,11 @@ interface StartFastPorts {
 
 /**
  * The state home's key files and folders, recognised by IDENTITY wherever they are reached — so a bind mount of one
- * of them alone is still refused. The one list the agent file tools, the session-file routes and the start checks
- * share (docs/agent-tools.md § The state home).
+ * of them alone is still refused. The fleet package owns the list, which `fy history claim` shares
+ * (`stateHomeFence`; docs/agent-tools.md § The state home).
  */
 function stateHomeKeys(paths: FoundationPaths): readonly string[] {
-  return [
-    join(paths.home, 'api-token'),
-    join(paths.home, 'api-warden-token'),
-    join(paths.home, 'tmux.sock'),
-    ...[SECRETS_KEY, SECRETS_DOCUMENT, MCP_OAUTH_SECRETS_DOCUMENT, LOGIN_SECRETS_DOCUMENT, 'passkeys.json'].map(name =>
-      join(paths.state, name),
-    ),
-    paths.daemonIdentity,
-    paths.fleet,
-    join(paths.fleet, 'homes'),
-    paths.sessions,
-  ];
+  return stateHomeFence(paths.home).pinned;
 }
 
 function createSessionControlSubsystem(
@@ -8579,10 +8568,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   /** One live writer per harness conversation (account model §9.3), over the shared pool's lease files. */
   const conversationLeases = (storage: DaemonStorage): ConversationLeases =>
     new ConversationLeases(
-      new FileConversationLeaseStore(paths.fleet, processIncarnationFor(), {
-        // The pool is the agents' to write: a lease is never read or written in a state home (docs/secrets.md).
-        fence: { ...componentSourceFence(paths), pinned: stateHomeKeys(paths) },
-      }),
+      // The pool is the agents' to write: a lease is never read or written in a state home (docs/secrets.md).
+      fencedConversationLeaseStore({ stateHome: paths.home, fleetDirectory: paths.fleet }, processIncarnationFor()),
       storage,
       process.pid,
     );
