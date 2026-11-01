@@ -118,6 +118,15 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     fixedSubject: 'copy-rule',
     detail: { action: 'added' },
   },
+  // Letting rules paste into programs from the owner's own profile loosens what a rule matches (owner decision
+  // !A182); the setting it now holds is kept with it.
+  {
+    method: 'PUT',
+    path: '/v1/copy-rules/settings',
+    event: 'security.changed',
+    fixedSubject: 'copy-rule-settings',
+    responseSettings: [],
+  },
   {
     method: 'DELETE',
     path: '/v1/copy-rules/:ruleId',

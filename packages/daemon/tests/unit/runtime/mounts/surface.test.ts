@@ -918,7 +918,7 @@ describe('the mounted daemon surface', () => {
       7 + // the owner's input requests: the two lists, a page request's picture, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
       6 + // saved logins: the list, the ferret’s hint, put, rename, delete and the owner’s answer to a recipe proposal (docs/input-requests.md#saved-logins)
       12 + // accounts and sign-ins: the list, the hint, look-alike, an account’s put, rename, delete, merge and apart, and a sign-in’s add, put, delete and recipe answer (docs/secrets.md)
-      6 + // secure copy: a session's copies, the rules (list, add, remove), the paste plans and an answer to one (docs/secure-copy.md)
+      7 + // secure copy: a session's copies, the rules (list, add, remove, settings), the paste plans and an answer to one (docs/secure-copy.md)
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
       7 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
       9 + // the catalogs this machine publishes: list, make, change, delete, preview, add, publish, withdraw and export (docs/catalogs.md)
@@ -1240,6 +1240,7 @@ describe('the mounted daemon surface', () => {
       // Secure copy: a session's copies by description, the owner's pre-approval rules and the ferrets' paste plans.
       'GET /v1/sessions/:sessionId/copies',
       'GET /v1/copy-rules',
+      'PUT /v1/copy-rules/settings',
       'POST /v1/copy-rules',
       'DELETE /v1/copy-rules/:ruleId',
       'GET /v1/copy-plans',
