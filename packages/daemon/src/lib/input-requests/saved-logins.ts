@@ -65,9 +65,10 @@ export function targetMatchKey(facts: InputTargetFacts, hostName: string): strin
   let key: string | undefined;
   if (facts.kind === 'secret') return undefined;
   if (facts.kind === 'terminal') {
-    // The PROVED program only: a shell that calls itself `sudo` must not make the sudo password the one-tap choice.
+    // The PROVED program only: a shell that calls itself `sudo` must not make the sudo password the one-tap choice. And
+    // only in line mode: a relay (`ssh -t`, `docker exec -it`) would hand the password to a reader it was never asked of.
     const program = facts.program?.trim().toLowerCase();
-    if (program === undefined || program === '') return undefined;
+    if (program === undefined || program === '' || facts.canonical !== true) return undefined;
     const host = REMOTE_PROGRAMS.has(program) ? remoteHostOf(facts.foreground.argv) : shortHost(hostName);
     key = host === undefined ? undefined : `${program}@${host}`;
   } else {

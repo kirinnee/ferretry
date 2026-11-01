@@ -39,6 +39,7 @@ const FACTS: InputTargetFacts = {
   promptLine: '[sudo] password for kirin:',
   promptLineDigest: 'a'.repeat(64),
   program: 'sudo',
+  canonical: true,
   recognisedConsumer: true,
 };
 
@@ -712,6 +713,25 @@ describe('InputRequestService.deliver', () => {
     should(card?.risk?.level).equal('amber');
     should(card?.risk?.reason).startWith('Unverified: Ferretry could not prove which program is reading the terminal');
     should(card?.risk?.reason).not.containEql('sudo');
+  });
+
+  it('should never flag a proved program green when the terminal is not reading a line: it may be a relay (L2)', async () => {
+    // Arrange — a proved ssh with echo off in raw mode: `ssh -t host` passing keys to a remote shell, not asking itself.
+    for (const canonical of [false, undefined]) {
+      const relay = {
+        ...FACTS,
+        foreground: { ...FACTS.foreground, comm: 'ssh', argv: 'ssh -t host' },
+        program: 'ssh',
+        canonical,
+      } as InputTargetFacts;
+
+      // Act
+      const [card] = await (await raised({ facts: relay })).service.list(HOST);
+
+      // Assert
+      should(card?.risk?.level).equal('amber');
+      should(card?.risk?.reason).startWith('The terminal is not reading a line');
+    }
   });
 
   it('should type a secret into an unrecognised program without any extra tick, since the flag is the warning', async () => {

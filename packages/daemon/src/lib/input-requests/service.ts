@@ -1820,6 +1820,7 @@ function riskOf(field: Pick<InputRequestField, 'id' | 'sensitivity'>, facts: Inp
       reason: 'Ferretry could not tell whether the terminal echoes, so the value may show on screen.',
     };
   if (facts.program === undefined) return UNVERIFIED_FLAG;
+  if (facts.canonical !== true) return RELAY_FLAG;
   if (!facts.recognisedConsumer)
     return {
       level: 'amber',
@@ -1838,6 +1839,17 @@ const UNVERIFIED_FLAG: InputRisk = {
   level: 'amber',
   reason:
     'Unverified: Ferretry could not prove which program is reading the terminal, so the name it shows may be a disguise and the value may land somewhere unexpected.',
+};
+
+/**
+ * The proved program reads the terminal key by key (raw or readline mode, or a mode that could not be read): a relay
+ * such as `ssh -t` or `docker exec -it` passes every key on to a reader outside this machine's foreground group. A
+ * real password prompt (getpass, readpassphrase, Go's ReadPassword) reads in line mode. Never green.
+ */
+const RELAY_FLAG: InputRisk = {
+  level: 'amber',
+  reason:
+    'The terminal is not reading a line, so the program may be passing each key on to something else (a remote shell or a container) rather than asking for a password itself.',
 };
 
 const PAGE_PRIVATE_FLAG = 'This value will show on the page; Ferretry hides the page from the ferret for 2 minutes.';

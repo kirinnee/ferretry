@@ -36,7 +36,8 @@ export interface CodeProgramPort {
 export interface ProvenProgram {
   /**
    * Its name: the entry in a root-controlled bin folder its executable is reached from, or, for a process running
-   * setuid root, the name the kernel keeps for it (only the root process itself can change that).
+   * setuid root, a getpass name it runs under. That second name is NOT proof of which setuid program it is: whoever
+   * starts it picks it (a link's name on Linux, argv[0] on macOS). Only that root placed the program is proved.
    */
   readonly name: string;
   /** It runs setuid root right now: effective uid 0 while its real uid is not. A ferret cannot make one. */

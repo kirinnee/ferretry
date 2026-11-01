@@ -679,12 +679,12 @@ describe('the program a secret card names is proved for every reader of the term
     should(facts).not.have.property('trustedProgram');
   });
 
-  it('should not call a group trusted when a member is proved but does not run setuid root', async () => {
-    // Arrange — `sudo -n bash -c 'read -s X'` leaves a root bash, which is never proved; an exe-proved ssh member is
-    // proved but is no setuid program, so the group is recognised and still not trusted for the short lock.
+  it('should not call a group trusted when a member runs the same program but not setuid root', async () => {
+    // Arrange — a setuid sudo leads; the second member is proved to be sudo by its executable, not setuid: the group
+    // runs one recognised program, and is still not trusted for the short lock.
     const w = world();
     w.ps = SUDO_AND_READER;
-    w.proved = { 4300: SUDO, 4301: { name: 'ssh', setuidRoot: false } };
+    w.proved = { 4300: SUDO, 4301: { name: 'sudo', setuidRoot: false } };
 
     // Act
     const facts = await observed(w);
@@ -695,14 +695,34 @@ describe('the program a secret card names is proved for every reader of the term
     should(facts).not.have.property('trustedProgram');
   });
 
-  it('should not recognise a group when a proved member is not a program that asks for a secret', async () => {
+  it('should name no program when the group runs two, each proved (sudo leading a proved sh, ssh and nc)', async () => {
+    // Arrange — every member is proved, but not to be the same program: the terminal goes to whichever reads first.
+    for (const second of [
+      { name: 'sh', setuidRoot: false },
+      { name: 'ssh', setuidRoot: false },
+    ]) {
+      const w = world();
+      w.ps = SUDO_AND_READER;
+      w.proved = { 4300: SUDO, 4301: second };
+
+      // Act
+      const facts = await observed(w);
+
+      // Assert
+      should(facts).not.have.property('program');
+      should(facts.recognisedConsumer).be.false();
+      should(facts).not.have.property('trustedProgram');
+    }
+  });
+
+  it('should name a proved program that does not ask for secrets, and not recognise it (a system bash)', async () => {
     const w = world();
-    w.ps = SUDO_AND_READER;
-    w.proved = { 4300: SUDO, 4301: { name: 'cat', setuidRoot: false } };
+    w.ps = ' 4242  4242  4300 bash -bash\n 4300  4300  4300 bash bash\n';
+    w.proved = { 4300: { name: 'bash', setuidRoot: false } };
 
     const facts = await observed(w);
 
-    should(facts.program).equal('sudo');
+    should(facts.program).equal('bash');
     should(facts.recognisedConsumer).be.false();
     should(facts).not.have.property('trustedProgram');
   });

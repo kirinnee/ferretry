@@ -20,6 +20,7 @@ const terminal = (comm: string, argv: string): InputTargetFacts => ({
   promptLine: '',
   promptLineDigest: 'a'.repeat(64),
   program: comm,
+  canonical: true,
   recognisedConsumer: true,
 });
 
@@ -66,6 +67,14 @@ describe('which saved login is for a target', () => {
     // The proved program decides, not the name the process gave itself.
     const proved = { ...terminal('bash', 'bash'), program: 'sudo' } as InputTargetFacts;
     should(targetMatchKey(proved, 'kirin-box')).equal('sudo@kirin-box');
+  });
+
+  it('should key nothing when a proved program reads key by key: ssh -t would relay the password (L2)', () => {
+    for (const canonical of [false, undefined])
+      should(
+        targetMatchKey({ ...terminal('ssh', 'ssh -t build'), canonical } as InputTargetFacts, 'box'),
+      ).be.undefined();
+    should(targetMatchKey(terminal('ssh', 'ssh build'), 'box')).equal('ssh@build');
   });
 
   it('should key ssh, scp and sftp by the destination on the command line', () => {

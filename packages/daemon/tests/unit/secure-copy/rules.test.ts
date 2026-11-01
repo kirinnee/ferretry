@@ -187,6 +187,16 @@ describe('PasteRuleService: matching a paste', () => {
     should(service.reserve('s1', GH_COPY, provedOther)).be.undefined();
   });
 
+  it('should never paste under a rule into a proved program that reads key by key: it may relay them (L2)', async () => {
+    const { service } = rules();
+    await service.load();
+    await service.create(OWNER, { from: GH, to: VERCEL_TERMINAL });
+
+    for (const canonical of [false, undefined])
+      should(service.reserve('s1', GH_COPY, { ...AT_VERCEL, canonical } as InputTargetFacts)).be.undefined();
+    should(service.reserve('s1', GH_COPY, AT_VERCEL)).not.be.undefined();
+  });
+
   it('should keep a session rule to its session, and a lapsed rule to nobody', async () => {
     const { service, ms } = rules();
     await service.load();

@@ -304,16 +304,17 @@ card draws what the **daemon** observed (`sudo` is reading it, typing is hidden)
 **agent** wrote small, and carries a **risk flag** with one fixed sentence that says what the risk is
 (`request.risk`: a level and a reason; the sentence never contains terminal text):
 
-| Level   | When                                                                                                                                                                        |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| green   | A `secret`, echo off, and EVERY process of the foreground group PROVED to be a recognised program (`sudo`, `ssh`, `gpg` and so on), with no stranger holding the terminal.  |
-| amber   | **Unverified**: the program reading the terminal is not proved ([who reads the terminal](#who-reads-the-terminal)), whatever name `ps` shows. The card says "unverified".   |
-| amber   | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.                                                           |
-| amber   | A `private` value (it echoes): "This value will show on screen while the terminal is hidden from the ferret for 2 minutes."                                                 |
-| neutral | A one-time `code`: "One-time code: the ferret can see it." A page field's amber checks (missing, covered, not https, another site's frame) still come first.                |
-| amber   | A page field: the page is not https, the field is in a frame from another site, a `secret` is going into a field that is not a password field, or the field cannot be seen. |
-| green   | A page's `secret` going into a password field on a secure page.                                                                                                             |
-| red     | A `plain` value: "Not secret: the ferret can see this value."                                                                                                               |
+| Level   | When                                                                                                                                                                                       |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| green   | A `secret`, echo off in line mode, and EVERY process of the foreground group PROVED to run one recognised program (`sudo`, `ssh`, `gpg` and so on), with no stranger holding the terminal. |
+| amber   | A proved program in raw or readline mode: it may be relaying keys (`ssh -t`, `docker exec -it`), not asking for a password itself.                                                         |
+| amber   | **Unverified**: the program reading the terminal is not proved ([who reads the terminal](#who-reads-the-terminal)), whatever name `ps` shows. The card says "unverified".                  |
+| amber   | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.                                                                          |
+| amber   | A `private` value (it echoes): "This value will show on screen while the terminal is hidden from the ferret for 2 minutes."                                                                |
+| neutral | A one-time `code`: "One-time code: the ferret can see it." A page field's amber checks (missing, covered, not https, another site's frame) still come first.                               |
+| amber   | A page field: the page is not https, the field is in a frame from another site, a `secret` is going into a field that is not a password field, or the field cannot be seen.                |
+| green   | A page's `secret` going into a password field on a secure page.                                                                                                                            |
+| red     | A `plain` value: "Not secret: the ferret can see this value."                                                                                                                              |
 
 The flag is computed from what the daemon observed, when the request is raised and again when it is
 restored. Send is available at every level. The only refusals are a control character or line break in
@@ -1013,19 +1014,28 @@ So the daemon proves the GROUP or nothing:
 
 1. Every process of the foreground group (`ps -t <tty>`, every row whose group is the terminal's foreground group) is
    proved, one by one. A process is proved when it runs **setuid root** right now (effective uid 0, real uid not: only
-   a root-owned setuid file gives that), named by the kernel's name for it, which only that root process can change;
-   or, on Linux, when its **executable** (`/proc/<pid>/exe`) is what a root-controlled bin folder resolves the name to
-   (the folders and walk of the [secure-copy rule](secure-copy.md#pasting)) and the name is a program that asks for a
-   secret or a code program (a proved bash is still bash). A process root runs outright (`sudo -n bash -c 'read -s
-X'` leaves one) is never proved: its executable cannot be read, and it is whatever a ferret with a cached sudo
-   started.
-2. No process whose controlling terminal is another (or none) holds the TTY open: on Linux every
-   `/proc/<pid>/fd` this account may read, on macOS `lsof` and `ps`. tmux itself holds only the pty's master side.
-3. Then `program` is the leader's proved name, `recognisedConsumer` says every member is a program that asks for a
-   secret, and `trustedProgram` says every member runs setuid root. Anything unread, unproved or thrown leaves
-   `program` out: the card is **unverified** (amber, never green), the lock stays full, the code exception is
-   refused, no secure-copy rule matches and no saved login is the one-tap choice. A member that joins the group
-   after the card changes the facts, so the write refuses with nothing typed.
+   a root-owned setuid file gives that) under a getpass name (sudo, sudoedit, su, doas, passwd); or, on Linux, when its
+   **executable** (`/proc/<pid>/exe`) is what a root-controlled bin folder resolves its name to (the folders and walk
+   of the [secure-copy rule](secure-copy.md#pasting)). The exe proof says WHICH system program runs, bash included;
+   what the name is worth is each decision's own. A process root runs outright (`sudo -n bash -c 'read -s X'` leaves
+   one) is never proved: its executable cannot be read, and it is whatever a ferret with a cached sudo started.
+2. No process whose controlling terminal is another (or none) holds the TTY open: on Linux every `/proc/<pid>/fd`,
+   each descriptor matched by the DEVICE it reaches, not by how its path is spelled; on macOS `lsof` and `ps`. A
+   process of this account whose descriptors cannot be read (one can make itself not dumpable) makes the answer
+   unknown, with one exception every systemd login has: systemd's own PAM helper `(sd-pam)`, told apart by the
+   kernel and not by its name (its parent runs a root-owned `systemd` this account cannot replace, and it started
+   within a second of that parent). tmux itself holds only the pty's master side.
+3. Then `program` is the ONE program every member is proved to run (two different programs, such as sudo leading a
+   proved `sh`, are unverified), `recognisedConsumer` says it is a program that asks for a secret, and `trustedProgram`
+   says every member runs setuid root. Anything unread, unproved or thrown leaves `program` out: the card is
+   **unverified** (amber, never green), the lock stays full, the code exception is refused, no secure-copy rule matches
+   and no saved login is the one-tap choice. A member that joins the group after the card changes the facts, so the
+   write refuses with nothing typed.
+4. **Line mode too.** A proved program that RELAYS keys (`ssh -t` to a remote shell, `docker exec -it`) hands them to a
+   reader outside this machine's foreground group. A real password prompt (getpass, readpassphrase, Go's
+   `ReadPassword`) reads a line; a relay puts the terminal in raw mode. So green, a secure-copy rule's match and the
+   one-tap saved login also need the terminal in line (canonical) mode, as the short lock always did. Otherwise the
+   card is amber: "The terminal is not reading a line…".
 
 Raising a card to a password from the NAME (`sudo` in `ps`, or the prompt line) still happens: a fake name there only
 makes the card stricter.
@@ -1033,9 +1043,15 @@ makes the card stricter.
 - **GAP: a macOS daemon proves only setuid programs.** No reading of a macOS process's executable is wired, so ssh,
   gpg, psql and every other program there is unverified (amber, full lock); sudo and su stay green.
 - **GAP: another account's processes are not looked at.** They cannot open this account's pty for reading unless
-  they are root, and root is outside this model.
-- **A setuid program can be started by a link of another name.** A ferret can run a real setuid `su` through a link
-  called `sudo`; the card then names sudo, but what reads the value is still a program root put there.
+  they are root, and root is outside this model. A setuid-root process whose descriptors cannot be read is passed over
+  too: it is a program root placed, the same trust its proof gives.
+- **GAP: the name of a setuid program is the caller's choice.** Whoever starts it picks the name: a link's name on
+  Linux, any argv[0] on macOS (`exec -a sudo /usr/bin/<another setuid program>`). So the proved `program` of a setuid
+  process says only that root placed it and that it runs under a getpass name; the card may say sudo while another
+  setuid program reads. What reads the value is still a program root put there, and no common setuid program is known
+  to hand what it reads to its caller.
+- **The stranger scan is a look at one moment, and best effort against this same account.** A TTY opened after the
+  final look, or held outside any descriptor table, is not seen.
 - **A ferret that can already run sudo without a password is root.** Nothing here holds against it.
 - **The proof is as old as the last look.** The write still only ENQUEUES ([honest limits](#honest-limits)); a process
   that joins the group, or execs, between the final look and the program's read is not seen.

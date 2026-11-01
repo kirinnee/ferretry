@@ -334,9 +334,9 @@ const TerminalFactsSchema = z.strictObject({
     .regex(/^[^\p{Cc}\p{Cf}]*$/u),
   promptLineDigest: Digest,
   /**
-   * The program reading the terminal, PROVED by the kernel for every process of the foreground group (the leader's
-   * name), with no process of another session holding the TTY open. Absent: UNVERIFIED — `foreground.comm` is only
-   * the name a process gave itself, and a ferret's shell can call itself `sudo`.
+   * The program reading the terminal, PROVED by the kernel to be the one program every process of the foreground group
+   * runs, with no process of another session holding the TTY open. Absent: UNVERIFIED — `foreground.comm` is only the
+   * name a process gave itself, and a ferret's shell can call itself `sudo`.
    */
   program: boundedLine(64).optional(),
   /**

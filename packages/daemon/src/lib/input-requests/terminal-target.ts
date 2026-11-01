@@ -267,8 +267,9 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
   }
 
   /**
-   * The foreground group, proved member by member: the leader's proven name, whether every member is a program that
-   * asks for a secret, and whether every member runs setuid root. `undefined` when any member is unproven.
+   * The foreground group, proved member by member: the ONE program every member is proved to run, whether it asks for
+   * a secret, and whether every member runs setuid root. `undefined` when any member is unproved, or two members run
+   * different programs (sudo leading a proved `sh` still hands the terminal to a shell).
    */
   private async proveGroup(leader: number, members: readonly number[]): Promise<ProvedGroup | undefined> {
     const proofs = this.proofs;
@@ -279,12 +280,13 @@ export class TmuxInputTarget implements TerminalInputTargetPort {
     const named = proved.flatMap(({ pid, proven }) => (proven === undefined ? [] : [{ pid, proven }]));
     const head = named.find(member => member.pid === leader);
     if (named.length !== members.length || head === undefined) return undefined;
+    const all = (test: (proven: ProvenProgram) => boolean): boolean => named.every(member => test(member.proven));
+    if (!all(proven => proven.name === head.proven.name)) return undefined;
     const program = plain(head.proven.name, 64);
     if (program === '') return undefined;
-    const all = (test: (proven: ProvenProgram) => boolean): boolean => named.every(member => test(member.proven));
     return {
       program,
-      recognised: all(proven => recognisedConsumer(proven.name)),
+      recognised: recognisedConsumer(program),
       setuidRoot: all(proven => proven.setuidRoot),
     };
   }

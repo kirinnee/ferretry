@@ -263,8 +263,14 @@ function toMatches(rule: PasteRule, facts: InputTargetFacts): boolean {
   switch (rule.to.kind) {
     case 'terminal':
       // The PROVED program (every process of the foreground group, by the kernel), never the name ps shows: a ferret's
-      // shell can call itself `sudo` and would be pasted into without a card. Unproved, the owner is asked.
-      return facts.kind === 'terminal' && facts.program !== undefined && facts.program === rule.to.program;
+      // shell can call itself `sudo` and would be pasted into without a card. And line mode: a relay (`ssh -t`,
+      // `docker exec -it`) reads key by key and hands them to a reader the proof never saw. Otherwise the owner is asked.
+      return (
+        facts.kind === 'terminal' &&
+        facts.canonical === true &&
+        facts.program !== undefined &&
+        facts.program === rule.to.program
+      );
     case 'browser':
       return facts.kind === 'browser' && facts.origin === rule.to.origin;
     case 'secret':

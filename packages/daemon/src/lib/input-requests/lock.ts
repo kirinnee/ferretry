@@ -88,7 +88,7 @@ export function provenByFacts(
  * The programs whose prompt is a local password read (getpass): echo off in line mode, nothing drawn. A relay (ssh,
  * docker, kubectl) or a readline program (psql, mysql) turns echo off and draws what is typed, so it is never one.
  */
-const GETPASS_PROGRAMS: ReadonlySet<string> = new Set(['sudo', 'sudoedit', 'su', 'doas', 'passwd']);
+export const GETPASS_PROGRAMS: ReadonlySet<string> = new Set(['sudo', 'sudoedit', 'su', 'doas', 'passwd']);
 
 /**
  * The programs whose echo-off prompt may be a one-time code: remote shells and cloud CLIs that ask for a 2FA code. A
