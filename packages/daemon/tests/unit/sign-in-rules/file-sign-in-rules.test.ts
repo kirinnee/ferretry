@@ -48,7 +48,10 @@ const damages = async (): Promise<readonly [string, string][]> => {
     ['a bad rule id', JSON.stringify({ ...good, rules: [{ ...rule, body: { ...rule.body, id: 'sr_nope' } }] })],
     ['a duplicate rule id', JSON.stringify({ ...good, rules: [rule, rule] })],
     ['two rules for one sign-in', JSON.stringify({ ...good, rules: [rule, other] })],
-    ['a terminal rule', JSON.stringify({ ...good, rules: [{ ...rule, body: { ...rule.body, surface: 'terminal' } }] })],
+    [
+      'a terminal surface at a web host',
+      JSON.stringify({ ...good, rules: [{ ...rule, body: { ...rule.body, surface: 'terminal' } }] }),
+    ],
     ['a truncated file', JSON.stringify(good).slice(0, 80)],
   ];
 };

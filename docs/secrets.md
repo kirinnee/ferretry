@@ -487,8 +487,9 @@ Each is a kept `secrets.changed` record by account and key id (`factor-added`, `
 
 ## Standing sign-in rules
 
-A standing rule is **one owner-signed permission for Ferretry to fill one page sign-in, for any ferret** (unless the
-owner narrowed its scope to one board project or one session), **for up to 90 days**. Rules are owner state on disk,
+A standing rule is **one owner-signed permission for Ferretry to fill one sign-in, for any ferret** (unless the
+owner narrowed its scope to one board project or one session): **a page sign-in for up to 90 days, or sudo, su or doas
+in a terminal for up to 7** ([below](#terminal-rules-sudo-su-or-doas)). Rules are owner state on disk,
 `<state>/accounts/sign-in-rules.json` (directory 0700, file 0600, written atomically). Task-plan grants stay in memory.
 
 > This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop
@@ -505,9 +506,11 @@ Creating, resuming, renewing or widening a rule is a **stage** and a **commit**.
 
 - **Stage** (`POST /v1/sign-in-rules/stages`). The owner ticks the username and password, and optionally the 2FA code.
   The code needs the red one-factor acknowledgement. The daemon then builds the rule's body itself:
-  - It finds the sign-in and checks that it can have a rule.
+  - It finds the sign-in and checks that it can have a rule. Its `surface` is the sign-in's own (a site is `page`,
+    sudo, su or doas is `terminal`), never the caller's word.
   - It snapshots every pin (below).
-  - It fixes `createdAt` and `expiresAt` (30 days by default, 1 hour to 90 days).
+  - It fixes `createdAt` and `expiresAt`: a page rule 30 days by default, 1 hour to 90 days; a terminal rule 1 day by
+    default, 1 hour to 7 days.
   - It draws a 32-byte nonce.
 
   The stage waits two minutes, one per sign-in. Nothing is approved yet.
@@ -546,21 +549,27 @@ Creating, resuming, renewing or widening a rule is a **stage** and a **commit**.
 
 ### What can have a rule
 
-A rule can only be made for a **page password sign-in the owner signed in to by hand from a paired device, at least
-twice in a row with the page moving on**. Otherwise the stage answers `409` with the reason:
+A rule can only be made for a **password sign-in the owner signed in to by hand from a paired device, at least twice
+in a row**: on a page, with the page moving on; in a terminal, into sudo, su or doas the kernel proved. Otherwise the
+stage answers `409` with the reason:
 
-| Reason             | When                                                                                        |
-| ------------------ | ------------------------------------------------------------------------------------------- |
-| `tool_not_covered` | A terminal sign-in. Rules are pages only; sudo, su and doas stay covered per task by plans. |
-| `via_provider`     | The sign-in goes through another account ("via Google").                                    |
-| `not_password`     | The sign-in does not use a password.                                                        |
-| `no_history`       | "Sign in yourself twice from the app first".                                                |
-| `passkey_required` | No passkey has been added on a paired device yet.                                           |
-| `no_code_key`      | The code was ticked, but no 2FA key on the account has a seed Ferretry holds.               |
+| Reason             | When                                                                                           |
+| ------------------ | ---------------------------------------------------------------------------------------------- |
+| `tool_not_covered` | A terminal sign-in for any program but sudo, su or doas (ssh, npm, …): no rule ever covers it. |
+| `via_provider`     | The sign-in goes through another account ("via Google").                                       |
+| `not_password`     | The sign-in does not use a password.                                                           |
+| `no_history`       | "Sign in yourself twice from the app first".                                                   |
+| `passkey_required` | No passkey has been added on a paired device yet.                                              |
+| `no_code_key`      | The code was ticked, but no 2FA key on the account has a seed Ferretry holds.                  |
+
+A terminal rule types the password only: a username or a code ticked for one, or a lifetime over 7 days, is `400`.
 
 History is the observed fact `tapped`. The login observer writes it only for a fill by the owner's own **device**
-(`observerByOf`, exhaustive), at the moment the page moved on, and only if the ferret had not steered the page. These
-never count:
+(`observerByOf`, exhaustive), and only if the ferret had not steered the target. On a page it is written at the
+moment the page moved on. In a terminal it is written at the write itself: `true` only when the password went, with
+echo off in line mode, into sudo, su or doas the KERNEL proved every process of the foreground group runs setuid root
+(`rootPromptProved`), and `false` (the count starts again) into anything else. A terminal is not asked to "move on":
+the ferret can steer what the screen shows, and the setuid proof is the gate. These never count:
 
 - task-plan fills;
 - rule fills;
@@ -575,7 +584,8 @@ added. It is never chosen by whether a code worked: a ferret can steer that.
 The body pins:
 
 - the account's immutable key, its handle and its username;
-- the sign-in's login domains and its recipe version;
+- the sign-in's login domains (or a terminal rule's one `sudo@host`, `su@host` or `doas@host`) and its recipe
+  version;
 - the field identities the owner's taps have history with;
 - a fingerprint of the account's 2FA keys (id, kind, whether Ferretry holds the seed; never `verified`, the label or
   when it was added).
@@ -587,7 +597,7 @@ A rule is **suspended**, and stays suspended until a new passkey approves it aga
     end.
   - A rename, a merge or a username change: `account-changed`. So is a sign-in that stops typing a password of its
     own (another method, or "via" a provider); switching it back does not resume the rule.
-  - A domains edit: `place-changed`.
+  - A domains edit, or a terminal sign-in moved to another tool or host, or to a site: `place-changed`.
   - A recipe change by the owner, an approved proposal or an auto-applied one: `recipe-changed`.
   - Any 2FA key added, removed, changed in kind, or given or stripped of its seed: `factor-changed`.
   - A new form at a pinned place: `form-changed`.
@@ -599,7 +609,9 @@ A rule is **suspended**, and stays suspended until a new passkey approves it aga
   - The list answers `503` until every record has been checked, so it never shows a rule as active before then.
   - If the accounts or the passkeys can't be read, no rule is verified, so none fills. The list marks each one
     `unverified`, and the daemon's sweep checks again every 15 seconds until it can.
-- **A page script on a pinned host:** `scripted-origin`. Fills will also suspend for their own reasons.
+- **A page script on a pinned host:** `scripted-origin`, for a page rule. A script whose page could not be read
+  suspends every page rule; a terminal rule is not a page's, and no page script reaches it. Fills will also suspend
+  for their own reasons.
 
 A label, a password change, `verified`, a pending proposal and a default suspend nothing. Changing a fact back resumes
 nothing. Every suspension is persisted, audited (`sign-in-rule-suspended` with its reason) and shown in the owner's
@@ -608,6 +620,35 @@ list. No card is raised in a ferret's session for it, so a ferret learns nothing
 If the file can't be written, the rule stays suspended in memory as `store-write-failed`, and so does a use that
 couldn't be counted. Every later write carries it, the sweep retries the write, and the daemon tries once more when it
 stops.
+
+### Terminal rules: sudo, su or doas
+
+The owner may also make a rule for **sudo, su or doas on this machine** (owner decision !A197): the sign-in's one
+`tool@host` key (`sudo@kirin-box`), the password only, **1 day by default and 7 at most**, made with the same passkey,
+pinned and suspended by the same triggers as a page rule. The staged rule and the owner's view carry `root: true` /
+the `root` flag, and the app draws a red line from that field, never from the summary's words; the summary says it
+second, before the account: "into sudo: root on kirin-box for every ferret it covers".
+
+It fills only where every check of a terminal plan line holds ([input requests › Standing rule
+fills](input-requests.md#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret)): the program **proved by
+the kernel**, never by its name (a shell that renamed itself `sudo` has no key, so no rule is even tried and the card is
+a plain one); every process of its foreground group setuid root; echo off; line mode; the proved tool and this machine
+exactly the pinned key; one password field; the form the owner's taps have history with. A miss types nothing,
+suspends nothing and tells the ferret nothing it would not be told with no rule. The rule is asked once more inside the
+terminal's own turn, right before the guarded tmux write (`proceed()`), so a revoke that lands then types nothing.
+
+Every terminal rule card, sheet and Settings row carries two more lines beside the honest-client one, verbatim:
+
+> This gives every ferret on this machine root whenever it asks, while the rule lasts. (`SIGN_IN_RULE_ROOT_WARNING`)
+
+> Ferretry types it only where the kernel proves sudo, su or doas is reading the terminal as root, never on a
+> program's name. A ferret starts that program, so it could start another program root installed under the name sudo.
+> (`SIGN_IN_RULE_TERMINAL_HONEST_LIMIT`)
+
+So, said plainly: **a sudo rule gives every ferret root on demand while it lasts**, and **the program is proved by the
+kernel, not by its name**: what reads the password is a setuid program root installed, but the ferret chooses which one
+it starts as `sudo` (`passwd` started under that name would get it). With full sudo that gives nothing beyond the rule
+itself; under a restricted sudoers it could set a password the ferret then knows.
 
 ### Strict, and fails closed
 
@@ -620,7 +661,8 @@ truncated or does not parse means:
 The owner's next write copies the damaged file aside to `sign-in-rules.json.damaged-<stamp>` and starts fresh. That can
 only drop approvals, and nothing is deleted. The overlay beside the signed body (suspension, narrowing, usage) is
 unsigned. A same-user edit can clear it, but never widen the body: the schema refuses an overlay that would. A
-rolled-back file can bring a revoked rule back until its signed end, at most 90 days after it was created.
+rolled-back file can bring a revoked rule back until its signed end, at most 90 days after it was created (7 for a
+terminal rule).
 
 Two more limits are declared:
 

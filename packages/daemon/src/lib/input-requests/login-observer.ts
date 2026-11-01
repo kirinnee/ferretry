@@ -10,6 +10,7 @@ import {
   ownerTapped,
   type SignInId,
   type SurfaceKind,
+  TASK_PLAN_TERMINAL_TOOLS,
   type TwoFactorId,
 } from '@ferretry/protocol';
 
@@ -26,8 +27,11 @@ import {
  *   waiting there (`push`: an approval elsewhere), or leaving at once (`none`).
  * - `tapped`, ONLY for the owner's own tap from a paired device (`by: 'device'`): on a page, written beside
  *   `navigatedAway`, at the same moment and under the same "not steered" rule — `true` when it moved on, `false`
- *   (which starts the count again) when it did not. A plan fill, a rule fill or the admin token's delivery never writes
- *   it, so only this fact counts toward a standing rule's history (sign-in-rules/eligibility.ts).
+ *   (which starts the count again) when it did not. In a terminal, written AT THE WRITE when the ferret had not acted
+ *   on a terminal since the card was raised: `true` only into sudo, su or doas the kernel proved setuid root, echo
+ *   off, in line mode ({@link rootPromptProved}), `false` into anything else. A terminal "moving on" is not asked: the
+ *   ferret can steer the screen, and the setuid proof is the gate. A plan fill, a rule fill or the admin token's
+ *   delivery never writes it, so only this fact counts toward a standing rule's history (sign-in-rules/eligibility.ts).
  *
  * THE FERRET CAN STEER WHAT A PAGE OR SCREEN SHOWS (it can navigate, clear the screen, click "Continue"), so a fact
  * from after the submit is DROPPED when the ferret drove a surface of that kind in the session meanwhile: only a
@@ -182,6 +186,24 @@ export function identityOf(facts: InputTargetFacts, place: string): string | und
   return undefined;
 }
 
+/**
+ * A PASSWORD PROMPT THE KERNEL PROVED IS SUDO, SU OR DOAS RUNNING SETUID ROOT: the one program every process of the
+ * foreground group runs (`program`, never `foreground.comm`, which a shell can rewrite), reading a line with echo off,
+ * every member setuid root. What a terminal tap must have been for a standing rule's history: the same facts the shared
+ * matcher asks of every terminal grant fill (sign-in-grants/matcher.ts, rows 10t–12t).
+ */
+function rootPromptProved(facts: InputTargetFacts): boolean {
+  return (
+    facts.kind === 'terminal' &&
+    facts.program !== undefined &&
+    facts.canonical === true &&
+    facts.echo === 'off' &&
+    facts.recognisedConsumer &&
+    facts.trustedProgram === true &&
+    (TASK_PLAN_TERMINAL_TOOLS as readonly string[]).includes(facts.program)
+  );
+}
+
 /** Every secret field went into a password input, or the terminal hid typing for a program that asks for secrets. */
 export function maskedAt(facts: InputTargetFacts, fields: readonly InputRequestField[]): boolean | undefined {
   if (facts.kind === 'terminal') return facts.echo === 'off' && facts.recognisedConsumer;
@@ -269,7 +291,12 @@ export class LoginObserver {
     const signIn = delivery.signIn;
     if (signIn === undefined) return;
     const masked = maskedAt(delivery.facts, delivery.fields);
-    await this.record(signIn, { ...base, ...(masked === undefined ? {} : { masked }) });
+    const tapped = this.terminalTap(delivery, masked, passwordField);
+    await this.record(signIn, {
+      ...base,
+      ...(masked === undefined ? {} : { masked }),
+      ...(tapped === undefined ? {} : { tapped }),
+    });
     if (!delivery.submitted || !passwordField) return;
     const waiting: Awaiting = { delivery, place, at: delivery.deliveredAt, settled: false };
     if (!codeField) this.awaiting.set(delivery.sessionId, [...(this.awaiting.get(delivery.sessionId) ?? []), waiting]);
@@ -281,6 +308,17 @@ export class LoginObserver {
         (this.awaiting.get(delivery.sessionId) ?? []).filter(other => other !== waiting),
       );
     }
+  }
+
+  /**
+   * Whether this terminal write is one of the owner's own taps toward a standing rule's history, or `undefined` when it
+   * says nothing: not a terminal, not the owner's device (a plan, a rule, the admin token), no password typed, or the
+   * ferret acted on a terminal since the card was raised. Decided from the facts of the write itself.
+   */
+  private terminalTap(delivery: LoginDelivery, masked: boolean | undefined, password: boolean): boolean | undefined {
+    if (delivery.facts.kind !== 'terminal' || !password) return undefined;
+    if (delivery.by === undefined || !ownerTapped(delivery.by) || this.steered(delivery)) return undefined;
+    return masked === true && rootPromptProved(delivery.facts);
   }
 
   /**

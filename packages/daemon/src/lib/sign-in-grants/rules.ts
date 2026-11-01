@@ -164,7 +164,9 @@ export class RuleSignInGrants implements SignInGrantSource {
    * THE LAST CHECK BEFORE TYPING, synchronous: the rule at this very revision is still in the service's memory, its
    * proof and facts checked out at the last look (`verified`), it is in force (or its spent use is still open for a later
    * step), it still covers every role being typed (a narrowing that dropped the code stops a code), its scope covers
-   * the session, no page script ran on its places since it was approved, and no agent script is running anywhere now.
+   * the session, no agent script is running anywhere now, and, for a PAGE rule, no page script ran on its places since
+   * it was approved (a terminal rule's write goes to a tmux pane no page script reaches, so a taint from a page whose
+   * origin could not be read does not stop it).
    */
   holds(grant: SignInGrant, at: GrantFillAt): boolean {
     const rule = grant.rule;
@@ -174,6 +176,7 @@ export class RuleSignInGrants implements SignInGrantSource {
       .find(each => each.body.id === rule.id && each.body.revision === rule.revision);
     if (record === undefined || record.suspended !== undefined) return false;
     if (this.#running > 0) return false;
+    const page = record.body.surface === 'page';
     if (!this.ports.rules.verified(rule.id, rule.revision)) return false;
     const effective = signInRuleEffective(record, at.now);
     const left = (effective.remaining ?? Number.POSITIVE_INFINITY) - (this.#inflight.get(grant.id) ?? 0);
@@ -185,7 +188,7 @@ export class RuleSignInGrants implements SignInGrantSource {
       inForce &&
       at.roles.every(role => effective.fields.includes(role)) &&
       scopeCovers(record.body.scope, at.sessionId, at.project) &&
-      !scriptedSince(this.scriptedOrigins(), record.body.pins.placeKeys, Date.parse(record.body.createdAt))
+      !(page && scriptedSince(this.scriptedOrigins(), record.body.pins.placeKeys, Date.parse(record.body.createdAt)))
     );
   }
 
