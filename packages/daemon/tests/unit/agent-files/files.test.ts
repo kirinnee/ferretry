@@ -428,7 +428,7 @@ describe('AgentFiles.save', () => {
     should(disk.entries.has('/outside/x.csv')).be.false();
   });
 
-  it('should refuse when the folder made turns out to lead outside, nowhere, or into .git', async () => {
+  it('should refuse, before writing, when a folder just made is swapped for a link outside, removed, or led into .git', async () => {
     // Arrange
     const swapTo = (target: string | undefined) => {
       const made = world();
@@ -451,9 +451,8 @@ describe('AgentFiles.save', () => {
     ];
 
     // Assert
-    should(refused.map(error => error.code)).deepEqual(['forbidden', 'not_found', 'forbidden']);
-    should(refused[0]?.message).containEql('outside this session’s folder');
-    should(refused[2]?.message).containEql('.git');
+    // Made through the checked folder, each new folder is opened and checked before anything goes into it.
+    should(refused.map(error => error.rule)).deepEqual(['changed', 'changed', 'changed']);
     should(outside.disk.entries.has('/outside/report.csv')).be.false();
     should(git.disk.entries.has('/work/.git/report.csv')).be.false();
   });
@@ -578,5 +577,32 @@ describe('AgentFiles.save — never into the daemon’s state home', () => {
     const { files } = world({ folder: '/home' });
 
     should((await files.save('s1', staged, SAVE)).saved).equal('downloads/report.csv');
+  });
+});
+
+describe('AgentFiles — the home’s key files, by identity', () => {
+  it('should refuse a key file bound into the session folder by itself', async () => {
+    // Arrange
+    const disk = new FakeAgentDisk();
+    disk.dir('/fy');
+    disk.file('/fy/api-token', 64);
+    disk.dir('/work');
+    disk.bind('/work/innocent.txt', '/fy/api-token');
+    const files = new AgentFiles({
+      fs: disk,
+      folderOf: async () => '/work',
+      readAttachment: async () => ({ filename: 'x', bytes: new Uint8Array() }),
+      uploadDirectory: '/upload',
+      stateHomes: ['/fy'],
+      pinned: ['/fy/api-token'],
+      token: () => 't',
+      now: () => NOW,
+    });
+
+    // Act
+    const error = await refusal(files.prepareUpload('s1', ['innocent.txt']));
+
+    // Assert
+    should(error).match({ code: 'forbidden', rule: 'state-home' });
   });
 });

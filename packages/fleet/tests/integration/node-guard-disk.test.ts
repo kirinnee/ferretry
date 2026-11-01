@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { chmod, link, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, link, mkdir, mkdtemp, readFile, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -8,7 +8,9 @@ import { GuardSizeError, NodeGuardDisk } from '../../src/adapters/node-guard-dis
 import {
   copyTreeOutsideStateHomes,
   createOutsideStateHomes,
+  MutableRootError,
   openOutsideStateHomes,
+  resolveImmutableRoots,
   resolveStateHomes,
   type StateHomes,
 } from '../../src/lib/state-home-guard.ts';
@@ -39,6 +41,9 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
+
+/** This process's group ids, as `resolveImmutableRoots` takes them. */
+const processGroups = (): number[] => [...(process.getgroups?.() ?? []), process.getegid?.() ?? -1];
 
 const failure = async (work: Promise<unknown>): Promise<unknown> =>
   await work.then(
@@ -227,5 +232,56 @@ describe('copyTreeOutsideStateHomes — on a real disk', () => {
     await chmod(join(work, 'copy'), 0o755);
     await chmod(join(source, 'skills'), 0o755);
     await chmod(source, 0o755);
+  });
+});
+
+describe('the guard on a real disk — folders, owners and immutable roots', () => {
+  it('should make missing folders through the checked one, with their mode', async () => {
+    await writeFile(join(root, 'source.txt'), 'bytes');
+
+    const made = await createOutsideStateHomes(join(work, 'a', 'b', 'c.txt'), homes, disk, {
+      inside: work,
+      overwrite: false,
+      mode: 0o644,
+      makeFolders: 0o750,
+    });
+    if (!made.ok) throw new Error(made.rule);
+    await made.value.copyFrom(join(root, 'source.txt'), 100);
+    await made.value.close();
+
+    should(await readFile(join(work, 'a', 'b', 'c.txt'), 'utf8')).equal('bytes');
+    should((await stat(join(work, 'a', 'b'))).mode & 0o777).equal(0o750);
+  });
+
+  it('should refuse a folder this user owns, and one anyone may write, as an immutable root', async () => {
+    const groups = processGroups();
+
+    const mine = await resolveImmutableRoots([work], disk, groups).catch((error: unknown) => error);
+    const shared = await resolveImmutableRoots([tmpdir()], disk, groups).catch((error: unknown) => error);
+
+    should(mine).be.instanceOf(MutableRootError);
+    should(shared).be.instanceOf(MutableRootError);
+  });
+
+  it('should accept a multi-user Nix store where there is one', async () => {
+    const present = await access('/nix/store').then(
+      () => true,
+      () => false,
+    );
+    const info = present ? await stat('/nix/store') : undefined;
+    // Only a root-owned store this user's groups cannot write qualifies; anything else is refused, which is right too.
+    const groups = processGroups();
+    const qualifies =
+      info !== undefined &&
+      info.uid === 0 &&
+      (info.mode & 0o002) === 0 &&
+      ((info.mode & 0o020) === 0 || !groups.includes(info.gid));
+
+    const roots = await resolveImmutableRoots(['/nix/store'], disk, groups).then(
+      result => result.roots,
+      () => undefined,
+    );
+
+    should(roots).eql(qualifies ? ['/nix/store'] : undefined);
   });
 });

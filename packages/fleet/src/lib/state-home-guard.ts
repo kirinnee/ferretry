@@ -32,6 +32,10 @@ export interface FileIdentity {
   readonly size: number;
   /** The permission bits. */
   readonly mode: number;
+  /** The owner's user id. */
+  readonly owner: number;
+  /** The owning group's id. */
+  readonly group: number;
 }
 
 /** A file opened to read. */
@@ -119,7 +123,25 @@ export interface StateHomes {
   readonly homes: readonly KnownDirectory[];
   /** Folders inside a home that ARE reachable (e.g. the fleet's assets), by name and identity. */
   readonly openings: readonly KnownDirectory[];
+  /** The home's key files and folders by identity, so a bind mount of one of them alone is still seen. */
+  readonly pinned: readonly { readonly device: bigint; readonly inode: bigint }[];
   readonly [stateHomesBrand]: true;
+}
+
+declare const immutableRootsBrand: unique symbol;
+
+/** Folders proven root-owned and unwritable by anyone else; made only by {@link resolveImmutableRoots}. */
+export interface ImmutableRoots {
+  readonly roots: readonly string[];
+  readonly [immutableRootsBrand]: true;
+}
+
+/** A root offered as immutable that is not: not root's, writable by anyone, or by a group this process is in. */
+export class MutableRootError extends Error {
+  constructor(readonly root: string) {
+    super(`${root} is not root-owned and closed to this process's writes, so a hard link under it proves nothing`);
+    this.name = 'MutableRootError';
+  }
 }
 
 /** Whether a path is inside a home — `home` names it when so. */
@@ -148,11 +170,17 @@ const same = (a: { readonly device: bigint; readonly inode: bigint }, b: FileIde
   b !== undefined && a.device === b.device && a.inode === b.inode;
 
 /**
- * Each home (and each opening) by name, by real path and by device+inode. Throws {@link StateHomeUnresolvedError}
- * when one cannot be resolved or is not a folder, and a `TypeError` for a relative path.
+ * Each home (and each opening) by name, by real path and by device+inode, and each `pinned` file or folder
+ * inside them by device+inode (one not there yet is skipped: nothing can be bound to it). Throws
+ * {@link StateHomeUnresolvedError} when a home cannot be resolved or is not a folder, and a `TypeError` for a
+ * relative path.
  */
 export async function resolveStateHomes(
-  input: { readonly homes: readonly string[]; readonly openings?: readonly string[] },
+  input: {
+    readonly homes: readonly string[];
+    readonly openings?: readonly string[];
+    readonly pinned?: readonly string[];
+  },
   disk: Pick<GuardDisk, 'realpath' | 'identity'>,
 ): Promise<StateHomes> {
   const known = async (paths: readonly string[]): Promise<readonly KnownDirectory[]> =>
@@ -167,7 +195,49 @@ export async function resolveStateHomes(
         return { named, real, device: entry.device, inode: entry.inode };
       }),
     );
-  return { homes: await known(input.homes), openings: await known(input.openings ?? []) } as StateHomes;
+  const pinned = await Promise.all(
+    (input.pinned ?? []).map(async path => {
+      const entry = await disk.identity(absolute(path, 'a pinned path')).catch(() => {
+        throw new StateHomeUnresolvedError();
+      });
+      return entry === undefined ? [] : [{ device: entry.device, inode: entry.inode }];
+    }),
+  );
+  return {
+    homes: await known(input.homes),
+    openings: await known(input.openings ?? []),
+    pinned: pinned.flat(),
+  } as unknown as StateHomes;
+}
+
+/**
+ * Proves each root closed to this process: its real path and every folder above it are folders owned by root
+ * (uid 0), never writable by other, and writable by their group only when this process is NOT in that group —
+ * a multi-user Nix store is `root:nixbld 1775`, written by build users only. So nothing this process (or an
+ * agent it runs) does can put a hard link, or a rename, under it. A single-user Nix store, owned by its user,
+ * does NOT qualify. `groups` are this process's group ids (its supplementary groups and its effective group, which the caller reads). Throws
+ * {@link MutableRootError} for any root that fails.
+ */
+export async function resolveImmutableRoots(
+  roots: readonly string[],
+  disk: Pick<GuardDisk, 'realpath' | 'identity'>,
+  groups: readonly number[],
+): Promise<ImmutableRoots> {
+  const real = await Promise.all(
+    roots.map(async root => {
+      const resolved = await disk.realpath(absolute(root, 'an immutable root')).catch(() => {
+        throw new MutableRootError(root);
+      });
+      for (let current = resolved; ; current = dirname(current)) {
+        const entry = await disk.identity(current);
+        const groupWrites = (entry?.mode ?? 0) & 0o020 && groups.includes(entry?.group ?? -1);
+        if (entry?.kind !== 'directory' || entry.owner !== 0 || (entry.mode & 0o002) !== 0 || groupWrites)
+          throw new MutableRootError(root);
+        if (dirname(current) === current) return resolved;
+      }
+    }),
+  );
+  return { roots: real } as unknown as ImmutableRoots;
 }
 
 /**
@@ -184,7 +254,8 @@ export function stateHomeByName(homes: StateHomes, path: string): HomeVerdict {
 
 /**
  * The home holding the REAL path `real`, by name and then by identity: every folder from `real` up to the root is
- * compared by device and inode with each home and opening, nearest first. A folder that cannot be read fails closed.
+ * compared by device and inode with each home, opening and pinned key file, nearest first. A folder that cannot be
+ * read fails closed.
  */
 export async function stateHomeOf(
   homes: StateHomes,
@@ -199,6 +270,7 @@ export async function stateHomeOf(
     if (homes.openings.some(opening => same(opening, entry))) return OUTSIDE;
     const home = homes.homes.find(directory => same(directory, entry));
     if (home !== undefined) return { inside: true, home: home.named };
+    if (homes.pinned.some(key => same(key, entry))) return { inside: true, home: homes.homes[0]?.named ?? current };
     if (dirname(current) === current) return OUTSIDE;
   }
 }
@@ -216,9 +288,10 @@ export interface GuardedFile {
 export interface GuardLinkOptions {
   /**
    * A file with more than one name is refused (its other name could be anywhere, a home included) unless its
-   * real path is under one of `allowUnder` — e.g. `/nix/store`, root-owned and immutable.
+   * real path is under one of `allowUnder` — roots PROVEN immutable by {@link resolveImmutableRoots}, such as a
+   * multi-user `/nix/store`; a raw path is not accepted.
    */
-  readonly hardLinks?: 'refuse' | { readonly allowUnder: readonly string[] };
+  readonly hardLinks?: 'refuse' | { readonly allowUnder: ImmutableRoots };
   /**
    * `landing` (the default) judges where a path finally lands. `every` also refuses a path whose resolution
    * passes through a symlink that LIVES inside a home — a link in a home that leads out to a credential —
@@ -268,8 +341,7 @@ async function hopInsideHome(homes: StateHomes, path: string, disk: GuardDisk): 
 }
 
 const hardLinkAllowed = (options: GuardLinkOptions, real: string): boolean =>
-  typeof options.hardLinks === 'object' &&
-  options.hardLinks.allowUnder.some(root => within(absolute(root, 'allowUnder'), real));
+  typeof options.hardLinks === 'object' && options.hardLinks.allowUnder.roots.some(root => within(root, real));
 
 /** Where a path really is and what is there, once judged outside every home. */
 export interface JudgedPath {
@@ -364,8 +436,8 @@ export interface GuardedWrite {
   copyFrom(source: string, maxBytes: number): Promise<number>;
   /**
    * After a failed write: removes the file this call made, through the folder it checked when the platform
-   * gives such a path (and only while it is still that file), else empties it. Never removes by a path that
-   * could have been swapped.
+   * gives such a path (and only while it is still that file), else empties it. A file that was already there
+   * is left as it is. Never removes by a path that could have been swapped.
    */
   discard(): Promise<void>;
   close(): Promise<void>;
@@ -378,6 +450,11 @@ export interface GuardWriteOptions {
   readonly overwrite: boolean;
   /** The new file's permission bits. */
   readonly mode: number;
+  /**
+   * The permission bits of each missing folder above the file, which is then made THROUGH the nearest checked
+   * folder's descriptor, one folder at a time, each checked in turn. Without it, a missing folder is `not-found`.
+   */
+  readonly makeFolders?: number;
 }
 
 /**
@@ -398,19 +475,46 @@ export async function createOutsideStateHomes(
     throw new TypeError(`name a file, not a folder: ${path}`);
   const named = stateHomeByName(homes, target);
   if (named.inside) return refused('state-home', named.home);
-  const parent = await disk.realpath(dirname(target)).catch(() => undefined);
+  // The nearest folder that exists; what is missing below it is made through it.
+  let existing = dirname(target);
+  const missing: string[] = [];
+  let parent = await disk.realpath(existing).catch(() => undefined);
+  while (parent === undefined && options.makeFolders !== undefined && dirname(existing) !== existing) {
+    missing.unshift(basename(existing));
+    existing = dirname(existing);
+    parent = await disk.realpath(existing).catch(() => undefined);
+  }
   if (parent === undefined) return refused('not-found');
-  const real = join(parent, leaf);
-  if (options.inside !== undefined && !within(absolute(options.inside, 'inside'), real)) return refused('outside');
-  const folder = await disk.openDirectory(parent).catch(() => undefined);
-  if (folder === undefined) return refused('changed');
+  const inside = options.inside === undefined ? undefined : absolute(options.inside, 'inside');
+  if (inside !== undefined && !within(inside, join(parent, ...missing, leaf))) return refused('outside');
+  const first = await disk.openDirectory(parent).catch(() => undefined);
+  if (first === undefined) return refused('changed');
+  let folder: GuardDirectoryHandle = first;
   const close = async (): Promise<void> => await folder.close();
   const folderProblem = await openedFolderProblem(homes, parent, folder.identity, disk);
   if (folderProblem !== undefined) {
     await close();
     return folderProblem;
   }
-  const through = folder.entryPath(leaf) ?? real;
+  for (const segment of missing) {
+    const at: string = folder.entryPath(segment) ?? join(parent, segment);
+    const made: GuardDirectoryHandle | undefined = await disk
+      .mkdir(at, options.makeFolders as number)
+      .then(async () => await disk.openDirectory(at))
+      .catch(() => undefined);
+    await close();
+    if (made === undefined) return refused('changed');
+    folder = made;
+    parent = join(parent, segment);
+    const problem = await openedFolderProblem(homes, parent, made.identity, disk);
+    if (problem !== undefined) {
+      await close();
+      return problem;
+    }
+  }
+  const real = join(parent, leaf);
+  const checked = folder;
+  const through = checked.entryPath(leaf) ?? real;
   // An open that fails outright (a folder, a link put there since) is refused, never retried by path.
   const openAs = async (how: 'new' | 'existing') =>
     await disk.openWrite(through, how, options.mode).catch(() => 'failed' as const);
@@ -423,8 +527,9 @@ export async function createOutsideStateHomes(
   }
   const opened = handle;
   const discard = async (): Promise<void> => {
-    const entry = folder.entryPath(leaf);
-    if (created && entry !== undefined && same(opened.identity, await disk.identity(entry))) await disk.unlink(entry);
+    if (!created) return;
+    const entry = checked.entryPath(leaf);
+    if (entry !== undefined && same(opened.identity, await disk.identity(entry))) await disk.unlink(entry);
     else await opened.truncate();
   };
   const problem =
@@ -434,7 +539,7 @@ export async function createOutsideStateHomes(
         ? refused('hard-link')
         : await openedProblem(homes, real, opened.identity, disk);
   if (problem !== undefined) {
-    if (created) await discard().catch(() => undefined);
+    await discard().catch(() => undefined);
     await opened.close();
     await close();
     return problem;

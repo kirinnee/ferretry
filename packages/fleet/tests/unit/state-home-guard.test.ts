@@ -5,7 +5,9 @@ import {
   createOutsideStateHomes,
   type FileIdentity,
   judgeOutsideStateHomes,
+  MutableRootError,
   openOutsideStateHomes,
+  resolveImmutableRoots,
   resolveStateHomes,
   type StateHomes,
   StateHomeUnresolvedError,
@@ -188,19 +190,22 @@ describe('openOutsideStateHomes', () => {
     should(results.map(rule)).deepEqual(['changed', 'not-a-file', 'changed']);
   });
 
-  it('should refuse a hard link unless its real path is under an allowed root', async () => {
+  it('should refuse a hard link unless its real path is under a root proven immutable', async () => {
     // Arrange
     const { disk, homes } = await world();
+    disk.own('/', 0, 0o755);
     disk.dir('/nix');
+    disk.own('/nix', 0, 0o755);
     disk.file('/nix/store-file', 2);
     disk.hardLink('/nix/second-name', '/nix/store-file');
     disk.hardLink('/work/token-too', '/fy/api-token');
+    const nixRoot = await resolveImmutableRoots(['/nix'], disk, [1000]);
 
     // Act
     const refused = await openOutsideStateHomes('/work/token-too', homes, disk);
-    const nix = await openOutsideStateHomes('/nix/store-file', homes, disk, { hardLinks: { allowUnder: ['/nix'] } });
+    const nix = await openOutsideStateHomes('/nix/store-file', homes, disk, { hardLinks: { allowUnder: nixRoot } });
     const notCovered = await openOutsideStateHomes('/work/token-too', homes, disk, {
-      hardLinks: { allowUnder: ['/nix'] },
+      hardLinks: { allowUnder: nixRoot },
     });
     const plain = await openOutsideStateHomes('/nix/store-file', homes, disk, { hardLinks: 'refuse' });
 
@@ -405,7 +410,7 @@ describe('createOutsideStateHomes', () => {
     should(disk.entries.get('/fy/api-token')).match({ size: 64 });
   });
 
-  it('should discard a file it made after a failed write, and empty one that was already there', async () => {
+  it('should discard a file it made after a failed write, and leave one that was already there alone', async () => {
     // Arrange
     const { disk, homes } = await world();
     disk.file('/stage', 500);
@@ -421,7 +426,7 @@ describe('createOutsideStateHomes', () => {
     // Assert
     should(failure).be.instanceOf(Error);
     should(disk.entries.has('/work/new.txt')).be.false();
-    should(disk.entries.get('/work/a.txt')).match({ size: 0 });
+    should(disk.entries.get('/work/a.txt')).match({ size: 3 });
   });
 
   it('should refuse a path that names no file, and a relative one', async () => {
@@ -555,5 +560,169 @@ describe('judgeOutsideStateHomes — a path judged without opening it', () => {
     // Assert
     should(results.map(rule)).deepEqual(['state-home', 'state-home', 'state-home', 'state-home', 'not-found']);
     should(rule(vanished)).equal('state-home');
+  });
+});
+
+describe('resolveImmutableRoots — what may hold a tolerated hard link', () => {
+  const chain = () => {
+    const disk = new FakeGuardDisk();
+    disk.own('/', 0, 0o755);
+    disk.dir('/nix');
+    disk.own('/nix', 0, 0o755);
+    disk.dir('/nix/store');
+    // A multi-user store: root:nixbld 1775, written by build users only.
+    disk.own('/nix/store', 0, 0o1775, 30_000);
+    return disk;
+  };
+  const refusal = async (work: Promise<unknown>) => await work.catch((error: unknown) => error);
+
+  it('should accept a root-owned store whose group writes are not this process’s', async () => {
+    const roots = await resolveImmutableRoots(['/nix/store'], chain(), [1000, 100]);
+
+    should(roots.roots).deepEqual(['/nix/store']);
+  });
+
+  it('should refuse a user-owned store, one anyone can write, one this process’s group can write, and a missing one', async () => {
+    // Arrange
+    const single = chain();
+    single.own('/nix/store', 1000, 0o755, 100);
+    const open = chain();
+    open.own('/nix', 0, 0o1777);
+    const grouped = chain();
+
+    // Act
+    const errors = [
+      await refusal(resolveImmutableRoots(['/nix/store'], single, [1000])),
+      await refusal(resolveImmutableRoots(['/nix/store'], open, [1000])),
+      await refusal(resolveImmutableRoots(['/nix/store'], grouped, [1000, 30_000])),
+      await refusal(resolveImmutableRoots(['/nix/missing'], chain(), [1000])),
+      await refusal(resolveImmutableRoots(['nix/store'], chain(), [1000])),
+    ];
+
+    // Assert
+    should(errors.slice(0, 4).every(error => error instanceof MutableRootError)).be.true();
+    should((errors[0] as MutableRootError).root).equal('/nix/store');
+    should((errors[0] as Error).message).containEql('not root-owned');
+    should(errors[4]).be.instanceOf(TypeError);
+  });
+});
+
+describe('pinned key files — a bind mount of one file alone', () => {
+  it('should refuse a key file bound somewhere else, skip one not there yet, and fail closed when one cannot be read', async () => {
+    // Arrange
+    const { disk } = await world();
+    const homes = await resolveStateHomes({ homes: ['/fy'], pinned: ['/fy/api-token', '/fy/not-yet'] }, disk);
+    disk.bind('/work/x', '/fy/api-token');
+    const broken = Object.create(disk) as FakeGuardDisk;
+    broken.identity = async (path: string) => {
+      if (path === '/fy/api-token') throw new Error('EIO');
+      return await disk.identity(path);
+    };
+
+    // Act
+    const bound = await openOutsideStateHomes('/work/x', homes, disk);
+    const unread = await resolveStateHomes({ homes: ['/fy'], pinned: ['/fy/api-token'] }, broken).catch(
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(homes.pinned).have.length(1);
+    should(rule(bound)).equal('state-home');
+    should(unread).be.instanceOf(StateHomeUnresolvedError);
+  });
+});
+
+describe('the pre-open check — a non-file is never opened', () => {
+  it('should refuse a folder and a pipe without opening either', async () => {
+    const { disk, homes } = await world();
+    disk.dir('/work/sub');
+    disk.pipe('/work/fifo');
+
+    const results = [
+      await openOutsideStateHomes('/work/sub', homes, disk),
+      await openOutsideStateHomes('/work/fifo', homes, disk),
+    ];
+
+    should(results.map(rule)).deepEqual(['not-a-file', 'not-a-file']);
+    should(disk.reads).deepEqual([]);
+  });
+});
+
+describe('createOutsideStateHomes — making missing folders', () => {
+  it('should make each missing folder THROUGH the checked one, and refuse a missing one when not asked', async () => {
+    // Arrange
+    const { disk, homes } = await world();
+
+    // Act
+    const made = await createOutsideStateHomes('/work/a/b/c.txt', homes, disk, {
+      inside: '/work',
+      overwrite: false,
+      mode: 0o644,
+      makeFolders: 0o750,
+    });
+    if (!made.ok) throw new Error(made.rule);
+    await made.value.close();
+    const plain = await createOutsideStateHomes('/work/x/y.txt', homes, disk, { overwrite: false, mode: 0o644 });
+
+    // Assert
+    should(made.value.path).equal('/work/a/b/c.txt');
+    should(disk.entries.get('/work/a/b')).match({ kind: 'directory', mode: 0o750 });
+    should(disk.modes.map(([at]) => at)).deepEqual(['/work/a', '/work/a/b']);
+    should(rule(plain)).equal('not-found');
+  });
+
+  it('should make no folder in the home when the checked folder is swapped for a link into it', async () => {
+    // Arrange: `/work/dl` is checked; just before the folder below it is made, it is renamed away and a link
+    // to the home's state put in its place.
+    const { disk, homes } = await world();
+    disk.dir('/work/dl');
+    const racing = Object.create(disk) as FakeGuardDisk;
+    racing.mkdir = async (at: string, mode: number) => {
+      disk.move('/work/dl', '/work/dl-was');
+      disk.link('/work/dl', '/fy/state');
+      await disk.mkdir(at, mode);
+    };
+
+    // Act
+    const result = await createOutsideStateHomes('/work/dl/new/passkeys.json', homes, racing, {
+      overwrite: false,
+      mode: 0o644,
+      makeFolders: 0o755,
+    });
+
+    // Assert
+    should(rule(result)).equal('changed');
+    should(disk.entries.has('/fy/state/new')).be.false();
+    should(disk.entries.get('/work/dl-was/new')).match({ kind: 'directory' });
+  });
+
+  it('should refuse when a folder cannot be made, or the one made is swapped for a link', async () => {
+    // Arrange
+    const { disk, homes } = await world();
+    const failing = Object.create(disk) as FakeGuardDisk;
+    failing.mkdir = async () => {
+      throw new Error('EACCES');
+    };
+    const swapped = (await world()).disk;
+    swapped.afterMkdirp = path => {
+      swapped.entries.delete(path);
+      swapped.link(path, '/fy/state');
+    };
+    const options = { overwrite: false, mode: 0o644, makeFolders: 0o755 };
+
+    // Act
+    const results = [
+      await createOutsideStateHomes('/work/new/x', homes, failing, options),
+      await createOutsideStateHomes(
+        '/work/new/x',
+        await resolveStateHomes({ homes: ['/fy'] }, swapped),
+        swapped,
+        options,
+      ),
+      await createOutsideStateHomes('/elsewhere/new/x', homes, disk, { ...options, inside: '/work' }),
+    ];
+
+    // Assert
+    should(results.map(rule)).deepEqual(['changed', 'changed', 'outside']);
   });
 });

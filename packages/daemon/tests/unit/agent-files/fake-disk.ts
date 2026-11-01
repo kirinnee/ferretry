@@ -4,9 +4,9 @@ import type { FileIdentity, GuardDirectoryHandle, GuardReadHandle, GuardWriteHan
 
 /** A file or folder: an inode several paths may share (hard links), mutated in place through any of them. */
 type Node =
-  | { kind: 'file'; readonly inode: bigint; size: number; mode: number; text: string }
-  | { kind: 'directory'; readonly inode: bigint; mode: number }
-  | { kind: 'other'; readonly inode: bigint; mode: number };
+  | { kind: 'file'; readonly inode: bigint; size: number; mode: number; text: string; owner?: number; group?: number }
+  | { kind: 'directory'; readonly inode: bigint; mode: number; owner?: number; group?: number }
+  | { kind: 'other'; readonly inode: bigint; mode: number; owner?: number; group?: number };
 type Entry = Node | { readonly kind: 'link'; readonly target: string };
 
 const errno = (code: string, path: string): Error => Object.assign(new Error(`${code} ${path}`), { code });
@@ -22,6 +22,8 @@ export class FakeAgentDisk implements AgentFilesystem {
   readonly removed: string[] = [];
   readonly unlinked: string[] = [];
   readonly written: string[] = [];
+  /** Every path opened to read, in order. */
+  readonly reads: string[] = [];
   /** Runs before an open of `path`, and may throw like a refused open. */
   beforeOpen: ((path: string) => void) | undefined;
   /** Runs once `path` is opened: what a same-user process could do between the check and the use. */
@@ -52,6 +54,14 @@ export class FakeAgentDisk implements AgentFilesystem {
   }
   link(path: string, target: string): void {
     this.entries.set(path, { kind: 'link', target });
+  }
+  /** Gives the entry at `path` an owner and mode, as `chown` and `chmod` do. */
+  own(path: string, owner: number, mode: number, group = 0): void {
+    const entry = this.entries.get(path);
+    if (entry === undefined || entry.kind === 'link') throw errno('ENOENT', path);
+    entry.owner = owner;
+    entry.group = group;
+    entry.mode = mode;
   }
   /** A second name for the inode at `existing`. */
   hardLink(path: string, existing: string): void {
@@ -116,7 +126,8 @@ export class FakeAgentDisk implements AgentFilesystem {
   }
 
   private identityOf(entry: Entry): FileIdentity {
-    if (entry.kind === 'link') return { kind: 'link', device: 7n, inode: 0n, links: 1, size: 0, mode: 0o777 };
+    if (entry.kind === 'link')
+      return { kind: 'link', device: 7n, inode: 0n, links: 1, size: 0, mode: 0o777, owner: 1000, group: 100 };
     return {
       kind: entry.kind,
       device: 7n,
@@ -124,6 +135,8 @@ export class FakeAgentDisk implements AgentFilesystem {
       links: this.links(entry),
       size: entry.kind === 'file' ? entry.size : 0,
       mode: entry.mode,
+      owner: entry.owner ?? 1000,
+      group: entry.group ?? 100,
     };
   }
 
@@ -142,6 +155,7 @@ export class FakeAgentDisk implements AgentFilesystem {
   }
 
   async openRead(path: string): Promise<GuardReadHandle> {
+    this.reads.push(path);
     const node = await this.opened(path);
     const identity = this.identityOf(node);
     const size = (maxBytes: number): number => {
@@ -226,6 +240,7 @@ export class FakeAgentDisk implements AgentFilesystem {
     if (entry !== undefined) throw errno('EEXIST', path);
     this.dir(key, mode);
     this.modes.push([key, mode]);
+    this.afterMkdirp?.(key);
   }
 
   async chmod(path: string, mode: number): Promise<void> {

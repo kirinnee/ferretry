@@ -52,6 +52,11 @@ export interface AgentFilesPorts {
    * directories. No file tool reads or writes inside one, however a path reaches it.
    */
   readonly stateHomes: readonly string[];
+  /**
+   * The home's key files and folders (the API tokens, the vault and its key, the passkeys …), compared by
+   * identity too, so a bind mount of one of them alone is still refused. One not there yet is skipped.
+   */
+  readonly pinned?: readonly string[];
   /** A fresh unguessable token, for a directory name. */
   token(): string;
   /** Now, in epoch milliseconds: when a copy was placed, and so when it is removed. */
@@ -163,7 +168,7 @@ export class AgentFiles {
     }
     let homes: StateHomes;
     try {
-      homes = await resolveStateHomes({ homes: this.ports.stateHomes }, this.ports.fs);
+      homes = await resolveStateHomes({ homes: this.ports.stateHomes, pinned: this.ports.pinned ?? [] }, this.ports.fs);
     } catch {
       // Unresolved, a symlinked home could not be recognised by its real path: refuse rather than guess.
       throw new AgentFileError('unavailable', 'this daemon’s state home cannot be resolved, so no file is reached');
@@ -288,12 +293,13 @@ export class AgentFiles {
     const overwrite = options.overwrite === true;
     const destination = await this.destination(root, requested, overwrite);
     const shown = relativeWords(root.folder, lexicalTarget(root.folder, requested));
-    await this.ports.fs.mkdirp(dirname(destination), DIRECTORY_MODE);
-    // The folder is opened and checked, and the file reached THROUGH it and proven before a byte is written.
+    // The nearest folder is opened and checked, any missing folder made THROUGH it, and the file reached
+    // through the last one and proven before a byte is written.
     const opened = await createOutsideStateHomes(destination, root.homes, this.ports.fs, {
       inside: root.real,
       overwrite,
       mode: SAVED_FILE_MODE,
+      makeFolders: DIRECTORY_MODE,
     });
     if (!opened.ok) throw refusalOf(opened, shown, 'write');
     const file = opened.value;

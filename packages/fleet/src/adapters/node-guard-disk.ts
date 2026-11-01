@@ -25,6 +25,8 @@ function identityOf(entry: BigIntStats): FileIdentity {
     links: Number(entry.nlink),
     size: Number(entry.size),
     mode: Number(entry.mode & 0o7777n),
+    owner: Number(entry.uid),
+    group: Number(entry.gid),
   };
 }
 
