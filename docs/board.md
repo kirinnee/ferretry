@@ -97,7 +97,7 @@ session identity — in `BoardService` (`create`, `act`) and on the lane route �
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | read the board, `fy task note` on a card                  | `fy task create`, `move`, `drop`, `reopen`, `assign`, `depend` / `undepend`, `block` / `unblock`, |
 | `fy task link --pr <url>` / `--branch <branch>` on a card | `reparent`, `focus`, `edit`, `file`, `order`, `refile`, `clarify`, `link --commit` / `--doc`      |
-| `fy task trigger` (`deploy.done`) on its card              |                                                                                                   |
+| `fy task trigger` (`deploy.done`) on its card             |                                                                                                   |
 | `fy send` its lead (and peers the lead names)             | editing a project's lanes (`PATCH` of the lane list: `403 sub-ferret`)                            |
 
 The refusal is `forbidden` and names the way out, e.g. `Sub-ferrets don't move cards; tell your lead: fy send <lead-callsign> "…"`.
