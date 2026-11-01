@@ -85,10 +85,11 @@ export const DAEMON_FEATURES = {
   workSearch: 'work.search.1',
   /**
    * Accounts and sign-ins (docs/input-requests.md, "Accounts and sign-ins"): `/v1/accounts*`, a card offer's
-   * `signIn`/`primary`/`why` and a `si_` `secretHint` that orders the card. A daemon without this name keeps saved
-   * logins (`/v1/secrets/logins*`), has no such routes and never sends those offer fields, so the app keeps today's
-   * surface there and sends no sign-in id.
-   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the store lands in a later change.
+   * `signIn`/`primary`/`why`, a deliver's `signIn` and a `si_` `secretHint` that orders the card. Without this name
+   * the app keeps today's surface: it reads no offer's `primary`/`why` (a daemon may send them before it reports the
+   * name, and an older one never does) and sends no sign-in id. A daemon that takes a deliver's `signIn` refuses one
+   * that is not of the deliver's account, with nothing typed.
+   * NAMED BUT NOT YET REPORTED ({@link NOT_YET_REPORTED}): the Accounts screen ships in the app first.
    */
   accountsSignIns: 'accounts.signins.1',
   /**

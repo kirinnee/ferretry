@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { type LoginRecipeProposal, type PutLoginEntry, PutLoginEntryRequestSchema } from '@ferretry/protocol';
+import {
+  type LoginObservation,
+  type LoginRecipeProposal,
+  type PutLoginEntry,
+  PutLoginEntryRequestSchema,
+  type SignInId,
+} from '@ferretry/protocol';
 import should from 'should';
 import { LoginDirectory, LoginEntryError } from '../../../src/lib/secrets/index.ts';
 import { FakeSecretCipher, MemoryLoginIndex, MemorySecretDocuments } from '../runtime/mounts/support.ts';
@@ -17,6 +23,19 @@ function world() {
     directory: new LoginDirectory(index, new MemorySecretDocuments(), new FakeSecretCipher(), CLOCK, { newKey }),
   };
 }
+
+type World = ReturnType<typeof world>;
+
+/** The account's only sign-in (each login here signs in at one place), or one that is not there. */
+const signInOf = async (w: World, id: string): Promise<SignInId> =>
+  (await w.directory.accounts.list()).signIns.find(signIn => signIn.account === id)?.id ?? 'si_00000000000000ff';
+/** Facts and proposals are filed by SIGN-IN: the observer's and the recipe service's one path. */
+const observe = async (w: World, id: string, seen: LoginObservation) =>
+  await w.directory.accounts.observeSignIn(await signInOf(w, id), seen);
+const propose = async (w: World, id: string, filed: LoginRecipeProposal) =>
+  await w.directory.accounts.proposeSignIn(await signInOf(w, id), filed);
+const proposalCard = async (w: World, id: string, proposalId: string, card: string) =>
+  await w.directory.accounts.proposalCardSignIn(await signInOf(w, id), proposalId, card);
 
 const proposal = (id: string, recipe: string, base?: string): LoginRecipeProposal => ({
   id,
@@ -72,9 +91,9 @@ describe('a saved login keeps what the daemon saw', () => {
     await w.directory.put('GOOGLE', change({ label: 'Google', domains: ['accounts.google.com'] }));
     const seen = { at: 'accounts.google.com', surface: 'page', identity: '0123456789abcdef', masked: true } as const;
     now = '2026-10-31T11:00:00.000Z';
-    await w.directory.observe('GOOGLE', seen);
-    await w.directory.observe('GOOGLE', { ...seen, masked: undefined, noEchoAfterSubmit: true });
-    await w.directory.observe('GOOGLE', seen);
+    await observe(w, 'GOOGLE', seen);
+    await observe(w, 'GOOGLE', { ...seen, masked: undefined, noEchoAfterSubmit: true });
+    await observe(w, 'GOOGLE', seen);
     const [entry] = await w.directory.list();
     should(entry?.updatedAt).equal('2026-10-31T09:00:00.000Z');
     should(entry?.observed).deepEqual([
@@ -97,12 +116,12 @@ describe('a saved login keeps what the daemon saw', () => {
       change({ label: 'Google', match: ['google.com'], domains: ['accounts.google.com'] }),
     );
     const seen = { at: 'accounts.google.com', surface: 'page', identity: '0123456789abcdef', masked: true } as const;
-    await w.directory.observe('GOOGLE', seen);
-    await w.directory.observe('GOOGLE', seen);
-    await w.directory.observe('GOOGLE', { ...seen, masked: false });
+    await observe(w, 'GOOGLE', seen);
+    await observe(w, 'GOOGLE', seen);
+    await observe(w, 'GOOGLE', { ...seen, masked: false });
     should((await w.directory.list())[0]?.observed?.[0]?.masked).containDeep({ value: false, count: 1 });
-    await w.directory.observe('GOOGLE', { ...seen, noEchoAfterSubmit: true, masked: undefined });
-    await w.directory.observe('GOOGLE', { ...seen, identity: 'fedcba9876543210', masked: undefined });
+    await observe(w, 'GOOGLE', { ...seen, noEchoAfterSubmit: true, masked: undefined });
+    await observe(w, 'GOOGLE', { ...seen, identity: 'fedcba9876543210', masked: undefined });
     const [replaced] = (await w.directory.list())[0]?.observed ?? [];
     should(replaced?.identity).equal('fedcba9876543210');
     should(replaced).not.have.property('masked');
@@ -111,7 +130,7 @@ describe('a saved login keeps what the daemon saw', () => {
 
   it('should ignore a fact about a login that is gone', async () => {
     const w = world();
-    await w.directory.observe('NOPE', { at: 'x.com', surface: 'page', identity: '0123456789abcdef', masked: true });
+    await observe(w, 'NOPE', { at: 'x.com', surface: 'page', identity: '0123456789abcdef', masked: true });
     should(await w.directory.list()).deepEqual([]);
   });
 });
@@ -121,13 +140,10 @@ describe('a ferret proposes a recipe', () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
     for (const n of [1, 2, 3]) {
-      const filed = await w.directory.propose(
-        'VERCEL',
-        proposal(`rp_000000000000000${String(n)}`, `step ${String(n)}`),
-      );
+      const filed = await propose(w, 'VERCEL', proposal(`rp_000000000000000${String(n)}`, `step ${String(n)}`));
       should(filed).deepEqual({ applied: false, dropped: [] });
     }
-    const fourth = await w.directory.propose('VERCEL', proposal('rp_0000000000000004', 'step 4'));
+    const fourth = await propose(w, 'VERCEL', proposal('rp_0000000000000004', 'step 4'));
     should(fourth.dropped.map(dropped => dropped.id)).deepEqual(['rp_0000000000000001']);
     const [entry] = await w.directory.list();
     should(entry?.recipe).be.undefined();
@@ -141,7 +157,7 @@ describe('a ferret proposes a recipe', () => {
   it('should apply at once when the owner allows it for this login', async () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], autoApplyRecipe: true }));
-    should(await w.directory.propose('VERCEL', proposal('rp_0000000000000001', 'new steps'))).deepEqual({
+    should(await propose(w, 'VERCEL', proposal('rp_0000000000000001', 'new steps'))).deepEqual({
       applied: true,
       dropped: [],
     });
@@ -150,19 +166,19 @@ describe('a ferret proposes a recipe', () => {
     should(entry).not.have.property('proposals');
   });
 
-  it('should refuse a proposal for a login that does not exist', async () => {
-    const error = await world()
-      .directory.propose('NOPE', proposal('rp_0000000000000001', 'x'))
-      .catch((caught: unknown) => caught);
+  it('should refuse a proposal for a sign-in that does not exist', async () => {
+    const error = await propose(world(), 'NOPE', proposal('rp_0000000000000001', 'x')).catch(
+      (caught: unknown) => caught,
+    );
     should(error).be.instanceOf(LoginEntryError);
-    should((error as LoginEntryError).refusal).equal('unknown_login');
+    should((error as LoginEntryError).refusal).equal('unknown_sign_in');
   });
 
   it('should approve one proposed against the recipe as it is, and remove it', async () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], recipe: 'old' }));
-    await w.directory.propose('VERCEL', proposal('rp_0000000000000001', 'new', 'old'));
-    await w.directory.proposalCard('VERCEL', 'rp_0000000000000001', 'A7');
+    await propose(w, 'VERCEL', proposal('rp_0000000000000001', 'new', 'old'));
+    await proposalCard(w, 'VERCEL', 'rp_0000000000000001', 'A7');
     const { entry, proposal: answered } = await w.directory.decide('VERCEL', 'rp_0000000000000001', 'approve');
     should(entry.recipe).equal('new');
     should(entry).not.have.property('proposals');
@@ -172,7 +188,7 @@ describe('a ferret proposes a recipe', () => {
   it('should refuse to approve a proposal made against an older recipe, and still decline it', async () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], recipe: 'old' }));
-    await w.directory.propose('VERCEL', proposal('rp_0000000000000001', 'new', 'old'));
+    await propose(w, 'VERCEL', proposal('rp_0000000000000001', 'new', 'old'));
     await w.directory.put('VERCEL', change({ recipe: 'edited by the owner' }));
     const stale = await w.directory
       .decide('VERCEL', 'rp_0000000000000001', 'approve')
@@ -192,7 +208,7 @@ describe('who wrote the recipe', () => {
   it('should mark an auto-applied recipe as a ferret’s, until the owner edits or approves', async () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], autoApplyRecipe: true }));
-    await w.directory.propose('VERCEL', proposal('rp_0000000000000001', 'ferret steps'));
+    await propose(w, 'VERCEL', proposal('rp_0000000000000001', 'ferret steps'));
     should((await w.directory.list())[0]?.recipeBy).equal('ferret');
     const relabelled = await w.directory.put('VERCEL', change({ label: 'Vercel (team)' }));
     should(relabelled.recipeBy).equal('ferret');
@@ -203,10 +219,10 @@ describe('who wrote the recipe', () => {
   it('should make an approved recipe the owner’s, and keep the mark on a decline', async () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], autoApplyRecipe: true }));
-    await w.directory.propose('VERCEL', proposal('rp_0000000000000001', 'ferret steps'));
+    await propose(w, 'VERCEL', proposal('rp_0000000000000001', 'ferret steps'));
     await w.directory.put('VERCEL', change({ autoApplyRecipe: false }));
-    await w.directory.propose('VERCEL', proposal('rp_0000000000000002', 'more', 'ferret steps'));
-    await w.directory.propose('VERCEL', proposal('rp_0000000000000003', 'other', 'ferret steps'));
+    await propose(w, 'VERCEL', proposal('rp_0000000000000002', 'more', 'ferret steps'));
+    await propose(w, 'VERCEL', proposal('rp_0000000000000003', 'other', 'ferret steps'));
     const declined = await w.directory.decide('VERCEL', 'rp_0000000000000002', 'decline');
     should(declined.entry.recipeBy).equal('ferret');
     const approved = await w.directory.decide('VERCEL', 'rp_0000000000000003', 'approve');

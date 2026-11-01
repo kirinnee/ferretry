@@ -247,10 +247,11 @@ describe('a recipe proposal on one sign-in', () => {
     ).equal('unknown_sign_in');
   });
 
-  it('should refuse an owner answer by sign-in where the service has no account store', async () => {
+  it('should refuse an owner answer on a sign-in that is not there', async () => {
     const w = world();
     const recipes = new LoginRecipeService({
       logins: w.logins,
+      accounts: w.logins.accounts,
       values: { redact: async text => text },
       agenda: { raise: async () => ({ ok: false, message: 'none' }), close: async () => undefined },
       audit: { record: async () => undefined },
@@ -306,9 +307,15 @@ describe('an older client over the account store, the rest of its refusals', () 
   it('should refuse a proposal by account for one that signs in nowhere', async () => {
     const w = world();
     await w.logins.put('NOWHERE', PutLoginEntryRequestSchema.parse({ label: 'Nowhere' }));
-    should((await failure(w.logins.propose('NOWHERE', proposal('rp_0000000000000003', 'x')))).refusal).equal(
-      'no_sign_in',
-    );
+    const recipes = new LoginRecipeService({
+      logins: w.logins,
+      accounts: w.logins.accounts,
+      values: { redact: async text => text },
+      agenda: { raise: async () => ({ ok: false, message: 'none' }), close: async () => undefined },
+      audit: { record: async () => undefined },
+      clock: CLOCK,
+    });
+    should((await failure(recipes.propose('session-1', { login: 'NOWHERE' }, 'x', 'y'))).refusal).equal('no_sign_in');
   });
 
   it('should keep a terminal-only saved login when an older client resends it as it is', async () => {

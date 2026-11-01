@@ -25,6 +25,7 @@ function world(options: { redactorFails?: boolean } = {}) {
   let next = 0;
   const service = new LoginRecipeService({
     logins: directory,
+    accounts: directory.accounts,
     values: {
       redact: async text => {
         if (options.redactorFails === true) throw new Error('vault locked');
@@ -50,8 +51,10 @@ describe('a recipe never holds a value', () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
     await should(w.service.assertNoValue(`type ${SECRET} here`)).be.rejectedWith(RecipeValueError);
-    await should(w.service.propose('s1', 'VERCEL', `type ${SECRET}`, 'it works')).be.rejectedWith(RecipeValueError);
-    await should(w.service.propose('s1', 'VERCEL', 'steps', `the password is ${SECRET}`)).be.rejectedWith(
+    await should(w.service.propose('s1', { login: 'VERCEL' }, `type ${SECRET}`, 'it works')).be.rejectedWith(
+      RecipeValueError,
+    );
+    await should(w.service.propose('s1', { login: 'VERCEL' }, 'steps', `the password is ${SECRET}`)).be.rejectedWith(
       RecipeValueError,
     );
     should((await w.directory.list())[0]).not.have.property('proposals');
@@ -73,13 +76,21 @@ describe('a ferret proposes', () => {
     );
     const proposed = await w.service.propose(
       's1',
-      'VERCEL',
+      { login: 'VERCEL' },
       'Open vercel.com\nContinue with Google',
       'the button moved',
     );
-    should(proposed).deepEqual({ id: 'rp_0000000000000000', login: 'VERCEL', state: 'pending', agendaItemId: 'A1' });
+    const [signIn] = (await w.directory.accounts.list()).signIns;
+    should(proposed).deepEqual({
+      id: 'rp_0000000000000000',
+      login: 'VERCEL',
+      signIn: signIn?.id as string,
+      state: 'pending',
+      agendaItemId: 'A1',
+    });
     should(w.cards).have.length(1);
-    should(w.cards[0]?.subject).equal("Recipe change for 'Vercel'");
+    should(w.cards[0]?.subject).equal("Recipe change for 'Vercel' on vercel.com");
+    should(w.cards[0]?.howToResolve).containEql('Settings › Accounts › Vercel › vercel.com › Recipe');
     should(w.cards[0]?.context).equal('- Click Log in\n+ Continue with Google\n\nThe ferret says: the button moved');
     should(w.cards[0]?.howToResolve).containEql('fy account recipe approve VERCEL rp_0000000000000000');
     const [entry] = await w.directory.list();
@@ -90,7 +101,7 @@ describe('a ferret proposes', () => {
   it('should apply at once, audited, only for a login the owner allowed it on', async () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], autoApplyRecipe: true }));
-    const proposed = await w.service.propose('s1', 'VERCEL', 'new steps', 'first sign-in');
+    const proposed = await w.service.propose('s1', { login: 'VERCEL' }, 'new steps', 'first sign-in');
     should(proposed.state).equal('applied');
     should(w.cards).deepEqual([]);
     should((await w.directory.list())[0]?.recipe).equal('new steps');
@@ -105,7 +116,7 @@ describe('a ferret proposes', () => {
   it('should close the card of a proposal pushed out by a fourth', async () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
-    for (const n of [1, 2, 3, 4]) await w.service.propose('s1', 'VERCEL', `steps ${String(n)}`, 'again');
+    for (const n of [1, 2, 3, 4]) await w.service.propose('s1', { login: 'VERCEL' }, `steps ${String(n)}`, 'again');
     should(w.closed).deepEqual([{ sessionId: 's1', id: 'A1', note: 'Replaced by a newer recipe proposal.' }]);
   });
 });
@@ -114,7 +125,7 @@ describe('the owner decides', () => {
   it('should apply an approval and close its card', async () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
-    const proposed = await w.service.propose('s1', 'VERCEL', 'new steps', 'why');
+    const proposed = await w.service.propose('s1', { login: 'VERCEL' }, 'new steps', 'why');
     const entry = await w.service.decide('VERCEL', proposed.id, 'approve');
     should(entry.recipe).equal('new steps');
     should(w.closed).deepEqual([{ sessionId: 's1', id: 'A1', note: 'Approved: the recipe was updated.' }]);
@@ -123,7 +134,7 @@ describe('the owner decides', () => {
   it('should drop a declined one and close its card', async () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
-    const proposed = await w.service.propose('s1', 'VERCEL', 'new steps', 'why');
+    const proposed = await w.service.propose('s1', { login: 'VERCEL' }, 'new steps', 'why');
     const entry = await w.service.decide('VERCEL', proposed.id, 'decline');
     should(entry).not.have.property('recipe');
     should(w.closed[0]?.note).equal('Declined.');
@@ -192,12 +203,13 @@ describe('a proposal’s card', () => {
     await directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], recipe: 'same' }));
     const service = new LoginRecipeService({
       logins: directory,
+      accounts: directory.accounts,
       values: { redact: async text => text },
       agenda: { raise: async () => ({ ok: false, message: 'full' }), close: async () => undefined },
       audit: { record: async () => undefined },
       clock: { now: () => NOW },
     });
-    const proposed = await service.propose('s1', 'VERCEL', 'same', 'nothing changed');
+    const proposed = await service.propose('s1', { login: 'VERCEL' }, 'same', 'nothing changed');
     should(proposed.state).equal('pending');
     should(proposed).not.have.property('agendaItemId');
     should(proposed.id).match(/^rp_[0-9a-f]{16}$/u);
@@ -256,7 +268,8 @@ describe('a recipe is masked when it is served', () => {
   it('should refuse to approve a proposal holding a value kept after it was made', async () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'] }));
-    await w.directory.propose('VERCEL', {
+    const [signIn] = (await w.directory.accounts.list()).signIns;
+    await w.directory.accounts.proposeSignIn(signIn?.id as string, {
       id: 'rp_00000000000000aa',
       recipe: `type ${SECRET}`,
       why: 'w',
@@ -272,10 +285,105 @@ describe('a proposal card and an answer are masked too', () => {
   it('should mask the current recipe on the card and in the approval’s answer', async () => {
     const w = world();
     await w.directory.put('VERCEL', change({ label: 'Vercel', match: ['vercel.com'], recipe: `old ${SECRET}` }));
-    const proposed = await w.service.propose('s1', 'VERCEL', 'new steps', 'why');
+    const proposed = await w.service.propose('s1', { login: 'VERCEL' }, 'new steps', 'why');
     should(w.cards[0]?.context).not.containEql(SECRET);
     should(w.cards[0]?.context).containEql('[redacted:login:X:password]');
     const declined = await w.service.decide('VERCEL', proposed.id, 'decline');
     should(JSON.stringify(declined)).not.containEql(SECRET);
+  });
+});
+
+describe('a proposal is keyed by the SIGN-IN it is for', () => {
+  /** GitHub, signing in at two places: its website and ssh to a build host. */
+  async function twoPlaces() {
+    const w = world();
+    await w.directory.put('GITHUB', change({ label: 'GitHub', match: ['github.com', 'ssh@build.example.com'] }));
+    const { signIns } = await w.directory.accounts.list();
+    const site = signIns.find(signIn => signIn.place.kind === 'site')?.id as string;
+    const ssh = signIns.find(signIn => signIn.place.kind === 'terminal')?.id as string;
+    return { ...w, site, ssh };
+  }
+  const proposalsOf = async (w: Awaited<ReturnType<typeof twoPlaces>>, id: string) =>
+    (await w.directory.accounts.list()).signIns.find(signIn => signIn.id === id)?.proposals ?? [];
+
+  it('should file it on the one sign-in it names, and name that place on the card', async () => {
+    const w = await twoPlaces();
+    const proposed = await w.service.propose('s1', { signIn: w.ssh }, 'Type the passphrase', 'ssh asks first');
+    should(proposed).containDeep({ login: 'GITHUB', signIn: w.ssh, state: 'pending' });
+    should((await proposalsOf(w, w.ssh)).map(each => each.id)).deepEqual([proposed.id]);
+    should(await proposalsOf(w, w.site)).deepEqual([]);
+    should(w.cards[0]?.subject).equal("Recipe change for 'GitHub' on ssh@build.example.com");
+    should(w.cards[0]?.howToResolve).containEql('GitHub › ssh@build.example.com › Recipe');
+  });
+
+  it('should refuse the older { login } for an account that signs in at several places, filing nothing', async () => {
+    const w = await twoPlaces();
+    const refused = (await w.service
+      .propose('s1', { login: 'GITHUB' }, 'steps', 'why')
+      .catch((error: unknown) => error)) as { refusal?: string; message: string };
+    should(refused.refusal).equal('account_has_sign_ins');
+    should(refused.message).containEql(w.site).and.containEql(w.ssh);
+    should([...(await proposalsOf(w, w.site)), ...(await proposalsOf(w, w.ssh))]).deepEqual([]);
+    should(w.cards).deepEqual([]);
+  });
+
+  it('should refuse a sign-in that is not there, and run the value check after resolving', async () => {
+    const w = await twoPlaces();
+    const unknown = (await w.service
+      .propose('s1', { signIn: 'si_00000000000000ff' }, 'steps', 'why')
+      .catch((error: unknown) => error)) as { refusal?: string };
+    should(unknown.refusal).equal('unknown_sign_in');
+    await should(w.service.propose('s1', { signIn: w.site }, `type ${SECRET}`, 'why')).be.rejectedWith(
+      RecipeValueError,
+    );
+    should(await proposalsOf(w, w.site)).deepEqual([]);
+  });
+
+  it('should apply at once only on the sign-in the owner allowed it on, bumping its version', async () => {
+    const w = await twoPlaces();
+    await w.directory.accounts.putSignIn(w.site, { recipe: 'Open github.com', autoApplyRecipe: true });
+    const before = (await w.directory.accounts.list()).signIns.find(signIn => signIn.id === w.site);
+    should(before?.recipeVersion).equal(1);
+
+    const onSsh = await w.service.propose('s1', { signIn: w.ssh }, 'Type the passphrase', 'why');
+    const onSite = await w.service.propose('s1', { signIn: w.site }, 'Open github.com/login', 'why');
+
+    should(onSsh.state).equal('pending');
+    should(onSite.state).equal('applied');
+    const after = (await w.directory.accounts.list()).signIns;
+    should(after.find(signIn => signIn.id === w.site)).containDeep({
+      recipe: 'Open github.com/login',
+      recipeVersion: 2,
+      recipeBy: 'ferret',
+    });
+    should(after.find(signIn => signIn.id === w.ssh)?.recipe).be.undefined();
+    should(w.audits.at(-1)).containDeep({ subject: 'GITHUB', detail: { action: 'login-recipe-auto', signIn: w.site } });
+  });
+
+  it('should never give a recipe set after a clear a version an earlier recipe had (secrev-1234 L2)', async () => {
+    const w = await twoPlaces();
+    const versionOf = async () =>
+      (await w.directory.accounts.list()).signIns.find(signIn => signIn.id === w.site)?.recipeVersion;
+    await w.directory.accounts.putSignIn(w.site, { recipe: 'Open github.com' });
+    should(await versionOf()).equal(1);
+    await w.directory.accounts.putSignIn(w.site, { recipe: null });
+    // No reader shows a version without a recipe; the counter is kept behind it.
+    should(await versionOf()).be.undefined();
+    // Clearing none is no change.
+    await w.directory.accounts.putSignIn(w.site, { recipe: null });
+    // A ferret's proposal, auto-applied after the clear, is a new version: never v1 again.
+    await w.directory.accounts.putSignIn(w.site, { autoApplyRecipe: true });
+    const applied = await w.service.propose('s1', { signIn: w.site }, 'Open github.com/login', 'why');
+    should(applied.state).equal('applied');
+    should(await versionOf()).equal(3);
+  });
+
+  it("should bump the sign-in's version when the owner approves", async () => {
+    const w = await twoPlaces();
+    const proposed = await w.service.propose('s1', { signIn: w.ssh }, 'Type the passphrase', 'why');
+    const approved = await w.service.decideSignIn(w.ssh, proposed.id, 'approve');
+    should(approved).containDeep({ recipe: 'Type the passphrase', recipeVersion: 1 });
+    const next = await w.service.propose('s1', { signIn: w.ssh }, 'Type the passphrase, then yes', 'why');
+    should((await w.service.decideSignIn(w.ssh, next.id, 'approve')).recipeVersion).equal(2);
   });
 });

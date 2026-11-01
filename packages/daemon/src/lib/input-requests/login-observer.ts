@@ -5,12 +5,13 @@ import type {
   InputTargetFacts,
   LoginEntryId,
   LoginObservation,
+  SignInId,
   SurfaceKind,
 } from '@ferretry/protocol';
 
 /**
- * WHAT THE DAEMON SEES WHILE A SAVED LOGIN SIGNS IN (docs/input-requests.md, "Login recipes"), kept as that login's
- * facts. Every fact comes from the daemon's own look at the real target, never from what an agent said:
+ * WHAT THE DAEMON SEES WHILE A SAVED ACCOUNT SIGNS IN (docs/input-requests.md, "Login recipes"), kept as the facts of
+ * the SIGN-IN it was typed at — never of the account as a whole, so two accounts on one host keep their own. Every fact comes from the daemon's own look at the real target, never from what an agent said:
  *
  * - AT THE WRITE, from the facts the owner's card was drawn from: every secret field was a password input, or the
  *   terminal had echo off and a recognised program was reading (`masked`), and the field's identity.
@@ -35,9 +36,12 @@ export const ECHO_SECOND_LOOK_MS = 5_000;
 /** How often the page's document and host are looked at while watching. */
 const POLL_MS = 1_000;
 
-/** Where a login's facts go: the saved-login directory, under its store lock. */
+/**
+ * Where a sign-in's facts go: the account directory, under its store lock. It keeps a fact only at one of that sign-in's
+ * own places (`AccountDirectory.observeSignIn`), so a fact is never misfiled even if it were handed the wrong one.
+ */
 export interface LoginFactSink {
-  observe(id: LoginEntryId, seen: LoginObservation): Promise<void>;
+  observeSignIn(id: SignInId, seen: LoginObservation): Promise<void>;
 }
 
 /** The daemon's own looks at a target after a submit. Each answers `undefined` when it cannot tell. */
@@ -73,9 +77,14 @@ export interface LoginObserverPorts {
 /** One delivery that used a saved login, as the input service hands it over once it was typed. */
 export interface LoginDelivery {
   readonly sessionId: string;
-  /** The saved login typed; absent for a value the owner typed, which can still be the code a login waits for. */
+  /** The saved account typed; absent for a value the owner typed, which can still be the code a login waits for. */
   readonly login?: LoginEntryId;
-  /** The login's own sign-in hosts: leaving them is the sign-in finishing. */
+  /**
+   * The sign-in the facts go to: the one the owner tapped, or the account's sign-in the daemon matched to this target.
+   * Absent (an account picked by hand on a place it does not sign in at): nothing is kept.
+   */
+  readonly signIn?: SignInId;
+  /** The sign-in's own login domains: leaving them is the sign-in finishing. */
   readonly domains: readonly string[];
   readonly target: InputTarget;
   readonly facts: InputTargetFacts;
@@ -225,15 +234,15 @@ export class LoginObserver {
     const codeField = delivery.fields.some(field => field.sensitivity === 'code' || field.sensitivity === 'private');
     const passwordField = delivery.fields.some(field => field.sensitivity === 'secret');
     if (codeField) this.codeSeen(delivery, place);
-    const login = delivery.login;
-    if (login === undefined) return;
+    const signIn = delivery.signIn;
+    if (signIn === undefined) return;
     const masked = maskedAt(delivery.facts, delivery.fields);
-    await this.record(login, { ...base, ...(masked === undefined ? {} : { masked }) });
+    await this.record(signIn, { ...base, ...(masked === undefined ? {} : { masked }) });
     if (!delivery.submitted || !passwordField) return;
     const waiting: Awaiting = { delivery, place, at: delivery.deliveredAt, settled: false };
     if (!codeField) this.awaiting.set(delivery.sessionId, [...(this.awaiting.get(delivery.sessionId) ?? []), waiting]);
     try {
-      await this.afterSubmit(login, delivery, base, waiting, codeField);
+      await this.afterSubmit(signIn, delivery, base, waiting, codeField);
     } finally {
       this.awaiting.set(
         delivery.sessionId,
@@ -265,7 +274,7 @@ export class LoginObserver {
    * when the page leaves the sign-in hosts. A later act of the ferret does not undo a fact already decided.
    */
   private async afterSubmit(
-    login: LoginEntryId,
+    signIn: SignInId,
     delivery: LoginDelivery,
     base: Pick<LoginObservation, 'at' | 'surface' | 'identity'>,
     waiting: Awaiting,
@@ -274,7 +283,7 @@ export class LoginObserver {
     const startDocument = delivery.facts.kind === 'browser' ? delivery.facts.navigationId : undefined;
     const elapsed = (): number => this.ports.now() - delivery.deliveredAt;
     const keep = async (seen: Omit<LoginObservation, 'at' | 'surface' | 'identity'>): Promise<void> => {
-      if (!this.steered(delivery)) await this.record(login, { ...base, ...seen });
+      if (!this.steered(delivery)) await this.record(signIn, { ...base, ...seen });
     };
     const echo = async (): Promise<void> => {
       const shown = await this.echoed(delivery);
@@ -315,7 +324,7 @@ export class LoginObserver {
     await Promise.all([echo(), watch()]);
   }
 
-  /** A one-time code was typed: the password submit it follows, on the same login and place, had a code as its second factor. */
+  /** A one-time code was typed: the password submit it follows, on the same account and place, had a code as its second factor. */
   private codeSeen(delivery: LoginDelivery, place: string): void {
     const now = this.ports.now();
     for (const waiting of this.awaiting.get(delivery.sessionId) ?? []) {
@@ -326,9 +335,9 @@ export class LoginObserver {
       waiting.settled = true;
       const identity = identityOf(waiting.delivery.facts, waiting.place);
       if (identity === undefined) continue;
-      const login = waiting.delivery.login;
-      if (login === undefined) continue;
-      void this.record(login, {
+      const signIn = waiting.delivery.signIn;
+      if (signIn === undefined) continue;
+      void this.record(signIn, {
         at: waiting.place,
         surface: waiting.delivery.facts.kind === 'browser' ? 'page' : 'terminal',
         identity,
@@ -337,8 +346,8 @@ export class LoginObserver {
     }
   }
 
-  private async record(login: LoginEntryId, seen: LoginObservation): Promise<void> {
-    await this.ports.sink.observe(login, seen).catch(() => undefined);
+  private async record(signIn: SignInId, seen: LoginObservation): Promise<void> {
+    await this.ports.sink.observeSignIn(signIn, seen).catch(() => undefined);
   }
 }
 

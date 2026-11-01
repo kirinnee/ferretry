@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import {
+  type AccountSummary,
   type LoginEntryId,
   type LoginEntrySummary,
   type LoginRecipeProposal,
@@ -8,6 +9,9 @@ import {
   type SignInSummary,
   AgendaIdSchema,
   MAX_AGENDA_DETAIL_LENGTH,
+  type Place,
+  placeKeys,
+  placeWords,
   recipeDiff,
 } from '@ferretry/protocol';
 import type { AgendaService } from '../agenda/service.ts';
@@ -24,11 +28,18 @@ import type { LoginDirectory } from './logins.ts';
  * - A recipe NEVER HOLDS A VALUE. Every recipe text, the owner's or a ferret's, is run through the daemon's own
  *   redactor before it is stored: text in which any vault secret, saved login or just-typed value is found is
  *   refused, and a redactor that cannot run refuses too (fail closed).
- * - A PROPOSAL IS A FERRET'S WORDS. It comes only from the ferret's own `login_propose` call (never from page text:
- *   the daemon never reads a recipe off a page) and waits on the owner, who sees the diff on an agenda card. The card
- *   approves nothing: approving is the owner-only route, so no agenda answer a ferret could steer changes a recipe.
- *   Only an owner who turned auto-apply on for that ONE login lets a proposal apply at once, and that is audited.
+ * - A PROPOSAL IS A FERRET'S WORDS. It comes only from the ferret's own `account_propose` call (never from page text:
+ *   the daemon never reads a recipe off a page), is filed on ONE SIGN-IN and waits on the owner, who sees the diff on an
+ *   agenda card. The card approves nothing: approving is the owner-only route, so no agenda answer a ferret could steer
+ *   changes a recipe. Only an owner who turned auto-apply on for that ONE sign-in lets a proposal apply at once, and
+ *   that is audited. Every applied change bumps the sign-in's `recipeVersion`.
  */
+
+/**
+ * Which sign-in a proposal is for: named (`{ signIn }`), or an account's ONLY sign-in (the older `{ login }`, from
+ * `login.propose` and `account.propose { login }`). Both go through {@link LoginRecipeService.propose}, ONE path.
+ */
+export type RecipeProposalTarget = { readonly signIn: SignInId } | { readonly login: LoginEntryId };
 
 /** Whether a text holds any value the daemon masks: the redactor would change it. Rejects when it cannot tell. */
 export interface RecipeValueCheck {
@@ -50,9 +61,10 @@ export interface RecipeAgendaPort {
 }
 
 export interface LoginRecipePorts {
-  readonly logins: Pick<LoginDirectory, 'list' | 'put' | 'propose' | 'proposalCard' | 'decide'>;
-  /** The account store, for an owner's answer to a proposal on one sign-in (`/v1/accounts/sign-ins/…`). */
-  readonly accounts?: Pick<AccountDirectory, 'list' | 'decideSignIn'>;
+  /** The saved-login projection, for an older client's answer to a proposal by account (`/v1/secrets/logins/…`). */
+  readonly logins: Pick<LoginDirectory, 'list' | 'decide'>;
+  /** The account store: where a proposal is filed (on one sign-in) and where the owner answers one. */
+  readonly accounts: Pick<AccountDirectory, 'list' | 'proposeSignIn' | 'proposalCardSignIn' | 'decideSignIn'>;
   readonly values: RecipeValueCheck;
   readonly agenda: RecipeAgendaPort;
   readonly audit: Pick<AuditSink, 'record'>;
@@ -92,38 +104,74 @@ export class LoginRecipeService {
   }
 
   /**
-   * A FERRET proposes a recipe for one login after a sign-in. The login must exist; the text is checked for values;
-   * then it applies at once only if the owner allowed that for this login, and otherwise waits on a card.
+   * WHICH SIGN-IN a proposal is for, and its account: the one named, or — for the older `{ login }` — the account's ONLY
+   * sign-in. An account that signs in nowhere, or at several places, is refused: the ferret names the sign-in.
    */
-  async propose(sessionId: string, id: LoginEntryId, recipe: string, why: string): Promise<LoginRecipeProposed> {
-    const entry = (await this.ports.logins.list()).find(each => each.id === id);
-    if (entry === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${id}`);
+  async resolve(
+    target: RecipeProposalTarget,
+  ): Promise<{ readonly signIn: SignInSummary; readonly account: AccountSummary }> {
+    const listing = await this.ports.accounts.list();
+    if ('signIn' in target) {
+      const signIn = listing.signIns.find(each => each.id === target.signIn);
+      const account = listing.accounts.find(each => each.id === signIn?.account);
+      if (signIn === undefined || account === undefined)
+        throw new LoginEntryError('unknown_sign_in', `there is no sign-in ${target.signIn}; account_hint lists them`);
+      return { signIn, account };
+    }
+    const account = listing.accounts.find(each => each.id === target.login);
+    if (account === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${target.login}`);
+    const own = listing.signIns.filter(each => each.account === account.id);
+    const [only] = own;
+    if (only === undefined)
+      throw new LoginEntryError('no_sign_in', `${account.label} signs in nowhere yet, so it has no recipe`);
+    if (own.length > 1)
+      throw new LoginEntryError(
+        'account_has_sign_ins',
+        `name the sign-in: ${account.label} signs in at ${String(own.length)} places (${own.map(each => each.id).join(', ')})`,
+      );
+    return { signIn: only, account };
+  }
+
+  /**
+   * A FERRET proposes a recipe for one SIGN-IN after signing in there: the older `{ login }` is resolved to the
+   * account's only sign-in FIRST ({@link resolve}), and every check below runs once, on that canonical sign-in. The text
+   * is checked for values; then it applies at once only if the owner allowed that for THIS sign-in, and otherwise
+   * waits on a card.
+   */
+  async propose(
+    sessionId: string,
+    target: RecipeProposalTarget,
+    recipe: string,
+    why: string,
+  ): Promise<LoginRecipeProposed & { readonly signIn: SignInId }> {
+    const { signIn, account } = await this.resolve(target);
     await this.assertNoValue(recipe);
     await this.assertNoValue(why);
     const proposal: LoginRecipeProposal = {
       id: this.ports.newId?.() ?? `rp_${randomBytes(8).toString('hex')}`,
       recipe,
-      ...(entry.recipe === undefined ? {} : { base: entry.recipe }),
+      ...(signIn.recipe === undefined ? {} : { base: signIn.recipe }),
       why,
       sessionId,
       proposedAt: this.ports.clock.now(),
     };
-    const filed = await this.ports.logins.propose(id, proposal);
+    const filed = await this.ports.accounts.proposeSignIn(signIn.id, proposal);
     for (const dropped of filed.dropped) await this.closeCard(dropped, 'Replaced by a newer recipe proposal.');
+    const answer = { id: proposal.id, login: account.id, signIn: signIn.id } as const;
     if (filed.applied) {
-      await this.record(id, 'login-recipe-auto', proposal.id, sessionId);
-      return { id: proposal.id, login: id, state: 'applied' };
+      await this.record(account.id, 'login-recipe-auto', proposal.id, sessionId, signIn.id);
+      return { ...answer, state: 'applied' };
     }
     const card = await this.ports.agenda.raise(sessionId, {
       sourceRef: proposal.id,
-      subject: `Recipe change for '${entry.label}'`,
+      subject: `Recipe change for '${account.label}' ${placeWords(signIn.place)}`,
       // The card shows the CURRENT recipe too, which may hold a value kept after it was written: masked like any read.
-      context: await this.masked(cardContext(entry.recipe, recipe, why)),
-      howToResolve: `Approve or decline it in Settings › Accounts › ${entry.label} › Recipe, or at the machine: \`fy account recipe approve ${id} ${proposal.id}\`.`,
+      context: await this.masked(cardContext(signIn.recipe, recipe, why)),
+      howToResolve: `Approve or decline it in Settings › Accounts › ${account.label} › ${placeName(signIn.place)} › Recipe, or at the machine: \`fy account recipe approve ${account.id} ${proposal.id}\`.`,
     });
-    if (!card.ok) return { id: proposal.id, login: id, state: 'pending' };
-    await this.ports.logins.proposalCard(id, proposal.id, card.id).catch(() => undefined);
-    return { id: proposal.id, login: id, state: 'pending', agendaItemId: card.id };
+    if (!card.ok) return { ...answer, state: 'pending' };
+    await this.ports.accounts.proposalCardSignIn(signIn.id, proposal.id, card.id).catch(() => undefined);
+    return { ...answer, state: 'pending', agendaItemId: card.id };
   }
 
   /**
@@ -199,7 +247,6 @@ export class LoginRecipeService {
    */
   async decideSignIn(id: SignInId, proposalId: string, decision: 'approve' | 'decline'): Promise<SignInSummary> {
     const accounts = this.ports.accounts;
-    if (accounts === undefined) throw new LoginEntryError('unknown_sign_in', `there is no sign-in ${id}`);
     if (decision === 'approve') {
       const waiting = (await accounts.list()).signIns
         .find(each => each.id === id)
@@ -216,17 +263,28 @@ export class LoginRecipeService {
     await this.ports.agenda.close(proposal.sessionId, proposal.agendaItemId, note).catch(() => undefined);
   }
 
-  private async record(id: LoginEntryId, action: string, proposal: string, session: string): Promise<void> {
+  private async record(
+    id: LoginEntryId,
+    action: string,
+    proposal: string,
+    session: string,
+    signIn: SignInId,
+  ): Promise<void> {
     await this.ports.audit
       .record({
         event: 'secrets.changed',
         actor: { kind: 'host' },
         subject: id,
         outcome: 'succeeded',
-        detail: { action, proposal, session, by: 'agent' },
+        detail: { action, proposal, session, signIn, by: 'agent' },
       })
       .catch(() => undefined);
   }
+}
+
+/** A place as the Accounts screen names a site row: its first login domain, or its `tool@host`. */
+function placeName(place: Place): string {
+  return (place.kind === 'site' ? (place.domains[0] ?? place.match[0]) : placeKeys(place)[0]) ?? 'this place';
 }
 
 /** The lines that change, `- ` and `+ `, and the ferret's reason, cut to fit a card; the app shows the whole diff. */

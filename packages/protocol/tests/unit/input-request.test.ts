@@ -395,13 +395,15 @@ describe('delivering', () => {
     ).be.false();
   });
 
-  it('should refuse a sign-in in a deliver until the daemon checks that it belongs to the account', () => {
+  it('should take a sign-in in a deliver only with the saved account it is one of', () => {
     // Arrange
     const tapped = { deliveryId: DELIVERY, observedDigest: DIGEST, entry: 'GITHUB_KIRINNEE', submit: true };
+    const { entry: _entry, ...typed } = { ...tapped, padded: 'x' };
 
-    // Act / Assert — accepted and ignored, a sign-in of ANOTHER account would ride along unchecked; so it is refused
-    should(InputDeliverBodySchema.safeParse(tapped).success).be.true();
-    should(InputDeliverBodySchema.safeParse({ ...tapped, signIn: 'si_0123456789abcdef' }).success).be.false();
+    // Act / Assert — that it is the account's own sign-in is the daemon's check (service.test.ts), before anything is typed
+    should(InputDeliverBodySchema.safeParse({ ...tapped, signIn: 'si_0123456789abcdef' }).success).be.true();
+    should(InputDeliverBodySchema.safeParse({ ...typed, signIn: 'si_0123456789abcdef' }).success).be.false();
+    should(InputDeliverBodySchema.safeParse({ ...tapped, signIn: 'GITHUB_KIRINNEE' }).success).be.false();
   });
 
   it('should name a 2FA key only with the saved account it belongs to', () => {
