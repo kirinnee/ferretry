@@ -191,9 +191,9 @@ export function matchSignInGrant(
   seen: GrantSighting,
   pinned: ReadonlyMap<string, string>,
 ): GrantMatch {
-  // 1. In force.
+  // 1. In force: not stopped, not expired, this very session. Uses are the ledger's: a later step of an open attempt
+  //    continues on the use it spent, even when none is left.
   if (grant.state === 'stopped') return miss('stopped');
-  if (grant.state === 'used-up' || grant.remaining <= 0) return miss('used-up');
   if (grant.expiresAt <= seen.now) return miss('expired');
   if (grant.source === 'plan' && grant.sessionId !== seen.sessionId) return miss('other-session');
   if (grant.sessionId !== undefined && grant.sessionId !== seen.sessionId) return miss('other-session');

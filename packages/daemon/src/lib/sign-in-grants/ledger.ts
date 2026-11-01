@@ -1,4 +1,4 @@
-import type { GrantMissReason, SignInId } from '@ferretry/protocol';
+import type { GrantMissReason, LoginFieldRole, SignInId } from '@ferretry/protocol';
 import { SECOND_FACTOR_WINDOW_MS } from '../input-requests/login-observer.ts';
 
 /**
@@ -8,9 +8,11 @@ import { SECOND_FACTOR_WINDOW_MS } from '../input-requests/login-observer.ts';
  * - **Synchronous.** {@link SignInGrantLedger.reserve} runs inside the session lock right before the write, and counts
  *   what is reserved and not yet settled, so two raises can never both spend a line's last use (the paste rules'
  *   pattern). {@link SignInGrantLedger.spent} and {@link SignInGrantLedger.release} settle a reservation once.
- * - **One use is one sign-in attempt.** An attempt opens at the first fill under a grant and takes each field set once;
- *   it closes {@link SECOND_FACTOR_WINDOW_MS} later, or when a field set it already filled comes again (which opens a new
- *   attempt and spends a new use). So username page → password page → code page within three minutes is ONE use.
+ * - **One use is one sign-in attempt, and each ROLE is typed once per use.** An attempt opens at the first fill under a
+ *   grant and records the roles it typed (username, password, code). A later fill joins it, for no new use, only within
+ *   {@link SECOND_FACTOR_WINDOW_MS} and only when it types no role the attempt already typed. So username page →
+ *   password page → code page within three minutes is ONE use, and a second password (a "confirm your password" form)
+ *   always needs a use of its own.
  * - **Rate.** At most {@link FILLS_PER_HOUR_PER_SIGN_IN} fills an hour of one sign-in, across every grant, and
  *   {@link FILLS_PER_HOUR_PER_SESSION} grant fills an hour in one session. Over either: `rate`.
  * - **Pins.** The form identity each field set was first filled with, per grant: every later fill must equal it.
@@ -34,6 +36,9 @@ export interface GrantReservation {
   readonly grant: string;
   readonly signIn: SignInId;
   readonly sessionId: string;
+  /** The roles this fill types. */
+  readonly roles: readonly LoginFieldRole[];
+  /** The field set its form identity is pinned for. */
   readonly fieldSet: string;
   /** This fill opens a new attempt, so it spends a use. */
   readonly opens: boolean;
@@ -42,7 +47,7 @@ export interface GrantReservation {
 
 interface Attempt {
   readonly opened: number;
-  readonly sets: Set<string>;
+  readonly roles: Set<LoginFieldRole>;
 }
 
 const recent = (times: readonly number[] | undefined, now: number): number[] =>
@@ -55,15 +60,31 @@ export class SignInGrantLedger {
   readonly #bySession = new Map<string, number[]>();
   readonly #open = new Set<GrantReservation>();
 
+  /** Whether a grant has an attempt open now: a later step of that sign-in may still join it. */
+  joinable(grant: string, now: number): boolean {
+    const attempt = this.#attempts.get(grant);
+    return attempt !== undefined && now - attempt.opened < SECOND_FACTOR_WINDOW_MS;
+  }
+
   /**
-   * Holds one fill of `fieldSet` under `grant`, or says why it can't: `used-up` when it would open an attempt and no use
-   * is left (counting those already reserved), `rate` when the sign-in or the session is over its hourly limit.
+   * Holds one fill typing `roles` under `grant`, or says why it can't: `used-up` when it would open an attempt and no use
+   * is left (counting those already reserved), `rate` when the sign-in or the session is over its hourly limit. A fill
+   * joins the open attempt only when none of its roles was typed in it, or is being typed by a fill still in flight.
    */
-  reserve(grant: LedgerGrant, sessionId: string, fieldSet: string, now: number): GrantReservation | GrantMissReason {
-    const attempt = this.#attempts.get(grant.id);
-    const joins =
-      attempt !== undefined && now - attempt.opened < SECOND_FACTOR_WINDOW_MS && !attempt.sets.has(fieldSet);
+  reserve(
+    grant: LedgerGrant,
+    sessionId: string,
+    roles: readonly LoginFieldRole[],
+    fieldSet: string,
+    now: number,
+  ): GrantReservation | GrantMissReason {
     const pending = [...this.#open];
+    const attempt = this.#attempts.get(grant.id);
+    const typed = new Set([
+      ...(attempt?.roles ?? []),
+      ...pending.filter(each => each.grant === grant.id && !each.opens).flatMap(each => each.roles),
+    ]);
+    const joins = this.joinable(grant.id, now) && roles.every(role => !typed.has(role));
     if (!joins) {
       const opening = pending.filter(each => each.grant === grant.id && each.opens).length;
       if (grant.remaining - opening <= 0) return 'used-up';
@@ -78,6 +99,7 @@ export class SignInGrantLedger {
       grant: grant.id,
       signIn: grant.signIn,
       sessionId,
+      roles: [...roles],
       fieldSet,
       opens: !joins,
       at: now,
@@ -87,9 +109,9 @@ export class SignInGrantLedger {
   }
 
   /**
-   * The fill was typed, or may have been: it counts against the rate, opens or joins its attempt, and pins the form's
-   * identity for its field set when none was pinned. Whether it spent a use (`opens`) is the caller's to record on the
-   * grant. A reservation already settled is ignored.
+   * The fill was typed, or may have been: it counts against the rate, opens or joins its attempt with its roles, and pins
+   * the form's identity for its field set when none was pinned. Whether it spent a use (`opens`) is the caller's to
+   * record on the grant. A reservation already settled is ignored.
    */
   spent(reservation: GrantReservation, identity: string | undefined): boolean {
     if (!this.#open.delete(reservation)) return false;
@@ -98,8 +120,8 @@ export class SignInGrantLedger {
     this.#bySession.set(reservation.sessionId, [...recent(this.#bySession.get(reservation.sessionId), at), at]);
     const attempt = this.#attempts.get(grant);
     if (reservation.opens || attempt === undefined)
-      this.#attempts.set(grant, { opened: at, sets: new Set([fieldSet]) });
-    else attempt.sets.add(fieldSet);
+      this.#attempts.set(grant, { opened: at, roles: new Set(reservation.roles) });
+    else for (const role of reservation.roles) attempt.roles.add(role);
     if (identity !== undefined) {
       const pins = this.#pins.get(grant) ?? new Map<string, string>();
       if (!pins.has(fieldSet)) pins.set(fieldSet, identity);

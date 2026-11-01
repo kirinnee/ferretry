@@ -666,17 +666,20 @@ export class TaskPlanService {
     const held = plan?.lines[line];
     if (plan?.state !== 'approved' || held === undefined || held.kind === 'paste' || held.state !== 'approved') return;
     if (held.approved === undefined) return;
-    const remaining = Math.max(0, held.approved.remaining - 1);
-    const used: TaskPlanLine = {
-      ...held,
-      state: remaining === 0 ? 'used-up' : 'approved',
-      approved: { ...held.approved, remaining, lastUsedAt: new Date(at).toISOString() },
-    };
-    const next = TaskPlanSchema.safeParse({
-      ...plan,
-      lines: plan.lines.map(each => (each.line === line ? used : each)),
-    });
-    if (next.success) this.#plans.set(planId, next.data);
+    try {
+      const remaining = Math.max(0, held.approved.remaining - 1);
+      const used: TaskPlanLine = {
+        ...held,
+        state: remaining === 0 ? 'used-up' : 'approved',
+        approved: { ...held.approved, remaining, lastUsedAt: new Date(at).toISOString() },
+      };
+      this.#plans.set(
+        planId,
+        TaskPlanSchema.parse({ ...plan, lines: plan.lines.map(each => (each.line === line ? used : each)) }),
+      );
+    } catch {
+      this.#lineFailed(plan, line);
+    }
   }
 
   /**
@@ -694,7 +697,7 @@ export class TaskPlanService {
       ...plan,
       lines: plan.lines.map(each => (each.line === line ? stopped : each)),
     });
-    if (!next.success) return;
+    if (!next.success) return this.#lineFailed(plan, line);
     this.#plans.set(planId, next.data);
     await this.#record(plan.id, {
       action: 'task-plan-line-stopped',
@@ -730,6 +733,15 @@ export class TaskPlanService {
   }
 
   // ── Inside ────────────────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * A write back from a fill could not be recorded (the plan record refused it): the line fails CLOSED. Its pins go, so it
+   * is no longer matched and every later fill under it asks; it is recorded. Nothing of the old state stays in force.
+   */
+  #lineFailed(plan: TaskPlan, line: number): void {
+    this.#pins.get(plan.id)?.delete(line);
+    void this.#record(plan.id, { action: 'task-plan-line-failed', session: auditText(plan.sessionId), line: line + 1 });
+  }
 
   /**
    * Holds one proposal's place against the caps until it is kept (it is a pending plan then) or refused (its place

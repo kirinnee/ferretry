@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SignInId } from '@ferretry/protocol';
+import type { LoginFieldRole, SignInId } from '@ferretry/protocol';
 import should from 'should';
 import {
   FILLS_PER_HOUR_PER_SESSION,
@@ -18,83 +18,123 @@ const reserved = (outcome: GrantReservation | string): GrantReservation => {
   return outcome;
 };
 
+/** Reserve a fill of `roles` (its field set is the roles, sorted). */
+const fill = (
+  ledger: SignInGrantLedger,
+  roles: readonly LoginFieldRole[],
+  remaining: number,
+  at: number,
+  over: { id?: string; session?: string; signIn?: SignInId } = {},
+) =>
+  ledger.reserve(
+    grant(remaining, over.id, over.signIn),
+    over.session ?? SESSION,
+    roles,
+    [...roles].sort().join('+'),
+    at,
+  );
+
 describe('SignInGrantLedger: uses are spent synchronously', () => {
   it('should let only one of two reservations in one tick take a line’s last use', () => {
     const ledger = new SignInGrantLedger();
-    const first = ledger.reserve(grant(1), SESSION, 'password+username', NOW);
-    const second = ledger.reserve(grant(1), SESSION, 'password+username', NOW);
-    should(typeof first).equal('object');
-    should(second).equal('used-up');
+    should(typeof fill(ledger, ['username', 'password'], 1, NOW)).equal('object');
+    should(fill(ledger, ['username', 'password'], 1, NOW)).equal('used-up');
   });
 
-  it('should give a released reservation back, and count a spent one', () => {
+  it('should give a released reservation back, and count a spent one once', () => {
     const ledger = new SignInGrantLedger();
-    ledger.release(reserved(ledger.reserve(grant(1), SESSION, 'password', NOW)));
-    const again = reserved(ledger.reserve(grant(1), SESSION, 'password', NOW));
+    ledger.release(reserved(fill(ledger, ['password'], 1, NOW)));
+    const again = reserved(fill(ledger, ['password'], 1, NOW));
     should(ledger.spent(again, 'id1')).be.true();
-    // Spending twice is ignored.
     should(ledger.spent(again, 'id1')).be.false();
   });
 });
 
-describe('SignInGrantLedger: one use is one sign-in attempt', () => {
+describe('SignInGrantLedger: one use is one sign-in attempt, and each role is typed once per use', () => {
   it('should take username, password and code steps within three minutes as one use', () => {
     const ledger = new SignInGrantLedger();
-    const user = reserved(ledger.reserve(grant(1), SESSION, 'username', NOW));
-    should(ledger.spent(user, 'a')).be.true();
-    // The grant now has no use left, yet the next steps of the same attempt join it.
-    const pass = reserved(ledger.reserve(grant(0), SESSION, 'password', NOW + 30_000));
+    should(ledger.spent(reserved(fill(ledger, ['username'], 1, NOW)), 'a')).be.true();
+    // No use is left, yet the next steps of the same attempt type roles it has not typed, so they join it.
+    should(ledger.joinable('plan:aa:0', NOW + 30_000)).be.true();
+    const pass = reserved(fill(ledger, ['password'], 0, NOW + 30_000));
     should(pass.opens).be.false();
     should(ledger.spent(pass, 'b')).be.false();
-    const code = reserved(ledger.reserve(grant(0), SESSION, 'totp', NOW + 60_000));
-    should(code.opens).be.false();
+    should(reserved(fill(ledger, ['totp'], 0, NOW + 60_000)).opens).be.false();
   });
 
-  it('should open a new attempt for a field set already filled, or after three minutes', () => {
+  it('should refuse a second password on one use: a confirm-password form is not part of the sign-in', () => {
     const ledger = new SignInGrantLedger();
-    ledger.spent(reserved(ledger.reserve(grant(2), SESSION, 'password', NOW)), 'a');
-    should(reserved(ledger.reserve(grant(1), SESSION, 'password', NOW + 1_000)).opens).be.true();
-    const later = new SignInGrantLedger();
-    later.spent(reserved(later.reserve(grant(2), SESSION, 'username', NOW)), 'a');
-    should(reserved(later.reserve(grant(1), SESSION, 'password', NOW + 181_000)).opens).be.true();
-    should(later.reserve(grant(0), SESSION, 'totp', NOW + 181_000)).equal('used-up');
+    ledger.spent(reserved(fill(ledger, ['username', 'password'], 1, NOW)), 'a');
+    should(fill(ledger, ['password'], 0, NOW + 1_000)).equal('used-up');
+    should(fill(ledger, ['password', 'totp'], 0, NOW + 1_000)).equal('used-up');
   });
 
-  it('should pin each field set to the identity of its first fill, and forget the pins with the grant', () => {
+  it('should spend a second use for a password typed twice, even inside the window', () => {
     const ledger = new SignInGrantLedger();
-    ledger.spent(reserved(ledger.reserve(grant(2), SESSION, 'password', NOW)), 'first');
-    ledger.spent(reserved(ledger.reserve(grant(1), SESSION, 'password', NOW + 1_000)), 'second');
+    ledger.spent(reserved(fill(ledger, ['password'], 2, NOW)), 'a');
+    const second = reserved(fill(ledger, ['password'], 1, NOW + 1_000));
+    should(second.opens).be.true();
+  });
+
+  it('should count a role still being typed by a fill in flight as typed', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(fill(ledger, ['username'], 1, NOW)), 'a');
+    reserved(fill(ledger, ['password'], 0, NOW + 1_000));
+    should(fill(ledger, ['password'], 0, NOW + 1_000)).equal('used-up');
+  });
+
+  it('should open a new attempt after three minutes', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(fill(ledger, ['username'], 2, NOW)), 'a');
+    should(ledger.joinable('plan:aa:0', NOW + 181_000)).be.false();
+    should(reserved(fill(ledger, ['password'], 1, NOW + 181_000)).opens).be.true();
+    should(fill(ledger, ['totp'], 0, NOW + 181_000)).equal('used-up');
+  });
+
+  it('should pin each field set to the identity of its first fill, and forget it with the grant', () => {
+    const ledger = new SignInGrantLedger();
+    ledger.spent(reserved(fill(ledger, ['password'], 2, NOW)), 'first');
+    ledger.spent(reserved(fill(ledger, ['password'], 1, NOW + 1_000)), 'second');
     should(ledger.pinned('plan:aa:0').get('password')).equal('first');
     ledger.retain(() => false);
     should(ledger.pinned('plan:aa:0').size).equal(0);
+    should(ledger.joinable('plan:aa:0', NOW + 2_000)).be.false();
   });
 });
 
 describe('SignInGrantLedger: the rate limit', () => {
   it(`should refuse the ${String(FILLS_PER_HOUR_PER_SIGN_IN + 1)}th fill of one sign-in within an hour, across grants`, () => {
     const ledger = new SignInGrantLedger();
-    for (let index = 0; index < FILLS_PER_HOUR_PER_SIGN_IN; index++) {
-      const each = grant(1, `plan:p${String(index)}:0`);
-      ledger.spent(reserved(ledger.reserve(each, `s${String(index)}`, 'password', NOW + index)), 'x');
-    }
-    should(ledger.reserve(grant(1, 'plan:fresh:0'), 'another', 'password', NOW + 100)).equal('rate');
-    // An hour later it fills again.
-    should(typeof ledger.reserve(grant(1, 'plan:fresh:0'), 'another', 'password', NOW + 3_600_100)).equal('object');
+    for (let index = 0; index < FILLS_PER_HOUR_PER_SIGN_IN; index++)
+      ledger.spent(
+        reserved(
+          fill(ledger, ['password'], 1, NOW + index, { id: `plan:p${String(index)}:0`, session: `s${String(index)}` }),
+        ),
+        'x',
+      );
+    should(fill(ledger, ['password'], 1, NOW + 100, { id: 'plan:fresh:0', session: 'another' })).equal('rate');
+    should(typeof fill(ledger, ['password'], 1, NOW + 3_600_100, { id: 'plan:fresh:0', session: 'another' })).equal(
+      'object',
+    );
   });
 
   it(`should refuse a session’s ${String(FILLS_PER_HOUR_PER_SESSION + 1)}th grant fill within an hour`, () => {
     const ledger = new SignInGrantLedger();
-    for (let index = 0; index < FILLS_PER_HOUR_PER_SESSION; index++) {
-      const each = grant(1, `plan:p${String(index)}:0`, `si_${String(index).padStart(24, '0')}` as SignInId);
-      ledger.spent(reserved(ledger.reserve(each, SESSION, 'password', NOW + index)), 'x');
-    }
+    for (let index = 0; index < FILLS_PER_HOUR_PER_SESSION; index++)
+      ledger.spent(
+        reserved(
+          fill(ledger, ['password'], 1, NOW + index, {
+            id: `plan:p${String(index)}:0`,
+            signIn: `si_${String(index).padStart(24, '0')}` as SignInId,
+          }),
+        ),
+        'x',
+      );
     should(
-      ledger.reserve(
-        grant(1, 'plan:fresh:0', 'si_ffffffffffffffffffffffff' as SignInId),
-        SESSION,
-        'password',
-        NOW + 100,
-      ),
+      fill(ledger, ['password'], 1, NOW + 100, {
+        id: 'plan:fresh:0',
+        signIn: 'si_ffffffffffffffffffffffff' as SignInId,
+      }),
     ).equal('rate');
   });
 });

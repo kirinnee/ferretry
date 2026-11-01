@@ -137,6 +137,10 @@ const reasonOf = (theGrant: SignInGrant, seen: GrantSighting, pinned = new Map<s
 };
 
 describe('matchSignInGrant: a grant that covers the card fills it', () => {
+  it('should leave uses to the ledger: a line whose uses are spent still matches, so a later step can join its attempt', () => {
+    should(reasonOf(grant({ state: 'used-up', remaining: 0 }), sighting())).equal('filled');
+  });
+
   it('should fill a login card at the pinned login domain, with the roles in the card’s order', () => {
     const match = matchSignInGrant(grant(), sighting(), new Map());
     should(match).match({
@@ -160,7 +164,6 @@ describe('matchSignInGrant: every check holds or nothing is typed (one row per c
     { check: '1 another session', seen: { sessionId: 'mvv6b4qw-49d0158e' }, reason: 'other-session' },
     { check: '1 a sub-ferret', seen: { sessionId: `${SESSION}-child` }, reason: 'other-session' },
     { check: '1 stopped', grant: { state: 'stopped' }, reason: 'stopped' },
-    { check: '1 used up', grant: { state: 'used-up', remaining: 0 }, reason: 'used-up' },
     { check: '2 the sign-in removed', listing: { signIns: [] }, reason: 'sign-in-gone' },
     {
       check: '2 the sign-in on another account',

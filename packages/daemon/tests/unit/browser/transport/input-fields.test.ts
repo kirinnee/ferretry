@@ -1,5 +1,4 @@
 import { describe, it } from 'bun:test';
-import { createHash } from 'node:crypto';
 import should from 'should';
 import {
   BROWSER_INPUT_SHOT_MARGIN,
@@ -7,6 +6,7 @@ import {
   BROWSER_INPUT_SHOT_MAX_SIDE,
   type BrowserInputClearJob,
   type BrowserInputFacts,
+  armInputFields,
   clearInputFields,
   describeInputDocument,
   type InputCdp,
@@ -206,17 +206,11 @@ class FakeSession implements InputCdpSession {
           this.armed.push(node);
           return { result: { value: !this.world.armFails } };
         }
-        // The check when the hold ends: the salted hash of what the field holds, compared in the page.
-        if (String(params.functionDeclaration).includes('crypto.subtle')) {
+        // The check before the hold ends: whatever the field holds is emptied, from the trusted world only.
+        if (String(params.functionDeclaration).includes('isConnected')) {
           if (!this.isolatedObjects.has(objectId)) this.pageWorld.push('Runtime.callFunctionOn');
-          if (this.world.clearThrows) return { exceptionDetails: { text: 'crypto is not defined' }, result: {} };
-          const [salt, digest] = (params.arguments as { value: string }[]).map(each => each.value);
-          const held = this.values.get(node) ?? '';
-          if (held === '') return { result: { value: 'moved' } };
-          const hash = createHash('sha256')
-            .update(`${salt ?? ''}${held}`, 'utf8')
-            .digest('hex');
-          if (hash !== digest) return { result: { value: 'moved' } };
+          if (this.world.clearThrows) return { exceptionDetails: { text: 'the page threw' }, result: {} };
+          if ((this.values.get(node) ?? '') === '') return { result: { value: 'moved' } };
           this.values.set(node, '');
           return { result: { value: 'cleared' } };
         }
@@ -288,7 +282,7 @@ class FakeWorld {
   unclearable = false;
   /** The trusted world could not arm the pagehide clear. */
   armFails = false;
-  /** The page could not hash (no crypto in an insecure context). */
+  /** The page threw while the clear ran in it. */
   clearThrows = false;
   /** WebSockets the page holds open, and how many it ever opened. */
   sockets = 0;
@@ -1860,124 +1854,92 @@ describe('probeInputFields', () => {
   });
 });
 
-describe('a grant fill’s pagehide clear and its check when the hold ends (R3a-4)', () => {
-  async function ready(): Promise<{ world: FakeWorld; facts: BrowserInputFacts }> {
+describe('a grant fill arms its pagehide clear, and its fields are checked before the hold ends (R3a-4)', () => {
+  async function ready(): Promise<{ world: FakeWorld; facts: BrowserInputFacts; frame: string }> {
     const { world } = loginWorld();
     const facts = await observed(world, ['#user', '#pw']);
     for (const session of world.sessions.values()) session.calls.length = 0;
-    return { world, facts };
+    return { world, facts, frame: facts.fields.find(each => each.fieldId === '#pw')?.frameId as string };
   }
 
   const values = [
     { field: '#user', text: 'alice@example.com' },
     { field: '#pw', text: SECRET },
   ];
+  const jobFor = (frameId: string, backendNodeId = 12, navigationId = 'loader-1'): BrowserInputClearJob => ({
+    navigationId,
+    fields: [{ frameId, backendNodeId }],
+  });
 
-  const jobFor = (
-    text: string,
-    frameId = 'page-target-frame',
-    over: Partial<BrowserInputClearJob> = {},
-  ): BrowserInputClearJob => {
-    const salt = 'a'.repeat(32);
-    return {
-      navigationId: 'loader-1',
-      fields: [
-        {
-          frameId,
-          backendNodeId: 12,
-          salt,
-          digest: createHash('sha256').update(`${salt}${text}`, 'utf8').digest('hex'),
-        },
-      ],
-      ...over,
-    };
-  };
-
-  const frameOf = (facts: BrowserInputFacts, field: string): string =>
-    facts.fields.find(each => each.fieldId === field)?.frameId as string;
-
-  it('should arm the clear on the password field only, from the trusted world, before anything is typed', async () => {
+  it('should arm the named password field from the trusted world, typing nothing', async () => {
     const { world, facts } = await ready();
-    should(await typeInputFields(world.subject, facts, values, false, { armClear: true })).equal('typed');
+    should(await armInputFields(world.subject, facts, ['#pw'])).equal('armed');
     const session = world.session('page-target');
     should(session.armed).eql([12]);
     should(session.pageWorld).eql([]);
-    const methods = session.calls.map(call => call.method);
-    const armedAt = session.calls.findIndex(
-      call => call.method === 'Runtime.callFunctionOn' && String(call.params.functionDeclaration).includes('pagehide'),
-    );
-    should(armedAt).be.below(methods.indexOf('Input.insertText'));
-    // The listener holds no value: nothing typed is in what was armed.
-    should(JSON.stringify(session.calls[armedAt])).not.containEql(SECRET);
-  });
-
-  it('should write nothing when the clear cannot be armed', async () => {
-    const { world, facts } = await ready();
-    world.armFails = true;
-    should(await typeInputFields(world.subject, facts, values, false, { armClear: true })).equal('target_changed');
     should(insertions(world)).equal(0);
   });
 
-  it('should arm nothing for an ordinary write', async () => {
-    const { world, facts } = await ready();
-    should(await typeInputFields(world.subject, facts, values, false)).equal('typed');
-    should(world.session('page-target').armed).eql([]);
+  it('should refuse to arm a field that is not a password box, nothing named, another document or a world that fails', async () => {
+    const plain = await ready();
+    should(await armInputFields(plain.world.subject, plain.facts, ['#user'])).equal('refused');
+    should(await armInputFields(plain.world.subject, plain.facts, [])).equal('refused');
+    const moved = await ready();
+    moved.world.loaderId = 'loader-2';
+    should(await armInputFields(moved.world.subject, moved.facts, ['#pw'])).equal('refused');
+    const failing = await ready();
+    failing.world.armFails = true;
+    should(await armInputFields(failing.world.subject, failing.facts, ['#pw'])).equal('refused');
+    const closed = await ready();
+    closed.world.closed = true;
+    should(await armInputFields(closed.world.subject, closed.facts, ['#pw'])).equal('refused');
   });
 
-  it('should empty a password field that still holds what was typed, and answer cleared', async () => {
-    const { world, facts } = await ready();
-    await typeInputFields(world.subject, facts, values, false, { armClear: true });
-    const job = jobFor(SECRET, frameOf(facts, '#pw'));
-    should(await clearInputFields(world.subject, job)).equal('cleared');
+  it('should empty a password field that still holds a value, whatever it holds, and answer cleared', async () => {
+    const { world, facts, frame } = await ready();
+    await typeInputFields(world.subject, facts, values, false);
+    // The ferret appended a character during the hold: the password is still in there, so it is still emptied.
+    world.session('page-target').values.set(12, `${SECRET}x`);
+    should(await clearInputFields(world.subject, jobFor(frame))).equal('cleared');
     should(world.session('page-target').values.get(12)).equal('');
     should(world.session('page-target').pageWorld).eql([]);
-    // The job carried a hash, never the value.
-    should(JSON.stringify(job)).not.containEql(SECRET);
   });
 
-  it('should answer moved for a field holding something else, another document or a closed page', async () => {
-    const { world, facts } = await ready();
-    await typeInputFields(world.subject, facts, values, false, { armClear: true });
-    const frame = frameOf(facts, '#pw');
-    should(await clearInputFields(world.subject, jobFor('not-what-was-typed', frame))).equal('moved');
-    should(world.session('page-target').values.get(12)).equal(SECRET);
-    should(await clearInputFields(world.subject, jobFor(SECRET, frame, { navigationId: 'loader-2' }))).equal('moved');
-    world.closed = true;
-    should(await clearInputFields(world.subject, jobFor(SECRET))).equal('moved');
-  });
-
-  it('should answer unknown when the page cannot check, so the line stops', async () => {
-    const { world, facts } = await ready();
-    await typeInputFields(world.subject, facts, values, false, { armClear: true });
-    world.clearThrows = true;
-    const job = jobFor(SECRET, frameOf(facts, '#pw'));
-    should(await clearInputFields(world.subject, job)).equal('unknown');
-  });
-});
-
-describe('the clear check fails closed (R3a-4)', () => {
-  const salted = (frameId: string, backendNodeId: number): BrowserInputClearJob => ({
-    navigationId: 'loader-1',
-    fields: [{ frameId, backendNodeId, salt: 'a'.repeat(32), digest: 'b'.repeat(64) }],
-  });
-
-  it('should answer moved, and empty nothing, for a field whose node is gone from the page', async () => {
-    const { world } = loginWorld();
-    const facts = await observed(world, ['#user', '#pw']);
-    const frame = facts.fields.find(each => each.fieldId === '#pw')?.frameId as string;
+  it('should answer moved for an empty field, another document, a closed page, or a node DevTools says is gone', async () => {
+    const { world, facts, frame } = await ready();
+    await typeInputFields(world.subject, facts, values, false);
+    world.session('page-target').values.set(12, '');
+    should(await clearInputFields(world.subject, jobFor(frame))).equal('moved');
     world.session('page-target').values.set(12, SECRET);
-    // Node 99 is in no frame of the session: the browser cannot resolve it.
-    should(await clearInputFields(world.subject, salted(frame, 99))).equal('moved');
+    should(await clearInputFields(world.subject, jobFor(frame, 99))).equal('moved');
     should(world.session('page-target').values.get(12)).equal(SECRET);
-    should(world.session('page-target').count('Runtime.callFunctionOn')).equal(0);
+    should(await clearInputFields(world.subject, jobFor(frame, 12, 'loader-2'))).equal('moved');
+    world.closed = true;
+    should(await clearInputFields(world.subject, jobFor(frame))).equal('moved');
   });
 
-  it('should answer unknown, so the line stops, when the browser cannot say which document it shows', async () => {
-    const { world } = loginWorld();
-    const facts = await observed(world, ['#user', '#pw']);
-    const frame = facts.fields.find(each => each.fieldId === '#pw')?.frameId as string;
-    world.session('page-target').failOn = method =>
+  it('should answer unknown, so the line stops, for any other failure on the same document', async () => {
+    const thrown = await ready();
+    await typeInputFields(thrown.world.subject, thrown.facts, values, false);
+    thrown.world.clearThrows = true;
+    should(await clearInputFields(thrown.world.subject, jobFor(thrown.frame))).equal('unknown');
+
+    const sessionless = await ready();
+    should(await clearInputFields(sessionless.world.subject, jobFor('a-frame-with-no-session'))).equal('unknown');
+
+    const describing = await ready();
+    describing.world.session('page-target').failOn = method =>
+      method === 'DOM.describeNode' ? new Error('Target closed') : undefined;
+    should(await clearInputFields(describing.world.subject, jobFor(describing.frame))).equal('unknown');
+
+    const resolving = await ready();
+    resolving.world.session('page-target').failOn = method =>
+      method === 'Page.createIsolatedWorld' ? new Error('Target closed') : undefined;
+    should(await clearInputFields(resolving.world.subject, jobFor(resolving.frame))).equal('unknown');
+
+    const document = await ready();
+    document.world.session('page-target').failOn = method =>
       method === 'Page.getFrameTree' ? new Error('Target closed') : undefined;
-    should(await clearInputFields(world.subject, salted(frame, 12))).equal('unknown');
+    should(await clearInputFields(document.world.subject, jobFor(document.frame))).equal('unknown');
   });
 });

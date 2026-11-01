@@ -167,9 +167,9 @@ export interface InputTargetPort {
     fieldIds: readonly string[],
   ): Promise<'hidden' | 'shown' | 'aborted'>;
   /**
-   * When a grant fill's page hold ends (a page target only): empties each password field that STILL holds what was typed
-   * (same document, node still there, its value hashing to `digest` with `salt`), and says what it found: `cleared`,
-   * `moved` (none still holds it) or `unknown`. The value is not sent: only a salted hash of it (`sign-in-grants/clear.ts`).
+   * Before a grant fill's page hold ends (a page target only): empties each typed password field that STILL holds a value
+   * (same document, node still connected, not empty), and says what it found: `cleared`, `moved` (none holds one) or
+   * `unknown`. No value is sent: only which nodes (`sign-in-grants/clear.ts`).
    */
   clear?(sessionId: string, target: InputTarget, job: ClearJob): Promise<ClearOutcome>;
 }
@@ -200,9 +200,10 @@ export interface TypeOptions {
    */
   readonly profileProgram?: ProfileProgram;
   /**
-   * A grant fill typed a password into a page: before the first value goes in, the browser arms a `pagehide` listener in an
-   * isolated world of each password field's frame that empties every password input when the page is hidden (the
-   * back/forward cache would otherwise keep the value). Arming fails: nothing is typed.
+   * A grant fill types a password into a page: before the first value goes in, the browser arms (its own `inputArm`
+   * call) a `pagehide` listener in an isolated world of each password field's frame that empties every password input
+   * when the page is hidden (the back/forward cache would otherwise keep the value). Arming fails or is refused (an
+   * older worker): nothing is typed.
    */
   readonly armClear?: boolean;
 }

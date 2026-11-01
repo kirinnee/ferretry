@@ -57,6 +57,7 @@ import type {
   BrowserInputValue,
 } from '../src/lib/browser/transport/input-contracts.ts';
 import {
+  armInputFields,
   clearInputFields,
   describeInputDocument,
   probeInputFields,
@@ -591,22 +592,29 @@ async function inputType(params: Readonly<Record<string, unknown>>): Promise<Rec
   }
   try {
     return {
-      outcome: await typeInputFields(
-        inputSubject(page),
-        expected,
-        values,
-        params.submit === true,
-        params.armClear === true ? { armClear: true } : {},
-      ),
+      outcome: await typeInputFields(inputSubject(page), expected, values, params.submit === true),
     };
   } catch {
     return { outcome: 'uncertain' };
   }
 }
 
+/** A grant fill arms its `pagehide` clear before the write: anything malformed or failing is `refused`, so nothing is typed. */
+async function inputArm(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
+  try {
+    const page = targetPage(params.pageId);
+    const expected = browserFactsParam(params.expected);
+    if (!Array.isArray(params.fieldIds) || !params.fieldIds.every(id => typeof id === 'string'))
+      return { outcome: 'refused' };
+    return { outcome: await armInputFields(inputSubject(page), expected, params.fieldIds as string[]) };
+  } catch {
+    return { outcome: 'refused' };
+  }
+}
+
 /**
- * A grant fill's check when its page hold ends. A page that is gone holds nothing (`moved`); anything malformed or
- * failing is `unknown`, which stops the line. The job carries salted hashes, never a value.
+ * A grant fill's check before its page hold ends. A page that is gone holds nothing (`moved`); anything malformed or
+ * failing is `unknown`, which stops the line. The job names nodes, never a value.
  */
 async function inputClear(params: Readonly<Record<string, unknown>>): Promise<Record<string, unknown>> {
   let page: Page;
@@ -622,7 +630,7 @@ async function inputClear(params: Readonly<Record<string, unknown>>): Promise<Re
   }
 }
 
-/** A clear job as the daemon sent it, checked field by field: a node, a 128-bit salt and a SHA-256 digest each. */
+/** A clear job as the daemon sent it, checked field by field: a frame and a node each, and nothing else. */
 function clearJobParam(raw: unknown): BrowserInputClearJob {
   const job = (raw ?? {}) as Record<string, unknown>;
   if (typeof job.navigationId !== 'string' || job.navigationId === '' || !Array.isArray(job.fields))
@@ -633,14 +641,10 @@ function clearJobParam(raw: unknown): BrowserInputClearJob {
       typeof field.frameId !== 'string' ||
       typeof field.backendNodeId !== 'number' ||
       !Number.isInteger(field.backendNodeId) ||
-      field.backendNodeId <= 0 ||
-      typeof field.salt !== 'string' ||
-      !/^[0-9a-f]{32}$/u.test(field.salt) ||
-      typeof field.digest !== 'string' ||
-      !/^[0-9a-f]{64}$/u.test(field.digest)
+      field.backendNodeId <= 0
     )
-      throw new Error('a clear field needs a node, a salt and a digest');
-    return { frameId: field.frameId, backendNodeId: field.backendNodeId, salt: field.salt, digest: field.digest };
+      throw new Error('a clear field needs a frame and a node');
+    return { frameId: field.frameId, backendNodeId: field.backendNodeId };
   });
   if (fields.length === 0 || fields.length > 8) throw new Error('a clear job names 1 to 8 fields');
   return { navigationId: job.navigationId, fields };
@@ -1025,6 +1029,8 @@ async function act(request: Request): Promise<Record<string, unknown>> {
       return await inputType(params);
     case 'inputProbe':
       return await inputProbe(params);
+    case 'inputArm':
+      return await inputArm(params);
     case 'inputClear':
       return await inputClear(params);
     case 'pointer': {

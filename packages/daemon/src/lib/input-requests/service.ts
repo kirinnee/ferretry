@@ -74,7 +74,7 @@ import {
   probeable,
   spellsPassword,
 } from './lock.ts';
-import type { LoginObserver } from './login-observer.ts';
+import type { LoginDelivery, LoginObserver } from './login-observer.ts';
 import type {
   InputAgendaPort,
   InputAgentNotifier,
@@ -216,6 +216,15 @@ interface Held {
 const PAGE_MARK = '~page:';
 const pageName = (name: string): string => `${PAGE_MARK}${name}`;
 const isPageHold = (hold: QuarantineHold): boolean => hold.names.every(name => name.startsWith(PAGE_MARK));
+
+/** The names a hold on a request's target takes: its key and up to three more it was seen under, a page's marked. */
+function holdNames(request: InputRequest, seenNames: readonly string[] | undefined): readonly string[] {
+  const surfaceNames = [...new Set([request.target.key, ...(seenNames ?? [])])].slice(0, 4);
+  return request.target.kind === 'browser' ? surfaceNames.map(pageName) : surfaceNames;
+}
+
+/** How long before a grant fill's page hold ends its clear takes a hold of its own and runs. */
+const CLEAR_LEAD_MS = 2_000;
 
 export interface InputRequestServiceDependencies {
   readonly target: InputTargetPort;
@@ -599,10 +608,18 @@ export class InputRequestService {
     return [...here.filter(grant => grant.state === 'in-force'), ...here.filter(grant => grant.state !== 'in-force')];
   }
 
-  /** Whether a grant in force is about this target: the card is then raised quiet, and the fill decides after. */
+  /**
+   * Whether a grant is about this target and may fill it: in force, or one whose sign-in attempt is still open (a later
+   * step continues on the use it spent). The card is then raised quiet, and the fill decides after.
+   */
   private grantLikely(sessionId: string, target: InputTarget, matchKey: string | undefined, now: number): boolean {
     if (target.kind === 'secret') return false;
-    return this.grantsAt(sessionId, matchKey).some(grant => grant.state === 'in-force' && grant.expiresAt > now);
+    const ledger = this.deps.grants?.ledger;
+    return this.grantsAt(sessionId, matchKey).some(
+      grant =>
+        grant.expiresAt > now &&
+        (grant.state === 'in-force' || (grant.state === 'used-up' && ledger?.joinable(grant.id, now) === true)),
+    );
   }
 
   /**
@@ -620,7 +637,8 @@ export class InputRequestService {
     const grants = this.deps.grants;
     const { sessionId } = held.request;
     const here = this.grantsAt(sessionId, held.matchKey);
-    if (grants === undefined || here.length === 0) return;
+    // A card raised quiet whose line ended (revoked, expired) while it was raised is the owner's again, at once.
+    if (grants === undefined || here.length === 0) return await this.unquiet(held, GRANT_MISS_CONTEXT_LINE);
     let chosen: SignInGrant | undefined;
     try {
       const decided = await this.decideGrant(held, facts, here, grants);
@@ -653,11 +671,18 @@ export class InputRequestService {
           },
           {
             recheck: async seen => {
-              const again = await this.matchAgain(held, seen, grant, grants);
+              // The grant as it stands NOW (a revoke, an expiry or a stop since the raise counts), on the facts just seen.
+              const now = grants.of(sessionId).find(each => each.id === grant.id);
+              if (now === undefined) throw new GrantMissed('expired');
+              const again = await this.matchAgain(held, seen, now, grants);
               if (!again.ok) throw new GrantMissed(again.reason);
               identity = again.identity;
             },
-            typed: (job, holdMs) => this.clearAfterHold(held, grant, grants, job, holdMs),
+            held: () => {
+              const now = grants.of(sessionId).find(each => each.id === grant.id);
+              return now !== undefined && now.state !== 'stopped' && now.expiresAt > this.deps.clock.now();
+            },
+            typed: (job, holdMs, names) => this.clearBeforeHoldEnds(held, grant, grants, job, holdMs, names),
           },
         );
         settle();
@@ -704,6 +729,7 @@ export class InputRequestService {
       const reservation = grants.ledger.reserve(
         { id: grant.id, signIn: grant.signIn, remaining: grant.remaining },
         held.request.sessionId,
+        match.fills,
         match.fieldSet,
         seen.now,
       );
@@ -812,24 +838,32 @@ export class InputRequestService {
   }
 
   /**
-   * WHEN THE PAGE HOLD ENDS, a password a grant fill typed must not still be sitting in its field: the browser checks
-   * each field against a salted hash of what was typed and empties one that still holds it. `cleared` or `unknown`
-   * (fails closed) stops the line (`did-not-move-on`): the page didn't move on as the owner approved.
+   * BEFORE THE PAGE HOLD ENDS, a password a grant fill typed must not still be sitting in its field. Shortly before the
+   * write's hold ends ({@link CLEAR_LEAD_MS}), a hold of its own is taken on the same page, which cannot expire while it
+   * is in flight; the browser then empties any typed field that still holds a value, and only then is that hold let go.
+   * So no read of the page ever falls between the hold and the clear. `cleared` or `unknown` (fails closed) stops the
+   * line (`did-not-move-on`): the page didn't move on as the owner approved.
    */
-  private clearAfterHold(
+  private clearBeforeHoldEnds(
     held: Held,
     grant: SignInGrant,
     grants: SignInGrantSource,
     job: ClearJob,
     holdMs: number,
+    names: readonly string[],
   ): void {
-    const { sessionId, target } = held.request;
+    const { sessionId, target, id } = held.request;
     void this.deps.timers
-      .after(holdMs)
+      .after(Math.max(0, holdMs - CLEAR_LEAD_MS))
       .then(async () => {
-        const outcome =
-          (await this.deps.target.clear?.(sessionId, target, job).catch(() => 'unknown' as const)) ?? 'unknown';
-        if (outcome !== 'moved') await grants.stopped(grant, 'did-not-move-on');
+        const clearing = this.deps.quarantine.begin(sessionId, names, id);
+        try {
+          const outcome =
+            (await this.deps.target.clear?.(sessionId, target, job).catch(() => 'unknown' as const)) ?? 'unknown';
+          if (outcome !== 'moved') await grants.stopped(grant, 'did-not-move-on');
+        } finally {
+          this.deps.quarantine.release(clearing);
+        }
       })
       .catch(() => undefined);
   }
@@ -1639,22 +1673,26 @@ export class InputRequestService {
         throw new InputRequestError('unavailable', 'Ferretry could not record the attempt, so nothing was typed');
       }
       // A grant fill that types a password into a page has its fields emptied on `pagehide` (armed before the write) and
-      // checked when the hold ends.
+      // checked before the hold ends.
       const clear =
         grant === undefined
           ? undefined
           : clearJobOf(
               seen.facts,
-              fields.map((field, index) => ({
-                field: field.id,
-                text: (values[index] as InputFieldValue).text,
-                secret: field.sensitivity === 'secret',
-              })),
+              fields.filter(field => field.sensitivity === 'secret').map(field => field.id),
             );
       // Every value that is masked is held before it is typed, so a read racing the write already hides it.
       for (const [index, field] of fields.entries())
         if (maskedFromReads(field, typed))
           this.deps.values.hold(request.sessionId, (values[index] as InputFieldValue).text, request.agendaItemId);
+      // A grant fill types only while its line is still held: a revoke, an expiry or a stop since the last look ends it
+      // here, with nothing awaited between this check and the write.
+      if (grant !== undefined && !grant.held()) {
+        await this.letGo(hold);
+        hold = undefined;
+        await this.journalQuietly({ ...held.request, state: 'pending' }, 'requested');
+        throw new GrantMissed('expired');
+      }
       const outcome: TypeResult = await this.deps.target
         .type(request.sessionId, request.target, values, submitted, seen.facts, {
           // A code left visible on the strength of a proven code program is typed only while one still holds it.
@@ -1704,7 +1742,12 @@ export class InputRequestService {
       }
       await this.settle(hold);
       hold = undefined;
-      if (clear !== undefined) grant?.typed(clear, (held.request.lock?.seconds ?? INPUT_QUARANTINE_SECONDS) * 1000);
+      if (clear !== undefined)
+        grant?.typed(
+          clear,
+          (held.request.lock?.seconds ?? INPUT_QUARANTINE_SECONDS) * 1000,
+          holdNames(request, held.names),
+        );
       if (pasted !== undefined) this.deps.sealed?.used(request.sessionId, pasted);
       await stored(false);
       const saved =
@@ -1718,6 +1761,7 @@ export class InputRequestService {
         deliveredAt,
         body.entry ?? (saved?.ok === true ? body.save?.entry : undefined),
         body.signIn,
+        by.kind === 'plan' || by.kind === 'rule' ? by.kind : 'owner',
       );
       const made = codeFields.length > 0 && factor !== undefined ? factor : undefined;
       await this.finish(held, 'delivered', undefined, by, {
@@ -1806,6 +1850,7 @@ export class InputRequestService {
     deliveredAt: number,
     login: LoginEntryId | undefined,
     tapped: SignInId | undefined,
+    filledBy: LoginDelivery['by'],
   ): Promise<void> {
     const observer = this.deps.observer;
     const { request } = held;
@@ -1836,6 +1881,7 @@ export class InputRequestService {
         surfaces: [...held.names],
         since: Date.parse(request.raisedAt),
         deliveredAt,
+        by: filledBy,
       });
     } catch {
       // A fact not kept is a fact not kept: the delivery already happened.
@@ -2016,9 +2062,7 @@ export class InputRequestService {
     seenNames: readonly string[] | undefined,
     window = QUARANTINE_MS,
   ): Promise<QuarantineHold> {
-    const surfaceNames = [...new Set([request.target.key, ...(seenNames ?? [])])].slice(0, 4);
-    const names = request.target.kind === 'browser' ? surfaceNames.map(pageName) : surfaceNames;
-    const hold = this.deps.quarantine.begin(request.sessionId, names, request.id, window);
+    const hold = this.deps.quarantine.begin(request.sessionId, holdNames(request, seenNames), request.id, window);
     try {
       await this.journalHold(hold, INPUT_QUARANTINE_EVENT_TYPES.started, this.deps.clock.now() + QUARANTINE_MS, true);
     } catch {
@@ -2858,8 +2902,10 @@ class GrantMissed extends Error {
 
 /** What a write under a grant does beyond a tap's: matches again on what was looked at, and clears a password later. */
 interface GrantWrite {
-  /** Throws (nothing typed) when the grant no longer covers the facts just seen. */
+  /** Throws (nothing typed) when the grant, read again, no longer covers the facts just seen. */
   recheck(seen: Extract<ObserveResult, { readonly ok: true }>): Promise<void>;
-  /** A page password was typed: what to check and empty once the hold (`holdMs`) ends. */
-  typed(job: ClearJob, holdMs: number): void;
+  /** Whether the grant is still held, asked synchronously as the last thing before the write. */
+  held(): boolean;
+  /** A page password was typed: what to check and empty before the hold (`holdMs`, on `names`) ends. */
+  typed(job: ClearJob, holdMs: number, names: readonly string[]): void;
 }

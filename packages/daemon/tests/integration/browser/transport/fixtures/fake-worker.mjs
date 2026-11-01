@@ -255,12 +255,20 @@ function inputReply(id, method, params) {
       true,
       page === 'garbled'
         ? { outcome: 'maybe' }
-        : page === 'arms'
-          ? // A grant fill's write: typed only when the client asked for the pagehide clear, and only then.
-            { outcome: params?.armClear === true ? 'typed' : 'target_changed' }
-          : { outcome: params?.values?.length === 1 && params?.submit === true ? 'typed' : 'target_changed' },
+        : { outcome: params?.values?.length === 1 && params?.submit === true ? 'typed' : 'target_changed' },
     );
-  // The check when a grant fill's hold ends: a salted hash in, one word out, never a value either way.
+  // A grant fill arms its pagehide clear before the write: the fields to arm ride the wire, the answer is one word.
+  else if (method === 'inputArm')
+    reply(
+      id,
+      true,
+      page === 'garbled'
+        ? { outcome: 'maybe' }
+        : {
+            outcome: params?.fieldIds?.[0] === 'password' && params?.expected?.kind === 'browser' ? 'armed' : 'refused',
+          },
+    );
+  // The check before a grant fill's hold ends: nodes in, one word out, never a value either way.
   else if (method === 'inputClear')
     reply(
       id,
@@ -269,7 +277,7 @@ function inputReply(id, method, params) {
         ? { outcome: 'maybe' }
         : page === 'gone'
           ? { outcome: 'moved' }
-          : { outcome: params?.job?.fields?.[0]?.digest?.length === 64 ? 'cleared' : 'unknown' },
+          : { outcome: params?.job?.fields?.[0]?.backendNodeId === 7 ? 'cleared' : 'unknown' },
     );
 }
 

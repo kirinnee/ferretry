@@ -104,11 +104,18 @@ interface Options {
   session?: string;
   /** Runs at each look at the target, numbered from 1 (the raise's look, then the write's). */
   onLook?: (look: number, h: { setScripted(next: boolean): void }) => void;
+  /** Runs as each journal event is published: `delivering` is the last step before the write. */
+  onJournal?: (type: string) => void;
+  /** Runs while the card is being raised, before the request is held. */
+  onRaise?: () => void;
 }
 
 function harness(options: Options = {}) {
   const writes: string[] = [];
   const typeOptions: (TypeOptions | undefined)[] = [];
+  const submits: boolean[] = [];
+  const delivered: (string | undefined)[] = [];
+  const heldDuringClear: boolean[] = [];
   const sinks: string[] = [];
   const cards: InputCard[] = [];
   const quietAtRaise: boolean[] = [];
@@ -124,7 +131,8 @@ function harness(options: Options = {}) {
   let looks = 0;
   let card = 1;
   let id = 1;
-  const clock = { now: () => NOW };
+  let clockAt = NOW;
+  const clock = { now: () => clockAt };
   const values = new EphemeralValues(clock);
   const index = new MemoryLoginIndex();
   const sealed = new MemorySecretDocuments();
@@ -164,19 +172,23 @@ function harness(options: Options = {}) {
         });
         return { ok: true, facts };
       },
-      type: async (_session, _target, typed, _submit, _expected, more) => {
+      type: async (_session, _target, typed, submit, _expected, more) => {
         typeOptions.push(more);
+        submits.push(submit);
         if ((options.written ?? 'typed') === 'typed') writes.push(...typed.map(value => value.text));
         return options.written ?? 'typed';
       },
       clear: async (_session, _target, job) => {
         clears.push(job);
+        // The page must still be held from the ferret while its fields are checked and emptied.
+        heldDuringClear.push(service.pageHeld(options.session ?? SESSION, ['app']) !== undefined);
         return options.clear ?? 'moved';
       },
     },
     agenda: {
       raise: async (_session, raised) => {
         cards.push(raised);
+        options.onRaise?.();
         quietAtRaise.push(service.quietCard(options.session ?? SESSION, raised.requestId));
         sinks.push(JSON.stringify(raised));
         return { ok: true, id: `A${card++}` as AgendaId };
@@ -187,7 +199,10 @@ function harness(options: Options = {}) {
     },
     notifier: { tell: async (_session, at, message) => void sinks.push(`${at}: ${message}`) },
     journal: {
-      publish: async (_session, event) => void sinks.push(JSON.stringify(event)),
+      publish: async (_session, event) => {
+        options.onJournal?.(event.type);
+        sinks.push(JSON.stringify(event));
+      },
       history: async () => [],
       quarantine: async (_session, event) => void sinks.push(JSON.stringify(event)),
       quarantines: async () => [],
@@ -213,7 +228,10 @@ function harness(options: Options = {}) {
     logins,
     hostName: 'kirin-box',
     grants,
-    observer: { delivered: async () => undefined, tainted: () => scripted },
+    observer: {
+      delivered: async delivery => void delivered.push(delivery.by),
+      tainted: () => scripted,
+    },
   });
   const everything = async (): Promise<string> =>
     [...sinks, JSON.stringify(await service.list(HOST)), JSON.stringify(lines)].join('\n');
@@ -222,6 +240,9 @@ function harness(options: Options = {}) {
     grants,
     writes,
     typeOptions,
+    submits,
+    delivered,
+    heldDuringClear,
     sinks,
     cards,
     quietAtRaise,
@@ -241,6 +262,9 @@ function harness(options: Options = {}) {
     },
     setEnabled: (next: boolean) => {
       enabled = next;
+    },
+    advance: (ms: number) => {
+      clockAt += ms;
     },
   };
 }
@@ -622,23 +646,25 @@ describe('a code Ferretry makes is typed only with its tick, and never returned'
   });
 });
 
-describe('a password left in a field is emptied when the hold ends, and the line stops', () => {
-  it('should ask the browser with a salted hash, never the value, once the page hold ends', async () => {
+describe('a password left in a field is emptied before the hold ends, and the line stops', () => {
+  it('should ask the browser about the typed nodes only, while the page is still held, shortly before the hold ends', async () => {
     const h = harness({ clear: 'moved' });
     await approve(h, await github(h), { remaining: 2 });
     await raised(h);
     const hold = h.timers.at(-1);
-    should(hold?.ms).equal(120_000);
+    // Two seconds before the write's 120-second hold ends.
+    should(hold?.ms).equal(118_000);
+    // Even when the timer fires late, after the write's own hold has run out, the clear holds the page itself.
+    h.advance(125_000);
     hold?.fire();
     await settled();
 
-    should(h.clears).have.length(1);
-    const job = h.clears[0] as ClearJob;
-    should(job.navigationId).equal('loader-1');
-    should(job.fields).have.length(1);
-    should(job.fields[0]).match({ frameId: 'main', backendNodeId: 12 });
-    should(JSON.stringify(job)).not.containEql(PASSWORD);
+    should(h.clears).deepEqual([{ navigationId: 'loader-1', fields: [{ frameId: 'main', backendNodeId: 12 }] }]);
+    should(h.heldDuringClear).deepEqual([true]);
+    should(JSON.stringify(h.clears)).not.containEql(PASSWORD);
     should(h.stopped).deepEqual([]);
+    // Its own hold is let go once the clear answered.
+    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
   });
 
   for (const outcome of ['cleared', 'unknown'] as const)
@@ -650,6 +676,149 @@ describe('a password left in a field is emptied when the hold ends, and the line
       await settled();
       should(h.stopped).deepEqual(['0:did-not-move-on']);
     });
+});
+
+describe('a fill is held from the ferret like a tap, and pressed like one', () => {
+  it('should hold the page after a plan fill', async () => {
+    const h = harness();
+    await approve(h, await github(h));
+    await raised(h);
+    should(h.service.pageHeld(SESSION, ['app'])).not.be.undefined();
+  });
+
+  it('should press Enter after the last value, unless the ferret raised the card to submit itself', async () => {
+    const pressed = harness();
+    await approve(pressed, await github(pressed));
+    await raised(pressed);
+    should(pressed.submits).deepEqual([true]);
+
+    const own = harness();
+    await approve(own, await github(own));
+    await raised(own, { ...SIGN_IN, submit: 'agent' });
+    should(own.submits).deepEqual([false]);
+  });
+
+  it('should tell the login observer the fill was the plan’s, not an owner’s tap', async () => {
+    const h = harness();
+    await approve(h, await github(h));
+    await raised(h);
+    await settled();
+    should(h.delivered).deepEqual(['plan']);
+  });
+
+  it('should keep the password out of the ferret’s own view as well as every record', async () => {
+    const h = harness();
+    await approve(h, await github(h));
+    const { view } = await raised(h);
+    await settled();
+    should(JSON.stringify(view)).not.containEql(PASSWORD);
+    should(JSON.stringify(view)).not.containEql(USERNAME);
+    should(await h.everything()).not.containEql(PASSWORD);
+  });
+});
+
+describe('one use is one sign-in attempt, and each role is typed once per use', () => {
+  const CODE_RAISE: InputRaise = {
+    target: { kind: 'browser', key: 'app' },
+    prompt: 'GitHub wants the 2FA code',
+    fields: [{ id: 'otp', sensitivity: 'code', element: { kind: 'ref', ref: 'e3' } }],
+    submit: 'owner-default',
+  };
+  const PASSWORD_ONLY: InputRaise = {
+    target: { kind: 'browser', key: 'app' },
+    prompt: 'GitHub wants your password again',
+    fields: [{ id: 'pass', sensitivity: 'secret', element: { kind: 'ref', ref: 'e2' } }],
+    submit: 'owner-default',
+  };
+  const SIX = { algorithm: 'SHA1', digits: 6, period: 30 } as const;
+
+  it('should fill the password page and then the code page on one use', async () => {
+    const h = harness();
+    const signIn = await github(h);
+    await plantSeed(h.directory.accounts, 'GITHUB', SEED, 'Authenticator app');
+    await approve(h, signIn, { fields: ['password', 'totp', 'username'] });
+    await raised(h);
+
+    h.setFacts(
+      loginPage({ navigationId: 'loader-2' }, [field('otp', {}, { type: 'text', autocomplete: 'one-time-code' })]),
+    );
+    const { view } = await raised(h, CODE_RAISE);
+
+    should(view.state).equal('delivered');
+    should(h.writes).deepEqual([USERNAME, PASSWORD, totpCode(SEED, SIX, NOW) as string]);
+    should(h.used).deepEqual([`${PLAN}:0`]);
+    // The code step joined the open attempt, so its card was raised quiet too.
+    should(h.quietAtRaise).deepEqual([true, true]);
+  });
+
+  it('should never type the password a second time on one use: a confirm-password form asks the owner', async () => {
+    const h = harness();
+    await approve(h, await github(h));
+    await raised(h);
+
+    h.setFacts(loginPage({ navigationId: 'loader-2' }, [field('pass', {}, { name: 'sudo_password' })]));
+    const { view, request } = await raised(h, PASSWORD_ONLY);
+
+    should(h.writes).deepEqual([USERNAME, PASSWORD]);
+    should(view.state).equal('pending');
+    should(request?.preapproval).match({ outcome: 'did-not-apply', reason: 'used-up' });
+  });
+
+  it('should spend a second use for a second password', async () => {
+    const h = harness();
+    await approve(h, await github(h), { remaining: 2 });
+    await raised(h);
+
+    h.setFacts(loginPage({ navigationId: 'loader-2' }, [field('pass')]));
+    await raised(h, PASSWORD_ONLY);
+
+    should(h.writes).deepEqual([USERNAME, PASSWORD, PASSWORD]);
+    should(h.used).deepEqual([`${PLAN}:0`, `${PLAN}:0`]);
+  });
+});
+
+describe('a revoke or an expiry during a fill stops the write', () => {
+  it('should type nothing when the line is revoked between the raise and the write’s look', async () => {
+    let h: Harness | undefined;
+    h = harness({ onLook: look => look === 2 && h?.lines.splice(0) });
+    await approve(h, await github(h));
+
+    const { view, request } = await raised(h);
+
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(request?.preapproval).match({ outcome: 'did-not-apply', reason: 'expired' });
+    should(h.used).deepEqual([]);
+  });
+
+  it('should type nothing when the line is revoked just before the write, after every look', async () => {
+    let h: Harness | undefined;
+    h = harness({ onJournal: type => type.endsWith('delivering') && h?.lines.splice(0) });
+    await approve(h, await github(h));
+
+    const { view, request } = await raised(h);
+
+    should(h.writes).deepEqual([]);
+    should(h.typeOptions).deepEqual([]);
+    should(view.state).equal('pending');
+    should(request?.preapproval).match({ outcome: 'did-not-apply', reason: 'expired' });
+    // Nothing was typed, so the page is not held and the use is given back.
+    should(h.service.pageHeld(SESSION, ['app'])).be.undefined();
+    should(h.used).deepEqual([]);
+  });
+
+  it('should hand a quiet card back to the owner at once when its line ends while it is raised', async () => {
+    let h: Harness | undefined;
+    h = harness({ onRaise: () => h?.lines.splice(0) });
+    await approve(h, await github(h));
+
+    const { view } = await raised(h);
+
+    should(h.quietAtRaise).deepEqual([true]);
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(h.sinks).containEql(`noted ${view.id}: A task plan line didn't apply here, so you're asked as usual.`);
+  });
 });
 
 describe('a terminal line is for sudo, su or doas running setuid root', () => {
@@ -695,6 +864,15 @@ describe('a terminal line is for sudo, su or doas running setuid root', () => {
     }
   });
 
+  it('should treat a prompt not in line mode (a relay) as no match at all, and type nothing', async () => {
+    const h = harness({ facts: sudoPrompt({ canonical: false }) });
+    await approve(h, await sudoAccount(h));
+    const { view, request } = await raised(h, SUDO);
+    should(h.writes).deepEqual([]);
+    should(view.state).equal('pending');
+    should(request?.preapproval).be.undefined();
+  });
+
   it('should treat a shell that only calls itself sudo as no match at all', async () => {
     const h = harness({ facts: sudoPrompt({ program: undefined, trustedProgram: undefined }) });
     await approve(h, await sudoAccount(h));
@@ -734,6 +912,7 @@ describe('the rate limit is the ledger’s, after the matcher', () => {
       const earlier = h.grants.ledger.reserve(
         { id: `plan:${'cd'.repeat(16)}:${String(index)}`, signIn, remaining: 1 },
         `session-${String(index)}`,
+        ['username', 'password'],
         'password+username',
         NOW - 60_000,
       );

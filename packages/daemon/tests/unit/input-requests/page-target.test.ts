@@ -42,6 +42,9 @@ function host(
     refound?: BrowserInputObservation;
     /** This browser cannot check or empty a field when a grant fill's hold ends. */
     clearless?: boolean;
+    /** This browser can't arm the pagehide clear (an older worker), or refuses to now. */
+    armless?: boolean;
+    arm?: 'armed' | 'refused';
     cleared?: 'cleared' | 'moved' | 'unknown' | Error;
   } = {},
 ) {
@@ -76,13 +79,19 @@ function host(
       calls.push(`shot:${pageId}`);
       return { pngBase64: 'AAAA', clip: { x: 0, y: 0, w: 10, h: 10 } };
     },
-    inputType: async (pageId, _expected, values, submit, more) => {
-      calls.push(
-        `type:${pageId}:${values.map(value => value.field).join(',')}:${submit}${more?.armClear === true ? ':arm' : ''}`,
-      );
+    inputType: async (pageId, _expected, values, submit) => {
+      calls.push(`type:${pageId}:${values.map(value => value.field).join(',')}:${submit}`);
       if (outcome instanceof Error) throw outcome;
       return outcome;
     },
+    ...(options.armless === true
+      ? {}
+      : {
+          inputArm: async (pageId: string, _expected: unknown, fieldIds: readonly string[]) => {
+            calls.push(`arm:${pageId}:${fieldIds.join(',')}`);
+            return options.arm ?? 'armed';
+          },
+        }),
     ...(options.clearless === true
       ? {}
       : {
@@ -336,22 +345,24 @@ describe('PageInputTarget: a grant fill’s clear (R3a-4)', () => {
   const VALUES = [{ field: 'password', text: 'hunter2-hunter2' }];
   const JOB = {
     navigationId: 'loader-1',
-    fields: [{ frameId: 'main', backendNodeId: 9, salt: 'a'.repeat(32), digest: 'b'.repeat(64) }],
+    fields: [{ frameId: 'main', backendNodeId: 9 }],
   };
 
-  it('should ask the browser to arm the pagehide clear with the write, and only when asked', async () => {
+  it('should arm the pagehide clear on the password fields first, in the same page turn, and only when asked', async () => {
     const armed = host();
     should(await armed.target.type('s1', APP, VALUES, true, FACTS_PAGE, { armClear: true })).equal('typed');
-    should(armed.calls).containEql('type:page-1:password:true:arm');
+    should(armed.calls).eql(['page:s1:app', 'arm:page-1:password', 'type:page-1:password:true']);
     const plain = host();
     should(await plain.target.type('s1', APP, VALUES, true, FACTS_PAGE)).equal('typed');
-    should(plain.calls).containEql('type:page-1:password:true');
+    should(plain.calls).eql(['page:s1:app', 'type:page-1:password:true']);
   });
 
-  it('should type nothing when the browser cannot clear what a grant fill types', async () => {
-    const { target, calls } = host({ clearless: true });
-    should(await target.type('s1', APP, VALUES, true, FACTS_PAGE, { armClear: true })).equal('target_changed');
-    should(calls.some(call => call.startsWith('type:'))).be.false();
+  it('should type nothing when the browser refuses the arm, cannot arm (an older worker) or cannot clear', async () => {
+    for (const options of [{ arm: 'refused' as const }, { armless: true }, { clearless: true }]) {
+      const { target, calls } = host(options);
+      should(await target.type('s1', APP, VALUES, true, FACTS_PAGE, { armClear: true })).equal('target_changed');
+      should(calls.some(call => call.startsWith('type:'))).be.false();
+    }
   });
 
   it('should check and empty the typed fields in the page’s own queue, and read anything odd as unknown', async () => {

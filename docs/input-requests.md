@@ -1257,7 +1257,7 @@ or nothing is typed:
 
 | #       | Check                                                                                                                                                                                                                                                                                         | Miss                                                                                                 |
 | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| 1       | The line is in force: not expired, this very session (a sub-ferret is another), not stopped, uses left                                                                                                                                                                                        | `expired` · `other-session` · `stopped` · `used-up`                                                  |
+| 1       | The line is in force: not expired, this very session (a sub-ferret is another), not stopped (uses are row 9)                                                                                                                                                                                  | `expired` · `other-session` · `stopped` · `used-up`                                                  |
 | 2       | The sign-in still exists, is still a password sign-in of its own, and still belongs to the account (its immutable key)                                                                                                                                                                        | `sign-in-gone`                                                                                       |
 | 3       | Its login domains (or `tool@host`) are those pinned at approval                                                                                                                                                                                                                               | `place-changed` (stops the line)                                                                     |
 | 4       | Its recipe version is the one pinned                                                                                                                                                                                                                                                          | `recipe-changed` (stops the line)                                                                    |
@@ -1265,7 +1265,7 @@ or nothing is typed:
 | 6       | Every field is a role the line covers; `private` never; a code needs the code tick; one username and one password at most                                                                                                                                                                     | `field-not-covered` · `code-not-ticked`                                                              |
 | 7       | The ferret's `secretHint`, if any, names this sign-in or its account (it can only prevent)                                                                                                                                                                                                    | `ferret-named-another`                                                                               |
 | 8       | The account holds every value it must type (username, password, an automatic 2FA key)                                                                                                                                                                                                         | `account-lacks-field`                                                                                |
-| 9       | At most 10 fills an hour of one sign-in, 30 grant fills an hour in one session                                                                                                                                                                                                                | `rate`                                                                                               |
+| 9       | A use left, or a later step of the open attempt typing a role it has not typed; at most 10 fills an hour of one sign-in, 30 an hour per session                                                                                                                                               | `used-up` · `rate`                                                                                   |
 | 10–16   | A page: `https:` (not merely secure), every field in the page's own origin, the password a visible, uncovered `<input type=password>`, every other field visible and uncovered, no human check, **no page script the ferret ever ran in this session**, a code field the daemon may type into | `not-https` · `frame` · `password-field` · `field-hidden` · `challenge` · `scripted` · `code-target` |
 | 10t–12t | A terminal: the program PROVED by the kernel, line mode, echo off, a known secret reader; every process of the foreground group setuid root, and the tool `sudo`, `su` or `doas`; one field, the password                                                                                     | `not-proved` · `not-system` · `field-not-covered`                                                    |
 | 17      | The form's identity is one the sign-in has history with (for a password), and the one the first fill of this field set pinned                                                                                                                                                                 | `form-changed` (stops the line)                                                                      |
@@ -1278,9 +1278,14 @@ or nothing is typed:
   pressed unless the ferret raised the card with `submit: 'agent'`. The write gets the same lock and hold as a tap,
   never a shorter one.
 - **Uses are spent synchronously** (`SignInGrantLedger`), inside the session lock, counting fills still in flight,
-  so two raises can't both spend a line's last use. One use is one sign-in attempt: username, password and code
-  steps within three minutes spend one use. A write that typed nothing gives the use back; an uncertain one spends
-  it. With several lines for one sign-in, the one that expires first is used first.
+  so two raises can't both spend a line's last use. **One use is one sign-in attempt, and each role is typed once per
+  use.** An attempt records the roles it typed; a later step within three minutes that types only roles it has not
+  typed continues on the same use. So a username page, a password page and a code page are ONE use, and a two-step
+  sign-in works with the default of 1. A role already typed needs a new use: a second password (a "confirm your
+  password" form) is never typed on the use the sign-in spent. A write that typed nothing gives the use back; an
+  uncertain one spends it. With several lines for one sign-in, the one that expires first is used first.
+- **A revoke stops a fill in flight.** The write re-reads the line after its last look and checks it is still held,
+  synchronously, as the last thing before typing: a line revoked, expired or stopped during the fill types nothing.
 - **A miss is the usual card.** Nothing is typed, the card stays for the owner, and the owner's view of the request
   carries `preapproval: { by: 'plan', plan, line, outcome: 'did-not-apply', reason }`; the app draws one line from
   `grantMissLine` ("Task plan line 2 didn't apply: the sign-in form changed since you approved it"). The ferret is
@@ -1290,16 +1295,19 @@ or nothing is typed:
 - **A filled card closes at once**, so the agenda history shows "Filled under your task plan (line 2) on
   github.com." It is raised **quiet**: it does not buzz the owner's phone ([notifications](notifications.md)).
 - **A password left in a field is emptied, and the line stops.** Before a grant types a password into a page, the
-  browser arms a `pagehide` listener in an isolated world that empties every password input when the page is hidden
-  (the back/forward cache would otherwise keep the value). When the page hold ends, the daemon asks the browser
-  whether the field STILL holds what was typed. It sends only a salted SHA-256 of it, made at the write, and the
-  browser compares in an isolated world. A field that still holds it is emptied and the line stops
-  (`did-not-move-on`); `unknown` stops it too. The test is about the value, not navigation: a single-page app that
-  swapped the form has moved on once the field no longer holds it. Terminals need none: a line-mode prompt
-  consumes the line.
+  browser arms (its own `inputArm` call) a `pagehide` listener in an isolated world that empties every password
+  input when the page is hidden (the back/forward cache would otherwise keep the value). A worker that refuses the
+  call (one from before it) types nothing. Shortly before the page hold ends, the daemon takes a hold of its own on
+  the page, so no read falls between, and asks the browser whether a typed field still holds ANY value (same
+  document, node still connected). It sends only which nodes, never a value. A field that holds one is emptied,
+  whatever it holds (a character added during the hold changes nothing), and the line stops (`did-not-move-on`). A
+  node DevTools says is gone, an empty field or another document is `moved`; any other failure is `unknown`, which
+  stops the line too. A single-page app that swapped the form has moved on once the node is gone. Terminals need
+  none: a line-mode prompt consumes the line.
 - **Audited, never a value.** `input.delivered` carries `by: 'plan'`, the plan, the line and the sign-in beside the
   usual names and flags. A miss is recorded as `input.requested` with `preapproval: 'did-not-apply'`, the plan, the
-  line and `because`. A stopped line is recorded as `task-plan-line-stopped`.
+  line and `because`. A stopped line is recorded as `task-plan-line-stopped`; a write back the plan record refuses
+  fails closed (the line is matched no more) and is recorded as `task-plan-line-failed`.
 
 ### Later, and off by default: standing permission
 
@@ -1403,6 +1411,11 @@ makes the card stricter.
   ferret using its tools normally (it can only ask; the owner ticks, a passkey confirms, the daemon matches) and page
   text or terminal output steering where a value goes: it can't add a line, approve one, or move a fill to another
   origin, a frame, a hidden or text field, or a renamed program.
+- **A terminal line is proved by the program's START NAME, not its binary.** The kernel proof names a setuid-root
+  program by the name it was started under, so a program root installed (`passwd`, `chfn`) started through a link
+  named `sudo` reads as `sudo`, and the approved password goes to it. With full sudo that gives nothing beyond the
+  approval; under a restricted sudoers it could set a password the ferret then knows. Approve a terminal line only
+  where that is acceptable.
 - **A `plain` value is visible by design.** It is marked on the card.
 - **A browser `private` value can appear in an after-screenshot** (a later phase).
 - **A one-time `code` is weaker than `private` on purpose** (the owner's decision, see [one-time codes](#one-time-codes-code)).

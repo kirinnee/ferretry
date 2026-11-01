@@ -1137,6 +1137,24 @@ describe('TaskPlanService: what a fill writes back (R3a-4)', () => {
     ).match([{ line: 1, because: 'form-changed' }]);
   });
 
+  it("should fail closed when a write back can't be recorded: the line is matched no more, and it is recorded", async () => {
+    const used = await approved(2);
+    // An instant no record can hold: the use can't be written, so the line is let go rather than left in force.
+    used.w.service.lineUsed(used.plan.id, 0, Number.NaN);
+    should(used.w.service.signInLineHeld(used.plan.id, 0)).be.false();
+    should(used.w.service.signInLines(SESSION)).eql([]);
+
+    const stopped = await approved(2);
+    // A reason the record refuses: the stop can't be written, so the line is let go all the same.
+    await stopped.w.service.lineStopped(stopped.plan.id, 0, 'not-a-reason' as never);
+    should(stopped.w.service.signInLineHeld(stopped.plan.id, 0)).be.false();
+    should(stopped.w.service.signInLines(SESSION)).eql([]);
+    for (const w of [used.w, stopped.w])
+      should(
+        w.audits.filter(entry => entry.detail?.action === 'task-plan-line-failed').map(entry => entry.detail),
+      ).match([{ line: 1 }]);
+  });
+
   it('should hold no line once the plan ends', async () => {
     const { w, plan } = await approved(2);
     await w.service.revoke(PHONE, SESSION, plan.id);

@@ -101,16 +101,19 @@ export class PageInputTarget implements InputTargetPort {
     try {
       return await this.host.inputOnPage(sessionId, target.key, async (port, pageId) => {
         if (pageId !== expected.pageId) return 'target_changed';
-        // A browser that cannot arm the clear a grant fill asks for types nothing: the clear is part of the fill.
-        if (options?.armClear === true && port.inputClear === undefined) return 'target_changed';
+        if (options?.armClear === true) {
+          // A grant fill arms its pagehide clear first, in this same turn of the page's queue. A browser that can't (or a
+          // worker from before the call, which refuses it) types nothing: the clear is part of the fill.
+          const passwords = values
+            .map(value => value.field)
+            .filter(
+              field => expected.fields.find(each => each.fieldId === field)?.field.type?.toLowerCase() === 'password',
+            );
+          if (port.inputArm === undefined || port.inputClear === undefined) return 'target_changed';
+          if ((await port.inputArm(pageId, expected, passwords)) !== 'armed') return 'target_changed';
+        }
         began = true;
-        return await port.inputType(
-          pageId,
-          expected,
-          values,
-          submit,
-          ...(options?.armClear === true ? [{ armClear: true as const }] : []),
-        );
+        return await port.inputType(pageId, expected, values, submit);
       });
     } catch {
       // A failure before the write began typed nothing; one after it may have typed part of the values.

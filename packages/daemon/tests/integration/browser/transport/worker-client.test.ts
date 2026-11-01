@@ -734,7 +734,7 @@ describe('browser worker client — the input bridge', () => {
   });
 });
 
-describe('browser worker client — a grant fill’s clear (R3a-4)', () => {
+describe('browser worker client — a grant fill’s arm and clear (R3a-4)', () => {
   const facts = {
     kind: 'browser' as const,
     pageId: 'p1',
@@ -743,21 +743,21 @@ describe('browser worker client — a grant fill’s clear (R3a-4)', () => {
     navigationId: 'loader-1',
     fields: [],
   } as never;
-  const job = {
-    navigationId: 'loader-1',
-    fields: [{ frameId: 'main', backendNodeId: 7, salt: 'a'.repeat(32), digest: 'b'.repeat(64) }],
-  };
+  const job = { navigationId: 'loader-1', fields: [{ frameId: 'main', backendNodeId: 7 }] };
 
-  it('should send the pagehide clear with the write only when asked', async () => {
+  it('should send the arm with the page, its facts and the fields, and believe only armed', async () => {
     const client = await connect();
-    const values = [{ field: 'password', text: 'x' }];
-    should(await client.inputType('arms', facts, values, true, { armClear: true })).equal('typed');
-    should(await client.inputType('arms', facts, values, true)).equal('target_changed');
+    should(await client.inputArm('p1', facts, ['password'])).equal('armed');
+    should(await client.inputArm('p1', facts, ['username'])).equal('refused');
+    should(await client.inputArm('garbled', facts, ['password'])).equal('refused');
+    // A worker that refuses the call (as one from before it does, as an unknown method) arms nothing.
+    should(await client.inputArm('refuses', facts, ['password'])).equal('refused');
   });
 
   it('should carry the clear job and believe only its three words, reading anything else as unknown', async () => {
     const client = await connect();
     should(await client.inputClear('p1', job)).equal('cleared');
+    should(await client.inputClear('p1', { ...job, fields: [{ frameId: 'main', backendNodeId: 8 }] })).equal('unknown');
     should(await client.inputClear('gone', job)).equal('moved');
     should(await client.inputClear('garbled', job)).equal('unknown');
     should(await client.inputClear('refuses', job)).equal('unknown');

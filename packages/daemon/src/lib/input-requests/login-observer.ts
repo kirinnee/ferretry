@@ -109,6 +109,11 @@ export interface LoginDelivery {
   readonly since: number;
   /** When the write returned, taken before anything else is awaited. */
   readonly deliveredAt: number;
+  /**
+   * Who filled it: the owner's tap, a task-plan line or a paste rule. A fill under a plan is not a tap, and a standing
+   * rule's history (R3c) must count taps only.
+   */
+  readonly by?: 'owner' | 'plan' | 'rule';
 }
 
 /** A one-time code the DAEMON made from a saved 2FA key and typed, then submitted: did it go through? */

@@ -76,6 +76,8 @@ export class PlanSignInGrants implements SignInGrantSource {
   of(sessionId: string): readonly SignInGrant[] {
     // A grant's attempts and pins die with it: a line no longer held is forgotten here.
     this.ledger.retain(id => {
+      // Only this source's own grants: another source sharing the ledger (R3c's rules) keeps its attempts and pins.
+      if (!id.startsWith('plan:')) return true;
       const [, planId, line] = id.split(':');
       return planId !== undefined && line !== undefined && this.plans.signInLineHeld(planId, Number(line));
     });
