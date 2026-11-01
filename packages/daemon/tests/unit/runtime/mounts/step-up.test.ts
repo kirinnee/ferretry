@@ -39,6 +39,8 @@ const warden = { authorization: 'Bearer warden-secret' };
 const b64 = (bytes: ArrayLike<number>): string => Buffer.from(Uint8Array.from(bytes)).toString('base64url');
 const CREDENTIAL_ID = b64([1, 2, 3, 4]);
 const SPKI = b64([9, 9, 9, 9]);
+const STAGE = `st_${'a'.repeat(24)}`;
+const BOUND = 'b'.repeat(64);
 
 /**
  * The ONE place the registry is built. The browser's copy of the app holds a live session throughout,
@@ -121,6 +123,8 @@ interface World {
   readonly rotation?: DeviceKeyRotationPort;
   /** A clock a case may move; the fixed instant otherwise. */
   readonly clock?: { now: number };
+  /** The staged 2FA seeds the options bind an `add-2fa-key` challenge to: stage id → what its proof is bound to. */
+  readonly stages?: Readonly<Record<string, string>>;
 }
 
 function mount(world: World = {}) {
@@ -155,7 +159,13 @@ function mount(world: World = {}) {
   const grants = grantSubsystem({ grants: DEFAULT_CAPABILITY_GRANTS });
   const surface = (async () => {
     await grants.refresh();
-    return new ApiDispatcher(new ApiRouter(stepUpRoutes(service)), credentials, grants, undefined, service);
+    return new ApiDispatcher(
+      new ApiRouter(stepUpRoutes(service, { boundSubjectOf: stage => world.stages?.[stage] })),
+      credentials,
+      grants,
+      undefined,
+      service,
+    );
   })();
   return { store, verifier, registry, service, surface, audited };
 }
@@ -264,11 +274,11 @@ describe('step-up routes', () => {
     should(world.service.claimFresh(browser, 'catalog-install')).be.true();
   });
 
-  it('should mint no proof for adding a 2FA key until this daemon stages one to bind it to', async () => {
-    // Arrange
+  it('should issue no add-2fa-key challenge for a stage that is not waiting, so no such proof can be minted', async () => {
+    // Arrange — no stage is waiting
     const world = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]) });
     const dispatcher = await world.surface;
-    const body = json({ origin: ORIGIN, act: 'add-2fa-key', subject: `st_${'a'.repeat(24)}` });
+    const body = json({ origin: ORIGIN, act: 'add-2fa-key', subject: STAGE });
 
     // Act
     const options = await dispatcher.dispatch(
@@ -278,10 +288,82 @@ describe('step-up routes', () => {
       request({ method: 'POST', path: '/v1/step-up', body: assertionBody, ...asDevice }),
     );
 
-    // Assert — no challenge was issued for the act, so no assertion can be stamped with it
-    should(options.status).equal(400);
+    // Assert
+    should(options.status).equal(404);
+    should(jsonBody(options)).containEql({ code: 'stage_not_found' });
     should(stepped.status).not.equal(200);
+    should(world.service.claimFresh(browser, 'add-2fa-key', BOUND)).be.false();
+  });
+
+  it('should bind an add-2fa-key proof to the one stage it named, and open no step-up with it', async () => {
+    // Arrange
+    const world = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]), stages: { [STAGE]: BOUND } });
+    const dispatcher = await world.surface;
+
+    // Act
+    const options = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/step-up/options',
+        body: json({ origin: ORIGIN, act: 'add-2fa-key', subject: STAGE }),
+        ...asDevice,
+      }),
+    );
+    const stepped = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/step-up', body: assertionBody, ...asDevice }),
+    );
+
+    // Assert — a short proof for that save only: no window, no act-less fresh proof, nothing for another stage
+    should([options.status, stepped.status]).deepEqual([200, 200]);
+    should(jsonBody(stepped)).deepEqual({
+      expiresAt: new Date(NOW + PASSKEY_CHALLENGE_TTL_SECONDS * 1_000).toISOString(),
+    });
+    should(world.service.held(browser)).be.false();
+    should(world.service.freshlyHeld(browser)).be.false();
+    should(world.service.claimFresh(browser)).be.false();
+    should(world.service.claimFresh(browser, 'catalog-install')).be.false();
+    should(world.service.claimFresh(browser, 'add-2fa-key', `${BOUND}0`)).be.false();
+    should(world.service.claimFresh(browser, 'add-2fa-key', BOUND)).be.true();
+    // Single use.
+    should(world.service.claimFresh(browser, 'add-2fa-key', BOUND)).be.false();
+  });
+
+  it('should never let a proof for another act, or a step-up, stand in for add-2fa-key', async () => {
+    // Arrange — a fresh proof stamped for a catalog install, which also opens a step-up window
+    const world = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]), stages: { [STAGE]: BOUND } });
+    const dispatcher = await world.surface;
+    await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/step-up/options',
+        body: json({ origin: ORIGIN, act: 'catalog-install' }),
+        ...asDevice,
+      }),
+    );
+    await dispatcher.dispatch(request({ method: 'POST', path: '/v1/step-up', body: assertionBody, ...asDevice }));
+
+    // Act + Assert
+    should(world.service.held(browser)).be.true();
+    should(world.service.claimFresh(browser, 'add-2fa-key', BOUND)).be.false();
+    // @ts-expect-error — an act every caller must prove names what its proof is bound to
     should(world.service.claimFresh(browser, 'add-2fa-key')).be.false();
+    should(world.service.claimFresh(browser, 'catalog-install')).be.true();
+  });
+
+  it('should refuse a subject on any act but add-2fa-key, and add-2fa-key without one', async () => {
+    // Arrange
+    const dispatcher = await mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]), stages: { [STAGE]: BOUND } })
+      .surface;
+    const ask = async (body: unknown) =>
+      (
+        await dispatcher.dispatch(
+          request({ method: 'POST', path: '/v1/step-up/options', body: json(body), ...asDevice }),
+        )
+      ).status;
+
+    // Act + Assert
+    should(await ask({ origin: ORIGIN, act: 'catalog-install', subject: STAGE })).equal(400);
+    should(await ask({ origin: ORIGIN, act: 'add-2fa-key' })).equal(400);
   });
 
   it('should never cache an answer, success or refusal', async () => {
@@ -1034,5 +1116,21 @@ describe('step-up routes: key rotation (B6)', () => {
       should([response.status, jsonBody(response).code]).deepEqual([401, stepUpRefusalCode('not-verified')]);
       should(rotated).deepEqual([]);
     });
+  });
+});
+
+describe('step-up options and the acts every caller must prove', () => {
+  it('should issue no challenge for such an act without a binding, nor a binding for any other act', async () => {
+    // Arrange
+    const world = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]) });
+    const caller = { device: browser, hostLocal: false };
+
+    // Act
+    const unbound = await world.service.stepUpOptions(caller, ORIGIN, 'add-2fa-key', '');
+    const stray = await world.service.stepUpOptions(caller, ORIGIN, 'catalog-install' as never, BOUND as never);
+
+    // Assert
+    should(unbound).match({ ok: false, refusal: 'not-verified' });
+    should(stray).match({ ok: false, refusal: 'not-verified' });
   });
 });

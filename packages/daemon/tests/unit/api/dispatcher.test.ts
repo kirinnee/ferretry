@@ -1751,15 +1751,16 @@ describe('spending a single-use step-up', () => {
       should(claimed).deepEqual([false]);
     });
 
-    it('should never let the machine, or any proof minted so far, stand in for an act every caller must prove', async () => {
+    it('should never let the machine stand in for an act every caller must prove, and claim it by its subject', async () => {
       // Arrange — a witness that would hand over a proof for anything, and a route asking for add-2fa-key
       const asked: unknown[] = [];
       const witness: StepUpWitness = {
         held: () => true,
-        claimFresh: (_subject, act) => {
-          asked.push(act);
+        freshlyHeld: () => true,
+        claimFresh: ((_subject: unknown, act?: string, bound?: string) => {
+          asked.push([act, bound]);
           return true;
-        },
+        }) as NonNullable<StepUpWitness['claimFresh']>,
       };
       const claimed: boolean[] = [];
       const stage = `st_${'a'.repeat(24)}`;
@@ -1786,9 +1787,9 @@ describe('spending a single-use step-up', () => {
         request({ method: 'POST', path: '/v1/claims', headers: { authorization: 'Bearer admin-secret' } }),
       );
 
-      // Assert — refused every time, and no proof was spent on it
-      should(claimed).deepEqual([false, false, false, false]);
-      should(asked).deepEqual([]);
+      // Assert — the device's claim names the stage; the short form and the machine's token never reach the witness
+      should(claimed).deepEqual([true, false, false, false]);
+      should(asked).deepEqual([['add-2fa-key', stage]]);
     });
   });
 

@@ -250,8 +250,8 @@ the store as **damaged** — it fails closed, never empty:
 To repair it, in the **older** daemon, before upgrading again:
 
 1. Find the login the older daemon says has lost its password or 2FA seed.
-2. Type its password (or seed) again, or delete that login: `fy account edit <NAME> --password` (or `--totp`),
-   or `fy account rm <NAME>`; Settings › Accounts does the same.
+2. Type its password (or seed) again, or delete that login: `fy account edit <NAME> --password` (or `--totp` in
+   that older `fy`), or `fy account rm <NAME>`; Settings › Accounts does the same.
 3. Upgrade. The index now names only values that are there, so it migrates.
 
 ### Routes
@@ -272,8 +272,7 @@ its body is read, exactly as for the vault (honest-client until a ferret has its
 | `POST /v1/accounts/sign-ins/:si/recipe/proposals/:pid`    | the owner approves or declines a ferret's recipe                       |
 | `POST /v1/accounts/:id/merge {from}`, `…/apart {from}`    | "these look like one account": merge, or keep apart                    |
 
-2FA keys have no route here yet: a seed is saved only with a passkey bound to that one save, which is its own
-change. Until then the older `PUT /v1/secrets/logins/:id` with `totp` saves an account's one seed.
+2FA keys have routes of their own: see [2FA keys](#2fa-keys).
 
 **"These look like one account" is offered, never automatic, and never stored.** It is computed on demand inside
 the vault: same username (trimmed, case-folded) and same password, compared in constant time. The answer is
@@ -286,7 +285,8 @@ when a via link would point an account at itself; via links and `[[FROM]]` in re
 **The saved-login routes keep working for one release, as a projection.** `GET /v1/secrets/logins` (and its hint)
 answer one saved login per account: `match` is every place it signs in, `domains` its websites' login domains,
 and method, recipe and auto-apply its primary sign-in's (its website, else its first terminal). A change to the
-account (label, username, password, its one seed, rename, delete) always works. A change to **where or how** it
+account (label, username, password, removing its seed, rename, delete) always works; a seed is saved only with a
+passkey ([2FA keys](#2fa-keys)), so a `totp` seed sent there is `403 add_2fa_key_needs_passkey`. A change to **where or how** it
 signs in (`match`, `domains`, `method`, `recipe`, `autoApplyRecipe`) maps 1:1 onto the account's one sign-in,
 and for an account that signs in at several places it is `409 account_has_sign_ins`: an older app's or CLI's body
 cannot say which sign-in it means, and guessing would be a lossy write. A fact the daemon sees is filed on the
@@ -297,6 +297,77 @@ that sign-in's own places; anything else is not kept.
 its offers name the sign-in, and a deliver's `signIn` must be one of the account's. The daemon still does not
 report `accounts.signins.1`, because the app ships first: until the Accounts screen lands, an app keeps today's
 surface.
+
+### 2FA keys
+
+An account keeps a list of **2FA keys** (at most 8): an authenticator app (`totp`), a phone number that gets SMS
+codes (`sms`, its last digits only), an inbox that gets email codes (`email`), a push app (`push`) or a security key.
+Only a `totp` key can hold a value — its **seed** — and then Ferretry makes that account's codes ("automatic codes").
+At most 4 seeds per account (a backup app, a re-enrolled authenticator). Every other kind is a label and a few plain
+facts, so a card can say where a code went. The seed rests in `login-secrets.json` like the password; the index
+names its seal, never the value. The code is `packages/daemon/src/lib/secrets/two-factor-seeds.ts`.
+
+**A seed is saved only with a passkey, every time, from every caller — the machine itself included.** A saved seed
+means the password and the code then come from this one machine, and every ferret holds the admin token. So the
+save is two steps, and the passkey binds to the one save:
+
+1. **Stage.** The owner pastes the key (base32, or an `otpauth://totp/…` link) with the warning ticked. The daemon
+   parses it again, checks it is for this account, seals it into **memory only** for two minutes, and masks it at
+   once. The answer says what it read (issuer, account name, digits, period, algorithm), never the seed.
+2. **Passkey.** The step-up options name the stage (`act: add-2fa-key`, `subject: st_…`). The challenge — and so the
+   proof — is bound to `sha256("ferretry.add-2fa-key.v1\0" + account key + "\0" + stage)`.
+3. **Commit.** Only a fresh proof for `add-2fa-key` bound to exactly that stage saves it, once, within two minutes.
+   The seed is sealed under a fresh `…_TOTP_…` name and the index names it: one all-or-nothing change.
+
+What does **not** stand in for that proof: the admin token on loopback (it is not a paired device, so it holds no
+proof at all), an unlock, a step-up window, `stepUpOnActions` off, a proof for any other act, or a proof for another
+stage. And the other way round: a proof for a seed opens no step-up window and is not the fresh proof that minting a
+pairing code, widening a device or any other act takes. Both directions are tested.
+
+- **No passkey on any device: refused** — "add a passkey in Settings › Security first" (`409 passkey_required`).
+  Seeds saved before this release keep working; they are not asked again.
+- **A key that says it is for another account** (its issuer or account name does not fit) is refused
+  (`409 factor_mismatch`) unless the owner ticked "save it here anyway". The warning is advice: the passkey is the act.
+- **Set up from a code card** (`request`): it saves only to the account the daemon matched for that card
+  (`409 not_this_cards_account`), so a ferret cannot steer which account a card's key lands on.
+- **At most 4 seeds wait at once on the whole daemon, 2 per caller, and callers that are not a paired device share
+  only 3** (`429`), so nobody fills its memory by staging and a ferret holding junk stages never keeps the owner's
+  app from staging. **Only the caller that staged a seed, or a paired device, may read, drop or card it** (another
+  caller is told it is not waiting): the stage id is on the agenda card, so knowing it proves nothing.
+  **Until ferrets have their own credentials (RF-2/RF-3), "caller" is honest-client:** a ferret that uses the admin
+  token without its session header counts as the SAME caller as your own shell's `fy` (`admin-cli`), so it can use up
+  or drop the stages `fy` made — never save a seed (that still takes your passkey). A paired device always keeps its
+  own slot, so the app can always stage.
+- **The old seed path is refused in the store itself** (`applySeed`), not only at its route: no caller, now or later,
+  writes a seed except through the passkey-bound save.
+- **Write-only.** No route, command, log, agenda item or push answers a seed or a code made from it. After the save
+  the owner sees "Automatic codes: on".
+- **Removing a key never asks for a passkey**: it only narrows what this machine can do. Its seed is swept with it.
+
+**From the command line**, `fy account factor add <ACCOUNT> --totp` shows the warning, takes the key at a hidden
+prompt (a base32 key or an `otpauth://totp` link), stages it and puts a card on the agenda — "Save automatic codes to
+GitHub · kirinnee? Asked by `fy` on kirin-box at 14:02 UTC" — then waits. Allow it in the app with your passkey and it
+prints "Saved"; Deny, or two minutes, and nothing is saved. `--session <id>` names the board for the card (the
+current session's by default). The CLI has no way to save a seed itself. **The old path is closed:**
+`PUT /v1/secrets/logins/:id` with a `totp` seed — today's app form and `fy account edit --totp` — answers
+`403 add_2fa_key_needs_passkey` with where to go instead; `totp: null` (remove the seed) still works there.
+
+The card is answered by its Allow (the passkey ceremony, then the commit) or Deny (drop the stage). An agenda answer
+saves nothing, so an app from before these cards shows the daemon's words and cannot save. **The app's half — the
+"Set up automatic codes" panel and the Allow on this card — ships in the next release (R2-5); until then a seed
+cannot be saved at all**, and the ones already saved keep working.
+
+| Route (owner only, `secrets`/`configure`)                  | Does                                                                                | Passkey                    |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------- |
+| `POST /v1/accounts/:id/factors`                            | add a key with no value (`sms`, `email`, `push`, `security-key`, a `totp` you hold) | no                         |
+| `PATCH` / `DELETE /v1/accounts/:id/factors/:tf`            | relabel; remove (its seed swept)                                                    | never                      |
+| `POST /v1/accounts/:id/factors/seed`                       | stage a seed (memory, two minutes); answers what was read                           | no (it saves nothing)      |
+| `GET` / `DELETE /v1/accounts/:id/factors/seed/:stage`      | where a stage stands; drop it                                                       | no                         |
+| `POST /v1/accounts/:id/factors/seed/:stage/commit`         | save it                                                                             | **yes, bound to `:stage`** |
+| `POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app` | put it on the agenda `{ session }` so the owner confirms it                         | no (it saves nothing)      |
+
+Each is a kept `secrets.changed` record by account and key id (`factor-added`, `factor-relabelled`,
+`factor-removed`, `factor-seed-staged`, …); a seed's save records `proof: passkey`. None records a value.
 
 ## Damaged is not empty
 

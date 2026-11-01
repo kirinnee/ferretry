@@ -45,6 +45,7 @@ import {
   type WardenRunView,
   type WardenStatusView,
   type WardenVerdictsView,
+  TotpParametersSchema,
 } from '@ferretry/protocol';
 import type { DaemonIdentity } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
@@ -151,6 +152,8 @@ import {
   SecretStoreError,
   SecretUseService,
   SecretVault,
+  TwoFactorSeedStages,
+  type TwoFactorSeedStagesDeps,
   type SecretVaultDocument,
 } from '../../../../src/lib/secrets/index.ts';
 import { SessionAttachService } from '../../../../src/lib/session/attach/index.ts';
@@ -2037,6 +2040,8 @@ export interface SecretWorld {
   /** This daemon's identity, for copying secrets; absent reads as an identity it cannot load. */
   readonly identity?: DaemonIdentity;
   readonly clock?: ClockPort;
+  /** The staged 2FA seeds' world: whether a passkey exists (yes), the input cards, the agenda, and their clock. */
+  readonly seeds?: Partial<Pick<TwoFactorSeedStagesDeps, 'anyPasskey' | 'cards' | 'agenda' | 'clock' | 'newStageId'>>;
 }
 
 /** A clock the vault fixtures stamp with, so every summary in a test is the same instant. */
@@ -2079,7 +2084,35 @@ export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
     }),
     imports: new SecretImportService({ crypto, identity, directory, clock }),
     exports: new SecretExportService({ crypto, identity, vault: new SecretVault(documents, cipher), clock }),
+    seeds: new TwoFactorSeedStages({
+      accounts: logins.accounts,
+      cipher,
+      clock: world.seeds?.clock ?? { nowMs: () => Date.parse(clock.now()) },
+      anyPasskey: world.seeds?.anyPasskey ?? (async () => true),
+      hostName: 'kirin-box',
+      ...(world.seeds?.cards === undefined ? {} : { cards: world.seeds.cards }),
+      ...(world.seeds?.agenda === undefined ? {} : { agenda: world.seeds.agenda }),
+      ...(world.seeds?.newStageId === undefined ? {} : { newStageId: world.seeds.newStageId }),
+    }),
   };
+}
+
+/**
+ * Saves a seed the way the passkey-bound commit does (`AccountDirectory.addSeed`): the old saved-login route no longer
+ * takes one, so a fixture that needs an account with a seed plants it here.
+ */
+export async function plantSeed(
+  accounts: NonNullable<SecretSubsystem['accounts']>,
+  id: string,
+  seed: string,
+  label?: string,
+  params: Parameters<typeof TotpParametersSchema.parse>[0] = {},
+): Promise<void> {
+  const { key } = await accounts.seedTarget(id);
+  await accounts.addSeed(key, seed, {
+    params: TotpParametersSchema.parse(params),
+    ...(label === undefined ? {} : { label }),
+  });
 }
 
 /** What a grant fixture starts from: the recorded decision. */

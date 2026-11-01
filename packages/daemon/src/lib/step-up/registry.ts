@@ -1,4 +1,11 @@
-import { PASSKEY_CHALLENGE_TTL_SECONDS, STEP_UP_TTL_SECONDS, type StepUpAct } from '@ferretry/protocol';
+import {
+  type EveryCallerStepUpAct,
+  type MachineSkippableStepUpAct,
+  PASSKEY_CHALLENGE_TTL_SECONDS,
+  STEP_UP_TTL_SECONDS,
+  type StepUpAct,
+  stepUpSkippableAtMachine,
+} from '@ferretry/protocol';
 import { bytesEqual } from '@ferretry/relay';
 
 /** One running copy of the app on one device: what a step-up and a challenge are bound to. */
@@ -23,7 +30,17 @@ interface HeldStepUp {
 /** A passkey proved for an act: when, and the act the person said it was for (none when they did not say). */
 interface FreshProof {
   readonly provedAtMs: number;
-  readonly act: StepUpAct | undefined;
+  readonly act: MachineSkippableStepUpAct | undefined;
+}
+
+/**
+ * A passkey proved for an act asked of EVERY caller (`STEP_UP_ACTS_EVERY_CALLER`), bound to the ONE thing it is for:
+ * `bound` is the digest the challenge was issued with (`addTwoFactorKeySubject`, the account and the staged seed).
+ */
+interface BoundProof {
+  readonly provedAtMs: number;
+  readonly act: EveryCallerStepUpAct;
+  readonly bound: string;
 }
 
 /** The step-up window in force, in minutes. `0` means a step-up admits exactly one governed act. */
@@ -65,6 +82,12 @@ export class StepUpRegistry {
    * while it is a challenge's lifetime old: the window a step-up otherwise covers is not enough.
    */
   readonly #fresh = new Map<string, FreshProof>();
+  /**
+   * Proofs for an act every caller must prove, kept APART from {@link #fresh} and {@link #held}: nothing that asks
+   * "did this copy prove a passkey just now?" without naming the act and its subject can see one, and no such proof
+   * can be spent on anything but the one save it was proved for. One per copy of the app; a newer one replaces it.
+   */
+  readonly #bound = new Map<string, BoundProof>();
   readonly #spans = new Map<string, AppSessionSpan>();
 
   constructor(
@@ -95,12 +118,22 @@ export class StepUpRegistry {
    * AN ACT (a step-up): the unlock opens the machine and is never one (`fresh: false`), so it can never
    * be spent on an act that adds access. `act` stamps the proof with the act it was proved for.
    */
-  grant(subject: StepUpSubject, nowMs: number, fresh = true, act?: StepUpAct): number {
+  grant(subject: StepUpSubject, nowMs: number, fresh = true, act?: MachineSkippableStepUpAct): number {
     const held: HeldStepUp = { grantedAtMs: nowMs };
     this.#held.set(key(subject), held);
     if (fresh) this.#fresh.set(key(subject), { provedAtMs: nowMs, act });
     else this.#fresh.delete(key(subject));
     return this.#endOf(held);
+  }
+
+  /**
+   * Records a passkey proved for an act every caller must prove, bound to `bound`, and returns when it lapses (one
+   * challenge's life). It is NOT a step-up: it opens no window ({@link held} stays as it was) and it is not the fresh
+   * proof an act-less check reads ({@link freshlyHeld}), so it buys the one save it names and nothing else.
+   */
+  grantBound(subject: StepUpSubject, nowMs: number, act: EveryCallerStepUpAct, bound: string): number {
+    this.#bound.set(key(subject), { provedAtMs: nowMs, act, bound });
+    return nowMs + PASSKEY_CHALLENGE_TTL_SECONDS * 1_000;
   }
 
   /**
@@ -149,10 +182,30 @@ export class StepUpRegistry {
    * Given an `act`, only a proof stamped for exactly that act is taken: a leftover proof for another act
    * (or none) stays where it is and does not count.
    */
-  claimFresh(subject: StepUpSubject, nowMs: number, act?: StepUpAct): boolean {
+  claimFresh(subject: StepUpSubject, nowMs: number, act?: MachineSkippableStepUpAct): boolean;
+  /**
+   * An act every caller must prove takes only a proof stamped with that act AND bound to exactly `bound`, within a
+   * challenge's life, on a copy of the app with a live session. A proof bound to anything else stays where it is.
+   */
+  claimFresh(subject: StepUpSubject, nowMs: number, act: EveryCallerStepUpAct, bound: string): boolean;
+  claimFresh(subject: StepUpSubject, nowMs: number, act?: StepUpAct, bound?: string): boolean {
+    if (act !== undefined && !stepUpSkippableAtMachine(act)) return this.#claimBound(subject, nowMs, act, bound);
     if (!this.freshlyHeld(subject, nowMs)) return false;
     if (act !== undefined && this.#fresh.get(key(subject))?.act !== act) return false;
     this.#fresh.delete(key(subject));
+    return true;
+  }
+
+  #claimBound(subject: StepUpSubject, nowMs: number, act: EveryCallerStepUpAct, bound: string | undefined): boolean {
+    const id = key(subject);
+    const proof = this.#bound.get(id);
+    if (bound === undefined || bound === '' || proof === undefined) return false;
+    if (nowMs - proof.provedAtMs >= PASSKEY_CHALLENGE_TTL_SECONDS * 1_000) {
+      this.#bound.delete(id);
+      return false;
+    }
+    if (proof.act !== act || proof.bound !== bound || this.#liveSpan(id, nowMs) === undefined) return false;
+    this.#bound.delete(id);
     return true;
   }
 
@@ -165,6 +218,7 @@ export class StepUpRegistry {
   forgetDevice(deviceId: string): void {
     for (const id of [...this.#held.keys()]) if (id.startsWith(`${deviceId}\u0000`)) this.#held.delete(id);
     for (const id of [...this.#fresh.keys()]) if (id.startsWith(`${deviceId}\u0000`)) this.#fresh.delete(id);
+    for (const id of [...this.#bound.keys()]) if (id.startsWith(`${deviceId}\u0000`)) this.#bound.delete(id);
   }
 
   /** When a held step-up lapses under the window in force now. A single-use one lasts a challenge's life. */
@@ -181,6 +235,7 @@ export class StepUpRegistry {
     this.#spans.delete(id);
     this.#held.delete(id);
     this.#fresh.delete(id);
+    this.#bound.delete(id);
     return undefined;
   }
 
@@ -188,6 +243,7 @@ export class StepUpRegistry {
   #begin(id: string): AppSessionSpan {
     this.#held.delete(id);
     this.#fresh.delete(id);
+    this.#bound.delete(id);
     const span: AppSessionSpan = { open: 0, closedAtMs: undefined };
     this.#spans.set(id, span);
     return span;
@@ -214,6 +270,11 @@ interface IssuedChallenge {
   readonly boundTo?: Uint8Array;
   /** The act a `step-up` challenge was asked for, which the proof it buys is stamped with. */
   readonly act?: StepUpAct;
+  /**
+   * What a challenge for an act every caller must prove is bound to (`addTwoFactorKeySubject`): the proof it buys is
+   * bound to the same, and spent only on it.
+   */
+  readonly bound?: string;
 }
 
 /**
@@ -235,6 +296,7 @@ export class ChallengeLedger {
     nowMs: number,
     boundTo?: Uint8Array,
     act?: StepUpAct,
+    bound?: string,
   ): void {
     for (const [id, issued] of this.#issued) if (issued.expiresAtMs <= nowMs) this.#issued.delete(id);
     this.#issued.set(`${purpose}\u0000${key(subject)}`, {
@@ -242,6 +304,7 @@ export class ChallengeLedger {
       expiresAtMs: nowMs + PASSKEY_CHALLENGE_TTL_SECONDS * 1_000,
       ...(boundTo === undefined ? {} : { boundTo }),
       ...(act === undefined ? {} : { act }),
+      ...(bound === undefined ? {} : { bound }),
     });
   }
 
@@ -253,12 +316,12 @@ export class ChallengeLedger {
     return this.#take(subject, purpose, nowMs)?.bytes;
   }
 
-  /** {@link take}, with the act the challenge was asked for. */
+  /** {@link take}, with the act the challenge was asked for and what it is bound to. */
   takeWithAct(
     subject: StepUpSubject,
     purpose: ChallengePurpose,
     nowMs: number,
-  ): { readonly bytes: Uint8Array; readonly act?: StepUpAct } | undefined {
+  ): { readonly bytes: Uint8Array; readonly act?: StepUpAct; readonly bound?: string } | undefined {
     return this.#take(subject, purpose, nowMs);
   }
 

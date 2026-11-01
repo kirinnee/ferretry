@@ -61,6 +61,19 @@ describe('StatePasskeyStore', () => {
     should(await Bun.file(path).exists()).equal(false);
   });
 
+  it('should say whether ANY device holds a passkey, from the file', async () => {
+    // Arrange
+    const { store } = await fixture('passkeys-any');
+    const before = await store.any();
+
+    // Act
+    await store.add(passkey('cred-any', deviceTwo));
+
+    // Assert — none, then one on another device: saving a 2FA seed asks only that one exists
+    should(before).be.false();
+    should(await store.any()).be.true();
+  });
+
   it('should round-trip a passkey, keeping each device’s passkeys apart', async () => {
     // Arrange
     const { store } = await fixture('passkeys-round-trip');

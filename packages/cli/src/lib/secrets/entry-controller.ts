@@ -3,7 +3,6 @@ import {
   LOGIN_LABEL_MAX_LENGTH,
   LOGIN_PASSWORD_MAX_LENGTH,
   LOGIN_PASSWORD_MIN_LENGTH,
-  LOGIN_TOTP_WARNING,
   LOGIN_USERNAME_MAX_LENGTH,
   LoginEntryIdSchema,
   type LoginEntrySummary,
@@ -19,7 +18,6 @@ import {
   namesPasskey,
   normalizedLoginDomain,
   type PutLoginEntryRequest,
-  TotpSeedSchema,
 } from '@ferretry/protocol';
 import type { LoginEntryPorts } from './entry-ports.ts';
 import { renderLoginEntryLine, renderLoginEntryList, renderLoginHint, renderLoginRecipe } from './entry-render.ts';
@@ -232,6 +230,11 @@ export class LoginEntryController {
       throw new Error(
         'nothing to change: name a field (--label, --match, --method, --via, --domain, --username, --password, --totp, --auto-apply-recipe ...)',
       );
+    // The old seed path has no passkey and the daemon refuses it (403): say where it went before anything is sent.
+    if (options.totp === true)
+      throw new Error(
+        `saving a 2FA seed needs your passkey now: run \`account factor add ${handleId} --totp\` and confirm it in the app. Nothing was changed`,
+      );
     const body: PutLoginEntryRequest = {};
     if (options.label !== undefined) body.label = oneLine(options.label, '--label', LOGIN_LABEL_MAX_LENGTH);
     if (options.match !== undefined) body.match = matches(options.match);
@@ -246,10 +249,6 @@ export class LoginEntryController {
     const chosen = method(loginMethodOf(existing), options);
     if (chosen !== undefined) body.method = chosen;
     if (options.password === true) body.password = await this.#askPassword(`new password for ${handleId} (hidden): `);
-    if (options.totp === true) {
-      body.totp = { seed: await this.#askSeed(options.iUnderstandTotp === true) };
-      body.totpAcknowledged = true;
-    }
     const saved = await this.ports.gateway.put(handleId, body);
     this.ports.out.success(`Updated ${renderLoginEntryLine(saved)}`);
   }
@@ -357,20 +356,6 @@ export class LoginEntryController {
     const problem = passwordProblem(value);
     if (problem !== undefined) throw new Error(problem);
     return value;
-  }
-
-  /** The warning first, then a typed "yes" (or --i-understand-totp), and only then the seed. */
-  async #askSeed(understood: boolean): Promise<string> {
-    this.#needTerminal('the 2FA seed is typed at a prompt, never given as a flag');
-    this.ports.out.success(`Keeping a 2FA seed: ${LOGIN_TOTP_WARNING}`);
-    if (!understood) {
-      const answer = await this.ports.prompt.ask('Type yes to keep the seed anyway: ');
-      if (answer.trim().toLowerCase() !== 'yes') throw new Error('no 2FA seed was kept: nothing was changed');
-    }
-    const seed = await this.ports.prompt.askHidden('2FA seed, as the setup page shows it (hidden): ');
-    if (!TotpSeedSchema.safeParse(seed).success)
-      throw new Error('that is not a base32 2FA seed of 16 to 128 characters');
-    return seed;
   }
 
   #needTerminal(why: string): void {

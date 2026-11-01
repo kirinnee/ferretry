@@ -334,16 +334,19 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
 }
 
 /**
- * A route's claim on the caller's fresh proof. An act asked of EVERY caller binds its proof to one subject, and this
- * daemon mints no such proof yet (step-up options for one are refused), so nothing satisfies it, whoever asks, the
- * machine included, and a proof minted for anything else is never spent on it. The subject-bound claim lands with the
- * staged save.
+ * A route's claim on the caller's fresh proof. A proof lives with a paired DEVICE's copy of the app, so a caller with no
+ * proven device (the machine's admin token, on loopback, or any bearer) holds none and is answered `false` for every
+ * act. An act asked of EVERY caller takes only a proof stamped with that act AND bound to exactly `subject` (the staged
+ * save, `addTwoFactorKeySubject`); an act-less claim, or one for any other act, never takes such a proof.
  */
 function claimFreshStepUp(device: RouteContext['request']['device'], stepUps: StepUpWitness): ClaimFreshStepUp {
-  return (act?: StepUpAct, _subject?: string): boolean => {
-    if (act !== undefined && !stepUpSkippableAtMachine(act)) return false;
-    return device !== undefined && stepUps.claimFresh?.(device, act) === true;
-  };
+  return ((act?: StepUpAct, subject?: string): boolean => {
+    const claim = stepUps.claimFresh;
+    if (device === undefined || claim === undefined) return false;
+    if (act !== undefined && !stepUpSkippableAtMachine(act))
+      return subject !== undefined && subject !== '' && claim(device, act, subject);
+    return claim(device, act);
+  }) as ClaimFreshStepUp;
 }
 
 /** What the remedy axis had to say about one request: nothing, a proven authority, or a refusal. */

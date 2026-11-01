@@ -290,6 +290,11 @@ const agendaCases: SchemaCase[] = [
     schema: agenda.AgendaPhoneApprovalRefSchema,
     value: { id: `pa_${'0'.repeat(23)}1` },
   },
+  {
+    name: 'attention 2FA seed pointer',
+    schema: agenda.AgendaTwoFactorSeedRefSchema,
+    value: { stage: `st_${'a'.repeat(24)}`, account: 'GITHUB' },
+  },
   { name: 'resolved attention', schema: agenda.ResolvedAgendaItemSchema, value: resolvedAgenda },
   {
     name: 'session attention summary',

@@ -928,6 +928,10 @@ import {
   LoginRecipeService,
   narrowAccountVault,
   RecipeAgendaAdapter,
+  TwoFactorSeedAgendaAdapter,
+  type TwoFactorSeedAgendaPort,
+  type TwoFactorSeedCardPort,
+  TwoFactorSeedStages,
   LoginVault,
   type LogLevel,
   type LoopBlockedClockPort,
@@ -7451,12 +7455,35 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     },
   };
   const secretCloneCrypto = new WebCryptoRelayCrypto();
+  // SAVING A 2FA SEED: staged here (memory only, masked at once), committed only with a passkey proved for that one
+  // save, from every caller. The agenda and the input cards are built further down; they are reached through these
+  // hand-offs once they are, and until then a confirm-in-app or a card-bound stage is refused.
+  let seedAgenda: TwoFactorSeedAgendaPort | undefined;
+  let seedCards: TwoFactorSeedCardPort | undefined;
+  const seedPasskeys = new StatePasskeyStore(paths, stateFiles);
+  const twoFactorSeeds = new TwoFactorSeedStages({
+    accounts: accountDirectory,
+    cipher: secretCipher,
+    clock: { nowMs: () => Date.now() },
+    anyPasskey: async () => await seedPasskeys.any(),
+    hostName: hostname(),
+    cards: { cardTarget: requestId => seedCards?.cardTarget(requestId) },
+    agenda: {
+      raise: async (sessionId, card) => {
+        if (seedAgenda === undefined) throw new Error('the agenda is not running yet');
+        return await seedAgenda.raise(sessionId, card);
+      },
+      close: async (sessionId, id, note) => await seedAgenda?.close(sessionId, id, note),
+    },
+  });
   const secrets: SecretSubsystem = {
     directory: secretDirectory,
     logins: loginDirectory,
     accounts: accountDirectory,
     // Only the look-alike answer (handles), as a closure: the route table holds nothing that opens a value.
     lookAlike: narrowVault.lookAlike,
+    // A staged 2FA seed waits here, sealed, in memory only, for the passkey bound to it (docs/secrets.md, "2FA keys").
+    seeds: twoFactorSeeds,
     // TWO places name secrets now: the operator's own recipes, and the fleet accounts a profile
     // authenticates. Both are listed, so an account whose credential is missing from the store is a
     // line on a screen before it is a session that dies at start.
@@ -7494,7 +7521,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // every read below that takes this redactor (screen, transcript, journal, processes) hides them too.
   const justTyped = new EphemeralValues({ now: () => Date.now() });
   const secretRedactor = new EphemeralAwareRedactor(
-    new SecretRedactor(combinedValues(secretVault, loginVault)),
+    new SecretRedactor(combinedValues(secretVault, loginVault, twoFactorSeeds)),
     justTyped,
   );
   // The terminals a secret was just typed into, kept from an agent and from a viewer for a window.
@@ -10410,6 +10437,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         loginFacts: accountDirectory,
       });
       inputRequests = inputRequestService;
+      // A 2FA seed set up from an input card saves only to the account matched for it; one staged at the machine asks
+      // the owner on the agenda (docs/secrets.md, "2FA keys").
+      seedCards = inputRequestService;
+      seedAgenda = new TwoFactorSeedAgendaAdapter(agenda);
       // Login recipes (docs/input-requests.md): every recipe text is checked against every value the daemon masks, and a
       // ferret's proposal waits on a card the owner answers in Settings or with `fy account recipe`.
       const loginRecipes = new LoginRecipeService({

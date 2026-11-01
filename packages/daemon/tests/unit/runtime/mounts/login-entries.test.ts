@@ -13,6 +13,7 @@ import {
   human,
   MemoryLoginIndex,
   MemorySecretDocuments,
+  plantSeed,
   secretSubsystem,
 } from './support.ts';
 
@@ -35,9 +36,8 @@ describe('the saved-login routes', () => {
       match: ['github.com'],
       username: 'kirinnee',
       password: PASSWORD,
-      totp: { seed: SEED },
-      totpAcknowledged: true,
     });
+    await plantSeed(subsystem.accounts as NonNullable<SecretSubsystem['accounts']>, 'GITHUB_KIRINNEE', SEED);
     const listed = await dispatch(subsystem, 'GET', '/v1/secrets/logins');
     const renamed = await dispatch(subsystem, 'POST', '/v1/secrets/logins/GITHUB_KIRINNEE/rename', { to: 'GITHUB' });
     const removed = await dispatch(subsystem, 'DELETE', '/v1/secrets/logins/GITHUB');
@@ -131,9 +131,8 @@ async function providerWorld(): Promise<SecretSubsystem> {
     match: ['accounts.google.com'],
     username: 'kirin@example.com',
     password: PASSWORD,
-    totp: { seed: SEED },
-    totpAcknowledged: true,
   });
+  await plantSeed(subsystem.accounts as NonNullable<SecretSubsystem['accounts']>, 'GOOGLE_KIRIN', SEED);
   await dispatch(subsystem, 'PUT', '/v1/secrets/logins/VERCEL', {
     label: 'Vercel',
     match: ['vercel.com'],

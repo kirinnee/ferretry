@@ -23,12 +23,14 @@
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
+  ADD_TWO_FACTOR_KEY_WHERE,
   type AccountId,
   type AccountIndexDocument,
   AccountIndexDocumentSchema,
   accountIndexProblems,
   type AccountRecord,
   type AccountsMigrationReport,
+  type AddTwoFactorKeyRequest,
   accountSeedFields,
   type AccountSummary,
   automaticKeysInOfferOrder,
@@ -42,6 +44,7 @@ import {
   MAX_SIGN_INS,
   MAX_SIGN_INS_PER_ACCOUNT,
   migrateLoginIndex,
+  type PatchTwoFactorKeyRequest,
   type Place,
   placeHosts,
   placeKeys,
@@ -50,7 +53,9 @@ import {
   type SignInRecord,
   type SignInSummary,
   type TotpParameters,
+  type TwoFactorId,
   type TwoFactorKeyRecord,
+  type TwoFactorKeySummary,
   foldObservation,
   recipeRenamed,
   sealedNamesOf,
@@ -104,7 +109,9 @@ export type LoginRefusal =
   | 'account_has_sign_ins'
   | 'account_has_2fa_keys'
   | 'no_sign_in'
-  | 'merge_refused';
+  | 'merge_refused'
+  | 'unknown_2fa_key'
+  | 'add_2fa_key_needs_passkey';
 
 export class LoginEntryError extends Error {
   constructor(
@@ -614,15 +621,17 @@ export class AccountDirectory {
   }
 
   /**
-   * The 2FA seed an older client writes (`PUT /v1/secrets/logins/:id` with `totp`): replaces the account's ONE seeded
-   * key (same id and label, a fresh seal), adds one when there is none, or (`null`) removes the seeded keys. An account
-   * with two or more seeded keys is refused: which one is meant cannot be read from that body.
+   * An older client's `totp` on `PUT /v1/secrets/logins/:id`. Only `null` (remove the seeded keys) does anything: a
+   * SEED is refused here, in the store, whoever calls — a seed is saved only by {@link addSeed}, after the passkey
+   * proof bound to its stage (docs/secrets.md, "2FA keys"). An account with two or more seeded keys is refused too:
+   * which one is meant cannot be read from that body.
    */
   async applySeed(
     draft: AccountDraft,
     id: AccountId,
     seed: { readonly seed: string; readonly parameters: TotpParameters } | null,
   ): Promise<void> {
+    if (seed !== null) throw new LoginEntryError('add_2fa_key_needs_passkey', ADD_TWO_FACTOR_KEY_WHERE);
     const account = this.accountIn(draft, id);
     const factors = account.factors ?? [];
     const seeded = factors.filter(factor => factor.kind === 'totp' && factor.seal !== undefined);
@@ -631,32 +640,152 @@ export class AccountDirectory {
         'account_has_2fa_keys',
         `${account.label} keeps ${String(seeded.length)} 2FA seeds; update the app or use \`fy account\` to change one`,
       );
-    let next: TwoFactorKeyRecord[];
-    if (seed === null) next = factors.filter(factor => !seeded.includes(factor));
-    else {
-      const [current] = seeded;
-      const seal = await this.seal(
-        draft,
-        account.key,
-        'totp',
-        seed.seed,
-        current?.kind === 'totp' ? current.seal : undefined,
+    const next = factors.filter(factor => !seeded.includes(factor));
+    const { factors: _old, ...rest } = account;
+    draft.accounts[id] = { ...rest, ...(next.length === 0 ? {} : { factors: next }), updatedAt: draft.at };
+  }
+
+  /**
+   * What saving a seed to an account reads of it: its immutable key (a stage is bound to it, so a rename moves
+   * nothing), its words for a card and the mismatch check, every place it signs in, its keys' labels, and how many
+   * seeds it keeps. Never a value.
+   */
+  async seedTarget(id: AccountId): Promise<SeedTarget> {
+    const { document } = await this.documents.read();
+    const account = this.accountIn(document, id);
+    const factors = account.factors ?? [];
+    return {
+      key: account.key,
+      label: account.label,
+      ...(account.username === undefined ? {} : { username: account.username }),
+      places: signInsOf(document.signIns, account.key).map(([, signIn]) => signIn.place),
+      labels: factors.map(factor => factor.label),
+      seeds: factors.filter(factor => factor.kind === 'totp' && factor.seal !== undefined).length,
+    };
+  }
+
+  /** The accounts that sign in at exactly this match key (a login domain, a site's `match` host, a `tool@host`). */
+  async accountsAt(matchKey: string): Promise<readonly AccountId[]> {
+    const { document } = await this.documents.read();
+    const keys = new Set(
+      Object.values(document.signIns)
+        .filter(signIn => placeKeys(signIn.place).includes(matchKey))
+        .map(signIn => signIn.account),
+    );
+    return Object.entries(document.accounts)
+      .filter(([, account]) => keys.has(account.key))
+      .map(([handle]) => handle);
+  }
+
+  /** A 2FA key with no value (`POST /v1/accounts/:id/factors`). A seed never comes this way: it is staged. */
+  async addFactor(id: AccountId, add: AddTwoFactorKeyRequest): Promise<TwoFactorKeySummary> {
+    return await this.transact(draft => {
+      const account = this.accountIn(draft, id);
+      const factors = account.factors ?? [];
+      assertLabelFree(factors, add.label, undefined, account.label);
+      const key = {
+        ...add,
+        id: this.freshTwoFactorId(draft),
+        addedAt: draft.at,
+        addedBy: 'owner',
+      } as TwoFactorKeyRecord;
+      draft.accounts[id] = { ...account, factors: [...factors, key], updatedAt: draft.at };
+      return twoFactorKeySummaryOf(key);
+    });
+  }
+
+  /** A new label, or the plain facts of the key's kind; `null` removes a fact. Never its kind or its seed. */
+  async patchFactor(
+    id: AccountId,
+    factorId: TwoFactorId,
+    patch: PatchTwoFactorKeyRequest,
+  ): Promise<TwoFactorKeySummary> {
+    return await this.transact(draft => {
+      const account = this.accountIn(draft, id);
+      const factors = account.factors ?? [];
+      const current = factorIn(factors, factorId, account.label);
+      if (patch.label !== undefined) assertLabelFree(factors, patch.label, factorId, account.label);
+      const facts: Partial<Record<'endsWith' | 'to' | 'app', string | null | undefined>> = {
+        ...(current.kind === 'sms' ? { endsWith: patch.endsWith } : {}),
+        ...(current.kind === 'email' ? { to: patch.to } : {}),
+        ...(current.kind === 'push' ? { app: patch.app } : {}),
+      };
+      const foreign = (['endsWith', 'to', 'app'] as const).find(
+        fact => patch[fact] !== undefined && !Object.hasOwn(facts, fact),
       );
+      if (foreign !== undefined)
+        throw new LoginEntryError('invalid_change', `a ${current.kind} 2FA key has no ${foreign}; nothing was changed`);
+      const next: Record<string, unknown> = {
+        ...current,
+        ...(patch.label === undefined ? {} : { label: patch.label }),
+      };
+      for (const [fact, value] of Object.entries(facts)) {
+        if (value === null) delete next[fact];
+        else if (value !== undefined) next[fact] = value;
+      }
+      const key = next as TwoFactorKeyRecord;
+      draft.accounts[id] = {
+        ...account,
+        factors: factors.map(factor => (factor.id === factorId ? key : factor)),
+        updatedAt: draft.at,
+      };
+      return twoFactorKeySummaryOf(key);
+    });
+  }
+
+  /**
+   * Removes a 2FA key: the index first (the commit), then its seed is swept with everything nothing points at. Never
+   * asks for a passkey: removing a key only narrows what this machine can do. `false`: there was no such key.
+   */
+  async removeFactor(id: AccountId, factorId: TwoFactorId): Promise<boolean> {
+    return await this.transact(draft => {
+      const account = this.accountIn(draft, id);
+      const factors = account.factors ?? [];
+      if (!factors.some(factor => factor.id === factorId)) return false;
+      const left = factors.filter(factor => factor.id !== factorId);
+      const { factors: _old, ...rest } = account;
+      draft.accounts[id] = { ...rest, ...(left.length === 0 ? {} : { factors: left }), updatedAt: draft.at };
+      return true;
+    });
+  }
+
+  /**
+   * THE SEED SAVE, for {@link TwoFactorSeedStages} only, after it took the passkey proof bound to the stage: the seed is
+   * sealed under a FRESH `…_TOTP_…` name of the account the stage was bound to (by its immutable key, so a rename in
+   * between moves nothing), then the index names it — the store's one all-or-nothing change. `undefined`: that
+   * account is gone.
+   */
+  async addSeed(
+    accountKey: string,
+    seed: string,
+    meta: {
+      readonly label?: string;
+      readonly params: TotpParameters;
+      readonly issuer?: string;
+      readonly accountName?: string;
+    },
+  ): Promise<{ readonly account: AccountId; readonly factor: TwoFactorKeySummary } | undefined> {
+    return await this.transact(async draft => {
+      const handle = handlesByKey(draft.accounts).get(accountKey);
+      if (handle === undefined) return undefined;
+      const account = this.accountIn(draft, handle);
+      const factors = account.factors ?? [];
       const labels = new Set(factors.map(factor => factor.label.toLowerCase()));
-      const label = current?.label ?? freeLabel(labels, 'Authenticator app');
+      if (meta.label !== undefined) assertLabelFree(factors, meta.label, undefined, account.label);
       const key: TwoFactorKeyRecord = {
-        id: current?.id ?? this.freshTwoFactorId(draft),
+        id: this.freshTwoFactorId(draft),
         kind: 'totp',
-        label,
-        seal,
-        params: seed.parameters,
+        label: meta.label ?? freeLabel(labels, DEFAULT_SEED_LABEL),
+        seal: await this.seal(draft, account.key, 'totp', seed),
+        params: meta.params,
+        ...(meta.issuer === undefined ? {} : { issuer: meta.issuer }),
+        ...(meta.accountName === undefined ? {} : { accountName: meta.accountName }),
         addedAt: draft.at,
         addedBy: 'owner',
       };
-      next = current === undefined ? [...factors, key] : factors.map(factor => (factor === current ? key : factor));
-    }
-    const { factors: _old, ...rest } = account;
-    draft.accounts[id] = { ...rest, ...(next.length === 0 ? {} : { factors: next }), updatedAt: draft.at };
+      draft.accounts[handle] = { ...account, factors: [...factors, key], updatedAt: draft.at };
+      return { account: handle, factor: twoFactorKeySummaryOf(key) };
+    });
   }
 
   /** A new handle for an account. Its sign-ins name its key and its sealed values stay where they are. */
@@ -1027,6 +1156,38 @@ export class AccountDirectory {
   }
 }
 
+/** The label a saved seed gets when the owner gave none, numbered when the account already has one. */
+const DEFAULT_SEED_LABEL = 'Authenticator app';
+
+/** What saving a seed reads of an account ({@link AccountDirectory.seedTarget}). */
+export interface SeedTarget {
+  readonly key: string;
+  readonly label: string;
+  readonly username?: string;
+  readonly places: readonly Place[];
+  readonly labels: readonly string[];
+  readonly seeds: number;
+}
+
+/** Refuses a 2FA key label the account already has (case-folded), other than `except`'s own. */
+function assertLabelFree(
+  factors: readonly TwoFactorKeyRecord[],
+  label: string,
+  except: TwoFactorId | undefined,
+  account: string,
+): void {
+  const folded = label.trim().toLowerCase();
+  if (factors.some(factor => factor.id !== except && factor.label.trim().toLowerCase() === folded))
+    throw new LoginEntryError('invalid_change', `${account} already has a 2FA key called ${label}; pick another label`);
+}
+
+/** The 2FA key an id names in an account, or a refusal. */
+function factorIn(factors: readonly TwoFactorKeyRecord[], id: TwoFactorId, account: string): TwoFactorKeyRecord {
+  const factor = factors.find(each => each.id === id);
+  if (factor === undefined) throw new LoginEntryError('unknown_2fa_key', `${account} has no 2FA key ${id}`);
+  return factor;
+}
+
 /** A label not yet taken in an account: the word, then the word and a number. */
 function freeLabel(taken: ReadonlySet<string>, word: string): string {
   if (!taken.has(word.toLowerCase())) return word;
@@ -1171,6 +1332,18 @@ export function narrowAccountVault(vault: AccountVault): {
   };
 }
 
+/**
+ * The mask name of one sealed value an account points at: `password`, `totp` (its first seed), `totp:<tf_id>` (any
+ * other seed), and — for a name that is neither, which `sealedNamesOf` never yields today — `totp:<the sealed name>`,
+ * so every value still gets a key of its own and is never left unmasked by sharing one.
+ */
+export function maskRoleOf(account: Pick<AccountRecord, 'seals' | 'factors'>, name: string): string {
+  if (name === account.seals.password) return 'password';
+  const seeded = (account.factors ?? []).filter(key => key.kind === 'totp' && key.seal !== undefined);
+  const position = seeded.findIndex(key => key.kind === 'totp' && key.seal === name);
+  return position === 0 ? 'totp' : `totp:${seeded[position]?.id ?? name}`;
+}
+
 /** The fields a card keeps in one account at once: the plain username, the secret password, or both. */
 export interface LoginFieldValues {
   readonly username?: string;
@@ -1230,14 +1403,10 @@ export class AccountVault implements AccountSealPort {
       named.add(name);
       byName.set(mask, value);
     };
+    // The same walk the sweep keeps ({@link sealedNamesOf}), so every value an account points at is masked under its
+    // name; a field this does not know by role is still masked under the account, never left unmasked.
     for (const [id, account] of Object.entries(index.accounts)) {
-      add(`login:${id}:password`, account.seals.password);
-      let first = true;
-      for (const key of account.factors ?? []) {
-        if (key.kind !== 'totp' || key.seal === undefined) continue;
-        add(first ? `login:${id}:totp` : `login:${id}:totp:${key.id}`, key.seal);
-        first = false;
-      }
+      for (const name of sealedNamesOf(account)) add(`login:${id}:${maskRoleOf(account, name)}`, name);
     }
     for (const [name, value] of opened) if (!named.has(name)) byName.set(`login:unnamed:${name}`, value);
     return byName;
@@ -1247,7 +1416,12 @@ export class AccountVault implements AccountSealPort {
    * The value an account's field types, made inside the use boundary: the username as stored, the password opened, or
    * the 2FA code generated at `nowMs` from the seed of the key a code card offers first (the seed never leaves here).
    */
-  async fill(id: AccountId, role: LoginFieldRole, nowMs: number): Promise<string> {
+  async fill(
+    id: AccountId,
+    role: LoginFieldRole,
+    nowMs: number,
+    options: { readonly factor?: TwoFactorId } = {},
+  ): Promise<string> {
     const { document } = await this.documents.read();
     const account = Object.hasOwn(document.accounts, id) ? document.accounts[id] : undefined;
     if (account === undefined) throw new LoginEntryError('unknown_login', `there is no saved login ${id}`);
@@ -1256,8 +1430,10 @@ export class AccountVault implements AccountSealPort {
         throw new LoginEntryError('no_such_field', `${account.label} has no username saved`);
       return account.username;
     }
+    // A code from the key named, which must be this account's and hold a seed; else the key a code card offers first.
     const [first] = automaticKeysInOfferOrder((account.factors ?? []).map(twoFactorKeySummaryOf));
-    const key = (account.factors ?? []).find(factor => factor.id === first?.id);
+    const chosen = options.factor ?? first?.id;
+    const key = (account.factors ?? []).find(factor => factor.id === chosen);
     const name = role === 'password' ? account.seals.password : key?.kind === 'totp' ? key.seal : undefined;
     if (name === undefined)
       throw new LoginEntryError(

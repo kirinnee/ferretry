@@ -922,6 +922,7 @@ describe('the mounted daemon surface', () => {
       7 + // the owner's input requests: the two lists, a page request's picture, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
       6 + // saved logins: the list, the ferret’s hint, put, rename, delete and the owner’s answer to a recipe proposal (docs/input-requests.md#saved-logins)
       12 + // accounts and sign-ins: the list, the hint, look-alike, an account’s put, rename, delete, merge and apart, and a sign-in’s add, put, delete and recipe answer (docs/secrets.md)
+      8 + // 2FA keys: add, relabel and remove one, and a seed’s stage, read, passkey-bound commit, confirm-in-app and drop (docs/secrets.md)
       8 + // secure copy: a session's copies, the rules (list, add, remove, settings read and change), the paste plans and an answer to one (docs/secure-copy.md)
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
       7 + // installing a catalog item from a signed file: a preview and an apply per scope, the list, and a remove per scope (docs/catalogs.md)
@@ -1104,6 +1105,15 @@ describe('the mounted daemon surface', () => {
       'POST /v1/accounts/:id/sign-ins',
       'POST /v1/accounts/:id/merge',
       'POST /v1/accounts/:id/apart',
+      // 2FA keys: a seed is staged, then saved only with a passkey bound to its stage; nothing answers one.
+      'POST /v1/accounts/:id/factors/seed',
+      'GET /v1/accounts/:id/factors/seed/:stage',
+      'POST /v1/accounts/:id/factors/seed/:stage/commit',
+      'POST /v1/accounts/:id/factors/seed/:stage/confirm-in-app',
+      'DELETE /v1/accounts/:id/factors/seed/:stage',
+      'POST /v1/accounts/:id/factors',
+      'PATCH /v1/accounts/:id/factors/:factor',
+      'DELETE /v1/accounts/:id/factors/:factor',
       // The catalogs this machine publishes (docs/catalogs.md): every one is `sharing`/`use`.
       'GET /v1/catalogs',
       'POST /v1/catalogs',

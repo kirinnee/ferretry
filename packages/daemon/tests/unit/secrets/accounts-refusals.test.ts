@@ -13,7 +13,7 @@ import {
   LoginRecipeService,
   SecretStoreError,
 } from '../../../src/lib/secrets/index.ts';
-import { FakeSecretCipher, MemoryLoginIndex } from '../runtime/mounts/support.ts';
+import { FakeSecretCipher, MemoryLoginIndex, plantSeed } from '../runtime/mounts/support.ts';
 import { CLOCK, CountingSealed, daemonOver, SEED } from './accounts-fixtures.ts';
 
 /**
@@ -169,8 +169,7 @@ describe('a merge, the rest of its rules', () => {
     await w.directory.putAccount('KEEP', { label: 'Keep' });
     await w.directory.putAccount('FROM', { label: 'From' });
     await w.directory.putAccount('OTHER', { label: 'Other' });
-    for (const id of ['KEEP', 'FROM'])
-      await w.logins.put(id, PutLoginEntryRequestSchema.parse({ totp: { seed: SEED }, totpAcknowledged: true }));
+    for (const id of ['KEEP', 'FROM']) await plantSeed(w.logins.accounts, id, SEED);
     const from = w.index.accounts.accounts.FROM as NonNullable<AccountIndexDocument['accounts']['FROM']>;
     w.index.document = {
       ...w.index.accounts,
@@ -264,7 +263,7 @@ describe('a recipe proposal on one sign-in', () => {
 });
 
 describe('an older client over the account store, the rest of its refusals', () => {
-  it('should refuse a seed by the older route where the account keeps two', async () => {
+  it('should refuse removing seeds by the older route where the account keeps two', async () => {
     const w = world();
     w.index.document = {
       v: 2,
@@ -288,9 +287,7 @@ describe('an older client over the account store, the rest of its refusals', () 
       },
       signIns: {},
     };
-    const refused = await failure(
-      w.logins.put('TWO', PutLoginEntryRequestSchema.parse({ totp: { seed: SEED }, totpAcknowledged: true })),
-    );
+    const refused = await failure(w.logins.put('TWO', PutLoginEntryRequestSchema.parse({ totp: null })));
     should(refused.refusal).equal('account_has_2fa_keys');
   });
 

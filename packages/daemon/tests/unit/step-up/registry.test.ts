@@ -419,3 +419,111 @@ describe('ChallengeLedger', () => {
     should(wrongPurpose).be.undefined();
   });
 });
+
+describe('StepUpRegistry bound proof (an act every caller must prove)', () => {
+  const STAGE_A = 'a'.repeat(64);
+  const STAGE_B = 'b'.repeat(64);
+
+  it('should take a bound proof only for its act and its exact subject, once', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grantBound(phone, NOW, 'add-2fa-key', STAGE_A);
+
+    // Act + Assert — another subject does not count, and does not spend it
+    should(registry.claimFresh(phone, NOW, 'add-2fa-key', STAGE_B)).be.false();
+    should(registry.claimFresh(phone, NOW, 'add-2fa-key', '')).be.false();
+    should(registry.claimFresh(phoneOtherTab, NOW, 'add-2fa-key', STAGE_A)).be.false();
+    should(registry.claimFresh(phone, NOW, 'add-2fa-key', STAGE_A)).be.true();
+    should(registry.claimFresh(phone, NOW, 'add-2fa-key', STAGE_A)).be.false();
+  });
+
+  it('should never let a bound proof satisfy an act-less check, a step-up or another act', () => {
+    // Arrange
+    const registry = openRegistry();
+
+    // Act
+    registry.grantBound(phone, NOW, 'add-2fa-key', STAGE_A);
+
+    // Assert — the dispatcher's `freshStepUp`, a window step-up, an act-less claim and a stamped act all see nothing
+    should(registry.freshlyHeld(phone, NOW)).be.false();
+    should(registry.held(phone, NOW)).be.false();
+    should(registry.claimFresh(phone, NOW)).be.false();
+    should(registry.claimFresh(phone, NOW, 'add-device')).be.false();
+    should(registry.claimFresh(phone, NOW, 'catalog-install')).be.false();
+    // …and it is still there for the save it was proved for.
+    should(registry.claimFresh(phone, NOW, 'add-2fa-key', STAGE_A)).be.true();
+  });
+
+  it('should never let a step-up, a fresh proof or an unlock stand in for an act every caller must prove', () => {
+    // Arrange — every other kind of proof this copy can hold
+    const registry = openRegistry();
+    registry.grant(phone, NOW);
+    registry.grant(phoneOtherTab, NOW, false);
+
+    // Act + Assert
+    should(registry.freshlyHeld(phone, NOW)).be.true();
+    should(registry.claimFresh(phone, NOW, 'add-2fa-key', STAGE_A)).be.false();
+    should(registry.claimFresh(phoneOtherTab, NOW, 'add-2fa-key', STAGE_A)).be.false();
+    // @ts-expect-error — an act every caller must prove names what its proof is bound to
+    should(registry.claimFresh(phone, NOW, 'add-2fa-key')).be.false();
+    // The fresh proof was not spent by those refusals.
+    should(registry.claimFresh(phone, NOW)).be.true();
+  });
+
+  it('should lapse a bound proof after one challenge lifetime', () => {
+    // Arrange
+    const lifetime = PASSKEY_CHALLENGE_TTL_SECONDS * 1_000;
+    const registry = openRegistry();
+
+    // Act
+    const until = registry.grantBound(phone, NOW, 'add-2fa-key', STAGE_A);
+    registry.grantBound(phoneOtherTab, NOW, 'add-2fa-key', STAGE_A);
+
+    // Assert
+    should(until).equal(NOW + lifetime);
+    should(registry.claimFresh(phone, NOW + lifetime, 'add-2fa-key', STAGE_A)).be.false();
+    should(registry.claimFresh(phoneOtherTab, NOW + lifetime - 1, 'add-2fa-key', STAGE_A)).be.true();
+  });
+
+  it('should end a bound proof with the page that proved it', () => {
+    // Arrange
+    let now = NOW;
+    const registry = new StepUpRegistry({ nowMs: () => now });
+    const close = registry.open(laptop);
+    registry.grantBound(laptop, NOW, 'add-2fa-key', STAGE_B);
+
+    // Act — the page closes, and stays closed past the grace
+    close();
+    now = NOW + APP_SESSION_GRACE_MS;
+
+    // Assert
+    should(registry.claimFresh(laptop, now, 'add-2fa-key', STAGE_B)).be.false();
+  });
+
+  it('should forget every bound proof of a revoked device', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grantBound(laptop, NOW, 'add-2fa-key', STAGE_B);
+
+    // Act
+    registry.forgetDevice(laptop.deviceId);
+
+    // Assert
+    should(registry.claimFresh(laptop, NOW, 'add-2fa-key', STAGE_B)).be.false();
+  });
+});
+
+describe('ChallengeLedger binding', () => {
+  it('should hand back what a step-up challenge was bound to, with its act', () => {
+    // Arrange
+    const ledger = new ChallengeLedger();
+    ledger.issue(phone, 'step-up', bytes(1), NOW, undefined, 'add-2fa-key', 'c'.repeat(64));
+
+    // Act
+    const taken = ledger.takeWithAct(phone, 'step-up', NOW);
+
+    // Assert
+    should(taken?.act).equal('add-2fa-key');
+    should(taken?.bound).equal('c'.repeat(64));
+  });
+});

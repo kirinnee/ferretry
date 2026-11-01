@@ -518,7 +518,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // The passkey step-up sits beside pairing too: it is how a paired device proves its owner is
         // holding it. Every path is under `/v1/passkeys` or `/v1/step-up`, which nothing else uses, and
         // there are no patterns among them, so it can neither shadow nor be shadowed.
-        ...stepUpRoutes(subsystems.stepUp),
+        ...stepUpRoutes(subsystems.stepUp, subsystems.secrets.seeds),
         // The machine's security settings sit beside the step-up they tune. `/v1/security` is a fixed
         // literal no other subsystem uses, so it can neither shadow nor be shadowed.
         ...securityRoutes(subsystems.security),

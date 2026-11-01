@@ -5,6 +5,8 @@ export * from './logins.ts';
 export * from './policy.ts';
 export * from './redaction.ts';
 export * from './totp.ts';
+export * from './two-factor-agenda.ts';
+export * from './two-factor-seeds.ts';
 export * from './types.ts';
 export * from './use.ts';
 export * from './vault.ts';

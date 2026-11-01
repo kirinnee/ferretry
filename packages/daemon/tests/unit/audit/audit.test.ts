@@ -991,6 +991,39 @@ describe('auditedRoutes', () => {
     should(journal.lines.join('\n')).not.containEql('hunter2');
   });
 
+  it('should record a 2FA seed save by account and key id, with its proof and whether it was a mismatch, never a value', async () => {
+    // Arrange
+    const stage = `st_${'a'.repeat(24)}`;
+    const { journal, routes } = decorated({
+      'POST /v1/accounts/:id/factors/seed/:stage/commit': async () =>
+        jsonResponse({
+          account: 'GITHUB',
+          factor: { id: 'tf_0123456789ab', kind: 'totp', label: 'Authenticator app', automatic: true },
+          mismatch: true,
+        }),
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(
+      request({
+        method: 'POST',
+        path: `/v1/accounts/GITHUB/factors/seed/${stage}/commit`,
+        headers: ADMIN,
+        loopback: true,
+      }),
+    );
+
+    // Assert
+    should(records(journal).map(record => [record.event, record.subject, record.detail])).deepEqual([
+      [
+        'secrets.changed',
+        'GITHUB',
+        { action: 'factor-added', proof: 'passkey', mismatch: true, factor: 'tf_0123456789ab', status: 200 },
+      ],
+    ]);
+  });
+
   it('should say what the security settings are after a change, in numbers and booleans only', async () => {
     // Arrange
     let body: unknown = {

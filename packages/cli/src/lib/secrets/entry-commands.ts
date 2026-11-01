@@ -1,6 +1,7 @@
 import { LOGIN_METHODS } from '@ferretry/protocol';
 import type { Command } from 'commander';
 import type { LoginEntryController } from './entry-controller.ts';
+import type { TwoFactorSeedController } from './factor-controller.ts';
 
 const collect = (value: string, previous: readonly string[] = []): string[] => [...previous, value];
 
@@ -14,34 +15,53 @@ A password or seed is typed at a hidden prompt, sent once and dropped. There is 
 environment variable or pipe that carries one, and no command that prints one: an answered input card
 types it for you (\`input answer !A7 --secret HANDLE\`) and nothing else ever reads it back.`;
 
+const FACTOR_HELP = `A 2FA key Ferretry holds makes that account's codes, so the password and the code then come
+from this one machine. So a key is saved only with your PASSKEY, every time, even here at the machine: \`factor add
+--totp\` stages it (in memory, two minutes) and puts a card on your agenda; Allow it in the app with your passkey
+and it is saved. Nothing else saves one, and nothing ever prints one back. Removing a key never asks.`;
+
 const RECIPE_HELP = `A recipe is the steps to sign in, in Markdown, with no values in it: "Open app.vercel.com, Continue with
 Google, [[GOOGLE_KIRIN]], wait for the phone approval". [[ID]] names another account, whose recipe the ferret
 is handed too. A ferret that finds the steps wrong proposes a better recipe after it signs in; nothing changes
 until you approve it here (or turn on --auto-apply-recipe for that one login).`;
 
 /** Mounts `fy account ls|add|edit|hint|recipe|rename|rm`. */
-export function registerAccountCommands(program: Command, controller: LoginEntryController): void {
+export function registerAccountCommands(
+  program: Command,
+  controller: LoginEntryController,
+  factors?: TwoFactorSeedController,
+): void {
   mountAccountCommands(
     program
       .command('account')
       .description('accounts the input bridge can type for you')
       .addHelpText('after', `\n${ENTRY_HELP}`),
     controller,
+    factors,
   );
 }
 
 /** `fy account …`: the old spelling of `fy account …`, i.e. `fy secret entry …`, kept for one release and hidden from `fy secret --help`. */
-export function registerLoginEntryCommands(secret: Command, controller: LoginEntryController): void {
+export function registerLoginEntryCommands(
+  secret: Command,
+  controller: LoginEntryController,
+  factors?: TwoFactorSeedController,
+): void {
   mountAccountCommands(
     secret
       .command('entry', { hidden: true })
       .description('alias of `fy account`')
       .addHelpText('after', `\n${ENTRY_HELP}`),
     controller,
+    factors,
   );
 }
 
-function mountAccountCommands(entry: Command, controller: LoginEntryController): void {
+function mountAccountCommands(
+  entry: Command,
+  controller: LoginEntryController,
+  factors?: TwoFactorSeedController,
+): void {
   entry
     .command('ls', { isDefault: true })
     .description('list the accounts: label, handle, what they match, username, which fields exist')
@@ -78,9 +98,9 @@ function mountAccountCommands(entry: Command, controller: LoginEntryController):
     .option('--no-via', 'sign in via no account')
     .option('--domain <host>', 'REPLACE where the sign-in happens (repeatable)', collect)
     .option('--password', 'replace the password (typed at a hidden prompt)')
-    .option('--totp', 'keep a 2FA seed (typed at a hidden prompt, after a warning)')
+    .option('--totp', '(moved) a 2FA seed is saved with `account factor add <id> --totp` now')
     .option('--no-totp', 'forget the 2FA seed')
-    .option('--i-understand-totp', 'skip the typed "yes" after the 2FA warning')
+    .option('--i-understand-totp', '(moved, see --totp)')
     .option('--auto-apply-recipe <on|off>', "let a ferret's recipe proposal for this login apply without asking")
     .action(async (id: string, options: Parameters<LoginEntryController['edit']>[1]) => {
       await controller.edit(id, options);
@@ -137,6 +157,23 @@ function mountAccountCommands(entry: Command, controller: LoginEntryController):
     .action(async (id: string, proposalId: string) => {
       await controller.recipeDecide(id, proposalId, 'decline');
     });
+
+  if (factors !== undefined) {
+    const factor = entry
+      .command('factor')
+      .description("an account's 2FA keys")
+      .addHelpText('after', `\n${FACTOR_HELP}`);
+    factor
+      .command('add <id>')
+      .description('save a 2FA key so Ferretry makes the codes; you confirm it with your passkey in the app')
+      .option('--totp', 'a TOTP key (typed at a hidden prompt, after a warning): base32, or an otpauth://totp link')
+      .option('--label <text>', 'what you call it, e.g. "Authy backup" (default: Authenticator app)')
+      .option('-s, --session <id>', 'the agenda board the confirm card goes on (defaults to the current session)')
+      .option('--i-understand-totp', 'skip the typed "yes" after the 2FA warning')
+      .action(async (id: string, options: Parameters<TwoFactorSeedController['add']>[1]) => {
+        await factors.add(id, options);
+      });
+  }
 
   entry
     .command('rename <id> <new-id>')
