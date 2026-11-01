@@ -780,6 +780,33 @@ describe('a terminal rule: sudo, su or doas, the password only, root (invariants
     }
   });
 
+  it('should still show where it was approved for once its sign-in is gone or became a site: its signed sudo key', async () => {
+    const pinned = { kind: 'terminal', tool: 'sudo', host: 'kirin-box' };
+    const base = listing();
+    for (const after of [
+      { ...base, signIns: base.signIns.filter(each => each.id !== SUDO) },
+      {
+        ...base,
+        signIns: base.signIns.map(each =>
+          each.id === SUDO ? { ...each, place: { kind: 'site', domains: ['sudo.example'], match: [] } } : each,
+        ),
+      },
+    ]) {
+      // Arrange
+      const w = await world();
+      await approved(w, SUDO_DRAFT);
+
+      // Act
+      await w.service.accountsChanged(after as never);
+      w.state.listing = after as never;
+      const [rule] = (await w.service.list(HOST_OWNER)).rules;
+
+      // Assert — the root flag and the terminal place come from the signed body, never from the listing now
+      should(rule).containDeep({ status: 'suspended', place: pinned, flags: ['root'] });
+      should(rule?.place).eql(pinned);
+    }
+  });
+
   it('should not be suspended by a page script, even one whose origin could not be read', async () => {
     // Arrange
     const w = await world();
