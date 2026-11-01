@@ -475,6 +475,7 @@ export function agentToolWorld(
     | 'recipes'
     | 'loginActs'
     | 'scriptedOrigins'
+    | 'ruleSuggestions'
   > &
     Partial<Pick<AgentToolPorts, 'redactor'>> = {},
 ) {

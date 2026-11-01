@@ -8,6 +8,7 @@ import {
   type AgendaConfirms,
   type AgendaCopyPlanRef,
   type AgendaTaskPlanRef,
+  type AgendaSignInRuleSuggestionRef,
   type AgendaPhoneApprovalRef,
   type AgendaTwoFactorSeedRef,
   type AgendaDisposition,
@@ -137,6 +138,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly copyPlan?: AgendaCopyPlanRef;
   /** The task plan a card presents (`AgendaTaskPlanRef`); only the daemon raises one (an agenda add has no field for it). */
   readonly taskPlan?: AgendaTaskPlanRef;
+  /** The ferret's standing-rule suggestion a card presents (`AgendaSignInRuleSuggestionRef`); only the daemon raises one. */
+  readonly signInRuleSuggestion?: AgendaSignInRuleSuggestionRef;
   /** The staged 2FA seed a card asks the owner to save with a passkey (`AgendaTwoFactorSeedRef`); only the daemon raises one. */
   readonly twoFactorSeed?: AgendaTwoFactorSeedRef;
   /** The approve-on-phone card an `info` item presents (`AgendaPhoneApprovalRef`); only the daemon raises one. */
@@ -717,6 +720,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.input === undefined ? {} : { input: request.input }),
       ...(request.copyPlan === undefined ? {} : { copyPlan: request.copyPlan }),
       ...(request.taskPlan === undefined ? {} : { taskPlan: request.taskPlan }),
+      ...(request.signInRuleSuggestion === undefined ? {} : { signInRuleSuggestion: request.signInRuleSuggestion }),
       ...(request.twoFactorSeed === undefined ? {} : { twoFactorSeed: request.twoFactorSeed }),
       ...(request.phoneApproval === undefined ? {} : { phoneApproval: request.phoneApproval }),
       ...(request.offerClose === true ? { offerClose: true as const } : {}),
@@ -847,6 +851,14 @@ function addressById(
       return failure(
         'use_input_form',
         `${command.id} is a task plan: answer it on its card in the app, where a sign-in is confirmed with your passkey`,
+      );
+    }
+    // A ferret's standing-rule suggestion opens the owner's create sheet with nothing ticked: an agenda answer would
+    // create nothing, and must never read as an approval.
+    if (target.item.signInRuleSuggestion !== undefined) {
+      return failure(
+        'use_input_form',
+        `${command.id} suggests a standing rule: open it in the app, where you choose what to allow and confirm with your passkey`,
       );
     }
     // A paste plan is answered by the owner's plan route, which makes its rules: an agenda answer would make none.
