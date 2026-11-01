@@ -51,6 +51,31 @@ export const openSharedDraftStream = async (
   // stream is refused the moment there is a session to refuse.
   let damaged = false;
   let refuse: (() => void) | undefined;
+  /**
+   * A draft too big for one frame, being put back together: its `snapshot` holds the first part and how
+   * many `snapshot-text` parts follow. Nothing else may arrive in between, and the composer only ever
+   * sees the whole draft.
+   */
+  let assembling:
+    | { frame: Extract<SharedDraftServerFrame, { kind: 'snapshot' }>; text: string; left: number }
+    | undefined;
+  const assemble = (frame: SharedDraftServerFrame): SharedDraftServerFrame | 'wait' | undefined => {
+    if (assembling !== undefined) {
+      if (frame.kind !== 'snapshot-text') return undefined;
+      assembling.text += frame.text;
+      assembling.left -= 1;
+      if (assembling.left > 0) return 'wait';
+      const { frame: first, text } = assembling;
+      assembling = undefined;
+      return { kind: 'snapshot', snapshot: { ...first.snapshot, text } };
+    }
+    if (frame.kind === 'snapshot-text') return undefined;
+    if (frame.kind === 'snapshot' && frame.more !== undefined) {
+      assembling = { frame, text: frame.snapshot.text, left: frame.more };
+      return 'wait';
+    }
+    return frame;
+  };
   const session = await open(daemon, {
     path: sharedDraftStreamPath(scope),
     ...(position === undefined
@@ -73,12 +98,13 @@ export const openSharedDraftStream = async (
           parsed = undefined;
         }
       }
-      if (parsed === undefined) {
+      const whole = parsed === undefined ? undefined : assemble(parsed);
+      if (whole === undefined) {
         damaged = true;
         refuse?.();
         return;
       }
-      handlers.onFrame(parsed);
+      if (whole !== 'wait') handlers.onFrame(whole);
     },
   });
   refuse = () => {

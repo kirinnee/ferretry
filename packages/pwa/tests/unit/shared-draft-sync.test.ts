@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
   applyTextOp,
+  composeTextOps,
+  diffToTextOp,
   normalizeTextOp,
+  SHARED_DRAFT_EDIT_BUDGET,
+  sharedDraftFrameBytes,
   type SharedDraftClientFrame,
   type SharedDraftServerFrame,
   type TextOp,
@@ -10,6 +14,8 @@ import {
 import {
   applyDisconnect,
   applyLocalText,
+  applyResync,
+  splitTextOp,
   applyServerFrame,
   initialSharedDraftState,
   type SharedDraftSyncState,
@@ -296,5 +302,72 @@ describe('two and three devices typing at once', () => {
           throw new Error(`seed ${seed}: ${name} has ${JSON.stringify(text)}, daemon ${JSON.stringify(server.text)}`);
       }
     }
+  });
+});
+
+describe('edits too big for one frame (review L2)', () => {
+  test('splitTextOp: the two halves, run in turn, are exactly the edit, and the first inserts no more than asked (2,000 seeded)', () => {
+    for (let seed = 1; seed <= 2_000; seed += 1) {
+      const next = random(seed * 31);
+      const before = 'ab😀c"d'.repeat(next(4));
+      const after = `${before.slice(0, next(before.length + 1))}${'x😀"\\'.repeat(next(5))}${before.slice(next(before.length + 1))}`;
+      const op = diffToTextOp(before, after);
+      const budget = next(6);
+      const [first, second] = splitTextOp(op, budget);
+      const inserted = first.reduce<number>((total, c) => total + (typeof c === 'string' ? c.length : 0), 0);
+      if (inserted > budget) throw new Error(`seed ${seed}: first inserts ${inserted} > ${budget}`);
+      if (applyTextOp(applyTextOp(before, first), second) !== after) throw new Error(`seed ${seed}: halves differ`);
+      expect(composeTextOps(first, second).length).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  test('never cuts a surrogate pair', () => {
+    const [first, second] = splitTextOp(['😀😀'], 3);
+    expect(first).toEqual(['😀']);
+    expect(second).toEqual([2, '😀']);
+  });
+
+  test('sends a paste of 16,000 quote marks as several edits, each within the budget, ending on the same text', () => {
+    const ids = counter('e');
+    const quotes = '"'.repeat(16_000);
+    let step = applyLocalText(synced('', 0), quotes, ids);
+    const frames = [...step.send];
+    let rev = 0;
+    let server = '';
+    while (step.state.inflight !== undefined) {
+      const frame = step.send[0] ?? frames.at(-1);
+      expect(sharedDraftFrameBytes(frame)).toBeLessThanOrEqual(SHARED_DRAFT_EDIT_BUDGET);
+      const edit = frame?.kind === 'edit' ? frame.edit : undefined;
+      server = applyTextOp(server, edit?.text ?? []);
+      rev += 1;
+      step = applyServerFrame(
+        step.state,
+        { kind: 'ack', id: step.state.inflight.id, applied: applied(edit?.text ?? [], rev), epoch: 0, rev },
+        ids,
+      );
+      frames.push(...step.send);
+    }
+    expect(rev).toBeGreaterThan(1);
+    expect(server).toBe(quotes);
+    expect(step.state.text).toBe(quotes);
+  });
+
+  test('keeps a send marked on the last part only', () => {
+    const ids = counter('e');
+    const quotes = '"'.repeat(16_000);
+    const typed = applyLocalText(synced('', 0), 'x', ids).state;
+    const queued = applyLocalText(typed, quotes, ids).state;
+    const step = applyServerFrame(queued, { kind: 'ack', id: 'e1', applied: applied(['x'], 1), epoch: 0, rev: 1 }, ids);
+    expect(step.send[0]).toMatchObject({ edit: { base: 1 } });
+    expect((step.send[0] as { edit: { sent?: boolean } }).edit.sent).toBeUndefined();
+    expect(step.state.buffer).toBeDefined();
+  });
+
+  test('a stream closed for a frame too big starts again from the whole draft, offering back what was unanswered', () => {
+    const ids = counter('e');
+    const state = applyResync(applyLocalText(synced('a', 1), 'a typed', ids).state);
+    expect(state.inflight).toBeUndefined();
+    expect(state.resyncing).toBe(true);
+    expect(applyServerFrame(state, snapshot('a', 2), ids).conflict).toBe('a typed');
   });
 });

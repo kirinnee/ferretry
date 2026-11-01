@@ -463,6 +463,31 @@ export const SHARED_DRAFT_ERROR_CODES = {
 
 // ── The live stream: every open composer for one session, kept in step ───────────────────────────
 
+/**
+ * The most bytes one stream frame may take ON THE WIRE. A relay record holds about 64 KiB, and a frame is
+ * JSON-escaped twice on the way (once as the frame, again inside the record), so a 16,000-character
+ * draft of quotes or control characters is far bigger than its length. Every frame is measured by
+ * {@link sharedDraftFrameBytes} and kept under this: a composer splits its edits, and the daemon splits
+ * a snapshot into parts.
+ */
+export const SHARED_DRAFT_STREAM_FRAME_BUDGET = 40_000;
+
+/**
+ * The most bytes a draft's files and places may take on the wire, together. Twenty items with names
+ * of 255 quote marks would not fit one frame; this keeps room for a part of the text in every snapshot.
+ */
+export const SHARED_DRAFT_ITEMS_BUDGET = 16_000;
+
+/** The most bytes one composer's edit frame may take: room left for the daemon's own fields when it echoes it. */
+export const SHARED_DRAFT_EDIT_BUDGET = 32_000;
+
+/** The close code that means "this stream could not carry a frame; read the whole draft again". */
+export const SHARED_DRAFT_STREAM_RESYNC_CLOSE = 4413;
+
+/** What a frame costs on the wire, escaped twice, in UTF-8 bytes. */
+export const sharedDraftFrameBytes = (frame: unknown): number =>
+  new TextEncoder().encode(JSON.stringify(JSON.stringify(frame))).length;
+
 /** A text selection as `[start, end]` UTF-16 offsets into the draft. */
 const SelectionSchema = z.tuple([NonNegativeIntegerSchema, NonNegativeIntegerSchema]).readonly();
 
@@ -490,7 +515,9 @@ export type SharedDraftClientFrame = z.infer<typeof SharedDraftClientFrameSchema
 /**
  * What the daemon sends down a composer's stream.
  *
- * - `snapshot` — the whole draft. First, when the composer could not be caught up edit by edit.
+ * - `snapshot` — the whole draft. First, when the composer could not be caught up edit by edit. A draft
+ *   too big for one frame comes as a `snapshot` holding the first part of its text and `more`, then that
+ *   many `snapshot-text` frames with the rest, in order.
  * - `edit` — an edit as sequenced, and the epoch and revision the draft is at after it (a send that
  *   emptied the draft moves the epoch on and the revision back to 0). `id` is the id the composer that
  *   made it gave it: a composer catching up after a reconnect may find its OWN edit here, landed while
@@ -503,7 +530,13 @@ export type SharedDraftClientFrame = z.infer<typeof SharedDraftClientFrameSchema
  *   person is typing there; and that it closed.
  */
 export const SharedDraftServerFrameSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('snapshot'), snapshot: SharedDraftSnapshotSchema }),
+  z.strictObject({
+    kind: z.literal('snapshot'),
+    snapshot: SharedDraftSnapshotSchema,
+    /** How many `snapshot-text` frames follow with the rest of the text, when the draft did not fit one frame. */
+    more: z.number().int().positive().max(1_000).optional(),
+  }),
+  z.strictObject({ kind: z.literal('snapshot-text'), text: z.string().min(1).max(SHARED_DRAFT_MAX_CHARS) }),
   z.strictObject({
     kind: z.literal('edit'),
     id: z.string().min(1).max(64).optional(),

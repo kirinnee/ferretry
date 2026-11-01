@@ -11,6 +11,8 @@ import {
   SHARED_DRAFT_WRITE_DELAY_MS,
   SHARED_DRAFT_WRITE_RETRY_MAX_MS,
   type SharedDraftChange,
+  sharedDraftOrigin,
+  splitSharedDraftOrigin,
   type SharedDraftRepository,
   SharedDraftService,
 } from '../../../src/lib/shared-drafts/index.ts';
@@ -479,6 +481,63 @@ describe('SharedDraftService', () => {
       SHARED_DRAFT_WRITE_RETRY_MAX_MS,
     ]);
     should(timers.pending.filter(entry => !entry.cancelled)).be.empty();
+  });
+
+  it('L4: keeps a draft with an open composer in memory, however many other drafts are read', async () => {
+    const { service } = subject({ memoryLimit: 1, generation: G });
+    const stop = service.subscribe('s1', () => undefined);
+    await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['open here'] });
+
+    await service.read('s2');
+    await service.read('s3');
+
+    // Still the same life of the draft: the composer's next edit merges.
+    should(await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [9, '!'] })).match({
+      snapshot: { text: 'open here!' },
+    });
+    stop();
+    stop();
+  });
+
+  it('L5: applies an edit sent twice once, answering the second with the first', async () => {
+    const { service } = subject();
+    const heard: SharedDraftChange[] = [];
+    service.subscribe('s1', change => heard.push(change));
+    const first = await service.edit(
+      's1',
+      { generation: G, epoch: 0, base: 0, text: ['once'] },
+      sharedDraftOrigin('old-stream', 'e1'),
+    );
+
+    // The composer reconnected and sent it again from a new stream.
+    const again = await service.edit(
+      's1',
+      { generation: G, epoch: 0, base: 0, text: ['once'] },
+      sharedDraftOrigin('new-stream', 'e1'),
+    );
+
+    should(again.applied).deepEqual(first.applied);
+    should(again.snapshot.text).equal('once');
+    should(heard).have.length(1);
+    // An edit with no id (the plain route) is never taken for a repeat.
+    await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [4, '!'] });
+    should(splitSharedDraftOrigin(undefined)).be.undefined();
+    should(splitSharedDraftOrigin('no-separator')).be.undefined();
+  });
+
+  it('L2: refuses files and places whose names together would not fit one frame', async () => {
+    const { service } = subject();
+    const longNamed = Array.from({ length: 20 }, (_, index) => ({
+      kind: 'attachment' as const,
+      id: `a${index}`,
+      name: '"'.repeat(255),
+      mime: 'image/png',
+      bytes: 1,
+    }));
+    await should(service.edit('s1', { generation: G, epoch: 0, base: 0, add: longNamed })).be.rejectedWith({
+      name: 'SharedDraftError',
+      code: 'too-many-items',
+    });
   });
 
   it('loads one session once for callers that arrive together', async () => {

@@ -33,6 +33,7 @@ import {
   applyTextOp,
   normalizeTextOp,
   SHARED_DRAFT_HISTORY_LIMIT,
+  SHARED_DRAFT_ITEMS_BUDGET,
   SHARED_DRAFT_MAX_CHARS,
   SHARED_DRAFT_MAX_ITEMS,
   SHARED_DRAFT_SCHEMA_VERSION,
@@ -42,6 +43,7 @@ import {
   type SharedDraftSnapshot,
   type TextOp,
   TextOpError,
+  sharedDraftFrameBytes,
   textOpBaseLength,
   transformTextOps,
 } from '@ferretry/protocol';
@@ -83,6 +85,19 @@ export interface SharedDraftChange {
 
 export type SharedDraftListener = (change: SharedDraftChange) => void;
 
+const ORIGIN_SEPARATOR = '\u0000';
+
+/** The origin a stream's edit travels under: which stream sent it, and the id its composer gave it. */
+export const sharedDraftOrigin = (stream: string, editId: string): string => `${stream}${ORIGIN_SEPARATOR}${editId}`;
+
+/** The two halves of an origin, when it has them. */
+export const splitSharedDraftOrigin = (
+  origin: string | undefined,
+): { readonly stream: string; readonly editId: string } | undefined => {
+  const at = origin?.indexOf(ORIGIN_SEPARATOR) ?? -1;
+  return origin === undefined || at === -1 ? undefined : { stream: origin.slice(0, at), editId: origin.slice(at + 1) };
+};
+
 interface LiveDraft {
   snapshot: SharedDraftSnapshot;
   /**
@@ -117,8 +132,9 @@ export class SharedDraftService {
   /** Writes in flight, so `flush` and a reload can wait for one a timer already started. */
   readonly #writes = new Set<Promise<void>>();
   /**
-   * Sessions a read or an edit is between loading and finishing with. Eviction skips them, so a draft
-   * is never let go of in the moment between being handed to an edit and the edit changing it.
+   * Sessions a read or an edit is between loading and finishing with, or an open composer is listening
+   * to. Eviction skips them, so a draft is never let go of in the moment between being handed to an edit
+   * and the edit changing it, nor while a composer is open on it.
    */
   readonly #holds = new Map<string, number>();
   readonly #listeners = new Map<string, Set<SharedDraftListener>>();
@@ -161,9 +177,17 @@ export class SharedDraftService {
     const listeners = this.#listeners.get(sessionId) ?? new Set<SharedDraftListener>();
     listeners.add(listener);
     this.#listeners.set(sessionId, listeners);
+    // An open composer holds its draft in memory: letting it go would mint a new generation under the
+    // composer's feet, and its next keystroke would be refused for nothing.
+    this.#hold(sessionId);
+    let subscribed = true;
     return () => {
+      if (!subscribed) return;
+      subscribed = false;
       listeners.delete(listener);
       if (listeners.size === 0 && this.#listeners.get(sessionId) === listeners) this.#listeners.delete(sessionId);
+      this.#release(sessionId);
+      this.#evict();
     };
   }
 
@@ -174,6 +198,13 @@ export class SharedDraftService {
 
   #apply(sessionId: string, live: LiveDraft, edit: SharedDraftEdit, origin: string | undefined): SharedDraftEditResult {
     const current = live.snapshot;
+    // The same edit twice — sent again by a composer that reconnected before it heard the first landed —
+    // is answered by the first and applied once. The composer already heard the first one, by its id.
+    const editId = splitSharedDraftOrigin(origin)?.editId;
+    if (editId !== undefined && edit.generation === current.generation) {
+      const first = live.history.find(change => splitSharedDraftOrigin(change.origin)?.editId === editId);
+      if (first !== undefined) return { applied: first.applied, snapshot: current };
+    }
     if (edit.generation !== current.generation)
       throw new SharedDraftError(
         'stale',
@@ -207,6 +238,9 @@ export class SharedDraftService {
     const items = [...kept, ...added];
     if (items.length > SHARED_DRAFT_MAX_ITEMS)
       throw new SharedDraftError('too-many-items', `a draft holds at most ${SHARED_DRAFT_MAX_ITEMS} files and places`);
+    // Bounded by size too, so the whole set always fits one stream frame beside a part of the text.
+    if (added.length > 0 && sharedDraftFrameBytes(items) > SHARED_DRAFT_ITEMS_BUDGET)
+      throw new SharedDraftError('too-many-items', 'the files and places in this draft have names too long to share');
 
     const applied: Applied = {
       generation: current.generation,
@@ -264,15 +298,23 @@ export class SharedDraftService {
 
   /** Loads the draft and runs `work` on it while eviction is kept off it. */
   async #holding<T>(sessionId: string, work: (live: LiveDraft) => T): Promise<T> {
-    this.#holds.set(sessionId, (this.#holds.get(sessionId) ?? 0) + 1);
+    this.#hold(sessionId);
     try {
       return work(await this.#draft(sessionId));
     } finally {
-      const left = (this.#holds.get(sessionId) ?? 1) - 1;
-      if (left === 0) this.#holds.delete(sessionId);
-      else this.#holds.set(sessionId, left);
+      this.#release(sessionId);
       this.#evict();
     }
+  }
+
+  #hold(sessionId: string): void {
+    this.#holds.set(sessionId, (this.#holds.get(sessionId) ?? 0) + 1);
+  }
+
+  #release(sessionId: string): void {
+    const left = (this.#holds.get(sessionId) ?? 1) - 1;
+    if (left === 0) this.#holds.delete(sessionId);
+    else this.#holds.set(sessionId, left);
   }
 
   /** The daemon is stopping: write everything still waiting, and schedule nothing after it. */

@@ -245,6 +245,16 @@ describe('shared draft schemas', () => {
       { name: 'left', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'left', peer: 'p1' } },
       { name: 'ready', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'ready' } },
       {
+        name: 'snapshot, first of three parts',
+        schema: draft.SharedDraftServerFrameSchema,
+        value: { kind: 'snapshot', snapshot, more: 2 },
+      },
+      {
+        name: 'a later part',
+        schema: draft.SharedDraftServerFrameSchema,
+        value: { kind: 'snapshot-text', text: 'rest' },
+      },
+      {
         name: 'own edit, replayed',
         schema: draft.SharedDraftServerFrameSchema,
         value: { kind: 'edit', id: 'e1', applied, epoch: 0, rev: 4 },
@@ -257,12 +267,20 @@ describe('shared draft schemas', () => {
         value: { kind: 'presence', peer: 'p', device: 'a\nb', typing: true },
       },
       { name: 'an unknown frame', schema: draft.SharedDraftClientFrameSchema, value: { kind: 'snapshot' } },
+      { name: 'an empty part', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'snapshot-text', text: '' } },
+      { name: 'no parts', schema: draft.SharedDraftServerFrameSchema, value: { kind: 'snapshot', snapshot, more: 0 } },
     ]);
   });
 
   it('round-trips every schema', () => {
     assertRoundTrips(cases);
     assertCoversEverySchema(draft, cases);
+  });
+
+  it('measures a frame as the wire carries it: escaped twice, in UTF-8 bytes', () => {
+    should(draft.sharedDraftFrameBytes('a')).equal(7);
+    should(draft.sharedDraftFrameBytes('"')).equal(10);
+    should(draft.sharedDraftFrameBytes('é')).equal(8);
   });
 
   it('accepts an edit that inserts exactly one whole draft', () => {

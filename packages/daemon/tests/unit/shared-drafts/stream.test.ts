@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { SharedDraftServerFrame } from '@ferretry/protocol';
+import {
+  SHARED_DRAFT_MAX_CHARS,
+  SHARED_DRAFT_STREAM_FRAME_BUDGET,
+  type SharedDraftServerFrame,
+  sharedDraftFrameBytes,
+} from '@ferretry/protocol';
 import type { SocketDownstream } from '../../../src/lib/api/socket.ts';
 import {
   SHARED_DRAFT_PRESENCE_PER_SECOND,
@@ -10,6 +15,7 @@ import {
   SharedDraftService,
   SharedDraftStreamHandler,
   type SharedDraftStreamTarget,
+  snapshotFrames,
 } from '../../../src/lib/shared-drafts/index.ts';
 
 const AT = '2026-11-01T00:00:00.000Z';
@@ -185,7 +191,99 @@ describe('SharedDraftStreamHandler', () => {
     one.handler.fromClient(edit('p1', ['x'], 0));
   });
 
-  it('closes a reader that fell behind, and goes quiet when the socket refuses a frame', async () => {
+  it('L1: a stream closed while catching up never joins, so it never stays behind in presence', async () => {
+    // Arrange — a draft that is slow to load from disk.
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const service = new SharedDraftService(
+      { has: async () => true },
+      {
+        load: async () => {
+          await gate;
+          return undefined;
+        },
+        save: async () => undefined,
+      },
+      { now: () => AT },
+      { after: () => ({ cancel: () => undefined }) },
+      { next: () => G },
+    );
+    const presence = new SharedDraftPresence();
+    const downstream = new RecordingDownstream();
+    const handler = new SharedDraftStreamHandler(
+      service,
+      presence,
+      { sessionId: 's1', peer: 'gone', device: 'Phone' },
+      downstream,
+      { nowMs: () => 0 },
+    );
+
+    // Act — the composer leaves before the draft has loaded.
+    const opening = handler.open();
+    handler.close();
+    release?.();
+    await opening;
+
+    // Assert
+    should(presence.members('s1')).equal(0);
+    should(downstream.readyAt).be.undefined();
+  });
+
+  it('L2: sends a draft too big for one frame in parts, every part within the budget', async () => {
+    const quotes = '"'.repeat(SHARED_DRAFT_MAX_CHARS);
+    const frames = snapshotFrames({
+      v: 1,
+      sessionId: 's1',
+      generation: G,
+      epoch: 0,
+      rev: 1,
+      text: quotes,
+      items: [],
+      updatedAt: AT,
+    });
+    should(frames.length).be.above(1);
+    for (const frame of frames) should(sharedDraftFrameBytes(frame)).be.belowOrEqual(SHARED_DRAFT_STREAM_FRAME_BUDGET);
+    should(frames[0]).match({ kind: 'snapshot', more: frames.length - 1 });
+    const text = frames.map(frame =>
+      frame.kind === 'snapshot' ? frame.snapshot.text : frame.kind === 'snapshot-text' ? frame.text : '',
+    );
+    should(text.join('')).equal(quotes);
+    // Never a surrogate pair cut across two parts.
+    const emoji = '😀'.repeat(SHARED_DRAFT_MAX_CHARS / 2);
+    const parts = snapshotFrames({
+      v: 1,
+      sessionId: 's1',
+      generation: G,
+      epoch: 0,
+      rev: 1,
+      text: emoji,
+      items: [],
+      updatedAt: AT,
+    });
+    for (const frame of parts) {
+      const piece = frame.kind === 'snapshot' ? frame.snapshot.text : frame.kind === 'snapshot-text' ? frame.text : '';
+      should(piece.length % 2).equal(0);
+    }
+  });
+
+  it('L2: opens with a big draft in parts, and closes for a fresh start on an edit no frame can carry', async () => {
+    // Arrange — a big draft already there, and an open stream.
+    const { open, service } = world();
+    await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['"'.repeat(12_000)] });
+    const phone = await open({ peer: 'phone' });
+    should(phone.downstream.frames[0]).match({ kind: 'snapshot' });
+    should(phone.downstream.frames.filter(frame => frame.kind === 'snapshot-text').length).be.above(0);
+
+    // Act — an edit sent through the plain route, bigger than a frame.
+    await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [-10_000, '\u0001'.repeat(7_000), 2_000] });
+
+    // Assert
+    should(phone.downstream.closed).deepEqual(SHARED_DRAFT_STREAM_CLOSES.oversized);
+  });
+
+  it('closes a reader that fell behind, and closes when the socket refuses a frame', async () => {
     const { open, service } = world();
     const slow = await open({ peer: 'slow' });
     const gone = await open({ peer: 'gone' });
@@ -195,8 +293,8 @@ describe('SharedDraftStreamHandler', () => {
     await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['x'] });
 
     should(slow.downstream.closed).deepEqual(SHARED_DRAFT_STREAM_CLOSES.slowReader);
-    should(gone.downstream.closed).be.undefined();
-    gone.handler.close();
+    // A refused frame is a reader not keeping up too: the socket is closed, not left with a dead handler.
+    should(gone.downstream.closed).deepEqual(SHARED_DRAFT_STREAM_CLOSES.slowReader);
   });
 
   it('closes as unavailable when the draft cannot be read, or an edit fails for a reason of its own', async () => {
@@ -321,7 +419,7 @@ describe('SharedDraftStreamHandler', () => {
     should(freshRevs.filter(([kind]) => kind === 'edit').length + (freshRevs[0]?.[1] === 2 ? 1 : 0)).equal(2);
   });
 
-  it('goes quiet when the socket throws on send', async () => {
+  it('closes when the socket throws on send', async () => {
     const { service, presence } = world();
     const throwing = new RecordingDownstream();
     throwing.send = () => {
@@ -336,7 +434,7 @@ describe('SharedDraftStreamHandler', () => {
     );
     await handler.open();
     await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['x'] });
-    should(throwing.closed).be.undefined();
+    should(throwing.closed).deepEqual(SHARED_DRAFT_STREAM_CLOSES.slowReader);
   });
 
   it('stops hearing edits once closed', async () => {

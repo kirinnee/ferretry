@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   applyTextOp,
+  SHARED_DRAFT_STREAM_RESYNC_CLOSE,
   normalizeTextOp,
   type SharedDraftClientFrame,
   SharedDraftClientFrameSchema,
@@ -8,7 +9,7 @@ import {
   type TextOp,
   transformTextOps,
 } from '@ferretry/protocol';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   type SharedDraft,
   type SharedDraftTimers,
@@ -105,7 +106,7 @@ class FakeDaemon {
     for (const closer of stream.closers) closer({ code: 1006, reason: 'gone' });
   }
 
-  private drop(stream: FakeStream): void {
+  drop(stream: FakeStream): void {
     if (!stream.alive) return;
     stream.alive = false;
     for (const other of this.streams) if (other.alive) other.deliver({ kind: 'left', peer: stream.peer });
@@ -448,12 +449,149 @@ describe('useSharedDraft', () => {
     run(() => root.unmount());
   });
 
+  test('a stream the daemon closes for a frame too big is reopened without a position, for the whole draft', async () => {
+    const daemonSide = new FakeDaemon();
+    const queries: (readonly (readonly [string, string])[] | undefined)[] = [];
+    const watching: DaemonStreamOpener = async (target, request) => {
+      queries.push(request.query);
+      return await daemonSide.open(target, request);
+    };
+    const devices = mountDevices(daemonSide, { phone: '' }, { open: watching });
+    await settle();
+    devices.type('phone', 'x');
+    await settle();
+    const first = daemonSide.streams[0] as FakeStream;
+    daemonSide.drop(first);
+    for (const closer of first.closers) closer({ code: SHARED_DRAFT_STREAM_RESYNC_CLOSE, reason: 'too large' });
+    await settle();
+    run(() => devices.timers.advance(1_000));
+    await settle();
+    expect(queries).toHaveLength(2);
+    expect(queries[1]).toBeUndefined();
+    devices.unmount();
+  });
+
   test('a composer that goes away closes its stream and opens nothing more', async () => {
     const daemonSide = new FakeDaemon();
     const devices = mountDevices(daemonSide, { phone: '' });
     await settle();
     devices.unmount();
     expect(daemonSide.streams[0]?.closedBy).toBe(1000);
+  });
+});
+
+/** One id for every edit: stable across renders, as the hook's inputs must be. */
+const fixedId = () => 'x';
+
+describe('switching sessions (review M1)', () => {
+  test("the stream of the session just left never writes into the next session's composer", async () => {
+    // Arrange — session A's stream is slow to open (a relay), and can answer before it settles.
+    const daemonB = new FakeDaemon();
+    daemonB.text = 'words for B';
+    daemonB.history.push({ op: ['words for B'] });
+    daemonB.devices = ['Laptop', 'Kirin’s iPhone'];
+    let answerA: RelayStreamRequest['onData'] | undefined;
+    let settleA: (() => void) | undefined;
+    const closedA: number[] = [];
+    const open: DaemonStreamOpener = async (target, request) => {
+      if (request.path.includes('/sess%20A/')) {
+        answerA = request.onData;
+        await new Promise<void>(resolve => {
+          settleA = resolve;
+        });
+        return {
+          sendStream: () => undefined,
+          closeStream: (code: number) => closedA.push(code),
+          onStreamClosed: () => undefined,
+        } as unknown as RelayClientSession;
+      }
+      return await daemonB.open(target, request);
+    };
+    const timers = new ManualTimers();
+    const seen: { text?: string; hook?: SharedDraft; switchTo?: (id: string) => void } = {};
+    const Composer = () => {
+      const [sessionId, setSession] = useState('sess A');
+      const [draft, setDraft] = useState('');
+      const scope = useMemo(() => daemonSessionScope(daemon, sessionId), [sessionId]);
+      seen.text = draft;
+      seen.switchTo = setSession;
+      seen.hook = useSharedDraft({ daemon, scope, text: draft, setText: setDraft, open, timers, ids: fixedId });
+      return null;
+    };
+    const root = render(<Composer />);
+    await settle();
+
+    // Act — the person moves to B; B's stream opens, and another device is typing there.
+    run(() => seen.switchTo?.('sess one'));
+    await settle();
+    run(() => daemonB.streams[0]?.deliver({ kind: 'presence', peer: 'p', device: 'Kirin’s iPhone', typing: true }));
+    await settle();
+    expect(seen.text).toBe('words for B');
+    expect(seen.hook?.live).toBe(true);
+
+    // A's stream answers late, then its open settles.
+    run(() =>
+      answerA?.({
+        kind: 'text',
+        text: JSON.stringify({
+          kind: 'snapshot',
+          snapshot: {
+            v: 1,
+            sessionId: 'sess A',
+            generation: 'gA',
+            epoch: 0,
+            rev: 3,
+            text: 'words meant for session A',
+            items: [],
+            updatedAt: AT,
+          },
+        }),
+      }),
+    );
+    await settle();
+    settleA?.();
+    await settle();
+
+    // Assert — B's composer is untouched: its words, its stream, its peers.
+    expect(seen.text).toBe('words for B');
+    expect(seen.hook?.live).toBe(true);
+    expect(seen.hook?.typing.map(peer => peer.device)).toEqual(['Kirin’s iPhone']);
+    expect(seen.hook?.conflict).toBeNull();
+    expect(daemonB.text).toBe('words for B');
+    // And A's stream, once it opened, was closed as left.
+    expect(closedA).toEqual([1000]);
+    run(() => root.unmount());
+  });
+
+  test('refuses a snapshot that names another session', async () => {
+    const daemonSide = new FakeDaemon();
+    const wrong: DaemonStreamOpener = async (target, request) => {
+      const session = await daemonSide.open(target, request);
+      queueMicrotask(() =>
+        request.onData({
+          kind: 'text',
+          text: JSON.stringify({
+            kind: 'snapshot',
+            snapshot: {
+              v: 1,
+              sessionId: 'someone else',
+              generation: G,
+              epoch: 0,
+              rev: 0,
+              text: 'not yours',
+              items: [],
+              updatedAt: AT,
+            },
+          }),
+        }),
+      );
+      return session;
+    };
+    const devices = mountDevices(daemonSide, { phone: 'mine' }, { open: wrong });
+    await settle();
+    await settle();
+    expect(devices.texts.phone).not.toBe('not yours');
+    devices.unmount();
   });
 });
 
@@ -569,6 +707,84 @@ describe('openSharedDraftStream', () => {
     link.send({ kind: 'presence', typing: true });
     link.close();
     expect(ended).toEqual([1003, 1011, 1003]);
+  });
+
+  test('puts a draft sent in parts back together before the composer sees it', async () => {
+    const { session } = fakeSession();
+    const frames: SharedDraftServerFrame[] = [];
+    let deliver: RelayStreamRequest['onData'] | undefined;
+    await openSharedDraftStream(
+      async (_d, request) => {
+        deliver = request.onData;
+        return session;
+      },
+      daemon,
+      scope,
+      undefined,
+      { onFrame: frame => frames.push(frame), onClosed: () => undefined },
+    );
+    const text = (frame: object) => deliver?.({ kind: 'text', text: JSON.stringify(frame) });
+    text({
+      kind: 'snapshot',
+      snapshot: { v: 1, sessionId: 'sess one', generation: G, epoch: 0, rev: 1, text: 'ab', items: [], updatedAt: AT },
+      more: 2,
+    });
+    text({ kind: 'snapshot-text', text: 'cd' });
+    expect(frames).toEqual([]);
+    text({ kind: 'snapshot-text', text: 'ef' });
+    text({ kind: 'ready' });
+    expect(frames).toEqual([
+      {
+        kind: 'snapshot',
+        snapshot: {
+          v: 1,
+          sessionId: 'sess one',
+          generation: G,
+          epoch: 0,
+          rev: 1,
+          text: 'abcdef',
+          items: [],
+          updatedAt: AT,
+        },
+      },
+      { kind: 'ready' },
+    ]);
+  });
+
+  test('ends the stream on a part out of place: a part with no draft, or another frame inside one', async () => {
+    const ended: number[] = [];
+    for (const sequence of [
+      [{ kind: 'snapshot-text', text: 'x' }],
+      [
+        {
+          kind: 'snapshot',
+          snapshot: {
+            v: 1,
+            sessionId: 'sess one',
+            generation: G,
+            epoch: 0,
+            rev: 1,
+            text: 'a',
+            items: [],
+            updatedAt: AT,
+          },
+          more: 1,
+        },
+        { kind: 'ready' },
+      ],
+    ]) {
+      await openSharedDraftStream(
+        async (_d, request) => {
+          for (const frame of sequence) request.onData({ kind: 'text', text: JSON.stringify(frame) });
+          return fakeSession().session;
+        },
+        daemon,
+        scope,
+        undefined,
+        { onFrame: () => undefined, onClosed: code => ended.push(code) },
+      );
+    }
+    expect(ended).toEqual([1003, 1003]);
   });
 
   test('refuses a scope from another daemon', async () => {

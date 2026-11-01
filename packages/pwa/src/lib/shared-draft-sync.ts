@@ -23,6 +23,10 @@ import {
   composeTextOps,
   diffToTextOp,
   isNoopTextOp,
+  normalizeTextOp,
+  SHARED_DRAFT_EDIT_BUDGET,
+  sharedDraftFrameBytes,
+  textOpBaseLength,
   type SharedDraftClientFrame,
   type SharedDraftServerFrame,
   type TextOp,
@@ -96,6 +100,58 @@ const editFrame = (position: SharedDraftPosition, inflight: InflightEdit): Share
 });
 
 /** Puts `pending` in flight when nothing is, and answers the frame that carries it. */
+/**
+ * `op` as two edits run one after the other: the first inserts at most `budget` characters, the second
+ * does the rest. Composed, they are exactly `op`; a surrogate pair is never cut.
+ */
+export const splitTextOp = (op: TextOp, budget: number): readonly [TextOp, TextOp] => {
+  const prefix: (number | string)[] = [];
+  let left = budget;
+  let consumed = 0;
+  let produced = 0;
+  let index = 0;
+  let carried: string | undefined;
+  for (; index < op.length; index += 1) {
+    const component = op[index] as number | string;
+    if (typeof component === 'string') {
+      if (component.length <= left) {
+        prefix.push(component);
+        left -= component.length;
+        produced += component.length;
+        continue;
+      }
+      let cut = left;
+      const unit = component.charCodeAt(cut - 1);
+      if (cut > 0 && unit >= 0xd800 && unit <= 0xdbff) cut -= 1;
+      if (cut > 0) {
+        prefix.push(component.slice(0, cut));
+        produced += cut;
+      }
+      carried = component.slice(cut);
+      index += 1;
+      break;
+    }
+    if (left === 0) break;
+    prefix.push(component);
+    if (component > 0) {
+      consumed += component;
+      produced += component;
+    } else consumed -= component;
+  }
+  const base = textOpBaseLength(op);
+  const first = normalizeTextOp([...prefix, base - consumed]);
+  const second = normalizeTextOp([produced, ...(carried === undefined ? [] : [carried]), ...op.slice(index)]);
+  return [first, second];
+};
+
+const insertedChars = (op: TextOp): number =>
+  op.reduce<number>((total, component) => total + (typeof component === 'string' ? component.length : 0), 0);
+
+/**
+ * Puts `pending` in flight when nothing is, and answers the frame that carries it. An edit too big for
+ * one frame on the wire (`SHARED_DRAFT_EDIT_BUDGET`) is sent in parts: the first goes now, the rest waits
+ * as the buffered edit behind it — a big paste arrives in a few edits instead of wedging the stream.
+ */
 const launch = (
   state: SharedDraftSyncState,
   pending: PendingEdit,
@@ -103,9 +159,33 @@ const launch = (
 ): { state: SharedDraftSyncState; send: SharedDraftClientFrame[] } => {
   const position = state.position;
   if (position === undefined || state.resyncing) return { state: { ...state, buffer: pending }, send: [] };
-  const inflight: InflightEdit = { ...pending, id: ids(), epoch: position.epoch, base: position.rev };
   const { buffer: _buffer, ...rest } = state;
-  return { state: { ...rest, inflight }, send: [editFrame(position, inflight)] };
+  let first = pending;
+  let remainder: PendingEdit | undefined;
+  const measure = (candidate: PendingEdit): number =>
+    sharedDraftFrameBytes(
+      editFrame(position, { ...candidate, id: 'x'.repeat(64), epoch: position.epoch, base: position.rev }),
+    );
+  while (measure(first) > SHARED_DRAFT_EDIT_BUDGET && insertedChars(first.op) > 1) {
+    const [head, tail] = splitTextOp(first.op, Math.floor(insertedChars(first.op) / 2));
+    const later: PendingEdit = { op: tail, sent: first.sent };
+    remainder = remainder === undefined ? later : { op: composeTextOps(tail, remainder.op), sent: remainder.sent };
+    first = { op: head, sent: false };
+  }
+  const inflight: InflightEdit = { ...first, id: ids(), epoch: position.epoch, base: position.rev };
+  return {
+    state: { ...rest, inflight, ...(remainder === undefined ? {} : { buffer: remainder }) },
+    send: [editFrame(position, inflight)],
+  };
+};
+
+/**
+ * The stream could not carry a frame and was closed for it: start again from the whole draft (which
+ * comes in parts), offering back whatever this device had not had answered.
+ */
+export const applyResync = (state: SharedDraftSyncState): SharedDraftSyncState => {
+  const { inflight: _inflight, buffer: _buffer, ...rest } = state;
+  return { ...rest, resyncing: true };
 };
 
 /**

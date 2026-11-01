@@ -12,7 +12,12 @@
  *
  * The stream reconnects on its own with a growing wait, and a reconnect asks only for what it missed.
  */
-import type { SharedDraftClientFrame, SharedDraftServerFrame, TextOp } from '@ferretry/protocol';
+import {
+  SHARED_DRAFT_STREAM_RESYNC_CLOSE,
+  type SharedDraftClientFrame,
+  type SharedDraftServerFrame,
+  type TextOp,
+} from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
@@ -22,6 +27,7 @@ import { openSharedDraftStream, type SharedDraftStreamLink } from '../lib/shared
 import {
   applyDisconnect,
   applyLocalText,
+  applyResync,
   applyServerFrame,
   initialSharedDraftState,
   type SharedDraftIdSource,
@@ -148,7 +154,19 @@ export function useSharedDraft({
     let stopped = false;
     let attempt = 0;
     let cancelRetry: (() => void) | undefined;
+    /**
+     * EVERY CALLBACK OF THIS RUN IS FENCED BY `stopped`. The refs above are shared by every session the
+     * composer shows, and a stream opened for the session the person just LEFT can still answer — even
+     * before its open settles. Unfenced, its snapshot would land in the next session's composer and be
+     * saved as that session's draft: one session's words sent to another session's agent.
+     */
     const handle = (frame: SharedDraftServerFrame): void => {
+      if (stopped) return;
+      // Defence in depth: a draft that names another session is never this composer's.
+      if (frame.kind === 'snapshot' && frame.snapshot.sessionId !== scope.sessionId) {
+        link.current?.close();
+        return;
+      }
       if (frame.kind === 'presence') {
         const seen: SharedDraftPeer = {
           peer: frame.peer,
@@ -187,10 +205,13 @@ export function useSharedDraft({
           current.resyncing ? undefined : current.position,
           {
             onFrame: handle,
-            onClosed: () => {
+            onClosed: (code: number) => {
+              if (stopped) return;
               if (link.current === opened) link.current = null;
               queued.current = [];
-              state.current = applyDisconnect(state.current);
+              // A frame no record could carry: the next stream starts from the whole draft, in parts.
+              state.current =
+                code === SHARED_DRAFT_STREAM_RESYNC_CLOSE ? applyResync(state.current) : applyDisconnect(state.current);
               setLive(false);
               setPeers(new Map());
               retry();
@@ -205,6 +226,7 @@ export function useSharedDraft({
         for (const frame of queued.current.splice(0)) opened.send(frame);
         setLive(true);
       } catch {
+        if (stopped) return;
         queued.current = [];
         state.current = applyDisconnect(state.current);
         retry();
@@ -214,6 +236,8 @@ export function useSharedDraft({
     return () => {
       stopped = true;
       cancelRetry?.();
+      // Frames this session's composer queued are this session's, never the next one's.
+      queued.current = [];
       const leaving = link.current;
       link.current = null;
       leaving?.close();

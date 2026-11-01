@@ -15,12 +15,21 @@
  */
 import {
   SHARED_DRAFT_ERROR_CODES,
+  SHARED_DRAFT_STREAM_FRAME_BUDGET,
+  SHARED_DRAFT_STREAM_RESYNC_CLOSE,
+  type SharedDraftSnapshot,
+  sharedDraftFrameBytes,
   type SharedDraftClientFrame,
   SharedDraftClientFrameSchema,
   type SharedDraftServerFrame,
 } from '@ferretry/protocol';
 import type { SocketDownstream, SocketFrame, SocketHandler } from '../api/socket.ts';
-import type { SharedDraftChange, SharedDraftService } from './service.ts';
+import {
+  type SharedDraftChange,
+  type SharedDraftService,
+  sharedDraftOrigin,
+  splitSharedDraftOrigin,
+} from './service.ts';
 import { SharedDraftError, type SharedDraftErrorCode } from './types.ts';
 
 /** A slow reader may hold at most this much in the host socket before its stream is closed. */
@@ -32,7 +41,52 @@ export const SHARED_DRAFT_STREAM_CLOSES = {
   malformed: { code: 1008, reason: 'shared draft stream frame not understood' },
   slowReader: { code: 1013, reason: 'shared draft stream reader fell behind' },
   unavailable: { code: 1011, reason: 'shared draft unavailable' },
+  /** A frame no record could carry: the composer reads the whole draft again, which comes in parts. */
+  oversized: { code: SHARED_DRAFT_STREAM_RESYNC_CLOSE, reason: 'shared draft frame too large; read the draft again' },
 } as const;
+
+/** The longest piece of `text` from `start` that keeps `frame(piece)` within the budget, never splitting a surrogate pair. */
+const fittingEnd = (text: string, start: number, frame: (piece: string) => unknown): number => {
+  let low = start + 1;
+  let high = text.length;
+  let best = start;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    if (sharedDraftFrameBytes(frame(text.slice(start, middle))) <= SHARED_DRAFT_STREAM_FRAME_BUDGET) {
+      best = middle;
+      low = middle + 1;
+    } else high = middle - 1;
+  }
+  // Ending on a high surrogate would split one character across two frames.
+  if (best > start + 1 && best < text.length) {
+    const unit = text.charCodeAt(best - 1);
+    if (unit >= 0xd800 && unit <= 0xdbff) best -= 1;
+  }
+  return Math.max(best, start + 1);
+};
+
+/** A draft too big for one frame, as a `snapshot` with the first part of its text and the rest in order. */
+export const snapshotFrames = (snapshot: SharedDraftSnapshot): readonly SharedDraftServerFrame[] => {
+  const whole: SharedDraftServerFrame = { kind: 'snapshot', snapshot };
+  if (sharedDraftFrameBytes(whole) <= SHARED_DRAFT_STREAM_FRAME_BUDGET) return [whole];
+  const text = snapshot.text;
+  // `more` is measured at its largest, so the count written later never makes the first frame grow.
+  const firstEnd = fittingEnd(text, 0, piece => ({
+    kind: 'snapshot',
+    snapshot: { ...snapshot, text: piece },
+    more: 1_000,
+  }));
+  const parts: string[] = [];
+  for (let start = firstEnd; start < text.length; ) {
+    const end = fittingEnd(text, start, piece => ({ kind: 'snapshot-text', text: piece }));
+    parts.push(text.slice(start, end));
+    start = end;
+  }
+  return [
+    { kind: 'snapshot', snapshot: { ...snapshot, text: text.slice(0, firstEnd) }, more: parts.length },
+    ...parts.map((part): SharedDraftServerFrame => ({ kind: 'snapshot-text', text: part })),
+  ];
+};
 
 const ERROR_CODES: Readonly<Record<SharedDraftErrorCode, string>> = {
   'not-found': 'not-found',
@@ -74,6 +128,11 @@ export class SharedDraftPresence {
     };
   }
 
+  /** How many composers are open on a session: memory that must come back when they close. */
+  members(sessionId: string): number {
+    return this.#sessions.get(sessionId)?.size ?? 0;
+  }
+
   publish(sessionId: string, peer: string, state: PresenceState): void {
     const members = this.#sessions.get(sessionId);
     const self = members?.get(peer);
@@ -107,8 +166,6 @@ export interface SharedDraftStreamTarget {
 export interface SharedDraftStreamClock {
   nowMs(): number;
 }
-
-const ORIGIN_SEPARATOR = '\u0000';
 
 interface Position {
   readonly epoch: number;
@@ -150,7 +207,7 @@ export class SharedDraftStreamHandler implements SocketHandler {
       let reached: Position;
       if (missed === undefined) {
         const snapshot = await this.drafts.read(sessionId);
-        this.#send({ kind: 'snapshot', snapshot });
+        for (const frame of snapshotFrames(snapshot)) this.#send(frame);
         reached = snapshot;
       } else {
         for (const change of missed) this.#deliver(change);
@@ -159,11 +216,14 @@ export class SharedDraftStreamHandler implements SocketHandler {
       // What was heard while catching up and is not already covered by it.
       for (const change of early.splice(0)) if (later(change, reached)) this.#deliver(change);
       caughtUp = true;
+      // Closed while catching up: joining now would leave a member nobody ever removes.
+      if (this.#closed) return;
       this.#send({ kind: 'ready' });
     } catch {
       this.#fail(SHARED_DRAFT_STREAM_CLOSES.unavailable);
       return;
     }
+    if (this.#closed) return;
     this.#leave = this.presence.join(sessionId, peer, this.target.device, frame => this.#send(frame));
   }
 
@@ -178,7 +238,7 @@ export class SharedDraftStreamHandler implements SocketHandler {
       this.#presence(parsed);
       return;
     }
-    const origin = `${this.target.peer}${ORIGIN_SEPARATOR}${parsed.id}`;
+    const origin = sharedDraftOrigin(this.target.peer, parsed.id);
     this.drafts.edit(this.target.sessionId, parsed.edit, origin).catch((error: unknown) => {
       if (error instanceof SharedDraftError)
         this.#send({ kind: 'error', id: parsed.id, code: ERROR_CODES[error.code], message: error.message });
@@ -206,12 +266,11 @@ export class SharedDraftStreamHandler implements SocketHandler {
 
   /** Another composer's edit, or — tagged with this stream's own id — the answer to one of ours. */
   #deliver(change: SharedDraftChange): void {
-    const separator = change.origin?.indexOf(ORIGIN_SEPARATOR) ?? -1;
-    const own = separator !== -1 && change.origin?.slice(0, separator) === this.target.peer;
-    if (own && change.origin !== undefined)
+    const origin = splitSharedDraftOrigin(change.origin);
+    if (origin?.stream === this.target.peer)
       this.#send({
         kind: 'ack',
-        id: change.origin.slice(separator + 1),
+        id: origin.editId,
         applied: change.applied,
         epoch: change.epoch,
         rev: change.rev,
@@ -219,7 +278,7 @@ export class SharedDraftStreamHandler implements SocketHandler {
     else
       this.#send({
         kind: 'edit',
-        ...(separator === -1 || change.origin === undefined ? {} : { id: change.origin.slice(separator + 1) }),
+        ...(origin === undefined ? {} : { id: origin.editId }),
         applied: change.applied,
         epoch: change.epoch,
         rev: change.rev,
@@ -242,13 +301,21 @@ export class SharedDraftStreamHandler implements SocketHandler {
       this.#fail(SHARED_DRAFT_STREAM_CLOSES.slowReader);
       return;
     }
+    // Every frame this stream makes fits but an edit sent through the plain route, which may be bigger
+    // than a record holds: rather than a link that fails on it forever, the composer starts afresh.
+    if (sharedDraftFrameBytes(frame) > SHARED_DRAFT_STREAM_FRAME_BUDGET) {
+      this.#fail(SHARED_DRAFT_STREAM_CLOSES.oversized);
+      return;
+    }
     let sent: number | undefined;
     try {
       sent = this.downstream.send(JSON.stringify(frame));
     } catch {
       sent = undefined;
     }
-    if (sent === undefined || sent < 0) this.close();
+    // Refused: on a relay the link is already gone; on a plain socket it is backpressure. Either way the
+    // reader is not keeping up, and a socket with a dead handler behind it must not stay open.
+    if (sent === undefined || sent < 0) this.#fail(SHARED_DRAFT_STREAM_CLOSES.slowReader);
   }
 
   #fail(close: { readonly code: number; readonly reason: string }): void {
