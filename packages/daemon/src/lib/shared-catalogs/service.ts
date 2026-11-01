@@ -11,6 +11,13 @@
  * ## Writes are one at a time
  *
  * The document is read, changed and written whole, so two writes at once would lose one. They queue.
+ *
+ * ## The upgrade from version 1
+ *
+ * The first call that finds a version 1 document upgrades it (`migrate.ts`) INSIDE that queue, so two first
+ * calls upgrade once, and every write starts from a version 2 document. The upgrade is repeatable step by step:
+ * the shared copies, then the backup of the old file, then the new file. A failure leaves the old file as it
+ * was, and the next call tries again.
  */
 import {
   CATALOG_PUBLIC_UNAVAILABLE,
@@ -40,18 +47,25 @@ import {
   SHARED_CATALOG_FILE_FORMAT,
   SHARED_CATALOG_FILE_MAX_BYTES,
   SHARED_CATALOG_MANIFEST_FORMAT,
-  catalogCanonicalText,
 } from '@ferretry/protocol';
 import { signCatalogManifest, verifySharedCatalogFile, type DaemonIdentity, type RelayCrypto } from '@ferretry/relay';
 import { basename, dirname } from 'node:path';
 import {
+  type CatalogBinding,
+  type CatalogEntry,
+  type CatalogsDocument,
+  EMPTY_CATALOGS_DOCUMENT,
   type StoredCatalog,
-  type StoredItem,
+  type StoredSharedItem,
   type StoredVersion,
+  bindingOf,
+  catalogsListing,
+  currentVersion,
   findCatalog,
-  findItem,
+  findEntry,
+  itemOf,
   latestVersion,
-  liveItems,
+  liveEntries,
   withCatalog,
   withCatalogPatch,
   withNewItem,
@@ -61,15 +75,22 @@ import {
 } from './document.ts';
 import {
   type FrozenBody,
+  NORMALISED_CATALOG_ID,
   NORMALISED_ITEM_ID,
+  canonicalCopy,
+  canonicalOrRefuse,
   defaultMcpSummary,
+  fileCountOf,
   fingerprint,
   freezeItem,
+  itemForCatalog,
   readItem,
+  sharedCopy,
   skillOf,
   skillSummary,
 } from './freeze.ts';
 import { lookupMcpServer, mcpSetupOf, describeMcpServer } from './mcp-source.ts';
+import { migrateCatalogs } from './migrate.ts';
 import type {
   CatalogBlobStore,
   CatalogDocumentStore,
@@ -103,11 +124,11 @@ export interface CatalogMembership {
 
 /** A source read and frozen as far as a preview goes. */
 interface Prepared {
-  readonly existing: StoredItem | undefined;
+  readonly existing: StoredSharedItem | undefined;
   readonly reference: CatalogSourceReference;
   readonly body: FrozenBody;
   readonly name: string;
-  readonly harness: StoredItem['harness'];
+  readonly harness: StoredSharedItem['harness'];
   readonly summary: string;
   readonly ownSummary: boolean;
   readonly version: number;
@@ -115,14 +136,17 @@ interface Prepared {
   readonly problems: readonly CatalogSourceProblem[];
 }
 
-/** The characters base64url writes, for an id of 128 random bits. */
+/** An id of 128 random bits in the characters base64url writes — never the placeholder a shared copy is stored under. */
 function randomId(crypto: RelayCrypto, prefix: 'cat_' | 'itm_'): string {
-  const bytes = crypto.randomBytes(16);
-  const text = btoa(String.fromCharCode(...bytes))
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replaceAll('=', '');
-  return `${prefix}${text}`;
+  const placeholder = prefix === 'cat_' ? NORMALISED_CATALOG_ID : NORMALISED_ITEM_ID;
+  for (;;) {
+    const bytes = crypto.randomBytes(16);
+    const text = btoa(String.fromCharCode(...bytes))
+      .replaceAll('+', '-')
+      .replaceAll('/', '_')
+      .replaceAll('=', '');
+    if (`${prefix}${text}` !== placeholder) return `${prefix}${text}`;
+  }
 }
 
 const instant = (ms: number): string => new Date(ms).toISOString();
@@ -150,18 +174,20 @@ export class SharedCatalogService {
    */
   async list(options: { readonly sourceState: boolean } = { sourceState: false }): Promise<OwnedCatalogList> {
     const identity = await this.#identity();
-    const document = await this.deps.documents.read();
+    const document = await this.#document();
     const catalogs: OwnedCatalog[] = [];
-    for (const catalog of document.catalogs) catalogs.push(await this.#owned(catalog, identity, options.sourceState));
+    for (const catalog of document.catalogs)
+      catalogs.push(await this.#owned(document, catalog, identity, options.sourceState));
     return { publisher: identity.daemonId, catalogs };
   }
 
   async previewItem(catalogId: string, request: CatalogItemPreviewRequest): Promise<CatalogItemPreview> {
     const identity = await this.#identity();
-    const catalog = findCatalog(await this.deps.documents.read(), catalogId);
+    const document = await this.#document();
+    const catalog = findCatalog(document, catalogId);
     const prepared =
       'itemId' in request
-        ? await this.#prepare({ item: findItem(catalog, request.itemId) })
+        ? await this.#prepare({ ...this.#listed(document, catalog, request.itemId) })
         : await this.#prepare({ source: request.source, summary: request.summary });
     const item = freezeItem(this.#input(identity, catalog, prepared, NORMALISED_ITEM_ID, prepared.version));
     const print = await fingerprint(this.deps.crypto, item);
@@ -192,7 +218,7 @@ export class SharedCatalogService {
     return this.#serially(async () => {
       const identity = await this.#identity();
       const id = randomId(this.deps.crypto, 'cat_');
-      const next = withCatalog(await this.deps.documents.read(), {
+      const next = withCatalog(await this.#writable(), {
         id,
         name: request.name,
         description: request.description ?? '',
@@ -200,7 +226,7 @@ export class SharedCatalogService {
         now: instant(this.deps.now()),
       });
       await this.deps.documents.write(next);
-      return await this.#owned(findCatalog(next, id), identity);
+      return await this.#owned(next, findCatalog(next, id), identity);
     });
   }
 
@@ -208,16 +234,16 @@ export class SharedCatalogService {
     if (request.visibility === 'public') throw new CatalogRefusal('public_unavailable', CATALOG_PUBLIC_UNAVAILABLE);
     return this.#serially(async () => {
       const identity = await this.#identity();
-      const document = await this.deps.documents.read();
+      const document = await this.#writable();
       const next = withCatalogPatch(document, catalogId, request, instant(this.deps.now()));
       if (next !== document) await this.deps.documents.write(next);
-      return await this.#owned(findCatalog(next, catalogId), identity);
+      return await this.#owned(next, findCatalog(next, catalogId), identity);
     });
   }
 
   remove(catalogId: string): Promise<DeletedCatalog> {
     return this.#serially(async () => {
-      const next = withoutCatalog(await this.deps.documents.read(), catalogId);
+      const next = withoutCatalog(await this.#writable(), catalogId);
       // BEFORE the catalog's own file changes: a failure in between leaves people without a catalog that still
       // exists, never holding a name for one that is gone.
       await this.deps.membership?.forgetCatalog(catalogId);
@@ -234,25 +260,27 @@ export class SharedCatalogService {
   ): Promise<PublishedCatalogItem> {
     return this.#serially(async () => {
       const identity = await this.#identity();
-      const document = await this.deps.documents.read();
+      const document = await this.#writable();
       const catalog = findCatalog(document, catalogId);
       const prepared = await this.#prepare({ source: request.source, summary: request.summary });
       await this.#bind(identity, catalog, prepared, request.digest);
       const itemId = randomId(this.deps.crypto, 'itm_');
-      const version = await this.#version(identity, catalog, prepared, itemId, 1);
+      const version = await this.#version(identity, catalog, prepared, itemId, 1, [catalog.id]);
       const now = instant(this.deps.now());
-      const item: StoredItem = {
+      const item: StoredSharedItem = {
         itemId,
         kind: prepared.body.kind,
         name: prepared.name,
         ...(prepared.harness === undefined ? {} : { harness: prepared.harness }),
         ownSummary: prepared.ownSummary,
+        createdAt: now,
+        current: 1,
         versions: [version.stored(now)],
       };
       const next = withNewItem(document, catalogId, item, now);
-      await this.deps.blobs.put(version.stored(now).digest, version.text);
+      await this.deps.blobs.put(version.contentDigest, version.text);
       await this.deps.documents.write(next);
-      return await this.#published(identity, findCatalog(next, catalogId), itemId);
+      return await this.#published(next, identity, findCatalog(next, catalogId), itemId);
     });
   }
 
@@ -263,36 +291,43 @@ export class SharedCatalogService {
   ): Promise<PublishedCatalogItem> {
     return this.#serially(async () => {
       const identity = await this.#identity();
-      const document = await this.deps.documents.read();
+      const document = await this.#writable();
       const catalog = findCatalog(document, catalogId);
-      const existing = findItem(catalog, itemId);
-      const prepared = await this.#prepare({ item: existing });
+      const listed = this.#listed(document, catalog, itemId);
+      const prepared = await this.#prepare(listed);
       await this.#bind(identity, catalog, prepared, request.digest);
-      const latest = latestVersion(existing);
-      const version = await this.#version(identity, catalog, prepared, itemId, prepared.version);
+      const latest = latestVersion(listed.item);
+      const version = await this.#version(
+        identity,
+        catalog,
+        prepared,
+        itemId,
+        prepared.version,
+        catalogsListing(document, itemId).map(other => other.id),
+      );
       if (version.contentDigest === latest.contentDigest)
         throw new CatalogRefusal(
           'nothing_to_publish',
-          `${existing.name} has not changed since version ${latest.version}, so there is nothing new to publish.`,
+          `${listed.item.name} has not changed since version ${latest.version}, so there is nothing new to publish.`,
         );
       const now = instant(this.deps.now());
       const next = withNewVersion(document, catalogId, itemId, version.stored(now), now);
-      await this.deps.blobs.put(version.stored(now).digest, version.text);
+      await this.deps.blobs.put(version.contentDigest, version.text);
       await this.deps.documents.write(next);
-      return await this.#published(identity, findCatalog(next, catalogId), itemId);
+      return await this.#published(next, identity, findCatalog(next, catalogId), itemId);
     });
   }
 
   withdraw(catalogId: string, itemId: string): Promise<WithdrawnCatalogItem> {
     return this.#serially(async () => {
-      const next = withWithdrawn(await this.deps.documents.read(), catalogId, itemId, instant(this.deps.now()));
+      const next = withWithdrawn(await this.#writable(), catalogId, itemId, instant(this.deps.now()));
       await this.deps.documents.write(next);
       const catalog = findCatalog(next, catalogId);
       return {
         catalogId,
         itemId,
         revision: catalog.revision,
-        withdrawnAt: findItem(catalog, itemId).withdrawnAt as string,
+        withdrawnAt: findEntry(catalog, itemId).withdrawnAt as string,
       };
     });
   }
@@ -301,17 +336,24 @@ export class SharedCatalogService {
 
   async exportCatalog(catalogId: string, request: ExportCatalogRequest): Promise<SharedCatalogFile> {
     const identity = await this.#identity();
-    const catalog = findCatalog(await this.deps.documents.read(), catalogId);
-    const live = liveItems(catalog);
-    const chosen = new Set(request.itemIds ?? live.map(item => item.itemId));
+    const document = await this.#document();
+    const catalog = findCatalog(document, catalogId);
+    const live = liveEntries(catalog);
+    const chosen = new Set(request.itemIds ?? live.map(entry => entry.itemId));
     for (const itemId of chosen) {
-      const item = findItem(catalog, itemId);
-      if (item.withdrawnAt !== undefined)
-        throw new CatalogRefusal('item_withdrawn', `${item.name} was withdrawn, so it cannot be exported.`);
+      if (findEntry(catalog, itemId).withdrawnAt !== undefined)
+        throw new CatalogRefusal(
+          'item_withdrawn',
+          `${itemOf(document, itemId).name} was withdrawn, so it cannot be exported.`,
+        );
     }
     const items: SharedCatalogItem[] = [];
-    for (const item of live) if (chosen.has(item.itemId)) items.push(await this.#frozen(item, latestVersion(item)));
-    const signed = await this.#signedManifest(identity, catalog);
+    for (const entry of live)
+      if (chosen.has(entry.itemId)) {
+        const item = itemOf(document, entry.itemId);
+        items.push(await this.#frozen(catalog.id, item, currentVersion(item)));
+      }
+    const signed = await this.#signedManifest(document, identity, catalog);
     const parsed = SharedCatalogFileSchema.safeParse({
       format: SHARED_CATALOG_FILE_FORMAT,
       version: 1,
@@ -344,34 +386,42 @@ export class SharedCatalogService {
   /** The catalog's signed manifest as it stands, made exactly as an export makes it. */
   async signedManifest(catalogId: string): Promise<SignedCatalogManifest> {
     const identity = await this.#identity();
-    return await this.#signedManifest(identity, findCatalog(await this.deps.documents.read(), catalogId));
+    const document = await this.#document();
+    return await this.#signedManifest(document, identity, findCatalog(document, catalogId));
   }
 
-  /** One frozen version of a live item, checked against the digest the document lists for it. */
+  /** One frozen version of a live item, checked against the digests the document lists for it. */
   async frozenItem(catalogId: string, itemId: string, version: number): Promise<SharedCatalogItem> {
-    const catalog = findCatalog(await this.deps.documents.read(), catalogId);
-    const item = findItem(catalog, itemId);
-    if (item.withdrawnAt !== undefined)
+    const document = await this.#document();
+    const entry = findEntry(findCatalog(document, catalogId), itemId);
+    const item = itemOf(document, itemId);
+    if (entry.withdrawnAt !== undefined)
       throw new CatalogRefusal('item_withdrawn', `${item.name} was withdrawn, so it cannot be read.`);
     const stored = item.versions.find(candidate => candidate.version === version);
     if (stored === undefined)
       throw new CatalogRefusal('item_unknown', `${item.name} has no version ${String(version)}.`);
-    return await this.#frozen(item, stored);
+    return await this.#frozen(catalogId, item, stored);
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────────────────────────
 
-  async #signedManifest(identity: DaemonIdentity, catalog: StoredCatalog): Promise<SignedCatalogManifest> {
-    const entries: SharedCatalogManifestEntry[] = liveItems(catalog).map(item => {
-      const version = latestVersion(item);
+  async #signedManifest(
+    document: CatalogsDocument,
+    identity: DaemonIdentity,
+    catalog: StoredCatalog,
+  ): Promise<SignedCatalogManifest> {
+    const entries: SharedCatalogManifestEntry[] = liveEntries(catalog).map(entry => {
+      const item = itemOf(document, entry.itemId);
+      const version = currentVersion(item);
+      const binding = bindingOf(version, catalog.id);
       return {
         itemId: item.itemId,
         kind: item.kind,
         name: item.name,
         summary: version.summary,
         version: version.version,
-        digest: version.digest,
-        size: version.size,
+        digest: binding.digest,
+        size: binding.size,
         publishedAt: version.publishedAt,
         ...(item.harness === undefined ? {} : { harness: item.harness }),
       };
@@ -388,8 +438,8 @@ export class SharedCatalogService {
       revision: catalog.revision,
       issuedAt: catalog.issuedAt,
       items: entries,
-      withdrawn: catalog.items.flatMap(item =>
-        item.withdrawnAt === undefined ? [] : [{ itemId: item.itemId, at: item.withdrawnAt }],
+      withdrawn: catalog.entries.flatMap(entry =>
+        entry.withdrawnAt === undefined ? [] : [{ itemId: entry.itemId, at: entry.withdrawnAt }],
       ),
     });
     if (!signed.ok) throw new CatalogRefusal('export_failed', signed.reason);
@@ -402,6 +452,31 @@ export class SharedCatalogService {
     return result;
   }
 
+  /**
+   * The document for a read. A version 1 file is upgraded first, and only inside the queue: whoever gets
+   * there first does it, the rest find version 2.
+   */
+  async #document(): Promise<CatalogsDocument> {
+    const raw = await this.deps.documents.readRaw();
+    if (raw.version === 2) return raw.doc;
+    if (raw.version === 'none') return EMPTY_CATALOGS_DOCUMENT;
+    return await this.#serially(() => this.#writable());
+  }
+
+  /** The document for a write, which already runs in the queue: version 1 is upgraded here, once. */
+  async #writable(): Promise<CatalogsDocument> {
+    const raw = await this.deps.documents.readRaw();
+    if (raw.version === 2) return raw.doc;
+    if (raw.version === 'none') return EMPTY_CATALOGS_DOCUMENT;
+    // Three repeatable steps, in this order: the shared copies, the old file kept as it was, the new file. A crash
+    // between any two leaves the old file in place and is repaired by the next call making the same bytes.
+    const migration = await migrateCatalogs(this.deps.crypto, raw.doc, digest => this.deps.blobs.get(digest));
+    for (const blob of migration.sharedBlobs) await this.deps.blobs.put(blob.digest, blob.text);
+    await this.deps.documents.writeBackupV1(raw.text);
+    await this.deps.documents.write(migration.document);
+    return migration.document;
+  }
+
   async #identity(): Promise<DaemonIdentity> {
     const identity = await this.deps.identity.identity();
     if (identity === undefined)
@@ -412,14 +487,27 @@ export class SharedCatalogService {
     return identity;
   }
 
-  /** A frozen version read back and checked against the digest this document lists for it. */
-  async #frozen(item: StoredItem, version: StoredVersion): Promise<SharedCatalogItem> {
+  /** The catalog's line for an item and the item it points at. */
+  #listed(
+    document: CatalogsDocument,
+    catalog: StoredCatalog,
+    itemId: string,
+  ): { readonly item: StoredSharedItem; readonly entry: CatalogEntry } {
+    const entry = findEntry(catalog, itemId);
+    return { item: itemOf(document, itemId), entry };
+  }
+
+  /**
+   * A frozen version read back for one catalog. The shared copy is checked against the digest of its content, and
+   * the item made from it against the digest this catalog's document lists, so a changed file is never handed on.
+   */
+  async #frozen(catalogId: string, item: StoredSharedItem, version: StoredVersion): Promise<SharedCatalogItem> {
     const damaged = (why: string) =>
       new CatalogRefusal(
         'store_damaged',
         `The frozen copy of ${item.name} version ${version.version} ${why}. Nothing was changed.`,
       );
-    const text = await this.deps.blobs.get(version.digest);
+    const text = await this.deps.blobs.get(version.contentDigest);
     if (text === undefined) throw damaged('is missing');
     let document: unknown;
     try {
@@ -429,12 +517,12 @@ export class SharedCatalogService {
     }
     const parsed = SharedCatalogItemSchema.safeParse(document);
     if (!parsed.success) throw damaged('is not a catalog item');
-    const canonical = catalogCanonicalText(parsed.data);
-    if (!canonical.ok) throw damaged('no longer matches its digest');
-    const hash = await this.deps.crypto.sha256(new TextEncoder().encode(canonical.text));
-    const digest = `sha256:${Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('')}`;
-    if (digest !== version.digest) throw damaged('no longer matches its digest');
-    return parsed.data;
+    const shared = await canonicalCopy(this.deps.crypto, parsed.data);
+    if (shared?.digest !== version.contentDigest) throw damaged('no longer matches its digest');
+    const made = itemForCatalog(parsed.data, { catalogId, itemId: item.itemId, itemVersion: version.version });
+    const own = await canonicalCopy(this.deps.crypto, made);
+    if (own?.digest !== bindingOf(version, catalogId).digest) throw damaged('no longer matches its digest');
+    return made;
   }
 
   #input(identity: DaemonIdentity, catalog: StoredCatalog, prepared: Prepared, itemId: string, version: number) {
@@ -450,29 +538,41 @@ export class SharedCatalogService {
     };
   }
 
-  /** The item for this version, its text and both digests. */
+  /**
+   * The item for this version: the shared copy to keep, and its digest for every catalog that lists the item,
+   * because each catalog's manifest names the item in its own catalog's terms.
+   */
   async #version(
     identity: DaemonIdentity,
     catalog: StoredCatalog,
     prepared: Prepared,
     itemId: string,
     version: number,
+    listedBy: readonly string[],
   ) {
     const item = freezeItem(this.#input(identity, catalog, prepared, itemId, version));
-    const print = await fingerprint(this.deps.crypto, item);
-    const canonical = catalogCanonicalText(item);
-    const text = canonical.ok ? canonical.text : JSON.stringify(item);
+    const shared = await canonicalOrRefuse(this.deps.crypto, sharedCopy(item));
+    const bindings: Record<string, CatalogBinding> = {};
+    for (const catalogId of listedBy) {
+      const own = await canonicalOrRefuse(
+        this.deps.crypto,
+        itemForCatalog(item, { catalogId, itemId, itemVersion: version }),
+      );
+      bindings[catalogId] = { digest: own.digest, size: own.size };
+    }
+    const fileCount = fileCountOf(item);
     return {
-      contentDigest: print.contentDigest,
-      text,
+      contentDigest: shared.digest,
+      text: shared.text,
       stored: (publishedAt: string): StoredVersion => ({
         version,
-        digest: print.digest,
-        contentDigest: print.contentDigest,
-        size: print.size,
         publishedAt,
         summary: prepared.summary,
         source: prepared.reference,
+        contentDigest: shared.digest,
+        size: shared.size,
+        ...(fileCount === undefined ? {} : { fileCount }),
+        bindings,
       }),
     };
   }
@@ -493,11 +593,13 @@ export class SharedCatalogService {
    * version of an item reads the source that item's latest version remembers.
    */
   async #prepare(
-    from: { readonly source: CatalogItemSource; readonly summary?: string | undefined } | { readonly item: StoredItem },
+    from:
+      | { readonly source: CatalogItemSource; readonly summary?: string | undefined }
+      | { readonly item: StoredSharedItem; readonly entry: CatalogEntry },
   ): Promise<Prepared> {
     const existing = 'item' in from ? from.item : undefined;
-    if (existing?.withdrawnAt !== undefined)
-      throw new CatalogRefusal('item_withdrawn', `${existing.name} was withdrawn, so it takes no new version.`);
+    if ('entry' in from && from.entry.withdrawnAt !== undefined)
+      throw new CatalogRefusal('item_withdrawn', `${from.item.name} was withdrawn, so it takes no new version.`);
     const reference = existing === undefined ? undefined : latestVersion(existing).source;
     const read =
       'item' in from
@@ -622,11 +724,12 @@ export class SharedCatalogService {
   async #sourceState(
     identity: DaemonIdentity,
     catalog: StoredCatalog,
-    item: StoredItem,
+    item: StoredSharedItem,
+    entry: CatalogEntry,
   ): Promise<{ state: CatalogSourceState; note?: string }> {
-    if (item.withdrawnAt !== undefined) return { state: 'withdrawn' };
+    if (entry.withdrawnAt !== undefined) return { state: 'withdrawn' };
     try {
-      const prepared = await this.#prepare({ item });
+      const prepared = await this.#prepare({ item, entry });
       const frozen = freezeItem(this.#input(identity, catalog, prepared, NORMALISED_ITEM_ID, prepared.version));
       const print = await fingerprint(this.deps.crypto, frozen);
       return { state: print.contentDigest === latestVersion(item).contentDigest ? 'unchanged' : 'changed' };
@@ -640,11 +743,12 @@ export class SharedCatalogService {
   async #ownedItem(
     identity: DaemonIdentity,
     catalog: StoredCatalog,
-    item: StoredItem,
+    item: StoredSharedItem,
+    entry: CatalogEntry,
     withState: boolean,
   ): Promise<OwnedCatalogItem> {
     const latest = latestVersion(item);
-    const { state, note } = withState ? await this.#sourceState(identity, catalog, item) : {};
+    const { state, note } = withState ? await this.#sourceState(identity, catalog, item, entry) : {};
     return {
       itemId: item.itemId,
       kind: item.kind,
@@ -654,19 +758,28 @@ export class SharedCatalogService {
       source: latest.source,
       ...(state === undefined ? {} : { sourceState: state }),
       ...(note === undefined ? {} : { sourceNote: note }),
-      ...(item.withdrawnAt === undefined ? {} : { withdrawnAt: item.withdrawnAt }),
-      versions: item.versions.map(version => ({
-        version: version.version,
-        digest: version.digest,
-        size: version.size,
-        publishedAt: version.publishedAt,
-      })),
+      ...(entry.withdrawnAt === undefined ? {} : { withdrawnAt: entry.withdrawnAt }),
+      versions: item.versions.map(version => {
+        const binding = bindingOf(version, catalog.id);
+        return {
+          version: version.version,
+          digest: binding.digest,
+          size: binding.size,
+          publishedAt: version.publishedAt,
+        };
+      }),
     };
   }
 
-  async #owned(catalog: StoredCatalog, identity: DaemonIdentity, withState = false): Promise<OwnedCatalog> {
+  async #owned(
+    document: CatalogsDocument,
+    catalog: StoredCatalog,
+    identity: DaemonIdentity,
+    withState = false,
+  ): Promise<OwnedCatalog> {
     const items: OwnedCatalogItem[] = [];
-    for (const item of catalog.items) items.push(await this.#ownedItem(identity, catalog, item, withState));
+    for (const entry of catalog.entries)
+      items.push(await this.#ownedItem(identity, catalog, itemOf(document, entry.itemId), entry, withState));
     return {
       id: catalog.id,
       name: catalog.name,
@@ -680,16 +793,21 @@ export class SharedCatalogService {
     };
   }
 
-  async #published(identity: DaemonIdentity, catalog: StoredCatalog, itemId: string): Promise<PublishedCatalogItem> {
-    const stored = findItem(catalog, itemId);
+  async #published(
+    document: CatalogsDocument,
+    identity: DaemonIdentity,
+    catalog: StoredCatalog,
+    itemId: string,
+  ): Promise<PublishedCatalogItem> {
+    const stored = itemOf(document, itemId);
     const latest = latestVersion(stored);
     return {
       catalogId: catalog.id,
       itemId,
       itemVersion: latest.version,
-      digest: latest.digest,
+      digest: bindingOf(latest, catalog.id).digest,
       revision: catalog.revision,
-      item: await this.#ownedItem(identity, catalog, stored, true),
+      item: await this.#ownedItem(identity, catalog, stored, findEntry(catalog, itemId), true),
     };
   }
 }

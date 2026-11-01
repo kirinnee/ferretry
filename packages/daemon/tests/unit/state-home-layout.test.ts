@@ -109,6 +109,7 @@ describe('foundation paths', () => {
       // What this machine publishes: the catalogs document and the frozen item versions beside it.
       catalogs: '/tmp/fy-home/state/catalogs',
       catalogsDocument: '/tmp/fy-home/state/catalogs/catalogs.json',
+      catalogsBackupV1: '/tmp/fy-home/state/catalogs/catalogs.v1.json',
       catalogBlobs: '/tmp/fy-home/state/catalogs/blobs',
       // The people it shares with and the codes that let them in: fingerprints of codes, never a code.
       catalogMembers: '/tmp/fy-home/state/catalogs/members.json',

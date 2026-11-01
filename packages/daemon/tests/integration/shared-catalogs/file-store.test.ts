@@ -6,6 +6,7 @@ import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import { FileCatalogBlobStore, FileCatalogDocumentStore } from '../../../src/adapters/shared-catalogs/index.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
+import { CatalogsDocumentV1Schema } from '../../../src/lib/shared-catalogs/document-v1.ts';
 import { EMPTY_CATALOGS_DOCUMENT, withCatalog } from '../../../src/lib/shared-catalogs/document.ts';
 
 /** The catalogs state under a real state home: its modes, its atomic writes, and a damaged file that is not empty. */
@@ -36,7 +37,7 @@ describe('the catalogs document on disk', () => {
   it('should read as no catalogs on a machine that has never published', async () => {
     const { documents } = await fixture();
 
-    should(await documents.read()).deepEqual(EMPTY_CATALOGS_DOCUMENT);
+    should(await documents.readRaw()).deepEqual({ version: 'none' });
   });
 
   it('should write it 0600 in a 0700 folder and read back what it wrote', async () => {
@@ -51,7 +52,7 @@ describe('the catalogs document on disk', () => {
 
     await documents.write(written);
 
-    should(await documents.read()).deepEqual(written);
+    should(await documents.readRaw()).deepEqual({ version: 2, doc: written });
     should(await mode(paths.catalogsDocument)).equal(0o600);
     should(await mode(paths.catalogs)).equal(0o700);
     should((await readdir(paths.catalogs)).filter(name => name.includes('tmp'))).deepEqual([]);
@@ -62,7 +63,7 @@ describe('the catalogs document on disk', () => {
     await documents.write(EMPTY_CATALOGS_DOCUMENT);
     await writeFile(paths.catalogsDocument, '{ not json');
 
-    const failure = await documents.read().then(
+    const failure = await documents.readRaw().then(
       () => undefined,
       (error: unknown) => error,
     );
@@ -76,12 +77,64 @@ describe('the catalogs document on disk', () => {
     await documents.write(EMPTY_CATALOGS_DOCUMENT);
     await writeFile(paths.catalogsDocument, JSON.stringify({ schemaVersion: 99, catalogs: [] }));
 
-    const failure = await documents.read().then(
+    const failure = await documents.readRaw().then(
       () => undefined,
       (error: unknown) => error,
     );
 
     should(failure).have.property('refusal', 'store_damaged');
+  });
+
+  it('should hand a version 1 file on with its exact text, and keep the backup beside it, 0600', async () => {
+    const { paths, documents } = await fixture();
+    const text = `${JSON.stringify({ schemaVersion: 1, catalogs: [] }, undefined, 2)}\n`;
+    await documents.writeBackupV1('seed');
+    await writeFile(paths.catalogsDocument, text);
+
+    should(await documents.readRaw()).deepEqual({ version: 1, doc: { schemaVersion: 1, catalogs: [] }, text });
+
+    await documents.writeBackupV1(text);
+    should(await readFile(paths.catalogsBackupV1, 'utf8')).equal(text);
+    should(await mode(paths.catalogsBackupV1)).equal(0o600);
+    should(await readFile(paths.catalogsDocument, 'utf8')).equal(text);
+  });
+
+  it('should refuse a version 1 file the version 1 schema does not accept', async () => {
+    const { paths, documents } = await fixture();
+    await documents.write(EMPTY_CATALOGS_DOCUMENT);
+    await writeFile(paths.catalogsDocument, JSON.stringify({ schemaVersion: 1, catalogs: [{ id: 'x' }] }));
+
+    const failure = await documents.readRaw().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    should(failure).have.property('refusal', 'store_damaged');
+  });
+
+  it('should leave a file whose top level is not an object to the version 2 schema, which refuses it', async () => {
+    const { paths, documents } = await fixture();
+    await documents.write(EMPTY_CATALOGS_DOCUMENT);
+    await writeFile(paths.catalogsDocument, '[1]');
+
+    const failure = await documents.readRaw().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    should(failure).have.property('refusal', 'store_damaged');
+  });
+
+  it('should write a file the previous daemon refuses and never overwrites', async () => {
+    const { paths, documents } = await fixture();
+    await documents.write(EMPTY_CATALOGS_DOCUMENT);
+    const before = await readFile(paths.catalogsDocument, 'utf8');
+
+    // The previous daemon read the file with the version 1 schema, whose version is the literal 1.
+    const old = CatalogsDocumentV1Schema.safeParse(JSON.parse(before));
+
+    should(old.success).be.false();
+    should(await readFile(paths.catalogsDocument, 'utf8')).equal(before);
   });
 });
 

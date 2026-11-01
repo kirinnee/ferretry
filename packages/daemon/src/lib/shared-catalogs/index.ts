@@ -1,10 +1,14 @@
 export { CATALOGS_SCHEMA_VERSION, CatalogsDocumentSchema, EMPTY_CATALOGS_DOCUMENT } from './document.ts';
 export type { CatalogsDocument } from './document.ts';
+export { CATALOGS_SCHEMA_VERSION_V1, CatalogsDocumentV1Schema } from './document-v1.ts';
+export type { CatalogsDocumentV1 } from './document-v1.ts';
+export { migrateCatalogs } from './migrate.ts';
 export type { McpComponentRecord, McpSourceServer } from './mcp-source.ts';
 export type {
   CatalogBlobStore,
   CatalogDocumentStore,
   CatalogIdentitySource,
+  RawCatalogs,
   McpDirectory,
   SkillDirectory,
 } from './ports.ts';
