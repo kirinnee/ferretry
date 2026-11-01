@@ -99,6 +99,8 @@ describe('appBarDestinationForRoute', () => {
     expect(appBarDestinationForRoute({ kind: 'warden', daemonId: DAEMON })).toBe('warden');
     expect(appBarDestinationForRoute({ kind: 'analytics', daemonId: DAEMON })).toBe('analytics');
     expect(appBarDestinationForRoute({ kind: 'learning', daemonId: DAEMON })).toBe('learning');
+    expect(appBarDestinationForRoute({ kind: 'sharing', daemonId: DAEMON })).toBe('sharing');
+    expect(appBarDestinationForRoute({ kind: 'sharing', daemonId: DAEMON, tab: 'people' })).toBe('sharing');
     expect(appBarDestinationForRoute({ kind: 'settings', daemonId: DAEMON })).toBe('settings');
     expect(appBarDestinationForRoute({ kind: 'connection-picker' })).toBeNull();
     expect(appBarDestinationForRoute({ kind: 'imported-history', daemonId: DAEMON })).toBeNull();
@@ -145,6 +147,7 @@ describe('APP_NAVIGATION', () => {
       'attention',
       'board',
       'projects',
+      'sharing',
       'analytics',
       'warden',
       'learning',
@@ -155,7 +158,7 @@ describe('APP_NAVIGATION', () => {
 
   it('puts every place either on the phone bar or under More, never both', () => {
     expect(TAB_BAR_PLACES).toEqual(['sessions', 'attention', 'board']);
-    expect(MORE_PLACES).toEqual(['projects', 'analytics', 'warden', 'learning', 'settings']);
+    expect(MORE_PLACES).toEqual(['projects', 'sharing', 'analytics', 'warden', 'learning', 'settings']);
     expect([...TAB_BAR_PLACES, ...MORE_PLACES].sort()).toEqual(APP_NAVIGATION.map(place => place.id).sort());
   });
 });
@@ -171,6 +174,7 @@ describe('AppBar destinations', () => {
       '/d/workshop/inbox',
       '/d/workshop/board',
       '/d/workshop/projects',
+      '/d/workshop/sharing',
       '/d/workshop/analytics',
       '/d/workshop/warden',
       '/d/workshop/learning',
@@ -192,6 +196,7 @@ describe('AppBar destinations', () => {
       '/d/laptop/inbox',
       '/d/laptop/board',
       '/d/laptop/projects',
+      '/d/laptop/sharing',
       '/d/laptop/analytics',
       '/d/laptop/warden',
       '/d/laptop/learning',
@@ -212,6 +217,7 @@ describe('AppBar destinations', () => {
       null,
       null,
       null,
+      null,
       'page',
       null,
       null,
@@ -224,7 +230,7 @@ describe('AppBar destinations', () => {
     await mounted.render(bar({ active: 'sessions' }));
     expect(
       linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('aria-current') === 'page'),
-    ).toEqual([true, false, false, false, false, false, false, false]);
+    ).toEqual([true, false, false, false, false, false, false, false, false]);
 
     await mounted.unmount();
   });
@@ -710,7 +716,7 @@ describe('AppTabBar', () => {
     await mounted.unmount();
   });
 
-  it('opens More as a sheet of Projects, Analytics, Warden, Learning and Settings, and closes it on a pick', async () => {
+  it('opens More as a sheet of Projects, Sharing, Analytics, Warden, Learning and Settings, and closes it on a pick', async () => {
     setViewport(PHONE);
     const visited: string[] = [];
     const mounted = await mount(tabBar({ active: 'learning', onNavigate: to => visited.push(to) }));
@@ -727,6 +733,7 @@ describe('AppTabBar', () => {
     const rows = [...sheet.querySelectorAll('[data-app-more]')] as HTMLAnchorElement[];
     expect(rows.map(row => row.getAttribute('data-app-more'))).toEqual([
       'projects',
+      'sharing',
       'analytics',
       'warden',
       'learning',
@@ -734,15 +741,17 @@ describe('AppTabBar', () => {
     ]);
     expect(rows.map(row => row.getAttribute('href'))).toEqual([
       '/d/workshop/projects',
+      '/d/workshop/sharing',
       '/d/workshop/analytics',
       '/d/workshop/warden',
       '/d/workshop/learning',
       '/d/workshop/settings',
     ]);
-    expect(rows.map(row => row.getAttribute('aria-current'))).toEqual([null, null, null, 'page', null]);
-    expect(rows[2]?.textContent).toContain('Open fleet supervision and verdicts');
+    expect(rows.map(row => row.getAttribute('aria-current'))).toEqual([null, null, null, null, 'page', null]);
+    expect(rows[1]?.textContent).toContain('Sharing');
+    expect(rows[3]?.textContent).toContain('Open fleet supervision and verdicts');
 
-    await interact(() => rows[2]?.dispatchEvent(primaryClick()));
+    await interact(() => rows[3]?.dispatchEvent(primaryClick()));
 
     expect(visited).toEqual(['/d/workshop/warden']);
     expect(more.getAttribute('aria-expanded')).toBe('false');

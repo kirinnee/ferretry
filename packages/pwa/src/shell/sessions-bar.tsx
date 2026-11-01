@@ -25,7 +25,18 @@
  */
 
 import type { RestartRequest, RestartResult, SessionView } from '@ferretry/protocol';
-import { ChartNoAxesCombined, ChevronDown, FolderKanban, Menu, Plus, QrCode, Search, Settings, X } from 'lucide-react';
+import {
+  ChartNoAxesCombined,
+  ChevronDown,
+  FolderKanban,
+  Menu,
+  Plus,
+  QrCode,
+  Search,
+  Settings,
+  Share2,
+  X,
+} from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { MachineLearners } from '../features/learning/passive-learning.tsx';
 import {
@@ -48,6 +59,7 @@ import {
   daemonProjectsPath,
   daemonHomePath,
   daemonSettingsPath,
+  daemonSharingPath,
 } from '../lib/pages/routes.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../lib/workspace-rail-preferences.ts';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from './context-menu.tsx';
@@ -70,10 +82,11 @@ import { SessionsBarTree } from './sessions-bar-tree.tsx';
  * The places the bar marks as current. Insights is Analytics, Warden and Learning together; Attention is
  * the inbox, whose door sits under the search rather than at the foot.
  */
-export type SessionsBarPlace = 'sessions' | 'attention' | 'projects' | 'insights' | 'settings';
+export type SessionsBarPlace = 'sessions' | 'attention' | 'projects' | 'sharing' | 'insights' | 'settings';
 
 export const SESSIONS_BAR_PLACES = [
   { id: 'projects', label: 'Projects', path: daemonProjectsPath, Icon: FolderKanban },
+  { id: 'sharing', label: 'Sharing', path: daemonSharingPath, Icon: Share2 },
   { id: 'insights', label: 'Insights', path: daemonAnalyticsPath, Icon: ChartNoAxesCombined },
   { id: 'settings', label: 'Settings', path: daemonSettingsPath, Icon: Settings },
 ] as const;

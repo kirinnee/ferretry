@@ -38,6 +38,23 @@ describe('SharedPage', () => {
   });
 });
 
+describe('SharedPage embedded', () => {
+  it('is a labelled section with a quiet h2 and no main or h1 of its own', async () => {
+    const view = await mount(
+      <SharedPage title="Inside" embedded>
+        body
+      </SharedPage>,
+    );
+    const page = q('[data-shared-page]') as HTMLElement;
+    expect(page.tagName).toBe('SECTION');
+    expect(page.getAttribute('aria-label')).toBe('Inside');
+    expect(page.querySelector('h2')?.textContent).toBe('Inside');
+    expect(document.querySelector('h1')).toBeNull();
+    expect(document.querySelector('main')).toBeNull();
+    await view.unmount();
+  });
+});
+
 describe('Fingerprint', () => {
   it('shows the head, the whole when tapped, and the head again', async () => {
     const view = await mount(<Fingerprint head="fy_daemon_12345678" full="fy_daemon_1234567890abcdef" />);

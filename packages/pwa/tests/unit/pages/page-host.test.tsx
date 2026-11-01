@@ -56,6 +56,10 @@ describe('PageHost', () => {
       Projects: daemonPage('projects'),
       ProjectDetail,
       SessionChat,
+      Sharing: ({ connection: actual, tab }) => {
+        received.push(actual);
+        return <div data-page="sharing">sharing:{tab ?? 'none'}</div>;
+      },
       Settings: daemonPage('settings'),
       Warden: daemonPage('warden'),
       Analytics: daemonPage('analytics'),
@@ -70,6 +74,7 @@ describe('PageHost', () => {
       '/d/daemon-a/projects',
       '/d/daemon-a/projects/11111111-1111-4111-8111-111111111111',
       '/d/daemon-a/session/session-one',
+      '/d/daemon-a/sharing/people',
       '/d/daemon-a/settings',
       '/d/daemon-a/warden',
       '/d/daemon-a/analytics',
@@ -91,6 +96,7 @@ describe('PageHost', () => {
       '<div data-page="projects">projects</div>',
       '<div data-page="project-detail">project-detail</div>',
       '<div data-page="session">session</div>',
+      '<div data-page="sharing">sharing:people</div>',
       '<div data-page="settings">settings</div>',
       '<div data-page="warden">warden</div>',
       '<div data-page="analytics">analytics</div>',
@@ -140,6 +146,9 @@ describe('PageHost', () => {
 
     // Assert
     should(unmounted).throw('the project detail route is not mounted');
+    should(() =>
+      renderToStaticMarkup(<PageHost route={pageRoute('/d/daemon-a/sharing')} connection={connection} slots={slots} />),
+    ).throw('the sharing route is not mounted');
     should(() =>
       renderToStaticMarkup(<PageHost route={pageRoute('/d/daemon-a/setup')} connection={connection} slots={slots} />),
     ).throw('the machine setup route is not mounted');

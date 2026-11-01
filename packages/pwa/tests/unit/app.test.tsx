@@ -2621,6 +2621,8 @@ describe('AppShell', () => {
       [`/d/${ALPHA}/warden`, 'Home, Warden'],
       [`/d/${ALPHA}/analytics`, 'Home, Analytics'],
       [`/d/${ALPHA}/learning`, 'Home, Learning'],
+      [`/d/${ALPHA}/sharing`, 'Home, Sharing'],
+      [`/d/${ALPHA}/sharing/skills`, 'Home, Sharing'],
       [`/d/${ALPHA}/inbox`, 'Home, Inbox'],
       [`/d/${ALPHA}/board`, 'Home, Board'],
       [`/d/${ALPHA}/queue`, 'Home, Queue'],
@@ -2878,6 +2880,7 @@ describe('route change accessibility', () => {
         { kind: 'warden', daemonId: id },
         { kind: 'analytics', daemonId: id },
         { kind: 'learning', daemonId: id },
+        { kind: 'sharing', daemonId: id },
       ] satisfies readonly PageRoute[]
     ).map(routeAnnouncement);
 
@@ -2895,6 +2898,7 @@ describe('route change accessibility', () => {
       'Home, Warden',
       'Home, Analytics',
       'Home, Learning',
+      'Home, Sharing',
     ]);
     // The daemon fingerprint is a credential-adjacent identifier, not a place.
     for (const announcement of announcements) expect(announcement).not.toContain('alpha');
@@ -4592,8 +4596,18 @@ describe('the sessions bar', () => {
   it('names the foot place every route belongs to', () => {
     const at = (kind: string) => sessionsBarPlace({ kind, daemonId: alpha.daemonId } as never);
     expect(
-      ['projects', 'project-detail', 'analytics', 'warden', 'learning', 'settings', 'attention', 'sessions'].map(at),
-    ).toEqual(['projects', 'projects', 'insights', 'insights', 'insights', 'settings', 'attention', null]);
+      [
+        'projects',
+        'project-detail',
+        'sharing',
+        'analytics',
+        'warden',
+        'learning',
+        'settings',
+        'attention',
+        'sessions',
+      ].map(at),
+    ).toEqual(['projects', 'projects', 'sharing', 'insights', 'insights', 'insights', 'settings', 'attention', null]);
   });
 
   it('opens the Sessions bar on Interactive for a device that never chose, and remembers the kind it picks', async () => {

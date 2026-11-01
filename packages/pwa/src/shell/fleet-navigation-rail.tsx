@@ -15,6 +15,7 @@ import {
   Plus,
   Radio,
   Settings,
+  Share2,
   ShieldCheck,
   SlidersHorizontal,
   User,
@@ -28,6 +29,7 @@ import {
   daemonImportedHistoryPath,
   daemonNewSessionPath,
   daemonSettingsPath,
+  daemonSharingPath,
   daemonWardenPath,
 } from '../lib/pages/routes.ts';
 import { RouteLink } from './route-link.tsx';
@@ -165,6 +167,15 @@ export function FleetNavigationRail({
         className="kt-btn h-[44px] w-[44px] justify-center !px-0"
       >
         <Archive size={14} aria-hidden="true" />
+      </RouteLink>
+      <RouteLink
+        to={daemonSharingPath(daemon)}
+        {...(onNavigate ? { onNavigate } : {})}
+        aria-label="Open sharing"
+        title="Sharing"
+        className="kt-btn h-[44px] w-[44px] justify-center !px-0"
+      >
+        <Share2 size={14} aria-hidden="true" />
       </RouteLink>
       <RouteLink
         to={daemonSettingsPath(daemon)}
