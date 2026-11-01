@@ -180,6 +180,10 @@ export interface WorldOptions {
   readonly listing?: RuleListing;
   /** The device names, as pairing answers them; it may act on the service (an idle device revoked while it is read). */
   readonly label?: (deviceId: string, service: SignInRuleService) => Promise<string | undefined>;
+  /** `false`: the service is handed back before it read its file, as at boot. */
+  readonly load?: boolean;
+  /** The stage's nonce, as the system CSPRNG would draw it; a test may hand a broken one. */
+  readonly nonce?: () => string;
 }
 
 export async function world(options: WorldOptions = {}) {
@@ -187,6 +191,7 @@ export async function world(options: WorldOptions = {}) {
   const store = options.store ?? new MemoryRuleStore();
   const proofs = options.proofs ?? new FakeProofs();
   const audits: AuditLine[] = [];
+  const warnings: string[] = [];
   const state = { listing: options.listing ?? (listing() as RuleListing), listingBroken: false };
   let ids = 0;
   const service = new SignInRuleService({
@@ -212,11 +217,12 @@ export async function world(options: WorldOptions = {}) {
     ids: {
       ruleId: () => `sr_${(++ids).toString(16).padStart(24, '0')}`,
       stageId: () => `srs_${(++ids).toString(16).padStart(24, '0')}` as SignInRuleStageId,
+      ...(options.nonce === undefined ? {} : { nonce: options.nonce }),
     },
-    warn: () => undefined,
+    warn: message => void warnings.push(message),
   });
-  await service.load();
-  return { service, store, proofs, audits, clock, state };
+  if (options.load !== false) await service.load();
+  return { service, store, proofs, audits, clock, state, warnings };
 }
 
 export type World = Awaited<ReturnType<typeof world>>;

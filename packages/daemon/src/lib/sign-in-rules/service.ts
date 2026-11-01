@@ -567,12 +567,9 @@ export class SignInRuleService {
           'capacity',
           `this machine already has ${String(SIGN_IN_RULE_MAX)} standing rules`,
         );
-      await this.#write([...this.#records.filter(each => each.body.id !== body.id), record.data]).catch(
-        (error: unknown) => {
-          if (error instanceof SignInRuleError) throw error;
-          throw new SignInRuleError(503, 'unavailable', 'the standing rules could not be saved; nothing was approved');
-        },
-      );
+      await this.#write([...this.#records.filter(each => each.body.id !== body.id), record.data]).catch(() => {
+        throw new SignInRuleError(503, 'unavailable', 'the standing rules could not be saved; nothing was approved');
+      });
       this.#verified.add(recordKey(record.data));
       const action = existing === undefined ? 'sign-in-rule-created' : againAction(existing, this.ports.clock.now());
       await this.#auditRule(record.data, action, { proof: 'passkey' }, auditActor(owner));
@@ -849,8 +846,8 @@ export class SignInRuleService {
     this.#health = 'ok';
   }
 
-  readonly #unsaved = (error: unknown): never => {
-    if (error instanceof SignInRuleError) throw error;
+  /** The store's own failure, said as the person's refusal (`#write` throws nothing of this service's). */
+  readonly #unsaved = (): never => {
     throw new SignInRuleError(503, 'unavailable', 'the standing rules could not be saved; nothing changed');
   };
 

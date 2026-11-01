@@ -389,3 +389,122 @@ describe('names need secrets.use (invariant 31)', () => {
     should(allowed.status).equal(201);
   });
 });
+
+/** A rule committed through the routes, as the app would make it. */
+async function made(s: Served): Promise<string> {
+  const stageId = await stage(s);
+  await ceremony(s, 'approve-sign-in-rule', stageId);
+  return jsonBody(await commit(s.dispatch, stageId))['id'] as string;
+}
+
+describe('the owner on every route', () => {
+  it('should list the rules, all or one sign-in’s, and refuse a sign-in that is not one', async () => {
+    // Arrange
+    const s = await served();
+    const rule = await made(s);
+
+    // Act
+    const all = await s.dispatch.dispatch(asDevice('GET', '/v1/sign-in-rules'));
+    const one = await s.dispatch.dispatch(asDevice('GET', `/v1/sign-in-rules?signIn=${GITLAB}`));
+    const bad = await s.dispatch.dispatch(asDevice('GET', '/v1/sign-in-rules?signIn=github'));
+
+    // Assert
+    should(all.status).equal(200);
+    should(jsonBody(all)).containDeep({ health: 'ok', rules: [{ id: rule, signIn: GITHUB }], stages: [] });
+    should(jsonBody(one)['rules']).eql([]);
+    should([bad.status, jsonBody(bad).code]).eql([400, 'bad_request']);
+  });
+
+  it('should answer the eligibility, and refuse a missing or unknown sign-in', async () => {
+    const s = await served();
+    const yes = await s.dispatch.dispatch(asDevice('GET', `/v1/sign-in-rules/eligibility?signIn=${GITHUB}`));
+    const missing = await s.dispatch.dispatch(asDevice('GET', '/v1/sign-in-rules/eligibility'));
+    const unknown = await s.dispatch.dispatch(
+      asDevice('GET', '/v1/sign-in-rules/eligibility?signIn=si_0000000000000fff'),
+    );
+    should([yes.status, jsonBody(yes)['eligible']]).eql([200, true]);
+    should([missing.status, jsonBody(missing).code]).eql([400, 'bad_request']);
+    should([unknown.status, jsonBody(unknown).code]).eql([404, 'not_found']);
+  });
+
+  it('should read a stage, drop it, and answer a stage id it never minted as not waiting', async () => {
+    // Arrange
+    const s = await served();
+    const stageId = await stage(s);
+
+    // Act
+    const read = await s.dispatch.dispatch(asDevice('GET', `/v1/sign-in-rules/stages/${stageId}`));
+    const dropped = await s.dispatch.dispatch(asDevice('DELETE', `/v1/sign-in-rules/stages/${stageId}`));
+    const again = await s.dispatch.dispatch(asDevice('DELETE', `/v1/sign-in-rules/stages/${stageId}`));
+    const minted = await s.dispatch.dispatch(asDevice('GET', '/v1/sign-in-rules/stages/tps_not-a-rule-stage'));
+
+    // Assert
+    should([read.status, jsonBody(read)['state']]).eql([200, 'waiting']);
+    should(jsonBody(dropped)).eql({ stage: stageId, dropped: true });
+    should([again.status, jsonBody(again).code]).eql([404, 'stage_not_found']);
+    should([minted.status, jsonBody(minted).code]).eql([404, 'stage_not_found']);
+    should(s.ruleStore.writes).equal(0);
+  });
+
+  it('should narrow a rule with no passkey, and refuse a rule id that is not one or a widening', async () => {
+    const s = await served();
+    const rule = await made(s);
+    const end = new Date(NOW + 86_400_000).toISOString();
+    const narrowed = await s.dispatch.dispatch(
+      asDevice('POST', `/v1/sign-in-rules/${rule}/narrow`, { expiresAt: end }),
+    );
+    const later = await s.dispatch.dispatch(
+      asDevice('POST', `/v1/sign-in-rules/${rule}/narrow`, { expiresAt: new Date(NOW + 2 * 86_400_000).toISOString() }),
+    );
+    const bad = await s.dispatch.dispatch(asDevice('POST', '/v1/sign-in-rules/rule-1/narrow', { uses: 1 }));
+    should([narrowed.status, jsonBody(narrowed)['expiresAt']]).eql([200, end]);
+    should([later.status, jsonBody(later).code]).eql([400, 'bad_request']);
+    should([bad.status, jsonBody(bad).code]).eql([400, 'bad_request']);
+  });
+
+  it('should revoke one rule, and every rule of an account, with no passkey', async () => {
+    // Arrange
+    const s = await served();
+    const rule = await made(s);
+
+    // Act
+    const one = await s.dispatch.dispatch(asDevice('DELETE', `/v1/sign-in-rules/${rule}`));
+    const gone = await s.dispatch.dispatch(asDevice('DELETE', `/v1/sign-in-rules/${rule}`));
+    const account = await s.dispatch.dispatch(asDevice('POST', '/v1/accounts/GITHUB_WORK/sign-in-rules/revoke', {}));
+    const bad = await s.dispatch.dispatch(asDevice('POST', '/v1/accounts/not%20a%20handle/sign-in-rules/revoke', {}));
+
+    // Assert
+    should(jsonBody(one)).eql({ id: rule, revoked: true });
+    should([gone.status, jsonBody(gone).code]).eql([404, 'not_found']);
+    should(jsonBody(account)).eql({ account: 'GITHUB_WORK', revoked: 0 });
+    should([bad.status, jsonBody(bad).code]).eql([400, 'invalid_account_id']);
+    should(s.ruleStore.document?.rules).eql([]);
+  });
+
+  it('should answer a fault that is not a refusal as one, never dressed as a refusal', async () => {
+    // Arrange — a service that fails as a bug would, not with one of its refusals
+    const broken = {
+      list: async () => {
+        throw new TypeError('a bug');
+      },
+      drop: () => {
+        throw new TypeError('a bug');
+      },
+    } as never;
+    const dispatch = new ApiDispatcher(
+      new ApiRouter(signInRuleRoutes(broken)),
+      {
+        ...CREDENTIALS,
+        devices: { has: (id: string) => id === deviceId, grants: () => DEFAULT_CAPABILITY_GRANTS },
+      },
+      GRANTED,
+    );
+
+    // Act
+    const list = await dispatch.dispatch(asDevice('GET', '/v1/sign-in-rules'));
+    const drop = await dispatch.dispatch(asDevice('DELETE', `/v1/sign-in-rules/stages/srs_${'0'.repeat(24)}`));
+
+    // Assert
+    should([list.status, drop.status]).eql([500, 500]);
+  });
+});
