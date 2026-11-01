@@ -61,7 +61,7 @@ export interface FinishedTurn {
 const RAISING_COMMAND = /\b(?:(?:attention|agenda)["',\s]+(?:add|edit)|notify)\b/u;
 const RAISING_TOOL = /(?:^|_)ask_owner$|^AskUserQuestion$/u;
 
-const raises = (event: TranscriptEvent): boolean => {
+export const raisesAgendaItem = (event: TranscriptEvent): boolean => {
   if (event.kind !== 'tool-call') return false;
   if (RAISING_TOOL.test(event.call.name)) return true;
   if (event.call.name.endsWith('_open') && JSON.stringify(event.call.input).includes('"askOwner"')) return true;
@@ -124,7 +124,7 @@ export function finishedTurn(events: readonly TranscriptEvent[]): FinishedTurn |
     opener,
     reply,
     replyKey: named === undefined ? digest(reply) : digest(named),
-    raised: turn.filter(raises).length,
+    raised: turn.filter(raisesAgendaItem).length,
     discussed,
     handled: discussed.filter(id => turn.some(event => handles(event, id))),
   };

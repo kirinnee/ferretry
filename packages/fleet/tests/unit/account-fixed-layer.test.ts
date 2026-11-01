@@ -855,7 +855,7 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).containEql('A card (&F412; agenda !A48):');
-    should(text).containEql('Search first (`zz search`); update or link a match instead of adding a duplicate.');
+    should(text).containEql('First `zz search`; link a match, no duplicate.');
     should(text).not.containEql('#F');
     should(text).containEql(
       'Make: `zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`',
@@ -871,6 +871,7 @@ describe('BOARD_INSTRUCTION', () => {
     should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');
     should(text).containEql("Owner's bug:");
     should(text).containEql('PRs, merges, `zz signal done` self-move; owner closes.');
+    should(text).endWith('Gates: the daemon asks; raise no agenda item for one.');
     should(text).not.containEql('`fy ');
   });
 

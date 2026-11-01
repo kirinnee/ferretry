@@ -611,6 +611,7 @@ import {
   BOARD_SWEEP_INTERVAL_MS,
   BoardService,
   BoardSweep,
+  BoardGateCheck,
   BoardTurnCheck,
   DoneDeliveryLadder,
   LivenessActivityDeriver,
@@ -11075,6 +11076,35 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         CLIENT_NAME,
       );
       armAgendaNudge(storage, boardTurnCheck, AGENDA_NUDGE_SETTLE_MS, (run, delayMs) => {
+        setTimeout(run, delayMs).unref();
+      });
+      // The gate check: a turn that raised its own agenda item on a card sitting at a gate, where the daemon has
+      // already asked the owner, gets one nudge to drop it. Same settled turn end, same listener.
+      const boardGateCheck = new BoardGateCheck(
+        {
+          readable: async sessionId =>
+            (await nudgeSessions.subject(sessionId)) !== undefined && !(await isSubFerret(boardSubFerrets, sessionId)),
+          boardOn: async sessionId => await boardWorld.switches.isOn(await laneSets.projectOf(sessionId)),
+          tail: async (sessionId, limit) => {
+            const subject = await nudgeSessions.subject(sessionId);
+            return subject === undefined
+              ? []
+              : await sendTranscripts.tail({ sessionId, harness: subject.harness }, limit);
+          },
+          open: async sessionId => {
+            const listed = await agenda.list(sessionId);
+            return listed.ok ? listed.value.items : [];
+          },
+          card: async ref => await boardWorld.board.task(ref.id),
+          send: async (sessionId, sendId, message) => {
+            const id = tryParseSessionId(sessionId);
+            if (id !== undefined) await boardSends.send({ id, sendId, message });
+          },
+          record: async (sessionId, items, cards) => await boardChecks.recordGate(sessionId, items, cards),
+        },
+        CLIENT_NAME,
+      );
+      armAgendaNudge(storage, boardGateCheck, AGENDA_NUDGE_SETTLE_MS, (run, delayMs) => {
         setTimeout(run, delayMs).unref();
       });
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route

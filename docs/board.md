@@ -76,7 +76,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in; most work needs no card. Make one only if the owner asked, your lead gave one, or `fy board status` says on; else ask: `fy agenda add -k yesno` "Track this on the board?". Search first (`fy search`); update or link a match instead of adding a duplicate. Make: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`. A card (&F412; agenda !A48): before To test `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`; lane by the work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy agenda add --task <id>` (owner), `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move; owner closes.
+Board: opt-in; most work needs no card. Make one only if the owner asked, your lead gave one, or `fy board status` says on; else ask: `fy agenda add -k yesno` "Track this on the board?". First `fy search`; link a match, no duplicate. Make: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<exact words>" --premise <point> --context <point>`. A card (&F412; agenda !A48): before To test `fy task edit <id> --how-to-test "<1. where 2. do 3. see; machine+version>"`; lane by the work (`fy board lanes show`): `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy agenda add --task <id>` (owner), `fy task depend` (card), `fy task block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<their words>"`. PRs, merges, `fy signal done` self-move; owner closes. Gates: the daemon asks; raise no agenda item for one.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -651,6 +651,26 @@ You changed code this turn without a card. Create one (fy task create …) or re
 - Each nudge is journalled on the session as `board.unfiled-work`, with the work it saw.
 
 The check is a queued nudge, not a refusal to end the turn (`board-design.md` §7, decision 2).
+
+### The gate check
+
+A card that reaches a gate stage raises **one** agenda item for the owner itself — the daemon does, so there is never
+a task notice and an agenda notice for the same thing. A ferret that also raises its own item on that card makes the
+owner answer twice, so a second check reads the same turn end
+(`packages/daemon/src/lib/board/gate-check.ts`, `BoardGateCheck`). If the turn raised an agenda item (`fy agenda add`,
+or an `*_ask_owner` tool) that is open on a card **currently** in a gate lane, and the daemon's own gate item for that
+card (`sourceRef` `gate:<card>:…`) is open too, the ferret gets one queued message per item:
+
+```text
+&F412 is at a gate; the daemon already asked the owner (!A31). Drop yours: fy agenda dismiss !A44
+```
+
+- **Once per item.** The send id carries the item, so a turn end seen twice is one message.
+- **A turn the check started is never checked**, so answering it cannot loop.
+- **Only on a board that is on**, and never for a sub-ferret (it raises no agenda items).
+- **When in doubt it says nothing**: no gate item to point to, a card or session it cannot read, or a turn whose start
+  time is unknown sends no message.
+- Each nudge is journalled on the session as `board.gate-nudged`, with the items it named and their cards.
 
 ## `fy task skip "<why>"`
 
