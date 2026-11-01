@@ -211,7 +211,13 @@ export class GateItems implements CardWriteObserver {
     for (const stale of open.gates.filter(each => each.item.sourceRef !== wanted)) {
       await this.ports.agenda.resolve(stale.sessionId, stale.item.id, DAEMON, GATE_MOVED_ON);
     }
-    if (gate === undefined || open.gates.some(each => each.item.sourceRef === wanted)) return false;
+    if (gate === undefined) return false;
+    const current = open.gates.find(each => each.item.sourceRef === wanted);
+    if (current !== undefined) {
+      // Already asked: brought up to date (an open PR said or unsaid), never raised a second time.
+      await this.ports.agenda.raise(current.sessionId, gateRaise(gate, card.task), DAEMON);
+      return false;
+    }
     const raised = await this.raise(card.task, gate, sessions);
     // Back at a gate: the conversation the last Not good opened has done its work.
     if (raised) {

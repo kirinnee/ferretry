@@ -645,17 +645,15 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   }
 
   const active = ledger.entries.filter(isActiveAgenda);
-  // A gate and its follow-up are raised once per entry, open or closed: the owner's "Not needed" stays said.
+  // A gate and its follow-up are raised once per entry: an open one is refreshed below, a closed one never comes
+  // back (the owner's "Not needed" stays said).
   const once =
     request.sourceRef !== null &&
     (parseGateReference(request.sourceRef) !== undefined ||
       parseGateFollowupReference(request.sourceRef) !== undefined);
-  if (
-    once &&
-    ledger.entries.some(entry => entry.item.source === request.source && entry.item.sourceRef === request.sourceRef)
-  ) {
-    return unchanged(ledger);
-  }
+  const sameRef = (entry: AgendaEntry): boolean =>
+    entry.item.source === request.source && entry.item.sourceRef === request.sourceRef;
+  if (once && !active.some(sameRef) && ledger.entries.some(sameRef)) return unchanged(ledger);
   const stable =
     request.sourceRef === null
       ? undefined

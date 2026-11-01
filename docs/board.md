@@ -161,7 +161,7 @@ card moves to a project's board when
 
 The refile goes through `BoardService` as the daemon, and its history says which rule moved it. A refiled card whose
 PRs say something lands where work resumes on the new board (its last active lane) and its PR facts move it on from
-there, so a card merged but not released lands in Merged, never in Released · to test because it sat in the Unfiled
+there — stopping at the first gate on the way, as every fact does ([Gates ask the owner](#gates-ask-the-owner)) — so a card merged but not released lands in Merged, never in Released · to test because it sat in the Unfiled
 board's To test. A card with nothing to say lands by its lane's category, as a refile by hand does. It is idempotent
 and safe under races: runs never overlap, a card someone (not the daemon) refiled to Unfiled on purpose stays there,
 and a ferret whose folder names no board is asked again only after ten minutes.
@@ -256,7 +256,7 @@ hand-made set.
 **`fy signal done` with no PR** moves a card still in an active lane to the lane its variant enters on `signal.done`,
 else the first review or verify lane ahead: a review lane where one comes first (today's behaviour on a board that
 has one), else the verify lane where the owner tries it. It never moves a card into a closed lane, because only the
-owner closes. A card with a PR is left where it is; its PR moves it.
+owner closes, never out of a gate, and stops at a gate on the way. A card with a PR is left where it is; its PR moves it.
 
 **A session starting on a card fires `work.started`.** `SessionCards` does it, for a card it just made (`fy new`,
 `fy start`) and for one handed over by `fy new --card`, so a sub-ferret, who may not move cards, still lands in the
@@ -534,8 +534,8 @@ grant. This replaced the old `task-boards` access list. The code is `packages/da
 | `daemon`      | the daemon's own automation                                | trigger moves, link cache, refile                                                |
 | `reader`      | any other ferret                                           | read; depend, but only from its own card                                         |
 
-Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a card on through an
-owner gate, and only the owner closes — except on an internal card, whose owner ferret and its leads pass its gates
+Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a card on out of a gate
+or past one (a lane whose stage is a gate, owner-gated or a `verify` lane), and only the owner closes — except on an internal card, whose owner ferret and its leads pass its gates
 and close it ([Gates ask the owner](#gates-ask-the-owner)). Reaching the routes at all is a `fleet` capability matter for a caller
 who is not on this host ([grants.md](grants.md)).
 
@@ -603,8 +603,21 @@ reopen's reason ("… — talk it over on !A12"). The ferret answers it like its
 the owner, `done` closes it (a sub-ferret's lead does that, as with every item on a sub-ferret's agenda). The owner's
 answer reaches the ferret as on its own item. It closes by itself when the card next reaches the gate.
 
-**Leaving.** A card that leaves the gate any other way — the owner's move on the Board, PR facts, a drop, a refile —
+**Leaving.** A card that leaves the gate any other way — the owner's move on the Board, a drop, a refile —
 has its open gate item resolved quietly: "the card moved on".
+
+**Only the owner passes a gate.** Their answer to its item, or their own move or report (and, on an internal card,
+its owner ferret's or a lead's move, below). Every other path may bring a card INTO a gate and move it between
+automatic stages, never out of one or past one: a ferret's `fy task move` (refused `owner-gate`, naming the lane),
+a daemon trigger (`work.started`, a PR, a release — it stops in the first gate on its way, and the history says
+"stopped at <lane>, which waits for the owner"), PR facts (they never pull a card back out of a gate for an open PR
+either), `fy signal done` (held, or stopped at the gate) and a refile's facts. One helper decides it,
+`gateOnTheWay` / `gatesBetween` in `card-actions.ts`, from each lane's stage (`laneStage`), so a `verify` lane with
+no `ownerGate` is a gate too. A ferret may still move a card back out of a gate, with a reason.
+
+**A PR opened while the card waits.** The card stays at the gate; its item says so in its context ("A new PR is open
+for this card: <url>", one line per open PR), refreshed in place when the PR opens or closes, so the owner waits or
+says Not good. Done while it is open closes the card as usual.
 
 **Nobody else answers.** A ferret, a lead over its sub-ferret (`overSubFerret`) and the daemon are refused every
 verb that would answer, close or reword a gate item (`answer`, `done`, `dismiss`, `edit`, `surface`); a ferret's
@@ -667,8 +680,9 @@ a card backward, with one exception: any open PR, draft or not and however old, 
 something pulls it back to where `pr.ready` goes (In progress, or Review/CI on an older board: "moved back to In
 progress: PR #1013 ready for review"), because work still in flight means the card is not shipped. A PR closed
 unmerged says nothing. Nor does a fact move a card out of Closed or a drop, or into a Closed lane in a set with a
-`verify` lane. A fact passes an owner gate (out of Plan/Design, and back out of Released · to test); gates still
-stop ferrets.
+`verify` lane. A fact never passes a gate: it moves a card into one and stops there, and it neither moves nor pulls back
+a card waiting at one (Plan/Design, Released · to test), whatever its PRs say
+([Gates ask the owner](#gates-ask-the-owner)); the "pulled back" exception above applies only outside a gate.
 The GitHub watcher reconciles every linked card on every poll, refile and `fy task link --pr` re-evaluate at once, and a
 PR nobody has asked GitHub about is polled on the next tick. A card the owner sent back stays back until a PR newer
 than that move merges. History names the fact; no move is ever typed into a chat
@@ -810,10 +824,8 @@ wherever it appears ([reference-standard.md](reference-standard.md)).
 
 ## Gaps and work in flight
 
-- **Gates do not raise agenda items yet.** A card that reaches a gate lane is still the owner's to move on the board
-  (Done / Not good, or a move out of Plan/Design); the one Inbox item per gate, and answering it with an option, come
-  next on top of [the model](#workflows-gate-and-automatic-stages). Nor can the lane editor set a gate's options or a
-  stage yet, nor `fy` report a trigger.
+- **The lane editor cannot set a gate's options or a stage yet**, nor `fy` report a trigger. A gate already raises
+  its one Inbox item ([Gates ask the owner](#gates-ask-the-owner)).
 - **`pr.review_approved` is reported, not watched.** The watcher asks GitHub for a PR's state, checks and merge,
   not its review decision, so for now an approval is reported (`{ "action": "trigger" }`).
 - **A daemon or an app that predates the two new triggers cannot read a lane that uses one.** Its trigger list is

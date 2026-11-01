@@ -176,6 +176,11 @@ const rank = (laneSet: LaneSet, laneId: string): number => {
   return category.ok ? LANE_CATEGORIES.indexOf(category.value) : -1;
 };
 
+const isBackward = (laneSet: LaneSet, from: string, to: string): boolean => {
+  const backward = isBackwardMove(laneSet, from, to);
+  return backward.ok && backward.value;
+};
+
 const requireOpen = (card: BoardTask, doing: string): void => {
   if (card.dropped !== null) {
     throw new BoardError('invalid', `${formatTaskRef(card)} is dropped; reopen it before you ${doing} it`);
@@ -202,6 +207,25 @@ const requireOwnerForClosed = (
 };
 
 // ---------------------------------------------------------------------------------------------------
+// Gates: the one stopping point (docs/board.md § Gates ask the owner)
+// ---------------------------------------------------------------------------------------------------
+
+const isGate = (lane: Lane): boolean => laneStage(lane).kind === 'gate';
+
+/**
+ * The gate lanes the card's variant walks strictly between its lane and `target`, in order. Entering a gate is not
+ * passing it, so `target` never counts; a move back passes none.
+ */
+export const gatesBetween = (laneSet: LaneSet, card: Pick<BoardTask, 'laneId' | 'workflow'>, target: Lane): Lane[] => {
+  const at = (id: string): number => laneSet.lanes.findIndex(lane => lane.id === id);
+  // A variant naming a lane the set lacks cannot say what is walked, so every lane is.
+  const walked = variantLanes(laneSet, card.workflow);
+  return (walked.ok ? walked.value : laneSet.lanes).filter(
+    lane => at(lane.id) > at(card.laneId) && at(lane.id) < at(target.id) && isGate(lane),
+  );
+};
+
+// ---------------------------------------------------------------------------------------------------
 // Moves
 // ---------------------------------------------------------------------------------------------------
 
@@ -217,13 +241,18 @@ const move = (card: BoardTask, to: string, reason: string | undefined, context: 
   }
   const gated = needsOwner(context.laneSet, card.laneId, to);
   const audience = context.audience ?? 'external';
-  if (gated.ok && gated.value && !mayPassGate(context.standing, audience)) {
+  const forward = !isBackward(context.laneSet, card.laneId, to);
+  // A move on never passes a gate, the card's own or one on the way; entering one is fine.
+  const passed = forward ? gateOnTheWay(context.laneSet, card, target) : undefined;
+  if (((gated.ok && gated.value) || passed !== undefined) && !mayPassGate(context.standing, audience)) {
     requireOwnerForClosed(target, context.standing, card, audience);
+    const gate = passed ?? from;
+    const where = gate.id === from.id ? `on from ${from.name}` : `past ${gate.name}`;
     throw new BoardError(
       'owner-gate',
       audience === 'internal'
-        ? `only its owner ferret or a lead above it moves ${ref} on from ${from.name}`
-        : `only the owner moves ${ref} on from ${from.name}: the daemon asks them in the Inbox, so raise no agenda item for it`,
+        ? `only its owner ferret or a lead above it moves ${ref} ${where}`
+        : `only the owner moves ${ref} ${where}: the daemon asks them in the Inbox, so raise no agenda item for it`,
       audience === 'internal' ? ['owner-human', 'owner', 'ancestor'] : ['owner-human'],
     );
   }
@@ -313,6 +342,9 @@ const reopen = (
  * never goes backwards (unless `backward` says the facts pulled the card back, see {@link laneFromFacts})
  * and never moves a dropped card, and it is NOT stopped by dependencies, because
  * reality wins over the rule; the history says what it was blocked by. `null` when nothing moves.
+ *
+ * IT NEVER PASSES A GATE (docs/board.md § Gates ask the owner): a card waiting at one stays there, whatever the
+ * signal, and a move that would pass one on the way stops in it. Only the owner's own report (`passGates`) goes on.
  */
 export const triggerMove = (
   card: BoardTask,
@@ -320,6 +352,7 @@ export const triggerMove = (
   reason: string | undefined,
   context: CardContext,
   backward = false,
+  passGates = false,
 ): BoardTask | null => {
   requireStanding('trigger', context.standing, card);
   if (card.dropped !== null) return null;
@@ -328,16 +361,20 @@ export const triggerMove = (
   if (lane.value.category === 'closed' && lane.value.ownerGate === true) return null;
   const movesBack = isBackwardMove(context.laneSet, card.laneId, lane.value.id);
   if (!movesBack.ok || movesBack.value !== backward) return null;
+  if (!passGates && isGate(requireLane(context.laneSet, card.laneId))) return null;
+  const stop = passGates ? undefined : gatesBetween(context.laneSet, card, lane.value)[0];
+  const to = stop ?? lane.value;
   const blockers = backward ? [] : blockedBy(card, context.index, context.laneSets);
   const note = blockers.length === 0 ? null : `${trigger} while blocked by ${blockers.map(formatTaskRef).join(', ')}`;
-  const said = [reason, note].filter(part => part !== undefined && part !== null).join('; ');
+  const held = stop === undefined ? null : `stopped at ${stop.name}, which waits for the owner`;
+  const said = [reason, note, held].filter(part => part !== undefined && part !== null).join('; ');
   return {
     ...withEvent(
       card,
       {
         type: 'moved',
         from: card.laneId,
-        to: lane.value.id,
+        to: to.id,
         backward,
         reason: said === '' ? null : said,
         auto: true,
@@ -345,7 +382,7 @@ export const triggerMove = (
       },
       context,
     ),
-    laneId: lane.value.id,
+    laneId: to.id,
   };
 };
 
@@ -360,13 +397,8 @@ export const gateOnTheWay = (
   card: Pick<BoardTask, 'laneId' | 'workflow'>,
   target: Lane,
 ): Lane | undefined => {
-  const at = (id: string): number => laneSet.lanes.findIndex(lane => lane.id === id);
-  // A variant naming a lane the set lacks cannot say what is walked, so every lane is.
-  const walked = variantLanes(laneSet, card.workflow);
-  const between = (walked.ok ? walked.value : laneSet.lanes).filter(
-    lane => at(lane.id) > at(card.laneId) && at(lane.id) < at(target.id),
-  );
-  return [requireLane(laneSet, card.laneId), ...between].find(lane => laneStage(lane).kind === 'gate');
+  const from = requireLane(laneSet, card.laneId);
+  return isGate(from) ? from : gatesBetween(laneSet, card, target)[0];
 };
 
 /**
@@ -430,11 +462,14 @@ const report = (
     );
   }
   const { actorVia: _via, ...rest } = context;
-  const moved = triggerMove(card, action.event, action.reason, {
-    ...rest,
-    actor: { kind: 'daemon' },
-    standing: 'daemon',
-  });
+  const moved = triggerMove(
+    card,
+    action.event,
+    action.reason,
+    { ...rest, actor: { kind: 'daemon' }, standing: 'daemon' },
+    false,
+    context.standing === 'owner-human',
+  );
   // Never null by now: every case triggerMove declines was answered above.
   return { task: moved === null ? null : reportedBy(moved, context) };
 };
@@ -454,8 +489,9 @@ const reportedBy = (moved: BoardTask, context: Pick<CardContext, 'actor' | 'acto
 });
 
 /**
- * Catches a card up to its own PR facts ({@link laneFromFacts}): the daemon's automatic move, forward
- * through any owner gate, recorded with the trigger and the fact that moved it. `null` when the facts
+ * Catches a card up to its own PR facts ({@link laneFromFacts}): the daemon's automatic move, recorded with the
+ * trigger and the fact that moved it. It stops at a gate like every daemon move ({@link triggerMove}): facts move a
+ * card into one, never out of or past it — not on, and not back for an open PR. `null` when the facts
  * put the card where it already is, or have no opinion. Whoever asked for the write, the move is the
  * daemon's: a card the facts moved was moved by no one.
  */

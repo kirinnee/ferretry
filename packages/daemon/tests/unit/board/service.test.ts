@@ -1888,7 +1888,7 @@ describe('lanes follow PR facts at the write', () => {
     },
   ])('should move a card at once on a linked PR that is $name', async ({ pr, lane, trigger }) => {
     // Arrange
-    const { ports, service } = serviceWith([card({ laneId: 'plan' }), holding(pr)], {
+    const { ports, service } = serviceWith([card({ laneId: 'implement' }), holding(pr)], {
       runningVersion: () => '4.114.0',
     });
 
@@ -1898,6 +1898,20 @@ describe('lanes follow PR facts at the write', () => {
     // Assert
     should(stored(ports).laneId).equal(lane);
     should(lastEvent(ports)).match({ type: 'moved', trigger, auto: true, actor: { kind: 'daemon' } });
+  });
+
+  it('should keep a card waiting at the Plan gate where it is, whatever its linked PR says', async () => {
+    // Arrange — only the owner passes a gate (docs/board.md § Gates ask the owner)
+    const { ports, service } = serviceWith([card({ laneId: 'plan' }), holding(known({ releasedIn: RELEASE }))], {
+      runningVersion: () => '4.114.0',
+    });
+
+    // Act
+    await service.act('F1', action({ action: 'link', pr: URL }), lead);
+
+    // Assert
+    should(stored(ports).laneId).equal('plan');
+    should(lastEvent(ports)).match({ type: 'linked' });
   });
 
   it('should leave a card where it is when the PR linked is one nobody has polled', async () => {

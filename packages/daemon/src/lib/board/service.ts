@@ -460,7 +460,9 @@ export class BoardService {
         return { task: requireValidCard(noted), result: { task: noted, moved: null, held: move.held } };
       }
       const task = requireValidCard(move.task);
-      return { task, result: { task, moved: target } };
+      // Where it landed: the lane done names, or a gate on the way, where it stops.
+      const moved = context.laneSet.lanes.find(lane => lane.id === task.laneId) ?? target;
+      return { task, result: { task, moved } };
     });
     if (outcome === null) return null;
     await this.afterWrite(caller, outcome.task, [outcome.task.projectId]);

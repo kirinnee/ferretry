@@ -946,3 +946,60 @@ describe('the gate lanes from the workflow model', () => {
     ).be.undefined();
   });
 });
+
+describe('a PR open while the card waits at its gate', () => {
+  const openPr = {
+    url: 'https://github.com/kirinnee/ferretry/pull/941',
+    number: 941,
+    repo: 'kirinnee/ferretry',
+    state: 'open' as const,
+    draft: false,
+    checks: 'pending' as const,
+    mergedAt: null,
+    mergeSha: null,
+    releasedIn: null,
+    polledAt: NOW,
+  };
+
+  it('says so on the gate item, and stops saying so when the PR closes, without a second item', async () => {
+    // Arrange
+    const world = fixture([external({ laneId: 'tested' })]);
+    await world.gates.backfill();
+    const [item] = world.open();
+
+    // Act — the PR opens, then is closed, while the card stays at the gate
+    world.store.cards.set('F1', { ...world.stored(), links: { ...world.stored().links, prs: [openPr] } });
+    await world.gates.written('F1');
+    const told = world.open();
+    world.store.cards.set('F1', {
+      ...world.stored(),
+      links: { ...world.stored().links, prs: [{ ...openPr, state: 'closed' }] },
+    });
+    await world.gates.written('F1');
+
+    // Assert
+    should(told).have.length(1);
+    should(told[0]).match({ id: item?.id, context: `A new PR is open for this card: ${openPr.url}` });
+    should(world.open()).have.length(1);
+    should(world.open()[0]).match({ id: item?.id, context: null });
+    should(world.stored().laneId).equal('tested');
+  });
+
+  it('closes the card normally when the owner answers Done while the PR is open', async () => {
+    // Arrange
+    const world = fixture([
+      external({ laneId: 'tested', links: { prs: [openPr], branch: null, commits: [], docs: [] } }),
+    ]);
+    await world.gates.backfill();
+    const [item] = world.open();
+
+    // Act
+    const outcome = await world.answer((item as AgendaItem).id, choose('Done'));
+
+    // Assert
+    should(item?.context).equal(`A new PR is open for this card: ${openPr.url}`);
+    should(outcome).match({ handled: true, mutation: { ok: true } });
+    should(world.stored().laneId).equal('closed');
+    should(world.open()).be.empty();
+  });
+});

@@ -151,6 +151,12 @@ const gateSubject = (gate: AgendaGate, task: Pick<BoardTask, 'title' | 'summary'
   return clipAtWord(line.replaceAll(/\s+/gu, ' '), MAX_AGENDA_SUBJECT_LENGTH);
 };
 
+/** One line per PR of the card that is still open, or `null` when none is. */
+const openPullRequests = (task: Pick<BoardTask, 'links'>): string | null => {
+  const open = task.links.prs.filter(pr => pr.state === 'open');
+  return open.length === 0 ? null : open.map(pr => `A new PR is open for this card: ${pr.url}`).join('\n');
+};
+
 /** Markdown cut to `limit` characters with its lines kept, marked … when it was cut. */
 const clipProse = (text: string, limit: number): string =>
   text.length <= limit ? text : `${text.slice(0, limit - 1).trimEnd()}…`;
@@ -164,7 +170,7 @@ export interface GateRaise {
   readonly subject: string;
   readonly why: string;
   readonly howToResolve: string;
-  readonly context: null;
+  readonly context: string | null;
   readonly premise?: string;
   readonly body?: string;
   readonly ask: { readonly kind: 'multiple-choice'; readonly options: { readonly label: string }[] };
@@ -179,7 +185,7 @@ export interface GateRaise {
  */
 export const gateRaise = (
   gate: AgendaGate,
-  task: Pick<BoardTask, 'id' | 'title' | 'summary' | 'howToTest'>,
+  task: Pick<BoardTask, 'id' | 'title' | 'summary' | 'howToTest' | 'links'>,
 ): GateRaise => {
   const labels = gateAskOptions(gate).map(option => option.label);
   const where = gate.projectName === undefined ? gate.laneName : `${gate.laneName} on ${gate.projectName}`;
@@ -193,7 +199,8 @@ export const gateRaise = (
     subject: gateSubject(gate, task),
     why: `${formatTaskRef(task)} reached ${where}, which waits on you.`,
     howToResolve: `Choose ${labels.join(' or ')}; the card moves when you answer.`,
-    context: null,
+    // A PR still open while the card waits: the card stays at the gate, so the owner is told to wait or say Not good.
+    context: openPullRequests(task),
     ...(summary === '' ? {} : { premise: clipAtWord(summary, MAX_AGENDA_REASON_LENGTH) }),
     // The card's How to test, as written: Markdown keeps its lines. Never `steps`, which make a choice a mix.
     ...(howToTest === '' ? {} : { body: clipProse(howToTest, MAX_AGENDA_BODY_LENGTH) }),
