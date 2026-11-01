@@ -742,3 +742,33 @@ describe('Attention undelivered answers', () => {
     should(changes.seen.filter(each => each.change.change === 'reopened')).have.length(2);
   });
 });
+
+describe('a forged gate follow-up (docs/agenda.md § Reserved sourceRefs)', () => {
+  it('routes no owner words to the ferret through a question that merely names a follow-up', async () => {
+    // Arrange — a question item (the harness producer's source) under a gate-followup reference
+    const changes = new RecordingChanges();
+    const agenda = service(new MemoryRepository(), changes);
+    await agenda.raise(
+      SESSION,
+      {
+        source: 'question',
+        sourceRef: 'gate-followup:F412:7',
+        subject: 'Talk it over?',
+        why: 'w',
+        howToResolve: 'h',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+      },
+      { kind: 'daemon', cause: 'harness-prompt' },
+    );
+    await agenda.answer(SESSION, 'A1', { kind: 'open-question', answer: 'my secret plan' }, HUMAN);
+    const messenger = new RecordingMessenger();
+    const delivery = new AgendaReplyDelivery(messenger, 'fy');
+
+    // Act
+    for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
+
+    // Assert
+    should(messenger.sent).be.empty();
+  });
+});

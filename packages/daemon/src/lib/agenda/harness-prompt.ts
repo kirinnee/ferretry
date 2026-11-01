@@ -1,4 +1,5 @@
 import {
+  isHarnessQuestionId,
   AGENDA_ASK_TARGET_LENGTH,
   type AgendaAsk,
   AgendaAskSchema,
@@ -225,10 +226,21 @@ export function harnessWait(state: unknown): HarnessWait | undefined {
   if (current.status !== undefined && ENDED.has(current.status)) return undefined;
   const pending = current.pendingQuestion ?? undefined;
   if (pending !== undefined) {
-    if (pending.toolUseId.length > MAX_AGENDA_SOURCE_REF_LENGTH) return undefined;
+    // The ferret's harness wrote this id: one shaped like the daemon's own references is no question to raise.
+    if (!isHarnessQuestionId(pending.toolUseId)) return undefined;
     return { sourceRef: pending.toolUseId, request: harnessQuestionRequest(pending) };
   }
   return current.turnState === 'needs-input' ? consolePromptWait(current) : undefined;
+}
+
+/**
+ * The tool id of a pending question that is NOT raised because it is shaped like a daemon reference (docs/agenda.md §
+ * Reserved sourceRefs), for the diagnostic; `undefined` for any other state.
+ */
+export function refusedQuestionId(state: unknown): string | undefined {
+  const parsed = HarnessStateSchema.safeParse(state);
+  const id = parsed.success ? parsed.data.pendingQuestion?.toolUseId : undefined;
+  return id === undefined || isHarnessQuestionId(id) ? undefined : id;
 }
 
 /** Whether a board row is one this producer raised. */
@@ -341,6 +353,8 @@ export class HarnessPromptAgenda {
     private readonly legacyAttention: HarnessAgenda,
     private readonly serial: Pick<SerialExecutor, 'run'>,
     private readonly states: { read(sessionId: string): Promise<unknown> },
+    /** Where a refused question is told: one shaped like a daemon reference raises nothing. */
+    private readonly diagnostics: { warn(message: string): void } = { warn: () => undefined },
   ) {}
 
   /** A state document was written. Total: a failure is retried at the next write. */
@@ -348,6 +362,12 @@ export class HarnessPromptAgenda {
     const wait = harnessWait(state);
     const key = wait?.sourceRef ?? '';
     if (this.seen.get(sessionId) === key) return;
+    const refused = refusedQuestionId(state);
+    if (refused !== undefined) {
+      this.diagnostics.warn(
+        `${sessionId}: a question whose id (${refused.slice(0, 80)}) is shaped like a daemon reference was not raised`,
+      );
+    }
     // A session with no wait and nothing open on its board has nothing to clear.
     if (wait === undefined && !this.seen.has(sessionId) && !hasOpenAgenda(state)) {
       this.seen.set(sessionId, key);

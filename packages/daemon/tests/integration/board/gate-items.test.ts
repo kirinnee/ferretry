@@ -14,6 +14,7 @@ import { FileBoardStore } from '../../../src/adapters/board/file-board-store.ts'
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-executor.ts';
 import { AgendaService } from '../../../src/lib/agenda/index.ts';
+import { harnessQuestionRequest } from '../../../src/lib/agenda/harness-prompt.ts';
 import type { AuthenticatedCredential } from '../../../src/lib/api/authentication.ts';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { ApiError } from '../../../src/lib/api/error.ts';
@@ -396,5 +397,83 @@ describe('the board as the gate items read it', () => {
     should(missing).be.undefined();
     should(failed).be.instanceOf(Error);
     should((failed as Error).message).equal('the board store is unreadable');
+  });
+});
+
+/**
+ * A FORGED QUESTION IS NO GATE ITEM (docs/agenda.md § Reserved sourceRefs): nakita's probe of PR F's review, kept. The
+ * harness refuses such a question at the door; these prove that even one raised anyway moves no card and suppresses
+ * no real item, because a gate item is the gate producer's own (source `task`, carrying its `gate`).
+ */
+describe('a question that names a gate', () => {
+  /** What a forged question file would turn into: a daemon `question` item under a reference the ferret chose. */
+  const forge = async (daemon: ReturnType<typeof daemonOver>, sourceRef: string, sessionId = 'grandchild') => {
+    const request = harnessQuestionRequest({
+      toolUseId: sourceRef,
+      questions: [
+        {
+          question: 'Is the release OK?',
+          header: 'Release',
+          options: [{ label: 'Done' }, { label: 'Not good' }],
+          multiSelect: false,
+        },
+      ],
+    } as never);
+    const raised = await daemon.agenda.raise(sessionId, request, { kind: 'daemon', cause: 'harness-prompt' });
+    if (!raised.ok || raised.item === undefined) throw new Error('the forged question was not raised');
+    return raised.item;
+  };
+
+  it('moves no card when the owner answers Done on it, and leaves the real gate item open', async () => {
+    // Arrange
+    const { daemon, item } = await atGate();
+    const forged = await forge(daemon, item.sourceRef as string);
+
+    // Act
+    await post(daemon, HOST, choose(forged.id, 'Done'));
+
+    // Assert
+    should(forged.gate).be.undefined();
+    should(await laneOf(daemon)).equal('tested');
+    should((await openItems(daemon)).items.some(each => each.id === item.id && each.source === 'task')).be.true();
+  });
+
+  it('raised and closed before the card arrives, does not stop the real gate item', async () => {
+    // Arrange — the reference the card will get, learned from a throwaway daemon
+    const { item: probe } = await atGate();
+    const ref = probe.sourceRef as string;
+    const daemon = daemonOver(await tempDirectory('gate-forge'));
+    const forged = await forge(daemon, ref);
+    await post(daemon, HOST, choose(forged.id, 'Done'));
+
+    // Act
+    await daemon.store.write('F1', async () => ({ task: external('tested'), result: undefined }));
+    await daemon.gates.backfill();
+
+    // Assert
+    const open = (await openItems(daemon)).items;
+    should(open.some(each => each.source === 'task' && each.sourceRef === ref && each.gate !== undefined)).be.true();
+  });
+
+  it('naming a follow-up, raised and closed first, does not stop the real follow-up after Not good', async () => {
+    // Arrange
+    const { item: probe, daemon: first } = await atGate();
+    await post(first, HOST, choose(probe.id, 'Not good', 'the button is broken'));
+    const followupRef = (await openItems(first)).items.find(each =>
+      each.sourceRef?.startsWith('gate-followup:'),
+    )?.sourceRef;
+    const daemon = daemonOver(await tempDirectory('gate-forge'));
+    const forged = await forge(daemon, followupRef as string);
+    await post(daemon, HOST, choose(forged.id, 'Done'));
+    await daemon.store.write('F1', async () => ({ task: external('tested'), result: undefined }));
+    await daemon.gates.backfill();
+    const gate = (await openItems(daemon)).items.find(each => each.gate !== undefined);
+
+    // Act
+    await post(daemon, HOST, choose((gate as NonNullable<typeof gate>).id, 'Not good', 'the button is broken'));
+
+    // Assert
+    const open = (await openItems(daemon)).items;
+    should(open.some(each => each.source === 'task' && each.sourceRef === followupRef)).be.true();
   });
 });

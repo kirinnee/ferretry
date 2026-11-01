@@ -7,6 +7,8 @@ import {
   type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 import should from 'should';
+import { AgendaService, type AgendaLedger } from '../../../src/lib/agenda/index.ts';
+import { harnessQuestionRequest } from '../../../src/lib/agenda/harness-prompt.ts';
 import type { AgendaBoardChange } from '../../../src/lib/agenda/service.ts';
 import { acceptedProposal, LaneProposalAcceptance, laneProposalCard } from '../../../src/lib/board-projects/index.ts';
 import { FERRETRY_ID } from './support.ts';
@@ -19,8 +21,13 @@ const LANES: LaneSet = {
   ...LANE_TEMPLATES.quick,
 };
 
-const item = (sourceRef: string | null, response?: unknown): ResolvedAgendaItem =>
-  ({ sourceRef, ...(response === undefined ? {} : { response }) }) as unknown as ResolvedAgendaItem;
+/** A closed item; by default the lane producer's own card (the daemon's, under source `task`). */
+const item = (
+  sourceRef: string | null,
+  response?: unknown,
+  producer: { readonly raisedBy: string; readonly source: string } = { raisedBy: 'daemon', source: 'task' },
+): ResolvedAgendaItem =>
+  ({ sourceRef, ...producer, ...(response === undefined ? {} : { response }) }) as unknown as ResolvedAgendaItem;
 
 const accept = { kind: 'multiple-choice', choice: ' Accept ' };
 
@@ -66,6 +73,63 @@ describe('acceptedProposal', () => {
     should(acceptedProposal(item(`lanes:${FERRETRY_ID}:0`, accept))).be.undefined();
     should(acceptedProposal(item('lanes::2', accept))).be.undefined();
     should(acceptedProposal(item('lanes:not-a-project:2', accept))).be.undefined();
+  });
+});
+
+describe('acceptedProposal binds to the lane producer (docs/agenda.md § Reserved sourceRefs)', () => {
+  it('never reads an Accept on an item any other producer raised under a lanes: reference', () => {
+    const reference = laneProposalReference(FERRETRY_ID, 2);
+    // The review's P6: a ferret's own question file, raised by the daemon's harness producer
+    should(acceptedProposal(item(reference, accept, { raisedBy: 'daemon', source: 'question' }))).be.undefined();
+    should(acceptedProposal(item(reference, accept, { raisedBy: 'agent', source: 'agent-raised' }))).be.undefined();
+    should(acceptedProposal(item(reference, accept, { raisedBy: 'agent', source: 'task' }))).be.undefined();
+    should(acceptedProposal(item(reference, accept))).deepEqual({ projectId: FERRETRY_ID, version: 2 });
+  });
+
+  it('confirms no lanes when the owner answers Accept on a forged question, end to end', async () => {
+    // Arrange — the agenda is real; the forged item is what a question file naming a lane proposal would raise
+    let ledger: AgendaLedger | null = null;
+    const accepted: number[] = [];
+    const acceptance = new LaneProposalAcceptance({
+      acceptProposal: async (_projectId, version) => {
+        accepted.push(version);
+        return true;
+      },
+    });
+    const agenda = new AgendaService(
+      {
+        read: async () => ledger,
+        transact: async (_sessionId, apply) => {
+          const mutation = apply(ledger);
+          if (mutation.ok) ledger = mutation.ledger;
+          return mutation;
+        },
+      },
+      { now: () => '2026-11-01T21:00:00.000Z' },
+      { has: async () => true },
+      { raised: async () => undefined },
+      acceptance,
+    );
+    const forged = harnessQuestionRequest({
+      toolUseId: laneProposalReference(FERRETRY_ID, 2),
+      questions: [
+        {
+          question: 'Keep going?',
+          header: 'Go',
+          options: [{ label: 'Accept' }, { label: 'Edit' }],
+          multiSelect: false,
+        },
+      ],
+    } as never);
+    const raised = await agenda.raise('s1', forged, { kind: 'daemon', cause: 'harness-prompt' });
+    const id = raised.ok && raised.item !== undefined ? raised.item.id : 'A0';
+
+    // Act
+    const answered = await agenda.answer('s1', id, { kind: 'multiple-choice', choice: 'Accept' }, { kind: 'human' });
+
+    // Assert
+    should(answered.ok).be.true();
+    should(accepted).be.empty();
   });
 });
 

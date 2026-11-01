@@ -252,6 +252,22 @@ as the owner; **Edit** points at the Board lane editor. A ferret's own edit leav
 owner's edit confirms it. The routes are `GET /v1/board/projects` and `GET|POST /v1/board/projects/:projectId/lanes`.
 If the card cannot be raised the set stays live and the response says `agenda: "failed"`.
 
+## Reserved sourceRefs
+
+Some daemon producers ACT on the owner's answer to their item: a lane proposal's Accept confirms lanes, a gate item's
+answer moves a card. So the grammars the daemon writes `sourceRef` in — `lanes:`, `gate:`, `gate-followup:`,
+`warden:`, `warden-orphan:`, `handover:`, `budget:`, `prompt:` (`DAEMON_SOURCE_REF_PREFIXES` in
+`@ferretry/protocol`) — are the daemon's alone, held at both ends:
+
+- **Nothing a ferret writes carries one.** An agenda add names no reference at all (`forbidden` for a ferret and the
+  owner alike), and a harness question — whose tool id the ferret's own question file supplies — is raised only for an
+  id a provider could have written: no `:` (Claude's `toolu_…`, Codex's `call_…` have none; every daemon grammar
+  does) and no reserved prefix (`isHarnessQuestionId`). Any other is not raised, and the daemon log says so.
+- **Every consumer checks the producer, not just the reference.** A lane proposal's Accept counts only on the daemon's
+  own `task`-source card (`acceptedProposal`); a gate item is the `task` source with its `gate`, and its follow-up
+  the daemon's `task` source too — so a question naming either moves no card, routes no words to a ferret, and, raised
+  and closed first, suppresses no real item.
+
 ## Confirming a configuration change
 
 An edit that loosens what the machine may spend or do is **held** until the owner confirms it

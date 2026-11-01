@@ -21,6 +21,7 @@ import {
   harnessQuestionAnswers,
   harnessQuestionRequest,
   harnessWait,
+  refusedQuestionId,
   isHarnessConsolePromptRef,
 } from '../../../src/lib/agenda/index.ts';
 
@@ -101,6 +102,31 @@ describe('harnessWait', () => {
     should(harnessWait(running({ status: 'completed', pendingQuestion: choice }))).be.undefined();
     should(harnessWait(running({ turnState: 'your-turn' }))).be.undefined();
     should(harnessWait(running({ pendingQuestion: { ...choice, toolUseId: 'x'.repeat(600) } }))).be.undefined();
+  });
+
+  it('should raise no question whose id is shaped like a daemon reference, and say which (docs/agenda.md § Reserved sourceRefs)', () => {
+    // A ferret writes its own question file: an id it chose must never name a daemon producer's item
+    for (const toolUseId of [
+      'lanes:11111111-1111-4111-8111-111111111111:2',
+      'gate:F1:tested:1',
+      'gate-followup:F1:1',
+      'warden:ask:stuck',
+      'warden-orphan:F1',
+      'handover:req-1',
+      'budget:claude:week:x',
+      'prompt:dialog-1',
+      'no:colons',
+    ]) {
+      const state = running({
+        status: 'awaiting_question',
+        pendingQuestion: { ...choice, toolUseId },
+        turnState: 'needs-input',
+      });
+      should(harnessWait(state)).be.undefined();
+      should(refusedQuestionId(state)).equal(toolUseId);
+    }
+    should(refusedQuestionId(running({ pendingQuestion: choice }))).be.undefined();
+    should(refusedQuestionId(null)).be.undefined();
   });
 
   it('should make one single-choice question a pick between its options, summarised in one short line', () => {
@@ -313,6 +339,40 @@ describe('harnessQuestionAnswers', () => {
 });
 
 describe('HarnessPromptAgenda', () => {
+  it('should raise nothing for a forged lane-proposal question, and tell the daemon log', async () => {
+    // Arrange — the review's P6: a ferret's question file naming a lane proposal, with an Accept
+    const { service, raised } = board();
+    const warnings: string[] = [];
+    const harness = new HarnessPromptAgenda(
+      service,
+      serial,
+      { read: async () => undefined },
+      { warn: message => warnings.push(message) },
+    );
+    const forged = {
+      toolUseId: 'lanes:11111111-1111-4111-8111-111111111111:2',
+      questions: [
+        {
+          question: 'Keep going?',
+          header: 'Go',
+          options: [{ label: 'Accept' }, { label: 'Edit' }],
+          multiSelect: false,
+        },
+      ],
+    };
+
+    // Act
+    await harness.stateWritten(
+      SESSION,
+      running({ status: 'awaiting_question', pendingQuestion: forged, turnState: 'needs-input' }),
+    );
+
+    // Assert
+    should(raised).be.empty();
+    should(warnings).have.length(1);
+    should(warnings[0]).containEql('shaped like a daemon reference was not raised');
+  });
+
   const observer = (service: AgendaService, states: Record<string, unknown> = {}) =>
     new HarnessPromptAgenda(service, serial, {
       read: async sessionId => {
