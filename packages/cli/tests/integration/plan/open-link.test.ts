@@ -29,15 +29,18 @@ const recordingLauncher = (dir: string, command: string): string => {
   return log;
 };
 
+/** The launcher's `>>` creates the file before `printf` fills it, so a complete log is one that ends in a newline. */
 const waitForFile = async (path: string): Promise<string> => {
-  for (let attempt = 0; attempt < 150; attempt += 1) {
+  for (let attempt = 0; attempt < 250; attempt += 1) {
     try {
-      return readFileSync(path, 'utf8');
+      const content = readFileSync(path, 'utf8');
+      if (content.endsWith('\n')) return content;
     } catch {
-      await Bun.sleep(20);
+      // not created yet
     }
+    await Bun.sleep(20);
   }
-  throw new Error(`${path} was never written`);
+  throw new Error(`${path} was never completed`);
 };
 
 describe('opening a plan link in this host’s browser', () => {
