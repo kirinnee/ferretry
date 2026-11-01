@@ -141,6 +141,36 @@ describe('the shared catalogs routes', () => {
     should(seen).deepEqual(['host', 'host', 'host', `host ${UNDO}`]);
   });
 
+  it('should hand the service the paired device that tapped, so two devices cannot spend each other’s Undo', async () => {
+    const seen: string[] = [];
+    const catalogs = {
+      quickAdd: async (caller: string) => {
+        seen.push(caller);
+        return { outcome: 'already' };
+      },
+      undoQuickAdd: async (caller: string, token: string) => {
+        seen.push(`${caller} ${token}`);
+        return { ok: true };
+      },
+    } as unknown as SharedCatalogSubsystem['catalogs'];
+    const routes = sharedCatalogRoutes({ catalogs });
+    const deviceOne = {
+      credential: { kind: 'authenticated', tokenClass: 'device', deviceId: 'd1' } as const,
+      actor: 'device:d1',
+    };
+    const deviceTwo = {
+      credential: { kind: 'authenticated', tokenClass: 'device', deviceId: 'd2' } as const,
+      actor: 'device:d2',
+    };
+    const body = { source: { kind: 'skill', skill: 'demo' } };
+
+    await handleDirectly(routes, 'POST', '/v1/catalog-items/quick-add', deviceOne, body);
+    await handleDirectly(routes, 'POST', '/v1/catalog-items/quick-add', deviceTwo, body);
+    await handleDirectly(routes, 'POST', '/v1/catalog-items/quick-add/undo', deviceTwo, { token: UNDO });
+
+    should(seen).deepEqual(['device:d1', 'device:d2', `device:d2 ${UNDO}`]);
+  });
+
   it('should refuse a bad Undo token and a quick add that claims to be clean, with nothing called', async () => {
     const { dispatch, calls } = stubbed();
     const bad = await dispatch.dispatch(call('POST', '/v1/catalog-items/quick-add/undo', { token: 'nope' }));

@@ -1,9 +1,15 @@
 import { describe, it } from 'bun:test';
-import { QUICK_ADD_UNDO_SECONDS, type QuickAddAnswer } from '@ferretry/protocol';
+import {
+  CATALOG_MAX_ITEMS,
+  CatalogLabelSchema,
+  QUICK_ADD_UNDO_SECONDS,
+  type QuickAddAnswer,
+  SHARED_ITEMS_MAX,
+} from '@ferretry/protocol';
 import should from 'should';
 import { CatalogRefusal } from '../../../src/lib/shared-catalogs/refusal.ts';
-import { defaultCatalogNames } from '../../../src/lib/shared-catalogs/service.ts';
-import { type Rig, rig, SKILL_PATH } from './support.ts';
+import { defaultCatalogNames, publisherLabel } from '../../../src/lib/shared-catalogs/service.ts';
+import { type Rig, rig, SKILL_MD, SKILL_PATH } from './support.ts';
 
 const SKILL = { kind: 'skill', skill: 'demo' } as const;
 const ME = 'host';
@@ -419,5 +425,239 @@ describe('Undo', () => {
     // The manifest ran first, so it listed the item, and Undo then had to withdraw.
     should(manifest.manifest.items).have.length(1);
     should(undone.mode).equal('withdrawn');
+  });
+});
+
+const SECOND_SKILL = '/home/me/.claude/skills/two/SKILL.md';
+const addSecondSkill = (r: Rig) => {
+  r.skills.push({ path: SECOND_SKILL, name: 'two' });
+  r.tree.set(SECOND_SKILL, { 'SKILL.md': '---\nname: two\ndescription: Another one\n---\nBody\n' });
+};
+
+describe('one-tap Add and the items a source already made', () => {
+  it('should refuse, naming the ids, when two kept items are the same source', async () => {
+    const r = await rig();
+    const first = await r.service.create({ name: 'A' });
+    const second = await r.service.create({ name: 'B' });
+    for (const catalog of [first, second]) {
+      const preview = await r.service.previewItem(catalog.id, { source: SKILL });
+      await r.service.addItem(catalog.id, { source: SKILL, digest: preview.digest });
+    }
+    const [one, two] = stored(r).items;
+    const writes = r.documents.writes;
+
+    should(await refusal(() => r.service.quickAdd(ME, { source: SKILL }))).equal('source_ambiguous');
+    try {
+      await r.service.quickAdd(ME, { source: SKILL });
+    } catch (error) {
+      should((error as Error).message)
+        .containEql(one?.itemId as string)
+        .and.containEql(two?.itemId as string);
+    }
+    should(r.documents.writes).equal(writes);
+  });
+
+  it('should match an item by its CURRENT version, not its latest one', async () => {
+    const r = await rig();
+    const other = await r.service.create({ name: 'Other' });
+    const preview = await r.service.previewItem(other.id, { source: SKILL });
+    await r.service.addItem(other.id, { source: SKILL, digest: preview.digest });
+    const document = stored(r);
+    const item = document.items[0];
+    const version = item?.versions[0];
+    if (item === undefined || version === undefined) throw new Error('no item');
+    r.documents.document = {
+      ...document,
+      items: [
+        {
+          ...item,
+          versions: [
+            version,
+            { ...version, version: 2, source: { kind: 'skill', path: '/elsewhere/skills/z/SKILL.md' } },
+          ],
+        },
+      ],
+    };
+
+    const answer = added(await r.service.quickAdd(ME, { source: SKILL }));
+
+    should(answer.newItem).be.false();
+    should(answer.itemId).equal(item.itemId);
+  });
+
+  it('should decide already and review before it makes or checks the default catalog', async () => {
+    const r = await rig();
+    for (const name of defaultCatalogNames('studio')) await r.service.create({ name });
+    const other = await r.service.create({ name: 'Other' });
+    const preview = await r.service.previewItem(other.id, { source: { kind: 'mcp', mcp: 'files' } });
+    const made = await r.service.addItem(other.id, {
+      source: { kind: 'mcp', mcp: 'files' },
+      digest: preview.digest,
+    });
+    const writes = r.documents.writes;
+
+    const answer = await r.service.quickAdd(ME, { itemId: made.itemId });
+    const bySource = await r.service.quickAdd(ME, { source: { kind: 'mcp', mcp: 'files' } });
+
+    should(answer.outcome).equal('review');
+    should(bySource.outcome).equal('review');
+    should(r.documents.writes).equal(writes);
+    should(stored(r).defaultCatalogId).be.undefined();
+  });
+});
+
+describe('one-tap Add reads its source once', () => {
+  it('should freeze, check and store the very same read, whatever the source says next', async () => {
+    const r = await rig();
+    r.tree.set(SKILL_PATH, { 'SKILL.md': SKILL_MD });
+    let lists = 0;
+    const list = r.tree.list.bind(r.tree);
+    r.tree.list = async (path: string) => {
+      lists += 1;
+      if (lists > 1)
+        r.tree.set(SKILL_PATH, { 'SKILL.md': '---\nname: demo\ndescription: Mutated\n---\nMutated body\n' });
+      return await list(path);
+    };
+
+    const answer = added(await r.service.quickAdd(ME, { source: SKILL }));
+
+    should(lists).equal(1);
+    const texts = [...r.blobs.blobs.values()];
+    should(texts).have.length(1);
+    should(texts[0]).containEql('Body').and.not.containEql('Mutated');
+    const version = stored(r).items[0]?.versions[0];
+    should(version?.bindings[answer.catalog.catalogId]?.digest).equal(answer.digest);
+    should([...r.blobs.blobs.keys()]).eql([version?.contentDigest]);
+  });
+});
+
+describe('the label of the default catalog', () => {
+  it('should be cut to a label the contract accepts, counting UTF-16 units', () => {
+    const label = `${'x'.repeat(70)}${String.fromCodePoint(0x1f600)}`;
+    for (const name of defaultCatalogNames(label)) should(CatalogLabelSchema.safeParse(name).success).be.true();
+  });
+
+  it('should keep a publisher label the contract accepts, whatever its characters count as', () => {
+    const label = publisherLabel(`${'x'.repeat(79)}${String.fromCodePoint(0x1f600)}`);
+    should(CatalogLabelSchema.safeParse(label).success).be.true();
+    should(label.startsWith('x')).be.true();
+  });
+});
+
+describe('Undo after a write that fails', () => {
+  it('should leave the token good when the write did not land', async () => {
+    const r = await rig();
+    const answer = added(await r.service.quickAdd(ME, { source: SKILL }));
+    r.documents.failWrites = true;
+
+    await r.service.undoQuickAdd(ME, answer.undo.token).then(
+      () => {
+        throw new Error('expected a failure');
+      },
+      () => undefined,
+    );
+    r.documents.failWrites = false;
+
+    should((await r.service.undoQuickAdd(ME, answer.undo.token)).mode).equal('retracted');
+  });
+
+  it('should keep the item when another catalog lists it as well', async () => {
+    const r = await rig();
+    const answer = added(await r.service.quickAdd(ME, { source: SKILL }));
+    const other = await r.service.create({ name: 'Other' });
+    await r.service.addItem(other.id, { itemId: answer.itemId, version: 1 });
+
+    const undone = await r.service.undoQuickAdd(ME, answer.undo.token);
+
+    should(undone.itemRemoved).be.false();
+    should(stored(r).items).have.length(1);
+  });
+});
+
+describe('one-tap Add and the limits', () => {
+  it('should refuse an item that would pass the cap on kept items', async () => {
+    const r = await rig();
+    added(await r.service.quickAdd(ME, { source: SKILL }));
+    const document = stored(r);
+    const item = document.items[0];
+    if (item === undefined) throw new Error('no item');
+    r.documents.document = {
+      ...document,
+      items: Array.from({ length: SHARED_ITEMS_MAX }, (_, index) => ({
+        ...item,
+        itemId: `itm_${String(index).padStart(22, '0')}`,
+      })),
+    };
+    addSecondSkill(r);
+
+    should(await refusal(() => r.service.quickAdd(ME, { source: { kind: 'skill', skill: 'two' } }))).equal(
+      'items_full',
+    );
+  });
+
+  it('should refuse when the default catalog is full', async () => {
+    const r = await rig();
+    added(await r.service.quickAdd(ME, { source: SKILL }));
+    const document = stored(r);
+    const item = document.items[0];
+    const catalog = document.catalogs[0];
+    if (item === undefined || catalog === undefined) throw new Error('no item');
+    const filler = Array.from({ length: CATALOG_MAX_ITEMS - 1 }, (_, index) => ({
+      ...item,
+      itemId: `itm_${String(index).padStart(22, '0')}`,
+    }));
+    r.documents.document = {
+      ...document,
+      items: [item, ...filler],
+      catalogs: [
+        {
+          ...catalog,
+          entries: [
+            ...catalog.entries,
+            ...filler.map(each => ({ itemId: each.itemId, addedAt: catalog.createdAt, sinceVersion: 1 })),
+          ],
+        },
+      ],
+    };
+    addSecondSkill(r);
+
+    should(await refusal(() => r.service.quickAdd(ME, { source: { kind: 'skill', skill: 'two' } }))).equal(
+      'catalog_full',
+    );
+  });
+});
+
+describe('one-tap Add on the write queue', () => {
+  it('should add once and answer already to a second tap that raced it', async () => {
+    const r = await rig();
+
+    const [first, second] = await Promise.all([
+      r.service.quickAdd('device:one', { source: SKILL }),
+      r.service.quickAdd('device:two', { source: SKILL }),
+    ]);
+
+    should([first.outcome, second.outcome]).eql(['added', 'already']);
+    should(stored(r).items).have.length(1);
+  });
+
+  it('should not interleave with a publish of another item', async () => {
+    const r = await rig();
+    addSecondSkill(r);
+    const other = await r.service.create({ name: 'Other' });
+    const preview = await r.service.previewItem(other.id, { source: { kind: 'skill', skill: 'two' } });
+
+    const [quick, published] = await Promise.all([
+      r.service.quickAdd(ME, { source: SKILL }),
+      r.service.addItem(other.id, { source: { kind: 'skill', skill: 'two' }, digest: preview.digest }),
+    ]);
+
+    should(quick.outcome).equal('added');
+    should(published.itemId).match(/^itm_/u);
+    should(stored(r).items).have.length(2);
+    should(
+      stored(r)
+        .catalogs.map(catalog => catalog.revision)
+        .sort(),
+    ).eql([2, 2]);
   });
 });

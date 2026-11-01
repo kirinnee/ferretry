@@ -55,10 +55,11 @@ export class UndoLedger {
   }
 
   /**
-   * The record, once. An unknown, lapsed or already used token, and another caller's, all answer `undefined`; only
-   * a lapsed one is dropped, so a stranger guessing cannot spend somebody else's token.
+   * The record, without using the token up (`spend` does that once the write it asks for has landed, so a failed write
+   * leaves the token good). An unknown, lapsed or already used token, and another caller's, all answer `undefined`;
+   * only a lapsed one is dropped, so a stranger guessing cannot spend somebody else's token.
    */
-  take(token: string, caller: string, now: number): UndoRecord | undefined {
+  peek(token: string, caller: string, now: number): UndoRecord | undefined {
     const held = this.#held.get(token);
     if (held === undefined) return undefined;
     if (held.expiresAt <= now) {
@@ -66,8 +67,12 @@ export class UndoLedger {
       return undefined;
     }
     if (held.caller !== caller) return undefined;
-    this.#held.delete(token);
     return held.record;
+  }
+
+  /** Uses a token up. */
+  spend(token: string): void {
+    this.#held.delete(token);
   }
 
   /** A manifest of this catalog at this revision was signed, so somebody may now hold it. */

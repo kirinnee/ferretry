@@ -174,13 +174,21 @@ const sameSource = (left: CatalogSourceReference, right: CatalogSourceReference)
     ? right.kind === 'skill' && left.path === right.path
     : right.kind === 'mcp' && left.id === right.id;
 
-const cutTo = (text: string, characters: number): string => Array.from(text).slice(0, characters).join('').trimEnd();
+/** The label cut by whole characters until `around(cut)` is a label the contract accepts (it counts UTF-16 units, not characters). */
+function cutToFit(label: string, around: (cut: string) => string): string {
+  const characters = Array.from(label);
+  while (characters.length > 0 && !CatalogLabelSchema.safeParse(around(characters.join('').trimEnd())).success)
+    characters.pop();
+  return characters.join('').trimEnd();
+}
 
-/** The names the default catalog may take, in order: "<label>'s skills", then the same with 2 to 9, each within 80 characters. */
+/** The names the default catalog may take, in order: "<label>'s skills", then the same with 2 to 9, each a valid label. */
 export function defaultCatalogNames(label: string): readonly string[] {
   return [
-    `${cutTo(label, 71)}'s skills`,
-    ...[2, 3, 4, 5, 6, 7, 8, 9].map(number => `${cutTo(label, 69)}'s skills ${number}`),
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(number => {
+      const tail = number === 1 ? "'s skills" : `'s skills ${number}`;
+      return `${cutToFit(label, cut => `${cut}${tail}`)}${tail}`;
+    }),
   ];
 }
 
@@ -190,7 +198,7 @@ export function publisherLabel(name: string): string {
     .filter(character => CatalogLabelSchema.safeParse(character).success)
     .join('')
     .trim();
-  const bounded = Array.from(cleaned).slice(0, 80).join('').trim();
+  const bounded = cutToFit(cleaned, cut => cut);
   return bounded === '' ? 'This machine' : bounded;
 }
 
@@ -386,10 +394,16 @@ export class SharedCatalogService {
       const identity = await this.#identity();
       const document = await this.#writable();
       const reference = 'source' in request ? await this.#resolve(request.source) : undefined;
-      const kept =
+      const matches =
         'itemId' in request
-          ? findItem(document, request.itemId)
-          : document.items.find(item => sameSource(latestVersion(item).source, reference as CatalogSourceReference));
+          ? [findItem(document, request.itemId)]
+          : document.items.filter(item => sameSource(currentVersion(item).source, reference as CatalogSourceReference));
+      if (matches.length > 1)
+        throw new CatalogRefusal(
+          'source_ambiguous',
+          `More than one kept item is this source: ${matches.map(item => item.itemId).join(', ')}. Name one by its itemId.`,
+        );
+      const kept = matches[0];
       return kept === undefined
         ? await this.#quickAddNew(caller, identity, document, reference as CatalogSourceReference)
         : await this.#quickAddKept(caller, identity, document, kept);
@@ -460,15 +474,20 @@ export class SharedCatalogService {
     document: CatalogsDocument,
     kept: StoredSharedItem,
   ): Promise<QuickAddAnswer> {
-    const target = this.#defaultCatalog(document);
-    const own = target.document.catalogs
-      .find(catalog => catalog.id === target.catalogId)
+    const own = document.catalogs
+      .find(catalog => catalog.id === document.defaultCatalogId)
       ?.entries.find(entry => entry.itemId === kept.itemId);
-    if (own !== undefined && own.withdrawnAt === undefined)
-      return { outcome: 'already', catalogId: target.catalogId, itemId: kept.itemId, itemVersion: kept.current };
+    if (own !== undefined && own.withdrawnAt === undefined && document.defaultCatalogId !== undefined)
+      return {
+        outcome: 'already',
+        catalogId: document.defaultCatalogId,
+        itemId: kept.itemId,
+        itemVersion: kept.current,
+      };
     const shared = await this.#sharedCopy(kept, currentVersion(kept));
     if (readItem(shared).warnings.length > 0)
       return { outcome: 'review', reasons: ['warnings'], preview: await this.#currentPreview(kept) };
+    const target = this.#defaultCatalog(document);
     const next = await this.#listExisting(target.document, target.catalogId, kept, kept.current);
     const { state } = await this.#sourceState(identity, kept, {
       itemId: kept.itemId,
@@ -548,7 +567,7 @@ export class SharedCatalogService {
   /** Takes an add back while its token holds: out with no trace if nobody was shown it, else withdrawn as usual. */
   undoQuickAdd(caller: string, token: string): Promise<QuickAddUndone> {
     return this.#serially(async () => {
-      const record = this.#ledger.take(token, caller, this.deps.now());
+      const record = this.#ledger.peek(token, caller, this.deps.now());
       const gone = () =>
         new CatalogRefusal(
           'undo_expired',
@@ -558,7 +577,10 @@ export class SharedCatalogService {
       const document = await this.#writable();
       const catalog = document.catalogs.find(candidate => candidate.id === record.catalogId);
       const entry = catalog?.entries.find(candidate => candidate.itemId === record.itemId);
-      if (catalog === undefined || entry === undefined || entry.withdrawnAt !== undefined) throw gone();
+      if (catalog === undefined || entry === undefined || entry.withdrawnAt !== undefined) {
+        this.#ledger.spend(token);
+        throw gone();
+      }
       const now = instant(this.deps.now());
       const retract =
         !record.relisted &&
@@ -567,6 +589,7 @@ export class SharedCatalogService {
       if (retract) {
         const taken = withoutEntry(document, catalog.id, record.itemId, now, record.createdItem);
         await this.#commit(taken.document);
+        this.#ledger.spend(token);
         return {
           catalogId: catalog.id,
           itemId: record.itemId,
@@ -577,6 +600,7 @@ export class SharedCatalogService {
       }
       const next = withWithdrawn(document, catalog.id, record.itemId, now);
       await this.#commit(next);
+      this.#ledger.spend(token);
       return {
         catalogId: catalog.id,
         itemId: record.itemId,

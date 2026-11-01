@@ -347,16 +347,20 @@ the daemon decides.
   **`already` (200)** is a double tap: the item is live in the default catalog and nothing is written.
 - **The default catalog is made lazily**, in the same single write as the item: "<this machine's label>'s skills", the label
   cut so the name is at most 80 characters, then "… 2" to "… 9" when the name is taken (`name_taken` after nine). A refusal
-  (`catalogs_full`, `catalog_full`, `items_full`) leaves nothing written. A kept item joins through the same step as
+  (`catalogs_full`, `catalog_full`, `items_full`) leaves nothing written. A source is matched to a kept item by that
+  item's **current** version; when two or more kept items are the same source (the sheet made one per catalog) the tap is
+  409 `source_ambiguous`, naming the item ids, and the caller names one by `itemId`. Whether the item is already live,
+  or needs review, is decided before the default catalog is made or checked. A kept item joins through the same step as
   `POST /items`, so its audience starts at its **current** version (`sinceVersion`); older versions are not served.
 - **Undo** (`POST …/quick-add/undo` with `{token}`) is bound to the credential that tapped (a paired device, or the host),
-  good once, for 60 seconds. It **retracts** (the entry is removed with no withdrawal record, and the item with it when this
+  good once, for 60 seconds. A token is used up only when its write has landed, so a failed write leaves it good. It **retracts** (the entry is removed with no withdrawal record, and the item with it when this
   tap made it and no catalog lists it) only while the catalog is still on the revision the add made **and** no signed
   manifest of that revision was ever produced (a member reading it, or an export). Otherwise it **withdraws**, the ordinary
   withdrawal that members see. An item relisted over an earlier withdrawal is always withdrawn again. The default catalog
-  the tap made stays. An unknown, lapsed, used or other caller's token is 410 `undo_expired` with nothing changed.
+  the tap made stays. An unknown, lapsed, used or other caller's token is 410 `undo_expired` with nothing changed; withdraw the item the ordinary way.
 - Every write, and every manifest or export that signs, runs in the one write queue, so a manifest read and an Undo cannot
-  interleave.
+  interleave. **Member manifest reads and exports now wait in that queue** behind a write in flight, instead of reading
+  alongside it.
 - Declared gap: **the undo record is in memory.** A restart forgets every token, so Undo then answers 410 and the item is
   withdrawn the ordinary way; it also forgets which revisions were signed, which is why no add survives a restart as
   retractable. The feature flag is `catalogs.quick-add.1`. Audit: `catalog.changed`, `publish` or `undo`, ids only

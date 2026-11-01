@@ -847,7 +847,15 @@ describe('auditedRoutes', () => {
       '/v1/catalog-items/quick-add',
       '/v1/catalog-items/quick-add/undo',
     ])
-      await api.dispatch(request({ method: 'POST', path, headers: ADMIN, loopback: true, body: '{}' }));
+      await api.dispatch(
+        request({
+          method: 'POST',
+          path,
+          headers: ADMIN,
+          loopback: true,
+          body: path.endsWith('/undo') ? JSON.stringify({ token: `cqu_${'u'.repeat(22)}` }) : '{}',
+        }),
+      );
 
     // Assert
     const logged = records(journal);
@@ -872,7 +880,7 @@ describe('auditedRoutes', () => {
   });
 
   it('should still record a quick add whose success names no outcome, or has no readable answer', async () => {
-    for (const answer of [() => jsonResponse(undefined), () => jsonResponse({ ok: true })]) {
+    for (const answer of [() => jsonResponse(undefined), () => jsonResponse({ ok: true }), () => jsonResponse(null)]) {
       // Arrange
       const { journal, routes } = decorated({ 'POST /v1/catalog-items/quick-add': async () => answer() });
       const api = await dispatcher(routes);
