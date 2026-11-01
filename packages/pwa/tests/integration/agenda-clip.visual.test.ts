@@ -330,9 +330,19 @@ describe('a short Answer-quickly card', () => {
               actions: rect('.fy-totest__actions'),
               padding,
               overflows: step.scrollHeight > step.clientHeight + 1,
+              tabBarTop: rect('[data-tab-bar]').top,
+              pageScrolls: (() => {
+                const page = document.querySelector('.fy-attn-inbox') as HTMLElement;
+                return page.scrollHeight > page.clientHeight + 1;
+              })(),
             };
           });
           if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${theme}-run-short.png`) });
+          expect(
+            geometry.tabBarTop - geometry.box.bottom,
+            `the box runs down to the tab bar (${JSON.stringify(geometry)})`,
+          ).toBeLessThanOrEqual(24);
+          expect(geometry.pageScrolls, 'the page does not scroll for it').toBe(false);
           expect(geometry.overflows, `a short card does not scroll (${JSON.stringify(geometry)})`).toBe(false);
           expect(
             Math.abs(geometry.card.bottom - (geometry.box.bottom - geometry.padding)),
@@ -370,6 +380,7 @@ describe('option labels that carry Markdown, in the open item', () => {
           });
           expect(shown.need, 'the need box').not.toContain('*');
           expect(shown.need).toContain('Send now');
+          expect(shown.need.replaceAll(/\s+/gu, ' '), 'no letter said twice').not.toMatch(/\bA A\b|\bB B\b/u);
           for (const text of shown.answers) expect(text, 'an answer button').not.toContain('*');
         } finally {
           await close();

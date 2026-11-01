@@ -14,7 +14,16 @@ const EMPHASIS_UNDERSCORE = new RegExp(`${BOUNDARY}_(?=\\S)([^_]+?)(?<=\\S)_${BO
 const CODE = /`([^`]*)`/gu;
 const STRIKE = /~~(?=\S)(.+?)(?<=\S)~~/gu;
 
-export const plainLabel = (label: string): string => {
+const SEPARATOR = String.raw`[:.)\-–—]`;
+
+/** The label less its own key letter ("B Wait" under B → "Wait"), when it repeats the letter drawn beside it. */
+const withoutOwnLetter = (plain: string, letter: string): string => {
+  const own = new RegExp(`^${letter}(?:\\s*${SEPARATOR}\\s*|\\s+(?![\\p{Ll}]))(?=\\S)`, 'u');
+  const rest = plain.replace(own, '');
+  return rest === plain || rest === '' ? plain : rest;
+};
+
+export const plainLabel = (label: string, letter?: string): string => {
   const plain = label
     .replaceAll(LINK, '$1')
     .replaceAll(CODE, '$1')
@@ -24,5 +33,6 @@ export const plainLabel = (label: string): string => {
     .replaceAll(EMPHASIS_UNDERSCORE, '$1')
     .replaceAll(/\s+/gu, ' ')
     .trim();
-  return plain === '' ? label : plain;
+  if (plain === '') return label;
+  return letter === undefined ? plain : withoutOwnLetter(plain, letter);
 };

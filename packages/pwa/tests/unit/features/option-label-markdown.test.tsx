@@ -43,6 +43,7 @@ describe('option labels that carry Markdown', () => {
     expect(need.textContent).not.toContain('*');
     expect(need.textContent).toContain('Send now');
     expect(need.textContent).toContain('Wait');
+    expect(need.textContent?.replaceAll(/\s+/gu, ' ')).not.toMatch(/\bA A\b|\bB B\b/u);
   });
 
   test('the answer buttons read as plain words, in their text, tooltip and accessible name', async () => {

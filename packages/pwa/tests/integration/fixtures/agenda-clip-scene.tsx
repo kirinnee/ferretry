@@ -104,22 +104,29 @@ function Item() {
 }
 
 function Run() {
+  const phone = window.innerWidth < 768;
   return (
-    <div style={{ padding: '16px' }}>
-      <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open">
-        <ToTestStep
-          answers={answers}
-          index={5}
-          now={NOW}
-          onNavigate={() => undefined}
-          onNext={() => {
-            win.__skipped += 1;
-          }}
-          onPrevious={() => undefined}
-          row={row}
-          total={40}
-        />
+    <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: '1 1 0', minHeight: 0 }}>
+        <div className="fy-attn-inbox" data-agenda-inbox="card" {...(phone ? { 'data-phone': '' } : {})}>
+          <header style={{ minHeight: 32 }}>Inbox</header>
+          <div className="fy-attn-inbox__deck fy-attn-inbox__deck--open">
+            <ToTestStep
+              answers={answers}
+              index={5}
+              now={NOW}
+              onNavigate={() => undefined}
+              onNext={() => {
+                win.__skipped += 1;
+              }}
+              onPrevious={() => undefined}
+              row={row}
+              total={40}
+            />
+          </div>
+        </div>
       </div>
+      <nav data-tab-bar="" style={{ flex: 'none', height: 56, borderTop: '1px solid currentColor' }} />
     </div>
   );
 }

@@ -312,7 +312,7 @@ export function AgendaItemCard({
     option => {
       const named = lettered ? option.letter : plainLabel(option.label);
       const meaning = lettered
-        ? `**${plainLabel(option.label)}**${option.detail === undefined ? '' : ` — ${option.detail}`}`
+        ? `**${plainLabel(option.label, option.letter)}**${option.detail === undefined ? '' : ` — ${option.detail}`}`
         : (option.detail ?? null);
       return {
         label: option.label,

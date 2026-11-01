@@ -21,6 +21,30 @@ describe('plainLabel', () => {
     expect(plainLabel(words)).toBe(words);
   });
 
+  test.each([
+    ['A **Send now**', 'A', 'Send now'],
+    ['B **Wait**', 'B', 'Wait'],
+    ['B Wait', 'B', 'Wait'],
+    ['A: Send now', 'A', 'Send now'],
+    ['A. Send now', 'A', 'Send now'],
+    ['C) Keep both', 'C', 'Keep both'],
+    ['**A** Send now', 'A', 'Send now'],
+    ['A - Send now', 'A', 'Send now'],
+  ])('%s drops its own letter %s: %s', (marked, letter, plain) => {
+    expect(plainLabel(marked, letter)).toBe(plain);
+  });
+
+  test.each([
+    ['A new approach', 'A'],
+    ['A', 'A'],
+    ['B Wait', 'A'],
+    ['Apples', 'A'],
+    ['A2 plan', 'A'],
+    ['Send now', 'A'],
+  ])('keeps %s as its own words under letter %s', (words, letter) => {
+    expect(plainLabel(words, letter)).toBe(words);
+  });
+
   test('never turns a label into nothing', () => {
     expect(plainLabel('****')).toBe('****');
   });

@@ -226,7 +226,7 @@ function OptionsList({
         <li className="fy-attn-options__row" data-agenda-option-detail={option.label} key={option.label}>
           <span className="fy-attn-options__head">
             <strong>
-              {option.letter} — {plainLabel(option.label)}
+              {option.letter} — {plainLabel(option.label, option.letter)}
             </strong>
             {option.recommended ? <RecommendedBadge /> : null}
           </span>
