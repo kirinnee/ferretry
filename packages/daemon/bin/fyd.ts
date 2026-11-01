@@ -875,9 +875,11 @@ import {
   FleetLaunchEnvironment,
   FleetLaunchRenewal,
   FleetManifestUnreadableError,
+  FleetPublication,
   FleetReading,
   FleetRefreshService,
   FleetSecretReferences,
+  PublishedFleetInventory,
   FleetWardenAgents,
   ForeignHistoryImporter,
   type FoundationPaths,
@@ -7860,11 +7862,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       }
     },
   };
+  /**
+   * The fleet as published, kept apart from the applies that republish it: an apply moves the manifest
+   * aside before linking its replacement in, and a read in that gap would find no fleet at all — which
+   * is how a start during the boot's catalog republish launched past its missing-credential refusal.
+   * ONE for the process: the inventory below reads under it, and the catalogue's provisioner applies
+   * under it (lib/fleet/publication.ts).
+   */
+  const fleetPublication = new FleetPublication();
   /** The published fleet, read fresh on every call. ONE inventory for the whole process: the
    *  recommender's advice and a start's account resolution must not disagree about what the fleet is. */
-  const accounts = new RuntimeAwareAccountInventory(
-    new ManifestAccountInventory(stateFiles, paths.fleetManifest),
-    new RuntimeIdsFile(stateFiles, runtimeIdsPath(paths.fleet)),
+  const accounts = new PublishedFleetInventory(
+    new RuntimeAwareAccountInventory(
+      new ManifestAccountInventory(stateFiles, paths.fleetManifest),
+      new RuntimeIdsFile(stateFiles, runtimeIdsPath(paths.fleet)),
+    ),
+    fleetPublication,
   );
   /** Stops the app-server daemon a Codex runtime started, once nothing uses that runtime (U12). */
   const codexAppServers = new CodexAppServerSupervisor({
@@ -8040,7 +8053,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     executable: () => Bun.which('Xvfb', { PATH: process.env.PATH }) ?? undefined,
     missing: () => xvfbMissingMessage(command => Bun.which(command, { PATH: process.env.PATH }) !== null),
   });
-  const publishedManifest = async () => await readFleetManifest(stateFiles, paths.fleetManifest);
+  /** The published manifest itself, read between applies like the inventory: mid-apply it is not there at all. */
+  const publishedManifest = async () =>
+    await fleetPublication.reading(async () => await readFleetManifest(stateFiles, paths.fleetManifest));
   /** The fleet's declared probe interval. A host with no readable configuration keeps the default. */
   const declaredUsageRefreshMs = async (): Promise<number> =>
     usageRefreshMs(
@@ -11628,6 +11643,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           config: configFiles,
           configDirectory: paths.config,
           pinned: stateHomeKeys(paths),
+          publication: fleetPublication,
         }),
         modelCatalogs: async () => await modelCatalogService.sources(),
         publishedManifest: async () => await publishedManifest(),

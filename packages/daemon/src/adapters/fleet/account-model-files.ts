@@ -38,6 +38,7 @@ import {
 import { configFilePath, type SessionStatus, SessionStatusSchema } from '@ferretry/protocol';
 import type { ConfigFilesService } from '../../lib/config-files/index.ts';
 import type { AccountDocumentReading, FleetCatalogServiceDeps } from '../../lib/fleet/catalog-service.ts';
+import { exclusiveProvisioner, type FleetPublication } from '../../lib/fleet/publication.ts';
 import type { FoundationPaths } from '../../lib/paths.ts';
 
 /** The largest component document the catalogue reads; a larger one is reported as unreadable. */
@@ -194,6 +195,12 @@ export interface FileFleetCatalogOptions {
    * them into a runtime is refused (docs/agent-tools.md#component-destinations).
    */
   readonly pinned?: readonly string[];
+  /**
+   * The daemon's one fleet publication: every apply runs exclusively under it, so a read of the published
+   * fleet never lands between a file moved aside and its replacement (`lib/fleet/publication.ts`).
+   * Required, so no composition can apply a fleet its readers are not kept out of.
+   */
+  readonly publication: FleetPublication;
 }
 
 /**
@@ -296,12 +303,17 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
         }),
     machineName: options.machineName,
     credentials: options.credentials,
+    // Exclusive around the file provisioner ONLY: the acknowledging wrapper reloads the configuration
+    // afterwards, and a load can republish — which must queue behind this apply, not run inside it.
     provisioner: acknowledgingProvisioner(
-      new FileFleetProvisioner(
-        allowedRoots,
-        new SharedHistoryMigration(new FileSharedHistoryFileSystem(allowedRoots, sourceFence)),
-        {},
-        sourceFence,
+      exclusiveProvisioner(
+        new FileFleetProvisioner(
+          allowedRoots,
+          new SharedHistoryMigration(new FileSharedHistoryFileSystem(allowedRoots, sourceFence)),
+          {},
+          sourceFence,
+        ),
+        options.publication,
       ),
       options.config,
       options.configDirectory,

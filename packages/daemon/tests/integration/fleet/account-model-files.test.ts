@@ -14,7 +14,12 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { parseAccountModel, RETIRED_FLEET_CONFIG_SENTENCE, RetiredFleetConfigError } from '@ferretry/fleet';
+import {
+  parseAccountModel,
+  RETIRED_FLEET_CONFIG_SENTENCE,
+  RetiredFleetConfigError,
+  runtimeIdsPath,
+} from '@ferretry/fleet';
 import should from 'should';
 import {
   documentRevision,
@@ -24,8 +29,12 @@ import {
   readDeclaredAccountModel,
   sessionStatusOf,
 } from '../../../src/adapters/fleet/account-model-files.ts';
+import { ManifestAccountInventory } from '../../../src/adapters/core/manifest-account-inventory.ts';
+import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../../../src/adapters/fleet/runtime-ids-file.ts';
+import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { FleetCatalogService, type FleetCatalogServiceDeps } from '../../../src/lib/fleet/catalog-service.ts';
+import { FleetPublication, PublishedFleetInventory } from '../../../src/lib/fleet/publication.ts';
 import { type ConfigHome, configHome, sha256, writeModelFiles } from './config-files-fixture.ts';
 
 const directories: string[] = [];
@@ -68,6 +77,8 @@ interface Machine extends ConfigHome {
   readonly config: string;
   readonly catalog: FleetCatalogService;
   readonly deps: FleetCatalogServiceDeps;
+  /** The publication every apply of this machine runs exclusively under. */
+  readonly publication: FleetPublication;
   /** Every file the provisioner acknowledged, by path relative to the configuration directory. */
   readonly acknowledged: { readonly path: string; readonly text: string }[];
   states: unknown[];
@@ -92,6 +103,7 @@ async function machine(
     config: home.paths.config,
     catalog: undefined as never,
     deps: undefined as never,
+    publication: new FleetPublication(),
     acknowledged,
     states: [],
   };
@@ -120,6 +132,7 @@ async function machine(
     },
     configDirectory: home.paths.config,
     ...(sessionRecords === undefined ? {} : { sessionRecords }),
+    publication: handle.publication,
   });
   return Object.assign(handle, { catalog: new FleetCatalogService(deps), deps });
 }
@@ -354,6 +367,49 @@ describe('a reviewed change applied by the real provisioner', () => {
     should(written?.profiles.default?.layers).deepEqual(['mcp/notes', 'instructions/main']);
     should((await stat(path.join(host.config, 'profiles', 'default.yaml'))).mode & 0o777).equal(0o600);
     should((await host.catalog.machine(LOCAL)).runningSessions).equal(1);
+  });
+
+  it('should never let a read of the published fleet land while an apply has the manifest moved aside', async () => {
+    // Arrange — a fleet already published, and a reader built the way the daemon builds its one inventory.
+    const host = await machine();
+    const component = await host.catalog.propose({
+      kind: 'component.put',
+      name: 'main',
+      component: { kind: 'instructions' },
+      content: 'Main guidance.\n',
+      create: true,
+    });
+    await host.catalog.apply(component.id, LOCAL);
+    const files = new StateFileSystem(host.paths);
+    const published = new PublishedFleetInventory(
+      new RuntimeAwareAccountInventory(
+        new ManifestAccountInventory(files, host.paths.fleetManifest),
+        new RuntimeIdsFile(files, runtimeIdsPath(host.fleet)),
+      ),
+      host.publication,
+    );
+    const profile = await host.catalog.propose({
+      kind: 'profile.put',
+      name: 'default',
+      layers: ['mcp/notes', 'instructions/main'],
+      create: false,
+    });
+
+    // Act — read as often as the event loop allows for as long as the apply runs. Ungated, a read here
+    // lands between the manifest moved aside and its replacement linked in, and finds no fleet at all.
+    let applying = true;
+    const applied = host.catalog.apply(profile.id, LOCAL).finally(() => {
+      applying = false;
+    });
+    const seen: { accounts: number; named: boolean }[] = [];
+    while (applying)
+      seen.push({ accounts: (await published.accounts()).length, named: (await published.ids()) !== undefined });
+    const outcome = await applied;
+
+    // Assert — every read found the one published runtime and its name, before the apply or after it.
+    should(outcome).match({ outcome: 'applied', apply: { outcome: 'committed' } });
+    should(seen.length).be.above(0);
+    should(seen.filter(read => read.accounts !== 1 || !read.named)).deepEqual([]);
   });
 
   it('should write a component file and link it in the SAME apply, when that apply is what creates the file', async () => {
