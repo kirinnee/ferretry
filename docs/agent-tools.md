@@ -704,7 +704,7 @@ a displaced tree is exactly this apply's, the names shown in a report): a swap c
 fall back to re-proving the folder by path, which a swap timed between the proof and the step could still redirect.
 There the provisioner fails closed: no name is moved aside or removed anywhere but the daemon's own folders and a fleet
 runtime's own folder — replacing an entry that is already there, a copy, and every sweep are **skipped**, and the
-result names each one ("Left … as it was"), with why descriptor reach is missing; a rollback that would have to take
+result names each one ("Left … as it was"), with why descriptor reach is missing, and the daemon keeps the last apply's skips per runtime in memory (replaced by the next committed apply, lost on a restart) and serves each runtime's paths relative to its folder as `skipped` on `GET /v1/fleet/runtimes`, never the folder's own place on disk, so every device shows "N items skipped" inside that runtime's card; a rollback that would have to take
 back something it created there reports it instead. What that fallback still leaves is a NEW name landing in the home
 if a folder is swapped at the exact moment it is created (`O_EXCL`: never over an existing file). The shared-history migration (`file-shared-history.ts`), which moves history folders between runtime homes
 and the shared pool, still works by path and is not covered by this yet.

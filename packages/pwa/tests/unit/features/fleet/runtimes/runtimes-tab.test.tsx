@@ -537,3 +537,57 @@ describe('Runtimes tab › Import conversations', () => {
     await view.unmount();
   });
 });
+
+describe('Runtimes tab › items the provisioner skipped', () => {
+  const skippedRuntime = (skipped?: readonly string[]): readonly FleetRuntimeView[] => [
+    { ...runtime({ name: 'claude-default' }), ...(skipped === undefined ? {} : { skipped }) },
+    ...RUNTIMES.runtimes.slice(1),
+  ];
+
+  it('says nothing about a runtime when the daemon names nothing skipped', async () => {
+    const view = await open({ routes: reads(skippedRuntime()) });
+    expect(view.container.querySelector('[data-runtime-skipped]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('shows a quiet line INSIDE that runtime’s card that opens a list with the path inside the runtime and a plain reason', async () => {
+    const view = await open({ routes: reads(skippedRuntime(['skills/review', 'commands/ship.md'])) });
+    const card = must(view.container.querySelector<HTMLElement>('[data-runtime-card="claude-default"]'), 'card');
+    const line = must(card.querySelector<HTMLElement>('[data-runtime-skipped="claude-default"]'), 'line in the card');
+    expect(view.container.querySelectorAll('[data-runtime-skipped]').length).toBe(1);
+    const toggle = must(line.querySelector<HTMLButtonElement>('button'), 'toggle');
+    expect(toggle.textContent).toContain('2 items skipped');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(line.querySelector('ul')).toBeNull();
+
+    await interact(() => toggle.click());
+
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const items = [...line.querySelectorAll('li')];
+    expect(items.map(item => item.querySelector('code')?.textContent)).toEqual(['skills/review', 'commands/ship.md']);
+    expect(items[0]?.textContent).toContain('left as it was');
+    expect(view.container.textContent).not.toContain('/home/kirin');
+    await view.unmount();
+  });
+
+  it('puts the line under the runtime’s rows and above Rename and Remove', async () => {
+    const view = await open({ routes: reads(skippedRuntime(['skills/review'])) });
+    const card = must(view.container.querySelector<HTMLElement>('[data-runtime-card="claude-default"]'), 'card');
+    const line = must(card.querySelector<HTMLElement>('[data-runtime-skipped]'), 'line');
+    const actions = must(card.querySelector<HTMLElement>('[data-runtime-actions]'), 'the actions');
+    expect(line.compareDocumentPosition(actions) & window.Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    await view.unmount();
+  });
+
+  it('shows the same line on the runtime’s own page', async () => {
+    const view = await open({ routes: reads(skippedRuntime(['skills/review'])) });
+    window.location.hash = '#machines/studio-mac/runtimes/claude-default';
+    await interact(() => window.dispatchEvent(new window.Event('hashchange')));
+    const line = must(
+      view.container.querySelector<HTMLElement>('[data-runtime-page] [data-runtime-skipped="claude-default"]'),
+      'page line',
+    );
+    expect(line.textContent).toContain('1 item skipped');
+    await view.unmount();
+  });
+});

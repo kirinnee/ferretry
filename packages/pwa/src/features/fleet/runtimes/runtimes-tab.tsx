@@ -21,6 +21,7 @@ import { AccountStatus } from '../shell/account-status.tsx';
 import { type AccountChanges, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import { DisableSwitch, type DisableSwitchParts } from '../shell/disable-switch.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
+import { skippedItems } from '../shell/skipped-model.ts';
 import { AddRuntime } from './add-runtime.tsx';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from './machine-data.ts';
 import { RemoveRuntimeDialog, RenameRuntimeDialog, RuntimeActionButtons } from './runtime-actions.tsx';
@@ -34,6 +35,7 @@ import {
   runtimeDefaultModel,
   runtimeProfileLine,
 } from './runtimes-model.ts';
+import { SkippedLine } from './skipped-line.tsx';
 
 /** The status shape a runtime shows: its login's. */
 const runtimeWord = (runtime: FleetRuntimeView) => runtime.credential.status ?? 'checking';
@@ -185,6 +187,8 @@ function RuntimePage({
       </div>
 
       <RuntimeSwitch runtime={runtime} machineName={machineName} online={online} changes={changes} reload={reload} />
+
+      <SkippedLine name={runtime.name} items={skippedItems(runtime)} />
 
       {installed ? null : (
         <div role="status" className="kt-panel flex flex-col gap-1 p-panel" data-runtime-note="missing">
@@ -435,6 +439,7 @@ function RuntimeRow({
             </>
           )}
         </RuntimeSwitch>
+        <SkippedLine name={runtime.name} items={skippedItems(runtime)} />
         <div className="relative flex flex-wrap items-start justify-end gap-2 border-t border-border-soft pt-2">
           <RuntimeActionButtons
             runtime={runtime}

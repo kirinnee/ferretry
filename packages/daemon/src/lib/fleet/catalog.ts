@@ -166,6 +166,8 @@ export interface CatalogFacts {
   readonly runningSessions: number;
   /** Each runtime's stable id from `ids.json`, by name. A runtime the last apply never published has none. */
   readonly runtimeIds?: Readonly<Record<string, string>>;
+  /** What the last apply left as it was, by runtime id: paths inside that runtime's folder (kept in memory until the next apply). */
+  readonly skipped?: Readonly<Record<string, readonly string[]>>;
   /** Each settings component's parsed file, by component name, so conflicts are real ones. */
   readonly settingsBodies?: Readonly<Record<string, SettingsObject>>;
   /** Instructions text and skill frontmatter, for partial support (K5). */
@@ -703,11 +705,13 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
                 : stack.available.available
                   ? fixed.refusal
                   : stack.available.reason;
+        // A runtime whose apply never landed has no id yet; its name stands in, and it cannot have
+        // a session for any other id to name.
+        const id = facts.runtimeIds?.[name] ?? name;
+        const skipped = facts.skipped?.[id] ?? [];
         return [
           {
-            // A runtime whose apply never landed has no id yet; its name stands in, and it cannot have
-            // a session for any other id to name.
-            id: facts.runtimeIds?.[name] ?? name,
+            id,
             name,
             // The wrapper is named after the runtime (`<bin>/<name>`), and `fy start --agent` takes that name.
             wrapper: name,
@@ -736,6 +740,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
               )
               .map(([other]) => other)
               .toSorted(byName),
+            ...(skipped.length === 0 ? {} : { skipped }),
           },
         ];
       }),

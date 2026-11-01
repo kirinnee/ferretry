@@ -14,7 +14,12 @@ import {
   FleetWriteOperationSchema,
 } from '@ferretry/protocol';
 import should from 'should';
-import { applyFailureSummary, applyResultSummary, operationSummary } from '../../../src/lib/fleet/wire.ts';
+import {
+  applyFailureSummary,
+  applyResultSummary,
+  operationSummary,
+  skippedWithinRuntimes,
+} from '../../../src/lib/fleet/wire.ts';
 
 const ACCOUNT_ID = '00000000-0000-4000-8000-000000000001';
 
@@ -440,5 +445,47 @@ describe('applyFailureSummary', () => {
     // Assert
     should(actual.outcome).equal('committed-with-history-failure');
     should(FleetApplyOutcomeSchema.safeParse(actual).success).be.true();
+  });
+});
+
+describe('skippedWithinRuntimes', () => {
+  const accounts = [
+    { id: ACCOUNT_ID, home: '/state/fleet/homes/claude-kirin' },
+    { id: '00000000-0000-4000-8000-000000000002', home: '/state/fleet/homes/codex/' },
+  ];
+
+  it('should give each runtime its skipped paths relative to its own folder, and keep no folder on disk', () => {
+    // Act
+    const actual = skippedWithinRuntimes(
+      [
+        { path: '/state/fleet/homes/claude-kirin/skills/review' },
+        { path: '/state/fleet/homes/codex/commands/ship.md' },
+        { path: '/state/fleet/homes/claude-kirin/commands' },
+      ],
+      accounts,
+    );
+
+    // Assert — a trailing slash on a home changes nothing.
+    should(actual).deepEqual({
+      [ACCOUNT_ID]: ['skills/review', 'commands'],
+      '00000000-0000-4000-8000-000000000002': ['commands/ship.md'],
+    });
+  });
+
+  it('should leave out a path in no runtime folder, a lookalike folder, and the folder itself', () => {
+    // Act
+    const actual = skippedWithinRuntimes(
+      [
+        { path: '/state/secrets.key' },
+        { path: '/state/fleet/homes/claude-kirin-two/skills' },
+        { path: '/state/fleet/homes/claude-kirin/' },
+        { path: '/state/fleet/homes/claude-kirin' },
+      ],
+      accounts,
+    );
+
+    // Assert
+    should(actual).deepEqual({});
+    should(skippedWithinRuntimes(undefined, accounts)).deepEqual({});
   });
 });

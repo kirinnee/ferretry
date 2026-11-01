@@ -143,6 +143,26 @@ const historySummary = (previews: readonly SharedHistoryPreview[]): readonly Fle
     links: preview.links,
   }));
 
+/**
+ * Each runtime's skipped paths from an apply, inside that runtime's own folder and keyed by its id. A path in no
+ * runtime's folder is left out: it names nothing a runtime could say, and the folder's place on disk stays here.
+ */
+export const skippedWithinRuntimes = (
+  skipped: readonly { readonly path: string }[] | undefined,
+  accounts: readonly { readonly id: string; readonly home: string }[],
+): Readonly<Record<string, readonly string[]>> => {
+  const found: Record<string, readonly string[]> = {};
+  for (const { path } of skipped ?? []) {
+    for (const { id, home } of accounts) {
+      const folder = `${home.replace(/\/+$/u, '')}/`;
+      if (!path.startsWith(folder) || path.length === folder.length) continue;
+      found[id] = [...(found[id] ?? []), path.slice(folder.length)];
+      break;
+    }
+  }
+  return found;
+};
+
 /** Residue is optional on the wire, so an apply that left none says nothing rather than empty. */
 const residueOf = (value: {
   readonly backupResidue?: readonly string[];
