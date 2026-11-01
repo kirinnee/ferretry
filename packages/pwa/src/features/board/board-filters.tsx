@@ -361,7 +361,8 @@ export function BoardFilterBar({
 }
 
 /**
- * The phone's filters: a button that opens a bottom sheet holding every field, so the page keeps its height.
+ * The phone's filters: a button that opens a bottom sheet holding every field, "Internal" included (a touch-sized
+ * toggle would add a row to the header), so the page keeps its height.
  * Fields apply as they are picked (the URL is the state); "Done" only closes the sheet.
  */
 export function BoardFilterSheet({
@@ -390,7 +391,6 @@ export function BoardFilterSheet({
           <span className="fy-board-filters__label">Filters</span>
           {count > 0 ? <span className="fy-board-filters__n">{count}</span> : null}
         </button>
-        {splitsAgents ? <InternalToggle filters={filters} onChange={onChange} /> : null}
         {count > 0 ? (
           <button className="fy-board-filters__clear" onClick={() => onChange(cleared(filters))} type="button">
             <X aria-hidden="true" size={12} />
@@ -410,6 +410,7 @@ export function BoardFilterSheet({
           Filters
         </h2>
         <div className="fy-board-filter-sheet__fields">
+          {splitsAgents ? <InternalToggle filters={filters} onChange={onChange} /> : null}
           <BoardFilterFields archive={archive} choices={choices} filters={filters} onChange={onChange} />
         </div>
         <div className="fy-board-filter-sheet__actions">

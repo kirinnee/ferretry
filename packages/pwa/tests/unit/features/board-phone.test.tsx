@@ -275,20 +275,28 @@ describe('Board on a phone — counts and filters', () => {
     expect(written.get('view')).toBe('list');
   });
 
-  it('keeps "Internal" in the bar beside Filters, where a thumb finds it', async () => {
+  it('keeps "Internal" in the Filters sheet, not the header, so the header gains no row', async () => {
     const split = [
       originCard('F1', 'human', null, { laneId: 'implement' }),
       originCard('F2', 'agent', { id: 'F1' }, { laneId: 'implement' }),
     ];
     const { root, searches } = await open('', {}, split);
+    expect(root.querySelector('.fy-board-filters__bar [data-filter="agents"]')).toBeNull();
+    await click(root, '.fy-board-filters__toggle');
     const toggle = must(
-      root.querySelector<HTMLInputElement>('.fy-board-filters__bar [data-filter="agents"]'),
+      document.querySelector<HTMLInputElement>('.fy-board-filter-sheet [data-filter="agents"]'),
       'the agents toggle',
     );
     expect(toggle.closest('label')?.textContent).toBe('Internal');
-    await click(root, '[data-filter="agents"]');
+    await click(document.body, '.fy-board-filter-sheet [data-filter="agents"]');
     expect(searches).toEqual(['agents=1']);
-    expect((await open('', {}, unasked(OPEN))).root.querySelector('[data-filter="agents"]')).toBeNull();
+  });
+
+  it('offers no "Internal" in the sheet when the daemon does not say who asked', async () => {
+    const { root } = await open('', {}, unasked(OPEN));
+    await click(root, '.fy-board-filters__toggle');
+    expect(document.querySelector('.fy-board-filter-sheet')).not.toBeNull();
+    expect(document.querySelector('[data-filter="agents"]')).toBeNull();
   });
 
   it('keeps the filters out of the page until the Filters button opens them in a sheet', async () => {

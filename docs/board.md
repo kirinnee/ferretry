@@ -539,7 +539,7 @@ and its lead writes them.
 The Board shows what the OWNER asked for by default, and folds the rest away behind the **Internal** filter (off
 unless chosen), each agent card under its `humanParent` where it has one. A card is internal when the daemon says
 `askedBy: agent`; the app reads that through one helper (`taskAsker`) that falls back to `origin` for a daemon
-that predates `askedBy`. While the filter is off, internal cards are in no lane, overview or Home count. `origin` is derived at read time by one pure rule, `cardOrigin` in
+that predates `askedBy`. On a desktop the toggle sits in the filter bar; on a phone it lives in the Filters sheet, so the header gains no row. While the filter is off, internal cards are in no lane, overview or Home count. `origin` is derived at read time by one pure rule, `cardOrigin` in
 `packages/daemon/src/lib/board/origin.ts`, and never stored. A card is **human** when:
 
 1. the owner made it (the Board page, a paired device, the admin CLI);
