@@ -1,4 +1,10 @@
-import { type IFyApiClient, type SessionContext, type SessionView, transformTextIndex } from '@ferretry/protocol';
+import {
+  DAEMON_FEATURES,
+  type IFyApiClient,
+  type SessionContext,
+  type SessionView,
+  transformTextIndex,
+} from '@ferretry/protocol';
 import { ArrowUp, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { OccupiedComposerNotice } from '../features/occupied-composer/occupied-composer-notice.tsx';
@@ -12,41 +18,42 @@ import { UnconfirmedSendNotice } from '../features/unconfirmed-send/unconfirmed-
 import { readInputModality, useInputModality } from '../hooks/use-input-modality.ts';
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import { useLocationShareHost } from '../hooks/use-location-share.ts';
+import { type SharedDraftSendMark, sharedDraftTypingHint, useSharedDraft } from '../hooks/use-shared-draft.ts';
+import { referencesOf } from '../lib/answer-chip.ts';
 import { uploadAttachment as uploadSessionAttachment } from '../lib/attachment-upload.ts';
 import { formatAttachmentSize } from '../lib/attachments.ts';
 import { continueList, type DraftEdit, insideCodeBlock } from '../lib/composer-editing.ts';
 import { useComposerHostWarmup } from '../lib/composer-host-warmup.ts';
-import type { ComposerReferenceTask } from '../lib/composer-reference-catalogs.ts';
 import {
   type ComposerEnterKeyPreference,
   composerEnterAction,
   shiftedComposerEnterAction,
 } from '../lib/composer-keybinding.ts';
+import type { ComposerReferenceTask } from '../lib/composer-reference-catalogs.ts';
 import { initialVimState, normalVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import { machineOffers } from '../lib/daemon-health.ts';
 import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
-import { referencesOf } from '../lib/answer-chip.ts';
-import { useSendOutbox } from '../lib/store.tsx';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
+import { escapeCloses } from '../lib/escape-closes.ts';
+import type { DaemonStreamOpener } from '../lib/event-transport.ts';
 import { applyFormat, type FormatCommand, formatShortcut } from '../lib/live-markdown.ts';
 import { asLocationError, formatLocationBlock } from '../lib/location-share.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
-import { escapeCloses } from '../lib/escape-closes.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
 import { carrierDelivery } from '../lib/relay-carrier.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { browserFetch } from '../lib/runtime-models.ts';
 import { canSubmitComposer } from '../lib/session-screens.ts';
+import { useSendOutbox } from '../lib/store.tsx';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import { REINSERT_TRANSCRIPTION_EVENT, reinsertTranscriptionText } from '../lib/stt/reinsert-transcription.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
+import { useDaemonHealth } from '../lib/use-daemon-health.ts';
 import type { WorkSearchPort } from '../lib/work-search.ts';
 import { addMenuActions, ComposerAddMenu } from './composer-add-menu.tsx';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
-import { useSharedComposerItems } from './composer-shared-items.ts';
-import { type SharedDraftSendMark, sharedDraftTypingHint, useSharedDraft } from '../hooks/use-shared-draft.ts';
-import type { DaemonStreamOpener } from '../lib/event-transport.ts';
 import {
   type ComposerField,
   type ComposerFieldKeyEvent,
@@ -62,6 +69,7 @@ import {
 } from './composer-autocomplete-providers.ts';
 import { ComposerFormatToolbar } from './composer-format-toolbar.tsx';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
+import { useSharedComposerItems } from './composer-shared-items.ts';
 import { ContextRing } from './context-ring.tsx';
 import { DictationControl } from './dictation-control.tsx';
 import { ImageViewer, type ViewerImage } from './image-viewer.tsx';
@@ -205,6 +213,8 @@ export interface ComposerProps {
    * store's carrier, which is what the app always uses; a harness or a test hands in its own.
    */
   readonly openDraftStream?: DaemonStreamOpener;
+  /** Says whether the machine takes uploads in presence, without reading its health (the harness and tests). */
+  readonly sharedUploads?: boolean;
   /** The session's runtime chips (model, effort), drawn at the start of the status line. */
   readonly statusSlot?: ReactNode;
   /** How much of the context window the session has used; absent while the window or the size is unknown. */
@@ -413,6 +423,7 @@ export function Composer({
   vimMode = false,
   uploadAttachment,
   openDraftStream,
+  sharedUploads,
   statusSlot,
   context,
   compacting,
@@ -604,12 +615,15 @@ export function Composer({
    * Another device's edit moves this caret the way the edit moved the text, so typing here is never
    * thrown to the end by somebody typing there.
    */
+  const health = useDaemonHealth(sharedUploads === undefined ? daemon : undefined);
   const shared = useSharedDraft({
     daemon,
     scope,
     text: draft,
     setText: setDraft,
     ...(openDraftStream === undefined ? {} : { open: openDraftStream }),
+    // The app ships before the daemon: an older machine closes the stream on a file still uploading.
+    reportUploads: sharedUploads ?? machineOffers(health, DAEMON_FEATURES.sharedDraftUploading),
     onRemote: (op, next) => {
       const input = inputRef.current;
       if (input === null) return;

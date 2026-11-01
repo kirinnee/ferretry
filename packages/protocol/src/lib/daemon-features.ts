@@ -165,6 +165,12 @@ export const DAEMON_FEATURES = {
    * terminal rule still fills only beside `sign-in-rules.1`: while that is not reported, every raise is a plain card.
    */
   signInRulesTerminal: 'sign-in-rules-terminal.1',
+  /**
+   * A shared-draft presence frame may name the files a composer is still uploading (`uploading`, &F331). A daemon
+   * without this name closes the whole stream on the field, because the frame is strict: the app reports uploads
+   * only where the machine reports it, and otherwise the other devices see a file once it has landed.
+   */
+  sharedDraftUploading: 'shared-draft.uploading.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];
