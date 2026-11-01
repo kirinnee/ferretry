@@ -1,4 +1,9 @@
-import { DependencyUntilSchema, TaskKindSchema, TaskWorkflowSchema } from '@ferretry/protocol';
+import {
+  DependencyUntilSchema,
+  ExternalLaneTriggerSchema,
+  TaskKindSchema,
+  TaskWorkflowSchema,
+} from '@ferretry/protocol';
 import type { Command } from 'commander';
 import type {
   BoardController,
@@ -108,6 +113,19 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     .addHelpText('after', `\n${laneGuide(program.name())}`)
     .action(async (id: string, lane: string, options: SessionOptions & { reason?: string }) => {
       await board.move(id, lane, options);
+    });
+
+  acting(group.command('trigger'))
+    .description('report an external event for a card (e.g. deploy.done); the daemon moves it if a lane waits on it')
+    .argument('<id>', ID_HELP)
+    .argument('<event>', `the event: ${choices(ExternalLaneTriggerSchema.options)}`)
+    .addHelpText(
+      'after',
+      '\nOnly events Ferretry cannot see itself: a PR is merged or a release published when GitHub says so, never on your word.\nA sub-ferret may report one: it is how a deploy it ran reaches the card.',
+    )
+    .option('--reason <why>', 'what happened, kept in the card history')
+    .action(async (id: string, event: string, options: SessionOptions & { reason?: string }) => {
+      await board.trigger(id, event, options);
     });
 
   acting(group.command('focus'))
