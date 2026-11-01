@@ -922,6 +922,7 @@ import {
   type LivenessTarget,
   LOOPBACK_FIREWALL_CHECK_MS,
   LocalModelsService,
+  AccountDefaults,
   type AccountDirectory,
   type AccountsBoot,
   LoginDirectory,
@@ -7445,6 +7446,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     seals: narrowVault.seals,
   });
   const accountDirectory = loginDirectory.accounts;
+  // The default account per place (config/account-defaults.yaml). The owner's account acts rewrite its lines in the
+  // same act, and the config status warns for a line naming an account, a sign-in or a project this machine lacks.
+  // Projects are read from the catalog file when a status asks, never at start.
+  const accountDefaults = new AccountDefaults({
+    config: configFiles,
+    projects: async () => await new FileProjectCatalog(join(paths.state, 'projects.json')).projects(),
+  });
+  accountDirectory.followDefaultsWith(async changes => await accountDefaults.repoint(changes));
+  configFiles.warnWith(async snapshot => await accountDefaults.warnings(await accountDirectory.list(), snapshot));
   // Copying secrets to another machine signs and checks offers with THIS daemon's identity — the key its
   // daemon id fingerprints — read per clone, so a daemon whose identity cannot be read refuses the copy
   // and serves everything else.
@@ -7482,6 +7492,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     accounts: accountDirectory,
     // Only the look-alike answer (handles), as a closure: the route table holds nothing that opens a value.
     lookAlike: narrowVault.lookAlike,
+    accountDefaults,
     // A staged 2FA seed waits here, sealed, in memory only, for the passkey bound to it (docs/secrets.md, "2FA keys").
     seeds: twoFactorSeeds,
     // TWO places name secrets now: the operator's own recipes, and the fleet accounts a profile

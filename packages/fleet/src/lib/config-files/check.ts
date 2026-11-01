@@ -133,7 +133,7 @@ export function checkConfigFile(path: string, text: string): ConfigFileCheck {
           path,
           severity: 'warning',
           message: 'Ferretry does not read this file',
-          fix: 'name it machine.yaml, warden.yaml, learning.yaml, voice.yaml, pack.yaml, models-guide.yaml, logins/<id>.yaml, profiles/<name>.yaml, runtimes/<name>.yaml or components/<kind>/<name>.yaml — or move it out of the config directory',
+          fix: 'name it machine.yaml, warden.yaml, learning.yaml, voice.yaml, pack.yaml, models-guide.yaml, account-defaults.yaml, logins/<id>.yaml, profiles/<name>.yaml, runtimes/<name>.yaml or components/<kind>/<name>.yaml — or move it out of the config directory',
         },
       ],
     };

@@ -271,8 +271,19 @@ its body is read, exactly as for the vault (honest-client until a ferret has its
 | `PUT` / `DELETE /v1/accounts/sign-ins/:si`                | change or remove one sign-in                                           |
 | `POST /v1/accounts/sign-ins/:si/recipe/proposals/:pid`    | the owner approves or declines a ferret's recipe                       |
 | `POST /v1/accounts/:id/merge {from}`, `…/apart {from}`    | "these look like one account": merge, or keep apart                    |
+| `PUT /v1/accounts/defaults`                               | owner only: the default account for a place (below)                    |
 
 2FA keys have routes of their own: see [2FA keys](#2fa-keys).
+
+**The default account per place** is `config/account-defaults.yaml`, not a part of the account store: its lines hold
+**handles only**, never a value, and every change to it is held for the owner when anyone else makes it
+([Default accounts](config-files.md#default-accounts)). `PUT /v1/accounts/defaults { scope, within?, key, account }`
+is the owner's own write of one line (`account: null` clears it): a ferret is refused before its body is read, a
+paired device needs the passkey step-up for loosening a configuration file, and the line is in effect at once. The
+account acts keep the lines true in the same act: a rename moves them, a delete drops them, a merge points them at the
+account that kept the sign-ins, and a handle that is created (or renamed to) never inherits a line left for an old
+account of the same name. If that rewrite fails the account act stands and the leftover line, which names no account,
+is ignored with a warning on `GET /v1/config/status`. _RF-2: this route becomes `caller: 'person'`._
 
 **"These look like one account" is offered, never automatic, and never stored.** It is computed on demand inside
 the vault: same username (trimmed, case-folded) and same password, compared in constant time. The answer is

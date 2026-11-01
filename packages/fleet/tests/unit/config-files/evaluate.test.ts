@@ -877,3 +877,57 @@ describe('evaluateConfigFiles: provider presets (docs/provider-presets.md)', () 
     should(actual.files.find(entry => entry.path === 'models/zai.yaml')).containDeep({ kind: 'models', state: 'ok' });
   });
 });
+
+describe('evaluateConfigFiles: account-defaults.yaml is held for the owner', () => {
+  const FIRST = 'sites:\n  app.clickup.com: CLICKUP_A\n';
+
+  it('should hold a first line, naming the place in words, and leave no default in effect', () => {
+    // Act
+    const actual = evaluate([file('account-defaults.yaml', FIRST)]);
+
+    // Assert
+    should(actual.pending).deepEqual([
+      {
+        path: 'account-defaults.yaml',
+        etag: digest(FIRST),
+        changes: ['changes which account a card offers first for app.clickup.com in every session on this machine'],
+      },
+    ]);
+    should(actual.effective.accountDefaults).deepEqual({});
+  });
+
+  it('should hold a change, and keep the owner’s earlier line in effect meanwhile', () => {
+    // Arrange
+    const accepted = acceptedOf([file('account-defaults.yaml', FIRST)]);
+
+    // Act
+    const actual = evaluate([file('account-defaults.yaml', 'sites:\n  app.clickup.com: CLICKUP_B\n')], accepted);
+
+    // Assert
+    should(actual.effective.accountDefaults).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A' } });
+    should(actual.pending.map(entry => entry.path)).deepEqual(['account-defaults.yaml']);
+  });
+
+  it('should hold a removal too: taking a default away is the owner’s call as well', () => {
+    // Arrange
+    const accepted = acceptedOf([file('account-defaults.yaml', FIRST)]);
+
+    // Act
+    const actual = evaluate([file('account-defaults.yaml', '{}\n')], accepted);
+
+    // Assert
+    should(actual.pending[0]?.changes).deepEqual([
+      'changes which account a card offers first for app.clickup.com in every session on this machine',
+    ]);
+    should(actual.effective.accountDefaults).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A' } });
+  });
+
+  it('should put the file in effect once it is the accepted version', () => {
+    // Act
+    const actual = evaluate([file('account-defaults.yaml', FIRST)], acceptedOf([file('account-defaults.yaml', FIRST)]));
+
+    // Assert
+    should(actual.pending).deepEqual([]);
+    should(actual.effective.accountDefaults).deepEqual({ sites: { 'app.clickup.com': 'CLICKUP_A' } });
+  });
+});

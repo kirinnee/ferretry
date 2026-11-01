@@ -30,6 +30,7 @@ import {
   classifyConfigPath,
   configFilePath,
   configSchemaId,
+  type AccountDefaultsFile,
   type LearningConfig,
   type ModelsGuideFile,
   type PackConfig,
@@ -95,6 +96,8 @@ export interface EffectiveConfig {
   readonly pack: PackConfig;
   /** The guide as written; `useCases` absent means the one derived from the catalogs (docs/pack-mode.md). */
   readonly modelsGuide: ModelsGuideFile;
+  /** Which account a sign-in card offers first (`account-defaults.yaml`); the owner's lines only, every change held. */
+  readonly accountDefaults: AccountDefaultsFile;
   /** This machine's own provider presets (`presets/<id>.yaml`), by id. The built-ins are not here. */
   readonly presets: Readonly<Record<string, ProviderPreset>>;
   /** This machine's own model catalogs (`models/<id>.yaml`), by id: each wins over the published and built-in one. */
@@ -284,6 +287,7 @@ export function evaluateConfigFiles(input: ConfigEvaluationInput): ConfigEvaluat
       voice: singleton('voice'),
       pack: singleton('pack'),
       modelsGuide: singleton('modelsGuide'),
+      accountDefaults: singleton('accountDefaults'),
       presets: Object.fromEntries(
         [...effective.values()].flatMap(candidate => {
           const address = candidate.checked.address;

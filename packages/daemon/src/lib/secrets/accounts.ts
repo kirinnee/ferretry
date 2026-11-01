@@ -24,6 +24,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import {
   ADD_TWO_FACTOR_KEY_WHERE,
+  type AccountDefaultsRepoint,
   type AccountId,
   type AccountIndexDocument,
   AccountIndexDocumentSchema,
@@ -296,6 +297,8 @@ export interface AccountDraft {
   readonly signIns: Record<string, SignInRecord>;
   readonly sealed: SecretVaultDocument;
   readonly added: Record<string, SealedSecret>;
+  /** What the account defaults file must follow once this change commits (docs/config-files.md). */
+  readonly repoints: AccountDefaultsRepoint[];
   readonly at: string;
 }
 
@@ -309,6 +312,12 @@ export interface AccountDirectoryOptions {
   readonly lock?: LoginStoreLock;
   /** What a merge moves a sealed value with. Absent: a merge that would move one is refused. */
   readonly seals?: AccountSealPort;
+  /**
+   * Told, after a change commits and under the same lock, how the account defaults file must follow it. A failure is
+   * the callee's to report: the change stands, and a line it could not rewrite names a handle that is not an account,
+   * which is ignored with a warning, never read as a default.
+   */
+  readonly repointDefaults?: (changes: readonly AccountDefaultsRepoint[]) => Promise<void>;
 }
 
 /** The listing a route answers from: every account by label, and every sign-in in the account's order. */
@@ -460,6 +469,7 @@ export class AccountDirectory {
   private readonly newTwoFactorId: () => string;
   private readonly newSealedName: (key: string, role: 'password' | 'totp') => string;
   private readonly seals: AccountSealPort | undefined;
+  private repointDefaults: ((changes: readonly AccountDefaultsRepoint[]) => Promise<void>) | undefined;
   readonly hostName: string;
 
   constructor(
@@ -477,6 +487,12 @@ export class AccountDirectory {
     this.newTwoFactorId = options.newTwoFactorId ?? randomTwoFactorId;
     this.newSealedName = options.newSealedName ?? freshSealedName;
     this.seals = options.seals;
+    this.repointDefaults = options.repointDefaults;
+  }
+
+  /** The composition root hands over the account defaults file once the service that rewrites it exists. */
+  followDefaultsWith(repoint: (changes: readonly AccountDefaultsRepoint[]) => Promise<void>): void {
+    this.repointDefaults = repoint;
   }
 
   /** Every account by label, and every sign-in. Raises `SecretStoreError` when it cannot tell — never an empty list. */
@@ -520,6 +536,7 @@ export class AccountDirectory {
         signIns: { ...read.document.signIns },
         sealed: sealed ?? { v: 1, cipher: this.documents.cipher.algorithm, entries: {} },
         added: {},
+        repoints: [],
         at: this.clock.now(),
       };
       const result = await work(draft);
@@ -535,8 +552,32 @@ export class AccountDirectory {
       if (Object.keys(draft.added).length > 0) await this.documents.sealed.write(staged);
       await this.documents.commit(read, next, staged);
       if (sealed !== undefined) await this.sweep(next, staged);
+      await this.followDefaults(read.document.accounts, next.accounts, draft.repoints);
       return result;
     });
+  }
+
+  /**
+   * The defaults file follows a committed change: a handle that did not exist before is new, so no line may name it
+   * (a reused handle never inherits a deleted account's default), then the change's own repoints in order.
+   */
+  private async followDefaults(
+    before: Record<string, AccountRecord>,
+    after: Record<string, AccountRecord>,
+    repoints: readonly AccountDefaultsRepoint[],
+  ): Promise<void> {
+    if (this.repointDefaults === undefined) return;
+    const fresh = Object.keys(after).filter(handle => !Object.hasOwn(before, handle));
+    const changes: AccountDefaultsRepoint[] = [
+      ...fresh.map(handle => ({ kind: 'fresh' as const, handle })),
+      ...repoints,
+    ];
+    if (changes.length === 0) return;
+    try {
+      await this.repointDefaults(changes);
+    } catch {
+      // The account change is committed and stands; see {@link AccountDirectoryOptions.repointDefaults}.
+    }
   }
 
   /** Seals `value` for `role` of `account` under a fresh name, staged in the draft; answers the name. */
@@ -797,6 +838,7 @@ export class AccountDirectory {
         throw new LoginEntryError('login_exists', `${to} is already an account; pick another name`);
       delete draft.accounts[from];
       draft.accounts[to] = { ...account, updatedAt: draft.at };
+      draft.repoints.push({ kind: 'rename', from, to });
       // A recipe that names `[[from]]` names the renamed account.
       for (const [id, signIn] of Object.entries(draft.signIns))
         if (signIn.recipe !== undefined && signIn.recipe.includes(`[[${from}]]`))
@@ -815,6 +857,7 @@ export class AccountDirectory {
         const account = Object.hasOwn(draft.accounts, id) ? draft.accounts[id] : undefined;
         if (account === undefined) return false;
         delete draft.accounts[id];
+        draft.repoints.push({ kind: 'remove', handle: id });
         for (const [signInId] of signInsOf(draft.signIns, account.key)) delete draft.signIns[signInId];
         unlinkVia(draft, account.key);
         dropApart(draft, account.key);
@@ -981,6 +1024,7 @@ export class AccountDirectory {
       const { apartFrom: _apart, factors: _factors, username: _username, ...rest } = keep;
       const username = keep.username ?? from.username;
       delete draft.accounts[fromId];
+      draft.repoints.push({ kind: 'merge', keep: keepId, from: fromId });
       draft.accounts[keepId] = {
         ...rest,
         ...(username === undefined ? {} : { username }),

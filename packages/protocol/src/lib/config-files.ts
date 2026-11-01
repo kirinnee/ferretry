@@ -73,6 +73,7 @@ export const CONFIG_FILE_KINDS = [
   'voice',
   'pack',
   'modelsGuide',
+  'accountDefaults',
   'preset',
   'models',
 ] as const;
@@ -81,7 +82,7 @@ export type ConfigFileKind = z.infer<typeof ConfigFileKindSchema>;
 
 /** One file the directory can hold, by what it is rather than where. */
 export type ConfigFileAddress =
-  | { readonly kind: 'machine' | 'warden' | 'learning' | 'voice' | 'pack' | 'modelsGuide' }
+  | { readonly kind: 'machine' | 'warden' | 'learning' | 'voice' | 'pack' | 'modelsGuide' | 'accountDefaults' }
   | { readonly kind: 'login' | 'profile' | 'runtime' | 'preset' | 'models'; readonly name: string }
   | { readonly kind: 'component'; readonly componentKind: ConfigComponentKind; readonly name: string };
 
@@ -93,6 +94,7 @@ const SINGLETON_FILES = {
   voice: 'voice.yaml',
   pack: 'pack.yaml',
   modelsGuide: 'models-guide.yaml',
+  accountDefaults: 'account-defaults.yaml',
 } as const satisfies Record<string, string>;
 
 const NAMED_DIRECTORIES = {
@@ -156,6 +158,7 @@ export function configFilePath(address: ConfigFileAddress): string {
     case 'voice':
     case 'pack':
     case 'modelsGuide':
+    case 'accountDefaults':
       return SINGLETON_FILES[address.kind];
     case 'component':
       return `${CONFIG_COMPONENTS_DIRECTORY}/${address.componentKind}/${address.name}${CONFIG_FILE_EXTENSION}`;
@@ -179,6 +182,7 @@ export const CONFIG_SCHEMA_IDS = [
   'voice',
   'pack',
   'modelsGuide',
+  'accountDefaults',
   'preset',
   'models',
 ] as const;

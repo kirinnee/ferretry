@@ -184,7 +184,17 @@ export class ConfigFilesService {
   /** Removals the daemon makes on the owner's behalf, by path, with when: in effect once the file is gone. */
   #acknowledgedRemovals = new Map<string, number>();
 
+  #warnings: ((snapshot: ConfigSnapshot) => Promise<readonly ConfigIssue[]>) | undefined;
+
   constructor(private readonly deps: ConfigFilesServiceDeps) {}
+
+  /**
+   * Findings only the daemon can make — a default account that names an account this machine does not have —
+   * added to {@link status} as warnings. Set once at the composition root, after the services it reads exist.
+   */
+  warnWith(source: (snapshot: ConfigSnapshot) => Promise<readonly ConfigIssue[]>): void {
+    this.#warnings = source;
+  }
 
   /** Run `work` after every load and write already queued, and before any queued after it. */
   #serial<T>(work: () => Promise<T>): Promise<T> {
@@ -315,11 +325,13 @@ export class ConfigFilesService {
 
   /** `GET /v1/config/status`. */
   async status(): Promise<ConfigStatusView> {
-    const { evaluation, at } = await this.load();
+    const snapshot = await this.load();
+    const { evaluation, at } = snapshot;
+    const extra = await this.#warnings?.(snapshot).catch(() => []);
     return {
       directory: this.deps.directory.directory,
       files: [...evaluation.files],
-      issues: [...evaluation.issues],
+      issues: [...evaluation.issues, ...(extra ?? [])],
       pending: [...evaluation.pending],
       checkedAt: at.toISOString(),
     };

@@ -14,6 +14,7 @@ const FILES: readonly { readonly address: Address; readonly path: string; readon
   { address: { kind: 'voice' }, path: 'voice.yaml', schema: 'voice' },
   { address: { kind: 'pack' }, path: 'pack.yaml', schema: 'pack' },
   { address: { kind: 'modelsGuide' }, path: 'models-guide.yaml', schema: 'modelsGuide' },
+  { address: { kind: 'accountDefaults' }, path: 'account-defaults.yaml', schema: 'accountDefaults' },
   { address: { kind: 'login', name: 'claude-you' }, path: 'logins/claude-you.yaml', schema: 'login' },
   { address: { kind: 'profile', name: 'default' }, path: 'profiles/default.yaml', schema: 'profile' },
   { address: { kind: 'runtime', name: 'claude-default' }, path: 'runtimes/claude-default.yaml', schema: 'runtime' },
@@ -113,6 +114,7 @@ describe('where a configuration file lives', () => {
       'voice',
       'pack',
       'modelsGuide',
+      'accountDefaults',
       'preset',
       'models',
     ]);

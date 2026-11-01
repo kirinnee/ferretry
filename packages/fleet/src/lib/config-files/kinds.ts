@@ -12,6 +12,11 @@
  * Pure: no filesystem, no clock.
  */
 import {
+  type AccountDefaultLine,
+  type AccountDefaultsFile,
+  AccountDefaultsFileSchema,
+  accountDefaultLines,
+  accountDefaultScopeWords,
   type ConfigComponentKind,
   type ConfigSchemaId,
   DEFAULT_LEARNING_CONFIG,
@@ -104,6 +109,7 @@ export const CONFIG_FILE_SCHEMAS: Readonly<Record<ConfigSchemaId, z.ZodType>> = 
   voice: VoiceConfigSchema,
   pack: PackFileSchema,
   modelsGuide: ModelsGuideFileSchema,
+  accountDefaults: AccountDefaultsFileSchema,
   preset: ProviderPresetFileSchema,
   models: ModelCatalogFileSchema,
 };
@@ -120,6 +126,7 @@ export interface ConfigValues {
   readonly voice: VoiceConfig;
   readonly pack: PackConfig;
   readonly modelsGuide: ModelsGuideFile;
+  readonly accountDefaults: AccountDefaultsFile;
   readonly preset: ProviderPresetFile;
   readonly models: ModelCatalogFile;
 }
@@ -166,6 +173,7 @@ export const SINGLETON_DEFAULTS = {
   voice: DEFAULT_VOICE_CONFIG,
   pack: DEFAULT_PACK_CONFIG,
   modelsGuide: DEFAULT_MODELS_GUIDE_FILE,
+  accountDefaults: {} as AccountDefaultsFile,
 } as const;
 export type SingletonKind = keyof typeof SINGLETON_DEFAULTS;
 
@@ -396,6 +404,24 @@ export function runtimeLoosening(
 }
 
 /**
+ * Every line of `account-defaults.yaml` that is added, removed or changed is a sentence: a default decides which
+ * account a card offers first, and the card says "Default for ferretry" in the owner's name, so the words must be the
+ * owner's and not a ferret's. Nothing here is an exemption — taking a default away is held too.
+ */
+function accountDefaultsLoosening(before: AccountDefaultsFile, after: AccountDefaultsFile): readonly string[] {
+  const address = (line: AccountDefaultLine): string => JSON.stringify([line.scope, line.within ?? null, line.key]);
+  const was = new Map(accountDefaultLines(before).map(line => [address(line), line]));
+  const now = new Map(accountDefaultLines(after).map(line => [address(line), line]));
+  const sentences: string[] = [];
+  for (const [where, line] of [...now, ...was]) {
+    if (was.get(where)?.account === now.get(where)?.account) continue;
+    const sentence = `changes which account a card offers first for ${line.key} in ${accountDefaultScopeWords(line)}`;
+    if (!sentences.includes(sentence)) sentences.push(sentence);
+  }
+  return sentences;
+}
+
+/**
  * Each loosening an edit from `before` to `after` makes, in words; empty when it loosens nothing.
  * The singleton files have rules here, and a login's budget has its own (`loginLoosening`): any other
  * edit to a login, component, profile or runtime changes what an agent RUNS WITH, which every editor may
@@ -418,6 +444,8 @@ export function configLoosening<K extends SingletonKind>(
     // The guide only says which model suits which work: it widens nothing a ferret may do or spend.
     case 'modelsGuide':
       return [];
+    case 'accountDefaults':
+      return accountDefaultsLoosening(before as AccountDefaultsFile, after as AccountDefaultsFile);
     default:
       return voiceLoosening(before as VoiceConfig, after as VoiceConfig);
   }
@@ -453,6 +481,8 @@ export const CONFIG_FILE_STARTERS: Readonly<Record<ConfigSchemaId, string>> = {
   pack: '# Pack mode: ferrets delegate to sub-ferrets (docs/pack-mode.md). Every setting is optional.\nenabled: true\ndecision: agent\n',
   modelsGuide:
     '# The routing prompt (docs/pack-mode.md): which model runs which kind of sub-task, in plain words.\n# Leave prompt out to use the one built from the model catalogs.\nprompt: |\n  Planning and review: claude-opus-5-5 at max. Everyday coding: claude-sonnet-5-5.\n  Chores and bulk edits: claude-haiku-5-5 at low. Prefer a login with quota left.\n',
+  accountDefaults:
+    '# Which account a sign-in card offers first. It only orders buttons: your tap is still the permission.\n# A change here waits for you to confirm it, so a ferret can suggest a default but never set one.\nsites:\n  github.com: MY_ACCOUNT\n',
   voice:
     '# Voice. Transcription is chosen on each device (Settings › Voice); this picks who cleans up the text.\npostProcessing:\n  provider: "off"\n',
   preset:

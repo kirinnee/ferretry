@@ -15,6 +15,12 @@ import {
   TwoFactorKeySummarySchema,
   TwoFactorStageIdSchema,
   AccountDefaultsFileSchema,
+  accountDefaultLines,
+  accountDefaultScopeWords,
+  PutAccountDefaultRequestSchema,
+  repointAccountDefaults,
+  withAccountDefault,
+  type AccountId,
   type AccountDefaultsFile,
   AccountHintListSchema,
   AccountHintSchema,
@@ -1141,5 +1147,98 @@ describe('facts are written only by the daemon (invariant 14)', () => {
       expect(schema.safeParse(body).success).toBe(true);
       expect(schema.safeParse({ ...body, observed: fact }).success).toBe(false);
     }
+  });
+});
+
+describe('the lines of config/account-defaults.yaml', () => {
+  const A = 'CLICKUP_A' as AccountId;
+  const B = 'CLICKUP_B' as AccountId;
+  const file: AccountDefaultsFile = {
+    sites: { 'app.clickup.com': A },
+    projects: { ferretry: { 'app.clickup.com': B } },
+    folders: { '/srv/app': { 'app.clickup.com': A } },
+  };
+
+  it('should read the file as one line per place and put the lines back as the same file', () => {
+    expect(accountDefaultLines(file)).toHaveLength(3);
+    expect(accountDefaultLines({})).toEqual([]);
+    expect(withAccountDefault(file, { scope: 'sites', key: 'app.clickup.com' }, A)).toEqual(file);
+  });
+
+  it('should say in words what a line governs', () => {
+    const words = accountDefaultLines(file).map(accountDefaultScopeWords);
+    expect(words).toEqual(['every session on this machine', 'project ferretry', 'folder /srv/app']);
+  });
+
+  it('should add, change and remove one line and leave the others alone', () => {
+    const added = withAccountDefault(file, { scope: 'sites', key: 'github.com' }, A);
+    expect(added.sites).toEqual({ 'app.clickup.com': A, 'github.com': A });
+    expect(added.projects).toEqual(file.projects);
+    const changed = withAccountDefault(file, { scope: 'projects', within: 'ferretry', key: 'app.clickup.com' }, A);
+    expect(changed.projects).toEqual({ ferretry: { 'app.clickup.com': A } });
+    expect(changed.sites).toEqual(file.sites);
+    const removed = withAccountDefault(file, { scope: 'folders', within: '/srv/app', key: 'app.clickup.com' }, null);
+    expect(removed.folders).toBeUndefined();
+    expect(removed.sites).toEqual(file.sites);
+  });
+
+  it('should follow a rename, drop a removed account’s lines and move a merge to the account that kept the sign-ins', () => {
+    const C = 'CLICKUP_C' as AccountId;
+    expect(repointAccountDefaults(file, [{ kind: 'rename', from: A, to: C }]).sites).toEqual({ 'app.clickup.com': C });
+    expect(repointAccountDefaults(file, [{ kind: 'remove', handle: A }])).toEqual({
+      projects: { ferretry: { 'app.clickup.com': B } },
+    });
+    expect(repointAccountDefaults(file, [{ kind: 'merge', keep: B, from: A }]).sites).toEqual({
+      'app.clickup.com': B,
+    });
+  });
+
+  it('should let the kept account’s own line win a merge for the same place', () => {
+    const both: AccountDefaultsFile = { sites: { 'app.clickup.com': A, 'github.com': B } };
+    const merged = repointAccountDefaults({ sites: { 'app.clickup.com': A }, projects: file.projects }, [
+      { kind: 'merge', keep: B, from: A },
+    ]);
+    expect(merged.sites).toEqual({ 'app.clickup.com': B });
+    const clash: AccountDefaultsFile = {
+      projects: { ferretry: { 'app.clickup.com': B } },
+      folders: { '/srv/app': { 'app.clickup.com': A } },
+    };
+    expect(repointAccountDefaults(clash, [{ kind: 'merge', keep: B, from: A }]).folders).toEqual({
+      '/srv/app': { 'app.clickup.com': B },
+    });
+    expect(accountDefaultLines(repointAccountDefaults(both, []))).toHaveLength(2);
+  });
+
+  it('should never let a new handle inherit a line a deleted account left behind', () => {
+    // A was deleted but its line survived (a failed rewrite); a new account is made with the handle A.
+    expect(repointAccountDefaults(file, [{ kind: 'fresh', handle: A }])).toEqual({
+      projects: { ferretry: { 'app.clickup.com': B } },
+    });
+    // A rename to a handle a stale line already names: the stale line goes first, then the renamed account's follow.
+    const stale: AccountDefaultsFile = { sites: { 'github.com': B, 'app.clickup.com': A } };
+    const moved = repointAccountDefaults(stale, [
+      { kind: 'fresh', handle: B },
+      { kind: 'rename', from: A, to: B },
+    ]);
+    expect(moved).toEqual({ sites: { 'app.clickup.com': B } });
+  });
+});
+
+describe('PUT /v1/accounts/defaults body', () => {
+  it('should take one line for each scope, and null to remove it', () => {
+    const ok = (body: unknown) => PutAccountDefaultRequestSchema.safeParse(body).success;
+    expect(ok({ scope: 'sites', key: 'github.com', account: 'GITHUB' })).toBe(true);
+    expect(ok({ scope: 'projects', within: 'ferretry', key: 'github.com', account: 'GITHUB' })).toBe(true);
+    expect(ok({ scope: 'folders', within: '/srv/app', key: 'github.com', account: null })).toBe(true);
+  });
+
+  it('should refuse a missing or extra place, a relative folder, a bad host and a bad handle', () => {
+    const ok = (body: unknown) => PutAccountDefaultRequestSchema.safeParse(body).success;
+    expect(ok({ scope: 'projects', key: 'github.com', account: 'GITHUB' })).toBe(false);
+    expect(ok({ scope: 'sites', within: 'x', key: 'github.com', account: 'GITHUB' })).toBe(false);
+    expect(ok({ scope: 'folders', within: 'rel/dir', key: 'github.com', account: 'GITHUB' })).toBe(false);
+    expect(ok({ scope: 'sites', key: 'GitHub.com', account: 'GITHUB' })).toBe(false);
+    expect(ok({ scope: 'sites', key: 'github.com', account: 'github' })).toBe(false);
+    expect(ok({ scope: 'sites', key: 'github.com', account: 'GITHUB', extra: 1 })).toBe(false);
   });
 });

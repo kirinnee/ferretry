@@ -20,6 +20,7 @@ wire).
 | `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([learning.md](learning.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `pack.yaml`                     | Pack mode: on/off, who picks a sub-ferret's model (`agent` or `jev`), the sub-ferret `limits`, the start `probe`, Jev's cap ([pack-mode.md](pack-mode.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `models-guide.yaml`             | the routing prompt: `prompt`, plain words naming which model runs which kind of sub-task (at most 1,200 characters), read by the asking ferret and by Jev alike; absent means the one built from the catalogs ([pack-mode.md](pack-mode.md#the-routing-prompt))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `account-defaults.yaml`         | which account a sign-in card offers first: `sites`, `projects` and `folders` map a place key (a site's host, or `tool@host`) to an account handle — see [Default accounts](#default-accounts)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `voice.yaml`                    | who cleans up dictated text (provider, style, your own prompts, conversation context), and `defaultEngine` — the speech engine (`parakeet` or `browser`) a device uses until it picks its own ([voice.md](voice.md)); transcription always runs on the device                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `presets/<id>.yaml`             | a provider preset of this machine's own, or one replacing a built-in ([provider-presets.md](provider-presets.md))                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
@@ -109,19 +110,62 @@ left out.
 
 ## Routes
 
-| Route                       | Grant                                                      | Does                                                   |
-| --------------------------- | ---------------------------------------------------------- | ------------------------------------------------------ |
-| `GET /v1/config/status`     | `fleet.use`                                                | every file, its state, every issue, every held edit    |
-| `GET /v1/config/file?path=` | the file's capability, `use`                               | one file (or the starter a new one begins with) + etag |
-| `PUT /v1/config/file`       | the file's capability, `configure`; `If-Match: <etag>`     | write a file that checks; a loosening may be held      |
-| `POST /v1/config/confirm`   | the file's capability, `configure`; fresh passkey remotely | confirm one held edit by its etag                      |
-| `POST /v1/agent/config`     | the agent's session credential; Ferretry settings on       | the `config.*` tools                                   |
+| Route                       | Grant                                                                           | Does                                                   |
+| --------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `GET /v1/config/status`     | `fleet.use`                                                                     | every file, its state, every issue, every held edit    |
+| `GET /v1/config/file?path=` | the file's capability, `use`                                                    | one file (or the starter a new one begins with) + etag |
+| `PUT /v1/config/file`       | the file's capability, `configure`; `If-Match: <etag>`                          | write a file that checks; a loosening may be held      |
+| `POST /v1/config/confirm`   | the file's capability, `configure`; fresh passkey remotely                      | confirm one held edit by its etag                      |
+| `PUT /v1/accounts/defaults` | `secrets.configure`, and the file's `configure` (fleet); fresh passkey remotely | the owner sets or clears one default account line      |
+| `POST /v1/agent/config`     | the agent's session credential; Ferretry settings on                            | the `config.*` tools                                   |
 
 The file's capability is `warden` for `warden.yaml` and `fleet` for everything else. A loosening `PUT` is in
 effect at once only for somebody at the machine or a device that proved a passkey for the act; anyone
 else's is written and held. An agent never confirms. The agenda's Allow
 ([agenda.md](agenda.md#confirming-a-configuration-change)) is a third door to the same act and asks exactly
 what `POST /v1/config/confirm` asks: one rule, `heldEditRefusal` in `runtime/mounts/config-files.ts`.
+
+## Default accounts
+
+`account-defaults.yaml` says which account a sign-in card offers first, for a place where more than one account
+could sign in. Three maps, each from a **place key** (a site's host such as `app.clickup.com`, or `tool@host` for a
+terminal) to an **account handle**:
+
+```yaml
+sites:
+  app.clickup.com: CLICKUP_A # every session on this machine
+projects:
+  ferretry: # a project's id, or its exact name
+    app.clickup.com: CLICKUP_B
+folders:
+  ~/Workspace/personal/scratch: # an absolute folder, or ~/…, for a session on no project
+    github.com: GITHUB_WORK
+```
+
+The card chooses by the ferret's own hint, then the project line, then the folder line, then the site line, then
+the only sign-in matched ([input-requests.md](input-requests.md#the-next-time-one-tap)). A default only ever
+chooses among the sign-ins the daemon already matched; it never adds one.
+
+**Every change is the owner's.** Adding, changing or removing a line is a loosening in the sense of rule 2 — it
+changes which account the owner is offered first, in the owner's name — so a ferret's `config.write` to this file
+is only ever a **held suggestion** ("changes which account a card offers first for `<key>` in <scope>"), and the
+version in effect stays as the owner last confirmed it. The owner sets one line with `PUT /v1/accounts/defaults`
+(`{ scope, within?, key, account }`; `account: null` clears it): at the machine it is direct, from a paired device
+it asks the passkey step-up that confirming a held edit asks. That one write goes through the comment-keeping
+editor, is in effect at once, and **does not confirm anything else** — a ferret's other held lines stay held. A
+defaults file that does not check is never written over; fix it first (`409 defaults_file_invalid`).
+
+**Lines follow the accounts.** An account's rename rewrites its lines to the new handle, its delete removes them,
+and a merge points the merged account's lines at the one that kept the sign-ins (the kept account's own line for
+the same place wins) — all in the owner's same act. A handle that is created, or renamed to, also has any line
+already naming it dropped first, so **a new account never inherits a default left behind for an old account of
+the same handle**. If a rewrite fails, the account act stands; the line left over names a handle that is not an
+account (or one with no sign-in there), so it is **ignored**, never read as a default.
+
+**What the daemon cannot see is a warning, not an error.** `fy config check` fails only the shape (an unknown map, a
+bad host, a lower-case handle, a relative folder). The daemon adds warnings to `GET /v1/config/status` for a line
+in effect that names an account that does not exist, an account with no sign-in on that key, or a project that is
+not registered (or named by two). Such a line is ignored.
 
 ## The Warden
 

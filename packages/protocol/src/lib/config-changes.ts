@@ -61,6 +61,7 @@ const KINDS_BY_FILE: Readonly<Record<ConfigFileAddress['kind'], readonly ConfigC
   voice: ['voice'],
   pack: ['pack'],
   modelsGuide: ['pack'],
+  accountDefaults: ['credentials'],
   preset: ['presets', 'credentials'],
   models: ['runtimes', 'pack'],
 };

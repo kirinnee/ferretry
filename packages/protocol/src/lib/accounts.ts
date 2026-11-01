@@ -934,6 +934,149 @@ export const AccountDefaultsFileSchema = z.strictObject({
 });
 export type AccountDefaultsFile = z.infer<typeof AccountDefaultsFileSchema>;
 
+// ── Reading and changing the lines ───────────────────────────────────────────────────────────────
+
+/** Where a defaults line applies. `sites` is the whole machine; a project or folder line also names which one. */
+export const ACCOUNT_DEFAULT_SCOPES = ['sites', 'projects', 'folders'] as const;
+export type AccountDefaultScope = (typeof ACCOUNT_DEFAULT_SCOPES)[number];
+
+/** One line of the file: the account the card offers first for `key`, in a scope. */
+export interface AccountDefaultLine {
+  readonly scope: AccountDefaultScope;
+  /** The project (id or name) or folder a line belongs to; absent for `sites`. */
+  readonly within?: string;
+  readonly key: string;
+  readonly account: AccountId;
+}
+
+/** Every line of the file, in file order. */
+export function accountDefaultLines(file: AccountDefaultsFile): readonly AccountDefaultLine[] {
+  const lines: AccountDefaultLine[] = [];
+  for (const [key, account] of Object.entries(file.sites ?? {})) lines.push({ scope: 'sites', key, account });
+  for (const scope of ['projects', 'folders'] as const)
+    for (const [within, map] of Object.entries(file[scope] ?? {}))
+      for (const [key, account] of Object.entries(map)) lines.push({ scope, within, key, account });
+  return lines;
+}
+
+/** A line's scope in words: "every session", "project ferretry", "folder ~/scratch". */
+export function accountDefaultScopeWords(line: Pick<AccountDefaultLine, 'scope' | 'within'>): string {
+  if (line.scope === 'sites') return 'every session on this machine';
+  return `${line.scope === 'projects' ? 'project' : 'folder'} ${line.within ?? ''}`;
+}
+
+/** The file after exactly these lines, with no empty map left behind. */
+function fileOfLines(lines: readonly AccountDefaultLine[]): AccountDefaultsFile {
+  const sites: Record<string, AccountId> = {};
+  const projects: Record<string, Record<string, AccountId>> = {};
+  const folders: Record<string, Record<string, AccountId>> = {};
+  for (const line of lines) {
+    if (line.scope === 'sites') sites[line.key] = line.account;
+    else {
+      const into = line.scope === 'projects' ? projects : folders;
+      const within = line.within ?? '';
+      const place = into[within] ?? {};
+      place[line.key] = line.account;
+      into[within] = place;
+    }
+  }
+  return {
+    ...(Object.keys(sites).length === 0 ? {} : { sites }),
+    ...(Object.keys(projects).length === 0 ? {} : { projects }),
+    ...(Object.keys(folders).length === 0 ? {} : { folders }),
+  };
+}
+
+/** A line's address: what makes two lines the same line, whatever account they name. */
+const lineAddress = (line: Pick<AccountDefaultLine, 'scope' | 'within' | 'key'>): string =>
+  JSON.stringify([line.scope, line.within ?? null, line.key]);
+
+/**
+ * The file after the line at `at` names `account` — or, with `null`, after that line is removed. Every other line is
+ * as it was.
+ */
+export function withAccountDefault(
+  file: AccountDefaultsFile,
+  at: Pick<AccountDefaultLine, 'scope' | 'within' | 'key'>,
+  account: AccountId | null,
+): AccountDefaultsFile {
+  const address = lineAddress(at);
+  const others = accountDefaultLines(file).filter(line => lineAddress(line) !== address);
+  return fileOfLines(account === null ? others : [...others, { ...at, account }]);
+}
+
+/** What happened to an account that its defaults lines must follow. */
+export type AccountDefaultsRepoint =
+  /** A new handle: no line may name it yet (a stale one could not have been the owner's choice for THIS account). */
+  | { readonly kind: 'fresh'; readonly handle: AccountId }
+  | { readonly kind: 'rename'; readonly from: AccountId; readonly to: AccountId }
+  | { readonly kind: 'remove'; readonly handle: AccountId }
+  | { readonly kind: 'merge'; readonly keep: AccountId; readonly from: AccountId };
+
+/**
+ * The file after an account's handle changed hands, in order: a line naming a handle that is new is dropped (it is
+ * left over from an account that is gone — a reused handle never inherits a default); a renamed account's lines follow
+ * it; a removed account's lines go; a merged account's lines name the account that kept its sign-ins, unless the same
+ * place already has a line of its own, which wins.
+ */
+export function repointAccountDefaults(
+  file: AccountDefaultsFile,
+  changes: readonly AccountDefaultsRepoint[],
+): AccountDefaultsFile {
+  let lines = accountDefaultLines(file);
+  for (const change of changes) {
+    switch (change.kind) {
+      case 'fresh':
+      case 'remove':
+        lines = lines.filter(line => line.account !== change.handle);
+        break;
+      case 'rename':
+        lines = lines.map(line => (line.account === change.from ? { ...line, account: change.to } : line));
+        break;
+      case 'merge': {
+        const own = new Set(lines.filter(line => line.account === change.keep).map(lineAddress));
+        lines = lines
+          .filter(line => line.account !== change.from || !own.has(lineAddress(line)))
+          .map(line => (line.account === change.from ? { ...line, account: change.keep } : line));
+        break;
+      }
+    }
+  }
+  return fileOfLines(lines);
+}
+
+/** `PUT /v1/accounts/defaults`: the owner writes ONE line, or removes it with `account: null`. */
+export const PutAccountDefaultRequestSchema = z
+  .strictObject({
+    scope: z.enum(ACCOUNT_DEFAULT_SCOPES),
+    /** The project (its id or exact name) or the folder; required for those scopes, refused for `sites`. */
+    within: z.string().min(1).max(1_024).optional(),
+    key: PlaceKeySchema,
+    account: AccountIdSchema.nullable(),
+  })
+  .superRefine((request, context) => {
+    if ((request.scope === 'sites') !== (request.within === undefined)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['within'],
+        message: request.scope === 'sites' ? 'sites has no project or folder' : `${request.scope} needs within`,
+      });
+      return;
+    }
+    const line = request.account ?? ('A' as AccountId);
+    const shaped = AccountDefaultsFileSchema.safeParse(
+      fileOfLines([{ scope: request.scope, key: request.key, account: line, ...(request.within === undefined ? {} : { within: request.within }) }]),
+    );
+    if (!shaped.success)
+      for (const issue of shaped.error.issues)
+        context.addIssue({ code: 'custom', path: ['within'], message: issue.message });
+  });
+export type PutAccountDefaultRequest = z.infer<typeof PutAccountDefaultRequestSchema>;
+
+/** What the owner route answers: the file's lines in effect after the write. */
+export const PutAccountDefaultResultSchema = z.strictObject({ defaults: AccountDefaultsFileSchema });
+export type PutAccountDefaultResult = z.infer<typeof PutAccountDefaultResultSchema>;
+
 // ── Which sign-in a card offers first ────────────────────────────────────────────────────────────
 
 /** What {@link chosenSignIn} needs of a sign-in. */

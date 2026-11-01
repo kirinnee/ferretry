@@ -858,7 +858,7 @@ capability (`use` to list, `configure` to change) and each change a kept `secret
 > [secrets](secrets.md#accounts-and-sign-ins-the-store). The card's offers, a deliver's `signIn`, the facts, the
 > lock, `account_hint` and `account_propose` read sign-ins ([one tap](#the-next-time-one-tap)). The app reads
 > `primary`/`why` and sends `signIn` only once a daemon reports `accounts.signins.1`, which waits for the Accounts
-> screen (the app ships first). Project and folder defaults are not read yet (`config/account-defaults.yaml`).
+> screen (the app ships first). The project, folder and site defaults are `config/account-defaults.yaml` ([config files](config-files.md#default-accounts)); the card's reason line for them comes later.
 
 A saved login is being split in two:
 
@@ -902,7 +902,7 @@ the same place, `via` names another account that signs in on a site and never go
 
 **Which account a card offers first** (`chosenSignIn`) is decided **only among the sign-ins the daemon matched**:
 the ferret's `secretHint` (a handle or a `si_…`), then the session's project default, then (an Unfiled session)
-its folder default, then the site default (`config/account-defaults.yaml`, R1-4), then the only matched one.
+its folder default, then the site default ([`config/account-defaults.yaml`](config-files.md#default-accounts): only the owner sets a line), then the only matched one.
 Two or more matched and nothing chose one: **no one-tap primary**, the owner picks ("Pick one: 2 accounts sign
 in here"). A hint or a default naming an account with no matched sign-in is ignored. None of them types
 anything: **the tap is still the permission.** A line that would choose two matched sign-ins at once chooses
