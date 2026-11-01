@@ -44,4 +44,6 @@ bun test --config=bunfig.int.toml \
   packages/fleet/tests/integration/file-provisioner-destination-fence.test.ts
 echo "🧪 Proving a whole shared-history migration goes through the held folders on this kernel..."
 bun test --config=bunfig.int.toml packages/fleet/tests/integration/file-shared-history.test.ts -t "checked folder handles"
+echo "🧪 Proving the conversation lease store reaches its lock and leases through the held folder on this kernel..."
+bun test --config=bunfig.int.toml packages/fleet/tests/integration/file-conversation-lease.test.ts -t "checked folder handles|the lease lock"
 echo "✅ Containment, the process inventory, pane identity, the attach proof, file events and the destination steps hold on $(uname -sm)"

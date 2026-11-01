@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  ConversationIdSchema,
   type ConversationLeaseClaim,
   type ConversationLeaseFacts,
   ConversationLeaseHeldError,
@@ -15,7 +16,7 @@ import {
   sharedHistoryPoolRoot,
 } from '../../src/lib/shared-history.ts';
 
-const CONVERSATION = '0b7e4c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21';
+const CONVERSATION = ConversationIdSchema.parse('0b7e4c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21');
 
 function lease(holder: ConversationLeaseRecord['holder']): ConversationLeaseRecord {
   return { v: 1, harness: 'claude', conversation: CONVERSATION, holder, since: '2026-10-13T14:02:09.000Z' };
@@ -246,6 +247,45 @@ describe('ConversationLeaseRecordSchema', () => {
 
     // Assert
     should(accepted).be.empty();
+  });
+});
+
+describe('ConversationIdSchema', () => {
+  it.each([
+    ['empty', ''],
+    ['the folder itself', '.'],
+    ['its parent', '..'],
+    ['a hidden name', '.lock'],
+    ['a path', 'a/b'],
+    ['a path out', '../escape'],
+    ['an absolute path', '/etc/passwd'],
+    ['a NUL', 'a\0b'],
+    ['an option', '-rf'],
+    ['an option spelled long', '--resume'],
+    ['a leading underscore', '_x'],
+    ['a dot inside', 'a.b'],
+    ['a space', 'a b'],
+    ['a backslash', 'a\\b'],
+    ['a newline', 'a\nb'],
+    ['a non-ASCII letter', 'é'],
+    ['129 characters', `a${'b'.repeat(128)}`],
+  ])('should refuse %s as a conversation id', (_why, candidate) => {
+    // Act
+    const parsed = ConversationIdSchema.safeParse(candidate);
+
+    // Assert
+    should(parsed.success).be.false();
+  });
+
+  it('should take a harness id, and a plain name up to 128 characters', () => {
+    // Arrange
+    const candidates = [CONVERSATION, 'api-token', 'A9_z-0', `a${'b'.repeat(127)}`];
+
+    // Act
+    const parsed = candidates.map(candidate => ConversationIdSchema.safeParse(candidate).data);
+
+    // Assert
+    should(parsed).eql(candidates);
   });
 });
 

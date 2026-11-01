@@ -1,4 +1,4 @@
-import { isAbsolute, relative, sep } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { expandAssetPath } from './paths.ts';
 
 /**
@@ -19,6 +19,45 @@ export interface StateHomeFence {
   readonly homes: readonly string[];
   /** Inside a home but open all the same: the fleet's asset tree. */
   readonly open: readonly string[];
+}
+
+/** The fence with the state home's key files and folders, which the guard judges by identity wherever they are met. */
+export interface PinnedStateHomeFence extends StateHomeFence {
+  readonly pinned: readonly string[];
+  /**
+   * A home not made yet is fenced by name rather than failing closed: `fy history claim` runs before the daemon's
+   * first start has laid the home out, and a home that is not there holds nothing (`resolveStateHomes`).
+   */
+  readonly homesMayBeUnmade: true;
+}
+
+/**
+ * The state home's fence as the daemon lays the home out under `home` — its state and config directories, the
+ * fleet's asset tree open, and its key files and folders pinned: recognised by IDENTITY wherever they are reached, so
+ * a bind mount of one alone is still refused. The one list the daemon (the agent file tools, the session-file routes,
+ * the start checks, the lease store) and `fy history claim` share (docs/agent-tools.md § The state home); the
+ * daemon's own names for each are held to it by `state-home-fence-contract.test.ts`.
+ */
+export function stateHomeFence(home: string): PinnedStateHomeFence {
+  const state = join(home, 'state');
+  const fleet = join(home, 'fleet');
+  return {
+    homes: [home, state, join(home, 'config')],
+    open: [join(fleet, 'assets')],
+    homesMayBeUnmade: true,
+    pinned: [
+      join(home, 'api-token'),
+      join(home, 'api-warden-token'),
+      join(home, 'tmux.sock'),
+      ...['secrets.key', 'secrets.json', 'mcp-oauth-secrets.json', 'login-secrets.json', 'passkeys.json'].map(name =>
+        join(state, name),
+      ),
+      join(state, 'daemon-identity.json'),
+      fleet,
+      join(fleet, 'homes'),
+      join(state, 'sessions'),
+    ],
+  };
 }
 
 const within = (directory: string, path: string): boolean => {

@@ -44,6 +44,7 @@ export * from './quota.ts';
 export * from './settings.ts';
 export {
   type ConversationHolderStanding,
+  type ConversationId,
   ConversationIdSchema,
   type ConversationLeaseClaim,
   type ConversationLeaseDecision,
@@ -53,6 +54,7 @@ export {
   ConversationLeaseHolderSchema,
   type ConversationLeaseRecord,
   ConversationLeaseRecordSchema,
+  ConversationLeaseUnavailableError,
   type ConversationLeaseStore,
   conversationFromArguments,
   conversationLeaseDirectory,

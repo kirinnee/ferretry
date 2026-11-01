@@ -1,5 +1,4 @@
 import { afterEach, describe, it, spyOn } from 'bun:test';
-import { constants } from 'node:fs';
 import * as fsSync from 'node:fs';
 import * as fs from 'node:fs/promises';
 import {
@@ -18,6 +17,7 @@ import {
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
+import { FILE_OPENINGS } from '../../src/adapters/descriptor-calls.ts';
 import { FileFleetProvisioner } from '../../src/adapters/file-provisioner.ts';
 import { STAGE_PREFIX } from '../../src/adapters/mutation-journal.ts';
 import type { FleetManifest } from '../../src/lib/manifest.ts';
@@ -293,7 +293,8 @@ describe('secrev-1260 L3 — the staged copy before it is published', () => {
     const token = path.join(home, 'api-token');
     const tokenMode = (await stat(token)).mode & 0o777;
     const real = fsSync.openSync;
-    const flags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+    // The staged copy's no-follow open, as the folder step makes it.
+    const flags = FILE_OPENINGS.read;
     let swapped = false;
     const openSpy = spyOn(fsSync, 'openSync').mockImplementation(((
       target: string,

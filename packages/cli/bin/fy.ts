@@ -2,7 +2,7 @@
 import { statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { TOOLS_SERVER_INSTRUCTIONS } from '@ferretry/fleet';
-import { FileConversationLeaseStore, HostProcessStarts, resolveUserHome } from '@ferretry/fleet/adapters';
+import { fencedConversationLeaseStore, HostProcessStarts, resolveUserHome } from '@ferretry/fleet/adapters';
 import {
   type AnalyticsResponse,
   appOriginChoice,
@@ -1371,12 +1371,13 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerHistoryCommands(
       program,
       new HistoryController(
-        new FileConversationLeaseStore(
+        // Fenced like the daemon's: the wrapper's claim, too, never lands a lease in the state home.
+        fencedConversationLeaseStore(
           resolveFleetLayout({
             stateHome: world.environment.FY_HOME,
             userHome: resolveUserHome(world.environment),
             product: PRODUCT_NAME,
-          }).fleetDirectory,
+          }),
           new HostProcessStarts(process.platform),
         ),
         world.io,

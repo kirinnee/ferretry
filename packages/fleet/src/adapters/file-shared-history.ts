@@ -1,15 +1,17 @@
-import { Database } from 'bun:sqlite';
 import { randomUUID } from 'node:crypto';
-import { closeSync, constants, fstatSync, fsyncSync, readSync, writeSync } from 'node:fs';
-import { type FileHandle, lstat, mkdir, open, readdir, readFile, realpath, rename, rm } from 'node:fs/promises';
+import { closeSync, fstatSync, fsyncSync, readSync, writeSync } from 'node:fs';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { HarnessKind } from '../lib/manifest.ts';
+import type { FleetLayout } from '../lib/provisioning.ts';
 import {
   type ConversationHolderStanding,
+  type ConversationId,
   type ConversationLeaseClaim,
   type ConversationLeaseRecord,
   ConversationLeaseRecordSchema,
   type ConversationLeaseStore,
+  ConversationLeaseUnavailableError,
   ConversationIdSchema,
   conversationLeaseDirectory,
   decideConversationLease,
@@ -19,9 +21,11 @@ import {
   type SharedHistoryNode,
   type SharedHistorySymbolicLinkNode,
 } from '../lib/shared-history.ts';
+import { stateHomeFence } from '../lib/state-home-fence.ts';
 import type { FileIdentity, FolderDisk, GuardDisk, GuardedFolder } from '../lib/state-home-guard.ts';
 import { DestinationFolders, readFolderFile } from './destination-folders.ts';
 import { resolveSourceFence, type SourceFence } from './fenced-source.ts';
+import { type FileLock, processFileLock } from './link-syscall.ts';
 import { NodeGuardDisk } from './node-guard-disk.ts';
 
 function isMissing(error: unknown): boolean {
@@ -95,47 +99,66 @@ function exclusiveRefusal(error: unknown, target: string): unknown {
   return new Error(`shared-history exclusive write refused an existing path: ${target}`);
 }
 
-/** Write every byte at an explicit offset: a single write can be short and the offset must not drift. */
-async function writeAllBytes(handle: FileHandle, bytes: Uint8Array): Promise<void> {
-  let written = 0;
-  while (written < bytes.byteLength) {
-    const result = await handle.write(bytes, written, bytes.byteLength - written, written);
-    written += result.bytesWritten;
-  }
-}
+/** Every folder the migration and the lease store make, as private to the account as the pool. */
+const FOLDER_MODE = 0o700;
 
-/** Sync the containing directory so a create, a rename or an unlink survives a crash, not only bytes. */
-async function syncDirectory(directory: string): Promise<void> {
-  const handle = await open(directory, constants.O_RDONLY);
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
+/**
+ * The checked folder at `directory`, or `undefined` when it is not there. Only ENOENT means not there: a name the
+ * guard could not reach as a folder but that IS there (a link that loops, one made in between) is refused, and a
+ * folder that cannot be reached for another reason surfaces that reason.
+ */
+async function existingFolder(
+  folders: DestinationFolders,
+  directory: string,
+  what: string,
+): Promise<GuardedFolder | undefined> {
+  const folder = await folders.existing(directory);
+  if (folder !== undefined) return folder;
+  const there = await lstat(directory).then(
+    () => true,
+    (error: unknown) => {
+      if (!isMissing(error)) throw error;
+      return false;
+    },
+  );
+  if (there)
+    throw new Error(`refusing to read ${what} at ${directory}: it is there, but not as a folder the guard can reach`);
+  return undefined;
 }
 
 /**
- * Create a directory and make every name it adds durable.
- *
- * A recursive create can add several levels at once, and a directory entry only becomes durable
- * when the directory holding it is synced — so each new level is synced through its parent. A
- * recursive create reports the outermost directory it made, or nothing at all when the directory
- * was already there, which keeps the common path free of syncs.
+ * The checked folder at `directory` (as `reach` answers it, `undefined` when not there), made first when it is not
+ * there: each missing folder is made THROUGH its checked parent, and the parent synced so the new name is durable.
+ * The caller closes it.
  */
-async function makeDirectoryDurable(target: string): Promise<void> {
-  const outermost = await mkdir(target, { recursive: true, mode: 0o700 });
-  if (outermost === undefined) return;
-  const created = path.resolve(outermost);
-  let current = path.resolve(target);
-  while (current !== created) {
-    await syncDirectory(path.dirname(current));
-    current = path.dirname(current);
+async function madeFolder(
+  folders: DestinationFolders,
+  directory: string,
+  reach: (directory: string) => Promise<GuardedFolder | undefined>,
+): Promise<GuardedFolder> {
+  const missing: string[] = [];
+  let at = path.resolve(directory);
+  let folder = await reach(at);
+  while (folder === undefined) {
+    missing.unshift(path.basename(at));
+    at = path.dirname(at);
+    folder = await reach(at);
   }
-  await syncDirectory(path.dirname(created));
+  for (const segment of missing) {
+    const parent: GuardedFolder = folder;
+    try {
+      const child = await folders.child(parent, segment, path.join(parent.path, segment), FOLDER_MODE);
+      await syncFolder(parent).catch(async (error: unknown) => {
+        await child.close();
+        throw error;
+      });
+      folder = child;
+    } finally {
+      await parent.close();
+    }
+  }
+  return folder;
 }
-
-/** Every folder the migration makes, as private to the account as the pool. */
-const FOLDER_MODE = 0o700;
 
 /** Make a folder's new, renamed or removed names durable: `fsync` through its held descriptor, never by path. */
 async function syncFolder(folder: GuardedFolder): Promise<void> {
@@ -580,23 +603,8 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
    * process may not search — surfaces that reason, as every read of this migration does.
    */
   private async reach(folders: DestinationFolders, directory: string): Promise<GuardedFolder | undefined> {
-    const folder = await folders.existing(directory);
-    if (folder === undefined) {
-      const there = await lstat(directory).then(
-        () => true,
-        (error: unknown) => {
-          if (!isMissing(error)) throw error;
-          return false;
-        },
-      );
-      // Something IS at the name the guard could not reach (a link that loops, or one made in between): not absent.
-      if (there)
-        throw new Error(
-          `refusing to read shared history at ${directory}: it is there, but not as a folder the guard can reach`,
-        );
-      return undefined;
-    }
-    if (folder.anchored) return folder;
+    const folder = await existingFolder(folders, directory, 'shared history');
+    if (folder === undefined || folder.anchored) return folder;
     await folder.close();
     throw new SharedHistoryUnavailableError(
       `refusing to migrate shared history in ${directory}: its folders cannot be reached through their descriptors here, so a step could be redirected into the state home${folders.unavailable === undefined ? '' : ` (${folders.unavailable})`}`,
@@ -621,24 +629,7 @@ export class FileSharedHistoryFileSystem implements SharedHistoryFileSystem {
    * checked parent, and the parent synced so the new name is durable. The caller closes it.
    */
   private async durable(folders: DestinationFolders, directory: string): Promise<GuardedFolder> {
-    const missing: string[] = [];
-    let at = path.resolve(directory);
-    let folder = await this.reach(folders, at);
-    while (folder === undefined) {
-      missing.unshift(path.basename(at));
-      at = path.dirname(at);
-      folder = await this.reach(folders, at);
-    }
-    for (const segment of missing) {
-      const parent: GuardedFolder = folder;
-      try {
-        folder = await folders.child(parent, segment, path.join(parent.path, segment), FOLDER_MODE);
-        await syncFolder(parent);
-      } finally {
-        await parent.close();
-      }
-    }
-    return folder;
+    return await madeFolder(folders, directory, async at => await this.reach(folders, at));
   }
 
   private async assertAllowedPath(target: string): Promise<void> {
@@ -712,45 +703,95 @@ export class HostProcessStarts implements ProcessStartSource {
   }
 }
 
-/** The file one conversation's lease lives in. The id grammar is what keeps this a single name. */
-function leaseFile(directory: string, conversation: string): string {
-  return path.join(directory, ConversationIdSchema.parse(conversation));
-}
+/** The file in each pool's `.leases` folder that its claimants are decided under, one at a time. */
+const LEASE_LOCK = '.lock';
 
-/** A lease as stored, or `undefined` when there is none or it is unreadable (which proves no holder). */
-async function readLease(file: string): Promise<ConversationLeaseRecord | undefined> {
-  let text: string;
+/** The most a lease can be: it is a few hundred bytes, and anything larger is not one, whatever it holds. */
+const MAX_LEASE_BYTES = 64 * 1024;
+
+/** How often a claimant tries for the lock file when another claimant's open makes it in between. */
+const LOCK_OPEN_ATTEMPTS = 3;
+
+/**
+ * A lease as stored, or `undefined` when there is none or it is not a lease (which proves no holder). Read THROUGH the
+ * held folder, a regular file only and never through a link or a pipe; only ENOENT means none, so a name that is
+ * something else refuses the claim rather than being written over. At most {@link MAX_LEASE_BYTES} are read: a larger
+ * file (a sparse one costs its writer nothing) is not a lease, and is never read whole.
+ */
+async function readLease(
+  folder: GuardedFolder,
+  conversation: ConversationId,
+): Promise<ConversationLeaseRecord | undefined> {
+  let descriptor: number;
   try {
-    text = await readFile(file, 'utf8');
+    descriptor = await folder.openFile(conversation, 'read');
   } catch (error) {
     if (isMissing(error)) return undefined;
     throw error;
   }
+  const bytes = Buffer.alloc(MAX_LEASE_BYTES + 1);
+  let length = 0;
   try {
-    const parsed = ConversationLeaseRecordSchema.safeParse(JSON.parse(text));
+    if (!fstatSync(descriptor).isFile())
+      throw new Error(`${path.join(folder.path, conversation)} is not a regular file`);
+    for (let read = -1; read !== 0 && length < bytes.length; length += read)
+      read = readSync(descriptor, bytes, length, bytes.length - length, null);
+  } finally {
+    closeSync(descriptor);
+  }
+  if (length > MAX_LEASE_BYTES) return undefined;
+  try {
+    const parsed = ConversationLeaseRecordSchema.safeParse(JSON.parse(bytes.toString('utf8', 0, length)));
     return parsed.success ? parsed.data : undefined;
   } catch {
     return undefined;
   }
 }
 
-/** Replace `file` with `text` in one rename, so a reader sees the old lease or the new one, never part. */
-async function writeLease(file: string, text: string): Promise<void> {
-  const directory = path.dirname(file);
-  const temporary = path.join(directory, `.${path.basename(file)}.${randomUUID()}.tmp`);
+/**
+ * Replaces the lease with `text` in one rename inside the held folder, so a reader sees the old lease or the new one,
+ * never part — the temporary made exclusively there, synced, renamed over the lease, and the folder synced.
+ */
+async function writeLease(folder: GuardedFolder, conversation: ConversationId, text: string): Promise<void> {
+  const temporary = `.${conversation}.${randomUUID()}.tmp`;
   try {
-    const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+    const descriptor = await folder.openFile(temporary, 'new', 0o600);
     try {
-      await writeAllBytes(handle, new TextEncoder().encode(text));
-      await handle.sync();
+      writeAll(descriptor, new TextEncoder().encode(text));
+      fsyncSync(descriptor);
     } finally {
-      await handle.close();
+      closeSync(descriptor);
     }
-    await rename(temporary, file);
-    await syncDirectory(directory);
+    await folder.rename(temporary, conversation);
+    await folder.sync();
   } finally {
-    await rm(temporary, { force: true });
+    await folder.unlink(temporary).catch(() => undefined);
   }
+}
+
+/**
+ * The lock file of the held `.leases` folder, opened THROUGH it: the one there (never through a link, never blocking
+ * on a pipe), or made there exclusively when there is none. Refused when it is not a regular file.
+ */
+async function openLeaseLock(folder: GuardedFolder): Promise<number> {
+  const lock = path.join(folder.path, LEASE_LOCK);
+  for (let attempt = 0; attempt < LOCK_OPEN_ATTEMPTS; attempt += 1) {
+    const descriptor = await folder.openFile(LEASE_LOCK, 'read').catch(async (error: unknown) => {
+      if (!isMissing(error)) throw error;
+      // Another claimant can make it between the two opens: open the one it made.
+      return await folder.openFile(LEASE_LOCK, 'new', 0o600).catch((made: unknown) => {
+        if ((made as NodeJS.ErrnoException).code !== 'EEXIST') throw made;
+        return undefined;
+      });
+    });
+    if (descriptor === undefined) continue;
+    if (fstatSync(descriptor).isFile()) return descriptor;
+    closeSync(descriptor);
+    throw new Error(`refusing the conversation lease lock ${lock}: it is not a regular file`);
+  }
+  throw new Error(
+    `refusing the conversation lease lock ${lock}: it kept appearing and disappearing while it was opened`,
+  );
 }
 
 export interface FileConversationLeaseStoreOptions {
@@ -758,22 +799,41 @@ export interface FileConversationLeaseStoreOptions {
   readonly waitMs?: number;
   readonly pollMs?: number;
   readonly now?: () => Date;
+  /**
+   * The state homes no lease may be read or written in, with their key files (docs/secrets.md#what-the-state-home-fence-refuses).
+   * Without it no home is judged, and every lease is still reached through a checked folder.
+   */
+  readonly fence?: SourceFence;
+  /** The guard's disk; the platform's own by default. */
+  readonly disk?: GuardDisk & FolderDisk;
+  /** How the lock's C call is loaded — a test names one that fails. */
+  readonly loadLock?: () => FileLock;
 }
 
 /**
  * Conversation leases as files under `<fleet>/shared/<harness>/.leases/` (docs/design/account-model.md §9.3).
  *
- * Every read-decide-write runs under one mutex per pool: an exclusive SQLite transaction on
- * `.leases/.lock`, the same OS-backed primitive the daemon's state-home lock uses. The kernel drops it
- * when its holder dies, so a crashed claimant can never wedge the next one, and two claimants can
- * never both read a stale lease and both believe they took it over. The lease itself is plain JSON
- * written by rename, so the harness pid it names — not an open file — is what holds it, and a holder
- * that has exited is stale without anybody removing anything.
+ * Every read-decide-write runs under one mutex per pool: an exclusive `flock(2)` on `.leases/.lock`, which the kernel
+ * drops when its holder closes it or dies, so a crashed claimant can never wedge the next one, and two claimants can
+ * never both read a stale lease and both believe they took it over. The lease itself is plain JSON written by rename,
+ * so the harness pid it names — not an open file — is what holds it, and a holder that has exited is stale without
+ * anybody removing anything.
+ *
+ * The pool is written by every runtime's harness, and so by the agent in it: the `.leases` folder (or a folder above
+ * it) can be swapped for a link the moment after it was looked at. So nothing in it is reached by path. The folder is
+ * opened and checked through the state-home guard (`DestinationFolders`) — inside a home, walked from the home without
+ * following a link; anywhere, refused where it is a home or one of its key files by identity — and the lock, every
+ * lease read, write, rename and unlink reach their entry THROUGH that handle (Linux `/proc/self/fd/N/<leaf>`, macOS
+ * descriptor calls). Where neither reach is available the lease is refused ({@link ConversationLeaseUnavailableError}),
+ * never made by path.
  */
 export class FileConversationLeaseStore implements ConversationLeaseStore {
   private readonly waitMs: number;
   private readonly pollMs: number;
   private readonly now: () => Date;
+  private readonly fence: SourceFence | undefined;
+  private readonly disk: GuardDisk & FolderDisk;
+  private readonly loadLock: () => FileLock;
 
   constructor(
     private readonly fleetDirectory: string,
@@ -783,88 +843,141 @@ export class FileConversationLeaseStore implements ConversationLeaseStore {
     this.waitMs = options.waitMs ?? 5_000;
     this.pollMs = options.pollMs ?? 10;
     this.now = options.now ?? (() => new Date());
+    this.fence = options.fence;
+    this.disk = options.disk ?? new NodeGuardDisk();
+    this.loadLock = options.loadLock ?? processFileLock;
   }
 
   async claim(
     claim: ConversationLeaseClaim,
     standing: (session: string) => Promise<ConversationHolderStanding>,
   ): ReturnType<ConversationLeaseStore['claim']> {
-    const directory = conversationLeaseDirectory(this.fleetDirectory, claim.harness);
-    const file = leaseFile(directory, claim.conversation);
-    await makeDirectoryDurable(directory);
-    return await this.exclusive(directory, async () => {
-      const existing = await readLease(file);
-      const decision = decideConversationLease(existing, claim, {
-        holderStart: existing === undefined ? undefined : await this.processes.startOf(existing.holder.pid),
-        holderSession: existing?.holder.session === undefined ? 'unknown' : await standing(existing.holder.session),
+    const conversation = ConversationIdSchema.parse(claim.conversation);
+    const folders = await this.folders();
+    const folder = await madeFolder(
+      folders,
+      conversationLeaseDirectory(this.fleetDirectory, claim.harness),
+      async directory => await this.reach(folders, directory),
+    );
+    try {
+      return await this.exclusive(folder, async () => {
+        const existing = await readLease(folder, conversation);
+        const decision = decideConversationLease(existing, claim, {
+          holderStart: existing === undefined ? undefined : await this.processes.startOf(existing.holder.pid),
+          holderSession: existing?.holder.session === undefined ? 'unknown' : await standing(existing.holder.session),
+        });
+        // Only an existing lease can be held, so `existing` is defined here.
+        if (decision === 'held') return { kind: 'held', lease: existing as ConversationLeaseRecord };
+        const start = await this.processes.startOf(claim.holder.pid);
+        const lease: ConversationLeaseRecord = {
+          v: 1,
+          harness: claim.harness,
+          conversation,
+          holder: { ...claim.holder, ...(start === undefined ? {} : { start }) },
+          // A renewal is the same writer, so the conversation has been written by it since it first took it.
+          since: decision === 'renew' && existing !== undefined ? existing.since : this.now().toISOString(),
+        };
+        await writeLease(folder, conversation, `${JSON.stringify(lease)}\n`);
+        return { kind: 'claimed', decision, lease };
       });
-      // Only an existing lease can be held, so `existing` is defined here.
-      if (decision === 'held') return { kind: 'held', lease: existing as ConversationLeaseRecord };
-      const start = await this.processes.startOf(claim.holder.pid);
-      const lease: ConversationLeaseRecord = {
-        v: 1,
-        harness: claim.harness,
-        conversation: claim.conversation,
-        holder: { ...claim.holder, ...(start === undefined ? {} : { start }) },
-        // A renewal is the same writer, so the conversation has been written by it since it first took it.
-        since: decision === 'renew' && existing !== undefined ? existing.since : this.now().toISOString(),
-      };
-      await writeLease(file, `${JSON.stringify(lease)}\n`);
-      return { kind: 'claimed', decision, lease };
-    });
+    } finally {
+      await folder.close();
+    }
   }
 
   async releaseSession(session: string): Promise<readonly string[]> {
     const released: string[] = [];
+    const folders = await this.folders();
     for (const kind of ['claude', 'codex'] as const satisfies readonly HarnessKind[]) {
-      const directory = conversationLeaseDirectory(this.fleetDirectory, kind);
-      const names = await readdir(directory).catch((error: unknown) => {
-        if (isMissing(error)) return undefined;
-        throw error;
-      });
-      if (names === undefined) continue;
-      await this.exclusive(directory, async () => {
-        for (const name of names) {
-          if (name.startsWith('.')) continue;
-          const file = path.join(directory, name);
-          const lease = await readLease(file);
-          if (lease?.holder.session !== session) continue;
-          await rm(file, { force: true });
-          released.push(lease.conversation);
-        }
-        if (released.length > 0) await syncDirectory(directory);
-      });
+      const folder = await this.reach(folders, conversationLeaseDirectory(this.fleetDirectory, kind));
+      if (folder === undefined) continue;
+      try {
+        await this.exclusive(folder, async () => {
+          let removed = false;
+          for (const name of await folder.list()) {
+            // The lock, a temporary, and any name this store never writes.
+            const conversation = ConversationIdSchema.safeParse(name).data;
+            if (conversation === undefined) continue;
+            // An entry that cannot be read as a lease holds nothing this session can release.
+            const lease = await readLease(folder, conversation).catch(() => undefined);
+            if (lease?.holder.session !== session) continue;
+            await folder.unlink(conversation);
+            released.push(lease.conversation);
+            removed = true;
+          }
+          if (removed) await folder.sync();
+        });
+      } finally {
+        await folder.close();
+      }
     }
     return released;
   }
 
-  /** Runs `work` while holding this pool's mutex, waiting up to the budget for another claimant. */
-  private async exclusive<T>(directory: string, work: () => Promise<T>): Promise<T> {
-    const database = new Database(path.join(directory, '.lock'), { create: true, strict: true });
+  /** This call's way to the folders, judged against the fence as the disk has it now. */
+  private async folders(): Promise<DestinationFolders> {
+    const homes = this.fence === undefined ? undefined : (await resolveSourceFence(this.fence, this.disk)).homes;
+    return new DestinationFolders(homes, this.disk);
+  }
+
+  /**
+   * The checked folder at `directory`, or `undefined` when it is not there; refused where it is not anchored (its
+   * entries would be reached by path). Only ENOENT means not there.
+   */
+  private async reach(folders: DestinationFolders, directory: string): Promise<GuardedFolder | undefined> {
+    if (this.disk.missingDescriptorPaths === true) throw this.unavailable(directory, 'this host has no /proc/self/fd');
+    const folder = await existingFolder(folders, directory, 'the conversation leases');
+    if (folder === undefined || folder.anchored) return folder;
+    await folder.close();
+    throw this.unavailable(directory, folders.unavailable);
+  }
+
+  private unavailable(directory: string, why: string | undefined): ConversationLeaseUnavailableError {
+    return new ConversationLeaseUnavailableError(
+      `refusing the conversation lease in ${directory}: its folder cannot be reached through its descriptor here, so a lease written there could be redirected into the state home${why === undefined ? '' : ` (${why})`}`,
+    );
+  }
+
+  /** Runs `work` while holding this pool's lock, waiting up to the budget for another claimant. */
+  private async exclusive<T>(folder: GuardedFolder, work: () => Promise<T>): Promise<T> {
+    let lock: FileLock;
     try {
-      // The database carries no state: its transaction is only an OS-backed lock, and a memory journal
-      // keeps it crash-releasable without leaving sidecar files in the pool.
-      database.exec('PRAGMA busy_timeout = 0');
+      lock = this.loadLock();
+    } catch (error) {
+      throw new ConversationLeaseUnavailableError(
+        `refusing the conversation lease in ${folder.path}: the lock it is decided under could not be loaded here (${error instanceof Error ? error.message : String(error)})`,
+      );
+    }
+    const descriptor = await openLeaseLock(folder);
+    try {
       const deadline = Date.now() + this.waitMs;
-      for (;;) {
-        try {
-          // Inside the retry: switching the journal needs the lock another claimant may hold.
-          database.exec('PRAGMA journal_mode = MEMORY');
-          database.exec('BEGIN EXCLUSIVE');
-          break;
-        } catch (error) {
-          if (!String(error).toLowerCase().includes('locked') || Date.now() >= deadline)
-            throw new Error(`the conversation lease store at ${directory} stayed busy: ${String(error)}`);
-          await Bun.sleep(this.pollMs);
-        }
+      while (!lock.tryLock(descriptor)) {
+        if (Date.now() >= deadline)
+          throw new Error(
+            `the conversation lease store at ${folder.path} stayed busy: another claimant held its lock for ${String(this.waitMs)} ms`,
+          );
+        await Bun.sleep(this.pollMs);
       }
-      try {
-        return await work();
-      } finally {
-        database.exec('ROLLBACK');
-      }
+      return await work();
     } finally {
-      database.close();
+      // The only open of the lock is this one, so closing it lets the next claimant in.
+      closeSync(descriptor);
     }
   }
+}
+
+/**
+ * The lease store over the fleet that the state home `layout.stateHome` holds, fenced by that home: its state and
+ * config directories and its key files ({@link stateHomeFence}). What the daemon claims through, and what
+ * `fy history claim` — the wrapper's claim before it `exec`s the harness, with no daemon to ask — claims through too.
+ */
+export function fencedConversationLeaseStore(
+  layout: Pick<FleetLayout, 'stateHome' | 'fleetDirectory'>,
+  processes: ProcessStartSource,
+  options: Omit<FileConversationLeaseStoreOptions, 'fence'> = {},
+): FileConversationLeaseStore {
+  return new FileConversationLeaseStore(layout.fleetDirectory, processes, {
+    ...options,
+    fence: stateHomeFence(layout.stateHome),
+  });
 }

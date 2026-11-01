@@ -229,28 +229,59 @@ const refused = (
 const same = (a: { readonly device: bigint; readonly inode: bigint }, b: FileIdentity | undefined): boolean =>
   b !== undefined && a.device === b.device && a.inode === b.inode;
 
+/** The device and inode of a home not made yet: no disk reports it, so nothing is ever that home by identity. */
+const UNMADE = -1n;
+
 /**
  * Each home (and each opening) by name, by real path and by device+inode, and each `pinned` file or folder
- * inside them by device+inode (one not there yet is skipped: nothing can be bound to it). Throws
- * {@link StateHomeUnresolvedError} when a home cannot be resolved or is not a folder, when an OPENING is a home or
- * holds one (an asset tree linked to the home, or to the folder above it, would open the whole fence: openings are
- * asked first), and a `TypeError` for a relative path.
+ * inside them by device+inode (one not there yet is skipped: nothing can be bound to it). With `homesMayBeUnmade`,
+ * a HOME NOT MADE YET (a fresh machine, before the daemon's first start lays the home out — what `fy history claim`
+ * meets) cannot be entered and holds nothing, so it is fenced by name alone: its configured name, and its real place
+ * — the nearest folder above it, resolved, with the rest of the name below it. Without it a missing home fails closed
+ * (a daemon route has its home, and one that has gone refuses an agent). Throws {@link StateHomeUnresolvedError} when
+ * a home that IS there cannot be identified (it cannot be resolved, or is not a folder), when an OPENING is a home or
+ * holds one (an asset
+ * tree linked to the home, or to the folder above it, would open the whole fence: openings are asked first), and a
+ * `TypeError` for a relative path.
  */
 export async function resolveStateHomes(
   input: {
     readonly homes: readonly string[];
     readonly openings?: readonly string[];
     readonly pinned?: readonly string[];
+    /** A home not there yet is fenced by name instead of failing closed (see above). */
+    readonly homesMayBeUnmade?: boolean;
   },
   disk: Pick<GuardDisk, 'realpath' | 'identity'>,
 ): Promise<StateHomes> {
-  const known = async (paths: readonly string[]): Promise<readonly KnownDirectory[]> =>
+  /** The real path of `named`, or `undefined` when nothing is there; anything else it cannot resolve fails closed. */
+  const resolved = async (named: string): Promise<string | undefined> =>
+    await disk.realpath(named).catch((error: unknown) => {
+      if (codeOf(error) === 'ENOENT') return undefined;
+      throw new StateHomeUnresolvedError();
+    });
+  /** A home not made yet, by the real place of the nearest folder above it that is there. */
+  const unmade = async (named: string): Promise<KnownDirectory> => {
+    const below = [basename(named)];
+    for (let above = dirname(named); ; above = dirname(above)) {
+      const real = await resolved(above);
+      if (real !== undefined) {
+        // What is above a home must be a folder; a file there is a home that cannot be laid out.
+        if ((await disk.identity(real))?.kind !== 'directory') throw new StateHomeUnresolvedError();
+        return { named, real: join(real, ...below), device: UNMADE, inode: UNMADE };
+      }
+      below.unshift(basename(above));
+    }
+  };
+  const known = async (paths: readonly string[], mayBeUnmade: boolean): Promise<readonly KnownDirectory[]> =>
     await Promise.all(
       paths.map(async path => {
         const named = absolute(path, 'a state home');
-        const real = await disk.realpath(named).catch(() => {
+        const real = await resolved(named);
+        if (real === undefined) {
+          if (mayBeUnmade) return await unmade(named);
           throw new StateHomeUnresolvedError();
-        });
+        }
         const entry = await disk.identity(real);
         if (entry?.kind !== 'directory') throw new StateHomeUnresolvedError();
         return { named, real, device: entry.device, inode: entry.inode };
@@ -270,8 +301,8 @@ export async function resolveStateHomes(
       return [{ device: entry.device, inode: entry.inode, place: join(folder, basename(named)) }];
     }),
   );
-  const homes = await known(input.homes);
-  const openings = await known(input.openings ?? []);
+  const homes = await known(input.homes, input.homesMayBeUnmade === true);
+  const openings = await known(input.openings ?? [], false);
   const keys = pinned.flat();
   for (const opening of openings) {
     const opensAHome = homes.some(

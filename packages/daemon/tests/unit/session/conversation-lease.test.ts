@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   type ConversationHolderStanding,
+  ConversationIdSchema,
   type ConversationLeaseClaim,
   ConversationLeaseHeldError,
   type ConversationLeaseRecord,
@@ -19,7 +20,7 @@ import { parseSessionId } from '../../../src/lib/session-id.ts';
 
 const SESSION = 'ms8-abcd1234';
 const HOLDER = 'ms8-holder01';
-const CONVERSATION = '0b7e4c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21';
+const CONVERSATION = ConversationIdSchema.parse('0b7e4c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21');
 const AGENT = '/state/fleet/bin/claude-review';
 
 function lease(session: string): ConversationLeaseRecord {

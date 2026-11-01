@@ -1609,10 +1609,16 @@ export function sharedHistoryPoolRequests(
  * A harness conversation id as it may be used for a lease file name.
  *
  * Both harnesses name conversations with UUIDs. The grammar is wider than a UUID so a future id shape
- * still leases, and narrow enough that an id can never be a path: no separator, no dot (so neither
- * `.` nor `..` nor a hidden name), and a leading letter or digit.
+ * still leases, and narrow enough that an id can never be a path: no separator, no NUL, no dot (so neither
+ * `.` nor `..` nor a hidden name), a leading letter or digit (so never an option), and at most 128
+ * characters. Parsed at every boundary an id comes in through — a launch's arguments, `fy history claim` —
+ * so a store is handed a {@link ConversationId} and never a string it would have to judge itself.
  */
-export const ConversationIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u);
+export const ConversationIdSchema = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u)
+  .brand<'ConversationId'>();
+export type ConversationId = z.infer<typeof ConversationIdSchema>;
 
 /** Who is writing a conversation. A daemon-launched writer names its session; a terminal one does not. */
 export const ConversationLeaseHolderSchema = z.strictObject({
@@ -1641,7 +1647,7 @@ export type ConversationLeaseRecord = z.infer<typeof ConversationLeaseRecordSche
 /** What a claimant asks for. Its start time is read by the store, never trusted from the caller. */
 export interface ConversationLeaseClaim {
   readonly harness: HarnessKind;
-  readonly conversation: string;
+  readonly conversation: ConversationId;
   readonly holder: Omit<ConversationLeaseHolder, 'start'>;
 }
 
@@ -1730,6 +1736,18 @@ export function conversationLeaseRefusal(record: ConversationLeaseRecord): strin
   return `conversation ${record.conversation} is being written by ${who} since ${leaseSince(record.since)}: ${remedy}`;
 }
 
+/**
+ * A lease that cannot be read or written safely here, so it is refused rather than made by path: the lease folder
+ * cannot be reached through its descriptor (no `/proc` on Linux, the C calls would not load on macOS), or the lock
+ * it is decided under could not be loaded. The launch that asked for it is refused with this reason; nothing else is.
+ */
+export class ConversationLeaseUnavailableError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'ConversationLeaseUnavailableError';
+  }
+}
+
 /** A claim refused because another live writer holds the conversation. */
 export class ConversationLeaseHeldError extends Error {
   constructor(readonly lease: ConversationLeaseRecord) {
@@ -1754,8 +1772,8 @@ function flagValue(args: readonly string[], flags: readonly string[]): string | 
 }
 
 /** An id that is safe to lease, or nothing. */
-function leasable(candidate: string | undefined): string | undefined {
-  return candidate !== undefined && ConversationIdSchema.safeParse(candidate).success ? candidate : undefined;
+function leasable(candidate: string | undefined): ConversationId | undefined {
+  return candidate === undefined ? undefined : ConversationIdSchema.safeParse(candidate).data;
 }
 
 /**
@@ -1767,7 +1785,7 @@ function leasable(candidate: string | undefined): string | undefined {
  * `exec`). A bare `--resume`, `--continue`, `resume --last` and the in-app picker choose the
  * conversation after launch, so they name nothing here — declared gap G3.
  */
-export function conversationFromArguments(kind: HarnessKind, args: readonly string[]): string | undefined {
+export function conversationFromArguments(kind: HarnessKind, args: readonly string[]): ConversationId | undefined {
   if (kind === 'claude') {
     const created = leasable(flagValue(args, ['--session-id']));
     if (created !== undefined) return created;

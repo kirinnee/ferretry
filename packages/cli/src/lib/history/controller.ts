@@ -1,4 +1,5 @@
 import {
+  type ConversationId,
   type ConversationLeaseStore,
   ConversationIdSchema,
   conversationFromArguments,
@@ -69,9 +70,10 @@ export class HistoryController {
     this.io.setExitCode(HISTORY_CLAIM_HELD_EXIT_CODE);
   }
 
-  private conversationOf(request: HistoryClaimRequest): string | undefined {
+  private conversationOf(request: HistoryClaimRequest): ConversationId | undefined {
     if (request.conversation === undefined) return conversationFromArguments(request.harness, request.arguments ?? []);
-    if (ConversationIdSchema.safeParse(request.conversation).success) return request.conversation;
+    const parsed = ConversationIdSchema.safeParse(request.conversation);
+    if (parsed.success) return parsed.data;
     throw new Error(`not a conversation id: ${JSON.stringify(request.conversation)}`);
   }
 }
