@@ -339,10 +339,10 @@ export const PACK_ENV = 'FY_PACK';
 /** The Pack mode teaching. Short on purpose — it is in every prompt. */
 export const PACK_INSTRUCTION = (fy: string): string =>
   [
-    `Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits its part. Prefer them over your built-in subagents for real work; do small things yourself. Pick each model by the Routing line below.`,
+    `Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits it. Prefer them to built-in subagents for real work; do small things yourself. Pick models by the Routing line below.`,
     `1. \`${fy} recommend\` lists the models usable now, most quota first, with the command to start each.`,
     `2. \`${fy} new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"\` starts one (\`${fy} new --auto "<brief>"\` lets Ferretry choose). Always pass \`--name\` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.`,
-    `3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason and start the next candidate. limit_reached or depth_exceeded: do the work yourself.`,
+    `3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason, start the next candidate. limit_reached or depth_exceeded: do the work yourself.`,
     `4. \`${fy} wait <id>\` prints its result when it finishes; check it, then combine the results yourself.`,
     `Stop sub-ferrets you no longer need (\`${fy} stop children <your id> --yes\`).`,
   ].join('\n');
