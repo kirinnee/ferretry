@@ -1,3 +1,10 @@
+## [4.196.0](https://github.com/kirinnee/ferretry/compare/v4.195.0...v4.196.0) (2026-11-01)
+
+### Features
+
+* **board:** make the board opt-in per project, with an owner-only switch ([#1237](https://github.com/kirinnee/ferretry/issues/1237)) ([9147a8a](https://github.com/kirinnee/ferretry/commit/9147a8a1d946819470bbc635c5a9625eef1e1864))
+* **secure-copy:** copy rules may target programs in the owner's own profile (setting, off by default) ([#1235](https://github.com/kirinnee/ferretry/issues/1235)) ([80363b5](https://github.com/kirinnee/ferretry/commit/80363b5e5b5a640ffa3241c1099eb6e507451547))
+
 ## [4.195.0](https://github.com/kirinnee/ferretry/compare/v4.194.0...v4.195.0) (2026-11-01)
 
 ### Features
