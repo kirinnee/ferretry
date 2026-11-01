@@ -139,7 +139,12 @@ export interface ConversationTurn {
  * - It references none: delivered exactly as typed, however many items are open.
  */
 export function conversationTurn(message: string, open: readonly AgendaItem[]): ConversationTurn {
-  return agendaChatReply(message, open, agendaTitle);
+  // A card's gate item is answered on its card, never by a chat message: it is no item the message can name.
+  return agendaChatReply(
+    message,
+    open.filter(item => item.gate === undefined),
+    agendaTitle,
+  );
 }
 
 /** An item on the FERRET's turn because the owner wrote about it or asked to talk it through (not for more information). */

@@ -12,6 +12,7 @@ import {
   type AgendaTwoFactorSeedRef,
   type AgendaDisposition,
   type AgendaErrorCode,
+  type AgendaGate,
   type AgendaHistoryEntry,
   type AgendaId,
   type AgendaInputRef,
@@ -36,6 +37,8 @@ import {
   agendaShapeProblems,
   agendaWakeAt,
   formAnswerProblems,
+  parseGateFollowupReference,
+  parseGateReference,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_HISTORY,
   MAX_AGENDA_PER_SESSION,
@@ -140,6 +143,13 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly phoneApproval?: AgendaPhoneApprovalRef;
   /** The owner's one tap may close `task` too (`DAEMON_FEATURES.agendaOfferClose`); needs a card. */
   readonly offerClose?: true;
+  /** The card gate the item asks about (`AgendaGate`); only the daemon raises one, under its `gate:` reference. */
+  readonly gate?: AgendaGate;
+  /**
+   * The item starts on the FERRET's turn, in discussion (`waitingFor: 'discussion'`), instead of the owner's: a
+   * gate's follow-up conversation, which the owner opened by saying Not good. Only the daemon raises one so.
+   */
+  readonly discussion?: true;
 }
 
 /** The writing an edit may change: never the ask, the kind, the answers, the reason or who raised the item. */
@@ -341,9 +351,35 @@ export function isWardenEscalationAgenda(entry: AgendaEntry): boolean {
   return entry.origin.kind === 'daemon' && entry.origin.cause === 'warden-escalation';
 }
 
+/** A card gate the daemon raised (`AgendaItem.gate`): only the owner answers or closes it, never a ferret or its lead. */
+export function isGateAgenda(entry: Pick<AgendaEntry, 'item'>): boolean {
+  return isGateItem(entry.item);
+}
+
+/** The gate items' own producer: the daemon's `task` source, carrying the `gate` it asks about. */
+function isGateItem(item: Pick<AgendaItem, 'gate' | 'source'>): boolean {
+  return item.gate !== undefined && item.source === 'task';
+}
+
+/**
+ * The follow-up conversation a gate's Not good opened (`gate-followup:`): raised by the daemon ON BEHALF of the card's
+ * ferret, so the ferret whose board holds it edits, surfaces and closes it as its own.
+ */
+export function isGateFollowupAgenda(entry: Pick<AgendaEntry, 'origin' | 'item'>): boolean {
+  return (
+    entry.origin.kind === 'daemon' &&
+    entry.item.source === 'task' &&
+    parseGateFollowupReference(entry.item.sourceRef) !== undefined
+  );
+}
+
 export function canDismissAgenda(actor: AgendaActor, entry: AgendaEntry): boolean {
   if (actor.kind === 'human') return true;
   if (actor.kind === 'agent') {
+    // A gate is the owner's: no ferret, lead or ancestor answers, closes or rewords one (docs/board.md § Gates).
+    if (isGateAgenda(entry)) return false;
+    // Confined to its own board (or a sub-ferret's) by `agentConfinedTo` before it gets here.
+    if (isGateFollowupAgenda(entry)) return true;
     if (actor.overSubFerret === true) return !isWardenEscalationAgenda(entry);
     return entry.origin.kind === 'agent' && entry.origin.sessionId === actor.sessionId;
   }
@@ -583,6 +619,9 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   if (request.sourceRef !== null && actor.kind !== 'daemon') {
     return failure('forbidden', 'stable agenda source references are reserved for trusted daemon producers');
   }
+  if ((request.gate !== undefined || request.discussion === true) && actor.kind !== 'daemon') {
+    return failure('forbidden', 'only the daemon raises a gate item or its follow-up');
+  }
   const noticeProblem = agendaNoticeProblems(request)[0];
   if (noticeProblem !== undefined) return failure('invalid', noticeProblem);
   const offerCloseProblem = agendaOfferCloseProblems(request)[0];
@@ -615,6 +654,15 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   }
 
   const active = ledger.entries.filter(isActiveAgenda);
+  // A gate and its follow-up are raised once per entry: an open one is refreshed below, a closed one never comes
+  // back (the owner's "Not needed" stays said).
+  const once =
+    request.sourceRef !== null &&
+    (parseGateReference(request.sourceRef) !== undefined ||
+      parseGateFollowupReference(request.sourceRef) !== undefined);
+  const sameRef = (entry: AgendaEntry): boolean =>
+    entry.item.source === request.source && entry.item.sourceRef === request.sourceRef;
+  if (once && !active.some(sameRef) && ledger.entries.some(sameRef)) return unchanged(ledger);
   const stable =
     request.sourceRef === null
       ? undefined
@@ -669,6 +717,10 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.twoFactorSeed === undefined ? {} : { twoFactorSeed: request.twoFactorSeed }),
       ...(request.phoneApproval === undefined ? {} : { phoneApproval: request.phoneApproval }),
       ...(request.offerClose === true ? { offerClose: true as const } : {}),
+      ...(request.gate === undefined ? {} : { gate: request.gate }),
+      ...(request.discussion === true
+        ? { waitingOn: 'ferret' as const, askedAt: command.at, waitingFor: 'discussion' as const }
+        : {}),
     },
     actor,
   );
@@ -693,12 +745,17 @@ function refreshStable(
   ) {
     return unchanged(ledger);
   }
-  if (sameRequest(existing.item, request) && existing.item.sourceSeq === request.sourceSeq) {
+  // A gate item an owner's chat message parked is the owner's again: its card still waits at the gate.
+  const unpark = isGateItem(existing.item) && existing.item.parked?.reason === 'replied';
+  if (sameRequest(existing.item, request) && existing.item.sourceSeq === request.sourceSeq && !unpark) {
     return unchanged(ledger);
   }
 
+  const { parked: _parked, ...kept } = existing.item;
   const item: AgendaItem = {
-    ...existing.item,
+    ...(unpark ? kept : existing.item),
+    // The gate it asks about follows the lane: a renamed lane or edited options are restated too.
+    ...(request.gate === undefined ? {} : { gate: request.gate }),
     subject: request.subject,
     why: request.why,
     context: request.context ?? null,
@@ -761,6 +818,13 @@ function addressById(
   } else if (!canAddressAgenda(command.actor, target)) {
     return failure('forbidden', 'an agent or daemon may resolve only an agenda item it raised');
   }
+  // The owner closes a gate by answering it (or Not needed): a bare "done" would close it with the card unmoved.
+  if (command.action === 'resolve' && command.actor.kind === 'human' && isGateAgenda(target)) {
+    return failure(
+      'invalid',
+      `answer ${command.id} instead: one of its options (Done / Not good / Not yet), or Not needed`,
+    );
+  }
   if (command.action === 'resolve' && command.actor.kind === 'agent' && isQuestionShape(target.item)) {
     if ((command.note ?? '').trim() === '') {
       return failure(
@@ -802,6 +866,10 @@ function addressById(
         'use_input_form',
         `${command.id} is a sign-in to approve on your phone: approve it there, or tap Not me on its card`,
       );
+    }
+    // A gate's answer moves the owner's card: never a ferret's, a lead's or the daemon's own.
+    if (isGateAgenda(target) && command.actor.kind !== 'human') {
+      return failure('forbidden', `only the owner answers ${command.id}: it decides where the card goes next`);
     }
     // An answer to a confirmation is the owner's decision about a configuration change: never a ferret's.
     if (target.item.confirms !== undefined && command.actor.kind !== 'human') {
@@ -957,6 +1025,7 @@ function sameRequest(item: AgendaItem, request: RaiseAgendaRequest): boolean {
     JSON.stringify(item.ask ?? null) === JSON.stringify(request.ask ?? null) &&
     item.notice === request.notice &&
     item.ping === request.ping &&
+    JSON.stringify(item.gate ?? null) === JSON.stringify(request.gate ?? null) &&
     JSON.stringify(cardFieldsOf(item)) === JSON.stringify(cardFieldsOf(request)) &&
     JSON.stringify(agendaBriefOf(item)) === JSON.stringify(agendaBriefOf(request))
   );
@@ -1308,6 +1377,8 @@ function reply(ledger: AgendaLedger, command: ReplyCommand): AgendaMutation {
       : failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   }
   if (target.item.notice === true) return failure('invalid', 'a notice is read, not replied to');
+  // A gate item is never parked by a chat message: nobody but the owner's answer could bring it back.
+  if (isGateAgenda(target)) return unchanged(ledger);
   const words = command.note?.trim() ?? '';
   const note = words === '' ? null : words.slice(0, MAX_AGENDA_DETAIL_LENGTH);
   // PARKED, not closed: the item leaves the owner's queue (and any discussion) and waits for the ferret to

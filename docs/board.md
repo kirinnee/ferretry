@@ -161,7 +161,7 @@ card moves to a project's board when
 
 The refile goes through `BoardService` as the daemon, and its history says which rule moved it. A refiled card whose
 PRs say something lands where work resumes on the new board (its last active lane) and its PR facts move it on from
-there, so a card merged but not released lands in Merged, never in Released · to test because it sat in the Unfiled
+there — stopping at the first gate on the way, as every fact does ([Gates ask the owner](#gates-ask-the-owner)) — so a card merged but not released lands in Merged, never in Released · to test because it sat in the Unfiled
 board's To test. A card with nothing to say lands by its lane's category, as a refile by hand does. It is idempotent
 and safe under races: runs never overlap, a card someone (not the daemon) refiled to Unfiled on purpose stays there,
 and a ferret whose folder names no board is asked again only after ten minutes.
@@ -256,7 +256,7 @@ hand-made set.
 **`fy signal done` with no PR** moves a card still in an active lane to the lane its variant enters on `signal.done`,
 else the first review or verify lane ahead: a review lane where one comes first (today's behaviour on a board that
 has one), else the verify lane where the owner tries it. It never moves a card into a closed lane, because only the
-owner closes. A card with a PR is left where it is; its PR moves it.
+owner closes, never out of a gate, and stops at a gate on the way. A card with a PR is left where it is; its PR moves it.
 
 **A session starting on a card fires `work.started`.** `SessionCards` does it, for a card it just made (`fy new`,
 `fy start`) and for one handed over by `fy new --card`, so a sub-ferret, who may not move cards, still lands in the
@@ -528,13 +528,15 @@ grant. This replaced the old `task-boards` access list. The code is `packages/da
 | `owner-human` | the owner: loopback, or a device the `fleet` grant let in  | everything, including owner gates and dependency overrides                       |
 |               | (on the admin token it is recorded as `admin-token`)       |                                                                                  |
 | `owner`       | the card's owner ferret                                    | the assignee's writes, plus re-plan                                              |
+|               |                                                            | and, on an INTERNAL card, passing its gates                                      |
 | `ancestor`    | a ferret above the owner in the `parent` chain of sessions | the same as the owner                                                            |
 | `assignee`    | the ferret doing it                                        | move, note, link, block, edit files, clarify, reopen, report an external trigger |
 | `daemon`      | the daemon's own automation                                | trigger moves, link cache, refile                                                |
 | `reader`      | any other ferret                                           | read; depend, but only from its own card                                         |
 
-Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a card into a lane with
-an owner gate, and only the owner closes. Reaching the routes at all is a `fleet` capability matter for a caller
+Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a card on out of a gate
+or past one (a lane whose stage is a gate, owner-gated or a `verify` lane), and only the owner closes — except on an internal card, whose owner ferret and its leads pass its gates
+and close it ([Gates ask the owner](#gates-ask-the-owner)). Reaching the routes at all is a `fleet` capability matter for a caller
 who is not on this host ([grants.md](grants.md)).
 
 ## Done and Not good
@@ -563,6 +565,109 @@ reaches. A `401 unauthorized` on an upload reads "pair it again from Settings", 
 
 While a move is in flight, the pressed button shows a spinner and both answers are disabled; a refusal is
 shown next to them.
+
+## Gates ask the owner
+
+A lane whose stage is a **gate** waits on the owner (Plan/Design's OK to build, Released · to test's Done / Not good;
+a lane stored without a stage reads with one, `laneStage` in `@ferretry/protocol`). The owner is asked on the agenda,
+never by the ferret: a card that reaches a gate raises **one** agenda item, and that item is the gate's only signal.
+The code is `GateItems` (`packages/daemon/src/lib/board/gate-items.ts`); the wire is `AgendaItem.gate`
+([agenda.md](agenda.md#gate-items)).
+
+**Entering.** After every committed write of a card, by any path — a move, a trigger, PR facts, a refile,
+`fy signal done`, a lane edit's relocation — a card the owner asked for (external, below) that sits in a gate lane
+has its one item: raised by the daemon on its ferret's agenda (the assignee's, else the owner ferret's, running or
+stopped), `task` naming the card, kind `choice`, the gate's options as its answers, `sourceRef`
+`gate:<card>:<lane>:<entry>` where `entry` is the history `seq` of the event that put the card there. The same
+entry is never raised twice, open or closed, so a restart, a second write or the owner's Not needed asks nothing
+again. At boot every card already waiting at a gate gets its item once, in the background. A card none of whose
+sessions the daemon knows gets no item and the daemon log says so.
+
+**Answering** is the owner's alone: at the machine (the admin token, recorded `admin-token` on the card) or from a
+paired device the `fleet` grant lets use the board — exactly who could have moved the card on the Board. The card
+moves FIRST, through `BoardService` as the owner, so authority, history and the done and reopen ladders are the
+board's own; only a move that went through answers the item, and a refused move leaves it open with the reason
+(`409 gate_not_moved`).
+
+| Option outcome          | The card                                                                                                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `next`, `lane`, `close` | moves there, reason "<option> (from the Inbox)"; Done tells the ferret in the done ladder's one line                      |
+| `reopen-with-agenda`    | needs the owner's words (`400` without): reopened to the set's Not good lane as the owner's Not good is, the words a      |
+|                         | clarification and sent to the ferret by the reopen ladder, and ONE follow-up conversation (below)                         |
+| "Not yet"               | the extra answer of a gate with one option: the card stays; words, if given, are a clarification and reach the ferret     |
+| Not needed (dismiss)    | the owner's choice: the card stays where it is, quietly; that entry asks nothing again (a device needs the `fleet` grant) |
+
+**The follow-up.** Not good opens one conversation about the card: a `reply` item raised by the daemon on behalf
+of the card's ferret (`sourceRef` `gate-followup:<card>:<entry>`), on the ferret's turn in discussion, raised only once the
+reopen went through (a refused Not good opens none). The ferret answers it like its own: `edit` or `surface` hands it to
+the owner, `done` closes it (a sub-ferret's lead does that, as with every item on a sub-ferret's agenda). The owner's
+answer reaches the ferret as on its own item. It closes by itself when the card next reaches the gate.
+
+**Leaving.** A card that leaves the gate any other way — the owner's move on the Board, a drop, a refile —
+has its open gate item resolved quietly: "the card moved on".
+
+**Only the owner passes a gate.** Their answer to its item, or their own move or report (and, on an internal card,
+its owner ferret's or a lead's move, below). Every other path may bring a card INTO a gate and move it between
+automatic stages, never out of one or past one: a ferret's `fy task move` (refused `owner-gate`, naming the lane),
+a daemon trigger (`work.started`, a PR, a release — it stops in the first gate on its way, and the history says
+"stopped at <lane>, which waits for the owner"), PR facts (they never pull a card back out of a gate for an open PR
+either), `fy signal done` (held, or stopped at the gate) and a refile's facts. A refile by anyone else never lands a card
+past a gate of the other board's variant: it stops in the first one on the way, and a lane named past one is refused;
+and a card waiting at a gate lands at a gate of the same stage or earlier, never a later one; a dropped card is reopened by anyone else only where it was dropped, or earlier. Leaving a gate is
+`needsOwner`'s and a gate on the way `gatesBetween`'s (`card-actions.ts`), both from each lane's stage
+(`laneStage`), so a `verify` lane with no `ownerGate` is a gate too. A ferret may still move a card back out of a
+gate, with a reason. A card's workflow never changes, so no variant can skip one.
+
+**Lane changes.** A ferret's lane edit or proposal over a live set may not take a gate from the owner
+(`laneGateProblems`, `lane-set-policy.ts`): remove a gate lane, make it automatic, drop its `ownerGate`, move it
+among the lanes a variant walks, let a variant skip it, or send cards into a closed lane, into a new lane, or past a gate
+of the new layout. It is refused
+`403 owner-gate`, naming the lane. Interim: a ferret's allowed edit still goes live; making every ferret edit a
+proposal the owner accepts is its own follow-up.
+
+**Answers, one at a time.** Answers to one card's gate take turns, and each move is written only if the card still sits
+in that gate by the entry the item asked about; anything else is `409 gate_not_moved` and the item stays open. A
+bare done (`resolve` without an answer) is refused: the owner answers it or says Not needed. Clearing the agent
+ferrets' backlog never touches a gate item, and a chat message naming one never parks it (one parked before is
+brought back on the card's next write).
+
+**A PR opened while the card waits.** The card stays at the gate; its item says so in its context ("A new PR is open
+for this card: <url>", one line per open PR), refreshed in place when the PR opens or closes, so the owner waits or
+says Not good. Done while it is open closes the card as usual.
+
+**Nobody else answers.** A ferret, a lead over its sub-ferret (`overSubFerret`) and the daemon are refused every
+verb that would answer, close or reword a gate item (`answer`, `done`, `dismiss`, `edit`, `surface`); a ferret's
+raise that carries a `gate`, a `gate:` reference or a discussion start is refused too. The agenda's state machine
+holds this, not the app.
+
+**Notifications.** The gate item buzzes the phone once, at its raise, and is never counted in a stop's push
+([notifications.md](notifications.md#when-the-phone-buzzes)). Nothing else announces the gate: no task notice, no
+second push. A daemon that raises gate items lists `board.gate-items.1` on `GET /v1/health`, and the app hides its
+own to-test rows only for such a machine.
+
+**Internal cards.** A card that is positively a ferret's own errand never raises a gate item, never buzzes and is not
+in the Inbox. Only what the daemon recorded decides it, never what a ferret wrote: the daemon made the card (`createdBy`
+`daemon`: a board import, or the card `fy new` makes for a sub-ferret — written by that start alone, kept by every
+hand-over, refile and reopen), or the session that wrote it was started by a ferret (a sub-lead's own card); AND no
+person asked for it (`askedBy` is not `person`). Anything else — a top-level ferret's `fy task create`, whatever its
+ask's source says; a lineage that could not be read — is EXTERNAL. One function decides it for the gate items and for
+who passes the gate alike (`BoardService.audienceOf`, `cardAudience` in `origin.ts`), so an external card at a gate
+always has its item, and an internal one always has someone who may pass it. By design a lead's `fy new` sub-card is internal even when the lead is top-level: the owner's own session card
+stays external and gated, so the owner still passes the gate that matters. An imported legacy task that recorded no
+creator is read as the owner's.
+
+| Standing             | External card's gate | Internal card's gate |
+| -------------------- | -------------------- | -------------------- |
+| `owner-human`        | passes               | passes               |
+| `owner`, `ancestor`  | refused              | passes               |
+| `assignee`, `reader` | refused              | refused              |
+| `daemon`             | PR facts only        | PR facts only        |
+
+**GAPS.** Every guarantee here holds against a ferret on its own session credential. The admin token with no session
+(an older `fy`, `fy --as-owner`) still has the owner's authority and is only RECORDED as `admin-token`
+([The board is opt-in](#the-board-is-opt-in), &F291). The Inbox's Not good carries words only: the agenda answer has no field for files, so a picture still goes
+through the Board's Not good. A closed gate item is remembered only as long as the agenda keeps it
+(`MAX_AGENDA_RESOLUTIONS`): a card left at a gate the owner dismissed long ago may ask again once its record is gone.
 
 ## Activity and staleness
 
@@ -598,8 +703,9 @@ a card backward, with one exception: any open PR, draft or not and however old, 
 something pulls it back to where `pr.ready` goes (In progress, or Review/CI on an older board: "moved back to In
 progress: PR #1013 ready for review"), because work still in flight means the card is not shipped. A PR closed
 unmerged says nothing. Nor does a fact move a card out of Closed or a drop, or into a Closed lane in a set with a
-`verify` lane. A fact passes an owner gate (out of Plan/Design, and back out of Released · to test); gates still
-stop ferrets.
+`verify` lane. A fact never passes a gate: it moves a card into one and stops there, and it neither moves nor pulls back
+a card waiting at one (Plan/Design, Released · to test), whatever its PRs say
+([Gates ask the owner](#gates-ask-the-owner)); the "pulled back" exception above applies only outside a gate.
 The GitHub watcher reconciles every linked card on every poll, refile and `fy task link --pr` re-evaluate at once, and a
 PR nobody has asked GitHub about is polled on the next tick. A card the owner sent back stays back until a PR newer
 than that move merges. History names the fact; no move is ever typed into a chat
@@ -741,10 +847,8 @@ wherever it appears ([reference-standard.md](reference-standard.md)).
 
 ## Gaps and work in flight
 
-- **Gates do not raise agenda items yet.** A card that reaches a gate lane is still the owner's to move on the board
-  (Done / Not good, or a move out of Plan/Design); the one Inbox item per gate, and answering it with an option, come
-  next on top of [the model](#workflows-gate-and-automatic-stages). Nor can the lane editor set a gate's options or a
-  stage yet, nor `fy` report a trigger.
+- **The lane editor cannot set a gate's options or a stage yet**, nor `fy` report a trigger. A gate already raises
+  its one Inbox item ([Gates ask the owner](#gates-ask-the-owner)).
 - **`pr.review_approved` is reported, not watched.** The watcher asks GitHub for a PR's state, checks and merge,
   not its review decision, so for now an approval is reported (`{ "action": "trigger" }`).
 - **A daemon or an app that predates the two new triggers cannot read a lane that uses one.** Its trigger list is

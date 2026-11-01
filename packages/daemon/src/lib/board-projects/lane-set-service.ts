@@ -235,7 +235,14 @@ const decide = (
 ): BoardResult<LaneSet, LaneSetProblem> => {
   switch (request.action) {
     case 'propose':
-      return proposeLaneSet(projectId, stored, request.template, request.renames, actorName(actor));
+      return proposeLaneSet(
+        projectId,
+        stored,
+        request.template,
+        request.renames,
+        actorName(actor),
+        actor.kind !== 'owner',
+      );
     case 'edit':
       return editLaneSet(stored, request, actor);
     case 'confirm':

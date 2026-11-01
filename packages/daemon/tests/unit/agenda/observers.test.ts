@@ -266,6 +266,62 @@ describe('Agenda board observers', () => {
     ]);
   });
 
+  it("should tell the ferret the owner's words on a gate's follow-up, and nothing of the gate item itself", async () => {
+    // Arrange — both raised by the daemon: the gate item, and the conversation a Not good opened for the ferret
+    const changes = new RecordingChanges();
+    const agenda = service(new MemoryRepository(), changes);
+    const DAEMON = { kind: 'daemon' as const, cause: 'system' as const };
+    await agenda.raise(
+      SESSION,
+      {
+        source: 'task',
+        sourceRef: 'gate:F412:released:7',
+        subject: 'Try it: open the Board',
+        why: 'It shipped.',
+        howToResolve: 'Choose.',
+        kind: 'choice',
+        ask: { kind: 'multiple-choice', options: [{ label: 'Not good' }, { label: 'Done' }] },
+        gate: {
+          cardId: 'F412',
+          laneId: 'released',
+          laneName: 'Released · to test',
+          entry: 7,
+          projectId: 'p-1',
+          options: [
+            { id: 'done', label: 'Done', outcome: 'close' },
+            { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+          ],
+        },
+      },
+      DAEMON,
+    );
+    await agenda.raise(
+      SESSION,
+      {
+        source: 'task',
+        sourceRef: 'gate-followup:F412:7',
+        subject: 'What should change in &F412?',
+        why: 'You said it is not good yet.',
+        howToResolve: 'Talk it over here.',
+        kind: 'reply',
+        ask: { kind: 'open-question' },
+        discussion: true,
+      },
+      DAEMON,
+    );
+    await agenda.answer(SESSION, 'A1', { kind: 'multiple-choice', choice: 'Done' }, HUMAN);
+    await agenda.answer(SESSION, 'A2', { kind: 'open-question', answer: 'make it faster' }, HUMAN);
+    const messenger = new RecordingMessenger();
+    const delivery = new AgendaReplyDelivery(messenger, 'fy');
+
+    // Act
+    for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
+
+    // Assert — the gate's own answer is the board's to tell (the done ladder); the follow-up is the ferret's
+    should(messenger.sent.map(sent => sent.id)).deepEqual(['A2']);
+    should(messenger.sent[0]?.message).containEql('make it faster');
+  });
+
   describe('an info item the owner closes', () => {
     const INFO = {
       source: 'agent-raised' as const,

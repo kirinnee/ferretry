@@ -19,6 +19,7 @@
  * as human, which errs toward showing the owner a card.
  */
 import type { BoardTask, BoardTaskAskedBy, BoardTaskId, BoardTaskOrigin, TaskRef } from '@ferretry/protocol';
+import type { CardAudience } from './authority.ts';
 import type { BoardIndex } from './graph.ts';
 
 /** An ask source that names the owner, in any of the ways ferrets write it down. */
@@ -112,4 +113,20 @@ export const decideAskedBy = async (
   if (ownerApp || cardAskedBy(card) === 'person') return 'person';
   const session = askSessionOf(card);
   return session !== undefined && ownerWordsMatch(card.ask.text, await said(session)) ? 'person' : 'agent';
+};
+
+/**
+ * Who a card's gates ask: the ONE reading the gates use (docs/board.md § Gates ask the owner), and the CONSERVATIVE
+ * one, because it decides who may pass them. A card is INTERNAL — its owner ferret and leads pass its gates, and the
+ * owner is never asked — only when it is positively a ferret's own errand: the daemon made it, or the session that
+ * REALLY wrote it (`createdBy`, never the ask's source, which the ferret writes) was started by a ferret; AND no
+ * person asked for it (`askedBy`). `startedByFerret` answers for `createdBy`'s session alone. Anything else — a
+ * top-level ferret's card, whatever its ask says; a lineage that could not be read — is EXTERNAL: the owner decides.
+ */
+export const cardAudience = (
+  card: Pick<BoardTask, 'createdBy' | 'ask' | 'askedBy'>,
+  startedByFerret: boolean,
+): CardAudience => {
+  const own = card.createdBy.kind === 'daemon' || (card.createdBy.kind === 'ferret' && startedByFerret);
+  return own && (card.askedBy ?? cardAskedBy(card)) !== 'person' ? 'internal' : 'external';
 };
