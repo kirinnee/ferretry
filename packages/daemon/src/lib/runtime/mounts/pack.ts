@@ -21,6 +21,7 @@ import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { lineageOf } from '../../api/lineage.ts';
+import { type StateHomeReach, stateHomeLaunchRefusal } from '../../api/state-homes.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import type { CleanUpService, GuideFileService } from '../../pack/cleanup/index.ts';
@@ -105,7 +106,11 @@ async function recommend(subsystem: PackSubsystem, context: RouteContext): Promi
   return jsonResponse(PackRecommendationSchema.parse(await subsystem.service.recommend(request)));
 }
 
-async function newChild(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
+async function newChild(
+  subsystem: PackSubsystem,
+  stateHomes: StateHomeReach | undefined,
+  context: RouteContext,
+): Promise<ApiResponse> {
   const request = lineageOf(context, await parseBody(context.request, PackNewRequestSchema));
   if (request.cwd !== undefined && context.presentation !== undefined && !context.presentation.loopback)
     throw new ApiError(
@@ -113,6 +118,8 @@ async function newChild(subsystem: PackSubsystem, context: RouteContext): Promis
       "a sub-ferret's folder may be chosen only at this machine; leave --cwd out to run it in its parent's folder",
       'not-granted',
     );
+  // Never in the state home, the same rule a ferret's `POST /v1/sessions` start meets.
+  await stateHomeLaunchRefusal(context, stateHomes, request.cwd);
   const outcome = await subsystem.service.newChild(request);
   return jsonResponse(PackNewOutcomeSchema.parse(outcome), outcome.outcome === 'started' ? 201 : 200);
 }
@@ -135,7 +142,11 @@ async function setSwitch(subsystem: PackSubsystem, context: RouteContext): Promi
 }
 
 /** `noStore` throughout: every answer is decided on live fleet facts or a live session. */
-export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
+export function packRoutes(
+  subsystem: PackSubsystem,
+  /** The daemon's own directories: a ferret names no `--cwd` inside them. Absent: it names none at all. */
+  stateHomes?: StateHomeReach,
+): readonly ApiRoute[] {
   return [
     {
       method: 'GET',
@@ -210,7 +221,7 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       minimum: 'operator',
       caller: 'any',
       noStore: true,
-      handle: async context => await newChild(subsystem, context),
+      handle: async context => await newChild(subsystem, stateHomes, context),
     },
     {
       method: 'GET',

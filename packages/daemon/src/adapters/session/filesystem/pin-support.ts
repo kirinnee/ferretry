@@ -37,7 +37,7 @@ export function componentIdentity(metadata: Stats): ComponentIdentity {
 
 export function pinnedMetadata(metadata: Stats): PinnedMetadata {
   const type = metadata.isDirectory() ? 'dir' : metadata.isFile() ? 'file' : 'other';
-  return { type, size: metadata.size, mtime: metadata.mtime.toISOString(), mode: metadata.mode };
+  return { type, size: metadata.size, mtime: metadata.mtime.toISOString(), mode: metadata.mode, links: metadata.nlink };
 }
 
 export function contains(rootReal: string, targetReal: string): boolean {

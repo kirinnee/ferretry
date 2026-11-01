@@ -529,6 +529,7 @@ import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import { ExecutableCodePrograms } from '../src/adapters/system/executable-code-programs.ts';
 import { KernelProgramProof } from '../src/adapters/system/kernel-program-proof.ts';
+import { NodeStateHomes } from '../src/adapters/system/node-state-homes.ts';
 import { machineProgramHomes } from '../src/adapters/system/profile-program.ts';
 import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
 import { SystemdUserSliceReader } from '../src/adapters/system/user-slice-reader.ts';
@@ -12478,6 +12479,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionFilesystem: new SessionFilesystem(sessionRootPinner(), new RunnerSessionGit(new BunGitRunner())),
         // Derived from the session id alone — a caller asks for `scope=media`, never for a directory.
         sessionMediaRoot: id => createSessionPaths(paths, parseSessionId(id)).media,
+        // No session file read for a ferret, and no session it starts, reaches these (docs/agent-tools.md).
+        stateHomes: new NodeStateHomes([paths.home, paths.state, paths.config]),
         scratchGc,
         // Constructed here: the service holds only a rate window, and the launcher starts nothing until a
         // loopback caller asks.

@@ -4,6 +4,7 @@ import { FY_REQUEST_ID_HEADER, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
+import type { StateHomeReach } from '../../../../src/lib/api/state-homes.ts';
 import {
   knownLaunchRoots,
   SessionControlError,
@@ -19,6 +20,7 @@ import {
   fromFerret,
   human,
 } from './support.ts';
+import { homesOf } from './state-homes-support.ts';
 
 /**
  * The session write surface: what a start refuses, what it passes through, and what a stop answers.
@@ -485,5 +487,90 @@ describe("a start on a ferret's own credential", () => {
 
     // Assert
     should(control.parents).deepEqual([undefined]);
+  });
+});
+
+describe('a ferret starting a session in the state home', () => {
+  const HOME = '/home/me/.ferretry';
+  const stateHomes: StateHomeReach = {
+    resolve: async () => homesOf(HOME),
+    // `/tmp/innocent` is a link into the home; everything else is itself.
+    realpath: async path => (path === '/tmp/innocent' ? `${HOME}/state` : path),
+  };
+  const gated = (control: FakeSessionControl, homes: StateHomeReach | undefined = stateHomes) => {
+    const instance = new ApiDispatcher(
+      new ApiRouter(
+        sessionControlRoutes(control, {
+          guard: NO_GOVERNED_ROUTES_GUARD,
+          knownRoots: async () => [],
+          ...(homes === undefined ? {} : { stateHomes: homes }),
+        }),
+      ),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
+    return {
+      dispatch: async (apiRequest: Parameters<ApiDispatcher['dispatch']>[0]) => await instance.dispatch(apiRequest),
+    };
+  };
+
+  it('should refuse a cwd inside the home, named there or reached through a link, and start nothing', async () => {
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = gated(control);
+
+    // Act
+    const named = await subject.dispatch(fromFerret(startRequest(startBody({ cwd: `${HOME}/state` }))));
+    const linked = await subject.dispatch(
+      fromFerret(startRequest(startBody({ cwd: '/tmp/innocent' }), { [FY_REQUEST_ID_HEADER]: 'req-l' })),
+    );
+    const header = await subject.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/sessions',
+        headers: { ...agentIn(FERRET_SESSION), [FY_REQUEST_ID_HEADER]: 'req-h' },
+        body: startBody({ cwd: HOME }),
+      }),
+    );
+
+    // Assert
+    for (const answer of [named, linked, header])
+      should([answer.status, jsonBody(answer).code]).deepEqual([403, 'state_home']);
+    should(control.starts).be.empty();
+  });
+
+  it('should start a ferret in a folder outside the home, and the owner anywhere', async () => {
+    // Arrange
+    const control = new FakeSessionControl();
+    const subject = gated(control);
+
+    // Act
+    const project = await subject.dispatch(fromFerret(startRequest(startBody({ cwd: '/work/app' }))));
+    // At the machine, so the terminal gate a remote start outside every project meets is not what answers.
+    const owner = await subject.dispatch({
+      ...startRequest(startBody({ cwd: `${HOME}/state` }), { [FY_REQUEST_ID_HEADER]: 'req-o' }),
+      loopback: true,
+    });
+
+    // Assert
+    should([project.status, owner.status]).deepEqual([201, 201]);
+  });
+
+  it('should refuse a ferret any cwd when the daemon cannot resolve its state home', async () => {
+    // Arrange
+    const control = new FakeSessionControl();
+
+    // Act
+    const broken: StateHomeReach = {
+      resolve: async () => {
+        throw new Error('ENOENT');
+      },
+      realpath: async () => undefined,
+    };
+    const answer = await gated(control, broken).dispatch(fromFerret(startRequest(startBody({ cwd: '/work/app' }))));
+
+    // Assert
+    should([answer.status, jsonBody(answer).code]).deepEqual([503, 'state_home_unresolved']);
+    should(control.starts).be.empty();
   });
 });

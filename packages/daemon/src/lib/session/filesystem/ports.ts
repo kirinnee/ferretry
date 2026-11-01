@@ -42,6 +42,11 @@ export interface PinnedMetadata {
   readonly mtime: string;
   /** POSIX mode bits. Only the executable bit is used, to keep a diff's file mode honest. */
   readonly mode: number;
+  /**
+   * How many names (hard links) the object has, from the same `fstat`. Absent where the platform did not
+   * say. A read for an agent refuses a file with more than one: another name could be inside the state home.
+   */
+  readonly links?: number;
 }
 
 /**

@@ -554,6 +554,56 @@ failing until the pane restarts. An older daemon gets the admin token plus `x-fe
 that can read `api-token` can pass it. The whole order and its limits:
 [secrets.md](secrets.md#what-a-ferrets-fy-presents). An older `fy` keeps working with the header.
 
+## The state home
+
+The state home (`FY_HOME`, normally `~/.ferretry`, and the daemon's state and config directories wherever they are
+configured) holds the admin and Warden tokens, the vault and its key, every runtime's sign-in and every session's
+environment. Nothing the daemon reads, copies or starts **on a ferret's behalf** reaches into it. Each refusal
+names the home and never the file's contents; the rule is the same everywhere (`StateHomeFence` in
+`@ferretry/fleet`), and a home the daemon cannot resolve refuses rather than guesses. The full threat model is
+[secrets.md](secrets.md#what-the-state-home-fence-refuses).
+
+### Reading a session's files
+
+`/v1/sessions/:id/fs`, `/fs/file`, `/fs/index`, `/fs/changes` and `/fs/diff` serve any caller, and an **agent** (its
+own session credential, the admin token naming its session, a warden) is held to two rules a person is not:
+
+- **Its own tree.** A ferret reads its own session and the sub-ferrets it started, however deep (the lead reviews
+  its sub-ferret's work); lineage is the sessions' own `parent`, walked fail-closed. The owner's sessions, a
+  sibling's and the Warden's answer `403 not_own_session` before anything is opened. An agent with no session of
+  its own reads nothing.
+- **Never the state home.** Whatever the session's folder is — `~`, which holds `~/.ferretry`; the home itself; a
+  folder swapped for a link into it — nothing whose real path is inside the home is read, listed into, diffed,
+  read from `HEAD`, put in the file index or named in the change list (`403 denied`, "inside this daemon's state
+  home"). A listing marks the home `denied`. The check is made inside the same descriptor-pinned walk the read
+  uses, which never follows a link, so the pinned root's real path plus the walked name IS what is read. The one
+  opening is the session's own media folder (`scope=media`), mapped onto the home by its configured prefix,
+  never by resolving the folder itself.
+- **No hard link.** A file with more than one name is refused to an agent (`403 denied`), judged from the opened
+  descriptor's own `fstat`: a hard link to `api-token` left in a session folder is the same inode as the token,
+  and nothing about it says where its other name is.
+
+A **person** (a paired device, the owner at the machine) is unchanged: the owner's viewer still opens any
+session's files, a Warden session's included. A daemon that cannot resolve its state home answers an agent
+`503 state_home_unresolved`.
+
+### Starting a session
+
+A ferret's `POST /v1/sessions` and `fy new --cwd` (`POST /v1/pack/new`) are refused `403 state_home` when the
+working folder is inside the home, named there or reached through a link — a session's folder is what its agent
+reads freely, so a child started in `~/.ferretry` would hold the tokens. This is asked before the terminal gate,
+which a caller on loopback skips. The owner may start a session anywhere.
+
+### Component sources
+
+An agent's `config.write` (the `settings` control) can name a fleet component's `file:` or `directory:`, which the
+provisioner copies or links into a runtime's config directory — the model's context. A source inside the home is
+an **error** in the configuration check (`fy config check`, `config.validate`, every reload), so it never comes
+into effect, and an older accepted version naming it is retired rather than kept. The provisioner refuses it
+again at apply time, on every link hop and the real path, reading each file through the descriptor it checked;
+the component-text reader treats it as absent. The fleet's asset tree (`<fleet>/assets`) is the opening, by
+where a source REALLY is: an asset linked into the rest of the home is refused.
+
 ## Sub-ferrets and the Ferretry verbs
 
 The same tools server serves a lead and a sub-ferret; the **daemon** tells them apart by session identity
@@ -594,6 +644,10 @@ agenda items in a sub-ferret's session with `-s <session>`, proven by lineage.
   - **A same-user process that can write in the state home** could move a file out of it (a rename leaves
     one name, outside). Such a process can read the file itself anyway: the guard matters once the state
     home is walled off from ferrets, and until then is one fewer way out, not a sandbox.
+- **The state home fence is the daemon's, not the disk's.** It governs what Ferretry reads, copies and starts for
+  a ferret ([The state home](#the-state-home)); a ferret's own shell, running as the same user, can still open
+  `~/.ferretry` directly. A session folder that a ferret swaps for a link into the home after its start is
+  refused by every daemon read, not by the ferret's own tools.
 - **PDF needs a headless browser.** In Real window mode `browser.pdf` is refused rather than faked.
 - **A staged download** sits in a daemon-owned directory (mode 0700) for up to 15 minutes before it is saved or pruned.
 

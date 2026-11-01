@@ -7,6 +7,7 @@ import type { CapabilityGuard } from '../../api/capability.ts';
 import type { ResponseCompressor } from '../../api/compression.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
 import type { ApiRoute } from '../../api/route.ts';
+import type { StateHomeReach } from '../../api/state-homes.ts';
 import { ApiRouter } from '../../api/router.ts';
 import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
@@ -441,6 +442,11 @@ export interface MountedSubsystems {
   readonly sessionFilesystem: SessionFilesystem;
   /** Names a session's media folder, which `/fs/file?scope=media` reads. Absent: no such folder. */
   readonly sessionMediaRoot?: SessionMediaRoot;
+  /**
+   * The daemon's own directories, resolved per request: no session file read for an agent, and no session an
+   * agent starts, reaches them. Absent: an agent reads no session file and starts no session with a cwd.
+   */
+  readonly stateHomes?: StateHomeReach;
   /** Expired session scratch, planned or reclaimed only after all safety gates pass. */
   readonly scratchGc: ScratchGcSubsystem;
   /** Hands a web address to this computer's own browser, for a caller on this machine only. */
@@ -617,6 +623,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...sessionControlRoutes(subsystems.sessionControl, {
           guard: subsystems.grants,
           knownRoots: knownLaunchRoots(subsystems.catalogs, subsystems.worktrees),
+          ...(subsystems.stateHomes === undefined ? {} : { stateHomes: subsystems.stateHomes }),
         }),
         // Beside the stop it is the gentler counterpart of: a one-segment pattern under `/v1/sessions/:sessionId`
         // with its own final literal, so it neither shadows nor is shadowed by the deeper per-session routes.
@@ -662,7 +669,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...sessionAgendaModeRoutes(subsystems.sessionAgendaMode),
         // `/v1/pack…` is a prefix no other route uses; the two session paths end in literals (`result`,
         // `pack`) no other one-segment session route uses, so none can shadow or be shadowed.
-        ...packRoutes(subsystems.pack),
+        ...packRoutes(subsystems.pack, subsystems.stateHomes),
         // Every path ends in literals under `mcp`, which no other route uses, and the subsystem registers its
         // deeper `preview` paths before the shallower ones itself, so none can shadow or be shadowed.
         ...sessionMcpRoutes(subsystems.sessionMcp),
@@ -730,7 +737,12 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // The working-tree read registers last among the per-session subsystems: three of its four paths are
         // two segments deep under `/v1/sessions/:sessionId`, and its own deeper patterns are registered before
         // its one-segment `fs`, so nothing here can shadow or be shadowed.
-        ...sessionFilesystemRoutes(subsystems.sessionFilesystem, subsystems.sessions, subsystems.sessionMediaRoot),
+        ...sessionFilesystemRoutes(
+          subsystems.sessionFilesystem,
+          subsystems.sessions,
+          subsystems.sessionMediaRoot,
+          subsystems.stateHomes,
+        ),
         // Every warden path is under `/v1/warden`, which no other subsystem uses, so this table can
         // neither shadow nor be shadowed by anything above it.
         ...wardenRoutes(subsystems.warden),

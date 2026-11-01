@@ -13,6 +13,7 @@ import { ApiError } from '../../api/error.ts';
 import { decodeParameter, headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
 import { isAgentCaller, OWNER_ONLY_CODE } from '../../api/agent-caller.ts';
 import { lineageOf } from '../../api/lineage.ts';
+import { type StateHomeReach, stateHomeLaunchRefusal } from '../../api/state-homes.ts';
 import { WARDEN_LABEL } from '../../warden/types.ts';
 import { errorResponse, jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
@@ -231,6 +232,8 @@ export interface SessionLaunchGate {
   readonly guard: CapabilityGuard;
   /** The folders a session may start in as an ordinary act: registered projects and the worktree root. */
   readonly knownRoots: () => Promise<readonly string[]>;
+  /** The daemon's own directories: a ferret starts no session in them. Absent: a ferret names no cwd. */
+  readonly stateHomes?: StateHomeReach;
 }
 
 const TERMINAL_USE: CapabilityDemand = { capability: 'terminal', axis: 'use' };
@@ -304,6 +307,9 @@ async function start(
   // and supervision. Only the daemon's own Warden spawner sets it; a ferret asking for it is refused.
   if (request.label?.trim() === WARDEN_LABEL && isAgentCaller(context))
     throw new ApiError(403, 'only the Warden starts a session under its own label; leave --label out', OWNER_ONLY_CODE);
+  // Before the terminal gate, which a loopback caller skips: a ferret is on loopback, and its child in the
+  // state home would read the tokens with its own tools.
+  await stateHomeLaunchRefusal(context, gate.stateHomes, request.cwd);
   const refused = await launchRefusal(gate, context, request);
   if (refused !== undefined) return refused;
   const id = requestId(context.request);
