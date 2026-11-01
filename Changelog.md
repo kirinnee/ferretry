@@ -1,3 +1,16 @@
+## [4.218.0](https://github.com/kirinnee/ferretry/compare/v4.217.1...v4.218.0) (2026-11-01)
+
+### Features
+
+* **board:** gates ask the owner through one agenda item ([#1280](https://github.com/kirinnee/ferretry/issues/1280)) ([906326f](https://github.com/kirinnee/ferretry/commit/906326f9b76838dc4b6cea0a8a8b01e4114817c3)), closes [#1230](https://github.com/kirinnee/ferretry/issues/1230)
+* **pwa:** a Sharing destination for catalogs, people and skills (catalogs 3a) ([#1290](https://github.com/kirinnee/ferretry/issues/1290)) ([1ab1496](https://github.com/kirinnee/ferretry/commit/1ab1496fe72f6265d6d61497c0a8c4e16adddb51))
+* **pwa:** skill and MCP rows with Share and Add on the side (catalogs 3b) ([#1289](https://github.com/kirinnee/ferretry/issues/1289)) ([ccbada2](https://github.com/kirinnee/ferretry/commit/ccbada287861d699114941141c1738e6c9481012))
+
+### Fixes
+
+* **board:** read the owner's words from every turn and the send ledger ([#1292](https://github.com/kirinnee/ferretry/issues/1292)) ([61a05e2](https://github.com/kirinnee/ferretry/commit/61a05e25d2d0d2a067258c2688e2db84b4f5db81))
+* **pwa:** Inbox card text can be highlighted; Inbox composer gets the mic ([#1288](https://github.com/kirinnee/ferretry/issues/1288)) ([89c4a8e](https://github.com/kirinnee/ferretry/commit/89c4a8ed03b96deb6ab69abe2011a8b50485f8f1))
+
 ## [4.217.1](https://github.com/kirinnee/ferretry/compare/v4.217.0...v4.217.1) (2026-11-01)
 
 ### Fixes

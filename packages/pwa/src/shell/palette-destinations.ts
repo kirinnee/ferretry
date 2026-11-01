@@ -34,6 +34,7 @@ import {
   daemonNewSessionPath,
   daemonQueuePath,
   daemonSessionsPath,
+  daemonSharingPath,
   parseRoute,
   routePath,
 } from '../lib/pages/routes.ts';
@@ -92,6 +93,25 @@ export const SHELL_DESTINATIONS = [
 ] as const satisfies readonly AppBarDestinationLike[];
 
 /**
+ * Two doors into Sharing that name a tab. They sit right after the Sharing place itself and appear only
+ * when the destinations given carry one, so a palette built from a list without Sharing never offers them.
+ */
+export const SHARING_TAB_DESTINATIONS = [
+  {
+    id: 'sharing-shared',
+    label: 'Shared with me',
+    title: 'Skills and MCP servers other people share with you',
+    path: (daemon: DaemonId) => daemonSharingPath(daemon, 'shared'),
+  },
+  {
+    id: 'sharing-skills',
+    label: 'Share a skill…',
+    title: 'Pick a skill on this machine to share',
+    path: (daemon: DaemonId) => daemonSharingPath(daemon, 'skills'),
+  },
+] as const satisfies readonly AppBarDestinationLike[];
+
+/**
  * Search terms that are NOT in the label or the description — the words a reader
  * reaches for when they do not remember what the page is called ("spend" for
  * analytics, "spawn" for a new session). Missing ids simply match on their own
@@ -109,6 +129,9 @@ const DESTINATION_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   analytics: ['analytics', 'usage', 'cost', 'spend', 'tokens', 'graph', 'chart', 'query', 'daily'],
   warden: ['warden', 'supervision', 'verdicts', 'accounts', 'failover', 'quota'],
   learning: ['learning', 'proposals', 'rules', 'lessons', 'scan'],
+  sharing: ['sharing', 'share', 'catalog', 'catalogs', 'people', 'members', 'skills', 'mcp'],
+  'sharing-shared': ['shared', 'received', 'invite', 'join', 'publisher', 'catalogs'],
+  'sharing-skills': ['share', 'skill', 'publish', 'send', 'give'],
   settings: ['settings', 'preferences', 'appearance', 'theme', 'density', 'options', 'configure'],
 };
 
@@ -187,7 +210,10 @@ export const destinationExists = (href: string): boolean => {
  */
 const ordered = (destinations: readonly AppBarDestinationLike[]): AppBarDestinationLike[] => {
   const [sessions, newSession] = SHELL_DESTINATIONS;
-  return [sessions, ...destinations, newSession];
+  const withTabs = destinations.flatMap(destination =>
+    destination.id === 'sharing' ? [destination, ...SHARING_TAB_DESTINATIONS] : [destination],
+  );
+  return [sessions, ...withTabs, newSession];
 };
 
 /**

@@ -52,7 +52,8 @@ export interface CatalogMembersPanelProps {
   readonly createClient?: CatalogClientFactory;
   /** The catalogs on this machine, to name what each person can read. */
   readonly catalogs: readonly OwnedCatalog[];
-  readonly onBack: () => void;
+  /** Omitted when the panel is a tab of its own and there is nowhere to go back to. */
+  readonly onBack?: () => void;
   /** Test and harness seams. */
   readonly now?: () => number;
   readonly timeZone?: string;
@@ -132,11 +133,13 @@ export function CatalogMembersPanel({
 
   return (
     <div className="flex min-w-0 flex-col gap-sm" data-catalog-members="">
-      <div>
-        <Button type="button" variant="ghost" className="kt-btn--flush-start" onClick={onBack} data-members-back="">
-          Back to catalogs
-        </Button>
-      </div>
+      {onBack === undefined ? null : (
+        <div>
+          <Button type="button" variant="ghost" className="kt-btn--flush-start" onClick={onBack} data-members-back="">
+            Back to catalogs
+          </Button>
+        </div>
+      )}
       <header className="flex min-w-0 flex-col gap-0.5">
         <h4 className="m-0 text-row font-semibold text-fg">{MEMBERS_TITLE}</h4>
         <p className="m-0 text-cell text-muted">{MEMBERS_NOTE}</p>

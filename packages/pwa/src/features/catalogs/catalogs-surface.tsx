@@ -1,5 +1,5 @@
 /**
- * Settings › machine › Catalogs: the catalogs this machine publishes, what is in each, and the acts on them.
+ * Sharing › My catalogs: the catalogs this machine publishes, what is in each, and the acts on them.
  *
  * Calm and plain. The list shows names and counts; one catalog shows its items with their versions, says
  * when a source changed since it was frozen, and offers Publish update, Withdraw, Rename, Delete and
@@ -8,7 +8,7 @@
  */
 
 import type { OwnedCatalog, OwnedCatalogItem } from '@ferretry/protocol';
-import { CircleAlert, CircleCheck, FileDown, Share2, Trash2, Users } from 'lucide-react';
+import { CircleAlert, CircleCheck, FileDown, Share2, Trash2 } from 'lucide-react';
 import { type FormEvent, useCallback, useEffect, useId, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -18,7 +18,6 @@ import { downloadText, type SaveText } from '../settings/performance-settings.ts
 import { AddCatalogFromLink } from './add-from-link.tsx';
 import { AddToCatalogSheet } from './add-to-catalog-sheet.tsx';
 import { CatalogMoreMenu } from './catalog-more-menu.tsx';
-import { CatalogMembersPanel } from './catalog-members.tsx';
 import { FailureLine, SharingOffPanel } from './catalog-parts.tsx';
 import { formatBytes, plural, shortDigest } from './catalog-review-model.ts';
 import { MarkedText } from './catalog-review-view.tsx';
@@ -52,13 +51,13 @@ export interface CatalogsSurfaceProps {
   readonly installHost?: InstallHost;
 }
 
-type Read =
+export type Read =
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly catalogs: readonly OwnedCatalog[] }
   | { readonly kind: 'failed'; readonly refusal: OwnerRefusal };
 
 /** Reads the catalogs, again whenever `reload` is called. Only the detail view asks for `sourceState`. */
-function useCatalogs(
+export function useCatalogs(
   connection: DaemonConnection,
   createClient: CatalogClientFactory,
   sourceState: boolean,
@@ -97,7 +96,6 @@ export function CatalogsSurface({
   const createClient: CatalogClientFactory = injected ?? routed;
   const [openId, setOpenId] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
-  const [showPeople, setShowPeople] = useState(false);
   const detail = openId !== null;
   const { read, reload } = useCatalogs(connection, createClient, detail);
 
@@ -107,7 +105,7 @@ export function CatalogsSurface({
         <h3 className="m-0 text-row font-semibold text-fg">Catalogs</h3>
         <p className="m-0 text-cell text-muted">{CATALOGS_INTRO}</p>
       </header>
-      {openId === null && !showPeople ? (
+      {openId === null ? (
         <div className="flex min-w-0 flex-col gap-xs" data-catalogs-add="">
           <AddCatalogFromLink />
           {read.kind === 'failed' && read.refusal.sharingOff ? null : (
@@ -127,25 +125,8 @@ export function CatalogsSurface({
         ) : (
           <FailureLine sentence={read.refusal.sentence} again onAgain={reload} againLabel="Try again" />
         )
-      ) : showPeople ? (
-        <CatalogMembersPanel
-          connection={connection}
-          createClient={createClient}
-          catalogs={read.catalogs}
-          onBack={() => setShowPeople(false)}
-        />
       ) : openId === null ? (
-        <>
-          <CatalogList catalogs={read.catalogs} onOpen={setOpenId} />
-          {read.catalogs.length === 0 ? null : (
-            <div>
-              <Button type="button" onClick={() => setShowPeople(true)} data-catalogs-people="">
-                <Users size={16} aria-hidden="true" />
-                People and codes
-              </Button>
-            </div>
-          )}
-        </>
+        <CatalogList catalogs={read.catalogs} onOpen={setOpenId} />
       ) : (
         <CatalogDetail
           connection={connection}

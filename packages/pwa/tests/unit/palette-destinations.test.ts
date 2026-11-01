@@ -52,12 +52,36 @@ describe('destinationPaletteEntries', () => {
       'destination-attention',
       'destination-board',
       'destination-projects',
+      'destination-sharing',
+      'destination-sharing-shared',
+      'destination-sharing-skills',
       'destination-analytics',
       'destination-warden',
       'destination-learning',
       'destination-settings',
       'destination-new-session',
     ]);
+  });
+
+  it('offers the two Sharing doors with the tab in their address', () => {
+    const entries = destinationPaletteEntries('', APP_BAR_DESTINATIONS, alpha);
+    const hrefOf = (id: string) => entries.find(entry => entry.id === id)?.href;
+
+    expect(hrefOf('destination-sharing')).toBe('/d/alpha/sharing');
+    expect(hrefOf('destination-sharing-shared')).toBe('/d/alpha/sharing/shared');
+    expect(hrefOf('destination-sharing-skills')).toBe('/d/alpha/sharing/skills');
+    expect(entries.find(entry => entry.id === 'destination-sharing-shared')?.label).toBe('Shared with me');
+    expect(entries.find(entry => entry.id === 'destination-sharing-skills')?.label).toBe('Share a skill…');
+    expect(destinationPaletteEntries('share a skill', APP_BAR_DESTINATIONS, alpha).map(entry => entry.id)).toContain(
+      'destination-sharing-skills',
+    );
+  });
+
+  it('leaves the Sharing doors out when the destinations carry no Sharing place', () => {
+    const without = APP_BAR_DESTINATIONS.filter(destination => destination.id !== 'sharing');
+    expect(destinationPaletteEntries('', without, alpha).map(entry => entry.id)).not.toContain(
+      'destination-sharing-shared',
+    );
   });
 
   it('builds every href from the daemon the palette is on', () => {

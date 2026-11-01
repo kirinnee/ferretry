@@ -8,12 +8,22 @@ export function SharedPage({
   title,
   children,
   flush = false,
+  embedded = false,
 }: {
   readonly title: string;
   readonly children: ReactNode;
   /** No frame padding: the caller sits inside a layout that has its own. */
   readonly flush?: boolean;
+  /** One tab of a page that already has its own h1: a section with a quiet h2, not a page of its own. */
+  readonly embedded?: boolean;
 }) {
+  if (embedded)
+    return (
+      <section className="flex w-full min-w-0 max-w-[680px] flex-col gap-sm" aria-label={title} data-shared-page="">
+        <h2 className="m-0 break-words text-row font-semibold text-fg">{title}</h2>
+        {children}
+      </section>
+    );
   return (
     <main
       className={cn('mx-auto flex w-full min-w-0 max-w-[680px] flex-col gap-sm', flush ? '' : 'px-3 py-4')}

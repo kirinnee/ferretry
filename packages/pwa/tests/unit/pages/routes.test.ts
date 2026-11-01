@@ -20,6 +20,7 @@ import {
   daemonSessionPath,
   daemonSessionsPath,
   daemonSettingsPath,
+  daemonSharingPath,
   daemonWardenPath,
   decodeRouteSegment,
   isDaemonless,
@@ -28,6 +29,7 @@ import {
   type Route,
   routePageKey,
   routePath,
+  SHARING_TABS,
   setupPath,
   sharedPath,
 } from '../../../src/lib/pages/routes.ts';
@@ -406,5 +408,36 @@ describe('daemonBackPlace', () => {
       { path: '/d/daemon%2Fa', label: '← Home' },
       { path: '/d/daemon%2Fa', label: '← Home' },
     ]);
+  });
+});
+
+describe('sharing routes', () => {
+  const daemonA = daemonId('daemon/a');
+
+  it('should build the Sharing address with or without a tab', () => {
+    should(daemonSharingPath(daemonA)).equal('/d/daemon%2Fa/sharing');
+    should(daemonSharingPath(daemonA, 'catalogs')).equal('/d/daemon%2Fa/sharing/catalogs');
+    should(daemonSharingPath(daemonA, 'skills')).equal('/d/daemon%2Fa/sharing/skills');
+  });
+
+  it('should parse every tab, and the bare page, back to the address it came from', () => {
+    should(parseRoute('/d/daemon%2Fa/sharing')).deepEqual({ kind: 'sharing', daemonId: daemonA });
+    for (const tab of SHARING_TABS) {
+      const path = daemonSharingPath(daemonA, tab);
+      should(parseRoute(path)).deepEqual({ kind: 'sharing', daemonId: daemonA, tab });
+      should(routePath(parseRoute(path))).equal(path);
+    }
+    should(routePath(parseRoute('/d/daemon%2Fa/sharing'))).equal('/d/daemon%2Fa/sharing');
+  });
+
+  it('should land an unknown tab on the Sharing page rather than somewhere else', () => {
+    should(parseRoute('/d/daemon%2Fa/sharing/nope')).deepEqual({ kind: 'sharing', daemonId: daemonA });
+  });
+
+  it('should keep the tab out of the page key so switching tabs does not remount the page', () => {
+    should(routePageKey(parseRoute('/d/daemon-b/sharing/people'))).equal(
+      routePageKey(parseRoute('/d/daemon-b/sharing/skills')),
+    );
+    should(routePageKey(parseRoute('/d/daemon-b/sharing'))).equal('sharing:"daemon-b"');
   });
 });

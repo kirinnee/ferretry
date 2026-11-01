@@ -236,28 +236,13 @@ describe('daemon settings panel list', () => {
     }
   });
 
-  it('hands the catalogs panel the frame’s own client factory, so nothing real is read', async () => {
-    const asked: string[] = [];
-    const view = await mount(
-      <DaemonSettingsFrame
-        connection={alpha}
-        name="Alpha"
-        additionalTabs={PRODUCTION_ADDITIONAL_TABS}
-        readWardenStatus={unavailable}
-        createWardenClient={unavailable}
-        createCatalogClient={async connection => {
-          asked.push(connection.daemonId);
-          return { request: async () => ({ catalogs: [] }) as never };
-        }}
-        onOpenPanel={() => undefined}
-        panel="catalogs"
-      />,
-    );
+  it('points the old catalogs tab at Sharing instead of showing the catalogs', async () => {
+    const view = await mount(frame({ panel: 'catalogs' }));
     try {
-      await interact(async () => {
-        await Promise.resolve();
-      });
-      expect(asked).toContain('alpha');
+      const link = view.container.querySelector<HTMLAnchorElement>('[data-catalogs-moved] a');
+      expect(link?.textContent).toBe('Catalogs moved to Sharing');
+      expect(link?.getAttribute('href')).toBe('/d/alpha/sharing/catalogs');
+      expect(view.container.querySelector('[data-catalogs-surface]')).toBeNull();
     } finally {
       await view.unmount();
     }
@@ -277,7 +262,7 @@ describe('daemon settings panel list', () => {
     ['secrets', '[aria-label="Loading secrets"], [aria-label="Secrets unavailable"]'],
     ['accounts', '[aria-label="Loading accounts"], [aria-label="Accounts unavailable"]'],
     ['secure-copy', '[aria-label="Loading approved pastes"], [aria-label="Approved pastes unavailable"]'],
-    ['catalogs', '[data-catalogs-surface]'],
+    ['catalogs', '[data-catalogs-moved]'],
     ['devices', '[data-daemon-panel-open="devices"] *'],
     ['grants', '[aria-label="Loading capability grants"], [aria-label="Capability grants unavailable"]'],
     ['security', '[data-daemon-panel-open="security"] *'],

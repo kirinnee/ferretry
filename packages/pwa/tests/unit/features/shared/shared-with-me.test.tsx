@@ -90,6 +90,27 @@ describe('nothing shared yet', () => {
   });
 });
 
+describe('inside another page', () => {
+  it('has no heading of its own and no way home when embedded', async () => {
+    const fake = fakeMembers({ list: async () => [] });
+    const view = await mount(<SharedWithMe embedded members={fake.members} machines={[]} onHome={() => undefined} />);
+    await settle();
+    expect(q('h1')).toBeNull();
+    expect(q('h2')?.textContent).toBe('Shared with me');
+    expect(q('[data-shared-home]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('shows no way home when nobody gave it one', async () => {
+    const fake = fakeMembers({ list: async () => [] });
+    const view = await mount(<SharedWithMe members={fake.members} machines={[]} />);
+    await settle();
+    expect(q('h1')?.textContent).toBe('Shared with me');
+    expect(q('[data-shared-home]')).toBeNull();
+    await view.unmount();
+  });
+});
+
 describe('two publishers', () => {
   it('shows each with the person’s own name and the head of the fingerprint, and what each shares', async () => {
     const { view, calls } = await open(two());

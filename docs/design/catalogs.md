@@ -6,6 +6,9 @@ phase by phase (§6).** What is built, and the contract each built part keeps, i
 (this design and its build), under &F136 (skills and MCP marketplace); &F135 (shareable hosted artifacts)
 is §2.9 and §3.8. The nix tool catalog (&F246) is a parked follow-up, not part of this design.
 
+The next round (the Sharing page, compact skill rows, versions and single-skill links, approved 2026-11-01) is
+[catalogs-sharing.md](catalogs-sharing.md); where it and this page differ on those, it wins.
+
 The owner's ask is quoted whole in [Appendix A](#appendix-a-the-owners-ask-verbatim). The lead's
 notes, and where each is answered, are [Appendix B](#appendix-b-the-leads-notes-and-where-each-is-answered).
 
