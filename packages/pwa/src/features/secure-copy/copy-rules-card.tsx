@@ -184,17 +184,30 @@ function AddRuleForm({
           {...(toKind === 'terminal' ? { hint: TERMINAL_RULE_HINT } : {})}
         >
           {id => (
-            <input
-              id={id}
-              className={`${INPUT} mono`}
-              value={to}
-              placeholder={TO_KINDS.find(kind => kind.value === toKind)?.placeholder}
-              autoCapitalize="off"
-              autoComplete="off"
-              spellCheck={false}
-              data-copy-rule-to=""
-              onChange={event => setTo(event.target.value)}
-            />
+            <>
+              <input
+                id={id}
+                className={`${INPUT} mono`}
+                value={to}
+                placeholder={TO_KINDS.find(kind => kind.value === toKind)?.placeholder}
+                autoCapitalize="off"
+                autoComplete="off"
+                spellCheck={false}
+                data-copy-rule-to=""
+                onChange={event => setTo(event.target.value)}
+              />
+              {/* Right under the field, before the help line: a shell or interpreter runs whatever it reads. */}
+              {toKind === 'terminal' && runsWhatItReads(to) && (
+                <p
+                  role="status"
+                  className="m-0 flex items-start gap-1.5 text-meta font-medium text-warn"
+                  data-copy-rule-runs-anything=""
+                >
+                  <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
+                  {RUNS_WHAT_IT_READS_WARNING}
+                </p>
+              )}
+            </>
           )}
         </Field>
       </div>
@@ -224,12 +237,6 @@ function AddRuleForm({
           )}
         </Field>
       </div>
-      {toKind === 'terminal' && runsWhatItReads(to) && (
-        <p role="status" className="m-0 flex items-start gap-1.5 text-meta text-warn" data-copy-rule-runs-anything="">
-          <TriangleAlert size={14} className="mt-0.5 shrink-0" aria-hidden="true" />
-          {RUNS_WHAT_IT_READS_WARNING}
-        </p>
-      )}
       {problem !== undefined && (
         <p role="alert" className="m-0 text-meta text-err" data-copy-rule-problem="">
           {problem}
