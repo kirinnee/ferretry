@@ -911,6 +911,28 @@ describe('auditedRoutes', () => {
     should(JSON.stringify(logged) + journal.lines.join('\n')).not.match(/my-private-login|secret-skill|logins\//u);
   });
 
+  it('should record a Settings confirmation with no kind when the answer is not JSON or names no known file', async () => {
+    // Arrange
+    const answers: readonly ApiRoute['handle'][] = [
+      async () => ({ status: 200, headers: new Map<string, string>(), body: 'plainly not json' }),
+      async () => jsonResponse({ path: 'not-a-known-file.yaml', confirmed: true }),
+      async () => jsonResponse({ confirmed: true }),
+    ];
+
+    for (const answer of answers) {
+      const { journal, routes } = decorated({ 'POST /v1/config/confirm': answer });
+      const api = await dispatcher(routes);
+
+      // Act
+      await api.dispatch(
+        request({ method: 'POST', path: '/v1/config/confirm', headers: ADMIN, loopback: true, body: '{}' }),
+      );
+
+      // Assert
+      should(records(journal).map(record => record.detail)).deepEqual([{ action: 'config-confirm', status: 200 }]);
+    }
+  });
+
   it('should record a refused Settings confirmation with no kind, since the refusal names no file', async () => {
     // Arrange
     const { journal, routes } = decorated({
