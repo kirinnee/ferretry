@@ -6,8 +6,10 @@ import {
   type PasskeyCrypto,
   type RegistrationInput,
   relyingPartyId,
+  type StoredAssertionInput,
   verifyAssertion,
   verifyRegistration,
+  verifyStoredAssertion,
 } from '../../../src/lib/passkeys/index.ts';
 import {
   assertion,
@@ -422,5 +424,109 @@ describe('verifyAssertion', () => {
       signCount: 7,
       origin: ORIGIN,
     });
+  });
+});
+
+describe('verifyStoredAssertion (a kept proof, checked again offline)', () => {
+  /** A kept assertion as a rule's record carries it: the signed bytes, the challenge derived again, the passkey now. */
+  const kept = async (
+    authenticator: Authenticator,
+    overrides: Parameters<typeof assertion>[1] = {},
+    passkey: { origin?: string; publicKeySpki?: Uint8Array } = {},
+  ): Promise<StoredAssertionInput> => {
+    const made = await assertion(authenticator, overrides);
+    return {
+      clientDataJSON: made.clientDataJSON,
+      authenticatorData: made.authenticatorData,
+      signature: made.signature,
+      expectedChallenge: CHALLENGE,
+      passkey: {
+        algorithm: authenticator.algorithm,
+        publicKeySpki: passkey.publicKeySpki ?? authenticator.spki,
+        origin: passkey.origin ?? ORIGIN,
+      },
+    };
+  };
+
+  it('should accept a genuine kept assertion from each algorithm, whatever its counter', async () => {
+    for (const authenticator of await authenticators()) {
+      for (const signCount of [0, 1, 9]) {
+        // Arrange
+        const input = await kept(authenticator, { auth: { signCount } });
+
+        // Act + Assert — the same bytes verify again and again: nothing offline moves a counter
+        should(await verifyStoredAssertion(webCrypto, input)).deepEqual({ ok: true, signCount, origin: ORIGIN });
+        should(await verifyStoredAssertion(webCrypto, input)).deepEqual({ ok: true, signCount, origin: ORIGIN });
+      }
+    }
+  });
+
+  it('should refuse an edited, re-aimed or unverified kept assertion, each with its own reason', async () => {
+    // Arrange
+    const authenticator = await es256Authenticator();
+    const other = await es256Authenticator();
+    const ANOTHER_CHALLENGE = Uint8Array.from({ length: 32 }, (_, index) => index);
+    const edited = async () => {
+      // The same challenge and origin, re-spelled: the signature covers SHA-256 of these exact bytes.
+      const input = await kept(authenticator);
+      const parsed = JSON.parse(new TextDecoder().decode(input.clientDataJSON)) as Record<string, unknown>;
+      return { ...input, clientDataJSON: utf8Bytes(JSON.stringify({ ...parsed, extra: 1 })) };
+    };
+    const cases: [string, Promise<StoredAssertionInput>][] = [
+      ['wrong-type', kept(authenticator, { client: clientData('webauthn.create') })],
+      ['challenge-mismatch', kept(authenticator).then(input => ({ ...input, expectedChallenge: ANOTHER_CHALLENGE }))],
+      [
+        'challenge-mismatch',
+        kept(authenticator, { client: clientData('webauthn.get', { challenge: toBase64Url(ANOTHER_CHALLENGE) }) }),
+      ],
+      // Made at the app, but the passkey on file was made at another origin: the kept origin must be the passkey's.
+      ['origin-not-allowed', kept(authenticator, {}, { origin: 'https://ferretry.example.com' })],
+      [
+        'origin-not-allowed',
+        kept(authenticator, { client: clientData('webauthn.get', { origin: 'https://ferretry.example.com' }) }),
+      ],
+      ['origin-not-allowed', kept(authenticator, { client: clientData('webauthn.get', { crossOrigin: true }) })],
+      ['rp-id-mismatch', kept(authenticator, { auth: { rpId: 'pages.dev' } })],
+      ['user-not-present', kept(authenticator, { auth: { flags: 0x04 } })],
+      ['user-not-verified', kept(authenticator, { auth: { flags: 0x01 } })],
+      ['bad-signature', edited()],
+      ['bad-signature', kept(authenticator, {}, { publicKeySpki: other.spki })],
+      ['bad-signature', kept(authenticator).then(input => ({ ...input, signature: new Uint8Array(64) }))],
+      [
+        'bad-signature',
+        kept(authenticator).then(input => {
+          const authenticatorData = input.authenticatorData.slice();
+          authenticatorData[36] = 7;
+          return { ...input, authenticatorData };
+        }),
+      ],
+    ];
+
+    // Act / Assert
+    for (const [reason, pending] of cases) {
+      const input = await pending;
+      should(await verifyStoredAssertion(webCrypto, input)).deepEqual({ ok: false, reason });
+    }
+  });
+
+  it('should leave the live check as it was: an unmoved counter is still refused there', async () => {
+    // Arrange — one assertion whose counter did not move past the one on file
+    const authenticator = await es256Authenticator();
+    const live = await assertion(authenticator, { auth: { signCount: 5 }, storedCount: 5 });
+    const stored: StoredAssertionInput = {
+      clientDataJSON: live.clientDataJSON,
+      authenticatorData: live.authenticatorData,
+      signature: live.signature,
+      expectedChallenge: live.expectedChallenge,
+      passkey: { algorithm: authenticator.algorithm, publicKeySpki: authenticator.spki, origin: ORIGIN },
+    };
+
+    // Act
+    const asLive = await verifyAssertion(webCrypto, live);
+    const asKept = await verifyStoredAssertion(webCrypto, stored);
+
+    // Assert — the live ceremony refuses the stalled counter; only the offline re-check skips it
+    should(asLive).deepEqual({ ok: false, reason: 'counter-not-increased' });
+    should(asKept).deepEqual({ ok: true, signCount: 5, origin: ORIGIN });
   });
 });

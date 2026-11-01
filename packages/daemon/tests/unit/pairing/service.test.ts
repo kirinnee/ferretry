@@ -1031,6 +1031,40 @@ describe('PairingService revocation', () => {
     should(credentials.get(FIRST_DEVICE_ID)).be.undefined();
   });
 
+  it('should attempt every owner’s purge when an earlier one fails, record the revocation, then report each failure', async () => {
+    // secrev-1272 L2: a push store that could not be written used to stop the loop, so the device's passkeys —
+    // and the "passkeys changed" signal they fire — stayed behind, and a kept proof it made still verified.
+    // Arrange — the first and third owners fail; the second (the passkeys) and the fourth must still run
+    const push = new RecordingDeviceState(new Error('the enrolment document could not be written'));
+    const passkeys = new RecordingDeviceState();
+    const later = new RecordingDeviceState(new Error('the rules document could not be written'));
+    const last = new RecordingDeviceState();
+    const audit = new RecordingAudit();
+    const { service, mint } = fixture({ deviceState: [push, passkeys, later, last], audit });
+    mint();
+    await redeemDirect(service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    // Act
+    const failure = await service.revokeDevice(FIRST_DEVICE_ID, 'admin-cli').then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should([push, passkeys, later, last].map(owner => owner.forgotten)).deepEqual([
+      [FIRST_DEVICE_ID],
+      [FIRST_DEVICE_ID],
+      [FIRST_DEVICE_ID],
+      [FIRST_DEVICE_ID],
+    ]);
+    should(audit.entries.map(entry => entry.changes)).deepEqual([[`device.revoked=${FIRST_DEVICE_ID}`]]);
+    should(failure).be.instanceOf(AggregateError);
+    should((failure as AggregateError).errors.map(error => (error as Error).message)).deepEqual([
+      'the enrolment document could not be written',
+      'the rules document could not be written',
+    ]);
+  });
+
   it('should purge a device’s other state even when there was no grant left to remove', async () => {
     // Two people revoking the same lost phone is the expected way this is used, and the second pass
     // must still be able to clean up whatever the first one left behind.

@@ -1886,6 +1886,123 @@ describe('spending a single-use step-up', () => {
     });
   });
 
+  describe('claiming a kept proof (a stored-proof act)', () => {
+    const RULE = `srs_${'a'.repeat(24)}` as const;
+    /** The challenge the commit derives again from the bytes it writes. */
+    const CHALLENGE = new Uint8Array(32).fill(7);
+    const EVIDENCE = {
+      deviceId: `fy_device_id_${'a'.repeat(22)}`,
+      credentialId: 'Y3JlZA',
+      clientDataJSON: 'Y2xpZW50',
+      authenticatorData: 'YXV0aA',
+      signature: 'c2ln',
+    } as const;
+    /** A witness built as the mounted one is: a class holding ONE kept proof, which it reads through `this`. */
+    class KeepingWitness implements StepUpWitness {
+      readonly asked: unknown[] = [];
+      #kept: typeof EVIDENCE | undefined = EVIDENCE;
+      held(): boolean {
+        return true;
+      }
+      claimFresh(): boolean {
+        this.asked.push('claimFresh');
+        return true;
+      }
+      claimStoredProof(
+        _subject: unknown,
+        act: string,
+        bound: string,
+        challenge: Uint8Array,
+      ): typeof EVIDENCE | undefined {
+        this.asked.push([act, bound, challenge]);
+        const kept = this.#kept;
+        this.#kept = undefined;
+        return bound === RULE ? kept : undefined;
+      }
+    }
+    const route = (seen: unknown[]): ApiRoute => ({
+      method: 'POST',
+      path: '/v1/claims',
+      minimum: 'operator',
+      caller: 'any',
+      capability: { capability: 'fleet', axis: 'use' },
+      handle: async context => {
+        seen.push(context.claimStoredProof?.('approve-sign-in-rule', RULE, CHALLENGE));
+        // @ts-expect-error — a kept proof is claimed by its own kind of stage, never by a digest
+        seen.push(context.claimStoredProof?.('approve-sign-in-rule', 'a'.repeat(64), CHALLENGE));
+        // @ts-expect-error — only a stored-proof act is claimed as a stored proof
+        seen.push(context.claimStoredProof?.('approve-task-plan', RULE, CHALLENGE));
+        // @ts-expect-error — and always with its subject
+        seen.push(context.claimStoredProof?.('approve-sign-in-rule'));
+        // @ts-expect-error — and always with the challenge derived again from the bytes being written
+        seen.push(context.claimStoredProof?.('approve-sign-in-rule', RULE));
+        // @ts-expect-error — a stored-proof act is never claimed as a fresh one
+        seen.push(context.claimFreshStepUp?.('approve-sign-in-rule', RULE));
+        return jsonResponse({});
+      },
+    });
+    const dispatcherFor = (seen: unknown[], witness: StepUpWitness) =>
+      new ApiDispatcher(
+        new ApiRouter([route(seen)]),
+        credentials,
+        guardDeciding({ allowed: true, refusal: 'granted' }),
+        undefined,
+        witness,
+      );
+
+    it('should hand a device its kept proof once, for its act and subject, and nothing to any other claim', async () => {
+      // Arrange
+      const witness = new KeepingWitness();
+      const seen: unknown[] = [];
+      const dispatcher = dispatcherFor(seen, witness);
+
+      // Act
+      await dispatcher.dispatch(request({ method: 'POST', path: '/v1/claims', device: DEVICE }));
+      await dispatcher.dispatch(request({ method: 'POST', path: '/v1/claims', device: DEVICE }));
+
+      // Assert — another kind of subject, the wrong act, a missing subject or challenge and a fresh claim never reach
+      // the witness
+      should(seen).deepEqual([
+        EVIDENCE,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+      ]);
+      should(witness.asked).deepEqual([
+        ['approve-sign-in-rule', RULE, CHALLENGE],
+        ['approve-sign-in-rule', RULE, CHALLENGE],
+      ]);
+    });
+
+    it("should hold no kept proof for the machine's own token, nor for a witness that keeps none", async () => {
+      // Arrange
+      const witness = new KeepingWitness();
+      const machine: unknown[] = [];
+      const none: unknown[] = [];
+
+      // Act
+      await dispatcherFor(machine, witness).dispatch(
+        request({ method: 'POST', path: '/v1/claims', headers: { authorization: 'Bearer admin-secret' } }),
+      );
+      await dispatcherFor(none, { held: () => true }).dispatch(
+        request({ method: 'POST', path: '/v1/claims', device: DEVICE }),
+      );
+
+      // Assert
+      should(machine).deepEqual([undefined, undefined, undefined, undefined, undefined, false]);
+      should(none).deepEqual([undefined, undefined, undefined, undefined, undefined, false]);
+      should(witness.asked).be.empty();
+    });
+  });
+
   it('should serve an allowed stepped-up act when the witness has nothing to spend', async () => {
     const served = await dispatcherWithGuard(guardDeciding({ allowed: true, refusal: 'granted', steppedUp: true }), {
       held: () => true,

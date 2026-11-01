@@ -1,9 +1,10 @@
 import { describe, it } from 'bun:test';
-import { PASSKEY_CHALLENGE_TTL_SECONDS, STEP_UP_TTL_SECONDS } from '@ferretry/protocol';
+import { PASSKEY_CHALLENGE_TTL_SECONDS, STEP_UP_TTL_SECONDS, type StoredStepUpProof } from '@ferretry/protocol';
 import should from 'should';
 import {
   APP_SESSION_GRACE_MS,
   ChallengeLedger,
+  type KeptProof,
   StepUpRegistry,
   type StepUpSubject,
 } from '../../../src/lib/step-up/index.ts';
@@ -303,17 +304,17 @@ describe('ChallengeLedger', () => {
   it('should hand back the act a challenge was issued for, once', () => {
     // Arrange
     const ledger = new ChallengeLedger();
-    ledger.issue(phone, 'step-up', bytes(1), NOW, undefined, 'catalog-install');
+    ledger.issue(phone, 'step-up', bytes(1), NOW, undefined, { kind: 'act', act: 'catalog-install' });
     ledger.issue(laptop, 'step-up', bytes(2), NOW);
 
     // Act / Assert
     const first = ledger.takeWithAct(phone, 'step-up', NOW);
     should(first?.bytes).eql(bytes(1));
-    should(first?.act).equal('catalog-install');
+    should(first?.stamp).eql({ kind: 'act', act: 'catalog-install' });
     should(ledger.takeWithAct(phone, 'step-up', NOW)).be.undefined();
     const plain = ledger.takeWithAct(laptop, 'step-up', NOW);
     should(plain?.bytes).eql(bytes(2));
-    should(plain?.act).be.undefined();
+    should(plain?.stamp).be.undefined();
   });
 
   it('should refuse a lapsed challenge and spend it in the same call', () => {
@@ -517,13 +518,134 @@ describe('ChallengeLedger binding', () => {
   it('should hand back what a step-up challenge was bound to, with its act', () => {
     // Arrange
     const ledger = new ChallengeLedger();
-    ledger.issue(phone, 'step-up', bytes(1), NOW, undefined, 'add-2fa-key', 'c'.repeat(64));
+    ledger.issue(phone, 'step-up', bytes(1), NOW, undefined, {
+      kind: 'bound',
+      act: 'add-2fa-key',
+      bound: 'c'.repeat(64),
+    });
 
     // Act
     const taken = ledger.takeWithAct(phone, 'step-up', NOW);
 
     // Assert
-    should(taken?.act).equal('add-2fa-key');
-    should(taken?.bound).equal('c'.repeat(64));
+    should(taken?.stamp).eql({ kind: 'bound', act: 'add-2fa-key', bound: 'c'.repeat(64) });
+  });
+});
+
+describe("StepUpRegistry stored proof (a standing rule's kept assertion, invariant 6)", () => {
+  /** A kept proof is bound to the staged rule it approves. */
+  const RULE = `srs_${'a'.repeat(24)}`;
+  const OTHER = `srs_${'b'.repeat(24)}`;
+  /** The challenge the live ceremony verified, derived from the rule's bytes; and one derived from other bytes. */
+  const CHALLENGE = bytes(7);
+  const ANOTHER = bytes(8);
+  const evidence = (deviceIdOf: string = phone.deviceId): StoredStepUpProof => ({
+    deviceId: deviceIdOf,
+    credentialId: 'Y3JlZGVudGlhbA',
+    clientDataJSON: 'Y2xpZW50',
+    authenticatorData: 'YXV0aA',
+    signature: 'c2ln',
+  });
+  const kept = (deviceIdOf?: string): KeptProof => ({ evidence: evidence(deviceIdOf), challenge: CHALLENGE });
+
+  it('should hand the kept assertion over once, for its act, its exact stage and its own challenge only', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grantBound(phone, NOW, 'approve-sign-in-rule', RULE, kept());
+
+    // Act + Assert — another stage, tab, device or challenge neither takes it nor spends it
+    should(registry.claimStoredProof(phone, NOW, 'approve-sign-in-rule', OTHER, CHALLENGE)).be.undefined();
+    should(registry.claimStoredProof(phone, NOW, 'approve-sign-in-rule', '', CHALLENGE)).be.undefined();
+    should(registry.claimStoredProof(phoneOtherTab, NOW, 'approve-sign-in-rule', RULE, CHALLENGE)).be.undefined();
+    should(registry.claimStoredProof(laptop, NOW, 'approve-sign-in-rule', RULE, CHALLENGE)).be.undefined();
+    should(registry.claimStoredProof(phone, NOW, 'approve-sign-in-rule', RULE, ANOTHER)).be.undefined();
+    should(registry.claimStoredProof(phone, NOW, 'approve-sign-in-rule', RULE, CHALLENGE.subarray(1))).be.undefined();
+    should(registry.claimStoredProof(phone, NOW, 'approve-sign-in-rule', RULE, CHALLENGE)).eql(evidence());
+    should(registry.claimStoredProof(phone, NOW, 'approve-sign-in-rule', RULE, CHALLENGE)).be.undefined();
+  });
+
+  it('should never let claimFresh take a stored proof, in any form', () => {
+    // Arrange
+    const registry = openRegistry();
+    registry.grantBound(phone, NOW, 'approve-sign-in-rule', RULE, kept());
+
+    // Act + Assert — every fresh claim, and every check a step-up answers, sees nothing
+    // @ts-expect-error — a stored-proof act is claimed only as a stored proof
+    should(registry.claimFresh(phone, NOW, 'approve-sign-in-rule', RULE)).be.false();
+    should(registry.claimFresh(phone, NOW, 'approve-task-plan', RULE)).be.false();
+    should(registry.claimFresh(phone, NOW, 'add-2fa-key', RULE)).be.false();
+    should(registry.claimFresh(phone, NOW)).be.false();
+    should(registry.claimFresh(phone, NOW, 'add-device')).be.false();
+    should(registry.freshlyHeld(phone, NOW)).be.false();
+    should(registry.held(phone, NOW)).be.false();
+    // …and it is still there for the commit it was proved for.
+    should(registry.claimStoredProof(phone, NOW, 'approve-sign-in-rule', RULE, CHALLENGE)).eql(evidence());
+  });
+
+  it("should never let claimStoredProof take another act's proof, nor a step-up", () => {
+    // Arrange — a bound proof for a spent act on the same subject, and a fresh step-up on another tab
+    const registry = openRegistry();
+    registry.grantBound(phone, NOW, 'approve-task-plan', RULE);
+    registry.grant(phoneOtherTab, NOW, true);
+
+    // Act + Assert
+    should(registry.claimStoredProof(phone, NOW, 'approve-sign-in-rule', RULE, CHALLENGE)).be.undefined();
+    should(registry.claimStoredProof(phoneOtherTab, NOW, 'approve-sign-in-rule', RULE, CHALLENGE)).be.undefined();
+    // @ts-expect-error — only a stored-proof act is ever answered
+    should(registry.claimStoredProof(phone, NOW, 'approve-task-plan', RULE, CHALLENGE)).be.undefined();
+    // Neither was spent by those refusals.
+    should(registry.claimFresh(phone, NOW, 'approve-task-plan', RULE)).be.true();
+    should(registry.claimFresh(phoneOtherTab, NOW)).be.true();
+  });
+
+  it('should refuse a grant that keeps the wrong thing, loudly, and record nothing', () => {
+    // Arrange
+    const registry = openRegistry();
+    const grantLoosely = registry.grantBound.bind(registry) as unknown as (
+      ...args: readonly unknown[]
+    ) => number | undefined;
+
+    // Act + Assert — a kept proof for an act whose proof is spent, and none for the act that keeps it
+    should(() => grantLoosely(phone, NOW, 'add-2fa-key', RULE, kept())).throw(TypeError);
+    should(() => grantLoosely(phoneOtherTab, NOW, 'approve-sign-in-rule', RULE)).throw(TypeError);
+    should(registry.claimFresh(phone, NOW, 'add-2fa-key', RULE)).be.false();
+    should(registry.claimStoredProof(phoneOtherTab, NOW, 'approve-sign-in-rule', RULE, CHALLENGE)).be.undefined();
+  });
+
+  it('should lapse a stored proof after one challenge lifetime (120 s)', () => {
+    // Arrange
+    const lifetime = PASSKEY_CHALLENGE_TTL_SECONDS * 1_000;
+    const registry = openRegistry();
+
+    // Act
+    const until = registry.grantBound(phone, NOW, 'approve-sign-in-rule', RULE, kept());
+    registry.grantBound(phoneOtherTab, NOW, 'approve-sign-in-rule', RULE, kept());
+
+    // Assert
+    should(lifetime).equal(120_000);
+    should(until).equal(NOW + lifetime);
+    should(registry.claimStoredProof(phone, NOW + lifetime, 'approve-sign-in-rule', RULE, CHALLENGE)).be.undefined();
+    should(registry.claimStoredProof(phoneOtherTab, NOW + lifetime - 1, 'approve-sign-in-rule', RULE, CHALLENGE)).eql(
+      evidence(),
+    );
+  });
+
+  it('should end a stored proof with its page, and with its revoked device', () => {
+    // Arrange
+    let now = NOW;
+    const registry = new StepUpRegistry({ nowMs: () => now });
+    const close = registry.open(laptop);
+    registry.open(phone);
+    registry.grantBound(laptop, NOW, 'approve-sign-in-rule', RULE, kept(laptop.deviceId));
+    registry.grantBound(phone, NOW, 'approve-sign-in-rule', RULE, kept());
+
+    // Act — the laptop's page closes past the grace; the phone is revoked
+    close();
+    now = NOW + APP_SESSION_GRACE_MS;
+    registry.forgetDevice(phone.deviceId);
+
+    // Assert
+    should(registry.claimStoredProof(laptop, now, 'approve-sign-in-rule', RULE, CHALLENGE)).be.undefined();
+    should(registry.claimStoredProof(phone, now, 'approve-sign-in-rule', RULE, CHALLENGE)).be.undefined();
   });
 });

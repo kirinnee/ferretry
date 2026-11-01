@@ -149,9 +149,15 @@ describe('CatalogMemberService.revokeMember', () => {
     // Act
     const revoked = await r.service.revokeMember(memberId(7));
 
-    // Assert
+    // Assert — every browser goes as removing one does, so each one's passkeys are forgotten too
     should(revoked).eql({ memberId: memberId(7), keysRemoved: 2, sharesEnded: 1 });
-    should(r.log).eql(['members.write', 'shares.write', `closeMember:${memberId(7)}`]);
+    should(r.log).eql([
+      'members.write',
+      'shares.write',
+      `closeMember:${memberId(7)}`,
+      `closeKey:${memberId(7)}:${keyId(71)}`,
+      `closeKey:${memberId(7)}:${keyId(72)}`,
+    ]);
     should(r.members.document.members.map(member => member.memberId)).eql([memberId(8)]);
   });
 
@@ -178,7 +184,12 @@ describe('CatalogMemberService.revokeMember', () => {
 
     // Assert
     should(revoked.sharesEnded).equal(0);
-    should(r.log).eql(['members.write', `closeMember:${memberId(7)}`]);
+    should(r.log).eql([
+      'members.write',
+      `closeMember:${memberId(7)}`,
+      `closeKey:${memberId(7)}:${keyId(71)}`,
+      `closeKey:${memberId(7)}:${keyId(72)}`,
+    ]);
   });
 
   it('should end the live shares of someone who never joined, and write no members file', async () => {
@@ -231,6 +242,8 @@ describe('CatalogMemberService.revokeMember', () => {
     // Assert
     should(error.message).equal('members disk full');
     should(r.log).containEql(`closeMember:${memberId(7)}`);
+    // The person is still on disk, so their browsers' passkeys stay for the next attempt.
+    should(r.log.filter(entry => entry.startsWith('closeKey:'))).eql([]);
     should((await r.service.listMembers()).members.map(member => member.memberId)).eql([memberId(8)]);
   });
 
@@ -263,6 +276,9 @@ describe('CatalogMemberService.revokeMember', () => {
     // Assert
     should(error.message).equal('shares disk full');
     should(first.log).containEql(`closeMember:${memberId(7)}`);
+    // The person was already gone from disk, so their browsers' passkeys went with them despite the shares failure.
+    should(first.log).containEql(`closeKey:${memberId(7)}:${keyId(71)}`);
+    should(first.log).containEql(`closeKey:${memberId(7)}:${keyId(72)}`);
     should(revoked).eql({ memberId: memberId(7), keysRemoved: 0, sharesEnded: 1 });
     should(restarted.members.writes).equal(0);
     should(shareOf(restarted.shares.document, 1).state).equal('ended');

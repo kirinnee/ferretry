@@ -13,6 +13,8 @@ import {
   ChallengeLedger,
   type DeviceKeyRotationPort,
   type PasskeyStore,
+  type PasskeysChange,
+  PasskeysChangedSignal,
   passkeyAddedNotice,
   passkeyVerifier,
   relyingPartyIdFor,
@@ -98,6 +100,10 @@ function fixture(
     machineName?: string;
     /** Where unlocks are kept across a restart; absent keeps them in memory only. */
     unlocks?: UnlockLedgerPort;
+    /** Told after a device is forgotten with its passkeys; absent tells nobody. */
+    passkeysChanged?: PasskeysChangedSignal;
+    /** `false` builds the verifier without its offline check of a kept proof. */
+    offline?: boolean;
   } = {},
 ) {
   const clock = { now: options.nowMs ?? PAIRED_AT_MS + 60_000 };
@@ -115,9 +121,13 @@ function fixture(
   registry.open(phone);
   registry.open({ ...phone, appSession: 'tab-two' });
   const audited: { readonly actor: string; readonly changes: readonly string[] }[] = [];
+  const verifier = passkeyVerifier(webCrypto);
   const service = new StepUpService({
     store,
-    verifier: passkeyVerifier(webCrypto),
+    verifier:
+      options.offline === false
+        ? { verifyRegistration: verifier.verifyRegistration, verifyAssertion: verifier.verifyAssertion }
+        : verifier,
     registry,
     challenges: new ChallengeLedger(),
     // The software authenticator signs over a known challenge, so the daemon "randomly" issues it.
@@ -140,6 +150,7 @@ function fixture(
       : {}),
     ...(options.rotation === undefined ? {} : { rotation: options.rotation }),
     ...(options.unlocks === undefined ? {} : { unlocks: options.unlocks }),
+    ...(options.passkeysChanged === undefined ? {} : { passkeysChanged: options.passkeysChanged }),
     audit: {
       record: async entry => {
         audited.push(entry);
@@ -1981,6 +1992,353 @@ describe('StepUpService key rotation (B6)', () => {
       // Assert
       should(refused).eql({ ok: false, refusal: 'not-verified' });
       should(rotation.rotated).eql([]);
+    });
+  });
+});
+
+describe('StepUpService stored proofs (approve-sign-in-rule: a derived challenge, a kept assertion)', () => {
+  /** The staged rule the proof is kept for: its id names the proof; the derived challenge binds its bytes. */
+  const STAGE = `srs_${'e'.repeat(24)}` as const;
+  /** A task-plan selection's bound digest, for the proofs that must never count as a rule's. */
+  const BOUND = 'e'.repeat(64);
+  /**
+   * The challenge DERIVED from the staged body (`signInRuleChallenge(nonce, subject)`). The software authenticator signs
+   * over {@link CHALLENGE}, so that is the derived one; once the passkey is registered the daemon's own draw is
+   * {@link CONFIRM}, which no assertion here answers, so a ceremony that verifies proves the derived challenge was issued.
+   */
+  const DERIVED = CHALLENGE;
+  const ANOTHER = Uint8Array.from({ length: 32 }, (_, index) => 255 - index);
+
+  const steppedUpFor = async (signCount = 5, offline = true) => {
+    const world = fixture({ challenges: [CHALLENGE, CONFIRM], offline });
+    const authenticator = await es256Authenticator();
+    await enrol(world.service, authenticator);
+    world.registry.forgetDevice(phone.deviceId);
+    const options = await world.service.stepUpOptions(remote(), ORIGIN, 'approve-sign-in-rule', STAGE, DERIVED);
+    const sent = await assertionBody(authenticator, { auth: { signCount } });
+    const stepped = await world.service.stepUp(remote(), sent);
+    return { ...world, authenticator, options, sent, stepped };
+  };
+
+  it('should issue exactly the derived challenge for a stored-proof act, never its own draw', async () => {
+    // Act
+    const { options, stepped } = await steppedUpFor();
+
+    // Assert
+    should(options).eql({
+      ok: true,
+      value: {
+        challenge: toBase64Url(DERIVED),
+        rpId: relyingPartyIdFor(ORIGIN),
+        allowCredentials: [{ type: 'public-key', id: toBase64Url(CREDENTIAL_ID) }],
+        timeout: PASSKEY_CHALLENGE_TTL_SECONDS * 1_000,
+      },
+    });
+    should(stepped.ok).be.true();
+  });
+
+  it('should require the derived challenge for a stored-proof act and refuse one for every other act', async () => {
+    // Arrange
+    const { service } = fixture();
+    await enrol(service, await es256Authenticator());
+    type Loose = (
+      caller: StepUpCaller,
+      origin: string,
+      act?: string,
+      bound?: string,
+      challenge?: Uint8Array,
+    ) => ReturnType<StepUpService['stepUpOptions']>;
+    const ask = service.stepUpOptions.bind(service) as unknown as Loose;
+
+    // Act
+    const outcomes = [
+      await ask(remote(), ORIGIN, 'approve-sign-in-rule', STAGE),
+      await ask(remote(), ORIGIN, 'approve-sign-in-rule', '', DERIVED),
+      // Bound to anything but a well-formed stage of its own kind: a digest, a task plan's stage.
+      await ask(remote(), ORIGIN, 'approve-sign-in-rule', BOUND, DERIVED),
+      await ask(remote(), ORIGIN, 'approve-sign-in-rule', `tps_${'e'.repeat(24)}`, DERIVED),
+      await ask(remote(), ORIGIN, 'approve-sign-in-rule', STAGE, DERIVED.subarray(1)),
+      await ask(remote(), ORIGIN, 'approve-sign-in-rule', STAGE, new Uint8Array(33)),
+      await ask(remote(), ORIGIN, 'add-2fa-key', BOUND, DERIVED),
+      await ask(remote(), ORIGIN, 'approve-task-plan', BOUND, DERIVED),
+      await ask(remote(), ORIGIN, 'catalog-install', undefined, DERIVED),
+      await ask(remote(), ORIGIN, undefined, undefined, DERIVED),
+    ];
+
+    // Assert
+    should(outcomes).eql(outcomes.map(() => ({ ok: false, refusal: 'not-verified' })));
+  });
+
+  it('should keep the verified assertion with the bound grant, and hand it over once to its own claim', async () => {
+    // Act
+    const { service, sent } = await steppedUpFor();
+
+    // Assert — the exact bytes the authenticator signed, the credential this device holds, nothing else
+    should(service.claimStoredProof(phone, 'approve-sign-in-rule', `srs_${'f'.repeat(24)}`, DERIVED)).be.undefined();
+    should(
+      service.claimStoredProof({ ...phone, appSession: 'tab-two' }, 'approve-sign-in-rule', STAGE, DERIVED),
+    ).be.undefined();
+    // @ts-expect-error — a kept proof is claimed by its stage, never by anything else
+    should(service.claimStoredProof(phone, 'approve-sign-in-rule', BOUND, DERIVED)).be.undefined();
+    // A commit of other bytes derives another challenge: it is handed nothing, and the proof is not spent.
+    should(service.claimStoredProof(phone, 'approve-sign-in-rule', STAGE, ANOTHER)).be.undefined();
+    should(service.claimStoredProof(phone, 'approve-sign-in-rule', STAGE, DERIVED)).eql({
+      deviceId: phone.deviceId,
+      credentialId: toBase64Url(CREDENTIAL_ID),
+      clientDataJSON: sent.clientDataJSON,
+      authenticatorData: sent.authenticatorData,
+      signature: sent.signature,
+    });
+    should(service.claimStoredProof(phone, 'approve-sign-in-rule', STAGE, DERIVED)).be.undefined();
+  });
+
+  it('should never let a fresh claim, a window or an unlock see a stored proof', async () => {
+    // Act
+    const { service } = await steppedUpFor();
+
+    // Assert
+    should(service.held(phone)).be.false();
+    should(service.freshlyHeld(phone)).be.false();
+    should(service.claimFresh(phone)).be.false();
+    should(service.claimFresh(phone, 'approve-task-plan', BOUND)).be.false();
+    should(service.claimFresh(phone, 'add-2fa-key', BOUND)).be.false();
+    should(service.claimFresh(phone, 'approve-task-plan', STAGE)).be.false();
+    // @ts-expect-error — a stored-proof act is claimed only as a stored proof
+    should(service.claimFresh(phone, 'approve-sign-in-rule', STAGE)).be.false();
+    should(service.claimStoredProof(phone, 'approve-sign-in-rule', STAGE, DERIVED)).not.be.undefined();
+  });
+
+  it("should never store an ordinary bound proof as a rule's", async () => {
+    // Arrange — a task-plan selection's proof
+    const { service, registry } = fixture();
+    const authenticator = await es256Authenticator();
+    await enrol(service, authenticator);
+    registry.forgetDevice(phone.deviceId);
+
+    // Act
+    await service.stepUpOptions(remote(), ORIGIN, 'approve-task-plan', BOUND);
+    const stepped = await service.stepUp(remote(), await assertionBody(authenticator, { auth: { signCount: 5 } }));
+
+    // Assert
+    should(stepped.ok).be.true();
+    should(service.claimStoredProof(phone, 'approve-sign-in-rule', STAGE, DERIVED)).be.undefined();
+    should(service.claimFresh(phone, 'approve-task-plan', BOUND)).be.true();
+  });
+
+  it('should refuse the ceremony, keeping nothing, when what it would keep does not fit a stored proof', async () => {
+    // Arrange — a passkey on file under an id longer than a stored proof may carry
+    const { service, store, registry } = fixture({ challenges: [CONFIRM] });
+    const authenticator = await es256Authenticator();
+    const longId = 'A'.repeat(1_400);
+    store.rows.push({
+      credentialId: longId,
+      deviceId: phone.deviceId,
+      algorithm: authenticator.algorithm,
+      publicKeySpki: toBase64Url(authenticator.spki),
+      signCount: 0,
+      origin: ORIGIN,
+      createdAt: new Date(PAIRED_AT_MS).toISOString(),
+    });
+    registry.forgetDevice(phone.deviceId);
+
+    // Act
+    await service.stepUpOptions(remote(), ORIGIN, 'approve-sign-in-rule', STAGE, DERIVED);
+    const stepped = await service.stepUp(
+      remote(),
+      await assertionBody(authenticator, { auth: { signCount: 5 } }, longId),
+    );
+
+    // Assert — refused rather than keeping less than was verified
+    should(stepped).eql({ ok: false, refusal: 'not-verified' });
+    should(service.claimStoredProof(phone, 'approve-sign-in-rule', STAGE, DERIVED)).be.undefined();
+  });
+
+  it('should keep the live ceremony as it was: a counter that did not move keeps nothing', async () => {
+    // Arrange — a passkey whose counter already stands at 5
+    const { service, store, registry, audited } = fixture();
+    const authenticator = await es256Authenticator();
+    await enrol(service, authenticator);
+    registry.forgetDevice(phone.deviceId);
+    store.rows = store.rows.map(row => ({ ...row, signCount: 5 }));
+
+    // Act
+    await service.stepUpOptions(remote(), ORIGIN, 'approve-sign-in-rule', STAGE, DERIVED);
+    const stepped = await service.stepUp(remote(), await assertionBody(authenticator, { auth: { signCount: 5 } }));
+
+    // Assert
+    should(stepped).eql({ ok: false, refusal: 'not-verified' });
+    should(service.claimStoredProof(phone, 'approve-sign-in-rule', STAGE, DERIVED)).be.undefined();
+    should(audited.some(entry => entry.changes.includes(`passkey.counter-refused=${phone.deviceId}`))).be.true();
+  });
+
+  describe('checking a kept proof again (verifyStoredProof)', () => {
+    const claimed = async (offline = true) => {
+      const world = await steppedUpFor(5, offline);
+      const proof = world.service.claimStoredProof(phone, 'approve-sign-in-rule', STAGE, DERIVED);
+      if (proof === undefined) throw new Error('the ceremony kept no proof');
+      return { ...world, proof };
+    };
+
+    it('should verify the kept proof against its derived challenge, as often as it is asked', async () => {
+      // Arrange
+      const { service, proof } = await claimed();
+
+      // Act + Assert — the counter on file has moved past it since, and that does not matter offline
+      should(await service.verifyStoredProof(proof, DERIVED)).be.true();
+      should(await service.verifyStoredProof(proof, DERIVED)).be.true();
+    });
+
+    it('should refuse a kept proof that was edited, re-aimed, unverified, forged, or whose passkey is gone', async () => {
+      // Arrange
+      const { service, authenticator, proof } = await claimed();
+      const other = await es256Authenticator();
+      const reSigned = async (overrides: Parameters<typeof assertion>[1], by: Authenticator = authenticator) => {
+        const made = await assertionBody(by, overrides);
+        return { ...proof, ...made, credentialId: proof.credentialId };
+      };
+      // The same fields in another order: everything a reader checks still matches, only the signed bytes changed.
+      const editedClient = toBase64Url(
+        new TextEncoder().encode(
+          JSON.stringify({ challenge: toBase64Url(DERIVED), type: 'webauthn.get', origin: ORIGIN, crossOrigin: false }),
+        ),
+      );
+
+      // Act + Assert
+      const refused: [string, typeof proof][] = [
+        ['an edited clientDataJSON', { ...proof, clientDataJSON: editedClient }],
+        [
+          'signed for another challenge (another rule)',
+          await reSigned({ client: clientData('webauthn.get', { challenge: toBase64Url(ANOTHER) }) }),
+        ],
+        [
+          "made at another origin this daemon serves, not the passkey's own",
+          await reSigned({ client: clientData('webauthn.get', { origin: OTHER_ORIGIN }) }),
+        ],
+        ['no user verification', await reSigned({ auth: { flags: 0x01 } })],
+        ["another key under this credential's id", await reSigned({}, other)],
+        ['a bad signature', { ...proof, signature: toBase64Url(new Uint8Array(70)) }],
+        ["another device presenting this device's credential", { ...proof, deviceId: laptop.deviceId }],
+        ['a credential this device does not hold', { ...proof, credentialId: toBase64Url(SECOND_ID) }],
+      ];
+      for (const [why, candidate] of refused)
+        should(await service.verifyStoredProof(candidate, DERIVED)).be.false(`${why} verified`);
+      should(await service.verifyStoredProof(proof, ANOTHER)).be.false();
+      // …while the genuine one still verifies.
+      should(await service.verifyStoredProof(proof, DERIVED)).be.true();
+    });
+
+    it('should refuse a kept proof whose bytes, or whose passkey on file, do not decode', async () => {
+      // Arrange
+      const { service, store, proof } = await claimed();
+      const undecodable = 'Y';
+
+      // Act + Assert — each field the check decodes, and the public key the registry holds now
+      for (const field of ['clientDataJSON', 'authenticatorData', 'signature'] as const)
+        should(await service.verifyStoredProof({ ...proof, [field]: undecodable }, DERIVED)).be.false(field);
+      store.rows = store.rows.map(row => ({ ...row, publicKeySpki: undecodable }));
+      should(await service.verifyStoredProof(proof, DERIVED)).be.false('publicKeySpki');
+    });
+
+    it('should refuse a kept proof once its device is no longer paired, even with its passkeys still on file', async () => {
+      // Arrange — a revocation whose passkey purge failed: the grant is gone, the passkeys are not
+      const { service, store, directory, proof } = await claimed();
+
+      // Act
+      directory.paired = false;
+
+      // Assert
+      should(await store.list(phone.deviceId)).have.length(1);
+      should(await service.verifyStoredProof(proof, DERIVED)).be.false();
+    });
+
+    it('should refuse a kept proof once its device is forgotten and its passkeys with it', async () => {
+      // Arrange
+      const { service, proof } = await claimed();
+
+      // Act
+      await service.forgetDevice(phone.deviceId);
+
+      // Assert
+      should(await service.verifyStoredProof(proof, DERIVED)).be.false();
+    });
+
+    it('should verify no kept proof on a verifier that cannot check one offline', async () => {
+      // Arrange — the live ceremony still runs and keeps the proof; only the offline check is missing
+      const { service, proof } = await claimed(false);
+
+      // Act + Assert
+      should(await service.verifyStoredProof(proof, DERIVED)).be.false();
+    });
+  });
+
+  describe('the passkeys-changed signal', () => {
+    it('should answer the removal without waiting past its bound on a listener that hangs, and report it', async () => {
+      // Arrange — one listener that never settles, one that answers at once
+      const failures: unknown[] = [];
+      const signal = new PasskeysChangedSignal((error, change) => failures.push([String(error), change.cause]), 20);
+      const { service } = fixture({ passkeysChanged: signal });
+      const heard: string[] = [];
+      signal.subscribe(() => new Promise<void>(() => undefined));
+      signal.subscribe(change => {
+        heard.push(change.cause);
+      });
+
+      // Act
+      const startedAt = Date.now();
+      await service.forgetDevice(phone.deviceId);
+
+      // Assert — the removal answered, every listener heard it, and the hung one was reported
+      should(Date.now() - startedAt).be.below(2_000);
+      should(heard).eql(['device-forgotten']);
+      should(failures).eql([
+        [
+          'PasskeysChangedListenerTimedOut: a passkeys-changed listener had not finished after 20 ms; the removal answered without it',
+          'device-forgotten',
+        ],
+      ]);
+    });
+
+    it('should fire after a device is forgotten, once its passkeys are gone', async () => {
+      // Arrange
+      const signal = new PasskeysChangedSignal();
+      const { service, store } = fixture({ passkeysChanged: signal });
+      await enrol(service, await es256Authenticator());
+      const heard: { change: PasskeysChange; passkeysLeft: number }[] = [];
+      signal.subscribe(async change => {
+        heard.push({ change, passkeysLeft: (await store.list(phone.deviceId)).length });
+      });
+
+      // Act
+      await service.forgetDevice(phone.deviceId);
+
+      // Assert
+      should(heard).eql([{ change: { cause: 'device-forgotten', deviceId: phone.deviceId }, passkeysLeft: 0 }]);
+    });
+
+    it('should report a failing listener and still tell the rest, without failing the removal', async () => {
+      // Arrange
+      const failures: unknown[] = [];
+      const signal = new PasskeysChangedSignal((error, change) => failures.push([String(error), change.cause]));
+      const { service } = fixture({ passkeysChanged: signal });
+      const heard: string[] = [];
+      signal.subscribe(() => {
+        throw new Error('rules could not be read');
+      });
+      const stop = signal.subscribe(change => {
+        heard.push(change.cause);
+      });
+
+      // Act
+      await service.forgetDevice(phone.deviceId);
+      stop();
+      await service.forgetDevice(laptop.deviceId);
+
+      // Assert
+      should(heard).eql(['device-forgotten']);
+      should(failures).eql([
+        ['Error: rules could not be read', 'device-forgotten'],
+        ['Error: rules could not be read', 'device-forgotten'],
+      ]);
     });
   });
 });

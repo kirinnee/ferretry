@@ -1,4 +1,10 @@
-import type { EveryCallerStepUpAct, MachineSkippableStepUpAct } from '@ferretry/protocol';
+import type {
+  EveryCallerStepUpAct,
+  MachineSkippableStepUpAct,
+  StepUpSubjectOf,
+  StoredProofStepUpAct,
+  StoredStepUpProof,
+} from '@ferretry/protocol';
 import type { ApiActor } from './actor.ts';
 import type { AuthenticatedCredential } from './authentication.ts';
 import type { CallerGovernance, CapabilityDemand, CapabilityPresentation } from './capability.ts';
@@ -144,7 +150,24 @@ export interface RouteContext {
    * caller with no proven device holds none. The proof is not refunded when the act then refuses.
    */
   readonly claimFreshStepUp?: ClaimFreshStepUp;
+  /**
+   * Takes the KEPT assertion of this caller's passkey, proved for a stored-proof act (`STEP_UP_ACTS_STORED_PROOF`) and
+   * bound to exactly `subject`, once, within a challenge's life — the evidence a standing rule's record carries. A
+   * caller with no proven device holds none. It never takes a proof {@link claimFreshStepUp} could, nor the reverse.
+   */
+  readonly claimStoredProof?: ClaimStoredProof;
 }
+
+/**
+ * Takes the KEPT proof of a stored-proof act ({@link RouteContext.claimStoredProof}): the act, its own kind of stage, and
+ * the challenge the caller derives AGAIN from the very bytes it is about to write. The evidence is handed over only when
+ * that is the challenge the live ceremony verified, so a commit can never store an assertion over other bytes.
+ */
+export type ClaimStoredProof = <Act extends StoredProofStepUpAct>(
+  act: Act,
+  subject: StepUpSubjectOf<Act>,
+  expectedChallenge: Uint8Array,
+) => StoredStepUpProof | undefined;
 
 /**
  * Takes a FRESH proof for an act ({@link RouteContext.claimFreshStepUp}). An act the machine may skip is asked the short
@@ -154,7 +177,8 @@ export interface RouteContext {
  */
 export interface ClaimFreshStepUp {
   (act?: MachineSkippableStepUpAct): boolean;
-  (act: EveryCallerStepUpAct, subject: string): boolean;
+  /** A stored-proof act is claimed only through {@link RouteContext.claimStoredProof}, so it does not compile here. */
+  (act: Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>, subject: string): boolean;
 }
 
 /**

@@ -79,16 +79,18 @@ export class StatePasskeyStore implements PasskeyStore {
   /**
    * A credential belongs to one device. Adding one another device already holds is refused rather than
    * re-pointed: re-pointing would hand that device's passkey to whoever registered the same id.
+   *
+   * Nor is one ever REPLACED on its own device: a new key or origin under a known id would quietly change
+   * what a kept proof (a standing rule's) is checked against, with no "passkeys changed" signal. A
+   * registration refuses a known id before it gets here, so this only meets a race, and refuses it.
    */
   async add(passkey: StoredPasskey): Promise<void> {
     await this.mutate(current => {
       const held = current.find(existing => existing.credentialId === passkey.credentialId);
       if (held !== undefined && held.deviceId !== passkey.deviceId)
         throw new PasskeyStoreDamaged('that credential already belongs to another device');
-      return [
-        ...current.filter(existing => existing.credentialId !== passkey.credentialId),
-        this.schemas.record.parse(passkey),
-      ];
+      if (held !== undefined) throw new PasskeyStoreDamaged('that credential is already stored, and is never replaced');
+      return [...current, this.schemas.record.parse(passkey)];
     });
   }
 

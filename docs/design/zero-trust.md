@@ -566,6 +566,67 @@ passkey over.
   real authenticator ceremony is not — the tests use a software authenticator on the daemon side and a
   fake credential container in the app.
 
+**Stored passkey proofs.** Every other step-up is spent and forgotten. A standing sign-in rule
+(`approve-sign-in-rule`, the one act in `STEP_UP_ACTS_STORED_PROOF`) is different: its record keeps the
+owner's assertion for as long as the rule lasts, so the daemon can check it again later, offline, against
+the passkey registry. Four things make that safe:
+
+- **The challenge is derived, not random.** `POST /v1/step-up/options { act: 'approve-sign-in-rule',
+subject: srs_… }` issues `signInRuleChallenge(nonce, signInRuleSubject(stage, canonical))`: the rule
+  service draws the 32-byte nonce from the system CSPRNG when it stages the body, and the subject commits
+  to the body's canonical bytes. So the assertion signs over exactly what the owner approved. The service
+  takes this challenge as an argument for a stored-proof act and refuses one for every other act; it must
+  be 32 bytes. The mount asks the rule service for the stage's challenge **for the session's own
+  device** (`challengeOf(stage, deviceId)`), so a stage is answered only to the device it waits on: another
+  paired device that learns an `srs_` id gets no challenge. A stage that isn't waiting, or isn't waiting
+  for this device, answers `404 stage_not_found` and no challenge is made. Until the rule service exists
+  (R3c-3), no stage is ever waiting.
+- **The live ceremony is unchanged.** The counter must move, the origin must be allowed, UV must be set,
+  and an overdue device key is rotated. A stored proof is a good live proof first. The daemon then keeps
+  the evidence beside the bound grant: `{ deviceId, credentialId, clientDataJSON, authenticatorData,
+signature }`, the bytes exactly as verified, never the rotation, together with the challenge it was
+  verified against. What a challenge is for (an act, a bound save, or a kept proof) is fixed when it is
+  issued and travels with it, so a stored-proof ceremony always keeps its evidence or is refused.
+- **It is claimed once, by its own claim, for its own bytes.** The commit route takes it with
+  `claimStoredProof(act, stage, expectedChallenge)`: once, within the challenge's 120 s, for that act and
+  that stage on that copy of the app, and only when `expectedChallenge` (which the commit derives again
+  from the very bytes it is about to write) equals, in constant time, the challenge the ceremony verified.
+  A wrong challenge is handed nothing and spends nothing. So evidence over other bytes never reaches a
+  commit, whatever the commit forgets. The every-caller claim (`claimFreshStepUp`) never takes a stored
+  proof, and `claimStoredProof` never takes any other proof. So a rule's evidence can't be spent as a
+  step-up, and a step-up can't be stored as a rule. A caller with no paired device (the admin token) holds
+  none.
+- **The offline re-check skips only the counter.** `verifyStoredAssertion` (`passkeys/verifier.ts`)
+  still requires `webauthn.get`, the challenge, an origin equal to the **passkey's own** origin (not
+  today's `corsOrigins`), the rpId hash, UP, UV and a valid signature. `StepUpService.verifyStoredProof`
+  first asks whether the proof's device is **still paired**, then looks up the credential on that device
+  in the registry as it stands now. So an unpaired device, a removed passkey or a forgotten device fails
+  it, even when a revocation's passkey purge failed and left the passkeys on file. A passkey is never
+  replaced under a known credential id either (the store refuses the duplicate), so what a kept proof is
+  checked against can't change quietly. The counter is not checked because a kept assertion is the
+  same bytes every time: its counter can never move again, and checking it would refuse every rule after
+  the owner's next tap. Replay is not the risk the counter guards against here, because the derived
+  challenge only verifies against the bytes it was made for, and nothing that checks a stored proof
+  grants a live step-up. **Never use it for a live ceremony**; a live ceremony still refuses a counter
+  that did not move.
+
+**The passkeys-changed signal.** When a device is forgotten (revoked, its passkeys with it), or a
+catalog member's key is (one browser removed, or the whole member revoked: every key goes), the daemon
+emits `PasskeysChangedSignal` once the passkeys are gone. Whatever keeps a stored proof subscribes and
+checks every proof again (R3c-3: the rule service, suspending `passkey-removed`). Listeners run at once
+and the removal waits for them for at most 5 s; a listener that fails, or is still running then, is
+reported and never undoes or stalls the removal. A device revocation attempts every owner's purge even
+when an earlier one fails, records the revocation, then reports each failure. A stored proof is
+re-checked before every use anyway, so a missed signal costs a later refusal, never a fill. Today nothing
+subscribes. A member's passkey can't back a rule; the signal fires for it only so "a passkey was removed"
+is one signal whichever route removed it.
+
+**Declared: a stage's challenge is fixed.** Asking for options twice for one stage issues the same
+challenge, because it is derived from that stage. An assertion captured from the first ceremony and
+replayed against the second, from the same copy of the app, buys a proof for exactly the same bytes and
+stage, so nothing is gained. The rule service drops a stage when it is committed, denied or expired, so a
+committed stage is never offered again.
+
 ### B3. The operator password is deleted
 
 **Done.** The step-up replaced the operator password for every purpose it had: the local-browser unlock,

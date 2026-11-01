@@ -1007,6 +1007,7 @@ import {
   PairingDeviceRegistry,
   type PairingService,
   type PaneLimit,
+  PasskeysChangedSignal,
   PassTrigger,
   type PassTriggerTimers,
   PasteRuleService,
@@ -7520,6 +7521,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     () => securitySettings?.current().stepUpWindowMinutes ?? 0,
   );
   const deviceConnections = new LiveDeviceConnections(stepUpRegistry);
+  // "THE PASSKEYS CHANGED": a device forgotten (its passkeys with it) or a member key's passkeys removed. Whatever keeps
+  // a passkey's assertion to check again later (a standing sign-in rule) subscribes; a listener that fails is said here
+  // and never undoes the removal.
+  const passkeysChanged = new PasskeysChangedSignal((error, change) => {
+    const cause = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`passkeys: a listener failed after ${change.cause}: ${cause}\n`);
+  });
   // The member side of every carrier: the carriers are built before the subsystems that answer for members, so
   // they hold the deferred half and the subsystem build binds the real one. `memberConnections` is what a revoke closes.
   const memberSessions = new DeferredMemberSessions();
@@ -9226,6 +9234,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         settings: () => security.current(),
         // Each device's unlock outlives a restart — an update — inside its period, bound to this identity.
         unlocks: new StateUnlockLedger(paths, stateFiles, state.daemonId),
+        passkeysChanged,
         // A device's key, replaced inside a step-up (B6): the new key proves itself over the carrying
         // session's transcript, the grant is rewritten, the device's other sessions end as lapsed
         // leases so each reopens on the new key, and the swap is journalled.
@@ -12871,6 +12880,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         daemonName: () => facts().daemonName,
         unlockDays: () => facts().unlockDays(),
         audit: auditLog,
+        passkeysChanged,
       });
       void memberPasskeys.restore().then(notice => {
         if (notice !== undefined) bootNotices.state(notice);

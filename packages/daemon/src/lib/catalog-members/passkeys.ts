@@ -28,6 +28,7 @@ import {
 import { fromBase64Url, toBase64Url } from '@ferretry/relay';
 import { secretsMatch } from '../api/authentication.ts';
 import { relyingPartyIdFor } from '../step-up/service.ts';
+import type { PasskeysChangedSignal } from '../step-up/passkeys-changed.ts';
 import type { ChallengeLedger } from '../step-up/registry.ts';
 import type {
   PasskeyStore,
@@ -80,6 +81,11 @@ export interface MemberPasskeyDeps {
   readonly daemonName: () => string;
   readonly unlockDays: () => number;
   readonly audit: MemberAuditSink;
+  /**
+   * Told after a key is forgotten with its passkeys. A member's passkey backs no kept proof today (a standing rule is a
+   * paired device's), so this only keeps "a passkey was removed" one signal whichever route removed it.
+   */
+  readonly passkeysChanged?: PasskeysChangedSignal;
 }
 
 const CHALLENGE_BYTES = 32;
@@ -297,11 +303,12 @@ export class MemberPasskeyService {
     return (await this.deps.store.list(keyId)).map(passkeyView);
   }
 
-  /** A key left or was removed: its passkeys, unlock and challenges go with it. */
+  /** A key left or was removed: its passkeys, unlock and challenges go with it, and the passkeys-changed signal is told. */
   async forgetKey(keyId: string): Promise<void> {
     this.deps.challenges.forgetDevice(keyId);
     if (this.#unlockedAt.delete(keyId)) await this.#persist();
     await this.deps.store.forgetDevice(keyId);
+    await this.deps.passkeysChanged?.emit({ cause: 'member-key-forgotten', keyId });
   }
 
   async #verify(keyId: string, assertion: Omit<StepUpAssertion, 'rotation'>, challenge: Uint8Array): Promise<boolean> {

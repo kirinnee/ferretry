@@ -4,7 +4,10 @@ import {
   PASSKEY_CHALLENGE_TTL_SECONDS,
   STEP_UP_TTL_SECONDS,
   type StepUpAct,
+  stepUpKeepsProof,
   stepUpSkippableAtMachine,
+  type StoredProofStepUpAct,
+  type StoredStepUpProof,
 } from '@ferretry/protocol';
 import { bytesEqual } from '@ferretry/relay';
 
@@ -34,14 +37,45 @@ interface FreshProof {
 }
 
 /**
+ * What is KEPT of a ceremony for a stored-proof act: the assertion exactly as verified (`evidence`), and the challenge
+ * the live ceremony verified it against. A claim must name that same challenge, so a kept proof is only ever handed to a
+ * commit of the very bytes it signed.
+ */
+export interface KeptProof {
+  readonly evidence: StoredStepUpProof;
+  readonly challenge: Uint8Array;
+}
+
+/**
  * A passkey proved for an act asked of EVERY caller (`STEP_UP_ACTS_EVERY_CALLER`), bound to the ONE thing it is for:
- * `bound` is the digest the challenge was issued with (`addTwoFactorKeySubject`, the account and the staged seed).
+ * `bound` is the digest the challenge was issued with (`addTwoFactorKeySubject`, the account and the staged seed), or
+ * the staged body's id (`srs_…`) for a stored-proof act.
+ *
+ * `kept` is present exactly when the act keeps its proof (`STEP_UP_ACTS_STORED_PROOF`), so which claim may take it is
+ * decided by the act alone.
  */
 interface BoundProof {
   readonly provedAtMs: number;
   readonly act: EveryCallerStepUpAct;
   readonly bound: string;
+  readonly kept?: KeptProof;
 }
+
+/** An every-caller act whose proof is spent, never kept: `claimFresh` takes it, `claimStoredProof` never does. */
+export type SpentProofStepUpAct = Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>;
+
+/**
+ * What a `step-up` challenge was asked for, decided when it is issued and carried to the ceremony that answers it:
+ * - `act`: an act the machine may skip; the proof it buys is stamped with it.
+ * - `bound`: an act every caller must prove, whose proof is spent on the one save it names (`bound`).
+ * - `kept`: an act whose proof is STORED; the challenge was derived from the staged body (`stage`), and the ceremony
+ *   keeps the assertion.
+ * No stamp: an act-less proof.
+ */
+export type ChallengeStamp =
+  | { readonly kind: 'act'; readonly act: MachineSkippableStepUpAct }
+  | { readonly kind: 'bound'; readonly act: SpentProofStepUpAct; readonly bound: string }
+  | { readonly kind: 'kept'; readonly act: StoredProofStepUpAct; readonly stage: string };
 
 /** The step-up window in force, in minutes. `0` means a step-up admits exactly one governed act. */
 export type StepUpWindow = () => number;
@@ -131,8 +165,24 @@ export class StepUpRegistry {
    * challenge's life). It is NOT a step-up: it opens no window ({@link held} stays as it was) and it is not the fresh
    * proof an act-less check reads ({@link freshlyHeld}), so it buys the one save it names and nothing else.
    */
-  grantBound(subject: StepUpSubject, nowMs: number, act: EveryCallerStepUpAct, bound: string): number {
-    this.#bound.set(key(subject), { provedAtMs: nowMs, act, bound });
+  grantBound(subject: StepUpSubject, nowMs: number, act: SpentProofStepUpAct, bound: string): number;
+  /**
+   * An act whose proof is STORED also keeps the assertion that proved it and its challenge (`kept`), for
+   * {@link claimStoredProof} to hand over once; `bound` is then the staged body's id (`srs_…`). What is kept is required
+   * for such an act and refused for every other: a mismatch records nothing and THROWS, never answering a lapse time
+   * for a grant that was not made.
+   */
+  grantBound(subject: StepUpSubject, nowMs: number, act: StoredProofStepUpAct, bound: string, kept: KeptProof): number;
+  grantBound(
+    subject: StepUpSubject,
+    nowMs: number,
+    act: EveryCallerStepUpAct,
+    bound: string,
+    kept?: KeptProof,
+  ): number {
+    if (stepUpKeepsProof(act) !== (kept !== undefined))
+      throw new TypeError('a stored-proof act keeps its proof, and no other act does');
+    this.#bound.set(key(subject), { provedAtMs: nowMs, act, bound, ...(kept === undefined ? {} : { kept }) });
     return nowMs + PASSKEY_CHALLENGE_TTL_SECONDS * 1_000;
   }
 
@@ -187,7 +237,7 @@ export class StepUpRegistry {
    * An act every caller must prove takes only a proof stamped with that act AND bound to exactly `bound`, within a
    * challenge's life, on a copy of the app with a live session. A proof bound to anything else stays where it is.
    */
-  claimFresh(subject: StepUpSubject, nowMs: number, act: EveryCallerStepUpAct, bound: string): boolean;
+  claimFresh(subject: StepUpSubject, nowMs: number, act: SpentProofStepUpAct, bound: string): boolean;
   claimFresh(subject: StepUpSubject, nowMs: number, act?: StepUpAct, bound?: string): boolean {
     if (act !== undefined && !stepUpSkippableAtMachine(act)) return this.#claimBound(subject, nowMs, act, bound);
     if (!this.freshlyHeld(subject, nowMs)) return false;
@@ -197,16 +247,53 @@ export class StepUpRegistry {
   }
 
   #claimBound(subject: StepUpSubject, nowMs: number, act: EveryCallerStepUpAct, bound: string | undefined): boolean {
+    // A stored-proof act's proof is handed over as evidence, never spent as a yes: refused here, and left in place.
+    if (stepUpKeepsProof(act)) return false;
+    const proof = this.#liveBound(subject, nowMs, act, bound);
+    if (proof === undefined || proof.kept !== undefined) return false;
+    this.#bound.delete(key(subject));
+    return true;
+  }
+
+  /**
+   * Takes the KEPT assertion of a passkey proved for `act` and bound to exactly `bound` (the stage), once, within a
+   * challenge's life, on a copy of the app with a live session — and only when `expectedChallenge` is the challenge it
+   * was verified against, compared in constant time. The caller derives that challenge again from the bytes it is about
+   * to write, so evidence over any other bytes is never handed over. Anything else answers nothing and spends nothing.
+   *
+   * Only a stored-proof act is ever answered: an ordinary fresh or bound proof stays where it is, so a step-up can never
+   * be stored as a rule's proof, and `claimFresh` never takes a proof this hands over.
+   */
+  claimStoredProof(
+    subject: StepUpSubject,
+    nowMs: number,
+    act: StoredProofStepUpAct,
+    bound: string,
+    expectedChallenge: Uint8Array,
+  ): StoredStepUpProof | undefined {
+    if (!stepUpKeepsProof(act)) return undefined;
+    const kept = this.#liveBound(subject, nowMs, act, bound)?.kept;
+    if (kept === undefined || !bytesEqual(kept.challenge, expectedChallenge)) return undefined;
+    this.#bound.delete(key(subject));
+    return kept.evidence;
+  }
+
+  /** This copy's bound proof when it is for exactly `act` and `bound` and still live; a lapsed one is dropped. */
+  #liveBound(
+    subject: StepUpSubject,
+    nowMs: number,
+    act: EveryCallerStepUpAct,
+    bound: string | undefined,
+  ): BoundProof | undefined {
     const id = key(subject);
     const proof = this.#bound.get(id);
-    if (bound === undefined || bound === '' || proof === undefined) return false;
+    if (bound === undefined || bound === '' || proof === undefined) return undefined;
     if (nowMs - proof.provedAtMs >= PASSKEY_CHALLENGE_TTL_SECONDS * 1_000) {
       this.#bound.delete(id);
-      return false;
+      return undefined;
     }
-    if (proof.act !== act || proof.bound !== bound || this.#liveSpan(id, nowMs) === undefined) return false;
-    this.#bound.delete(id);
-    return true;
+    if (proof.act !== act || proof.bound !== bound || this.#liveSpan(id, nowMs) === undefined) return undefined;
+    return proof;
   }
 
   /** An act that adds access was admitted on this copy's fresh proof: the next one needs another. */
@@ -268,13 +355,8 @@ interface IssuedChallenge {
   readonly expiresAtMs: number;
   /** The registration challenge a `register-confirm` was issued with. */
   readonly boundTo?: Uint8Array;
-  /** The act a `step-up` challenge was asked for, which the proof it buys is stamped with. */
-  readonly act?: StepUpAct;
-  /**
-   * What a challenge for an act every caller must prove is bound to (`addTwoFactorKeySubject`): the proof it buys is
-   * bound to the same, and spent only on it.
-   */
-  readonly bound?: string;
+  /** What a `step-up` challenge was asked for, which the proof it buys is stamped with. */
+  readonly stamp?: ChallengeStamp;
 }
 
 /**
@@ -295,16 +377,14 @@ export class ChallengeLedger {
     bytes: Uint8Array,
     nowMs: number,
     boundTo?: Uint8Array,
-    act?: StepUpAct,
-    bound?: string,
+    stamp?: ChallengeStamp,
   ): void {
     for (const [id, issued] of this.#issued) if (issued.expiresAtMs <= nowMs) this.#issued.delete(id);
     this.#issued.set(`${purpose}\u0000${key(subject)}`, {
       bytes,
       expiresAtMs: nowMs + PASSKEY_CHALLENGE_TTL_SECONDS * 1_000,
       ...(boundTo === undefined ? {} : { boundTo }),
-      ...(act === undefined ? {} : { act }),
-      ...(bound === undefined ? {} : { bound }),
+      ...(stamp === undefined ? {} : { stamp }),
     });
   }
 
@@ -316,12 +396,12 @@ export class ChallengeLedger {
     return this.#take(subject, purpose, nowMs)?.bytes;
   }
 
-  /** {@link take}, with the act the challenge was asked for and what it is bound to. */
+  /** {@link take}, with what the challenge was asked for. */
   takeWithAct(
     subject: StepUpSubject,
     purpose: ChallengePurpose,
     nowMs: number,
-  ): { readonly bytes: Uint8Array; readonly act?: StepUpAct; readonly bound?: string } | undefined {
+  ): { readonly bytes: Uint8Array; readonly stamp?: ChallengeStamp } | undefined {
     return this.#take(subject, purpose, nowMs);
   }
 

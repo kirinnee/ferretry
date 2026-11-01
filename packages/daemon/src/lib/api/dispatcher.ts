@@ -5,7 +5,10 @@ import {
   STEP_UP_REQUIRED_CODE,
   type StepUpAct,
   type StepUpRequiredBody,
+  STEP_UP_SUBJECTS,
+  stepUpKeepsProof,
   stepUpSkippableAtMachine,
+  type StoredProofStepUpAct,
 } from '@ferretry/protocol';
 import { type ApiActor, resolveApiActor, type TokenClass } from './actor.ts';
 import { callerIsAgent, OWNER_ONLY_CODE } from './agent-caller.ts';
@@ -43,6 +46,7 @@ import { errorResponse, jsonResponse, methodNotAllowedResponse, noStore, unknown
 import type {
   ApiRoute,
   ClaimFreshStepUp,
+  ClaimStoredProof,
   RouteContext,
   ScopedRoute,
   WardenRemedyAuthorizer,
@@ -400,6 +404,7 @@ export function authorizeRequest<TRoute extends ScopedRoute>(
         if (request.device !== undefined) stepUps.spendFresh?.(request.device);
       },
       claimFreshStepUp: claimFreshStepUp(request.device, stepUps),
+      claimStoredProof: claimStoredProof(request.device, stepUps),
     },
   };
 }
@@ -416,9 +421,25 @@ function claimFreshStepUp(device: RouteContext['request']['device'], stepUps: St
     const claim = stepUps.claimFresh?.bind(stepUps);
     if (device === undefined || claim === undefined) return false;
     if (act !== undefined && !stepUpSkippableAtMachine(act))
-      return subject !== undefined && subject !== '' && claim(device, act, subject);
+      return subject !== undefined && subject !== '' && !stepUpKeepsProof(act) && claim(device, act, subject);
     return claim(device, act);
   }) as ClaimFreshStepUp;
+}
+
+/**
+ * A route's claim on the caller's KEPT proof (`claimStoredProof`): only a paired device's copy of the app holds one, so
+ * the admin token, on loopback or anywhere, is answered nothing. Only a stored-proof act, always with its own kind of
+ * stage (`srs_…`) and the challenge the commit derives again from its bytes — a missing or malformed one never reaches
+ * the witness.
+ */
+function claimStoredProof(device: RouteContext['request']['device'], stepUps: StepUpWitness): ClaimStoredProof {
+  return ((act: StoredProofStepUpAct, subject: string, expectedChallenge: Uint8Array) => {
+    const claim = stepUps.claimStoredProof?.bind(stepUps);
+    if (device === undefined || claim === undefined || !stepUpKeepsProof(act)) return undefined;
+    const stage = STEP_UP_SUBJECTS[act].safeParse(subject);
+    if (!stage.success || !(expectedChallenge instanceof Uint8Array)) return undefined;
+    return claim(device, act, stage.data, expectedChallenge);
+  }) as ClaimStoredProof;
 }
 
 /**
