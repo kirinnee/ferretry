@@ -147,6 +147,26 @@ describe('CatalogItemRow rendering', () => {
     await view.unmount();
   });
 
+  it("an installed skill that is in none of this machine's catalogs has no Share and no Add, only the ⋯", async () => {
+    const { view } = await show(baseHandlers([], [installRecord('skill', 'pdf-tools')]));
+    expect(q('[data-row-from]')).not.toBeNull();
+    expect(q('[data-row-share]')).toBeNull();
+    expect(q('[data-row-add]')).toBeNull();
+    expect(q('[data-catalog-sheet]')).toBeNull();
+    await tap('[data-row-more]');
+    expect([...document.querySelectorAll('[role="menuitem"]')].map(node => node.textContent)).toEqual(['Remove']);
+    await view.unmount();
+  });
+
+  it('an installed skill that this machine also holds in a catalog still shares that catalog, never the add sheet', async () => {
+    const { view } = await show(baseHandlers([ownedCatalog()], [installRecord('skill', 'pdf-tools')]));
+    expect(q('[data-row-add]')).toBeNull();
+    await tap('[data-row-share]');
+    expect(q('[data-catalog-sheet="add"]')).toBeNull();
+    expect(q('[data-catalog-sheet="share"]')?.textContent).toContain('Team skills');
+    await view.unmount();
+  });
+
   it('a server row matches its catalogs by server id and shows the content under the line', async () => {
     const withMcp = ownedCatalog(
       {},

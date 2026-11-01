@@ -98,13 +98,14 @@ export function CatalogItemRow({
   const matches = read === undefined ? [] : ownedMatches(read.catalogs, source);
   const chips = rowChips(installs, matches);
   const addable = host !== undefined && canAdd(installs);
+  const shareable = host !== undefined && (addable || matches.length > 0);
 
   const share = (): void => {
     setFailure(null);
     const plan = sharePlan(matches);
     if (plan.kind === 'one') setSharing(plan.catalog);
     else if (plan.kind === 'many') setPicking(plan.catalogs);
-    else setAdding('share');
+    else if (addable) setAdding('share');
   };
 
   const remove = async (install: CatalogInstall): Promise<void> => {
@@ -220,7 +221,7 @@ export function CatalogItemRow({
         )}
         {host === undefined && items.length === 0 ? null : (
           <div className="ml-auto flex shrink-0 items-center gap-1" data-row-controls="">
-            {host === undefined ? null : (
+            {shareable ? (
               <Button
                 type="button"
                 size="sm"
@@ -233,6 +234,8 @@ export function CatalogItemRow({
                 <Share2 size={14} aria-hidden="true" />
                 Share
               </Button>
+            ) : (
+              <span className="w-[5rem]" aria-hidden="true" />
             )}
             {addable ? (
               <Button

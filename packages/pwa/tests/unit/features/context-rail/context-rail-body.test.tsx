@@ -614,8 +614,9 @@ describe('ContextRailBody — catalogs', () => {
     const floop = must(root.querySelector('[data-context-skill-scope] [data-catalog-item-row="floop"]'), 'floop row');
     expect(floop.querySelector('[data-row-from]')?.textContent).toContain('from');
     expect(floop.querySelector('[data-row-add]')).toBeNull();
+    expect(floop.querySelector('[data-row-share]')).toBeNull();
     expect(root.querySelectorAll('[data-row-add]')).toHaveLength(3);
-    expect(root.querySelectorAll('[data-row-share]')).toHaveLength(4);
+    expect(root.querySelectorAll('[data-row-share]')).toHaveLength(3);
     expect(root.querySelectorAll('[data-row-from]')).toHaveLength(1);
     await click(root, '[data-catalog-item-row="babysit-pr"] [data-row-add]');
     expect(root.querySelector('[data-catalog-sheet="add"]')).not.toBeNull();
@@ -629,7 +630,8 @@ describe('ContextRailBody — catalogs', () => {
     expect(root.querySelector('[data-context-mcp="linear"] [data-row-from]')).toBeNull();
     expect(root.querySelector('[data-context-mcp="github"] [data-row-add]')).toBeNull();
     expect(root.querySelector('[data-context-mcp="linear"] [data-row-add]')).not.toBeNull();
-    expect(root.querySelectorAll('[data-row-share]').length).toBe(root.querySelectorAll('[data-context-mcp]').length);
+    expect(root.querySelector('[data-context-mcp="github"] [data-row-share]')).toBeNull();
+    expect(root.querySelector('[data-context-mcp="linear"] [data-row-share]')).not.toBeNull();
     await mounted?.render(
       <StoreProvider store={store}>
         <ContextRailBody
