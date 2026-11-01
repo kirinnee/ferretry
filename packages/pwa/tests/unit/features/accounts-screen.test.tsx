@@ -816,3 +816,25 @@ describe('the rest of what a key, a place and a recipe say', () => {
     expect(odd.q('[data-accounts-defaults-unreadable]')?.textContent).toContain('does not say what');
   });
 });
+
+describe('the last two branches', () => {
+  it('should send only the label when the username is left as it was', async () => {
+    const screen = await open();
+    await screen.openAccount('GITHUB');
+
+    await typeInto(screen.q('[data-accounts-label]'), 'GitHub, renamed');
+    await click(screen.q('[data-accounts-save]'));
+    await settle();
+
+    expect(screen.writes()[0]?.body).toEqual({ label: 'GitHub, renamed' });
+  });
+
+  it('should name a terminal sign-in’s place on its own method tab', async () => {
+    const screen = await open({ accounts: richWorld() });
+    await screen.openAccount('GITHUB');
+    await screen.tab('sites');
+    await click(screen.q('[data-accounts-signin="si_0000000000000004"] button'));
+
+    expect(screen.q('[data-accounts-panel="method"]')?.textContent).toContain('Where it signs in: sudo@kirin-box');
+  });
+});
