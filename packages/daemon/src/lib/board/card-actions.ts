@@ -360,8 +360,14 @@ const report = (
     actor: { kind: 'daemon' },
     standing: 'daemon',
   });
-  if (moved === null) return { task: null };
-  const history = moved.history.map((event, index) =>
+  // Never null by now: every case triggerMove declines was answered above.
+  return { task: moved === null ? null : reportedBy(moved, context) };
+};
+
+/** The move just made, with who reported the trigger beside the daemon that made it. */
+const reportedBy = (moved: BoardTask, context: Pick<CardContext, 'actor' | 'actorVia'>): BoardTask => ({
+  ...moved,
+  history: moved.history.map((event, index) =>
     index === moved.history.length - 1 && event.type === 'moved'
       ? {
           ...event,
@@ -369,9 +375,8 @@ const report = (
           ...(context.actorVia === undefined ? {} : { reportedVia: context.actorVia }),
         }
       : event,
-  );
-  return { task: { ...moved, history } };
-};
+  ),
+});
 
 /**
  * Catches a card up to its own PR facts ({@link laneFromFacts}): the daemon's automatic move, forward

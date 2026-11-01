@@ -166,6 +166,11 @@ describe('a stage and its compatibility fields', () => {
     ]);
   });
 
+  it('should refuse a stage that is not one, leaving the lane as it came', () => {
+    should(parse(lane('doing', 'active', { stage: { kind: 'manual' } as never })).success).be.false();
+    should(parse(lane('doing', 'active', { stage: { kind: 'auto' } as never })).success).be.false();
+  });
+
   it('should keep an owner-gated closed lane automatic', () => {
     should(
       parse(lane('closed', 'closed', { ownerGate: true, stage: { kind: 'auto', triggers: [] } })).success,
