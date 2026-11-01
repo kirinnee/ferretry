@@ -185,7 +185,12 @@ import {
   type WardenCardNotice,
 } from './orphans.ts';
 import { wardenOwnerRoutes } from './owner-routes.ts';
-import { buildAssignedWardenPrompt, buildWardenSweepPrompt, type WardenPromptSettings } from './prompt.ts';
+import {
+  buildAssignedWardenPrompt,
+  buildWardenSweepPrompt,
+  type WardenMigrateCandidates,
+  type WardenPromptSettings,
+} from './prompt.ts';
 import {
   buildWardenSpawnProvenance,
   type WardenSelectionProvenance,
@@ -2301,9 +2306,12 @@ export class WardenSweepService {
     // front of these remedies, so a ferret gone or finished since is never restarted, resumed or stopped.
     const target = (await this.ports.fleet.fleet()).find(session => session.config.id === targetId);
     if (target === undefined || isTerminalStatus(target.state.status)) return { state, done: false };
+    let routed: { readonly agent: string; readonly note?: string } | undefined;
     try {
-      if (act.action === 'failover') await this.ports.remedies.failover(targetId, act.agent);
-      else if (act.action === 'nudge') await this.ports.remedies.nudge(targetId, words.nudge);
+      if (act.action === 'failover') {
+        routed = await this.routeFailover(target, act.agent);
+        await this.ports.remedies.failover(targetId, routed.agent);
+      } else if (act.action === 'nudge') await this.ports.remedies.nudge(targetId, words.nudge);
       else if (act.action === 'resume' || act.action === 'restart') {
         // The ferret started again carries on with its card (`focus-card.ts`). Only an auto one is handed
         // a turn: an interactive one is somebody's terminal, and keeps the resume domain's own behaviour.
@@ -2334,7 +2342,51 @@ export class WardenSweepService {
       ...(base.confidence === undefined ? {} : { confidence: base.confidence }),
       ...(base.reason === undefined ? {} : { reason: base.reason }),
     });
-    return { state: this.recordAction(state, { ...base, outcome: 'done', detail: words.detail('done') }), done: true };
+    const moved = act.action === 'failover' && routed !== undefined ? { ...act, agent: routed.agent } : undefined;
+    const detail =
+      moved === undefined
+        ? words.detail('done')
+        : `${wardenActDetail(moved, 'done')}${routed?.note === undefined ? '' : ` ${routed.note}`}`;
+    return {
+      state: this.recordAction(state, {
+        ...base,
+        ...(moved === undefined ? {} : { agent: moved.agent }),
+        outcome: 'done',
+        detail,
+      }),
+      done: true,
+    };
+  }
+
+  /**
+   * The login an investigation's `MIGRATE (agent)` really goes to: the one it named when it is ready, else the best
+   * ready one, else an error naming every login tried (`auto-migrate.ts`). Without the mover there is no one to say
+   * a login is ready, and the move is refused rather than made blind.
+   */
+  private async routeFailover(
+    target: WardenFleetSession,
+    named: string,
+  ): Promise<{ readonly agent: string; readonly note?: string }> {
+    const service = this.ports.autoMigrate;
+    if (service === undefined) throw new Error(`nothing can check that ${named} is ready, so it was not moved`);
+    const { agent, harness } = target.config;
+    if (agent === undefined || harness === undefined) throw new Error('it records no login to move from');
+    const config = parseStoredWardenConfig(await this.ports.config.read()).config;
+    return await service.failoverTarget({ agent, harness }, named, config);
+  }
+
+  /** The logins each flagged ferret could be moved to, for the investigation's prompt; none without the mover. */
+  private async migrateCandidates(
+    anomalies: readonly WardenAnomaly[],
+    fleet: readonly WardenFleetSession[],
+    config: WardenConfig,
+  ): Promise<readonly WardenMigrateCandidates[] | undefined> {
+    if (this.ports.autoMigrate === undefined) return undefined;
+    const flagged = new Set(anomalies.flatMap(item => item.affectedSessionIds ?? [item.sessionId]));
+    return await this.ports.autoMigrate.migrateCandidates(
+      fleet.filter(session => flagged.has(session.config.id)),
+      config,
+    );
   }
 
   /** A ferret's focus card, or `undefined` when there is no board, no card, or it cannot be read. */
@@ -2612,6 +2664,7 @@ export class WardenSweepService {
           sessions: input.fleet,
           reportPath,
           at: input.at,
+          migrateCandidates: await this.migrateCandidates(anomalies, input.fleet, config),
           settings: this.settings,
         }),
         cwd: this.settings.wardenCwd,

@@ -321,7 +321,7 @@ const AUTO_MIGRATE_TRIGGER_WORDS: Readonly<Record<WardenConfig['autoMigrate']['w
 /**
  * Moving a ferret to another login destroys its pane and starts it again elsewhere, so everything that lets
  * the Warden do that in more cases waits for the owner: switching it on, letting it stop background jobs, a
- * new trigger, a login it may move onto, more moves an hour. A login named where any ready one was allowed is
+ * new trigger, a login it may move onto, more moves an hour, a lower headroom floor. A login named where any ready one was allowed is
  * held too — a named login may be another provider's, which "any ready login" never reaches.
  */
 function autoMigrateLoosening(before: WardenConfig, after: WardenConfig): readonly string[] {
@@ -347,6 +347,7 @@ function autoMigrateLoosening(before: WardenConfig, after: WardenConfig): readon
       ? ['the Warden may now move ferrets onto any ready login of the same harness and provider']
       : []),
     ...raised(was.maxMovesPerHour, now.maxMovesPerHour, 'the moves one ferret may get in an hour'),
+    ...lowered(was.minHeadroomPercent, now.minHeadroomPercent, 'the share a login must have left to be moved onto'),
   ];
 }
 

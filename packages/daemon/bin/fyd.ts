@@ -1385,6 +1385,7 @@ import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/se
 import { dropFerretIdentity, sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
 import { cutOffResume } from '../src/lib/session/resume/cut-off.ts';
+import { settleUnrevivedRelaunch } from '../src/lib/session/resume/unrevived-relaunch.ts';
 import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {
   AttachmentFacetContributor,
@@ -4540,6 +4541,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         forceInflight: false,
         note: request.note,
         actor: 'warden',
+        movedBy: 'warden',
       });
     },
     agentOf: async sessionId => (await parts.sessions.get(sessionId).catch(() => undefined))?.config.agent,
@@ -4630,7 +4632,12 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
           await parts.control.stop(sessionId, reason);
         },
         failover: async (sessionId, agent) => {
-          await parts.migrate.migrate(sessionId, { agent, allowContextDowngrade: false, forceInflight: false });
+          await parts.migrate.migrate(sessionId, {
+            agent,
+            allowContextDowngrade: false,
+            forceInflight: false,
+            movedBy: 'warden',
+          });
         },
         closeLeftoverBrowsers: async sessionId => await parts.closeLeftoverBrowsers(sessionId),
       },
@@ -5620,7 +5627,10 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
             (error instanceof Error ? error.message : String(error)),
         );
       });
+    // The record as it stood, to put back if the old harness is still the one serving after a failed relaunch.
+    let recordBefore: unknown;
     await parts.storage.updateConfig(id, current => {
+      recordBefore = current;
       // The previous account's transcript record is REMOVED rather than merged over: a target that
       // declares no resolvable home must leave the session with no transcript, and a merge would
       // silently keep the old harness's file under the new harness's name.
@@ -5671,9 +5681,11 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         updatedAt: at,
       };
     });
+    const by = request.movedBy ?? 'owner';
     await parts.storage.append(id, 'session.migrating', {
       from,
       to: account.agent,
+      by,
       model: plan.model,
       conversation:
         relaunchConversation.kind === 'fresh'
@@ -5714,6 +5726,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       await parts.storage.append(id, ok ? 'session.migrated' : 'session.migrate_failed', {
         from,
         to: account.agent,
+        by,
         ...(detail === undefined ? {} : { detail }),
       });
     };
@@ -5735,11 +5748,13 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         migrateRelaunchRefusal(error);
       });
     if (outcome.disposition !== 'revived') {
-      const detail =
-        outcome.disposition === 'preserved'
-          ? `the relaunch failed and the previous harness was still at a prompt, so ${from} is still serving ` +
-            `this session while its record already names ${account.agent}`
-          : `the relaunch failed and an automatic retry was scheduled; the session is still on ${from}`;
+      const detail = await settleUnrevivedRelaunch({
+        disposition: outcome.disposition,
+        from,
+        rollBack: async () => {
+          await parts.storage.updateConfig(id, () => recordBefore);
+        },
+      });
       await settle(false, detail);
       throw new SessionMigrateError('failed', detail);
     }
@@ -11238,7 +11253,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           const view = await sessions.get(id);
           if (view === undefined) throw new Error(`no session ${id}`);
           await sessionMigrate
-            .migrate(id, { agent: view.config.agent, allowContextDowngrade: false, forceInflight: false })
+            .migrate(id, {
+              agent: view.config.agent,
+              allowContextDowngrade: false,
+              forceInflight: false,
+              movedBy: 'owner',
+            })
             .catch((error: unknown) => {
               if (error instanceof SessionMigrateError && error.failure === 'refused')
                 throw new RestartBusy(error.message);

@@ -12,8 +12,8 @@
  * WHAT IT NEVER DOES:
  * - move a ferret with an input card open, a secret it holds, or a prompt waiting on the owner (`ownerHold`);
  * - move one more than `maxMovesPerHour` times an hour;
- * - move one onto a login that is not ready, holds spend, is out of quota, is the one that ran out, or — unless
- *   named — belongs to another provider (`chooseMoveTarget`);
+ * - move one onto a login that is not ready, holds spend, is out of quota or short of `minHeadroomPercent`, is the
+ *   one that ran out, or — unless named — belongs to another provider (`chooseMoveTarget`);
  * - stop a background job the owner did not let it stop. Without `forceStopBackground` the ferret is ASKED, with
  *   the same message `fy migrate` sends, and given `waitMinutes`; then the owner is told.
  *
@@ -29,18 +29,21 @@ import {
   type AutoMigrateSubject,
   askExpired,
   autoMigrateHoldKey,
+  chooseFailoverTarget,
   chooseMoveTarget,
   EMPTY_AUTO_MIGRATE_MEMORY,
   movesInLastHour,
   moveTriggers,
   parseAutoMigrateMemory,
   pruneAutoMigrateMemory,
+  rankMoveTargets,
   rateLimitedSubjects,
   recordMove,
   sessionMemory,
   triedLine,
   withSession,
 } from './auto-migrate.ts';
+import type { WardenMigrateCandidates } from './prompt.ts';
 import { isoFromMs } from './time.ts';
 import type { WardenSessionView } from './types.ts';
 
@@ -189,6 +192,58 @@ export class WardenAutoMigrateService {
     });
   }
 
+  /**
+   * The login an LLM verdict's `MIGRATE (agent)` really moves a ferret to: the one it named when the rules allow
+   * it, else the best login they do allow. Throws, with every reason, when there is none — a verdict is never
+   * carried out onto a login nobody checked.
+   */
+  async failoverTarget(
+    source: { readonly agent: string; readonly harness: AutoMigrateSubject['harness'] },
+    named: string,
+    config: WardenConfig,
+  ): Promise<{ readonly agent: string; readonly note?: string }> {
+    const choice = chooseFailoverTarget({
+      source,
+      named,
+      facts: await this.ports.facts(),
+      targets: config.autoMigrate.targets,
+      minHeadroomPercent: config.autoMigrate.minHeadroomPercent,
+    });
+    if (choice.kind === 'none') throw new Error(`no login could take it. ${triedLine(choice.tried)}`);
+    const refused = 'refusedNamed' in choice ? choice.refusedNamed : undefined;
+    return {
+      agent: choice.runtime.wrapper,
+      ...(refused === undefined
+        ? {}
+        : { note: `${named} was turned down (${refused.why}), so it went to ${choice.runtime.name} instead.` }),
+    };
+  }
+
+  /**
+   * For each ferret, the logins an investigation may pick for it (`fy migrate -a <login>`): the ready ones, most
+   * headroom first. A ferret whose login cannot be read, or any ferret when the facts cannot be, gets an empty list —
+   * which the prompt reads as "do not migrate".
+   */
+  async migrateCandidates(
+    sessions: readonly Pick<WardenSessionView, 'config'>[],
+    config: WardenConfig,
+  ): Promise<readonly WardenMigrateCandidates[]> {
+    const facts = await this.ports.facts().catch(() => undefined);
+    return sessions.flatMap(({ config: session }) => {
+      if (session.agent === undefined || session.harness === undefined) return [];
+      const ready =
+        facts === undefined
+          ? []
+          : rankMoveTargets({
+              source: { agent: session.agent, harness: session.harness },
+              facts,
+              targets: config.autoMigrate.targets,
+              minHeadroomPercent: config.autoMigrate.minHeadroomPercent,
+            }).ready;
+      return [{ sessionId: session.id, currentAgent: session.agent, candidates: ready.map(r => r.wrapper) }];
+    });
+  }
+
   private async exclusive<T>(work: () => Promise<T>): Promise<T> {
     const run = this.lock.then(work, work);
     this.lock = run.catch(() => undefined);
@@ -280,6 +335,7 @@ export class WardenAutoMigrateService {
       source: { agent: subject.agent, harness: subject.harness },
       facts: await this.ports.facts(),
       targets: settings.targets,
+      minHeadroomPercent: settings.minHeadroomPercent,
     });
     if (choice.kind === 'none')
       return await this.holdAndTell(

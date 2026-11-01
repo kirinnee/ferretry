@@ -206,6 +206,17 @@ const EXPECTED: Readonly<Record<string, Shape>> = {
     escape: 'skip',
     selected: 1,
   },
+  // Reconstructed from the dialog the daemon stored for the 13 Codex limit hits (title, body, options and
+  // cursor are the stored values); the footer wording is the one that yields its recorded `back` escape.
+  'codex-usage-limit-increase': {
+    harness: 'codex',
+    kind: 'usage-limit',
+    title: 'Usage limit reached',
+    body: 'Request a limit increase from your owner to continue using codex. Request\nincrease?',
+    options: [opt(1, 'Yes (y)'), opt(2, 'No (default) (n)')],
+    escape: 'back',
+    selected: 2,
+  },
   // 0.164 asks it at startup when the configured model has a successor; Ferretry reads it as a generic dialog.
   'codex-0.164.0-model-migration': {
     harness: 'codex',

@@ -9,6 +9,7 @@
  */
 
 import {
+  WARDEN_AUTO_MIGRATE_HEADROOM_RANGE,
   WARDEN_AUTO_MIGRATE_MOVES_RANGE,
   WARDEN_AUTO_MIGRATE_WAIT_RANGE,
   WARDEN_CONFIG_SECTIONS,
@@ -39,6 +40,7 @@ export interface WardenFormErrors {
   readonly blessMinutes?: string;
   readonly moveWaitMinutes?: string;
   readonly movesPerHour?: string;
+  readonly minHeadroomPercent?: string;
 }
 
 /** The limits the form offers. The daemon's own schema is wider; these are what a person should pick. */
@@ -49,6 +51,7 @@ export const WARDEN_FORM_LIMITS = {
   blessMinutes: { min: 1, max: 240 },
   moveWaitMinutes: WARDEN_AUTO_MIGRATE_WAIT_RANGE,
   movesPerHour: WARDEN_AUTO_MIGRATE_MOVES_RANGE,
+  minHeadroomPercent: WARDEN_AUTO_MIGRATE_HEADROOM_RANGE,
 } as const;
 
 const CAP_ERROR = 'Enter a cap between $0.01 and $100.';
@@ -80,7 +83,7 @@ export const wardenFormErrors = (config: WardenConfig): WardenFormErrors => {
 const autoMigrateErrors = (config: WardenConfig): WardenFormErrors => {
   const moving = config.autoMigrate;
   if (!moving.enabled) return {};
-  const { moveWaitMinutes, movesPerHour } = WARDEN_FORM_LIMITS;
+  const { moveWaitMinutes, movesPerHour, minHeadroomPercent } = WARDEN_FORM_LIMITS;
   return {
     ...(moving.forceStopBackground || wholeInRange(moving.waitMinutes, moveWaitMinutes)
       ? {}
@@ -88,6 +91,9 @@ const autoMigrateErrors = (config: WardenConfig): WardenFormErrors => {
     ...(wholeInRange(moving.maxMovesPerHour, movesPerHour)
       ? {}
       : { movesPerHour: `${movesPerHour.min} to ${movesPerHour.max}.` }),
+    ...(wholeInRange(moving.minHeadroomPercent, minHeadroomPercent)
+      ? {}
+      : { minHeadroomPercent: `${minHeadroomPercent.min} to ${minHeadroomPercent.max} percent.` }),
   };
 };
 

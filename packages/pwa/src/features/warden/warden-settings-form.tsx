@@ -470,6 +470,14 @@ function MoveToAnotherLogin({
             step={1}
             onChange={maxMovesPerHour => setMoving({ maxMovesPerHour })}
           />
+          <NumberField
+            label="Least quota left on the login it moves to (%)"
+            value={moving.minHeadroomPercent}
+            error={errors.minHeadroomPercent}
+            {...WARDEN_FORM_LIMITS.minHeadroomPercent}
+            step={1}
+            onChange={minHeadroomPercent => setMoving({ minHeadroomPercent })}
+          />
         </div>
         <p className="m-0 text-meta leading-base text-muted">
           Never while it has a card open for you, holds a secret, or waits on a prompt. Every move is listed under

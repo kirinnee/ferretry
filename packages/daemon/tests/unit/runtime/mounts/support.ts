@@ -1464,6 +1464,7 @@ export class FakeSessionMigrate implements SessionMigrateSubsystem {
         readonly model?: string;
         readonly allowContextDowngrade: boolean;
         readonly forceInflight: boolean;
+        readonly movedBy?: string;
       },
     ]
   > = [];
@@ -1482,6 +1483,7 @@ export class FakeSessionMigrate implements SessionMigrateSubsystem {
       readonly model?: string;
       readonly allowContextDowngrade: boolean;
       readonly forceInflight: boolean;
+      readonly movedBy?: string;
     },
   ): Promise<SessionView> {
     this.migrations.push([sessionId, request]);

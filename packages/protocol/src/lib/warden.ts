@@ -272,15 +272,21 @@ export type WardenAutoMigrateTrigger = z.infer<typeof WardenAutoMigrateTriggerSc
 export const WARDEN_AUTO_MIGRATE_WAIT_RANGE = { min: 1, max: 60 } as const;
 /** How many times one ferret may be moved in an hour. */
 export const WARDEN_AUTO_MIGRATE_MOVES_RANGE = { min: 1, max: 6 } as const;
+/** How much of its tightest window a login must have left to be moved onto, in percent. 0 turns the floor off. */
+export const WARDEN_AUTO_MIGRATE_HEADROOM_RANGE = { min: 0, max: 90 } as const;
+/** At least this share left: a login 99% used is not a place to move a ferret that just ran dry. */
+export const DEFAULT_WARDEN_MIN_HEADROOM_PERCENT = 20;
 
 /**
  * MOVING A FERRET THAT HIT A LIMIT. Off by default. When on, a ferret whose login is out of quota (or past its
  * hard budget) is moved — same session, same chat, same card — to another login of the SAME harness that is
  * ready, signed in, not switched off and under its own quota and budget. `targets` empty means "any such login
  * of the same provider, most headroom first"; a list is the owner's order, and the only way a move crosses to
- * another provider. A ferret with background jobs is asked to stop them and given `waitMinutes`; with
+ * another provider. A login with less than `minHeadroomPercent` of its tightest window left is never moved onto,
+ * so a move does not just hand the ferret to the next login about to run dry. A ferret with background jobs is asked to stop them and given `waitMinutes`; with
  * `forceStopBackground` the Warden stops the jobs under that ferret's own pane itself instead. Switching it on,
- * switching force-stop on, adding a trigger or a target, or raising `maxMovesPerHour` waits for the owner.
+ * switching force-stop on, adding a trigger or a target, raising `maxMovesPerHour` or lowering
+ * `minHeadroomPercent` waits for the owner.
  */
 export const WardenAutoMigrateConfigSchema = z.object({
   enabled: z.boolean(),
@@ -290,6 +296,13 @@ export const WardenAutoMigrateConfigSchema = z.object({
   forceStopBackground: z.boolean(),
   waitMinutes: z.number().int().min(WARDEN_AUTO_MIGRATE_WAIT_RANGE.min).max(WARDEN_AUTO_MIGRATE_WAIT_RANGE.max),
   maxMovesPerHour: z.number().int().min(WARDEN_AUTO_MIGRATE_MOVES_RANGE.min).max(WARDEN_AUTO_MIGRATE_MOVES_RANGE.max),
+  /** The share of its tightest window a target login must have left. A document written before this existed reads as the default. */
+  minHeadroomPercent: z
+    .number()
+    .int()
+    .min(WARDEN_AUTO_MIGRATE_HEADROOM_RANGE.min)
+    .max(WARDEN_AUTO_MIGRATE_HEADROOM_RANGE.max)
+    .default(DEFAULT_WARDEN_MIN_HEADROOM_PERCENT),
 });
 export type WardenAutoMigrateConfig = z.infer<typeof WardenAutoMigrateConfigSchema>;
 export const DEFAULT_WARDEN_AUTO_MIGRATE: WardenAutoMigrateConfig = {
@@ -299,6 +312,7 @@ export const DEFAULT_WARDEN_AUTO_MIGRATE: WardenAutoMigrateConfig = {
   forceStopBackground: false,
   waitMinutes: 10,
   maxMovesPerHour: 1,
+  minHeadroomPercent: DEFAULT_WARDEN_MIN_HEADROOM_PERCENT,
 };
 const WardenConfigShape = z.object({
   enabled: z.boolean(),

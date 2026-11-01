@@ -179,6 +179,7 @@ export const wardenConfig = {
     forceStopBackground: false,
     waitMinutes: 10,
     maxMovesPerHour: 1,
+    minHeadroomPercent: 20,
   },
   failover: { policy: 'fallback', failureThreshold: 2, cooldownMinutes: 10 },
   providerOutage: { minDistinctSessions: 2, persistenceSweeps: 2, tailLines: 20 },

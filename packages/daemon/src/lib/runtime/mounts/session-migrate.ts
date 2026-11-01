@@ -11,6 +11,7 @@ import {
   type SessionRelaunchSettings,
   type SessionView,
 } from '@ferretry/protocol';
+import { parseActor } from '../../api/actor.ts';
 import { parseBody, parseOptionalBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiRequest, type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';
@@ -138,6 +139,8 @@ export interface SessionMigrateSubsystem {
       readonly note?: string;
       /** Who moved it, so that turn is drawn as theirs. Never set by the route: the Warden's own moves only. */
       readonly actor?: 'warden';
+      /** Who asked, as the journal records it: `owner`, `session:<id>` of the calling ferret, or `warden` for its own moves. */
+      readonly movedBy?: string;
     },
   ): Promise<SessionView>;
   /**
@@ -228,6 +231,13 @@ function committedAfterDestruction(error: unknown): boolean {
   return error instanceof SessionMigrateError ? error.failure === 'failed' : true;
 }
 
+/** Who a request came from, in the words the journal keeps: a calling ferret's session, else the owner. */
+export function moverOf(actor: string | undefined): string {
+  const { kind, id } = parseActor(actor ?? '');
+  if (kind === 'peer') return id === undefined || id === '' ? 'session' : `session:${id}`;
+  return 'owner';
+}
+
 /** The raw path parameter, decoded. A parameter that regains a separator never reaches the service. */
 function pathSessionId(context: RouteContext): string {
   const raw = context.params.get('sessionId') ?? '';
@@ -271,6 +281,7 @@ async function migrate(
     allowContextDowngrade: request.allowContextDowngrade,
     forceInflight: request.forceInflight,
     ...(request.conversation === undefined ? {} : { conversation: request.conversation }),
+    movedBy: moverOf(context.actor),
   };
   // The fingerprint is the PARSED target, not the raw bytes: the start's digest has to hash the bytes
   // because a third party presents it later as proof, whereas this only ever compares two requests

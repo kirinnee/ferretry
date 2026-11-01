@@ -15,6 +15,16 @@ A same-harness move or Restart never converts: it resumes the transcript as it i
 ([launch-settings.md › The conversation](launch-settings.md#the-conversation)). Without `convert`, a
 cross-harness move is still refused (`409 harness_mismatch`), and the refusal names `--convert`.
 
+## Who moved it, and a relaunch that fails
+
+- **Who.** `session.migrating` and `session.migrated` (and `session.migrate_failed`) carry `by`: `owner` (the CLI
+  or the app), `session:<id>` (a ferret that called the move, by its session id) or `warden` (the Warden's own
+  move). The Warden's token cannot call the route; its moves are labelled by the Warden itself.
+- **A failed relaunch.** The record is restamped onto the new login before the harness is relaunched. If the
+  relaunch fails and the old harness is still the one serving the session, the record is put back, so it never
+  names a login the move did not reach, and the failure says so. If an automatic retry was scheduled instead,
+  the record keeps the new login because that retry needs it.
+
 ## What stays the same
 
 - The ferret keeps its **id, folder, journal and name**. Only the login, the harness and the conversation file change.

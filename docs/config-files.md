@@ -491,6 +491,7 @@ autoMigrate:
   forceStopBackground: false
   waitMinutes: 10 # how long the ferret has to stop its own background jobs
   maxMovesPerHour: 1 # 1 to 6, per ferret
+  minHeadroomPercent: 20 # 0 to 90: a target must have at least this share of its quota left
 ```
 
 - **When.** `rate_limited`: the sweep finds the ferret waiting on a usage limit. `budget_exceeded`: the budget
@@ -504,6 +505,14 @@ autoMigrate:
 - **Never** while the ferret has an input card open, a sign-in waiting on your phone, a plan card waiting for you,
   holds a secure copy, handed a terminal or browser to the owner, or waits on a permission prompt or a dialog; never a Warden or anything a Warden started; never more than
   `maxMovesPerHour` times an hour.
+- **Headroom.** A target with less than `minHeadroomPercent` of its tightest window left is refused, with the
+  reason, so a ferret is never moved onto a login that is about to run out too. A login whose usage is unknown
+  is not refused on this rule. The same check applies to a login the Warden's Jev names for a move.
+- **Jev's `MIGRATE`.** When the Warden's Jev decides a ferret should move, the login it names goes through the
+  same rules as a rule-made move: ready, same harness, enough headroom. A named login that fails them is
+  replaced by the best candidate, and the action says so; with no candidate, the move is refused with the
+  reason. The sweep prompt lists every candidate with the reason it was or was not usable. When no
+  mover is wired in, the move is refused, never done unchecked.
 - **Background jobs.** Off (`forceStopBackground: false`): the ferret is asked, with `fy migrate`'s own message,
   to stop the jobs in the way, and given `waitMinutes`; still running after that, the owner is told and the
   ferret stays. A budget stop does not wait. On: the Warden stops only the jobs the ferret started from its own
@@ -517,8 +526,8 @@ autoMigrate:
   credential. **A command you run yourself in the ferret's pane with the harness's `!` shell escape looks exactly
   like one of the ferret's jobs, and is stopped too.**
 - **Held for the owner:** switching it on, switching `forceStopBackground` on, adding a trigger or a target
-  (including a named target where any login was allowed, or going back from a list to any login), and raising
-  `maxMovesPerHour`.
+  (including a named target where any login was allowed, or going back from a list to any login), raising
+  `maxMovesPerHour`, and lowering `minHeadroomPercent`.
 
 Every move, hold and failure is a `failover` under Recent actions by `auto`, with the login it left and the one
 it went to, and is counted in Insights › Warden. The moves are kept in the Warden's own `auto-migrate.json`, which the sweep and the budget stop

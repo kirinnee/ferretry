@@ -347,12 +347,16 @@ describe('moving a ferret that hit a limit', () => {
 
   it('should check its numbers whenever it is on, even with both layers off, and the wait only while it waits', () => {
     // Act
-    const bad = wardenFormErrors(moving({ waitMinutes: 0, maxMovesPerHour: 7 }));
+    const bad = wardenFormErrors(moving({ waitMinutes: 0, maxMovesPerHour: 7, minHeadroomPercent: 95 }));
     const forced = wardenFormErrors(moving({ waitMinutes: 0, forceStopBackground: true }));
     const off = wardenFormErrors(wardenConfig({ autoMigrate: { ...wardenConfig().autoMigrate, waitMinutes: 0 } }));
 
     // Assert
-    expect(bad).toEqual({ moveWaitMinutes: '1 to 60 minutes.', movesPerHour: '1 to 6.' });
+    expect(bad).toEqual({
+      moveWaitMinutes: '1 to 60 minutes.',
+      movesPerHour: '1 to 6.',
+      minHeadroomPercent: '0 to 90 percent.',
+    });
     expect(forced).toEqual({});
     expect(off).toEqual({});
   });
