@@ -37,7 +37,14 @@ import {
 } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
 import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
-import { type BoardCaller, type BoardStanding, effectiveAssignee, mayHandDown, standingOf } from './authority.ts';
+import {
+  type BoardCaller,
+  type BoardStanding,
+  type CardAudience,
+  effectiveAssignee,
+  mayHandDown,
+  standingOf,
+} from './authority.ts';
 import {
   applyAction,
   type CardContext,
@@ -52,7 +59,8 @@ import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
-import { decideAskedBy } from './origin.ts';
+import { gateEntry } from './gate-policy.ts';
+import { cardAudience, decideAskedBy } from './origin.ts';
 import type {
   ActivityDeriver,
   AgendaLinkSource,
@@ -102,6 +110,16 @@ export interface BoardServiceDependencies {
   readonly attachments?: BoardAttachmentSource;
   /** What the owner said to a session, for deciding whether a card's ask is theirs. Absent, no ask matches. */
   readonly ownerWords?: OwnerWords;
+  /**
+   * Told after every committed write of a card, by any path (docs/board.md § Gates ask the owner): the gate items
+   * follow the card's lane from here. Total in spirit: a failure is a diagnostic, never the write's.
+   */
+  readonly gates?: CardWriteObserver;
+}
+
+/** What follows a card's lane after each write: the gate items (`GateItems`). */
+export interface CardWriteObserver {
+  written(id: BoardTaskId): Promise<void>;
 }
 
 /** What `fy signal done` did to the ferret's focus card. */
@@ -259,21 +277,25 @@ export class BoardService {
   }
 
   /**
-   * Stores who asked for every card that lacks it (a card from before it was stored), by the same rule a new card
-   * is decided by, except that a stored creator of kind `owner` proves nothing (a ferret holding the admin token
-   * wrote that too). Idempotent; writes no history and does not touch the card's last-touched time. A card that
-   * cannot be decided or written is reported and left for the next boot.
+   * Decides again who asked for every card not already a person's, by the same rule a new card is decided by,
+   * except that a stored creator of kind `owner` proves nothing (a ferret holding the admin token wrote that too):
+   * a card from before the field, and a card stored `agent` from fewer of the owner's words than are read now.
+   * It only ever ADDS `person`: a stored `person` may rest on a fact this cannot see again (the owner's own app
+   * made it), so it is never taken back. Idempotent, and a card it would not change is not written; writes no
+   * history and does not touch the card's last-touched time. A card that cannot be decided or written is reported
+   * and left for the next boot. Answers how many cards it stored.
    */
   async backfillAskedBy(): Promise<number> {
     const { cards } = await this.ports.store.read();
     let stored = 0;
     for (const { id, askedBy } of cards) {
-      if (askedBy !== undefined) continue;
+      if (askedBy === 'person') continue;
       try {
         const done = await this.ports.store.write(id, async current => {
-          if (current === undefined || current.askedBy !== undefined) return { task: null, result: false };
-          const next = requireValidCard({ ...current, askedBy: await this.askedByOf(current, false) });
-          return { task: next, result: true };
+          if (current === undefined || current.askedBy === 'person') return { task: null, result: false };
+          const decided = await this.askedByOf(current, false);
+          if (decided === current.askedBy) return { task: null, result: false };
+          return { task: requireValidCard({ ...current, askedBy: decided }), result: true };
         });
         if (done) stored += 1;
       } catch (error) {
@@ -450,15 +472,25 @@ export class BoardService {
         return { task: requireValidCard(noted), result: { task: noted, moved: null, held: move.held } };
       }
       const task = requireValidCard(move.task);
-      return { task, result: { task, moved: target } };
+      // Where it landed: the lane done names, or a gate on the way, where it stops.
+      const moved = context.laneSet.lanes.find(lane => lane.id === task.laneId) ?? target;
+      return { task, result: { task, moved } };
     });
     if (outcome === null) return null;
     await this.afterWrite(caller, outcome.task, [outcome.task.projectId]);
     return outcome;
   }
 
-  /** One action on one card. */
-  async act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<BoardTaskResponse> {
+  /**
+   * One action on one card. `expect` (an answer to a gate item) is checked inside the card's write: the card must
+   * still sit in that lane by that entry, or nothing is written.
+   */
+  async act(
+    id: BoardTaskId,
+    request: BoardTaskActionRequest,
+    caller: BoardCaller,
+    expect?: { readonly laneId: string; readonly entry: number },
+  ): Promise<BoardTaskResponse> {
     // An assign is judged inside the write: a sub-ferret that is the card's assignee may hand it down (`decide`).
     if (!subFerretMay(request) && request.action !== 'assign') {
       await this.refuseSubFerret(caller, subFerretDoing(request));
@@ -469,6 +501,9 @@ export class BoardService {
     const write = async () =>
       await this.ports.store.write(id, async current => {
         const card = this.requireCard(current, id);
+        if (expect !== undefined && (card.laneId !== expect.laneId || gateEntry(card) !== expect.entry)) {
+          throw new BoardError('invalid', `${formatTaskRef(card)} has moved on from the gate the answer was about`);
+        }
         const outcome = await this.decide(card, request, caller);
         return { task: outcome.task === null ? null : requireValidCard(outcome.task), result: { card, outcome } };
       });
@@ -735,10 +770,21 @@ export class BoardService {
       ...viaOf(caller),
       standing,
       ...(handsDown ? { handsDown } : {}),
+      audience: await this.audienceOf(card),
       laneSet,
       index,
       laneSets: new Map([...laneSets, [card.projectId, laneSet]]),
     };
+  }
+
+  /**
+   * Who a card's gates ask (`cardAudience`): the session that wrote it is read for whether a ferret started it, and a
+   * read that fails reads as the owner's.
+   */
+  async audienceOf(card: Pick<BoardTask, 'createdBy' | 'ask' | 'askedBy'>): Promise<CardAudience> {
+    const writer = card.createdBy.kind === 'ferret' ? card.createdBy.sessionId : undefined;
+    const parent = writer === undefined ? undefined : await this.ports.parents.parentOf(writer).catch(() => undefined);
+    return cardAudience(card, parent !== undefined);
   }
 
   /** The caller's standing on a card; the owner's lineage is walked only for a ferret that is not it. */
@@ -852,6 +898,9 @@ export class BoardService {
         .changed(session, { projectId, taskIds: [task.id] })
         .catch((error: unknown) => this.warn(`could not publish board.changed for ${formatTaskRef(task)}`, error));
     }
+    await this.ports.gates
+      ?.written(task.id)
+      .catch((error: unknown) => this.warn(`could not bring the gate item of ${formatTaskRef(task)} in line`, error));
   }
 
   /** Tells the card's ferret it was sent back — unless the ferret doing it is who sent it. */

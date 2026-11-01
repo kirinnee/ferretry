@@ -220,7 +220,9 @@ export const buildCard = (input: CardInput): CardBuild => {
     files: unique(task.files),
     order: task.order,
     createdAt: task.createdAt,
-    createdBy: input.actorOf(task.createdBy),
+    // A task that recorded no creator is read as the owner's: who passes a card's gates follows its creator, and a
+    // creator nobody wrote down never makes the owner's work a ferret's own (docs/board.md § Gates ask the owner).
+    createdBy: task.createdBy === null ? { kind: 'owner' } : input.actorOf(task.createdBy),
     history: events,
     legacyRef: legacyRefOf(sessionId, task.id),
   };

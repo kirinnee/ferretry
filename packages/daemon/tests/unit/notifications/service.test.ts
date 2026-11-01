@@ -257,6 +257,69 @@ describe('NotificationService woke push', () => {
   });
 });
 
+/** A card's gate item (docs/board.md § Gates ask the owner): raised by the daemon, answered only by the owner. */
+const gated = AgendaItemSchema.parse({
+  id: 'A5',
+  source: 'task',
+  sourceRef: 'gate:F412:released:7',
+  subject: 'Try it: open the Board',
+  why: '&F412 reached Released · to test, which waits on you.',
+  waitingSince: AT,
+  howToResolve: 'Choose Not good or Done; the card moves when you answer.',
+  kind: 'choice',
+  title: 'Gate items',
+  ask: { kind: 'multiple-choice', options: [{ label: 'Not good' }, { label: 'Done' }] },
+  task: { id: 'F412' },
+  gate: {
+    cardId: 'F412',
+    laneId: 'released',
+    laneName: 'Released · to test',
+    entry: 7,
+    projectId: 'p-1',
+    options: [
+      { id: 'done', label: 'Done', outcome: 'close' },
+      { id: 'not-good', label: 'Not good', outcome: 'reopen-with-agenda' },
+    ],
+  },
+  raisedBy: 'daemon',
+  raisedBySession: null,
+  raisedByName: null,
+});
+
+describe('NotificationService gate push', () => {
+  it('should push a gate item once, at its raise, saying what to try', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    await world.service.raised(SESSION, gated, snapshot);
+    await world.service.raised(SESSION, gated, snapshot);
+
+    // Assert
+    should(world.push.calls).equal(1);
+    should(requested(world).map(record => record.key)).deepEqual([`agenda:${SESSION}:A5:ping`]);
+    should(world.push.dispatches[0]?.payload).match({ body: 'Try it: open the Board', eventKey: 'agenda-gate:A5' });
+  });
+
+  it('should leave a gate item out of a stop: alone it is no stop, beside another it is not counted', async () => {
+    // Arrange
+    const alone = fixture();
+    const beside = fixture();
+    const gateOnly = AgendaSnapshotSchema.parse({ ...snapshot, items: [gated], count: 1 });
+    const both = AgendaSnapshotSchema.parse({ ...snapshot, items: [gated, item], count: 2 });
+
+    // Act
+    await alone.service.stopped(SESSION, AT, gateOnly);
+    await beside.service.stopped(SESSION, AT, both);
+
+    // Assert
+    should(alone.push.calls).equal(0);
+    should(beside.push.calls).equal(1);
+    should(requested(beside).map(record => record.key)).deepEqual([`agenda:${SESSION}:stopped:${AT}`]);
+    should(beside.push.dispatches[0]?.payload.url).containEql('A1');
+  });
+});
+
 describe('NotificationService ping push', () => {
   it('should push a notice that asked to, once, and nothing for one that did not', async () => {
     // Arrange

@@ -118,6 +118,24 @@ export const standingOf = (
   return 'reader';
 };
 
+/**
+ * Who a card's gates ask (docs/board.md § Gates ask the owner): an EXTERNAL card is one a person asked for, and its
+ * gates are the owner's alone, asked as agenda items; an INTERNAL card is a ferret's own bookkeeping, and the owner
+ * never sees it, so its owner ferret or a lead above that ferret passes its gates with an ordinary move.
+ */
+export type CardAudience = 'external' | 'internal';
+
+/** The standings that pass an INTERNAL card's gate besides the owner: its owner ferret and that ferret's leads. */
+const INTERNAL_GATE_KEEPERS: readonly BoardStanding[] = ['owner-human', 'owner', 'ancestor'];
+
+/**
+ * Whether a standing passes an owner gate (out of a gated lane, or into a gated closed lane) on a card of this
+ * audience. The owner always; the owner ferret or an ancestor only on an internal card; an assignee, a sub-ferret,
+ * a reader and the daemon never (the daemon's own moves are its triggers, which never enter a gated closed lane).
+ */
+export const mayPassGate = (standing: BoardStanding, audience: CardAudience): boolean =>
+  audience === 'internal' ? INTERNAL_GATE_KEEPERS.includes(standing) : standing === 'owner-human';
+
 /** Whether a standing admits an operation. */
 export const mayDo = (operation: BoardOperation, standing: BoardStanding): boolean =>
   OPERATION_STANDINGS[operation].includes(standing);
