@@ -18,6 +18,7 @@ import {
   buildReparentAction,
   buildRefileAction,
   buildReopenAction,
+  buildTriggerAction,
   buildUnblockAction,
   buildUndependAction,
   createPrLinks,
@@ -247,6 +248,19 @@ describe('the action builders', () => {
     should(buildMoveAction('review', '  ')).eql({ action: 'move', to: 'review' });
     should(buildMoveAction('review', undefined)).eql({ action: 'move', to: 'review' });
     should(() => buildMoveAction('Not A Lane', undefined)).throw(/cannot move: to:/u);
+  });
+
+  it('should build a trigger from an external event only', () => {
+    // Act + Assert
+    should(buildTriggerAction(' deploy.done ')).eql({ action: 'trigger', event: 'deploy.done' });
+    should(buildTriggerAction('deploy.done', ' prod is up ')).eql({
+      action: 'trigger',
+      event: 'deploy.done',
+      reason: 'prod is up',
+    });
+    should(buildTriggerAction('pr.review_approved')).eql({ action: 'trigger', event: 'pr.review_approved' });
+    should(() => buildTriggerAction('pr.merged')).throw(/not an event you can report.*deploy\.done/u);
+    should(() => buildTriggerAction('')).throw(/not an event you can report/u);
   });
 
   it('should build a focus', () => {

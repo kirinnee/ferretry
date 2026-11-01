@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type BoardTaskEvent, BoardTaskEventSchema } from '../../src/lib/board.ts';
-import { attachmentsPhrase, describeBoardEvent } from '../../src/lib/board-history.ts';
+import { attachmentsPhrase, boardEventActor, describeBoardEvent } from '../../src/lib/board-history.ts';
 
 const AT = '2026-10-30T10:00:00.000Z';
 const DENISHA = 'mvuc7tsf-0c3d50df';
@@ -55,6 +55,46 @@ describe('describeBoardEvent', () => {
         actor: { kind: 'daemon' },
       }),
     ).equal('moved Implement → Review/CI (auto, pr.opened)');
+  });
+
+  it('should say a reported trigger was reported, never as a move Ferretry saw for itself', () => {
+    // Arrange
+    const reported = {
+      type: 'moved',
+      from: 'review',
+      to: 'merged',
+      backward: false,
+      reason: 'deployed to production',
+      auto: true,
+      trigger: 'deploy.done',
+      actor: { kind: 'daemon' },
+      reportedBy: { kind: 'ferret', sessionId: DENISHA },
+    };
+
+    // Act + Assert
+    should(say(reported)).equal('reported deploy.done → moved Review/CI → Merged: deployed to production');
+    should(say({ ...reported, reason: null })).equal('reported deploy.done → moved Review/CI → Merged');
+  });
+
+  it('should name the reporter of a reported move as who the line is by, and the actor of anything else', () => {
+    // Arrange
+    const moved = { type: 'moved', from: 'review', to: 'merged', backward: false, reason: null };
+    const auto = { ...moved, auto: true, trigger: 'deploy.done', actor: { kind: 'daemon' } };
+
+    // Act + Assert
+    should(boardEventActor(event({ ...auto, reportedBy: { kind: 'ferret', sessionId: DENISHA } }))).deepEqual({
+      actor: { kind: 'ferret', sessionId: DENISHA },
+      via: undefined,
+    });
+    should(boardEventActor(event({ ...auto, reportedBy: { kind: 'owner' }, reportedVia: 'admin-token' }))).deepEqual({
+      actor: { kind: 'owner' },
+      via: 'admin-token',
+    });
+    should(boardEventActor(event({ ...moved, actor: { kind: 'owner' }, actorVia: 'admin-token' }))).deepEqual({
+      actor: { kind: 'owner' },
+      via: 'admin-token',
+    });
+    should(boardEventActor(event(auto))).deepEqual({ actor: { kind: 'daemon' }, via: undefined });
   });
 
   it('should describe a reopen with the owner’s new ask', () => {

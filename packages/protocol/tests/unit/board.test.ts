@@ -275,6 +275,18 @@ const VALID: readonly SchemaCase[] = [
   { name: 'link field', schema: BoardLinkFieldSchema, value: 'commit' },
   { name: 'editable field', schema: BoardEditableFieldSchema, value: 'terms' },
   ...HISTORY.map(entry => ({ name: `event ${entry.type}`, schema: BoardTaskEventSchema, value: entry })),
+  {
+    name: 'reported move',
+    schema: BoardTaskEventSchema,
+    value: {
+      ...event(1, { type: 'moved', from: 'waiting', to: 'deployed', backward: false, reason: 'deployed' }),
+      actor: DAEMON,
+      auto: true,
+      trigger: 'deploy.done',
+      reportedBy: OWNER,
+      reportedVia: 'admin-token',
+    },
+  },
   { name: 'legacy ref', schema: LegacyTaskRefSchema, value: `${LEAD}:F12` },
   { name: 'card', schema: BoardTaskSchema, value: CARD },
   { name: 'card a person asked for', schema: BoardTaskSchema, value: { ...CARD, askedBy: 'person' } },
@@ -403,6 +415,36 @@ const INVALID: readonly SchemaCase[] = [
       ...event(1, { type: 'moved', from: 'todo', to: 'implement', backward: false, reason: null }),
       auto: true,
       trigger: 'work.started',
+    },
+  },
+  {
+    name: 'observed trigger reported',
+    schema: BoardTaskEventSchema,
+    value: {
+      ...event(1, { type: 'moved', from: 'review', to: 'merged', backward: false, reason: null }),
+      actor: DAEMON,
+      auto: true,
+      trigger: 'pr.merged',
+      reportedBy: { kind: 'ferret', sessionId: 'child' },
+    },
+  },
+  {
+    name: 'person move reported',
+    schema: BoardTaskEventSchema,
+    value: {
+      ...event(1, { type: 'moved', from: 'review', to: 'merged', backward: false, reason: null }),
+      reportedBy: { kind: 'owner' },
+    },
+  },
+  {
+    name: 'report via with no reporter',
+    schema: BoardTaskEventSchema,
+    value: {
+      ...event(1, { type: 'moved', from: 'review', to: 'merged', backward: false, reason: null }),
+      actor: DAEMON,
+      auto: true,
+      trigger: 'deploy.done',
+      reportedVia: 'admin-token',
     },
   },
   {
@@ -726,6 +768,8 @@ describe('board mutations', () => {
       { action: 'refile', projectId: PROJECT },
       { action: 'reparent', parent: { id: 'F85' }, reason: 'fits' },
       { action: 'reparent', parent: null },
+      { action: 'trigger', event: 'deploy.done' },
+      { action: 'trigger', event: 'pr.review_approved', reason: 'approved by the reviewer' },
     ];
     should(accepted.filter(value => !action(value))).deepEqual([]);
     should(BoardTaskActionRequestSchema.parse({ action: 'depend', task: { id: 'F18' } })).deepEqual({
@@ -746,6 +790,11 @@ describe('board mutations', () => {
       { action: 'block', reason: '' },
       { action: 'reopen', to: 'implement', reason: 'broken' },
       { action: 'move', to: 'Review' },
+      { action: 'trigger', event: 'pr.merged' },
+      { action: 'trigger', event: 'release.published' },
+      { action: 'trigger' },
+      { action: 'trigger', event: 'deploy.done', reason: '' },
+      { action: 'trigger', event: 'deploy.done', by: LEAD },
     ];
     should(refused.filter(value => action(value))).deepEqual([]);
   });

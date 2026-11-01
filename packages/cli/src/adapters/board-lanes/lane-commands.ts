@@ -2,6 +2,7 @@ import type { Command } from 'commander';
 import { LaneController } from '../../lib/board-lanes/lane-controllers';
 import type { LaneEditOptions, LaneProposeOptions } from '../../lib/board-lanes/lane-request';
 import type { ILaneGateway, ILaneOutput } from '../../lib/board-lanes/ports';
+import type { WorkflowEditOptions } from '../../lib/board-lanes/workflow-request';
 
 export interface LaneCommandDependencies {
   readonly gateway: ILaneGateway;
@@ -59,6 +60,41 @@ export function registerLaneCommands(program: Command, dependencies: LaneCommand
     .action(async (_options: unknown, command: Command) => {
       const options = merged<LaneEditOptions & TargetOptions>(command);
       await controller.edit(target(options), options);
+    });
+
+  const workflow = board
+    .command('workflow')
+    .description("a project's workflow: which lanes are gates the owner answers and which move on their own");
+  const workflowOptions = <T>(command: Command): T => ({ ...board.opts(), ...workflow.opts(), ...command.opts() }) as T;
+
+  targeted(workflow.command('show'))
+    .description(
+      'each lane in order: a GATE (its options and where each sends the card) or AUTO (what moves a card in)',
+    )
+    .action(async (_options: unknown, command: Command) => {
+      await controller.workflow(target(workflowOptions<TargetOptions>(command)));
+    });
+
+  targeted(workflow.command('edit'))
+    .description('make one lane a gate or an automatic step (version-checked; a sub-ferret is refused)')
+    .requiredOption('--lane <id>', 'the lane to change, by id (see `workflow show`)')
+    .option(
+      '--gate <label=outcome>',
+      'an option of the gate, up to 3: "<Label>=<next|close|reopen|lane:<id>>" (repeatable); Label is at most 24 characters',
+      collect,
+      [],
+    )
+    .option(
+      '--auto <triggers>',
+      'make the lane automatic: the triggers that move a card in, comma separated, or "none" when the ferret moves it',
+    )
+    .addHelpText(
+      'after',
+      '\nOutcomes: next = the next lane of the card; close = the closed lane; reopen = back to the Not good lane, with the owner\'s words; lane:<id> = that lane.\nExample: --lane review --gate "Ship it=next" --gate "Rework=reopen"',
+    )
+    .action(async (_options: unknown, command: Command) => {
+      const options = workflowOptions<WorkflowEditOptions & TargetOptions>(command);
+      await controller.editWorkflow(target(options), options);
     });
 
   // Whether the project uses the board at all (docs/board.md § The board is opt-in): read by anybody, thrown
