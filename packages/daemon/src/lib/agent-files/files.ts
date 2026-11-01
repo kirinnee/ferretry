@@ -1,5 +1,5 @@
 import { basename, dirname, join, resolve } from 'node:path';
-import { type FileIdentity, openedFileProblem, resolveStateHomes } from '@ferretry/fleet';
+import { type FileIdentity, openedFileProblem, resolveStateHomes, stateHomeHolding } from '@ferretry/fleet';
 import type { AgentUploadFile } from '@ferretry/protocol';
 import {
   AGENT_FILE_LIMITS,
@@ -11,9 +11,28 @@ import {
   relativeWords,
   STAGED_FILE_TTL_MS,
   sanitizeFileName,
-  stateHomeRefusal,
   uploadSizeProblem,
 } from './policy.ts';
+
+/**
+ * The state-home rule in the file tools' words (`state-home-guard.ts` in `@ferretry/fleet`, kept out of `policy.ts`
+ * because the browser worker imports that under node type stripping): the daemon's own directories
+ * are out of reach even when a session's folder contains them. `homes` holds each as configured AND as its real
+ * path, and `path` is checked as named and again once resolved, so neither a symlink nor a symlinked home gets past.
+ */
+export function stateHomeRefusal(
+  homes: readonly string[],
+  path: string,
+  verb: 'read' | 'write',
+): AgentFileError | undefined {
+  const home = stateHomeHolding(homes, path);
+  if (home === undefined) return undefined;
+  return new AgentFileError(
+    'forbidden',
+    `that path is inside this daemon's state home (${home}), which holds this machine's credentials, so the file tools never ${verb} there`,
+    'state-home',
+  );
+}
 
 /** Which file an entry is (the shared state-home guard's {@link FileIdentity}). */
 export type AgentFileIdentity = FileIdentity;

@@ -79,8 +79,11 @@ describe('AgentFiles.prepareUpload — what an agent may hand a page', () => {
     const relative = await files.prepareUpload('s1', ['reports/q3.pdf']);
     const absolute = await files.prepareUpload('s1', [join(folder, 'reports', 'q3.pdf')]);
 
+    // Each upload hands the page its own private copy, so the two name the same file but not the same path.
     should(relative.files).match([{ name: 'q3.pdf', size: 5 }]);
-    should(absolute.files[0]?.path).equal(relative.files[0]?.path);
+    should(absolute.files).match([{ name: 'q3.pdf', size: 5 }]);
+    should(await readFile(absolute.files[0]?.path ?? '', 'utf8')).equal('12345');
+    should(await readFile(relative.files[0]?.path ?? '', 'utf8')).equal('12345');
   });
 
   it('should refuse "..", an absolute path outside, and a session with no folder', async () => {

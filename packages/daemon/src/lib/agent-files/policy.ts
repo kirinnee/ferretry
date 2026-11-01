@@ -7,7 +7,6 @@ import {
   AGENT_TOOL_MAX_UPLOAD_FILES,
 } from '@ferretry/protocol';
 import { isDaemonOwnedScratchEntry } from '../scratch/policy.ts';
-import { stateHomeHolding } from '@ferretry/fleet';
 
 /**
  * The pure decisions of the agent file tools (`browser.upload`, `browser.download`, `browser.pdf`): which
@@ -103,25 +102,6 @@ export function lexicalTarget(folder: string, requested: string): string {
   const refusal = forbiddenInside(relative(folder, candidate));
   if (refusal !== undefined) throw new AgentFileError('forbidden', refusal);
   return candidate;
-}
-
-/**
- * The state-home rule in the file tools' words (`state-home-guard.ts` in `@ferretry/fleet`): the daemon's own directories
- * are out of reach even when a session's folder contains them. `homes` holds each as configured AND as its real
- * path, and `path` is checked as named and again once resolved, so neither a symlink nor a symlinked home gets past.
- */
-export function stateHomeRefusal(
-  homes: readonly string[],
-  path: string,
-  verb: 'read' | 'write',
-): AgentFileError | undefined {
-  const home = stateHomeHolding(homes, path);
-  if (home === undefined) return undefined;
-  return new AgentFileError(
-    'forbidden',
-    `that path is inside this daemon's state home (${home}), which holds this machine's credentials, so the file tools never ${verb} there`,
-    'state-home',
-  );
 }
 
 /** The same rule, once symlinks are resolved: the real path must still be under the folder's real path. */
