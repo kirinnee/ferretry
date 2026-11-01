@@ -33,6 +33,8 @@ class Tabs {
   dialog: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; message: string } | undefined;
   /** The browser cannot say which document a page shows. */
   documentFails = false;
+  /** The host the live page reports, when a case sets one. */
+  documentHost: string | undefined;
   /** While set, a click does not return: the page's queue is stuck behind it, as it is behind a dialog. */
   clickGate: Promise<void> | undefined;
   private minted = 0;
@@ -104,7 +106,7 @@ class Tabs {
     inputDocument: async pageId => {
       this.calls.push(`inputDocument:${pageId}`);
       if (this.documentFails) throw new Error('the page is gone');
-      return { navigationId: 'loader-1' };
+      return { navigationId: 'loader-1', ...(this.documentHost === undefined ? {} : { host: this.documentHost }) };
     },
     inputObserve: async pageId => {
       this.calls.push(`inputObserve:${pageId}`);
@@ -939,6 +941,23 @@ describe('the machine agent browser — a page’s lifecycle', () => {
 
     // Assert
     should(seen).eql(['loader-1', undefined]);
+  });
+
+  it('should let a guard read, from inside the page queue, the host the page is on, or nothing when it cannot', async () => {
+    // Arrange — the host a page script is about to run on, as the standing rules' taint reads it (R3c-4).
+    const { tabs, service } = harness();
+    await service.openPage('s1', 'app');
+    tabs.documentHost = 'github.com';
+    const seen: (string | undefined)[] = [];
+    const guard = async (page: { host?(): Promise<string | undefined> }) => void seen.push(await page.host?.());
+
+    // Act
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+    tabs.documentFails = true;
+    await service.actOnPage('s1', 'app', { action: 'back' }, guard);
+
+    // Assert
+    should(seen).eql(['github.com', undefined]);
   });
 
   it('should refuse a lifecycle request on a page of another session', async () => {

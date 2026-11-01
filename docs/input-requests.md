@@ -1316,47 +1316,107 @@ or nothing is typed:
   stops the line too and keeps the page held a full window more, since the value may still be there. The agent
   browser runs with the back/forward cache off, so a page never comes back with its old heap; the `pagehide` arm is
   defence in depth. A single-page app that swapped the form has moved on once the node is gone. Terminals need
-  none: a line-mode prompt consumes the line.
+  none: a line-mode prompt consumes the line. A write that could not say whether it typed (`uncertain`: the
+  password may have landed) gets the same clear and hold, and stops the line at once (`did-not-move-on`).
 - **Audited, never a value.** `input.delivered` carries `by: 'plan'`, the plan, the line and the sign-in beside the
   usual names and flags. A miss is recorded as `input.requested` with `preapproval: 'did-not-apply'`, the plan, the
   line and `because`. A stopped line is recorded as `task-plan-line-stopped`; a write back the plan record refuses
   fails closed (the line is matched no more) and is recorded as `task-plan-line-failed`.
 
-### Coming, and off by default: standing sign-in rules
+### Standing rule fills: a sign-in the owner approved for any ferret
 
-A **standing rule** (R3c) is one owner-signed permission for Ferretry to fill ONE page sign-in, for any ferret unless
-the owner narrows its scope, for at most 90 days. It reuses the same matcher, ledger, clear and reasons. Until it
-ships, a placement without a tap happens only under a task plan line, as above. Today only its wire contract exists
-(`packages/protocol/src/lib/sign-in-rules.ts`), and the daemon does not report `sign-in-rules.1`:
+> **Needs `sign-in-rules.1`, which the daemon does not report yet.** The fills below are built and tested, and run
+> only once the app that draws the rule sheet and its cards ships (R3c-6); until then every sign-in a rule would cover
+> is a normal card. How a rule is made, pinned, suspended and revoked is
+> [secrets › Standing sign-in rules](secrets.md#standing-sign-in-rules).
 
-- **Pages only.** The signed body's `surface` is `page` and its pins are web hosts; a sudo, su or doas password stays
-  covered per task by a plan line.
-- **The passkey is bound to the bytes, every time.** Creating, widening, resuming or renewing a rule is the
-  `approve-sign-in-rule` act, asked of every caller, the admin token on loopback included. Its challenge is DERIVED:
-  `signInRuleChallenge(nonce, signInRuleSubject(stage, canonicalSignInRule(body)))`, where the canonical bytes are RFC
-  8785 JSON of the whole body (sets sorted) and each step has its own domain string, apart from a task plan's and a 2FA
-  seed's. The daemon keeps the assertion with the rule (a stored proof) so it can check it again offline
-  ([secrets.md](secrets.md#standing-sign-in-rules)).
-- **Pinned facts are signed.** The account's key, handle and username, the login domains, the recipe version, the
-  field identities the owner's own taps have history with (required: a rule never pins a new form) and a fingerprint
-  of the account's 2FA keys (`factorFingerprint`: ids, kinds and whether Ferretry makes the codes, never `verified`).
-  Lifetime is between one hour and 90 days, inside the signed body. The schema never reads a clock; the daemon checks
-  `signInRuleClockProblems(body, now)` (a body created more than 5 minutes ahead is refused) as it stages, commits
-  and loads a rule, and a rule is in force only between its signed start and end. A staged rule names its account and
-  place as fields, so the passkey dialog never learns which sign-in it is from (clippable) summary words alone.
-- **The rest only narrows.** The record's unsigned overlay (suspension, narrowing, usage) is refused if it would widen
-  the body, and a document that does not parse strictly means no rule at all.
-- **The owner's line for a miss** comes from `grantMissLineFor`: "Your standing rule for this sign-in didn't apply:
-  … The rule is suspended until you approve it again." for a miss that changes what was approved. The new reasons are
-  `suspended`, `out-of-scope`, `account-changed`, `factor-changed`, `proof-invalid`, `no-history`,
-  `code-without-sign-in` and `scripted-origin`; the four drift reasons also stop a plan line. A fill would be audited
-  as `input.delivered` with `by: 'rule'`, `signInRule` and `revision`, and the card's actor is `sign-in-rule`.
+A **standing rule** is one owner-signed permission for Ferretry to fill ONE page sign-in, for any ferret unless the
+owner narrowed its scope, until it expires (at most 90 days). It is the second source of grants beside plan lines,
+through the same matcher, the same write and ONE ledger (`sign-in-grants/rules.ts`, `sources.ts`): the hourly rate
+counts plan and rule fills of a sign-in together, and neither source forgets the other's attempts or pins. Every check
+in the table above holds for a rule too, plus these:
+
+| #   | Check (a standing rule only)                                                                                                                                                                                                                                                                                                                      | Miss                                             |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| 1   | Not suspended, revoked or expired; its uses are row 9 (a rule may have no cap)                                                                                                                                                                                                                                                                    | `suspended` · `expired` · `used-up`              |
+| 1b  | Its scope covers the session: any ferret (the default; sub-ferrets too), exactly one session (never its children), or the sessions STAMPED with one board project (never a project read from a folder, never Unfiled)                                                                                                                             | `out-of-scope` (no suspension)                   |
+| 2b  | The account's handle and username are the ones approved                                                                                                                                                                                                                                                                                           | `account-changed` (suspends)                     |
+| 8   | The account's 2FA keys are as approved (any change), and a code comes only from the key the rule PINNED, still one Ferretry makes codes for; never the first key by `verified` order, which a ferret can steer                                                                                                                                    | `factor-changed` (suspends)                      |
+| 9   | A code-only step types only as the NEXT STEP of the sign-in whose password this rule typed: the same session, the same tab, the same place (the daemon-observed host), on a document that tab navigated to since, within three minutes, with no act of the ferret on its pages in between                                                         | `code-without-sign-in`                           |
+| 15b | No page script ran on any of its login domains since it was approved, in ANY session (the machine-wide taint below)                                                                                                                                                                                                                               | `scripted-origin` (suspends)                     |
+| 17  | EVERY field set it fills is a form the owner's own taps have history with: a rule never pins a new form. A password form outside it suspends; a username-only step asks. One exception: a lone code box (field set exactly `totp`, one field, the code ticked) outside the history fills ONLY as row 9's join, pins nothing and starts no attempt | `form-changed` (suspends) · `no-history`         |
+| —   | Right before the second match, its stored passkey proof is checked again offline against the registry, and its pinned facts against the accounts now                                                                                                                                                                                              | `proof-invalid` or the drift's reason (suspends) |
+
+- **Checked twice, then once more with nothing awaited.** The matcher runs at the raise and again at the write; before
+  the second run the rule's proof and pinned facts are re-checked (a registry or account store that can't be read
+  fills nothing and suspends nothing). The last check before typing (`held()`, asked again inside the page's queue as
+  `proceed()`) is synchronous: the rule service still says its proof and facts checked out (`verified`, false while
+  any check is pending or a suspension is being written), the rule is still in force at that revision, still covers
+  every role being typed (a narrowing that dropped the code stops a code), its scope covers the session, and no page
+  script ran on its places since. A revoke, a suspension or a narrowing that lands while the fill looked or waited its
+  turn types nothing, and the use is given back.
+- **One use, per session.** An attempt belongs to one session: another ferret's code step never joins it, and two
+  ferrets signing in at once each spend their own use. A use is counted in memory the moment it is spent and written
+  to the rule's record after the fill (a crash in between leaves one use uncounted).
+- **The machine-wide script taint.** A rule fills for every ferret, in one shared browser profile, for weeks, so ferret
+  A's script on github.com could plant what github.com's own code reads when ferret B's fill types. Every
+  `browser_eval`, from any caller, taints three hosts: the one the page is on right before the script (read from the
+  live page inside its queue), the ORIGIN OF THE WORLD THE SCRIPT ACTUALLY RAN IN (read by DevTools on that same world,
+  in evaluations of their own before and after the agent's code, and trusted only when both agree; never from anything
+  the agent's evaluation returns, which its source could forge: the page may move between the look and the world being
+  made), and the one it left the page on. Each is tainted in memory at once, then every rule pinned to it is
+  suspended on disk, so it outlasts a restart. While any agent script is running, NO rule fills anywhere, so nothing
+  lands before the world's origin is known. A host that can't be read (an opaque origin, `about:blank` read from its
+  address, a worker too old to report one) taints EVERY rule, and so does a script that ran and then failed. Only `browser_eval`
+  is seen: a ferret editing the browser profile on disk, or an extension, is outside it.
+- **The clear suspends.** A password left in its field at the hold's end (`cleared`), or a clear that can't tell
+  (`unknown`), suspends the rule (`did-not-move-on`), exactly as it stops a plan line. A write that could not say whether it
+  typed (`uncertain`) gets the same clear and its own hold for the full window, and suspends the rule at once.
+- **What the ferret is told.** On a fill: "Filled under a rule the owner approved in advance." and `source: saved`,
+  never the rule or the account. On a miss: **nothing at all**. Its view, its words and its agenda card are
+  byte-identical to a sign-in no rule was ever about (no "didn't apply" note, no context line), and so are the states
+  it can read while the rule is tried: until the request really ends it reads the card as it stood when the fill began
+  (never `delivering`, never a longer lock), so a late refusal looks the same as a card nobody answered yet. A card a
+  plan line was also tried on says the plan's words, as it would without the rule. **Timing is not equal:** a raise a
+  rule was tried on, and missed, does more work before it answers (the accounts are read, the miss is audited, the card
+  is made to buzz), so a ferret that measures how long its raises take could tell that some rule is about that sign-in.
+  It learns nothing more (not which account, not why), and it is accepted. A suspension raises no card in the ferret's session: the owner sees it in Settings, on the input card's reason
+  line and in the audit.
+- **What the owner reads.** The request carries `preapproval: { by: 'rule', rule, revision, outcome, reason }`, and the
+  card's line comes from `grantMissLineFor` ("Your standing rule for this sign-in didn't apply: … The rule is suspended
+  until you approve it again." for a miss that suspends). A filled card closes as "Filled under your standing rule on
+  github.com."; it is raised quiet, and a miss buzzes once, with no edit to the card ([notifications](notifications.md)).
+- **Pages only, for now.** A rule's signed `surface` is `page`; a sudo, su or doas password stays covered per task by a
+  plan line until terminal rules land.
 - **A ferret can only suggest one.** `account.propose` takes `preapprove: true` (then `recipe` is optional), which will
   raise a card that opens the owner's sheet with nothing ticked. Until that handler lands, the daemon refuses such a
   call whole (`unavailable`) and files no recipe from it.
-- Every rule surface carries `SIGN_IN_RULE_HONEST_LIMIT`: "This stops a ferret putting the password anywhere else, or
-  granting itself a rule, through Ferretry. It can't stop a ferret that reads Ferretry's own files, and any ferret may
-  use this sign-in while the rule lasts."
+- **Audited, never a value.** `input.delivered` carries `by: 'rule'`, `signInRule` and `revision` beside the sign-in,
+  the account handle and the 2FA key id; a miss is `input.requested` with `preapproval: 'did-not-apply'`, the rule and
+  `because`. Each suspension is `sign-in-rule-suspended` with its reason.
+
+What it does NOT do, said plainly:
+
+- **A rule checks where the password goes, not why.**
+- **A refusal that lands in the last moment before typing can show.** The fill asks whether the rule still holds
+  before the page is held from the ferret, so a refusal the ferret can cause (a script it starts, say) lands before
+  anything it can read changes. One that lands in the few milliseconds between taking that hold and typing (a revoke, a
+  script started in exactly that gap) leaves the page held from the ferret for that moment, which a card no rule was
+  about never does: a ferret polling its page could so learn that some rule was tried. It learns nothing more.- **A code page fills only right after the rule's own password.** The owner's history counts a form only when its
+  secret went into a password box (`masked`), so a code page is never in it, however often you tap it. A rule with the
+  code ticked therefore types a code on a separate page only as a JOIN to the sign-in it just did: the rule typed the
+  password in this same session, IN THIS SAME TAB, at this same place, within the last three minutes; the tab has since
+  navigated to a new document (the code page); the ferret has not clicked, typed, navigated or run a script on its pages
+  since (reading and waiting are fine; the rule's own Enter is the daemon's); and the code page has exactly one code box.
+  It never pins the code form and never starts an attempt. So a "confirm with 2FA" form in another tab, or one the
+  ferret steered to, asks you (`code-without-sign-in`), and a page script on the place in between still suspends the
+  rule. A site that shows its code step without loading a new document asks you too.
+- **A username-only page asks you** (`no-history`, no suspension): it is no password box either. So does a form that
+  asks for the password and the code together when its code box is a plain text box.
+- **Every ferret is honest-client** (`SIGN_IN_RULE_HONEST_LIMIT`):
+
+> This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop a
+> ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
 
 ## Who reads the terminal
 

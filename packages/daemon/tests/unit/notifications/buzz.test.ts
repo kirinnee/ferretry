@@ -447,3 +447,39 @@ describe('AgendaBuzz wake', () => {
     should(sink.stops).deepEqual([`${NOW}:A1`]);
   });
 });
+
+describe('AgendaBuzz: a card a standing rule did not fill after all (R3c-4, invariant 27)', () => {
+  it('should push nothing while the card is quiet, and exactly one push when it is handed back, with the board untouched', async () => {
+    // Arrange — an input card raised while a rule is filling it.
+    const { attention: agenda, boards, sink, snapshot } = world();
+    const quiet = new Set<string>(['ab'.repeat(16)]);
+    const buzz = new AgendaBuzz(
+      boards,
+      { current: async () => undefined },
+      sink,
+      { now: () => NOW },
+      undefined,
+      (_session, requestId) => quiet.has(requestId),
+    );
+    const card = await new InputAgendaAdapter(agenda).raise(SESSION, {
+      requestId: 'ab'.repeat(16),
+      title: 'Needs a login',
+      ask: 'Sign in',
+      prompt: 'GitHub wants a login',
+      blocking: false,
+      expiresAt: '2026-10-23T10:10:00.000Z',
+    });
+    if (!card.ok) throw new Error(card.message);
+    await buzz.raised(SESSION, snapshot().items.find(each => each.id === card.id) as AgendaItem, snapshot());
+    should(sink.deadlines).deepEqual([]);
+    const before = JSON.stringify(boards.ledger);
+
+    // Act — the rule did not apply: the card is the owner's, with no edit to its words.
+    quiet.clear();
+    await buzz.unquieted(SESSION);
+
+    // Assert
+    should(sink.deadlines).deepEqual([card.id]);
+    should(JSON.stringify(boards.ledger)).equal(before);
+  });
+});

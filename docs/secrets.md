@@ -494,8 +494,10 @@ owner narrowed its scope to one board project or one session), **for up to 90 da
 > This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop
 > a ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
 
-**Nothing fills under a rule yet.** The service, the file, the routes, suspension and history are built. The matcher
-that fills under a rule comes next, and the app after it. `sign-in-rules.1` stays unadvertised until then.
+**No rule fills until the app ships.** The service, the file, the routes, suspension, history and the fills through the
+shared matcher ([input requests › Standing rule fills](input-requests.md#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret))
+are built; `sign-in-rules.1` stays unadvertised until the app draws the rule sheet and its cards, and until then every
+sign-in a rule would cover is a normal card.
 
 ### Only the owner, a fresh passkey every time, bound to the bytes
 
@@ -625,10 +627,13 @@ Two more limits are declared:
 - **A crash before an owed write lands.** A suspension or a use that only memory holds is lost if the daemon crashes
   before any write succeeds. The rule's drift, its proof and its expiry are found again at load; a suspension caused
   by an event (a page script, a page that did not move on, a failed write) is not.
-- **Timing.** An account change that suspends a rule takes one rules-file write and an audit record longer than one
-  that does not. A ferret that can cause such a change (an auto-applied recipe, a new form recorded after its own fill)
-  could time it to learn that a rule existed. The probe costs it the rule, which is then suspended until the owner
-  approves it again. This is accepted.
+- **Timing.** A raise a rule was tried on answers later than one no rule is about, even when the rule misses without
+  being suspended (out of scope, say): the accounts are read, the miss is audited and the card is made to buzz. A
+  ferret that measures its raises could so learn that some rule is about a sign-in, without spending it. Likewise an
+  account change that suspends a rule takes one rules-file write and an audit record longer than one that does not.
+  What a ferret reads (its view, its words, its agenda card) stays byte-identical either way, save a refusal in the last
+  milliseconds before typing, which can leave its page held for that moment (input-requests.md, "Standing rule
+  fills"). This is accepted.
 
 ### Routes
 
