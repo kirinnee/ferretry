@@ -103,7 +103,7 @@ describe('SharedCatalogService', () => {
     );
     should(error.refusal).equal('changed_since_preview');
     should(error.message).match(/changed since you previewed it/u);
-    should(r.documents.document.catalogs[0]?.items).have.length(0);
+    should(r.documents.document.catalogs[0]?.entries).have.length(0);
   });
 
   it('should bind a new version to its preview and refuse one with nothing new', async () => {
@@ -300,10 +300,9 @@ describe('SharedCatalogService', () => {
   it('should refuse a file it cannot make, and one that does not verify', async () => {
     const { r, catalog } = await withSkill();
     const stored = r.documents.document;
-    const item = stored.catalogs[0]?.items[0];
-    if (stored.catalogs[0] === undefined || item === undefined) throw new Error('fixture');
-    const withHarness = { ...item, harness: 'claude' as const };
-    r.documents.document = { ...stored, catalogs: [{ ...stored.catalogs[0], items: [withHarness] }] };
+    const item = stored.items[0];
+    if (item === undefined) throw new Error('fixture');
+    r.documents.document = { ...stored, items: [{ ...item, harness: 'claude' as const }] };
     const made = await refusal(async () => await r.service.exportCatalog(catalog.id, {}));
     should(made.refusal).equal('export_failed');
     should(made.message).match(/could not be made/u);

@@ -297,7 +297,7 @@ All are `sharing`/`use`, `noStore`, and the writes answer a ferret 403 `forbidde
 | `GET /v1/catalogs[?sourceState=1]`             | every catalog, its items and versions (`sourceState` only when asked) | may     |
 | `POST /v1/catalogs`                            | make one (201)                                                        | refused |
 | `PATCH /v1/catalogs/:id`                       | rename, describe or set the publisher name                            | refused |
-| `DELETE /v1/catalogs/:id`                      | delete it and its versions                                            | refused |
+| `DELETE /v1/catalogs/:id`                      | delete it (its items and versions are kept in the store)              | refused |
 | `POST /v1/catalogs/:id/items/preview`          | freeze a source for review; writes nothing                            | may     |
 | `POST /v1/catalogs/:id/items`                  | add the previewed source as a new item (201)                          | refused |
 | `POST /v1/catalogs/:id/items/:itemId/versions` | publish the next version (201)                                        | refused |
@@ -321,14 +321,75 @@ every route above except the two reads. Governed remote callers also need a pass
 
 Under `<FY_HOME>/state/catalogs/`, directory `0700`, files `0600`, written atomically:
 
-- `catalogs.json`: the catalogs, their items and a line per version (digest, size, when, source). It
-  carries a `schemaVersion` and is parsed with zod on every read. A damaged file is a clear
-  `store_damaged` error; it is never silently reset.
-- `blobs/<sha256-hex>.json`: one frozen item version each, **content-addressed and never rewritten**.
-  The blob is written before the document that lists it, and a blob is checked against its digest when
-  read.
+- `catalogs.json` (**schema version 2**): one shared **item table** and the catalogs that list its items.
+  An item holds its kind, name, source and a line per version. A catalog holds its own settings, its
+  `revision` and an ordered list of `entries` (`itemId`, `addedAt`, `withdrawnAt` once withdrawn). A
+  version carries two digests:
+  - `contentDigest`: the digest of the version with the three fields that name a catalog
+    (`catalogId`, `itemId`, `itemVersion`) replaced by fixed placeholders, so the same content has the
+    **same** `contentDigest` in every catalog. This is the **shared copy**.
+  - `bindings[catalogId] = { digest, size }`: the digest and size of the item **as that catalog signs
+    it**. A signed item names its catalog, so the digest differs per catalog and the signed format
+    cannot change.
 
-Mutations are serialised, so two requests never interleave a read-modify-write.
+  The file carries a `schemaVersion` and is parsed with zod on every read. A damaged file is a clear
+  `store_damaged` error; it is never silently reset.
+
+- `blobs/<hex>.json`: one frozen item version each, **content-addressed**: the name is the SHA-256 of the
+  file's text, so a file that holds other text is replaced with the right text on the next write (see the gap
+  below). Version 2 stores the **shared copy**, named by the hex of its `contentDigest` (no `sha256:` prefix
+  in the file name), once per version. Reading it for a
+  catalog sets the three placeholder fields back (a pure step), and **every read checks both**: the
+  shared copy against its `contentDigest`, and the re-identified item against that catalog's
+  `bindings[catalogId].digest`. A blob is written before the document that lists it.
+- `catalogs.v1.json`: the version 1 file as it was, kept by the upgrade (see below). Nothing reads it.
+
+Mutations are serialised, so two requests never interleave a read-modify-write. A new version of an item
+raises the `revision` of **every** catalog that lists it live, in one document write; a catalog where it
+is withdrawn is not raised, but still gets a binding so it can be listed again later.
+
+Deleting a catalog removes it and its bindings and **keeps the items and versions** it listed (and their
+shared copies); the route still answers as before. Nothing yet removes an item no catalog lists.
+
+#### Upgrading from version 1
+
+A version 1 `catalogs.json` listed items inside each catalog, with one blob per catalog version. The
+first call that finds one upgrades it, **inside the write queue**, so two first calls upgrade once. The
+steps run in this order and each is safe to run again:
+
+1. Read every version 1 blob and **verify it against the digest the file lists**. Any blob that is
+   missing, not JSON, not an item, not the item the file says it is, or that no longer hashes to its
+   digest stops the upgrade with `store_damaged` naming `blobs/<hex>.json`. **Nothing is written.** The
+   next call tries again; restore the file, or install the previous Ferretry version.
+2. Write the shared copies (`blobs/<hex of contentDigest>.json`, no `sha256:` prefix).
+3. Write `catalogs.v1.json` with the exact text of the old file.
+4. Write the version 2 `catalogs.json`.
+
+A crash between any two steps leaves the version 1 file in place, and the next call repeats the upgrade
+to the same bytes. The upgrade is pure and deterministic: a version 2 file is left alone. It changes
+**nothing a member or an installer can see**: the signed manifests, the per-catalog items, their digests
+and the revisions are byte-identical before and after, and the next export equals the one before.
+The version 1 per-catalog blobs stay on disk.
+
+**One thing does change: a preview held across the upgrade is stale.** A version 1 `contentDigest` kept the
+catalog's real id; a version 2 one is catalog-independent (the shared copy carries placeholder ids). A
+preview taken before the upgrade and sent back after it is therefore answered `409 changed_since_preview`;
+take a new preview and send that. Nothing is published by the refusal.
+
+**Going back.** A previous daemon only reads `schemaVersion: 1`; it refuses the version 2 file and never
+writes to it (`store_damaged`). To go back: stop the daemon, move `catalogs.v1.json` over `catalogs.json`
+(`mv catalogs.v1.json catalogs.json`), then start the previous version. **Caveat:** everything changed
+since the upgrade is lost, and revision numbers may be **reused**, which an installer that saw the newer
+revision refuses ([the revision rule](#the-revision-rule)). The refusal's advice to "move the file
+aside" is the wrong way back: the previous daemon then starts with no catalogs, and the next upgrade
+would write a new `catalogs.v1.json` over the backup.
+
+**If the version 2 file was already moved aside** and the previous daemon has run since, stop the daemon
+first. Copy `catalogs.v1.json` somewhere safe if it is the backup you want to keep. Then either put the
+moved-aside file back as `catalogs.json` (it is a whole, valid version 2 file, so the newer daemon reads
+it as it was, with every shared copy still in `blobs/`), or, to go back to version 1, move your saved
+`catalogs.v1.json` over `catalogs.json` as above. Anything the previous daemon published in between is in
+the file it wrote and is lost either way; keep that file too if you need it.
 
 ### Audit
 
@@ -685,6 +746,16 @@ What this does **not** protect against, said plainly (more in design §4.8):
   a regular file with one link. What is not closed is the instant between the parent check and the open:
   a folder replaced by a link in that instant is followed for that one read. The attacker must already be
   the same user on the publisher, and the content is shown in the preview and bound by its digest.
+- **A damaged shared copy is healed only when something writes it again.** A blob's name is the digest of its
+  text, so writing one replaces a file that holds other text (atomically, 0600). The upgrade and a new
+  version write the shared copies they need, so a damaged one is repaired then. A copy no write touches stays
+  damaged until it is needed: every read checks it against its `contentDigest` and answers `store_damaged`,
+  so nothing wrong is served. Restore the file from a backup in the meantime.
+- **One damaged version 1 blob stops the upgrade for every catalog** (it fails closed rather than
+  upgrade some). Nothing is written, and the daemon keeps answering `store_damaged` for catalogs until
+  the file is restored or the previous version is installed.
+- **Going back loses changes and can reuse revisions** ([Storage](#upgrading-from-version-1)). Orphaned
+  items (a deleted catalog's, or the old per-catalog blobs) are kept; nothing collects them yet.
 - `public` and members are not available; a file is the only way a catalog leaves.
 
 ## What is built

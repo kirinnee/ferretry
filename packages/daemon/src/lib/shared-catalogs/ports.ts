@@ -4,17 +4,29 @@
  */
 import type { DaemonIdentity } from '@ferretry/relay';
 import type { CatalogsDocument } from './document.ts';
+import type { CatalogsDocumentV1 } from './document-v1.ts';
 import type { McpSourceServer } from './mcp-source.ts';
 
-/** `state/catalogs/catalogs.json`. A damaged file is an error from `read`, never an empty document. */
+/**
+ * What `state/catalogs/catalogs.json` holds. A version 1 file arrives with its exact text, because the
+ * backup written before the upgrade is those bytes and no re-spelling of them.
+ */
+export type RawCatalogs =
+  | { readonly version: 1; readonly doc: CatalogsDocumentV1; readonly text: string }
+  | { readonly version: 2; readonly doc: CatalogsDocument }
+  | { readonly version: 'none' };
+
+/** `state/catalogs/catalogs.json`. A damaged file is an error from `readRaw`, never an empty document. */
 export interface CatalogDocumentStore {
-  read(): Promise<CatalogsDocument>;
+  readRaw(): Promise<RawCatalogs>;
   write(document: CatalogsDocument): Promise<void>;
+  /** Writes `catalogs.v1.json` with exactly these bytes, over any older backup. */
+  writeBackupV1(text: string): Promise<void>;
 }
 
-/** The frozen item versions, content-addressed by their digest (`sha256:<hex>`) and never rewritten. */
+/** The frozen item versions, content-addressed by the digest (`sha256:<hex>`) of their text. */
 export interface CatalogBlobStore {
-  /** Writes the text unless a blob of that digest is already there. */
+  /** Makes sure the blob holds exactly this text: left alone when it does, replaced when it holds anything else. */
   put(digest: string, text: string): Promise<void>;
   /** The text, or `undefined` when there is no such blob. */
   get(digest: string): Promise<string | undefined>;

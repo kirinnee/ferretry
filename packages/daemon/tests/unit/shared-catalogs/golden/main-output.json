@@ -1,0 +1,450 @@
+{
+  "export:cat_BBBBBBBBBBBBBBBBBBBBBB": {
+    "format": "ferretry-catalog-file",
+    "version": 1,
+    "exportedAt": "2026-01-05T00:00:00.000Z",
+    "signedManifest": {
+      "manifest": {
+        "format": "ferretry-catalog-manifest",
+        "version": 1,
+        "publisher": "fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA",
+        "publisherName": "studio",
+        "catalogId": "cat_BBBBBBBBBBBBBBBBBBBBBB",
+        "name": "Team tools",
+        "description": "for us",
+        "visibility": "members",
+        "revision": 6,
+        "issuedAt": "2026-01-05T00:00:00.000Z",
+        "items": [
+          {
+            "itemId": "itm_SSSSSSSSSSSSSSSSSSSSSS",
+            "kind": "skill",
+            "name": "demo",
+            "summary": "Does the demo thing",
+            "version": 2,
+            "digest": "sha256:fec9d84042fad624a3a4a9898c8243f2a76c634670fce92888c9dc8cb2b2600a",
+            "size": 428,
+            "publishedAt": "2026-01-04T00:00:00.000Z"
+          }
+        ],
+        "withdrawn": [
+          {
+            "itemId": "itm_MMMMMMMMMMMMMMMMMMMMMM",
+            "at": "2026-01-05T00:00:00.000Z"
+          }
+        ]
+      },
+      "spki": "MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+      "sig": "tWM3elZLuD-ZHPx0A0t8_tGOJxEITiuHHVNmS2bUKPx3yFrvxzbt0K2SaWJEHECPYU4xOwMIZQ4fxiIwghg6DA"
+    },
+    "items": [
+      {
+        "format": "ferretry-catalog-item",
+        "version": 1,
+        "publisher": "fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA",
+        "catalogId": "cat_BBBBBBBBBBBBBBBBBBBBBB",
+        "itemId": "itm_SSSSSSSSSSSSSSSSSSSSSS",
+        "itemVersion": 2,
+        "name": "demo",
+        "summary": "Does the demo thing",
+        "kind": "skill",
+        "skill": {
+          "files": [
+            {
+              "path": "SKILL.md",
+              "content": "---\nname: demo\ndescription: Does the demo thing\n---\nBody\n"
+            },
+            {
+              "path": "notes.txt",
+              "content": "new notes"
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "manifest:cat_BBBBBBBBBBBBBBBBBBBBBB": {
+    "manifest": {
+      "format": "ferretry-catalog-manifest",
+      "version": 1,
+      "publisher": "fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA",
+      "publisherName": "studio",
+      "catalogId": "cat_BBBBBBBBBBBBBBBBBBBBBB",
+      "name": "Team tools",
+      "description": "for us",
+      "visibility": "members",
+      "revision": 6,
+      "issuedAt": "2026-01-05T00:00:00.000Z",
+      "items": [
+        {
+          "itemId": "itm_SSSSSSSSSSSSSSSSSSSSSS",
+          "kind": "skill",
+          "name": "demo",
+          "summary": "Does the demo thing",
+          "version": 2,
+          "digest": "sha256:fec9d84042fad624a3a4a9898c8243f2a76c634670fce92888c9dc8cb2b2600a",
+          "size": 428,
+          "publishedAt": "2026-01-04T00:00:00.000Z"
+        }
+      ],
+      "withdrawn": [
+        {
+          "itemId": "itm_MMMMMMMMMMMMMMMMMMMMMM",
+          "at": "2026-01-05T00:00:00.000Z"
+        }
+      ]
+    },
+    "spki": "MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+    "sig": "tWM3elZLuD-ZHPx0A0t8_tGOJxEITiuHHVNmS2bUKPx3yFrvxzbt0K2SaWJEHECPYU4xOwMIZQ4fxiIwghg6DA"
+  },
+  "export:cat_CCCCCCCCCCCCCCCCCCCCCC": {
+    "format": "ferretry-catalog-file",
+    "version": 1,
+    "exportedAt": "2026-01-03T00:00:00.000Z",
+    "signedManifest": {
+      "manifest": {
+        "format": "ferretry-catalog-manifest",
+        "version": 1,
+        "publisher": "fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA",
+        "publisherName": "studio",
+        "catalogId": "cat_CCCCCCCCCCCCCCCCCCCCCC",
+        "name": "Other",
+        "description": "",
+        "visibility": "members",
+        "revision": 2,
+        "issuedAt": "2026-01-03T00:00:00.000Z",
+        "items": [
+          {
+            "itemId": "itm_LLLLLLLLLLLLLLLLLLLLLL",
+            "kind": "mcp",
+            "name": "files",
+            "summary": "files summary",
+            "version": 1,
+            "digest": "sha256:7a8ab26f99010ed0910219ed5619dd1e6a89ea99d979497109252e376f76ea8e",
+            "size": 340,
+            "publishedAt": "2026-01-03T00:00:00.000Z"
+          },
+          {
+            "itemId": "itm_HHHHHHHHHHHHHHHHHHHHHH",
+            "kind": "mcp",
+            "name": "docs",
+            "summary": "docs summary",
+            "version": 1,
+            "digest": "sha256:1fd117e9f4eab9d7ae59cada220db2b57af2f3639da7308992047782fcbbb06b",
+            "size": 356,
+            "publishedAt": "2026-01-03T00:00:00.000Z",
+            "harness": "claude"
+          }
+        ],
+        "withdrawn": []
+      },
+      "spki": "MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+      "sig": "SQyFhe2YXMyMf8C_tXlGD0DkvukSrMMN9x7LbIZPoAoSmEX9-4MTmnuXNxqAhsQ-VqvbExOTX9VuV3jwLRC4AQ"
+    },
+    "items": [
+      {
+        "format": "ferretry-catalog-item",
+        "version": 1,
+        "publisher": "fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA",
+        "catalogId": "cat_CCCCCCCCCCCCCCCCCCCCCC",
+        "itemId": "itm_LLLLLLLLLLLLLLLLLLLLLL",
+        "itemVersion": 1,
+        "name": "files",
+        "summary": "files summary",
+        "kind": "mcp",
+        "mcp": {
+          "transport": "command",
+          "command": "npx",
+          "args": ["-y", "files"],
+          "env": {}
+        }
+      },
+      {
+        "format": "ferretry-catalog-item",
+        "version": 1,
+        "publisher": "fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA",
+        "catalogId": "cat_CCCCCCCCCCCCCCCCCCCCCC",
+        "itemId": "itm_HHHHHHHHHHHHHHHHHHHHHH",
+        "itemVersion": 1,
+        "name": "docs",
+        "summary": "docs summary",
+        "harness": "claude",
+        "kind": "mcp",
+        "mcp": {
+          "transport": "command",
+          "command": "npx",
+          "args": ["-y", "docs"],
+          "env": {}
+        }
+      }
+    ]
+  },
+  "manifest:cat_CCCCCCCCCCCCCCCCCCCCCC": {
+    "manifest": {
+      "format": "ferretry-catalog-manifest",
+      "version": 1,
+      "publisher": "fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA",
+      "publisherName": "studio",
+      "catalogId": "cat_CCCCCCCCCCCCCCCCCCCCCC",
+      "name": "Other",
+      "description": "",
+      "visibility": "members",
+      "revision": 2,
+      "issuedAt": "2026-01-03T00:00:00.000Z",
+      "items": [
+        {
+          "itemId": "itm_LLLLLLLLLLLLLLLLLLLLLL",
+          "kind": "mcp",
+          "name": "files",
+          "summary": "files summary",
+          "version": 1,
+          "digest": "sha256:7a8ab26f99010ed0910219ed5619dd1e6a89ea99d979497109252e376f76ea8e",
+          "size": 340,
+          "publishedAt": "2026-01-03T00:00:00.000Z"
+        },
+        {
+          "itemId": "itm_HHHHHHHHHHHHHHHHHHHHHH",
+          "kind": "mcp",
+          "name": "docs",
+          "summary": "docs summary",
+          "version": 1,
+          "digest": "sha256:1fd117e9f4eab9d7ae59cada220db2b57af2f3639da7308992047782fcbbb06b",
+          "size": 356,
+          "publishedAt": "2026-01-03T00:00:00.000Z",
+          "harness": "claude"
+        }
+      ],
+      "withdrawn": []
+    },
+    "spki": "MCowBQYDK2VwAyEAebVWLo_mVPlAeLES6KmLp5AfhTrmlb7X4OORC60ElmQ",
+    "sig": "SQyFhe2YXMyMf8C_tXlGD0DkvukSrMMN9x7LbIZPoAoSmEX9-4MTmnuXNxqAhsQ-VqvbExOTX9VuV3jwLRC4AQ"
+  },
+  "list": {
+    "publisher": "fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA",
+    "catalogs": [
+      {
+        "id": "cat_BBBBBBBBBBBBBBBBBBBBBB",
+        "name": "Team tools",
+        "description": "for us",
+        "publisherName": "studio",
+        "visibility": "members",
+        "revision": 6,
+        "issuedAt": "2026-01-05T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "items": [
+          {
+            "itemId": "itm_SSSSSSSSSSSSSSSSSSSSSS",
+            "kind": "skill",
+            "name": "demo",
+            "summary": "Does the demo thing",
+            "source": {
+              "kind": "skill",
+              "path": "/home/me/.claude/skills/demo/SKILL.md"
+            },
+            "versions": [
+              {
+                "version": 1,
+                "digest": "sha256:2ac984da2bc7d8d23d02de5d2691720b7e6f65605fbeb6e221fcd7dae09c900c",
+                "size": 424,
+                "publishedAt": "2026-01-02T00:00:00.000Z"
+              },
+              {
+                "version": 2,
+                "digest": "sha256:fec9d84042fad624a3a4a9898c8243f2a76c634670fce92888c9dc8cb2b2600a",
+                "size": 428,
+                "publishedAt": "2026-01-04T00:00:00.000Z"
+              }
+            ]
+          },
+          {
+            "itemId": "itm_MMMMMMMMMMMMMMMMMMMMMM",
+            "kind": "mcp",
+            "name": "files",
+            "summary": "files summary",
+            "source": {
+              "kind": "mcp",
+              "id": "id-files",
+              "name": "files"
+            },
+            "withdrawnAt": "2026-01-05T00:00:00.000Z",
+            "versions": [
+              {
+                "version": 1,
+                "digest": "sha256:72246f0ed21651724d1d4a17ea2ad3993e47c36c980bdb9f595b15e76144e5f5",
+                "size": 340,
+                "publishedAt": "2026-01-03T00:00:00.000Z"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "cat_CCCCCCCCCCCCCCCCCCCCCC",
+        "name": "Other",
+        "description": "",
+        "publisherName": "studio",
+        "visibility": "members",
+        "revision": 2,
+        "issuedAt": "2026-01-03T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "items": [
+          {
+            "itemId": "itm_LLLLLLLLLLLLLLLLLLLLLL",
+            "kind": "mcp",
+            "name": "files",
+            "summary": "files summary",
+            "source": {
+              "kind": "mcp",
+              "id": "id-files",
+              "name": "files"
+            },
+            "versions": [
+              {
+                "version": 1,
+                "digest": "sha256:7a8ab26f99010ed0910219ed5619dd1e6a89ea99d979497109252e376f76ea8e",
+                "size": 340,
+                "publishedAt": "2026-01-03T00:00:00.000Z"
+              }
+            ]
+          },
+          {
+            "itemId": "itm_HHHHHHHHHHHHHHHHHHHHHH",
+            "kind": "mcp",
+            "name": "docs",
+            "summary": "docs summary",
+            "harness": "claude",
+            "source": {
+              "kind": "mcp",
+              "id": "id-component-docs",
+              "name": "docs"
+            },
+            "versions": [
+              {
+                "version": 1,
+                "digest": "sha256:1fd117e9f4eab9d7ae59cada220db2b57af2f3639da7308992047782fcbbb06b",
+                "size": 356,
+                "publishedAt": "2026-01-03T00:00:00.000Z"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "listWithState": {
+    "publisher": "fy_daemon_ZG1r5J2fAEj5T2d0nso1FW7tT3p74Y5PxKlL_UTjALA",
+    "catalogs": [
+      {
+        "id": "cat_BBBBBBBBBBBBBBBBBBBBBB",
+        "name": "Team tools",
+        "description": "for us",
+        "publisherName": "studio",
+        "visibility": "members",
+        "revision": 6,
+        "issuedAt": "2026-01-05T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "items": [
+          {
+            "itemId": "itm_SSSSSSSSSSSSSSSSSSSSSS",
+            "kind": "skill",
+            "name": "demo",
+            "summary": "Does the demo thing",
+            "source": {
+              "kind": "skill",
+              "path": "/home/me/.claude/skills/demo/SKILL.md"
+            },
+            "sourceState": "unchanged",
+            "versions": [
+              {
+                "version": 1,
+                "digest": "sha256:2ac984da2bc7d8d23d02de5d2691720b7e6f65605fbeb6e221fcd7dae09c900c",
+                "size": 424,
+                "publishedAt": "2026-01-02T00:00:00.000Z"
+              },
+              {
+                "version": 2,
+                "digest": "sha256:fec9d84042fad624a3a4a9898c8243f2a76c634670fce92888c9dc8cb2b2600a",
+                "size": 428,
+                "publishedAt": "2026-01-04T00:00:00.000Z"
+              }
+            ]
+          },
+          {
+            "itemId": "itm_MMMMMMMMMMMMMMMMMMMMMM",
+            "kind": "mcp",
+            "name": "files",
+            "summary": "files summary",
+            "source": {
+              "kind": "mcp",
+              "id": "id-files",
+              "name": "files"
+            },
+            "sourceState": "withdrawn",
+            "withdrawnAt": "2026-01-05T00:00:00.000Z",
+            "versions": [
+              {
+                "version": 1,
+                "digest": "sha256:72246f0ed21651724d1d4a17ea2ad3993e47c36c980bdb9f595b15e76144e5f5",
+                "size": 340,
+                "publishedAt": "2026-01-03T00:00:00.000Z"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "cat_CCCCCCCCCCCCCCCCCCCCCC",
+        "name": "Other",
+        "description": "",
+        "publisherName": "studio",
+        "visibility": "members",
+        "revision": 2,
+        "issuedAt": "2026-01-03T00:00:00.000Z",
+        "createdAt": "2026-01-01T00:00:00.000Z",
+        "items": [
+          {
+            "itemId": "itm_LLLLLLLLLLLLLLLLLLLLLL",
+            "kind": "mcp",
+            "name": "files",
+            "summary": "files summary",
+            "source": {
+              "kind": "mcp",
+              "id": "id-files",
+              "name": "files"
+            },
+            "sourceState": "unchanged",
+            "versions": [
+              {
+                "version": 1,
+                "digest": "sha256:7a8ab26f99010ed0910219ed5619dd1e6a89ea99d979497109252e376f76ea8e",
+                "size": 340,
+                "publishedAt": "2026-01-03T00:00:00.000Z"
+              }
+            ]
+          },
+          {
+            "itemId": "itm_HHHHHHHHHHHHHHHHHHHHHH",
+            "kind": "mcp",
+            "name": "docs",
+            "summary": "docs summary",
+            "harness": "claude",
+            "source": {
+              "kind": "mcp",
+              "id": "id-component-docs",
+              "name": "docs"
+            },
+            "sourceState": "unchanged",
+            "versions": [
+              {
+                "version": 1,
+                "digest": "sha256:1fd117e9f4eab9d7ae59cada220db2b57af2f3639da7308992047782fcbbb06b",
+                "size": 356,
+                "publishedAt": "2026-01-03T00:00:00.000Z"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
