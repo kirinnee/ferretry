@@ -436,9 +436,16 @@ is a person route; a ferret's call is refused by the daemon and `fy` reports tha
 `403 add_2fa_key_needs_passkey` with where to go instead; `totp: null` (remove the seed) still works there.
 
 The card is answered by its Allow (the passkey ceremony, then the commit) or Deny (drop the stage). An agenda answer
-saves nothing, so an app from before these cards shows the daemon's words and cannot save. **The app's half — the
-"Set up automatic codes" panel and the Allow on this card — ships in the next release (R2-5); until then a seed
-cannot be saved at all**, and the ones already saved keep working.
+saves nothing, so an app from before these cards shows the daemon's words and cannot save.
+
+**The app draws this card itself** (`TwoFactorSeedHost`, in the Inbox and the agenda panel, wherever an item carries the
+daemon's `twoFactorSeed` reference; a ferret's words that merely copy the title draw nothing). Every sentence is the
+daemon's (subject, why, context); the app adds the one-factor warning with its tick, an amber box and a second tick when
+the stage was staged with "save it here anyway" (the daemon marks that with `TWO_FACTOR_SEED_CARD_MISMATCH_LINE`, one
+shared constant), **Allow** and **Deny**. Allow is the same shared flow as the "Set up automatic codes" panel: the
+`add-2fa-key` passkey bound to THAT stage (`useAddKeyStepUp`), then the commit with no body. A dismissed passkey leaves
+the stage waiting (it expires in two minutes), so the owner can try again or Deny; Deny drops the stage with no passkey. The
+card reads only where the stage stands (`GET …/seed/:stage`) and the account's name; it never holds the key.
 
 | Route (owner only, `secrets`/`configure`)                  | Does                                                                                | Passkey                    |
 | ---------------------------------------------------------- | ----------------------------------------------------------------------------------- | -------------------------- |

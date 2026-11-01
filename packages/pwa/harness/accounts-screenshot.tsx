@@ -30,6 +30,7 @@ const run = (command: string, args: readonly string[]): void => {
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
 import { AccountsSurface } from '../../src/features/accounts/accounts-surface.tsx';
+import { TwoFactorSeedHost } from '../../src/features/input-request/two-factor-seed-host.tsx';
 import { LoginsSurface } from '../../src/features/secrets/logins-surface.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { answer } from '../../tests/support/accounts-fixtures.ts';
@@ -41,12 +42,32 @@ const world = {
   groups: view === 'lookalike' ? [['GITHUB', 'GITHUB_WORK']] : [],
   defaults: view === 'site-defaults' ? 'sites:\\n  vercel.com: VERCEL\\n' : undefined,
 };
-const machine = fakeClient(view === 'fallback' ? () => logins() : answer(world));
+const seed = view.startsWith('seed-');
+const stage = 'st_' + 'a'.repeat(24);
+const seedItem = {
+  twoFactorSeed: { stage, account: 'GITHUB' },
+  subject: 'Save automatic codes to GitHub · kirinnee?',
+  why: 'Asked by fy on kirin-box at 10:02 UTC. If you didn’t just ask for this, Deny.',
+  context: [
+    '- The key says it is for GitHub · kirinnee.',
+    ...(view.includes('mismatch') ? ['- It does not look like this account’s key; it was staged with “save it here anyway”.'] : []),
+    '- Password and code both come from this machine then: together they are one factor.',
+  ].join('\\n'),
+};
+const seedAnswer = (call) =>
+  call.path.startsWith('/v1/accounts/' + 'GITHUB' + '/factors/seed/')
+    ? { stage, account: 'GITHUB', label: 'Authenticator app', state: view === 'seed-saved' ? 'saved' : 'waiting', expiresAt: '2099-01-01T00:00:00.000Z' }
+    : answer(world)(call);
+const machine = fakeClient(view === 'fallback' ? () => logins() : seed ? seedAnswer : answer(world));
 
 createRoot(document.getElementById('root')).render(
   <div className="kt-shell flex min-h-full flex-col items-center bg-bg p-3">
     <div className="w-full max-w-[640px]" data-harness-surface="">
-      {view === 'fallback' ? (
+      {seed ? (
+        <article className="fy-card" data-harness-card="">
+          <TwoFactorSeedHost connection={connection} createClient={async () => machine.client} addKey={async () => true} item={seedItem} />
+        </article>
+      ) : view === 'fallback' ? (
         <LoginsSurface connection={connection} createClient={async () => machine.client} />
       ) : (
         <AccountsSurface connection={connection} createClient={async () => machine.client} addKey={async () => true} />
@@ -102,6 +123,11 @@ const STEPS: Readonly<Record<string, readonly string[]>> = {
   'site-recipe': SITE('recipe'),
   'site-seen': SITE('seen'),
   'site-defaults': SITE('defaults'),
+  'seed-card': [],
+  'seed-card-ticked': ['[data-seed-warning-tick]'],
+  'seed-card-mismatch': ['[data-seed-warning-tick]'],
+  'seed-card-mismatch-ticked': ['[data-seed-warning-tick]', '[data-seed-mismatch-tick]'],
+  'seed-saved': [],
 };
 
 function SITE(tab: string): readonly string[] {
@@ -161,7 +187,7 @@ try {
           await page.goto(`${server.url}?theme=studio-${scheme}&view=${state}`);
           await page.locator('[data-harness-surface]').waitFor({ state: 'visible' });
           await page
-            .locator('[data-accounts-screen], [data-login], [aria-label="Accounts unavailable"]')
+            .locator('[data-accounts-screen], [data-login], [data-seed-card], [aria-label="Accounts unavailable"]')
             .first()
             .waitFor({ state: 'visible' });
           for (const step of STEPS[state] ?? []) await page.locator(step).first().click();

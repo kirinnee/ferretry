@@ -21,8 +21,8 @@
 import { randomBytes } from 'node:crypto';
 import {
   type AccountId,
-  addTwoFactorKeySubject,
   type AgendaId,
+  addTwoFactorKeySubject,
   factorMismatch,
   factorMismatchWords,
   type InputActor,
@@ -32,6 +32,7 @@ import {
   type StageTwoFactorSeedRequest,
   type TotpParameters,
   TWO_FACTOR_ERROR_CODES,
+  TWO_FACTOR_SEED_CARD_MISMATCH_LINE,
   TWO_FACTOR_STAGE_TTL_SECONDS,
   type TwoFactorId,
   type TwoFactorSeedSaved,
@@ -407,7 +408,7 @@ export class TwoFactorSeedStages implements RedactionValueSource {
     const says = [held.issuer, held.accountName].filter(part => part !== undefined).join(' · ');
     const context = [
       ...(says === '' ? [] : [`The key says it is for ${says}.`]),
-      ...(held.mismatch ? ['It does not look like this account’s key; it was staged with “save it here anyway”.'] : []),
+      ...(held.mismatch ? [TWO_FACTOR_SEED_CARD_MISMATCH_LINE] : []),
       'Password and code both come from this machine then: together they are one factor.',
     ];
     const id = await agenda.raise(sessionId, {

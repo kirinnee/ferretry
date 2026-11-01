@@ -137,3 +137,45 @@ describe('an approve-on-phone card in the Inbox', () => {
     expect((await draw(true, false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
   });
 });
+
+describe('a staged 2FA seed card in the Inbox', () => {
+  const REF = { stage: `st_${'a'.repeat(24)}`, account: 'GITHUB' };
+  const seed = (ref: boolean) =>
+    inboxCard(
+      agendaItem('A10', {
+        kind: 'permission',
+        ask: undefined,
+        raisedBy: 'daemon',
+        subject: 'Save automatic codes to GitHub · kirinnee?',
+        ...(ref ? { twoFactorSeed: REF } : {}),
+      } as never),
+    );
+
+  const draw = async (ref: boolean, connected = true) => {
+    const fake = fakeInbox();
+    const view = await mount(
+      <InboxHarness
+        cards={[seed(ref)]}
+        fake={fake}
+        render={inbox => (
+          <AgendaNeedsYou
+            clock={fake.clock.now}
+            daemonId={WORKSHOP.daemonId}
+            inbox={{ ...inbox, connectionFor: id => (connected && id === WORKSHOP.daemonId ? WORKSHOP : undefined) }}
+            now={NOW}
+            onNavigate={() => undefined}
+          />
+        )}
+      />,
+    );
+    mounted.push(view);
+    await settle();
+    return view;
+  };
+
+  it('is answered on its own card from the daemon’s reference, never from a title a ferret copied', async () => {
+    expect((await draw(false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+    expect((await draw(true)).container.querySelector('[data-agenda-plan-form]')).not.toBeNull();
+    expect((await draw(true, false)).container.querySelector('[data-agenda-plan-form]')).toBeNull();
+  });
+});

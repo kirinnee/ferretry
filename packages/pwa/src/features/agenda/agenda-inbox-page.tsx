@@ -38,6 +38,7 @@ import { Spinner } from '../../components/spinner.tsx';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { CLEAR_ACTION, kindWord } from '../../lib/agenda-answers.ts';
 import type { ClearPort } from '../../lib/agenda-clear-agents.ts';
+import { sendForm } from '../../lib/agenda-form-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import {
   actionSentence,
@@ -69,7 +70,6 @@ import {
   skipSelection,
   stepSelection,
 } from '../../lib/agenda-inbox-list.ts';
-import { sendForm } from '../../lib/agenda-form-send.ts';
 import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { agendaAuthor, agendaStatus, clockWords } from '../../lib/agenda-status.ts';
 import type { ModeFilter } from '../../lib/controls.ts';
@@ -86,8 +86,9 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import { InputCardHost } from '../input-request/input-card-host.tsx';
-import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { PhoneApprovalHost } from '../input-request/phone-approval-host.tsx';
+import { TwoFactorSeedHost } from '../input-request/two-factor-seed-host.tsx';
+import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { CopyPlanHost } from '../secure-copy/copy-plan-host.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
@@ -196,6 +197,8 @@ const inputFormFor = (
         />
       ),
     };
+  if (connection !== undefined && card.item.twoFactorSeed !== undefined)
+    return { planForm: <TwoFactorSeedHost connection={connection} item={card.item} /> };
   return card.item.kind !== 'input' || connection === undefined
     ? {}
     : {

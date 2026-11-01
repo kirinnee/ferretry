@@ -21,19 +21,21 @@ import {
   InputRequestListSchema,
   type InputShot,
   InputShotSchema,
+  type PhoneApproval,
+  type PhoneApprovalList,
+  PhoneApprovalListSchema,
   type PutAccountDefaultRequest,
   PutAccountDefaultRequestSchema,
   type PutAccountDefaultResult,
   PutAccountDefaultResultSchema,
-  type PhoneApproval,
-  type PhoneApprovalList,
-  PhoneApprovalListSchema,
   type StageTwoFactorSeedRequest,
   StageTwoFactorSeedRequestSchema,
   type TwoFactorSeedSaved,
   TwoFactorSeedSavedSchema,
   type TwoFactorSeedStaged,
   TwoFactorSeedStagedSchema,
+  type TwoFactorSeedStageView,
+  TwoFactorSeedStageViewSchema,
   type TwoFactorStageId,
 } from '@ferretry/protocol';
 import { z } from 'zod';
@@ -142,6 +144,17 @@ export async function stageSeed(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(StageTwoFactorSeedRequestSchema.parse(body)),
+  });
+}
+
+/** Where one staged save stands (`waiting`, `saved`, `dropped`, `expired`): never the key. A paired device may read any stage. */
+export async function readSeedStage(
+  client: InputClient,
+  account: AccountId,
+  stage: TwoFactorStageId,
+): Promise<TwoFactorSeedStageView> {
+  return await client.request(`${seedPath(account)}/${encodeURIComponent(stage)}`, TwoFactorSeedStageViewSchema, {
+    method: 'GET',
   });
 }
 
