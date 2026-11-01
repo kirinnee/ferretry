@@ -57,7 +57,10 @@ export type InboxAction =
 
 /** The item fields the answers are read from. */
 export type AnswerSource = AgendaCardSource &
-  Pick<AgendaItem, 'waitingOn' | 'waitingFor'> & { readonly raisedBy?: AgendaItem['raisedBy'] };
+  Pick<AgendaItem, 'waitingOn' | 'waitingFor'> & {
+    readonly raisedBy?: AgendaItem['raisedBy'];
+    readonly gate?: AgendaItem['gate'];
+  };
 
 /** The three ways a card can be swiped, which are also the three arrows of its answer bar. */
 export type AnswerDirection = AgendaDirection;
@@ -159,8 +162,13 @@ export const cardAnswers = (item: AnswerSource): readonly AgendaCardAnswer[] => 
   const answers = agendaCardAnswers(item);
   // A card in discussion stays fully answerable: only a plain "need more info" wait takes Done away.
   const waiting = item.ask?.kind === 'task' && item.waitingOn === 'ferret' && !agendaInDiscussion(item);
-  return waiting ? answers.filter(answer => answer.does !== 'done' && answer.does !== 'needs-info') : answers;
+  const open = waiting ? answers.filter(answer => answer.does !== 'done' && answer.does !== 'needs-info') : answers;
+  return item.gate === undefined ? open : open.map(mirrored);
 };
+
+/** A gate item answers the owner's one model — → is Done, ← is Not good — so the protocol's ← first option is turned around. */
+const mirrored = (answer: AgendaCardAnswer): AgendaCardAnswer =>
+  answer.direction === 'up' ? answer : { ...answer, direction: answer.direction === 'left' ? 'right' : 'left' };
 
 /** What one swipe (or arrow) gives: its label for the stamp, and the action — `null` until a clarify has text. */
 export interface SwipeTarget {

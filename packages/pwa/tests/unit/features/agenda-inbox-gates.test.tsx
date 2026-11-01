@@ -24,7 +24,7 @@ const gateItem = (id: string, cardId: string, extra: Partial<AgendaItem> = {}): 
     kind: 'choice',
     raisedBy: 'daemon',
     raisedBySession: null,
-    // The daemon lays the options out in swipe order: ← Done first, → Not good last.
+    // The daemon lays the options out in swipe order: Done first, Not good last; the app turns them: → Done, ← Not good.
     ask: choices('Done', 'Not good'),
     gate: {
       cardId,
@@ -161,6 +161,15 @@ describe('a gate item in the Inbox', () => {
   it('keeps the composer under a question', async () => {
     const mounted = await mount(page(fakeInbox(), [question], { initialOpen: question.key, renderComposer: composer }));
     expect(mounted.container.querySelector('[data-fake-composer]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('lays the buttons out Not good (left) · Done (right), the order of the swipes', async () => {
+    const mounted = await mount(page(fakeInbox(), [gate], { initialOpen: gate.key }));
+    const names = [...mounted.container.querySelectorAll('.fy-attn-deck__top [data-agenda-option]')].map(button =>
+      button.getAttribute('data-agenda-option'),
+    );
+    expect(names).toEqual(['Not good', 'Done']);
     await mounted.unmount();
   });
 
@@ -309,16 +318,16 @@ describe('the arrow keys on a gate item', () => {
   const view = (mounted: Mounted): HTMLElement =>
     must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-view]'), 'the open item');
 
-  it('← answers the forward option and → asks for the words first', async () => {
+  it('→ answers the forward option and ← asks for the words first', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [gate], { initialOpen: gate.key }));
-    await key(view(mounted), 'ArrowRight');
+    await key(view(mounted), 'ArrowLeft');
     expect(pending(fake)).toEqual([]);
     expect(mounted.container.querySelector('[data-inbox-gate-why]')).not.toBeNull();
     await mounted.unmount();
     const forward = fakeInbox();
     const again = await mount(page(forward, [gate], { initialOpen: gate.key }));
-    await key(view(again), 'ArrowLeft');
+    await key(view(again), 'ArrowRight');
     expect(pending(forward)).toEqual(['Done']);
     await again.unmount();
   });

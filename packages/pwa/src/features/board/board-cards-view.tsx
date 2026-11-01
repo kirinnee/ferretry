@@ -3,8 +3,8 @@
  *
  * Only cards that need the owner are here (`awaitingOwner`): cards waiting for a try, then plans waiting for an OK.
  * Everything else — todo, in progress, in review, merged, closed — is on the Kanban and the List. A card waiting for a try
- * is the Inbox's own row (`ToTestList`): Done, Not good and Skip as buttons, and on a touch screen a swipe left (Done),
- * right (Not good, with the same reason box) or down (Skip, the next card) at once. A plan to approve is drawn by the host (`draw`), as in the Kanban and List.
+ * is the Inbox's own row (`ToTestList`): Done, Not good and Skip as buttons, and on a touch screen a swipe right (Done),
+ * left (Not good, with the same reason box) or down (Skip, the next card) at once. A plan to approve is drawn by the host (`draw`), as in the Kanban and List.
  *
  * The place in the stack is kept as the card the reader was on, so a card that moves on (its verdict) leaves the reader
  * at the same place in the stack rather than jumping to the top.

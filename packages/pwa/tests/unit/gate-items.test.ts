@@ -46,17 +46,18 @@ const twoOptions = gate([
 ]);
 
 describe('a gate item answers as a plain multiple choice', () => {
-  test('← is the forward option and sends the choice, nothing else', () => {
+  test('→ is the forward option and sends the choice, nothing else', () => {
     const targets = swipeTargets(gateItem(twoOptions));
-    expect(targets.left?.action).toEqual({
+    expect(targets.left?.label).toBe('Not good');
+    expect(targets.right?.action).toEqual({
       kind: 'respond',
       label: 'Done',
       response: { kind: 'multiple-choice', choice: 'Done' },
     });
   });
 
-  test('→ is Not good, and it carries the words as the note', () => {
-    expect(swipeTargets(gateItem(twoOptions), 'The QR is blank').right?.action).toEqual({
+  test('← is Not good, and it carries the words as the note', () => {
+    expect(swipeTargets(gateItem(twoOptions), 'The QR is blank').left?.action).toEqual({
       kind: 'respond',
       label: 'Not good',
       response: { kind: 'multiple-choice', choice: 'Not good' },

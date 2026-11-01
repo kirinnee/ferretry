@@ -255,7 +255,7 @@ for (const form of ['phone', 'desktop'] as const) {
     );
     const done = await gate.locator('.fy-attn-deck__top [data-agenda-option="Done"]').boundingBox();
     const bad = await gate.locator('.fy-attn-deck__top [data-agenda-option="Not good"]').boundingBox();
-    check(done !== null && bad !== null && done.x < bad.x, `${form} ${theme}: Done is not left of Not good`);
+    check(done !== null && bad !== null && bad.x < done.x, `${form} ${theme}: Not good is not left of Done`);
     await shot(gate, 'gate', form, theme);
     const gateClient = await context.newCDPSession(gate);
     await compassSteps(gate, gateClient, 'gate', form, theme);

@@ -9,7 +9,7 @@
  * ephemeral loopback port, drives it with REAL touch input (the swipe is touch only), and FAILS (after writing every
  * picture) when: a page scrolls sideways; the panel does not open on the Cards or the card to test is not first; the
  * held drag does not read as the answer it would send, or the uncovered area does not name it; a swipe past the threshold
- * does not send Done; a left swipe does not open the reason box; or a tab does not switch the view. A held drag is
+ * does not send Done; a right swipe does not open the reason box; or a tab does not switch the view. A held drag is
  * cancelled, so nothing is sent by it.
  */
 
@@ -208,8 +208,8 @@ for (const form of ['phone', 'desktop'] as const) {
     // Mid-swipe all three ways.
     const client = await context.newCDPSession(page);
     for (const [name, dx, aim, direction] of [
-      ['swipe-left', -150, 'Done', 'left'],
-      ['swipe-right', 150, 'Not good', 'right'],
+      ['swipe-left', -150, 'Not good', 'left'],
+      ['swipe-right', 150, 'Done', 'right'],
       ['swipe-down', 0, 'Skip', 'down'],
     ] as const) {
       await hold(page, client, dx, direction === 'down' ? 150 : 0);
@@ -232,21 +232,21 @@ for (const form of ['phone', 'desktop'] as const) {
       );
     }
 
-    // Past the threshold: left is Done at once, right opens the reason box.
-    const end = await hold(page, client, -300);
+    // Past the threshold: right is Done at once, left opens the reason box.
+    const end = await hold(page, client, 300);
     await touch(client, 'touchEnd', end.x, end.y);
     await page.waitForTimeout(300);
     const moves = await page.evaluate(() => (window as unknown as { __moves: { to: string }[] }).__moves);
     check(
       moves.length === 1 && moves[0]?.to === 'closed',
-      `${form} ${theme}: a left swipe sent ${JSON.stringify(moves)}`,
+      `${form} ${theme}: a right swipe sent ${JSON.stringify(moves)}`,
     );
-    const away = await hold(page, client, 300);
+    const away = await hold(page, client, -300);
     await touch(client, 'touchEnd', away.x, away.y);
     await page.waitForTimeout(300);
     check(
       (await page.locator('[role="dialog"]').count()) === 1,
-      `${form} ${theme}: a right swipe did not open the reason box`,
+      `${form} ${theme}: a left swipe did not open the reason box`,
     );
     await shot(page, 'reason', form, theme);
     await page.keyboard.press('Escape');

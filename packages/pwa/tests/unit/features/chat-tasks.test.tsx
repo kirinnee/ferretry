@@ -666,16 +666,16 @@ const swipe = async (root: HTMLElement, dx: number): Promise<void> => {
 describe('ChatTasks — swiping a card to test, at once', () => {
   beforeEach(() => boardSideView.set('cards'));
 
-  it('a left swipe is Done, with no tap on a button first', async () => {
+  it('a right swipe is Done, with no tap on a button first', async () => {
     const { root, acts } = await open();
-    await swipe(root, -300);
+    await swipe(root, 300);
     await interact(() => flush());
     expect(acts).toEqual([{ id: 'F22', request: { action: 'move', to: 'closed' } }]);
   });
 
-  it('a right swipe opens the Board’s reason box and moves nothing yet', async () => {
+  it('a left swipe opens the Board’s reason box and moves nothing yet', async () => {
     const { root, acts } = await open();
-    await swipe(root, 300);
+    await swipe(root, -300);
     await interact(() => flush());
     expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
     expect(acts).toEqual([]);

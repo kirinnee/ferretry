@@ -493,12 +493,12 @@ the owner meets one stream, not a question list and a separate to-test list. It 
 the card's ONE head row (the title, ‹ n/N ›, ⓘ, the snooze clock, ✕ — `CardHead`) under ONE quiet meta line: **what it is** — "Try it"
 (a card in a verify lane) or "OK to build?" (a plan awaiting approval) — the project, the ferret and "Open chat ›". It repeats
 nothing: no summary line, no chip, no restated ask. Its body is the card's _How to test_ as numbered tick-steps, and its
-options are the gate's own, laid out as every choice is: the first ←, the second ↑, the third →.
+options are the gate's own, laid out as every choice is (the first ←, the second ↑, the third →) and then MIRRORED left/right for a gate, so the forward option is always on the right.
 
-- **←** is the forward option (Done, OK, Yes), the same as the side panel's Cards view; **→** is **Not good**, which reopens the card with an agenda item; **↓** is Skip.
-- **Not good needs words.** Pressing it (or →) answers nothing yet: the "why" composer opens where the answer row was, and
+- **→** is the forward option (Done, OK to build, Yes), the same as the side panel's Cards view and the to-test rows; **←** is **Not good**, which reopens the card with an agenda item; **↓** is Skip. The buttons read Not good (left) · Done (right).
+- **Not good needs words.** Pressing it (or ←) answers nothing yet: the "why" composer opens where the answer row was, and
   Send back stays disabled until something is written. The words go as the answer's note. Cancel changes nothing.
-- On a **one-option gate** the right answer is **Not yet** — not one of `gate.options`: the card stays where it is, and words
+- On a **one-option gate** the left answer is **Not yet** — not one of `gate.options`: the card stays where it is, and words
   are welcome but not required.
 - Answering is a plain choice, `{ kind: 'multiple-choice', choice: <label> }`, held in the undo window like any answer. A
   refusal (the card moved on, or the gate was not reached) shows beside the buttons, as for every answer.
@@ -521,6 +521,8 @@ internal agent), and sitting in a gate lane**. A gate lane is a verify lane ("Tr
 closed ("OK to build?"). Everything else — to do, in progress, in review, merged, released, closed, and every internal or
 agent-asked card — never appears there; the Kanban and the List show the rest. With nothing waiting, the view says so in one
 line rather than listing cards that need nothing from the owner.
+
+A card here swipes as a gate item does: **→ Done**, **← Not good**, **↓ Skip**, and the buttons read Not good (left) · Done (right). The to-test rows in the Inbox and the Answer-quickly run swipe the same way.
 
 ## Delivery
 
