@@ -2,14 +2,13 @@ import { describe, expect, it } from 'bun:test';
 import type { WardenAccount, WardenConfig, WardenLogin } from '@ferretry/protocol';
 import { useState } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
-
-import type { PickerAccount } from '../../../src/lib/account-picker-catalog.ts';
 import { WardenSettingsForm, wardenPrivacyNote } from '../../../src/features/warden/warden-settings-form.tsx';
 import {
   type JevKeyStatus,
   wardenConfigPatchFrom,
   wardenFormErrors,
 } from '../../../src/features/warden/warden-settings-model.ts';
+import type { PickerAccount } from '../../../src/lib/account-picker-catalog.ts';
 import { render, run } from '../../support/react.ts';
 import { wardenConfig } from '../../support/warden.ts';
 
@@ -638,5 +637,123 @@ describe('WardenSettingsForm, when the owner chose no login', () => {
     expect(standIn.root.findAll(node => node.props['data-warden-unknown-login'] === '')).toHaveLength(1);
     expect(text(standIn)).toContain('gone-runtime');
     for (const renderer of [chosen, standIn]) run(() => renderer.unmount());
+  });
+});
+
+describe('WardenSettingsForm: moving a ferret that hit a limit', () => {
+  const picker = (wrapper: string): PickerAccount => ({
+    id: `${wrapper}-id`,
+    wrapper,
+    displayName: wrapper,
+    kind: 'claude',
+    agent: true,
+    credentialId: wrapper,
+    defaultModel: null,
+    models: [],
+    available: true,
+    unavailableReason: null,
+  });
+  const moving = (changes: Partial<WardenConfig['autoMigrate']> = {}) =>
+    wardenConfig({ autoMigrate: { ...wardenConfig().autoMigrate, enabled: true, ...changes } });
+
+  it('should offer it off, even with no AI layer on, and turn it on with the switch', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(<Harness initial={wardenConfig()} changes={changes} />);
+    const toggle = () => renderer.root.findByProps({ 'aria-label': 'Move the ferret to another login on' });
+
+    // Act
+    const before = toggle().props['aria-checked'];
+    run(() => toggle().props.onClick());
+
+    // Assert
+    expect(before).toBe(false);
+    expect(last(changes).autoMigrate.enabled).toBe(true);
+    expect(text(renderer)).toContain('Stop its background jobs if they are in the way');
+    expect(text(renderer)).toContain('same chat, same card');
+    run(() => renderer.unmount());
+  });
+
+  it('should drop a trigger, and warn when none is left', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(<Harness initial={moving({ when: ['rate_limited'] })} changes={changes} />);
+
+    // Act
+    run(() => option(renderer, 'It hits a usage limit').props.onChange({ target: { checked: false } }));
+
+    // Assert
+    expect(last(changes).autoMigrate.when).toEqual([]);
+    expect(text(renderer)).toContain('Pick at least one, or it never moves anything.');
+    run(() => renderer.unmount());
+  });
+
+  it('should name logins in the order they are ticked, and go back to any ready login', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(
+      <Harness initial={moving()} runtimes={[picker('claude-b'), picker('glm-a')]} changes={changes} />,
+    );
+
+    // Act
+    run(() => option(renderer, 'Only these, in order').props.onChange());
+    run(() => option(renderer, 'glm-a').props.onChange({ target: { checked: true } }));
+    const named = last(changes).autoMigrate.targets;
+    run(() => option(renderer, 'Any ready login, same provider').props.onChange());
+
+    // Assert
+    expect(named).toEqual(['claude-b', 'glm-a']);
+    expect(last(changes).autoMigrate.targets).toEqual([]);
+    run(() => renderer.unmount());
+  });
+
+  it('should hide the wait once the Warden may stop the jobs itself, and say what it stops', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(<Harness initial={moving()} changes={changes} />);
+    expect(text(renderer)).toContain('Wait for the ferret to stop them (min)');
+
+    // Act
+    run(() =>
+      option(renderer, 'Stop its background jobs if they are in the way').props.onChange({ target: { checked: true } }),
+    );
+
+    // Assert
+    expect(last(changes).autoMigrate.forceStopBackground).toBe(true);
+    expect(text(renderer)).not.toContain('Wait for the ferret to stop them (min)');
+    expect(text(renderer)).toContain('never anything else');
+    run(() => renderer.unmount());
+  });
+});
+
+describe('WardenSettingsForm: moving, the remaining choices', () => {
+  const moving = (changes: Partial<WardenConfig['autoMigrate']> = {}) =>
+    wardenConfig({ autoMigrate: { ...wardenConfig().autoMigrate, enabled: true, ...changes } });
+
+  it('should tick a trigger back on, last in the list', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(<Harness initial={moving({ when: ['budget_exceeded'] })} changes={changes} />);
+
+    // Act
+    run(() => option(renderer, 'It hits a usage limit').props.onChange({ target: { checked: true } }));
+
+    // Assert
+    expect(last(changes).autoMigrate.when).toEqual(['budget_exceeded', 'rate_limited']);
+    run(() => renderer.unmount());
+  });
+
+  it('should keep a named list when its own choice is picked again', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(<Harness initial={moving({ targets: ['glm-a'] })} changes={changes} />);
+
+    // Act
+    run(() => option(renderer, 'Only these, in order').props.onChange());
+
+    // Assert
+    expect(last(changes).autoMigrate.targets).toEqual(['glm-a']);
+    expect(text(renderer)).toContain('Tried in this order: ');
+    run(() => renderer.unmount());
   });
 });

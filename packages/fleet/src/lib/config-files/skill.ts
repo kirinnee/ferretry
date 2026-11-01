@@ -39,7 +39,7 @@ Run \`${bin} config path\` for the directory. Inside it:
 | \`components/<kind>/<name>.yaml\` | one component; kind is \`instructions\`, \`mcp\`, \`skills\`, \`settings\`, \`hooks\` or \`modelSets\` |
 | \`profiles/<name>.yaml\` | \`contents:\` — components and other profiles (\`mcp/github\`, \`profile/base\`), in order; a later entry overrides an earlier one |
 | \`runtimes/<name>.yaml\` | one runtime: \`credential\` (a login id), \`profile\`, \`agent: true\` for one Ferretry launches |
-| \`warden.yaml\` | the Warden: \`enabled\`, \`layers\` (\`jev\` and \`llm\`, each on or off), \`caps\`, \`mayActAlone\`, \`intervalMinutes\`, \`accounts\`, … |
+| \`warden.yaml\` | the Warden: \`enabled\`, \`layers\` (\`jev\` and \`llm\`, each on or off), \`caps\`, \`mayActAlone\`, \`intervalMinutes\`, \`accounts\`, \`autoMigrate\` (move a ferret that hit a usage limit or its hard budget to another login of the same harness: \`enabled\`, \`when\`, \`targets\` — empty for any ready login of the same provider —, \`forceStopBackground\`, \`waitMinutes\`, \`maxMovesPerHour\`; off by default), … |
 | \`learning.yaml\` | lesson mining |
 | \`voice.yaml\` | who cleans up dictated text: \`postProcessing\`: \`provider\` (\`off\`, \`groq\`, \`cerebras\`, \`login\`), \`style\` (\`off\`, \`fix\`, \`polish\`), your own \`prompts\` for each style, \`useConversation\` and \`conversationMessages\` |
 | \`pack.yaml\` | Pack mode: \`enabled\`, \`decision\` (\`agent\` or \`jev\`), \`limits\` (\`interactiveChildren\`, \`autoChildren\`, \`maxDepth\`), \`probe\`, \`jev\` |
@@ -57,7 +57,7 @@ JSON Schema of a kind (\`${bin} config schema\` lists the kinds).
 2. **Run \`${bin} config check\` after every edit.** It names each problem by file, line and column, with the
    fix. (\`${bin} config write <file>\` writes from stdin through the daemon and refuses a file that does not check.) A broken file is never half-applied: its last good version stays in effect until it checks.
 3. **A change that loosens what the machine may spend or what agents may do waits for the owner** —
-   switching on a Warden layer that spends (\`jev\` or \`llm\`), raising a cap, letting the Warden act alone, letting agents control more, opening the public usage feed (\`publicUsageFeed\`), sending dictated text to a provider.
+   switching on a Warden layer that spends (\`jev\` or \`llm\`), raising a cap, letting the Warden act alone, letting the Warden move ferrets to another login (\`autoMigrate\`: switching it on, \`forceStopBackground\`, a new trigger or target, more moves an hour), letting agents control more, opening the public usage feed (\`publicUsageFeed\`), sending dictated text to a provider.
    It is written, but the tighter version stays in effect until the owner runs \`${bin} config confirm\` at
    the machine or confirms it in the app with a passkey. Tell the owner what you changed and why with an
    agenda card whose Allow confirms it: \`${bin} agenda add "<the ask>" --title "<title>" --context "<the facts around it>" --confirms <file>\`. Never

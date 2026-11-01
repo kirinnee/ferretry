@@ -13,6 +13,7 @@ import {
   defaultWardenConfig,
   type JevJudgementNode,
   type WardenAgendaWrite,
+  type WardenAutoMigrateService,
   type WardenAnomalyKind,
   type WardenBoardPort,
   type WardenCardNotice,
@@ -178,6 +179,8 @@ export function harness(
     readonly unreadableBoards?: readonly string[];
     /** Auto-revive, when a test is about it. */
     readonly revive?: WardenReviveService;
+    /** Moving a ferret that hit a limit, when a test is about it. */
+    readonly autoMigrate?: WardenAutoMigrateService;
     /** The project boards, when a test is about cards. */
     readonly board?: WardenBoardPort;
     /** The send ledgers, when a test is about who answered whom. */
@@ -378,6 +381,7 @@ export function harness(
     },
     journal: { record: (type, data) => void journal.push({ type, data: { ...data } }) },
     ...(options.revive === undefined ? {} : { revive: options.revive }),
+    ...(options.autoMigrate === undefined ? {} : { autoMigrate: options.autoMigrate }),
     ...(options.board === undefined ? {} : { board: options.board }),
     ...(options.exchanges === undefined ? {} : { exchanges: options.exchanges }),
     jevChecks: {

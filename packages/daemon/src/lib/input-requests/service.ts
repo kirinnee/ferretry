@@ -1042,6 +1042,15 @@ export class InputRequestService {
   }
 
   /**
+   * Whether the session has a card open the owner has not answered yet — what keeps the Warden from moving a ferret
+   * in the middle of one. A yes or no, nothing about the card: it needs no owner, and says nothing a value could leak through.
+   */
+  hasOpen(sessionId: string): boolean {
+    for (const { request } of this.held.values()) if (request.sessionId === sessionId && !isFinal(request)) return true;
+    return false;
+  }
+
+  /**
    * The pending request on a surface, so an agent cannot type into the field the owner has been asked about. Asked
    * for `typing`, a card of one-time codes only does not count: the ferret may type a code itself (one it read from
    * an inbox it has), so it is never kept off the surface for one. Any other field on the card still blocks.

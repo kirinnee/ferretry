@@ -319,6 +319,18 @@ describe('TaskPlanService: the ferret asks', () => {
     should(error.message).match(/one sign-in, one line/u);
   });
 
+  it('should say whether a plan card of a session still waits for the owner', async () => {
+    const w = world();
+    await w.rules.load();
+    const before = w.service.awaitingOwner(SESSION);
+
+    await w.service.propose(SESSION, { lines: [PASTE] });
+
+    should(before).be.false();
+    should(w.service.awaitingOwner(SESSION)).be.true();
+    should(w.service.awaitingOwner('other-session')).be.false();
+  });
+
   it('should take only the call: nothing read from a page or terminal is a parameter', async () => {
     const w = world();
     await w.rules.load();

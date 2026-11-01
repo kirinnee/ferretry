@@ -94,6 +94,8 @@ export interface WardenActionRow {
   readonly anomalyKind?: WardenAnomalyKind;
   /** The account a failover moved to. */
   readonly failoverTo?: string;
+  /** The account it left, when the Warden moved a ferret off a login that hit a limit. */
+  readonly failoverFrom?: string;
   readonly reportPath?: string;
   /** How many identical actions this row stands for. */
   readonly count: number;
@@ -137,6 +139,7 @@ const rowFor = (action: WardenAction, now: number): WardenActionRow => {
     ...optional('anomaly', action.anomalyKind === undefined ? undefined : ANOMALY_CHIPS[action.anomalyKind]),
     ...optional('anomalyKind', action.anomalyKind),
     ...optional('failoverTo', action.agent),
+    ...optional('failoverFrom', action.fromAgent),
     ...optional('reportPath', action.reportPath),
     ...optional('jev', actor === 'llm' ? jevBeforeLine(action.jev) : undefined),
     count: 1,

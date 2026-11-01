@@ -650,3 +650,57 @@ describe('BunProcessProbe — which processes are servers', () => {
     );
   });
 });
+
+describe('BunProcessProbe, looking up pids wherever they are', () => {
+  it('should read each pid from procfs, whoever its parent is, and leave out the ones not running', async () => {
+    // Arrange
+    const root = await mkdtemp(join(tmpdir(), 'fy-proc-'));
+    await fakeProc(root);
+    const subject = new BunProcessProbe(undefined, { procRoot: root });
+
+    try {
+      // Act
+      const actual = await subject.lookup([200, 400, 999]);
+
+      // Assert
+      should([...actual.entries()]).deepEqual([
+        [200, { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js' }],
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('should throw rather than answer "gone" when procfs gives no usable uptime', async () => {
+    // Arrange
+    const badUptime = await mkdtemp(join(tmpdir(), 'fy-proc-'));
+    await writeFile(join(badUptime, 'uptime'), 'soon\n');
+
+    try {
+      // Act
+      const read = new BunProcessProbe(undefined, { procRoot: badUptime }).lookup([1]);
+
+      // Assert
+      await should(read).be.rejectedWith(/uptime/);
+    } finally {
+      await rm(badUptime, { recursive: true, force: true });
+    }
+  });
+
+  it('should read the real table where there is no procfs, and throw when it cannot read one', async () => {
+    // Arrange
+    const executable = Bun.which('ps');
+    if (!executable) throw new Error('ps executable is required for this isolated integration test');
+
+    // Act
+    const own = await new BunProcessProbe(executable, { procRoot: undefined }).lookup([
+      globalThis.process.pid,
+      4_194_305,
+    ]);
+    const unreadable = new BunProcessProbe(undefined, { procRoot: undefined }).lookup([1]);
+
+    // Assert
+    should([...own.keys()]).deepEqual([globalThis.process.pid]);
+    await should(unreadable).be.rejectedWith(/ps executable/);
+  });
+});

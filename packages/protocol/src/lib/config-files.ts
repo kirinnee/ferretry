@@ -2,13 +2,15 @@ import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { type LearningConfig, LearningConfigSchema } from './learning.ts';
 import {
+  DEFAULT_WARDEN_AUTO_MIGRATE,
+  DEFAULT_WARDEN_JEV_ACTS,
   DEFAULT_WARDEN_REVIVE,
-  WardenReviveConfigSchema,
   LegacyWardenTriageSchema,
   mergeWardenConfig,
   migrateLegacyWardenSettings,
   ProviderOutageConfigSchema,
   WardenAccountSchema,
+  WardenAutoMigrateConfigSchema,
   WardenCapsSchema,
   type WardenConfig,
   WardenEventTriggersSchema,
@@ -16,9 +18,9 @@ import {
   WardenGuardConfigSchema,
   WardenInvestigationConfigSchema,
   WardenJevActsSchema,
-  DEFAULT_WARDEN_JEV_ACTS,
   WardenLayersSchema,
   WardenMayActAloneSchema,
+  WardenReviveConfigSchema,
   WardenSweepIntervalSchema,
 } from './warden.ts';
 
@@ -229,6 +231,7 @@ export function configFileCapability(address: ConfigFileAddress): 'fleet' | 'war
 export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
   enabled: true,
   revive: DEFAULT_WARDEN_REVIVE,
+  autoMigrate: DEFAULT_WARDEN_AUTO_MIGRATE,
   layers: { jev: false, llm: false },
   // Jev costs $0.042 per million input tokens, output free (docs.typesafe.ai/models.md, checked 2026-10-29).
   guard: { threshold: 0.7, model: 'jev-latest', usdPerMillionInputTokens: 0.042 },
@@ -258,6 +261,7 @@ export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
  */
 export const WardenFileSchema = z.strictObject({
   revive: WardenReviveConfigSchema.strict().partial().optional(),
+  autoMigrate: WardenAutoMigrateConfigSchema.strict().partial().optional(),
   enabled: z.boolean().optional(),
   layers: WardenLayersSchema.strict().partial().optional(),
   /** DEPRECATED: the single choice `layers` replaced. Read as its layers; never written back. */

@@ -9,7 +9,10 @@
  */
 
 import {
+  WARDEN_AUTO_MIGRATE_MOVES_RANGE,
+  WARDEN_AUTO_MIGRATE_WAIT_RANGE,
   WARDEN_CONFIG_SECTIONS,
+  type WardenAutoMigrateTrigger,
   type WardenAccount,
   type WardenConfig,
   type WardenConfigPatch,
@@ -34,6 +37,8 @@ export interface WardenFormErrors {
   readonly maxInvestigationsPerHour?: string;
   readonly maxAssignedWardens?: string;
   readonly blessMinutes?: string;
+  readonly moveWaitMinutes?: string;
+  readonly movesPerHour?: string;
 }
 
 /** The limits the form offers. The daemon's own schema is wider; these are what a person should pick. */
@@ -42,6 +47,8 @@ export const WARDEN_FORM_LIMITS = {
   perHour: { min: 1, max: 60 },
   atATime: { min: 1, max: 4 },
   blessMinutes: { min: 1, max: 240 },
+  moveWaitMinutes: WARDEN_AUTO_MIGRATE_WAIT_RANGE,
+  movesPerHour: WARDEN_AUTO_MIGRATE_MOVES_RANGE,
 } as const;
 
 const CAP_ERROR = 'Enter a cap between $0.01 and $100.';
@@ -56,9 +63,10 @@ const wholeInRange = (value: number, range: { readonly min: number; readonly max
  */
 export const wardenFormErrors = (config: WardenConfig): WardenFormErrors => {
   const { jev, llm } = config.layers;
-  if (!jev && !llm) return {};
+  const moving = autoMigrateErrors(config);
+  if (!jev && !llm) return moving;
   const { capUsd, perHour, atATime, blessMinutes } = WARDEN_FORM_LIMITS;
-  const errors: { -readonly [K in keyof WardenFormErrors]: string } = {};
+  const errors: { -readonly [K in keyof WardenFormErrors]: string } = { ...moving };
   if (jev && !inRange(config.caps.jevUsdPerDay, capUsd.min, capUsd.max)) errors.jevUsdPerDay = CAP_ERROR;
   if (llm && !inRange(config.caps.investigationUsdPerDay, capUsd.min, capUsd.max))
     errors.investigationUsdPerDay = CAP_ERROR;
@@ -68,7 +76,58 @@ export const wardenFormErrors = (config: WardenConfig): WardenFormErrors => {
   return errors;
 };
 
+/** Moving a ferret is a rule, not a layer: its numbers are checked whenever it is on, whatever spends. */
+const autoMigrateErrors = (config: WardenConfig): WardenFormErrors => {
+  const moving = config.autoMigrate;
+  if (!moving.enabled) return {};
+  const { moveWaitMinutes, movesPerHour } = WARDEN_FORM_LIMITS;
+  return {
+    ...(moving.forceStopBackground || wholeInRange(moving.waitMinutes, moveWaitMinutes)
+      ? {}
+      : { moveWaitMinutes: `${moveWaitMinutes.min} to ${moveWaitMinutes.max} minutes.` }),
+    ...(wholeInRange(moving.maxMovesPerHour, movesPerHour)
+      ? {}
+      : { movesPerHour: `${movesPerHour.min} to ${movesPerHour.max}.` }),
+  };
+};
+
 export const hasWardenFormErrors = (errors: WardenFormErrors): boolean => Object.keys(errors).length > 0;
+
+/** What can make the Warden move a ferret, in the words the form and the summary use. */
+export const AUTO_MIGRATE_TRIGGER_WORDS: Readonly<Record<WardenAutoMigrateTrigger, string>> = {
+  rate_limited: 'its login hits a usage limit',
+  budget_exceeded: 'its login passes its hard spend budget',
+};
+
+/**
+ * The sentence the summary ends with while moving is on: when a ferret is moved, where to, how often, and what
+ * happens to its background jobs. Empty while it is off, or while it has no trigger and so can never act.
+ */
+export const autoMigrateSummary = (config: WardenConfig): string => {
+  const moving = config.autoMigrate;
+  if (!moving.enabled || moving.when.length === 0) return '';
+  const errors = autoMigrateErrors(config);
+  const when = moving.when.map(trigger => AUTO_MIGRATE_TRIGGER_WORDS[trigger]).join(' or ');
+  const where =
+    moving.targets.length === 0
+      ? 'another ready login of the same kind and provider'
+      : `the first ready one of ${moving.targets.join(' → ')}`;
+  const often =
+    errors.movesPerHour === undefined
+      ? `at most ${moving.maxMovesPerHour === 1 ? 'once' : `${moving.maxMovesPerHour} times`} an hour`
+      : '(fix) times an hour';
+  const wait = errors.moveWaitMinutes === undefined ? `${moving.waitMinutes} min` : '(fix)';
+  const jobs = moving.forceStopBackground
+    ? 'The Warden stops its own background jobs first if it must.'
+    : `Its background jobs are never stopped by the Warden: it asks the ferret and waits ${wait}, then tells you.`;
+  return ` When ${when}, a ferret is moved to ${where} — same chat, same card — ${often}. ${jobs}`;
+};
+
+/** Ticks one login on or off the owner's move list; a login ticked on goes last, so the list keeps its order. */
+export const toggledMoveTarget = (config: WardenConfig, wrapper: string, on: boolean): WardenConfig => {
+  const others = config.autoMigrate.targets.filter(target => target !== wrapper);
+  return { ...config, autoMigrate: { ...config.autoMigrate, targets: on ? [...others, wrapper] : others } };
+};
 
 const money = (amount: number): string => `$${amount.toFixed(2)}`;
 const pct = (fraction: number): string => `${Math.round(fraction * 100)}%`;
@@ -99,6 +158,11 @@ export const wardenMachineDefaultLogin = (view: Pick<WardenConfigView, 'accounts
  */
 export const wardenSummary = (config: WardenConfig, hasJevKey: boolean, machineDefault?: string): string => {
   if (!config.enabled) return 'The Warden is off. Nothing watches your ferrets, and nothing spends money.';
+  return `${layerSummary(config, hasJevKey, machineDefault)}${autoMigrateSummary(config)}`;
+};
+
+/** What the rules and the two layers do with a flag, and what they may spend. */
+const layerSummary = (config: WardenConfig, hasJevKey: boolean, machineDefault?: string): string => {
   const every = `Every ${config.intervalMinutes} min the rules flag anomalies`;
   const { jev, llm } = config.layers;
   if (!jev && !llm) return `${every} and show them to you. No AI runs and nothing is spent.`;

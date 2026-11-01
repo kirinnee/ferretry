@@ -104,6 +104,30 @@ export class BunProcessProbe implements ProcessProbePort {
     }
   }
 
+  /**
+   * These pids, wherever they are on the host now — a job re-parented out of its pane included. From procfs where
+   * there is one, else the full table, read fresh (never the cached one: a stopped job must be seen gone). A pid
+   * not running is absent. Throws when neither can be read, so the caller can never mistake "unreadable" for "gone".
+   */
+  async lookup(pids: readonly number[]): Promise<ReadonlyMap<number, ProcRow>> {
+    const found = new Map<number, ProcRow>();
+    const proc = this.procRoot;
+    if (proc !== undefined) {
+      const uptime = Number((await readFile(join(proc, 'uptime'), 'utf8')).split(' ')[0]);
+      if (!Number.isFinite(uptime)) throw new Error('procfs gave no usable uptime');
+      for (const pid of pids) {
+        const row = await procRow(proc, pid, uptime);
+        if (row !== undefined) found.set(pid, row);
+      }
+      return found;
+    }
+    const read = await this.readTable();
+    if (read.kind === 'failed') throw new Error(read.reason);
+    const wanted = new Set(pids);
+    for (const row of parseProcessTable(read.stdout)) if (wanted.has(row.pid)) found.set(row.pid, row);
+    return found;
+  }
+
   private async readTable(): Promise<ProcessTableRead> {
     if (this.psExecutable === undefined || !isAbsolute(this.psExecutable))
       return { kind: 'failed', reason: 'no absolute ps executable is available to read the process table' };
