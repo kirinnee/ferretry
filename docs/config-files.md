@@ -501,21 +501,28 @@ autoMigrate:
   a native login; a hand-made environment login is its own provider) and takes the one with most headroom. A
   named list is tried in order and is the only way a move crosses to another provider. When nothing qualifies
   the owner is told once, in one line naming every login tried and why it was refused.
-- **Never** while the ferret has an input card open, holds a secure copy, handed a terminal or browser to the
-  owner, or waits on a permission prompt or a dialog; never a Warden or anything a Warden started; never more than
+- **Never** while the ferret has an input card open, a sign-in waiting on your phone, a plan card waiting for you,
+  holds a secure copy, handed a terminal or browser to the owner, or waits on a permission prompt or a dialog; never a Warden or anything a Warden started; never more than
   `maxMovesPerHour` times an hour.
 - **Background jobs.** Off (`forceStopBackground: false`): the ferret is asked, with `fy migrate`'s own message,
   to stop the jobs in the way, and given `waitMinutes`; still running after that, the owner is told and the
   ferret stays. A budget stop does not wait. On: the Warden stops only the jobs the ferret started from its own
-  tool shell, under its own tmux pane — children first, SIGTERM then SIGKILL, re-reading the tree before every
-  signal so a reused pid is never hit — names them to the ferret and in Recent actions, and forces the move.
-  A job that survives keeps the ferret where it is.
+  tool shell, under its own tmux pane — children first, SIGTERM then SIGKILL. Each one is followed by its pid and
+  start time wherever it goes (a child its dying shell left behind included), and signalled only while it is
+  still the same process, so a reused pid is never hit; init, the daemon and its parent are never signalled. Any
+  job that survives keeps the ferret where it is. **The move is never forced**: after the jobs are stopped the
+  migration's safety check reads the pane afresh, and anything else in the way — work it cannot see, a blocker
+  that is not one of the ferret's jobs — still keeps the ferret where it is. The ferret is told the stopped jobs'
+  commands; your notice and Recent actions name only their pids and programs, since a command line can carry a
+  credential. **A command you run yourself in the ferret's pane with the harness's `!` shell escape looks exactly
+  like one of the ferret's jobs, and is stopped too.**
 - **Held for the owner:** switching it on, switching `forceStopBackground` on, adding a trigger or a target
   (including a named target where any login was allowed, or going back from a list to any login), and raising
   `maxMovesPerHour`.
 
 Every move, hold and failure is a `failover` under Recent actions by `auto`, with the login it left and the one
-it went to, and is counted in Insights › Warden. The ferret's own log gets `warden.auto_migrated`,
+it went to, and is counted in Insights › Warden. The moves are kept in the Warden's own `auto-migrate.json`, which the sweep and the budget stop
+share under one lock, so the hourly limit counts every move however the two meet. The ferret's own log gets `warden.auto_migrated`,
 `warden.auto_migrate_asked` or `warden.auto_migrate_stopped_jobs`.
 
 ### Auto-revive

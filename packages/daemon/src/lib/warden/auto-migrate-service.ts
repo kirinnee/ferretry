@@ -30,8 +30,10 @@ import {
   askExpired,
   autoMigrateHoldKey,
   chooseMoveTarget,
+  EMPTY_AUTO_MIGRATE_MEMORY,
   movesInLastHour,
   moveTriggers,
+  parseAutoMigrateMemory,
   pruneAutoMigrateMemory,
   rateLimitedSubjects,
   recordMove,
@@ -70,10 +72,17 @@ export interface WardenAutoMigratePorts {
   /** Stop the ferret's own jobs under its own pane, and nothing else. */
   stopJobs(sessionId: string): Promise<StoppedAgentJobs>;
   /** Move the ferret — same session — to `agent`. `note` opens the turn it is handed. Throws when it did not move. */
-  migrate(
-    sessionId: string,
-    request: { readonly agent: string; readonly force: boolean; readonly note: string },
-  ): Promise<void>;
+  migrate(sessionId: string, request: { readonly agent: string; readonly note: string }): Promise<void>;
+  /**
+   * The login the ferret is on NOW, read inside the mover's lock — a sweep and a budget stop may both have meant to
+   * move it, and the second must see that the first already did. `undefined` when it cannot be read or is gone.
+   */
+  agentOf(sessionId: string): Promise<string | undefined>;
+  /**
+   * Who has been moved, when, and what each was asked or held for (`auto-migrate.ts`). The mover owns it: every
+   * read and write happens inside its one lock, so two paths can never both pass the hourly cap.
+   */
+  readonly ledger: { read(): Promise<unknown>; write(memory: AutoMigrateMemory): Promise<void> };
   /** One notice to the owner. Total. */
   notifyOwner(notice: WardenAutoMigrateNotice): Promise<void>;
   /** Append one Warden event to the ferret's own journal. Total. */
@@ -84,12 +93,10 @@ export interface WardenAutoMigratePorts {
 export interface WardenAutoMigrateInput {
   readonly fleet: readonly WardenSessionView[];
   readonly config: WardenConfig;
-  readonly memory: AutoMigrateMemory;
   readonly nowMs: number;
 }
 
 export interface WardenAutoMigrateResult {
-  readonly memory: AutoMigrateMemory;
   readonly actions: readonly WardenAction[];
   /** The ferrets moved this run, so the sweep does not flag them on the same pass. */
   readonly moved: ReadonlySet<string>;
@@ -112,13 +119,29 @@ const TRIGGER_WORDS: Readonly<Record<WardenAutoMigrateTrigger, (agent: string) =
   budget_exceeded: agent => `${agent} passed its hard spend budget on this machine`,
 };
 
-const jobList = (jobs: readonly AgentJob[]): string => jobs.map(job => `pid ${job.pid} (${job.command})`).join(', ');
+/**
+ * A job as the OWNER's words name it — a notice that pings their phone, Recent actions a paired device reads, the
+ * journal: its pid and its program, never its command line, which can carry a credential the vault does not know.
+ * The ferret that started it is told the whole (redacted) command in its own turn ({@link moveNote}).
+ */
+const program = (job: AgentJob): string => job.command.trim().split(/\s+/u)[0]?.split('/').at(-1) || '?';
+const jobList = (jobs: readonly AgentJob[]): string => jobs.map(job => `pid ${job.pid} (${program(job)})`).join(', ');
+const jobFacts = (jobs: readonly AgentJob[]) => jobs.map(job => ({ pid: job.pid, program: program(job) }));
+const commandList = (jobs: readonly AgentJob[]): string =>
+  jobs.map(job => `pid ${job.pid} (${job.command})`).join(', ');
+
+const sameMemory = (left: AutoMigrateMemory, right: AutoMigrateMemory): boolean =>
+  JSON.stringify(left) === JSON.stringify(right);
 
 const failureMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 export class WardenAutoMigrateService {
-  /** Ferrets being considered right now: a budget stop and a sweep must never move the same one twice. */
-  private readonly busy = new Set<string>();
+  /**
+   * The one lock every move runs under — a sweep's and a budget stop's alike. The ledger is read and written only
+   * inside it, so the hourly cap counts every move however the two paths interleave, and a ferret is never
+   * considered by both at once.
+   */
+  private lock: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly ports: WardenAutoMigratePorts) {}
 
@@ -127,30 +150,57 @@ export class WardenAutoMigrateService {
     const { fleet, config, nowMs } = input;
     const subjects = rateLimitedSubjects(fleet, config);
     const live = new Set(fleet.map(view => view.config.id));
-    let memory = pruneAutoMigrateMemory(this.settle(input.memory, subjects), live, nowMs);
-    const actions: WardenAction[] = [];
-    const moved = new Set<string>();
-    for (const subject of subjects) {
-      const result = await this.guarded(subject, config, memory, nowMs, 'sweep');
-      memory = result.memory;
-      if (result.action !== undefined) actions.push(result.action);
-      if (result.moved) moved.add(subject.id);
-    }
-    return { memory, actions, moved };
+    return await this.exclusive(async () => {
+      const read = await this.load();
+      let memory = pruneAutoMigrateMemory(this.settle(read, subjects), live, nowMs);
+      if (!sameMemory(memory, read)) await this.ports.ledger.write(memory);
+      const actions: WardenAction[] = [];
+      const moved = new Set<string>();
+      for (const subject of subjects) {
+        const result = await this.guarded(subject, config, memory, nowMs, 'sweep');
+        // Written after each ferret, not at the end: a daemon that dies mid-run has already counted the moves made.
+        if (!sameMemory(result.memory, memory)) await this.ports.ledger.write(result.memory);
+        memory = result.memory;
+        if (result.action !== undefined) actions.push(result.action);
+        if (result.moved) moved.add(subject.id);
+      }
+      return { actions, moved };
+    });
   }
 
   /**
    * One ferret, now, for a trigger outside the sweep — a login past its hard budget, about to be stopped. There
    * is no waiting here: a ferret whose jobs would have to be asked about is left to the stop that was coming.
+   * `away` is true when the ferret is no longer on the login that ran out — moved now, or by a sweep that held the
+   * lock first — so there is nothing left on that login to stop.
    */
   async relocate(
     subject: AutoMigrateSubject,
     config: WardenConfig,
-    memory: AutoMigrateMemory,
     nowMs: number,
-  ): Promise<{ readonly memory: AutoMigrateMemory; readonly action?: WardenAction; readonly moved: boolean }> {
-    if (!moveTriggers(config).has(subject.trigger)) return { memory, moved: false };
-    return await this.guarded(subject, config, memory, nowMs, 'now');
+  ): Promise<{ readonly action?: WardenAction; readonly away: boolean }> {
+    if (!moveTriggers(config).has(subject.trigger)) return { away: false };
+    return await this.exclusive(async () => {
+      if ((await this.ports.agentOf(subject.id)) !== subject.agent) return { away: true };
+      const memory = await this.load();
+      const result = await this.guarded(subject, config, memory, nowMs, 'now');
+      if (!sameMemory(result.memory, memory)) await this.ports.ledger.write(result.memory);
+      return { ...(result.action === undefined ? {} : { action: result.action }), away: result.moved };
+    });
+  }
+
+  private async exclusive<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.lock.then(work, work);
+    this.lock = run.catch(() => undefined);
+    return await run;
+  }
+
+  /** The ledger as stored. One that cannot be read as a ledger starts over, and says so in the journal. */
+  private async load(): Promise<AutoMigrateMemory> {
+    const parsed = parseAutoMigrateMemory(await this.ports.ledger.read());
+    if (parsed !== undefined) return parsed;
+    this.ports.journal.record('fleet.warden_auto_migrate_ledger_reset', {});
+    return EMPTY_AUTO_MIGRATE_MEMORY;
   }
 
   /**
@@ -184,9 +234,9 @@ export class WardenAutoMigrateService {
     nowMs: number,
     pace: Pace,
   ): Promise<Considered> {
-    if (this.busy.has(subject.id)) return { memory, moved: false };
-    this.busy.add(subject.id);
     try {
+      // Moved since the fleet was read — by the other path, or by a person: this episode is over.
+      if ((await this.ports.agentOf(subject.id)) !== subject.agent) return { memory, moved: false };
       return await this.consider(subject, config, memory, nowMs, pace);
     } catch (error) {
       // Nothing here may throw at the sweep or the budget tick: an unexpected failure is one failed action.
@@ -195,8 +245,6 @@ export class WardenAutoMigrateService {
         message: failureMessage(error),
       });
       return this.hold(subject, memory, nowMs, 'error', `Not moved: ${failureMessage(error)}.`, 'failed');
-    } finally {
-      this.busy.delete(subject.id);
     }
   }
 
@@ -251,8 +299,8 @@ export class WardenAutoMigrateService {
         const result = await this.ports.stopJobs(subject.id);
         stopped = result.stopped;
         await this.ports.emit(subject.id, 'warden.auto_migrate_stopped_jobs', {
-          stopped: result.stopped.map(job => ({ pid: job.pid, command: job.command })),
-          survivors: result.survivors.map(job => ({ pid: job.pid, command: job.command })),
+          stopped: jobFacts(result.stopped),
+          survivors: jobFacts(result.survivors),
         });
         this.ports.journal.record('fleet.warden_auto_migrate_stopped_jobs', {
           sessionId: subject.id,
@@ -318,9 +366,10 @@ export class WardenAutoMigrateService {
       fromAgent: subject.agent,
     };
     try {
-      // Force only when the owner allowed the Warden to clear the way: then nothing the ferret left running is
-      // a reason to stay, and what the migration went past is journalled by the migration itself.
-      await this.ports.migrate(subject.id, { agent: target.wrapper, force: settings.forceStopBackground, note });
+      // NEVER FORCED, force-stop or not. Stopping its jobs is all the owner allowed; the migration's own safety
+      // check then reads the pane afresh, and anything else in the way — work it cannot see, a blocker that is not
+      // one of the ferret's jobs, a job that came back — still keeps the ferret where it is.
+      await this.ports.migrate(subject.id, { agent: target.wrapper, note });
     } catch (error) {
       next = withSession(memory, subject.id, entry => ({ ...entry, held: autoMigrateHoldKey(subject, 'failed') }));
       const detail = `Tried to move it from ${subject.agent} to ${target.wrapper} because ${because}, and the move did not take: ${failureMessage(error)}.`;
@@ -335,7 +384,7 @@ export class WardenAutoMigrateService {
       from: subject.agent,
       to: target.wrapper,
       trigger: subject.trigger,
-      ...(stopped.length === 0 ? {} : { stopped: stopped.map(job => ({ pid: job.pid, command: job.command })) }),
+      ...(stopped.length === 0 ? {} : { stopped: jobFacts(stopped) }),
     });
     this.ports.journal.record('fleet.warden_auto_migrated', {
       sessionId: subject.id,
@@ -404,6 +453,6 @@ export function moveNote(from: string, to: string, because: string, stopped: rea
   const jobs =
     stopped.length === 0
       ? ''
-      : ` To move you, it stopped these background jobs you had started: ${jobList(stopped)}. Start again any you still need.`;
+      : ` To move you, it stopped these background jobs you had started: ${commandList(stopped)}. Start again any you still need.`;
   return `Ferretry's Warden moved you from ${from} to ${to} because ${because}.${jobs}`;
 }

@@ -161,7 +161,6 @@ import { StoreBoardAttachments } from '../src/adapters/board/board-attachments.t
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
 import { FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
 import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
-import { QueueOwnerWords } from '../src/adapters/board/session-owner-words.ts';
 import {
   JournalBoardChanges,
   JournalBoardChecks,
@@ -169,6 +168,7 @@ import {
   StorageSessionParents,
   StorageSubFerretDirectory,
 } from '../src/adapters/board/session-board-adapters.ts';
+import { QueueOwnerWords } from '../src/adapters/board/session-owner-words.ts';
 import { type LivenessLedgerReader, StorageSessionRoster } from '../src/adapters/board/session-roster.ts';
 import { GhCliRunner, GitWorkingCopies } from '../src/adapters/board-github/index.ts';
 import {
@@ -273,7 +273,6 @@ import {
   FileModelCatalogCache,
   FilePasteRuleStore,
   FileProjectCatalog,
-  FileSignInRuleStore,
   FileQuotaFailoverConfigStore,
   FileQuotaFailoverStateStore,
   FileRestartQueue,
@@ -282,6 +281,7 @@ import {
   FileSecretDocumentStore,
   FileSecretKey,
   FileSessionSpawnFacts,
+  FileSignInRuleStore,
   FileSpeedupTestLedger,
   FileTunnelHolding,
   FileUpdateDocuments,
@@ -583,6 +583,7 @@ import {
 } from '../src/adapters/transfer/index.ts';
 import {
   ConfigFileWardenConfigStore,
+  FileAutoMigrateLedger,
   FileWardenArtifacts,
   FileWardenJevCheckLog,
   FileWardenStateStore,
@@ -710,6 +711,7 @@ import {
   type AgentCopyPort,
   AgentFiles,
   type AgentInputPort,
+  type AgentJob,
   type AgentJobControl,
   AgentJobStopper,
   type AgentPhoneApprovalPort,
@@ -793,13 +795,6 @@ import {
   type ConversionSummary as ConvertedConversationSummary,
   type CopyPageHost,
   CredentialAgentIdentities,
-  TaskPlanAgendaAdapter,
-  TaskPlanService,
-  SignInRuleService,
-  SignInRuleDevicePurge,
-  connectSignInRules,
-  PlanSignInGrants,
-  type SignInGrantSource,
   CredentialUsageSource,
   canServeModel,
   chooseRelayCarrierSources,
@@ -813,6 +808,7 @@ import {
   computerConversationRoots,
   configuredAt,
   connectorBaseEnvironment,
+  connectSignInRules,
   contextWindowForSession,
   conversationResumeArguments,
   createFoundationPaths,
@@ -1014,6 +1010,7 @@ import {
   OutboundProviderAuthorizer,
   outdatedSections,
   overriddenBy,
+  ownerHoldReason,
   PacedTranscriptParser,
   PageCopyRecords,
   type PageInputHost,
@@ -1034,6 +1031,7 @@ import {
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
   PlanSignInGrants,
+  type ProcRow,
   ProjectAdoption,
   ProjectMcpLaunch,
   ProjectMcpOAuthServers,
@@ -1218,6 +1216,8 @@ import {
   SignalRefused,
   type SignInChoicePort,
   type SignInGrantSource,
+  SignInRuleDevicePurge,
+  SignInRuleService,
   type SkillRuntimeHome,
   SkillsInventoryService,
   type SocketRoute,
@@ -4513,28 +4513,36 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         .catch(() => undefined);
     },
   });
+  const redactedJobs = async (jobs: readonly AgentJob[]): Promise<readonly AgentJob[]> =>
+    await parts.redactor.batch(scrub => jobs.map(job => ({ ...job, command: scrub.text(job.command) })));
   // The move is the migration every other caller makes — same session, same conversation, same card — drawn as
   // Ferretry · Warden on the turn it hands over. Never a context downgrade, and forced only when the owner set
   // `forceStopBackground`, after the ferret's own jobs were stopped.
   const autoMigrate = new WardenAutoMigrateService({
     ...parts.autoMigrate,
-    blockingJobs: async sessionId => await parts.migrate.blockingJobs(sessionId),
+    // Every command line through the vault redactor first: the ferret's own turn quotes it whole.
+    blockingJobs: async sessionId => await redactedJobs(await parts.migrate.blockingJobs(sessionId)),
     askToStopJobs: async sessionId => {
       await parts.migrate.askToStopJobs(sessionId).catch((error: unknown) => {
         // The jobs finished between the look and the ask: there is nothing to ask about, and the next sweep moves it.
         if (!(error instanceof SessionMigrateError && error.failure === 'no_jobs')) throw error;
       });
     },
-    stopJobs: async sessionId => await parts.migrate.stopAgentJobs(sessionId),
+    stopJobs: async sessionId => {
+      const result = await parts.migrate.stopAgentJobs(sessionId);
+      return { stopped: await redactedJobs(result.stopped), survivors: await redactedJobs(result.survivors) };
+    },
     migrate: async (sessionId, request) => {
       await parts.migrate.migrate(sessionId, {
         agent: request.agent,
         allowContextDowngrade: false,
-        forceInflight: request.force,
+        forceInflight: false,
         note: request.note,
         actor: 'warden',
       });
     },
+    agentOf: async sessionId => (await parts.sessions.get(sessionId).catch(() => undefined))?.config.agent,
+    ledger: new FileAutoMigrateLedger(parts.files, parts.wardenRoot),
     emit: async (sessionId, type, data) => await parts.revive.events.emit(sessionId, type, data),
     journal: wardenJournal,
     notifyOwner: async notice => {
@@ -4978,6 +4986,8 @@ async function wardenFleetSession(
  *  flow happens to use them is a call site nobody can check. */
 interface SessionMigrateParts {
   readonly storage: DaemonStorage;
+  /** Pids read wherever they are on the host, for following a stopped job out of its pane (`migrate/stop-jobs.ts`). */
+  readonly processes: { lookup(pids: readonly number[]): Promise<ReadonlyMap<number, ProcRow>> };
   readonly sessions: SessionDirectorySubsystem;
   /** The SAME service the revive uses — see `createSessionResumeSubsystem`. */
   readonly resume: SessionResumeService;
@@ -5819,7 +5829,10 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         async () =>
           await new AgentJobStopper({
             inspect: async () => await inspect(id, target),
+            lookup: async pids => await parts.processes.lookup(pids),
             signal: deliverStopSignal,
+            // Never these, whatever a pane's tree claims: init, this daemon, and what started it.
+            protectedPids: new Set([1, process.pid, process.ppid]),
             sleep: async milliseconds => await Bun.sleep(milliseconds),
           }).stop(),
       );
@@ -11101,6 +11114,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // rather than through a second, ungated path of its own.
       const sessionMigrate = createSessionMigrateSubsystem({
         storage,
+        processes: new BunProcessProbe(Bun.which('ps') ?? undefined),
         sessions,
         resume,
         preflight,
@@ -12736,24 +12750,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             facts: packFleetFacts,
             // Anything of the owner's open on the ferret keeps it where it is: a move would kill the pane the owner
             // is about to type into, or drop a value it holds. A check that cannot be made is a reason too.
-            ownerHold: async sessionId => {
-              if (inputRequestService.hasOpen(sessionId)) return 'it has an input card open for the owner';
-              if (secureCopies.heldCount(sessionId) > 0) return 'it holds a secret it copied, which a move would drop';
-              for (const surface of ['terminal', 'browser'] as const) {
-                const view = await agentToolsMounted.service.controlView(sessionId, surface).catch(() => undefined);
-                if (view === undefined) return `whether it handed its ${surface} to the owner could not be read`;
-                if (view.asked.length > 0) return `it handed its ${surface} to the owner, who has not given it back`;
-              }
-              const state = SessionStateSchema.safeParse(
-                await storage.readState(parseSessionId(sessionId)).catch(() => undefined),
-              );
-              if (!state.success) return 'its state could not be read';
-              if (state.data.permissionRequest !== undefined) return 'it is waiting on a permission prompt';
-              const dialog = state.data.harnessDialog;
-              if (dialog !== undefined && dialog.kind !== 'usage-limit')
-                return `it is waiting on a dialog: ${dialog.title}`;
-              return undefined;
-            },
+            ownerHold: async sessionId =>
+              await ownerHoldReason(
+                {
+                  inputCardOpen: id => inputRequestService.hasOpen(id),
+                  phoneApprovalOpen: id => phoneApprovals.hasOpen(id),
+                  planAwaitingOwner: id => copyPlans.awaitingOwner(id),
+                  heldSecrets: id => secureCopies.heldCount(id),
+                  surfaceAsked: async (id, surface) =>
+                    (await agentToolsMounted.service.controlView(id, surface)).asked.length > 0,
+                  state: async id => await storage.readState(parseSessionId(id)),
+                },
+                sessionId,
+              ),
           },
           // The board as the Warden reads it: every card with its derived activity (the orphans), and the card
           // a session works on (what a ferret it starts again carries on). Each read is total.

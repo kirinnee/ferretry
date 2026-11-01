@@ -365,6 +365,17 @@ export class TaskPlanService {
       .slice(0, MAX_LISTED);
   }
 
+  /**
+   * Whether a plan card of this session waits for the owner's answer — what keeps the Warden from moving the ferret
+   * mid-question. A yes or no, nothing about the plan: it needs no owner.
+   */
+  awaitingOwner(sessionId: string): boolean {
+    this.sweep();
+    for (const plan of this.#plans.values())
+      if (plan.sessionId === sessionId && this.#current(plan).state === 'pending') return true;
+    return false;
+  }
+
   /** One plan of one session. Owner only. Another session's plan reads as not found. */
   get(caller: PasteRuleCaller, sessionId: string, planId: string): TaskPlan {
     requireOwner(caller);

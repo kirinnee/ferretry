@@ -5,6 +5,7 @@ import { DEFAULT_WARDEN_CONFIG, mergeWardenConfig, type WardenConfigPatch } from
 import should from 'should';
 import {
   ConfigFileWardenConfigStore,
+  FileAutoMigrateLedger,
   FileWardenStateStore,
   NodeWardenReportFileSystem,
   WARDEN_STATE_FILENAME,
@@ -12,8 +13,11 @@ import {
 import {
   createWardenPaths,
   defaultWardenConfig,
+  EMPTY_AUTO_MIGRATE_MEMORY,
+  parseAutoMigrateMemory,
   parseStoredWardenConfig,
   parseWardenRuntimeState,
+  recordMove,
   type WardenRuntimeState,
 } from '../../../src/lib/warden/index.ts';
 import { configHome } from '../fleet/config-files-fixture.ts';
@@ -118,6 +122,24 @@ describe('the durable warden state document', () => {
 
     // Act / Assert
     should(await new FileWardenStateStore(files, root).read()).be.undefined();
+  });
+});
+
+describe('the Warden move ledger document', () => {
+  it('should read as a fresh ledger before anything moved, and round-trip the moves after', async () => {
+    // Arrange
+    const { root, files } = await wardenHome('warden-move-ledger');
+    const ledger = new FileAutoMigrateLedger(files, root);
+    const moved = recordMove(EMPTY_AUTO_MIGRATE_MEMORY, 's1', Date.parse('2026-11-01T12:00:00.000Z'));
+
+    // Act
+    const before = parseAutoMigrateMemory(await ledger.read());
+    await ledger.write(moved);
+    const after = parseAutoMigrateMemory(await ledger.read());
+
+    // Assert
+    should(before).deepEqual(EMPTY_AUTO_MIGRATE_MEMORY);
+    should(after).deepEqual(moved);
   });
 });
 

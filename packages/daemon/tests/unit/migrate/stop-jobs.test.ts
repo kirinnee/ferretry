@@ -1,7 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { InflightReport, ProcessInfo } from '../../../src/lib/migrate/inflight-report.ts';
-import { AgentJobStopper, jobProcesses, type StopSignal, sameProcess } from '../../../src/lib/migrate/stop-jobs.ts';
+import type { ProcRow } from '../../../src/lib/migrate/process-table.ts';
+import {
+  AgentJobStopper,
+  jobProcesses,
+  mayBeSameProcess,
+  type StopSignal,
+  sameProcess,
+} from '../../../src/lib/migrate/stop-jobs.ts';
 
 const CLI = 100;
 
@@ -60,48 +67,86 @@ describe('jobProcesses', () => {
   });
 });
 
-describe('sameProcess', () => {
-  it('should accept the same process looked at again, a second younger by rounding', () => {
+const row = (process: ProcessInfo, changes: Partial<ProcRow> = {}): ProcRow => ({
+  pid: process.pid,
+  ppid: process.ppid ?? 1,
+  startedSecondsAgo: process.startedSecondsAgo ?? 0,
+  argv: process.argv,
+  ...changes,
+});
+
+describe('sameProcess and mayBeSameProcess', () => {
+  it('should accept the same process looked at again, a second younger by rounding, wherever its parent is now', () => {
     // Act
-    const same = sameProcess(server, { ...server, startedSecondsAgo: 125 });
-    const rounded = sameProcess(server, { ...server, startedSecondsAgo: 118 });
+    const same = sameProcess(server, row(server, { startedSecondsAgo: 125 }));
+    const rounded = sameProcess(server, row(server, { startedSecondsAgo: 118 }));
+    const reparented = sameProcess(server, row(server, { ppid: 1 }));
 
     // Assert
     should(same).be.true();
     should(rounded).be.true();
+    should(reparented).be.true();
   });
 
-  it('should refuse a reused pid: a process started after the first look, or another command', () => {
+  it('should refuse a reused pid, and signal only the same command line while still counting it alive', () => {
     // Act
-    const younger = sameProcess(server, { ...server, startedSecondsAgo: 2 });
-    const other = sameProcess(server, { ...server, argv: 'vim notes.md' });
-    const unparented = sameProcess(server, { ...server, toolShell: undefined });
+    const younger = mayBeSameProcess(server, row(server, { startedSecondsAgo: 2 }));
+    const other = sameProcess(server, row(server, { argv: 'vim notes.md' }));
+    const otherAlive = mayBeSameProcess(server, row(server, { argv: 'vim notes.md' }));
 
     // Assert
     should(younger).be.false();
     should(other).be.false();
-    should(unparented).be.false();
+    should(otherAlive).be.true();
   });
 });
 
-function stopper(looks: readonly (readonly ProcessInfo[])[]) {
+/** How a process answers a signal: gone on TERM, gone only on KILL, or never gone. */
+type Behaviour = 'term' | 'kill' | 'never';
+
+/**
+ * A host: the pane tree the first look sees, then every process by pid as signals take effect. A child whose shell
+ * dies is re-parented to init — out of the pane's tree, still on the host.
+ */
+function host(
+  processes: readonly ProcessInfo[],
+  behaviour: Readonly<Record<number, Behaviour>>,
+  options: { readonly unreadable?: boolean; readonly protectedPids?: readonly number[]; readonly reuse?: number } = {},
+) {
   const signals: [number, StopSignal][] = [];
-  let look = 0;
+  const running = new Map(processes.map(process => [process.pid, row(process)]));
   const service = new AgentJobStopper({
-    inspect: async () => report(looks[Math.min(look++, looks.length - 1)] ?? []),
+    inspect: async () => report(processes),
+    lookup: async pids => {
+      if (options.unreadable === true) throw new Error('ps failed');
+      const found = new Map<number, ProcRow>();
+      for (const pid of pids) {
+        const current = running.get(pid);
+        // A reused pid is a process started after the first look: it has run for less time.
+        if (current !== undefined)
+          found.set(pid, pid === options.reuse ? { ...current, startedSecondsAgo: 0, argv: 'vim' } : current);
+      }
+      return found;
+    },
     signal: (pid, signal) => {
       signals.push([pid, signal]);
+      const answer = behaviour[pid] ?? 'term';
+      if (answer === 'term' || (answer === 'kill' && signal === 'SIGKILL')) {
+        running.delete(pid);
+        for (const [child, entry] of running) if (entry.ppid === pid) running.set(child, { ...entry, ppid: 1 });
+      }
       return true;
     },
     sleep: async () => undefined,
+    protectedPids: new Set(options.protectedPids ?? []),
   });
-  return { service, signals };
+  return { service, signals, running };
 }
 
 describe('AgentJobStopper', () => {
   it('should do nothing when no job blocks', async () => {
     // Arrange
-    const { service, signals } = stopper([[cli, safeJob]]);
+    const { service, signals } = host([cli, safeJob], {});
 
     // Act
     const result = await service.stop();
@@ -113,7 +158,7 @@ describe('AgentJobStopper', () => {
 
   it('should send SIGTERM children first and report the jobs stopped once they are gone', async () => {
     // Arrange
-    const { service, signals } = stopper([[cli, shell, server], [cli, shell, server], [cli]]);
+    const { service, signals } = host([cli, shell, server], {});
 
     // Act
     const result = await service.stop();
@@ -127,23 +172,39 @@ describe('AgentJobStopper', () => {
     should(result.survivors).deepEqual([]);
   });
 
-  it('should SIGKILL only what is still the same process after the grace period', async () => {
-    // Arrange
-    const lingering = [cli, shell, server];
-    const { service, signals } = stopper([lingering, lingering, ...Array(10).fill(lingering), [cli, server], [cli]]);
+  it('should follow a child that ignored SIGTERM out of the pane tree and SIGKILL it, never calling it stopped while it runs', async () => {
+    // Arrange: the server traps TERM; its shell dies on TERM, so the server is re-parented to init.
+    const { service, signals, running } = host([cli, shell, server], { 201: 'kill' });
 
     // Act
     const result = await service.stop();
 
     // Assert
-    should(signals.filter(([, signal]) => signal === 'SIGKILL')).deepEqual([[201, 'SIGKILL']]);
+    should(signals).deepEqual([
+      [201, 'SIGTERM'],
+      [200, 'SIGTERM'],
+      [201, 'SIGKILL'],
+    ]);
+    should(running.has(201)).be.false();
     should(result.survivors).deepEqual([]);
   });
 
-  it('should never signal a pid that now belongs to another process', async () => {
+  it('should report a re-parented child that outlived SIGKILL as a survivor, not stopped', async () => {
     // Arrange
-    const reused: ProcessInfo = { ...server, startedSecondsAgo: 0 };
-    const { service, signals } = stopper([[cli, shell, server], [cli, shell, reused], [cli]]);
+    const { service, running } = host([cli, shell, server], { 201: 'never' });
+
+    // Act
+    const result = await service.stop();
+
+    // Assert
+    should(running.get(201)?.ppid).equal(1);
+    should(result.stopped).deepEqual([]);
+    should(result.survivors.map(job => job.pid)).deepEqual([200, 201]);
+  });
+
+  it('should never signal a pid that now belongs to another process, and not count it as the job', async () => {
+    // Arrange
+    const { service, signals } = host([cli, shell, server], {}, { reuse: 201 });
 
     // Act
     await service.stop();
@@ -152,14 +213,28 @@ describe('AgentJobStopper', () => {
     should(signals).deepEqual([[200, 'SIGTERM']]);
   });
 
-  it('should report a job that outlived SIGKILL as a survivor', async () => {
-    // Arrange
-    const { service } = stopper([[cli, shell, server]]);
+  it('should never signal init, the daemon or its parent, and keep the job they are part of as a survivor', async () => {
+    // Arrange: a tree that somehow lists the daemon under a job's shell.
+    const daemon: ProcessInfo = { ...server, pid: 4000, argv: 'fyd' };
+    const { service, signals } = host([cli, shell, daemon], {}, { protectedPids: [4000] });
 
     // Act
     const result = await service.stop();
 
     // Assert
+    should(signals.map(([pid]) => pid)).not.containEql(4000);
+    should(result.survivors.map(job => job.pid)).containEql(4000);
+  });
+
+  it('should stop nothing it cannot account for when the host cannot be read', async () => {
+    // Arrange
+    const { service, signals } = host([cli, shell, server], {}, { unreadable: true });
+
+    // Act
+    const result = await service.stop();
+
+    // Assert
+    should(signals).deepEqual([]);
     should(result.stopped).deepEqual([]);
     should(result.survivors.map(job => job.pid)).deepEqual([200, 201]);
   });

@@ -8,11 +8,11 @@ import type { SavedListing } from '../../../src/lib/input-requests/saved-logins.
 import { phoneApprovalRoutes } from '../../../src/lib/runtime/mounts/input-requests.ts';
 import {
   AGENT,
+  LISTING,
   OWNER,
   okta,
   read,
   SESSION,
-  LISTING,
   SI_AWS,
   SI_CLICKUP,
   SI_OKTA,
@@ -20,6 +20,7 @@ import {
   terminalFacts,
   world,
 } from './phone-approval-support.ts';
+
 describe('PhoneApprovalService raise', () => {
   it('should refuse a raise until the app that draws the card ships', async () => {
     // Arrange
@@ -246,6 +247,20 @@ describe('PhoneApprovalService raise', () => {
     should(approval.number).be.undefined();
     should(JSON.stringify([approval, run.cards, run.pushes])).not.match(/42/u);
     should(run.pushes[0]?.body).equal('Approve on your phone: AWS — check the terminal');
+  });
+
+  it('should say whether a session has an approval waiting on the phone, and no for another session', async () => {
+    // Arrange
+    const run = world();
+    const before = run.service.hasOpen(SESSION);
+
+    // Act
+    await run.raise();
+
+    // Assert
+    should(before).be.false();
+    should(run.service.hasOpen(SESSION)).be.true();
+    should(run.service.hasOpen('other-session')).be.false();
   });
 
   it('should keep one approval per page waiting', async () => {

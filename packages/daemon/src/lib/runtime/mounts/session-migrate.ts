@@ -43,10 +43,10 @@ import {
  * request with the flag after an explicit confirm. A forced move is journalled
  * (`session.migrate_forced`) with the inventory it went past, and the forensic report says FORCED.
  * The unattended callers — the warden's failover and the quota loop — send `false` and cannot
- * choose otherwise: a loop with no human watching may not decide that work is expendable. The one
- * exception is the OWNER's decision, made ahead of time: with `autoMigrate.forceStopBackground` in
- * `warden.yaml` (held for the owner's confirmation like every loosening), the Warden stops the ferret's
- * own background jobs and then forces its move — journalled exactly like a person's forced move.
+ * choose otherwise: a loop with no human watching may not decide that work is expendable. That holds
+ * for `autoMigrate.forceStopBackground` too: it lets the Warden stop the ferret's own background jobs
+ * (`migrate/stop-jobs.ts`), and the move that follows is unforced, so anything else in the way still
+ * refuses it.
  *
  * A MIGRATION IS SAME-KIND, and `harness_mismatch` is the refusal that makes that true. The CLI has
  * always described this operation as continuing a session on another same-kind account while the

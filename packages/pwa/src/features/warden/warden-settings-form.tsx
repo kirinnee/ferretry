@@ -445,7 +445,7 @@ function MoveToAnotherLogin({
           label="Stop its background jobs if they are in the way"
           detail={
             moving.forceStopBackground
-              ? 'The Warden stops the jobs this ferret started itself — never anything else — tells the ferret which, then moves it.'
+              ? 'The Warden stops the jobs this ferret started itself — never anything else — tells the ferret which, then moves it if nothing else is in the way.'
               : 'Off: the Warden asks the ferret to stop them and waits; if they still run, it tells you instead of moving it.'
           }
           checked={moving.forceStopBackground}

@@ -21,7 +21,13 @@
  * Pure: no IO, no clock, no globals.
  */
 
-import type { FleetRuntimeView, WardenAutoMigrateTrigger, WardenConfig } from '@ferretry/protocol';
+import {
+  type FleetRuntimeView,
+  type WardenAutoMigrateTrigger,
+  WardenAutoMigrateTriggerSchema,
+  type WardenConfig,
+} from '@ferretry/protocol';
+import { z } from 'zod';
 import { QUOTA_RANK, quotaOf } from '../pack/quota.ts';
 import { type PackFleetFacts, runtimeRefusal } from '../pack/recommend.ts';
 import { instantMs } from './time.ts';
@@ -118,10 +124,14 @@ export function chooseMoveTarget(input: MoveTargetInput): MoveTargetChoice {
   const { source, facts, targets } = input;
   const own = facts.runtimes.find(runtime => named(runtime, source.agent));
   const explicit = targets.length > 0;
-  if (!explicit && own === undefined)
+  // Not a runtime here: neither its provider nor its login can be told, so not even a named target is safe — it
+  // might share the very login that ran out.
+  if (own === undefined)
     return {
       kind: 'none',
-      tried: [{ runtime: source.agent, why: 'it is not a runtime on this machine, so its provider is unknown' }],
+      tried: [
+        { runtime: source.agent, why: 'it is not a runtime on this machine, so its login and provider are unknown' },
+      ],
     };
   const tried: MoveTargetTried[] = [];
   const ready: FleetRuntimeView[] = [];
@@ -145,7 +155,7 @@ export function chooseMoveTarget(input: MoveTargetInput): MoveTargetChoice {
 function moveRefusal(
   runtime: FleetRuntimeView,
   context: {
-    readonly own: FleetRuntimeView | undefined;
+    readonly own: FleetRuntimeView;
     readonly harness: HarnessKind;
     readonly explicit: boolean;
     readonly facts: PackFleetFacts;
@@ -154,9 +164,9 @@ function moveRefusal(
   const { own, harness, explicit, facts } = context;
   if (runtime === own) return 'it is the login the ferret is on';
   if (runtime.harness !== harness) return `it runs ${runtime.harness}, not ${harness}`;
-  if (own !== undefined && runtime.credential.id === own.credential.id)
+  if (runtime.credential.id === own.credential.id)
     return `it shares the login ${own.credential.id}, the one that ran out`;
-  if (!explicit && own !== undefined && providerOf(runtime) !== providerOf(own))
+  if (!explicit && providerOf(runtime) !== providerOf(own))
     return `another provider (${providerOf(runtime)}), which only a named target may reach`;
   return runtimeRefusal(runtime, undefined, facts)?.message;
 }
@@ -259,4 +269,27 @@ export function askExpired(
   nowMs: number,
 ): boolean {
   return nowMs - (instantMs(asked.at) ?? 0) >= waitMinutes * 60_000;
+}
+
+const Instant = z.string().min(1);
+
+const AutoMigrateMemorySchema = z.object({
+  sessions: z.record(
+    z.string(),
+    z.object({
+      moves: z.array(Instant).default([]),
+      asked: z.object({ at: Instant, trigger: WardenAutoMigrateTriggerSchema, from: z.string().min(1) }).optional(),
+      held: z.string().min(1).optional(),
+    }),
+  ),
+});
+
+/**
+ * The ledger a stored document means: absent is a fresh ledger, and anything that is not a ledger is `undefined`
+ * — the caller says so out loud rather than silently forgetting who was moved.
+ */
+export function parseAutoMigrateMemory(value: unknown): AutoMigrateMemory | undefined {
+  if (value === undefined || value === null) return EMPTY_AUTO_MIGRATE_MEMORY;
+  const parsed = AutoMigrateMemorySchema.safeParse(value);
+  return parsed.success ? (parsed.data as AutoMigrateMemory) : undefined;
 }

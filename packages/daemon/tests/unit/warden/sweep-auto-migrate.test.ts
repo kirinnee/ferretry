@@ -29,6 +29,8 @@ function mover(moved: { sessionId: string; agent: string }[]) {
     migrate: async (sessionId, request) => {
       moved.push({ sessionId, agent: request.agent });
     },
+    agentOf: async sessionId => moved.find(entry => entry.sessionId === sessionId)?.agent ?? 'claude-a-wrapper',
+    ledger: { read: async () => undefined, write: async () => undefined },
     notifyOwner: async () => undefined,
     emit: async () => undefined,
     journal: { record: () => undefined },
@@ -54,7 +56,6 @@ describe('moving a ferret that hit a limit, in the sweep', () => {
       agent: 'claude-b-wrapper',
       fromAgent: 'claude-a-wrapper',
     });
-    should(subject.state().autoMigrate?.sessions.s1?.moves).have.length(1);
     should(status.actionTotals?.find(entry => entry.action === 'failover' && entry.outcome === 'done')).containEql({
       auto: 1,
     });
@@ -114,7 +115,7 @@ describe('moving in the sweep when the mover fails', () => {
       },
       relocate: async () => {
         if (relocated === undefined) throw new Error('disk full');
-        return { memory: { sessions: {} }, moved: false, ...relocated };
+        return { away: false, ...relocated };
       },
     }) as unknown as WardenAutoMigrateService;
 
@@ -130,24 +131,32 @@ describe('moving in the sweep when the mover fails', () => {
     should(subject.state().lastSweepAt).not.be.undefined();
   });
 
-  it('should answer not moved when the budget move threw, and keep what the sweep remembered', async () => {
+  it('should answer not moved when the budget move threw, and write down only what the mover did', async () => {
     // Arrange
+    const held = {
+      at: new Date(Date.parse('2026-11-01T12:00:00.000Z')).toISOString(),
+      sessionId: 's1',
+      action: 'failover' as const,
+      outcome: 'held' as const,
+      by: 'warden' as const,
+      actor: 'auto' as const,
+      detail: 'Not moved.',
+    };
     const thrown = harness({ config: moving(), fleet: [limited()], autoMigrate: broken() });
-    const kept = harness({
-      config: moving(),
-      fleet: [limited()],
-      state: { autoMigrate: { sessions: { other: { moves: [new Date(Date.parse('2026-01-01')).toISOString()] } } } },
-      autoMigrate: broken({}),
-    });
+    const quiet = harness({ config: moving(), fleet: [limited()], autoMigrate: broken({}) });
+    const holding = harness({ config: moving(), fleet: [limited()], autoMigrate: broken({ action: held }) });
 
     // Act
     const threw = await thrown.service.relocate('s1', 'budget_exceeded');
-    const nothing = await kept.service.relocate('s1', 'budget_exceeded');
+    const nothing = await quiet.service.relocate('s1', 'budget_exceeded');
+    const kept = await holding.service.relocate('s1', 'budget_exceeded');
 
     // Assert
     should(threw).be.false();
     should(thrown.journal.map(entry => entry.type)).containEql('fleet.warden_auto_migrate_failed');
     should(nothing).be.false();
-    should(Object.keys(kept.state().autoMigrate?.sessions ?? {})).deepEqual(['other']);
+    should(quiet.state().actions ?? []).deepEqual([]);
+    should(kept).be.false();
+    should(holding.state().actions?.[0]).match({ action: 'failover', outcome: 'held', detail: 'Not moved.' });
   });
 });

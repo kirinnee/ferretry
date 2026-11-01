@@ -229,18 +229,25 @@ describe('chooseMoveTarget', () => {
     should(choice).deepEqual({ kind: 'none', tried: [{ runtime: 'codex-a', why: 'it runs codex, not claude' }] });
   });
 
-  it('should refuse any-login when the login the ferret is on is not a runtime here', () => {
+  it('should refuse every target, named ones too, when the login the ferret is on is not a runtime here', () => {
     // Arrange
     const known = facts({ runtimes: [runtime('claude-b')], credentials: [credential('claude-b-login')] });
+    const expected = {
+      kind: 'none',
+      tried: [{ runtime: 'gone', why: 'it is not a runtime on this machine, so its login and provider are unknown' }],
+    };
 
     // Act
-    const choice = chooseMoveTarget({ source: { agent: 'gone', harness: 'claude' }, facts: known, targets: [] });
+    const any = chooseMoveTarget({ source: { agent: 'gone', harness: 'claude' }, facts: known, targets: [] });
+    const named = chooseMoveTarget({
+      source: { agent: 'gone', harness: 'claude' },
+      facts: known,
+      targets: ['claude-b'],
+    });
 
     // Assert
-    should(choice).deepEqual({
-      kind: 'none',
-      tried: [{ runtime: 'gone', why: 'it is not a runtime on this machine, so its provider is unknown' }],
-    });
+    should(any).deepEqual(expected);
+    should(named).deepEqual(expected);
   });
 });
 
