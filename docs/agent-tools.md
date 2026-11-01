@@ -405,7 +405,8 @@ its own).
   handler runs and before the body is read. They are: answering or declining an input card and its
   quarantines, approving a copy plan, every secure-copy rule (the profile-target setting included),
   writing a secret, a saved login, an account or a sign-in (merge, apart, recipe answers, 2FA keys and
-  their staged seeds), the owner's account list and its look-alike check, pairing and devices, passkeys,
+  their staged seeds), the default account for a place (`PUT /v1/accounts/defaults`), the owner's account
+  list and its look-alike check, pairing and devices, passkeys,
   the step-up and the unlock, grants, the security settings and the tunnel switch, confirming a held
   config change, updating the daemon or the agent CLIs, the browser proxy test, catalog shares, members,
   installs and publishing, Pack mode's clean-up, applying a lesson, the old-board import, the owner's

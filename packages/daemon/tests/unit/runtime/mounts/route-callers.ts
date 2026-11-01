@@ -106,6 +106,7 @@ export const ROUTE_CALLERS: readonly string[] = [
   'PUT /v1/accounts/sign-ins/:signIn operator person',
   'DELETE /v1/accounts/sign-ins/:signIn operator person',
   'POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId operator person',
+  'PUT /v1/accounts/defaults operator person',
   'PUT /v1/accounts/:id operator person',
   'POST /v1/accounts/:id/rename operator person',
   'DELETE /v1/accounts/:id operator person',

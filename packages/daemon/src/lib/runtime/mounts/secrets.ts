@@ -568,7 +568,7 @@ function accountRoutes(
     // would otherwise read "defaults" as a handle. Every change to that file is HELD when anyone else makes it, so
     // this is the owner's own act: a ferret is refused before the body is read, a paired device needs the passkey
     // step-up for loosening a configuration file, and at the machine it is direct. The line is written and in effect
-    // in the same act. RF-2: this becomes `caller: 'person'`.
+    // in the same act. It is `caller: 'person'` (from `configure`), so the boundary refuses a ferret first.
     ...(defaults === undefined
       ? []
       : [
