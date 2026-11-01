@@ -1503,9 +1503,11 @@ export class InputRequestService {
   }
 
   /**
-   * At the write, on the facts just seen: a code the DAEMON makes goes only where {@link codeTargetProblem} allows, and
-   * never into a field that now looks like a password (R0b's upgrade wins: that field is a secret from now on, and a
-   * code is not what it asks for). Refused before anything is opened, with nothing typed.
+   * At the write: a code the DAEMON makes never goes into a field that now looks like a password (R0b's upgrade wins:
+   * that field is a secret from now on, and a code is not what it asks for). Refused before anything is opened, with
+   * nothing typed. Where it may go ({@link codeTargetProblem}) was checked by {@link guardOffered} on the card's facts,
+   * and `seen` is those very facts (the digest compare, or a look again that found them), so it holds here too; only
+   * whether a code program reads the prompt is seen afresh, and that is what this checks.
    */
   private guardCodeTarget(
     held: Held,
@@ -1513,15 +1515,6 @@ export class InputRequestService {
     codeFields: readonly InputRequestField[],
   ): void {
     const { request } = held;
-    const problem = codeTargetProblem(
-      seen.facts,
-      codeFields.map(field => field.id),
-    );
-    if (problem !== undefined)
-      throw new InputRequestError(
-        'bad_request',
-        `Ferretry types a code it made only into a sign-in's own field: ${problem}. Nothing was typed`,
-      );
     const now = observedAs(request.fields, seen.facts, held.upgraded, request.prompt, seen.codeProgram === true);
     if (codeFields.some(field => now.find(each => each.id === field.id)?.sensitivity === 'secret')) {
       held.request = { ...held.request, fields: now, sensitivity: strongestSensitivity(now) };

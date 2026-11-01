@@ -203,6 +203,13 @@ describe('use it now: a seed saved from an input card types its first code into 
     ).be.false();
   });
 
+  it('should say nothing was typed when the commit names no saver, or no card can take a code', async () => {
+    const w = card();
+    const { stage } = await w.stages.stage('GITHUB', staged(), DEVICE);
+    should((await w.stages.commit('GITHUB', stage, () => true)).typed).be.false();
+    should(w.used).deepEqual([]);
+  });
+
   it('should type nothing for a save staged from the machine or a ferret’s token, whose card says nothing of typing', async () => {
     const w = card();
     const { stage } = await w.stages.stage('GITHUB', staged(), OWNER);

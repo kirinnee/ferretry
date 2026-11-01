@@ -89,6 +89,10 @@ interface Options {
   codeProgram?: boolean;
   /** What the login observer says a code Ferretry made came to. Absent: no observer. */
   verdict?: boolean | undefined;
+  /** Runs inside the observer's check, before its verdict; a throw is the check failing. */
+  beforeVerdict?: (service: InputRequestService) => Promise<void>;
+  /** The page is pictured (every raise and redraw). */
+  pictured?: true;
 }
 
 function harness(options: Options = {}) {
@@ -116,13 +120,16 @@ function harness(options: Options = {}) {
     },
     save: async (...args) => await real.save(...args),
   };
-  const service = new InputRequestService({
+  const service: InputRequestService = new InputRequestService({
     target: {
       observe: async () => ({ ok: true, facts, ...(codeProgram ? { codeProgram: true as const } : {}) }),
       type: async (_session, _target, typed) => {
         writes.push(...typed.map(value => value.text));
         return 'typed';
       },
+      ...(options.pictured === true
+        ? { shoot: async () => ({ pngBase64: 'iVBORw0KGgo=', clip: { x: 0, y: 0, w: 1, h: 1 } }) }
+        : {}),
     },
     agenda: {
       raise: async (_session, raised) => {
@@ -162,6 +169,7 @@ function harness(options: Options = {}) {
             tainted: () => false,
             codeTyped: async (typed: CodeDelivery) => {
               checks.push(typed);
+              await options.beforeVerdict?.(service);
               if (typed.facts.kind === 'browser') facts = typed.facts;
               return options.verdict;
             },
@@ -669,6 +677,71 @@ describe('a request opened again is on its new card only', () => {
     await h.service.cardDismissed(SESSION, 'A1' as AgendaId);
     should((await h.service.list(HOST)).map(open => open.agendaItemId)).deepEqual(['A2']);
     await h.service.cardDismissed(SESSION, 'A2' as AgendaId);
+    should(await h.service.list(HOST)).deepEqual([]);
+  });
+});
+
+describe('opening a request again, at its edges', () => {
+  it('should open a terminal’s code card again, and picture a page’s new card again', async () => {
+    const term = harness({ facts: otpPrompt(), codeProgram: true, verdict: false });
+    await github(term, ['ssh@bastion']);
+    await plantSeed(term.directory.accounts, 'GITHUB', SEED_A, 'Authy');
+    const t = await raised(term, TERMINAL_CODE);
+    await term.service.deliver(SESSION, t.request.id, useCode(t.request.observedDigest as string, 'GITHUB'), HOST);
+    await settled();
+    should((await term.service.list(HOST)).map(open => [open.agendaItemId, open.pictured])).deepEqual([
+      ['A2', undefined],
+    ]);
+
+    const shown = harness({ verdict: false, pictured: true });
+    await github(shown);
+    await plantSeed(shown.directory.accounts, 'GITHUB', SEED_A, 'Authy');
+    const p = await raised(shown);
+    await shown.service.deliver(SESSION, p.request.id, useCode(p.request.observedDigest as string, 'GITHUB'), HOST);
+    await settled();
+    const [again] = await shown.service.list(HOST);
+    should(again).containDeep({ agendaItemId: 'A2', pictured: true });
+    should(shown.service.shot(HOST, SESSION, p.request.id).pngBase64).equal('iVBORw0KGgo=');
+  });
+
+  it('should raise nothing when another request already waits on that target, and tell the ferret', async () => {
+    const h = harness({
+      verdict: false,
+      beforeVerdict: async service => {
+        await service.raise(SESSION, { ...PAGE_CODE, prompt: 'the ferret asks again' });
+      },
+    });
+    await github(h);
+    await plantSeed(h.directory.accounts, 'GITHUB', SEED_A, 'Authy');
+    const { request } = await raised(h);
+    await h.service.deliver(SESSION, request.id, useCode(request.observedDigest as string, 'GITHUB'), HOST);
+    await settled();
+    should((await h.service.list(HOST)).map(open => open.prompt)).deepEqual(['the ferret asks again']);
+    should(h.cards.length).equal(2);
+    should(
+      h.sinks.some(line => line.startsWith('A1: ') && line.includes('raise a fresh browser_request_input')),
+    ).be.true();
+  });
+
+  it('should open nothing again when the check itself fails: the code was typed either way', async () => {
+    const h = harness({
+      verdict: false,
+      beforeVerdict: async () => {
+        throw new Error('the page went away');
+      },
+    });
+    await github(h);
+    await plantSeed(h.directory.accounts, 'GITHUB', SEED_A, 'Authy');
+    const { request } = await raised(h);
+    const result = await h.service.deliver(
+      SESSION,
+      request.id,
+      useCode(request.observedDigest as string, 'GITHUB'),
+      HOST,
+    );
+    await settled();
+    should(result.state).equal('delivered');
+    should(h.cards.length).equal(1);
     should(await h.service.list(HOST)).deepEqual([]);
   });
 });

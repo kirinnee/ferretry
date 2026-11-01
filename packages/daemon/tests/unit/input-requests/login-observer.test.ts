@@ -504,6 +504,13 @@ describe('checked by use: did a code Ferretry made go through?', () => {
     ]);
   });
 
+  it('should judge nothing typed into the secret store: there is no sign-in to watch', async () => {
+    const w = checking({ where: () => ({ navigationId: 'doc-2', host: 'github.com' }) });
+    const stored = code({ kind: 'secret', name: 'X', exists: false } as InputTargetFacts, { kind: 'secret', key: 'X' });
+    should(await w.observer.codeTyped(stored)).be.undefined();
+    should(w.verdicts).deepEqual([]);
+  });
+
   it('should keep nothing for a terminal it cannot read, or one the ferret typed into since', async () => {
     const unread = checking({});
     should(await unread.observer.codeTyped(atPrompt)).be.undefined();
