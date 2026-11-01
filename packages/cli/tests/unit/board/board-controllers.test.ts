@@ -780,6 +780,34 @@ describe('the action verbs', () => {
     ]);
   });
 
+  it('should report an external event, with the reason trimmed and left out when absent', async () => {
+    // Arrange
+    const { controller, gateway, log } = harness();
+
+    // Act
+    await controller.trigger('&F1', ' deploy.done ', { reason: ' prod is up ' });
+    await controller.trigger('F1', 'pr.review_approved', {});
+
+    // Assert
+    should(sent(gateway)).eql([
+      { action: 'trigger', event: 'deploy.done', reason: 'prod is up' },
+      { action: 'trigger', event: 'pr.review_approved' },
+    ]);
+    should(log[0]?.split(' — ')[0]).equal('ok: &F1 event reported');
+  });
+
+  it('should refuse an event that is not an external one before sending anything', async () => {
+    // Arrange
+    const { controller, gateway } = harness();
+
+    // Act
+    const message = await refusal(() => controller.trigger('F1', 'pr.merged', {}));
+
+    // Assert
+    should(message).match(/^"pr\.merged" is not an event you can report; one of pr\.review_approved \| deploy\.done/u);
+    should(gateway.actCalls).eql([]);
+  });
+
   it('should record a skip on the calling session, with the words as one reason', async () => {
     // Arrange
     const { controller, gateway, log } = harness(new FakeGateway(), DENISHA);

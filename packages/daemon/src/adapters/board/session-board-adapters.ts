@@ -110,6 +110,9 @@ export class JournalBoardChanges implements BoardChangeSink {
 /** The journal entry the turn-end check leaves, with the mutating work it saw: the audit of each nudge. */
 export const BOARD_CHECKED_EVENT = 'board.unfiled-work';
 
+/** The journal entry the gate check leaves: the ferret items it asked to drop and the gate cards they sat on. */
+export const BOARD_GATE_NUDGED_EVENT = 'board.gate-nudged';
+
 /** Journals a turn-end nudge on the nudged session (`board-design.md` §3.4). */
 export class JournalBoardChecks {
   constructor(private readonly storage: SessionDocuments) {}
@@ -117,6 +120,12 @@ export class JournalBoardChecks {
   async record(sessionId: string, seen: readonly string[]): Promise<void> {
     const id = known(this.storage, sessionId);
     if (id !== undefined) await this.storage.append(id, BOARD_CHECKED_EVENT, { seen: [...seen] });
+  }
+
+  async recordGate(sessionId: string, items: readonly string[], cards: readonly string[]): Promise<void> {
+    const id = known(this.storage, sessionId);
+    if (id !== undefined)
+      await this.storage.append(id, BOARD_GATE_NUDGED_EVENT, { items: [...items], cards: [...cards] });
   }
 }
 

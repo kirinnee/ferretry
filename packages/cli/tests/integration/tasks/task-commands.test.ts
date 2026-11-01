@@ -179,6 +179,28 @@ describe('fy task lifecycle verbs', () => {
     should(gateway.acted?.request).containEql({ action: 'move' });
   });
 
+  it('should report an external event for a card', async () => {
+    // Arrange
+    const { run, gateway, output } = harness();
+
+    // Act
+    await run('task', 'trigger', '&F412', 'deploy.done', '--reason', 'prod is up');
+
+    // Assert
+    should(gateway.acted?.id).equal('F412');
+    should(gateway.acted?.request).eql({ action: 'trigger', event: 'deploy.done', reason: 'prod is up' });
+    should(output.lines.join('\n')).containEql('event reported');
+  });
+
+  it('should refuse an event the daemon observes itself, before any request', async () => {
+    // Arrange
+    const { run, gateway } = harness();
+
+    // Act + Assert
+    await should(run('task', 'trigger', '&F412', 'pr.merged')).rejectedWith(/not an event you can report/u);
+    should(gateway.acted).be.undefined();
+  });
+
   it('should let --session override the ambient session', async () => {
     // Arrange
     const { run, gateway } = harness();

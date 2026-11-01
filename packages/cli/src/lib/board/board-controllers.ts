@@ -43,6 +43,7 @@ import {
   buildRefileAction,
   buildReopenAction,
   buildReparentAction,
+  buildTriggerAction,
   buildUnblockAction,
   buildUndependAction,
   createPrLinks,
@@ -337,6 +338,10 @@ export class BoardController {
     const ref = requireCardRef(idText);
     const { laneSet } = await this.gateway.task(ref.id);
     await this.perform('move', ref, options, buildMoveAction(resolveLaneRef(laneSet, laneText), options.reason));
+  }
+
+  async trigger(idText: string, event: string, options: BoardCommonOptions & { readonly reason?: string }) {
+    await this.perform('trigger', requireCardRef(idText), options, buildTriggerAction(event, options.reason));
   }
 
   async focus(idText: string, options: BoardCommonOptions) {

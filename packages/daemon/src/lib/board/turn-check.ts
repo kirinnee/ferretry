@@ -62,16 +62,16 @@ const mutatingCommands = (binary: string): readonly (readonly [RegExp, string])[
 ];
 
 /** The tool calls of the session's last turn: everything after its last user-channel message. */
-const lastTurn = (
+export const lastTurn = (
   events: readonly TranscriptEvent[],
-): { readonly opener: string; readonly turn: TranscriptEvent[] } => {
+): { readonly opener: string; readonly turn: TranscriptEvent[]; readonly startedAt: string | undefined } => {
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index] as TranscriptEvent;
     if (event.kind === 'message' && event.role === 'user' && event.inputSource !== 'harness') {
-      return { opener: event.text, turn: events.slice(index + 1) };
+      return { opener: event.text, turn: events.slice(index + 1), startedAt: event.timestamp };
     }
   }
-  return { opener: '', turn: [...events] };
+  return { opener: '', turn: [...events], startedAt: undefined };
 };
 
 /**

@@ -159,6 +159,46 @@ describe('fy board lanes edit', () => {
   });
 });
 
+describe('fy board workflow show', () => {
+  it('should print each lane as a gate or an automatic step', async () => {
+    const { controller, lines } = harness();
+    await controller.workflow({ json: false });
+    should(lines[0])
+      .match(/Ferretry workflow, lanes version 3/u)
+      .and.match(/plan\tPlan\/Design\tGATE/u);
+  });
+
+  it('should print the project as JSON on request', async () => {
+    const { controller, lines } = harness();
+    await controller.workflow({ json: true, project: 'Ferretry' });
+    should(JSON.parse(lines[0] ?? '')).containEql({ id: FERRETRY_ID });
+  });
+});
+
+describe('fy board workflow edit', () => {
+  it('should edit a stage against the version it just read', async () => {
+    const { controller, gateway, lines } = harness();
+    await controller.editWorkflow({ json: false }, { lane: 'implement', gate: ['Ship it=next'] });
+    should(gateway.changes[0]?.request).containEql({ action: 'edit', version: 3 });
+    should(lines[0]).match(/version 4/u);
+  });
+
+  it('should print JSON on request', async () => {
+    const { controller, lines } = harness();
+    await controller.editWorkflow({ json: true }, { lane: 'plan', auto: 'none' });
+    should(JSON.parse(lines[0] ?? '')).containEql({ agenda: 'raised' });
+  });
+
+  it('should refuse a project with no lanes and say how to get some', async () => {
+    const { controller, gateway } = harness(new FakeGateway(project({ laneSet: null })));
+    await controller.editWorkflow({ json: false }, { lane: 'plan', auto: 'none' }).then(
+      () => should.fail('expected a refusal', 'a refusal'),
+      (error: Error) => should(error.message).match(/Ferretry has no lanes to edit.*fy board lanes propose/u),
+    );
+    should(gateway.changes).eql([]);
+  });
+});
+
 describe('rendering lanes', () => {
   it('should say a set confirmed on the admin token was confirmed by the token, not the owner', () => {
     const text = renderLaneSet(laneSet({ confirmedBy: 'owner', confirmedVia: 'admin-token' }), 'Ferretry');

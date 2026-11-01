@@ -293,6 +293,7 @@ export function renderCard(
 export type BoardVerb =
   | 'create'
   | 'move'
+  | 'trigger'
   | 'focus'
   | 'block'
   | 'unblock'
@@ -313,6 +314,7 @@ export type BoardVerb =
 const PAST: Readonly<Record<BoardVerb, string>> = {
   create: 'created',
   move: 'moved',
+  trigger: 'event reported',
   focus: 'is now your focus',
   block: 'blocked',
   unblock: 'unblocked',
