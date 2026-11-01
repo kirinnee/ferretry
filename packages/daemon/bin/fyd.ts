@@ -161,6 +161,7 @@ import { StoreBoardAttachments } from '../src/adapters/board/board-attachments.t
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
 import { FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
 import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
+import { QueueOwnerWords } from '../src/adapters/board/session-owner-words.ts';
 import {
   JournalBoardChanges,
   JournalBoardChecks,
@@ -609,6 +610,7 @@ import {
   BoardTurnCheck,
   DoneDeliveryLadder,
   LivenessActivityDeriver,
+  type OwnerWords,
   ReopenDeliveryLadder,
   SessionCards,
   type SessionLivenessSource,
@@ -2151,6 +2153,8 @@ function createBoardWorld(
   userHome: string,
   /** The attachment store: the files the owner sends with "Not good" are named and carried through it. */
   attachments: StoreBoardAttachments,
+  /** What the owner said to a session: a card's ask is a person's when it matches. */
+  ownerWords: OwnerWords,
 ): BoardWorld {
   const diagnostics = boardDiagnostics;
   const parents = new StorageSessionParents(storage);
@@ -2196,6 +2200,7 @@ function createBoardWorld(
     serial: new KeyedSerialExecutor(),
     adoption,
     subFerrets: new StorageSubFerretDirectory(storage),
+    ownerWords,
   });
   // Whether each project uses the board: one document beside the lane sets. Its one-time pass reads every card
   // and every board, so it switches on exactly the boards the owner worked on lately.
@@ -9976,6 +9981,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.projectRoots ?? [],
         userHome,
         new StoreBoardAttachments(attachmentStore),
+        new QueueOwnerWords(sessionQueue, new StorageSessionParents(storage), taskId =>
+          new FileSessionTaskStore(id => createSessionPaths(paths, id).directory).file(taskId),
+        ),
       );
       // The GitHub watcher that moves the board's cards on PR facts (board-design.md §3.1): it runs the host's
       // own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. Armed after
@@ -10370,6 +10378,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             }
           })
           .then(async () => await unfiledRefiler.run())
+          .catch(() => undefined);
+      });
+      // Every card from before who asked was stored gets it now, from the owner's messages to the session it came
+      // from. Idempotent, so every boot runs it; a card it cannot settle is reported and left for the next boot.
+      unrefTimer(2000, () => {
+        void boardWorld.board
+          .backfillAskedBy()
+          .then(stored => {
+            if (stored > 0) process.stderr.write(`board: stored who asked for ${String(stored)} card(s)\n`);
+          })
           .catch(() => undefined);
       });
       // The one-time import of the old per-session task files onto the project boards. It shares the board's

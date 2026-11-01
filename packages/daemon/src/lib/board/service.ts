@@ -52,6 +52,7 @@ import { deriveView, gatherDerivation, neighbourhoodOf } from './derive.ts';
 import { BoardError, BoardUnavailableError } from './errors.ts';
 import { BoardIndex, blockedBy, cardCategory, type LaneSets } from './graph.ts';
 import { ancestorsOf } from './lineage.ts';
+import { decideAskedBy } from './origin.ts';
 import type {
   ActivityDeriver,
   AgendaLinkSource,
@@ -61,6 +62,7 @@ import type {
   BoardSnapshot,
   BoardStore,
   LaneSetSource,
+  OwnerWords,
   ProjectAdopter,
   BoardAttachmentSource,
   DoneNotifier,
@@ -98,6 +100,8 @@ export interface BoardServiceDependencies {
   readonly subFerrets?: SubFerretDirectory;
   /** The attachment store, for a move back that carries files. Absent, such a move is refused. */
   readonly attachments?: BoardAttachmentSource;
+  /** What the owner said to a session, for deciding whether a card's ask is theirs. Absent, no ask matches. */
+  readonly ownerWords?: OwnerWords;
 }
 
 /** What `fy signal done` did to the ferret's focus card. */
@@ -249,6 +253,33 @@ export class BoardService {
     const index = new BoardIndex(snapshot.cards, this.ports.machineId() ?? '');
     const derivation = await gatherDerivation(snapshot.cards, index, laneSets, this.ports);
     return { views: snapshot.cards.map(card => deriveView(card, derivation)), laneSets };
+  }
+
+  /**
+   * Stores who asked for every card that lacks it (a card from before it was stored), by the same rule a new card
+   * is decided by, except that a stored creator of kind `owner` proves nothing (a ferret holding the admin token
+   * wrote that too). Idempotent; writes no history and does not touch the card's last-touched time. A card that
+   * cannot be decided or written is reported and left for the next boot.
+   */
+  async backfillAskedBy(): Promise<number> {
+    const { cards } = await this.ports.store.read();
+    let stored = 0;
+    for (const { id, askedBy } of cards) {
+      if (askedBy !== undefined) continue;
+      try {
+        const done = await this.ports.store.write(id, async current => {
+          if (current === undefined || current.askedBy !== undefined) return { task: null, result: false };
+          const next = requireValidCard({ ...current, askedBy: await this.askedByOf(current, false) });
+          return { task: next, result: true };
+        });
+        if (done) stored += 1;
+      } catch (error) {
+        this.ports.diagnostics.warn(
+          `board: could not store who asked for ${id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return stored;
   }
 
   /** One card, in full, with its board's lanes. */
@@ -549,6 +580,21 @@ export class BoardService {
   // -------------------------------------------------------------------------------------------------
 
   /** Writes a brand-new card under a counter id; the id already holding a card is the counter's fault. */
+  /** A new card never fails for want of the owner's words; the backfill lets it, so the card waits for the next boot. */
+  private async askedByOf(card: Pick<BoardTask, 'createdBy' | 'ask'>, ownerApp: boolean, lenient = false) {
+    return await decideAskedBy(card, ownerApp, async sessionId => {
+      try {
+        return (await this.ports.ownerWords?.said(sessionId)) ?? [];
+      } catch (error) {
+        if (!lenient) throw error;
+        this.ports.diagnostics.warn(
+          `board: could not read what the owner said to ${sessionId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return [];
+      }
+    });
+  }
+
   private async insert(
     id: BoardTaskId,
     request: BoardTaskCreateRequest,
@@ -561,20 +607,22 @@ export class BoardService {
       readonly index: BoardIndex;
     },
   ): Promise<BoardTask> {
-    const card = requireValidCard(
-      newCard(request, {
-        id,
-        machineId: facts.machineId,
-        now: this.ports.clock.now(),
-        actor: actorOf(facts.caller),
-        ...viaOf(facts.caller),
-        standing: facts.caller.kind === 'owner' ? 'owner-human' : 'owner',
-        owner: facts.owner,
-        projectId: facts.projectId,
-        laneSet: facts.laneSet,
-        index: facts.index,
-      }),
-    );
+    const made = newCard(request, {
+      id,
+      machineId: facts.machineId,
+      now: this.ports.clock.now(),
+      actor: actorOf(facts.caller),
+      ...viaOf(facts.caller),
+      standing: facts.caller.kind === 'owner' ? 'owner-human' : 'owner',
+      owner: facts.owner,
+      projectId: facts.projectId,
+      laneSet: facts.laneSet,
+      index: facts.index,
+    });
+    const card = requireValidCard({
+      ...made,
+      askedBy: await this.askedByOf(made, facts.caller.kind === 'owner' && facts.caller.via === undefined, true),
+    });
     await this.ports.store.write(id, async current => {
       if (current !== undefined)
         throw new BoardUnavailableError(`the counter issued ${id}, which a card already holds`);

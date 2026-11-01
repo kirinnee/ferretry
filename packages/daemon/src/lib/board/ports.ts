@@ -230,3 +230,9 @@ export interface BoardClock {
   /** The instant to stamp on what is about to be written. */
   now(): string;
 }
+
+/** What the owner said to a session, for deciding whether a card's ask is theirs. */
+export interface OwnerWords {
+  /** The owner's messages to a session, first turn included; empty when it cannot tell. Never throws. */
+  said(sessionId: string): Promise<readonly string[]>;
+}

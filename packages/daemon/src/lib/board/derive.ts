@@ -5,7 +5,7 @@
  * - `blockedBy`, `blocks`, `rollup`, `suggestedLane` and `shippedIn` are computed here, from the cards.
  * - `lastTouchedAt`, `touchedBy` and `activity` come from the {@link ActivityDeriver} port.
  * - `waitingOnOwner` and `openAsks` come from the {@link AgendaLinkSource} port (U7).
- * - `askedBy` comes from the card's ask alone (`origin.ts`).
+ * - `askedBy` is the one the card was stored with, else (a card from before it was stored) read from its ask's source (`origin.ts`).
  * - `origin` and `humanParent` come from the card and its ancestors (`origin.ts`), with the lineage of the
  *   sessions a card was recorded from read through the {@link SessionParents} port.
  */
@@ -125,7 +125,7 @@ export const deriveView = (card: BoardTask, inputs: DerivationInputs): BoardTask
       .map(dependent => ({ id: dependent.id })),
     shippedIn: shippedIn(card),
     origin: cardOrigin(card, origins),
-    askedBy: cardAskedBy(card),
+    askedBy: card.askedBy ?? cardAskedBy(card),
     humanParent: humanParentOf(card, inputs.index, ancestor => cardOrigin(ancestor, origins)),
   };
 };

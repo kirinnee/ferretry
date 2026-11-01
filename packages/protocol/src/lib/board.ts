@@ -419,6 +419,10 @@ export type BoardTaskEventType = BoardTaskEvent['type'];
 /** Where a migrated card came from: `<session>:<old id>`. Old `&F12` references resolve through it. */
 export const LegacyTaskRefSchema = z.string().regex(/^[^\s:]+:[BFIC][1-9][0-9]{0,8}$/u);
 
+/** Who asked for the work, for the surfaces that wait on the owner: a `person`, or an `agent` on its own errand. */
+export const BoardTaskAskedBySchema = z.enum(['person', 'agent']);
+export type BoardTaskAskedBy = z.infer<typeof BoardTaskAskedBySchema>;
+
 const BoardTaskShape = {
   v: z.literal(BOARD_TASK_SCHEMA_VERSION),
   id: BoardTaskIdSchema,
@@ -471,6 +475,12 @@ const BoardTaskShape = {
   createdByVia: BoardActorViaSchema.optional(),
   history: z.array(BoardTaskEventSchema).min(1),
   legacyRef: LegacyTaskRefSchema.optional(),
+  /**
+   * Whether a PERSON asked for the card, decided by the daemon once (at creation, or at the first boot that
+   * finds the card without it) and never taken from a caller: the Inbox's cards to test are only a person's.
+   * Absent on a card stored before it existed; a reader then falls back to the ask's source.
+   */
+  askedBy: BoardTaskAskedBySchema.optional(),
 };
 
 type BoardTaskCoherence = Pick<
@@ -529,10 +539,6 @@ export type BoardTaskActivity = z.infer<typeof BoardTaskActivitySchema>;
 export const BoardTaskOriginSchema = z.enum(['human', 'agent']);
 export type BoardTaskOrigin = z.infer<typeof BoardTaskOriginSchema>;
 
-/** Who asked for the work, for the surfaces that wait on the owner: a `person`, or an `agent` on its own errand. */
-export const BoardTaskAskedBySchema = z.enum(['person', 'agent']);
-export type BoardTaskAskedBy = z.infer<typeof BoardTaskAskedBySchema>;
-
 const categoryCounts = z.strictObject({
   backlog: NonNegativeIntegerSchema,
   active: NonNegativeIntegerSchema,
@@ -586,11 +592,6 @@ const BoardTaskViewShape = {
    * reader takes as "show it".
    */
   origin: BoardTaskOriginSchema.optional(),
-  /**
-   * Whether a person asked for the card (its ask's source names the owner), stricter than `origin`: the Inbox's
-   * cards to test are only a person's. Absent from a daemon older than the field, which a reader takes as `agent`.
-   */
-  askedBy: BoardTaskAskedBySchema.optional(),
   /** The nearest ANCESTOR card (never the card itself) whose origin is `human`; `null` when there is none. */
   humanParent: TaskRefSchema.nullable().optional(),
 };
