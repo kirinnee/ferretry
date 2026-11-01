@@ -567,3 +567,80 @@ describe('the old seed path, below the route', () => {
     should(r.sealed.writes).equal(0);
   });
 });
+
+describe('the 2FA key routes, at their edges', () => {
+  it('should answer a stage id it could never have minted as not waiting, and an unknown key as unknown', async () => {
+    // Arrange
+    const r = await rig();
+
+    // Act
+    const badStage = await r.call('GET', '/v1/accounts/GITHUB/factors/seed/st_nope');
+    const unknown = await r.call('PATCH', '/v1/accounts/GITHUB/factors/tf_000000000000', { label: 'x' });
+
+    // Assert
+    should(badStage.status).equal(404);
+    should(badStage.body).match({ code: 'stage_not_found' });
+    should(unknown.status).equal(404);
+    should(unknown.body).match({ code: 'unknown_2fa_key' });
+  });
+
+  it('should set a fact of the key’s kind on a relabel', async () => {
+    // Arrange
+    const r = await rig();
+    const sms = (await r.call('POST', '/v1/accounts/GITHUB/factors', { kind: 'sms', label: 'Phone' })).body as {
+      id: string;
+    };
+
+    // Act
+    const changed = await r.call('PATCH', `/v1/accounts/GITHUB/factors/${sms.id}`, { endsWith: '99' });
+
+    // Assert
+    should(changed.body).match({ kind: 'sms', label: 'Phone', endsWith: '99' });
+  });
+
+  it('should refuse a key not sent padded, and a label the account already has, before holding anything', async () => {
+    // Arrange
+    const r = await rig();
+    await r.call('POST', '/v1/accounts/GITHUB/factors', { kind: 'push', label: 'Phone' });
+
+    // Act
+    const unpadded = await r.call('POST', '/v1/accounts/GITHUB/factors/seed', { padded: SEED, totpAcknowledged: true });
+    const clash = await r.call('POST', '/v1/accounts/GITHUB/factors/seed', stageBody(SEED, { label: 'phone' }));
+
+    // Assert
+    should(unpadded.status).equal(400);
+    should(unpadded.body).match({ code: 'not_a_2fa_key' });
+    should(clash.status).equal(409);
+    should([...(await (r.subsystem.seeds as NonNullable<SecretSubsystem['seeds']>).values()).values()]).deepEqual([]);
+  });
+
+  it('should drop the stage and change nothing when the save itself is refused', async () => {
+    // Arrange — a stage labelled Backup, then another key takes that label before the commit
+    const r = await rig();
+    const staged = await stage(r, 'GITHUB', SEED, { label: 'Backup' });
+    await r.call('POST', '/v1/accounts/GITHUB/factors', { kind: 'push', label: 'Backup' });
+    proveFor(r, staged);
+
+    // Act
+    const refused = await commit(r, staged);
+    const view = await r.call('GET', `/v1/accounts/GITHUB/factors/seed/${staged.stage}`);
+
+    // Assert
+    should(refused.status).equal(409);
+    should(refused.body).match({ code: 'invalid_change' });
+    should(view.body).match({ state: 'dropped' });
+    should(seeds(r)).equal(0);
+  });
+
+  it('should serve no seed route on a daemon that stages none', () => {
+    // Arrange
+    const { seeds: _none, ...without } = secretSubsystem();
+
+    // Act
+    const paths = secretRoutes(without).map(route => route.path);
+
+    // Assert
+    should(paths.some(path => path.includes('/factors/seed'))).be.false();
+    should(paths).containEql('/v1/accounts/:id/factors');
+  });
+});

@@ -902,3 +902,21 @@ describe('a login observer that fails', () => {
     should(result.state).equal('delivered');
   });
 });
+
+describe('a 2FA key set up from an open card', () => {
+  it('should say where the daemon saw the open card’s target, and nothing for one that is closed or unknown', async () => {
+    // Arrange
+    const h = harness();
+    const { request } = await raised(h);
+
+    // Act
+    const open = h.service.cardTarget(request.id);
+    await h.service.cancel(SESSION, request.id, HOST);
+    const closed = h.service.cardTarget(request.id);
+
+    // Assert — the match key is the daemon's (`sudo@<host>`), never the ferret's words
+    should(open).match({ matchKey: /^sudo@/u });
+    should(closed).be.undefined();
+    should(h.service.cardTarget('f'.repeat(32))).be.undefined();
+  });
+});

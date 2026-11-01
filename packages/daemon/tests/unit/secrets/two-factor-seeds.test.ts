@@ -12,7 +12,7 @@ import { FakeSecretCipher } from '../runtime/mounts/support.ts';
 const SEED = 'JBSWY3DPEHPK3PXP';
 const OWNER: StageCaller = { key: 'admin-cli', device: false };
 
-function world() {
+function world(options: { readonly deleted?: boolean } = {}) {
   const cipher = new FakeSecretCipher();
   const masked: boolean[] = [];
   let release: () => void = () => undefined;
@@ -43,6 +43,7 @@ function world() {
       accountsAt: async () => [],
       // The store waits for its lock, then writes: the mask must hold across both.
       addSeed: async () => {
+        if (options.deleted === true) return undefined;
         await seen();
         await lockHeld;
         await seen();
@@ -114,5 +115,23 @@ describe('a staged seed through its commit', () => {
     // Assert
     should(dropped).equal('stage_not_found');
     should(masked).be.true();
+  });
+});
+
+describe('a staged seed whose account went away', () => {
+  it('should save nothing, drop the stage and say the account was deleted', async () => {
+    // Arrange
+    const w = world({ deleted: true });
+    const staged = await w.stages.stage('GITHUB', { padded: padInputValue(SEED), totpAcknowledged: true }, OWNER);
+
+    // Act
+    const refused = await w.stages
+      .commit('GITHUB', staged.stage, () => true)
+      .catch((error: { code?: string }) => error);
+
+    // Assert
+    should(refused).match({ status: 404, code: 'unknown_login' });
+    should(await w.stages.view('GITHUB', staged.stage, OWNER)).match({ state: 'dropped' });
+    should([...(await w.stages.values()).values()]).deepEqual([]);
   });
 });

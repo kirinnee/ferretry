@@ -1118,3 +1118,19 @@ describe('step-up routes: key rotation (B6)', () => {
     });
   });
 });
+
+describe('step-up options and the acts every caller must prove', () => {
+  it('should issue no challenge for such an act without a binding, nor a binding for any other act', async () => {
+    // Arrange
+    const world = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]) });
+    const caller = { device: browser, hostLocal: false };
+
+    // Act
+    const unbound = await world.service.stepUpOptions(caller, ORIGIN, 'add-2fa-key', '');
+    const stray = await world.service.stepUpOptions(caller, ORIGIN, 'catalog-install' as never, BOUND as never);
+
+    // Assert
+    should(unbound).match({ ok: false, refusal: 'not-verified' });
+    should(stray).match({ ok: false, refusal: 'not-verified' });
+  });
+});
