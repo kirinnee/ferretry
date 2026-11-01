@@ -921,7 +921,7 @@ describe('the mounted daemon surface', () => {
       5 + // the board's projects: the list, one project's lanes, a propose, edit or confirm of them, and its switch read and set
       7 + // the owner's input requests: the two lists, a page request's picture, deliver or cancel one, and the quarantine list and its end (docs/input-requests.md)
       6 + // saved logins: the list, the ferret’s hint, put, rename, delete and the owner’s answer to a recipe proposal (docs/input-requests.md#saved-logins)
-      12 + // accounts and sign-ins: the list, the hint, look-alike, an account’s put, rename, delete, merge and apart, and a sign-in’s add, put, delete and recipe answer (docs/secrets.md)
+      13 + // accounts and sign-ins: the list, the hint, look-alike, an account’s put, rename, delete, merge and apart, a sign-in’s add, put, delete and recipe answer, and the owner’s default account for a place (docs/secrets.md)
       8 + // 2FA keys: add, relabel and remove one, and a seed’s stage, read, passkey-bound commit, confirm-in-app and drop (docs/secrets.md)
       8 + // secure copy: a session's copies, the rules (list, add, remove, settings read and change), the paste plans and an answer to one (docs/secure-copy.md)
       2 + // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
@@ -1099,6 +1099,7 @@ describe('the mounted daemon surface', () => {
       'PUT /v1/accounts/sign-ins/:signIn',
       'DELETE /v1/accounts/sign-ins/:signIn',
       'POST /v1/accounts/sign-ins/:signIn/recipe/proposals/:proposalId',
+      'PUT /v1/accounts/defaults',
       'PUT /v1/accounts/:id',
       'POST /v1/accounts/:id/rename',
       'DELETE /v1/accounts/:id',
