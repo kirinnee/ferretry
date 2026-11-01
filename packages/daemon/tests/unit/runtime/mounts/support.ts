@@ -104,6 +104,7 @@ import {
 } from '../../../../src/lib/learning/index.ts';
 import { CALLSIGN_WINDOW_MS, type NameClaim } from '../../../../src/lib/names/index.ts';
 import { type PinRepository, PinService, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
+import { SharedDraftService } from '../../../../src/lib/shared-drafts/index.ts';
 import type { ClockPort } from '../../../../src/lib/ports.ts';
 import type { AnalyticsSubsystem } from '../../../../src/lib/runtime/mounts/analytics.ts';
 import type { BoardSubsystem } from '../../../../src/lib/runtime/mounts/board.ts';
@@ -258,6 +259,20 @@ class FakePinSessions implements PinSessionDirectory {
   async has(sessionId: string): Promise<boolean> {
     return this.known.includes(sessionId);
   }
+}
+
+/**
+ * A shared-draft service over memory: the sequencing is real, the disk and the timer are not. The timer
+ * never fires, so nothing is written unless a test flushes.
+ */
+export function sharedDraftService(known: readonly string[], instant: string = AT): SharedDraftService {
+  return new SharedDraftService(
+    new FakePinSessions(known),
+    { load: async () => undefined, save: async () => undefined },
+    { now: () => instant },
+    { after: () => ({ cancel: () => undefined }) },
+    { next: () => 'gen-1' },
+  );
 }
 
 /** A pin service whose ids and instant are fixed, so a response body can be asserted exactly. */

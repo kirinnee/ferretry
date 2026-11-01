@@ -76,6 +76,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     "the owner dismissing every open agenda item of the agent ferrets; each item's own history records the dismissal and its note, and it widens nobody's access",
   'POST /v1/sessions/:sessionId/notify': 'an agent notifying; its payload is labelled with the agent (see L5)',
   'POST /v1/sessions/:sessionId/pins': 'a bookmark in a transcript',
+  'POST /v1/sessions/:sessionId/shared-draft':
+    "the owner's own unsent words, typed at keystroke rate; it widens nobody's access, and logging it would copy the draft into a log",
   'POST /v1/board/tasks': 'a work card on a project board; its own append-only history records who did what',
   'POST /v1/board/tasks/:taskId': 'a work card on a project board; its own append-only history records who did what',
   'POST /v1/board/skip':

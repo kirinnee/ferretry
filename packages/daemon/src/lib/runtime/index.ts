@@ -18,6 +18,7 @@ export * from './mounts/names.ts';
 export * from './mounts/pack.ts';
 export * from './mounts/pairing.ts';
 export * from './mounts/pins.ts';
+export * from './mounts/shared-drafts.ts';
 export * from './mounts/push.ts';
 export * from './mounts/recommend.ts';
 export * from './mounts/scratch-gc.ts';

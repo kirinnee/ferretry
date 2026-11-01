@@ -103,6 +103,7 @@ export * from './session-transfer.ts';
 export * from './shared-catalog.ts';
 export * from './shared-catalog-owner.ts';
 export * from './shared-catalog-review.ts';
+export * from './shared-draft.ts';
 export * from './skills-inventory.ts';
 export * from './speedups.ts';
 export * from './state-home-layout.ts';
