@@ -533,7 +533,7 @@ grant. This replaced the old `task-boards` access list. The code is `packages/da
 | `daemon`      | the daemon's own automation                                | trigger moves, link cache, refile                                                |
 | `reader`      | any other ferret                                           | read; depend, but only from its own card                                         |
 
-Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A ferret never moves a card into a lane with
+Re-plan means retitle, rewrite the brief, reassign, drop and reorder. The one re-plan write an `assignee` has is handing the card DOWN: it may assign it to one of its own descendants (`fy new --card`, `fy task assign <child>`), recorded as "handed down by" the assignee; never sideways, upward or to nobody. A sub-ferret that is the assignee may do it too: it is the one reassign the sub-ferret limit lets through. A ferret never moves a card into a lane with
 an owner gate, and only the owner closes. Reaching the routes at all is a `fleet` capability matter for a caller
 who is not on this host ([grants.md](grants.md)).
 

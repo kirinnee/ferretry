@@ -459,7 +459,10 @@ export class BoardService {
 
   /** One action on one card. */
   async act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<BoardTaskResponse> {
-    if (!subFerretMay(request)) await this.refuseSubFerret(caller, subFerretDoing(request));
+    // An assign is judged inside the write: a sub-ferret that is the card's assignee may hand it down (`decide`).
+    if (!subFerretMay(request) && request.action !== 'assign') {
+      await this.refuseSubFerret(caller, subFerretDoing(request));
+    }
     if (request.action === 'focus' && caller.kind !== 'ferret') {
       throw new BoardError('invalid', 'focus is for a ferret: it names the card its session works on');
     }
@@ -646,6 +649,9 @@ export class BoardService {
       await this.refuseSubFerret(caller, 'report events on a card they are not doing');
     }
     const context = await this.context(card, caller, request.action === 'assign' ? request.assignee : undefined);
+    if (request.action === 'assign' && context.handsDown !== true) {
+      await this.refuseSubFerret(caller, subFerretDoing(request));
+    }
     const target =
       request.action === 'refile' && request.projectId !== card.projectId
         ? await this.ports.lanes.laneSet(request.projectId)

@@ -6,7 +6,7 @@ import {
 } from '@ferretry/protocol';
 import should from 'should';
 import { type BoardCaller, BoardError, BoardService } from '../../../src/lib/board/index.ts';
-import { card, MemoryBoardStore, world } from '../board/support.ts';
+import { card, FakeParents, MemoryBoardStore, world } from '../board/support.ts';
 import { DIRECTORY, REFUSED } from './support.ts';
 
 const ferret = (sessionId: string): BoardCaller => ({ kind: 'ferret', sessionId });
@@ -59,6 +59,33 @@ describe('a sub-ferret on the board', () => {
       should(error?.message).match(REFUSED);
     });
   }
+
+  it('should hand its card down to its own sub-ferret, and nowhere else', async () => {
+    // Arrange
+    const ports = world({
+      store: new MemoryBoardStore([card({ owner: 'lead', assignee: 'child' })]),
+      parents: new FakeParents({ child: 'lead', grandchild: 'child', sibling: 'lead' }),
+      subFerrets: DIRECTORY,
+    });
+    const service = new BoardService(ports);
+    const to = (assignee: string | null) => action({ action: 'assign', assignee });
+
+    // Act
+    const refused = [
+      await refusal(service.act('F1', to('sibling'), child)),
+      await refusal(service.act('F1', to('lead'), child)),
+      await refusal(service.act('F1', to(null), child)),
+      await refusal(service.act('F1', to('child'), child)),
+    ];
+    const notAssignee = await refusal(service.act('F1', to('grandchild'), ferret('sibling')));
+    const handed = await refusal(service.act('F1', to('grandchild'), child));
+
+    // Assert
+    should(refused.map(error => error?.message.match(REFUSED) !== null)).eql([true, true, true, true]);
+    should(notAssignee?.code).equal('forbidden');
+    should(handed).be.undefined();
+    should(ports.store.cards.get('F1')?.assignee).equal('grandchild');
+  });
 
   it('should be refused a new card', async () => {
     // Arrange

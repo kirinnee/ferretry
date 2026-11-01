@@ -18,7 +18,17 @@ import {
   reraiseBoardError,
 } from '../../../../src/lib/runtime/mounts/board.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { card, FakeLanes, lanes, MemoryBoardStore, PROJECT, type ServiceWorld, world } from '../../board/support.ts';
+import {
+  card,
+  FakeLanes,
+  FakeParents,
+  lanes,
+  MemoryBoardStore,
+  PROJECT,
+  type ServiceWorld,
+  world,
+} from '../../board/support.ts';
+import { DIRECTORY as SUB_FERRETS } from '../../sub-ferret/support.ts';
 import { handleDirectly } from './second-line.ts';
 import { agentIn, boardSubsystem, CREDENTIALS, FERRET_SESSION, fromFerret, grantSubsystem, human } from './support.ts';
 
@@ -322,6 +332,40 @@ describe('the board mount', () => {
     should(calls[0]?.caller).eql({ kind: 'owner', via: 'admin-token' });
     should(refused.status).equal(403);
     should(jsonBody(refused)).match({ code: 'forbidden', allowed: ['owner-human', 'owner', 'ancestor', 'assignee'] });
+  });
+
+  it('should let a sub-ferret that is the assignee hand its card down over the wire, and refuse anywhere else', async () => {
+    // Arrange — the production guard (sub-ferrets may not reassign) and the lineage, both wired.
+    const service = new BoardService(
+      world({
+        store: new MemoryBoardStore([card({ assignee: 'child' })]),
+        parents: new FakeParents({ child: 'lead', grandchild: 'child', sibling: 'lead' }),
+        subFerrets: SUB_FERRETS,
+      }),
+    );
+    const { board } = recording();
+    const live = await dispatcher({ ...board, act: async (id, value, caller) => await service.act(id, value, caller) });
+    const assign = (session: string, assignee: string | null) =>
+      live.dispatch(
+        request({
+          method: 'POST',
+          path: '/v1/board/tasks/F1',
+          headers: agentIn(session),
+          body: JSON.stringify({ action: 'assign', assignee }),
+        }),
+      );
+
+    // Act
+    const sibling = await assign('child', 'sibling');
+    const upward = await assign('child', 'lead');
+    const stranger = await assign('stranger', 'grandchild');
+    const handedDown = await assign('child', 'grandchild');
+
+    // Assert
+    should([sibling.status, upward.status, stranger.status]).eql([403, 403, 403]);
+    should(String(jsonBody(sibling).error)).startWith("Sub-ferrets don't reassign cards");
+    should(handedDown.status).equal(200);
+    should(jsonBody(handedDown)).match({ task: { assignee: 'grandchild', owner: 'lead' } });
   });
 
   it('should move a card as a ferret on its own credential, and as the admin token without one', async () => {
