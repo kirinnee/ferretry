@@ -3,6 +3,7 @@ import {
   CopyMetaSchema,
   type PasteRule,
   type PasteRuleCreate,
+  HealthViewSchema,
   PasteRuleCreateSchema,
   type PasteRuleList,
   PasteRuleListSchema,
@@ -24,6 +25,7 @@ import {
   TaskPlanStageViewSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import { DAEMON_HEALTH_PATH } from '../agenda/gateway.ts';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME } from '../session/connection.ts';
 import type { CopyApiClient, ICopyGateway, IPlanGateway } from './ports.ts';
 
@@ -118,6 +120,11 @@ export class ProtocolPlanGateway implements IPlanGateway {
       headers: this.#json,
       body: JSON.stringify(TaskPlanRevokeSchema.parse(lines === undefined ? {} : { lines })),
     });
+  }
+
+  async features(): Promise<readonly string[]> {
+    const health = await this.client.request(DAEMON_HEALTH_PATH, HealthViewSchema).catch(() => undefined);
+    return health?.features ?? [];
   }
 }
 

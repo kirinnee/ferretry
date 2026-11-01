@@ -926,7 +926,6 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
 }
 
 /** Where the owner's Ferretry app lives: a plan card's deep link is `<this>/#agenda/<card>`. */
-const PLAN_APP_URL = 'https://ferretry.pages.dev';
 
 /** `fy pair`, and the QR `fy setup` offers at a terminal: one construction, so the two cannot differ. */
 function buildPairController(world: CliWorld, client: SharedDaemonClient): PairController {
@@ -1070,11 +1069,6 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         out: world.io,
         ownSessionId,
         agentCredential: paneCredentialValue(world.environment),
-        cardLink: agendaItemId => `${PLAN_APP_URL}/#agenda/${encodeURIComponent(agendaItemId)}`,
-        open: async url =>
-          await desktopBrowserOpener(
-            resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME),
-          ).open(url),
         sleep: async ms => await Bun.sleep(ms),
         nowMs: () => Date.now(),
       }),

@@ -1,4 +1,5 @@
 import {
+  DAEMON_FEATURES,
   namesSignIn,
   placeKeys,
   TASK_PLAN_MAX_LINES,
@@ -22,7 +23,6 @@ export interface PlanCommandOptions {
 export interface PlanApproveOptions extends PlanCommandOptions {
   readonly pick?: readonly string[] | undefined;
   readonly totp?: readonly string[] | undefined;
-  readonly open?: boolean | undefined;
 }
 
 const POLL_MS = 1_000;
@@ -102,6 +102,13 @@ export class PlanController {
     const plan = await this.#plan(reference);
     if (plan.state !== 'pending') throw new Error(`the plan ${plan.id.slice(0, 8)} is ${plan.state}, not waiting`);
     const approval = this.#approval(plan, numbers, options);
+    if (
+      approval.lines.some(tick => plan.lines[tick.line]?.kind !== 'paste') &&
+      !(await this.ports.gateway.features()).includes(DAEMON_FEATURES.taskPlan)
+    )
+      throw new Error(
+        'a sign-in line can only be confirmed on the plan card in the app, and this daemon does not report that card yet: nothing was staged. Allow the paste lines now, or the sign-in lines once the app shows plan cards',
+      );
     const answer = await this.ports.gateway.stage(plan.sessionId, plan.id, approval);
     if (answer.outcome === 'answered') {
       this.ports.out.success(
@@ -110,16 +117,23 @@ export class PlanController {
       return;
     }
     const { staged } = answer;
-    for (const words of staged.summary) this.ports.out.success(`  ${showUntrusted(words)}`);
+    const say = (message: string): void =>
+      options.json === true ? this.ports.out.diagnostic(message) : this.ports.out.success(message);
+    for (const words of staged.summary) say(`  ${showUntrusted(words)}`);
     const card = await this.ports.gateway.confirmInApp(plan.sessionId, plan.id, staged.stage);
-    const link = this.ports.cardLink(card.agendaItemId);
-    this.ports.out.success(
-      `Confirm it with your passkey on the card !${card.agendaItemId} in the Ferretry app: ${link}\nNothing is approved until you do; waiting up to ${String(TASK_PLAN_STAGE_TTL_SECONDS / 60)} minutes…`,
+    say(
+      `Confirm it with your passkey on the plan's card !${card.agendaItemId} in the Ferretry app (Agenda).\nNothing is approved until you do; waiting up to ${String(TASK_PLAN_STAGE_TTL_SECONDS / 60)} minutes…`,
     );
-    if (options.open === true && !(await this.ports.open(link)))
-      this.ports.out.diagnostic(`could not open a browser; open ${link} yourself`);
-    const final = await this.#wait(plan, staged.stage);
-    this.ports.out.success(options.json === true ? JSON.stringify(final, null, 2) : OUTCOME[final.state](plan));
+    const state = await this.#wait(plan, staged.stage);
+    const inForce = state === 'approved' ? undefined : await this.#inForce(plan);
+    const final = inForce === undefined ? { state } : { state: 'approved' as const, plan: inForce };
+    this.ports.out.success(
+      options.json === true
+        ? JSON.stringify(final, null, 2)
+        : inForce === undefined
+          ? OUTCOME[state](plan)
+          : `Approved in the app. Line ${lineList(inForce.lines.filter(line => line.state === 'approved').map(line => line.line))} of the plan ${plan.id.slice(0, 8)} are in force; each goes through for the uses it asked.`,
+    );
   }
 
   /** Ends the numbered lines of a plan (every line when none is named). It only narrows: no passkey. */
@@ -211,16 +225,22 @@ export class PlanController {
     return `Allowed line ${lineList(approval.lines.map(tick => tick.line))} of the plan ${id}: each goes through for the uses it asked, until ${plan.expiresAt}.`;
   }
 
-  async #wait(plan: TaskPlan, stage: string): Promise<{ readonly state: keyof typeof OUTCOME }> {
+  /** The plan as the daemon holds it now, when the owner answered it in the app by another stage than this one. */
+  async #inForce(plan: TaskPlan): Promise<TaskPlan | undefined> {
+    const { plans } = await this.ports.gateway.plans(plan.sessionId);
+    return plans.find(found => found.id === plan.id && found.state === 'approved');
+  }
+
+  async #wait(plan: TaskPlan, stage: string): Promise<keyof typeof OUTCOME> {
     const until = this.ports.nowMs() + (TASK_PLAN_STAGE_TTL_SECONDS + 5) * 1_000;
     for (;;) {
       const view = await this.ports.gateway.view(plan.sessionId, plan.id, stage).catch((error: unknown) => {
         if (error instanceof FyHttpError && error.status === 404) return undefined;
         throw error;
       });
-      if (view === undefined) return { state: 'expired' };
-      if (view.state !== 'waiting') return { state: view.state };
-      if (this.ports.nowMs() >= until) return { state: 'expired' };
+      if (view === undefined) return 'expired';
+      if (view.state !== 'waiting') return view.state;
+      if (this.ports.nowMs() >= until) return 'expired';
       await this.ports.sleep(POLL_MS);
     }
   }

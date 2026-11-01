@@ -109,7 +109,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'terminal_open',
     tool: 'terminal.open',
     description:
-      'Open a new terminal (a shell) with a name, optionally in a folder and running a command. The person sees it as a tab named %terminal:<name>.',
+      'Open a terminal (a shell) with a name, optionally in a folder, running a command. The person sees it as a tab named %terminal:<name>.',
     inputSchema: object(
       {
         name: NEW_NAME,
@@ -174,7 +174,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'terminal_ask_owner',
     tool: 'terminal.ask_owner',
     description:
-      'Hand a terminal to the owner when you need them to act in it (a password, a code, "press Enter"): their tab comes forward with "Your turn here". Then wait and read it.',
+      'Hand a terminal to the owner when you need them to act in it (a password, a code, "press Enter"): their tab comes forward ("Your turn here"). Then wait and read it.',
     inputSchema: object({ name: NAME, message: ASK_MESSAGE }, ['name']),
   },
   {
@@ -198,7 +198,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'input_wait',
     tool: 'input.wait',
     description:
-      'Wait for the owner to answer your input card (!A<n>): where it stands, and once delivered the screen with the value masked. Never the value.',
+      'Wait for the owner to answer your input card (!A<n>): where it stands, then the screen with the value masked. Never the value.',
     inputSchema: object(
       {
         id: { type: 'string', description: 'The card, like !A7, or a pa_ id.' },
@@ -290,7 +290,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_type',
     tool: 'browser.type',
     description:
-      'Fill a field (ref or selector) with text, replacing what it held. submit presses Enter after; slowly types key by key. Never a secret.',
+      'Fill a field (ref or selector), replacing its text. submit presses Enter after; slowly types key by key. Never a secret.',
     inputSchema: object(
       {
         name: NAME,
@@ -307,7 +307,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_read',
     tool: 'browser.read',
     description:
-      'Read a page: visible text, or mode "snapshot" (use it first): the accessibility tree with a ref per element for other tools. find narrows it to lines with that text.',
+      'Read a page: visible text, or mode "snapshot" (use it first): the accessibility tree with a ref per element for other tools. find: only lines with that text.',
     inputSchema: object(
       {
         name: NAME,
@@ -465,7 +465,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_upload',
     tool: 'browser.upload',
     description:
-      'Give a page files: a file input or the button that opens the picker (ref or selector). files: paths in your working folder, or {"attachment": "att_…"}. mode "drop": onto a dropzone. Needs the files switch.',
+      'Give a page files: a file input or its picker button (ref or selector). files: paths in your working folder, or {"attachment": "att_…"}. mode "drop": onto a dropzone. Needs the files switch.',
     inputSchema: object(
       {
         name: NAME,
@@ -491,7 +491,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_download',
     tool: 'browser.download',
     description:
-      'Save a file the page downloaded (a result says "a download started … id dl-1") into your working folder: downloads/<its name> unless saveAs says where. Needs the files switch.',
+      'Save a file the page downloaded (a result says "a download started … id dl-1") into your working folder as downloads/<name>, or saveAs. Needs the files switch.',
     inputSchema: object(
       {
         name: NAME,
@@ -506,7 +506,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_pdf',
     tool: 'browser.pdf',
     description:
-      'Print the page to a PDF in your working folder (downloads/<title>.pdf unless saveAs says where). Needs headless mode and the files switch.',
+      'Print the page to a PDF in your working folder (downloads/<title>.pdf, or saveAs). Needs headless mode and the files switch.',
     inputSchema: object(
       {
         name: NAME,
@@ -570,7 +570,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_press',
     tool: 'browser.press',
     description:
-      'Press up to 32 keys in order, e.g. ["Enter"], ["Control+Shift+K"]. Modifiers Alt, Control, ControlOrMeta, Meta, Shift, then a named key or one character. ref/selector focuses an element first. Never a secret.',
+      'Press up to 32 keys in order, e.g. ["Enter"], ["Control+Shift+K"]. Modifiers: Alt, Control, ControlOrMeta, Meta, Shift, then one key. ref/selector focuses an element first. Never a secret.',
     inputSchema: object(
       {
         name: NAME,
@@ -678,7 +678,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     name: 'browser_ask_owner',
     tool: 'browser.ask_owner',
     description:
-      'Hand a page to the owner when you need them to act in it (a captcha, a payment, a consent screen): their tab comes forward with "Your turn here". Then wait and read it.',
+      'Hand a page to the owner when you need them to act in it (a captcha, a payment, a consent screen): their tab comes forward ("Your turn here"). Then wait and read it.',
     inputSchema: object({ name: NAME, message: ASK_MESSAGE }, ['name']),
   },
   {
@@ -773,7 +773,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
 const CONFIG_PATH = {
   type: 'string',
   description:
-    'A file, relative to the configuration directory: machine.yaml, warden.yaml, learning.yaml, voice.yaml, logins/<id>.yaml, profiles/<name>.yaml, runtimes/<name>.yaml or components/<kind>/<name>.yaml.',
+    'A file in the config directory: machine.yaml, warden.yaml, learning.yaml, voice.yaml, logins/<id>.yaml, profiles/<name>.yaml, runtimes/<name>.yaml or components/<kind>/<name>.yaml.',
 };
 const CONFIG_TEXT = {
   type: 'string',
@@ -791,7 +791,7 @@ export const MCP_CONFIG_TOOLS: readonly (McpToolDefinition & { readonly configTo
     name: 'config_read',
     configTool: 'config.read',
     description:
-      'Read this machine’s Ferretry configuration: with no path, every file and every problem; with a path, that file’s text and its etag (pass the etag back to config_write).',
+      'Read this machine’s Ferretry configuration: no path: every file and problem; a path: that file’s text and etag (pass it to config_write).',
     inputSchema: object({ path: CONFIG_PATH }),
   },
   {
@@ -870,6 +870,6 @@ export const MCP_SEARCH_TOOLS: readonly (McpToolDefinition & { readonly searchTo
 export const MCP_INSTRUCTIONS_TOOL: McpToolDefinition = {
   name: 'instructions',
   description:
-    'Which Ferretry sections of your system prompt you launched with (hypermedia, Pack mode, agenda mode, lessons) and how the owner turns each on. Check this before telling the owner a section is missing.',
+    'Which Ferretry sections your system prompt launched with (hypermedia, Pack mode, agenda mode, lessons) and how to turn each on. Check before telling the owner one is missing.',
   inputSchema: object({}),
 };

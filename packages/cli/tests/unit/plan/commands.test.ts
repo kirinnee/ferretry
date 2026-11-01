@@ -51,7 +51,6 @@ describe('fy copy commands', () => {
         '1=si_0123456789abcdef',
         '--totp',
         '1',
-        '--open',
       ],
       ['plan', 'revoke', 'feed', '2'],
       ['plan', 'revoke', 'feed'],
@@ -71,12 +70,7 @@ describe('fy copy commands', () => {
       ['plan.list', { session: 's1' }],
       ['plan.approve', 'feed', ['1', '3'], { pick: [], totp: [] }],
       ['plan.list', { json: true }],
-      [
-        'plan.approve',
-        'feed',
-        ['1', '3'],
-        { pick: ['3=GITHUB_WORK', '1=si_0123456789abcdef'], totp: ['1'], open: true },
-      ],
+      ['plan.approve', 'feed', ['1', '3'], { pick: ['3=GITHUB_WORK', '1=si_0123456789abcdef'], totp: ['1'] }],
       ['plan.revoke', 'feed', ['2'], {}],
       ['plan.revoke', 'feed', [], {}],
     ]);

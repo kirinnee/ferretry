@@ -618,7 +618,7 @@ export class AgentToolService {
       case 'task.plan': {
         const plan = await this.planPort(caller).propose(sessionId, call);
         return {
-          summary: `Asked the owner to approve ${plural(plan.lines.length, 'line')} in advance (!${plan.agendaItemId}). Until they answer, each asks them. Raise browser_request_input / terminal_request_input as usual; Ferretry fills a covered sign-in itself.`,
+          summary: `Asked the owner to approve ${plural(plan.lines.length, 'line')} in advance (!${plan.agendaItemId}). The plan is only recorded for now: Ferretry fills nothing from it yet, so keep raising browser_request_input / terminal_request_input and the owner is asked each time.`,
           taskPlan: taskPlanAgentView(plan),
         };
       }

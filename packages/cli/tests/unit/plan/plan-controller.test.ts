@@ -74,6 +74,7 @@ class SpyGateway implements IPlanGateway {
   readonly revoked: { readonly planId: string; readonly lines: readonly number[] | undefined }[] = [];
   plan: TaskPlan = PLAN;
   views: (TaskPlanStageState | 'gone')[] = ['waiting', 'approved'];
+  reported: string[] = ['task-plan.1'];
 
   async plans() {
     this.calls.push('plans');
@@ -97,6 +98,10 @@ class SpyGateway implements IPlanGateway {
         expiresAt: '2026-11-01T12:02:00.000Z',
       },
     };
+  }
+  async features() {
+    this.calls.push('features');
+    return this.reported;
   }
   async confirmInApp() {
     this.calls.push('confirmInApp');
@@ -126,7 +131,6 @@ function rig(overrides: Partial<PlanPorts> = {}) {
   const gateway = new SpyGateway();
   const said: string[] = [];
   const warned: string[] = [];
-  const opened: string[] = [];
   let now = 0;
   const slept: number[] = [];
   const controller = new PlanController({
@@ -134,11 +138,6 @@ function rig(overrides: Partial<PlanPorts> = {}) {
     out: { success: message => void said.push(message), diagnostic: message => void warned.push(message) },
     ownSessionId: undefined,
     agentCredential: undefined,
-    cardLink: id => `https://app.test/#agenda/${id}`,
-    open: async url => {
-      opened.push(url);
-      return true;
-    },
     sleep: async ms => {
       slept.push(ms);
       now += ms;
@@ -146,7 +145,7 @@ function rig(overrides: Partial<PlanPorts> = {}) {
     nowMs: () => now,
     ...overrides,
   });
-  return { gateway, said, warned, opened, slept, controller };
+  return { gateway, said, warned, slept, controller };
 }
 
 const failure = async (work: Promise<unknown>): Promise<string> =>
@@ -174,7 +173,7 @@ describe('fy plan: who may run it', () => {
 
 describe('fy plan approve: a sign-in line is never approved without the app', () => {
   it('should answer a paste-only selection at once, with no stage in the app', async () => {
-    const { controller, gateway, said, opened } = rig();
+    const { controller, gateway, said } = rig();
 
     await controller.approve('feed', ['1'], {});
 
@@ -183,7 +182,6 @@ describe('fy plan approve: a sign-in line is never approved without the app', ()
     should(said).eql([
       'Allowed line 1 of the plan feedbeef: each goes through for the uses it asked, until 2026-11-01T14:00:00.000Z.',
     ]);
-    should(opened).eql([]);
   });
 
   it('should stage a sign-in line, confirm it in the app, print the card link and poll until approved', async () => {
@@ -192,10 +190,10 @@ describe('fy plan approve: a sign-in line is never approved without the app', ()
     await controller.approve('feed', ['3'], {});
 
     should(gateway.staged).eql([{ lines: [{ line: 2, signIn: ONLY }] }]);
-    should(gateway.calls).eql(['plans', 'stage', 'confirmInApp', 'view', 'view']);
+    should(gateway.calls).eql(['plans', 'features', 'stage', 'confirmInApp', 'view', 'view']);
     should(slept).eql([1_000]);
     should(said[0]).equal('  Sign in as GITHUB_WORK on github.com');
-    should(said[1]).containEql('https://app.test/#agenda/A9');
+    should(said[1]).containEql('card !A9');
     should(said[1]).containEql('Nothing is approved until you do');
     should(said[2]).startWith('Approved.');
   });
@@ -208,16 +206,6 @@ describe('fy plan approve: a sign-in line is never approved without the app', ()
 
     should(gateway.calls.filter(call => /commit|approve/iu.test(call))).eql([]);
     should(Object.getOwnPropertyNames(SpyGateway.prototype).filter(name => /commit/iu.test(name))).eql([]);
-  });
-
-  it('should open the card when asked, and say so when no browser could open', async () => {
-    const opening = rig();
-    await opening.controller.approve('feed', ['3'], { open: true });
-    const failing = rig({ open: async () => false });
-    await failing.controller.approve('feed', ['3'], { open: true });
-
-    should(opening.opened).eql(['https://app.test/#agenda/A9']);
-    should(failing.warned).eql(['could not open a browser; open https://app.test/#agenda/A9 yourself']);
   });
 
   it('should say Denied, and Timed out for a stage that is gone, and stop polling at the deadline', async () => {
@@ -400,6 +388,60 @@ describe('fy plan: the less common lines and answers', () => {
     await controller.approve('feed', ['3'], { json: true });
 
     should(JSON.parse(said.at(-1) as string)).eql({ state: 'denied' });
+  });
+
+  it('should keep --json output pure: the prose goes to the diagnostic stream, one JSON document to the output', async () => {
+    const { controller, gateway, said, warned } = rig();
+    gateway.views = ['approved'];
+
+    await controller.approve('feed', ['3'], { json: true });
+
+    should(said).have.length(1);
+    should(JSON.parse(said[0] as string)).eql({ state: 'approved' });
+    should(warned[0]).equal('  Sign in as GITHUB_WORK on github.com');
+    should(warned[1]).containEql('card !A9');
+  });
+
+  it('should report the plan in force when the owner re-ticked the lines in the app and the stage was replaced', async () => {
+    const human = rig();
+    const data = rig();
+    for (const { gateway } of [human, data]) {
+      gateway.views = ['denied'];
+      const stage = gateway.stage.bind(gateway);
+      gateway.stage = async (...args) => {
+        const answer = await stage(...args);
+        gateway.plan = { ...PLAN, state: 'approved', lines: [PASTE, PICKER, { ...SINGLE, state: 'approved' }] };
+        return answer;
+      };
+    }
+
+    await human.controller.approve('feed', ['3'], {});
+    await data.controller.approve('feed', ['3'], { json: true });
+
+    should(human.said.at(-1)).startWith('Approved in the app. Line 3 of the plan feedbeef are in force');
+    should(human.gateway.calls.at(-1)).equal('plans');
+    const final = JSON.parse(data.said.at(-1) as string) as { state: string; plan: { state: string } };
+    should([final.state, final.plan.state]).eql(['approved', 'approved']);
+  });
+
+  it('should refuse a sign-in line up front when the daemon does not report plan cards, and stage nothing', async () => {
+    const { controller, gateway } = rig();
+    gateway.reported = [];
+
+    const message = await failure(controller.approve('feed', ['3'], {}));
+
+    should(message).containEql('does not report that card yet: nothing was staged');
+    should(gateway.staged).eql([]);
+    should(gateway.calls).eql(['plans', 'features']);
+  });
+
+  it('should still allow a paste line when the daemon does not report plan cards, without asking it', async () => {
+    const { controller, gateway } = rig();
+    gateway.reported = [];
+
+    await controller.approve('feed', ['1'], {});
+
+    should(gateway.calls).eql(['plans', 'stage']);
   });
 
   it('should print the revoked plan with --json', async () => {

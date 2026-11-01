@@ -1,5 +1,9 @@
 import { describe, it } from 'bun:test';
 import {
+  type AccountId,
+  type AccountKey,
+  type AccountSummary,
+  type SignInSummary,
   AgentToolCallSchema,
   type AgentToolCall,
   CopyPlanSchema,
@@ -10,6 +14,8 @@ import {
 import should from 'should';
 import { type AgentToolError, PasteRuleService, TaskPlanService, type TaskPlanCard } from '../../../src/lib/index.ts';
 import { agent, agentToolWorld, person } from './support.ts';
+
+const work = (id: string): AccountId => id as AccountId;
 
 const NOW = Date.parse('2026-11-01T12:00:00.000Z');
 
@@ -38,8 +44,40 @@ const refused = async (work: Promise<unknown>): Promise<AgentToolError> =>
     (error: unknown) => error,
   )) as AgentToolError;
 
+const KEY: AccountKey = `L${'A'.repeat(24)}`;
+const EMPTY = { accounts: [] as AccountSummary[], signIns: [] as SignInSummary[] };
+
+/** One saved github.com sign-in; the secret fields it holds (a username, a TOTP key) are what must never reach a ferret. */
+function githubWith(options: { readonly totp: boolean }) {
+  const id = work(options.totp ? 'GITHUB_WORK' : 'GITHUB_HOME');
+  return {
+    accounts: [
+      {
+        id,
+        label: options.totp ? 'GitHub secret-label-work' : 'GitHub secret-label-home',
+        username: options.totp ? 'secret-user-work' : 'secret-user-home',
+        fields: { password: true, totp: options.totp },
+        factors: [],
+        signIns: [],
+        createdAt: '2026-10-01T00:00:00.000Z',
+        updatedAt: '2026-10-01T00:00:00.000Z',
+      } as AccountSummary,
+    ],
+    signIns: [
+      {
+        id: options.totp ? 'si_00000000000000a1' : 'si_00000000000000a2',
+        account: id,
+        place: { kind: 'site', domains: ['github.com'], match: [] },
+        method: { kind: 'password' },
+        createdAt: '2026-10-01T00:00:00.000Z',
+        updatedAt: '2026-10-01T00:00:00.000Z',
+      } as SignInSummary,
+    ],
+  };
+}
+
 /** The real plan service over an empty account store: a site line is "not in Accounts" and stays unavailable. */
-function planWorld() {
+function planWorld(accounts: { readonly accounts: AccountSummary[]; readonly signIns: SignInSummary[] } = EMPTY) {
   const cards: (TaskPlanCard & { readonly sessionId: string })[] = [];
   const proposed: { readonly sessionId: string; readonly call: TaskPlanCall }[] = [];
   const rules = new PasteRuleService({
@@ -58,7 +96,10 @@ function planWorld() {
       close: async () => undefined,
     },
     rules,
-    accounts: { listing: async () => ({ accounts: [], signIns: [] }), keyOf: async () => undefined },
+    accounts: {
+      listing: async () => accounts,
+      keyOf: async id => (accounts.accounts.some(each => each.id === id) ? KEY : undefined),
+    },
     passkeys: { any: async () => true },
     redact: async text => text,
     tell: async () => undefined,
@@ -84,14 +125,15 @@ const BOTH_NAMES: readonly { readonly name: string; readonly call: AgentToolCall
 ];
 
 describe('the task.plan agent tool', () => {
-  it('should raise one card for the lines and teach how a covered sign-in is filled', async () => {
+  it('should raise one card for the lines and say plainly that nothing is filled from it yet', async () => {
     const world = planWorld();
 
     const answered = await world.service.call(agent, { tool: 'task.plan', lines: [PASTE_LINE, SITE_LINE] });
 
     should(answered.summary).equal(
-      'Asked the owner to approve 2 lines in advance (!A1). Until they answer, each asks them. ' +
-        'Raise browser_request_input / terminal_request_input as usual; Ferretry fills a covered sign-in itself.',
+      'Asked the owner to approve 2 lines in advance (!A1). ' +
+        'The plan is only recorded for now: Ferretry fills nothing from it yet, so keep raising ' +
+        'browser_request_input / terminal_request_input and the owner is asked each time.',
     );
     should(world.cards).have.length(1);
     should(world.cards[0]?.sessionId).equal('s1');
@@ -100,14 +142,24 @@ describe('the task.plan agent tool', () => {
     should(answered.plan).be.undefined();
   });
 
-  it('should tell the ferret nothing about which secret fields an account holds', async () => {
-    const world = planWorld();
+  it('should tell the ferret nothing about which secret fields an account holds, with real accounts saved', async () => {
+    const withKey = planWorld(githubWith({ totp: true }));
+    const without = planWorld(githubWith({ totp: false }));
 
-    const answered = await world.service.call(agent, { tool: 'task.plan', lines: [SITE_LINE] });
+    const first = await withKey.service.call(agent, { tool: 'task.plan', lines: [SITE_LINE] });
+    const second = await without.service.call(agent, { tool: 'task.plan', lines: [SITE_LINE] });
 
-    const text = JSON.stringify(answered);
+    should(first.taskPlan?.lines.map(line => line.state)).eql(['waiting']);
+    const text = JSON.stringify([first, second]);
     for (const key of ['candidates', 'history', 'flags', 'because', 'can', 'fields', 'totp', 'username'])
       should(text).not.containEql(`"${key}"`);
+    for (const secret of ['secret-user', 'secret-label', 'GITHUB_WORK', 'GITHUB_HOME', 'si_0000', KEY])
+      should(text).not.containEql(secret);
+    const bare = (answered: unknown): string =>
+      JSON.stringify(answered)
+        .replace(/"id":"[^"]*"/gu, '"id":"-"')
+        .replace(/!A\d+/gu, '!A-');
+    should(bare(first)).equal(bare(second));
   });
 
   it('should plan for the calling session only, whatever the body says', async () => {
@@ -151,6 +203,25 @@ describe('secure.preapprove, kept for an older pane', () => {
       'Asked the owner to approve 1 paste in advance (!A1). Until they answer, each paste asks them.',
     );
     should(next.taskPlan?.lines).eql([{ line: 0, state: 'waiting' }]);
+  });
+});
+
+describe('secure.preapprove: a translated call only ever asks for pastes of one use', () => {
+  it('should propose every item as a one-use paste line, whatever the body carried', async () => {
+    const world = planWorld();
+    const items = [
+      ...OLD_ITEMS,
+      { from: GH, to: { kind: 'browser', origin: 'https://vercel.com' } as const, why: 'the token field' },
+    ];
+
+    await world.service.call(agent, { tool: 'secure.preapprove', items, expiresInSeconds: 3_600 });
+
+    const lines = world.proposed.flatMap(entry => entry.call.lines);
+    should(lines.map(line => [line.kind, line.uses])).eql([
+      ['paste', 1],
+      ['paste', 1],
+    ]);
+    should(world.proposed[0]?.call.expiresInSeconds).equal(3_600);
   });
 });
 

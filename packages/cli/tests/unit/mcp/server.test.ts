@@ -405,6 +405,7 @@ describe('McpServer — the tools', () => {
     // lessons_suggest, browser_open, browser_pdf, config_write and a few older phrases (31,899).
     // task_plan (sign-ins and pastes in one plan) took it to 32,011, so browser_network, terminal_wait,
     // browser_open, browser_emulate and four older phrases gave up repeated words (31,945).
+    // Margin for the plan work after it (R3a): a dozen older descriptions gave up repeated words (31,749).
     // Owner-gated groups are listed only while they are on.
     should(bytes).be.below(32_000);
     should(longest).be.belowOrEqual(300);

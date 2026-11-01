@@ -209,6 +209,46 @@ describe('agent tool schemas', () => {
     });
   });
 
+  it('should read the legacy secure.preapprove body strictly: no uses, no sign-in, no extra key, at most a day', () => {
+    const item = {
+      from: { kind: 'command', program: 'gh' },
+      to: { kind: 'terminal', program: 'vercel' },
+      why: 'token',
+    };
+    const accepts = (body: object) =>
+      tools.AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items: [item], ...body }).success;
+    const accepted = (items: unknown) =>
+      tools.AgentToolCallSchema.safeParse({ tool: 'secure.preapprove', items }).success;
+
+    const table: readonly (readonly [string, boolean])[] = [
+      ['plain item', accepted([item])],
+      ['uses on an item', accepted([{ ...item, uses: 5 }])],
+      ['uses beside the items', accepts({ uses: 5 })],
+      ['a sign-in item', accepted([{ kind: 'sign-in', site: 'github.com', fields: ['password'], uses: 1, why: 'x' }])],
+      ['a sign-in item with a place', accepted([{ ...item, kind: 'sign-in', site: 'github.com' }])],
+      ['a terminal sign-in item', accepted([{ kind: 'terminal-sign-in', place: 'sudo@box', why: 'x' }])],
+      ['an extra key on an item', accepted([{ ...item, password: 'hunter2' }])],
+      ['an extra key on the body', accepts({ sessionId: 's2' })],
+      ['299 seconds', accepts({ expiresInSeconds: 299 })],
+      ['a day', accepts({ expiresInSeconds: 86_400 })],
+      ['a day and a second', accepts({ expiresInSeconds: 86_401 })],
+    ];
+
+    should(table).eql([
+      ['plain item', true],
+      ['uses on an item', false],
+      ['uses beside the items', false],
+      ['a sign-in item', false],
+      ['a sign-in item with a place', false],
+      ['a terminal sign-in item', false],
+      ['an extra key on an item', false],
+      ['an extra key on the body', false],
+      ['299 seconds', false],
+      ['a day', true],
+      ['a day and a second', false],
+    ]);
+  });
+
   it('should refuse a task.plan line that carries a place, a value or a second line for one sign-in', () => {
     const line = { kind: 'sign-in', site: 'github.com', fields: ['password'], uses: 1, why: 'settings' };
     const refuses = (body: object) => tools.AgentToolCallSchema.safeParse({ tool: 'task.plan', ...body }).success;

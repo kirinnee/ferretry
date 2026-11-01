@@ -39,6 +39,8 @@ export interface IPlanGateway {
   confirmInApp(sessionId: string, planId: string, stage: string): Promise<TaskPlanConfirming>;
   view(sessionId: string, planId: string, stage: string): Promise<TaskPlanStageView>;
   revoke(sessionId: string, planId: string, lines?: readonly number[]): Promise<TaskPlan>;
+  /** The features the daemon reports (`DAEMON_FEATURES`); empty when it reports none or cannot be asked. */
+  features(): Promise<readonly string[]>;
 }
 
 export type CopyApiClient = Pick<IFyApiClient, 'request'>;
@@ -59,10 +61,6 @@ export interface CopyPorts extends CallerPorts {
 export interface PlanPorts extends CallerPorts {
   readonly gateway: IPlanGateway;
   readonly out: ICopyOutput;
-  /** The address of the agenda card in the Ferretry app. */
-  readonly cardLink: (agendaItemId: string) => string;
-  /** Opens an address in the owner's browser; false when it could not. */
-  readonly open: (url: string) => Promise<boolean>;
   readonly sleep: (ms: number) => Promise<void>;
   readonly nowMs: () => number;
 }

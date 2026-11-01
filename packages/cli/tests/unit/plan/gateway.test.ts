@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import type { PasteRule } from '@ferretry/protocol';
 import should from 'should';
 import { ProtocolCopyGateway, ProtocolPlanGateway } from '../../../src/lib/plan/gateway';
+import { health } from '../daemon/fixtures';
 
 interface Call {
   readonly path: string;
@@ -174,6 +175,15 @@ describe('ProtocolPlanGateway', () => {
     should(calls[5]?.body).eql({ lines: [0, 2] });
     should(calls[6]?.body).eql({});
     should(calls.every(call => !('x-ferretry-session-id' in call.headers))).be.true();
+  });
+
+  it('should read the features the daemon reports from its health route, and none when it can not be read', async () => {
+    const { calls, plans } = planGateway(() => health({ features: ['task-plan.1'] }));
+    const broken = new ProtocolPlanGateway({ request: () => Promise.reject(new Error('down')) });
+
+    should(await plans.features()).eql(['task-plan.1']);
+    should(await broken.features()).eql([]);
+    should(calls.map(call => `${call.method} ${call.path}`)).eql(['GET /v1/health']);
   });
 
   it('should have no way to commit: no method for it, and no route it could reach', async () => {
