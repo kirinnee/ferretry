@@ -50,11 +50,21 @@ const useFor = (container: HTMLElement, invocation: string): HTMLButtonElement =
     buttons(container).find(button => button.getAttribute('aria-label') === `Use ${invocation} in chat`),
     `the ${invocation} use action`,
   );
-const detailFor = (container: HTMLElement, invocation: string): HTMLButtonElement =>
-  must(
-    buttons(container).find(button => button.getAttribute('aria-label') === `View full detail for ${invocation}`),
-    `the ${invocation} detail action`,
+/** Opens the row's ⋯ menu and picks its detail item (Show detail, then Hide detail once open). */
+const toggleDetail = async (container: HTMLElement, invocation: string): Promise<void> => {
+  const more = must(
+    buttons(container).find(button => button.getAttribute('aria-label') === `More for ${invocation}`),
+    `the ${invocation} more action`,
   );
+  await interact(() => more.click());
+  const item = must(
+    [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(entry =>
+      /detail$/u.test(entry.textContent ?? ''),
+    ),
+    'the detail item',
+  );
+  await interact(() => item.click());
+};
 const refresh = (container: HTMLElement): HTMLButtonElement =>
   must(container.querySelector<HTMLButtonElement>('button[aria-label="Refresh skills"]'), 'the refresh button');
 const search = (container: HTMLElement): HTMLInputElement =>
@@ -83,9 +93,12 @@ describe('SkillsCatalogList', () => {
 
     expect([...container.querySelectorAll('h3')].map(heading => heading.textContent)).toEqual(['Global', 'Project']);
     expect([...container.querySelectorAll('ul')].every(list => list.children.length > 0)).toBe(true);
-    expect([...container.querySelectorAll('code')].map(code => code.textContent)).toEqual(['/kteam', '/run']);
-    expect(useFor(container, '/run').textContent).toContain('Use in chat');
-    expect(detailFor(container, '/run').textContent).toContain('View full detail');
+    expect([...container.querySelectorAll('[data-row-label]')].map(label => label.textContent)).toEqual([
+      '/kteam',
+      '/run',
+    ]);
+    expect(useFor(container, '/run').textContent).toContain('/run');
+    expect(container.querySelector('[data-catalog-item-row="run"] [data-row-more]')).not.toBeNull();
     await unmount();
   });
 
@@ -101,7 +114,7 @@ describe('SkillsCatalogList', () => {
       />,
     );
 
-    await interact(() => detailFor(container, '/run').click());
+    await toggleDetail(container, '/run');
     const detail = must(container.querySelector<HTMLElement>('[data-skill-detail="run"]'), 'the full skill detail');
     expect(detail.textContent).toContain('Launch the project app.');
     expect(detail.textContent).toContain('Project');
@@ -165,7 +178,7 @@ describe('SkillsSurface', () => {
 
     await typeSearch(container, 'teammates');
     expect(container.textContent).toContain('1 of 2');
-    expect(container.querySelectorAll('code')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-row-label]')).toHaveLength(1);
 
     await interact(() => useFor(container, '/kteam').click());
     expect(inserted).toEqual(['/kteam']);

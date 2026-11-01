@@ -110,6 +110,19 @@ const tab = async (root: HTMLElement, label: string): Promise<void> => {
 const rows = (root: HTMLElement, attribute: string): string[] =>
   [...root.querySelectorAll(`[${attribute}]`)].map(row => row.getAttribute(attribute) ?? '');
 
+/** Opens a skill's SKILL.md the way a person does: its ⋯, then Open. */
+const openSkillFile = async (root: HTMLElement, name: string): Promise<void> => {
+  await click(root, `[data-catalog-item-row="${name}"] [data-row-more]`);
+  const item = must(
+    [...root.ownerDocument.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      entry => entry.textContent === 'Open SKILL.md',
+    ),
+    'the Open SKILL.md item',
+  );
+  await interact(() => item.click());
+  await settle();
+};
+
 const search = (root: HTMLElement, value: string) => type(root, '[data-side-pane-search] input', value);
 
 describe('ContextRailBody — MCP', () => {
@@ -312,17 +325,17 @@ describe('ContextRailBody — MCP', () => {
 describe('ContextRailBody — Skills', () => {
   it('lists every skill this ferret sees by scope, the winners first, and says which ones are overridden', async () => {
     const { root, inserted } = await body({ tab: 'skills' });
-    expect(rows(root, 'data-context-skill')).toEqual(['summary', 'floop', 'babysit-pr', 'summary']);
+    expect(rows(root, 'data-row-use')).toEqual(['summary', 'floop', 'babysit-pr', 'summary']);
     expect(rows(root, 'data-context-skill-scope')).toEqual(['project', 'user', 'ferretry', 'user']);
     expect(rows(root, 'data-context-chip')).toEqual(['all', 'project', 'user', 'ferretry']);
-    expect(text(root, '[data-context-skill-override]')).toBe('Overridden by Project');
+    expect(text(root, '[data-row-note]')).toBe('Overridden by Project');
     expect(root.textContent).toContain('Claude · inserts /name');
 
-    await click(root, '[data-context-skill="floop"]');
+    await click(root, '[data-row-use="floop"]');
     expect(inserted).toEqual(['/floop']);
 
     await click(root, '[data-context-chip="user"]');
-    expect(rows(root, 'data-context-skill')).toEqual(['floop', 'summary']);
+    expect(rows(root, 'data-row-use')).toEqual(['floop', 'summary']);
     await search(root, 'green');
     expect(text(root, '[data-context-note]')).toBe('Nothing under User matches “green”.');
   });
@@ -334,9 +347,7 @@ describe('ContextRailBody — Skills', () => {
       return { path, content: '---\nname: floop\ndescription: Review.\n---\n# Summary\n\nSay what happened.' };
     };
     const { root } = await body({ tab: 'skills', loadSkillFile });
-    const open = must(root.querySelector<HTMLButtonElement>('[data-context-skill-open="floop"]'), 'Open');
-    await interact(() => open.click());
-    await settle();
+    await openSkillFile(root, 'floop');
     expect(read).toEqual(['/fy/fleet/homes/claude-work/skills/floop/SKILL.md']);
     const sheet = must(document.body.querySelector('[data-context-skill-file="floop"]'), 'the sheet');
     expect(sheet.querySelector('h1')?.textContent).toBe('Summary');
@@ -354,9 +365,7 @@ describe('ContextRailBody — Skills', () => {
         throw new Error('no listed skill has that path');
       },
     });
-    const open = must(root.querySelector<HTMLButtonElement>('[data-context-skill-open="floop"]'), 'Open');
-    await interact(() => open.click());
-    await settle();
+    await openSkillFile(root, 'floop');
     expect(document.body.querySelector('[data-context-skill-file] [data-context-failed] p')?.textContent).toBe(
       'Couldn’t open floop’s SKILL.md',
     );
@@ -372,8 +381,8 @@ describe('ContextRailBody — Skills', () => {
     const { root, inserted } = await body({ tab: 'skills', loadSkills: async () => codex });
     expect(rows(root, 'data-context-chip')).toEqual(['all', 'user']);
     expect(root.textContent).toContain('the list was cut short');
-    expect(root.querySelector('[data-context-skill-open]')).toBeNull();
-    await click(root, '[data-context-skill="deploy"]');
+    expect(root.querySelector('[data-row-more]')).toBeNull();
+    await click(root, '[data-row-use="deploy"]');
     expect(inserted).toEqual(['$deploy']);
   });
 
@@ -539,9 +548,7 @@ describe('Context › MCP and Skills against a daemon older than the app', () =>
       tab: 'skills',
       loadSkillFile: skillFileLoader(STUDIO, async () => client, 'session-a'),
     });
-    const open = must(root.querySelector<HTMLButtonElement>('[data-context-skill-open="floop"]'), 'Open');
-    await interact(() => open.click());
-    await settle();
+    await openSkillFile(root, 'floop');
     expect(document.body.querySelector('[data-context-skill-file] [data-context-outdated] p')?.textContent).toBe(
       'This machine needs an update to show this SKILL.md here',
     );
@@ -604,14 +611,13 @@ describe('ContextRailBody — catalogs', () => {
   it('shows where a skill came from, offers Add to catalog and Install from a file on the Skills tab', async () => {
     const client = fake();
     const { root } = await body({ tab: 'skills', catalogs: { connection: STUDIO, createClient: client.factory } });
-    const floop = must(
-      root.querySelector('[data-context-skill-scope] [data-catalog-row-tools="floop"]'),
-      'floop tools',
-    );
-    expect(floop.querySelector('[data-catalog-installed-from]')?.textContent).toContain('From');
-    expect(root.querySelectorAll('[data-catalog-add-to]')).toHaveLength(4);
-    expect(root.querySelectorAll('[data-catalog-installed-from]')).toHaveLength(1);
-    await click(root, '[data-catalog-row-tools="babysit-pr"] [data-catalog-add-to]');
+    const floop = must(root.querySelector('[data-context-skill-scope] [data-catalog-item-row="floop"]'), 'floop row');
+    expect(floop.querySelector('[data-row-from]')?.textContent).toContain('from');
+    expect(floop.querySelector('[data-row-add]')).toBeNull();
+    expect(root.querySelectorAll('[data-row-add]')).toHaveLength(3);
+    expect(root.querySelectorAll('[data-row-share]')).toHaveLength(4);
+    expect(root.querySelectorAll('[data-row-from]')).toHaveLength(1);
+    await click(root, '[data-catalog-item-row="babysit-pr"] [data-row-add]');
     expect(root.querySelector('[data-catalog-sheet="add"]')).not.toBeNull();
     expect(client.calls.some(call => call.path === '/v1/catalogs')).toBe(true);
   });
@@ -619,9 +625,11 @@ describe('ContextRailBody — catalogs', () => {
   it('does the same on the MCP tab, matching a server by name', async () => {
     const client = fake();
     const { root } = await body({ tab: 'mcp', catalogs: { connection: STUDIO, createClient: client.factory } });
-    expect(root.querySelector('[data-context-mcp="github"] [data-catalog-installed-from]')).not.toBeNull();
-    expect(root.querySelector('[data-context-mcp="linear"] [data-catalog-installed-from]')).toBeNull();
-    expect(root.querySelectorAll('[data-catalog-add-to]')).toHaveLength(6);
+    expect(root.querySelector('[data-context-mcp="github"] [data-row-from]')).not.toBeNull();
+    expect(root.querySelector('[data-context-mcp="linear"] [data-row-from]')).toBeNull();
+    expect(root.querySelector('[data-context-mcp="github"] [data-row-add]')).toBeNull();
+    expect(root.querySelector('[data-context-mcp="linear"] [data-row-add]')).not.toBeNull();
+    expect(root.querySelectorAll('[data-row-share]').length).toBe(root.querySelectorAll('[data-context-mcp]').length);
     await mounted?.render(
       <StoreProvider store={store}>
         <ContextRailBody
@@ -645,7 +653,8 @@ describe('ContextRailBody — catalogs', () => {
 
   it('shows no catalog tools at all when the host names no machine', async () => {
     const { root } = await body({ tab: 'skills' });
-    expect(root.querySelector('[data-catalog-row-tools]')).toBeNull();
+    expect(root.querySelector('[data-row-share]')).toBeNull();
+    expect(root.querySelector('[data-row-add]')).toBeNull();
     expect(root.querySelector('[data-catalog-add-entry]')).toBeNull();
   });
 });

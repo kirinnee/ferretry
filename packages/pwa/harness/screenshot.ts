@@ -631,9 +631,10 @@ const captureContextTools = async (page: Page, viewportName: string): Promise<vo
   await page.locator('[data-mcp-row="scratch"] [data-mcp-failure="check"] details summary').click();
   await shot('mcp-failures');
 
-  await frame('skills', '[data-context-skill]');
+  await frame('skills', '[data-row-use]');
   await shot('skills');
-  await page.locator('[data-context-skill-open="release"]').click();
+  await page.locator('[data-catalog-item-row="release"] [data-row-more]').click();
+  await page.getByRole('menuitem', { name: 'Open SKILL.md' }).click();
   await page.locator('[data-context-skill-file="release"] h1').waitFor({ state: 'visible' });
   await shot('skill-open');
 
@@ -3913,9 +3914,10 @@ try {
             const skills = page.locator('#harness-skills');
             await skills.scrollIntoViewIfNeeded();
             await skills
-              .getByRole('button', { name: /^View full detail for/u })
+              .getByRole('button', { name: /^More for/u })
               .first()
               .click();
+            await page.getByRole('menuitem', { name: 'Show detail' }).click();
             const skillsDetailTarget = join(outDir, `${viewport.name}-harness-skills-detail.png`);
             await captureElement(page, skills, skillsDetailTarget);
             process.stdout.write(`📸 ${viewport.name} skills detail -> ${skillsDetailTarget}\n`);

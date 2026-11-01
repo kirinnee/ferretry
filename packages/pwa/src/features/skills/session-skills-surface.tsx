@@ -61,5 +61,6 @@ export function SessionSkillsSurface({ connection, scope, loadCatalog }: Session
     },
     [scope],
   );
-  return <SkillsSurface loadCatalog={load} onInsert={insert} scope={scope} />;
+  const catalogs = useMemo(() => ({ connection }), [connection]);
+  return <SkillsSurface loadCatalog={load} onInsert={insert} scope={scope} catalogs={catalogs} />;
 }
