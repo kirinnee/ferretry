@@ -356,6 +356,64 @@ describe('the events and the audit detail', () => {
     should(InputAuditDetailSchema.safeParse(detail).success).be.true();
     should(InputAuditDetailSchema.safeParse({ ...detail, prompt: '[sudo] password for kirin:' }).success).be.false();
   });
+
+  it('should record a fill under a task plan by its plan, line and sign-in, and a miss by its closed reason', () => {
+    const filled = {
+      targetKind: 'browser',
+      sensitivity: 'secret',
+      plan: ID,
+      line: 1,
+      signIn: 'si_0123456789abcdef',
+      entry: 'GITHUB_KIRINNEE',
+      submitted: true,
+    };
+    const missed = {
+      targetKind: 'browser',
+      sensitivity: 'secret',
+      plan: ID,
+      line: 1,
+      preapproval: 'did-not-apply',
+      because: 'frame',
+    };
+
+    should(InputAuditDetailSchema.safeParse(filled).success).be.true();
+    should(InputAuditDetailSchema.safeParse(missed).success).be.true();
+    should(InputAuditDetailSchema.safeParse({ ...missed, because: 'the page looked odd' }).success).be.false();
+    should(InputAuditDetailSchema.safeParse({ ...filled, line: 10 }).success).be.false();
+    should(InputAuditDetailSchema.safeParse({ ...filled, signIn: 'GITHUB_KIRINNEE' }).success).be.false();
+  });
+});
+
+describe('a card a task plan filled, or tried to', () => {
+  const outcome = { at: AT, by: { kind: 'plan', planId: ID, line: 2 }, submitted: true, source: 'saved' };
+
+  it('should name the plan line a fill was made under as its actor', () => {
+    should(InputOutcomeSchema.safeParse(outcome).success).be.true();
+    should(InputOutcomeSchema.safeParse({ ...outcome, by: { kind: 'plan', planId: ID } }).success).be.false();
+    should(InputOutcomeSchema.safeParse({ ...outcome, by: { kind: 'plan', planId: ID, line: 10 } }).success).be.false();
+    should(
+      InputOutcomeSchema.safeParse({ ...outcome, by: { kind: 'plan', planId: 'short', line: 2 } }).success,
+    ).be.false();
+  });
+
+  it('should carry the owner a line that did not apply and its closed reason, and a fill with no reason', () => {
+    const missed = { by: 'plan', plan: ID, line: 1, outcome: 'did-not-apply', reason: 'form-changed' };
+
+    should(InputRequestSchema.safeParse({ ...REQUEST, preapproval: missed }).success).be.true();
+    should(
+      InputRequestSchema.safeParse({ ...REQUEST, preapproval: { by: 'plan', plan: ID, line: 1, outcome: 'filled' } })
+        .success,
+    ).be.true();
+    should(
+      InputRequestSchema.safeParse({ ...REQUEST, preapproval: { ...missed, outcome: 'filled' } }).success,
+    ).be.false();
+    should(InputRequestSchema.safeParse({ ...REQUEST, preapproval: { ...missed, reason: 'nope' } }).success).be.false();
+    should(InputRequestSchema.safeParse({ ...REQUEST, preapproval: { ...missed, by: 'rule' } }).success).be.false();
+  });
+
+  it('should never tell the ferret about a preapproval', () => {
+    should(Object.keys(InputAgentViewSchema.shape)).not.containEql('preapproval');
+  });
 });
 
 describe('delivering', () => {

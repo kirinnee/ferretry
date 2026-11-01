@@ -244,11 +244,12 @@ export const CopyRouteToSchema = z.discriminatedUnion('kind', [
 ]);
 export type CopyRouteTo = z.infer<typeof CopyRouteToSchema>;
 
-/** Who approved a rule: the owner at the machine, or a paired device. */
-const RuleOwnerSchema = z.discriminatedUnion('kind', [
+/** Who approved a rule or answered a plan: the owner at the machine, or a paired device. */
+export const RuleOwnerSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('host') }),
   z.strictObject({ kind: z.literal('device'), deviceId: boundedLine(128) }),
 ]);
+export type RuleOwner = z.infer<typeof RuleOwnerSchema>;
 
 const RuleIdSchema = z.string().regex(/^[0-9a-f]{32}$/u, 'a 128-bit hex id');
 export const CopyPlanIdSchema = z.string().regex(/^[0-9a-f]{32}$/u, 'a 128-bit hex id');

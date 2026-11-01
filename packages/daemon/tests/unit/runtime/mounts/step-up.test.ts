@@ -350,6 +350,35 @@ describe('step-up routes', () => {
     should(world.service.claimFresh(browser, 'catalog-install')).be.true();
   });
 
+  it('should mint no approve-task-plan challenge while no task-plan selection can be staged', async () => {
+    // Arrange — a device with a passkey, and a 2FA stage that must not be mistaken for a plan's
+    const world = mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]), stages: { [STAGE]: BOUND } });
+    const dispatcher = await world.surface;
+    const ask = async (body: unknown) =>
+      await dispatcher.dispatch(
+        request({ method: 'POST', path: '/v1/step-up/options', body: json(body), ...asDevice }),
+      );
+    const planStage = `tps_${'b'.repeat(24)}`;
+
+    // Act
+    const options = await ask({ origin: ORIGIN, act: 'approve-task-plan', subject: planStage });
+    const borrowed = await ask({ origin: ORIGIN, act: 'approve-task-plan', subject: STAGE });
+    const unbound = await ask({ origin: ORIGIN, act: 'approve-task-plan' });
+    const stepped = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/step-up', body: assertionBody, ...asDevice }),
+    );
+
+    // Assert — refused before any challenge: nothing to answer, nothing claimable for any subject
+    should(options.status).equal(404);
+    should(jsonBody(options)).containEql({ code: 'stage_not_found' });
+    should([borrowed.status, unbound.status]).deepEqual([400, 400]);
+    should(stepped.status).not.equal(200);
+    should(world.service.claimFresh(browser, 'approve-task-plan', planStage)).be.false();
+    should(world.service.claimFresh(browser, 'approve-task-plan', BOUND)).be.false();
+    // @ts-expect-error — an act every caller must prove names what its proof is bound to
+    should(world.service.claimFresh(browser, 'approve-task-plan')).be.false();
+  });
+
   it('should refuse a subject on any act but add-2fa-key, and add-2fa-key without one', async () => {
     // Arrange
     const dispatcher = await mount({ store: new MemoryStore([stored(CREDENTIAL_ID)]), stages: { [STAGE]: BOUND } })
@@ -364,6 +393,7 @@ describe('step-up routes', () => {
     // Act + Assert
     should(await ask({ origin: ORIGIN, act: 'catalog-install', subject: STAGE })).equal(400);
     should(await ask({ origin: ORIGIN, act: 'add-2fa-key' })).equal(400);
+    should(await ask({ origin: ORIGIN, act: 'add-2fa-key', subject: `tps_${'b'.repeat(24)}` })).equal(400);
   });
 
   it('should never cache an answer, success or refusal', async () => {

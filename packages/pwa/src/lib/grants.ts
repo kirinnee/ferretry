@@ -116,6 +116,7 @@ const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = 
   'share-catalog': 'share a catalog with someone',
   'add-2fa-key': 'save automatic 2FA codes for an account',
   'allow-profile-targets': 'let copy rules paste into programs in your own profile',
+  'approve-task-plan': "let Ferretry sign in for a ferret with an account's password",
 };
 
 /**

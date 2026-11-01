@@ -1083,8 +1083,9 @@ or a label of a host its sign-ins name. The account name must match the username
 part is the username. If either differs, the owner sees: "This key says it is for Okta · bob@x.com, but you're
 saving it to GitHub · kirinnee." The daemon refuses the save unless the owner ticked "save it here anyway".
 
-**The passkey is asked every time, even at the machine.** `add-2fa-key` is the one step-up act that
-**every** caller must prove, the admin token on loopback included. Its proof is bound to the one staged save:
+**The passkey is asked every time, even at the machine.** `add-2fa-key` is a step-up act that **every**
+caller must prove, the admin token on loopback included (the other is `approve-task-plan`,
+[secure-copy.md](secure-copy.md#task-plans)). Its proof is bound to the one staged save:
 `StepUpOptionsRequest.subject` is the stage (`st_…`), and the challenge carries
 `addTwoFactorKeySubject(accountKey, stage)`. A proof for one save can never commit another.
 
