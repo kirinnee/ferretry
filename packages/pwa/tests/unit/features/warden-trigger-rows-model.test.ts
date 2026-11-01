@@ -190,6 +190,135 @@ describe('triggerRows: one row per trigger', () => {
     expect(row.jev).toBeUndefined();
   });
 
+  it('should make Maryah’s Jev check (4m) and her queued investigation (2m) ONE Jev → LLM row, Queued', () => {
+    // Arrange
+    const jev: WardenJevBefore = { verdict: 'handed_on', why: 'unsure', at: at(4), confidence: 0.21, costUsd: 0.0041 };
+    const status = {
+      jevChecks: [check({ at: at(4), sessionId: 'maryah', anomalyKind: 'unattended_question', confidence: 0.21 })],
+      investigations: [
+        wardenInvestigation({
+          id: 'queued:maryah',
+          state: 'queued',
+          targetSession: 'maryah',
+          anomalyKind: 'unattended_question',
+          queuedAt: at(2),
+          jev,
+        }),
+      ],
+    };
+
+    // Act
+    const row = only(status);
+
+    // Assert
+    expect(row.who).toBe('jev_llm');
+    expect(row.result).toMatchObject({ key: 'working', label: 'Queued' });
+    expect(row.timeline.map(step => step.kind)).toEqual(['flag', 'jev', 'llm']);
+  });
+
+  it('should join a queued investigation to its Jev check even when its link points at another moment or names none', () => {
+    // Arrange
+    const askedFor = (jev?: WardenJevBefore) => ({
+      jevChecks: [check({ at: at(4), sessionId: 'maryah', anomalyKind: 'unattended_question' })],
+      investigations: [
+        wardenInvestigation({
+          id: 'queued:maryah',
+          state: 'queued',
+          targetSession: 'maryah',
+          anomalyKind: 'unattended_question',
+          queuedAt: at(2),
+          ...(jev === undefined ? {} : { jev }),
+        }),
+      ],
+    });
+
+    // Act
+    const drifted = only(askedFor({ verdict: 'handed_on', why: 'unsure', at: at(2), confidence: 0.2, costUsd: 0 }));
+    const unlinked = only(askedFor());
+
+    // Assert
+    expect(drifted.who).toBe('jev_llm');
+    expect(drifted.result.label).toBe('Queued');
+    expect(unlinked.who).toBe('jev_llm');
+    expect(unlinked.result.label).toBe('Queued');
+  });
+
+  it('should make Jaylynn’s Jev check (12m) and her running investigation (3m) ONE row, Investigating', () => {
+    // Arrange
+    const jev: WardenJevBefore = {
+      verdict: 'handed_on',
+      why: 'never_alone',
+      act: 'stop',
+      at: at(12),
+      confidence: 0.99,
+      costUsd: 0.0038,
+    };
+    const status = {
+      jevChecks: [
+        check({ at: at(12), sessionId: 'jaylynn', anomalyKind: 'dead_monitor', why: 'never_alone', act: 'stop' }),
+      ],
+      investigations: [
+        wardenInvestigation({
+          id: 'warden-jaylynn',
+          state: 'running',
+          targetSession: 'jaylynn',
+          anomalyKind: 'dead_monitor',
+          startedAt: at(3),
+          agent: 'claude-default',
+          model: 'sonnet',
+          jev,
+        }),
+      ],
+    };
+
+    // Act
+    const row = only(status);
+
+    // Assert
+    expect(row.who).toBe('jev_llm');
+    expect(row.result).toMatchObject({ key: 'working', busy: true });
+    expect(row.runtime).toBe('claude-default · sonnet');
+  });
+
+  it('should not hand a check to an investigation of another flag, another ferret or one that began before it', () => {
+    // Arrange
+    const flagged = check({ at: at(10), sessionId: 'maryah', anomalyKind: 'unattended_question' });
+    const queued = (overrides: Parameters<typeof wardenInvestigation>[0]) =>
+      wardenInvestigation({ id: 'q', state: 'queued', queuedAt: at(2), ...overrides });
+
+    // Act
+    const otherFlag = rowsOf({
+      jevChecks: [flagged],
+      investigations: [queued({ targetSession: 'maryah', anomalyKind: 'dead_monitor' })],
+    });
+    const otherFerret = rowsOf({
+      jevChecks: [flagged],
+      investigations: [queued({ targetSession: 'jaylynn', anomalyKind: 'unattended_question' })],
+    });
+    const earlier = rowsOf({
+      jevChecks: [flagged],
+      investigations: [queued({ targetSession: 'maryah', anomalyKind: 'unattended_question', queuedAt: at(30) })],
+    });
+
+    // Assert
+    expect(otherFlag).toHaveLength(2);
+    expect(otherFerret).toHaveLength(2);
+    expect(earlier).toHaveLength(2);
+    expect(otherFlag.map(row => row.result.key).sort()).toEqual(['handed', 'working']);
+  });
+
+  it('should say which limit skipped a check no investigation followed, and never call it Handed to LLM', () => {
+    // Arrange / Act
+    const cap = only({ jevChecks: [check({ verdict: 'skipped', why: 'jev_cap', confidence: 0, costUsd: 0 })] });
+    const paced = only({ jevChecks: [check({ verdict: 'skipped', why: 'jev_paced', confidence: 0, costUsd: 0 })] });
+    const bare = only({ jevChecks: [check({ verdict: 'skipped', why: undefined, confidence: 0, costUsd: 0 })] });
+
+    // Assert
+    expect(cap.result).toMatchObject({ key: 'skipped', label: 'Skipped: daily cap' });
+    expect(paced.result).toMatchObject({ key: 'skipped', label: 'Skipped: hourly share' });
+    expect(bare.result).toMatchObject({ key: 'skipped', label: 'Skipped' });
+  });
+
   it('should settle a Jev check with the act Jev made in that sweep', () => {
     // Arrange
     const status = {
@@ -622,7 +751,7 @@ describe('filters and paging', () => {
     expect(options[0]).toEqual({ key: 'all', label: 'All results · 3' });
     expect(options.find(option => option.key === 'moved')?.label).toBe('Moved login · 1');
     expect(options.find(option => option.key === 'held')?.label).toBe('Held · 0');
-    expect(options).toHaveLength(14);
+    expect(options).toHaveLength(15);
   });
 
   it('should page by TRIGGERS_PAGE and report how many are hidden', () => {

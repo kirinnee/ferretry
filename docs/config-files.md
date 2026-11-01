@@ -405,7 +405,7 @@ act are ONE row. A row says **when** (time and "1h ago"), **which ferret** (call
 chat), **what flagged it** (_stuck 20m_, _usage limit_, _ferret died_ …), **who** handled it (_Rule_, _Jev_,
 _Jev → LLM_, _LLM_), **the runtime** of the investigation (its login and model, only when an LLM ran) and
 **the result** (_Left alone_, _Nudged_, _Resumed_, _Restarted_, _Moved login a → b_, _Stopped_, _Asked you_,
-_Held: reason_, _Failed: reason_; _Investigating_ and _Handed to LLM_ while it is still open). Opening a row
+_Held: reason_, _Failed: reason_; _Queued_ and _Investigating_ while an investigation is open). _Handed to LLM_ appears only for a check no investigation ever followed, and a check the cap or the hourly share skipped reads _Skipped: daily cap_ or _Skipped: hourly share_. Opening a row
 shows only that trigger's timeline: flag → Jev's verdict and cost → the LLM's report → the act. Identical
 repeats on one ferret fold into _3×_ only when every column is the same. The list filters by **Who** and by
 **Result**, and by machine as before; it keeps the 20 newest and reveals more on request.
@@ -415,7 +415,9 @@ keeps: an act's `reportPath` and `investigator` name its investigation's `report
 `jev` block on both names Jev's check by its time (`jev.at` = the check's `at`, on the same ferret and flag). An
 act Jev took itself belongs to the check of the same sweep on the same ferret and flag. A record from before
 those links existed falls back to the same ferret within a two-hour window, and is never joined to a report
-that names a different investigation. The runtime is the investigation's `agent` and `model`.
+that names a different investigation. An investigation that is only queued or still running joins the check that
+handed it on the same way: by the time its `jev` names, else by the nearest handed-on check on that ferret and
+flag before it (two-hour window), so a Jev check and the investigation it started are never two rows. The runtime is the investigation's `agent` and `model`.
 
 **Investigators are named `warden-000001` … `warden-FFFFFF`**, from a counter in `warden/state.json`
 (`investigatorSequence`) that wraps to 1 and skips a name a live session still holds — never from the first-name

@@ -203,7 +203,7 @@ const JEV_CHECKS: readonly WardenJevCheck[] = [
   {
     at: at(12),
     sessionId: 'harness-jaylynn',
-    anomalyKind: 'sus_subprocess',
+    anomalyKind: 'dead_monitor',
     verdict: 'handed_on',
     why: 'never_alone',
     act: 'stop',
@@ -700,15 +700,15 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
           ...entry,
           jev:
             entry.state === 'queued'
-              ? {
+              ? { verdict: 'handed_on', why: 'unsure', at: at(4), confidence: 0.21, costUsd: 0.0041 }
+              : {
                   verdict: 'handed_on',
-                  why: 'not_sure_enough',
-                  act: 'restart',
-                  at: at(2),
-                  confidence: 0.62,
+                  why: 'never_alone',
+                  act: 'stop',
+                  at: at(12),
+                  confidence: 0.99,
                   costUsd: 0.0038,
-                }
-              : { verdict: 'not_asked', why: 'not_judgeable' },
+                },
         },
   ),
   actions: STATUS_WITHOUT_JEV.actions.map(action =>

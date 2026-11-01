@@ -69,6 +69,7 @@ type ResultKey =
   | 'closed'
   | 'working'
   | 'handed'
+  | 'skipped'
   | 'reviewed';
 
 export type WhoFilter = 'all' | Exclude<TriggerWho, 'owner'>;
@@ -102,6 +103,7 @@ const RESULTS: Readonly<Record<ResultKey, WardenChip>> = {
   closed: chip('Closed browser', 'pend'),
   working: chip('Investigating', 'accent'),
   handed: chip('Handed to LLM', 'accent'),
+  skipped: chip('Skipped', 'pend'),
   reviewed: chip('Reviewed', 'pend'),
 };
 
@@ -256,29 +258,43 @@ const joinRecords = (status: WardenStatusView): readonly Group[] => {
     return found;
   };
   const named = investigations.map(entry => taken(action => carriesOut(entry, action)));
-  investigations.forEach((entry, index) => {
-    const own = [...(named[index] ?? []), ...taken(action => follows(entry, action))];
-    const exact = checks.find(
-      check =>
-        !usedChecks.has(check) &&
-        check.sessionId === entry.targetSession &&
-        sameFlag(check, entry.anomalyKind) &&
-        namedBy(entry.jev, check),
-    );
-    const near = checks
-      .filter(
+  // The check an investigation followed: the one it names, else the nearest passed-on check before it.
+  const followed = new Map<WardenInvestigation, WardenJevCheck>();
+  const claim = (entry: WardenInvestigation, check: WardenJevCheck | undefined) => {
+    if (check === undefined) return;
+    followed.set(entry, check);
+    usedChecks.add(check);
+  };
+  for (const entry of investigations)
+    claim(
+      entry,
+      checks.find(
         check =>
-          entry.jev === undefined &&
           !usedChecks.has(check) &&
-          passedOn(check) &&
           check.sessionId === entry.targetSession &&
           sameFlag(check, entry.anomalyKind) &&
-          ms(stampOf(entry)) - ms(check.at) >= 0 &&
-          ms(stampOf(entry)) - ms(check.at) <= LINK_WINDOW_MS,
-      )
-      .sort((left, right) => ms(right.at) - ms(left.at))[0];
-    const check = exact ?? near;
-    if (check !== undefined) usedChecks.add(check);
+          namedBy(entry.jev, check),
+      ),
+    );
+  for (const entry of investigations)
+    if (!followed.has(entry))
+      claim(
+        entry,
+        checks
+          .filter(
+            check =>
+              !usedChecks.has(check) &&
+              passedOn(check) &&
+              check.sessionId === entry.targetSession &&
+              sameFlag(check, entry.anomalyKind) &&
+              ms(stampOf(entry)) - ms(check.at) >= 0 &&
+              ms(stampOf(entry)) - ms(check.at) <= LINK_WINDOW_MS,
+          )
+          .sort((left, right) => ms(right.at) - ms(left.at))[0],
+      );
+  investigations.forEach((entry, index) => {
+    const own = [...(named[index] ?? []), ...taken(action => follows(entry, action))];
+    const check = followed.get(entry);
     groups.push({
       sessionId: entry.targetSession,
       investigation: entry,
@@ -413,12 +429,19 @@ const investigationResult = (entry: WardenInvestigation): TriggerResult => {
   return resultOf(VERDICT_RESULT[entry.verdict ?? 'unknown']);
 };
 
+/** A skip says which limit stopped Jev, since no investigation followed to carry the flag on. */
+const skipLabel = (why: WardenJevCheckWhy | undefined): string =>
+  why === 'jev_cap' ? 'Skipped: daily cap' : why === 'jev_paced' ? 'Skipped: hourly share' : 'Skipped';
+
+/** A check no investigation followed. `Handed to LLM` is only right while one may still come. */
 const checkResult = (check: WardenJevCheck): TriggerResult => {
   if (check.verdict === 'healthy') return resultOf({ key: 'left' });
   if (check.verdict === 'acted') return resultOf(check.act === undefined ? { key: 'reviewed' } : ACT_RESULT[check.act]);
   return check.route === 'owner'
     ? { ...resultOf({ key: 'asked' }), note: checkCause(check) }
-    : resultOf({ key: 'handed' });
+    : check.verdict === 'skipped'
+      ? resultOf({ key: 'skipped', label: skipLabel(check.why) })
+      : resultOf({ key: 'handed' });
 };
 
 const groupResult = (group: Group): TriggerResult => {
