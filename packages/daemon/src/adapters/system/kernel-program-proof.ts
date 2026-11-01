@@ -87,7 +87,8 @@ export class KernelProgramProof implements ProgramProofPort {
   }
 }
 
-const UNPROVEN: ProcessHost = {
+/** A platform with no reading wired: nothing is proved and nobody is known not to hold the TTY. */
+export const UNPROVEN: ProcessHost = {
   uids: async () => undefined,
   name: async () => undefined,
   executable: async () => undefined,
@@ -219,7 +220,8 @@ export async function strangerHolds(
   return seen.includes('unknown') ? undefined : false;
 }
 
-const PROC: ProcFiles = {
+/** The real `/proc`, as the stranger scan reads it on Linux. */
+export const PROC_FILES: ProcFiles = {
   device: async ttyPath => (await stat(ttyPath)).rdev,
   pids: async () => (await readdir('/proc')).filter(name => /^[1-9][0-9]*$/u.test(name)).map(name => Number(name)),
   fds: async pid => await readdir(`/proc/${String(pid)}/fd`),
@@ -234,17 +236,19 @@ const PROC: ProcFiles = {
   replaceable: async path => await replaceableBy(process.getuid?.(), path),
 };
 
-function linuxHost(account: number | undefined): ProcessHost {
+/** Linux: `/proc` for the uids, the name and the scan; the exe proof for the program. */
+export function linuxHost(account: number | undefined): ProcessHost {
   const executables = ExecutableCodePrograms.forPlatform('linux', account);
   return {
     uids: async pid => parseStatusUids(await readFile(`/proc/${String(pid)}/status`, 'utf8')),
     name: async pid => (await readFile(`/proc/${String(pid)}/comm`, 'utf8')).replace(/\n$/u, ''),
     executable: async pid => await executables.provenRootProgram(pid, ANY_NAME),
-    heldElsewhere: async ttyPath => await strangerHolds(PROC, ttyPath, account, process.pid),
+    heldElsewhere: async ttyPath => await strangerHolds(PROC_FILES, ttyPath, account, process.pid),
   };
 }
 
-function darwinHost(run: ProgramRunner): ProcessHost {
+/** macOS: `ps` for the uids and the name, `lsof` and `ps` for the scan; no executable reading (GAP). */
+export function darwinHost(run: ProgramRunner): ProcessHost {
   return {
     uids: async pid => {
       const output = await run(['ps', '-o', 'uid=,ruid=', '-p', String(pid)]);

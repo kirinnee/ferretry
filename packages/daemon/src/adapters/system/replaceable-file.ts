@@ -1,6 +1,7 @@
 import { lstat, readlink } from 'node:fs/promises';
 import { userInfo } from 'node:os';
 import { basename, dirname, isAbsolute } from 'node:path';
+import { accountName } from '../terminal/system-login-shell.ts';
 
 /**
  * The folders a program is trusted from: system folders this account cannot fill. A program counts only when the
@@ -19,7 +20,7 @@ export const ROOT_PROGRAM_FOLDERS: readonly string[] = [
   '/usr/local/bin',
   '/run/current-system/sw/bin',
   '/nix/var/nix/profiles/default/bin',
-  ...perUserProfile(),
+  ...perUserProfile(accountName(() => userInfo().username)),
 ];
 
 /** The Nix store: owned by root, yet ANY user may add a path to it through the daemon. Ownership proves nothing here. */
@@ -122,12 +123,7 @@ async function reachedFromRootFolder(
   return false;
 }
 
-/** `/etc/profiles/per-user/<account>/bin`, when this account has a name. */
-function perUserProfile(): readonly string[] {
-  try {
-    const name = userInfo().username;
-    return /^[A-Za-z0-9._-]+$/u.test(name) ? [`/etc/profiles/per-user/${name}/bin`] : [];
-  } catch {
-    return [];
-  }
+/** `/etc/profiles/per-user/<account>/bin`, when this account has a name that can be one folder's. */
+export function perUserProfile(name: string | undefined): readonly string[] {
+  return name !== undefined && /^[A-Za-z0-9._-]+$/u.test(name) ? [`/etc/profiles/per-user/${name}/bin`] : [];
 }
