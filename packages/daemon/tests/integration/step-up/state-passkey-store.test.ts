@@ -89,16 +89,23 @@ describe('StatePasskeyStore', () => {
     should(await store.list(`fy_device_id_${'z'.repeat(22)}`)).deepEqual([]);
   });
 
-  it('should replace a passkey added again under the same credential id', async () => {
+  it('should refuse a passkey added again under the same credential id, and keep the first', async () => {
+    // A new key or origin under a known id would quietly change what a kept proof is checked against.
     // Arrange
     const { store } = await fixture('passkeys-replace');
     await store.add(passkey('cred-one', deviceOne, { signCount: 1 }));
 
     // Act
-    await store.add(passkey('cred-one', deviceOne, { signCount: 9 }));
+    const replaced = await store
+      .add(passkey('cred-one', deviceOne, { signCount: 9, origin: 'https://other.example' }))
+      .then(
+        () => 'replaced',
+        (error: unknown) => (error instanceof PasskeyStoreDamaged ? error.message : 'other'),
+      );
 
     // Assert
-    should(await store.list(deviceOne)).deepEqual([passkey('cred-one', deviceOne, { signCount: 9 })]);
+    should(replaced).equal('that credential is already stored, and is never replaced');
+    should(await store.list(deviceOne)).deepEqual([passkey('cred-one', deviceOne, { signCount: 1 })]);
   });
 
   it('should record a new counter for exactly the named passkey', async () => {

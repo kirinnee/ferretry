@@ -127,6 +127,11 @@ interface World {
   readonly stages?: Readonly<Record<string, string>>;
   /** The staged task-plan selections the options bind an `approve-task-plan` challenge to, the same way. */
   readonly planStages?: Readonly<Record<string, string>>;
+  /**
+   * The staged standing rules: stage id → the device it waits on and the challenge derived from its body. Absent mounts
+   * the routes with no rule provider at all, as this daemon runs until rules are staged.
+   */
+  readonly ruleStages?: Readonly<Record<string, { readonly device: string; readonly challenge: Uint8Array }>>;
 }
 
 function mount(world: World = {}) {
@@ -134,6 +139,8 @@ function mount(world: World = {}) {
   const verifier = new FakeVerifier();
   const registry = newRegistry(world.clock);
   const audited: { readonly actor: string; readonly changes: readonly string[] }[] = [];
+  /** What the routes asked of the staged rules: which stage, for which device. */
+  const askedRules: [string, string][] = [];
   const service = new StepUpService({
     store,
     verifier,
@@ -167,6 +174,15 @@ function mount(world: World = {}) {
           service,
           { boundSubjectOf: stage => world.stages?.[stage] },
           { boundSubjectOf: stage => world.planStages?.[stage] },
+          world.ruleStages === undefined
+            ? undefined
+            : {
+                challengeOf: (stage, device) => {
+                  askedRules.push([stage, device]);
+                  const staged = world.ruleStages?.[stage];
+                  return staged?.device === device ? staged.challenge : undefined;
+                },
+              },
         ),
       ),
       credentials,
@@ -175,7 +191,7 @@ function mount(world: World = {}) {
       service,
     );
   })();
-  return { store, verifier, registry, service, surface, audited };
+  return { store, verifier, registry, service, surface, audited, askedRules };
 }
 
 const json = (value: unknown): string => JSON.stringify(value);
@@ -395,7 +411,7 @@ describe('step-up routes', () => {
       await dispatcher.dispatch(
         request({ method: 'POST', path: '/v1/step-up/options', body: json(body), ...asDevice }),
       );
-    const ruleStage = `srs_${'d'.repeat(24)}`;
+    const ruleStage = `srs_${'d'.repeat(24)}` as const;
 
     // Act
     const options = await ask({ origin: ORIGIN, act: 'approve-sign-in-rule', subject: ruleStage });
@@ -410,10 +426,100 @@ describe('step-up routes', () => {
     should(jsonBody(options)).containEql({ code: 'stage_not_found' });
     should([borrowed.status, unbound.status]).deepEqual([400, 400]);
     should(stepped.status).not.equal(200);
+    should(
+      world.service.claimStoredProof(browser, 'approve-sign-in-rule', ruleStage, new Uint8Array(32)),
+    ).be.undefined();
+    // @ts-expect-error — a kept proof is claimed by its stage, never by a digest
+    should(world.service.claimStoredProof(browser, 'approve-sign-in-rule', BOUND, new Uint8Array(32))).be.undefined();
+    // @ts-expect-error — a stored-proof act is claimed only as a stored proof, never as a fresh one
     should(world.service.claimFresh(browser, 'approve-sign-in-rule', ruleStage)).be.false();
-    should(world.service.claimFresh(browser, 'approve-sign-in-rule', BOUND)).be.false();
     // @ts-expect-error — an act every caller must prove names what its proof is bound to
     should(world.service.claimFresh(browser, 'approve-sign-in-rule')).be.false();
+  });
+
+  it("should issue a staged rule's DERIVED challenge and keep its assertion for that stage's claim alone", async () => {
+    // Arrange — one rule waiting for its passkey, with the challenge derived from its body
+    const ruleStage = `srs_${'d'.repeat(24)}` as const;
+    const derived = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
+    const world = mount({
+      store: new MemoryStore([stored(CREDENTIAL_ID)]),
+      ruleStages: { [ruleStage]: { device: deviceId, challenge: derived } },
+    });
+    const dispatcher = await world.surface;
+    const ask = async (body: unknown) =>
+      await dispatcher.dispatch(
+        request({ method: 'POST', path: '/v1/step-up/options', body: json(body), ...asDevice }),
+      );
+
+    // Act
+    const missing = await ask({ origin: ORIGIN, act: 'approve-sign-in-rule', subject: `srs_${'e'.repeat(24)}` });
+    const options = await ask({ origin: ORIGIN, act: 'approve-sign-in-rule', subject: ruleStage });
+    const stepped = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/step-up', body: assertionBody, ...asDevice }),
+    );
+
+    // Assert — the stage's own challenge, never this daemon's draw; the proof is kept, for that stage only
+    should(missing.status).equal(404);
+    should(jsonBody(missing)).containEql({ code: 'stage_not_found' });
+    should(options.status).equal(200);
+    should(jsonBody(options)).containEql({ challenge: Buffer.from(derived).toString('base64url') });
+    should(stepped.status).equal(200);
+    should(world.service.held(browser)).be.false();
+    should(world.service.claimFresh(browser)).be.false();
+    should(
+      world.service.claimStoredProof(browser, 'approve-sign-in-rule', `srs_${'e'.repeat(24)}`, derived),
+    ).be.undefined();
+    // A commit of other bytes derives another challenge, and is handed nothing — nor does it spend the proof.
+    should(
+      world.service.claimStoredProof(
+        browser,
+        'approve-sign-in-rule',
+        ruleStage,
+        derived.map(byte => byte ^ 1),
+      ),
+    ).be.undefined();
+    should(world.service.claimStoredProof(browser, 'approve-sign-in-rule', ruleStage, derived)).eql({
+      deviceId,
+      credentialId: CREDENTIAL_ID,
+      clientDataJSON: 'Y2xpZW50',
+      authenticatorData: 'YXV0aA',
+      signature: 'c2ln',
+    });
+    should(world.service.claimStoredProof(browser, 'approve-sign-in-rule', ruleStage, derived)).be.undefined();
+    should(world.askedRules).eql([
+      [`srs_${'e'.repeat(24)}`, deviceId],
+      [ruleStage, deviceId],
+    ]);
+  });
+
+  it('should answer a staged rule only to the device it waits on: another device that knows the id gets no challenge', async () => {
+    // Arrange — a rule staged for ANOTHER paired device; this browser has learned its id
+    const ruleStage = `srs_${'f'.repeat(24)}` as const;
+    const otherDevice = `fy_device_id_${'o'.repeat(22)}`;
+    const world = mount({
+      store: new MemoryStore([stored(CREDENTIAL_ID)]),
+      ruleStages: { [ruleStage]: { device: otherDevice, challenge: new Uint8Array(32).fill(9) } },
+    });
+    const dispatcher = await world.surface;
+
+    // Act
+    const options = await dispatcher.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/step-up/options',
+        body: json({ origin: ORIGIN, act: 'approve-sign-in-rule', subject: ruleStage }),
+        ...asDevice,
+      }),
+    );
+
+    // Assert — asked for THIS session's device, refused as a stage that is not waiting, and nothing issued
+    should(options.status).equal(404);
+    should(jsonBody(options)).containEql({ code: 'stage_not_found' });
+    should(world.askedRules).eql([[ruleStage, deviceId]]);
+    const stepped = await dispatcher.dispatch(
+      request({ method: 'POST', path: '/v1/step-up', body: assertionBody, ...asDevice }),
+    );
+    should(stepped.status).not.equal(200);
   });
 
   it('should bind an approve-task-plan proof to the one staged selection it named, and to nothing else', async () => {

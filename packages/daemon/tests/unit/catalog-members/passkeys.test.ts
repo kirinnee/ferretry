@@ -7,6 +7,8 @@ import { MEMBER_PASSKEY_REFUSALS, MemberPasskeyService } from '../../../src/lib/
 import type { MemberAccess } from '../../../src/lib/catalog-members/service.ts';
 import {
   ChallengeLedger,
+  type PasskeysChange,
+  PasskeysChangedSignal,
   passkeyVerifier,
   type PasskeyStore,
   type StoredPasskey,
@@ -137,6 +139,7 @@ function fixture(
     auditFails?: boolean;
     names?: ReadonlyMap<string, string>;
     daemonName?: string;
+    passkeysChanged?: PasskeysChangedSignal;
   } = {},
 ) {
   const clock = { now: T0 };
@@ -172,6 +175,7 @@ function fixture(
         if (options.auditFails === true) throw new Error('audit is down');
       },
     },
+    ...(options.passkeysChanged === undefined ? {} : { passkeysChanged: options.passkeysChanged }),
   });
   return { clock, store, ledger, challenges, service, audited, added, config, view };
 }
@@ -1030,6 +1034,23 @@ describe('MemberPasskeyService', () => {
       should(f.service.unlockExpiresAt(keyId(1))).be.undefined();
       should(f.challenges.take({ deviceId: keyId(1), appSession: 'tab-one' }, 'unlock', T0)).be.undefined();
       should(f.ledger.writes.at(-1)?.size).equal(0);
+    });
+
+    it("should say the passkeys changed once the key's passkeys are gone", async () => {
+      // Arrange
+      const signal = new PasskeysChangedSignal();
+      const f = fixture({ passkeysChanged: signal });
+      await enrol(f, await es256Authenticator());
+      const heard: { change: PasskeysChange; left: number }[] = [];
+      signal.subscribe(async change => {
+        heard.push({ change, left: (await f.service.views(keyId(1))).length });
+      });
+
+      // Act
+      await f.service.forgetKey(keyId(1));
+
+      // Assert
+      should(heard).eql([{ change: { cause: 'member-key-forgotten', keyId: keyId(1) }, left: 0 }]);
     });
 
     it('should not rewrite the ledger for a key that was never unlocked', async () => {

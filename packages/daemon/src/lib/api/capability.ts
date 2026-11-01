@@ -5,6 +5,9 @@ import type {
   EveryCallerStepUpAct,
   GrantRefusal,
   MachineSkippableStepUpAct,
+  StepUpSubjectOf,
+  StoredProofStepUpAct,
+  StoredStepUpProof,
 } from '@ferretry/protocol';
 import type { ApiActor } from './actor.ts';
 import type { SessionDevice } from './http.ts';
@@ -237,12 +240,23 @@ export interface StepUpWitness {
    * must prove names what its proof is bound to, and takes no other proof; no other claim takes one of its proofs.
    */
   claimFresh?: ClaimFreshWitness;
+  /**
+   * Takes the KEPT assertion of a passkey proved for a stored-proof act on exactly `stage`, once, while it is fresh, and
+   * only when `expectedChallenge` is the challenge it was verified against — or nothing. Never a proof
+   * {@link claimFresh} could take, and {@link claimFresh} never takes one of these.
+   */
+  claimStoredProof?<Act extends StoredProofStepUpAct>(
+    subject: SessionDevice,
+    act: Act,
+    stage: StepUpSubjectOf<Act>,
+    expectedChallenge: Uint8Array,
+  ): StoredStepUpProof | undefined;
 }
 
 /** {@link StepUpWitness.claimFresh}, overloaded so an act every caller must prove cannot be asked the short way. */
 export interface ClaimFreshWitness {
   (subject: SessionDevice, act?: MachineSkippableStepUpAct): boolean;
-  (subject: SessionDevice, act: EveryCallerStepUpAct, bound: string): boolean;
+  (subject: SessionDevice, act: Exclude<EveryCallerStepUpAct, StoredProofStepUpAct>, bound: string): boolean;
 }
 
 /**

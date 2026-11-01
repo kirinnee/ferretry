@@ -28,7 +28,7 @@ export interface PasskeyStore {
    * other phones, and none of them may use it as their own.
    */
   holder(credentialId: string): Promise<string | undefined>;
-  /** Stores a new credential. Refuses — never overwrites — one another device already holds. */
+  /** Stores a new credential. Refuses — never overwrites — one any device already holds, this one included. */
   add(passkey: StoredPasskey): Promise<void>;
   /**
    * Records a verified assertion's counter as ONE compare-and-set, and says whether it moved: `false`
@@ -74,6 +74,21 @@ export interface PasskeyVerifierPort {
       readonly algorithm: PasskeyAlgorithmId;
       readonly publicKeySpki: Uint8Array;
       readonly signCount: number;
+    };
+  }): Promise<PasskeyVerdict<{ readonly signCount: number; readonly origin: string }>>;
+  /**
+   * A KEPT assertion checked again offline (`verifyStoredAssertion`): every check but the counter, against the
+   * passkey's own origin. Never for a live ceremony. Absent: no stored proof ever verifies.
+   */
+  verifyStoredAssertion?(input: {
+    readonly clientDataJSON: Uint8Array;
+    readonly authenticatorData: Uint8Array;
+    readonly signature: Uint8Array;
+    readonly expectedChallenge: Uint8Array;
+    readonly passkey: {
+      readonly algorithm: PasskeyAlgorithmId;
+      readonly publicKeySpki: Uint8Array;
+      readonly origin: string;
     };
   }): Promise<PasskeyVerdict<{ readonly signCount: number; readonly origin: string }>>;
 }

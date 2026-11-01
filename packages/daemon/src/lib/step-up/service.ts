@@ -13,21 +13,34 @@ import {
   PushNotificationPayloadSchema,
   SECURITY_SETTING_BOUNDS,
   type SecuritySettings,
-  type EveryCallerStepUpAct,
   type MachineSkippableStepUpAct,
   type StepUpAct,
+  stepUpKeepsProof,
   stepUpSkippableAtMachine,
   type StepUpAssertion,
   type StepUpGranted,
   type StepUpOptions,
   type StepUpRefusal,
+  type StepUpSubjectOf,
+  STEP_UP_SUBJECTS,
+  type StoredProofStepUpAct,
+  type StoredStepUpProof,
+  StoredStepUpProofSchema,
   type UnlockGranted,
 } from '@ferretry/protocol';
 import { fromBase64Url, toBase64Url } from '@ferretry/relay';
 import { secretsMatch } from '../api/authentication.ts';
 import type { GrantAuditPort } from '../grants/types.ts';
-import { type PasskeyCrypto, verifyAssertion, verifyRegistration } from '../passkeys/index.ts';
-import type { ChallengeLedger, StepUpRegistry, StepUpSubject } from './registry.ts';
+import { type PasskeyCrypto, verifyAssertion, verifyRegistration, verifyStoredAssertion } from '../passkeys/index.ts';
+import type { PasskeysChangedSignal } from './passkeys-changed.ts';
+import type {
+  ChallengeLedger,
+  ChallengeStamp,
+  KeptProof,
+  SpentProofStepUpAct,
+  StepUpRegistry,
+  StepUpSubject,
+} from './registry.ts';
 import type {
   DeviceKeyRotationPort,
   PasskeyStore,
@@ -85,6 +98,11 @@ export interface StepUpServiceDeps {
    * Absent keeps unlocks in memory only, and a restart asks every device again.
    */
   readonly unlocks?: UnlockLedgerPort;
+  /**
+   * Told after a device is forgotten and its passkeys with it, so a kept proof (a standing rule's) is checked again
+   * against the registry as it now stands. Absent: nobody keeps one.
+   */
+  readonly passkeysChanged?: PasskeysChangedSignal;
 }
 
 const CHALLENGE_BYTES = 32;
@@ -272,12 +290,63 @@ export class StepUpService {
    * An act every caller must prove takes only a proof proved for it AND bound to `bound` (the staged save it is for):
    * there is no way to ask for one without naming what it is bound to.
    */
-  claimFresh(subject: StepUpSubject, act: EveryCallerStepUpAct, bound: string): boolean;
+  claimFresh(subject: StepUpSubject, act: SpentProofStepUpAct, bound: string): boolean;
   claimFresh(subject: StepUpSubject, act?: StepUpAct, bound?: string): boolean {
     const now = this.deps.clock.nowMs();
     if (act !== undefined && !stepUpSkippableAtMachine(act))
-      return bound !== undefined && this.deps.registry.claimFresh(subject, now, act, bound);
+      return bound !== undefined && !stepUpKeepsProof(act) && this.deps.registry.claimFresh(subject, now, act, bound);
     return this.deps.registry.claimFresh(subject, now, act as MachineSkippableStepUpAct | undefined);
+  }
+
+  /**
+   * Takes the KEPT assertion of a passkey proved for a stored-proof act on exactly `stage` (the staged body it approves),
+   * once, within a challenge's life — or nothing. No other claim takes it, and it takes no other proof.
+   *
+   * `expectedChallenge` is the challenge the caller derives AGAIN from the very bytes it is about to write; the proof is
+   * handed over only when it is the challenge the live ceremony verified, so evidence over other bytes never leaves
+   * here. A wrong challenge answers nothing and spends nothing.
+   */
+  claimStoredProof<Act extends StoredProofStepUpAct>(
+    subject: StepUpSubject,
+    act: Act,
+    stage: StepUpSubjectOf<Act>,
+    expectedChallenge: Uint8Array,
+  ): StoredStepUpProof | undefined {
+    if (!STEP_UP_SUBJECTS[act].safeParse(stage).success) return undefined;
+    return this.deps.registry.claimStoredProof(subject, this.deps.clock.nowMs(), act, stage, expectedChallenge);
+  }
+
+  /**
+   * Whether a KEPT proof still verifies, offline, against `expectedChallenge` (derived again from what it approved) and
+   * the passkey registry as it stands NOW: the device must still hold the credential it names, the assertion must have
+   * been made at that passkey's own origin, and every check but the counter must pass (`verifyStoredAssertion`). A
+   * device that is no longer paired, a forgotten device or a removed passkey is `false` — the pairing is asked first,
+   * so a revocation whose passkey purge failed still ends every proof that device made. Rejects only when the
+   * registry cannot be read, so a caller can tell "could not check" from "does not verify".
+   */
+  async verifyStoredProof(proof: StoredStepUpProof, expectedChallenge: Uint8Array): Promise<boolean> {
+    const verify = this.deps.verifier.verifyStoredAssertion;
+    if (verify === undefined) return false;
+    if ((await this.deps.devices.device(proof.deviceId)) === undefined) return false;
+    const passkeys = await this.deps.store.list(proof.deviceId);
+    const passkey = passkeys.find(
+      candidate => candidate.deviceId === proof.deviceId && secretsMatch(candidate.credentialId, proof.credentialId),
+    );
+    if (passkey === undefined) return false;
+    const clientDataJSON = fromBase64Url(proof.clientDataJSON);
+    const authenticatorData = fromBase64Url(proof.authenticatorData);
+    const signature = fromBase64Url(proof.signature);
+    const publicKeySpki = fromBase64Url(passkey.publicKeySpki);
+    if (clientDataJSON === null || authenticatorData === null || signature === null || publicKeySpki === null)
+      return false;
+    const verdict = await verify.call(this.deps.verifier, {
+      clientDataJSON,
+      authenticatorData,
+      signature,
+      expectedChallenge,
+      passkey: { algorithm: passkey.algorithm, publicKeySpki, origin: passkey.origin },
+    });
+    return verdict.ok;
   }
 
   /** Spends the fresh proof an act that adds access was admitted on. */
@@ -377,7 +446,7 @@ export class StepUpService {
     if (kind === 'confirm-existing') {
       if (registration.confirmation === undefined || confirmChallenge === undefined) return refuse('not-verified');
       const confirmed = await this.#verifyAssertion(device, passkeys, registration.confirmation, confirmChallenge, now);
-      if (!confirmed) return refuse('not-verified');
+      if (confirmed === undefined) return refuse('not-verified');
     }
     const clientDataJSON = fromBase64Url(registration.clientDataJSON);
     const attestationObject = fromBase64Url(registration.attestationObject);
@@ -433,19 +502,32 @@ export class StepUpService {
   async stepUpOptions(
     caller: StepUpCaller,
     origin: string,
-    act: EveryCallerStepUpAct,
+    act: SpentProofStepUpAct,
     bound: string,
+  ): Promise<StepUpOutcome<StepUpOptions>>;
+  /**
+   * Options for an act whose proof is STORED: the proof is bound to the one staged body it approves (`stage`, `srs_…`),
+   * and the challenge is not drawn here but DERIVED by the caller from that body's bytes (`signInRuleChallenge(nonce,
+   * signInRuleSubject(stage, canonical))`), so the kept assertion commits to them and can be checked again offline.
+   * Required for such an act, refused for every other, and exactly {@link CHALLENGE_BYTES} long.
+   */
+  async stepUpOptions<Act extends StoredProofStepUpAct>(
+    caller: StepUpCaller,
+    origin: string,
+    act: Act,
+    stage: StepUpSubjectOf<Act>,
+    challenge: Uint8Array,
   ): Promise<StepUpOutcome<StepUpOptions>>;
   async stepUpOptions(
     caller: StepUpCaller,
     origin: string,
     act?: StepUpAct,
     bound?: string,
+    challenge?: Uint8Array,
   ): Promise<StepUpOutcome<StepUpOptions>> {
-    // Never a challenge for such an act without what it is bound to, nor a binding on any other act.
-    if ((act !== undefined && !stepUpSkippableAtMachine(act)) !== (bound !== undefined && bound !== ''))
-      return refuse('not-verified');
-    return await this.#assertionOptions(caller, origin, 'step-up', act, bound);
+    const stamped = challengeStampOf(act, bound, challenge);
+    if (!stamped.ok) return refuse('not-verified');
+    return await this.#assertionOptions(caller, origin, 'step-up', stamped.stamp, challenge);
   }
 
   /** Options for a confirmation on opening: the same ceremony, its own challenge. */
@@ -480,8 +562,8 @@ export class StepUpService {
     caller: StepUpCaller,
     origin: string,
     purpose: 'step-up' | 'unlock',
-    act?: StepUpAct,
-    bound?: string,
+    stamp?: ChallengeStamp,
+    derived?: Uint8Array,
   ): Promise<StepUpOutcome<StepUpOptions>> {
     const device = caller.device;
     if (device === undefined) return refuse('not-a-device');
@@ -491,8 +573,9 @@ export class StepUpService {
     const usable = (await this.deps.store.list(device.deviceId)).filter(passkey => passkey.origin === origin);
     if (usable.length === 0) return refuse('no-passkey');
     const now = this.deps.clock.nowMs();
-    const challenge = this.deps.random.bytes(CHALLENGE_BYTES);
-    this.deps.challenges.issue(device, purpose, challenge, now, undefined, act, bound);
+    // A copy, so nothing the caller does to its bytes afterwards reaches the challenge this ledger judges against.
+    const challenge = derived === undefined ? this.deps.random.bytes(CHALLENGE_BYTES) : derived.slice();
+    this.deps.challenges.issue(device, purpose, challenge, now, undefined, stamp);
     return {
       ok: true,
       value: {
@@ -523,14 +606,16 @@ export class StepUpService {
     const done = await this.#ceremony(caller, device, 'step-up', assertion, now);
     if (!done.ok) return done;
     // A proof for an act every caller must prove opens no step-up window and is not the fresh proof an act-less check
-    // reads: it is kept bound to the one save its challenge named, and only that save can spend it.
-    const act = done.act;
-    if (act !== undefined && !stepUpSkippableAtMachine(act)) {
-      if (done.bound === undefined) return refuse('not-verified');
-      const until = instant(this.deps.registry.grantBound(device, now, act, done.bound));
-      return { ok: true, value: done.rotated ? { expiresAt: until, keyRotated: true } : { expiresAt: until } };
-    }
-    const expiresAt = instant(this.deps.registry.grant(device, now, true, act));
+    // reads: it is kept bound to the one save its challenge named, and only that save can spend it. A stored-proof act
+    // also keeps the assertion that proved it, for its commit to claim once (`claimStoredProof`).
+    const proved = done.proved;
+    const until =
+      proved?.kind === 'kept'
+        ? this.deps.registry.grantBound(device, now, proved.act, proved.stage, proved.kept)
+        : proved?.kind === 'bound'
+          ? this.deps.registry.grantBound(device, now, proved.act, proved.bound)
+          : this.deps.registry.grant(device, now, true, proved?.act);
+    const expiresAt = instant(until);
     return { ok: true, value: done.rotated ? { expiresAt, keyRotated: true } : { expiresAt } };
   }
 
@@ -552,7 +637,7 @@ export class StepUpService {
     assertion: StepUpAssertion,
     now: number,
   ): Promise<
-    | { readonly ok: true; readonly rotated: boolean; readonly act?: StepUpAct; readonly bound?: string }
+    | { readonly ok: true; readonly rotated: boolean; readonly proved?: Proved }
     | { readonly ok: false; readonly refusal: StepUpRefusal }
   > {
     const rotateBy = this.rotateBy(device.deviceId);
@@ -573,10 +658,7 @@ export class StepUpService {
     }
     const verified = await this.#verify(device, purpose, assertion, now);
     if (!verified.ok) return verified;
-    const stamp = {
-      ...(verified.act === undefined ? {} : { act: verified.act }),
-      ...(verified.bound === undefined ? {} : { bound: verified.bound }),
-    };
+    const stamp = verified.proved === undefined ? {} : { proved: verified.proved };
     if (rotation === undefined || this.deps.rotation === undefined || transcriptHash === undefined)
       return { ok: true, rotated: false, ...stamp };
     // The device was revoked between the assertion and the swap: nothing to step up any more.
@@ -590,6 +672,11 @@ export class StepUpService {
   /**
    * One assertion against the outstanding challenge for `purpose`, verified by the WebAuthn verifier and
    * its counter recorded. The challenge is spent whatever the answer.
+   *
+   * What it proved is what the challenge was issued for. For an act whose proof is STORED it also KEEPS the verified
+   * assertion — the bytes exactly as the authenticator signed them, the credential this device holds that signed them —
+   * and the challenge it was verified against. The live checks are unchanged (the counter moved, the origin allowed,
+   * UV), so a kept proof was a good live proof first.
    */
   async #verify(
     device: StepUpSubject,
@@ -597,18 +684,18 @@ export class StepUpService {
     assertion: StepUpAssertion,
     now: number,
   ): Promise<
-    | { readonly ok: true; readonly act?: StepUpAct; readonly bound?: string }
-    | { readonly ok: false; readonly refusal: StepUpRefusal }
+    { readonly ok: true; readonly proved?: Proved } | { readonly ok: false; readonly refusal: StepUpRefusal }
   > {
     const issued = this.deps.challenges.takeWithAct(device, purpose, now);
     if (issued === undefined) return refuse('not-verified');
     const passkeys = await this.deps.store.list(device.deviceId);
-    if (!(await this.#verifyAssertion(device, passkeys, assertion, issued.bytes, now))) return refuse('not-verified');
-    return {
-      ok: true,
-      ...(issued.act === undefined ? {} : { act: issued.act }),
-      ...(issued.bound === undefined ? {} : { bound: issued.bound }),
-    };
+    const credential = await this.#verifyAssertion(device, passkeys, assertion, issued.bytes, now);
+    if (credential === undefined) return refuse('not-verified');
+    const stamp = issued.stamp;
+    if (stamp?.kind !== 'kept') return stamp === undefined ? { ok: true } : { ok: true, proved: stamp };
+    const evidence = keptProof(device.deviceId, credential, assertion);
+    if (evidence === undefined) return refuse('not-verified');
+    return { ok: true, proved: { ...stamp, kept: { evidence, challenge: issued.bytes } } };
   }
 
   /**
@@ -632,7 +719,10 @@ export class StepUpService {
     return at === undefined ? 0 : at + settings.unlockValidityHours * HOUR_MS;
   }
 
-  /** Revoking a device forgets its passkeys, its step-ups, its unlock and its outstanding challenges. */
+  /**
+   * Revoking a device forgets its passkeys, its step-ups, its unlock and its outstanding challenges — and then says the
+   * passkeys changed, so a proof one of them signed and something kept (a standing rule's) is checked again.
+   */
   async forgetDevice(deviceId: string): Promise<void> {
     this.#reopened.delete(deviceId);
     this.deps.registry.forgetDevice(deviceId);
@@ -640,6 +730,7 @@ export class StepUpService {
     await this.#persistUnlocks();
     this.deps.challenges.forgetDevice(deviceId);
     await this.deps.store.forgetDevice(deviceId);
+    await this.deps.passkeysChanged?.emit({ cause: 'device-forgotten', deviceId });
   }
 
   /** The `register-confirm` challenge, issued bound to this registration's, and the options it travels in. */
@@ -662,9 +753,9 @@ export class StepUpService {
 
   /**
    * One assertion by a passkey THIS device holds, against `challenge`, its counter moved by the store's
-   * compare-and-set. A counter that did not move — stalled, rewound, or beaten by a concurrent assertion
-   * from another copy of the app — refuses, and is written down, because it is the one sign a cloned
-   * authenticator leaves.
+   * compare-and-set: the passkey that signed it, or nothing. A counter that did not move — stalled, rewound, or
+   * beaten by a concurrent assertion from another copy of the app — refuses, and is written down, because it is
+   * the one sign a cloned authenticator leaves.
    */
   async #verifyAssertion(
     device: StepUpSubject,
@@ -672,15 +763,15 @@ export class StepUpService {
     assertion: StepUpAssertion,
     challenge: Uint8Array,
     nowMs: number,
-  ): Promise<boolean> {
+  ): Promise<StoredPasskey | undefined> {
     const credential = passkeys.find(passkey => secretsMatch(passkey.credentialId, assertion.credentialId));
-    if (credential === undefined) return false;
+    if (credential === undefined) return undefined;
     const clientDataJSON = fromBase64Url(assertion.clientDataJSON);
     const authenticatorData = fromBase64Url(assertion.authenticatorData);
     const signature = fromBase64Url(assertion.signature);
     const publicKeySpki = fromBase64Url(credential.publicKeySpki);
     if (clientDataJSON === null || authenticatorData === null || signature === null || publicKeySpki === null)
-      return false;
+      return undefined;
     const verdict = await this.deps.verifier.verifyAssertion({
       clientDataJSON,
       authenticatorData,
@@ -694,14 +785,14 @@ export class StepUpService {
     const moved =
       verdict.ok &&
       (await this.deps.store.updateSignCount(device.deviceId, credential.credentialId, verdict.signCount));
-    if (moved) return true;
+    if (moved) return credential;
     if (verdict.ok || verdict.reason === 'counter-not-increased')
       await this.deps.audit.record({
         actor: `device:${device.deviceId}`,
         changes: [`passkey.counter-refused=${device.deviceId}`],
         at: instant(nowMs),
       });
-    return false;
+    return undefined;
   }
 
   async #registration(
@@ -737,6 +828,57 @@ export function passkeyAddedNotice(deviceName: string): PushNotificationPayload 
   });
 }
 
+/** What one verified ceremony proved: what its challenge was issued for, and for a stored-proof act what it kept. */
+type Proved =
+  | Exclude<ChallengeStamp, { readonly kind: 'kept' }>
+  | (Extract<ChallengeStamp, { readonly kind: 'kept' }> & { readonly kept: KeptProof });
+
+/**
+ * What a `step-up` challenge may be issued for, or a refusal. An act the machine may skip, or none, takes neither a
+ * binding nor a challenge. An act every caller must prove names what its proof is bound to; when its proof is STORED it
+ * also takes the challenge DERIVED from that body (exactly {@link CHALLENGE_BYTES}) and is bound to a well-formed stage
+ * of its own kind, and otherwise takes no challenge: the daemon draws its own.
+ */
+function challengeStampOf(
+  act: StepUpAct | undefined,
+  bound: string | undefined,
+  challenge: Uint8Array | undefined,
+): { readonly ok: true; readonly stamp?: ChallengeStamp } | { readonly ok: false } {
+  if (act === undefined || stepUpSkippableAtMachine(act)) {
+    if ((bound !== undefined && bound !== '') || challenge !== undefined) return { ok: false };
+    return act === undefined ? { ok: true } : { ok: true, stamp: { kind: 'act', act } };
+  }
+  if (bound === undefined || bound === '') return { ok: false };
+  if (!stepUpKeepsProof(act))
+    return challenge === undefined ? { ok: true, stamp: { kind: 'bound', act, bound } } : { ok: false };
+  const derived = challenge?.length === CHALLENGE_BYTES && STEP_UP_SUBJECTS[act].safeParse(bound).success;
+  return derived ? { ok: true, stamp: { kind: 'kept', act, stage: bound } } : { ok: false };
+}
+
+/**
+ * What is kept of a verified assertion for a stored-proof act: the device, the credential it holds that signed, and the
+ * signed bytes exactly as verified (decoded and spelled again, so what is kept is what was checked). Never the rotation.
+ * Nothing when it does not fit the stored shape, which refuses the ceremony rather than keeping less.
+ */
+function keptProof(
+  deviceId: string,
+  credential: StoredPasskey,
+  assertion: StepUpAssertion,
+): StoredStepUpProof | undefined {
+  const clientDataJSON = fromBase64Url(assertion.clientDataJSON);
+  const authenticatorData = fromBase64Url(assertion.authenticatorData);
+  const signature = fromBase64Url(assertion.signature);
+  if (clientDataJSON === null || authenticatorData === null || signature === null) return undefined;
+  const kept = StoredStepUpProofSchema.safeParse({
+    deviceId,
+    credentialId: credential.credentialId,
+    clientDataJSON: toBase64Url(clientDataJSON),
+    authenticatorData: toBase64Url(authenticatorData),
+    signature: toBase64Url(signature),
+  });
+  return kept.success ? kept.data : undefined;
+}
+
 const passkeyView = (passkey: StoredPasskey): PasskeyView => ({
   id: passkey.credentialId,
   origin: passkey.origin,
@@ -752,4 +894,5 @@ const passkeyView = (passkey: StoredPasskey): PasskeyView => ({
 export const passkeyVerifier = (crypto: PasskeyCrypto): PasskeyVerifierPort => ({
   verifyRegistration: async input => await verifyRegistration(crypto, input),
   verifyAssertion: async input => await verifyAssertion(crypto, input),
+  verifyStoredAssertion: async input => await verifyStoredAssertion(crypto, input),
 });

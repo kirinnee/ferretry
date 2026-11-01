@@ -737,9 +737,13 @@ export class PairingService {
    * THE GRANT GOES FIRST, then the device's live sessions, and only then its passkeys, step-ups and push
    * enrolments. A stolen phone loses its access in the first step, so no request can be served between
    * the purge and the revocation, and a purge that fails cannot leave the phone paired with its passkeys
-   * gone (review L5). What a failed purge leaves is harmless: notifications reach only devices that are
-   * still paired (`PushService` drops an orphaned enrolment at delivery), and a passkey bound to a
-   * device id that is never minted again can step nobody up.
+   * gone (review L5). EVERY OWNER'S PURGE IS ATTEMPTED, whatever an earlier one did: one that throws is
+   * collected and the rest still run, so a push store that cannot be written never leaves the device's
+   * passkeys — and the passkeys-changed signal they fire — behind. The failures are thrown together at
+   * the end, after the revocation is recorded. What a failed purge leaves is harmless: notifications reach
+   * only devices that are still paired (`PushService` drops an orphaned enrolment at delivery), a passkey
+   * bound to a device id that is never minted again can step nobody up, and a KEPT proof that device made
+   * stops verifying because it is no longer paired (`StepUpService.verifyStoredProof`).
    *
    * WHEN `actor` IS GIVEN, the revocation is written to the audit journal as `device.revoked=<id>` —
    * and only once it has actually happened, as the LAST step. A refused or unknown revocation leaves no
@@ -758,16 +762,24 @@ export class PairingService {
       this.options.connections?.endDevice(id);
     }
     // Even with no grant left to remove: revoking a lost phone twice is how its leftovers are cleaned up.
-    for (const owner of this.options.deviceState ?? []) await owner.forgetDevice(id);
-    if (!removed) return false;
-    if (actor !== undefined) {
+    const failures: unknown[] = [];
+    for (const owner of this.options.deviceState ?? []) {
+      try {
+        await owner.forgetDevice(id);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+    if (removed && actor !== undefined) {
       await this.options.audit?.record({
         actor,
         changes: [`device.revoked=${id}`],
         at: instant(this.options.clock.now()),
       });
     }
-    return true;
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, `${failures.length} purges of a revoked device failed`);
+    return removed;
   }
 
   /**

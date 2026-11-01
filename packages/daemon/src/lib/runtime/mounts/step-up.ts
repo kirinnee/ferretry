@@ -35,6 +35,7 @@ import {
   stepUpRefusalCode,
   TASK_PLAN_ERROR_CODES,
   TWO_FACTOR_ERROR_CODES,
+  type SignInRuleStageId,
   type TaskPlanStageId,
   type TwoFactorStageId,
 } from '@ferretry/protocol';
@@ -107,10 +108,23 @@ export interface StagedTaskPlanBinding {
   boundSubjectOf(stage: TaskPlanStageId): string | undefined;
 }
 
+/**
+ * What the step-up options need of the staged standing sign-in rules: the challenge DERIVED from one's body
+ * (`signInRuleChallenge(nonce, signInRuleSubject(stage, canonical))`, the nonce the rule service drew at stage time), or
+ * nothing when it is not waiting FOR THIS DEVICE (`deviceId`, the session's proven device — never a body field). A
+ * stage is answered only to the device it is waiting on, so another paired device that learns an `srs_` id gets no
+ * challenge for it. The proof is kept bound to the stage; the challenge binds it to the bytes. Absent: this daemon
+ * stages none, so it issues no challenge for `approve-sign-in-rule`.
+ */
+export interface StagedSignInRuleBinding {
+  challengeOf(stage: SignInRuleStageId, deviceId: string): Uint8Array | undefined;
+}
+
 export function stepUpRoutes(
   service: StepUpService,
   seeds?: StagedSeedBinding,
   plans?: StagedTaskPlanBinding,
+  rules?: StagedSignInRuleBinding,
 ): readonly ApiRoute[] {
   return [
     {
@@ -188,14 +202,24 @@ export function stepUpRoutes(
             StepUpOptionsSchema.parse(value),
           );
         }
-        // Approving a standing sign-in rule binds a DERIVED challenge to its staged body and keeps the assertion (R3c-2).
-        // Until this daemon stages rules, there is nothing to bind to: no challenge is minted for the act, from anyone.
-        if (body.act === STEP_UP_ACTS.approveSignInRule)
-          return errorResponse(
-            404,
-            'that standing sign-in rule is not waiting for a passkey: stage it again',
-            SIGN_IN_RULE_ERROR_CODES.stageNotFound,
+        // Approving a standing sign-in rule issues the challenge DERIVED from its staged body, so the assertion the
+        // daemon keeps commits to those bytes. A stage that is not waiting — or a daemon that stages no rules — gets no
+        // challenge at all, from anyone.
+        if (body.act === STEP_UP_ACTS.approveSignInRule) {
+          const stage = body.subject as SignInRuleStageId | undefined;
+          const deviceId = context.request.device?.deviceId;
+          const challenge =
+            stage === undefined || deviceId === undefined ? undefined : rules?.challengeOf(stage, deviceId);
+          if (stage === undefined || challenge === undefined)
+            return errorResponse(
+              404,
+              'that standing sign-in rule is not waiting for a passkey: stage it again',
+              SIGN_IN_RULE_ERROR_CODES.stageNotFound,
+            );
+          return answer(await service.stepUpOptions(caller(context), body.origin, body.act, stage, challenge), value =>
+            StepUpOptionsSchema.parse(value),
           );
+        }
         return answer(await service.stepUpOptions(caller(context), body.origin, body.act), value =>
           StepUpOptionsSchema.parse(value),
         );

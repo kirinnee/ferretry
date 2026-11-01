@@ -531,6 +531,10 @@ export class CatalogMemberService {
   /**
    * Removes a person: their record and every browser, and ends the shares that name them. The members file is
    * written first. Asked again after a failure between the two writes, it finishes the job.
+   *
+   * Every browser goes exactly as removing one does (`closeKey`): its passkeys are forgotten, which tells the
+   * passkeys-changed signal. Only once the record is gone from disk: a members write that failed leaves the person, and
+   * their passkeys with them, for the next attempt; a shares write that failed after it does not keep them.
    */
   async revokeMember(memberId: string): Promise<RevokedMember> {
     await this.ready();
@@ -548,14 +552,19 @@ export class CatalogMemberService {
       const shares = this.#ended(state.shares, share => share.memberId === memberId);
       this.#state = { members, shares };
       let failure: unknown;
+      let removedKeys: readonly string[] = [];
       try {
-        if (member !== undefined) await this.deps.members.write(members);
+        if (member !== undefined) {
+          await this.deps.members.write(members);
+          removedKeys = member.keys.map(key => key.keyId);
+        }
         if (shares !== state.shares) await this.deps.shares.write(shares);
       } catch (error) {
         failure = error;
       }
       // Closing what is open does not wait on a write: the person's access is already gone in memory.
       await this.deps.sessions.closeMember(memberId);
+      for (const keyId of removedKeys) await this.deps.sessions.closeKey(memberId, keyId);
       if (failure !== undefined) throw failure;
       return { memberId, keysRemoved: member?.keys.length ?? 0, sharesEnded: named.length };
     });

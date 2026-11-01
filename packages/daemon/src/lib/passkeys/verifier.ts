@@ -8,6 +8,9 @@
  * fixes. What is a property of daemon state is the caller's: that the challenge was issued to this
  * device and `appSession`, is unexpired and unspent, and that the credential belongs to this device.
  *
+ * A STORED proof (a standing sign-in rule's) is checked again later by {@link verifyStoredAssertion}: the same checks
+ * but the counter, against the passkey's own origin. It is never a live ceremony.
+ *
  * Every check is total. A malformed input is `{ ok: false, reason: 'malformed' }`, never a throw, and
  * a refusal is one of a closed set of reasons that never carries an input value — so nothing a
  * caller logs or answers can echo a challenge, a signature or a key.
@@ -187,6 +190,51 @@ export async function verifyAssertion(crypto: PasskeyCrypto, input: AssertionInp
     return refuse('counter-not-increased');
   }
   return { ok: true, signCount: header.signCount, origin: client.origin };
+}
+
+/**
+ * A KEPT assertion, checked again later: the bytes exactly as the authenticator signed them, the challenge the daemon
+ * derives again from what was approved, and the passkey it names as the registry holds it NOW.
+ */
+export interface StoredAssertionInput {
+  readonly clientDataJSON: Uint8Array;
+  readonly authenticatorData: Uint8Array;
+  readonly signature: Uint8Array;
+  readonly expectedChallenge: Uint8Array;
+  readonly passkey: {
+    readonly algorithm: PasskeyAlgorithm;
+    readonly publicKeySpki: Uint8Array;
+    /** The app origin the passkey was made at: the only origin its kept assertion may name. */
+    readonly origin: string;
+  };
+}
+
+/**
+ * Checks a STORED assertion again, offline (`docs/design/zero-trust.md`, "Stored passkey proofs"): everything
+ * {@link verifyAssertion} checks — `webauthn.get`, the challenge, the origin, the rpId hash, UP, UV and the signature —
+ * except the counter.
+ *
+ * NEVER USE IT FOR A LIVE CEREMONY. The counter is the one sign a cloned authenticator leaves, and a live assertion must
+ * move it; a kept one is the same bytes every time it is checked, so its counter can never move again. What makes the
+ * missing counter safe here is the challenge: it is derived from the approved bytes, so a kept assertion verifies only
+ * against exactly those bytes, and nothing that checks a stored proof ever grants a live step-up.
+ *
+ * The origin is the passkey's own, never the daemon's `corsOrigins`: a kept proof outlives any config change, and it
+ * was made at exactly one origin.
+ */
+export async function verifyStoredAssertion(
+  crypto: PasskeyCrypto,
+  input: StoredAssertionInput,
+): Promise<AssertionResult> {
+  return await verifyAssertion(crypto, {
+    clientDataJSON: input.clientDataJSON,
+    authenticatorData: input.authenticatorData,
+    signature: input.signature,
+    expectedChallenge: input.expectedChallenge,
+    allowedOrigins: [input.passkey.origin],
+    // Zero stored, so any counter the authenticator reported passes: the counter is not checked offline.
+    credential: { algorithm: input.passkey.algorithm, publicKeySpki: input.passkey.publicKeySpki, signCount: 0 },
+  });
 }
 
 type ClientDataCheck = { readonly ok: true; readonly origin: string } | Refusal;
