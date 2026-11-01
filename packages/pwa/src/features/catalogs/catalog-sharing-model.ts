@@ -397,7 +397,7 @@ const SHARING_REFUSALS: Readonly<Record<string, string>> = {
   shares_full: 'There are too many live codes. End one under Shares, then try again.',
   catalogs_full: 'A code can grant only so many catalogs. Share fewer at once.',
   share_link_unavailable:
-    'This machine has no address another person could open, so no code was made. Nothing was spent. Open this machine to the internet or a relay, then try again.',
+    'No other person can reach this machine: it has no public address and is not on a relay their browser can find. No code was made. Nothing was spent. Turn the hosted relay on, or set a public address (publicUrl), then try again.',
   store_damaged: 'This machine could not read its sharing files. Nothing was changed. Check the machine’s log.',
 };
 

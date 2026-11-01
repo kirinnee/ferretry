@@ -107,6 +107,19 @@ export function isLoopbackHost(host: string): boolean {
 }
 
 /**
+ * Whether a link's address names "this computer itself". From any other device it reaches nothing, so a
+ * browser opening such a link goes to the rendezvous it discovered and does not dial the address at all, instead
+ * of stalling on (and possibly being asked permission for) its own loopback. Anything unreadable is not loopback.
+ */
+export function isLoopbackLinkAddress(daemonUrl: string): boolean {
+  try {
+    return isLoopbackHost(new URL(daemonUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * A socket's PEER ADDRESS, as a transport reports one.
  *
  * `::ffff:127.0.0.1` is here because that is what a dual-stack socket actually reports for a v4

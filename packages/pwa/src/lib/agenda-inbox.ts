@@ -109,9 +109,49 @@ export const unreadSessions = (sources: readonly AgendaInboxSource[]): readonly 
   return entries.map(({ order: _order, ...entry }) => entry);
 };
 
-/** The open items across every listed conversation: the number on the Agenda tab. */
+/** The open items the summaries of `entries` say need the owner: what a conversation counts until its board is read. */
 export const unreadTotal = (entries: readonly UnreadSession[]): number =>
   entries.reduce((total, entry) => total + needsYouCount(entry.attention), 0);
+
+/**
+ * THE INBOX COUNT: the one number the sidebar's Inbox entry, the top bar, the tab bar and the Inbox page's
+ * heading all show. A conversation whose board is held counts what that board puts in the deck — `cards`, plain
+ * notifications included and answers still in their undo window left out — and one whose board is not held yet
+ * (or could not be read) counts its summary's needs-you items, which are all a device knows of it. Then the cards
+ * waiting for a try.
+ *
+ * The summary and the board disagree on purpose, so the two must never be mixed for one conversation: the
+ * summary leaves notifications out and keeps an item waiting on its ferret for more information in, and the deck
+ * does the opposite. The badges used to add up summaries while the page counted cards, and read different numbers
+ * for the same Inbox.
+ */
+export const inboxCount = (
+  unread: readonly UnreadSession[],
+  held: (entry: UnreadSession) => boolean,
+  cards: readonly InboxCard[],
+  toTest: number,
+): number => cards.length + unreadTotal(unread.filter(entry => !held(entry))) + toTest;
+
+/** A machine whose boards could not be read: the items the Inbox counts there but cannot show yet. */
+export interface InboxUnavailable {
+  readonly daemonId: DaemonId;
+  readonly machineName: string;
+  readonly items: number;
+}
+
+/** The machines with a conversation whose board could not be read, in the order they are listed, with their items. */
+export const inboxUnavailable = (
+  unread: readonly UnreadSession[],
+  failed: (entry: UnreadSession) => boolean,
+): readonly InboxUnavailable[] => {
+  const machines = new Map<DaemonId, InboxUnavailable>();
+  for (const entry of unread) {
+    if (!failed(entry)) continue;
+    const items = (machines.get(entry.daemonId)?.items ?? 0) + needsYouCount(entry.attention);
+    machines.set(entry.daemonId, { daemonId: entry.daemonId, machineName: entry.machineName, items });
+  }
+  return [...machines.values()];
+};
 
 /**
  * Sorts sessions so the ones with open Attention lead, newest first, and the rest keep their order.

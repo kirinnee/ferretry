@@ -284,7 +284,9 @@ describe('the card’s plain buttons for the compass moves', () => {
     await interact(() => fake.clock.advance(10_000));
     await flush();
     expect(fake.commits).toEqual([]);
-    expect(mounted.container.querySelector('[data-unread-badge]')?.getAttribute('data-count')).toBe('1');
+    // The card is back: listed again, and nothing claims the Inbox is clear.
+    expect(mounted.container.textContent).toContain(question.item.subject);
+    expect(mounted.container.querySelector('[data-agenda-empty]')).toBeNull();
     await mounted.unmount();
   });
 

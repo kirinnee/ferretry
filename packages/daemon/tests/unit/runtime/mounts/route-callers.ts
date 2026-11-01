@@ -283,6 +283,8 @@ export const ROUTE_CALLERS: readonly string[] = [
   'POST /v1/sessions/:sessionId/task-plans/:planId/approval/:stage/confirm-in-app operator person',
   'DELETE /v1/sessions/:sessionId/task-plans/:planId/approval/:stage operator person',
   'POST /v1/sessions/:sessionId/task-plans/:planId/revoke operator person',
+  'GET /v1/sign-in-rules/suggestions operator person',
+  'DELETE /v1/sign-in-rules/suggestions/:sid operator person',
   'GET /v1/sign-in-rules operator person',
   'GET /v1/sign-in-rules/eligibility operator person',
   'POST /v1/sign-in-rules/stages operator person',

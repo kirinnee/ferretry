@@ -127,6 +127,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/sign-in-rules/stages/:stage/commit':
     'audited by the standing-rule service: security.changed sign-in-rule-created (or -resumed, -renewed, -widened) with the device and the passkey; the step-up that proved it is audited too',
   'DELETE /v1/sign-in-rules/stages/:stage': 'drops a staged standing rule; approves nothing',
+  'DELETE /v1/sign-in-rules/suggestions/:sid':
+    'forgets a standing-rule suggestion held in memory; it grants nothing (the suggestion itself is audited as sign-in-rule-suggested)',
   'POST /v1/sign-in-rules/:id/narrow':
     'only narrows; audited by the standing-rule service: security.changed sign-in-rule-narrowed',
   'DELETE /v1/sign-in-rules/:id':

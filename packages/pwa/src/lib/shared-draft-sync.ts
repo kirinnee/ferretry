@@ -29,12 +29,12 @@ import {
   isNoopTextOp,
   normalizeTextOp,
   SHARED_DRAFT_EDIT_BUDGET,
-  sharedDraftFrameBytes,
-  textOpBaseLength,
   type SharedDraftClientFrame,
   type SharedDraftItem,
   type SharedDraftServerFrame,
+  sharedDraftFrameBytes,
   type TextOp,
+  textOpBaseLength,
   transformTextOps,
 } from '@ferretry/protocol';
 
@@ -390,11 +390,14 @@ const answered = (
   if (position === undefined) return { state, send: [] };
   const { inflight: _inflight, buffer, ...rest } = state;
   const serverItems = applyItems(state.serverItems, frame.applied.add, frame.applied.remove);
+  // Never backwards: a repeat is answered where its first copy left the draft, which may be behind
+  // what this composer has already heard since.
+  const later = frame.epoch > position.epoch || (frame.epoch === position.epoch && frame.rev > position.rev);
   const settled: SharedDraftSyncState = {
     ...rest,
     serverItems,
     items: visibleItems(serverItems, undefined, buffer),
-    position: { ...position, epoch: frame.epoch, rev: frame.rev },
+    position: later ? { ...position, epoch: frame.epoch, rev: frame.rev } : position,
   };
   if (buffer === undefined) return { state: settled, send: [] };
   return launch(settled, buffer, ids);

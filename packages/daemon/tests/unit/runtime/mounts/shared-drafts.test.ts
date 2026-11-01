@@ -2,9 +2,7 @@ import { describe, it } from 'bun:test';
 import { SHARED_DRAFT_MAX_CHARS } from '@ferretry/protocol';
 import should from 'should';
 import { type CapabilityGuard, NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
-import { sessionSendRoutes } from '../../../../src/lib/runtime/mounts/session-send.ts';
 import { ApiDispatcher, type ApiResponse, ApiRouter, ApiSocketDispatcher } from '../../../../src/lib/api/index.ts';
-import { SharedDraftPresence, sharedDraftOrigin } from '../../../../src/lib/shared-drafts/index.ts';
 import {
   assertDraftOwner,
   SHARED_DRAFT_MAX_BODY_BYTES,
@@ -12,6 +10,8 @@ import {
   sharedDraftRoutes,
   sharedDraftSocketRoutes,
 } from '../../../../src/lib/runtime/index.ts';
+import { sessionSendRoutes } from '../../../../src/lib/runtime/mounts/session-send.ts';
+import { SharedDraftPresence, sharedDraftOrigin } from '../../../../src/lib/shared-drafts/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { AT, agentIn, CREDENTIALS, FakeSessionSend, human, sharedDraftService } from './support.ts';
 
@@ -376,6 +376,25 @@ describe('shared draft stream route', () => {
   });
 });
 
+describe('the edit route budget', () => {
+  it("counts an edit against the caller's own budget, the one its stream edits use", async () => {
+    const calls: unknown[][] = [];
+    const drafts = {
+      edit: async (...args: unknown[]) => {
+        calls.push(args);
+        return { applied: {}, snapshot: {} };
+      },
+    } as unknown as Parameters<typeof sharedDraftRoutes>[0];
+    const dispatcher = new ApiDispatcher(
+      new ApiRouter([...sharedDraftRoutes(drafts)]),
+      CREDENTIALS,
+      NO_GOVERNED_ROUTES_GUARD,
+    );
+    await dispatcher.dispatch(request(edit({ epoch: 0, base: 0, text: ['x'] })));
+    should(calls[0]?.[3]).eql({ author: 'admin-cli' });
+  });
+});
+
 describe('sentDraftClearer (&F331 H1)', () => {
   it("takes out exactly what was sent, keeps words typed since, and only for the owner's own sends", async () => {
     // Arrange — "hello" at revision 1; the person sends it; another device then adds " world".
@@ -394,6 +413,35 @@ describe('sentDraftClearer (&F331 H1)', () => {
 
     // Assert
     should(await drafts.read('s1')).match({ text: ' world', epoch: 0 });
+  });
+
+  it('never applies a "clear" that would add words', async () => {
+    const drafts = sharedDraftService(['s1']);
+    await drafts.edit('s1', { generation: 'gen-1', epoch: 0, base: 0, text: ['kept'] });
+    await sentDraftClearer(drafts)('s1', 'device:phone', 'req-1', {
+      generation: 'gen-1',
+      epoch: 0,
+      base: 1,
+      text: [-4, 'more'],
+    });
+    should(await drafts.read('s1')).match({ text: 'kept', rev: 1 });
+  });
+
+  it("is the daemon's own edit, which no device's typing budget can crowd out", async () => {
+    const calls: unknown[][] = [];
+    const drafts = {
+      edit: async (...args: unknown[]) => {
+        calls.push(args);
+        return await Promise.reject(new Error('unused'));
+      },
+    } as unknown as Parameters<typeof sentDraftClearer>[0];
+    await sentDraftClearer(drafts)('s1', 'device:phone', 'req-1', {
+      generation: 'gen-1',
+      epoch: 0,
+      base: 1,
+      text: [-4],
+    }).catch(() => undefined);
+    should(calls[0]?.[3]).eql({ metered: false });
   });
 
   it('is the same edit as the composer clearing it on its stream: whichever lands first, it applies once', async () => {

@@ -26,6 +26,7 @@ import { observedRoutes } from '../../performance/observed-routes.ts';
 import type { PerformanceProbe } from '../../performance/recorder.ts';
 import type { PinService } from '../../pins/index.ts';
 import type { SignInRuleService } from '../../sign-in-rules/service.ts';
+import type { SignInRuleSuggestions } from '../../sign-in-rules/suggestions.ts';
 import type { TaskPlanService } from '../../task-plans/service.ts';
 import type { PasteRuleService } from '../../secure-copy/rules.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
@@ -426,6 +427,8 @@ export interface MountedSubsystems {
    * whose challenge commits to the rule's bytes. The step-up options ask it for a staged rule's derived challenge.
    */
   readonly signInRules: SignInRuleService;
+  /** What ferrets suggested the owner make rules for (RAM only): read and dismissed by the owner, never turned into a rule. */
+  readonly signInRuleSuggestions: SignInRuleSuggestions;
   /** Free teammate callsigns, for composing a session title before starting one. */
   readonly names: NameSubsystem;
   /** The learning review board: the evidence the daemon holds, and a human's verdict on each rule
@@ -733,7 +736,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...taskPlanRoutes(subsystems.secureCopy.plans),
         // `/v1/sign-in-rules` is a literal no other subsystem uses; `/v1/accounts/:id/sign-in-rules/revoke` ends in two
         // literals no account route has, so neither can shadow or be shadowed.
-        ...signInRuleRoutes(subsystems.signInRules),
+        ...signInRuleRoutes(subsystems.signInRules, subsystems.signInRuleSuggestions),
         ...terminalRoutes(subsystems.terminals),
         // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
         // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the

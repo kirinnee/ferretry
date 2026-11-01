@@ -1226,6 +1226,8 @@ import {
   type SignInGrantSource,
   SignInRuleDevicePurge,
   SignInRuleService,
+  SignInRuleSuggestionAgendaAdapter,
+  SignInRuleSuggestions,
   type SkillRuntimeHome,
   SkillsInventoryService,
   type SocketRoute,
@@ -6380,6 +6382,8 @@ function createAgentToolsSubsystem(input: {
   readonly signInChoice: SignInChoicePort;
   /** A ferret's recipe proposals, and where its acts are told so a steered sign-in fact is not kept. */
   readonly recipes: Pick<LoginRecipeService, 'propose' | 'scrubbedAccounts'>;
+  /** A ferret's suggestion of a standing rule: a card for the owner and nothing else. */
+  readonly ruleSuggestions: Pick<SignInRuleSuggestions, 'suggest'>;
   readonly loginActs: Pick<LoginObserver, 'acted'>;
   /** Told where every page script runs, machine-wide: a standing rule pinned to that host stops filling. */
   readonly scriptedOrigins?: { scriptedOn(host: string | undefined): void; running?(): () => void };
@@ -6423,6 +6427,7 @@ function createAgentToolsSubsystem(input: {
       accounts: input.accounts,
       signInChoice: input.signInChoice,
       recipes: input.recipes,
+      ruleSuggestions: input.ruleSuggestions,
       loginActs: input.loginActs,
       ...(input.scriptedOrigins === undefined ? {} : { scriptedOrigins: input.scriptedOrigins }),
       redactor: input.redactor,
@@ -7478,6 +7483,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // What a share link points at: read from the same advertisement pairing mints from, kept here for the same
   // reason as the id above. Unset until pairing opens, which no request can precede.
   let shareAdvertisement: Advertisement | undefined;
+  // The rendezvous another person's browser can find for itself, the value pairing's QR is drawn from: beside a
+  // loopback advertisement it is what makes a share link openable at all.
+  let shareDiscoveredRelayUrl: string | undefined;
   // The name pairing gave this machine, stamped on analytics rows as the `machine` label.
   let analyticsMachineName: string | undefined;
   const clock = new SystemClock();
@@ -9294,6 +9302,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const state = await repository.open(hostname());
       attachmentDaemonId = state.daemonId;
       shareAdvertisement = config.advertisement;
+      shareDiscoveredRelayUrl = discoveredRelayUrl;
       memberFacts = {
         daemonName: state.daemonName,
         carriers,
@@ -10821,6 +10830,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         warn: message => void process.stderr.write(`sign-in rules: ${message}\n`),
         terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),
       });
+      // A ferret's suggestion of a rule (account_propose preapprove): RAM only, one card on the agenda, no stage or proof.
+      const signInRuleSuggestions = new SignInRuleSuggestions({
+        accounts: { listing: async () => await accountDirectory.keyedList() },
+        agenda: new SignInRuleSuggestionAgendaAdapter(agenda),
+        redact: async text => await secretRedactor.redact(text),
+        audit: auditLog,
+        clock: { now: () => Date.now() },
+        terminalRules: () => daemonFeatureList().includes(DAEMON_FEATURES.signInRulesTerminal),
+      });
+      setInterval(() => signInRuleSuggestions.sweep(), INPUT_REQUEST_SWEEP_MS).unref();
       connectSignInRules(signInRules, {
         accounts: accountDirectory,
         passkeys: passkeysChanged,
@@ -12231,6 +12250,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         accounts: accountDirectory,
         signInChoice,
         recipes: loginRecipes,
+        ruleSuggestions: signInRuleSuggestions,
         loginActs: loginObserver,
         // Every page script, in any session, taints its page's host for the owner's standing rules (R3c §7.3).
         scriptedOrigins: signInRuleGrants,
@@ -12710,6 +12730,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         inputRequests: inputRequestService,
         phoneApprovals,
         signInRules,
+        signInRuleSuggestions,
         secureCopy: {
           copies: { list: sessionId => secureCopies.list(sessionId) },
           rules: pasteRules,
@@ -13165,7 +13186,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           knownIds: async () => new Set((await sharedCatalogs.list()).catalogs.map(catalog => catalog.id)),
         },
         links: {
-          target: () => shareLinkTarget(shareAdvertisement, attachmentDaemonId, HOSTED_APP_ORIGIN),
+          target: () =>
+            shareLinkTarget(shareAdvertisement, attachmentDaemonId, HOSTED_APP_ORIGIN, shareDiscoveredRelayUrl),
         },
         // A revoke writes first, drops the grants, then ends this member's live sessions (and forgets a removed
         // browser's passkeys, so a key id that is reused can never inherit them).

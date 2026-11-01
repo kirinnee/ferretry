@@ -6,6 +6,7 @@ import {
   FY_DEFAULT_DAEMON_PORT,
   FY_DEFAULT_DAEMON_URL,
   isLoopbackHost,
+  isLoopbackLinkAddress,
   isLoopbackPeer,
   isWildcardHost,
   recordedBindAddress,
@@ -211,5 +212,15 @@ describe('which part of a daemon document names its listener', () => {
     should(declaredBind(relayOnly)).equal(relayOnly);
     should(declaredBind(damaged)).equal(damaged);
     should(declaredBind({ carriers: [null, 'bind', { kind: 'bind' }] })).deepEqual({ kind: 'bind' });
+  });
+});
+
+describe('whether a link’s address names this computer itself', () => {
+  it('should read a loopback address as loopback, and a routed or unreadable one as not', () => {
+    should(isLoopbackLinkAddress('http://127.0.0.1:7077')).be.true();
+    should(isLoopbackLinkAddress('http://[::1]:7077')).be.true();
+    should(isLoopbackLinkAddress('http://localhost:7077')).be.true();
+    should(isLoopbackLinkAddress('https://192.168.1.20:7300')).be.false();
+    should(isLoopbackLinkAddress('not-a-url')).be.false();
   });
 });

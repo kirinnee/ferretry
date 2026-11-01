@@ -3,9 +3,9 @@ import {
   applyTextOp,
   SHARED_DRAFT_HISTORY_LIMIT,
   SHARED_DRAFT_ITEMS_BUDGET,
-  sharedDraftFrameBytes,
   type SharedDraftItem,
   type SharedDraftSnapshot,
+  sharedDraftFrameBytes,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -13,10 +13,10 @@ import {
   SHARED_DRAFT_WRITE_DELAY_MS,
   SHARED_DRAFT_WRITE_RETRY_MAX_MS,
   type SharedDraftChange,
-  sharedDraftOrigin,
-  splitSharedDraftOrigin,
   type SharedDraftRepository,
   SharedDraftService,
+  sharedDraftOrigin,
+  splitSharedDraftOrigin,
 } from '../../../src/lib/shared-drafts/index.ts';
 
 const AT = '2026-11-01T00:00:00.000Z';
@@ -546,7 +546,7 @@ describe('SharedDraftService', () => {
     should(laptop.snapshot).match({ text: 'phone laptop', rev: 2 });
   });
 
-  it('5: takes at most so many edits a second from every device together, and more the next second', async () => {
+  it('5: takes at most so many edits a second from one device, and more the next second', async () => {
     let now = Date.parse(AT);
     const { service } = subject({ editsPerSecond: 3, clock: { now: () => new Date(now).toISOString() } });
     for (let rev = 0; rev < 3; rev += 1)
@@ -560,6 +560,40 @@ describe('SharedDraftService', () => {
     should(await service.edit('s1', { generation: G, epoch: 0, base: 3, text: [3, 'x'] })).match({
       snapshot: { rev: 4 },
     });
+  });
+
+  it("budgets each device on its own: one device's flood never refuses another's edit, nor the daemon's own", async () => {
+    // Arrange — the phone uses its whole budget.
+    const { service } = subject({ editsPerSecond: 2, clock: { now: () => AT } });
+    const phone = (id: string) => sharedDraftOrigin('device:phone', 'st-1', id);
+    await service.edit('s1', { generation: G, epoch: 0, base: 0, text: ['a'] }, phone('p1'));
+    await service.edit('s1', { generation: G, epoch: 0, base: 1, text: [1, 'b'] }, phone('p2'));
+    await should(service.edit('s1', { generation: G, epoch: 0, base: 2, text: [2, 'c'] }, phone('p3'))).be.rejectedWith(
+      {
+        code: 'rate-limited',
+      },
+    );
+
+    // Act — the laptop types, and a send's clear arrives from the daemon itself, in the same second.
+    const laptop = await service.edit(
+      's1',
+      { generation: G, epoch: 0, base: 2, text: [2, '!'] },
+      sharedDraftOrigin('device:laptop', 'st-2', 'l1'),
+    );
+    const cleared = await service.edit(
+      's1',
+      { generation: G, epoch: 0, base: 3, text: [-2, 1] },
+      sharedDraftOrigin('device:phone', 'send', 'req-1'),
+      { metered: false },
+    );
+
+    // Assert
+    should(laptop.snapshot).match({ text: 'ab!', rev: 3 });
+    should(cleared.snapshot).match({ text: '!', rev: 4 });
+    // An edit with no origin counts against the author it names: the phone's, over HTTP, is still refused.
+    await should(
+      service.edit('s1', { generation: G, epoch: 0, base: 4, text: [1, '?'] }, undefined, { author: 'device:phone' }),
+    ).be.rejectedWith({ code: 'rate-limited' });
   });
 
   it('L2: refuses files and places whose names together would not fit one frame', async () => {

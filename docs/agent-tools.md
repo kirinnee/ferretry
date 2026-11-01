@@ -345,6 +345,38 @@ can make them. A ferret's pane (and any command carrying an agent credential) is
 around Ferretry: every ferret can read Ferretry's own state-home files. Every plan card says so. Design and rules:
 [secure-copy.md](secure-copy.md#task-plans).
 
+## Suggesting a standing rule
+
+`account_propose` takes `preapprove: true` (and `recipe` is then optional) to ask the owner to consider a
+[standing sign-in rule](secrets.md#standing-sign-in-rules) for one sign-in. It is a **suggestion and nothing more**:
+
+- **It holds no rule, stage or proof.** The suggestion is a line in the daemon's memory and a card on the owner's
+  agenda. No route turns it into a rule. The card's only action opens the owner's create sheet with **nothing ticked**;
+  the rule is then made exactly as if the owner had started it, with a fresh passkey over the bytes the daemon builds.
+  A plain agenda answer to the card is refused (`use_input_form`), so it can never read as an approval.
+- **The card is the daemon's words.** It names the **host** from the sign-in's own place: never an account label, a
+  username or a word of the ferret's. The ferret's `why` is redacted, flattened to one line, clipped to 300 characters
+  and shown only in the owner's sheet, faint and quoted.
+- **The caps are taken before anything awaits.** At most **one pending suggestion per sign-in per session** and
+  **three an hour per session**, reserved in the same synchronous run that checks them, so calls sent together cannot
+  all pass. A refused call gives its place back. A suggestion lives in memory only and ends after 24 hours (the card
+  closes with it). The owner can dismiss it (`DELETE /v1/sign-in-rules/suggestions/:sid`) or close its card on the
+  agenda: either way it leaves the owner's sheet and the card closes with the note "The owner closed this card.", but a
+  **tombstone** stays until the original expiry, so the sign-in still counts as waiting and a retry gets the same
+  "already suggested" answer as while the owner is silent. A dismissed suggestion does not free its place.
+- **What the ferret is told.** One line: it suggested a rule for the host, the owner decides, it will not hear back, and
+  it must not ask again. A refusal is only ever about the sign-in it can already read (a sign-in that goes through
+  another account, one that is not a password, a program no rule covers, an unknown id) or about its own earlier
+  suggestion or the hourly cap. **What the ferret is not told:** whether the owner has a rule, tapped this sign-in by
+  hand, holds a passkey, or turned the suggestion down. The answer is the same whatever any of those is.
+- **Terminal sign-ins** are suggestible only while the daemon reports `sign-in-rules-terminal.1`.
+- **Both in one call.** With a `recipe` too, the recipe is filed first; a refused suggestion is then said in the
+  summary instead of failing the recipe.
+
+The owner reads the suggestions with `GET /v1/sign-in-rules/suggestions` (a person route; a ferret's credential is
+`owner_only`). An honest-client limit applies as to every rule: a ferret that reads Ferretry's own state files is
+outside what this guards.
+
 ## Handing a surface to the owner
 
 An agent that needs the person to act — a sudo or password prompt, an OAuth or device-code login,

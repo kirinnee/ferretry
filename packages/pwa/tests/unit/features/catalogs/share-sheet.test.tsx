@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
+import { SHARE_LINK_RELAYED_NOTICE } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { ShareSheet } from '../../../../src/features/catalogs/share-sheet.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
@@ -6,6 +7,7 @@ import { fakeClient } from '../../../support/catalog-client.ts';
 import {
   FAKE_CODE,
   FAKE_LINK,
+  FAKE_RELAYED_LINK,
   MEMBER_A,
   memberView,
   mintResponse,
@@ -152,6 +154,20 @@ describe('ShareSheet result', () => {
     expect(q('[data-share-countdown]')?.textContent).toBe('Expires in 1:00:00 · single use');
     expect(text()).toContain('shown once');
     expect(text()).toContain('Carol');
+    await view.unmount();
+  });
+
+  it('says nothing about a relay beside a link another device dials directly', async () => {
+    const { view } = await makeLink();
+    expect(q('[data-share-relayed]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('says the relay carries a link minted on a loopback-only machine, and what the relay can see', async () => {
+    const { view } = await makeLink({}, { 'POST /v1/catalog-shares': () => mintResponse({ link: FAKE_RELAYED_LINK }) });
+    expect(q('[data-share-link]')?.textContent).toBe(FAKE_RELAYED_LINK);
+    expect(q('[data-share-relayed]')?.textContent).toBe(SHARE_LINK_RELAYED_NOTICE);
+    expect(q('[data-share-relayed]')?.getAttribute('role')).toBeNull();
     await view.unmount();
   });
 
